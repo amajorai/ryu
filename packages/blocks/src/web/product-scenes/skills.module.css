@@ -1,0 +1,244 @@
+/*
+ * Skills card scene. The base styles are the open, lifted pose, which is the
+ * server-rendered and reduced-motion frame; every keyframe loop starts and
+ * ends on it. One 8.4s cycle:
+ *   0-30%  hold open: the centre skill is loaded, a source dot blinks once
+ *   30-38% unload: the body folds and the centre sheet settles
+ *   38-47% the fan closes into a stack
+ *   48-63% install: a ghost sheet drops from skills.sh into the stack
+ *   63-75% the fan opens, staggered from the centre out
+ *   75-85% load on demand: the centre lifts and its body unfolds
+ * Motion runs only while `Stage` marks the card in view.
+ */
+
+.stage {
+	--skills-duration: 8.4s;
+	--skills-arrive: cubic-bezier(0.22, 1, 0.36, 1);
+	--skills-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+	--skills-stroke: var(--foreground);
+	position: absolute;
+	inset: 0 0 auto;
+	height: calc(100% - 7rem);
+	color: var(--foreground);
+}
+
+.stage:not([data-inview]) * {
+	animation-play-state: paused;
+}
+
+.root {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+
+.hairline,
+.sheet,
+.pill,
+.folderBack,
+.folderPocket {
+	stroke: var(--skills-stroke);
+	stroke-opacity: 0.3;
+	stroke-width: 1;
+	stroke-linejoin: round;
+	stroke-linecap: round;
+	vector-effect: non-scaling-stroke;
+}
+
+.hairline {
+	fill: none;
+}
+
+.sheet {
+	fill: var(--background);
+}
+
+.pill {
+	fill: color-mix(in srgb, var(--background) 80%, transparent);
+}
+
+.folderBack {
+	fill: color-mix(in srgb, var(--foreground) 5%, var(--background));
+}
+
+.folderPocket {
+	fill: var(--background);
+}
+
+.mono,
+.folderLabel {
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 7.5px;
+	letter-spacing: 0.01em;
+}
+
+.mono {
+	fill: var(--foreground);
+	fill-opacity: 0.72;
+}
+
+.folderLabel {
+	fill: var(--muted-foreground, var(--foreground));
+}
+
+.titleBar {
+	fill: var(--foreground);
+	fill-opacity: 0.32;
+}
+
+.dot,
+.trackedDot {
+	opacity: 0.5;
+	fill: var(--foreground);
+}
+
+.fan {
+	transform: rotate(var(--skills-fan));
+	transform-origin: 160px 206px;
+	transform-box: view-box;
+	animation-name: skills-fan;
+	animation-duration: var(--skills-duration);
+	animation-delay: var(--skills-fan-delay);
+	animation-iteration-count: infinite;
+	animation-fill-mode: both;
+}
+
+.lift {
+	transform: translateY(-12px) scale(1.03);
+	transform-origin: 50% 100%;
+	transform-box: fill-box;
+	animation-name: skills-lift;
+	animation-duration: var(--skills-duration);
+	animation-iteration-count: infinite;
+	animation-fill-mode: both;
+}
+
+.bar {
+	fill: var(--foreground);
+	fill-opacity: 0.22;
+	transform-origin: 50% 0;
+	transform-box: fill-box;
+	animation-name: skills-bar;
+	animation-duration: var(--skills-duration);
+	animation-delay: var(--skills-bar-delay);
+	animation-iteration-count: infinite;
+	animation-fill-mode: both;
+}
+
+.trackedDot {
+	animation-name: skills-track;
+	animation-duration: var(--skills-duration);
+	animation-iteration-count: infinite;
+	animation-fill-mode: both;
+}
+
+.ghost {
+	opacity: 0;
+	transform-origin: 50% 50%;
+	transform-box: fill-box;
+	animation-name: skills-install;
+	animation-duration: var(--skills-duration);
+	animation-iteration-count: infinite;
+	animation-fill-mode: both;
+}
+
+@keyframes skills-fan {
+	0%,
+	38% {
+		transform: rotate(var(--skills-fan));
+		animation-timing-function: var(--skills-in-out);
+	}
+	47%,
+	63% {
+		transform: rotate(0deg);
+		animation-timing-function: var(--skills-arrive);
+	}
+	75%,
+	100% {
+		transform: rotate(var(--skills-fan));
+	}
+}
+
+@keyframes skills-lift {
+	0%,
+	30% {
+		transform: translateY(-12px) scale(1.03);
+		animation-timing-function: var(--skills-in-out);
+	}
+	36%,
+	75% {
+		transform: translateY(0) scale(1);
+		animation-timing-function: var(--skills-arrive);
+	}
+	82%,
+	100% {
+		transform: translateY(-12px) scale(1.03);
+	}
+}
+
+@keyframes skills-bar {
+	0%,
+	30% {
+		opacity: 1;
+		transform: scaleY(1);
+		animation-timing-function: var(--skills-in-out);
+	}
+	34%,
+	77% {
+		opacity: 0;
+		transform: scaleY(0);
+		animation-timing-function: var(--skills-arrive);
+	}
+	83%,
+	100% {
+		opacity: 1;
+		transform: scaleY(1);
+	}
+}
+
+@keyframes skills-track {
+	0%,
+	14%,
+	24%,
+	100% {
+		opacity: 0.5;
+	}
+	18%,
+	20% {
+		opacity: 1;
+	}
+}
+
+@keyframes skills-install {
+	0%,
+	48% {
+		opacity: 0;
+		transform: translate(-98px, -86px) scale(0.4);
+	}
+	51% {
+		opacity: 0.9;
+		transform: translate(-98px, -86px) scale(0.4);
+		animation-timing-function: var(--skills-in-out);
+	}
+	60% {
+		opacity: 0.9;
+		transform: translate(0, -4px) scale(0.92);
+		animation-timing-function: ease-out;
+	}
+	63%,
+	100% {
+		opacity: 0;
+		transform: translate(0, 0) scale(1);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.fan,
+	.lift,
+	.bar,
+	.trackedDot,
+	.ghost {
+		animation: none;
+	}
+}

@@ -1,0 +1,508 @@
+/*
+ * Gateway homepage scene. The base rules are the static pose (the call held
+ * for approval at the gate, the fallback provider lit, three audit ticks),
+ * which reduced-motion visitors keep. With motion allowed, one 7.2s loop of
+ * three 2.4s beats plays: route, fall back, hold for approval. Keyframe 0% and
+ * 100% match for every element (the end of beat 3), and beat 1 opens with a
+ * short reset, so the seam does not show. Only transform and opacity animate,
+ * plus the dashed wire flow, which is paint-only.
+ */
+
+.root {
+	--gateway-amber: var(--color-realm-review-marker, #fbbf24);
+	--gateway-amber-text: var(--color-realm-progress, #b45309);
+	--gateway-ease: cubic-bezier(0.45, 0, 0.25, 1);
+	position: absolute;
+	inset: 12px 12px 100px;
+}
+
+:where([class~="dark"]) .root {
+	--gateway-amber-text: var(--color-realm-progress-dark, #fcd34d);
+}
+
+.svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+	font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.wire {
+	fill: none;
+	stroke: currentColor;
+	stroke-opacity: 0.28;
+	stroke-width: 1;
+}
+
+.flow {
+	opacity: 0.35;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1;
+	stroke-dasharray: 2 6;
+}
+
+.frame {
+	fill: none;
+	stroke: currentColor;
+	stroke-opacity: 0.6;
+	stroke-width: 1;
+}
+
+.label {
+	font-size: 7.5px;
+	letter-spacing: 0.04em;
+	fill: currentColor;
+}
+
+.micro {
+	font-size: 6.5px;
+	letter-spacing: 0.08em;
+	fill: currentColor;
+	fill-opacity: 0.55;
+}
+
+.barBase {
+	opacity: 0.4;
+	fill: currentColor;
+}
+
+.barAmber {
+	opacity: 1;
+	fill: var(--gateway-amber);
+}
+
+.tether {
+	stroke: currentColor;
+	stroke-opacity: 0.4;
+	stroke-dasharray: 1 2;
+}
+
+.keyStroke {
+	fill: none;
+	stroke: currentColor;
+	stroke-opacity: 0.7;
+	stroke-linecap: round;
+}
+
+.providerTop {
+	opacity: 0.3;
+}
+
+.providerMid {
+	opacity: 1;
+}
+
+.providerTool {
+	opacity: 0.55;
+}
+
+.strike {
+	stroke: currentColor;
+	stroke-opacity: 0.8;
+}
+
+.approval {
+	font-size: 7.5px;
+	letter-spacing: 0.04em;
+	fill: var(--gateway-amber-text);
+}
+
+.packet {
+	transform: translate(154px, 84px);
+}
+
+.packetBody {
+	fill: currentColor;
+}
+
+.packetAmber {
+	opacity: 1;
+	fill: var(--gateway-amber);
+}
+
+.baseline {
+	stroke: currentColor;
+	stroke-opacity: 0.3;
+}
+
+.tickSlot {
+	opacity: 0.18;
+	fill: currentColor;
+}
+
+.tickFirst,
+.tickSecond,
+.tickThird {
+	opacity: 0.85;
+	fill: currentColor;
+}
+
+/* Policy bars flash in sequence, 90ms apart. The delays only shift the loop. */
+.barFirst {
+	--gateway-bar-delay: 0ms;
+}
+
+.barSecond {
+	--gateway-bar-delay: 90ms;
+}
+
+.barThird {
+	--gateway-bar-delay: 180ms;
+}
+
+.vault {
+	opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.flow {
+		animation: gateway-flow 1.6s linear infinite;
+	}
+
+	.barBase,
+	.barAmber,
+	.packet,
+	.packetAmber,
+	.approval,
+	.providerTop,
+	.providerMid,
+	.providerTool,
+	.strike,
+	.tickFirst,
+	.tickSecond,
+	.tickThird {
+		animation-duration: 7.2s;
+		animation-timing-function: var(--gateway-ease);
+		animation-iteration-count: infinite;
+		animation-fill-mode: both;
+	}
+
+	.barBase {
+		animation-name: gateway-bar;
+		animation-delay: var(--gateway-bar-delay);
+	}
+
+	.barAmber {
+		animation-name: gateway-amber;
+		animation-delay: var(--gateway-bar-delay);
+	}
+
+	.packet {
+		animation-name: gateway-packet;
+	}
+
+	.packetAmber {
+		animation-name: gateway-amber;
+	}
+
+	.approval {
+		animation-name: gateway-approval;
+	}
+
+	.providerTop {
+		animation-name: gateway-provider-top;
+	}
+
+	.strike {
+		animation-name: gateway-strike;
+	}
+
+	.providerMid {
+		animation-name: gateway-provider-mid;
+	}
+
+	.providerTool {
+		animation-name: gateway-provider-tool;
+	}
+
+	.tickFirst {
+		animation-name: gateway-tick-first;
+	}
+
+	.tickSecond {
+		animation-name: gateway-tick-second;
+	}
+
+	.tickThird {
+		animation-name: gateway-tick-third;
+	}
+}
+
+.root:not([data-inview]) * {
+	animation-play-state: paused;
+}
+
+@keyframes gateway-flow {
+	to {
+		stroke-dashoffset: -16;
+	}
+}
+
+/* Agent (58,84) -> gate (154,84) -> exit (166,84) -> a provider chip. */
+@keyframes gateway-packet {
+	0% {
+		opacity: 0;
+		transform: translate(262px, 125px);
+	}
+	0.01% {
+		opacity: 0;
+		transform: translate(58px, 84px);
+	}
+	2.08% {
+		opacity: 1;
+		transform: translate(58px, 84px);
+	}
+	11.81%,
+	14.58% {
+		opacity: 1;
+		transform: translate(154px, 84px);
+	}
+	15.97% {
+		opacity: 1;
+		transform: translate(166px, 84px);
+	}
+	24.31% {
+		opacity: 1;
+		transform: translate(262px, 43px);
+	}
+	27.08% {
+		opacity: 0;
+		transform: translate(262px, 43px);
+	}
+	33.33% {
+		opacity: 0;
+		transform: translate(58px, 84px);
+	}
+	35.42% {
+		opacity: 1;
+		transform: translate(58px, 84px);
+	}
+	45.14%,
+	47.92% {
+		opacity: 1;
+		transform: translate(154px, 84px);
+	}
+	49.31% {
+		opacity: 1;
+		transform: translate(166px, 84px);
+	}
+	57.64% {
+		opacity: 1;
+		transform: translate(262px, 84px);
+	}
+	60.42% {
+		opacity: 0;
+		transform: translate(262px, 84px);
+	}
+	66.67% {
+		opacity: 0;
+		transform: translate(58px, 84px);
+	}
+	68.06% {
+		opacity: 1;
+		transform: translate(58px, 84px);
+	}
+	75%,
+	93.75% {
+		opacity: 1;
+		transform: translate(154px, 84px);
+	}
+	94.72% {
+		opacity: 1;
+		transform: translate(166px, 84px);
+	}
+	97.92% {
+		opacity: 1;
+		transform: translate(262px, 125px);
+	}
+	100% {
+		opacity: 0;
+		transform: translate(262px, 125px);
+	}
+}
+
+@keyframes gateway-bar {
+	0%,
+	10.42% {
+		opacity: 0.4;
+	}
+	11.81% {
+		opacity: 1;
+	}
+	15.97%,
+	43.75% {
+		opacity: 0.4;
+	}
+	45.14% {
+		opacity: 1;
+	}
+	49.31%,
+	73.61% {
+		opacity: 0.4;
+	}
+	75% {
+		opacity: 1;
+	}
+	78.47%,
+	93.75% {
+		opacity: 0;
+	}
+	95.83%,
+	100% {
+		opacity: 0.4;
+	}
+}
+
+/* Beat 3: the bars and the packet cross-fade to amber and hold for 1.1s. */
+@keyframes gateway-amber {
+	0%,
+	75.69% {
+		opacity: 0;
+	}
+	78.47%,
+	93.75% {
+		opacity: 1;
+	}
+	95.83%,
+	100% {
+		opacity: 0;
+	}
+}
+
+@keyframes gateway-approval {
+	0%,
+	76.39% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	80.56%,
+	93.75% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	95.83% {
+		opacity: 0;
+		transform: translateY(0);
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+/* The primary model: lit in beat 1, down (dimmed and struck) from beat 2. */
+@keyframes gateway-provider-top {
+	0%,
+	6.94% {
+		opacity: 0.3;
+	}
+	11.11%,
+	23.61% {
+		opacity: 0.55;
+	}
+	24.31%,
+	30.56% {
+		opacity: 1;
+	}
+	33.33%,
+	43.06% {
+		opacity: 0.55;
+	}
+	47.22%,
+	100% {
+		opacity: 0.3;
+	}
+}
+
+@keyframes gateway-strike {
+	0%,
+	6.94% {
+		opacity: 1;
+	}
+	11.11%,
+	43.06% {
+		opacity: 0;
+	}
+	47.22%,
+	100% {
+		opacity: 1;
+	}
+}
+
+@keyframes gateway-provider-mid {
+	0%,
+	6.94% {
+		opacity: 1;
+	}
+	11.11%,
+	56.94% {
+		opacity: 0.55;
+	}
+	57.64%,
+	100% {
+		opacity: 1;
+	}
+}
+
+@keyframes gateway-provider-tool {
+	0%,
+	6.94% {
+		opacity: 1;
+	}
+	11.11%,
+	97.22% {
+		opacity: 0.55;
+	}
+	97.92%,
+	100% {
+		opacity: 1;
+	}
+}
+
+/* Each crossing writes an audit tick; the log clears as beat 1 opens. */
+@keyframes gateway-tick-first {
+	0%,
+	6.94% {
+		opacity: 0.85;
+	}
+	11.11%,
+	25% {
+		opacity: 0;
+	}
+	29.17%,
+	100% {
+		opacity: 0.85;
+	}
+}
+
+@keyframes gateway-tick-second {
+	0%,
+	6.94% {
+		opacity: 0.85;
+	}
+	11.11%,
+	58.33% {
+		opacity: 0;
+	}
+	62.5%,
+	100% {
+		opacity: 0.85;
+	}
+}
+
+@keyframes gateway-tick-third {
+	0%,
+	6.94% {
+		opacity: 0.85;
+	}
+	11.11%,
+	97.22% {
+		opacity: 0;
+	}
+	99.31%,
+	100% {
+		opacity: 0.85;
+	}
+}

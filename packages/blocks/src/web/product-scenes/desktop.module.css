@@ -1,0 +1,324 @@
+/*
+ * Ryu Desktop card scene. The un-animated styles are the reduced-motion frame:
+ * both imported threads at the top of the sidebar, the model chip on
+ * "your key", the sandbox tick resting mid-track. Every concept animation
+ * shares one 8.8s cycle so import, model switch and reset stay in step; only
+ * the sandbox border (1.6s) and the app tick (2.1s) loop on their own.
+ */
+.root {
+	--desk-ink: var(--foreground);
+	--desk-line: color-mix(in oklab, var(--foreground) 18%, transparent);
+	--desk-faint: color-mix(in oklab, var(--foreground) 7%, transparent);
+	--desk-mid: color-mix(in oklab, var(--foreground) 14%, transparent);
+	--desk-lit: color-mix(in oklab, var(--foreground) 62%, transparent);
+	--desk-paper: color-mix(in oklab, var(--background) 72%, transparent);
+	position: absolute;
+	inset: 12px 0 auto;
+	height: calc(100% - 120px);
+}
+
+.svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+.frame {
+	fill: var(--desk-paper);
+	stroke: var(--desk-line);
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.rule {
+	stroke: var(--desk-line);
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.dot {
+	fill: var(--desk-mid);
+}
+
+.row {
+	fill: var(--desk-faint);
+}
+
+.ink {
+	fill: var(--desk-mid);
+}
+
+.lit {
+	fill: var(--desk-lit);
+}
+
+.label {
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 7px;
+	letter-spacing: 0.02em;
+	fill: var(--desk-ink);
+}
+
+.chipRow {
+	fill: var(--desk-paper);
+	stroke: var(--desk-line);
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.badge {
+	fill: var(--desk-paper);
+	stroke: var(--desk-lit);
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.sandbox {
+	fill: none;
+	stroke: var(--desk-lit);
+	stroke-width: 0.75;
+	stroke-dasharray: 3 3;
+	animation: desk-march 1.6s linear infinite;
+}
+
+.tile {
+	fill: var(--desk-faint);
+	stroke: var(--desk-line);
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.track {
+	stroke: var(--desk-mid);
+	stroke-width: 2;
+	stroke-linecap: round;
+}
+
+.tick {
+	fill: var(--desk-ink);
+	animation: desk-tick 2.1s ease-in-out infinite alternate;
+}
+
+/* The ghost chips slide in from beyond the left edge into the top slots. */
+.chipA,
+.chipB {
+	animation-duration: 8.8s;
+	animation-timing-function: ease-in-out;
+	animation-iteration-count: infinite;
+	animation-fill-mode: both;
+}
+
+.chipA {
+	animation-name: desk-import-a;
+}
+
+.chipB {
+	animation-name: desk-import-b;
+}
+
+.rowsShift {
+	transform: translateY(36px);
+	animation: desk-rows 8.8s ease-in-out infinite both;
+}
+
+.rowLast {
+	opacity: 0;
+	animation: desk-row-last 8.8s ease-in-out infinite both;
+}
+
+/* Model labels and the reply badge initial share one cross-fade per model. */
+.local,
+.key,
+.plan {
+	animation-duration: 8.8s;
+	animation-timing-function: ease-in-out;
+	animation-iteration-count: infinite;
+	animation-fill-mode: both;
+}
+
+.local {
+	opacity: 0;
+	animation-name: desk-local;
+}
+
+.key {
+	animation-name: desk-key;
+}
+
+.plan {
+	opacity: 0;
+	animation-name: desk-plan;
+}
+
+.replyBar {
+	fill: var(--desk-lit);
+	transform-origin: 0 50%;
+	transform-box: fill-box;
+	animation: desk-reply 8.8s ease-in-out infinite both;
+}
+
+.root:not([data-inview]) * {
+	animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.root * {
+		animation: none !important;
+	}
+}
+
+@keyframes desk-march {
+	to {
+		stroke-dashoffset: -12;
+	}
+}
+
+@keyframes desk-tick {
+	from {
+		transform: translateX(-22px);
+	}
+	to {
+		transform: translateX(22px);
+	}
+}
+
+@keyframes desk-import-a {
+	0%,
+	4.5% {
+		opacity: 0.3;
+		transform: translateX(-62px);
+	}
+	13.6%,
+	86.4% {
+		opacity: 1;
+		transform: translateX(0);
+	}
+	93.2%,
+	100% {
+		opacity: 0.3;
+		transform: translateX(-62px);
+	}
+}
+
+@keyframes desk-import-b {
+	0%,
+	8% {
+		opacity: 0.3;
+		transform: translateX(-62px);
+	}
+	17%,
+	88.6% {
+		opacity: 1;
+		transform: translateX(0);
+	}
+	95.5%,
+	100% {
+		opacity: 0.3;
+		transform: translateX(-62px);
+	}
+}
+
+@keyframes desk-rows {
+	0%,
+	1.5% {
+		transform: translateY(0);
+	}
+	10.2%,
+	93.2% {
+		transform: translateY(36px);
+	}
+	100% {
+		transform: translateY(0);
+	}
+}
+
+@keyframes desk-row-last {
+	0%,
+	1.5% {
+		opacity: 1;
+	}
+	8%,
+	93.2% {
+		opacity: 0;
+	}
+	100% {
+		opacity: 1;
+	}
+}
+
+@keyframes desk-local {
+	0%,
+	18.2% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	22.7% {
+		opacity: 0;
+		transform: translateY(-2px);
+	}
+	72.7% {
+		opacity: 0;
+		transform: translateY(2px);
+	}
+	77.3%,
+	100% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes desk-key {
+	0%,
+	18.2% {
+		opacity: 0;
+		transform: translateY(2px);
+	}
+	22.7%,
+	45.5% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	50%,
+	100% {
+		opacity: 0;
+		transform: translateY(-2px);
+	}
+}
+
+@keyframes desk-plan {
+	0%,
+	45.5% {
+		opacity: 0;
+		transform: translateY(2px);
+	}
+	50%,
+	72.7% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	77.3%,
+	100% {
+		opacity: 0;
+		transform: translateY(-2px);
+	}
+}
+
+/* The reply regrows from the left each time the model slot switches. */
+@keyframes desk-reply {
+	0%,
+	18.2%,
+	29.5%,
+	45.5%,
+	56.8%,
+	72.7%,
+	84.1%,
+	100% {
+		transform: scaleX(1);
+	}
+	20.5%,
+	47.7%,
+	75% {
+		transform: scaleX(0);
+	}
+}

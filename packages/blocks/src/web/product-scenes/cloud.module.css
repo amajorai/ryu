@@ -1,0 +1,479 @@
+/*
+ * Ryu Cloud card: one 10.4s story. The laptop hands a run to the managed node
+ * and sleeps, the node keeps the runs going while every outbound call crosses
+ * the Gateway policy bars, and the result lands back on the laptop at wake.
+ *
+ * Only transform and opacity animate. Every element that scales or rotates
+ * uses `transform-box: fill-box`, so its origin is its own box rather than the
+ * SVG viewport. The SVG has no ids, so many cards can share a page.
+ *
+ * Timeline (percent of 10.4s):
+ *   2-9      hand-off packet, laptop to rack; LED 1 lights at 9
+ *   10-20    sleep: screen dims to .2, the moon turns in
+ *   12-84    slots fill at staggered rates; LEDs pulse
+ *   23/38/54/69  gateway trips every 1.6s (2.4s, 4.0s, 5.6s, 7.2s)
+ *   78-92    wake: moon out, screen back, the result packet returns
+ *   92-100   reset to the pose
+ */
+
+.root:not([data-inview]) * {
+	animation-play-state: paused;
+}
+
+.screen {
+	animation: cloud-screen 10.4s ease-in-out infinite;
+}
+
+.moon {
+	opacity: 0;
+	transform: rotate(-20deg);
+	transform-origin: center;
+	transform-box: fill-box;
+	animation: cloud-moon 10.4s ease-in-out infinite;
+}
+
+.handoff {
+	opacity: 0;
+	animation: cloud-handoff 10.4s linear infinite;
+}
+
+.ledOne,
+.ledTwo,
+.ledThree {
+	opacity: 0;
+	animation-duration: 10.4s;
+	animation-timing-function: ease-in-out;
+	animation-iteration-count: infinite;
+}
+.ledOne {
+	animation-name: cloud-led-one;
+}
+.ledTwo {
+	animation-name: cloud-led-two;
+}
+.ledThree {
+	animation-name: cloud-led-three;
+}
+
+/* The iso-pulse beat, offset per slot. */
+.pulse {
+	animation: cloud-pulse 1.6s ease-in-out infinite;
+}
+.pulseTwo {
+	animation-delay: 0.53s;
+}
+.pulseThree {
+	animation-delay: 1.07s;
+}
+
+.fillOne,
+.fillTwo,
+.fillThree {
+	transform: scaleX(0);
+	transform-origin: left center;
+	transform-box: fill-box;
+	animation-duration: 10.4s;
+	animation-timing-function: linear;
+	animation-iteration-count: infinite;
+}
+.fillOne {
+	animation-name: cloud-fill-one;
+}
+.fillTwo {
+	animation-name: cloud-fill-two;
+}
+.fillThree {
+	animation-name: cloud-fill-three;
+}
+
+.outbound {
+	opacity: 0;
+	animation: cloud-outbound 10.4s linear infinite;
+}
+
+/* The same policy glyph as the Gateway card, flashed as each call crosses. */
+.bar {
+	opacity: 0.4;
+	animation: cloud-bar 10.4s ease-in-out infinite;
+}
+.barTwo {
+	animation-delay: 80ms;
+}
+.barThree {
+	animation-delay: 160ms;
+}
+
+.chip {
+	opacity: 0.6;
+	animation: cloud-chip 10.4s ease-in-out infinite;
+}
+
+.returning {
+	opacity: 0;
+	animation: cloud-return 10.4s linear infinite;
+}
+
+.result {
+	opacity: 0;
+	animation: cloud-result 10.4s ease-in-out infinite;
+}
+
+/* Only the still pose needs words: the motion tells this story itself. */
+.caption {
+	display: none;
+}
+
+@keyframes cloud-screen {
+	0%,
+	10% {
+		opacity: 1;
+	}
+	16%,
+	80% {
+		opacity: 0.2;
+	}
+	86%,
+	100% {
+		opacity: 1;
+	}
+}
+
+@keyframes cloud-moon {
+	0%,
+	12% {
+		opacity: 0;
+		transform: rotate(-20deg);
+	}
+	20%,
+	78% {
+		opacity: 1;
+		transform: rotate(0deg);
+	}
+	84% {
+		opacity: 0;
+		transform: rotate(0deg);
+	}
+	86%,
+	100% {
+		opacity: 0;
+		transform: rotate(-20deg);
+	}
+}
+
+@keyframes cloud-handoff {
+	0%,
+	2% {
+		opacity: 0;
+		transform: translateX(0);
+	}
+	3% {
+		opacity: 1;
+		transform: translateX(4.9px);
+	}
+	8% {
+		opacity: 1;
+		transform: translateX(29.1px);
+	}
+	9%,
+	100% {
+		opacity: 0;
+		transform: translateX(34px);
+	}
+}
+
+@keyframes cloud-led-one {
+	0%,
+	8.5% {
+		opacity: 0;
+	}
+	9.5%,
+	92% {
+		opacity: 1;
+	}
+	95%,
+	100% {
+		opacity: 0;
+	}
+}
+
+@keyframes cloud-led-two {
+	0%,
+	12% {
+		opacity: 0;
+	}
+	13%,
+	92% {
+		opacity: 1;
+	}
+	95%,
+	100% {
+		opacity: 0;
+	}
+}
+
+@keyframes cloud-led-three {
+	0%,
+	15.5% {
+		opacity: 0;
+	}
+	16.5%,
+	92% {
+		opacity: 1;
+	}
+	95%,
+	100% {
+		opacity: 0;
+	}
+}
+
+@keyframes cloud-pulse {
+	0%,
+	100% {
+		opacity: 0.45;
+	}
+	12% {
+		opacity: 1;
+	}
+	40% {
+		opacity: 0.45;
+	}
+}
+
+@keyframes cloud-fill-one {
+	0%,
+	12% {
+		opacity: 1;
+		transform: scaleX(0);
+	}
+	55%,
+	92% {
+		opacity: 1;
+		transform: scaleX(1);
+	}
+	96% {
+		opacity: 0;
+		transform: scaleX(1);
+	}
+	97% {
+		opacity: 0;
+		transform: scaleX(0);
+	}
+	100% {
+		opacity: 1;
+		transform: scaleX(0);
+	}
+}
+
+@keyframes cloud-fill-two {
+	0%,
+	15% {
+		opacity: 1;
+		transform: scaleX(0);
+	}
+	72%,
+	92% {
+		opacity: 1;
+		transform: scaleX(1);
+	}
+	96% {
+		opacity: 0;
+		transform: scaleX(1);
+	}
+	97% {
+		opacity: 0;
+		transform: scaleX(0);
+	}
+	100% {
+		opacity: 1;
+		transform: scaleX(0);
+	}
+}
+
+@keyframes cloud-fill-three {
+	0%,
+	18% {
+		opacity: 1;
+		transform: scaleX(0);
+	}
+	84%,
+	92% {
+		opacity: 1;
+		transform: scaleX(1);
+	}
+	96% {
+		opacity: 0;
+		transform: scaleX(1);
+	}
+	97% {
+		opacity: 0;
+		transform: scaleX(0);
+	}
+	100% {
+		opacity: 1;
+		transform: scaleX(0);
+	}
+}
+
+/* Four 0.8s trips, rack to models, starting every 1.6s. */
+@keyframes cloud-outbound {
+	0%,
+	23.08%,
+	38.46%,
+	53.85%,
+	69.23%,
+	100% {
+		opacity: 0;
+		transform: translateX(0);
+	}
+	24.04%,
+	39.42%,
+	54.81%,
+	70.19% {
+		opacity: 1;
+		transform: translateX(9px);
+	}
+	29.81%,
+	45.19%,
+	60.58%,
+	75.96% {
+		opacity: 1;
+		transform: translateX(63px);
+	}
+	30.77%,
+	46.15%,
+	61.54%,
+	76.92% {
+		opacity: 0;
+		transform: translateX(72px);
+	}
+}
+
+/* Each flash peaks as a trip's packet crosses the bars (its midpoint). */
+@keyframes cloud-bar {
+	0%,
+	25.48%,
+	30.29%,
+	40.87%,
+	45.68%,
+	56.25%,
+	61.06%,
+	71.64%,
+	76.45%,
+	100% {
+		opacity: 0.4;
+	}
+	26.92%,
+	42.31%,
+	57.69%,
+	73.08% {
+		opacity: 1;
+	}
+}
+
+@keyframes cloud-chip {
+	0%,
+	30.3%,
+	33%,
+	45.7%,
+	48.4%,
+	61.1%,
+	63.8%,
+	76.5%,
+	79.2%,
+	100% {
+		opacity: 0.6;
+	}
+	30.9%,
+	46.3%,
+	61.7%,
+	77.1% {
+		opacity: 1;
+	}
+}
+
+@keyframes cloud-return {
+	0%,
+	84% {
+		opacity: 0;
+		transform: translateX(0);
+	}
+	85% {
+		opacity: 1;
+		transform: translateX(-5.25px);
+	}
+	91% {
+		opacity: 1;
+		transform: translateX(-36.75px);
+	}
+	92%,
+	100% {
+		opacity: 0;
+		transform: translateX(-42px);
+	}
+}
+
+@keyframes cloud-result {
+	0%,
+	91.5% {
+		opacity: 0;
+	}
+	92.5%,
+	97% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+
+/* The still pose: asleep, three runs going, one call parked in the policy. */
+@media (prefers-reduced-motion: reduce) {
+	.screen,
+	.moon,
+	.handoff,
+	.ledOne,
+	.ledTwo,
+	.ledThree,
+	.pulse,
+	.fillOne,
+	.fillTwo,
+	.fillThree,
+	.outbound,
+	.bar,
+	.chip,
+	.returning,
+	.result {
+		animation: none;
+	}
+	.screen {
+		opacity: 0.2;
+	}
+	.moon {
+		opacity: 1;
+		transform: none;
+	}
+	.ledOne,
+	.ledTwo,
+	.ledThree,
+	.pulse,
+	.bar,
+	.chip {
+		opacity: 1;
+	}
+	.fillOne {
+		transform: scaleX(0.3);
+	}
+	.fillTwo {
+		transform: scaleX(0.7);
+	}
+	.fillThree {
+		transform: none;
+	}
+	.outbound {
+		opacity: 1;
+		transform: translateX(33px);
+	}
+	.caption {
+		display: inline;
+	}
+}

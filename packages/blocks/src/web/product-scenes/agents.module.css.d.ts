@@ -1,0 +1,27 @@
+declare const styles: {
+	readonly blink: string;
+	readonly chatNew: string;
+	readonly chatOld: string;
+	readonly chip: string;
+	readonly chipIn: string;
+	readonly chipOut: string;
+	readonly core: string;
+	readonly coreLabel: string;
+	readonly doc: string;
+	readonly docBack: string;
+	readonly docFront: string;
+	readonly docMid: string;
+	readonly docNew: string;
+	readonly dot: string;
+	readonly end: string;
+	readonly flow: string;
+	readonly glyph: string;
+	readonly halo: string;
+	readonly label: string;
+	readonly newFlow: string;
+	readonly outline: string;
+	readonly stage: string;
+	readonly trace: string;
+	readonly wire: string;
+};
+export default styles;

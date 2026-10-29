@@ -1,6 +1,10 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import type { ProductRealmId } from "./data/product-realms.ts";
 import styles from "./product-realm-scenes.module.css";
+import { BotScene } from "./product-scenes/bot.tsx";
+import { ConsoleScene } from "./product-scenes/console.tsx";
+import { GatewayScene } from "./product-scenes/gateway.tsx";
+import { Scene } from "./product-scenes/scene.tsx";
 
 type SceneId = ProductRealmId | "apps";
 
@@ -10,19 +14,6 @@ interface WorkspaceArtworkStyle extends CSSProperties {
 const workspaceArtwork: WorkspaceArtworkStyle = {
 	"--realm-workspace-image": "url('/homepage/ryu-os-workspace.png')",
 };
-
-/** The homepage card backdrop every product scene draws inside. */
-export function Scene({ children, id }: { children: ReactNode; id: string }) {
-	return (
-		<div
-			aria-hidden="true"
-			className="relative h-full w-full overflow-hidden bg-muted/65 text-foreground"
-			data-testid={`realm-visual-${id}`}
-		>
-			{children}
-		</div>
-	);
-}
 
 export function ProductRealmScene({ id }: { id: SceneId }) {
 	switch (id) {
@@ -59,44 +50,7 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 				</Scene>
 			);
 		case "gateway":
-			return (
-				<Scene id={id}>
-					<div className="absolute inset-0 bg-muted/65 px-5 pt-5 font-mono text-foreground dark:bg-realm-terminal-background dark:text-realm-terminal-foreground">
-						<div className="type-compact flex items-center justify-between text-muted-foreground dark:text-realm-terminal-muted">
-							<span>POST /v1/exec/tool</span>
-							<span>req_8c41</span>
-						</div>
-						<div className="type-caption mt-6 space-y-2 leading-relaxed">
-							<p>
-								<span className="text-muted-foreground dark:text-realm-terminal-muted">
-									agent
-								</span>{" "}
-								<span className="ml-4">research-agent</span>
-							</p>
-							<p>
-								<span className="text-muted-foreground dark:text-realm-terminal-muted">
-									tool
-								</span>{" "}
-								<span className="ml-6">gmail.send</span>
-							</p>
-							<p>
-								<span className="text-muted-foreground dark:text-realm-terminal-muted">
-									scope
-								</span>{" "}
-								<span className="ml-3">client-update</span>
-							</p>
-						</div>
-						<div className="mt-5 rounded-xl border border-realm-review-marker/45 bg-realm-review-marker/10 px-3 py-2">
-							<p className="font-medium font-sans text-realm-review-foreground text-sm dark:text-realm-review-foreground-dark">
-								Needs your approval
-							</p>
-							<p className="type-compact mt-1 font-sans text-muted-foreground dark:text-realm-terminal-muted">
-								The draft is ready. Sending waits for review.
-							</p>
-						</div>
-					</div>
-				</Scene>
-			);
+			return <GatewayScene />;
 		case "compute":
 			return (
 				<Scene id={id}>
@@ -128,57 +82,9 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 				</Scene>
 			);
 		case "console":
-			return (
-				<Scene id={id}>
-					<div className="absolute inset-0 overflow-hidden bg-muted/65">
-						<div className="grid grid-cols-3 divide-x divide-border/50 border-border/50 border-b">
-							{[
-								["12", "Nodes"],
-								["04", "Models"],
-								["28", "Agents"],
-							].map(([count, label]) => (
-								<div className="px-5 py-4" key={label}>
-									<p className="font-medium text-2xl tracking-tight">{count}</p>
-									<p className="type-compact mt-1 text-muted-foreground">
-										{label}
-									</p>
-								</div>
-							))}
-						</div>
-						<div className="type-caption px-5 pt-4">
-							<div className="flex items-center justify-between border-border/40 border-b py-2">
-								<span>Customer support</span>
-								<span className="text-realm-complete dark:text-realm-complete-dark">
-									Completed
-								</span>
-							</div>
-							<div className="flex items-center justify-between border-border/40 border-b py-2">
-								<span>Research brief</span>
-								<span className="text-realm-progress dark:text-realm-progress-dark">
-									Running
-								</span>
-							</div>
-						</div>
-					</div>
-				</Scene>
-			);
+			return <ConsoleScene />;
 		case "bot":
-			return (
-				<Scene id={id}>
-					<div className="type-caption absolute inset-0 space-y-3 px-4 pt-5 leading-relaxed">
-						<div className="ml-auto w-[78%] rounded-2xl rounded-br-sm bg-foreground px-3 py-2.5 text-background">
-							Can you prepare a summary for tomorrow&apos;s meeting?
-						</div>
-						<div className="w-[92%] rounded-2xl rounded-bl-sm bg-background/85 px-3 py-2.5">
-							I read the project notes and drafted a one-page brief. Two
-							decisions need your review.
-						</div>
-						<div className="type-compact ml-auto w-fit rounded-full bg-realm-review-marker/20 px-2.5 py-1 text-realm-brief-foreground dark:text-realm-brief-foreground-dark">
-							Brief ready for review
-						</div>
-					</div>
-				</Scene>
-			);
+			return <BotScene />;
 		case "passport":
 			return (
 				<Scene id={id}>

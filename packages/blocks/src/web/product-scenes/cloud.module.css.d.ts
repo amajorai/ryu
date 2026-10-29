@@ -1,0 +1,24 @@
+declare const styles: {
+	readonly bar: string;
+	readonly barThree: string;
+	readonly barTwo: string;
+	readonly caption: string;
+	readonly chip: string;
+	readonly fillOne: string;
+	readonly fillThree: string;
+	readonly fillTwo: string;
+	readonly handoff: string;
+	readonly ledOne: string;
+	readonly ledThree: string;
+	readonly ledTwo: string;
+	readonly moon: string;
+	readonly outbound: string;
+	readonly pulse: string;
+	readonly pulseThree: string;
+	readonly pulseTwo: string;
+	readonly result: string;
+	readonly returning: string;
+	readonly root: string;
+	readonly screen: string;
+};
+export default styles;

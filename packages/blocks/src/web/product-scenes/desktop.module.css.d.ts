@@ -1,0 +1,26 @@
+declare const styles: {
+	readonly badge: string;
+	readonly chipA: string;
+	readonly chipB: string;
+	readonly chipRow: string;
+	readonly dot: string;
+	readonly frame: string;
+	readonly ink: string;
+	readonly key: string;
+	readonly label: string;
+	readonly lit: string;
+	readonly local: string;
+	readonly plan: string;
+	readonly replyBar: string;
+	readonly root: string;
+	readonly row: string;
+	readonly rowLast: string;
+	readonly rowsShift: string;
+	readonly rule: string;
+	readonly sandbox: string;
+	readonly svg: string;
+	readonly tick: string;
+	readonly tile: string;
+	readonly track: string;
+};
+export default styles;

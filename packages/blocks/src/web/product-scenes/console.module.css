@@ -1,0 +1,289 @@
+/*
+ * Console card motion. The base rules are the still frame, shown under
+ * reduced motion and before any keyframe runs: run 1 done and filed, run 2
+ * waiting at its approval, run 3 idle. One 8s loop drives every element; only
+ * opacity and transform change. `Stage` sets `data-inview` while the card is
+ * near the viewport; without it the loop is paused.
+ */
+
+.root {
+	--console-cycle: 8s;
+}
+
+.fastTick,
+.slowTick,
+.litTick {
+	opacity: 1;
+}
+
+.idleTick,
+.resumeTick {
+	opacity: 0.2;
+}
+
+.runPending {
+	opacity: 0;
+}
+
+.runDone {
+	opacity: 1;
+}
+
+.approval {
+	opacity: 1;
+}
+
+.approved {
+	opacity: 0;
+}
+
+.recordMark {
+	opacity: 1;
+}
+
+.record {
+	opacity: 0.8;
+	transform-origin: left center;
+	transform-box: fill-box;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.fastTick,
+	.slowTick,
+	.resumeTick,
+	.runPending,
+	.runDone,
+	.approval,
+	.approved,
+	.recordMark,
+	.record,
+	.ledgerShift {
+		animation-duration: var(--console-cycle);
+		animation-timing-function: ease-in-out;
+		animation-iteration-count: infinite;
+		animation-fill-mode: both;
+	}
+
+	/* Run 1 lights left to right; the last tick lands at about 45%. */
+	.fastTick {
+		animation-name: console-fast-tick;
+		animation-delay: calc(var(--i) * 0.36s);
+	}
+
+	/* Run 2 lights at half speed and reaches the approval at about 48%. */
+	.slowTick {
+		animation-name: console-slow-tick;
+		animation-delay: calc(var(--i) * 0.72s);
+	}
+
+	.resumeTick {
+		animation-name: console-resume-tick;
+	}
+
+	.runPending {
+		animation-name: console-run-pending;
+	}
+
+	.runDone {
+		animation-name: console-run-done;
+	}
+
+	.approval {
+		animation-name: console-approval;
+	}
+
+	.approved {
+		animation-name: console-approved;
+	}
+
+	.record {
+		animation-name: console-record;
+	}
+
+	.recordMark {
+		animation-name: console-record-mark;
+	}
+
+	.ledgerShift {
+		animation-name: console-ledger-shift;
+	}
+
+	.root:not([data-inview]) * {
+		animation-play-state: paused;
+	}
+}
+
+@keyframes console-fast-tick {
+	0%,
+	20% {
+		opacity: 0.2;
+	}
+	24%,
+	74% {
+		opacity: 1;
+	}
+	78%,
+	100% {
+		opacity: 0.2;
+	}
+}
+
+@keyframes console-slow-tick {
+	0%,
+	20% {
+		opacity: 0.2;
+	}
+	24%,
+	78% {
+		opacity: 1;
+	}
+	82%,
+	100% {
+		opacity: 0.2;
+	}
+}
+
+@keyframes console-resume-tick {
+	0%,
+	70% {
+		opacity: 0.2;
+	}
+	74%,
+	80% {
+		opacity: 1;
+	}
+	85%,
+	100% {
+		opacity: 0.2;
+	}
+}
+
+@keyframes console-run-pending {
+	0%,
+	44% {
+		opacity: 1;
+	}
+	48%,
+	80% {
+		opacity: 0;
+	}
+	86%,
+	100% {
+		opacity: 1;
+	}
+}
+
+@keyframes console-run-done {
+	0%,
+	44% {
+		opacity: 0;
+	}
+	48%,
+	80% {
+		opacity: 1;
+	}
+	86%,
+	100% {
+		opacity: 0;
+	}
+}
+
+/* Faint until run 2 arrives, then waits (pulses) about 1.5s for approval. */
+@keyframes console-approval {
+	0%,
+	45% {
+		opacity: 0.3;
+	}
+	48% {
+		opacity: 1;
+	}
+	53% {
+		opacity: 0.5;
+	}
+	58% {
+		opacity: 1;
+	}
+	63% {
+		opacity: 0.5;
+	}
+	66% {
+		opacity: 1;
+	}
+	70%,
+	84% {
+		opacity: 0;
+	}
+	90%,
+	100% {
+		opacity: 0.3;
+	}
+}
+
+@keyframes console-approved {
+	0%,
+	66% {
+		opacity: 0;
+	}
+	70%,
+	82% {
+		opacity: 1;
+	}
+	86%,
+	100% {
+		opacity: 0;
+	}
+}
+
+/* The finished run's record leaves run 1 and files into the ledger's top slot. */
+@keyframes console-record {
+	0%,
+	46% {
+		opacity: 0;
+		transform: translate(-34px, -13px) scaleX(0.4);
+	}
+	49% {
+		opacity: 0.8;
+		transform: translate(-34px, -13px) scaleX(0.4);
+	}
+	56%,
+	82% {
+		opacity: 0.8;
+		transform: translate(0, 0) scaleX(1);
+	}
+	89%,
+	100% {
+		opacity: 0;
+		transform: translate(0, 0) scaleX(1);
+	}
+}
+
+@keyframes console-record-mark {
+	0%,
+	55% {
+		opacity: 0;
+	}
+	59%,
+	82% {
+		opacity: 1;
+	}
+	88%,
+	100% {
+		opacity: 0;
+	}
+}
+
+/* Older records step down 8 units to make room; the oldest leaves the clip. */
+@keyframes console-ledger-shift {
+	0%,
+	50% {
+		transform: translateY(-8px);
+	}
+	56%,
+	83% {
+		transform: translateY(0);
+	}
+	91%,
+	100% {
+		transform: translateY(-8px);
+	}
+}
