@@ -9,10 +9,6 @@ import { EntityAvatar } from "./entity-avatar.tsx";
 import { Logo } from "./logo.tsx";
 import { PassCardShell } from "./pass-card-shell.tsx";
 import { PassQrBack } from "./pass-qr-back.tsx";
-import {
-	SensitiveRevealButton,
-	useSensitiveValue,
-} from "./sensitive-value.tsx";
 import { TearTicket } from "./tear-ticket.tsx";
 
 /**
@@ -311,7 +307,6 @@ export function WaitlistPass({
 	torn = false,
 	username,
 }: WaitlistPassProps) {
-	const { revealed, toggle } = useSensitiveValue(referralUrl);
 	const displayName = name?.trim() || (username ? `@${username}` : "Member");
 	// When there is no name the hero falls back to the handle — which is right on
 	// the public `/pass` page, where there is no session to read a name from. What
@@ -350,9 +345,10 @@ export function WaitlistPass({
 					<PassQrBack
 						caption="Scan to invite"
 						metalTheme={metalTheme}
-						onRevealToggle={toggle}
-						revealed={revealed}
 						seed={backdropSeed}
+						// The waitlist link exists to be shared, so its QR is shown
+						// in the clear rather than masked behind a reveal toggle.
+						sensitive={false}
 						value={referralUrl}
 					/>
 				}
@@ -442,13 +438,6 @@ export function WaitlistPass({
 							</span>
 							<span className="text-muted-foreground text-xs">Position</span>
 						</div>
-					) : null}
-					{referralUrl ? (
-						<SensitiveRevealButton
-							label="waitlist invite QR"
-							onToggle={toggle}
-							revealed={revealed}
-						/>
 					) : null}
 				</div>
 			</PassCardShell>

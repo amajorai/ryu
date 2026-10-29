@@ -80,6 +80,7 @@ function ensureOverlay(display: Display): BrowserWindow {
 		webPreferences: {
 			contextIsolation: true,
 			nodeIntegration: false,
+			sandbox: true,
 		},
 	});
 	win.setBounds(display.bounds);

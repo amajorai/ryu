@@ -1,5 +1,10 @@
 appId: ai.amajor.ryu.island
 productName: Ryu Island
+# electron-builder's default `@electron/rebuild` step needs a `node-abi` entry for
+# the pinned Electron train. When a security bump lands before node-abi is updated,
+# skip rebuild: Island native deps (uiohook-napi, koffi, …) ship N-API/generic
+# prebuilds and are unpacked from asar anyway (see `asarUnpack` below).
+npmRebuild: false
 # Stable, predictable artifact names so a downloader (e.g. the desktop's
 # `~/.ryu/bin`-style managed-companion install, mirroring ryu-core's
 # `install.rs`) can hardcode a `releases/latest/download/<name>` URL. Without a

@@ -176,9 +176,10 @@ test("a preload that requires anything but Electron's sandbox modules fails the 
 	expect(result.exit).toBe(1);
 	expect(result.stderr).toBe(
 		[
-			"Island bundle check failed (2):",
+			"Island bundle check failed (3):",
 			'  - preload/index.cjs: "zod" cannot be loaded by a sandboxed preload; bundle it',
 			'  - preload/index.cjs: "./ipc.cjs" cannot be loaded by a sandboxed preload; bundle it',
+			'  - preload/index.cjs: "node:events" cannot be loaded by a sandboxed preload; bundle it',
 			"",
 		].join("\n")
 	);

@@ -231,7 +231,7 @@ function ChartTooltipContent({
 	return (
 		<div
 			className={cn(
-				"corner-squircle before:corner-squircle relative grid min-w-32 items-start gap-1.5 rounded-xl bg-popover/70 px-2.5 py-1.5 text-popover-foreground text-xs backdrop-blur-2xl backdrop-saturate-150 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit]",
+				"relative grid min-w-32 items-start gap-1.5 rounded-xl bg-popover/70 px-2.5 py-1.5 text-popover-foreground text-xs backdrop-blur-2xl backdrop-saturate-150 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit]",
 				className
 			)}
 		>
@@ -262,7 +262,7 @@ function ChartTooltipContent({
 											!hideIndicator && (
 												<div
 													className={cn(
-														"corner-squircle shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
+														"shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
 														{
 															"h-2.5 w-2.5": indicator === "dot",
 															"w-1": indicator === "line",
@@ -359,7 +359,7 @@ function ChartLegendContent({
 								<itemConfig.icon />
 							) : (
 								<div
-									className="corner-squircle h-2 w-2 shrink-0 rounded-[2px] bg-(--chart-swatch)"
+									className="h-2 w-2 shrink-0 rounded-[2px] bg-(--chart-swatch)"
 									style={swatchStyle}
 								/>
 							)}

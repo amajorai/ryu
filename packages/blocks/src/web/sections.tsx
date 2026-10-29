@@ -62,7 +62,7 @@ export function Cta({
 			className={cn(
 				buttonVariants({ variant, size }),
 				// Match the DownloadMenu pill so paired CTAs share one silhouette.
-				"corner-round rounded-full",
+				"rounded-full",
 				variant === "outline" && outlineCtaClass
 			)}
 			href={nextLinkHref(cta.href)}

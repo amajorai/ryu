@@ -31,6 +31,12 @@ export interface PassQrBackProps {
 	revealed?: boolean;
 	/** The same public seed that paints the card's warp field. */
 	seed: string;
+	/**
+	 * Whether the code is a secret to mask until revealed. Defaults to true for
+	 * the invite and referral passes; the waitlist pass opts out, since its
+	 * referral link is meant to be shared and is shown in the clear.
+	 */
+	sensitive?: boolean;
 	/** The absolute URL a phone camera should open. */
 	value?: string | null;
 }
@@ -51,10 +57,11 @@ export function PassQrBack({
 	onRevealToggle,
 	metalTheme = "auto",
 	seed,
+	sensitive = true,
 	value,
 }: PassQrBackProps) {
 	const visibility = useSensitiveValue(value);
-	const revealed = controlledRevealed ?? visibility.revealed;
+	const revealed = !sensitive || (controlledRevealed ?? visibility.revealed);
 	const toggle = onRevealToggle ?? visibility.toggle;
 	const isDark = useIsDarkFace(metalTheme);
 	const colors = passQrColors(ditherAvatarHue(seed), isDark);
@@ -120,12 +127,14 @@ export function PassQrBack({
 					>
 						{caption}
 					</span>
-					<SensitiveRevealButton
-						label="invite QR"
-						onToggle={toggle}
-						revealed
-						tabIndex={controlledRevealed === undefined ? undefined : -1}
-					/>
+					{sensitive ? (
+						<SensitiveRevealButton
+							label="invite QR"
+							onToggle={toggle}
+							revealed
+							tabIndex={controlledRevealed === undefined ? undefined : -1}
+						/>
+					) : null}
 				</>
 			) : (
 				<div

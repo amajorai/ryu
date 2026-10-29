@@ -16,12 +16,7 @@ import { SURFACE_CHANNELS } from "../shared/screen-surface.ts";
 import { SCREEN_WINDOW_CHANNELS } from "./surface-channels.ts";
 
 /** What a sandboxed preload's `require` can load (Electron's sandbox polyfill). */
-const SANDBOXED_PRELOAD_MODULES = new Set([
-	"electron",
-	"events",
-	"timers",
-	"url",
-]);
+const SANDBOXED_PRELOAD_MODULES = new Set(["electron"]);
 const sourceRoot = resolve(import.meta.dirname, "..");
 const transpilers = {
 	ts: new Bun.Transpiler({ loader: "ts" }),

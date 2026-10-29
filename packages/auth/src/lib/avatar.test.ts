@@ -13,6 +13,7 @@ interface RecordedCommand {
 
 const sent: RecordedCommand[] = [];
 let listPages: { Key: string }[][] = [];
+let putFailure: Error | null = null;
 
 function command(kind: string) {
 	return class {
@@ -31,6 +32,9 @@ mock.module("@aws-sdk/client-s3", () => ({
 	S3Client: class {
 		send(request: RecordedCommand) {
 			sent.push({ input: request.input, kind: request.kind });
+			if (request.kind === "PutObject" && putFailure) {
+				return Promise.reject(putFailure);
+			}
 			if (request.kind !== "ListObjectsV2") {
 				return Promise.resolve({});
 			}
@@ -48,8 +52,10 @@ mock.module("@aws-sdk/client-s3", () => ({
 }));
 
 const {
+	AvatarStorageError,
 	AvatarValidationError,
 	assertValidAvatarInput,
+	avatarStorageErrorCode,
 	deleteAvatarSet,
 	deleteUserAvatarFiles,
 	processAndUploadAvatar,
@@ -63,6 +69,7 @@ const deletedKeys = () =>
 beforeEach(() => {
 	sent.length = 0;
 	listPages = [];
+	putFailure = null;
 });
 
 test("rejects an unsupported or oversized image before any storage call", async () => {
@@ -78,6 +85,42 @@ test("rejects an unsupported or oversized image before any storage call", async 
 		processAndUploadAvatar("user-1", Buffer.from("gif"), "image/gif")
 	).rejects.toBeInstanceOf(AvatarValidationError);
 	expect(sent).toHaveLength(0);
+});
+
+test("reports bytes that are not a readable image as a validation error", async () => {
+	await expect(
+		processAndUploadAvatar("user-1", Buffer.from("not an image"), "image/png")
+	).rejects.toThrow("We couldn't read that image");
+	expect(sent).toHaveLength(0);
+});
+
+test("wraps a storage failure so its cause stays out of user messages", async () => {
+	const { default: sharp } = await import("sharp");
+	const image = await sharp({
+		create: { width: 4, height: 4, channels: 3, background: "#336699" },
+	})
+		.png()
+		.toBuffer();
+	putFailure = Object.assign(
+		new Error("The specified bucket does not exist."),
+		{
+			Code: "NoSuchBucket",
+		}
+	);
+
+	const failure = await processAndUploadAvatar(
+		"user-1",
+		image,
+		"image/png"
+	).catch((error: unknown) => error);
+
+	expect(failure).toBeInstanceOf(AvatarStorageError);
+	expect(failure).not.toBeInstanceOf(AvatarValidationError);
+	if (!(failure instanceof AvatarStorageError)) {
+		throw new Error("expected a storage error");
+	}
+	expect(failure.message).not.toContain("bucket");
+	expect(avatarStorageErrorCode(failure)).toBe("NoSuchBucket");
 });
 
 test("deletes exactly the displaced avatar set and nothing else", async () => {

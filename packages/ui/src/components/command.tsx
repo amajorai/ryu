@@ -43,7 +43,7 @@ function Command({
 	return (
 		<CommandPrimitive
 			className={cn(
-				"corner-squircle flex size-full flex-col overflow-hidden rounded-4xl p-1 text-popover-foreground",
+				"flex size-full flex-col overflow-hidden rounded-4xl p-1 text-popover-foreground",
 				appearance === "os-launcher" &&
 					"rounded-none! bg-transparent p-0 text-white",
 				className
@@ -146,7 +146,7 @@ function CommandDialog({
 			</DialogHeader>
 			<DialogContent
 				className={cn(
-					"!corner-squircle top-1/3 translate-y-0 animate-none! overflow-hidden rounded-4xl! p-0 duration-0",
+					"top-1/3 translate-y-0 animate-none! overflow-hidden rounded-4xl! p-0 duration-0",
 					layout === "expanded" && "top-[14%] overflow-visible sm:max-w-4xl",
 					appearance === "os-launcher" &&
 						"inset-0! top-0! left-0! h-full! w-full! max-w-none! translate-x-0! translate-y-0! rounded-none! border-0! bg-white/5! p-0 text-white ring-0! backdrop-blur-3xl backdrop-saturate-150 sm:max-w-none!",
@@ -317,7 +317,7 @@ function CommandItem({
 	return (
 		<CommandPrimitive.Item
 			className={cn(
-				"group/command-item in-data-[slot=dialog-content]:corner-squircle corner-squircle relative flex cursor-default select-none items-center gap-1.5 in-data-[slot=dialog-content]:rounded-3xl in-data-[slot=drawer-content]:rounded-3xl rounded-2xl px-1.5 py-1 font-medium text-sm outline-hidden data-[disabled=true]:pointer-events-none data-selected:bg-accent data-selected:text-foreground data-[disabled=true]:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0 data-selected:*:[svg]:text-foreground",
+				"group/command-item relative flex cursor-default select-none items-center gap-1.5 in-data-[slot=dialog-content]:rounded-3xl in-data-[slot=drawer-content]:rounded-3xl rounded-2xl px-1.5 py-1 font-medium text-sm outline-hidden data-[disabled=true]:pointer-events-none data-selected:bg-accent data-selected:text-foreground data-[disabled=true]:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0 data-selected:*:[svg]:text-foreground",
 				appearance === "provider-row" && "rounded-lg px-3 py-3",
 				appearance === "os-window-preview" &&
 					"flex-col items-stretch gap-2 rounded-2xl bg-transparent p-0 text-white data-selected:bg-transparent [&>svg:last-child]:hidden",

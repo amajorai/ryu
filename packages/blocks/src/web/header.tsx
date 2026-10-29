@@ -195,7 +195,11 @@ export default function Header({
 }: {
 	className?: string;
 	signedIn?: boolean;
-	/** Render the portal chrome with foreground/background roles inverted. */
+	/**
+	 * Render the portal chrome with foreground/background roles inverted. In
+	 * dark mode the inverted chrome would be a white bar, so it sits on the muted
+	 * surface with the normal text roles instead.
+	 */
 	inverse?: boolean;
 	variant?: "marketing" | "portal";
 	userMenu?: ReactNode;
@@ -246,10 +250,22 @@ export default function Header({
 				<div
 					className={cn(
 						"backdrop-blur-xl",
-						inverse ? "bg-foreground text-background" : "bg-background/85"
+						inverse
+							? "bg-foreground text-background dark:bg-muted dark:text-foreground"
+							: "bg-background/85"
 					)}
 				>
-					<div className="mx-auto w-full max-w-7xl">
+					{/* On the muted dark header, a ghost button's hover, press and open
+					    fills (all `bg-muted`) would match the bar itself, so the bar's
+					    contents read muted one step lighter. Portaled menus are outside
+					    this subtree and keep the normal surface. */}
+					<div
+						className={cn(
+							"mx-auto w-full max-w-7xl",
+							inverse &&
+								"dark:[--muted:color-mix(in_oklch,var(--background),var(--foreground)_27%)]"
+						)}
+					>
 						<div className="flex min-h-14 items-center gap-2 px-4 sm:px-6">
 							{signedIn ? null : (
 								<Link
@@ -273,7 +289,7 @@ export default function Header({
 										className={cn(
 											"select-none text-lg",
 											inverse
-												? "text-background/40"
+												? "text-background/40 dark:text-muted-foreground/40"
 												: "text-muted-foreground/40"
 										)}
 									>
@@ -295,7 +311,7 @@ export default function Header({
 									className={cn(
 										"inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 font-medium text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
 										inverse
-											? "text-background/70 hover:bg-background/10 hover:text-background focus-visible:ring-background"
+											? "text-background/70 hover:bg-background/10 hover:text-background focus-visible:ring-background dark:text-muted-foreground dark:focus-visible:ring-ring dark:hover:bg-foreground/10 dark:hover:text-foreground"
 											: "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring"
 									)}
 									data-cuelume-hover="tick"

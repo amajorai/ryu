@@ -120,12 +120,12 @@ export function StandaloneCreditPlans({
 								: Zap;
 					return (
 						<div
-							className="group corner-squircle relative rounded-[calc(var(--radius-4xl)+2px)] bg-border p-[2px] dark:bg-transparent"
+							className="group relative rounded-[calc(var(--radius-4xl)+2px)] bg-border p-[2px] dark:bg-transparent"
 							key={option.id}
 						>
 							<div
 								aria-hidden
-								className={`t-card-border-spin corner-squircle pointer-events-none absolute inset-0 rounded-[inherit] transition-opacity duration-500 ease-out ${choice === option.id ? "opacity-100" : `opacity-0 group-hover:opacity-100 ${motionStyles.idleRing}`}`}
+								className={`t-card-border-spin pointer-events-none absolute inset-0 rounded-[inherit] transition-opacity duration-500 ease-out ${choice === option.id ? "opacity-100" : `opacity-0 group-hover:opacity-100 ${motionStyles.idleRing}`}`}
 								style={{
 									backgroundImage: planCardConicGradient("gateway-payg"),
 								}}

@@ -283,12 +283,12 @@ function Calendar({
 				),
 				button_previous: cn(
 					buttonVariants({ variant: buttonVariant }),
-					"corner-round size-(--cell-size) select-none p-0 aria-disabled:opacity-50",
+					"size-(--cell-size) select-none p-0 aria-disabled:opacity-50",
 					defaultClassNames.button_previous
 				),
 				button_next: cn(
 					buttonVariants({ variant: buttonVariant }),
-					"corner-round size-(--cell-size) select-none p-0 aria-disabled:opacity-50",
+					"size-(--cell-size) select-none p-0 aria-disabled:opacity-50",
 					defaultClassNames.button_next
 				),
 				month_caption: cn(

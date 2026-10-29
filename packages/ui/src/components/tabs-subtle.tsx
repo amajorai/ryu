@@ -40,8 +40,8 @@ export type IconComponent = ComponentType<{
 // Rounded shape tokens for the selection pill and the focus ring. The upstream
 // registry sources these from a swappable "shape context"; we inline the
 // rounded variant to match the rest of the design system.
-const PILL_RADIUS = "rounded-lg corner-squircle";
-const FOCUS_RADIUS = "rounded-[10px] corner-squircle";
+const PILL_RADIUS = "rounded-lg";
+const FOCUS_RADIUS = "rounded-[10px]";
 
 interface TabsSubtleContextValue {
 	activeLabel: boolean;

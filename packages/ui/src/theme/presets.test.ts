@@ -470,15 +470,12 @@ describe("Ryu brand colour", () => {
 		});
 	}
 
-	// The presets above only reach surfaces that run the theme engine (desktop,
-	// island). web / webapp / extension / fumadocs / storyboard just `@import`
-	// globals.css and never call `applyVariant`, so what they render is the base
-	// `:root` / `.dark` block — which held the shadcn neutral (near-black light,
-	// near-white dark) and showed no brand colour at all. Assert the base block
-	// directly; a preset-only guard cannot see this surface.
+	// Presets only reach surfaces that run the theme engine. Web, extension,
+	// fumadocs and storyboard just `@import` globals.css, so they render its base
+	// `:root` / `.dark` block (from globals/theme-tokens.css). Assert it directly.
 	describe("globals.css base block", () => {
 		const css = readFileSync(
-			new URL("../styles/globals.css", import.meta.url),
+			new URL("../styles/globals/theme-tokens.css", import.meta.url),
 			"utf8"
 		);
 

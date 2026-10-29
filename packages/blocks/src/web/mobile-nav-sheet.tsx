@@ -1,65 +1,130 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
-import { cn } from "@ryu/ui/lib/utils";
-import { X } from "lucide-react";
+import { Accordion } from "@base-ui/react/accordion";
+import { useLiteralMessages, useLocalizedText } from "@ryu/i18n/react";
+import { ChevronDown, X } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import Link from "next/link";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useEffect } from "react";
 import {
 	focusableElements,
+	initialSheetGroup,
 	productSheet,
 	RESOURCE_SHEET,
 	SHEET_FOOTERS,
 	SHEET_TITLES,
+	type SheetGroup,
 	type SheetKey,
+	type SheetLinkData,
 } from "./mobile-nav-sheet-data.ts";
 import { nextLinkHref } from "./next-link-href.ts";
 
 // The mobile nav's animated Products/Resources sheet and its scrim. MobileNav
 // loads this module on the first open (or on intent to open), so pages that
 // never open a sheet do not pay for it or for motion.
+//
+// The sheet mirrors the desktop menus: one collapsible section per menu group,
+// each item its name with a one-line summary under it, then the menu's footer
+// links. Only one section is open at a time so the sheet stays short. It uses
+// the Base UI accordion directly (not the @ryu/ui card-styled wrapper) so the
+// lazily loaded sheet chunk stays small and the rows need no style overrides.
 
-function SheetLink({
-	external = false,
-	href,
-	label,
+function LocalizedCopy({ value }: { value: string }) {
+	return <>{useLocalizedText(value, { literal: true })}</>;
+}
+
+function SheetAnchor({
+	children,
+	className,
+	link,
 	onClose,
-	primary = false,
-	sameTab = false,
 }: {
-	external?: boolean;
-	href: string;
-	label: string;
+	children: ReactNode;
+	className: string;
+	link: SheetLinkData;
 	onClose: () => void;
-	primary?: boolean;
-	sameTab?: boolean;
 }) {
-	const className = cn(
-		"flex min-h-11 items-center rounded-lg px-2 text-[15px] transition-colors",
-		primary
-			? "font-medium text-foreground hover:text-accent-foreground"
-			: "text-muted-foreground hover:bg-muted hover:text-foreground"
-	);
-	if (external) {
+	if (link.external) {
 		return (
 			<a
 				className={className}
-				href={href}
+				href={link.href}
 				onClick={onClose}
-				{...(sameTab
-					? {}
-					: { rel: "noopener noreferrer", target: "_blank" as const })}
+				rel="noopener noreferrer"
+				target="_blank"
 			>
-				{label}
+				{children}
 			</a>
 		);
 	}
 	return (
-		<Link className={className} href={nextLinkHref(href)} onClick={onClose}>
-			{label}
+		<Link
+			className={className}
+			href={nextLinkHref(link.href)}
+			onClick={onClose}
+		>
+			{children}
 		</Link>
+	);
+}
+
+function SheetItem({
+	link,
+	onClose,
+}: {
+	link: SheetLinkData;
+	onClose: () => void;
+}) {
+	return (
+		<SheetAnchor
+			className="flex min-h-11 flex-col justify-center gap-0.5 rounded-xl px-2 py-2 text-foreground transition-colors hover:bg-muted"
+			link={link}
+			onClose={onClose}
+		>
+			<span className="font-medium text-[15px] leading-tight">
+				<LocalizedCopy value={link.label} />
+			</span>
+			{link.description ? (
+				<span className="block truncate text-[13px] text-muted-foreground leading-snug">
+					<LocalizedCopy value={link.description} />
+				</span>
+			) : null}
+		</SheetAnchor>
+	);
+}
+
+function SheetSection({
+	group,
+	onClose,
+}: {
+	group: SheetGroup;
+	onClose: () => void;
+}) {
+	return (
+		<Accordion.Item data-sheet-group={group.title} value={group.title}>
+			<Accordion.Header className="flex">
+				<Accordion.Trigger className="group flex min-h-11 flex-1 items-center justify-between gap-4 rounded-xl px-2 text-left font-medium text-muted-foreground text-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:text-foreground">
+					<LocalizedCopy value={group.title} />
+					<ChevronDown
+						aria-hidden="true"
+						className="size-4 shrink-0 transition-transform duration-200 group-aria-expanded:rotate-180 motion-reduce:transition-none"
+					/>
+				</Accordion.Trigger>
+			</Accordion.Header>
+			<Accordion.Panel
+				className="h-(--accordion-panel-height) overflow-hidden transition-[height] duration-200 ease-out data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none"
+				data-slot="accordion-content"
+			>
+				<ul className="flex flex-col pb-2">
+					{group.links.map((link) => (
+						<li key={`${link.href}-${link.label}`}>
+							<SheetItem link={link} onClose={onClose} />
+						</li>
+					))}
+				</ul>
+			</Accordion.Panel>
+		</Accordion.Item>
 	);
 }
 
@@ -68,16 +133,19 @@ function Sheet({
 	hiddenProductIds,
 	kind,
 	onClose,
+	pathname,
 }: {
 	dialogRef: RefObject<HTMLDivElement | null>;
 	hiddenProductIds: readonly string[];
 	kind: SheetKey;
 	onClose: () => void;
+	pathname: string;
 }) {
 	const tl = useLiteralMessages();
 	const groups =
 		kind === "products" ? productSheet(hiddenProductIds) : RESOURCE_SHEET;
 	const footer = SHEET_FOOTERS[kind];
+	const openGroup = initialSheetGroup(groups, pathname);
 
 	// Move focus into the sheet when it opens or switches lists. MobileNav sends
 	// it back to the tab that opened it when the sheet closes.
@@ -92,15 +160,18 @@ function Sheet({
 		<div
 			aria-labelledby={`${kind}-mobile-nav-title`}
 			aria-modal="true"
-			className="rounded-2xl border border-border/60 bg-background px-4 pt-3 pb-2 shadow-2xl"
+			className="rounded-2xl border border-border/60 bg-background px-3 pt-3 pb-2 shadow-2xl"
 			id="mobile-nav-sheet"
 			ref={dialogRef}
 			role="dialog"
 			tabIndex={-1}
 		>
-			<div className="mb-2 flex items-center justify-between">
-				<p className="font-medium text-lg" id={`${kind}-mobile-nav-title`}>
-					{SHEET_TITLES[kind]}
+			<div className="mb-1 flex items-center justify-between pl-2">
+				<p
+					className="font-semibold text-xl tracking-tight"
+					id={`${kind}-mobile-nav-title`}
+				>
+					<LocalizedCopy value={SHEET_TITLES[kind]} />
 				</p>
 				<button
 					aria-label={tl("Close {menuName} menu", {
@@ -115,41 +186,28 @@ function Sheet({
 			</div>
 			{/* The fade marks that the list scrolls; the bottom padding keeps the last
 			    row clear of it when everything fits. */}
-			<div className="max-h-[calc(100dvh-12rem)] overflow-y-auto pr-1 pb-4 [mask-image:linear-gradient(to_bottom,black_90%,transparent)]">
-				{groups.map((group) => (
-					<div
-						className="mb-3"
-						key={`${group.title ?? "top"}-${group.links[0]?.href ?? ""}`}
-					>
-						{group.title ? (
-							<p className="mb-1 px-2 font-medium text-[13px] text-muted-foreground">
-								{group.title}
-							</p>
-						) : null}
-						<div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-							{group.links.map((link) => (
-								<SheetLink
-									external={link.external}
-									href={link.href}
-									key={`${link.href}-${link.label}`}
-									label={link.label}
-									onClose={onClose}
-									sameTab={link.sameTab}
-								/>
-							))}
-						</div>
-					</div>
-				))}
+			<div className="max-h-[calc(100dvh-14rem)] overflow-y-auto pb-4 [mask-image:linear-gradient(to_bottom,black_90%,transparent)]">
+				<Accordion.Root defaultValue={openGroup ? [openGroup] : []} key={kind}>
+					{groups.map((group) => (
+						<SheetSection group={group} key={group.title} onClose={onClose} />
+					))}
+				</Accordion.Root>
 			</div>
-			{footer ? (
-				<div className="mt-2 pb-1">
-					<SheetLink
-						external={footer.external}
-						href={footer.href}
-						label={footer.label}
-						onClose={onClose}
-						primary
-					/>
+			{footer.length > 0 ? (
+				<div
+					className="mt-1 flex flex-wrap gap-x-2 border-border/60 border-t pt-2 pb-1"
+					data-testid="mobile-nav-sheet-footer"
+				>
+					{footer.map((link) => (
+						<SheetAnchor
+							className="flex min-h-11 items-center rounded-full px-2 font-medium text-foreground text-sm transition-colors hover:bg-muted"
+							key={link.href}
+							link={link}
+							onClose={onClose}
+						>
+							<LocalizedCopy value={link.label} />
+						</SheetAnchor>
+					))}
 				</div>
 			) : null}
 		</div>
@@ -161,6 +219,8 @@ export interface MobileNavSheetsProps {
 	hiddenProductIds: readonly string[];
 	onClose: () => void;
 	open: SheetKey | null;
+	/** The current route, so the sheet opens on the section that holds it. */
+	pathname: string;
 }
 
 /** The scrim and the open sheet, animated in and out. */
@@ -169,6 +229,7 @@ export default function MobileNavSheets({
 	hiddenProductIds,
 	onClose,
 	open,
+	pathname,
 }: MobileNavSheetsProps) {
 	return (
 		<MotionConfig reducedMotion="user">
@@ -199,6 +260,7 @@ export default function MobileNavSheets({
 							hiddenProductIds={hiddenProductIds}
 							kind={open}
 							onClose={onClose}
+							pathname={pathname}
 						/>
 					</motion.div>
 				) : null}

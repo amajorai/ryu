@@ -32,12 +32,6 @@ const SANDBOXED_PRELOAD_MODULES = new Set([
 	"electron",
 	"electron/common",
 	"electron/renderer",
-	"events",
-	"node:events",
-	"timers",
-	"node:timers",
-	"url",
-	"node:url",
 ]);
 
 const BUILTINS = new Set(builtinModules);

@@ -13,6 +13,21 @@ import legacyMarkup from "./general-controls.fixture.json" with {
 	type: "json",
 };
 
+// The archive predates dropping the shared squircle corner shape; its retired
+// corner-* utilities are not part of the preserved treatment.
+const RETIRED_CORNER_UTILITY = /corner-(?:[a-z]{1,2}-)?(?:squircle|round)$/;
+
+function withoutRetiredCorners(markup: string) {
+	return markup.replace(
+		/class="([^"]*)"/g,
+		(_attribute, classes: string) =>
+			`class="${classes
+				.split(" ")
+				.filter((value) => !RETIRED_CORNER_UTILITY.test(value))
+				.join(" ")}"`
+	);
+}
+
 // Archived native markup records the pre-migration caller treatment; fixtures
 // never restyle current primitives to manufacture their expected appearance.
 it("preserves the native segmented group's exact default-size and pressed-state markup", () => {
@@ -35,7 +50,10 @@ it("preserves the native segmented group's exact default-size and pressed-state 
 			</ToggleGroup>
 		);
 		expect(current).toBe(
-			markup.replaceAll("focus-visible:ring-[3px]", "focus-visible:ring-3")
+			withoutRetiredCorners(markup).replaceAll(
+				"focus-visible:ring-[3px]",
+				"focus-visible:ring-3"
+			)
 		);
 	}
 });
@@ -45,6 +63,7 @@ function normalizeUtilityOrder(markup: string) {
 			...new Set(
 				classes
 					.split(" ")
+					.filter((value) => !RETIRED_CORNER_UTILITY.test(value))
 					.map((value) => (value === "flex-shrink-0" ? "shrink-0" : value))
 			),
 		].sort();

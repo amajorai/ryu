@@ -3,7 +3,6 @@
 @import "./registered-icon.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@plugin "@toolwind/corner-shape";
 /*
  * Build-time theme substrate for sandboxed Companion apps.
  *

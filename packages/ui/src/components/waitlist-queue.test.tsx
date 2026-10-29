@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { WaitlistPass } from "./waitlist-pass.tsx";
 import { WaitlistQueue } from "./waitlist-queue.tsx";
+import {
+	WaitlistHandleStep,
+	WaitlistShareStep,
+} from "./waitlist-queue-steps.tsx";
 
 const requiredProps = {
 	handle: "",
@@ -84,4 +89,63 @@ test("waitlist status refuses a protocol-relative Discord path", () => {
 	);
 
 	expect(html).not.toContain("Join our Discord");
+});
+
+test("waitlist referral link is shown in full with no reveal controls", () => {
+	const html = renderToStaticMarkup(
+		<WaitlistQueue
+			{...requiredProps}
+			loaded
+			referralUrl="https://ryuhq.com/r/ABCD2345"
+			reserved="member"
+			subtitle="Stay close to the queue."
+		/>
+	);
+
+	expect(html).toContain("/r/ABCD2345");
+	expect(html).not.toContain("Reveal");
+	expect(html).not.toContain("••••");
+});
+
+test("the username nudge lives on the handle step, not the share step", () => {
+	const handleStep = (reserved: string | null) =>
+		renderToStaticMarkup(
+			<WaitlistHandleStep
+				handle=""
+				onChangeHandle={() => {}}
+				onReserve={() => {}}
+				reserved={reserved}
+				reserving={false}
+			/>
+		);
+	const nudge = "Claim your username before it&#x27;s taken.";
+	expect(handleStep(null)).toContain(nudge);
+	// Once the handle is yours the nudge has nothing left to ask for.
+	expect(handleStep("member")).not.toContain(nudge);
+
+	const shareStep = renderToStaticMarkup(
+		<WaitlistShareStep
+			copied={false}
+			metalTheme="light"
+			onCopyReferral={() => {}}
+			onShare={() => {}}
+			referralCount={0}
+			referralUrl="https://ryuhq.com/r/ABCD2345"
+		/>
+	);
+	expect(shareStep).not.toContain(nudge);
+	expect(shareStep).toContain("/r/ABCD2345");
+});
+
+test("the waitlist pass shows its invite QR with no reveal toggle", () => {
+	const html = renderToStaticMarkup(
+		<WaitlistPass
+			referralUrl="https://ryuhq.com/r/ABCD2345"
+			username="member"
+		/>
+	);
+
+	expect(html).toContain('aria-label="Scan to invite"');
+	expect(html).not.toContain("Invite QR hidden");
+	expect(html).not.toContain("Reveal");
 });

@@ -68,6 +68,14 @@ const nowSpy = spyOn(performance, "now").mockImplementation(() => frameTime);
 const { useLenis } = await import("lenis/react");
 const { ScrollProgress, SmoothScroll } = await import("./smooth-scroll.tsx");
 const { driveLenisOnDemand } = await import("./smooth-scroll-frames.ts");
+const { isSmoothScrollPaused, usePauseSmoothScroll } = await import(
+	"./smooth-scroll-pause.ts"
+);
+
+function PauseProbe({ paused }: { paused: boolean }) {
+	usePauseSmoothScroll(paused);
+	return null;
+}
 
 let seen: Lenis | undefined;
 function LenisProbe() {
@@ -142,6 +150,45 @@ test("root mode creates Lenis only on the first wheel", async () => {
 	// No autoRaf loop: an idle Lenis requests no frames.
 	await drainFrames();
 	expect(frames.size).toBe(0);
+});
+
+test("an open menu holds Lenis stopped until every pause is released", async () => {
+	const tree = (first: boolean, second: boolean) => (
+		<>
+			<SmoothScroll root />
+			<LenisProbe />
+			<PauseProbe paused={first} />
+			<PauseProbe paused={second} />
+		</>
+	);
+	await render(tree(false, false));
+	await wheel();
+	expect(seen?.isStopped).toBe(false);
+
+	const root = mounted?.root;
+	await act(async () => root?.render(tree(true, true)));
+	expect(isSmoothScrollPaused()).toBe(true);
+	expect(seen?.isStopped).toBe(true);
+
+	await act(async () => root?.render(tree(false, true)));
+	expect(seen?.isStopped).toBe(true);
+
+	await act(async () => root?.render(tree(false, false)));
+	expect(isSmoothScrollPaused()).toBe(false);
+	expect(seen?.isStopped).toBe(false);
+});
+
+test("a pause requested before Lenis loads applies once it is created", async () => {
+	await render(
+		<>
+			<SmoothScroll root />
+			<LenisProbe />
+			<PauseProbe paused />
+		</>
+	);
+	expect(seen).toBeUndefined();
+	await wheel();
+	expect(seen?.isStopped).toBe(true);
 });
 
 test("the root-mode children are not remounted when Lenis is created", async () => {

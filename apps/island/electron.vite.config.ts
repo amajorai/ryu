@@ -14,12 +14,7 @@ const workspacePackages = Object.entries(packageJson.dependencies)
 	.map(([name]) => name);
 
 /** What a sandboxed preload's `require` can load (Electron's sandbox polyfill). */
-const SANDBOXED_PRELOAD_MODULES = new Set([
-	"electron",
-	"events",
-	"timers",
-	"url",
-]);
+const SANDBOXED_PRELOAD_MODULES = new Set(["electron"]);
 
 /**
  * Both Island windows run sandboxed renderers, so each preload must be ONE

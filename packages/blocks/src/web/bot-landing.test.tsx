@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import BotLanding from "./bot-landing.tsx";
 import { BotAppVisual } from "./bot-visual.tsx";
@@ -34,6 +35,18 @@ test("Bot product visual uses theme-aware surfaces", () => {
 	}
 });
 
+const GLOBALS_URL = "../../../ui/src/styles/globals.css";
+const GLOBALS_PARTIAL_IMPORT = /@import "(\.\/globals\/[\w-]+\.css)";/g;
+
+/** globals.css with its ordered `./globals/*.css` partials inlined. */
+function readGlobalsCss(): string {
+	const url = new URL(GLOBALS_URL, import.meta.url);
+	return readFileSync(url, "utf8").replace(
+		GLOBALS_PARTIAL_IMPORT,
+		(_statement, partial: string) => readFileSync(new URL(partial, url), "utf8")
+	);
+}
+
 const AVATAR_PATTERN =
 	/<span class="([^"]*)" style="--blocks-backgroundColor:var\(--([\w-]+)\)">/g;
 const NEUTRAL_TOKEN_PATTERN = /--(chart-\d):\s*oklch\(([\d.]+) 0 0\)/g;
@@ -45,10 +58,8 @@ function contrastRatio(first: number, second: number): number {
 	return (lighter + 0.05) / (darker + 0.05);
 }
 
-test("Bot avatar initials keep AA contrast on their chart fills", async () => {
-	const theme = await Bun.file(
-		new URL("../../../ui/src/styles/globals.css", import.meta.url)
-	).text();
+test("Bot avatar initials keep AA contrast on their chart fills", () => {
+	const theme = readGlobalsCss();
 	// Neutral OKLCH greys: relative luminance is the cube of the lightness.
 	// Keep every definition (light and dark) so a theme split is still checked.
 	const luminancesByToken = new Map<string, number[]>();

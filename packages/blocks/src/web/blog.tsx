@@ -16,6 +16,7 @@ import {
 	useMemo,
 	useState,
 } from "react";
+import { FeaturedUpdates } from "./featured-updates.tsx";
 import { formatPublicationDate } from "./publication-date.ts";
 import { outlineCtaClass } from "./sections.tsx";
 
@@ -241,40 +242,28 @@ export function BlogPostRow({ post }: { post: BlogPostData }) {
 }
 
 /**
- * One post in the featured tier: date and a large title, text only. Post data
- * carries no curated excerpt (`content` is a search blob), so none is shown.
+ * The newest posts as the featured tier above the list, laid out by the
+ * shared `FeaturedUpdates` (the home page "Latest updates" uses it too). A
+ * post without a banner shows its generated social card instead.
  */
-export function BlogFeaturedPost({ post }: { post: BlogPostData }) {
-	return (
-		<li>
-			<time
-				className="text-muted-foreground text-sm tabular-nums"
-				dateTime={post.date}
-			>
-				{formatPublicationDate(post.date, "short")}
-			</time>
-			<Link
-				className="relative mt-3 block text-balance font-heading font-medium text-2xl text-foreground leading-[1.2] tracking-[-0.03em] underline-offset-4 hover:underline md:text-[1.75rem]"
-				href={`/blog/${post.slug}`}
-			>
-				<LinkPendingIndicator className="top-1 -left-4" />
-				{post.title}
-			</Link>
-		</li>
-	);
-}
-
-/** The newest posts as a text-only featured tier above the list. */
 export function BlogFeatured({ posts }: { posts: BlogPostData[] }) {
 	if (posts.length === 0) {
 		return null;
 	}
 	return (
-		<ul className="mb-16 grid gap-10 md:mb-20 md:grid-cols-3">
-			{posts.map((post) => (
-				<BlogFeaturedPost key={post.id} post={post} />
-			))}
-		</ul>
+		<FeaturedUpdates
+			className="mb-16 md:mb-20"
+			items={posts.map((post) => ({
+				date: post.date,
+				fallbackImage: `/blog/${post.slug}/opengraph-image`,
+				href: `/blog/${post.slug}`,
+				image: post.banner,
+				key: post.id,
+				label: post.tag,
+				title: post.title,
+			}))}
+			titleAs="h2"
+		/>
 	);
 }
 
@@ -415,7 +404,7 @@ export function BlogPostsSearch({
 					</ul>
 					{orderedPosts.length > visibleCount ? (
 						<Button
-							className={cn("corner-round mt-10 rounded-full", outlineCtaClass)}
+							className={cn("mt-10 rounded-full", outlineCtaClass)}
 							onClick={() => setVisibleCount((count) => count + BLOG_PAGE_SIZE)}
 							size="lg"
 							type="button"

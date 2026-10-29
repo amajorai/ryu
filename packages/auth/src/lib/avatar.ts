@@ -82,6 +82,30 @@ export class AvatarValidationError extends Error {
 }
 
 /**
+ * The image store refused or could not be reached (missing bucket, bad
+ * credentials, network). Never the caller's fault, and its message is internal:
+ * routes log {@link AvatarStorageError.cause} and show a generic message.
+ */
+export class AvatarStorageError extends Error {
+	constructor(cause: unknown) {
+		super("Avatar storage is unavailable", { cause });
+		this.name = "AvatarStorageError";
+	}
+}
+
+/** Short storage failure code for logs (an S3 `Code`, or the error name). */
+export function avatarStorageErrorCode(error: AvatarStorageError): string {
+	const cause = error.cause;
+	if (cause && typeof cause === "object") {
+		const code = Reflect.get(cause, "Code") ?? Reflect.get(cause, "name");
+		if (typeof code === "string" && code.length > 0) {
+			return code;
+		}
+	}
+	return "unknown";
+}
+
+/**
  * Validate an avatar before anything is uploaded or deleted. A replace must
  * check the new image first, so a rejected file can never cost the user the
  * avatar they already have.
@@ -135,16 +159,14 @@ export async function processAndUploadOwnerAvatar(
 		"xlarge",
 	] satisfies (keyof AvatarUrls)[]) {
 		const width = AVATAR_SIZES[sizeName];
-		const processedBuffer = await sharp(imageBuffer)
-			.resize(width, width, {
-				fit: "cover",
-				position: "center",
-			})
-			.webp({ quality: 85 })
-			.toBuffer();
+		const processedBuffer = await renderAvatar(imageBuffer, width);
 
 		const key = `${baseKey}_${width}.webp`;
-		await uploadToS3(key, processedBuffer, "image/webp");
+		try {
+			await uploadToS3(key, processedBuffer, "image/webp");
+		} catch (error) {
+			throw new AvatarStorageError(error);
+		}
 		urls[sizeName] = generatePublicUrl(key);
 		totalCompressedSize += processedBuffer.length;
 	}
@@ -156,6 +178,24 @@ export async function processAndUploadOwnerAvatar(
 		compressedSize: totalCompressedSize,
 		avatarId: baseKey,
 	};
+}
+
+/**
+ * One square WebP rendition. A file whose bytes are not a readable image (a
+ * renamed PDF, a truncated download, an unsupported HEIC) is the caller's
+ * fault, so the decode failure surfaces as an {@link AvatarValidationError}.
+ */
+async function renderAvatar(imageBuffer: Buffer, width: number) {
+	try {
+		return await sharp(imageBuffer)
+			.resize(width, width, { fit: "cover", position: "center" })
+			.webp({ quality: 85 })
+			.toBuffer();
+	} catch {
+		throw new AvatarValidationError(
+			"We couldn't read that image. Try a different JPEG, PNG, or WebP file."
+		);
+	}
 }
 
 async function uploadToS3(

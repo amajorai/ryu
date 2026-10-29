@@ -38,7 +38,7 @@ export function HubCardFrame({
 			aria-labelledby={titleId}
 			aria-roledescription="card"
 			className={cn(
-				"@container/hub-card corner-squircle flex h-(--hub-card-h) w-(--hub-card) shrink-0 snap-start scroll-ml-(--hub-gutter) flex-col rounded-[28px] bg-card px-6 pt-6 pb-4 text-card-foreground outline-none ring-1 ring-border/60 focus-visible:ring-2 focus-visible:ring-ring",
+				"@container/hub-card flex h-(--hub-card-h) w-(--hub-card) shrink-0 snap-start scroll-ml-(--hub-gutter) flex-col rounded-[28px] bg-card px-6 pt-6 pb-4 text-card-foreground outline-none ring-1 ring-border/60 focus-visible:ring-2 focus-visible:ring-ring",
 				className
 			)}
 			data-card={id}
@@ -196,7 +196,7 @@ export function HubSkeletonCard({ index }: { index: number }) {
 	return (
 		<div
 			aria-hidden="true"
-			className="corner-squircle flex h-(--hub-card-h) w-(--hub-card) shrink-0 flex-col overflow-hidden rounded-[28px] bg-card px-6 pt-6 pb-7 ring-1 ring-border/60"
+			className="flex h-(--hub-card-h) w-(--hub-card) shrink-0 flex-col overflow-hidden rounded-[28px] bg-card px-6 pt-6 pb-7 ring-1 ring-border/60"
 			data-index={index}
 		>
 			<Skeleton className="my-0.5 h-4 w-28" radius="pill" />

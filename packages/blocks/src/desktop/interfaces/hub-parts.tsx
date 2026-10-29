@@ -196,7 +196,7 @@ export function HubThreadSheet({
 				animate={{ x: 0 }}
 				aria-labelledby={titleId}
 				aria-modal="true"
-				className="corner-squircle absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col overflow-hidden bg-background outline-none md:w-[min(48rem,62%)] md:rounded-l-[28px] md:border-border/60 md:border-l"
+				className="absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col overflow-hidden bg-background outline-none md:w-[min(48rem,62%)] md:rounded-l-[28px] md:border-border/60 md:border-l"
 				data-testid="hub-thread-sheet"
 				exit={reduceMotion ? { opacity: 0 } : { x: "100%" }}
 				initial={reduceMotion ? false : { x: "100%" }}

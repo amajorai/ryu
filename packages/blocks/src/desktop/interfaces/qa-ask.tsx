@@ -82,7 +82,7 @@ function PickerTrigger({
 			aria-labelledby={labelledBy}
 			render={
 				<button
-					className="corner-squircle flex h-9 w-full min-w-0 items-center gap-2 rounded-3xl border border-transparent bg-input/50 px-3 text-left text-foreground text-sm outline-none transition-[color,box-shadow,background-color] hover:bg-input/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+					className="flex h-9 w-full min-w-0 items-center gap-2 rounded-3xl border border-transparent bg-input/50 px-3 text-left text-foreground text-sm outline-none transition-[color,box-shadow,background-color] hover:bg-input/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
 					type="button"
 				/>
 			}

@@ -134,8 +134,8 @@ async function runAsk(
 /** Insert `text` into the focused app per the configured insertion mode. */
 async function insertText(text: string, prefs: DictationPrefs): Promise<void> {
 	if (prefs.insertMode === "paste") {
-		const previous = prefs.restoreClipboard ? clipboard.readText() : null;
-		clipboard.writeText(text);
+		const previous = prefs.restoreClipboard ? await clipboard.readText() : null;
+		await clipboard.writeText(text);
 		await callTool({
 			agent_id: GHOST_AGENT_ID,
 			arguments: { keys: pasteKeysFor(prefs) },
@@ -143,7 +143,7 @@ async function insertText(text: string, prefs: DictationPrefs): Promise<void> {
 		});
 		if (previous !== null) {
 			setTimeout(() => {
-				clipboard.writeText(previous);
+				void clipboard.writeText(previous);
 			}, CLIPBOARD_RESTORE_DELAY_MS);
 		}
 	} else {

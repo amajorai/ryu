@@ -20,7 +20,7 @@ function Empty({
 	return (
 		<div
 			className={cn(
-				"corner-squircle flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 text-balance rounded-2xl border-dashed p-12 text-center",
+				"flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 text-balance rounded-2xl border-dashed p-12 text-center",
 				spacing === "compact" && "py-8",
 				appearance === "bordered" && "border border-dashed py-12",
 				inset === "compact" && "p-8",
@@ -64,7 +64,7 @@ const emptyMediaVariants = cva(
 		variants: {
 			variant: {
 				default: "bg-transparent",
-				icon: "corner-squircle flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground [&_svg:not([class*='size-'])]:size-5",
+				icon: "flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground [&_svg:not([class*='size-'])]:size-5",
 			},
 			tone: { default: "", destructive: "text-status-destructive" },
 		},

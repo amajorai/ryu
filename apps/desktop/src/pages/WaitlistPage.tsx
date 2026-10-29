@@ -1,5 +1,4 @@
 import { WaitlistShareDialog } from "@ryu/blocks/web/waitlist-share-dialog.tsx";
-import { HalloweenPassCompanion } from "@ryu/ui/components/halloween-pass-companion.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import {
 	linkedInShareUrl,
@@ -368,7 +367,6 @@ export default function WaitlistPage({
 				onSignOut={handleSignOut}
 				onUnreserve={unreserveHandle}
 				onUpgrade={() => openExternal(`${SHARE_ORIGIN}/pricing`)}
-				passCompanion={<HalloweenPassCompanion />}
 				position={me?.position ?? null}
 				referralCount={me?.referralCount ?? 0}
 				referralUrl={me?.referralUrl}

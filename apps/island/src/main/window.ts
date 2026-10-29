@@ -220,6 +220,7 @@ export function createIslandWindow(
 			additionalArguments: [placementArg(anchor.placement)],
 			contextIsolation: true,
 			nodeIntegration: false,
+			sandbox: true,
 		},
 	};
 

@@ -30,6 +30,7 @@ import {
 } from "@ryu/ui/components/popover.tsx";
 import { COORDINATION_OPTIONS } from "@ryuhq/core-client/teams.ts";
 import { useEffect, useMemo, useState } from "react";
+import { PrimaryBotControl } from "@/src/components/chat/PrimaryBotControl.tsx";
 import { ScopeDefaultsPanel } from "@/src/components/chat/ScopeDefaultsPanel.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -168,6 +169,13 @@ export function ThreadHierarchyBar({
 				</BreadcrumbList>
 			</Breadcrumb>
 			<div className="flex shrink-0 items-center gap-1.5">
+				{isMain && hierarchy?.ownerKind === "agent" && !projectId && agentId ? (
+					<PrimaryBotControl
+						agentId={agentId}
+						agentName={agentName(agentId) ?? agentId}
+						target={target}
+					/>
+				) : null}
 				{isGroup ? (
 					<NativeSelect
 						aria-label="Group coordination"

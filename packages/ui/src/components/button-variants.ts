@@ -7,7 +7,7 @@ export const imageViewerControlClasses =
 	"grid size-9 place-items-center rounded-full border border-image-viewer-foreground/10 bg-image-viewer-background/50 text-image-viewer-foreground outline-none backdrop-blur-sm transition-image-viewer-control duration-150 hover:border-image-viewer-foreground/25 hover:bg-image-viewer-background/70 focus-visible:ring-2 focus-visible:ring-image-viewer-foreground/60";
 
 const buttonVariantClasses = cva(
-	"group/button corner-squircle inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-4xl border border-transparent bg-clip-padding font-medium text-sm outline-none transition-[color,background-color,border-color,box-shadow,opacity,scale,translate] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring active:not-aria-[haspopup]:translate-y-px active:duration-75 disabled:pointer-events-none disabled:opacity-50 has-[>div.flex-col]:items-stretch aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+	"group/button inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-4xl border border-transparent bg-clip-padding font-medium text-sm outline-none transition-[color,background-color,border-color,box-shadow,opacity,scale,translate] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring active:not-aria-[haspopup]:translate-y-px active:duration-75 disabled:pointer-events-none disabled:opacity-50 has-[>div.flex-col]:items-stretch aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 	{
 		variants: {
 			typography: { default: "", compact: "text-xs", caption: "type-caption" },
@@ -33,7 +33,7 @@ const buttonVariantClasses = cva(
 					"relative overflow-hidden bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] active:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_10%)]",
 			},
 			size: {
-				"transcript-follow-icon": "corner-round size-9 h-8 w-8",
+				"transcript-follow-icon": "size-9 h-8 w-8",
 				"transcript-follow-unread":
 					"h-8 h-8 gap-1 gap-1.5 px-3 px-3 has-data-[icon=inline-start]:ps-2 has-data-[icon=inline-end]:pe-2",
 				compact:
@@ -54,10 +54,10 @@ const buttonVariantClasses = cva(
 				micro:
 					"type-compact h-6 gap-1 px-1.5 has-data-[icon=inline-start]:ps-2 has-data-[icon=inline-end]:pe-2",
 				lg: "h-14 gap-2 px-6 has-data-[icon=inline-start]:ps-5 has-data-[icon=inline-end]:pe-5",
-				icon: "corner-round size-9",
-				"icon-xs": "corner-round size-6 [&_svg:not([class*='size-'])]:size-3",
-				"icon-sm": "corner-round size-8",
-				"icon-lg": "corner-round size-10",
+				icon: "size-9",
+				"icon-xs": "size-6 [&_svg:not([class*='size-'])]:size-3",
+				"icon-sm": "size-8",
+				"icon-lg": "size-10",
 			},
 			spacing: {
 				default: "",

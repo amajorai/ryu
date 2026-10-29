@@ -15,7 +15,7 @@ function Accordion({
 	return (
 		<AccordionPrimitive.Root
 			className={cn(
-				"corner-squircle flex w-full flex-col overflow-hidden rounded-2xl border",
+				"flex w-full flex-col overflow-hidden rounded-2xl border",
 				appearance === "plain" &&
 					"overflow-visible rounded-none border-0 bg-transparent shadow-none",
 				className

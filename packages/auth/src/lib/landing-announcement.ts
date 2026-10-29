@@ -29,6 +29,31 @@ export type LandingAnnouncementIcon =
 export const DEFAULT_LANDING_ANNOUNCEMENT_ICON: LandingAnnouncementIcon =
 	"witching-hour";
 
+/**
+ * The backgrounds an admin may pick, fixed like the icons so the database never
+ * carries arbitrary CSS. Each preset maps to design-system tokens in the bar's
+ * stylesheet (`landing-announcement-bar.module.css`):
+ *
+ *   - `witching-hour`: the Halloween night gradient with its pumpkin glow
+ *   - `night`: the same night gradient without the glow
+ *   - `neutral`: the site's muted surface and foreground text; follows the theme
+ *   - `inverse`: foreground as the surface, background as the text
+ *   - `brand`: the site's primary colour, deepened so its foreground stays legible
+ */
+export const LANDING_ANNOUNCEMENT_BACKGROUNDS = [
+	"witching-hour",
+	"night",
+	"neutral",
+	"inverse",
+	"brand",
+] as const;
+export type LandingAnnouncementBackground =
+	(typeof LANDING_ANNOUNCEMENT_BACKGROUNDS)[number];
+
+/** The seasonal look every bar wore before backgrounds were selectable. */
+export const DEFAULT_LANDING_ANNOUNCEMENT_BACKGROUND: LandingAnnouncementBackground =
+	"witching-hour";
+
 /** Authoring bounds; the bar is one line on desktop. */
 export const LANDING_ANNOUNCEMENT_LIMITS = {
 	message: 120,
@@ -39,6 +64,7 @@ export const LANDING_ANNOUNCEMENT_LIMITS = {
 
 /** The admin view: everything stored, including a disabled or future bar. */
 export interface LandingAnnouncementConfig {
+	background: LandingAnnouncementBackground;
 	detail: string | null;
 	enabled: boolean;
 	endsAt: string | null;
@@ -52,6 +78,7 @@ export interface LandingAnnouncementConfig {
 
 /** What the landing page renders. Only ever produced for a live bar. */
 export interface LiveLandingAnnouncement {
+	background: LandingAnnouncementBackground;
 	detail: string | null;
 	/** Kept so a cached copy can still expire on time at render. */
 	endsAt: string | null;
@@ -122,6 +149,7 @@ function toTime(value: Date | string | null | undefined): number | null {
 
 /** The fields the resolver reads; dates may be stored Dates or ISO strings. */
 export interface LandingAnnouncementCandidate {
+	background?: string | null;
 	detail?: string | null;
 	enabled?: boolean | null;
 	endsAt?: Date | string | null;
@@ -139,6 +167,17 @@ export function landingAnnouncementIcon(
 	return (
 		LANDING_ANNOUNCEMENT_ICONS.find((icon) => icon === value) ??
 		DEFAULT_LANDING_ANNOUNCEMENT_ICON
+	);
+}
+
+/** A known background, or the default for anything else. */
+export function landingAnnouncementBackground(
+	value: string | null | undefined
+): LandingAnnouncementBackground {
+	return (
+		LANDING_ANNOUNCEMENT_BACKGROUNDS.find(
+			(background) => background === value
+		) ?? DEFAULT_LANDING_ANNOUNCEMENT_BACKGROUND
 	);
 }
 
@@ -182,12 +221,14 @@ export function resolveActiveLandingAnnouncement(
 		linkLabel,
 		linkHref,
 		icon: landingAnnouncementIcon(candidate.icon),
+		background: landingAnnouncementBackground(candidate.background),
 		endsAt: endsAt === null ? null : new Date(endsAt).toISOString(),
 	};
 }
 
 /** The fields an admin saves; validated by `validateLandingAnnouncementInput`. */
 export interface LandingAnnouncementInput {
+	background: LandingAnnouncementBackground;
 	detail: string | null;
 	enabled: boolean;
 	endsAt: Date | null;
@@ -213,6 +254,7 @@ const rawInputSchema = z.object({
 	linkLabel: optionalText,
 	linkHref: optionalText,
 	icon: z.enum(LANDING_ANNOUNCEMENT_ICONS).nullish(),
+	background: z.enum(LANDING_ANNOUNCEMENT_BACKGROUNDS).nullish(),
 	startsAt: optionalText,
 	endsAt: optionalText,
 });
@@ -313,6 +355,7 @@ export function validateLandingAnnouncementInput(
 			linkLabel: input.linkLabel,
 			linkHref: input.linkHref,
 			icon: input.icon ?? DEFAULT_LANDING_ANNOUNCEMENT_ICON,
+			background: input.background ?? DEFAULT_LANDING_ANNOUNCEMENT_BACKGROUND,
 			startsAt: startsAt.value,
 			endsAt: endsAt.value,
 		},

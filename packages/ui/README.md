@@ -13,7 +13,7 @@ The single source of UI truth across Ryu's closed surfaces: ~66 React components
 
 - **Components** (`components/*`): the shadcn-style primitive set on Base UI, plus the data grid (`@tanstack/react-table` + virtualization) and the vendored PlateJS editor (`components/editor/*`).
 - **Hooks, lib, theme** (`hooks/*`, `lib/*`, `theme/*`): shared utilities and theming.
-- **Styles** (`./globals.css`, `./app-ui.css`, `./components/editor/editor.css`): the base stylesheet, Companion App UI contract, and editor CSS. Both shared style entries register `@toolwind/corner-shape`; rectangular shadcn-style primitives pair `corner-squircle` with their existing `rounded-*` fallback. Circular controls and pill shapes keep round corners.
+- **Styles** (`./globals.css`, `./app-ui.css`, `./components/editor/editor.css`): the base stylesheet, Companion App UI contract, and editor CSS. Primitives use plain round corners from their `rounded-*` utilities.
 
 ## Role
 

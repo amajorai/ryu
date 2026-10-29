@@ -122,7 +122,7 @@ export function PriceBlock({
  * `isRecommended` explicitly so only the recommended card keeps the same
  * conic ring visible; the other card returns to the static default border and
  * only animates on hover (`.t-card-border-spin` + {@link planCardConicGradient}).
- * The outer ring and hover layer use the same squircle corners as the card so
+ * The outer ring and hover layer use the same rounded corners as the card so
  * the gradient stays visible all the way around its rounded edge.
  *
  * Motion budget (pricing-motion.module.css): a hover-only ring stays paused
@@ -145,7 +145,7 @@ export function PricingCardBorder({
 		return (
 			<div
 				className={cn(
-					`t-pro-card-border corner-squircle relative ${styles.frame} p-0.5`,
+					`t-pro-card-border relative ${styles.frame} p-0.5`,
 					motionStyles.offscreenAware
 				)}
 				ref={frameRef}
@@ -164,7 +164,7 @@ export function PricingCardBorder({
 	return (
 		<div
 			className={cn(
-				`group corner-squircle relative ${styles.frame} bg-border p-0.5 dark:bg-transparent`,
+				`group relative ${styles.frame} bg-border p-0.5 dark:bg-transparent`,
 				motionStyles.offscreenAware
 			)}
 			ref={frameRef}
@@ -172,7 +172,7 @@ export function PricingCardBorder({
 			<div
 				aria-hidden
 				className={cn(
-					`t-card-border-spin corner-squircle pointer-events-none absolute inset-0 ${styles.border} transition-opacity duration-500 ease-out`,
+					`t-card-border-spin pointer-events-none absolute inset-0 ${styles.border} transition-opacity duration-500 ease-out`,
 					showHighlightedBorder
 						? "opacity-100"
 						: `opacity-0 group-hover:opacity-100 ${motionStyles.idleRing}`

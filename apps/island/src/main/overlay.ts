@@ -161,6 +161,7 @@ function ensureOverlay(): BrowserWindow {
 		webPreferences: {
 			contextIsolation: true,
 			nodeIntegration: false,
+			sandbox: true,
 		},
 	});
 	// Click-through (forward so nothing underneath is ever blocked) and topmost,

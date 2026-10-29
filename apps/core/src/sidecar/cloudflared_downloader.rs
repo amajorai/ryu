@@ -9,9 +9,9 @@ use crate::sidecar::download_manager::{
 };
 
 /// Cloudflare release pinned by this Ryu build.
-pub const CLOUDFLARED_TARGET_VERSION: &str = "2026.9.1";
+pub const CLOUDFLARED_TARGET_VERSION: &str = "2026.10.5";
 
-const RELEASE_BASE: &str = "https://github.com/cloudflare/cloudflared/releases/download/2026.9.1";
+const RELEASE_BASE: &str = "https://github.com/cloudflare/cloudflared/releases/download/2026.10.5";
 const VERSION_KEY: &str = "cloudflared";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,49 +44,49 @@ fn host_artifact(os: &str, arch: &str) -> Option<Artifact> {
     let (filename, sha256, platform, kind) = match (os, arch) {
         ("windows", "x86_64") => (
             "cloudflared-windows-amd64.exe",
-            "2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712",
+            "db4e4c413612a0916f3e1679d3caaf376f94911952d163028fb726fb2e0516a9",
             "windows-amd64",
             ArtifactKind::Raw,
         ),
         ("windows", "x86") => (
             "cloudflared-windows-386.exe",
-            "11b6e4b2d306950bd87e7caa4deee8e80a32d71ffee555a96237a76651eeae4c",
+            "66cba8003e4f87a8e6b772f331b8c04c7d41ac4f2dc30dd2c13ae09de3b6007e",
             "windows-386",
             ArtifactKind::Raw,
         ),
         ("linux", "x86_64") => (
             "cloudflared-linux-amd64",
-            "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc",
+            "e1bc0cf084fd9e590554fe769a86b1db46701c3f847a43d902f7b974a4e16298",
             "linux-amd64",
             ArtifactKind::Raw,
         ),
         ("linux", "aarch64") => (
             "cloudflared-linux-arm64",
-            "3d97437c71848bd8df68041e12436b484a661d95073ea1937f01a845ce88faa3",
+            "72e0d05a67e09da87cf495e409a28c3cc5994dd23fc66a982eebea6a55923b7d",
             "linux-arm64",
             ArtifactKind::Raw,
         ),
         ("linux", "arm") => (
             "cloudflared-linux-arm",
-            "093ffa3638ab2b636de63c43a8c68f96a69cf71f9699dd8277a91b160b0f4fc0",
+            "a018911e1bbfd739937f3011f589e9e73245baeee14742f8b3413472bb007adc",
             "linux-arm",
             ArtifactKind::Raw,
         ),
         ("linux", "x86") => (
             "cloudflared-linux-386",
-            "5d66134cf7646cb98f33aeee7bcc8b97d8feacd76db279f5903f9585226e0922",
+            "f2de713829081837130b38e27f3c95aa9d7fc1a4f48b833362d21234dd8780d8",
             "linux-386",
             ArtifactKind::Raw,
         ),
         ("macos", "x86_64") => (
             "cloudflared-darwin-amd64.tgz",
-            "ff0d3b51d5ff70eceef89d6b32145fee985018a2174596a5dbe405e2766e2ac4",
+            "6699392fed92367808c248c2d90bed66e49bbf66e1b4ee3e4141230f3f7391b3",
             "darwin-amd64",
             ArtifactKind::Archive,
         ),
         ("macos", "aarch64") => (
             "cloudflared-darwin-arm64.tgz",
-            "c27ab8fd0aa489449e3d201eb02f957ef460a13b613662928b1b23394bf1bcfe",
+            "184c7d4f5f977348243a6d7ca8f6cf6073b9b2746cfe8c1fe15aa59e9a522bf0",
             "darwin-arm64",
             ArtifactKind::Archive,
         ),
@@ -256,18 +256,18 @@ mod tests {
     #[test]
     fn macos_digests_are_of_the_downloaded_archive_not_the_extracted_binary() {
         // The download verifies the `.tgz`. These are the digests of the
-        // 2026.9.1 archives; the digests of the binaries inside them
-        // (9a0b19f6… arm64, 1ea07ae7… amd64) must never be pinned here.
+        // 2026.10.5 archives; the digests of the binaries inside them
+        // (2b239645… arm64, cb09afb9… amd64) must never be pinned here.
         for (arch, archive, binary) in [
             (
                 "aarch64",
-                "c27ab8fd0aa489449e3d201eb02f957ef460a13b613662928b1b23394bf1bcfe",
-                "9a0b19f67dc7a3011bc6b972c7ce06a5fcea8784ac6bd599ffa382ea4aeb5a6e",
+                "184c7d4f5f977348243a6d7ca8f6cf6073b9b2746cfe8c1fe15aa59e9a522bf0",
+                "2b23964528ddcd641c1449275df8b5b51e3c7193b5257919846331bc5bc13b0f",
             ),
             (
                 "x86_64",
-                "ff0d3b51d5ff70eceef89d6b32145fee985018a2174596a5dbe405e2766e2ac4",
-                "1ea07ae775b03236bd6be18ca1848d6bdc4af2f4f3bce398823b5a36e5761b75",
+                "6699392fed92367808c248c2d90bed66e49bbf66e1b4ee3e4141230f3f7391b3",
+                "cb09afb9b4d0a4730de477ac710aebb6107568930a8345775629bf264f70c284",
             ),
         ] {
             let artifact = host_artifact("macos", arch).expect("macOS asset");

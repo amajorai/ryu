@@ -9,7 +9,6 @@
 // Not part of the plugin-runtime cert; served by the same harness Vite config
 // via its own html entry.
 
-import { HalloweenPassCompanion } from "@ryu/ui/components/halloween-pass-companion.tsx";
 import { WaitlistQueue } from "@ryu/ui/components/waitlist-queue.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -45,9 +44,6 @@ function Column({ dark, label }: { dark: boolean; label: string }) {
 				onSignOut={() => undefined}
 				onUnreserve={() => setReserved(null)}
 				onUpgrade={() => undefined}
-				passCompanion={
-					<HalloweenPassCompanion now={new Date("2026-10-31T20:00:00")} />
-				}
 				position={642}
 				referralCount={7}
 				referralUrl="https://ryuhq.com/r/ABCD2345"

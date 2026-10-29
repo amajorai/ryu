@@ -1,6 +1,6 @@
-diff --git a/dist/introspect-6ew7sakf.mjs b/dist/introspect-6ew7sakf.mjs
---- a/dist/introspect-6ew7sakf.mjs
-+++ b/dist/introspect-6ew7sakf.mjs
+diff --git a/dist/introspect-CNR06Oy3.mjs b/dist/introspect-CNR06Oy3.mjs
+--- a/dist/introspect-CNR06Oy3.mjs
++++ b/dist/introspect-CNR06Oy3.mjs
 @@ -1206,7 +1206,7 @@ async function userInfoEndpoint(ctx, opts) {
  			url: getEndpointUrl(ctx, "/oauth2/userinfo"),
  			proofMaxAgeSeconds: opts.dpop?.proofMaxAgeSeconds,

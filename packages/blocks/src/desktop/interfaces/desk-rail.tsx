@@ -61,7 +61,7 @@ import { agentById } from "./interface-renderer.ts";
  * hook needs a `SidebarProvider`, and a second provider would register its own
  * Cmd/Ctrl+B shortcut and cookie, fighting the app's real sidebar.
  */
-const MENU_BUTTON_CLASS = `peer/menu-button group/menu-button corner-squircle flex h-8 w-full items-center gap-2 overflow-hidden rounded-lg pr-9 pl-2 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 ${DESK_FOCUS_RING}`;
+const MENU_BUTTON_CLASS = `peer/menu-button group/menu-button flex h-8 w-full items-center gap-2 overflow-hidden rounded-lg pr-9 pl-2 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 ${DESK_FOCUS_RING}`;
 
 const SHARED_ICONS: Record<string, LucideIcon> = {
 	all: Inbox,

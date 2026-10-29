@@ -12,11 +12,20 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import originalMarkup from "./ugc-controls.fixture.json" with { type: "json" };
 
+// The archived markup predates the squircle removal; retired corner-shape
+// utilities (including variant-prefixed ones) are the only tokens dropped since.
+const RETIRED_CORNER_UTILITY =
+	/(?:^|:)corner-(?:[a-z]{1,2}-)?(?:squircle|round)$/;
+
 function normalizeClasses(markup: string) {
 	return markup.replace(
 		/class="([^"]*)"/g,
 		(_match, classes: string) =>
-			`class="${classes.split(" ").sort().join(" ")}"`
+			`class="${classes
+				.split(" ")
+				.filter((value) => !RETIRED_CORNER_UTILITY.test(value))
+				.sort()
+				.join(" ")}"`
 	);
 }
 

@@ -357,7 +357,7 @@ export function ConnectionStatusToast({
 							{phase === "node-unreachable" && onRetry ? (
 								<Button
 									aria-label={retrying ? "Checking connection" : "Retry"}
-									className="corner-round size-7 shrink-0 rounded-full border border-white/10 bg-white/10 p-0 text-white/90 opacity-(--toast-opacity) shadow-none hover:bg-white/15 hover:text-white focus-visible:border-white/30 focus-visible:ring-white/30"
+									className="size-7 shrink-0 rounded-full border border-white/10 bg-white/10 p-0 text-white/90 opacity-(--toast-opacity) shadow-none hover:bg-white/15 hover:text-white focus-visible:border-white/30 focus-visible:ring-white/30"
 									data-slot="connection-status-retry"
 									disabled={retrying}
 									onClick={onRetry}

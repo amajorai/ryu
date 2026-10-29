@@ -57,7 +57,7 @@ use crate::sidecar::download_manager::{
 /// users until the next Ryu release. The alternative — resolving version, filename
 /// and digest together from `?mode=json` in a single fetch — is the only other
 /// safe shape; a floating version against a pinned digest is not.
-pub const TAILSCALE_TARGET_VERSION: &str = "1.102.2";
+pub const TAILSCALE_TARGET_VERSION: &str = "1.104.4";
 
 /// Env carrying a FULL per-platform archive URL (not a base directory), mirroring
 /// `RYU_GHOST_RELEASE_URL`. It is the escape hatch for a self-built archive, a
@@ -133,7 +133,7 @@ fn goarch_of(rust_arch: &str) -> Option<&'static str> {
     }
 }
 
-/// The upstream asset name for this host, e.g. `tailscale_1.102.2_arm64.tgz`.
+/// The upstream asset name for this host, e.g. `tailscale_1.104.4_arm64.tgz`.
 /// Derived from [`TAILSCALE_TARGET_VERSION`] + [`goarch`] so neither the URL nor
 /// the failure message can name an asset that was never published.
 fn artifact_name(goarch: &str) -> String {
@@ -616,7 +616,7 @@ pub async fn install_mesh_client(downloads: &crate::downloads::DownloadCenter) -
 /// load-bearing rather than laziness: `registry::SENTINEL_VERSIONS` contains
 /// `"brew"`, and `is_comparable_version` uses that list to suppress update
 /// comparisons. `github::fetch_latest_version` returns `tag_name` VERBATIM
-/// (`"v1.102.2"`, with the `v`), while `tailscale version` prints `1.102.2` — so the
+/// (`"v1.104.4"`, with the `v`), while `tailscale version` prints `1.104.4` — so the
 /// moment someone "improves" this to record the real version, the two differ
 /// forever and the entry shows a permanent "Update available" with a button that
 /// cannot possibly clear it.

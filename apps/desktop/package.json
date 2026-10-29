@@ -52,7 +52,7 @@
     "@xyflow/react": "^12.10.2",
     "agentation": "^3.0.2",
     "ai": "catalog:",
-    "better-auth": "^1.7.1",
+    "better-auth": "^1.7.7",
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cn": "^0.2.4",

@@ -1,8 +1,27 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { renderToStaticMarkup } from "react-dom/server";
-import { RELEASES_PAGE } from "./download-assets.ts";
-import { DownloadMenu } from "./download-menu.tsx";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
+// The menu's static graph reaches vaul and Radix (through the @ryu/ui dropdown's
+// phone drawer), and Radix picks its layout effect when it first loads: with no
+// DOM it keeps a no-op for the whole process. Register the DOM before loading
+// the menu, so a DOM suite sharing this process (download-send-drawer.test.tsx)
+// can still mount its portal. Server markup is unaffected: renderToStaticMarkup
+// runs no effects.
+const registeredDom = globalThis.document === undefined;
+if (registeredDom) {
+	GlobalRegistrator.register({ url: "https://ryu.test/" });
+}
+
+afterAll(async () => {
+	if (registeredDom) {
+		await GlobalRegistrator.unregister();
+	}
+});
+
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { RELEASES_PAGE } = await import("./download-assets.ts");
+const { DownloadMenu } = await import("./download-menu.tsx");
 
 const MENU_SOURCE = readFileSync(
 	new URL("./download-menu.tsx", import.meta.url),

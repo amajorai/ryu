@@ -64,7 +64,7 @@ export function useHelperTextSize(): "text-sm" | "text-xs" {
 }
 
 /** Public CTAs are large mono pills; product surfaces keep the default shape. */
-const PUBLIC_CTA_SHAPE = "corner-round rounded-full";
+const PUBLIC_CTA_SHAPE = "rounded-full";
 
 export function usePlanCtaShape(): { className: string; size?: "lg" } {
 	// A disabled public CTA (terms not yet accepted) stays the same black/white

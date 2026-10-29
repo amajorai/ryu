@@ -140,4 +140,18 @@ test("portal inverse header renders the inverted shell", () => {
 
 	expect(html).toContain("bg-foreground text-background");
 	expect(html).toContain("text-background/40");
+	// Dark mode keeps the chrome on the muted surface instead of a white bar.
+	expect(html).toContain("dark:bg-muted dark:text-foreground");
+	// Ghost-button hover, press and open fills (bg-muted) must not vanish into
+	// that muted bar, so its contents read muted a step lighter.
+	expect(html).toContain(
+		"dark:[--muted:color-mix(in_oklch,var(--background),var(--foreground)_27%)]"
+	);
+});
+
+test("portal header keeps the normal muted token when not inverted", () => {
+	const html = renderToStaticMarkup(
+		createElement(Header, { variant: "portal" })
+	);
+	expect(html).not.toContain("dark:[--muted:");
 });

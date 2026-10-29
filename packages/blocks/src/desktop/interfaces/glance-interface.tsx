@@ -423,7 +423,7 @@ export function GlanceInterface({
 							aria-label={stageLabel}
 							aria-roledescription="display"
 							className={cn(
-								"@container corner-squircle relative h-(--glance-size) w-full touch-pan-y select-none overflow-hidden rounded-[calc(var(--glance-size)*0.075)] bg-card ring-1 ring-border",
+								"@container relative h-(--glance-size) w-full touch-pan-y select-none overflow-hidden rounded-[calc(var(--glance-size)*0.075)] bg-card ring-1 ring-border",
 								// A phone-width Home Screen grows with its widgets; the page scrolls.
 								view === "home" &&
 									"@max-[34rem]:h-auto @max-[34rem]:overflow-visible overflow-y-auto"

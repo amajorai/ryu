@@ -3,10 +3,6 @@
 
 @layer base {
 	/* Download split controls keep a pill silhouette on both outer ends. */
-	.group[data-slot="button-group"] > [data-slot] {
-		corner-shape: round !important;
-	}
-
 	.group[data-slot="button-group"] > [data-slot]:first-child {
 		border-top-left-radius: calc(infinity * 1px) !important;
 		border-bottom-left-radius: calc(infinity * 1px) !important;

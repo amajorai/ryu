@@ -1,17 +1,18 @@
 "use client";
 
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	BookOpen,
-	CircleUserRound,
-	Download,
-	LayoutGrid,
-	Store,
-} from "lucide-react";
+import { BookOpen, CircleUserRound, FileText, LayoutGrid } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { DOCS_URL } from "./data/resources.tsx";
+import {
+	isWithinPrefixes,
+	PRODUCT_ACTIVE_PREFIXES,
+	RESOURCE_ACTIVE_PREFIXES,
+} from "./header-active-routes.ts";
+import { MobileNavDownloadAction } from "./mobile-nav-download.tsx";
 import type { MobileNavSheetsProps } from "./mobile-nav-sheet.tsx";
 import {
 	focusableElements,
@@ -43,26 +44,13 @@ function NoSheets() {
 // The mobile bottom nav mirrors the desktop header: Products and Resources are
 // the same menu groups (fed from the same data files) opened as a sheet instead
 // of a hover dropdown, Download is the header's primary CTA, and Account is the
-// header's user menu. Marketplace keeps its own tab. Enterprise keeps its slot
-// in the mobile top bar and the logo stays the way home, as on desktop. The bar
-// is symmetric: two tabs, the raised Download action, two tabs.
-const RESOURCE_ACTIVE_PREFIXES = [
-	"/pricing",
-	"/gifts",
-	"/academy",
-	"/certifications",
-	"/guides",
-	"/help",
-	"/blog",
-	"/changelog",
-	"/stories",
-	"/challenges",
-	"/compare",
-	"/community",
-	"/perks",
-];
+// header's user menu. Docs is the header's Docs link and, like it, opens the
+// docs site in this tab. Marketplace sits in the Products sheet, as it does in
+// the desktop Products menu. Enterprise keeps its slot in the mobile top bar and
+// the logo stays the way home, as on desktop. The bar is symmetric: two tabs,
+// the raised Download action, two tabs.
 
-type TabKey = SheetKey | "marketplace" | "download";
+type TabKey = SheetKey | "download";
 
 interface MobileNavProps {
 	/**
@@ -79,28 +67,16 @@ interface MobileNavProps {
 	hiddenProductIds?: readonly string[];
 }
 
-function isPathWithin(pathname: string, prefix: string): boolean {
-	return pathname === prefix || pathname.startsWith(`${prefix}/`);
-}
-
-// Same routes the desktop header's Products trigger highlights for.
+// The routes the desktop header's Products and Resources triggers highlight
+// for, from the list both headers share.
 function isTabActive(key: TabKey, pathname: string): boolean {
 	switch (key) {
 		case "products":
-			return (
-				isPathWithin(pathname, "/products") ||
-				pathname === "/bot" ||
-				pathname === "/agent" ||
-				pathname === "/platform"
-			);
+			return isWithinPrefixes(pathname, PRODUCT_ACTIVE_PREFIXES);
 		case "resources":
-			return RESOURCE_ACTIVE_PREFIXES.some((prefix) =>
-				isPathWithin(pathname, prefix)
-			);
-		case "marketplace":
-			return isPathWithin(pathname, "/marketplace");
+			return isWithinPrefixes(pathname, RESOURCE_ACTIVE_PREFIXES);
 		case "download":
-			return isPathWithin(pathname, "/download");
+			return isWithinPrefixes(pathname, ["/download"]);
 	}
 }
 
@@ -241,7 +217,6 @@ export function MobileNav({
 		);
 	};
 
-	const marketplaceActive = isTabActive("marketplace", pathname);
 	const downloadActive = isTabActive("download", pathname);
 
 	return (
@@ -257,6 +232,7 @@ export function MobileNav({
 						hiddenProductIds={hiddenProductIds}
 						onClose={() => setOpen(null)}
 						open={open}
+						pathname={pathname}
 					/>
 				</Suspense>
 			) : null}
@@ -276,23 +252,17 @@ export function MobileNav({
 				{sheetTab("resources", <BookOpen />)}
 
 				<div className="relative flex justify-center">
-					<Link
-						aria-current={downloadActive ? "page" : undefined}
-						className="absolute -top-5 flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-95"
-						href="/download"
-					>
-						<Download aria-hidden="true" className="size-6" />
-						<span className="sr-only">Download</span>
-					</Link>
+					<MobileNavDownloadAction
+						active={downloadActive}
+						onOpen={() => setOpen(null)}
+					/>
 				</div>
 
-				<Link
-					aria-current={marketplaceActive ? "page" : undefined}
-					className={mobileNavTabClassName(marketplaceActive)}
-					href="/marketplace"
-				>
-					<MobileNavTabBody icon={<Store />} label="Marketplace" />
-				</Link>
+				{/* The docs share this site's chrome, so they open in this tab, like
+				    the desktop header's Docs link. */}
+				<a className={mobileNavTabClassName()} href={DOCS_URL}>
+					<MobileNavTabBody icon={<FileText />} label="Docs" />
+				</a>
 
 				<div className="flex" data-testid="mobile-account-menu">
 					{account ?? <MobileNavSignInTab />}

@@ -18,6 +18,11 @@ import {
 	resourceCategories,
 	resourcesByCategory,
 } from "./data/resources.tsx";
+import {
+	isWithinPrefixes,
+	PRODUCT_ACTIVE_PREFIXES,
+	RESOURCE_ACTIVE_PREFIXES,
+} from "./header-active-routes.ts";
 import { nextLinkHref } from "./next-link-href.ts";
 
 // The marketing header's Products and Resources mega-menus (see header.tsx).
@@ -50,36 +55,6 @@ function menuLink(
 
 export function LocalizedHeaderCopy({ value }: { value: string }) {
 	return <>{useLocalizedText(value, { literal: true })}</>;
-}
-
-const PRODUCT_ACTIVE_PREFIXES = [
-	"/products",
-	"/bot",
-	"/agent",
-	"/platform",
-	"/marketplace",
-] as const;
-
-const RESOURCE_ACTIVE_PREFIXES = [
-	"/pricing",
-	"/gifts",
-	"/academy",
-	"/certifications",
-	"/guides",
-	"/help",
-	"/blog",
-	"/changelog",
-	"/stories",
-	"/challenges",
-	"/compare",
-	"/community",
-	"/perks",
-] as const;
-
-function isWithin(pathname: string, prefixes: readonly string[]) {
-	return prefixes.some(
-		(prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-	);
 }
 
 // Menus list bare names in large type under a small group label, the way
@@ -162,7 +137,7 @@ export function ProductsMenu({
 	pathname: string;
 }) {
 	const productsLabel = useLocalizedText("Products", { literal: true });
-	const active = isWithin(pathname, PRODUCT_ACTIVE_PREFIXES);
+	const active = isWithinPrefixes(pathname, PRODUCT_ACTIVE_PREFIXES);
 	return (
 		<>
 			<MotionNavigationMenuTrigger
@@ -200,7 +175,7 @@ function ResourceLink({
 
 export function ResourcesMenu({ pathname }: { pathname: string }) {
 	const resourcesLabel = useLocalizedText("Resources", { literal: true });
-	const active = isWithin(pathname, RESOURCE_ACTIVE_PREFIXES);
+	const active = isWithinPrefixes(pathname, RESOURCE_ACTIVE_PREFIXES);
 	return (
 		<>
 			<MotionNavigationMenuTrigger

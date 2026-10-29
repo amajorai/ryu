@@ -54,7 +54,7 @@ function ItemSeparator({
 }
 
 const itemVariants = cva(
-	"group/item corner-squircle flex w-full flex-wrap items-center rounded-2xl border text-sm outline-none transition-colors duration-100 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring [a]:transition-colors [a]:hover:bg-muted",
+	"group/item flex w-full flex-wrap items-center rounded-2xl border text-sm outline-none transition-colors duration-100 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring [a]:transition-colors [a]:hover:bg-muted",
 	{
 		variants: {
 			variant: {
@@ -115,7 +115,7 @@ const itemMediaVariants = cva(
 				default: "bg-transparent",
 				icon: "[&_svg:not([class*='size-'])]:size-4",
 				image:
-					"corner-squircle group-data-[size=xs]/item:corner-squircle size-10 overflow-hidden rounded-xl group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 group-data-[size=xs]/item:rounded-lg [&_img]:size-full [&_img]:object-cover",
+					"size-10 overflow-hidden rounded-xl group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 group-data-[size=xs]/item:rounded-lg [&_img]:size-full [&_img]:object-cover",
 			},
 		},
 		defaultVariants: {

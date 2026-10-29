@@ -256,7 +256,7 @@ export function WorkspaceRail({
 		>
 			<span
 				aria-label="Ryu workspace"
-				className="corner-squircle flex size-9 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"
+				className="flex size-9 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"
 				role="img"
 			>
 				<RyuLogo
@@ -273,7 +273,7 @@ export function WorkspaceRail({
 					onClick={onHome}
 					type="button"
 				>
-					<span className="corner-squircle flex size-9 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground ring-sidebar-ring transition-colors group-hover:bg-sidebar-primary/15 group-focus-visible:ring-2">
+					<span className="flex size-9 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground ring-sidebar-ring transition-colors group-hover:bg-sidebar-primary/15 group-focus-visible:ring-2">
 						<House aria-hidden="true" className="size-4" />
 					</span>
 					<span className="font-medium text-sidebar-foreground text-xs leading-4">

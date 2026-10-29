@@ -14,6 +14,7 @@ type GlassScrimSide = "top" | "bottom" | "both";
 type GlassScrimCardProps = Omit<ComponentProps<typeof Card>, "appearance"> & {
 	appearance?: "default" | "island";
 	material?: "glass" | "native";
+	/** Kept for existing callers; every contour now renders plain round corners. */
 	contour?: "round" | "squircle";
 	liquidProps?: Omit<LiquidGlassProps, "children">;
 	surfaceClassName?: string;
@@ -56,7 +57,7 @@ function scrimGradient(
 function GlassScrimCard({
 	appearance = "default",
 	material = "glass",
-	contour = "round",
+	contour: _contour = "round",
 	className,
 	liquidProps,
 	surfaceClassName,
@@ -82,7 +83,6 @@ function GlassScrimCard({
 			{...liquidProps}
 			className={cn(
 				material === "native" && "glass-native-backdrop bg-transparent",
-				contour === "squircle" && "corner-squircle",
 				surfaceClassName,
 				liquidProps?.className
 			)}
@@ -98,11 +98,7 @@ function GlassScrimCard({
 			/>
 			<Card
 				appearance={appearance === "island" ? "island" : "glass"}
-				className={cn(
-					"relative",
-					contour === "squircle" && "corner-squircle",
-					className
-				)}
+				className={cn("relative", className)}
 				data-scrim={scrim}
 				data-slot="glass-scrim-card"
 				{...props}

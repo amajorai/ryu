@@ -35,6 +35,7 @@ import {
 	stableReleases,
 } from "./download-assets.ts";
 import styles from "./download-menu.module.css";
+import { useSendDownloadLink } from "./send-download-link.tsx";
 import { OS_SVGL, SvglIcon } from "./svgl-icon.tsx";
 import { whenBrowserIdle } from "./when-browser-idle.ts";
 
@@ -111,6 +112,11 @@ export function DownloadMenu({
 	// Mounting the (closed) content renders nothing until the menu opens, so
 	// it is mounted on the first sign of intent to have its chunk ready.
 	const [menuRequested, setMenuRequested] = useState(false);
+
+	// On a phone the installer is no use: both segments open the drawer that
+	// sends the download page to the visitor's computer instead (desktop is
+	// unchanged, and the server HTML is the desktop markup).
+	const sendLink = useSendDownloadLink(siteOrigin);
 
 	const active = useRef(true);
 	const releasesRequested = useRef(false);
@@ -189,97 +195,123 @@ export function DownloadMenu({
 		variant === "mono"
 			? "my-0 bg-[color-mix(in_oklch,var(--background)_25%,var(--foreground))]"
 			: "my-px bg-input";
+	const chevron = showChevron ? <ChevronDown className="size-4" /> : null;
 	return (
-		<div
-			className={cn(buttonGroupVariants(), styles.group)}
-			data-slot="button-group"
-			data-transparent={transparentBackground || undefined}
-			role="group"
-		>
-			<Button
-				appearance={
-					transparentBackground
-						? "download-primary-transparent"
-						: "download-primary"
-				}
-				className={className}
-				// The button base draws a transparent, padding-clipped border; on a mono
-				// split it would leave a strip of page beside the divider, so join it.
-				edge={
-					(separatorVisible && variant !== "mono") || !showMenu
-						? undefined
-						: "joined"
-				}
-				nativeButton={false}
-				onFocus={requestReleases}
-				onPointerEnter={requestReleases}
-				render={
-					<a
-						download={ready ? state.asset.name : undefined}
-						href={href}
-						rel="noopener noreferrer"
-						{...(ready ? {} : { target: "_blank" })}
-					/>
-				}
-				size={size}
-				variant={variant}
+		<>
+			<div
+				className={cn(buttonGroupVariants(), styles.group)}
+				data-slot="button-group"
+				data-transparent={transparentBackground || undefined}
+				role="group"
 			>
-				{showPlatform ? (
-					<SvglIcon
-						className={
-							variant === "mono"
-								? "brightness-0 invert dark:invert-0"
-								: "brightness-0 invert"
-						}
-						size={iconSize}
-						spec={OS_SVGL[os]}
+				<Button
+					appearance={
+						transparentBackground
+							? "download-primary-transparent"
+							: "download-primary"
+					}
+					aria-haspopup={sendLink.mobile ? "dialog" : undefined}
+					className={className}
+					// The button base draws a transparent, padding-clipped border; on a mono
+					// split it would leave a strip of page beside the divider, so join it.
+					edge={
+						(separatorVisible && variant !== "mono") || !showMenu
+							? undefined
+							: "joined"
+					}
+					nativeButton={false}
+					onClick={sendLink.intercept}
+					onFocus={requestReleases}
+					onPointerEnter={requestReleases}
+					render={
+						<a
+							download={ready ? state.asset.name : undefined}
+							href={href}
+							rel="noopener noreferrer"
+							{...(ready ? {} : { target: "_blank" })}
+						/>
+					}
+					size={size}
+					variant={variant}
+				>
+					{showPlatform ? (
+						<SvglIcon
+							className={
+								variant === "mono"
+									? "brightness-0 invert dark:invert-0"
+									: "brightness-0 invert"
+							}
+							size={iconSize}
+							spec={OS_SVGL[os]}
+						/>
+					) : null}
+					{primaryLabel}
+				</Button>
+				{separatorVisible ? (
+					<span
+						aria-orientation="vertical"
+						className={cn(
+							"relative h-auto w-px shrink-0 self-stretch",
+							separatorTone,
+							separatorClassName
+						)}
+						data-slot="button-group-separator"
+						data-vertical=""
+						role="separator"
 					/>
 				) : null}
-				{primaryLabel}
-			</Button>
-			{separatorVisible ? (
-				<span
-					aria-orientation="vertical"
-					className={cn(
-						"relative h-auto w-px shrink-0 self-stretch",
-						separatorTone,
-						separatorClassName
-					)}
-					data-slot="button-group-separator"
-					data-vertical=""
-					role="separator"
-				/>
-			) : null}
-			{showMenu ? (
-				<DropdownMenu onOpenChange={handleMenuOpenChange}>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								appearance={
-									transparentBackground
-										? "download-trigger-transparent"
-										: "download-trigger"
-								}
-								aria-label="More download options"
-								onFocus={requestMenu}
-								onPointerEnter={requestMenu}
-								size={size}
-								variant={variant}
-							>
-								{showChevron ? <ChevronDown className="size-4" /> : null}
-							</Button>
+				{showMenu && sendLink.mobile ? (
+					<Button
+						appearance={
+							transparentBackground
+								? "download-trigger-transparent"
+								: "download-trigger"
 						}
-					/>
-					{menuRequested ? (
-						<Suspense fallback={null}>
-							<LazyDownloadDropdownContent
-								align={contentAlign}
-								{...(siteOrigin ? { siteOrigin } : {})}
-							/>
-						</Suspense>
-					) : null}
-				</DropdownMenu>
-			) : null}
-		</div>
+						aria-haspopup="dialog"
+						aria-label="Send the download link to yourself"
+						// Same slot as the menu trigger it stands in for, so the split
+						// control keeps its pill ends (download-menu.module.css).
+						data-slot="dropdown-menu-trigger"
+						onClick={sendLink.intercept}
+						size={size}
+						type="button"
+						variant={variant}
+					>
+						{chevron}
+					</Button>
+				) : null}
+				{showMenu && !sendLink.mobile ? (
+					<DropdownMenu onOpenChange={handleMenuOpenChange}>
+						<DropdownMenuTrigger
+							render={
+								<Button
+									appearance={
+										transparentBackground
+											? "download-trigger-transparent"
+											: "download-trigger"
+									}
+									aria-label="More download options"
+									onFocus={requestMenu}
+									onPointerEnter={requestMenu}
+									size={size}
+									variant={variant}
+								>
+									{chevron}
+								</Button>
+							}
+						/>
+						{menuRequested ? (
+							<Suspense fallback={null}>
+								<LazyDownloadDropdownContent
+									align={contentAlign}
+									{...(siteOrigin ? { siteOrigin } : {})}
+								/>
+							</Suspense>
+						) : null}
+					</DropdownMenu>
+				) : null}
+			</div>
+			{sendLink.drawer}
+		</>
 	);
 }

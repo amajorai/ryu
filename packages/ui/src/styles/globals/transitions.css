@@ -1,0 +1,552 @@
+/* ===========================================================================
+   transitions.dev — semantic motion tokens + the transitions used in the app.
+   Motion values (duration/easing/distance/blur/scale) are pasted verbatim from
+   the skill's _root.css. Color tokens are mapped to the app's theme vars (which
+   already flip in .dark) instead of the skill's light-mode literals, so every
+   transition follows light / dark mode automatically.
+   ========================================================================== */
+:root {
+	/* Card resize */
+	--resize-dur: 300ms;
+	--resize-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Number pop-in */
+	--digit-dur: 500ms;
+	--digit-distance: 8px;
+	--digit-stagger: 70ms;
+	--digit-blur: 2px;
+	--digit-ease: cubic-bezier(0.34, 1.45, 0.64, 1);
+	--digit-dir-x: 0;
+	--digit-dir-y: 1;
+	/* Notification badge */
+	--badge-slide-dur: 260ms;
+	--badge-pop-dur: 500ms;
+	--badge-pop-close-dur: 180ms;
+	--badge-fade-dur: 400ms;
+	--badge-fade-close-dur: 180ms;
+	--badge-blur: 2px;
+	--badge-offset-x: -8.2px;
+	--badge-offset-y: 12.4px;
+	--badge-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	--badge-pop-ease: cubic-bezier(0.34, 1.36, 0.64, 1);
+	--badge-close-ease: cubic-bezier(0.4, 0, 0.2, 1);
+	/* Staggered text reveal */
+	--stagger-dur: 500ms;
+	--stagger-distance: 12px;
+	--stagger-stagger: 40ms;
+	--stagger-blur: 3px;
+	--stagger-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Menu dropdown */
+	--dropdown-open-dur: 250ms;
+	--dropdown-close-dur: 150ms;
+	--dropdown-pre-scale: 0.97;
+	--dropdown-closing-scale: 0.99;
+	--dropdown-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Plus-to-menu morph. The open size is a pair of custom props rather than a
+	   literal because our menus differ in size — a consumer sets --morph-open-w /
+	   --morph-open-h on its own .t-morph and the reference values below are only
+	   the fallback. */
+	--morph-open-dur: 350ms;
+	--morph-close-dur: 250ms;
+	--morph-ease: cubic-bezier(0.34, 1.25, 0.64, 1);
+	--morph-close-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	--morph-r-closed: 40px;
+	--morph-r-open: 20px;
+	--morph-fade-dur: 200ms;
+	--morph-slide: 40px;
+	--morph-rotate: 45deg;
+	--morph-scale: 0.97;
+	--morph-blur: 2px;
+	--morph-open-w: 183px;
+	--morph-open-h: 172px;
+	/* Modal open / close */
+	--modal-open-dur: 250ms;
+	--modal-close-dur: 150ms;
+	--modal-scale: 0.96;
+	--modal-scale-close: 0.96;
+	--modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Panel reveal */
+	--panel-open-dur: 400ms;
+	--panel-close-dur: 350ms;
+	--panel-translate-y: 100px;
+	--panel-blur: 2px;
+	--panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Icon swap */
+	--icon-swap-dur: 250ms;
+	--icon-swap-blur: 2px;
+	--icon-swap-start-scale: 0.25;
+	--icon-swap-ease: ease-in-out;
+	/* Shimmer text */
+	--shimmer-dur: 2000ms;
+	--shimmer-band: 400%;
+	--shimmer-ease: linear;
+	/* Onboarding progress marquee — an always-moving highlight so the phase bar
+	   never reads as frozen while a long auto-advancing step waits. */
+	--progress-marquee-dur: 900ms;
+	--progress-marquee-band: 45%;
+	--progress-marquee-ease: cubic-bezier(0.4, 0, 0.6, 1);
+	/* Switch thumb bounce */
+	--toggle-dur: 350ms;
+	--toggle-ov1: 1px;
+	--toggle-ov2: 0px;
+	--toggle-track: 150ms;
+	--toggle-ease: cubic-bezier(0.34, 1.35, 0.64, 1);
+	--toggle-stretch: 1.18;
+	--toggle-press: 160ms;
+	--toggle-release: 90ms;
+	/* Success check (10) — the confirmation icon on terminal success pages
+	   (device activated, email verified, payment complete). */
+	--check-opacity-dur: 500ms;
+	--check-rotate-dur: 500ms;
+	--check-rotate-from: 80deg;
+	--check-bob-dur: 500ms;
+	--check-y-amount: 40px;
+	--check-blur-dur: 500ms;
+	--check-blur-from: 10px;
+	--check-path-dur: 500ms;
+	--check-path-delay: 80ms;
+	--check-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--check-ease-opacity: cubic-bezier(0.22, 1, 0.36, 1);
+	--check-ease-rotate: cubic-bezier(0.22, 1, 0.36, 1);
+	--check-ease-bob: cubic-bezier(0.34, 1.35, 0.64, 1);
+	--check-ease-path: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Theme-mapped color tokens (follow light/dark via the app's vars) */
+	--tabs-bar-bg: var(--muted);
+	--tabs-pill-bg: var(--background);
+	--tabs-text-muted: var(--muted-foreground);
+	--tabs-text-active: var(--foreground);
+	--shimmer-base: var(--muted-foreground);
+	--shimmer-highlight: var(--foreground);
+}
+
+/* Transitions.dev — Menu dropdown */
+.t-dropdown {
+	pointer-events: none;
+	opacity: 0;
+	transform: scale(var(--dropdown-pre-scale));
+	transform-origin: top left;
+	transition:
+		transform var(--dropdown-open-dur) var(--dropdown-ease),
+		opacity var(--dropdown-open-dur) var(--dropdown-ease);
+	will-change: transform, opacity;
+}
+.t-dropdown[data-origin="top-right"] {
+	transform-origin: top right;
+}
+.t-dropdown[data-origin="top-center"] {
+	transform-origin: top center;
+}
+.t-dropdown[data-origin="bottom-left"] {
+	transform-origin: bottom left;
+}
+.t-dropdown[data-origin="bottom-center"] {
+	transform-origin: bottom center;
+}
+.t-dropdown[data-origin="bottom-right"] {
+	transform-origin: bottom right;
+}
+
+.t-dropdown.is-open {
+	pointer-events: auto;
+	opacity: 1;
+	transform: scale(1);
+}
+.t-dropdown.is-closing {
+	pointer-events: none;
+	opacity: 0;
+	transform: scale(var(--dropdown-closing-scale));
+	transition:
+		transform var(--dropdown-close-dur) var(--dropdown-ease),
+		opacity var(--dropdown-close-dur) var(--dropdown-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.t-dropdown {
+		transition: none !important;
+	}
+}
+
+/* --- Switch toggle bounce --- */
+.t-toggle {
+	transition:
+		background-color var(--toggle-track) var(--toggle-ease),
+		border-color var(--toggle-track) var(--toggle-ease);
+}
+.t-toggle-thumb {
+	--toggle-travel: calc(100% - 8px);
+	transform-origin: left center;
+	translate: 0 0;
+	transition:
+		translate var(--toggle-dur) var(--toggle-ease),
+		scale var(--toggle-release) ease-out,
+		transform-origin var(--toggle-release) ease-out;
+	will-change: translate;
+}
+.t-toggle[data-checked] .t-toggle-thumb {
+	transform-origin: right center;
+	translate: var(--toggle-travel) 0;
+}
+/* While held, stretch the thumb toward the side it will travel to. `scale`
+   (not width) so the percentage travel above never overshoots the track; the
+   origin anchors the edge the thumb is leaving. Release snaps back fast. */
+.t-toggle:active:not([data-disabled]) .t-toggle-thumb {
+	scale: var(--toggle-stretch) 1;
+	transition:
+		translate var(--toggle-dur) var(--toggle-ease),
+		scale var(--toggle-press) ease-out,
+		transform-origin var(--toggle-press) ease-out;
+}
+
+/* --- Avatar stacks: clip each avatar against its next neighbour instead of a
+   background-coloured ring, so overlaps stay correct on gradients and images.
+   The notch is a radial mask centred on the neighbour's centre. --- */
+/* Defaults live in the base layer so `[--avatar-size:…]` utilities override
+   them; unlayered declarations would beat every Tailwind utility. */
+@layer base {
+	:where([data-slot="avatar-group"], [data-avatar-stack]) {
+		--avatar-size: 2rem;
+		--avatar-overlap: 0.5rem;
+		--avatar-gap: 2px;
+	}
+	/* Smaller overlap at sm (matches `has-data-[size=sm]:-space-x-1.5`) so two
+	   initials still fit in the visible crescent. */
+	:where([data-slot="avatar-group"]):has([data-size="sm"]) {
+		--avatar-size: 1.5rem;
+		--avatar-overlap: 0.375rem;
+	}
+	:where([data-slot="avatar-group"]):has([data-size="lg"]) {
+		--avatar-size: 2.5rem;
+	}
+}
+:where([data-slot="avatar-group"], [data-avatar-stack]) > :not(:last-child) {
+	--_avatar-notch-x: calc(
+		100% +
+		var(--avatar-size) /
+		2 -
+		var(--avatar-overlap)
+	);
+	--_avatar-notch: radial-gradient(
+		circle at var(--_avatar-notch-x) 50%,
+		transparent calc(var(--avatar-size) / 2 + var(--avatar-gap)),
+		#000 calc(var(--avatar-size) / 2 + var(--avatar-gap) + 0.5px)
+	);
+	-webkit-mask-image: var(--_avatar-notch);
+	mask-image: var(--_avatar-notch);
+}
+:where([data-slot="avatar-group"], [data-avatar-stack]):where(
+		[dir="rtl"],
+		[dir="rtl"] *
+	)
+	> :not(:last-child) {
+	--_avatar-notch-x: calc(var(--avatar-overlap) - var(--avatar-size) / 2);
+}
+/* Centre initials in the visible crescent, not under the neighbour. */
+:where([data-slot="avatar-group"], [data-avatar-stack])
+	> :not(:last-child)
+	:where([data-slot="avatar-fallback"]) {
+	padding-inline-end: var(--avatar-overlap);
+}
+:where([data-slot="avatar-group"])
+	> [data-size="sm"]:not(:last-child)
+	:where([data-slot="avatar-fallback"]) {
+	font-size: 0.625rem;
+	letter-spacing: -0.02em;
+}
+
+/* --- Notification badge (03) --- */
+@keyframes t-badge-slide-in {
+	from {
+		transform: translate(var(--badge-offset-x), var(--badge-offset-y));
+	}
+	to {
+		transform: translate(0, 0);
+	}
+}
+.t-badge {
+	position: absolute;
+	pointer-events: none;
+	will-change: transform;
+}
+.t-badge[data-open="true"] {
+	animation: t-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);
+}
+.t-badge-dot {
+	display: block;
+	opacity: 1;
+	filter: blur(0);
+	transform: scale(1);
+	transform-origin: center;
+	transition:
+		transform var(--badge-pop-dur) var(--badge-pop-ease),
+		opacity var(--badge-fade-dur) var(--badge-pop-ease),
+		filter var(--badge-pop-dur) var(--badge-pop-ease);
+	will-change: transform, opacity, filter;
+}
+.t-badge[data-open="false"] .t-badge-dot {
+	opacity: 0;
+	filter: blur(var(--badge-blur));
+	transform: scale(0);
+	transition:
+		transform var(--badge-pop-close-dur) var(--badge-close-ease),
+		opacity var(--badge-fade-close-dur) var(--badge-close-ease),
+		filter var(--badge-pop-close-dur) var(--badge-close-ease);
+}
+
+/* --- Number pop-in (02) --- */
+@keyframes t-digit-pop-in {
+	0% {
+		transform: translate(
+			calc(var(--digit-distance) * var(--digit-dir-x)),
+			calc(var(--digit-distance) * var(--digit-dir-y))
+		);
+		opacity: 0;
+		filter: blur(var(--digit-blur));
+	}
+	100% {
+		transform: translate(0, 0);
+		opacity: 1;
+		filter: blur(0);
+	}
+}
+.t-digit-group {
+	display: inline-flex;
+	align-items: baseline;
+	font-variant-numeric: tabular-nums;
+}
+.t-digit {
+	display: inline-block;
+	will-change: transform, opacity, filter;
+}
+.t-digit-group.is-animating .t-digit {
+	animation: t-digit-pop-in var(--digit-dur) var(--digit-ease) both;
+}
+.t-digit-group.is-animating .t-digit[data-stagger="1"] {
+	animation-delay: var(--digit-stagger);
+}
+.t-digit-group.is-animating .t-digit[data-stagger="2"] {
+	animation-delay: calc(var(--digit-stagger) * 2);
+}
+
+/* --- Progress marquee — a low-alpha foreground band that sweeps inside the
+   filled portion (onboarding clips it to the primary fill; indeterminate tray
+   lines mount it on the full track). Keeps long waits from reading as stuck. --- */
+@keyframes t-progress-marquee {
+	from {
+		transform: translateX(-120%);
+	}
+	to {
+		transform: translateX(320%);
+	}
+}
+.t-progress-marquee {
+	position: absolute;
+	inset: 0;
+	width: var(--progress-marquee-band);
+	pointer-events: none;
+	background-image: linear-gradient(
+		90deg,
+		transparent,
+		color-mix(in oklab, var(--foreground) 22%, transparent),
+		transparent
+	);
+	animation: t-progress-marquee var(--progress-marquee-dur)
+		var(--progress-marquee-ease) infinite;
+	will-change: transform;
+}
+
+/* --- Icon swap (09) --- */
+.t-icon-swap {
+	position: relative;
+	display: inline-grid;
+}
+.t-icon-swap .t-icon {
+	grid-area: 1 / 1;
+	transition:
+		opacity var(--icon-swap-dur) var(--icon-swap-ease),
+		filter var(--icon-swap-dur) var(--icon-swap-ease),
+		transform var(--icon-swap-dur) var(--icon-swap-ease);
+	will-change: opacity, filter, transform;
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="a"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="b"] {
+	opacity: 1;
+	filter: blur(0);
+	transform: scale(1);
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+	opacity: 0;
+	filter: blur(var(--icon-swap-blur));
+	transform: scale(var(--icon-swap-start-scale));
+}
+
+/* --- Panel reveal (07) --- */
+.t-panel-slide {
+	pointer-events: none;
+	opacity: 0;
+	filter: blur(var(--panel-blur));
+	transform: translateY(var(--panel-translate-y));
+	transition:
+		transform var(--panel-close-dur) var(--panel-ease),
+		opacity var(--panel-close-dur) var(--panel-ease),
+		filter var(--panel-close-dur) var(--panel-ease);
+	will-change: transform, opacity, filter;
+}
+.t-panel-slide[data-open="true"] {
+	pointer-events: auto;
+	opacity: 1;
+	filter: blur(0);
+	transform: translateY(0);
+	transition:
+		transform var(--panel-open-dur) var(--panel-ease),
+		opacity var(--panel-open-dur) var(--panel-ease),
+		filter var(--panel-open-dur) var(--panel-ease);
+}
+
+/* --- Plan badge shimmer — a diagonal highlight sweeping left to right,
+   looping, across the tier badge's gradient face and its edge. Both layers
+   share one keyframe so the face sheen and the border catch light in sync. */
+@keyframes t-plan-badge-shimmer {
+	from {
+		background-position: -150% 0;
+	}
+	to {
+		background-position: 250% 0;
+	}
+}
+.t-plan-badge-sheen {
+	position: absolute;
+	inset: 0;
+	background-image: linear-gradient(
+		115deg,
+		transparent 35%,
+		rgba(255, 255, 255, 0.55) 50%,
+		transparent 65%
+	);
+	background-repeat: no-repeat;
+	background-size: 250% 100%;
+	animation: t-plan-badge-shimmer var(--shimmer-dur, 2000ms)
+		var(--shimmer-ease, linear) infinite;
+}
+.t-plan-badge-border {
+	position: absolute;
+	inset: 0;
+	padding: 1px;
+	background-image: linear-gradient(
+		115deg,
+		transparent 35%,
+		rgba(255, 255, 255, 0.95) 50%,
+		transparent 65%
+	);
+	background-repeat: no-repeat;
+	background-size: 250% 100%;
+	border-radius: inherit;
+	-webkit-mask:
+		linear-gradient(#fff 0 0) content-box,
+		linear-gradient(#fff 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	animation: t-plan-badge-shimmer var(--shimmer-dur, 2000ms)
+		var(--shimmer-ease, linear) infinite;
+}
+
+/* Drift every tier's enlarged gradient across the badge face independently
+   of the white sheen, keeping the tier palette itself visibly in motion. */
+@keyframes t-plan-badge-gradient-drift {
+	0%,
+	100% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+}
+.t-plan-badge-gradient {
+	background-repeat: no-repeat;
+	background-position: 0% 50%;
+	background-size: 300% 100%;
+	animation: t-plan-badge-gradient-drift 8s ease-in-out infinite;
+}
+.t-plan-badge-plus-gradient {
+	inset: -1px;
+	background-color: #e2dfd8;
+	background-size: 180% 100%;
+}
+.t-plan-badge-business-gradient {
+	background-size: 500% 100%;
+}
+
+/* --- Pricing card borders consume the shared palettes from plan-badge.
+   Pro stays visible; the remaining card rings fade in on hover. --- */
+@property --tier-border-angle {
+	syntax: "<angle>";
+	initial-value: 0deg;
+	inherits: false;
+}
+@keyframes t-card-border-spin {
+	to {
+		--tier-border-angle: 360deg;
+	}
+}
+.t-pro-card-border {
+	animation: t-card-border-spin var(--pro-border-dur, 6s) linear infinite;
+}
+/* Whip the sweep around on hover. */
+.t-pro-card-border:hover {
+	--pro-border-dur: 1.2s;
+}
+
+/* Other cards share the same rotating angle, but fade their rings in on hover. */
+.t-card-border-spin {
+	animation: t-card-border-spin var(--tier-border-dur, 7s) linear infinite;
+}
+.group:hover .t-card-border-spin {
+	--tier-border-dur: 1.4s;
+}
+
+/* --- Staggered text reveal — lines rise, sharpen and fade in one after the
+   other, so a heading reads as being written rather than pasted. The parent
+   carries .is-shown; the delay lives on the line so the browser drives the
+   cascade without a per-line timer. --- */
+.t-stagger-line {
+	display: block;
+	opacity: 0;
+	filter: blur(var(--stagger-blur));
+	transform: translateY(var(--stagger-distance));
+	transition:
+		transform var(--stagger-dur) var(--stagger-ease),
+		filter var(--stagger-dur) var(--stagger-ease),
+		opacity var(--stagger-dur) var(--stagger-ease);
+	will-change: transform, filter, opacity;
+}
+.t-stagger.is-shown .t-stagger-line {
+	opacity: 1;
+	filter: blur(0);
+	transform: translateY(0);
+}
+/* --1 is a no-op, but consumers generate `--${i + 1}` over a list, so the 1-4
+   contract is spelled out rather than implied. */
+.t-stagger-line--1 {
+	transition-delay: 0s;
+}
+.t-stagger-line--2 {
+	transition-delay: var(--stagger-stagger);
+}
+.t-stagger-line--3 {
+	transition-delay: calc(var(--stagger-stagger) * 2);
+}
+.t-stagger-line--4 {
+	transition-delay: calc(var(--stagger-stagger) * 3);
+}
+/* Leaving is deliberately not the entrance played backwards: a staggered,
+   blurring exit reads as a glitch when the copy is about to be replaced. The
+   lines just fade out together, in place, with the cascade cancelled. */
+.t-stagger.is-hiding .t-stagger-line {
+	opacity: 0;
+	filter: blur(0);
+	transform: translateY(0);
+	transition:
+		opacity 200ms ease,
+		transform 0s,
+		filter 0s;
+	transition-delay: 0s;
+}

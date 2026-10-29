@@ -15,12 +15,16 @@ import {
 	useSpring,
 } from "motion/react";
 import type { ComponentProps, ReactNode } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import styles from "./smooth-scroll.module.css";
 import {
 	driveLenisOnDemand,
 	useSmoothInputIntent,
 } from "./smooth-scroll-frames.ts";
+import {
+	isSmoothScrollPaused,
+	subscribeSmoothScrollPause,
+} from "./smooth-scroll-pause.ts";
 
 const DEFAULT_SPRING = {
 	damping: 26,
@@ -39,10 +43,26 @@ export interface SmoothScrollProps
 	root?: boolean;
 }
 
-/** Runs Lenis's frame loop only while it animates (see `driveLenisOnDemand`). */
+/**
+ * Runs Lenis's frame loop only while it animates (see `driveLenisOnDemand`),
+ * and holds Lenis stopped while an open menu or dialog asks the page to stay
+ * still (see `usePauseSmoothScroll`).
+ */
 function LenisFrames() {
 	const lenis = useLenis();
+	const paused = useSyncExternalStore(
+		subscribeSmoothScrollPause,
+		isSmoothScrollPaused,
+		() => false
+	);
 	useEffect(() => (lenis ? driveLenisOnDemand(lenis) : undefined), [lenis]);
+	useEffect(() => {
+		if (!(lenis && paused)) {
+			return;
+		}
+		lenis.stop();
+		return () => lenis.start();
+	}, [lenis, paused]);
 	return null;
 }
 

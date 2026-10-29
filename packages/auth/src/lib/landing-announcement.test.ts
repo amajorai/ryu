@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
 	isSafeLandingAnnouncementHref,
+	LANDING_ANNOUNCEMENT_BACKGROUNDS,
+	landingAnnouncementBackground,
 	resolveActiveLandingAnnouncement,
 	validateLandingAnnouncementInput,
 } from "./landing-announcement.ts";
@@ -61,6 +63,7 @@ describe("validateLandingAnnouncementInput", () => {
 				linkLabel: "Read more",
 				linkHref: "/blog/ryu-1",
 				icon: "rocket",
+				background: "witching-hour",
 				startsAt: new Date("2026-11-01T00:00:00.000Z"),
 				endsAt: new Date("2026-11-08T00:00:00.000Z"),
 			},
@@ -73,6 +76,29 @@ describe("validateLandingAnnouncementInput", () => {
 			icon: undefined,
 		});
 		expect(result.ok && result.value.icon).toBe("witching-hour");
+	});
+
+	test("keeps a chosen background and defaults a missing one", () => {
+		for (const background of LANDING_ANNOUNCEMENT_BACKGROUNDS) {
+			const result = validateLandingAnnouncementInput({
+				...complete,
+				background,
+			});
+			expect(result.ok && result.value.background).toBe(background);
+		}
+		const result = validateLandingAnnouncementInput({
+			...complete,
+			background: null,
+		});
+		expect(result.ok && result.value.background).toBe("witching-hour");
+	});
+
+	test("rejects an unknown background, including raw CSS", () => {
+		for (const background of ["skull", "red", "url(javascript:alert(1))"]) {
+			expect(
+				validateLandingAnnouncementInput({ ...complete, background }).ok
+			).toBe(false);
+		}
 	});
 
 	test("rejects an unknown icon and malformed bodies", () => {
@@ -161,6 +187,7 @@ describe("resolveActiveLandingAnnouncement", () => {
 			linkLabel: "Read more",
 			linkHref: "https://ryuhq.com/blog/ryu-1",
 			icon: "gift",
+			background: "witching-hour",
 			endsAt: "2026-11-08T00:00:00.000Z",
 		});
 	});
@@ -213,5 +240,28 @@ describe("resolveActiveLandingAnnouncement", () => {
 		expect(
 			resolveActiveLandingAnnouncement({ ...stored, icon: "skull" }, now)
 		).toMatchObject({ icon: "witching-hour" });
+	});
+
+	test("serves a stored background, and the default for an unknown one", () => {
+		expect(
+			resolveActiveLandingAnnouncement({ ...stored, background: "brand" }, now)
+		).toMatchObject({ background: "brand" });
+		expect(
+			resolveActiveLandingAnnouncement(
+				{ ...stored, background: "#ff0000" },
+				now
+			)
+		).toMatchObject({ background: "witching-hour" });
+	});
+});
+
+describe("landingAnnouncementBackground", () => {
+	test("passes the presets through and defaults everything else", () => {
+		for (const background of LANDING_ANNOUNCEMENT_BACKGROUNDS) {
+			expect(landingAnnouncementBackground(background)).toBe(background);
+		}
+		for (const value of [null, undefined, "", "Brand", "red"]) {
+			expect(landingAnnouncementBackground(value)).toBe("witching-hour");
+		}
 	});
 });

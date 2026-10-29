@@ -1,36 +1,33 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 
-const skeletonVariants = cva(
-	"corner-squircle animate-skeleton motion-reduce:animate-none",
-	{
-		variants: {
-			radius: {
-				default: "rounded-2xl",
-				block: "rounded",
-				pill: "rounded-full",
-				row: "rounded-lg",
-				dense: "rounded-md",
-				panel: "rounded-xl",
-			},
-			tone: {
-				default: "bg-muted",
-				"paper-heading":
-					"bg-space-paper-heading-placeholder dark:bg-space-paper-heading-placeholder-dark",
-				"paper-line":
-					"bg-space-paper-line-placeholder dark:bg-space-paper-line-placeholder-dark",
-				docsPrimary30: "bg-docs-preview-primary/30",
-				docsBackground: "bg-docs-preview-background",
-				docsBackground60: "bg-docs-preview-background/60",
-				docsBackground70: "bg-docs-preview-background/70",
-				docsBackground80: "bg-docs-preview-background/80",
-				docsSecondary: "bg-docs-preview-secondary",
-				docsSecondary70: "bg-docs-preview-secondary/70",
-			},
+const skeletonVariants = cva("animate-skeleton motion-reduce:animate-none", {
+	variants: {
+		radius: {
+			default: "rounded-2xl",
+			block: "rounded",
+			pill: "rounded-full",
+			row: "rounded-lg",
+			dense: "rounded-md",
+			panel: "rounded-xl",
 		},
-		defaultVariants: { radius: "default", tone: "default" },
-	}
-);
+		tone: {
+			default: "bg-muted",
+			"paper-heading":
+				"bg-space-paper-heading-placeholder dark:bg-space-paper-heading-placeholder-dark",
+			"paper-line":
+				"bg-space-paper-line-placeholder dark:bg-space-paper-line-placeholder-dark",
+			docsPrimary30: "bg-docs-preview-primary/30",
+			docsBackground: "bg-docs-preview-background",
+			docsBackground60: "bg-docs-preview-background/60",
+			docsBackground70: "bg-docs-preview-background/70",
+			docsBackground80: "bg-docs-preview-background/80",
+			docsSecondary: "bg-docs-preview-secondary",
+			docsSecondary70: "bg-docs-preview-secondary/70",
+		},
+	},
+	defaultVariants: { radius: "default", tone: "default" },
+});
 
 function Skeleton({
 	className,
