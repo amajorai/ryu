@@ -19,6 +19,7 @@ import { SuggestionPlugin } from "@platejs/suggestion/react";
 import { TablePlugin } from "@platejs/table/react";
 import { insertToc } from "@platejs/toc";
 import {
+	type EditorPropOptions,
 	KEYS,
 	type NodeEntry,
 	type Path,
@@ -53,49 +54,68 @@ const selectBlockquoteStart = (editor: PlateEditor, path: Path) => {
 	}
 };
 
-const insertBlockMap: Record<
-	string,
-	(editor: PlateEditor, type: string) => void
-> = {
-	[KEYS.listTodo]: insertList,
-	[KEYS.ol]: insertList,
-	[KEYS.ul]: insertList,
-	[ACTION_THREE_COLUMNS]: (editor) =>
-		insertColumnGroup(editor, { columns: 3, select: true }),
-	[KEYS.audio]: (editor) => insertAudioPlaceholder(editor, { select: true }),
-	[KEYS.callout]: (editor) => insertCallout(editor, { select: true }),
-	[KEYS.codeBlock]: (editor) => insertCodeBlock(editor, { select: true }),
-	[KEYS.codeDrawing]: (editor) =>
-		insertCodeDrawing(editor, {}, { select: true }),
-	[KEYS.equation]: (editor) => insertEquation(editor, { select: true }),
-	[KEYS.excalidraw]: (editor) => insertExcalidraw(editor, {}, { select: true }),
-	[KEYS.file]: (editor) => insertFilePlaceholder(editor, { select: true }),
-	[KEYS.img]: (editor) =>
-		insertMedia(editor, {
-			select: true,
-			type: KEYS.img,
-		}),
-	[KEYS.mediaEmbed]: (editor) =>
-		insertMedia(editor, {
-			select: true,
-			type: KEYS.mediaEmbed,
-		}),
-	[KEYS.table]: (editor) =>
-		editor.getTransforms(TablePlugin).insert.table({}, { select: true }),
-	[KEYS.toc]: (editor) => insertToc(editor, { select: true }),
-	[KEYS.video]: (editor) => insertVideoPlaceholder(editor, { select: true }),
-};
+// Complete private action ports: the requested native Plate editor and type are
+// forwarded unchanged to every authored insertion/setting handler.
+type EditorElementInsertion = (editor: PlateEditor, type: string) => void;
 
-const insertInlineMap: Record<
-	string,
-	(editor: PlateEditor, type: string) => void
-> = {
-	[KEYS.date]: (editor) => insertDate(editor, { select: true }),
-	[ACTION_FOOTNOTE]: (editor) => insertFootnote(editor, { select: true }),
-	[KEYS.inlineEquation]: (editor) =>
-		insertInlineEquation(editor, "", { select: true }),
-	[KEYS.link]: (editor) => triggerFloatingLink(editor, { focused: true }),
-};
+type EditorBlockSetting = (
+	editor: PlateEditor,
+	type: string,
+	entry: NodeEntry<TElement>
+) => void;
+
+const insertBlockMap = new Map<string, EditorElementInsertion>([
+	[KEYS.listTodo, insertList],
+	[KEYS.ol, insertList],
+	[KEYS.ul, insertList],
+	[
+		ACTION_THREE_COLUMNS,
+		(editor) => insertColumnGroup(editor, { columns: 3, select: true }),
+	],
+	[KEYS.audio, (editor) => insertAudioPlaceholder(editor, { select: true })],
+	[KEYS.callout, (editor) => insertCallout(editor, { select: true })],
+	[KEYS.codeBlock, (editor) => insertCodeBlock(editor, { select: true })],
+	[
+		KEYS.codeDrawing,
+		(editor) => insertCodeDrawing(editor, {}, { select: true }),
+	],
+	[KEYS.equation, (editor) => insertEquation(editor, { select: true })],
+	[KEYS.excalidraw, (editor) => insertExcalidraw(editor, {}, { select: true })],
+	[KEYS.file, (editor) => insertFilePlaceholder(editor, { select: true })],
+	[
+		KEYS.img,
+		(editor) =>
+			insertMedia(editor, {
+				select: true,
+				type: KEYS.img,
+			}),
+	],
+	[
+		KEYS.mediaEmbed,
+		(editor) =>
+			insertMedia(editor, {
+				select: true,
+				type: KEYS.mediaEmbed,
+			}),
+	],
+	[
+		KEYS.table,
+		(editor) =>
+			editor.getTransforms(TablePlugin).insert.table({}, { select: true }),
+	],
+	[KEYS.toc, (editor) => insertToc(editor, { select: true })],
+	[KEYS.video, (editor) => insertVideoPlaceholder(editor, { select: true })],
+]);
+
+const insertInlineMap = new Map<string, EditorElementInsertion>([
+	[KEYS.date, (editor) => insertDate(editor, { select: true })],
+	[ACTION_FOOTNOTE, (editor) => insertFootnote(editor, { select: true })],
+	[
+		KEYS.inlineEquation,
+		(editor) => insertInlineEquation(editor, "", { select: true }),
+	],
+	[KEYS.link, (editor) => triggerFloatingLink(editor, { focused: true })],
+]);
 
 interface InsertBlockOptions {
 	upsert?: boolean;
@@ -143,7 +163,7 @@ export const insertBlock = (
 
 			return;
 		}
-		const insertBlock = insertBlockMap[type];
+		const insertBlock = insertBlockMap.get(type);
 		if (insertBlock) {
 			insertBlock(editor, type);
 		} else {
@@ -162,8 +182,9 @@ export const insertBlock = (
 };
 
 export const insertInlineElement = (editor: PlateEditor, type: string) => {
-	if (insertInlineMap[type]) {
-		insertInlineMap[type](editor, type);
+	const insertInline = insertInlineMap.get(type);
+	if (insertInline) {
+		insertInline(editor, type);
 	}
 };
 
@@ -183,16 +204,13 @@ const setList = (
 	);
 };
 
-const setBlockMap: Record<
-	string,
-	(editor: PlateEditor, type: string, entry: NodeEntry<TElement>) => void
-> = {
-	[KEYS.listTodo]: setList,
-	[KEYS.ol]: setList,
-	[KEYS.ul]: setList,
-	[ACTION_THREE_COLUMNS]: (editor) => toggleColumnGroup(editor, { columns: 3 }),
-	[KEYS.codeBlock]: (editor) => toggleCodeBlock(editor),
-};
+const setBlockMap = new Map<string, EditorBlockSetting>([
+	[KEYS.listTodo, setList],
+	[KEYS.ol, setList],
+	[KEYS.ul, setList],
+	[ACTION_THREE_COLUMNS, (editor) => toggleColumnGroup(editor, { columns: 3 })],
+	[KEYS.codeBlock, (editor) => toggleCodeBlock(editor)],
+]);
 
 export const setBlockType = (
 	editor: PlateEditor,
@@ -208,7 +226,7 @@ export const setBlockType = (
 			}
 
 			editor.tf.toggleBlock(type, {
-				...(at ? { at } : {}),
+				...(at ? { at } : undefined),
 				wrap: true,
 			});
 
@@ -221,7 +239,7 @@ export const setBlockType = (
 			if (node[KEYS.listType]) {
 				editor.tf.unsetNodes([KEYS.listType, "indent"], { at: path });
 			}
-			const setBlock = setBlockMap[type];
+			const setBlock = setBlockMap.get(type);
 			if (setBlock) {
 				return setBlock(editor, type, entry);
 			}
@@ -248,7 +266,9 @@ export const setBlockType = (
 	});
 };
 
-export const getBlockType = (block: TElement) => {
+export const getBlockType: NonNullable<EditorPropOptions["getProp"]> = (
+	block
+) => {
 	if (block[KEYS.listType]) {
 		if (block[KEYS.listType] === KEYS.ol) {
 			return KEYS.ol;

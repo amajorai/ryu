@@ -1,0 +1,49 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+.composer {
+	composes: composer-container from global;
+	position: relative;
+	cursor: text;
+}
+@layer components {
+	.infoBar {
+		display: flex;
+		gap: 12px;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		height: 34px;
+		padding-inline: 12px;
+		overflow: hidden;
+		transition-timing-function: ease-out;
+		transition-duration: 150ms;
+		transition-property: max-height, opacity;
+	}
+	.infoBarOpen {
+		max-height: 34px;
+		opacity: 1;
+	}
+	.infoBarClosed {
+		max-height: 0;
+		opacity: 0;
+	}
+	.caret {
+		display: inline-block;
+		width: 2px;
+		height: 1em;
+		margin-left: 1px;
+		vertical-align: text-bottom;
+		background-color: var(--foreground);
+	}
+	.attachments {
+		display: grid;
+		grid-template-rows: 0fr;
+		transition-timing-function: ease-out;
+		transition-duration: 200ms;
+		transition-property: grid-template-rows;
+	}
+	.attachmentsOpen {
+		grid-template-rows: 1fr;
+	}
+}

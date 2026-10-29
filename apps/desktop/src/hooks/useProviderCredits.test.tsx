@@ -4,18 +4,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let node = { url: "https://node.test", token: "one", userJwt: "caller" };
 mock.module("./useActiveNode.ts", () => ({ useActiveNode: () => node }));
-const reads: Array<{ signal: AbortSignal; resolve: (value: unknown) => void }> =
-	[];
+const reads: Array<{
+	signal: AbortSignal;
+	resolve: <TValue>(value: TValue) => void;
+}> = [];
 mock.module("@/src/lib/api/provider-credits.ts", () => ({
 	supportsProviderCredits: (id: string) => id === "openrouter",
-	fetchProviderCredits: (_target: unknown, _id: string, signal: AbortSignal) =>
-		new Promise((resolve) => reads.push({ signal, resolve })),
+	fetchProviderCredits: (
+		_target: Parameters<
+			typeof import("@/src/lib/api/provider-credits.ts").fetchProviderCredits
+		>[0],
+		_id: string,
+		signal: AbortSignal
+	) => new Promise((resolve) => reads.push({ signal, resolve })),
 }));
 const { useProviderCredits } = await import("./useProviderCredits.ts");
 const client = new QueryClient({

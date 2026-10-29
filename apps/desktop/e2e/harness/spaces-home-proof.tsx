@@ -1,5 +1,5 @@
-import type { SpaceDocumentRow } from "@ryu/blocks/desktop/spaces";
-import { SpacesView } from "@ryu/blocks/desktop/spaces";
+import type { SpaceDocumentRow } from "@ryu/blocks/desktop/spaces.tsx";
+import { SpacesView } from "@ryu/blocks/desktop/spaces.tsx";
 import { FileUpload } from "@ryu/ui/components/file-upload.tsx";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
@@ -110,7 +110,7 @@ function Story() {
 					uploadPanel: (
 						<section
 							aria-labelledby="space-upload-title"
-							className="rounded-lg border border-border/70 bg-white/80 p-4 dark:bg-[#25262a]"
+							className="rounded-lg border border-border/70 bg-white/80 p-4 dark:bg-card"
 							data-testid="space-upload-panel"
 						>
 							<h2 className="font-medium text-sm" id="space-upload-title">
@@ -167,4 +167,4 @@ const app = location.search.includes("live") ? (
 	<Story />
 );
 
-createRoot(document.getElementById("root") as HTMLElement).render(app);
+createRoot(document.getElementById("root")!).render(app);

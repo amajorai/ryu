@@ -1,0 +1,36 @@
+.popup[data-scroll-edges="both"] {
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 1.5rem,
+		#000 calc(100% - 1.5rem),
+		transparent 100%
+	) !important;
+	mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 1.5rem,
+		#000 calc(100% - 1.5rem),
+		transparent 100%
+	) !important;
+}
+.popup[data-scroll-edges="bottom"] {
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		#000 calc(100% - 1.5rem),
+		transparent 100%
+	) !important;
+	mask-image: linear-gradient(
+		to bottom,
+		#000 calc(100% - 1.5rem),
+		transparent 100%
+	) !important;
+}
+.popup[data-scroll-edges="top"] {
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 1.5rem
+	) !important;
+	mask-image: linear-gradient(to bottom, transparent 0, #000 1.5rem) !important;
+}

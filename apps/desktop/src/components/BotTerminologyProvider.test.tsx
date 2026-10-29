@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { LanguagePack } from "@ryu/i18n";
+import { messageIdForLiteral } from "@ryu/i18n/core";
+import { I18nProvider } from "@ryu/i18n/react";
 import {
 	readBotTerminology,
 	setBotTerminology,
@@ -13,6 +16,10 @@ if (!GlobalRegistrator.isRegistered) {
 	GlobalRegistrator.register();
 }
 
+// SAFETY: The actual installed ReactDOM act environment reads this optional
+// global flag. This test writes the authored boolean true to that native hook;
+// the declaration gap concerns only this flag, without asserting other globals
+// or replacing the registered DOM/native React test environment.
 (
 	globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -94,5 +101,45 @@ describe("BotTerminologyProvider", () => {
 		expect(readBotTerminology()).toBe(false);
 		expect(container.textContent).toBe("Agents");
 		expect(container.querySelector("button")?.title).toBe("Agent");
+	});
+
+	it("leaves data-ryu-i18n=off user data alone under an English pack", async () => {
+		const pack: LanguagePack = {
+			baseLocale: "en",
+			direction: "ltr",
+			id: "en-flavor",
+			locale: "en",
+			messages: { [messageIdForLiteral("Inbox")]: "Mailroom" },
+			name: "English flavor",
+			schemaVersion: 1,
+			version: "1.0.0",
+		};
+		await act(async () => {
+			root.render(
+				<I18nProvider
+					autoLocalizeDom={false}
+					initialPackId={pack.id}
+					manageDocument={false}
+					packs={[pack]}
+				>
+					<BotTerminologyProvider>
+						<span id="ui">Inbox</span>
+						<span data-ryu-i18n="off" id="data" title="Inbox">
+							Inbox
+						</span>
+						<span data-ryu-i18n="off" id="name">
+							Sales Agent
+						</span>
+					</BotTerminologyProvider>
+				</I18nProvider>
+			);
+		});
+
+		expect(container.querySelector("#ui")?.textContent).toBe("Mailroom");
+		expect(container.querySelector("#data")?.textContent).toBe("Inbox");
+		expect(container.querySelector("#data")?.getAttribute("title")).toBe(
+			"Inbox"
+		);
+		expect(container.querySelector("#name")?.textContent).toBe("Sales Agent");
 	});
 });

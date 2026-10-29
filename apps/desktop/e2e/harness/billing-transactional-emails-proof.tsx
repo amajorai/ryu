@@ -1,18 +1,44 @@
-import { useState } from "react";
+// React's style contract includes the exact CSS custom properties consumed below.
+declare module "react" {
+	interface CSSProperties {
+		"--fixture-value-1"?: string | number;
+		"--fixture-value-2"?: string | number;
+		"--fixture-value-3"?: string | number;
+		"--fixture-value-4"?: string | number;
+		"--fixture-value-5"?: string | number;
+		"--fixture-value-6"?: string | number;
+		"--fixture-value-7"?: string | number;
+		"--fixture-value-8"?: string | number;
+		"--fixture-value-9"?: string | number;
+		"--fixture-value-10"?: string | number;
+		"--fixture-value-11"?: string | number;
+		"--fixture-value-12"?: string | number;
+		"--fixture-value-13"?: string | number;
+		"--fixture-value-14"?: string | number;
+		"--fixture-value-15"?: string | number;
+		"--fixture-value-16"?: string | number;
+		"--fixture-value-17"?: string | number;
+		"--fixture-value-18"?: string | number;
+		"--fixture-value-19"?: string | number;
+		"--fixture-value-20"?: string | number;
+		"--fixture-value-21"?: string | number;
+		"--fixture-value-22"?: string | number;
+		"--fixture-value-23"?: string | number;
+		"--fixture-value-24"?: string | number;
+		"--fixture-value-25"?: string | number;
+		"--fixture-value-26"?: string | number;
+		"--fixture-value-27"?: string | number;
+		"--fixture-value-28"?: string | number;
+		"--fixture-value-29"?: string | number;
+		"--fixture-value-30"?: string | number;
+	}
+}
+
+import { type ReactNode, useState } from "react";
 import { createRoot } from "react-dom/client";
+import proofStyles from "./billing-transactional-emails-proof.module.css";
 
 type InvitationAudience = "existing" | "new";
-
-const styles = {
-	accent: "#c4b5fd",
-	background: "#09090b",
-	border: "#27272a",
-	green: "#86efac",
-	muted: "#a1a1aa",
-	panel: "#111113",
-	text: "#f4f4f5",
-	yellow: "#fcd34d",
-};
 
 const BASE_URL = "https://app.ryuhq.com";
 const BILLING_URL = `${BASE_URL}/organizations/billing`;
@@ -95,21 +121,28 @@ function StatusPill({
 	children,
 	tone = "green",
 }: {
-	children: string;
+	children: ReactNode;
 	tone?: "green" | "yellow";
 }) {
 	return (
 		<span
+			className={proofStyles.dynamicFixture1}
 			style={{
-				background: tone === "green" ? "#123022" : "#33270c",
-				border: `1px solid ${tone === "green" ? "#245c3e" : "#765b16"}`,
-				borderRadius: 999,
-				color: tone === "green" ? styles.green : styles.yellow,
-				fontSize: 10,
-				fontWeight: 800,
-				letterSpacing: 0.8,
-				padding: "6px 9px",
-				whiteSpace: "nowrap",
+				"--fixture-value-1":
+					tone === "green"
+						? "var(--billing-transactional-emails-proof-color-1)"
+						: "var(--billing-transactional-emails-proof-color-2)",
+				"--fixture-value-2": `1px solid ${tone === "green" ? "var(--billing-transactional-emails-proof-color-3)" : "var(--billing-transactional-emails-proof-color-4)"}`,
+				"--fixture-value-3": "999px",
+				"--fixture-value-4":
+					tone === "green"
+						? "var(--billing-transactional-emails-proof-color-5)"
+						: "var(--billing-transactional-emails-proof-color-6)",
+				"--fixture-value-5": "10px",
+				"--fixture-value-6": 800,
+				"--fixture-value-7": "0.8px",
+				"--fixture-value-8": "6px 9px",
+				"--fixture-value-9": "nowrap",
 			}}
 		>
 			{children}
@@ -135,70 +168,19 @@ function EmailCard({
 	linkLabel?: string;
 }) {
 	return (
-		<article
-			data-email-card
-			style={{
-				background: styles.panel,
-				border: `1px solid ${styles.border}`,
-				borderRadius: 16,
-				display: "flex",
-				flexDirection: "column",
-				gap: 13,
-				padding: 18,
-			}}
-		>
-			<div
-				style={{
-					alignItems: "center",
-					display: "flex",
-					justifyContent: "space-between",
-					gap: 12,
-				}}
-			>
-				<div
-					style={{
-						color: styles.accent,
-						fontSize: 11,
-						letterSpacing: 1.1,
-						textTransform: "uppercase",
-					}}
-				>
-					{label}
-				</div>
+		<article className={proofStyles.fixture1} data-email-card>
+			<div className={proofStyles.fixture2}>
+				<div className={proofStyles.fixture3}>{label}</div>
 				<StatusPill>WIRED</StatusPill>
 			</div>
-			<div
-				style={{
-					color: styles.muted,
-					fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-					fontSize: 11,
-				}}
-			>
-				{event}
-			</div>
-			<div
-				style={{
-					background: "#fafafa",
-					borderRadius: 11,
-					color: "#333",
-					padding: 15,
-				}}
-			>
-				<div style={{ fontSize: 16, fontWeight: 700 }}>{heading}</div>
-				<p style={{ fontSize: 13, lineHeight: 1.55, margin: "9px 0 12px" }}>
-					{body}
-				</p>
-				<a
-					href={href}
-					style={{
-						color: "#2754c5",
-						fontSize: 13,
-						textDecoration: "underline",
-					}}
-				>
+			<div className={proofStyles.fixture4}>{event}</div>
+			<div className={proofStyles.fixture5}>
+				<div className={proofStyles.fixture6}>{heading}</div>
+				<p className={proofStyles.fixture7}>{body}</p>
+				<a className={proofStyles.fixture8} href={href}>
 					{linkLabel}
 				</a>
-				<div style={{ color: "#898989", fontSize: 10, marginTop: 12 }}>
+				<div className={proofStyles.fixture9}>
 					{audience} · Notion-style transactional shell
 				</div>
 			</div>
@@ -217,77 +199,28 @@ function InvitationCard({ audience }: { audience: InvitationAudience }) {
 	const href = isExisting ? BASE_URL + INVITATION_PATH : SIGN_UP_URL;
 
 	return (
-		<article
-			data-email-card
-			style={{
-				background: styles.panel,
-				border: `1px solid ${styles.accent}`,
-				borderRadius: 16,
-				display: "flex",
-				flexDirection: "column",
-				gap: 13,
-				gridColumn: "1 / -1",
-				padding: 18,
-			}}
-		>
-			<div
-				style={{
-					alignItems: "center",
-					display: "flex",
-					justifyContent: "space-between",
-					gap: 12,
-				}}
-			>
-				<div
-					style={{
-						color: styles.accent,
-						fontSize: 11,
-						letterSpacing: 1.1,
-						textTransform: "uppercase",
-					}}
-				>
-					Account-aware invitation
-				</div>
+		<article className={proofStyles.fixture10} data-email-card>
+			<div className={proofStyles.fixture11}>
+				<div className={proofStyles.fixture12}>Account-aware invitation</div>
 				<StatusPill tone="yellow">
 					{isExisting ? "SIGN IN THEN ACCEPT" : "SIGN UP THEN RETURN"}
 				</StatusPill>
 			</div>
-			<div
-				style={{
-					color: styles.muted,
-					fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-					fontSize: 11,
-				}}
-			>
+			<div className={proofStyles.fixture13}>
 				organization invitation ·{" "}
 				{isExisting ? "existing-account template" : "new-account template"}
 			</div>
-			<div
-				style={{
-					background: "#fafafa",
-					borderRadius: 11,
-					color: "#333",
-					padding: 15,
-				}}
-			>
-				<div style={{ fontSize: 16, fontWeight: 700 }}>{heading}</div>
-				<p style={{ fontSize: 13, lineHeight: 1.55, margin: "9px 0 12px" }}>
-					{body}
-				</p>
+			<div className={proofStyles.fixture14}>
+				<div className={proofStyles.fixture15}>{heading}</div>
+				<p className={proofStyles.fixture16}>{body}</p>
 				<a
+					className={proofStyles.fixture17}
 					data-testid="invitation-link"
 					href={href}
-					style={{
-						color: "#2754c5",
-						fontSize: 13,
-						textDecoration: "underline",
-					}}
 				>
 					{isExisting ? "Accept the invitation" : "Create your Ryu account"}
 				</a>
-				<div style={{ color: "#898989", fontSize: 10, marginTop: 12 }}>
-					{href}
-				</div>
+				<div className={proofStyles.fixture18}>{href}</div>
 			</div>
 		</article>
 	);
@@ -358,39 +291,18 @@ function OrganizationNotificationSettingsProof() {
 
 	return (
 		<section
+			className={proofStyles.fixture19}
 			data-testid="organization-notification-settings"
-			style={{
-				background: styles.panel,
-				border: `1px solid ${styles.accent}`,
-				borderRadius: 18,
-				marginBottom: 16,
-				padding: 20,
-			}}
 		>
-			<div
-				style={{
-					alignItems: "center",
-					display: "flex",
-					flexWrap: "wrap",
-					gap: 10,
-					justifyContent: "space-between",
-				}}
-			>
+			<div className={proofStyles.fixture20}>
 				<div>
-					<div style={{ color: styles.accent, fontSize: 11, letterSpacing: 1 }}>
+					<div className={proofStyles.fixture21}>
 						ORGANIZATION · NOTIFICATIONS
 					</div>
-					<div style={{ fontSize: 19, fontWeight: 700, marginTop: 5 }}>
+					<div className={proofStyles.fixture22}>
 						One place for organization email
 					</div>
-					<p
-						style={{
-							color: styles.muted,
-							fontSize: 13,
-							lineHeight: 1.5,
-							margin: "8px 0 0",
-						}}
-					>
+					<p className={proofStyles.fixture23}>
 						Owner/admin controls · all switches are enabled by default · members
 						are read-only
 					</p>
@@ -398,41 +310,28 @@ function OrganizationNotificationSettingsProof() {
 				<StatusPill>{enabledCount} OF 9 ENABLED</StatusPill>
 			</div>
 			<div
+				className={proofStyles.fixture24}
 				data-testid="organization-notification-count"
-				style={{ color: styles.muted, fontSize: 12, marginTop: 16 }}
 			>
 				{enabledCount} of 9 enabled
 			</div>
-			<div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+			<div className={proofStyles.fixture25}>
 				{ORGANIZATION_NOTIFICATION_ROWS.map((notification) => {
 					const enabled = preferences[notification.id];
 					return (
-						<div
-							key={notification.id}
-							style={{
-								alignItems: "center",
-								background: "#18181b",
-								border: `1px solid ${styles.border}`,
-								borderRadius: 11,
-								display: "flex",
-								gap: 12,
-								justifyContent: "space-between",
-								padding: "12px 13px",
-							}}
-						>
+						<div className={proofStyles.fixture26} key={notification.id}>
 							<div>
-								<div style={{ fontSize: 14, fontWeight: 650 }}>
+								<div className={proofStyles.fixture27}>
 									{notification.label}
 								</div>
-								<div
-									style={{ color: styles.muted, fontSize: 11, marginTop: 3 }}
-								>
+								<div className={proofStyles.fixture28}>
 									{notification.description}
 								</div>
 							</div>
 							<button
 								aria-label={`${notification.label} notifications`}
 								aria-pressed={enabled}
+								className={proofStyles.dynamicFixture2}
 								data-testid={`org-notification-toggle-${notification.id}`}
 								onClick={() =>
 									setPreferences((current) => ({
@@ -441,15 +340,19 @@ function OrganizationNotificationSettingsProof() {
 									}))
 								}
 								style={{
-									background: enabled ? "#123022" : "#33270c",
-									border: `1px solid ${enabled ? "#245c3e" : "#765b16"}`,
-									borderRadius: 999,
-									color: enabled ? styles.green : styles.yellow,
-									cursor: "pointer",
-									fontSize: 11,
-									fontWeight: 800,
-									minWidth: 76,
-									padding: "7px 10px",
+									"--fixture-value-10": enabled
+										? "var(--billing-transactional-emails-proof-color-1)"
+										: "var(--billing-transactional-emails-proof-color-2)",
+									"--fixture-value-11": `1px solid ${enabled ? "var(--billing-transactional-emails-proof-color-3)" : "var(--billing-transactional-emails-proof-color-4)"}`,
+									"--fixture-value-12": "999px",
+									"--fixture-value-13": enabled
+										? "var(--billing-transactional-emails-proof-color-5)"
+										: "var(--billing-transactional-emails-proof-color-6)",
+									"--fixture-value-14": "pointer",
+									"--fixture-value-15": "11px",
+									"--fixture-value-16": 800,
+									"--fixture-value-17": "76px",
+									"--fixture-value-18": "7px 10px",
 								}}
 								type="button"
 							>
@@ -469,110 +372,54 @@ function BillingTransactionalEmailsProof() {
 
 	return (
 		<main
+			className={proofStyles.fixture29}
 			data-testid="billing-transactional-emails-proof"
-			style={{
-				background: styles.background,
-				boxSizing: "border-box",
-				color: styles.text,
-				fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-				minHeight: "100vh",
-				padding: "32px 24px 56px",
-			}}
 		>
-			<div style={{ margin: "0 auto", maxWidth: 1100 }}>
-				<header style={{ marginBottom: 24 }}>
-					<div
-						style={{ color: styles.accent, fontSize: 12, letterSpacing: 1.4 }}
-					>
+			<div className={proofStyles.fixture30}>
+				<header className={proofStyles.fixture31}>
+					<div className={proofStyles.fixture32}>
 						RYU · BILLING · LIVE REACT PROOF
 					</div>
-					<div
-						style={{
-							alignItems: "center",
-							display: "flex",
-							gap: 14,
-							justifyContent: "space-between",
-						}}
-					>
-						<h1
-							style={{ fontSize: 34, letterSpacing: -1.2, margin: "8px 0 0" }}
-						>
+					<div className={proofStyles.fixture33}>
+						<h1 className={proofStyles.fixture34}>
 							Transactional email system
 						</h1>
 						<div data-testid="proof-status">
 							<StatusPill>VERIFIED</StatusPill>
 						</div>
 					</div>
-					<p
-						style={{
-							color: styles.muted,
-							fontSize: 15,
-							lineHeight: 1.55,
-							margin: "10px 0 0",
-							maxWidth: 790,
-						}}
-					>
+					<p className={proofStyles.fixture35}>
 						Every charge, balance threshold, subscription transition,
 						invitation, and organization transfer has a specific message, a safe
 						action link, and a durable delivery identity.
 					</p>
 				</header>
 
-				<section
-					style={{
-						background: styles.panel,
-						border: `1px solid ${styles.border}`,
-						borderRadius: 18,
-						marginBottom: 16,
-						padding: 20,
-					}}
-				>
-					<div
-						style={{
-							alignItems: "center",
-							display: "flex",
-							flexWrap: "wrap",
-							gap: 10,
-							justifyContent: "space-between",
-						}}
-					>
+				<section className={proofStyles.fixture36}>
+					<div className={proofStyles.fixture37}>
 						<div>
-							<div
-								style={{ color: styles.muted, fontSize: 11, letterSpacing: 1 }}
-							>
-								DELIVERY GUARANTEES
-							</div>
-							<div style={{ fontSize: 17, fontWeight: 650, marginTop: 5 }}>
+							<div className={proofStyles.fixture38}>DELIVERY GUARANTEES</div>
+							<div className={proofStyles.fixture39}>
 								7 billing events · 1 organization activity · 1 account-aware
 								invitation · 1 replay-safe ledger
 							</div>
 						</div>
 						<button
+							className={proofStyles.fixture40}
 							data-testid="replay-button"
 							onClick={() => setReplayed(true)}
-							style={{
-								background: "#18181b",
-								border: `1px solid ${styles.border}`,
-								borderRadius: 9,
-								color: styles.text,
-								cursor: "pointer",
-								padding: "9px 12px",
-							}}
 							type="button"
 						>
 							Replay order.paid
 						</button>
 					</div>
-					<div style={{ color: styles.muted, fontSize: 13, marginTop: 12 }}>
+					<div className={proofStyles.fixture41}>
 						{replayed
 							? "1 sent · 1 replay suppressed by dedupe key"
 							: "Ready · dedupe key is claimed before send and marked sent after delivery"}
 					</div>
 					{replayed ? (
-						<div
-							data-testid="replay-proof"
-							style={{ color: styles.green, fontSize: 13, marginTop: 8 }}
-						>
+						<div className={proofStyles.fixture42} data-testid="replay-proof">
 							Replay proof complete
 						</div>
 					) : null}
@@ -581,36 +428,34 @@ function BillingTransactionalEmailsProof() {
 				<OrganizationNotificationSettingsProof />
 
 				<section
+					className={proofStyles.fixture43}
 					data-testid="transactional-email-grid"
-					style={{
-						display: "grid",
-						gap: 12,
-						gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))",
-					}}
 				>
 					{EVENT_CARDS.map((card) => (
 						<EmailCard key={card.id} {...card} />
 					))}
-					<div
-						style={{
-							display: "flex",
-							gap: 8,
-							gridColumn: "1 / -1",
-							marginTop: 4,
-						}}
-					>
+					<div className={proofStyles.fixture44}>
 						<button
 							aria-pressed={audience === "existing"}
+							className={proofStyles.dynamicFixture3}
 							onClick={() => setAudience("existing")}
 							style={{
-								background: audience === "existing" ? styles.accent : "#18181b",
-								border:
+								"--fixture-value-19":
+									audience === "existing"
+										? "var(--billing-transactional-emails-proof-color-7)"
+										: "var(--billing-transactional-emails-proof-color-8)",
+								"--fixture-value-20":
 									"1px solid " +
-									(audience === "existing" ? styles.accent : styles.border),
-								borderRadius: 9,
-								color: audience === "existing" ? "#17121f" : styles.text,
-								cursor: "pointer",
-								padding: "9px 12px",
+									(audience === "existing"
+										? "var(--billing-transactional-emails-proof-color-7)"
+										: "var(--billing-transactional-emails-proof-color-9)"),
+								"--fixture-value-21": "9px",
+								"--fixture-value-22":
+									audience === "existing"
+										? "var(--billing-transactional-emails-proof-color-10)"
+										: "var(--billing-transactional-emails-proof-color-11)",
+								"--fixture-value-23": "pointer",
+								"--fixture-value-24": "9px 12px",
 							}}
 							type="button"
 						>
@@ -618,16 +463,25 @@ function BillingTransactionalEmailsProof() {
 						</button>
 						<button
 							aria-pressed={audience === "new"}
+							className={proofStyles.dynamicFixture4}
 							onClick={() => setAudience("new")}
 							style={{
-								background: audience === "new" ? styles.accent : "#18181b",
-								border:
+								"--fixture-value-25":
+									audience === "new"
+										? "var(--billing-transactional-emails-proof-color-7)"
+										: "var(--billing-transactional-emails-proof-color-8)",
+								"--fixture-value-26":
 									"1px solid " +
-									(audience === "new" ? styles.accent : styles.border),
-								borderRadius: 9,
-								color: audience === "new" ? "#17121f" : styles.text,
-								cursor: "pointer",
-								padding: "9px 12px",
+									(audience === "new"
+										? "var(--billing-transactional-emails-proof-color-7)"
+										: "var(--billing-transactional-emails-proof-color-9)"),
+								"--fixture-value-27": "9px",
+								"--fixture-value-28":
+									audience === "new"
+										? "var(--billing-transactional-emails-proof-color-10)"
+										: "var(--billing-transactional-emails-proof-color-11)",
+								"--fixture-value-29": "pointer",
+								"--fixture-value-30": "9px 12px",
 							}}
 							type="button"
 						>
@@ -641,6 +495,6 @@ function BillingTransactionalEmailsProof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<BillingTransactionalEmailsProof />
 );

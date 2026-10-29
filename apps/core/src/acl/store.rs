@@ -115,10 +115,13 @@ pub struct AclStore {
 }
 
 pub fn store_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("resource-acl.json")
+    crate::paths::state_path("resource-acl.json")
 }
 
 static CACHE: Mutex<Option<AclStore>> = Mutex::new(None);
+/// Serializes read-modify-write mutations so two concurrent edits to different
+/// resources cannot each save a snapshot that drops the other's change.
+static MUTATION: Mutex<()> = Mutex::new(());
 
 fn load_from_disk() -> AclStore {
     let Ok(bytes) = std::fs::read(store_path()) else {
@@ -154,24 +157,9 @@ fn save(store: &AclStore) -> std::io::Result<()> {
     let body = serde_json::to_string_pretty(store)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)?;
-        file.write_all(body.as_bytes())?;
-        file.sync_all()?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(&path, body)?;
-    }
+    // Atomic (temp + fsync + rename) and owner-only: a torn write would read
+    // back as an empty store and silently drop every overwrite.
+    crate::atomic_file::write_atomic(&path, body.as_bytes())?;
     invalidate_cache();
     Ok(())
 }
@@ -214,6 +202,7 @@ pub fn set_overwrites(key: &ResourceKey, rows: Vec<StoredOverwrite>) -> std::io:
             "resource kind must be non-empty and contain no ':'; id must be non-empty",
         ));
     }
+    let _mutation = MUTATION.lock().unwrap_or_else(|e| e.into_inner());
     let mut store = cached();
     if rows.is_empty() {
         store.resources.remove(&key.to_flat());

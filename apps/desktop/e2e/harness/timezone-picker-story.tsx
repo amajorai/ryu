@@ -36,7 +36,7 @@ function SampleStamp() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<div className="min-h-screen bg-background p-8 text-foreground">
 		<div className="mx-auto w-[42rem]">
 			<TimezoneSetting />

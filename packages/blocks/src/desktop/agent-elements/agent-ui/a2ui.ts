@@ -1,3 +1,5 @@
+import type { Spec, StateModel } from "@json-render/core";
+import { z } from "zod";
 import type { AgentUiSpec } from "./template.ts";
 
 /** The A2UI catalog Ryu currently knows how to map into its native catalog. */
@@ -11,36 +13,105 @@ const MAX_COMPONENTS = 100;
 const MAX_ID_LENGTH = 128;
 const MAX_COMPONENT_NAME_LENGTH = 64;
 const MAX_ISSUES = 32;
+/** Array writes may only replace or append; a huge index would allocate a vast sparse array. */
+const MAX_ARRAY_INDEX = 1000;
 const FORBIDDEN_POINTER_SEGMENTS = new Set([
 	"__proto__",
 	"constructor",
 	"prototype",
 ]);
 
-type JsonObject = Record<string, unknown>;
+const textSchema = z.string();
+const flagSchema = z.boolean();
+// Direct native messages can retain non-finite decoded numbers; the mapper
+// previously passed these through rather than silently choosing a new bound.
+const numberSchema = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const versionSchema = z.enum(["v0.9", "v0.9.1"]);
+const supportedCatalogIds = new Set<string>(A2UI_BASIC_CATALOG_IDS);
 
-interface A2uiComponent extends JsonObject {
+/** Raw wire slots are decoded independently so one bad field cannot discard a surface. */
+interface A2uiCarrier {
+	action?: unknown;
+	align?: unknown;
+	axis?: unknown;
+	catalogId?: unknown;
+	child?: unknown;
+	children?: unknown;
+	component?: unknown;
+	components?: unknown;
+	context?: unknown;
+	createSurface?: unknown;
+	deleteSurface?: unknown;
+	description?: unknown;
+	direction?: unknown;
+	event?: unknown;
+	href?: unknown;
+	id?: unknown;
+	justify?: unknown;
+	label?: unknown;
+	literalBoolean?: unknown;
+	literalNumber?: unknown;
+	literalString?: unknown;
+	literalStringList?: unknown;
+	max?: unknown;
+	messages?: unknown;
+	min?: unknown;
+	name?: unknown;
+	options?: unknown;
+	path?: unknown;
+	surfaceId?: unknown;
+	text?: unknown;
+	title?: unknown;
+	updateComponents?: unknown;
+	updateDataModel?: unknown;
+	url?: unknown;
+	value?: unknown;
+	variant?: unknown;
+	version?: unknown;
+}
+
+// An empty Zod object tests the native non-array object carrier without touching
+// getters or replacing its identity. Every consumed slot has its own decoder.
+const carrierSchema = z.custom<A2uiCarrier>(
+	(value) => z.object({}).safeParse(value).success
+);
+const stateObjectSchema = z.custom<StateModel>(
+	(value) => carrierSchema.safeParse(value).success
+);
+const messageOperations = [
+	"createSurface",
+	"updateComponents",
+	"updateDataModel",
+	"deleteSurface",
+] as const;
+
+interface A2uiComponent extends A2uiCarrier {
 	component: string;
 	id: string;
 }
 
-interface A2uiCreateSurface extends JsonObject {
+interface A2uiCreateSurface extends A2uiCarrier {
 	catalogId?: string;
 	surfaceId: string;
 }
 
-interface A2uiUpdateComponents extends JsonObject {
+interface A2uiUpdateComponents extends A2uiCarrier {
 	components: A2uiComponent[];
 	surfaceId: string;
 }
 
-interface A2uiUpdateDataModel extends JsonObject {
+interface A2uiUpdateDataModel extends A2uiCarrier {
 	path?: string;
 	surfaceId: string;
 	value?: unknown;
 }
 
-interface A2uiDeleteSurface extends JsonObject {
+interface A2uiDeleteSurface extends A2uiCarrier {
 	surfaceId: string;
 }
 
@@ -52,9 +123,10 @@ interface A2uiMessage {
 	version?: string;
 }
 
-export type AgentUiRenderSpec = AgentUiSpec & {
-	state?: Record<string, unknown>;
-};
+/** Renderer state retains the native JSON-render values and binding semantics. */
+export type AgentUiRenderSpec = AgentUiSpec & Pick<Spec, "state">;
+
+type AgentUiElement = AgentUiSpec["elements"][string];
 
 export interface A2uiNormalizationResult {
 	issues: string[];
@@ -69,16 +141,14 @@ interface SurfaceState {
 	id: string;
 }
 
-function isObject(value: unknown): value is JsonObject {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+function isObject(
+	value: Parameters<typeof carrierSchema.safeParse>[0]
+): value is A2uiCarrier {
+	return carrierSchema.safeParse(value).success;
 }
 
-function stringValue(value: unknown, maxLength: number): string | null {
-	return typeof value === "string" &&
-		value.length > 0 &&
-		value.length <= maxLength
-		? value
-		: null;
+function boundedTextSchema(maxLength: number) {
+	return textSchema.min(1).max(maxLength).nullable().catch(null);
 }
 
 function pushIssue(issues: string[], message: string): void {
@@ -87,174 +157,183 @@ function pushIssue(issues: string[], message: string): void {
 	}
 }
 
-function parseVersion(value: unknown, issues: string[]): string | undefined {
-	if (value === undefined) {
+function versionInputSchema(issues: string[]) {
+	return versionSchema.optional().catch(({ input }) => {
+		pushIssue(issues, `Unsupported A2UI protocol version: ${String(input)}`);
 		return undefined;
-	}
-	if (value !== "v0.9" && value !== "v0.9.1") {
-		pushIssue(issues, `Unsupported A2UI protocol version: ${String(value)}`);
-		return undefined;
-	}
-	return value;
+	});
 }
 
-function parseSurfaceId(
-	value: unknown,
-	operation: string,
-	issues: string[]
-): string | null {
-	const surfaceId = stringValue(value, MAX_ID_LENGTH);
-	if (!surfaceId) {
-		pushIssue(issues, `${operation} requires a bounded string surfaceId`);
-	}
-	return surfaceId;
-}
-
-function parseMessage(
-	input: unknown,
-	index: number,
-	issues: string[]
-): A2uiMessage | null {
-	if (!isObject(input)) {
-		pushIssue(issues, `A2UI message ${index + 1} must be an object`);
-		return null;
-	}
-
-	const version = parseVersion(input.version, issues);
-	const operations = [
-		"createSurface",
-		"updateComponents",
-		"updateDataModel",
-		"deleteSurface",
-	].filter((key) => key in input);
-	if (operations.length !== 1) {
-		pushIssue(
-			issues,
-			`A2UI message ${index + 1} must contain exactly one supported operation`
-		);
-		return null;
-	}
-
-	const operation = operations[0];
-	const payload = input[operation];
-	if (!isObject(payload)) {
-		pushIssue(issues, `A2UI ${operation} payload must be an object`);
-		return null;
-	}
-
-	if (operation === "createSurface") {
-		const surfaceId = parseSurfaceId(payload.surfaceId, operation, issues);
+function surfaceIdInputSchema(operation: string, issues: string[]) {
+	return boundedTextSchema(MAX_ID_LENGTH).transform((surfaceId) => {
 		if (!surfaceId) {
-			return null;
+			pushIssue(issues, `${operation} requires a bounded string surfaceId`);
 		}
-		const catalogId =
-			payload.catalogId === undefined
-				? undefined
-				: stringValue(payload.catalogId, 512);
-		if (payload.catalogId !== undefined && !catalogId) {
-			pushIssue(
-				issues,
-				"A2UI createSurface catalogId must be a bounded string"
-			);
-			return null;
-		}
-		return {
-			version,
-			createSurface: {
-				...payload,
-				surfaceId,
-				catalogId: catalogId ?? undefined,
-			},
-		};
-	}
-
-	if (operation === "updateComponents") {
-		const surfaceId = parseSurfaceId(payload.surfaceId, operation, issues);
-		if (!(surfaceId && Array.isArray(payload.components))) {
-			pushIssue(issues, "A2UI updateComponents requires a components array");
-			return null;
-		}
-		const components: A2uiComponent[] = [];
-		for (const [componentIndex, rawComponent] of payload.components.entries()) {
-			if (!isObject(rawComponent)) {
-				pushIssue(
-					issues,
-					`A2UI component ${componentIndex + 1} in message ${index + 1} must be an object`
-				);
-				continue;
-			}
-			const id = stringValue(rawComponent.id, MAX_ID_LENGTH);
-			const component = stringValue(
-				rawComponent.component,
-				MAX_COMPONENT_NAME_LENGTH
-			);
-			if (!(id && component)) {
-				pushIssue(
-					issues,
-					`A2UI component ${componentIndex + 1} needs bounded id and component fields`
-				);
-				continue;
-			}
-			components.push({ ...rawComponent, id, component });
-		}
-		return { version, updateComponents: { ...payload, surfaceId, components } };
-	}
-
-	if (operation === "updateDataModel") {
-		const surfaceId = parseSurfaceId(payload.surfaceId, operation, issues);
-		const path = payload.path === undefined ? "/" : payload.path;
-		if (!surfaceId || typeof path !== "string" || !path.startsWith("/")) {
-			pushIssue(
-				issues,
-				"A2UI updateDataModel path must be an absolute JSON Pointer"
-			);
-			return null;
-		}
-		return {
-			version,
-			updateDataModel: { ...payload, path, surfaceId },
-		};
-	}
-
-	const surfaceId = parseSurfaceId(payload.surfaceId, operation, issues);
-	return surfaceId
-		? { version, deleteSurface: { ...payload, surfaceId } }
-		: null;
+		return surfaceId;
+	});
 }
 
-function parseInput(input: unknown, issues: string[]): A2uiMessage[] {
-	let rawMessages: unknown[];
-	if (typeof input === "string") {
-		rawMessages = input
-			.split(/\r?\n/)
-			.map((line) => line.trim())
-			.filter(Boolean)
-			.map((line, index) => {
-				try {
-					return JSON.parse(line) as unknown;
-				} catch {
-					pushIssue(issues, `A2UI JSONL line ${index + 1} is not valid JSON`);
-					return null;
-				}
-			});
-	} else if (Array.isArray(input)) {
-		rawMessages = input;
-	} else if (isObject(input) && Array.isArray(input.messages)) {
-		rawMessages = input.messages;
-	} else {
-		rawMessages = [input];
-	}
+function messageInputSchema(index: number, issues: string[]) {
+	return z.unknown().transform((input): A2uiMessage | null => {
+		if (!isObject(input)) {
+			pushIssue(issues, `A2UI message ${index + 1} must be an object`);
+			return null;
+		}
 
-	if (rawMessages.length > MAX_MESSAGES) {
-		pushIssue(
-			issues,
-			`A2UI streams may contain at most ${MAX_MESSAGES} messages`
+		const version = versionInputSchema(issues).parse(input.version);
+		const operations = messageOperations.filter((key) => key in input);
+		if (operations.length !== 1) {
+			pushIssue(
+				issues,
+				`A2UI message ${index + 1} must contain exactly one supported operation`
+			);
+			return null;
+		}
+
+		const operation = operations[0];
+		if (!operation) {
+			return null;
+		}
+		const payload = input[operation];
+		if (!isObject(payload)) {
+			pushIssue(issues, `A2UI ${operation} payload must be an object`);
+			return null;
+		}
+
+		if (operation === "createSurface") {
+			const surfaceId = surfaceIdInputSchema(operation, issues).parse(
+				payload.surfaceId
+			);
+			if (!surfaceId) {
+				return null;
+			}
+			const catalogId =
+				payload.catalogId === undefined
+					? undefined
+					: boundedTextSchema(512).parse(payload.catalogId);
+			if (payload.catalogId !== undefined && !catalogId) {
+				pushIssue(
+					issues,
+					"A2UI createSurface catalogId must be a bounded string"
+				);
+				return null;
+			}
+			return {
+				version,
+				createSurface: {
+					...payload,
+					surfaceId,
+					catalogId: catalogId ?? undefined,
+				},
+			};
+		}
+
+		if (operation === "updateComponents") {
+			const surfaceId = surfaceIdInputSchema(operation, issues).parse(
+				payload.surfaceId
+			);
+			if (!(surfaceId && Array.isArray(payload.components))) {
+				pushIssue(issues, "A2UI updateComponents requires a components array");
+				return null;
+			}
+			const components: A2uiComponent[] = [];
+			for (const [
+				componentIndex,
+				rawComponent,
+			] of payload.components.entries()) {
+				if (!isObject(rawComponent)) {
+					pushIssue(
+						issues,
+						`A2UI component ${componentIndex + 1} in message ${index + 1} must be an object`
+					);
+					continue;
+				}
+				const id = boundedTextSchema(MAX_ID_LENGTH).parse(rawComponent.id);
+				const component = boundedTextSchema(MAX_COMPONENT_NAME_LENGTH).parse(
+					rawComponent.component
+				);
+				if (!(id && component)) {
+					pushIssue(
+						issues,
+						`A2UI component ${componentIndex + 1} needs bounded id and component fields`
+					);
+					continue;
+				}
+				components.push({ ...rawComponent, id, component });
+			}
+			return {
+				version,
+				updateComponents: { ...payload, surfaceId, components },
+			};
+		}
+
+		if (operation === "updateDataModel") {
+			const surfaceId = surfaceIdInputSchema(operation, issues).parse(
+				payload.surfaceId
+			);
+			const parsedPath = textSchema.safeParse(
+				payload.path === undefined ? "/" : payload.path
+			);
+			if (
+				!(surfaceId && parsedPath.success && parsedPath.data.startsWith("/"))
+			) {
+				pushIssue(
+					issues,
+					"A2UI updateDataModel path must be an absolute JSON Pointer"
+				);
+				return null;
+			}
+			return {
+				version,
+				updateDataModel: { ...payload, path: parsedPath.data, surfaceId },
+			};
+		}
+
+		const surfaceId = surfaceIdInputSchema(operation, issues).parse(
+			payload.surfaceId
 		);
-		rawMessages = rawMessages.slice(0, MAX_MESSAGES);
-	}
-	return rawMessages.flatMap((message, index) => {
-		const parsed = parseMessage(message, index, issues);
-		return parsed ? [parsed] : [];
+		return surfaceId
+			? { version, deleteSurface: { ...payload, surfaceId } }
+			: null;
+	});
+}
+
+function streamInputSchema(issues: string[]) {
+	return z.unknown().transform((input): A2uiMessage[] => {
+		let rawMessages: unknown[];
+		const jsonLines = textSchema.safeParse(input);
+		if (jsonLines.success) {
+			rawMessages = jsonLines.data
+				.split(/\r?\n/)
+				.map((line) => line.trim())
+				.filter(Boolean)
+				.map((line, index) => {
+					try {
+						return JSON.parse(line);
+					} catch {
+						pushIssue(issues, `A2UI JSONL line ${index + 1} is not valid JSON`);
+						return null;
+					}
+				});
+		} else if (Array.isArray(input)) {
+			rawMessages = input;
+		} else if (isObject(input) && Array.isArray(input.messages)) {
+			rawMessages = input.messages;
+		} else {
+			rawMessages = [input];
+		}
+
+		if (rawMessages.length > MAX_MESSAGES) {
+			pushIssue(
+				issues,
+				`A2UI streams may contain at most ${MAX_MESSAGES} messages`
+			);
+			rawMessages = rawMessages.slice(0, MAX_MESSAGES);
+		}
+		return rawMessages.flatMap((message, index) => {
+			const parsed = messageInputSchema(index, issues).parse(message);
+			return parsed ? [parsed] : [];
+		});
 	});
 }
 
@@ -274,7 +353,8 @@ function pointerSegments(path: string): string[] | null {
 		: null;
 }
 
-function cloneJson(value: unknown): unknown {
+/** Clone values for the real JSON-render state store, retaining its native leaf contract. */
+function cloneJson(value: StateModel[string]): StateModel[string] {
 	if (Array.isArray(value)) {
 		return value.map(cloneJson);
 	}
@@ -287,12 +367,12 @@ function cloneJson(value: unknown): unknown {
 }
 
 function updateDataModel(
-	current: unknown,
+	current: StateModel[string],
 	path: string,
-	value: unknown,
+	value: StateModel[string],
 	hasValue: boolean,
 	issues: string[]
-): unknown {
+): StateModel[string] {
 	const segments = pointerSegments(path);
 	if (!segments) {
 		pushIssue(issues, "A2UI data model paths may not address prototype keys");
@@ -303,7 +383,7 @@ function updateDataModel(
 	}
 
 	const root = cloneJson(current);
-	let cursor: unknown = root;
+	let cursor: StateModel[string] = root;
 	if (!(Array.isArray(cursor) || isObject(cursor))) {
 		cursor = {};
 	}
@@ -314,6 +394,13 @@ function updateDataModel(
 			const arrayIndex = Number(segment);
 			if (!Number.isInteger(arrayIndex) || arrayIndex < 0) {
 				pushIssue(issues, `A2UI array path segment is invalid: ${segment}`);
+				return current;
+			}
+			if (arrayIndex > cursor.length || arrayIndex >= MAX_ARRAY_INDEX) {
+				pushIssue(
+					issues,
+					`A2UI array path segment is out of range: ${segment}`
+				);
 				return current;
 			}
 			if (last) {
@@ -332,7 +419,8 @@ function updateDataModel(
 			cursor = cursor[arrayIndex];
 			continue;
 		}
-		if (!isObject(cursor)) {
+		const cursorObject = stateObjectSchema.safeParse(cursor);
+		if (!cursorObject.success) {
 			pushIssue(
 				issues,
 				"A2UI data model path does not address an object or array"
@@ -341,79 +429,93 @@ function updateDataModel(
 		}
 		if (last) {
 			if (hasValue) {
-				cursor[segment] = cloneJson(value);
+				cursorObject.data[segment] = cloneJson(value);
 			} else {
-				delete cursor[segment];
+				delete cursorObject.data[segment];
 			}
 			return rootValue;
 		}
-		if (!(Array.isArray(cursor[segment]) || isObject(cursor[segment]))) {
-			cursor[segment] = {};
+		if (
+			!(
+				Array.isArray(cursorObject.data[segment]) ||
+				isObject(cursorObject.data[segment])
+			)
+		) {
+			cursorObject.data[segment] = {};
 		}
-		cursor = cursor[segment];
+		cursor = cursorObject.data[segment];
 	}
 	return rootValue;
 }
 
 function supportedCatalog(catalogId: string | undefined): boolean {
-	return (
-		catalogId === undefined ||
-		(A2UI_BASIC_CATALOG_IDS as readonly string[]).includes(catalogId)
-	);
+	return catalogId === undefined || supportedCatalogIds.has(catalogId);
 }
 
-function dynamicExpression(
-	value: unknown,
+function expressionInputSchema(
 	binding: boolean,
 	issues: string[]
-): unknown {
-	if (!isObject(value)) {
-		return value;
-	}
-	if (typeof value.literalString === "string") {
-		return value.literalString;
-	}
-	if (typeof value.literalNumber === "number") {
-		return value.literalNumber;
-	}
-	if (typeof value.literalBoolean === "boolean") {
-		return value.literalBoolean;
-	}
-	if (Array.isArray(value.literalStringList)) {
-		return value.literalStringList.filter(
-			(entry): entry is string => typeof entry === "string"
-		);
-	}
-	if (typeof value.path === "string") {
-		if (!value.path.startsWith("/")) {
+): z.ZodType<StateModel[string]> {
+	return z.unknown().transform((value) => {
+		if (!isObject(value)) {
+			return value;
+		}
+		const literalString = textSchema.safeParse(value.literalString);
+		if (literalString.success) {
+			return literalString.data;
+		}
+		const literalNumber = numberSchema.safeParse(value.literalNumber);
+		if (literalNumber.success) {
+			return literalNumber.data;
+		}
+		const literalBoolean = flagSchema.safeParse(value.literalBoolean);
+		if (literalBoolean.success) {
+			return literalBoolean.data;
+		}
+		if (Array.isArray(value.literalStringList)) {
+			return value.literalStringList.flatMap((entry) => {
+				const parsed = textSchema.safeParse(entry);
+				return parsed.success ? [parsed.data] : [];
+			});
+		}
+		const statePath = textSchema.safeParse(value.path);
+		if (statePath.success) {
+			if (!statePath.data.startsWith("/")) {
+				pushIssue(
+					issues,
+					`A2UI relative data path is not supported: ${statePath.data}`
+				);
+				return undefined;
+			}
+			return binding
+				? { $bindState: statePath.data }
+				: { $state: statePath.data };
+		}
+		if ("functionCall" in value) {
 			pushIssue(
 				issues,
-				`A2UI relative data path is not supported: ${value.path}`
+				"A2UI functionCall expressions are not executed by Ryu"
 			);
 			return undefined;
 		}
-		return binding ? { $bindState: value.path } : { $state: value.path };
-	}
-	if ("functionCall" in value) {
-		pushIssue(issues, "A2UI functionCall expressions are not executed by Ryu");
-		return undefined;
-	}
-	return Object.fromEntries(
-		Object.entries(value)
-			.map(([key, entry]) => [key, dynamicExpression(entry, false, issues)])
-			.filter(([, entry]) => entry !== undefined)
-	);
+		return Object.fromEntries(
+			Object.entries(value)
+				.map(([key, entry]) => [
+					key,
+					expressionInputSchema(false, issues).parse(entry),
+				])
+				.filter(([, entry]) => entry !== undefined)
+		);
+	});
 }
 
 function childrenOf(component: A2uiComponent, issues: string[]): string[] {
 	const children = component.children;
 	if (Array.isArray(children)) {
-		return children.filter(
-			(child): child is string =>
-				typeof child === "string" &&
-				child.length > 0 &&
-				child.length <= MAX_ID_LENGTH
-		);
+		return children.flatMap((child) => {
+			const parsed = textSchema.min(1).max(MAX_ID_LENGTH).safeParse(child);
+			return parsed.success ? [parsed.data] : [];
+		});
 	}
 	if (isObject(children)) {
 		pushIssue(
@@ -427,9 +529,9 @@ function childrenOf(component: A2uiComponent, issues: string[]): string[] {
 function textFromComponent(
 	component: A2uiComponent | undefined,
 	issues: string[]
-): unknown {
+) {
 	return component?.component === "Text"
-		? dynamicExpression(component.text ?? "", false, issues)
+		? expressionInputSchema(false, issues).parse(component.text ?? "")
 		: undefined;
 }
 
@@ -437,7 +539,7 @@ function actionFor(
 	component: A2uiComponent,
 	surfaceId: string,
 	issues: string[]
-): Record<string, unknown> | undefined {
+) {
 	if (!isObject(component.action)) {
 		return undefined;
 	}
@@ -449,7 +551,11 @@ function actionFor(
 		return undefined;
 	}
 	const event = component.action.event;
-	if (!isObject(event) || typeof event.name !== "string") {
+	if (!isObject(event)) {
+		return undefined;
+	}
+	const eventName = textSchema.safeParse(event.name);
+	if (!eventName.success) {
 		return undefined;
 	}
 	return {
@@ -458,45 +564,53 @@ function actionFor(
 			params: {
 				value: {
 					protocol: "a2ui",
-					name: event.name,
+					name: eventName.data,
 					surfaceId,
-					context: dynamicExpression(event.context ?? {}, false, issues),
+					context: expressionInputSchema(false, issues).parse(
+						event.context ?? {}
+					),
 				},
 			},
 		},
 	};
 }
 
-function alignValue(
-	value: unknown
-): "start" | "center" | "end" | "stretch" | undefined {
-	return value === "start" ||
-		value === "center" ||
-		value === "end" ||
-		value === "stretch"
-		? value
-		: undefined;
-}
+const alignValue = z
+	.enum(["start", "center", "end", "stretch"])
+	.optional()
+	.catch(undefined).parse;
 
-function justifyValue(
-	value: unknown
-): "start" | "center" | "end" | "between" | "around" | undefined {
-	if (value === "start" || value === "center" || value === "end") {
-		return value;
-	}
-	if (value === "spaceBetween") {
-		return "between";
-	}
-	if (value === "spaceAround" || value === "spaceEvenly") {
-		return "around";
-	}
-	return undefined;
-}
+const justifyValue = z
+	.enum([
+		"start",
+		"center",
+		"end",
+		"spaceBetween",
+		"spaceAround",
+		"spaceEvenly",
+	])
+	.optional()
+	.catch(undefined)
+	.transform((value) => {
+		switch (value) {
+			case "start":
+			case "center":
+			case "end":
+				return value;
+			case "spaceBetween":
+				return "between";
+			case "spaceAround":
+			case "spaceEvenly":
+				return "around";
+			default:
+				return undefined;
+		}
+	}).parse;
 
 function unsupportedElement(
 	component: A2uiComponent,
 	issues: string[]
-): { type: string; props: Record<string, unknown>; children: string[] } {
+): AgentUiElement {
 	pushIssue(issues, `A2UI component is not mapped: ${component.component}`);
 	return {
 		type: "Alert",
@@ -513,26 +627,22 @@ function mapComponent(
 	components: Map<string, A2uiComponent>,
 	surfaceId: string,
 	issues: string[]
-): {
-	type: string;
-	props: Record<string, unknown>;
-	children: string[];
-	on?: Record<string, unknown>;
-} {
+): AgentUiElement {
 	const children = childrenOf(component, issues);
-	const child =
-		typeof component.child === "string" ? component.child : children[0];
+	const parsedChild = textSchema.safeParse(component.child);
+	const child = parsedChild.success ? parsedChild.data : children[0];
 	const on = actionFor(component, surfaceId, issues);
 	const mapped = (
 		type: string,
-		props: Record<string, unknown>,
+		props: AgentUiElement["props"],
 		nextChildren = children
-	) => ({
-		type,
-		props,
-		children: nextChildren,
-		...(on ? { on } : {}),
-	});
+	): AgentUiElement => {
+		const element: AgentUiElement = { type, props, children: nextChildren };
+		if (on) {
+			element.on = on;
+		}
+		return element;
+	};
 
 	switch (component.component) {
 		case "Column":
@@ -564,7 +674,9 @@ function mapComponent(
 				[]
 			);
 		case "Text": {
-			const text = dynamicExpression(component.text ?? "", false, issues);
+			const text = expressionInputSchema(false, issues).parse(
+				component.text ?? ""
+			);
 			const variant = component.variant;
 			if (
 				variant === "h1" ||
@@ -595,8 +707,10 @@ function mapComponent(
 			return mapped(
 				"Image",
 				{
-					src: dynamicExpression(component.url ?? "", false, issues),
-					alt: dynamicExpression(component.description ?? "", false, issues),
+					src: expressionInputSchema(false, issues).parse(component.url ?? ""),
+					alt: expressionInputSchema(false, issues).parse(
+						component.description ?? ""
+					),
 				},
 				[]
 			);
@@ -604,15 +718,11 @@ function mapComponent(
 			return mapped(
 				"Link",
 				{
-					text: dynamicExpression(
-						component.text ?? component.title ?? "Open link",
-						false,
-						issues
+					text: expressionInputSchema(false, issues).parse(
+						component.text ?? component.title ?? "Open link"
 					),
-					href: dynamicExpression(
-						component.url ?? component.href ?? "",
-						false,
-						issues
+					href: expressionInputSchema(false, issues).parse(
+						component.url ?? component.href ?? ""
 					),
 				},
 				[]
@@ -636,9 +746,13 @@ function mapComponent(
 				[]
 			);
 		case "TextField": {
-			const value = dynamicExpression(component.value ?? "", true, issues);
+			const value = expressionInputSchema(true, issues).parse(
+				component.value ?? ""
+			);
 			const props = {
-				label: dynamicExpression(component.label ?? "", false, issues),
+				label: expressionInputSchema(false, issues).parse(
+					component.label ?? ""
+				),
 				value,
 			};
 			if (component.variant === "longText") {
@@ -662,8 +776,12 @@ function mapComponent(
 			return mapped(
 				"Checkbox",
 				{
-					label: dynamicExpression(component.label ?? "", false, issues),
-					checked: dynamicExpression(component.value ?? false, true, issues),
+					label: expressionInputSchema(false, issues).parse(
+						component.label ?? ""
+					),
+					checked: expressionInputSchema(true, issues).parse(
+						component.value ?? false
+					),
 				},
 				[]
 			);
@@ -673,17 +791,19 @@ function mapComponent(
 			}
 			const options = Array.isArray(component.options)
 				? component.options.flatMap((option) => {
-						if (!isObject(option) || typeof option.value !== "string") {
+						if (!isObject(option)) {
+							return [];
+						}
+						const optionValue = textSchema.safeParse(option.value);
+						if (!optionValue.success) {
 							return [];
 						}
 						return [
 							{
-								label: dynamicExpression(
-									option.label ?? option.value,
-									false,
-									issues
+								label: expressionInputSchema(false, issues).parse(
+									option.label ?? optionValue.data
 								),
-								value: option.value,
+								value: optionValue.data,
 							},
 						];
 					})
@@ -691,8 +811,12 @@ function mapComponent(
 			return mapped(
 				"OptionList",
 				{
-					label: dynamicExpression(component.label ?? "", false, issues),
-					value: dynamicExpression(component.value ?? "", true, issues),
+					label: expressionInputSchema(false, issues).parse(
+						component.label ?? ""
+					),
+					value: expressionInputSchema(true, issues).parse(
+						component.value ?? ""
+					),
 					options,
 				},
 				[]
@@ -702,10 +826,14 @@ function mapComponent(
 			return mapped(
 				"Slider",
 				{
-					label: dynamicExpression(component.label ?? "", false, issues),
-					value: dynamicExpression(component.value ?? 0, true, issues),
-					min: typeof component.min === "number" ? component.min : 0,
-					max: typeof component.max === "number" ? component.max : 100,
+					label: expressionInputSchema(false, issues).parse(
+						component.label ?? ""
+					),
+					value: expressionInputSchema(true, issues).parse(
+						component.value ?? 0
+					),
+					min: numberSchema.catch(0).parse(component.min),
+					max: numberSchema.catch(100).parse(component.max),
 				},
 				[]
 			);
@@ -713,12 +841,12 @@ function mapComponent(
 			return mapped(
 				"Input",
 				{
-					label: dynamicExpression(
-						component.label ?? "Date and time",
-						false,
-						issues
+					label: expressionInputSchema(false, issues).parse(
+						component.label ?? "Date and time"
 					),
-					value: dynamicExpression(component.value ?? "", true, issues),
+					value: expressionInputSchema(true, issues).parse(
+						component.value ?? ""
+					),
 					type: "text",
 				},
 				[]
@@ -728,7 +856,7 @@ function mapComponent(
 	}
 }
 
-function isSupportedRoot(elements: Record<string, unknown>): boolean {
+function isSupportedRoot(elements: AgentUiSpec["elements"]): boolean {
 	return Object.hasOwn(elements, "root");
 }
 
@@ -740,139 +868,137 @@ function isSupportedRoot(elements: Record<string, unknown>): boolean {
  * HTML/JavaScript. Unsupported components remain visible as inert Alert nodes so
  * a foreign surface cannot crash or escape the native renderer.
  */
-export function normalizeA2ui(input: unknown): A2uiNormalizationResult {
-	const issues: string[] = [];
-	const messages = parseInput(input, issues);
-	let surface: SurfaceState | null = null;
-	let sawMultipleSurfaces = false;
+export const normalizeA2ui = z
+	.unknown()
+	.transform((input): A2uiNormalizationResult => {
+		const issues: string[] = [];
+		const messages = streamInputSchema(issues).parse(input);
+		let surface: SurfaceState | null = null;
+		let sawMultipleSurfaces = false;
 
-	for (const message of messages) {
-		if (message.createSurface) {
-			if (surface && surface.id !== message.createSurface.surfaceId) {
-				sawMultipleSurfaces = true;
-				pushIssue(
-					issues,
-					"Ryu Agent UI currently renders one A2UI surface per card"
-				);
-				continue;
-			}
-			surface = {
-				catalogId: message.createSurface.catalogId,
-				components: new Map(),
-				dataModel: {},
-				id: message.createSurface.surfaceId,
-			};
-			if (!supportedCatalog(surface.catalogId)) {
-				pushIssue(issues, `Unsupported A2UI catalog: ${surface.catalogId}`);
-			}
-			continue;
-		}
-
-		if (message.deleteSurface) {
-			if (surface?.id === message.deleteSurface.surfaceId) {
-				surface = null;
-			}
-			continue;
-		}
-
-		if (message.updateComponents) {
-			if (!surface) {
-				pushIssue(issues, "A2UI updateComponents arrived before createSurface");
-				continue;
-			}
-			if (surface.id !== message.updateComponents.surfaceId) {
-				pushIssue(issues, "A2UI updateComponents targets another surface");
-				continue;
-			}
-			for (const component of message.updateComponents.components) {
-				if (
-					surface.components.size >= MAX_COMPONENTS &&
-					!surface.components.has(component.id)
-				) {
+		for (const message of messages) {
+			if (message.createSurface) {
+				if (surface && surface.id !== message.createSurface.surfaceId) {
+					sawMultipleSurfaces = true;
 					pushIssue(
 						issues,
-						`A2UI surfaces may contain at most ${MAX_COMPONENTS} components`
+						"Ryu Agent UI currently renders one A2UI surface per card"
 					);
-					break;
+					continue;
 				}
-				surface.components.set(component.id, component);
+				surface = {
+					catalogId: message.createSurface.catalogId,
+					components: new Map(),
+					dataModel: {},
+					id: message.createSurface.surfaceId,
+				};
+				if (!supportedCatalog(surface.catalogId)) {
+					pushIssue(issues, `Unsupported A2UI catalog: ${surface.catalogId}`);
+				}
+				continue;
 			}
-			continue;
+
+			if (message.deleteSurface) {
+				if (surface?.id === message.deleteSurface.surfaceId) {
+					surface = null;
+				}
+				continue;
+			}
+
+			if (message.updateComponents) {
+				if (!surface) {
+					pushIssue(
+						issues,
+						"A2UI updateComponents arrived before createSurface"
+					);
+					continue;
+				}
+				if (surface.id !== message.updateComponents.surfaceId) {
+					pushIssue(issues, "A2UI updateComponents targets another surface");
+					continue;
+				}
+				for (const component of message.updateComponents.components) {
+					if (
+						surface.components.size >= MAX_COMPONENTS &&
+						!surface.components.has(component.id)
+					) {
+						pushIssue(
+							issues,
+							`A2UI surfaces may contain at most ${MAX_COMPONENTS} components`
+						);
+						break;
+					}
+					surface.components.set(component.id, component);
+				}
+				continue;
+			}
+
+			if (message.updateDataModel) {
+				if (!surface) {
+					pushIssue(
+						issues,
+						"A2UI updateDataModel arrived before createSurface"
+					);
+					continue;
+				}
+				if (surface.id !== message.updateDataModel.surfaceId) {
+					pushIssue(issues, "A2UI updateDataModel targets another surface");
+					continue;
+				}
+				surface.dataModel = updateDataModel(
+					surface.dataModel,
+					message.updateDataModel.path ?? "/",
+					message.updateDataModel.value,
+					Object.hasOwn(message.updateDataModel, "value"),
+					issues
+				);
+			}
 		}
 
-		if (message.updateDataModel) {
-			if (!surface) {
-				pushIssue(issues, "A2UI updateDataModel arrived before createSurface");
-				continue;
-			}
-			if (surface.id !== message.updateDataModel.surfaceId) {
-				pushIssue(issues, "A2UI updateDataModel targets another surface");
-				continue;
-			}
-			surface.dataModel = updateDataModel(
-				surface.dataModel,
-				message.updateDataModel.path ?? "/",
-				message.updateDataModel.value,
-				Object.hasOwn(message.updateDataModel, "value"),
+		if (!surface) {
+			return { issues, spec: null };
+		}
+		if (sawMultipleSurfaces) {
+			return { issues, spec: null, surfaceId: surface.id };
+		}
+		if (!supportedCatalog(surface.catalogId)) {
+			return { issues, spec: null, surfaceId: surface.id };
+		}
+		const rawElements: AgentUiSpec["elements"] = {};
+		const mappedIds = new Set<string>();
+		for (const [id, component] of surface.components) {
+			rawElements[id] = mapComponent(
+				component,
+				surface.components,
+				surface.id,
 				issues
 			);
+			mappedIds.add(id);
 		}
-	}
+		if (!isSupportedRoot(rawElements)) {
+			pushIssue(issues, "A2UI surface must define a component with id 'root'");
+			return { issues, spec: null, surfaceId: surface.id };
+		}
 
-	if (!surface) {
-		return { issues, spec: null };
-	}
-	if (sawMultipleSurfaces) {
-		return { issues, spec: null, surfaceId: surface.id };
-	}
-	if (!supportedCatalog(surface.catalogId)) {
-		return { issues, spec: null, surfaceId: surface.id };
-	}
-	const rawElements: Record<string, unknown> = {};
-	const mappedIds = new Set<string>();
-	for (const [id, component] of surface.components) {
-		rawElements[id] = mapComponent(
-			component,
-			surface.components,
-			surface.id,
-			issues
+		const elements = Object.fromEntries(
+			Object.entries(rawElements).map(([id, element]) => {
+				return [
+					id,
+					{
+						...element,
+						children: element.children.filter((child) => mappedIds.has(child)),
+					},
+				];
+			})
 		);
-		mappedIds.add(id);
-	}
-	if (!isSupportedRoot(rawElements)) {
-		pushIssue(issues, "A2UI surface must define a component with id 'root'");
-		return { issues, spec: null, surfaceId: surface.id };
-	}
 
-	const elements = Object.fromEntries(
-		Object.entries(rawElements).map(([id, rawElement]) => {
-			const element = rawElement as {
-				children?: unknown;
-				on?: Record<string, unknown>;
-				props: Record<string, unknown>;
-				type: string;
-			};
-			return [
-				id,
-				{
-					...element,
-					children: Array.isArray(element.children)
-						? element.children.filter(
-								(child): child is string =>
-									typeof child === "string" && mappedIds.has(child)
-							)
-						: [],
-				},
-			];
-		})
-	) as AgentUiRenderSpec["elements"];
-
-	const state = isObject(surface.dataModel)
-		? (surface.dataModel as Record<string, unknown>)
-		: { value: surface.dataModel };
-	return {
-		issues,
-		spec: { root: "root", elements, state },
-		surfaceId: surface.id,
-	};
-}
+		const stateInput = stateObjectSchema.safeParse(surface.dataModel);
+		const state = stateInput.success
+			? stateInput.data
+			: { value: surface.dataModel };
+		return {
+			issues,
+			spec: { root: "root", elements, state },
+			surfaceId: surface.id,
+		};
+	}).parse;

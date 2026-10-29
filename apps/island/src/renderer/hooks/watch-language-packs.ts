@@ -1,8 +1,16 @@
 import type { LanguagePack } from "@ryu/i18n/core";
+import type { IslandApi, LanguagePacksResult } from "../../shared/ipc.ts";
 
-/** Refresh the catalog only while visible, with one IPC read at a time. */
+/** The catalog read; the on-screen generative UI window passes its own bridge. */
+export type LanguagePacksSource = IslandApi["languagePacks"];
+
+/**
+ * Refresh the catalog only while visible, with one IPC read at a time. `source`
+ * defaults to the Island's bridge (`window.island.languagePacks`).
+ */
 export function watchLanguagePacks(
-	receive: (packs: LanguagePack[]) => void
+	receive: (packs: LanguagePack[], result: LanguagePacksResult) => void,
+	source?: LanguagePacksSource
 ): () => void {
 	let alive = true;
 	let pending = false;
@@ -12,9 +20,9 @@ export function watchLanguagePacks(
 		}
 		pending = true;
 		try {
-			const result = await window.island.languagePacks.get();
+			const result = await (source ?? window.island.languagePacks).get();
 			if (alive && !document.hidden && result.available) {
-				receive(result.packs);
+				receive(result.packs, result);
 			}
 		} catch {
 			/* Retain the current catalog until a later successful refresh. */

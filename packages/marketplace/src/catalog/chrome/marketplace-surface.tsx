@@ -26,6 +26,7 @@ export default function MarketplaceSurface({
 	onSelect,
 	query,
 	sections,
+	showGlobalSearch = true,
 	showSectionTabs = true,
 	trailing,
 }: {
@@ -38,6 +39,8 @@ export default function MarketplaceSurface({
 	onSelect: (value: string) => void;
 	query: string;
 	sections: StoreSectionTab[];
+	/** Hide global catalog search for desktop-local sections with their own search. */
+	showGlobalSearch?: boolean;
 	/** Hide the global section strip when the active section already owns the
 	 *  canonical navigation for the same destinations (for example Browse's
 	 *  marketplace-kind tabs). */
@@ -56,16 +59,19 @@ export default function MarketplaceSurface({
 					fullBleed ? "max-w-none" : "max-w-4xl"
 				)}
 			>
-				<StoreGlobalSearch
-					onChange={onSearch}
-					placeholder={t("marketplace.search", {}, GLOBAL_SEARCH_PLACEHOLDER)}
-					trailing={trailing}
-					value={query}
-				/>
+				{showGlobalSearch ? (
+					<StoreGlobalSearch
+						className="flex-wrap [&>div:first-child]:min-w-[min(100%,18rem)] [&>div:first-child]:flex-[1_1_18rem]"
+						onChange={onSearch}
+						placeholder={t("marketplace.search", {}, GLOBAL_SEARCH_PLACEHOLDER)}
+						trailing={trailing}
+						value={query}
+					/>
+				) : null}
 				{showSectionTabs ? (
 					<StoreSectionTabs
 						active={active}
-						className="pt-2 pb-1"
+						inset="store-sections"
 						onSelect={onSelect}
 						sections={sections}
 					/>

@@ -7,8 +7,8 @@
 // `_userConfiguredCapabilities`). The effective flags gate the composer controls
 // and annotate the Tools allowlist below.
 
-import { Button } from "@ryu/ui/components/button";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useCallback } from "react";
 import {
 	SettingsGroup,
@@ -106,15 +106,12 @@ function TriToggle({
 		>
 			{TRI_OPTIONS.map((opt) => (
 				<Button
+					appearance={value === opt.value ? "island-tab-active" : "default"}
 					aria-pressed={value === opt.value}
-					className={cn(
-						"h-6 px-2 text-xs",
-						value === opt.value && "bg-accent text-accent-foreground"
-					)}
 					disabled={disabled}
 					key={opt.value}
 					onClick={() => onChange(opt.value)}
-					size="sm"
+					size="tiny"
 					type="button"
 					variant="ghost"
 				>
@@ -132,6 +129,7 @@ export function AgentCapabilitiesPanel({
 	agentId: string;
 	disabled?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const { capabilities, loading, saving, setOverrides } =
 		useAgentCapabilities(agentId);
 
@@ -163,13 +161,15 @@ export function AgentCapabilitiesPanel({
 				<>
 					<SettingsGroup>
 						{ROWS.map((row) => {
-							const detected = capabilities.detected[row.key as "tools"];
+							const detected = capabilities.detected[row.key];
 							const tri = overrideToTri(capabilities.overrides[row.key]);
 							return (
 								<SettingsItem
 									actions={
 										<TriToggle
-											ariaLabel={`${row.label} capability`}
+											ariaLabel={tl("{capability} capability", {
+												capability: tl(row.label),
+											})}
 											disabled={disabled || saving}
 											onChange={(next) =>
 												handleChange(capabilities, row.key, next)

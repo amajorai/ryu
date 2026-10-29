@@ -1,6 +1,11 @@
-import { Alert, AlertDescription, AlertTitle } from "@ryu/ui/components/alert";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	Alert,
+	AlertDescription,
+	AlertTitle,
+} from "@ryu/ui/components/alert.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
@@ -8,15 +13,15 @@ import {
 	CardFooter,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
+} from "@ryu/ui/components/card.tsx";
 import {
 	Field,
 	FieldDescription,
 	FieldError,
 	FieldGroup,
 	FieldLabel,
-} from "@ryu/ui/components/field";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/ui/components/field.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
@@ -24,11 +29,12 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Skeleton } from "@ryu/ui/components/skeleton";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
@@ -36,6 +42,7 @@ import {
 	FLEET_NODE_NAME_MAX_LENGTH,
 	fleetNodeNameError,
 	getFleetBindingStatus,
+	NodeAlreadyBoundError,
 } from "@/src/lib/api/fleet.ts";
 import { fetchMyPermissions, type OrgSummary } from "@/src/lib/api/org.ts";
 
@@ -54,6 +61,8 @@ export function NodeOrganizationBindingCard({
 }) {
 	const activeNode = useActiveNode();
 	const queryClient = useQueryClient();
+	const stepUp = useStepUp();
+	const tl = useLiteralMessages();
 	const [organizationId, setOrganizationId] = useState("");
 	const [nodeName, setNodeName] = useState(
 		activeNode.name === "local" ? "My Ryu node" : activeNode.name
@@ -71,14 +80,27 @@ export function NodeOrganizationBindingCard({
 	});
 	const canBind = canBindNode(permissionsQuery.data);
 	const bindingMutation = useMutation({
-		mutationFn: () =>
-			bindSelfHostedNodeToOrganization({
-				name: nodeName,
-				organizationId,
-				target,
-			}),
+		// The enrollment code makes this node able to resolve members' shared
+		// secrets, so the control plane asks for a fresh confirmation first.
+		// A dismissed prompt resolves to `null` and binds nothing. A node that
+		// is already bound says so before anyone is asked to confirm.
+		mutationFn: async () => {
+			const current = await getFleetBindingStatus(target);
+			if (current.enrolled) {
+				throw new NodeAlreadyBoundError(current);
+			}
+			return await stepUp.guard("org.credentials", () =>
+				bindSelfHostedNodeToOrganization({
+					name: nodeName,
+					organizationId,
+					target,
+				})
+			);
+		},
 		onSuccess: (status) => {
-			queryClient.setQueryData(statusKey, status);
+			if (status) {
+				queryClient.setQueryData(statusKey, status);
+			}
 		},
 		onSettled: async () => {
 			await queryClient.invalidateQueries({ exact: true, queryKey: statusKey });
@@ -195,6 +217,7 @@ export function NodeOrganizationBindingCard({
 			aria-labelledby="node-binding-title"
 			className="min-w-0 max-w-full"
 		>
+			{stepUp.dialog}
 			<CardHeader>
 				<CardTitle className="break-words" id="node-binding-title">
 					Bind this node to an organization
@@ -253,7 +276,9 @@ export function NodeOrganizationBindingCard({
 							<FieldError>{nodeNameValidationError}</FieldError>
 						) : (
 							<FieldDescription>
-								Up to {FLEET_NODE_NAME_MAX_LENGTH} characters.
+								{tl("Up to {maxLength} characters.", {
+									maxLength: String(FLEET_NODE_NAME_MAX_LENGTH),
+								})}
 							</FieldDescription>
 						)}
 					</Field>
@@ -265,7 +290,7 @@ export function NodeOrganizationBindingCard({
 					{organizationId && permissionsQuery.isError ? (
 						<Alert variant="destructive">
 							<AlertTitle>Could not check access</AlertTitle>
-							<AlertDescription className="flex flex-col items-start gap-3">
+							<AlertDescription layout="retry-actions">
 								<span>{permissionsQuery.error.message}</span>
 								<Button
 									onClick={() => permissionsQuery.refetch()}

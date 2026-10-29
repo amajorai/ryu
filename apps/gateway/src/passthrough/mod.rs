@@ -20,7 +20,15 @@
 //! ## Security boundary
 //! This endpoint forwards the user's subscription bearer in transit, so it is
 //! bound **loopback-only** — a request from a non-loopback peer is refused. A
-//! remote gateway must never carry a user's subscription credential.
+//! remote gateway must never carry a user's subscription credential, so the
+//! route is also refused outright in fleet mode, where external callers reach
+//! the process through a co-located proxy and appear as loopback.
+//!
+//! The route takes no Gateway credential (the `Authorization` header is the
+//! user's own subscription bearer), so loopback is not an identity:
+//! `x-ryu-user-id` / `x-ryu-agent-id` / `x-ryu-feature` are recorded only when
+//! the request also presents the master key or a `trusted_forwarder` key in
+//! `x-ryu-gateway-key`, and no `x-ryu-*` header is forwarded upstream.
 //!
 //! ## Supported agents
 //! - **Claude Code** → Anthropic Messages (`/passthrough/anthropic/*`), upstream
@@ -32,8 +40,21 @@
 //!
 //! ## Redaction scope
 //! - **Request-side** redaction (what goes upstream) buffers cleanly and is the
-//!   primary DLP win — applied here when the firewall is enabled (Anthropic
-//!   Messages `system`/`messages`, Codex Responses `instructions`/`input`).
+//!   primary DLP win — applied here with the resolved (node → org → trusted
+//!   agent) scanner when the firewall is enabled. It covers every
+//!   prompt-bearing string, including tool results, tool inputs, replayed
+//!   function-call output and tool definitions
+//!   (`ryu_gw_passthrough::visit_request_strings_mut`). Agent traffic always
+//!   redacts rather than following a Block policy: a blocked turn would re-send
+//!   the same history and stall the session. A PII/secret match that survives
+//!   redaction refuses the request, and control-plane locked guardrails and the
+//!   model allowlist are enforced as on the chat path.
+//! - **Provider and region policy** applies to every passthrough endpoint before
+//!   the body is read: the fixed upstream (`anthropic` for Claude Code,
+//!   `openai` for Codex) must be in `approvedProviders`, and because neither
+//!   upstream has verified region metadata, any `allowedRegions` restriction
+//!   refuses the route. When a trusted credential vouches for `x-ryu-user-id`,
+//!   the node policy is narrowed by that caller's own rules first.
 //! - **Response-side** redaction (#455): as the upstream SSE response streams
 //!   back, each complete event is reassembled across network-chunk boundaries and
 //!   its assistant-text delta (`text_delta` for Anthropic,
@@ -75,11 +96,11 @@ use crate::{audit::AuditRecord, firewall::FirewallBackend, state::SharedState};
 // the gateway's `dyn FirewallBackend` (the `with_firewall` closure type) and its
 // concrete `FirewallScanner` (the redaction unit tests). `WireFormat` is
 // re-exported so `crate::passthrough::WireFormat` paths resolve unchanged.
-pub(crate) use ryu_gw_passthrough::WireFormat;
 use ryu_gw_passthrough::{
-    build_upstream_url, is_messages_path, is_responses_path, is_safe_upstream_path,
-    redact_request_body, redact_sse_stream, PassthroughFirewall,
+    build_upstream_url, classify_path, is_safe_upstream_path, redact_sse_stream,
+    visit_request_conversation_strings_mut, visit_request_strings_mut, PassthroughFirewall,
 };
+pub(crate) use ryu_gw_passthrough::{PassthroughRoute, WireFormat};
 
 impl PassthroughFirewall for dyn FirewallBackend + '_ {
     fn sanitize(&self, text: &str) -> String {
@@ -133,6 +154,122 @@ fn passthrough_http_client() -> &'static reqwest::Client {
     })
 }
 
+/// Set by Core on a cloud node: its provider egress proxy, and the state file
+/// that says which provider routes currently leave through the owner's desktop.
+const PROVIDER_PROXY_ENV: &str = "RYU_PROVIDER_EGRESS_PROXY_URL";
+const PROVIDER_STATE_ENV: &str = "RYU_PROVIDER_EGRESS_STATE";
+
+/// The provider proxy as a `reqwest` proxy. Loopback upstreams (test doubles)
+/// never go through it.
+fn provider_proxy(value: Option<String>) -> Option<reqwest::Proxy> {
+    let url = value.filter(|value| !value.trim().is_empty())?;
+    let proxy = reqwest::Proxy::all(url.trim()).ok()?;
+    Some(proxy.no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1")))
+}
+
+/// What Core's state file says about the Claude route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClaudeRoute {
+    /// Whether Claude must leave through the owner's desktop.
+    active: bool,
+    /// Core's current provider listener, when the file names one.
+    proxy: Option<String>,
+}
+
+/// Parse the state file. A file that cannot be read or parsed counts as active
+/// with no proxy named, so the Gateway falls back to the proxy Core passed at
+/// spawn and never leaves directly while a route may apply.
+fn claude_route(contents: Option<&str>) -> ClaudeRoute {
+    let Some(parsed) = contents.and_then(|text| serde_json::from_str::<Value>(text).ok()) else {
+        return ClaudeRoute {
+            active: true,
+            proxy: None,
+        };
+    };
+    let active = parsed
+        .get("active")
+        .and_then(Value::as_array)
+        .is_none_or(|active| active.iter().any(|id| id.as_str() == Some("claude")));
+    let proxy = parsed
+        .get("proxy")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|proxy| !proxy.is_empty())
+        .map(str::to_owned);
+    ClaudeRoute { active, proxy }
+}
+
+/// Read the state file for this request. It is a few bytes and model requests
+/// are long, so reading it every time costs nothing noticeable and a route the
+/// owner just turned on applies to the very next request. `None` when Core set
+/// no state file: this node does not route providers.
+async fn claude_route_now() -> Option<ClaudeRoute> {
+    let path = std::env::var_os(PROVIDER_STATE_ENV)?;
+    Some(claude_route(
+        tokio::fs::read_to_string(path).await.ok().as_deref(),
+    ))
+}
+
+/// Why an Anthropic passthrough call was refused: the Claude route applies but
+/// the Gateway has no working provider proxy.
+const CLAUDE_ROUTE_UNAVAILABLE: &str = "Claude traffic must leave through the owner's computer, but this node's route for it is not running";
+
+/// Which proxy, if any, carries Anthropic: `Ok(None)` is the direct client,
+/// `Err` refuses. The state file's proxy (Core's current listener) wins over
+/// the one passed at spawn, which a Core restart may have replaced.
+fn anthropic_proxy(
+    route: Option<ClaudeRoute>,
+    spawn_proxy: Option<String>,
+) -> Result<Option<String>, &'static str> {
+    let Some(route) = route else {
+        return Ok(None);
+    };
+    if !route.active {
+        return Ok(None);
+    }
+    route
+        .proxy
+        .or(spawn_proxy.filter(|proxy| !proxy.trim().is_empty()))
+        .map(Some)
+        .ok_or(CLAUDE_ROUTE_UNAVAILABLE)
+}
+
+/// The client for one passthrough format: Anthropic uses the node's provider
+/// proxy while the Claude route is in effect; everything else, and Anthropic
+/// the rest of the time, uses the direct client. `Err` refuses the call: the
+/// route applies but cannot carry it, and it must not go out directly.
+async fn passthrough_client_for(format: WireFormat) -> Result<reqwest::Client, &'static str> {
+    use std::sync::Mutex;
+    static ANTHROPIC: Mutex<Option<(String, reqwest::Client)>> = Mutex::new(None);
+    if format != WireFormat::Anthropic {
+        return Ok(passthrough_http_client().clone());
+    }
+    let Some(url) = anthropic_proxy(
+        claude_route_now().await,
+        std::env::var(PROVIDER_PROXY_ENV).ok(),
+    )?
+    else {
+        return Ok(passthrough_http_client().clone());
+    };
+    let mut cached = ANTHROPIC
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((cached_url, client)) = cached.as_ref() {
+        if *cached_url == url {
+            return Ok(client.clone());
+        }
+    }
+    let proxy = provider_proxy(Some(url.clone())).ok_or(CLAUDE_ROUTE_UNAVAILABLE)?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(60))
+        .proxy(proxy)
+        .build()
+        .map_err(|_| CLAUDE_ROUTE_UNAVAILABLE)?;
+    *cached = Some((url, client.clone()));
+    Ok(client)
+}
+
 fn anthropic_upstream() -> String {
     std::env::var("RYU_PASSTHROUGH_ANTHROPIC_UPSTREAM")
         .ok()
@@ -166,7 +303,7 @@ pub async fn anthropic(
         .forward(
             WireFormat::Anthropic,
             anthropic_upstream(),
-            is_messages_path(&path),
+            classify_path(WireFormat::Anthropic, method.as_str(), &path),
             state,
             peer,
             path,
@@ -200,7 +337,7 @@ pub async fn codex(
         .forward(
             WireFormat::OpenAiResponses,
             codex_upstream(),
-            is_responses_path(&path),
+            classify_path(WireFormat::OpenAiResponses, method.as_str(), &path),
             state,
             peer,
             path,
@@ -213,14 +350,16 @@ pub async fn codex(
 }
 
 /// Shared transparent reverse-proxy core for every passthrough route. Applies the
-/// loopback boundary, request-side DLP (when `redact_body` and the firewall are
-/// on), forwards with the caller's own credentials unchanged, emits audit, and
+/// loopback boundary, the provider and data-region policy (narrowed by a vouched
+/// caller's rules), the deny-by-default endpoint classification (`route`),
+/// the model allowlist and request-side DLP on prompt endpoints, forwards with
+/// the caller's own credentials unchanged, emits audit, and
 /// streams the response through a scan-and-audit tee (no response redaction).
 #[allow(clippy::too_many_arguments)]
 async fn forward(
     format: WireFormat,
     upstream_base: &str,
-    redact_body: bool,
+    route: PassthroughRoute,
     state: SharedState,
     peer: SocketAddr,
     path: String,
@@ -229,11 +368,21 @@ async fn forward(
     raw_query: axum::extract::RawQuery,
     body: Bytes,
 ) -> Response {
-    // ── Security boundary: loopback only ──────────────────────────────────────
+    // ── Security boundary: loopback only, never on a hosted gateway ───────────
     // This path forwards the user's subscription bearer; never expose it to a
-    // remote peer even if the gateway itself binds 0.0.0.0.
+    // remote peer even if the gateway itself binds 0.0.0.0. In fleet mode an
+    // external caller arrives through the co-located proxy and appears as
+    // 127.0.0.1, so loopback proves nothing there: a hosted gateway must never
+    // carry a subscription credential at all.
     if !peer.ip().is_loopback() {
         return (StatusCode::FORBIDDEN, "passthrough proxy is loopback-only").into_response();
+    }
+    if crate::custody::exposure_hardened(state.config.fleet, state.custody) {
+        return (
+            StatusCode::FORBIDDEN,
+            "passthrough proxy is disabled in fleet mode",
+        )
+            .into_response();
     }
 
     if !is_safe_upstream_path(&path) {
@@ -244,18 +393,73 @@ async fn forward(
     let url = build_upstream_url(upstream_base, &path, raw_query.0.as_deref());
 
     // Control-plane attribution (profiles / usage-points): tag the audit row with
-    // the forwarded end-user id + product surface when Core relays them. `None`
-    // for a bare subscription CLI (self-hosted) — the row is still recorded.
-    let user_id = header_string(&headers, "x-ryu-user-id");
-    let agent_id = header_string(&headers, "x-ryu-agent-id");
-    let feature = header_string(&headers, "x-ryu-feature");
+    // the forwarded end-user id + product surface only when a trusted forwarder
+    // vouches for them. The route itself takes no Gateway credential, so a bare
+    // `x-ryu-user-id` is self-asserted and is never recorded.
+    let PassthroughIdentity {
+        user_id,
+        agent_id,
+        feature,
+    } = PassthroughIdentity::from_headers(&state, &headers);
 
-    // ── Request-side DLP: redact the outbound body when the firewall is on ─────
-    // Prompt-bearing messages and count_tokens endpoints are scanned; unrelated
-    // provider sub-paths are proxied untouched.
-    let scan_inbound = state.with_firewall(|fw| fw.config().enabled && fw.config().scan_inbound);
-    if redact_body
-        && scan_inbound
+    // ── Request-side DLP ───────────────────────────────────────────────────────
+    // The resolved scanner (node → org → trusted agent overlay) redacts every
+    // prompt-bearing string on prompt endpoints. Only the short inert allow-list
+    // (model listing, batch status) is proxied uninspected; any other endpoint
+    // cannot be evaluated, so it is refused while a prompt policy is in force.
+    // Agent traffic always redacts (it never blocks on a redactable match,
+    // whatever the firewall policy), because a blocked turn would re-send the
+    // same history and stall the agent session for good.
+    let scanner = state.passthrough_scanner(agent_id.as_deref());
+    let policy = passthrough_policy(&state, user_id.as_deref()).await;
+    // ── Provider and data-region policy ───────────────────────────────────────
+    // Enforced on every passthrough endpoint, before the body is read, as on
+    // every other Gateway PEP (`inference_governance::authorize_provider_region`).
+    if let Err(reason) = authorize_upstream(format, &policy) {
+        return refuse_request(
+            &state,
+            format,
+            "unknown",
+            started,
+            reason,
+            (user_id, agent_id, feature),
+        );
+    }
+    let redact = scanner.config().enabled && scanner.config().scan_inbound;
+    // An inert endpoint carries no prompt; a body on one is not inert.
+    let route = match route {
+        PassthroughRoute::Inert if !body.is_empty() => PassthroughRoute::Unknown,
+        route => route,
+    };
+    let governed = redact
+        || policy.requires_firewall()
+        || !policy.approved_models.is_empty()
+        || !policy.available;
+    if route == PassthroughRoute::Unknown {
+        let reason =
+            format!("passthrough endpoint '{method} {path}' carries no inspectable prompt");
+        if governed {
+            return refuse_request(
+                &state,
+                format,
+                "unknown",
+                started,
+                format!("{reason} and is not allowed while prompt policy is enforced"),
+                (user_id, agent_id, feature),
+            );
+        }
+        warn!(
+            provider = provider_label(format),
+            %reason,
+            "passthrough: proxying an uninspected endpoint"
+        );
+    }
+    let prompt_route = matches!(
+        route,
+        PassthroughRoute::Prompt | PassthroughRoute::MessageBatch
+    );
+    let inspect = prompt_route && (redact || policy.requires_firewall());
+    if inspect
         && headers.get_all("content-encoding").iter().any(|value| {
             value
                 .to_str()
@@ -269,28 +473,45 @@ async fn forward(
             .into_response();
     }
     let mut model = "unknown".to_string();
-    let forward_body: Bytes = if redact_body {
+    let forward_body: Bytes = if prompt_route {
         match serde_json::from_slice::<Value>(&body) {
             Ok(mut json) => {
-                if let Some(m) = json.get("model").and_then(Value::as_str) {
-                    model = m.to_string();
-                }
-                let redacted = state.with_firewall(|fw| {
-                    let cfg = fw.config();
-                    if cfg.enabled && cfg.scan_inbound {
-                        redact_request_body(format, fw, &mut json);
-                        true
-                    } else {
-                        false
-                    }
-                });
-                if redacted {
-                    serde_json::to_vec(&json).map(Bytes::from).unwrap_or(body)
+                let governed_prompt = if route == PassthroughRoute::MessageBatch {
+                    govern_message_batch(
+                        scanner.as_ref(),
+                        &policy,
+                        redact,
+                        governed,
+                        &mut json,
+                        &mut model,
+                    )
                 } else {
-                    body
+                    govern_prompt(
+                        format,
+                        scanner.as_ref(),
+                        &policy,
+                        redact,
+                        &mut json,
+                        &mut model,
+                    )
+                };
+                match governed_prompt {
+                    Ok(true) => serde_json::to_vec(&json).map(Bytes::from).unwrap_or(body),
+                    Ok(false) => body,
+                    Err(reason) => {
+                        return refuse_request(
+                            &state,
+                            format,
+                            &model,
+                            started,
+                            reason,
+                            (user_id, agent_id, feature),
+                        );
+                    }
                 }
             }
-            Err(_) if scan_inbound => {
+            // While any prompt policy applies, a body it cannot read is refused.
+            Err(_) if governed => {
                 return (
                     StatusCode::BAD_REQUEST,
                     "passthrough prompt must be valid JSON",
@@ -304,12 +525,29 @@ async fn forward(
     };
 
     // ── Forward upstream with the caller's OWN credentials unchanged ───────────
-    let mut req = passthrough_http_client()
-        .request(method.clone(), &url)
-        .body(forward_body);
+    let client = match passthrough_client_for(format).await {
+        Ok(client) => client,
+        Err(reason) => {
+            emit_audit(
+                &state,
+                format,
+                &model,
+                started.elapsed().as_millis() as u64,
+                Some(reason.to_owned()),
+                user_id.clone(),
+                agent_id.clone(),
+                feature.clone(),
+            );
+            return (StatusCode::SERVICE_UNAVAILABLE, reason).into_response();
+        }
+    };
+    let mut req = client.request(method.clone(), &url).body(forward_body);
     let mut req_headers = reqwest::header::HeaderMap::new();
     for (name, value) in &headers {
-        if STRIPPED_REQUEST_HEADERS.contains(&name.as_str()) {
+        // `x-ryu-*` headers are Gateway-local attribution and proof headers; the
+        // provider never needs them.
+        if STRIPPED_REQUEST_HEADERS.contains(&name.as_str()) || name.as_str().starts_with("x-ryu-")
+        {
             continue;
         }
         if let Ok(v) = reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
@@ -375,13 +613,13 @@ async fn forward(
             }
         }
     }
-    let scan_enabled = state.with_firewall(|fw| fw.config().enabled);
     let upstream_body = Body::from_stream(resp.bytes_stream());
-    let response_body = if scan_enabled {
+    let response_body = if scanner.config().enabled {
         redact_response_passthrough(
             upstream_body,
             format,
             state.clone(),
+            scanner,
             user_id,
             agent_id,
             feature,
@@ -391,6 +629,275 @@ async fn forward(
     };
     out.body(response_body)
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// Header a trusted forwarder uses to authenticate on the passthrough. The
+/// `Authorization` header already carries the user's subscription bearer, so the
+/// Gateway credential travels separately; it is stripped before forwarding.
+const GATEWAY_KEY_HEADER: &str = "x-ryu-gateway-key";
+
+/// Attribution recorded on passthrough audit rows.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PassthroughIdentity {
+    user_id: Option<String>,
+    agent_id: Option<String>,
+    feature: Option<String>,
+}
+
+impl PassthroughIdentity {
+    /// Honor `x-ryu-user-id` / `x-ryu-agent-id` / `x-ryu-feature` only when the
+    /// request also presents the master key or a `trusted_forwarder` API key in
+    /// [`GATEWAY_KEY_HEADER`]; otherwise record no identity. Loopback alone is not
+    /// an identity: any local process (or, under userspace mesh networking, a
+    /// tailnet peer) can reach this route.
+    fn from_headers(state: &SharedState, headers: &HeaderMap) -> Self {
+        let Some(key) = header_string(headers, GATEWAY_KEY_HEADER) else {
+            return Self::default();
+        };
+        let key = key.strip_prefix("Bearer ").unwrap_or(&key);
+        let trusted = state.with_auth(|auth| {
+            auth.master_key
+                .as_deref()
+                .is_some_and(|master| crate::pipeline::ct_eq(key, master))
+                || auth
+                    .api_keys
+                    .iter()
+                    .any(|entry| entry.trusted_forwarder && crate::pipeline::ct_eq(key, &entry.key))
+        });
+        if !trusted {
+            return Self::default();
+        }
+        Self {
+            user_id: header_string(headers, "x-ryu-user-id"),
+            agent_id: header_string(headers, "x-ryu-agent-id"),
+            feature: header_string(headers, "x-ryu-feature"),
+        }
+    }
+}
+
+/// Apply request-side DLP and locked guardrails to a parsed prompt body in place.
+///
+/// When `redact` is on, every prompt-bearing string is sanitized; the redacted
+/// text is then re-scanned, and a PII/secret match that survived redaction (for
+/// example a zero-width split the raw-text regexes miss) refuses the request
+/// rather than forwarding it. Control-plane locked guardrails are enforced on
+/// the outgoing text even when the local firewall is off, as on the chat path.
+/// Returns whether the body changed, or the refusal reason.
+fn inspect_request(
+    format: WireFormat,
+    scanner: &crate::firewall::FirewallScanner,
+    policy: &crate::policy::EffectivePolicy,
+    redact: bool,
+    body: &mut Value,
+) -> Result<bool, String> {
+    if !redact && policy.locked_guardrails.is_empty() {
+        return Ok(false);
+    }
+    let mut changed = false;
+    let mut outgoing = String::new();
+    visit_request_strings_mut(format, body, &mut |text| {
+        if redact {
+            let sanitized = FirewallBackend::sanitize(scanner, text);
+            if sanitized != *text {
+                *text = sanitized;
+                changed = true;
+            }
+        }
+        if !outgoing.is_empty() {
+            outgoing.push('\n');
+        }
+        outgoing.push_str(text);
+    });
+    if redact {
+        let config = scanner.config();
+        let mut categories: Vec<String> = Vec::with_capacity(2);
+        if config.redact_pii {
+            categories.push("pii".to_owned());
+        }
+        if config.redact_secrets {
+            categories.push("secrets".to_owned());
+        }
+        if let Some(survivor) = scanner.scan_locked_guardrails(&outgoing, &categories) {
+            return Err(format!(
+                "passthrough prompt content could not be redacted: {} ({:?})",
+                survivor.pattern_name, survivor.kind
+            ));
+        }
+    }
+    // Locked DLP categories (secrets, PII) scan every outgoing string. The
+    // content categories (prompt and code injection, toxicity, bias) scan only
+    // the conversation: the agent's own system prompt and tool definitions are
+    // agent-authored and would trip them on every turn (Claude Code's Bash tool
+    // text matches both the instruction-override and `$(cat …)` patterns).
+    let (dlp, content): (Vec<String>, Vec<String>) = policy
+        .locked_guardrails
+        .iter()
+        .cloned()
+        .partition(|name| crate::pipeline::is_dlp_guardrail(name));
+    let mut violation = scanner.scan_locked_guardrails(&outgoing, &dlp);
+    if violation.is_none() && !content.is_empty() {
+        let mut conversation = String::new();
+        visit_request_conversation_strings_mut(format, body, &mut |text| {
+            if !conversation.is_empty() {
+                conversation.push('\n');
+            }
+            conversation.push_str(text);
+        });
+        violation = scanner.scan_locked_guardrails(&conversation, &content);
+    }
+    if let Some(violation) = violation {
+        return Err(format!(
+            "passthrough prompt violates a locked guardrail: {} ({:?})",
+            violation.pattern_name, violation.kind
+        ));
+    }
+    Ok(changed)
+}
+
+/// Apply the model allowlist and [`inspect_request`] to one native prompt body.
+/// A prompt that names no model is refused while the policy restricts models
+/// (or is unavailable), so omitting `model` cannot skip the allowlist.
+/// Records the first model seen in `model` for the audit row.
+fn govern_prompt(
+    format: WireFormat,
+    scanner: &crate::firewall::FirewallScanner,
+    policy: &crate::policy::EffectivePolicy,
+    redact: bool,
+    prompt: &mut Value,
+    model: &mut String,
+) -> Result<bool, String> {
+    match prompt.get("model").and_then(Value::as_str) {
+        Some(requested) => {
+            if *model == "unknown" {
+                *model = requested.to_owned();
+            }
+            if !policy.allows_model(requested) {
+                return Err(format!(
+                    "Model '{requested}' is not approved by control-plane policy"
+                ));
+            }
+        }
+        None if !policy.available || !policy.approved_models.is_empty() => {
+            return Err(
+                "passthrough prompt names no model and control-plane policy restricts models"
+                    .to_owned(),
+            );
+        }
+        None => {}
+    }
+    inspect_request(format, scanner, policy, redact, prompt)
+}
+
+/// Govern an Anthropic Message Batches create body: every `requests[].params`
+/// is a Messages request and gets the same model allowlist and DLP as
+/// `v1/messages`. While any prompt policy is in force, a body that is not a
+/// `requests` array of objects with `params` cannot be evaluated and is refused.
+fn govern_message_batch(
+    scanner: &crate::firewall::FirewallScanner,
+    policy: &crate::policy::EffectivePolicy,
+    redact: bool,
+    governed: bool,
+    body: &mut Value,
+    model: &mut String,
+) -> Result<bool, String> {
+    const MALFORMED: &str =
+        "passthrough message batch must be a `requests` array of objects with `params`";
+    let Some(requests) = body.get_mut("requests").and_then(Value::as_array_mut) else {
+        return if governed {
+            Err(MALFORMED.to_owned())
+        } else {
+            Ok(false)
+        };
+    };
+    let mut changed = false;
+    for request in requests {
+        match request
+            .get_mut("params")
+            .filter(|params| params.is_object())
+        {
+            Some(params) => {
+                changed |= govern_prompt(
+                    WireFormat::Anthropic,
+                    scanner,
+                    policy,
+                    redact,
+                    params,
+                    model,
+                )?;
+            }
+            None if governed => return Err(MALFORMED.to_owned()),
+            None => {}
+        }
+    }
+    Ok(changed)
+}
+
+/// The control-plane provider id a passthrough wire format reaches upstream.
+fn upstream_provider_id(format: WireFormat) -> &'static str {
+    match format {
+        WireFormat::Anthropic => "anthropic",
+        WireFormat::OpenAiResponses => "openai",
+    }
+}
+
+/// The policy that governs one passthrough request: the node's effective
+/// policy, narrowed by the caller's own rules when a trusted credential vouched
+/// for an end-user id (as the chat path narrows `resolved_policy`). Unresolved
+/// caller rules yield an unavailable policy, which denies.
+async fn passthrough_policy(
+    state: &SharedState,
+    user_id: Option<&str>,
+) -> crate::policy::EffectivePolicy {
+    let base = state.policy_snapshot();
+    let (Some(cache), Some(user_id)) = (state.user_policy.as_ref(), user_id) else {
+        return base;
+    };
+    let Some(token) = cache.static_key() else {
+        return base;
+    };
+    let rules = cache.rules_for(token, user_id).await;
+    crate::policy::policy_for_caller(&base, rules.as_deref())
+}
+
+/// Refuse the request unless the policy approves the fixed upstream provider
+/// and its data region. The passthrough upstreams carry no verified region
+/// metadata, so any `allowed_regions` restriction denies them (fail closed).
+fn authorize_upstream(
+    format: WireFormat,
+    policy: &crate::policy::EffectivePolicy,
+) -> Result<(), String> {
+    let provider = upstream_provider_id(format);
+    if policy.allows_provider(provider) && policy.allows_region(None) {
+        return Ok(());
+    }
+    Err(format!(
+        "Provider '{provider}' is not authorized for the control-plane provider or region policy"
+    ))
+}
+
+/// Refuse a passthrough request before it is forwarded: audit the refusal and
+/// return 403 with the reason.
+fn refuse_request(
+    state: &SharedState,
+    format: WireFormat,
+    model: &str,
+    started: std::time::Instant,
+    reason: String,
+    (user_id, agent_id, feature): (Option<String>, Option<String>, Option<String>),
+) -> Response {
+    warn!(provider = provider_label(format), %reason, "passthrough: request refused");
+    state.metrics.inc_firewall_blocked();
+    emit_audit(
+        state,
+        format,
+        model,
+        started.elapsed().as_millis() as u64,
+        Some(reason.clone()),
+        user_id,
+        agent_id,
+        feature,
+    );
+    (StatusCode::FORBIDDEN, reason).into_response()
 }
 
 /// Read an optional non-empty header value as an owned string. Mirrors the
@@ -424,6 +931,7 @@ fn emit_audit(
     feature: Option<String>,
 ) {
     state.log_audit(AuditRecord {
+        key_id: None,
         request_id: format!(
             "pt-{}-{}",
             provider_label(format),
@@ -433,12 +941,19 @@ fn emit_audit(
         user_name: None,
         org_id: None,
         team_id: None,
+        team_ids: None,
         project_id: None,
         provider: provider_label(format).to_string(),
         model: model.to_string(),
         input_tokens: 0,
         output_tokens: 0,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
         cache_hit: false,
+        prompt_cache_outcome: None,
+        prompt_cache_read_tokens: None,
+        prompt_cache_write_tokens: None,
+        cache_write_1h_tokens: None,
         latency_ms,
         eval_score: None,
         error,
@@ -447,6 +962,7 @@ fn emit_audit(
         user_id,
         agent_id,
         feature,
+        purpose: None,
         managed_inference: false,
         provider_cost_micro_usd: None,
         event_type: crate::audit::EventType::ModelCall,
@@ -468,6 +984,9 @@ const MAX_REDACT_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 struct ResponseRedactState {
     inner: axum::body::BodyDataStream,
     state: SharedState,
+    /// The request's resolved scanner, so response redaction applies the same
+    /// overlays as the request side.
+    scanner: std::sync::Arc<crate::firewall::FirewallScanner>,
     format: WireFormat,
     /// Raw response bytes held until the single contiguous DLP pass. Holding a
     /// bounded response is deliberate: per-delta redaction can miss a secret
@@ -490,6 +1009,7 @@ fn redact_response_passthrough(
     body: Body,
     format: WireFormat,
     state: SharedState,
+    scanner: std::sync::Arc<crate::firewall::FirewallScanner>,
     user_id: Option<String>,
     agent_id: Option<String>,
     feature: Option<String>,
@@ -499,6 +1019,7 @@ fn redact_response_passthrough(
     let init = ResponseRedactState {
         inner: body.into_data_stream(),
         state,
+        scanner,
         format,
         raw: Vec::new(),
         flushed: false,
@@ -535,17 +1056,16 @@ fn redact_response_passthrough(
                     }
                     s.flushed = true;
                     let raw = String::from_utf8_lossy(&s.raw).to_string();
+                    let scanner = s.scanner.as_ref();
                     let (redacted, audit_text) = if raw.contains("data:") {
-                        s.state
-                            .with_firewall(|fw| redact_sse_stream(s.format, fw, &raw))
+                        redact_sse_stream(s.format, scanner, &raw)
                     } else {
-                        s.state.with_firewall(|fw| {
-                            let (redacted, _) = fw.redact_outbound(&raw);
-                            (redacted.clone(), redacted)
-                        })
+                        let (redacted, _) = FirewallBackend::redact_outbound(scanner, &raw);
+                        (redacted.clone(), redacted)
                     };
                     audit_outbound(
                         &s.state,
+                        scanner,
                         s.format,
                         &audit_text,
                         s.user_id.clone(),
@@ -569,6 +1089,7 @@ fn redact_response_passthrough(
 /// per-delta redaction (e.g. split across two deltas — the known limitation).
 fn audit_outbound(
     state: &SharedState,
+    scanner: &crate::firewall::FirewallScanner,
     format: WireFormat,
     text: &str,
     user_id: Option<String>,
@@ -578,7 +1099,7 @@ fn audit_outbound(
     if text.is_empty() {
         return;
     }
-    if let Some(violation) = state.with_firewall(|fw| fw.scan_outbound(text)) {
+    if let Some(violation) = scanner.scan_outbound(text) {
         warn!(
             provider = provider_label(format),
             pattern = %violation.pattern_name,
@@ -601,293 +1122,7 @@ fn audit_outbound(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::{FirewallConfig, FirewallPolicy};
-    use crate::firewall::FirewallScanner;
-    use ryu_gw_passthrough::{drain_complete_events, redact_sse_event};
-    // Request-body redactors are consumed only by these tests (the non-test path
-    // calls `redact_request_body`); import them test-locally to avoid an unused
-    // import in the non-test build.
-    use ryu_gw_passthrough::{redact_anthropic_body, redact_responses_body};
-
-    #[tokio::test]
-    async fn credential_client_does_not_follow_redirects() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let app = axum::Router::new()
-            .route(
-                "/start",
-                axum::routing::post(|| async {
-                    axum::response::Redirect::temporary("/credential-sink")
-                }),
-            )
-            .route(
-                "/credential-sink",
-                axum::routing::post(|| async { "leaked" }),
-            );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let response = passthrough_http_client()
-            .post(format!("http://{address}/start"))
-            .header("x-api-key", "test-secret")
-            .body("private prompt")
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
-        assert_eq!(response.url().path(), "/start");
-        server.abort();
-    }
-
-    #[tokio::test]
-    async fn inbound_scanning_refuses_uninspectable_prompts_before_forwarding() {
-        let mut state = crate::state::AppState::new_for_test_default();
-        state.firewall = crate::firewall::FirewallRegistry::new(FirewallConfig {
-            enabled: true,
-            scan_inbound: true,
-            ..FirewallConfig::default()
-        });
-        let state = std::sync::Arc::new(state);
-        for (encoding, body, expected) in [
-            (None, "not-json", StatusCode::BAD_REQUEST),
-            (Some("gzip"), "{}", StatusCode::UNSUPPORTED_MEDIA_TYPE),
-        ] {
-            let mut headers = HeaderMap::new();
-            if let Some(encoding) = encoding {
-                headers.insert("content-encoding", encoding.parse().unwrap());
-            }
-            let response = forward(
-                WireFormat::Anthropic,
-                "http://127.0.0.1:1",
-                true,
-                state.clone(),
-                "127.0.0.1:10000".parse().unwrap(),
-                "v1/messages".into(),
-                Method::POST,
-                headers,
-                axum::extract::RawQuery(None),
-                Bytes::from(body),
-            )
-            .await;
-            assert_eq!(response.status(), expected);
-        }
-    }
-
-    fn enabled_scanner() -> FirewallScanner {
-        FirewallScanner::new(FirewallConfig {
-            enabled: true,
-            scan_inbound: true,
-            policy: FirewallPolicy::Sanitize,
-            redact_pii: true,
-            redact_secrets: true,
-            ..FirewallConfig::default()
-        })
-    }
-
-    #[test]
-    fn redacts_string_content_and_system() {
-        let fw = enabled_scanner();
-        let mut body = serde_json::json!({
-            "model": "claude-opus-4-8",
-            "system": "Reach me at admin@example.com",
-            "messages": [
-                { "role": "user", "content": "my key is sk-abcdefghijklmnopqrstuvwx" }
-            ]
-        });
-        redact_anthropic_body(&fw, &mut body);
-        assert!(!body["system"]
-            .as_str()
-            .unwrap()
-            .contains("admin@example.com"));
-        assert!(!body["messages"][0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("sk-abcdefghijklmnopqrstuvwx"));
-    }
-
-    #[test]
-    fn redacts_content_block_array() {
-        let fw = enabled_scanner();
-        let mut body = serde_json::json!({
-            "messages": [
-                { "role": "user", "content": [
-                    { "type": "text", "text": "ssn 123-45-6789 here" }
-                ]}
-            ]
-        });
-        redact_anthropic_body(&fw, &mut body);
-        let text = body["messages"][0]["content"][0]["text"].as_str().unwrap();
-        assert!(!text.contains("123-45-6789"), "got: {text}");
-    }
-
-    // ── Codex (OpenAI Responses) passthrough (#455) ──────────────────────────
-
-    #[test]
-    fn redacts_responses_instructions_and_input_string() {
-        let fw = enabled_scanner();
-        let mut body = serde_json::json!({
-            "model": "gpt-5.5-codex",
-            "instructions": "Email admin@example.com if stuck",
-            "input": "my key is sk-abcdefghijklmnopqrstuvwx"
-        });
-        redact_responses_body(&fw, &mut body);
-        assert!(!body["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("admin@example.com"));
-        assert!(!body["input"]
-            .as_str()
-            .unwrap()
-            .contains("sk-abcdefghijklmnopqrstuvwx"));
-    }
-
-    #[test]
-    fn redacts_responses_input_item_array() {
-        let fw = enabled_scanner();
-        let mut body = serde_json::json!({
-            "input": [
-                { "role": "user", "content": [
-                    { "type": "input_text", "text": "ssn 123-45-6789 here" }
-                ]}
-            ]
-        });
-        redact_responses_body(&fw, &mut body);
-        let text = body["input"][0]["content"][0]["text"].as_str().unwrap();
-        assert!(!text.contains("123-45-6789"), "got: {text}");
-    }
-
-    // ── Response-side streaming redaction (#455) ──────────────────────────────
-
-    /// Feed `raw` through the redactor one chunk at a time (mimicking arbitrary
-    /// network-chunk boundaries, including a split mid-event) and return the full
-    /// emitted output, asserting nothing is dropped and framing is reassembled.
-    fn redact_in_chunks(
-        format: WireFormat,
-        fw: &FirewallScanner,
-        raw: &[u8],
-        chunk: usize,
-    ) -> String {
-        let mut pending: Vec<u8> = Vec::new();
-        let mut out: Vec<u8> = Vec::new();
-        for piece in raw.chunks(chunk) {
-            pending.extend_from_slice(piece);
-            let (emitted, _) = drain_complete_events(format, fw, &mut pending);
-            out.extend_from_slice(&emitted);
-        }
-        // Flush any trailing partial event at stream end.
-        if !pending.is_empty() {
-            let tail = String::from_utf8_lossy(&pending).to_string();
-            let (emitted, _) = redact_sse_event(format, fw, &tail);
-            out.extend_from_slice(emitted.as_bytes());
-        }
-        String::from_utf8(out).unwrap()
-    }
-
-    #[test]
-    fn anthropic_response_redacts_secret_in_text_delta() {
-        let fw = enabled_scanner();
-        let transcript = concat!(
-            "event: message_start\n",
-            "data: {\"type\":\"message_start\"}\n\n",
-            "event: content_block_delta\n",
-            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"my key is sk-abcdefghijklmnopqrstuvwx ok\"}}\n\n",
-            "event: message_stop\n",
-            "data: {\"type\":\"message_stop\"}\n\n",
-        );
-        // Split the transcript into small chunks so events span chunk boundaries.
-        let out = redact_in_chunks(WireFormat::Anthropic, &fw, transcript.as_bytes(), 7);
-        assert!(
-            !out.contains("sk-abcdefghijklmnopqrstuvwx"),
-            "secret should be redacted, got: {out}"
-        );
-        assert!(
-            out.contains("[REDACTED:"),
-            "expected a redaction marker: {out}"
-        );
-        // Non-text events pass through verbatim, framing preserved.
-        assert!(out.contains("\"type\":\"message_start\""));
-        assert!(out.contains("event: content_block_delta\n"));
-    }
-
-    #[test]
-    fn responses_response_redacts_secret_in_text_delta() {
-        let fw = enabled_scanner();
-        let transcript = concat!(
-            "data: {\"type\":\"response.created\"}\n\n",
-            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"here sk-abcdefghijklmnopqrstuvwx done\"}\n\n",
-            "data: {\"type\":\"response.completed\"}\n\n",
-            "data: [DONE]\n\n",
-        );
-        let out = redact_in_chunks(WireFormat::OpenAiResponses, &fw, transcript.as_bytes(), 5);
-        assert!(
-            !out.contains("sk-abcdefghijklmnopqrstuvwx"),
-            "secret should be redacted, got: {out}"
-        );
-        assert!(
-            out.contains("[REDACTED:"),
-            "expected a redaction marker: {out}"
-        );
-        // Sentinel and non-text events untouched.
-        assert!(out.contains("[DONE]"));
-        assert!(out.contains("\"type\":\"response.created\""));
-    }
-
-    #[test]
-    fn non_text_events_pass_through_unchanged() {
-        let fw = enabled_scanner();
-        // A ping + a non-text-delta event: must be byte-identical after redaction.
-        let transcript =
-            "event: ping\ndata: {\"type\":\"ping\"}\n\ndata: {\"type\":\"response.created\"}\n\n";
-        let out = redact_in_chunks(WireFormat::Anthropic, &fw, transcript.as_bytes(), 3);
-        assert_eq!(out, transcript);
-    }
-
-    #[test]
-    fn unparseable_data_line_passes_through() {
-        let fw = enabled_scanner();
-        let event = "data: not-json-at-all\n\n";
-        let (out, text) = redact_sse_event(WireFormat::Anthropic, &fw, event);
-        assert_eq!(out, event);
-        assert!(text.is_empty());
-    }
-
-    /// OUTBOUND-DLP wiring proof: a GitHub OAuth PAT (`gho_…`) inside an
-    /// Anthropic `text_delta` survives a small network-chunk split and is redacted
-    /// by `redact_outbound`. `gho_` is deliberately chosen because the config-gated
-    /// `sanitize` secret set does NOT match it — only the new outbound rule does —
-    /// so a passing assertion proves the wiring, not pre-existing behavior.
-    #[test]
-    fn anthropic_response_redacts_outbound_only_secret_across_chunks() {
-        let fw = enabled_scanner();
-        let secret = "gho_abcdefghijklmnopqrstuvwxyz0123456789";
-        let transcript = format!(
-            concat!(
-                "event: content_block_delta\n",
-                "data: {{\"type\":\"content_block_delta\",\"delta\":{{\"type\":\"text_delta\",\"text\":\"here is {} done\"}}}}\n\n",
-            ),
-            secret
-        );
-        let out = redact_in_chunks(WireFormat::Anthropic, &fw, transcript.as_bytes(), 7);
-        assert!(
-            !out.contains(secret),
-            "outbound-only secret must be redacted, got: {out}"
-        );
-        assert!(
-            out.contains("[REDACTED:gh_pat]"),
-            "expected stable outbound marker: {out}"
-        );
-    }
-
-    #[test]
-    fn codex_upstream_is_swappable() {
-        std::env::set_var(
-            "RYU_PASSTHROUGH_CODEX_UPSTREAM",
-            "http://test-upstream.local",
-        );
-        assert_eq!(codex_upstream(), "http://test-upstream.local");
-        std::env::remove_var("RYU_PASSTHROUGH_CODEX_UPSTREAM");
-    }
-}
+mod tests;
 
 // ─── Swappable passthrough proxy backend (W6c decomposition) ─────────────────
 
@@ -906,7 +1141,7 @@ pub(crate) trait PassthroughBackend: Send + Sync {
         &self,
         format: WireFormat,
         upstream_base: String,
-        redact_body: bool,
+        route: PassthroughRoute,
         state: SharedState,
         peer: SocketAddr,
         path: String,
@@ -927,7 +1162,7 @@ impl PassthroughBackend for BuiltinPassthrough {
         &self,
         format: WireFormat,
         upstream_base: String,
-        redact_body: bool,
+        route: PassthroughRoute,
         state: SharedState,
         peer: SocketAddr,
         path: String,
@@ -939,7 +1174,7 @@ impl PassthroughBackend for BuiltinPassthrough {
         forward(
             format,
             &upstream_base,
-            redact_body,
+            route,
             state,
             peer,
             path,
@@ -1060,57 +1295,4 @@ impl Default for PassthroughRegistry {
 }
 
 #[cfg(test)]
-mod passthrough_registry_tests {
-    use super::*;
-
-    /// A stub backend answering with a fixed sentinel response — proof the registry
-    /// dispatches to a swapped-in impl.
-    struct StubPassthrough;
-    #[async_trait::async_trait]
-    impl PassthroughBackend for StubPassthrough {
-        async fn forward(
-            &self,
-            _format: WireFormat,
-            _upstream_base: String,
-            _redact_body: bool,
-            _state: SharedState,
-            _peer: SocketAddr,
-            _path: String,
-            _method: Method,
-            _headers: HeaderMap,
-            _raw_query: axum::extract::RawQuery,
-            _body: Bytes,
-        ) -> Response {
-            (StatusCode::IM_A_TEAPOT, "stub").into_response()
-        }
-    }
-
-    #[test]
-    fn builtin_is_the_default_active_backend() {
-        let reg = PassthroughRegistry::new();
-        assert_eq!(reg.active_id(), PassthroughRegistry::BUILTIN);
-        assert_eq!(
-            reg.available(),
-            vec![PassthroughRegistry::BUILTIN.to_string()]
-        );
-    }
-
-    #[test]
-    fn register_then_set_active_swaps_the_live_backend() {
-        let reg = PassthroughRegistry::new();
-        reg.register(
-            "stub",
-            std::sync::Arc::new(StubPassthrough) as std::sync::Arc<dyn PassthroughBackend>,
-        );
-        // Registered but not active: built-in is still the active id.
-        assert_eq!(reg.active_id(), PassthroughRegistry::BUILTIN);
-        assert_eq!(reg.available().len(), 2);
-
-        assert!(reg.set_active("stub"));
-        assert_eq!(reg.active_id(), "stub");
-
-        // Unknown id is a no-op keeping the current active backend.
-        assert!(!reg.set_active("nope"));
-        assert_eq!(reg.active_id(), "stub");
-    }
-}
+mod passthrough_registry_tests;

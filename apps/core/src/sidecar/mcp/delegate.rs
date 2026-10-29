@@ -27,13 +27,19 @@
 //! agent allowlist the tool is offered directly, so an agent can delegate with **no
 //! configuration** — the "automatic by default" behavior.
 //!
-//! # Defaulting to a real agent
+//! # Read-only by construction
 //!
-//! Each task may name an `agent_id`; when omitted it routes to the node's default
-//! agent ([`crate::registry::DEFAULT_AGENT_ID`]) rather than a bare LLM call, so a
-//! delegated subtask runs as a *real* agent with its own tools, gateway routing,
-//! and persona. (The engine's `PermissionPreset` only governs the bare-LLM path and
-//! is therefore not exposed on this tool.)
+//! Each task may name an `agent_id`; when omitted it is filled with the node's
+//! default agent ([`crate::registry::DEFAULT_AGENT_ID`]). The tool does not expose
+//! the engine's `PermissionPreset`, so every task carries the default
+//! [`PermissionPreset::CodeRead`]. The engine only enters a registered agent's full
+//! tool loop for a `CodeWrite` delegate (`should_use_registered_agent`), so every
+//! `delegate.fanout` task runs as a single clean-context Gateway completion under
+//! the `code_read` preset, whatever `agent_id` it names. This is deliberate: the
+//! tool is offered with no configuration, and routing to a registered agent would
+//! hand the delegate that agent's (possibly write/exec) tools. Callers that need a
+//! tool-executing delegate use the `AgentDelegate` workflow node or
+//! `POST /api/delegate/stream` with an explicit `code_write` preset.
 //!
 //! # Inline "dynamic subagents"
 //!
@@ -45,9 +51,8 @@
 //! every call still routes through the Gateway firewall/DLP/budget/audit. Because
 //! there is no tool loop, an inline sub-agent's `tools` are advisory prompt text
 //! only — it cannot *execute* them. When a `system_prompt` is present, `agent_id`
-//! is ignored (uniformly, at every entry point). Use `agent_id` for a
-//! tool-executing specialist; use `system_prompt` to spin up a purpose-built
-//! reasoner for one task with zero setup.
+//! is ignored (uniformly, at every entry point). Use `system_prompt` to spin up a
+//! purpose-built reasoner for one task with zero setup.
 //!
 //! # Bounding fan-out
 //!
@@ -96,10 +101,10 @@ fn fanout_schema() -> Value {
                     "type": "object",
                     "properties": {
                         "task": { "type": "string", "description": "The self-contained instruction for one sub-agent. Include everything it needs; it cannot see this conversation." },
-                        "agent_id": { "type": "string", "description": "Existing agent to run this subtask (omit to use the node's default agent). Ignored when system_prompt is set." },
+                        "agent_id": { "type": "string", "description": "Existing agent to name for this subtask (omit to use the node's default agent). Every fanout subtask runs read-only as a single clean-context completion; the agent's tools are not executed. Ignored when system_prompt is set." },
                         "system_prompt": { "type": "string", "description": "Define a sub-agent inline (a 'dynamic subagent'): its role and instructions. When set, this subtask runs as a fresh clean-context agent with these instructions — no pre-registered agent needed — and agent_id is ignored. Use this to spin up a purpose-built specialist for one task." },
                         "model": { "type": "string", "description": "Optional model for an inline sub-agent (only used together with system_prompt)." },
-                        "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names listed in an inline sub-agent's prompt for awareness ONLY (used with system_prompt). An inline sub-agent runs as a single completion and cannot execute tools — use agent_id for a tool-executing specialist." }
+                        "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names listed in an inline sub-agent's prompt for awareness ONLY (used with system_prompt). An inline sub-agent runs as a single completion and cannot execute tools." }
                     },
                     "required": ["task"]
                 }
@@ -140,7 +145,9 @@ pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
     }
 }
 
-async fn fanout(arguments: Value) -> Result<Value> {
+/// Parse the `tasks` array into delegate specs. Every spec carries the read-only
+/// default preset (see the module docs, "Read-only by construction").
+fn build_specs(arguments: &Value) -> Result<Vec<DelegateSpec>> {
     let raw_tasks = arguments
         .get("tasks")
         .and_then(Value::as_array)
@@ -158,8 +165,9 @@ async fn fanout(arguments: Value) -> Result<Value> {
             .ok_or_else(|| anyhow::anyhow!("tasks[{i}].task must be a non-empty string"))?;
         // An inline `system_prompt` defines an ephemeral "dynamic subagent": the
         // subtask runs as a fresh, clean-context agent authored right here (routed
-        // through the Gateway), with no registered agent_id. Otherwise default the
-        // delegate to a real agent so it has tools/governance, not a bare LLM call.
+        // through the Gateway), with no registered agent_id. Otherwise the task
+        // carries an agent_id, but under the code_read preset below it still runs
+        // as a clean-context Gateway completion, never the agent's tool loop.
         let inline = item
             .get("system_prompt")
             .and_then(Value::as_str)
@@ -192,7 +200,7 @@ async fn fanout(arguments: Value) -> Result<Value> {
             });
 
         // An inline sub-agent takes the clean-context Gateway path (no registered
-        // agent_id); otherwise route to a real agent (explicit empty/whitespace
+        // agent_id); otherwise record the named agent (explicit empty/whitespace
         // agent_id falls back to the node's default).
         let agent_id = if inline.is_some() {
             None
@@ -210,12 +218,19 @@ async fn fanout(arguments: Value) -> Result<Value> {
             id: format!("d{i}"),
             task: task.to_owned(),
             agent_id,
-            // Preset only governs the bare-LLM path (no agent_id, no inline). Kept
-            // at the safe default; inline defs supply their own system prompt.
+            // Always the read-only default. The engine runs a registered agent's
+            // tool loop only for a code_write delegate, so this keeps every
+            // fan-out task on the clean completion path. Exposing or raising it
+            // would grant the named agent's full tool set; do not do so silently.
             preset: PermissionPreset::default(),
             inline,
         });
     }
+    Ok(specs)
+}
+
+async fn fanout(arguments: Value) -> Result<Value> {
+    let specs = build_specs(&arguments)?;
 
     let mut caps = DelegationCaps::default();
     if let Some(n) = arguments.get("max_concurrent").and_then(Value::as_u64) {
@@ -234,6 +249,10 @@ async fn fanout(arguments: Value) -> Result<Value> {
 
     // Depth 1: these are top-level delegates. The engine's depth cap still guards
     // the per-fan-out tree; the global semaphore above bounds re-entrancy.
+    //
+    // No child Box: a fan-out task is a read-only completion, and the engine
+    // binds a delegate's conversation to a child Box only on the registered-agent
+    // path, which needs a write preset.
     let results = delegation::run_fanout(specs, caps, 1, None)
         .await
         .map_err(|e| anyhow::anyhow!("delegation fan-out failed: {e}"))?;
@@ -241,16 +260,19 @@ async fn fanout(arguments: Value) -> Result<Value> {
     let tasks_out: Vec<Value> = results
         .into_iter()
         .enumerate()
-        .map(|(i, r)| {
-            json!({
-                "index": i,
-                "output": r.output,
-                "error": r.error,
-            })
-        })
+        .map(|(i, r)| delegate_result(i, r))
         .collect();
     let count = tasks_out.len();
     Ok(json!({ "ok": true, "results": tasks_out, "count": count }))
+}
+
+/// One delegate's entry in the fan-out result.
+fn delegate_result(index: usize, result: delegation::DelegateResult) -> Value {
+    json!({
+        "index": index,
+        "output": result.output,
+        "error": result.error,
+    })
 }
 
 #[cfg(test)]
@@ -278,6 +300,32 @@ mod tests {
             .await
             .expect_err("blank task must be rejected");
         assert!(err.to_string().contains("non-empty string"));
+    }
+
+    #[test]
+    fn fanout_specs_stay_read_only_even_when_naming_an_agent() {
+        // The engine only runs a registered agent's tool loop for a mutation-capable
+        // preset, so every fanout spec must carry a non-mutating preset regardless
+        // of the agent it names. Raising this would grant that agent's tools.
+        let specs = build_specs(&json!({
+            "tasks": [
+                { "task": "a", "agent_id": "write-capable-agent" },
+                { "task": "b" },
+                { "task": "c", "system_prompt": "You are a critic." }
+            ]
+        }))
+        .expect("valid tasks");
+        assert_eq!(specs.len(), 3);
+        assert_eq!(specs[0].agent_id.as_deref(), Some("write-capable-agent"));
+        assert_eq!(
+            specs[1].agent_id.as_deref(),
+            Some(crate::registry::DEFAULT_AGENT_ID)
+        );
+        assert!(specs[2].agent_id.is_none() && specs[2].inline.is_some());
+        for spec in &specs {
+            assert_eq!(spec.preset, PermissionPreset::CodeRead);
+            assert!(!spec.preset.allows_mutation());
+        }
     }
 
     #[tokio::test]

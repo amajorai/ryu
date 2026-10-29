@@ -15,6 +15,7 @@
   "privacyPolicyUrl": "https://ryuhq.com/privacy",
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "icon": "mic-01",
+  "iconDither": { "from": 318, "to": "transparent", "direction": "down" },
   "tags": ["memory", "audio", "transcription", "recaps", "rewind"],
   "keywords": ["life recorder", "conversations", "shadow", "rewind", "recaps"],
   "engines": {

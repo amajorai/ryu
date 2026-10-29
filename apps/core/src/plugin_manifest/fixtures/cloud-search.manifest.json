@@ -1,0 +1,70 @@
+{
+  "id": "@ryu/cloud-search",
+  "name": "Ryu Cloud Search",
+  "version": "1.0.0",
+  "description": "Web search through Ryu Cloud's hosted search service, exposed as the swappable `web.search` layer. Selecting it re-points the stable `web.search` tool at Ryu Cloud without changing what agents call. No search provider key is needed: Core forwards each query to the hosted Gateway with this node's Ryu Cloud credential, and each successful search is billed to the organization's credit balance as Web search usage. Requires a node connected to Ryu Cloud with managed inference; an organization admin can turn hosted search off. When it is unavailable the tool returns a readable reason instead of failing the turn.",
+  "tagline": "Web search billed to your Ryu Cloud credits",
+  "keywords": ["search", "web", "cloud"],
+  "category": "Search",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "tool-cloud-search",
+      "name": "Ryu Cloud Search",
+      "kind": "tool",
+      "config": {
+        "slug": "cloudsearch.search",
+        "backend": "http",
+        "method": "POST",
+        "url": "core:/api/cloud/web-search",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Search the public web through Ryu Cloud's hosted search. Returns up to 10 results with title, URL and a snippet. Each successful search is billed to the organization's Ryu Cloud credits. Returns `available: false` with a reason when this node is not connected to Ryu Cloud, the organization turned hosted search off, or credits are exhausted.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "What to search for, up to 400 characters."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of results.",
+              "minimum": 1,
+              "maximum": 10
+            }
+          },
+          "required": ["query"]
+        }
+      }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "web.search",
+      "version": "1.0.0",
+      "title": "Search",
+      "selectable": true,
+      "tools": {
+        "web.search": {
+          "tool": "cloudsearch.search",
+          "response": {
+            "results": "results",
+            "fields": {
+              "title": "title",
+              "url": "url",
+              "snippet": "snippet",
+              "score": "score"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:127.0.0.1"]
+}

@@ -33,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "chat-surface-parity-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

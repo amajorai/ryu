@@ -20,7 +20,7 @@ describe("formatPrice", () => {
 
 	test("returns a non-empty string for a non-usd currency code", () => {
 		const eur = formatPrice(2000, "eur");
-		expect(typeof eur).toBe("string");
+		expect(eur.length).toBeGreaterThan(0);
 		expect(eur).toContain("20.00");
 	});
 

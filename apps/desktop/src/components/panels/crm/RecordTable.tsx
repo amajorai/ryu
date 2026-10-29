@@ -1,3 +1,4 @@
+import type { ValueBag } from "@/src/lib/api/crm.ts";
 // The record grid — the surface people judge a CRM by.
 //
 // Renders one saved view over one object: the view decides which fields are
@@ -12,9 +13,10 @@
 
 import { Alert01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Skeleton } from "@ryu/ui/components/skeleton";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import {
 	Table,
 	TableBody,
@@ -22,9 +24,9 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-} from "@ryu/ui/components/table";
+} from "@ryu/ui/components/table.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	FieldEditor,
@@ -67,6 +69,7 @@ export function RecordTable({
 	subject: ObjectWithFields;
 	view: View | undefined;
 }) {
+	const tl = useLiteralMessages();
 	const [records, setRecords] = useState<CrmRecord[]>([]);
 	const [total, setTotal] = useState(0);
 	const [hasMore, setHasMore] = useState(false);
@@ -76,6 +79,7 @@ export function RecordTable({
 	const [editing, setEditing] = useState<CellAddress | null>(null);
 	const [sorts, setSorts] = useState<ViewSort[]>(view?.sorts ?? []);
 	const [offset, setOffset] = useState(0);
+	const slug = subject.object.slug;
 
 	// A view switch is a different query, so both the sort override and the page
 	// reset with it — carrying either across would show page 3 of a view the user
@@ -85,7 +89,16 @@ export function RecordTable({
 		setOffset(0);
 		setSelected(new Set());
 		setEditing(null);
-	}, [view?.sorts]);
+	}, [slug, view?.id, view?.sorts]);
+
+	useEffect(() => {
+		setOffset(0);
+	}, [search]);
+
+	useEffect(() => {
+		setSelected(new Set());
+		setEditing(null);
+	}, [offset, search, sorts]);
 
 	const columns = useMemo(() => {
 		const visible = view?.visible_field_ids ?? [];
@@ -103,8 +116,6 @@ export function RecordTable({
 		() => subject.fields.find((f) => f.id === subject.object.title_field_id),
 		[subject.fields, subject.object.title_field_id]
 	);
-
-	const slug = subject.object.slug;
 
 	const load = useCallback(
 		(signal?: AbortSignal) => {
@@ -124,7 +135,7 @@ export function RecordTable({
 					setTotal(page.total);
 					setHasMore(page.has_more);
 				})
-				.catch((cause: unknown) => {
+				.catch((cause) => {
 					if (signal?.aborted) {
 						return;
 					}
@@ -158,7 +169,11 @@ export function RecordTable({
 	// Optimistic: paint the new value, send the merge, and put the old value back
 	// if the store rejects it. The store validates per field type, so a rejection
 	// here is a real answer ("that is not a valid email"), not a transport error.
-	const commitCell = async (record: CrmRecord, field: Field, next: unknown) => {
+	const commitCell = async (
+		record: CrmRecord,
+		field: Field,
+		next: ValueBag[string]
+	) => {
 		setEditing(null);
 		const previous = record.values?.[field.slug];
 		if (previous === next) {
@@ -178,6 +193,7 @@ export function RecordTable({
 			setRecords((current) =>
 				current.map((row) => (row.id === record.id ? updated : row))
 			);
+			setError(null);
 		} catch (cause) {
 			setRecords((current) =>
 				current.map((row) =>
@@ -199,13 +215,21 @@ export function RecordTable({
 
 	const deleteSelected = async () => {
 		const ids = [...selected];
-		setSelected(new Set());
-		try {
-			await Promise.all(ids.map((id) => client.deleteRecord(id)));
-		} catch (cause) {
+		const results = await Promise.allSettled(
+			ids.map((id) => client.deleteRecord(id))
+		);
+		const failedIds = ids.filter(
+			(_, index) => results[index]?.status === "rejected"
+		);
+		setSelected(new Set(failedIds));
+		await load();
+		const failure = results.find(
+			(result): result is PromiseRejectedResult => result.status === "rejected"
+		);
+		if (failure) {
+			const cause: unknown = failure.reason;
 			setError(cause instanceof Error ? cause.message : String(cause));
 		}
-		await load();
 	};
 
 	return (
@@ -222,7 +246,9 @@ export function RecordTable({
 					{selected.size > 0 && (
 						<>
 							<span className="text-muted-foreground text-xs">
-								{selected.size} selected
+								{tl("{selectedCount} selected", {
+									selectedCount: String(selected.size),
+								})}
 							</span>
 							<Button
 								onClick={() => void deleteSelected()}
@@ -251,7 +277,7 @@ export function RecordTable({
 										link.click();
 										URL.revokeObjectURL(url);
 									})
-									.catch((cause: unknown) =>
+									.catch((cause) =>
 										setError(
 											cause instanceof Error ? cause.message : String(cause)
 										)
@@ -265,7 +291,9 @@ export function RecordTable({
 					)}
 					<Button onClick={onRequestCreate} size="sm" variant="ghost">
 						<HugeiconsIcon icon={PlusSignIcon} size={14} />
-						New {subject.object.singular}
+						{tl("New {objectSingular}", {
+							objectSingular: subject.object.singular,
+						})}
 					</Button>
 				</div>
 			</div>
@@ -281,7 +309,7 @@ export function RecordTable({
 			    scrolls horizontally. */}
 			<div className="min-h-0 flex-1 overflow-auto">
 				<Table>
-					<TableHeader className="sticky top-0 z-10 bg-card">
+					<TableHeader appearance="record" className="sticky top-0 z-10">
 						<TableRow>
 							<TableHead className="w-8">
 								<Checkbox
@@ -314,7 +342,10 @@ export function RecordTable({
 											)}
 											<span className="sr-only">
 												{sort
-													? `sorted ${sort.direction === "desc" ? "descending" : "ascending"}, activate to reverse`
+													? tl(
+															"sorted {direction, select, desc {descending} other {ascending}}, activate to reverse",
+															{ direction: sort.direction }
+														)
 													: "activate to sort"}
 											</span>
 										</button>
@@ -326,7 +357,7 @@ export function RecordTable({
 					<TableBody>
 						{loading && records.length === 0
 							? Array.from({ length: 6 }, (_, index) => (
-									// biome-ignore lint/suspicious/noArrayIndexKey: skeleton rows have no identity
+									// skeleton rows have no identity
 									<TableRow key={`skeleton-${index}`}>
 										<TableCell colSpan={columns.length + 2}>
 											<Skeleton className="h-4 w-full" />
@@ -337,7 +368,13 @@ export function RecordTable({
 									<TableRow key={record.id}>
 										<TableCell>
 											<Checkbox
-												aria-label={`Select ${recordTitle(record.title, record.values, titleField)}`}
+												aria-label={tl("Select {recordTitle}", {
+													recordTitle: recordTitle(
+														record.title,
+														record.values,
+														titleField
+													),
+												})}
 												checked={selected.has(record.id)}
 												onCheckedChange={(checked) =>
 													setSelected((current) => {
@@ -356,6 +393,11 @@ export function RecordTable({
 											<button
 												className="truncate text-left font-medium hover:underline"
 												onClick={() => onOpenRecord(record.id)}
+												title={recordTitle(
+													record.title,
+													record.values,
+													titleField
+												)}
 												type="button"
 											>
 												{recordTitle(record.title, record.values, titleField)}
@@ -404,12 +446,20 @@ export function RecordTable({
 						{!loading && records.length === 0 && (
 							<TableRow>
 								<TableCell
-									className="py-10 text-center text-muted-foreground text-sm"
 									colSpan={columns.length + 2}
+									presentation="record-empty"
 								>
 									{search.trim()
-										? `No ${subject.object.plural} match “${search}”.`
-										: `No ${subject.object.plural} yet. Create one, or import a CSV.`}
+										? tl("No {objectPlural} match “{search}”.", {
+												objectPlural: subject.object.plural,
+												search,
+											})
+										: tl(
+												"No {objectPlural} yet. Create one, or import a CSV.",
+												{
+													objectPlural: subject.object.plural,
+												}
+											)}
 								</TableCell>
 							</TableRow>
 						)}

@@ -78,9 +78,9 @@ mod tests {
             .remove(0);
         assert!(identity_matches(&local, None, false));
         assert!(!identity_matches(&local, None, true));
-        let user = parse_identities(r#"[{"ownerUserId":"alice","jwtFile":"/run/identity.jwt"}]"#)
-            .unwrap()
-            .remove(0);
+        let jwt_file = std::env::temp_dir().join("identity.jwt");
+        let user_raw = serde_json::json!([{"ownerUserId":"alice","jwtFile":jwt_file}]).to_string();
+        let user = parse_identities(&user_raw).unwrap().remove(0);
         assert!(identity_matches(&user, Some("alice"), true));
         assert!(!identity_matches(&user, Some("bob"), true));
         assert!(!identity_matches(&user, None, false));

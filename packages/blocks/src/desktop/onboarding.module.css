@@ -1,0 +1,9 @@
+.welcomeTitle {
+	font-size: var(--text-lg);
+	font-weight: var(--font-weight-medium);
+	line-height: var(--text-lg--line-height);
+}
+.progress {
+	width: var(--onboarding-progress);
+	transition-property: width;
+}

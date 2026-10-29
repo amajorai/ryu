@@ -1,8 +1,6 @@
 import { expect, test } from "@playwright/test";
 
 const STORY_URL = "/git-environment-proof.html";
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/22/01a027df-8194-7ff3-bd80-ccc3f31eb495/git-environment-proof.png";
 
 test("walks the Ryu Work local Git to GitHub publish flow", async ({
 	page,
@@ -30,7 +28,10 @@ test("walks the Ryu Work local Git to GitHub publish flow", async ({
 	await expect(
 		page.getByRole("radio", { name: "Public repository" })
 	).toBeChecked();
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("git-environment-proof.png"),
+		fullPage: true,
+	});
 
 	await page.getByRole("button", { name: "Create and push" }).click();
 	await expect(page.getByTestId("flow-status")).toContainText(

@@ -1,14 +1,19 @@
+import { SseFrameDecoder } from "@ryuhq/protocol/sse";
+import { z } from "zod";
+
 export interface LocalNodeConfig {
 	baseUrl: string;
 	token: string | null;
 }
 
-export interface LocalNodeHealth {
-	capabilities?: unknown;
-	channel?: string;
-	status: string;
-	version?: string;
-}
+const LocalNodeHealthSchema = z.object({
+	capabilities: z.json().optional().catch(undefined),
+	channel: z.string().optional().catch(undefined),
+	status: z.string().catch("ok"),
+	version: z.string().optional().catch(undefined),
+});
+
+export type LocalNodeHealth = z.infer<typeof LocalNodeHealthSchema>;
 
 export interface LocalNodeChatMessage {
 	content: string;
@@ -88,7 +93,7 @@ async function responseError(
 	return new Error(detail || `${fallback} (${response.status}).`);
 }
 
-function describeNetworkError(error: unknown): Error {
+function describeNetworkError(error: Error | undefined): Error {
 	if (error instanceof Error && error.name === "AbortError") {
 		return error;
 	}
@@ -110,7 +115,7 @@ export async function checkLocalNode(
 			signal,
 		});
 	} catch (error) {
-		throw describeNetworkError(error);
+		throw describeNetworkError(z.instanceof(Error).safeParse(error).data);
 	}
 	if (!healthResponse.ok) {
 		throw await responseError(healthResponse, "Node health check failed");
@@ -125,49 +130,64 @@ export async function checkLocalNode(
 			signal,
 		});
 	} catch (error) {
-		throw describeNetworkError(error);
+		throw describeNetworkError(z.instanceof(Error).safeParse(error).data);
 	}
 	if (!agentsResponse.ok) {
 		throw await responseError(agentsResponse, "Node authentication failed");
 	}
 
-	const payload: unknown = await healthResponse.json().catch(() => ({}));
-	if (!payload || typeof payload !== "object") {
-		return { status: "ok" };
-	}
-	const record = payload as Record<string, unknown>;
-	return {
-		capabilities: record.capabilities,
-		channel: typeof record.channel === "string" ? record.channel : undefined,
-		status: typeof record.status === "string" ? record.status : "ok",
-		version: typeof record.version === "string" ? record.version : undefined,
-	};
+	const payload = LocalNodeHealthSchema.safeParse(
+		await healthResponse.json().catch(() => ({}))
+	);
+	return payload.success ? payload.data : { status: "ok" };
 }
+
+const LocalNodeFrameSchema = z.object({
+	type: z.string().optional().catch(undefined),
+	errorText: z.string().optional().catch(undefined),
+	error: z.string().optional().catch(undefined),
+	delta: z.string().optional().catch(undefined),
+	choices: z
+		.array(
+			z.object({
+				delta: z
+					.object({ content: z.string().optional().catch(undefined) })
+					.optional()
+					.catch(undefined),
+				text: z.string().optional().catch(undefined),
+			})
+		)
+		.optional()
+		.catch(undefined),
+});
 
 function parseTextFrame(data: string): string | "done" | null {
 	if (data === "[DONE]") {
 		return "done";
 	}
-	let parsed: Record<string, unknown>;
 	try {
-		parsed = JSON.parse(data) as Record<string, unknown>;
-	} catch {
-		return null;
-	}
-	if (parsed.type === "error") {
-		const detail = parsed.errorText ?? parsed.error;
-		throw new Error(
-			typeof detail === "string" ? detail : "The local node returned an error."
+		const decoded = LocalNodeFrameSchema.safeParse(JSON.parse(data));
+		if (!decoded.success) {
+			return null;
+		}
+		const frame = decoded.data;
+		if (frame.type === "error") {
+			throw new Error(
+				frame.errorText ?? frame.error ?? "The local node returned an error."
+			);
+		}
+		if (frame.type === "text-delta" && frame.delta !== undefined) {
+			return frame.delta;
+		}
+		return (
+			frame.choices?.[0]?.delta?.content ?? frame.choices?.[0]?.text ?? null
 		);
+	} catch (error) {
+		if (error instanceof SyntaxError) {
+			return null;
+		}
+		throw error;
 	}
-	if (parsed.type === "text-delta" && typeof parsed.delta === "string") {
-		return parsed.delta;
-	}
-	const choices = parsed.choices as
-		| Array<{ delta?: { content?: unknown }; text?: unknown }>
-		| undefined;
-	const fallback = choices?.[0]?.delta?.content ?? choices?.[0]?.text;
-	return typeof fallback === "string" ? fallback : null;
 }
 
 /** Stream one non-persistent, visitor-scoped turn through a running Core node. */
@@ -200,27 +220,25 @@ export async function runLocalNodeChat(
 			signal: options.signal,
 		});
 	} catch (error) {
-		throw describeNetworkError(error);
+		throw describeNetworkError(z.instanceof(Error).safeParse(error).data);
 	}
 	if (!(response.ok && response.body)) {
 		throw await responseError(response, "Local node chat failed");
 	}
 
 	const reader = response.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
+	// Bounded incremental framing: a peer that never ends an event is cut off
+	// at the frame limit instead of growing this tab's memory.
+	const decoder = new SseFrameDecoder();
 	let answer = "";
 	try {
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) {
+				decoder.finish();
 				break;
 			}
-			buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-			let boundary = buffer.indexOf("\n\n");
-			while (boundary !== -1) {
-				const frame = buffer.slice(0, boundary);
-				buffer = buffer.slice(boundary + 2);
+			for (const frame of decoder.push(value)) {
 				const data = frame
 					.split("\n")
 					.filter((line) => line.startsWith("data:"))
@@ -238,7 +256,6 @@ export async function runLocalNodeChat(
 						options.onDelta?.(delta);
 					}
 				}
-				boundary = buffer.indexOf("\n\n");
 			}
 		}
 	} catch (error) {
@@ -247,6 +264,8 @@ export async function runLocalNodeChat(
 		}
 		throw error instanceof Error ? error : new Error(String(error));
 	} finally {
+		decoder.finish();
+		await reader.cancel().catch(() => undefined);
 		reader.releaseLock();
 	}
 	return answer;

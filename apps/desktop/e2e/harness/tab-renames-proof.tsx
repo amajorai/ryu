@@ -4,11 +4,7 @@ import { createRoot } from "react-dom/client";
 import { GroupHeaderPill } from "../../src/components/layout/TitleBar.tsx";
 import { TabDndProvider } from "../../src/components/layout/tabDnd.tsx";
 import { SplitPresetSettings } from "../../src/components/settings/SplitPresetSettings.tsx";
-import type {
-	Tab,
-	TabGroup,
-	TabsContextValue,
-} from "../../src/contexts/TabsContext.tsx";
+import type { Tab, TabGroup } from "../../src/contexts/TabsContext.tsx";
 import { TabsContext } from "../../src/contexts/TabsContext.tsx";
 import {
 	makePresetBranch,
@@ -19,6 +15,7 @@ import {
 	SPLIT_PRESETS_KEY,
 	useSplitPresetStore,
 } from "../../src/store/useSplitPresetStore.ts";
+import { createTabsProofContext } from "./tabs-proof-context.ts";
 import "../../src/index.css";
 
 const GROUP_ID = "group-research";
@@ -50,7 +47,7 @@ function Story() {
 	const [group, setGroup] = useState(GROUP);
 	const contextValue = useMemo(
 		() =>
-			({
+			createTabsProofContext({
 				activeTabId: GROUP_TAB.id,
 				closeGroup: () => undefined,
 				groups: [group],
@@ -71,7 +68,7 @@ function Story() {
 					}
 				},
 				ungroup: () => undefined,
-			}) as unknown as TabsContextValue,
+			}),
 		[group]
 	);
 
@@ -81,7 +78,7 @@ function Story() {
 				<TabDndProvider>
 					<main className="min-h-screen bg-background p-6 text-foreground">
 						<header className="mx-auto mb-6 max-w-3xl">
-							<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+							<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 								Desktop interaction proof
 							</p>
 							<h1 className="mt-1 font-semibold text-2xl">Inline renames</h1>
@@ -92,7 +89,7 @@ function Story() {
 						</header>
 						<div className="mx-auto grid max-w-3xl gap-6 lg:grid-cols-2">
 							<section className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
-								<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+								<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 									Tab group
 								</p>
 								<div className="mt-4 flex items-center gap-3">

@@ -1,3 +1,4 @@
+import proofStyles from "./file-tree-theme-story.module.css";
 // Standalone browser story for the file-tree THEME path: the real
 // `useFileTreeThemeStyles` hook feeding a real `@pierre/trees` `<FileTree>`.
 //
@@ -11,6 +12,7 @@
 import { getResolvedOrResolveTheme } from "@pierre/diffs";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { ThemeProvider } from "next-themes";
+import { useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
 	fileTreePrefsToOptions,
@@ -41,8 +43,10 @@ async function resolveEveryCatalogTheme(): Promise<string[]> {
 	return failed;
 }
 
-(
-	window as unknown as { __resolveEveryCatalogTheme?: () => Promise<string[]> }
+/* SAFETY: This assignment publishes the actual locally declared resolveEveryCatalogTheme callback, whose complete return is Promise<string[]>. The optional private slot preserves the native browser Window and is not a decoded theme payload. */ (
+	window as typeof window & {
+		__resolveEveryCatalogTheme?: () => Promise<string[]>;
+	}
 ).__resolveEveryCatalogTheme = resolveEveryCatalogTheme;
 
 const PATHS = [
@@ -54,25 +58,46 @@ const PATHS = [
 function ThemedTree() {
 	const prefs = useFileTreePrefs();
 	const style = useFileTreeThemeStyles(prefs);
+	const hostRef = useRef<HTMLDivElement>(null);
+	useLayoutEffect(() => {
+		const host = hostRef.current;
+		if (!(host && style)) {
+			return;
+		}
+		for (const [property, value] of Object.entries(style)) {
+			if (value === undefined || value === null) {
+				continue;
+			}
+			const cssProperty = property.replace(
+				/[A-Z]/g,
+				(letter) => `-${letter.toLowerCase()}`
+			);
+			host.style.setProperty(cssProperty, String(value));
+		}
+		return () => {
+			for (const property of Object.keys(style)) {
+				host.style.removeProperty(
+					property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
+				);
+			}
+		};
+	}, [style]);
 	const { model } = useFileTree({
 		...fileTreePrefsToOptions(prefs),
 		paths: PATHS,
 	});
 	return (
-		<FileTree
-			className="h-full w-full"
-			data-testid="tree"
-			model={model}
-			style={style}
-		/>
+		<div className="h-full w-full" ref={hostRef}>
+			<FileTree className="h-full w-full" data-testid="tree" model={model} />
+		</div>
 	);
 }
 
 function Story() {
 	const prefs = useFileTreePrefs();
 	return (
-		<div style={{ padding: 24 }}>
-			<div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+		<div className={proofStyles.fixture1}>
+			<div className={proofStyles.fixture2}>
 				<button
 					data-testid="set-github-light"
 					onClick={() => setFileTreePrefs({ lightTheme: "github-light" })}
@@ -91,7 +116,7 @@ function Story() {
 			<div data-testid="pref">{prefs.lightTheme}</div>
 			{/* Keyed on the constructor-time options only — the same invariant the
 			    app relies on: a theme switch must NOT remount the tree. */}
-			<div style={{ height: 200 }}>
+			<div className={proofStyles.fixture3}>
 				<ThemedTree key={JSON.stringify(fileTreePrefsToOptions(prefs))} />
 			</div>
 		</div>

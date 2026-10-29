@@ -1,0 +1,35 @@
+.fixture1 {
+	min-height: 100vh;
+	padding: 24px 32px;
+	font-family: var(--font-sans);
+	color: #e6e9f0;
+	background: #0b0d12;
+}
+
+.fixture2 {
+	margin: 0 0 6px;
+	font-size: 18px;
+}
+
+.fixture3 {
+	margin: 0 0 18px;
+	font-size: 13px;
+	color: #8a91a3;
+}
+
+.fixture4 {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 300px;
+}
+
+.fixture5 {
+	font-size: 12px;
+	color: #8a91a3;
+}
+
+.fixture6 {
+	font-size: 12px;
+	color: #8a91a3;
+}

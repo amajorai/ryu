@@ -1,13 +1,13 @@
 import { ArrowDown01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@ryu/ui/components/collapsible";
+} from "@ryu/ui/components/collapsible.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -15,9 +15,9 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { ScrollArea } from "@ryu/ui/components/scroll-area";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { useEffect, useId, useMemo, useState } from "react";
 import type {
 	SkillTargetChoice as ApiSkillTargetChoice,
@@ -126,7 +126,10 @@ export function SkillTargetList({
 								)}
 							</span>
 							{path ? (
-								<span className="block truncate font-mono text-muted-foreground text-xs">
+								<span
+									className="block truncate font-mono text-muted-foreground text-xs"
+									title={path}
+								>
 									{path}
 								</span>
 							) : null}
@@ -222,8 +225,9 @@ export function SkillTargetDialog({
 
 				<Collapsible onOpenChange={setShowAll} open={showAll}>
 					<CollapsibleTrigger
+						appearance="skill-targets"
 						aria-label="Show all supported agents"
-						className="flex w-full items-center justify-between rounded-2xl px-3 py-2 font-medium text-sm hover:bg-muted"
+						className="flex w-full items-center justify-between"
 					>
 						Show all supported agents
 						<HugeiconsIcon
@@ -240,7 +244,7 @@ export function SkillTargetDialog({
 							/>
 							<Input
 								aria-label="Search supported agents"
-								className="pl-9"
+								leadingAdornment="default"
 								onInput={(event) => setQuery(event.currentTarget.value)}
 								placeholder="Search agents"
 								role="searchbox"

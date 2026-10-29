@@ -9,17 +9,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
+	type AgentComposioConnections,
 	type ComposioAction,
 	type ComposioConnectInitiate,
 	type ComposioConnection,
 	type ComposioStatus,
 	type ComposioToolkit,
 	type ComposioTrigger,
+	disconnectAgentComposioConnection,
+	fetchAgentComposioConnections,
 	fetchComposioActions,
 	fetchComposioConnections,
 	fetchComposioStatus,
 	fetchComposioToolkits,
 	fetchComposioTriggers,
+	initiateAgentComposioConnection,
 	initiateComposioConnection,
 } from "@/src/lib/api/composio.ts";
 import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
@@ -86,7 +90,7 @@ export function useComposioActions(
 ) {
 	const target = useTarget();
 	const tagsKey = tags.join(",");
-	// biome-ignore lint/correctness/useExhaustiveDependencies: tagsKey is the content key for tags.
+	// tagsKey is the content key for tags.
 	const options = useMemo(
 		() => ({
 			queryKey: [
@@ -178,6 +182,81 @@ export function useInitiateComposioConnection() {
 			queryClient.invalidateQueries({
 				queryKey: ["composio", "connections", target.url],
 			});
+		},
+	});
+}
+
+/** The query key of one agent's own Composio connections. */
+function agentComposioConnectionsKey(
+	target: ApiTarget,
+	agentId: string | null
+) {
+	return ["composio", "agent-connections", target.url, agentId] as const;
+}
+
+/**
+ * The apps connected to an agent's own Composio identity. Refetches on window
+ * focus so an app authorized in the browser shows as active on return.
+ */
+export function useAgentComposioConnections(
+	agentId: string | null,
+	enabled: boolean
+) {
+	const target = useTarget();
+	const options = useMemo(
+		() => ({
+			queryKey: agentComposioConnectionsKey(target, agentId),
+			queryFn: () => fetchAgentComposioConnections(target, agentId ?? ""),
+			enabled: enabled && agentId !== null,
+			retry: false,
+			staleTime: 15_000,
+			refetchOnWindowFocus: true,
+		}),
+		[agentId, enabled, target]
+	);
+	return useQuery<AgentComposioConnections>(options);
+}
+
+/**
+ * Start connecting an app to an agent's own identity. The agent record is
+ * refetched too: Core adds the new account to a limited agent's allowlist.
+ */
+export function useInitiateAgentComposioConnection(agentId: string | null) {
+	const target = useTarget();
+	const queryClient = useQueryClient();
+	return useMutation<
+		ComposioConnectInitiate,
+		Error,
+		{ accessLevel: ConnectionAccessLevel; toolkit: string }
+	>({
+		mutationFn: ({ accessLevel, toolkit }) =>
+			initiateAgentComposioConnection(
+				target,
+				agentId ?? "",
+				toolkit,
+				accessLevel
+			),
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				queryKey: agentComposioConnectionsKey(target, agentId),
+			});
+			queryClient.invalidateQueries({ queryKey: ["agents"] });
+		},
+	});
+}
+
+/** Disconnect an app from an agent's own identity. */
+export function useDisconnectAgentComposioConnection(agentId: string | null) {
+	const target = useTarget();
+	const queryClient = useQueryClient();
+	return useMutation<void, Error, string>({
+		mutationFn: (id) =>
+			disconnectAgentComposioConnection(target, agentId ?? "", id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				queryKey: agentComposioConnectionsKey(target, agentId),
+			});
+			queryClient.invalidateQueries({ queryKey: ["agents"] });
 		},
 	});
 }

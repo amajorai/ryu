@@ -3,9 +3,9 @@ export type {
 	ButtonProps,
 	ButtonSize,
 	ButtonVariant,
-} from "./base";
-export { Button, ButtonLink } from "./base";
-export type { MagneticButtonProps } from "./magnetic";
-export { MagneticButton } from "./magnetic";
-export type { ButtonState, StatefulButtonProps } from "./stateful";
-export { StatefulButton } from "./stateful";
+} from "./base.tsx";
+export { Button, ButtonLink } from "./base.tsx";
+export type { MagneticButtonProps } from "./magnetic.tsx";
+export { MagneticButton } from "./magnetic.tsx";
+export type { ButtonState, StatefulButtonProps } from "./stateful.tsx";
+export { StatefulButton } from "./stateful.tsx";

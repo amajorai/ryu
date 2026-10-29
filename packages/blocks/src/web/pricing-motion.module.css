@@ -1,0 +1,40 @@
+/*
+ * Pricing card motion budget.
+ *
+ * The rotating conic rings (`.t-card-border-spin`, `.t-pro-card-border`) and
+ * the plan badge sheen/drift (`.t-plan-badge-*`, globals.css) loop forever.
+ * The ring angle is a registered custom property, so every running loop costs
+ * a style recalculation and a repaint per frame on the main thread, even when
+ * the ring sits at opacity 0 waiting for a hover or the card is far off screen.
+ * These overrides pause a loop only while nobody can see it; the visible
+ * motion is unchanged, and a paused loop resumes from the frame it stopped on.
+ *
+ * Specificity is doubled so the pause wins over the unlayered `animation`
+ * shorthand in globals.css no matter which stylesheet loads first. The
+ * reduced-motion rule there (`animation: none !important`) still wins over all
+ * of this. Global classes are matched as `[class~="…"]` (same specificity as a
+ * class selector) so the CSS-module compilers leave them unscoped.
+ */
+
+/* A hover-only ring: paused while hidden, running while its card is hovered.
+   `@media (hover: hover)` mirrors Tailwind's `group-hover:` reveal, so a touch
+   screen, where the ring never shows, never runs it either. */
+.idleRing.idleRing {
+	animation-play-state: paused;
+}
+
+@media (hover: hover) {
+	[class~="group"]:hover .idleRing.idleRing {
+		animation-play-state: running;
+	}
+}
+
+/* An always-visible ring or badge inside a card that is off screen. The
+   attribute is toggled by `usePauseMotionOffscreen`. */
+.offscreenAware.offscreenAware[data-motion-offscreen],
+.offscreenAware[data-motion-offscreen] [class~="t-card-border-spin"],
+.offscreenAware[data-motion-offscreen] [class~="t-plan-badge-gradient"],
+.offscreenAware[data-motion-offscreen] [class~="t-plan-badge-sheen"],
+.offscreenAware[data-motion-offscreen] [class~="t-plan-badge-border"] {
+	animation-play-state: paused;
+}

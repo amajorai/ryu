@@ -1,8 +1,12 @@
-import type { DockTabKind } from "@/src/components/panels/dock-panels.ts";
+import { z } from "zod";
+
+/** Persisted identifiers outlive the current renderer's registered panel kinds. */
+export const persistedDockTabKindSchema = z.string().min(1).max(512);
+export type PersistedDockTabKind = z.infer<typeof persistedDockTabKindSchema>;
 
 /** The serializable identity of one workspace dock tab. */
 export interface WorkspaceSessionTab {
-	kind: DockTabKind;
+	kind: PersistedDockTabKind;
 	label: string;
 	/** Project tabs marked shared remain pinned if the dock store rebuilds them. */
 	pinned?: boolean;
@@ -34,69 +38,75 @@ export function emptyWorkspaceSessionState(): WorkspaceSessionState {
 	};
 }
 
-function parseTab(value: unknown): WorkspaceSessionTab | null {
-	if (!value || typeof value !== "object") {
-		return null;
-	}
-	const row = value as Record<string, unknown>;
-	if (
-		typeof row.kind !== "string" ||
-		row.kind.length === 0 ||
-		row.kind.length > 512 ||
-		typeof row.label !== "string"
-	) {
-		return null;
-	}
-	// Older builds opened one `subagent` tab per selected worker and persisted its
-	// synthetic persona label (for example, "Atlas"). The unified roster owns its
-	// detail view now, so migrate both fields at the persistence boundary.
-	const legacySubagent = row.kind === "subagent";
-	return {
-		kind: (legacySubagent ? "subagents" : row.kind) as DockTabKind,
-		label: legacySubagent ? "Subagents" : row.label,
-		...(row.project === true ? { project: true } : {}),
-		...(row.pinned === true ? { pinned: true } : {}),
-		...(typeof row.uid === "string" && row.uid.length > 0
-			? { uid: row.uid }
-			: {}),
-	};
-}
+const workspaceSessionTabSchema = z
+	.object({
+		kind: persistedDockTabKindSchema,
+		label: z.string(),
+		project: z.literal(true).optional().catch(undefined),
+		pinned: z.literal(true).optional().catch(undefined),
+		uid: z.string().min(1).optional().catch(undefined),
+	})
+	.transform((row): WorkspaceSessionTab => {
+		// Older builds saved worker-specific `subagent` tabs; restore the unified roster.
+		const legacySubagent = row.kind === "subagent";
+		const tab: WorkspaceSessionTab = {
+			kind: legacySubagent ? "subagents" : row.kind,
+			label: legacySubagent ? "Subagents" : row.label,
+		};
+		if (row.project) {
+			tab.project = true;
+		}
+		if (row.pinned) {
+			tab.pinned = true;
+		}
+		if (row.uid) {
+			tab.uid = row.uid;
+		}
+		return tab;
+	});
+const workspaceSessionIndexSchema = z
+	.union([
+		z.number(),
+		z.nan(),
+		z.literal(Number.POSITIVE_INFINITY),
+		z.literal(Number.NEGATIVE_INFINITY),
+	])
+	.catch(0);
+const workspaceSessionDockSchema = z
+	.object({
+		activeIndex: workspaceSessionIndexSchema,
+		tabs: z
+			.array(workspaceSessionTabSchema.optional().catch(undefined))
+			.catch([]),
+	})
+	.catch({ activeIndex: 0, tabs: [] })
+	.transform((row): WorkspaceSessionDock => {
+		const tabs = row.tabs.filter((tab) => tab !== undefined);
+		return {
+			tabs,
+			activeIndex:
+				tabs.length === 0
+					? 0
+					: Math.min(Math.max(0, Math.trunc(row.activeIndex)), tabs.length - 1),
+		};
+	});
+export const workspaceSessionSchema = z.object({
+	bottom: workspaceSessionDockSchema,
+	bottomOpen: z.boolean().catch(false),
+	right: workspaceSessionDockSchema,
+	rightOpen: z.boolean().catch(false),
+});
+const workspaceSessionValueSchema = z.json().optional();
+type WorkspaceSessionInput =
+	| z.infer<typeof workspaceSessionValueSchema>
+	| WorkspaceSessionState;
 
-function parseDock(value: unknown): WorkspaceSessionDock {
-	if (!value || typeof value !== "object") {
-		return { activeIndex: 0, tabs: [] };
-	}
-	const row = value as Record<string, unknown>;
-	const tabs = Array.isArray(row.tabs)
-		? row.tabs.flatMap((tab) => {
-				const parsed = parseTab(tab);
-				return parsed ? [parsed] : [];
-			})
-		: [];
-	const rawIndex = typeof row.activeIndex === "number" ? row.activeIndex : 0;
-	return {
-		activeIndex:
-			tabs.length === 0
-				? 0
-				: Math.min(Math.max(0, Math.trunc(rawIndex)), tabs.length - 1),
-		tabs,
-	};
-}
-
-/** Validate and normalize a value read from a persisted chat tab. */
+/** Normalize a persisted snapshot while retaining opaque historical/future kinds. */
 export function parseWorkspaceSessionState(
-	value: unknown
+	value: WorkspaceSessionInput
 ): WorkspaceSessionState | undefined {
-	if (!value || typeof value !== "object") {
-		return undefined;
-	}
-	const row = value as Record<string, unknown>;
-	return {
-		bottom: parseDock(row.bottom),
-		bottomOpen: row.bottomOpen === true,
-		right: parseDock(row.right),
-		rightOpen: row.rightOpen === true,
-	};
+	const parsed = workspaceSessionSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
 /** Compare snapshots without making React updates for an unchanged dock. */

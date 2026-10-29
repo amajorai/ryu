@@ -1,0 +1,81 @@
+.fixture1 {
+	box-sizing: border-box;
+	min-height: 100vh;
+	padding: 48px 24px;
+	font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+	color: #f5f5f5;
+	background: #171717;
+}
+
+.fixture2 {
+	max-width: 760px;
+	padding: 28px;
+	margin: 0 auto;
+	background: #202020;
+	border: 1px solid #3b3b3b;
+	border-radius: 18px;
+}
+
+.fixture3 {
+	margin: 0;
+	font-size: 12px;
+	color: #a3a3a3;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+}
+
+.fixture4 {
+	margin: 10px 0 8px;
+	font-size: 28px;
+}
+
+.fixture5 {
+	margin: 0 0 28px;
+	color: #bdbdbd;
+}
+
+.fixture6 {
+	display: grid;
+	gap: 12px;
+}
+
+.fixture7 {
+	display: grid;
+	gap: 8px;
+	padding: 16px;
+	border: 1px solid #3b3b3b;
+	border-radius: 12px;
+}
+
+.fixture8 {
+	font-weight: 600;
+}
+
+.fixture9 {
+	font-size: 13px;
+	color: #a3a3a3;
+}
+
+.fixture10 {
+	display: grid;
+	gap: 8px;
+	padding: 16px;
+	border: 1px solid #3b3b3b;
+	border-radius: 12px;
+}
+
+.fixture11 {
+	font-weight: 600;
+}
+
+.fixture12 {
+	font-size: 13px;
+	color: #a3a3a3;
+}
+
+.fixture13 {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	margin-top: 20px;
+}

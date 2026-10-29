@@ -1,3 +1,4 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/mcp.ts
 //
 // Typed client for Core's MCP endpoints (`/api/mcp/*`). Core registers MCP
@@ -6,7 +7,51 @@
 // tool list to a single agent's allowlist, and test-calls a tool. Wire shapes
 // mirror `apps/core/src/sidecar/mcp/mod.rs` (snake_case fields, no serde rename).
 
+import type {
+	GhostActionInput,
+	McpCatalogCard,
+	McpCatalogDetail,
+	McpCatalogSource,
+	McpCatalogSources,
+	McpInstallResult,
+	McpPackage,
+	McpRemote,
+	McpSearchParams,
+} from "@ryuhq/core-client/mcp.ts";
+import { z } from "zod";
 import { type ApiTarget, authenticatedFetch, request } from "./client.ts";
+
+export type {
+	GhostActionInput,
+	GhostActionKind,
+	McpCatalogCard,
+	McpCatalogDetail,
+	McpCatalogSource,
+	McpCatalogSources,
+	McpInstallResult,
+	McpPackage,
+	McpRemote,
+	McpSearchParams,
+} from "@ryuhq/core-client/mcp.ts";
+
+export const mcpJsonPayloadSchema = z.json();
+export type McpJsonPayload = z.infer<typeof mcpJsonPayloadSchema>;
+const mcpCallResponseSchema = z.object({
+	ok: z.boolean().optional(),
+	output: mcpJsonPayloadSchema.optional(),
+	error: z.string().optional(),
+});
+interface McpServerWriteBody {
+	args?: string[];
+	command?: string;
+	description?: string | null;
+	enabled?: boolean;
+	env?: Record<string, string>;
+	headers?: Record<string, string>;
+	name?: string;
+	type?: McpTransport;
+	url?: string;
+}
 
 /** A registered MCP server as Core summarizes it for the listing endpoint. */
 export interface McpServer {
@@ -26,6 +71,11 @@ export interface McpServer {
 	name: string;
 	ownerPluginId: string | null;
 	ownerServerName: string | null;
+	/**
+	 * The id an agent's account access names (`mcp-secret:<id>`) when calling
+	 * this server hands it one of your saved keys; `null` when it uses none.
+	 */
+	savedKeyAccount: string | null;
 	/** `stdio`, Streamable HTTP, or the legacy HTTP+SSE transport. */
 	transport: string | null;
 	/** The configured endpoint for a remote server, if any. */
@@ -38,6 +88,7 @@ export interface McpTool {
 	/** Fully-qualified id `<server>.<tool>`, unique across servers. */
 	id: string;
 	inputSchema: unknown | null;
+	meta?: unknown;
 	name: string;
 	server: string;
 }
@@ -49,7 +100,7 @@ export type McpTransport = "stdio" | "streamable-http" | "sse";
 export interface McpCallResult {
 	error?: string;
 	ok: boolean;
-	output?: unknown;
+	output?: McpJsonPayload;
 }
 
 interface ServerWire {
@@ -66,6 +117,7 @@ interface ServerWire {
 	name: string;
 	owner_plugin_id?: string | null;
 	owner_server_name?: string | null;
+	saved_key_account?: string | null;
 	transport?: string | null;
 	url?: string | null;
 }
@@ -74,6 +126,7 @@ interface ToolWire {
 	description?: string | null;
 	id: string;
 	input_schema?: unknown | null;
+	meta?: unknown;
 	name: string;
 	server: string;
 }
@@ -95,11 +148,13 @@ function toServer(s: ServerWire): McpServer {
 		headerNames: s.header_names ?? [],
 		ownerPluginId: s.owner_plugin_id ?? null,
 		ownerServerName: s.owner_server_name ?? null,
+		savedKeyAccount: s.saved_key_account ?? null,
 	};
 }
 
 function toTool(t: ToolWire): McpTool {
 	return {
+		meta: t.meta,
 		id: t.id,
 		server: t.server,
 		name: t.name,
@@ -108,6 +163,79 @@ function toTool(t: ToolWire): McpTool {
 	};
 }
 
+const serverWireResponseCodec: z.ZodType<ServerWire> = z
+	.object({
+		args: z.array(z.string()).optional(),
+		auth_configured: z.boolean().optional(),
+		auth_required: z.boolean().optional(),
+		auth_type: z
+			.union([
+				z.literal("env"),
+				z.literal("header"),
+				z.literal("oauth"),
+				z.null(),
+			])
+			.optional(),
+		available: z.union([z.boolean(), z.null()]).optional(),
+		command: z.string(),
+		description: z.union([z.string(), z.null()]).optional(),
+		enabled: z.boolean(),
+		env_keys: z.array(z.string()).optional(),
+		header_names: z.array(z.string()).optional(),
+		name: z.string(),
+		owner_plugin_id: z.union([z.string(), z.null()]).optional(),
+		owner_server_name: z.union([z.string(), z.null()]).optional(),
+		saved_key_account: z.union([z.string(), z.null()]).optional(),
+		transport: z.union([z.string(), z.null()]).optional(),
+		url: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const toolWireResponseCodec: z.ZodType<ToolWire> = z
+	.object({
+		description: z.union([z.string(), z.null()]).optional(),
+		id: z.string(),
+		input_schema: z.union([gatewayJsonValueSchema, z.null()]).optional(),
+		meta: gatewayJsonValueSchema.optional(),
+		name: z.string(),
+		server: z.string(),
+	})
+	.passthrough();
+const catalogCardWireResponseCodec: z.ZodType<CatalogCardWire> = z
+	.object({
+		description: z.union([z.string(), z.null()]).optional(),
+		has_packages: z.boolean().optional(),
+		has_remotes: z.boolean().optional(),
+		id: z.string(),
+		installed: z.boolean().optional(),
+		name: z.string().optional(),
+		transports: z.array(z.string()).optional(),
+		version: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const packageWireResponseCodec: z.ZodType<PackageWire> = z
+	.object({
+		file_sha256: z.union([z.string(), z.null()]).optional(),
+		identifier: z.union([z.string(), z.null()]).optional(),
+		registry_base_url: z.union([z.string(), z.null()]).optional(),
+		registry_type: z.union([z.string(), z.null()]).optional(),
+		transport: z.union([z.string(), z.null()]).optional(),
+		version: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const remoteWireResponseCodec: z.ZodType<RemoteWire> = z
+	.object({
+		transport_type: z.union([z.string(), z.null()]).optional(),
+		url: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const sourceWireResponseCodec: z.ZodType<SourceWire> = z
+	.object({
+		base_url: z.union([z.string(), z.null()]).optional(),
+		builtin: z.boolean().optional(),
+		display_name: z.string(),
+		id: z.string(),
+	})
+	.passthrough();
 export async function fetchMcpServers(
 	target: ApiTarget,
 	signal?: AbortSignal
@@ -115,7 +243,10 @@ export async function fetchMcpServers(
 	const json = await request<{ servers?: ServerWire[] }>(
 		target,
 		"/api/mcp/servers",
-		{ signal }
+		{ signal },
+		z
+			.object({ servers: z.array(serverWireResponseCodec).optional() })
+			.passthrough()
 	);
 	return (json.servers ?? []).map(toServer);
 }
@@ -133,7 +264,8 @@ export async function fetchMcpTools(
 	const json = await request<{ tools?: ToolWire[] }>(
 		target,
 		`/api/mcp/tools${suffix}`,
-		{ signal }
+		{ signal },
+		z.object({ tools: z.array(toolWireResponseCodec).optional() }).passthrough()
 	);
 	return (json.tools ?? []).map(toTool);
 }
@@ -178,7 +310,7 @@ export interface UpdateMcpServerResult {
 
 /**
  * Register a new user-defined MCP server. On success, Core writes the entry
- * into `~/.ryu/mcp.json` and reloads the registry so the server and its tools
+ * into `~/.ryu/state/mcp.json` and reloads the registry so the server and its tools
  * appear immediately in GET /api/mcp/servers and GET /api/mcp/tools.
  *
  * A non-2xx response carries `{ ok: false, error }` — surfaced inline in the
@@ -188,23 +320,40 @@ export async function createMcpServer(
 	target: ApiTarget,
 	input: CreateMcpServerInput
 ): Promise<CreateMcpServerResult> {
+	const body: McpServerWriteBody = {
+		name: input.name,
+		type: input.transport,
+		headers: input.headers ?? {},
+		args: input.args ?? [],
+		env: input.env ?? {},
+		description: input.description ?? null,
+	};
+	if (input.command) {
+		body.command = input.command;
+	}
+	if (input.url) {
+		body.url = input.url;
+	}
+
 	const parsed = await request<{
 		error?: string;
 		ok?: boolean;
 		server?: ServerWire;
-	}>(target, "/api/mcp/servers", {
-		body: {
-			name: input.name,
-			...(input.command ? { command: input.command } : {}),
-			type: input.transport,
-			...(input.url ? { url: input.url } : {}),
-			headers: input.headers ?? {},
-			args: input.args ?? [],
-			env: input.env ?? {},
-			description: input.description ?? null,
+	}>(
+		target,
+		"/api/mcp/servers",
+		{
+			body,
+			method: "POST",
 		},
-		method: "POST",
-	});
+		z
+			.object({
+				error: z.string().optional(),
+				ok: z.boolean().optional(),
+				server: serverWireResponseCodec.optional(),
+			})
+			.passthrough()
+	);
 	return {
 		ok: parsed.ok !== false,
 		error: parsed.error,
@@ -218,25 +367,51 @@ export async function updateMcpServer(
 	name: string,
 	input: UpdateMcpServerInput
 ): Promise<UpdateMcpServerResult> {
+	const body: McpServerWriteBody = {};
+	if (input.command) {
+		body.command = input.command;
+	}
+	if (input.transport) {
+		body.type = input.transport;
+	}
+	if (input.url) {
+		body.url = input.url;
+	}
+	if (input.args) {
+		body.args = input.args;
+	}
+	if (input.env) {
+		body.env = input.env;
+	}
+	if (input.headers) {
+		body.headers = input.headers;
+	}
+	if (input.description !== undefined) {
+		body.description = input.description;
+	}
+	if (input.enabled !== undefined) {
+		body.enabled = input.enabled;
+	}
+
 	const parsed = await request<{
 		error?: string;
 		ok?: boolean;
 		server?: ServerWire;
-	}>(target, `/api/mcp/servers/${encodeURIComponent(name)}`, {
-		body: {
-			...(input.command ? { command: input.command } : {}),
-			...(input.transport ? { type: input.transport } : {}),
-			...(input.url ? { url: input.url } : {}),
-			...(input.args ? { args: input.args } : {}),
-			...(input.env ? { env: input.env } : {}),
-			...(input.headers ? { headers: input.headers } : {}),
-			...(input.description === undefined
-				? {}
-				: { description: input.description }),
-			...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+	}>(
+		target,
+		`/api/mcp/servers/${encodeURIComponent(name)}`,
+		{
+			body,
+			method: "PUT",
 		},
-		method: "PUT",
-	});
+		z
+			.object({
+				error: z.string().optional(),
+				ok: z.boolean().optional(),
+				server: serverWireResponseCodec.optional(),
+			})
+			.passthrough()
+	);
 	return {
 		error: parsed.error,
 		ok: parsed.ok !== false,
@@ -252,7 +427,10 @@ export async function deleteMcpServer(
 	const parsed = await request<{ error?: string; ok?: boolean }>(
 		target,
 		`/api/mcp/servers/${encodeURIComponent(name)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		z
+			.object({ error: z.string().optional(), ok: z.boolean().optional() })
+			.passthrough()
 	);
 	return {
 		ok: parsed.ok !== false,
@@ -265,7 +443,7 @@ export async function deleteMcpServer(
 // The MCP catalog browses servers from the active source (the official MCP
 // registry by default), shows each server's packages/remotes so the launch
 // command is reviewable, and installs a chosen server as a **disabled**
-// `~/.ryu/mcp.json` entry (Core never auto-launches a registry command). ALL
+// `~/.ryu/state/mcp.json` entry (Core never auto-launches a registry command). ALL
 // logic lives in Core; this module only shapes requests and parses responses.
 //
 // Installed-state is NOT carried by the catalog payload (Core hardcodes
@@ -275,44 +453,6 @@ export async function deleteMcpServer(
 // trimmed catalog `id` (slashes preserved — see `sanitize_server_name` in
 // `apps/core/src/mcp_catalog/mod.rs`). So a card is installed iff its id is in
 // the registered-server name set.
-
-/** A server row in the left-hand MCP catalog selector. */
-export interface McpCatalogCard {
-	description: string | null;
-	/** Whether this server advertises any local (stdio) package. */
-	hasPackages: boolean;
-	/** Whether this server advertises any remote (hosted) endpoint. */
-	hasRemotes: boolean;
-	/** Registry id / name, e.g. `io.github.owner/server`. */
-	id: string;
-	/** Whether this server is registered in `~/.ryu/mcp.json` (derived). */
-	installed: boolean;
-	name: string;
-	/** Transport strings advertised by the server (stdio, http, sse, …). */
-	transports: string[];
-	version: string | null;
-}
-
-/** A launchable package for a server (npm/pypi/oci, etc.). */
-export interface McpPackage {
-	identifier: string | null;
-	registryType: string | null;
-	transport: string | null;
-	version: string | null;
-}
-
-/** A hosted remote endpoint for a server. */
-export interface McpRemote {
-	transportType: string | null;
-	url: string | null;
-}
-
-/** Full right-hand detail payload for a selected catalog server. */
-export interface McpCatalogDetail {
-	card: McpCatalogCard;
-	packages: McpPackage[];
-	remotes: McpRemote[];
-}
 
 interface CatalogCardWire {
 	description?: string | null;
@@ -326,7 +466,9 @@ interface CatalogCardWire {
 }
 
 interface PackageWire {
+	file_sha256?: string | null;
 	identifier?: string | null;
+	registry_base_url?: string | null;
 	registry_type?: string | null;
 	transport?: string | null;
 	version?: string | null;
@@ -352,7 +494,9 @@ function toCatalogCard(w: CatalogCardWire): McpCatalogCard {
 
 function toPackage(w: PackageWire): McpPackage {
 	return {
+		fileSha256: w.file_sha256 ?? null,
 		registryType: w.registry_type ?? null,
+		registryBaseUrl: w.registry_base_url ?? null,
 		identifier: w.identifier ?? null,
 		version: w.version ?? null,
 		transport: w.transport ?? null,
@@ -364,13 +508,6 @@ function toRemote(w: RemoteWire): McpRemote {
 		transportType: w.transport_type ?? null,
 		url: w.url ?? null,
 	};
-}
-
-export interface McpSearchParams {
-	/** Opaque pagination cursor from a prior page's {@link McpCatalogPage}. */
-	cursor?: string;
-	limit?: number;
-	query?: string;
 }
 
 /** One page of catalog results plus the cursor for the next page (if any). */
@@ -404,7 +541,19 @@ export async function searchMcpCatalog(
 		next_cursor?: string | null;
 		total?: number | null;
 		total_count?: number | null;
-	}>(target, `/api/mcp/catalog?${q.toString()}`);
+	}>(
+		target,
+		`/api/mcp/catalog?${q.toString()}`,
+		{},
+		z
+			.object({
+				servers: z.array(catalogCardWireResponseCodec).optional(),
+				next_cursor: z.union([z.string(), z.null()]).optional(),
+				total: z.union([z.number(), z.null()]).optional(),
+				total_count: z.union([z.number(), z.null()]).optional(),
+			})
+			.passthrough()
+	);
 	return {
 		servers: (json.servers ?? []).map(toCatalogCard),
 		nextCursor: json.next_cursor ?? null,
@@ -421,7 +570,18 @@ export async function fetchMcpCatalogDetail(
 		card: CatalogCardWire;
 		packages?: PackageWire[];
 		remotes?: RemoteWire[];
-	}>(target, `/api/mcp/catalog/detail?id=${encodeURIComponent(id)}`);
+	}>(
+		target,
+		`/api/mcp/catalog/detail?id=${encodeURIComponent(id)}`,
+		{},
+		z
+			.object({
+				card: catalogCardWireResponseCodec,
+				packages: z.array(packageWireResponseCodec).optional(),
+				remotes: z.array(remoteWireResponseCodec).optional(),
+			})
+			.passthrough()
+	);
 	return {
 		card: toCatalogCard(json.card),
 		packages: (json.packages ?? []).map(toPackage),
@@ -429,47 +589,115 @@ export async function fetchMcpCatalogDetail(
 	};
 }
 
-/** The written server entry returned by a successful catalog install. */
-export interface McpInstallResult {
-	command: string;
-	name: string;
-	url: string | null;
-}
-
-export interface McpInstallPreview {
-	action: "install";
-	dryRun: true;
-	server: McpInstallResult & { args?: string[]; description?: string | null };
-	success: boolean;
-	[key: string]: unknown;
-}
+export const mcpInstallPreviewSchema = z
+	.object({
+		action: z.literal("install"),
+		dryRun: z.literal(true),
+		success: z.boolean(),
+		server: z.discriminatedUnion("transport", [
+			z
+				.object({
+					transport: z.literal("stdio"),
+					args: z.array(z.string()),
+					command: z.string(),
+					name: z.string(),
+					url: z.null(),
+					description: z.string().nullable().optional(),
+				})
+				.catchall(mcpJsonPayloadSchema),
+			z
+				.object({
+					transport: z.literal("streamable-http"),
+					args: z.tuple([]),
+					command: z.null(),
+					name: z.string(),
+					url: z.string(),
+					description: z.string().nullable().optional(),
+				})
+				.catchall(mcpJsonPayloadSchema),
+		]),
+	})
+	.catchall(mcpJsonPayloadSchema);
+export type McpInstallPreview = z.infer<typeof mcpInstallPreviewSchema>;
 
 /**
- * Install a catalog server as a **disabled** `~/.ryu/mcp.json` entry. Core never
+ * Install a catalog server as a **disabled** `~/.ryu/state/mcp.json` entry. Core never
  * auto-launches the registry command; the user must explicitly enable/start it
  * via the existing MCP servers path. The written `name` equals the catalog id.
  */
 export async function installMcpServer(
 	target: ApiTarget,
 	id: string,
-	force = false
+	force = false,
+	source?: string | null
 ): Promise<McpInstallResult> {
 	const json = await request<{
 		success?: boolean;
 		error?: string;
-		server?: { name: string; command: string; url?: string | null };
-	}>(target, "/api/mcp/catalog/install", {
-		method: "POST",
-		body: { id, force },
-	});
+		server?: {
+			args: string[];
+			command: string | null;
+			name: string;
+			transport: "stdio" | "streamable-http";
+			url: string | null;
+		};
+	}>(
+		target,
+		"/api/mcp/catalog/install",
+		{
+			method: "POST",
+			body: { id, force, ...(source ? { source } : {}) },
+		},
+		z
+			.object({
+				success: z.boolean().optional(),
+				error: z.string().optional(),
+				server: z
+					.object({
+						args: z.array(z.string()),
+						command: z.union([z.string(), z.null()]),
+						name: z.string(),
+						transport: z.union([
+							z.literal("stdio"),
+							z.literal("streamable-http"),
+						]),
+						url: z.union([z.string(), z.null()]),
+					})
+					.passthrough()
+					.optional(),
+			})
+			.passthrough()
+	);
 	if (json.success === false || !json.server) {
 		throw new Error(json.error ?? `Failed to install ${id}`);
 	}
-	return {
-		name: json.server.name,
-		command: json.server.command,
-		url: json.server.url ?? null,
-	};
+	if (
+		json.server.transport === "stdio" &&
+		json.server.command &&
+		json.server.url === null
+	) {
+		return {
+			args: json.server.args,
+			command: json.server.command,
+			name: json.server.name,
+			transport: "stdio",
+			url: null,
+		};
+	}
+	if (
+		json.server.transport === "streamable-http" &&
+		json.server.command === null &&
+		json.server.url
+	) {
+		return {
+			args: [],
+			command: null,
+			name: json.server.name,
+			transport: "streamable-http",
+			url: json.server.url,
+		};
+	}
+	throw new Error("Core returned an invalid MCP install result");
 }
 
 /** Resolve a catalog MCP server without writing mcp.json, lifecycle state, or
@@ -479,10 +707,15 @@ export function previewMcpServerInstall(
 	id: string,
 	force = false
 ): Promise<McpInstallPreview> {
-	return request<McpInstallPreview>(target, "/api/mcp/catalog/install", {
-		method: "POST",
-		body: { dryRun: true, force, id },
-	});
+	return request(
+		target,
+		"/api/mcp/catalog/install",
+		{
+			method: "POST",
+			body: { dryRun: true, force, id },
+		},
+		mcpInstallPreviewSchema
+	);
 }
 
 /** One installed MCP server whose recorded catalog version trails the registry.
@@ -492,6 +725,8 @@ export interface McpUpdateEntry {
 	currentVersion: string | null;
 	latestVersion: string | null;
 	name: string;
+	/** MCP source the update was found on, which must apply it. */
+	source: string | null;
 }
 
 /** List installed MCP servers with a newer catalog version. Returns `[]` on any
@@ -506,13 +741,35 @@ export async function listMcpUpdates(
 				catalog_id?: string;
 				current_version?: string | null;
 				latest_version?: string | null;
+				source?: string | null;
 			}[];
-		}>(target, "/api/mcp/updates");
+		}>(
+			target,
+			"/api/mcp/updates",
+			{},
+			z
+				.object({
+					updates: z
+						.array(
+							z
+								.object({
+									name: z.string().optional(),
+									catalog_id: z.string().optional(),
+									current_version: z.union([z.string(), z.null()]).optional(),
+									latest_version: z.union([z.string(), z.null()]).optional(),
+								})
+								.passthrough()
+						)
+						.optional(),
+				})
+				.passthrough()
+		);
 		return (json.updates ?? []).map((u) => ({
 			name: u.name ?? u.catalog_id ?? "",
 			catalogId: u.catalog_id ?? "",
 			currentVersion: u.current_version ?? null,
 			latestVersion: u.latest_version ?? null,
+			source: u.source ?? null,
 		}));
 	} catch {
 		return [];
@@ -526,25 +783,11 @@ export async function listMcpUpdates(
 // seam). The active source lives in Core; the dropdown lists them and selects
 // one, after which the catalog re-keys against the newly-active endpoint.
 
-/** One selectable MCP catalog source. Mirrors Core's source descriptor. */
-export interface McpCatalogSource {
-	baseUrl: string | null;
-	builtin: boolean;
-	displayName: string;
-	id: string;
-}
-
 interface SourceWire {
 	base_url?: string | null;
 	builtin?: boolean;
 	display_name: string;
 	id: string;
-}
-
-/** The active source id plus every source available for the MCP kind. */
-export interface McpCatalogSources {
-	active: string;
-	sources: McpCatalogSource[];
 }
 
 function toSource(w: SourceWire): McpCatalogSource {
@@ -563,7 +806,17 @@ export async function fetchMcpSources(
 	const json = await request<{
 		active?: string;
 		sources?: SourceWire[];
-	}>(target, "/api/catalog/sources?kind=mcp");
+	}>(
+		target,
+		"/api/catalog/sources?kind=mcp",
+		{},
+		z
+			.object({
+				active: z.string().optional(),
+				sources: z.array(sourceWireResponseCodec).optional(),
+			})
+			.passthrough()
+	);
 	return {
 		active: json.active ?? "",
 		sources: (json.sources ?? []).map(toSource),
@@ -575,28 +828,18 @@ export async function selectMcpSource(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(target, "/api/catalog/sources/select", {
-		method: "POST",
-		body: { kind: "mcp", id },
-	});
+	await request<unknown>(
+		target,
+		"/api/catalog/sources/select",
+		{
+			method: "POST",
+			body: { kind: "mcp", id },
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 // ── Ghost computer-use actions (M7 / issue #201) ─────────────────────────────
-
-/**
- * The small, named set of Ghost actions exposed in the companion overlay.
- * Full Ghost tool catalog exposure is out of scope; these cover the most
- * common one-shot automation actions.
- */
-export type GhostActionKind = "click" | "focus" | "screenshot";
-
-/** Parameters for each named Ghost action. */
-export interface GhostActionInput {
-	kind: GhostActionKind;
-	/** For `focus` - required app name. For `click` - element query string.
-	 *  Not used for `screenshot`. */
-	target?: string;
-}
 
 /**
  * Map a named Ghost action to its fully-qualified tool id and arguments.
@@ -687,7 +930,7 @@ export async function callMcpTool(
 		}),
 	});
 	const text = await resp.text();
-	const parsed = (text ? JSON.parse(text) : {}) as McpCallResult;
+	const parsed = mcpCallResponseSchema.parse(text ? JSON.parse(text) : {});
 	return {
 		ok: parsed.ok ?? resp.ok,
 		output: parsed.output,

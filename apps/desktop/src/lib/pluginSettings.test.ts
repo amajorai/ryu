@@ -6,6 +6,7 @@
 // against the SAME grouping the nav uses rather than against a hardcoded string.
 
 import { describe, expect, test } from "bun:test";
+import type { z } from "zod";
 import {
 	APP_SECTION_PREFIX,
 	isEntitySection,
@@ -38,7 +39,7 @@ const COMPANION_APP = "com.ryu.learning";
 const isApp = (id: string) => id === COMPANION_APP;
 
 describe("parseSettingsTabs — the app-enabled bit", () => {
-	const raw = (extra: Record<string, unknown>) => ({
+	const raw = (extra: Record<string, z.infer<ReturnType<typeof z.json>>>) => ({
 		plugin: EXA,
 		title: "Exa Search",
 		fields: [{ type: "secret", pref_key: "RYU_EXA_API_KEY", label: "Key" }],
@@ -118,4 +119,67 @@ describe("resolveSettingsDestination", () => {
 			expect(bucket.has(pluginId)).toBe(true);
 		}
 	});
+});
+
+test("plugin manifest fields keep unknown controls and tolerant sibling fallbacks", () => {
+	const [result] = parseSettingsTabs([
+		{
+			plugin: EXA,
+			scope: "future",
+			app_enabled: "false",
+			fields: [
+				null,
+				{ pref_key: "", prefKey: "SHOULD_NOT_FALL_BACK" },
+				{
+					prefKey: "UNITS",
+					type: "future_control",
+					label: 1,
+					min: "2",
+					max: 8,
+					options: [
+						"mm",
+						{ value: "in", label: 2 },
+						null,
+						{ label: "missing value" },
+					],
+					default: false,
+				},
+			],
+		},
+	]);
+	expect(result?.scope).toBe("node");
+	expect(result?.enabled).toBe(true);
+	expect(result?.fields).toEqual([
+		{
+			prefKey: "UNITS",
+			type: "future_control",
+			label: "UNITS",
+			options: [
+				{ value: "mm", label: "mm" },
+				{ value: "in", label: "in" },
+			],
+			default: false,
+			description: undefined,
+			placeholder: undefined,
+			min: undefined,
+			max: 8,
+			step: undefined,
+		},
+	]);
+});
+
+test("plugin settings keep named surfaces and ignore malformed MCP descriptors", () => {
+	const results = parseSettingsTabs([
+		{
+			plugin: EXA,
+			view: "advanced",
+			fields: "bad",
+			mcpSettings: { readTool: "other.read", updateTool: "other.update" },
+		},
+		{ plugin: "companion", companion: "preferences", title: 2 },
+		{ plugin: EXA, fields: [] },
+	]);
+	expect(results.map((result) => result.plugin)).toEqual([EXA, "companion"]);
+	expect(results[0]?.mcpSettings).toBeUndefined();
+	expect(results[1]?.title).toBe("Settings");
 });

@@ -1,5 +1,5 @@
 import CheckoutSuccess from "@ryu/blocks/web/checkout-success.tsx";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { GiftSettlement } from "../../../web/src/app/success/gift-settlement.tsx";

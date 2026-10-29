@@ -1,28 +1,28 @@
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
+} from "@ryu/ui/components/card.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/empty.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import {
 	Activity,
@@ -37,8 +37,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { ApiError } from "@/src/lib/api/client.ts";
 import {
+	enableUsageReview,
 	getReflectDashboard,
 	getReflectSettings,
+	isUsageReviewDisabled,
 	REFLECT_PERIODS,
 	type ReflectDashboard,
 	type ReflectPeriod,
@@ -46,13 +48,13 @@ import {
 	updateReflectSettings,
 } from "@/src/lib/api/memory.ts";
 
-const PERIOD_LABELS: Record<ReflectPeriod, string> = {
+const PERIOD_LABELS = {
 	"7d": "Last 7 days",
 	"30d": "Last 30 days",
 	"90d": "Last 90 days",
-};
+} satisfies Record<ReflectPeriod, string>;
 
-function isUnsupported(error: unknown): boolean {
+function isUnsupported<TError>(error: TError): boolean {
 	return error instanceof ApiError && [404, 405, 501].includes(error.status);
 }
 
@@ -69,8 +71,10 @@ function formatHour(hour: number): string {
 	}).format(new Date(2020, 0, 1, hour));
 }
 
+// Mirrors Core's defaults so the switches don't flash a different state while
+// the node's saved settings load.
 const EMPTY_SETTINGS: ReflectSettings = {
-	breakNudges: true,
+	breakNudges: false,
 	quietHoursEnabled: true,
 	quietHoursEnd: 8,
 	quietHoursStart: 22,
@@ -83,8 +87,8 @@ function StatCard({
 }) {
 	const trend = formatTrend(activity.trend);
 	return (
-		<Card className="border-border/70 shadow-none">
-			<CardContent className="flex items-start justify-between gap-3 pt-5">
+		<Card borderTone="muted" elevation="flat">
+			<CardContent layout="reflection-summary" topSpacing="generous">
 				<div>
 					<p className="text-muted-foreground text-xs">{activity.label}</p>
 					<p className="mt-1 font-medium text-2xl tracking-tight">
@@ -112,6 +116,7 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 	const [loading, setLoading] = useState(true);
 	const [settingsLoading, setSettingsLoading] = useState(true);
 	const [error, setError] = useState<unknown>(null);
+	const [enablingReview, setEnablingReview] = useState(false);
 
 	const load = useCallback(
 		async (nextPeriod: ReflectPeriod) => {
@@ -148,11 +153,28 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 		};
 	}, [load, period, target]);
 
+	const turnOnUsageReview = async () => {
+		setEnablingReview(true);
+		try {
+			if (!(await enableUsageReview(target))) {
+				throw new Error("Usage review stayed off");
+			}
+			await load(period);
+		} catch {
+			toast.error("Usage review couldn't be turned on", {
+				description: "Check the active node connection and try again.",
+			});
+		} finally {
+			setEnablingReview(false);
+		}
+	};
+
 	const changePeriod = (next: string | null) => {
 		if (!next) {
 			return;
 		}
-		const value = next as ReflectPeriod;
+		const value =
+			/* SAFETY: The native includes comparison below checks the unchanged search value against REFLECT_PERIODS before it reaches setPeriod; this assertion alone makes no membership claim. */ next as ReflectPeriod;
 		if (REFLECT_PERIODS.includes(value)) {
 			setPeriod(value);
 		}
@@ -223,7 +245,7 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 			</div>
 
 			{error && isUnsupported(error) ? (
-				<Empty className="border border-dashed py-12">
+				<Empty appearance="bordered">
 					<EmptyHeader>
 						<EmptyTitle>Reflect is not available on this node yet</EmptyTitle>
 						<EmptyDescription>
@@ -236,11 +258,30 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 					</Button>
 				</Empty>
 			) : loading ? (
-				<div className="flex justify-center py-16">
-					<Spinner />
+				<div className="py-16">
+					<SkeletonRows />
 				</div>
+			) : error && isUsageReviewDisabled(error) ? (
+				<Empty appearance="bordered">
+					<EmptyHeader>
+						<EmptyTitle>Reflect needs usage review</EmptyTitle>
+						<EmptyDescription>
+							Reflect summarizes the opt-in usage review, which is off on this
+							node. Turning it on lets the node aggregate your conversations and
+							activity when you open Reflect. It adds no background capture and
+							no model call, and any usage review exclusions still apply.
+						</EmptyDescription>
+					</EmptyHeader>
+					<Button
+						disabled={enablingReview}
+						onClick={() => void turnOnUsageReview()}
+						variant="secondary"
+					>
+						Turn on usage review
+					</Button>
+				</Empty>
 			) : error ? (
-				<Empty className="border border-dashed py-12">
+				<Empty appearance="bordered">
 					<EmptyHeader>
 						<EmptyTitle>Reflect couldn't load</EmptyTitle>
 						<EmptyDescription>
@@ -260,11 +301,11 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 					</div>
 
 					<div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-						<Card className="border-border/70 shadow-none">
+						<Card borderTone="muted" elevation="flat">
 							<CardHeader>
 								<CardTitle>Topics that surfaced</CardTitle>
 							</CardHeader>
-							<CardContent className="flex flex-col gap-3">
+							<CardContent layout="stack">
 								{dashboard.topics.length ? (
 									dashboard.topics.map((topic) => (
 										<div
@@ -292,14 +333,14 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 							</CardContent>
 						</Card>
 
-						<Card className="border-border/70 shadow-none">
+						<Card borderTone="muted" elevation="flat">
 							<CardHeader>
-								<CardTitle className="flex items-center gap-2">
+								<CardTitle layout="badge-row">
 									<Lightbulb className="size-4 text-primary" />
 									Insights
 								</CardTitle>
 							</CardHeader>
-							<CardContent className="flex flex-col gap-3">
+							<CardContent layout="stack">
 								{dashboard.insights.length ? (
 									dashboard.insights.map((insight) => (
 										<div
@@ -323,18 +364,19 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 				</>
 			) : null}
 
-			<Card className="border-border/70 shadow-none">
+			<Card borderTone="muted" elevation="flat">
 				<CardHeader>
 					<CardTitle>Gentle reminders</CardTitle>
 				</CardHeader>
-				<CardContent className="flex flex-col gap-4">
+				<CardContent layout="spaced-stack">
 					<div className="flex items-center justify-between gap-3">
 						<div className="flex items-start gap-3">
 							<PauseCircle className="mt-0.5 size-4 text-muted-foreground" />
 							<div>
 								<Label htmlFor="reflect-break-nudges">Break nudges</Label>
 								<p className="mt-1 text-muted-foreground text-xs">
-									Occasional reminders to step away after a long stretch.
+									Saved on this node for later. Ryu doesn't send break reminders
+									yet.
 								</p>
 							</div>
 						</div>

@@ -11,6 +11,7 @@ import type { IconSvgElement } from "@hugeicons/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { z } from "zod";
 import {
 	BUILTIN_SECTIONS,
 	type BuiltinSectionKey,
@@ -39,13 +40,20 @@ import { useSandboxBackends } from "@/src/hooks/useSandboxBackends.ts";
 import { installedSkillsQuery } from "@/src/hooks/useSkillsCatalog.ts";
 import { useVoiceEngines } from "@/src/hooks/useVoiceEngines.ts";
 import { CHANNEL_LABELS } from "@/src/lib/api/channels.ts";
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 import type { InstalledSkill } from "@/src/lib/api/skills.ts";
+import {
+	chatPullRequestUrls,
+	pullRequestSearchTerms,
+} from "@/src/lib/chat-pull-request-search.ts";
 import { basename } from "@/src/lib/files.ts";
 import { dedupeFolders, folderKey } from "@/src/lib/folder-path.ts";
+import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
 import {
 	findWorkspaceProject,
 	workspaceProjectName,
 } from "@/src/lib/workspace-projects.ts";
+import { useChatPullRequestIndex } from "@/src/store/useChatPullRequestIndex.ts";
 import { useConversationFlagsStore } from "@/src/store/useConversationFlagsStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 
@@ -53,6 +61,8 @@ import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 export interface CommandSearchItem {
 	icon?: IconSvgElement;
 	id: string;
+	/** Extra matched text that is not displayed (e.g. a chat's `#123` PRs). */
+	keywords?: string;
 	onSelect: () => void;
 	subtitle?: string | null;
 	timestamp?: number;
@@ -68,10 +78,10 @@ export interface CommandSearchSection {
 }
 
 /** Owner gates used by the sidebar's compiled-in app-backed sections. */
-const SECTION_PLUGIN_OWNER: Partial<Record<BuiltinSectionKey, string>> = {
+const SECTION_PLUGIN_OWNER = {
 	agents: SURFACE_PLUGIN_OWNER.agents,
 	spaces: SURFACE_PLUGIN_OWNER.spaces,
-};
+} satisfies Partial<Record<BuiltinSectionKey, string>>;
 
 function searchItem(
 	id: string,
@@ -79,6 +89,7 @@ function searchItem(
 	onSelect: () => void,
 	options: {
 		icon?: IconSvgElement;
+		keywords?: string;
 		subtitle?: string | null;
 		timestamp?: number;
 	} = {}
@@ -86,15 +97,22 @@ function searchItem(
 	return { id, onSelect, title, ...options };
 }
 
-function toTimestamp(value: unknown): number | undefined {
-	if (typeof value === "number" && Number.isFinite(value)) {
-		return value > 0 && value < 1_000_000_000_000 ? value * 1000 : value;
+const timestampInputSchema = z.union([z.number(), z.string()]);
+function toTimestamp(
+	value: Parameters<typeof timestampInputSchema.parse>[0]
+): number | undefined {
+	const numeric = z.number().safeParse(value);
+	if (numeric.success) {
+		return numeric.data > 0 && numeric.data < 1_000_000_000_000
+			? numeric.data * 1000
+			: numeric.data;
 	}
-	if (typeof value === "string") {
-		const parsed = Date.parse(value);
-		return Number.isFinite(parsed) ? parsed : undefined;
+	const text = z.string().safeParse(value);
+	if (!text.success) {
+		return undefined;
 	}
-	return undefined;
+	const parsed = Date.parse(text.data);
+	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /**
@@ -103,10 +121,7 @@ function toTimestamp(value: unknown): number | undefined {
  * sections are added by the palette from the same contributions feed, so a new
  * app gets a filter tab without a shell code change.
  */
-export function useCommandSearchSections(): {
-	agents: ReturnType<typeof useAgents>["agents"];
-	sections: CommandSearchSection[];
-} {
+export function useCommandSearchSections() {
 	const { activateTab, openTab, tabs } = useTabsContext();
 	const { conversations, setActiveConversationId } = useChatHistoryContext();
 	const { spaces } = useSpacesContext();
@@ -148,6 +163,9 @@ export function useCommandSearchSections(): {
 	const workspaceProjects = useWorkspaceStore((state) => state.projects);
 	const pinnedIds = useConversationFlagsStore((state) => state.pinnedIds);
 	const archivedIds = useConversationFlagsStore((state) => state.archivedIds);
+	const branchPullRequests = useChatPullRequestIndex(
+		(state) => state.branchPullRequests
+	);
 
 	const projectPaths = useMemo(() => {
 		const removed = new Set(removedProjects.map(folderKey));
@@ -185,6 +203,9 @@ export function useCommandSearchSections(): {
 				() => openChat(conversation.id),
 				{
 					icon: SECTION_ICONS.chats,
+					keywords: pullRequestSearchTerms(
+						chatPullRequestUrls(conversation, branchPullRequests)
+					),
 					subtitle: conversation.folderPath,
 					timestamp: toTimestamp(
 						conversation.updatedAt ?? conversation.createdAt
@@ -207,6 +228,9 @@ export function useCommandSearchSections(): {
 					() => openChat(conversation.id),
 					{
 						icon: Archive01Icon,
+						keywords: pullRequestSearchTerms(
+							chatPullRequestUrls(conversation, branchPullRequests)
+						),
 						subtitle: conversation.folderPath,
 						timestamp: toTimestamp(
 							conversation.updatedAt ?? conversation.createdAt
@@ -215,9 +239,7 @@ export function useCommandSearchSections(): {
 				)
 			);
 
-		const itemsBySection: Partial<
-			Record<BuiltinSectionKey, CommandSearchItem[]>
-		> = {
+		const itemsBySection = {
 			archived: archivedItems,
 			agents: agents.map((agent) =>
 				searchItem(
@@ -244,17 +266,19 @@ export function useCommandSearchSections(): {
 				)
 			),
 			chats: chatSidebarItems,
-			companions: companions.map((companion) =>
-				searchItem(
-					companion.id,
-					companion.label || companion.name,
-					() =>
-						openTab(pluginCompanionPath(companion.id), {
-							title: companion.label || companion.name,
-						}),
-					{ icon: SECTION_ICONS.companions, subtitle: companion.pluginId }
-				)
-			),
+			companions: companions
+				.filter(isNavigablePluginCompanion)
+				.map((companion) =>
+					searchItem(
+						companion.id,
+						companion.label || companion.name,
+						() =>
+							openTab(pluginCompanionPath(companion.id), {
+								title: companion.label || companion.name,
+							}),
+						{ icon: SECTION_ICONS.companions, subtitle: companion.pluginId }
+					)
+				),
 			engines: [
 				...localEngines.map((engine) =>
 					searchItem(
@@ -378,7 +402,7 @@ export function useCommandSearchSections(): {
 					{ icon: Wrench01Icon, subtitle: tool.server }
 				)
 			),
-		};
+		} satisfies Partial<Record<BuiltinSectionKey, CommandSearchItem[]>>;
 
 		const enabledPluginIds = new Set(
 			apps.filter((app) => app.enabled).map((app) => app.id)
@@ -386,16 +410,20 @@ export function useCommandSearchSections(): {
 		const visibleSections = appsLoading
 			? BUILTIN_SECTIONS
 			: BUILTIN_SECTIONS.filter((section) => {
-					const owner = SECTION_PLUGIN_OWNER[section.key];
+					const owner = Object.entries(SECTION_PLUGIN_OWNER).find(
+						([key]) => key === section.key
+					)?.[1];
 					return !owner || enabledPluginIds.has(owner);
 				}).filter((section) => {
-					const owner = SECTION_PLUGIN_OWNER[section.key];
+					const owner = Object.entries(SECTION_PLUGIN_OWNER).find(
+						([key]) => key === section.key
+					)?.[1];
 					return !(
 						owner &&
 						contributedSections.some(
 							(contribution) =>
 								contribution.plugin === owner &&
-								Boolean(contribution.spec?.source)
+								Boolean(pluginSidebarSpec(contribution)?.source)
 						)
 					);
 				});
@@ -403,7 +431,10 @@ export function useCommandSearchSections(): {
 		return visibleSections.map((section) => ({
 			icon: SECTION_ICONS[section.key],
 			id: section.key,
-			items: itemsBySection[section.key] ?? [],
+			items:
+				Object.entries(itemsBySection).find(
+					([key]) => key === section.key
+				)?.[1] ?? [],
 			label: section.label,
 		}));
 	}, [
@@ -413,6 +444,7 @@ export function useCommandSearchSections(): {
 		apps,
 		appsLoading,
 		archivedIds,
+		branchPullRequests,
 		channels,
 		companions,
 		contributedSections,

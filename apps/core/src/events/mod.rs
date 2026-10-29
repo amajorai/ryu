@@ -111,6 +111,10 @@ pub enum NavigationKind {
     Panel,
     /// Open or focus the embedded Browser app and load the requested URL.
     Browser,
+    /// Switch the shell to the interface whose id is the target (`ryu:channels`,
+    /// `<plugin>:<id>`). The shell applies it only when its own switcher would
+    /// offer that interface to this user.
+    Interface,
 }
 
 #[derive(Clone, Debug, Serialize)]

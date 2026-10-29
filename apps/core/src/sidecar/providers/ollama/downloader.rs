@@ -4,17 +4,33 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use ryu_sidecar_runtime::layout::{EngineGroup, Modality};
+
 use crate::sidecar::download_manager::{
-    build_http_client, compute_sha256, retry_download, ryu_dir, ProgressCallback, VersionStore,
+    build_http_client, compute_sha256, engine_dir, model_family_dir, retry_download, tmp_dir,
+    ProgressCallback, VersionStore,
 };
 
-fn bin_path() -> PathBuf {
+/// `<data dir>/engines/chat/ollama` — the Ryu-managed Ollama binary.
+pub fn install_dir() -> PathBuf {
+    engine_dir(EngineGroup::Chat, "ollama")
+}
+
+/// Path of the Ryu-managed `ollama` executable.
+pub fn bin_path() -> PathBuf {
     let name = if cfg!(target_os = "windows") {
         "ollama.exe"
     } else {
         "ollama"
     };
-    ryu_dir().join("bin").join(name)
+    install_dir().join(name)
+}
+
+/// `<data dir>/models/chat/ollama` — the `OLLAMA_MODELS` store a Ryu-spawned
+/// `ollama serve` uses, so pulled models live in the data dir instead of
+/// `~/.ollama`.
+pub fn models_dir() -> PathBuf {
+    model_family_dir(Modality::Chat, "ollama")
 }
 
 /// Returns (asset_filename, archive_format) for the current platform.
@@ -98,7 +114,16 @@ impl OllamaDownloader {
 
         // Download the release archive through the global DownloadCenter (#456)
         // to a deterministic temp dest, then read it back to extract the binary.
-        let archive_dest = ryu_dir().join("tmp").join(format!("ollama-{tag}-{asset}"));
+        let archive_dest = tmp_dir().join(format!("ollama-{tag}-{asset}"));
+        // An engine is executed, so DownloadCenter refuses it unverified: read the
+        // digest the release itself publishes for this asset.
+        let archive_sha256 = crate::sidecar::download_manager::require_release_asset_sha256(
+            &self.client,
+            &release,
+            asset,
+        )
+        .await
+        .context("verifying the Ollama release")?;
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
                 kind: crate::downloads::DownloadKind::Engine,
@@ -106,7 +131,7 @@ impl OllamaDownloader {
                 label: "Ollama".to_string(),
                 url,
                 dest: archive_dest,
-                sha256: None,
+                sha256: Some(archive_sha256),
                 version_record: None,
             })
             .await
@@ -174,7 +199,10 @@ impl OllamaDownloader {
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i).context("reading zip entry")?;
-            let name = file.name().to_string();
+            let name = file
+                .name()
+                .context("zip entry has an invalid name")?
+                .into_owned();
             if name.ends_with(binary_name) {
                 let mut bytes = Vec::new();
                 file.read_to_end(&mut bytes)
@@ -273,10 +301,10 @@ mod tests {
 
     fn make_zip(name: &str, data: &[u8]) -> Vec<u8> {
         use std::io::Cursor;
-        use zip::write::FileOptions;
+        use zip::write::SimpleFileOptions;
         use zip::ZipWriter;
         let mut zw = ZipWriter::new(Cursor::new(Vec::new()));
-        zw.start_file(name, FileOptions::default()).unwrap();
+        zw.start_file(name, SimpleFileOptions::default()).unwrap();
         zw.write_all(data).unwrap();
         zw.finish().unwrap().into_inner()
     }

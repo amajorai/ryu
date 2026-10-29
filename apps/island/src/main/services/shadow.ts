@@ -12,20 +12,29 @@ import {
 	type SpeechHistoryInput,
 	speechHistoryQuery,
 } from "@ryuhq/core-client/shadow";
+import { z } from "zod";
 import type {
-	CaptureControl,
 	CaptureControlResult,
 	CaptureControlUpdate,
 	FeedbackRequest,
 	FeedbackResult,
-	ProactiveSuggestion,
-	ShadowContext,
 	ShadowContextResult,
 	ShadowProactiveInboxResult,
 	ShadowProactiveResult,
 } from "../../shared/ipc.ts";
-import { loadConfig, shadowApiToken } from "./config.ts";
+import { forgetShadowApiToken, loadConfig, shadowApiToken } from "./config.ts";
 import { isContextReadAllowed } from "./consent.ts";
+import {
+	captureControlSchema,
+	proactiveResponseSchema,
+	shadowContextSchema,
+	speechHistorySchema,
+} from "./shadow-contract.ts";
+import {
+	fetchWithVerifiedBearer,
+	PeerProofCache,
+	UnverifiedPeerError,
+} from "./shadow-peer-proof.ts";
 
 export async function getSpeechHistory(
 	input: SpeechHistoryInput
@@ -44,7 +53,7 @@ export async function getSpeechHistory(
 			"Shadow speech history is unavailable. Check that transcription is running."
 		);
 	}
-	return (await response.json()) as SpeechHistory;
+	return speechHistorySchema.parse(await response.json());
 }
 
 /** Shadow probes should be quick; capture runs locally. */
@@ -56,7 +65,10 @@ const SHADOW_TIMEOUT_MS = 4000;
  */
 const CONSENT_DENIED = "context-read consent not granted";
 
-function reasonFromError(error: unknown): string {
+const shadowFailureSchema = z
+	.union([z.instanceof(DOMException), z.instanceof(Error)])
+	.catch(new Error("shadow unreachable"));
+function reasonFromError(error: z.infer<typeof shadowFailureSchema>): string {
 	if (error instanceof DOMException && error.name === "AbortError") {
 		return "timeout";
 	}
@@ -66,23 +78,40 @@ function reasonFromError(error: unknown): string {
 	return "shadow unreachable";
 }
 
+/**
+ * Island's recent Shadow proof, so the poll loop and read-then-write calls do
+ * not re-challenge Shadow on every request.
+ */
+const SHADOW_PEER_PROOF = new PeerProofCache(2000);
+
 async function shadowFetch(path: string, init: RequestInit): Promise<Response> {
 	const { shadowBaseUrl } = loadConfig();
+	// Shadow's HTTP surface is bearer-gated (everything except /health). The
+	// token is attached only after the listener proves it holds it (see
+	// shadow-peer-proof.ts); without a token there is nothing to verify, so
+	// fail closed rather than calling whatever holds the port.
+	const token = shadowApiToken();
+	if (!token) {
+		throw new Error(
+			"No Shadow API token found (SHADOW_API_TOKEN or services/shadow/api-token); nothing was sent to Shadow."
+		);
+	}
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), SHADOW_TIMEOUT_MS);
-	// Shadow's HTTP surface is bearer-gated (everything except /health); attach
-	// the shared-secret token the main process resolves from env / token file.
-	const token = shadowApiToken();
-	const headers: Record<string, string> = {
-		...((init.headers as Record<string, string> | undefined) ?? {}),
-		...(token ? { Authorization: `Bearer ${token}` } : {}),
-	};
 	try {
-		return await fetch(`${shadowBaseUrl}${path}`, {
-			...init,
-			headers,
-			signal: controller.signal,
-		});
+		return await fetchWithVerifiedBearer(
+			`${shadowBaseUrl}${path}`,
+			{ ...init, signal: controller.signal },
+			token,
+			SHADOW_PEER_PROOF
+		);
+	} catch (error) {
+		if (error instanceof UnverifiedPeerError) {
+			// Core rotates the token when it finds the port squatted, so drop the
+			// cached copy and re-read it on the next call.
+			forgetShadowApiToken();
+		}
+		throw error;
 	} finally {
 		clearTimeout(timer);
 	}
@@ -101,10 +130,13 @@ export async function getCurrentContext(): Promise<ShadowContextResult> {
 		if (!resp.ok) {
 			return { available: false, reason: `shadow responded ${resp.status}` };
 		}
-		const context = (await resp.json()) as ShadowContext;
+		const context = shadowContextSchema.parse(await resp.json());
 		return { available: true, context };
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(shadowFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -125,14 +157,15 @@ export async function getProactive(): Promise<ShadowProactiveResult> {
 		if (!resp.ok) {
 			return { available: false, reason: `shadow responded ${resp.status}` };
 		}
-		const data = (await resp.json()) as {
-			suggestions?: ProactiveSuggestion[];
-		};
+		const data = proactiveResponseSchema.parse(await resp.json());
 		const suggestion =
 			data.suggestions?.find((s) => s.disposition === "push_now") ?? null;
 		return { available: true, suggestion };
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(shadowFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -155,15 +188,16 @@ export async function getProactiveInbox(): Promise<ShadowProactiveInboxResult> {
 		if (!resp.ok) {
 			return { available: false, reason: `shadow responded ${resp.status}` };
 		}
-		const data = (await resp.json()) as {
-			suggestions?: ProactiveSuggestion[];
-		};
+		const data = proactiveResponseSchema.parse(await resp.json());
 		const suggestions = (data.suggestions ?? []).filter(
 			(s) => s.disposition !== "drop"
 		);
 		return { available: true, suggestions };
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(shadowFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -185,7 +219,10 @@ export async function postFeedback(
 		});
 		return { available: true, ok: resp.ok };
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(shadowFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -202,10 +239,13 @@ export async function getCaptureControl(): Promise<CaptureControlResult> {
 		if (!resp.ok) {
 			return { available: false, reason: `shadow responded ${resp.status}` };
 		}
-		const control = (await resp.json()) as CaptureControl;
+		const control = captureControlSchema.parse(await resp.json());
 		return { available: true, control };
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(shadowFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -228,9 +268,12 @@ export async function setCaptureControl(
 		if (!resp.ok) {
 			return { available: false, reason: `shadow responded ${resp.status}` };
 		}
-		const control = (await resp.json()) as CaptureControl;
+		const control = captureControlSchema.parse(await resp.json());
 		return { available: true, control };
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(shadowFailureSchema.parse(error)),
+		};
 	}
 }

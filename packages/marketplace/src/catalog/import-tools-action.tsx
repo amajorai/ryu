@@ -8,9 +8,31 @@
 
 import { Download01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
 import type { CatalogNode } from "./host.tsx";
+
+/** Core's user-identity header. Mirrors `USER_JWT_HEADER` in
+ *  `@ryu/core-client` (this package does not depend on it). */
+const USER_JWT_HEADER = "x-ryu-user-jwt";
+
+/** Same admission shape as core-client `makeHeaders`: a managed node has no node
+ *  token, so the user JWT is both the Bearer and the identity header. */
+function importHeaders(node: CatalogNode): Record<string, string> {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	const userJwt = node.userJwt?.trim() ? node.userJwt : null;
+	const bearer = node.token ?? userJwt;
+	if (bearer) {
+		headers.Authorization = `Bearer ${bearer}`;
+	}
+	if (userJwt) {
+		headers[USER_JWT_HEADER] = userJwt;
+	}
+	return headers;
+}
 
 /** Import an integrations.sh API entry (REST `openapi` or `graphql`) as
  *  gateway-governed `http` tools via the Core import endpoints. Core resolves +
@@ -23,13 +45,14 @@ export default function ImportToolsAction({
 	label = "Add as tools",
 	size = "sm",
 }: {
-	body: Record<string, unknown>;
+	body: Parameters<typeof JSON.stringify>[0];
 	endpoint: string;
 	/** Verb on the idle button, for surfaces that name the connection instead. */
 	label?: string;
 	node: CatalogNode;
 	size?: "sm" | "default";
 }) {
+	const tl = useLiteralMessages();
 	const [state, setState] = useState<"idle" | "busy" | "done" | "error">(
 		"idle"
 	);
@@ -41,13 +64,11 @@ export default function ImportToolsAction({
 		const base = node.url.replace(/\/$/, "");
 		fetch(`${base}${endpoint}`, {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				...(node.token ? { Authorization: `Bearer ${node.token}` } : {}),
-			},
+			headers: importHeaders(node),
 			body: JSON.stringify(body),
 		})
 			.then(async (res) => {
+				// SAFETY: The two mounted catalog callers use Core import_openapi_tools/import_graphql_tool, whose serde JSON success/error branches publish these optional boolean/string/count fields; failed JSON decoding supplies the authored empty object.
 				const json = (await res.json().catch(() => ({}))) as {
 					dropped?: number;
 					error?: string;
@@ -55,11 +76,22 @@ export default function ImportToolsAction({
 					tools?: number;
 				};
 				if (res.ok && json.success) {
-					const dropped = json.dropped
-						? ` (${json.dropped} more not imported)`
-						: "";
+					const toolCount = json.tools ?? 0;
+					const toolCountLabel = String(toolCount);
 					setMessage(
-						`Added ${json.tools ?? 0} tool${json.tools === 1 ? "" : "s"}${dropped}. Enable it from Tools to use them.`
+						json.dropped
+							? tl(
+									"Added {toolCount, plural, one {{toolCountLabel} tool} other {{toolCountLabel} tools}} ({droppedCount} more not imported). Enable it from Tools to use them.",
+									{
+										droppedCount: String(json.dropped),
+										toolCount,
+										toolCountLabel,
+									}
+								)
+							: tl(
+									"Added {toolCount, plural, one {{toolCountLabel} tool} other {{toolCountLabel} tools}}. Enable it from Tools to use them.",
+									{ toolCount, toolCountLabel }
+								)
 					);
 					setState("done");
 				} else {
@@ -67,7 +99,7 @@ export default function ImportToolsAction({
 					setState("error");
 				}
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				setMessage(err instanceof Error ? err.message : String(err));
 				setState("error");
 			});

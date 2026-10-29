@@ -132,7 +132,29 @@ pub fn tools() -> Vec<RegistryTool> {
                  Space document, or a database table). Pass the payload as `artifact` \
                  ({ kind, title, content, language?, filePath?, actions? }); the client draws it \
                  as a card the user can open in the side panel or a workspace tab. This tool \
-                 stores nothing — for a persisted file artifact use `artifact.create`."
+                 stores nothing — for a persisted file artifact use `artifact.create`.\n\n\
+                 Use kind `html` for answers the ui.render catalog can't express: custom \
+                 visualizations (treemaps, heatmaps, annotated charts), interactive explainers, \
+                 small games, or mocks of a product screen. html/svg/mermaid render at full \
+                 width and their natural height (up to ~960px, then the frame scrolls), so \
+                 size the page to its content rather than to the viewport.\n\n\
+                 The page runs in a sandbox with no network: inline all CSS, JS and data \
+                 (embed datasets as JSON in a <script>; draw large ones on a <canvas>). \
+                 The app's theme is available as CSS variables that follow light/dark mode: \
+                 --background, --foreground, --card, --muted, --muted-foreground, --border, \
+                 --primary, --primary-foreground, --accent, --destructive, --radius, \
+                 --chart-1 … --chart-5, --font-sans and --font-mono. Use them instead of \
+                 hard-coded colors so the page looks native in both themes. An HTML fragment \
+                 gets a themed body; a full document keeps its own styles.\n\n\
+                 To keep page state (a game score, ticked items, form input) across reloads, \
+                 call window.ryu.state.set(obj) with a plain JSON object (up to 63KB as UTF-8 \
+                 JSON, at most 31 levels deep; set() throws a RangeError beyond that) whenever \
+                 it changes, and start from window.ryu.state.get() (null on first load). The \
+                 state of the page's card in the chat is saved with the conversation, and \
+                 ui.get_state returns it under this tool call's id (kind \"artifact\") so you can \
+                 see what the user did. Opening the page in the side panel or a tab shows a \
+                 fresh copy whose changes are not saved. localStorage and cookies are \
+                 unavailable in the sandbox."
                     .to_owned(),
             ),
             input_schema: Some(render_schema()),

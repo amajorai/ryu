@@ -79,7 +79,7 @@ fn safe_slug(app_id: &str) -> String {
             }
         })
         .collect::<String>()
-        .trim_matches('-')
+        .trim_matches(|value| matches!(value, '-' | '.'))
         .to_owned();
     if slug.is_empty() {
         "app".to_owned()

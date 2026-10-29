@@ -31,12 +31,12 @@ export type HapticKind =
  * Durations in ms. A pattern alternates vibrate/pause/vibrate.
  * Short and dry: a long buzz reads as an alarm, not as feedback.
  */
-const PATTERNS: Record<HapticKind, number | number[]> = {
+const PATTERNS = {
 	snap: 8,
 	commit: 12,
 	success: [10, 40, 10],
 	error: [24, 60, 24],
-};
+} satisfies Record<HapticKind, number | number[]>;
 
 /**
  * Fire the haptic for a moment, if the device has one. Silently does nothing
@@ -45,16 +45,13 @@ const PATTERNS: Record<HapticKind, number | number[]> = {
  * haptic is the reinforcement.
  */
 export function haptic(kind: HapticKind): void {
-	if (typeof navigator === "undefined") {
+	if (globalThis.navigator === undefined) {
 		return;
 	}
-	// Not all engines type `vibrate`, and Safari omits it entirely.
-	const vibrate = (
-		navigator as Navigator & {
-			vibrate?: (pattern: number | number[]) => boolean;
-		}
-	).vibrate;
-	if (typeof vibrate !== "function") {
+	// The DOM owns this method's signature. Engines that omit it, and engines
+	// that reject a vibration, both use the same guarded no-op below.
+	const vibrate = navigator.vibrate;
+	if (!vibrate) {
 		return;
 	}
 	try {

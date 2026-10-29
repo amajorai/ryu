@@ -7,20 +7,21 @@
 
 import { ActivityIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/popover.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type AuditEntry, fetchGatewayAudit } from "@/src/lib/api/gateway.ts";
 import {
@@ -63,12 +64,12 @@ function formatLatency(ms: number): string {
 	return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
-const STATUS_COLOR: Record<SessionStatus, string> = {
+const STATUS_COLOR = {
 	idle: "bg-muted-foreground/40",
 	running: "bg-warning",
 	completed: "bg-success",
 	failed: "bg-destructive",
-};
+} satisfies Record<SessionStatus, string>;
 
 export function SessionsPopover({
 	conversationId,
@@ -77,38 +78,92 @@ export function SessionsPopover({
 	conversationId: string | null;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [sessions, setSessions] = useState<Session[]>([]);
 	const [costSummary, setCostSummary] = useState<RunCostSummary | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
+	const owner = useMemo(
+		() => ({
+			conversationId,
+			target: { url: target.url, token: target.token, userJwt: target.userJwt },
+		}),
+		[conversationId, target.url, target.token, target.userJwt]
+	);
+	const ownerRef = useRef(owner);
+	ownerRef.current = owner;
+	const mounted = useRef(false);
+	const loadSequence = useRef(0);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			loadSequence.current += 1;
+		};
+	}, []);
+	useEffect(() => {
+		if (ownerRef.current !== owner) {
+			return;
+		}
+		setSessions([]);
+		setCostSummary(null);
+		setError(null);
+	}, [owner]);
+	const onOpenChange = useCallback((next: boolean) => {
+		if (!next) {
+			loadSequence.current += 1;
+		}
+		setOpen(next);
+	}, []);
 	const load = useCallback(async () => {
+		const sequence = ++loadSequence.current;
+		const ownsResult = () =>
+			mounted.current &&
+			ownerRef.current === owner &&
+			loadSequence.current === sequence;
 		if (!conversationId) {
 			return;
 		}
 		setLoading(true);
 		try {
-			setSessions(await listSessionsForConversation(target, conversationId));
+			const nextSessions = await listSessionsForConversation(
+				owner.target,
+				conversationId
+			);
+			if (!ownsResult()) {
+				return;
+			}
+			setSessions(nextSessions);
 			setError(null);
 		} catch (e) {
+			if (!ownsResult()) {
+				return;
+			}
 			setError(e instanceof Error ? e.message : "Could not load sessions.");
 		} finally {
-			setLoading(false);
+			if (ownsResult()) {
+				setLoading(false);
+			}
 		}
 		// Per-run cost + latency (#548, P6) is best-effort and independent of the
 		// session list: the gateway audit may be disabled/unreachable while sessions
 		// still load. A failure just hides the rollup, never blocks the popover.
 		try {
-			const audit = await fetchGatewayAudit(target, {
+			const audit = await fetchGatewayAudit(owner.target, {
 				sessionId: conversationId,
 				limit: 200,
 			});
-			setCostSummary(audit.reachable ? summarizeRun(audit.entries) : null);
+			if (ownsResult()) {
+				setCostSummary(audit.reachable ? summarizeRun(audit.entries) : null);
+			}
 		} catch {
-			setCostSummary(null);
+			if (ownsResult()) {
+				setCostSummary(null);
+			}
 		}
-	}, [conversationId, target]);
+	}, [conversationId, owner]);
 
 	// Fetch when the popover opens (sessions change as runs happen).
 	useEffect(() => {
@@ -122,21 +177,23 @@ export function SessionsPopover({
 	}
 
 	return (
-		<Popover onOpenChange={setOpen} open={open}>
+		<Popover onOpenChange={onOpenChange} open={open}>
 			<Tooltip>
 				<TooltipTrigger
 					render={
-						<PopoverTrigger
-							aria-label="Sessions"
-							className="flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-						>
+						<PopoverTrigger aria-label="Sessions" variant="sessions">
 							<HugeiconsIcon className="size-4" icon={ActivityIcon} />
 						</PopoverTrigger>
 					}
 				/>
 				<TooltipContent>Sessions</TooltipContent>
 			</Tooltip>
-			<PopoverContent align="end" className="w-72 p-0" side="bottom">
+			<PopoverContent
+				align="end"
+				className="w-72"
+				side="bottom"
+				spacing="flush"
+			>
 				<div className="border-b px-3 py-2">
 					<p className="font-medium text-sm">Sessions</p>
 					<p className="text-muted-foreground text-xs">
@@ -145,8 +202,13 @@ export function SessionsPopover({
 					{costSummary && costSummary.callCount > 0 ? (
 						<div className="mt-2 flex items-center gap-3 text-xs tabular-nums">
 							<span className="text-muted-foreground">
-								{costSummary.callCount} call
-								{costSummary.callCount === 1 ? "" : "s"}
+								{tl(
+									"{callCount, plural, one {{callLabel} call} other {{callLabel} calls}}",
+									{
+										callCount: costSummary.callCount,
+										callLabel: String(costSummary.callCount),
+									}
+								)}
 							</span>
 							<Tooltip>
 								<TooltipTrigger
@@ -176,9 +238,7 @@ export function SessionsPopover({
 					) : null}
 				</div>
 				{loading ? (
-					<div className="flex items-center justify-center py-6">
-						<Spinner />
-					</div>
+					<SkeletonRows spacing="generous" />
 				) : error ? (
 					<p className="px-3 py-4 text-status-destructive text-xs">{error}</p>
 				) : sessions.length === 0 ? (
@@ -206,7 +266,11 @@ export function SessionsPopover({
 									/>
 									<TooltipContent>{s.runnableId}</TooltipContent>
 								</Tooltip>
-								<Badge className="shrink-0 text-[9px]" variant="secondary">
+								<Badge
+									className="shrink-0"
+									typography="micro"
+									variant="secondary"
+								>
 									{s.runnableKind}
 								</Badge>
 								<span className="shrink-0 text-muted-foreground tabular-nums">

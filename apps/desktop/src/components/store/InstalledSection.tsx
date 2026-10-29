@@ -25,7 +25,8 @@ import {
 	Triangle01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Markdown } from "@ryu/blocks/desktop/agent-elements/markdown";
+import { Markdown } from "@ryu/blocks/desktop/agent-elements/markdown.tsx";
+import DeprecationNotice from "@ryu/marketplace/catalog/chrome/deprecation-notice";
 import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
 import StoreCatalogLayout, {
 	StoreCardGrid,
@@ -35,6 +36,11 @@ import StoreItemAction, {
 	storeItemContextMenu,
 } from "@ryu/marketplace/catalog/chrome/store-item-action";
 import StoreShelfHeading from "@ryu/marketplace/catalog/chrome/store-shelf-heading";
+import {
+	DEPRECATED_LABEL,
+	isDeprecated,
+	resolveDeprecation,
+} from "@ryu/marketplace/catalog/deprecation";
 import { RequiredPluginsSection } from "@ryu/marketplace/catalog/detail/dependency-graph";
 import {
 	ListingAsideCard,
@@ -60,9 +66,10 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -70,11 +77,11 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { StatusBadge } from "@ryu/ui/components/status-badge";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/empty.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { StatusBadge } from "@ryu/ui/components/status-badge.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
@@ -100,36 +107,30 @@ import {
 	fetchAppLifecycleCapabilities,
 	fetchPluginCatalogDetail,
 	fetchPluginDoctor,
-	fetchPluginEvals,
-	fetchSidecarStatus,
+	fetchSidecarDetails,
 	installSidecar,
 	type PluginDoctorReport,
-	type PluginEvalOverview,
-	type PluginEvalRunResult,
-	runPluginEvals,
-	setPluginGrants,
+	type SidecarSandboxStatus,
 	startSidecar,
 	stopSidecar,
 } from "@/src/lib/api/plugins.ts";
 import type { PluginSettingsTab } from "@/src/lib/pluginSettings.ts";
-import {
-	grantDescription,
-	grantLabel,
-} from "@/src/lib/plugins/grant-labels.ts";
+import { AppPermissionsEditor as PermissionsEditor } from "./AppPermissionsEditor.tsx";
+import { InstalledPluginEvalCard } from "./InstalledPluginEvalCard.tsx";
 
 const AGENT_KIND = "agent";
 const SIDECAR_POLL_MS = 5000;
 
-const KIND_LABELS: Record<string, string> = {
-	agent: "Agent",
-	workflow: "Workflow",
-	tool: "Tool",
-	skill: "Skill",
-	companion: "Companion",
-	channel: "Channel",
-	engine: "Engine",
-	policy: "Policy",
-};
+const KIND_LABELS = new Map<string, string>([
+	["agent", "Agent"],
+	["workflow", "Workflow"],
+	["tool", "Tool"],
+	["skill", "Skill"],
+	["companion", "Companion"],
+	["channel", "Channel"],
+	["engine", "Engine"],
+	["policy", "Policy"],
+]);
 
 function primaryAgentId(app: AppInfo): string | null {
 	const entry = app.runnables.find((r) => r.kind === AGENT_KIND);
@@ -188,7 +189,7 @@ const CATEGORY_ORDER: InstalledCategory[] = [
 	"system",
 ];
 
-const CATEGORY_LABELS: Record<InstalledCategory, string> = {
+const CATEGORY_LABELS = {
 	apps: "Apps",
 	agents: "Agents",
 	tools: "Tools",
@@ -198,10 +199,12 @@ const CATEGORY_LABELS: Record<InstalledCategory, string> = {
 	policies: "Policies",
 	plugins: "Plugins",
 	system: "System",
-};
+} satisfies Record<InstalledCategory, string>;
 
 function appCategory(app: AppInfo): InstalledCategory {
-	if (app.builtIn) {
+	// "System" is exactly what Core refuses to uninstall (`app.system`), plus the
+	// sidecar-managed built-ins that have no lifecycle record of their own.
+	if (app.builtIn || app.system) {
 		return "system";
 	}
 	const kinds = new Set(app.runnables.map((r) => r.kind));
@@ -229,16 +232,13 @@ function appCategory(app: AppInfo): InstalledCategory {
 	return "plugins";
 }
 
-const LIFECYCLE_LABELS: Record<
-	(typeof APP_LIFECYCLE_PERMISSIONS)[number],
-	string
-> = {
+const LIFECYCLE_LABELS = {
 	"app.disable": "Disable",
 	"app.enable": "Enable",
 	"app.install": "Install",
 	"app.uninstall": "Uninstall",
 	"app.update": "Update",
-};
+} satisfies Record<(typeof APP_LIFECYCLE_PERMISSIONS)[number], string>;
 
 function LifecycleAccessCard({
 	capabilities,
@@ -345,6 +345,9 @@ export default function InstalledSection() {
 	const [sidecarStatus, setSidecarStatus] = useState<Record<string, boolean>>(
 		{}
 	);
+	const [sidecarSandbox, setSidecarSandbox] = useState<
+		Record<string, SidecarSandboxStatus>
+	>({});
 
 	const pollSidecarStatus = useCallback(async () => {
 		const node = getActiveNode();
@@ -354,8 +357,17 @@ export default function InstalledSection() {
 			userJwt: node.userJwt ?? null,
 		};
 		try {
-			const status = await fetchSidecarStatus(nodeTarget);
-			setSidecarStatus(status);
+			const details = await fetchSidecarDetails(nodeTarget);
+			const running: Record<string, boolean> = {};
+			const sandbox: Record<string, SidecarSandboxStatus> = {};
+			for (const [name, detail] of Object.entries(details)) {
+				running[name] = detail.running;
+				if (detail.sandbox) {
+					sandbox[name] = detail.sandbox;
+				}
+			}
+			setSidecarStatus(running);
+			setSidecarSandbox(sandbox);
 		} catch {
 			// Non-fatal: status stays at last known value.
 		}
@@ -402,10 +414,13 @@ export default function InstalledSection() {
 		}
 	};
 
-	const handleUninstall = async (app: AppInfo) => {
+	const handleUninstall = async (
+		app: AppInfo,
+		options?: { deleteStorage?: boolean }
+	) => {
 		setPendingFor(app.id, true);
 		try {
-			await uninstall(app.id);
+			await uninstall(app.id, options);
 		} finally {
 			setPendingFor(app.id, false);
 		}
@@ -499,11 +514,7 @@ export default function InstalledSection() {
 		: null;
 
 	if (loading) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	if (error) {
@@ -595,9 +606,7 @@ export default function InstalledSection() {
 		if (app.mandatory) {
 			return (
 				<div className="flex shrink-0 items-center gap-1">
-					<Badge className="text-xs" variant="secondary">
-						Required
-					</Badge>
+					<Badge variant="secondary">Required</Badge>
 					<StoreItemOverflowMenu
 						extra={<StandaloneAppDropdownMenuItems {...standaloneMenu} />}
 						onOpenSettings={openSettings}
@@ -643,11 +652,16 @@ export default function InstalledSection() {
 					});
 				}}
 				onOpenSettings={openSettings}
-				onUninstall={() => {
-					handleUninstall(app).catch(() => {
-						// Errors surface via the shared toggleError banner.
-					});
-				}}
+				// Core refuses to uninstall a system app; offer no Remove for it.
+				onUninstall={
+					app.system
+						? undefined
+						: () => {
+								handleUninstall(app).catch(() => {
+									// Errors surface via the shared toggleError banner.
+								});
+							}
+				}
 				reportTarget={{
 					id: app.id,
 					kind: "plugin",
@@ -726,11 +740,13 @@ export default function InstalledSection() {
 				});
 			},
 			onOpenSettings: openSettings,
-			onUninstall: () => {
-				handleUninstall(app).catch(() => {
-					// Errors surface via the shared toggleError banner.
-				});
-			},
+			onUninstall: app.system
+				? undefined
+				: () => {
+						handleUninstall(app).catch(() => {
+							// Errors surface via the shared toggleError banner.
+						});
+					},
 		});
 	};
 
@@ -759,6 +775,7 @@ export default function InstalledSection() {
 							onLaunch={handleLaunch}
 							onToggle={handleToggle}
 							onUninstall={handleUninstall}
+							sandbox={appSandboxStatus(selectedApp.id, sidecarSandbox)}
 							settingsTabs={settingsByPlugin.get(selectedApp.id) ?? []}
 							target={target}
 							toggleError={toggleError}
@@ -802,6 +819,7 @@ export default function InstalledSection() {
 											action={renderAppAction(app)}
 											cacheKey={iconCacheKey(app.id, installedVersionOf(app))}
 											contextMenu={appContextMenu(app)}
+											deprecated={isDeprecated(app.deprecated)}
 											description={cardDescription(app)}
 											dither={app.iconDither}
 											external={app.external}
@@ -825,7 +843,7 @@ export default function InstalledSection() {
 							</section>
 						))
 					) : (
-						<Empty className="py-10">
+						<Empty spacing="comfortable">
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<HugeiconsIcon icon={PackageIcon} />
@@ -909,89 +927,6 @@ function InstalledAppSettings({
 	);
 }
 
-// The per-app permissions editor: one row per grant the app DECLARED. When the app
-// is enabled each row is a Switch reflecting whether the grant is currently in the
-// app's APPROVED set; toggling it POSTs the new subset to `/api/plugins/:id/grants`.
-// When disabled the grants are read-only (grant editing requires an enabled app).
-function PermissionsEditor({
-	app,
-	target,
-	onGrantsChanged,
-}: {
-	app: AppInfo;
-	target: ApiTarget;
-	onGrantsChanged: () => void;
-}) {
-	const [pending, setPending] = useState<string | null>(null);
-	const approved = new Set(app.approvedGrants);
-
-	const setGrant = async (grant: string, on: boolean) => {
-		setPending(grant);
-		const next = new Set(app.approvedGrants);
-		if (on) {
-			next.add(grant);
-		} else {
-			next.delete(grant);
-		}
-		try {
-			await setPluginGrants(target, app.id, Array.from(next));
-			onGrantsChanged();
-		} catch (e) {
-			toast.error("Couldn't update permissions", {
-				description: e instanceof Error ? e.message : "Please try again.",
-			});
-		} finally {
-			setPending(null);
-		}
-	};
-
-	return (
-		<section className="flex flex-col gap-2">
-			<h3 className="font-medium text-sm">Permissions</h3>
-			<div className="flex flex-col gap-1.5">
-				{app.permissionGrants.map((grant) => {
-					const description = grantDescription(grant);
-					const on = approved.has(grant);
-					return (
-						<div
-							className="flex items-center justify-between gap-3 rounded-md border px-3 py-1.5"
-							key={grant}
-						>
-							<div className="min-w-0">
-								<div className="font-medium text-sm">{grantLabel(grant)}</div>
-								{description ? (
-									<div className="text-muted-foreground text-xs">
-										{description}
-									</div>
-								) : null}
-							</div>
-							{app.enabled ? (
-								<Switch
-									aria-label={`${on ? "Revoke" : "Grant"} "${grantLabel(grant)}" for ${app.name}`}
-									checked={on}
-									disabled={pending !== null}
-									onCheckedChange={(checked) => {
-										setGrant(grant, checked).catch(() => {
-											// Errors surfaced via toast in setGrant.
-										});
-									}}
-								/>
-							) : (
-								<Badge variant="secondary">{on ? "Granted" : "Off"}</Badge>
-							)}
-						</div>
-					);
-				})}
-			</div>
-			{app.enabled ? null : (
-				<p className="text-muted-foreground text-xs">
-					Enable this app to change its permissions.
-				</p>
-			)}
-		</section>
-	);
-}
-
 interface InstalledAppDetailProps {
 	app: AppInfo;
 	busy: boolean;
@@ -1000,10 +935,65 @@ interface InstalledAppDetailProps {
 	onInstall: (app: AppInfo) => Promise<void>;
 	onLaunch: (app: AppInfo) => void;
 	onToggle: (app: AppInfo, checked: boolean) => Promise<void>;
-	onUninstall: (app: AppInfo) => Promise<void>;
+	onUninstall: (
+		app: AppInfo,
+		options?: { deleteStorage?: boolean }
+	) => Promise<void>;
+	/** OS isolation of the app's sidecar process(es); null when it has none. */
+	sandbox: SidecarSandboxStatus | null;
 	settingsTabs: PluginSettingsTab[];
 	target: ApiTarget;
 	toggleError: string | null;
+}
+
+const SANDBOX_BACKEND_LABELS = new Map<string, string>([
+	["landlock", "Landlock"],
+	["seatbelt", "Seatbelt"],
+	["job_object", "Job Object"],
+]);
+
+/** How strongly a status confines its process, for picking the weakest. */
+function sandboxStrength(status: SidecarSandboxStatus): number {
+	if (status.fsRestricted) {
+		return 2;
+	}
+	return status.enforced ? 1 : 0;
+}
+
+/** The least-confined OS isolation among an app's sidecars (keyed
+ *  `<plugin_id>/<sidecar>`), so the detail never overstates the protection. */
+function appSandboxStatus(
+	appId: string,
+	statuses: Record<string, SidecarSandboxStatus>
+): SidecarSandboxStatus | null {
+	let weakest: SidecarSandboxStatus | null = null;
+	for (const [name, status] of Object.entries(statuses)) {
+		if (!name.startsWith(`${appId}/`)) {
+			continue;
+		}
+		if (
+			weakest === null ||
+			sandboxStrength(status) < sandboxStrength(weakest)
+		) {
+			weakest = status;
+		}
+	}
+	return weakest;
+}
+
+/** A short "OS sandbox" value for the app's Information card. */
+function sandboxLabel(status: SidecarSandboxStatus): string {
+	const backend = SANDBOX_BACKEND_LABELS.get(status.backend) ?? status.backend;
+	if (status.mode === "off") {
+		return "Off";
+	}
+	if (status.mode === "audit") {
+		return "Audit only";
+	}
+	if (status.fsRestricted) {
+		return `Enforced · ${backend}`;
+	}
+	return status.enforced ? `${backend} · no file limits` : "Unavailable";
 }
 
 /** The catalog entry an installed app maps onto, so the shared detail tabs can
@@ -1208,164 +1198,6 @@ function InstalledDoctorCard({
 	);
 }
 
-function evalStatusLabel(status: string): string {
-	switch (status) {
-		case "ready":
-		case "ready_with_warnings":
-			return "Ready";
-		case "not_configured":
-			return "Not configured";
-		case "empty":
-			return "Empty suite";
-		case "invalid":
-			return "Needs attention";
-		default:
-			return status;
-	}
-}
-
-function PluginEvalResultSummary({ result }: { result: PluginEvalRunResult }) {
-	return (
-		<div className="space-y-2" data-testid="plugin-evals-result">
-			<div className="flex flex-wrap items-center gap-2 text-xs">
-				<Badge variant="outline">
-					{result.score === null
-						? "—"
-						: `${Math.round(result.score * 100)}/100`}
-				</Badge>
-				<span className="text-muted-foreground">
-					{result.status} · {result.evidenceLevel}
-				</span>
-			</div>
-			<ul className="space-y-1">
-				{result.cases.map((item) => (
-					<li
-						className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background px-3 py-2"
-						key={item.id}
-					>
-						<span className="min-w-0 truncate">{item.name}</span>
-						<span className="shrink-0 text-muted-foreground">
-							{item.score === null
-								? "not scored"
-								: `${Math.round(item.score * 100)}/100`}
-						</span>
-					</li>
-				))}
-			</ul>
-			<p className="text-[11px] text-muted-foreground">
-				The no-plugin baseline is intentionally not run because Ryu never
-				disables a live installation to manufacture an ablation.
-			</p>
-		</div>
-	);
-}
-
-function InstalledPluginEvalCard({
-	appId,
-	target,
-}: {
-	appId: string;
-	target: ApiTarget;
-}) {
-	const [running, setRunning] = useState(false);
-	const [result, setResult] = useState<PluginEvalRunResult | null>(null);
-	const [runError, setRunError] = useState<string | null>(null);
-	const suiteQuery = useQuery({
-		enabled: Boolean(appId),
-		queryFn: async () => {
-			const payload = await fetchPluginEvals(target, appId);
-			return "suite" in payload ? payload : null;
-		},
-		queryKey: ["plugins", "evals", target.url, appId],
-		retry: false,
-		staleTime: 5 * 60 * 1000,
-	});
-	const overview = suiteQuery.data as PluginEvalOverview | null | undefined;
-	const suite = overview?.suite;
-	const run = async () => {
-		if (!suite || suite.caseCount === 0 || running) {
-			return;
-		}
-		setRunning(true);
-		setRunError(null);
-		try {
-			setResult(await runPluginEvals(target, { id: appId }));
-		} catch (error) {
-			setRunError(error instanceof Error ? error.message : String(error));
-		} finally {
-			setRunning(false);
-		}
-	};
-
-	return (
-		<section
-			className="flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/5 p-4"
-			data-testid="plugin-evals-card"
-		>
-			<div className="flex flex-wrap items-start justify-between gap-3">
-				<div>
-					<h3 className="font-medium text-sm">Behavioral evals</h3>
-					<p className="mt-1 text-muted-foreground text-xs leading-relaxed">
-						Runs the package's evals/ cases through the enabled Ryu plugin or
-						app. This is behavioral evidence, separate from the static scorecard
-						and read-only doctor.
-					</p>
-				</div>
-				<Button
-					disabled={!suite || suite.caseCount === 0 || running}
-					loading={running}
-					onClick={() => {
-						void run();
-					}}
-					size="sm"
-				>
-					{running ? "Running" : "Run evals"}
-				</Button>
-			</div>
-			{suiteQuery.isLoading ? (
-				<p className="text-muted-foreground text-xs">Inspecting eval suite…</p>
-			) : suiteQuery.error ? (
-				<p className="text-status-destructive text-xs" role="alert">
-					{suiteQuery.error instanceof Error
-						? suiteQuery.error.message
-						: "Eval suite inspection failed."}
-				</p>
-			) : suite ? (
-				<div className="space-y-2 text-xs">
-					<div className="flex flex-wrap items-center gap-2">
-						<Badge data-testid="plugin-evals-status" variant="outline">
-							{evalStatusLabel(suite.status)}
-						</Badge>
-						<span className="text-muted-foreground">
-							{suite.caseCount} case{suite.caseCount === 1 ? "" : "s"} ·{" "}
-							{suite.graderCount} grader{suite.graderCount === 1 ? "" : "s"}
-						</span>
-					</div>
-					{suite.unsupportedGraders.length > 0 ? (
-						<p className="text-status-warning">
-							Skipped grader types: {suite.unsupportedGraders.join(", ")}
-						</p>
-					) : null}
-					{suite.issues.length > 0 ? (
-						<p className="text-muted-foreground">{suite.issues[0]?.message}</p>
-					) : null}
-					{result ? <PluginEvalResultSummary result={result} /> : null}
-				</div>
-			) : (
-				<p className="text-muted-foreground text-xs">
-					No package eval suite found. Add evals/&lt;case&gt;/prompt.md and a
-					grader to measure behavior.
-				</p>
-			)}
-			{runError ? (
-				<p className="text-status-destructive text-xs" role="alert">
-					{runError}
-				</p>
-			) : null}
-		</section>
-	);
-}
-
 function InstalledAppDetail({
 	app,
 	busy,
@@ -1374,6 +1206,7 @@ function InstalledAppDetail({
 	onToggle,
 	onUninstall,
 	onGrantsChanged,
+	sandbox,
 	settingsTabs,
 	target,
 	toggleError,
@@ -1383,6 +1216,14 @@ function InstalledAppDetail({
 	const agentId = primaryAgentId(app);
 	const hasSettings = isInstalled && settingsTabs.length > 0;
 	const [confirmUninstall, setConfirmUninstall] = useState(false);
+	const deprecation = resolveDeprecation(null, app.deprecated);
+	const [deleteStorage, setDeleteStorage] = useState(false);
+	const handleConfirmOpenChange = (open: boolean) => {
+		setConfirmUninstall(open);
+		if (!open) {
+			setDeleteStorage(false);
+		}
+	};
 
 	return (
 		<ListingDetailShell
@@ -1408,9 +1249,9 @@ function InstalledAppDetail({
 							Add
 						</Button>
 					)}
-					{isInstalled && !app.mandatory ? (
+					{isInstalled && !(app.mandatory || app.system) ? (
 						<Button
-							className="text-status-destructive hover:text-status-destructive"
+							appearance="dictation-recording"
 							disabled={busy}
 							onClick={() => setConfirmUninstall(true)}
 							size="sm"
@@ -1471,11 +1312,17 @@ function InstalledAppDetail({
 									label: "Grants",
 									value: formatCount(app.permissionGrants.length) ?? "—",
 								},
+								...(sandbox
+									? [{ label: "OS sandbox", value: sandboxLabel(sandbox) }]
+									: []),
 							]}
 						/>
 					</ListingAsideCard>
 					<ListingAsideCard title="Plugin ID">
-						<code className="block truncate rounded bg-muted px-2 py-1 text-muted-foreground text-xs">
+						<code
+							className="block truncate rounded bg-muted px-2 py-1 text-muted-foreground text-xs"
+							title={app.id}
+						>
 							{app.id}
 						</code>
 					</ListingAsideCard>
@@ -1490,6 +1337,8 @@ function InstalledAppDetail({
 								: "Disabled"
 							: "Not installed",
 						app.mandatory ? "Required" : null,
+						deprecation ? DEPRECATED_LABEL : null,
+						app.system && !app.mandatory ? "System" : null,
 						app.runnables.some((r) => r.kind === AGENT_KIND) ? "Agent" : null,
 						...catalogLayerBadges(app.layers, app.external),
 					].filter((b): b is string => Boolean(b))}
@@ -1511,16 +1360,27 @@ function InstalledAppDetail({
 				/>
 			}
 			notice={
-				toggleError ? (
-					<div className="flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
-						<span>{toggleError}</span>
-						<button
-							className="shrink-0 font-medium underline-offset-2 hover:underline"
-							onClick={onClearToggleError}
-							type="button"
-						>
-							Dismiss
-						</button>
+				toggleError || deprecation ? (
+					<div className="flex flex-col gap-3">
+						{toggleError ? (
+							<div className="flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
+								<span>{toggleError}</span>
+								<button
+									className="shrink-0 font-medium underline-offset-2 hover:underline"
+									onClick={onClearToggleError}
+									type="button"
+								>
+									Dismiss
+								</button>
+							</div>
+						) : null}
+						{deprecation ? (
+							<DeprecationNotice
+								message={deprecation.message}
+								name={app.name}
+								replacement={deprecation.replacement}
+							/>
+						) : null}
 					</div>
 				) : null
 			}
@@ -1554,7 +1414,7 @@ function InstalledAppDetail({
 					<div className="flex flex-wrap gap-1">
 						{app.runnables.map((r) => (
 							<Badge key={r.id} variant="secondary">
-								{KIND_LABELS[r.kind] ?? r.kind} — {r.name}
+								{KIND_LABELS.get(r.kind) ?? r.kind} — {r.name}
 							</Badge>
 						))}
 					</div>
@@ -1568,7 +1428,8 @@ function InstalledAppDetail({
 			    paths. */}
 
 			{/* Permission grants, in plain English, with per-grant revoke toggles. */}
-			{app.permissionGrants.length > 0 ? (
+			{app.permissionGrants.length > 0 ||
+			(app.optionalPermissionGrants?.length ?? 0) > 0 ? (
 				<PermissionsEditor
 					app={app}
 					onGrantsChanged={onGrantsChanged}
@@ -1585,20 +1446,31 @@ function InstalledAppDetail({
 				<InstalledAppSettings settingsTabs={settingsTabs} target={target} />
 			) : null}
 
-			<AlertDialog onOpenChange={setConfirmUninstall} open={confirmUninstall}>
+			<AlertDialog
+				onOpenChange={handleConfirmOpenChange}
+				open={confirmUninstall}
+			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>Remove {app.name}?</AlertDialogTitle>
 						<AlertDialogDescription>
 							This removes {app.name} and disables it. You can add it again from
-							the store later. Its settings and permission grants are cleared.
+							the store later. Its settings and permission grants are cleared,
+							and its saved secrets are removed.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
+					<label className="flex items-center gap-3 text-sm">
+						<Checkbox
+							checked={deleteStorage}
+							onCheckedChange={(value) => setDeleteStorage(value === true)}
+						/>
+						Also delete this app's saved data
+					</label>
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={() => {
-								onUninstall(app).catch(() => {
+								onUninstall(app, { deleteStorage }).catch(() => {
 									// Refusals surface via the shared toggleError banner.
 								});
 							}}
@@ -1637,9 +1509,9 @@ function BuiltInAppDetail({
 	const isInstalled = running !== undefined;
 	const isRunning = running === true;
 
-	const run = async (
+	const run = async <TResult,>(
 		action: SidecarAction,
-		call: (target: ApiTarget, name: string) => Promise<unknown>
+		call: (target: ApiTarget, name: string) => Promise<TResult>
 	) => {
 		if (!isConfigured || pending !== null) {
 			return;
@@ -1647,7 +1519,7 @@ function BuiltInAppDetail({
 		setActionError(null);
 		setPending(action);
 		try {
-			await call(target, sidecarName as string);
+			await call(target, sidecarName);
 			onStatusChange();
 		} catch (e) {
 			setActionError(
@@ -1737,7 +1609,10 @@ function BuiltInAppDetail({
 						</ListingAsideCard>
 					) : null}
 					<ListingAsideCard title="Plugin ID">
-						<code className="block truncate rounded bg-muted px-2 py-1 text-muted-foreground text-xs">
+						<code
+							className="block truncate rounded bg-muted px-2 py-1 text-muted-foreground text-xs"
+							title={app.id}
+						>
 							{app.id}
 						</code>
 					</ListingAsideCard>

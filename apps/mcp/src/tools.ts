@@ -5,8 +5,7 @@
 //
 // All logging MUST go to stderr — stdout is the JSON-RPC channel.
 
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { fetchAgents } from "@ryuhq/core-client/agents";
 import { askBtw } from "@ryuhq/core-client/btw";
 import type { ApiTarget } from "@ryuhq/core-client/client";
@@ -36,16 +35,16 @@ import { fetchSession, loadToken } from "./auth.ts";
 
 type ToolText = CallToolResult;
 
-const ok = (value: unknown): ToolText => ({
+const ok = <Value>(value: Value): ToolText => ({
 	content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
 });
 
-const fail = (err: unknown): ToolText => ({
+const fail = <ErrorValue>(err: ErrorValue): ToolText => ({
 	content: [{ type: "text", text: String(err) }],
 	isError: true,
 });
 
-const run = async (fn: () => Promise<unknown>): Promise<ToolText> => {
+const run = async <Value>(fn: () => Promise<Value>): Promise<ToolText> => {
 	try {
 		return ok(await fn());
 	} catch (err) {
@@ -64,7 +63,7 @@ export const registerRyuTools = (
 			title: "Ryu Health",
 			description:
 				"Probe whether the Ryu Core node is alive (GET /api/health).",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchHealth(target))
 	);
@@ -75,7 +74,7 @@ export const registerRyuTools = (
 			title: "Ryu System Info",
 			description:
 				"Live hardware snapshot of the node (CPU, RAM, disk, GPU/VRAM, OS).",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchSystemInfo(target))
 	);
@@ -86,7 +85,7 @@ export const registerRyuTools = (
 			title: "Ryu System Status",
 			description:
 				"Service status of the node - active engine, engine running state, sidecars, gateway reachability, mesh.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchSystemStatus(target))
 	);
@@ -97,7 +96,7 @@ export const registerRyuTools = (
 		{
 			title: "Ryu List Agents",
 			description: "List the agents configured on this Ryu node.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchAgents(target))
 	);
@@ -107,7 +106,7 @@ export const registerRyuTools = (
 		{
 			title: "Ryu List Teams",
 			description: "List the multi-agent teams configured on this Ryu node.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchTeams(target))
 	);
@@ -119,7 +118,7 @@ export const registerRyuTools = (
 			title: "Ryu Search Models",
 			description:
 				"Search the Ryu model catalog (Hugging Face GGUF by default). Returns matching model cards.",
-			inputSchema: {
+			inputSchema: z.object({
 				query: z.string().describe("Free-text model search query."),
 				limit: z
 					.number()
@@ -127,7 +126,7 @@ export const registerRyuTools = (
 					.positive()
 					.optional()
 					.describe("Max results to return."),
-			},
+			}),
 		},
 		({ query, limit }) => run(() => searchModels(target, { query, limit }))
 	);
@@ -138,7 +137,7 @@ export const registerRyuTools = (
 			title: "Ryu Get Active Model",
 			description:
 				"Read which installed model local Chat is currently serving.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => getActiveModel(target))
 	);
@@ -149,7 +148,7 @@ export const registerRyuTools = (
 			title: "Ryu Set Active Model",
 			description:
 				"Switch the model the local chat stack serves to an already-installed model. modelId is the local stem or Hugging Face repo id. Optionally override the derived engine.",
-			inputSchema: {
+			inputSchema: z.object({
 				modelId: z
 					.string()
 					.describe(
@@ -159,7 +158,7 @@ export const registerRyuTools = (
 					.string()
 					.optional()
 					.describe("Override the engine derived from the model format."),
-			},
+			}),
 		},
 		({ modelId, engine }) => run(() => setActiveModel(target, modelId, engine))
 	);
@@ -170,7 +169,7 @@ export const registerRyuTools = (
 			title: "Ryu List Engines",
 			description:
 				"List the inference engines available on this node and their installed models.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchEngines(target))
 	);
@@ -182,7 +181,7 @@ export const registerRyuTools = (
 			title: "Ryu List Skills",
 			description:
 				"List the skills installed on this node and their active (enabled) state.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => listSkills(target))
 	);
@@ -192,7 +191,7 @@ export const registerRyuTools = (
 		{
 			title: "Ryu Search Skills",
 			description: "Search/browse the Ryu skills directory.",
-			inputSchema: {
+			inputSchema: z.object({
 				query: z.string().describe("Free-text skill search query."),
 				limit: z
 					.number()
@@ -200,7 +199,7 @@ export const registerRyuTools = (
 					.positive()
 					.optional()
 					.describe("Max results to return."),
-			},
+			}),
 		},
 		({ query, limit }) => run(() => searchSkills(target, { query, limit }))
 	);
@@ -211,9 +210,9 @@ export const registerRyuTools = (
 			title: "Ryu Install Skill",
 			description:
 				"Install a skill (by catalog id) into the node and hot-reload Core's skill registry.",
-			inputSchema: {
+			inputSchema: z.object({
 				id: z.string().describe("Catalog id of the skill to install."),
-			},
+			}),
 		},
 		({ id }) => run(() => installSkill(target, id))
 	);
@@ -224,7 +223,7 @@ export const registerRyuTools = (
 		{
 			title: "Ryu List Workflows",
 			description: "List the workflows defined on this Ryu node.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchWorkflows(target))
 	);
@@ -235,7 +234,7 @@ export const registerRyuTools = (
 			title: "Ryu Run Workflow",
 			description:
 				"Run a workflow by id with an optional string input map. Set dryRun to true for a transient read-only preview that skips effectful nodes and creates no run history.",
-			inputSchema: {
+			inputSchema: z.object({
 				id: z.string().describe("Workflow id to run."),
 				input: z
 					.record(z.string(), z.string())
@@ -245,7 +244,7 @@ export const registerRyuTools = (
 					.boolean()
 					.optional()
 					.describe("Read-only preview; no run history or effectful nodes."),
-			},
+			}),
 		},
 		({ id, input, dryRun }) =>
 			run(() => runWorkflow(target, id, input ?? {}, { dryRun }))
@@ -258,7 +257,7 @@ export const registerRyuTools = (
 			title: "Ryu List MCP Servers",
 			description:
 				"List the MCP servers Ryu has registered. Use ryu_call_mcp_tool to invoke any tool they expose.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchMcpServers(target))
 	);
@@ -269,7 +268,7 @@ export const registerRyuTools = (
 			title: "Ryu Call MCP Tool",
 			description:
 				"Bridge: invoke a tool on ANY MCP server Ryu has registered. tool is the fully-qualified id (server.tool); if you pass a bare tool name, also pass server and they are combined. agentId is required - Core ties the per-agent tool allowlist to a registered agent (empty/unknown agent is denied).",
-			inputSchema: {
+			inputSchema: z.object({
 				tool: z
 					.string()
 					.describe(
@@ -290,7 +289,7 @@ export const registerRyuTools = (
 					.record(z.string(), z.unknown())
 					.optional()
 					.describe("Arguments object passed to the target tool."),
-			},
+			}),
 		},
 		({ tool, server: mcpServer, agentId, args }) => {
 			const toolId =
@@ -314,7 +313,7 @@ export const registerRyuTools = (
 			title: "Ryu List Spaces",
 			description:
 				"List the knowledge Spaces (document collections) on this node.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		() => run(() => fetchSpaces(target))
 	);
@@ -325,7 +324,7 @@ export const registerRyuTools = (
 			title: "Ryu Search Space",
 			description:
 				"Search within a single Space. Returns ranked chunk matches. A Space set to graph retrieval answers by traversing an entity graph, so this can connect facts across documents; a vector Space answers by similarity alone.",
-			inputSchema: {
+			inputSchema: z.object({
 				spaceId: z.string().describe("Id of the Space to search."),
 				query: z.string().describe("Search query."),
 				limit: z
@@ -334,7 +333,7 @@ export const registerRyuTools = (
 					.positive()
 					.optional()
 					.describe("Max matches to return."),
-			},
+			}),
 		},
 		({ spaceId, query, limit }) =>
 			run(() => searchSpace(target, spaceId, query, limit))
@@ -346,7 +345,7 @@ export const registerRyuTools = (
 			title: "Ryu Search Retrieval",
 			description:
 				"Search across memory and all Spaces, returning scored chunks ranked by relevance (unified RAG retrieval).",
-			inputSchema: {
+			inputSchema: z.object({
 				query: z.string().describe("Retrieval query."),
 				topK: z
 					.number()
@@ -354,7 +353,7 @@ export const registerRyuTools = (
 					.positive()
 					.optional()
 					.describe("Max chunks to return after ranking."),
-			},
+			}),
 		},
 		({ query, topK }) => run(() => searchRetrieval(target, { query, topK }))
 	);
@@ -366,7 +365,7 @@ export const registerRyuTools = (
 			title: "Ask Ryu",
 			description:
 				"Ask Ryu a question and get a single synchronous answer (POST /api/btw). This routes to the node's configured side-question model with no tool access. Pass conversationId to ground the answer in an existing conversation's context; omit it to ask against an empty/ephemeral context.",
-			inputSchema: {
+			inputSchema: z.object({
 				question: z.string().describe("The question to ask Ryu."),
 				conversationId: z
 					.string()
@@ -374,7 +373,7 @@ export const registerRyuTools = (
 					.describe(
 						"Optional Core conversation id to ground the answer; omit for an ephemeral context."
 					),
-			},
+			}),
 		},
 		({ question, conversationId }) =>
 			run(() => askBtw(target, conversationId ?? "", question))
@@ -387,7 +386,7 @@ export const registerRyuTools = (
 			title: "Ryu Who Am I",
 			description:
 				"Report the Ryu user this server is signed in as (via the device-auth login). Returns the control-plane session user, or a prompt to run `ryu-mcp login` when not signed in.",
-			inputSchema: {},
+			inputSchema: z.object({}),
 		},
 		async () => {
 			const data = loadToken();

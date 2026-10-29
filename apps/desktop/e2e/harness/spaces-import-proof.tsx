@@ -1,4 +1,8 @@
-import { SpacesView } from "@ryu/blocks/desktop/spaces";
+import { z } from "zod";
+
+declare const window: Window;
+
+import { SpacesView } from "@ryu/blocks/desktop/spaces.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -6,6 +10,34 @@ import { SpaceImportsPanel } from "../../src/components/spaces/SpaceImportsPanel
 import "../../src/index.css";
 
 const now = Date.now();
+const scenario = new URL(window.location.href).searchParams.get("scenario");
+
+const composioImportBodySchema = z.object({
+	action: z.string(),
+	arguments: z.record(z.string(), z.json()),
+	destination_kind: z.string(),
+	title: z.string().optional(),
+	toolkit: z.string(),
+});
+type ComposioImportBody = z.infer<typeof composioImportBodySchema>;
+
+interface SpaceImportsCapturedState {
+	composioRequests: Array<{
+		body: ComposioImportBody;
+		method: string;
+		url: string;
+	}>;
+	historyReads: number;
+	successfulComposioBodies: ComposioImportBody[];
+}
+
+const proofState: SpaceImportsCapturedState = {
+	composioRequests: [],
+	historyReads: 0,
+	successfulComposioBodies: [],
+};
+
+Object.assign(window, { __spaceImportsProofState: proofState });
 
 const completedImports = [
 	{
@@ -67,22 +99,121 @@ const completedImports = [
 let uploaded = false;
 let composioImported = false;
 
-function response(payload: unknown, status = 200) {
+const slackReadAction = {
+	name: "SLACK_LIST_CHANNEL_HISTORY",
+	display_name: "Read channel history",
+	description: "Read messages from a connected channel.",
+	toolkit: "slack",
+	no_auth: false,
+	tags: ["readOnlyHint"],
+	input_schema: {
+		type: "object",
+		required: ["channel_id", "format"],
+		properties: {
+			channel_id: { type: "string", title: "Channel ID" },
+			limit: { type: "integer", title: "Message limit", default: 20 },
+			include_replies: {
+				type: "boolean",
+				title: "Include replies",
+				default: false,
+			},
+			format: {
+				type: "string",
+				title: "Output style",
+				enum: ["compact", "full"],
+				default: "full",
+			},
+			filters: { type: "object", title: "Filters", default: {} },
+			labels: { type: "array", title: "Labels", default: [] },
+		},
+	},
+};
+
+const slackWriteAction = {
+	name: "SLACK_DELETE_CHANNEL",
+	display_name: "Delete channel",
+	description: "Permanently delete a channel.",
+	toolkit: "slack",
+	no_auth: false,
+	tags: ["destructiveHint"],
+	input_schema: { type: "object", properties: {} },
+};
+
+function interactionImports() {
+	return proofState.successfulComposioBodies.map((body, index) => {
+		const title = body.title ?? "Read channel history";
+		const kind = body.destination_kind === "page" ? "page" : "database";
+		return {
+			id: `import_interaction_${index + 1}`,
+			space_id: "space_demo",
+			source_type: "composio",
+			source_name: title,
+			source_format: body.toolkit,
+			destination_kind: body.destination_kind,
+			status: "completed",
+			result_documents: [
+				{
+					id: `result_interaction_${index + 1}`,
+					kind,
+					title,
+				},
+			],
+			item_count: Number(body.arguments.limit ?? 1),
+			byte_size: 0,
+			message: null,
+			created_at: now + index + 1,
+			updated_at: now + index + 2,
+			completed_at: now + index + 2,
+		};
+	});
+}
+
+function response<FixturePayload>(payload: FixturePayload, status = 200) {
 	return new Response(JSON.stringify(payload), {
 		status,
 		headers: { "content-type": "application/json" },
 	});
 }
 
-globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
+window.fetch = async (input: URL | RequestInfo, init?: RequestInit) => {
 	const url = String(input);
 	if (url.endsWith("/api/composio/status")) {
 		return response({
-			configured: true,
+			configured: scenario !== "unconfigured",
 			base_url: "https://backend.composio.dev/api/v3",
 		});
 	}
 	if (url.endsWith("/api/composio/connections")) {
+		if (scenario === "unconnected") {
+			return response({
+				data: [
+					{
+						id: "connection_pending",
+						toolkit: "github",
+						status: "INITIATED",
+						active: false,
+					},
+				],
+			});
+		}
+		if (scenario === "interactions") {
+			return response({
+				data: [
+					{
+						id: "connection_github",
+						toolkit: "github",
+						status: "ACTIVE",
+						active: true,
+					},
+					{
+						id: "connection_slack",
+						toolkit: "slack",
+						status: "ACTIVE",
+						active: true,
+					},
+				],
+			});
+		}
 		return response({
 			data: [
 				{
@@ -95,6 +226,24 @@ globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
 		});
 	}
 	if (url.endsWith("/api/composio/toolkits")) {
+		if (scenario === "interactions" || scenario === "unconnected") {
+			return response({
+				data: [
+					{
+						slug: "github",
+						name: "GitHub",
+						description: "Issues, pull requests, and repositories",
+						logo: null,
+					},
+					{
+						slug: "slack",
+						name: "Slack",
+						description: "Messages and channels",
+						logo: null,
+					},
+				],
+			});
+		}
 		return response({
 			data: [
 				{
@@ -112,6 +261,32 @@ globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
 				{ error: "Missing provider-owned read-only filter" },
 				400
 			);
+		}
+		if (scenario === "interactions") {
+			const requestedToolkit = new URL(url).searchParams.get("toolkit");
+			return response({
+				data:
+					requestedToolkit === "slack"
+						? [slackReadAction, slackWriteAction]
+						: [
+								{
+									name: "GITHUB_LIST_REPOSITORY_ISSUES",
+									display_name: "List repository issues",
+									description: "Read GitHub issues.",
+									toolkit: "github",
+									no_auth: false,
+									tags: ["readOnlyHint"],
+									input_schema: {
+										type: "object",
+										required: ["owner", "repo"],
+										properties: {
+											owner: { type: "string", title: "Owner" },
+											repo: { type: "string", title: "Repository" },
+										},
+									},
+								},
+							],
+			});
 		}
 		return response({
 			data: [
@@ -169,13 +344,33 @@ globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
 		url.endsWith("/api/spaces/space_demo/imports/composio") &&
 		init?.method === "POST"
 	) {
-		const body = JSON.parse(String(init.body)) as {
-			action?: string;
-			arguments?: { owner?: string; repo?: string };
-			destination_kind?: string;
-			title?: string;
-			toolkit?: string;
-		};
+		const body = composioImportBodySchema.parse(JSON.parse(String(init.body)));
+		if (scenario === "interactions") {
+			proofState.composioRequests.push({ body, method: "POST", url });
+			if (proofState.composioRequests.length === 1) {
+				return response({ error: "Simulated Composio import failure" }, 503);
+			}
+			proofState.successfulComposioBodies.push(body);
+			const index = proofState.successfulComposioBodies.length;
+			return response(
+				{
+					import: {
+						...completedImports[2],
+						id: `import_interaction_${index}`,
+						source_name: body.title ?? "Read channel history",
+						source_format: body.toolkit,
+						destination_kind: body.destination_kind,
+						status: "pending",
+						result_documents: [],
+						item_count: 0,
+						created_at: Date.now(),
+						updated_at: Date.now(),
+						completed_at: null,
+					},
+				},
+				202
+			);
+		}
 		if (
 			body.toolkit !== "github" ||
 			body.action !== "GITHUB_LIST_REPOSITORY_ISSUES" ||
@@ -205,6 +400,16 @@ globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
 		);
 	}
 	if (url.endsWith("/api/spaces/space_demo/imports")) {
+		if (scenario === "interactions") {
+			proofState.historyReads += 1;
+			if (proofState.historyReads === 1) {
+				return response({ error: "Simulated import history outage" }, 503);
+			}
+			return response({
+				space_id: "space_demo",
+				imports: [...interactionImports(), ...completedImports],
+			});
+		}
 		const newImport = uploaded
 			? [
 					{
@@ -248,11 +453,15 @@ globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
 		});
 	}
 	return response({ error: `Unrouted story request: ${url}` }, 404);
-}) as typeof fetch;
+};
 
 function Story() {
 	const [opened, setOpened] = useState("None");
-	const onImportCompleted = useCallback(() => undefined, []);
+	const [completionRefreshes, setCompletionRefreshes] = useState(0);
+	const onImportCompleted = useCallback(
+		() => setCompletionRefreshes((current) => current + 1),
+		[]
+	);
 	return (
 		<div className="h-screen bg-background text-foreground">
 			<div className="h-full min-h-0">
@@ -292,6 +501,9 @@ function Story() {
 			<output className="sr-only" data-testid="opened-document">
 				{opened}
 			</output>
+			<output className="sr-only" data-testid="import-completion-refreshes">
+				{completionRefreshes}
+			</output>
 		</div>
 	);
 }
@@ -302,7 +514,7 @@ const queryClient = new QueryClient({
 	},
 });
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<QueryClientProvider client={queryClient}>
 		<Story />
 	</QueryClientProvider>

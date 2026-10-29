@@ -1,6 +1,16 @@
-import type { TDiscussion } from "@ryu/ui/components/editor/plugins/discussion-kit";
-import type { TComment } from "@ryu/ui/components/editor/ui/comment";
+import type { TDiscussion } from "@ryu/ui/components/editor/plugins/discussion-kit.tsx";
+import type { TComment } from "@ryu/ui/components/editor/ui/comment.tsx";
+import { plateValueSchema } from "@ryu/ui/lib/plate-value.ts";
 import type { Doc, Map as YMap } from "yjs";
+import {
+	discussionDateSchema,
+	discussionJsonTextSchema,
+	discussionMetadataSchema,
+	discussionUserSchema,
+	type StoredDiscussion,
+	type StoredDiscussionComment,
+	storedDiscussionCommentSchema,
+} from "./discussion-wire-contracts.ts";
 
 const DISCUSSIONS_MAP = "ryu:discussion-meta";
 const COMMENTS_MAP = "ryu:discussion-comments";
@@ -14,7 +24,8 @@ interface DiscussionMetadataWire {
 	userId: string;
 }
 
-interface CommentWire extends Omit<TComment, "createdAt"> {
+interface CommentWire extends Omit<TComment, "createdAt" | "contentRich"> {
+	contentRich: TComment["contentRich"] | StoredDiscussionComment["contentRich"];
 	createdAt: string;
 	updatedAt?: string;
 }
@@ -26,87 +37,28 @@ export interface DiscussionUser {
 	name: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+function parseMetadata(value: string) {
+	return (
+		discussionJsonTextSchema.pipe(discussionMetadataSchema).safeParse(value)
+			.data ?? null
+	);
 }
 
-function parseJson(value: string): unknown {
-	try {
-		return JSON.parse(value) as unknown;
-	} catch {
-		return null;
-	}
+function parseComment(value: string) {
+	return (
+		discussionJsonTextSchema
+			.pipe(storedDiscussionCommentSchema)
+			.safeParse(value).data ?? null
+	);
 }
 
-function parseDate(value: unknown): Date | null {
-	if (typeof value !== "string") {
-		return null;
-	}
-	const date = new Date(value);
-	return Number.isNaN(date.valueOf()) ? null : date;
-}
-
-function parseMetadata(value: string): DiscussionMetadataWire | null {
-	const parsed = parseJson(value);
-	if (
-		!isRecord(parsed) ||
-		typeof parsed.id !== "string" ||
-		typeof parsed.createdAt !== "string" ||
-		typeof parsed.isResolved !== "boolean" ||
-		typeof parsed.userId !== "string" ||
-		(parsed.documentContent !== undefined &&
-			typeof parsed.documentContent !== "string")
-	) {
-		return null;
-	}
-	return {
-		createdAt: parsed.createdAt,
-		documentContent: parsed.documentContent,
-		id: parsed.id,
-		isResolved: parsed.isResolved,
-		userId: parsed.userId,
-	};
-}
-
-function parseComment(value: string): TComment | null {
-	const parsed = parseJson(value);
-	const createdAt = isRecord(parsed) ? parseDate(parsed.createdAt) : null;
-	if (
-		!(isRecord(parsed) && createdAt && Array.isArray(parsed.contentRich)) ||
-		typeof parsed.discussionId !== "string" ||
-		typeof parsed.id !== "string" ||
-		typeof parsed.isEdited !== "boolean" ||
-		typeof parsed.userId !== "string"
-	) {
-		return null;
-	}
-	return {
-		contentRich: parsed.contentRich,
-		createdAt,
-		discussionId: parsed.discussionId,
-		id: parsed.id,
-		isEdited: parsed.isEdited,
-		userId: parsed.userId,
-	};
-}
-
-function parseUser(value: string): DiscussionUser | null {
-	const parsed = parseJson(value);
-	if (
-		!isRecord(parsed) ||
-		typeof parsed.id !== "string" ||
-		typeof parsed.name !== "string" ||
-		(parsed.avatarUrl !== undefined && typeof parsed.avatarUrl !== "string") ||
-		(parsed.hue !== undefined && typeof parsed.hue !== "number")
-	) {
-		return null;
-	}
-	return {
-		avatarUrl: parsed.avatarUrl,
-		hue: parsed.hue,
-		id: parsed.id,
-		name: parsed.name,
-	};
+function parseUser(value: string) {
+	const user = discussionJsonTextSchema
+		.pipe(discussionUserSchema)
+		.safeParse(value).data;
+	return user
+		? { avatarUrl: user.avatarUrl, hue: user.hue, id: user.id, name: user.name }
+		: null;
 }
 
 function commentKey(comment: TComment): string {
@@ -114,6 +66,10 @@ function commentKey(comment: TComment): string {
 }
 
 export class DiscussionCollabStore {
+	private readonly storedEditorFallbacks = new WeakMap<
+		TComment["contentRich"],
+		StoredDiscussionComment["contentRich"]
+	>();
 	private readonly comments: YMap<string>;
 	private readonly discussions: YMap<string>;
 	private readonly users: YMap<string>;
@@ -124,8 +80,8 @@ export class DiscussionCollabStore {
 		this.users = document.getMap<string>(USERS_MAP);
 	}
 
-	readDiscussions(): TDiscussion[] {
-		const commentsByDiscussion = new Map<string, TComment[]>();
+	readStoredDiscussions(): StoredDiscussion[] {
+		const commentsByDiscussion = new Map<string, StoredDiscussionComment[]>();
 		for (const value of this.comments.values()) {
 			const comment = parseComment(value);
 			if (!comment) {
@@ -136,10 +92,12 @@ export class DiscussionCollabStore {
 			commentsByDiscussion.set(comment.discussionId, comments);
 		}
 
-		const result: TDiscussion[] = [];
+		const result: StoredDiscussion[] = [];
 		for (const value of this.discussions.values()) {
 			const metadata = parseMetadata(value);
-			const createdAt = metadata ? parseDate(metadata.createdAt) : null;
+			const createdAt = metadata
+				? discussionDateSchema.safeParse(metadata.createdAt).data
+				: undefined;
 			if (!(metadata && createdAt)) {
 				continue;
 			}
@@ -161,7 +119,22 @@ export class DiscussionCollabStore {
 		);
 	}
 
-	readUsers(): Record<string, DiscussionUser> {
+	readDiscussions(): TDiscussion[] {
+		return this.readStoredDiscussions().map((discussion) => ({
+			...discussion,
+			comments: discussion.comments.map((comment) => {
+				const decoded = plateValueSchema.safeParse(comment.contentRich);
+				if (decoded.success) {
+					return { ...comment, contentRich: decoded.data };
+				}
+				const contentRich: TComment["contentRich"] = [];
+				this.storedEditorFallbacks.set(contentRich, comment.contentRich);
+				return { ...comment, contentRich };
+			}),
+		}));
+	}
+
+	readUsers() {
 		const result: Record<string, DiscussionUser> = {};
 		for (const value of this.users.values()) {
 			const user = parseUser(value);
@@ -202,8 +175,13 @@ export class DiscussionCollabStore {
 				};
 				this.discussions.set(discussion.id, JSON.stringify(metadata));
 				for (const comment of discussion.comments) {
+					const storedFallback =
+						comment.contentRich.length === 0
+							? this.storedEditorFallbacks.get(comment.contentRich)
+							: undefined;
 					const wire: CommentWire = {
 						...comment,
+						contentRich: storedFallback ?? comment.contentRich,
 						createdAt: comment.createdAt.toISOString(),
 					};
 					this.comments.set(commentKey(comment), JSON.stringify(wire));

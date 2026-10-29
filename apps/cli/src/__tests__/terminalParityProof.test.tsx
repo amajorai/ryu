@@ -1,8 +1,8 @@
 /* @jsxImportSource @opentui/react */
 
 import { afterEach, expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
 import { TerminalParityProof } from "../proof/terminal-parity-proof.tsx";
+import { testRender } from "./cli-test-render.ts";
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | null = null;
 

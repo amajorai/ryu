@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/timeline",
   "name": "Timeline",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Productivity",
   "description": "The activity timeline with Replay lanes and a chronological History view over Shadow's captured screen/input/window/audio lanes, plus a keyframe preview, Dayflow work journal, and jump-to-moment focus.",
@@ -51,20 +51,5 @@
   "companion": {
     "label": "Timeline",
     "icon": "timeline"
-  },
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "timeline.chat",
-        "title": "Timeline widget",
-        "description": "Timeline chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["timeline widget"],
-        "examples": ["Show me a timeline widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
   }
 }

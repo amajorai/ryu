@@ -1,13 +1,22 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { once } from "node:events";
 import { createServer } from "node:net";
+import { z } from "zod";
 import {
 	approveLoginApproval,
+	type LoginApprovalEvent,
+	LoginApprovalHttpError,
 	listLoginApprovals,
+	loginApprovalRetryDelay,
 	pollLoginApprovalSession,
 	startLoginApproval,
 	streamLoginApprovals,
 } from "./login-approval-client.ts";
+
+function fetchFixture(
+	handle: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+): typeof globalThis.fetch {
+	return Object.assign(handle, { preconnect: () => undefined });
+}
 
 const originalFetch = globalThis.fetch;
 
@@ -30,7 +39,7 @@ const request = {
 
 describe("login approval client", () => {
 	it("maps the server start response into the shared client contract", async () => {
-		globalThis.fetch = async () =>
+		globalThis.fetch = fetchFixture(async () =>
 			Response.json({
 				deviceCode: "device-secret",
 				expiresIn: 300,
@@ -41,7 +50,8 @@ describe("login approval client", () => {
 				verificationUri: "https://app.example/device",
 				verificationUriComplete:
 					"https://app.example/device?user_code=ABCD2345",
-			});
+			})
+		);
 
 		await expect(
 			startLoginApproval("https://api.example", "ryu-desktop", {
@@ -61,13 +71,13 @@ describe("login approval client", () => {
 
 	it("lists and approves only the parsed request shape", async () => {
 		const calls: Request[] = [];
-		globalThis.fetch = async (input, init) => {
+		globalThis.fetch = fetchFixture(async (input, init) => {
 			calls.push(new Request(input, init));
 			if (calls.length === 1) {
 				return Response.json({ requests: [request] });
 			}
 			return Response.json({ ok: true, status: "approved" });
-		};
+		});
 
 		await expect(
 			listLoginApprovals("https://api.example", { token: "session-token" })
@@ -82,6 +92,56 @@ describe("login approval client", () => {
 		expect(calls[1]?.url).toBe(
 			"https://api.example/api/login-approvals/pending/request-1/approve"
 		);
+	});
+
+	it("rejects refused and failed reads with their HTTP status and unchanged message", async () => {
+		globalThis.fetch = fetchFixture(async (input) =>
+			String(input).endsWith("/pending")
+				? Response.json({ error: "Unauthorized" }, { status: 401 })
+				: new Response("upstream unavailable", { status: 503 })
+		);
+
+		const refused = listLoginApprovals("https://api.example");
+		await expect(refused).rejects.toBeInstanceOf(LoginApprovalHttpError);
+		await expect(refused).rejects.toMatchObject({
+			message: "Unauthorized",
+			status: 401,
+		});
+		const unavailable = streamLoginApprovals(
+			"https://api.example",
+			{},
+			() => undefined
+		);
+		await expect(unavailable).rejects.toBeInstanceOf(LoginApprovalHttpError);
+		await expect(unavailable).rejects.toMatchObject({
+			message: "Login approval request failed (503)",
+			status: 503,
+		});
+	});
+
+	it("backs listener reconnects off with jitter and parks refused sessions", () => {
+		const refusedDelays = [401, 403].map((status) =>
+			loginApprovalRetryDelay(0, new LoginApprovalHttpError("refused", status))
+		);
+		expect(refusedDelays).toEqual([300_000, 300_000]);
+
+		const unavailable = new LoginApprovalHttpError("unavailable", 503);
+		expect(loginApprovalRetryDelay(0, unavailable, () => 0)).toBe(500);
+		expect(loginApprovalRetryDelay(0, unavailable, () => 1)).toBe(1000);
+		expect(loginApprovalRetryDelay(3, new Error("offline"), () => 0)).toBe(
+			4000
+		);
+		expect(loginApprovalRetryDelay(3, null, () => 1)).toBe(8000);
+		for (const attempt of [5, 6, 20, 1000]) {
+			expect(loginApprovalRetryDelay(attempt, null, () => 0)).toBe(15_000);
+			expect(loginApprovalRetryDelay(attempt, null, () => 1)).toBe(30_000);
+		}
+		for (let attempt = 0; attempt < 8; attempt += 1) {
+			const base = Math.min(30_000, 1000 * 2 ** attempt);
+			const delay = loginApprovalRetryDelay(attempt, null);
+			expect(delay).toBeGreaterThanOrEqual(base / 2);
+			expect(delay).toBeLessThanOrEqual(base);
+		}
 	});
 
 	it("parses an SSE snapshot and live approval event", async () => {
@@ -99,11 +159,13 @@ describe("login approval client", () => {
 				controller.close();
 			},
 		});
-		globalThis.fetch = async () =>
-			new Response(stream, {
-				headers: { "Content-Type": "text/event-stream" },
-			});
-		const events: unknown[] = [];
+		globalThis.fetch = fetchFixture(
+			async () =>
+				new Response(stream, {
+					headers: { "Content-Type": "text/event-stream" },
+				})
+		);
+		const events: LoginApprovalEvent[] = [];
 
 		await streamLoginApprovals("https://api.example", {}, (event) => {
 			events.push(event);
@@ -115,10 +177,10 @@ describe("login approval client", () => {
 
 	it("polls the browser session endpoint with the device grant", async () => {
 		const calls: Request[] = [];
-		globalThis.fetch = async (input, init) => {
+		globalThis.fetch = fetchFixture(async (input, init) => {
 			calls.push(new Request(input, init));
 			return Response.json({ ok: true, expires_in: 300 });
-		};
+		});
 
 		await pollLoginApprovalSession("https://app.example", "ryu-web", {
 			deviceCode: "device-secret",
@@ -167,20 +229,19 @@ it("cancels pending approval reads before headers and during the response body",
 				received();
 			});
 		});
-		const listening = once(server, "listening");
-		server.listen(0, "127.0.0.1");
-		await listening;
-		const address = server.address();
-		if (!address || typeof address === "string") {
-			throw new Error("Expected TCP listener");
-		}
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		const address = z
+			.object({ port: z.number(), address: z.string(), family: z.string() })
+			.parse(server.address());
 		const controller = new AbortController();
 		let bodyStarted!: () => void;
 		const readingBody = new Promise<void>((resolve) => {
 			bodyStarted = resolve;
 		});
 		if (sendHeaders) {
-			globalThis.fetch = async (input, init) => {
+			globalThis.fetch = fetchFixture(async (input, init) => {
 				const response = await originalFetch(input, init);
 				const json = response.json.bind(response);
 				response.json = () => {
@@ -189,7 +250,7 @@ it("cancels pending approval reads before headers and during the response body",
 					return pending;
 				};
 				return response;
-			};
+			});
 		}
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const deadline = new Promise<never>((_resolve, reject) => {
@@ -206,7 +267,12 @@ it("cancels pending approval reads before headers and during the response body",
 			);
 			const rejected = pending.then(
 				() => null,
-				(error: unknown) => error
+				(error) => {
+					if (!(error instanceof Error)) {
+						throw new Error("Expected an abort error");
+					}
+					return error;
+				}
 			);
 			await Promise.race([entered, deadline]);
 			if (sendHeaders) {
@@ -244,7 +310,7 @@ it("releases the stream when its event consumer throws", async () => {
 			cancelled += 1;
 		},
 	});
-	globalThis.fetch = async () => new Response(body);
+	globalThis.fetch = fetchFixture(async () => new Response(body));
 	await expect(
 		streamLoginApprovals("https://api.example", {}, () => {
 			throw new Error("Consumer stopped");
@@ -268,7 +334,7 @@ it("stops buffered events and releases its reader when the consumer aborts", asy
 			cancelled += 1;
 		},
 	});
-	globalThis.fetch = async () => new Response(body);
+	globalThis.fetch = fetchFixture(async () => new Response(body));
 	const controller = new AbortController();
 	const events: unknown[] = [];
 	await streamLoginApprovals(

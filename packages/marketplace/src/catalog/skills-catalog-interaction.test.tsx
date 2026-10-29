@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import type { CatalogHost, CatalogInstall } from "./host.tsx";
 import type { SkillCard, SkillDetail, SkillsCatalogState } from "./types.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 

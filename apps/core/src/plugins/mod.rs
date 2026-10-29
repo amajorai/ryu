@@ -24,8 +24,12 @@ pub mod catalog;
 pub mod graph;
 pub mod isolation;
 pub mod lifecycle;
+pub mod rollback;
 pub mod runtime;
 pub mod seed;
+
+#[cfg(test)]
+mod shipped_grants_runtime_tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -37,7 +41,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::governance::{resolve_field, GovernanceScope, HookPolicyOverride, ScopedValue};
-use crate::sidecar::download_manager::ryu_dir;
 
 // ── Record types ──────────────────────────────────────────────────────────────
 
@@ -88,6 +91,17 @@ pub struct PluginRecord {
 /// deserializes onto the stable train rather than an empty string.
 fn default_channel() -> String {
     crate::update::STABLE_CHANNEL.to_owned()
+}
+
+/// One entry on the node's local plugin revocation list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginRevocation {
+    /// A plugin id, or `id@version` revoking only that installed version.
+    pub entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// RFC3339 time the entry was written.
+    pub revoked_at: String,
 }
 
 /// Result of a grant-validation call to the Gateway.
@@ -142,6 +156,11 @@ fn resolve_hook_override_records(
             ]
             .into_iter()
             .map(|scope| {
+                // A hook an organization/team administrator locked cannot be
+                // re-enabled or re-trusted by a more specific layer.
+                if crate::governance::locked_above(scope, &format!("hooks.{hook_key}")) {
+                    return ScopedValue::new(scope, None);
+                }
                 let value = records
                     .iter()
                     .filter(|record| record.hook_key == hook_key && record.scope == scope)
@@ -153,23 +172,44 @@ fn resolve_hook_override_records(
     };
     HookPolicyOverride {
         enabled: field(|policy| policy.enabled),
-        trusted: field(|policy| policy.trusted),
+        trusted: resolve_hook_trust(records, hook_key),
     }
 }
 
-/// Resolve the plugins lifecycle DB path.
-///
-/// Defaults to `~/.ryu/plugins.db`. To avoid orphaning installs made before the
-/// apps→plugins rename, if the new DB does not exist but the legacy
-/// `~/.ryu/apps.db` does, the legacy path is used.
-fn db_path() -> PathBuf {
-    let dir = ryu_dir();
-    let new_path = dir.join("plugins.db");
-    let legacy_path = dir.join("apps.db");
-    if !new_path.exists() && legacy_path.exists() {
-        return legacy_path;
+/// Trust is an authority claim, not a preference: it resolves like any field
+/// (most specific wins, locks respected), except that the user layer may only
+/// withdraw trust, never grant it to a hook a broader layer (the node admin,
+/// or the organization/team administrators) explicitly distrusted.
+fn resolve_hook_trust(records: &[HookOverrideRecord], hook_key: &str) -> Option<bool> {
+    let path = format!("hooks.{hook_key}");
+    let mut trusted = None;
+    for scope in [
+        GovernanceScope::Node,
+        GovernanceScope::Organization,
+        GovernanceScope::Team,
+        GovernanceScope::User,
+    ] {
+        if crate::governance::locked_above(scope, &path) {
+            continue;
+        }
+        let Some(value) = records
+            .iter()
+            .filter(|record| record.hook_key == hook_key && record.scope == scope)
+            .find_map(|record| record.policy.trusted)
+        else {
+            continue;
+        };
+        if scope == GovernanceScope::User && value && trusted == Some(false) {
+            continue;
+        }
+        trusted = Some(value);
     }
-    new_path
+    trusted
+}
+
+/// Resolve the plugins lifecycle DB path: `<data dir>/db/plugins.db`.
+fn db_path() -> PathBuf {
+    crate::paths::db_path("plugins.db")
 }
 
 /// SQLite-backed store for App lifecycle records. Cheap to clone (`Arc` inside).
@@ -179,13 +219,16 @@ pub struct PluginStore {
 }
 
 impl PluginStore {
-    /// Open (creating if needed) the plugins DB under `~/.ryu/plugins.db`
-    /// (falling back to the legacy `~/.ryu/apps.db` when present) and run the
-    /// schema migration.
+    /// Open (creating if needed) the plugins DB at `<data dir>/db/plugins.db` and
+    /// run the schema migration.
     pub fn open() -> Result<Self> {
         let path = db_path();
+        Self::open_at(&path)
+    }
+
+    fn open_at(path: &std::path::Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).context("creating ~/.ryu for plugins.db")?;
+            std::fs::create_dir_all(dir).context("creating the plugins.db directory")?;
         }
         let conn = Connection::open(&path)
             .with_context(|| format!("opening plugins db at {}", path.display()))?;
@@ -205,6 +248,17 @@ impl PluginStore {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    /// Make every later listing fail (drops the lifecycle table), so tests can
+    /// exercise callers' store-error paths.
+    #[cfg(test)]
+    pub(crate) async fn break_listing_for_test(&self) {
+        self.conn
+            .lock()
+            .await
+            .execute_batch("DROP TABLE apps;")
+            .expect("drop apps table");
     }
 
     fn migrate(conn: &Connection) -> Result<()> {
@@ -272,7 +326,85 @@ impl PluginStore {
             );",
         )
         .context("creating hook_overrides table")?;
+        // The node's local plugin revocation list: `entry` is a plugin id, or
+        // `id@version` to revoke one installed version. Revocation only tightens —
+        // a revoked record reads as disabled through every runtime read
+        // ([`Self::list`] / [`Self::get`]) and the lifecycle refuses to enable it.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS plugin_revocations (
+                entry      TEXT PRIMARY KEY,
+                reason     TEXT,
+                revoked_at TEXT NOT NULL
+            );",
+        )
+        .context("creating plugin_revocations table")?;
         Ok(())
+    }
+
+    /// Add `id` (or `id@version` when `version` is given) to the local revocation
+    /// list. Idempotent; re-revoking refreshes the reason and timestamp.
+    pub async fn revoke(
+        &self,
+        id: &str,
+        version: Option<&str>,
+        reason: Option<&str>,
+    ) -> Result<PluginRevocation> {
+        let entry = match version.map(str::trim).filter(|v| !v.is_empty()) {
+            Some(version) => format!("{id}@{version}"),
+            None => id.to_owned(),
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO plugin_revocations (entry, reason, revoked_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(entry) DO UPDATE SET reason = excluded.reason,
+                                              revoked_at = excluded.revoked_at",
+            params![entry, reason, now],
+        )
+        .with_context(|| format!("revoking plugin '{entry}'"))?;
+        Ok(PluginRevocation {
+            entry,
+            reason: reason.map(str::to_owned),
+            revoked_at: now,
+        })
+    }
+
+    /// Remove one revocation entry. Returns whether it existed.
+    pub async fn unrevoke(&self, entry: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let removed = conn.execute(
+            "DELETE FROM plugin_revocations WHERE entry = ?1",
+            params![entry],
+        )?;
+        Ok(removed > 0)
+    }
+
+    /// Every local revocation entry, oldest first.
+    pub async fn list_revocations(&self) -> Result<Vec<PluginRevocation>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT entry, reason, revoked_at FROM plugin_revocations ORDER BY revoked_at ASC",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(PluginRevocation {
+                    entry: row.get(0)?,
+                    reason: row.get(1)?,
+                    revoked_at: row.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// The revocation entry blocking `id` at `version`, if any.
+    pub async fn revocation_for(&self, id: &str, version: &str) -> Result<Option<String>> {
+        Ok(self
+            .list_revocations()
+            .await?
+            .into_iter()
+            .map(|row| row.entry)
+            .find(|entry| isolation::revocation_matches(entry, id, version)))
     }
 
     fn record_verified_official_packages(conn: &Connection) -> Result<()> {
@@ -491,7 +623,9 @@ impl PluginStore {
         let Some(record) = self.get_record(id).await? else {
             return Ok(None);
         };
-        Ok(apply_safe_mode_mask(vec![record], crate::safe_mode::is_active()).pop())
+        let revoked = self.revoked_entries().await?;
+        let masked = apply_safe_mode_mask(vec![record], crate::safe_mode::is_active());
+        Ok(apply_revocation_mask(masked, &revoked).pop())
     }
 
     /// The RAW record for `id`, unmasked by Safe Mode. Lifecycle and management
@@ -525,9 +659,22 @@ impl PluginStore {
     /// spawning. See [`Self::list_all_records`] for the raw read, and note that
     /// nothing here writes: the persisted `enabled` bit is never touched, which is
     /// what makes leaving safe mode a no-op.
+    async fn revoked_entries(&self) -> Result<Vec<String>> {
+        Ok(self
+            .list_revocations()
+            .await?
+            .into_iter()
+            .map(|row| row.entry)
+            .collect())
+    }
+
     pub async fn list(&self) -> Result<Vec<PluginRecord>> {
         let rows = self.list_all_records().await?;
-        Ok(apply_safe_mode_mask(rows, crate::safe_mode::is_active()))
+        let revoked = self.revoked_entries().await?;
+        Ok(apply_revocation_mask(
+            apply_safe_mode_mask(rows, crate::safe_mode::is_active()),
+            &revoked,
+        ))
     }
 
     /// The RAW lifecycle rows, unmasked by Safe Mode.
@@ -718,6 +865,9 @@ impl PluginStore {
     /// Reconcile grants after an installed manifest changes without toggling
     /// the app. Persisted approvals are capabilities for the old manifest and
     /// must never survive when the new declaration no longer requests them.
+    /// The update lifecycle commits this together with the version through
+    /// [`Self::apply_update`]; this standalone form is a test fixture.
+    #[cfg(test)]
     pub async fn set_approved_grants(
         &self,
         id: &str,
@@ -754,15 +904,28 @@ impl PluginStore {
         self.get(id).await
     }
 
-    /// Update the installed version of an app (used by the update lifecycle).
-    /// Does NOT toggle `enabled` — that is handled by `set_enabled`.
-    pub async fn set_version(&self, id: &str, version: &str) -> Result<Option<PluginRecord>> {
+    /// Commit an update's store half in ONE statement: the new version, the
+    /// reconciled grants (`None` keeps the stored ones) and the bundled `ui_code`
+    /// (`None` clears it). Separate writes could leave the row at the new version
+    /// with the old code or grants after a failure or crash part-way, and every
+    /// retry would then see "same version" and no-op. Does NOT toggle `enabled`.
+    /// Returns `Ok(None)` when no such record exists.
+    pub async fn apply_update(
+        &self,
+        id: &str,
+        version: &str,
+        approved_grants: Option<&[String]>,
+        ui_code: Option<&str>,
+    ) -> Result<Option<PluginRecord>> {
+        let grants_json = approved_grants
+            .map(|grants| serde_json::to_string(grants).unwrap_or_else(|_| "[]".to_owned()));
         let now = chrono::Utc::now().to_rfc3339();
         {
             let conn = self.conn.lock().await;
             let rows_affected = conn.execute(
-                "UPDATE apps SET version = ?2, updated_at = ?3 WHERE id = ?1",
-                params![id, version, now],
+                "UPDATE apps SET version = ?2, approved_grants = COALESCE(?3, approved_grants), \
+                 ui_code = ?4, updated_at = ?5 WHERE id = ?1",
+                params![id, version, grants_json, ui_code, now],
             )?;
             if rows_affected == 0 {
                 return Ok(None);
@@ -861,6 +1024,34 @@ fn apply_safe_mode_mask(records: Vec<PluginRecord>, active: bool) -> Vec<PluginR
         .collect()
 }
 
+/// The local revocation read mask: a revoked record (by id, or by `id@version`
+/// matching its installed version) reads as disabled with its grants cleared, for
+/// the same reason Safe Mode masks — every runtime consumer keys on `enabled`, so
+/// hooks, adapters, sidecars, MCP servers, Pi extensions and routes all stop. The
+/// persisted `enabled` bit is untouched, so un-revoking restores the user's choice.
+/// A mandatory plugin is never masked: it is compiled into Core, so no publisher can
+/// compromise it, and the revocation route refuses it for the same reason a disable
+/// does. This also covers a revocation row written before that refusal existed.
+fn apply_revocation_mask(records: Vec<PluginRecord>, revoked: &[String]) -> Vec<PluginRecord> {
+    if revoked.is_empty() {
+        return records;
+    }
+    records
+        .into_iter()
+        .map(|mut record| {
+            if !crate::plugins::builtins::is_mandatory(&record.id)
+                && revoked
+                    .iter()
+                    .any(|entry| isolation::revocation_matches(entry, &record.id, &record.version))
+            {
+                record.enabled = false;
+                record.approved_grants.clear();
+            }
+            record
+        })
+        .collect()
+}
+
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<PluginRecord> {
     let grants_json: String = row.get(3)?;
     let approved_grants = serde_json::from_str(&grants_json).unwrap_or_default();
@@ -942,6 +1133,48 @@ mod tests {
         let effective = s.effective_hook_override(key).await.unwrap();
         assert_eq!(effective.enabled, Some(false));
         assert_eq!(effective.trusted, Some(true));
+    }
+
+    #[tokio::test]
+    async fn user_layer_cannot_trust_a_hook_a_broader_layer_distrusted() {
+        let s = store();
+        let key = "com.example.plugin::review";
+        let set = |scope, trusted| {
+            let s = s.clone();
+            async move {
+                s.upsert_hook_override(
+                    scope,
+                    key,
+                    &HookPolicyOverride {
+                        enabled: None,
+                        trusted: Some(trusted),
+                    },
+                    scope != GovernanceScope::Node && scope != GovernanceScope::User,
+                )
+                .await
+                .unwrap();
+            }
+        };
+        set(GovernanceScope::Node, false).await;
+        set(GovernanceScope::User, true).await;
+        assert_eq!(
+            s.effective_hook_override(key).await.unwrap().trusted,
+            Some(false)
+        );
+
+        // An organization administrator can trust it; then the user may too.
+        set(GovernanceScope::Organization, true).await;
+        assert_eq!(
+            s.effective_hook_override(key).await.unwrap().trusted,
+            Some(true)
+        );
+
+        // The user layer can always withdraw trust.
+        set(GovernanceScope::User, false).await;
+        assert_eq!(
+            s.effective_hook_override(key).await.unwrap().trusted,
+            Some(false)
+        );
     }
 
     #[tokio::test]
@@ -1179,6 +1412,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn revocation_masks_runtime_reads_without_writing_records() {
+        let s = store();
+        s.insert("com.test.revoked", "1.0.0").await.unwrap();
+        s.set_enabled("com.test.revoked", &["sidecar:process".to_owned()])
+            .await
+            .unwrap();
+        s.revoke("com.test.revoked", None, Some("compromised"))
+            .await
+            .unwrap();
+
+        let masked = s.get("com.test.revoked").await.unwrap().unwrap();
+        assert!(!masked.enabled);
+        assert!(masked.approved_grants.is_empty());
+        assert!(s
+            .list()
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.id != "com.test.revoked" || !r.enabled));
+        // The user's real choice is preserved for the lifecycle/management reads.
+        let raw = s.get_record("com.test.revoked").await.unwrap().unwrap();
+        assert!(raw.enabled);
+        assert_eq!(raw.approved_grants, vec!["sidecar:process".to_owned()]);
+
+        assert!(s.unrevoke("com.test.revoked").await.unwrap());
+        assert!(s.get("com.test.revoked").await.unwrap().unwrap().enabled);
+    }
+
+    /// A mandatory plugin is compiled into Core, so a revocation row (one written
+    /// before the route refused it, say) never masks it off.
+    #[tokio::test]
+    async fn a_revocation_never_masks_a_mandatory_plugin() {
+        let s = store();
+        let mandatory = crate::plugins::builtins::MANDATORY_PLUGINS[0];
+        s.insert(mandatory, "1.0.0").await.unwrap();
+        s.set_enabled(mandatory, &[]).await.unwrap();
+        s.revoke(mandatory, None, None).await.unwrap();
+        assert!(s.get(mandatory).await.unwrap().unwrap().enabled);
+        assert!(s
+            .list()
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.id == mandatory && r.enabled));
+    }
+
+    #[tokio::test]
+    async fn a_version_pinned_revocation_matches_only_that_installed_version() {
+        let s = store();
+        s.insert("com.test.pinned", "1.0.0").await.unwrap();
+        s.set_enabled("com.test.pinned", &[]).await.unwrap();
+        let row = s
+            .revoke("com.test.pinned", Some("2.0.0"), None)
+            .await
+            .unwrap();
+        assert_eq!(row.entry, "com.test.pinned@2.0.0");
+        assert!(s.get("com.test.pinned").await.unwrap().unwrap().enabled);
+        assert_eq!(
+            s.revocation_for("com.test.pinned", "1.0.0").await.unwrap(),
+            None
+        );
+        s.revoke("com.test.pinned", Some("1.0.0"), None)
+            .await
+            .unwrap();
+        assert!(!s.get("com.test.pinned").await.unwrap().unwrap().enabled);
+        assert_eq!(
+            s.revocation_for("com.test.pinned", "1.0.0").await.unwrap(),
+            Some("com.test.pinned@1.0.0".to_owned())
+        );
+        assert_eq!(s.list_revocations().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
     async fn insert_get_roundtrip() {
         let s = store();
         let rec = s.insert("com.test.app", "1.0.0").await.unwrap();
@@ -1217,15 +1523,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_version_updates_version() {
+    async fn apply_update_sets_version_and_code_and_keeps_grants_when_none() {
         let s = store();
         s.insert("com.test.app", "1.0.0").await.unwrap();
+        s.set_approved_grants("com.test.app", &["spaces:docs".to_owned()])
+            .await
+            .unwrap();
         let rec = s
-            .set_version("com.test.app", "2.0.0")
+            .apply_update("com.test.app", "2.0.0", None, Some("CODE"))
             .await
             .unwrap()
             .unwrap();
         assert_eq!(rec.version, "2.0.0");
+        assert_eq!(rec.approved_grants, vec!["spaces:docs"]);
+        assert_eq!(
+            s.get_ui_code("com.test.app").await.unwrap().as_deref(),
+            Some("CODE")
+        );
+
+        let rec = s
+            .apply_update("com.test.app", "3.0.0", Some(&[]), None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rec.version, "3.0.0");
+        assert!(rec.approved_grants.is_empty());
+        assert_eq!(s.get_ui_code("com.test.app").await.unwrap(), None);
     }
 
     /// An unpinned record describes its OWN channel, read off the installed

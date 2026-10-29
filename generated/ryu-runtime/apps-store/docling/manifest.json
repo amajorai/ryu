@@ -16,7 +16,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/docling",
   "name": "Docling",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "Document parsing via IBM's MIT-licensed Docling — the highest-fidelity `document.parse` backend. Where a text extractor hands a model a stream of characters, Docling runs real layout analysis: a page-segmentation model finds the reading order, a table-structure model rebuilds merged cells and spanning headers, and the result is exported as markdown whose headings, lists and tables mirror the document's actual structure. That is what makes a multi-column paper or a financial statement survive chunking instead of interleaving into nonsense. The cost is weight: the first parse downloads its models (hundreds of MB) and can take minutes, and every parse after that is CPU-bound inference rather than a string copy. Everything runs locally — Docling explicitly supports air-gapped operation once the models are cached — and no document ever leaves the node. Parses run as jobs: submit returns 202 + a job_id, the caller polls.",
   "icon": "document-attachment",
@@ -76,10 +76,8 @@
           "format": "tar.gz"
         },
         "env": {
-          "RYU_DOCLING_HOST": "127.0.0.1",
           "RYU_DOCLING_ROOTS": "${RYU_DIR}",
-          "RYU_DOCLING_WORKDIR": "${RYU_DIR}/cache/docling",
-          "DOCLING_CACHE_DIR": "${RYU_DIR}/cache/docling/docling",
+          "DOCLING_CACHE_DIR": "${RYU_PLUGIN_DATA_DIR}/cache/docling",
           "HF_HOME": "${RYU_DIR}/models/hf",
           "TORCH_HOME": "${RYU_DIR}/models/torch",
           "HF_HUB_DISABLE_TELEMETRY": "1",
@@ -96,20 +94,5 @@
         ]
       }
     }
-  ],
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "docling.chat",
-        "title": "Docling widget",
-        "description": "Docling chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["docling widget"],
-        "examples": ["Show me a docling widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
-  }
+  ]
 }

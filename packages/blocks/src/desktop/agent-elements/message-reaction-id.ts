@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+
 /**
  * Core mints message ids as UUID v4 (`uuid::Uuid::new_v4()` in
  * `ConversationStore::append_message`). The AI SDK's client-side `generateId`
@@ -28,5 +30,5 @@ const SERVER_MESSAGE_ID =
 export function isServerAssignedMessageId(
 	messageId: string | undefined
 ): messageId is string {
-	return typeof messageId === "string" && SERVER_MESSAGE_ID.test(messageId);
+	return isNativeText(messageId) && SERVER_MESSAGE_ID.test(messageId);
 }

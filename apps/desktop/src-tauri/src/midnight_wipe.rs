@@ -74,11 +74,22 @@ fn write_state(state: &MidnightWipeState) -> Result<(), String> {
         "could not resolve this machine's config directory, so the setting has nowhere to live"
             .to_string()
     })?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "midnight-wipe state path has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let json = serde_json::to_vec_pretty(state).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
+    // Core reads this file at boot and writes it atomically; an in-place write
+    // here could be observed half-written (parsed as default) or, if
+    // interrupted, drop Core's `last_wipe_date` so a toggle re-arms a wipe that
+    // already ran today.
+    let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut staged, &json).map_err(|e| e.to_string())?;
+    staged.as_file().sync_all().map_err(|e| e.to_string())?;
+    staged
+        .persist(&path)
+        .map(|_| ())
+        .map_err(|e| e.error.to_string())
 }
 
 /// True when the running build's profile is one the wipe may ever target.
