@@ -1,10 +1,10 @@
 import {
-	Download,
-	Laptop,
-	type LucideIcon,
-	Puzzle,
-	Smartphone,
-} from "lucide-react";
+	Download01Icon,
+	LaptopIcon,
+	PuzzleIcon,
+	SmartPhone01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
 	GET_RYU_APPS_LABEL,
 	otherRyuAppSurfaces,
@@ -20,10 +20,10 @@ import {
 } from "./dropdown-menu.tsx";
 
 const SURFACE_ICONS = {
-	desktop: Laptop,
-	extension: Puzzle,
-	mobile: Smartphone,
-} satisfies Record<RyuAppSurfaceId, LucideIcon>;
+	desktop: LaptopIcon,
+	extension: PuzzleIcon,
+	mobile: SmartPhone01Icon,
+} satisfies Record<RyuAppSurfaceId, IconSvgElement>;
 
 interface GetRyuAppsSubmenuProps {
 	current: RyuCurrentSurface;
@@ -43,7 +43,7 @@ interface GetRyuAppsSubmenuProps {
 /** User-nav submenu that cross-promotes the other installable Ryu clients. */
 export function GetRyuAppsSubmenu({
 	current,
-	iconClassName = "mr-2 size-4",
+	iconClassName = "size-4",
 	mobileListed,
 	onOpen,
 }: GetRyuAppsSubmenuProps) {
@@ -54,18 +54,20 @@ export function GetRyuAppsSubmenu({
 	return (
 		<DropdownMenuSub>
 			<DropdownMenuSubTrigger>
-				<Download className={iconClassName} />
+				<HugeiconsIcon className={iconClassName} icon={Download01Icon} />
 				{GET_RYU_APPS_LABEL}
 			</DropdownMenuSubTrigger>
 			<DropdownMenuSubContent className="min-w-60">
 				{surfaces.map((surface) => {
-					const Icon = SURFACE_ICONS[surface.id];
 					return (
 						<DropdownMenuItem
 							key={surface.id}
 							onClick={() => onOpen(surface.path)}
 						>
-							<Icon className={iconClassName} />
+							<HugeiconsIcon
+								className={iconClassName}
+								icon={SURFACE_ICONS[surface.id]}
+							/>
 							<span className="flex-1">{surface.label}</span>
 							<span className="ml-3 text-muted-foreground text-xs">
 								{surface.description}

@@ -14,235 +14,26 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { importVaultSecrets } from "@ryuhq/core-client/vault";
-import { z } from "zod";
+import { tf } from "../i18n/translate.ts";
+import { parseMigrateArgs } from "./migrate-args.ts";
+import {
+	CORE_SOURCE_IDS,
+	ITEM_KINDS,
+	type ItemKind,
+	itemKindSchema,
+	KIND_LABELS,
+	type Outcome,
+	runSchema,
+	type Scan,
+	type ScanItem,
+	SOURCES,
+	type SourceId,
+	scanSchema,
+	sourceIdSchema,
+} from "./migrate-sources.ts";
 import { type CliContext, type Command, UsageError } from "./types.ts";
 
-interface SourceSpec {
-	/** Folders tried in order when no path is given (`~` expands on the node). */
-	defaults: readonly string[];
-	label: string;
-	/** Shown when no default exists and no path was given. */
-	needsPath?: string;
-}
-
-const SOURCES = {
-	openclaw: {
-		label: "OpenClaw",
-		defaults: ["~/.openclaw", "~/.clawdbot", "~/.moltbot"],
-	},
-	hermes: { label: "Hermes", defaults: ["~/.hermes"] },
-	chatgpt: {
-		label: "ChatGPT",
-		defaults: [],
-		needsPath:
-			"Export your data from ChatGPT (Settings → Data controls → Export data), unzip the download, and pass the folder that holds conversations.json.",
-	},
-	claude: {
-		label: "Claude",
-		defaults: [],
-		needsPath:
-			"Export your data from Claude (Settings → Privacy → Export data), unzip the download, and pass the folder that holds conversations.json.",
-	},
-	muse: {
-		label: "Muse",
-		defaults: [],
-		needsPath:
-			"Download your Muse data (Settings → Data controls → Download your Muse data), extract it, and pass the folder that holds SOUL.md and MEMORY.md.",
-	},
-	mastra: { label: "Mastra", defaults: ["."] },
-	langchain: { label: "LangChain", defaults: ["."] },
-	dots: {
-		label: "Dots",
-		defaults: [],
-		needsPath:
-			"OpenAI Dots has no setup export. Save the dot's instructions as SOUL.md (add IDENTITY.md with `Name: <name>` to keep its name) and anything you want it to remember as MEMORY.md in one folder, then pass that folder.",
-	},
-} as const satisfies Record<string, SourceSpec>;
-
-type SourceId = keyof typeof SOURCES;
-
-const sourceIdSchema = z.enum([
-	"openclaw",
-	"hermes",
-	"chatgpt",
-	"claude",
-	"muse",
-	"mastra",
-	"langchain",
-	"dots",
-]);
-
-/** Core reports a Claude data export as `claude-ai`; the CLI says `claude`. */
-const CORE_SOURCE_IDS = new Map<SourceId, string>([
-	["claude", "claude-ai"],
-	["dots", "persona"],
-]);
-
-/** Accept a few common spellings of each source. */
-const SOURCE_ALIASES = new Map<string, SourceId>([
-	["claw", "openclaw"],
-	["clawdbot", "openclaw"],
-	["moltbot", "openclaw"],
-	["hermes-agent", "hermes"],
-	["langgraph", "langchain"],
-	["dot", "dots"],
-	["openai-dots", "dots"],
-	["meta-muse", "muse"],
-	["openai", "chatgpt"],
-	["claude.ai", "claude"],
-	["claude-ai", "claude"],
-	["anthropic", "claude"],
-]);
-
-const ITEM_KINDS = [
-	"conversations",
-	"agent",
-	"instructions",
-	"skill",
-	"mcp_server",
-	"memory",
-	"plugin",
-	"slash_command",
-] as const;
-const itemKindSchema = z.enum(ITEM_KINDS);
-type ItemKind = z.infer<typeof itemKindSchema>;
-
-const KIND_LABELS: Record<ItemKind, string> = {
-	conversations: "Chats and projects",
-	agent: "Agents",
-	instructions: "Instructions",
-	skill: "Skills",
-	mcp_server: "MCP servers",
-	memory: "Memory",
-	plugin: "Plugins (installed disabled)",
-	slash_command: "Slash commands",
-};
-
-const scanItemSchema = z.object({
-	already_exists: z.boolean().optional(),
-	detail: z.string().optional(),
-	id: z.string(),
-	kind: z.string(),
-	title: z.string(),
-});
-type ScanItem = z.infer<typeof scanItemSchema>;
-
-const scanSchema = z.object({
-	items: z.array(scanItemSchema).default([]),
-	root: z.string(),
-	source: z.string().nullish(),
-	warnings: z.array(z.string()).default([]),
-});
-type Scan = z.infer<typeof scanSchema>;
-
-const outcomeSchema = z.object({
-	detail: z.string().nullish(),
-	id: z.string(),
-	kind: z.string(),
-	status: z.string(),
-	title: z.string(),
-});
-type Outcome = z.infer<typeof outcomeSchema>;
-
-const runSchema = z.object({
-	results: z.array(outcomeSchema).default([]),
-	root: z.string().optional(),
-});
-
-/** Parsed `ryu migrate` options. Global flags (`--json`, `--dry-run`) come
- *  from the dispatcher; the rest are parsed from the raw argv here. */
-export interface MigrateArgs {
-	only: ItemKind[] | null;
-	path: string | null;
-	secrets: boolean;
-	source: SourceId | null;
-	yes: boolean;
-}
-
-export function parseMigrateArgs(rawArgs: readonly string[]): MigrateArgs {
-	const parsed: MigrateArgs = {
-		only: null,
-		path: null,
-		secrets: false,
-		source: null,
-		yes: false,
-	};
-	const positional: string[] = [];
-	for (let i = 0; i < rawArgs.length; i++) {
-		const token = rawArgs[i] ?? "";
-		const [name, inline] = token.startsWith("--")
-			? (token.split(/=(.*)/s, 2) as [string, string | undefined])
-			: [token, undefined];
-		const value = () => {
-			if (inline !== undefined) {
-				return inline;
-			}
-			i++;
-			const next = rawArgs[i];
-			if (next === undefined) {
-				throw new UsageError(`${name} needs a value.`);
-			}
-			return next;
-		};
-		if (name === "--yes" || name === "-y") {
-			parsed.yes = true;
-		} else if (name === "--secrets" || name === "--migrate-secrets") {
-			parsed.secrets = true;
-		} else if (name === "--path" || name === "--source") {
-			parsed.path = value();
-		} else if (name === "--only") {
-			parsed.only = parseKinds(value());
-		} else if (name === "--node") {
-			value();
-		} else if (!token.startsWith("-")) {
-			positional.push(token);
-		}
-	}
-	const [first, second] = positional;
-	if (first) {
-		const source = resolveSourceId(first);
-		if (source) {
-			parsed.source = source;
-			parsed.path ??= second ?? null;
-		} else {
-			parsed.path ??= first;
-		}
-	}
-	return parsed;
-}
-
-function resolveSourceId(token: string): SourceId | null {
-	const lower = token.toLowerCase();
-	const parsed = sourceIdSchema.safeParse(lower);
-	if (parsed.success) {
-		return parsed.data;
-	}
-	return SOURCE_ALIASES.get(lower) ?? null;
-}
-
-function parseKinds(raw: string): ItemKind[] {
-	const kinds: ItemKind[] = [];
-	for (const part of raw.split(",")) {
-		const normalized = part.trim().toLowerCase().replace(/-/g, "_");
-		const singular = normalized.endsWith("s")
-			? normalized.slice(0, -1)
-			: normalized;
-		const alias =
-			singular === "mcp"
-				? "mcp_server"
-				: singular === "chat" || singular === "conversation"
-					? "conversations"
-					: singular;
-		const parsed = itemKindSchema.safeParse(alias);
-		if (!parsed.success) {
-			throw new UsageError(
-				`Unknown kind "${part}". Use: ${ITEM_KINDS.join(", ")}.`
-			);
-		}
-		kinds.push(parsed.data);
-	}
-	return kinds;
-}
+export { type MigrateArgs, parseMigrateArgs } from "./migrate-args.ts";
 
 /** Turn a Core error into "not found" (try the next default) vs a real error. */
 function isMissingFolder(error: unknown): boolean {
@@ -452,7 +243,10 @@ async function migrateSecrets(
 	} catch {
 		return {
 			created: 0,
-			message: `No readable ${join(root, ".env")} on this machine; add credentials with \`ryu secrets set\` instead.`,
+			message: tf(
+				"No readable {path} on this machine; add credentials with `ryu secrets set` instead.",
+				{ path: join(root, ".env") }
+			),
 			names: [],
 			skipped: 0,
 		};
@@ -474,7 +268,14 @@ async function migrateSecrets(
 	});
 	return {
 		created: report.created,
-		message: `Secret Vault: ${report.created} created, ${report.skipped} skipped (${names.join(", ")}). Values were not printed.`,
+		message: tf(
+			"Secret Vault: {created} created, {skipped} skipped ({names}). Values were not printed.",
+			{
+				created: String(report.created),
+				skipped: String(report.skipped),
+				names: names.join(", "),
+			}
+		),
 		names,
 		skipped: report.skipped,
 	};
@@ -520,14 +321,14 @@ async function detectAll(ctx: CliContext): Promise<number> {
 	}
 	if (found.length === 0) {
 		ctx.io.out(
-			`No OpenClaw or Hermes home, and no Mastra or LangChain project in ${process.cwd()}.\n${MIGRATE_USAGE}\n`
+			`${tf("No OpenClaw or Hermes home, and no Mastra or LangChain project in {cwd}.", { cwd: process.cwd() })}\n${MIGRATE_USAGE}\n`
 		);
 		return 0;
 	}
 	ctx.io.out("Found setups you can migrate:\n");
 	for (const { command, scan } of found) {
 		ctx.io.out(
-			`  ${sourceLabel(scan.source).padEnd(10)} ${scan.root} (${scan.items.length} items)\n    → ${command} --dry-run\n`
+			`  ${tf("{label} {root} ({count} items)\n    → {command} --dry-run", { label: sourceLabel(scan.source).padEnd(10), root: scan.root, count: String(scan.items.length), command })}\n`
 		);
 	}
 	return 0;
@@ -564,7 +365,7 @@ export const migrateCommand: Command = {
 			: null;
 		if (wanted && scan.source && scan.source !== wanted) {
 			ctx.io.err(
-				`Note: ${scan.root} looks like ${sourceLabel(scan.source)}, not ${sourceLabel(wanted)}; importing what was found.\n`
+				`${tf("Note: {root} looks like {found}, not {wanted}; importing what was found.", { root: scan.root, found: sourceLabel(scan.source), wanted: sourceLabel(wanted) })}\n`
 			);
 		}
 		const selected = scan.items.filter(
@@ -584,7 +385,7 @@ export const migrateCommand: Command = {
 		}
 		if (ctx.flags.dryRun) {
 			ctx.io.out(
-				`\nDry run: ${selected.length} item(s) would be imported. Nothing was changed.\n`
+				`\n${tf("Dry run: {count} item(s) would be imported. Nothing was changed.", { count: String(selected.length) })}\n`
 			);
 			return 0;
 		}
@@ -601,7 +402,16 @@ export const migrateCommand: Command = {
 				args.yes ||
 				(await confirm(
 					ctx,
-					`\nImport ${selected.length} item(s)${args.secrets ? " and move credentials into the Secret Vault" : ""}?`
+					`\n${
+						args.secrets
+							? tf(
+									"Import {count} item(s) and move credentials into the Secret Vault?",
+									{ count: String(selected.length) }
+								)
+							: tf("Import {count} item(s)?", {
+									count: String(selected.length),
+								})
+					}`
 				))
 			)
 		) {

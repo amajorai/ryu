@@ -1,5 +1,5 @@
 /* eslint-disable react/no-unknown-property */
-import { useFrame } from "@react-three/fiber";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgentAct,
@@ -7,30 +7,24 @@ import {
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ScrollText, Sparkles } from "lucide-react";
-import { useMemo, useRef } from "react";
-import type { Group } from "three";
-import { FlowerClusters, type FlowerPatch } from "./game3d-grass.tsx";
+import { useMemo } from "react";
+import { FlowerClusters } from "./game3d-grass.tsx";
 import { IslandGrass, IsoIsland } from "./game3d-ground.tsx";
-import { InstancedParts, type InstanceSpec } from "./game3d-instances.tsx";
-import { type IslandShape, onIsland } from "./game3d-island.ts";
+import { InstancedParts } from "./game3d-instances.tsx";
+import type { IslandShape } from "./game3d-island.ts";
 import type { Rgb } from "./game3d-lawn.ts";
-import { CurvedBasicMaterial, ToonMaterial } from "./game3d-materials.tsx";
-import { ADDITIVE_BLENDING, jitter } from "./game3d-math.ts";
+import { ToonMaterial } from "./game3d-materials.tsx";
 import type { Scene3dTheme, Vec3 } from "./game3d-palette.ts";
 import {
 	Benches,
 	Bushes,
 	LampPosts,
-	type PlacedBush,
-	type PlacedProp,
-	type PlantedTree,
 	PROP_INK,
 	TreeGrove,
 } from "./game3d-props.tsx";
 import { IsoLabel, IsoMarker } from "./game3d-stage.tsx";
 import { linearRgb, type RenderQuality } from "./game3d-toon.ts";
 import {
-	FACE_CAMERA,
 	type MemberLooks,
 	type VillagerPose,
 	type VillagerSpec,
@@ -44,6 +38,14 @@ import {
 	lobbyPaths,
 	lobbyYouSpot,
 } from "./lobby-acts.tsx";
+import { Podium, Portal, SelectedGlow } from "./lobby-diorama-landmarks.tsx";
+import {
+	boardParts,
+	furniture,
+	MATCH_ROW,
+	scenery,
+	TOWARD,
+} from "./lobby-diorama-scenery.ts";
 import {
 	type LobbyMember,
 	SQUAD_STATE_DESCRIPTIONS,
@@ -71,10 +73,6 @@ import {
 /** The squad stands a head taller than ordinary villagers, to read at a glance. */
 const VILLAGER_SCALE = 1.3;
 
-/** Toward the camera on the ground, as a unit vector. */
-const TOWARD: [number, number] = [Math.SQRT1_2, Math.SQRT1_2];
-/** Height of one recent match's row on the board. */
-const MATCH_ROW = 0.7;
 /** Where the match board's first row sits. */
 const MATCH_TOP = 0.55 + MATCH_ROW * RECENT_MATCHES + 0.5 - 0.6;
 
@@ -85,292 +83,6 @@ const POSE: Record<SquadState, VillagerPose> = {
 	ready: "idle",
 	waiting: "waiting",
 };
-
-/** A box part of a board standing at `at`, turned to face the camera. */
-function boardBox(
-	at: [number, number],
-	local: Vec3,
-	size: Vec3,
-	color?: string
-): InstanceSpec {
-	// Local x runs along screen right; local z toward the camera.
-	const across: [number, number] = [Math.SQRT1_2, -Math.SQRT1_2];
-	return {
-		color,
-		position: [
-			at[0] + across[0] * local[0] + TOWARD[0] * local[2],
-			local[1],
-			at[1] + across[1] * local[0] + TOWARD[1] * local[2],
-		],
-		rotation: [0, FACE_CAMERA, 0],
-		scale: size,
-	};
-}
-
-/** The quest board and the matches board: posts, frames, cork and notes. */
-function boardParts(
-	world: LobbyWorld,
-	/** A phone with the act layer has no room for the matches board. */
-	withMatches = true
-) {
-	const posts: InstanceSpec[] = [];
-	const frames: InstanceSpec[] = [];
-	const corks: InstanceSpec[] = [];
-	const notes: InstanceSpec[] = [];
-	const boards = [
-		{ at: world.questBoard, height: 1.25, notes: 5, width: 2 },
-		{
-			at: world.matches.at,
-			height: MATCH_ROW * RECENT_MATCHES + 0.5,
-			notes: 0,
-			width: 3,
-		},
-	].slice(0, withMatches ? 2 : 1);
-	for (const [index, board] of boards.entries()) {
-		const half = board.width / 2;
-		const centre = 0.55 + board.height / 2;
-		for (const side of [-1, 1]) {
-			posts.push(
-				boardBox(
-					board.at,
-					[side * (half - 0.08), (centre + board.height / 2 + 0.1) / 2, -0.04],
-					[0.12, centre + board.height / 2 + 0.1, 0.12]
-				)
-			);
-		}
-		frames.push(
-			boardBox(
-				board.at,
-				[0, centre, 0],
-				[board.width, board.height + 0.14, 0.1],
-				LOBBY_3D.boardFrame
-			)
-		);
-		corks.push(
-			boardBox(
-				board.at,
-				[0, centre, 0.03],
-				[board.width - 0.2, board.height - 0.08, 0.08],
-				LOBBY_3D.boardCork
-			)
-		);
-		for (let note = 0; note < board.notes; note++) {
-			const column = note % 3;
-			const row = Math.floor(note / 3);
-			notes.push(
-				boardBox(
-					board.at,
-					[
-						(column - 1) * 0.55 + (jitter(note, index, 3) - 0.5) * 0.12,
-						centre + 0.25 - row * 0.5,
-						0.08,
-					],
-					[0.42, 0.34, 0.02],
-					LOBBY_3D.notes[note % LOBBY_3D.notes.length]
-				)
-			);
-		}
-	}
-	return { corks, frames, notes, posts };
-}
-
-/** Trees round the island's rim, shrubs and flowers, clear of the plaza. */
-function scenery(world: LobbyWorld, shape: IslandShape) {
-	const trees: PlantedTree[] = [];
-	const bushes: PlacedBush[] = [];
-	const flowers: FlowerPatch[] = [];
-	const columns = Math.ceil(shape.halfWidth);
-	const rows = Math.ceil(shape.halfDepth);
-	const clear = [world.questBoard, world.portal, world.matches.at];
-	for (let y = -rows; y <= rows; y++) {
-		for (let x = -columns; x <= columns; x++) {
-			const hash = jitter(x, y, 3);
-			const fx = x + (jitter(x, y, 5) - 0.5) * 0.5;
-			const fz = y + (jitter(x, y, 7) - 0.5) * 0.5;
-			const radius = Math.hypot(fx, fz);
-			if (!onIsland(shape, fx, fz, 0.6) || radius < PLAZA_RADIUS + 0.4) {
-				continue;
-			}
-			if (clear.some(([cx, cz]) => Math.hypot(cx - fx, cz - fz) < 2)) {
-				continue;
-			}
-			// Woods at the back; the front corner (toward the camera) stays lawn.
-			const front = fx + fz > 2;
-			const woods = front
-				? radius > PLAZA_RADIUS + 1.8 && hash < 0.3
-				: radius > PLAZA_RADIUS + 0.9 && hash < 0.72;
-			if (woods) {
-				let kind: PlantedTree["kind"] = "fruit";
-				if (hash < 0.26) {
-					kind = "cedar";
-				} else if (hash > 0.6) {
-					kind = "blossom";
-				}
-				trees.push({
-					at: [fx, 0, fz],
-					kind,
-					scale: 0.8 + jitter(x, y, 9) * 0.35,
-					seed: Math.round(hash * 1000),
-				});
-			} else if (hash > (front ? 0.78 : 0.84)) {
-				bushes.push({ at: [fx, 0, fz], scale: 0.8, seed: x * 31 + y });
-			} else if (hash > (front ? 0.48 : 0.62)) {
-				flowers.push({ at: [fx, 0, fz], x, y });
-			}
-		}
-	}
-	return { bushes, flowers, trees };
-}
-
-/** Lamps and benches round the plaza's edge, between the landmarks. */
-function furniture() {
-	const lamps: Vec3[] = [];
-	for (let index = 0; index < 8; index++) {
-		const angle = (index / 8) * Math.PI * 2 + Math.PI / 8;
-		lamps.push([
-			Math.cos(angle) * (PLAZA_RADIUS - 0.5),
-			0,
-			Math.sin(angle) * (PLAZA_RADIUS - 0.5),
-		]);
-	}
-	const benches: PlacedProp[] = [
-		{ at: [4.3, 0, 0.9], yaw: -Math.PI / 2 },
-		{ at: [0.9, 0, 4.3], yaw: 0 },
-		{ at: [3.4, 0, -3], yaw: -Math.PI * 0.75 },
-	];
-	return { benches, lamps };
-}
-
-/** The play portal: a stone base, a gold ring and a glowing gate. */
-function Portal({
-	at,
-	night,
-	reducedMotion,
-}: {
-	at: [number, number];
-	night: boolean;
-	reducedMotion: boolean;
-}) {
-	const sparks = useRef<Group>(null);
-	useFrame(({ clock }) => {
-		const group = sparks.current;
-		if (!group || reducedMotion) {
-			return;
-		}
-		group.rotation.z = clock.elapsedTime * 0.6;
-	});
-	const sparkles = useMemo<InstanceSpec[]>(
-		() =>
-			Array.from({ length: 8 }, (_, index) => {
-				const angle = (index / 8) * Math.PI * 2;
-				return {
-					color: LOBBY_3D.portalCore,
-					position: [Math.cos(angle) * 0.86, Math.sin(angle) * 0.86, 0.06],
-					scale: index % 2 === 0 ? 0.07 : 0.045,
-				};
-			}),
-		[]
-	);
-	return (
-		<group position={[at[0], 0, at[1]]} rotation={[0, FACE_CAMERA, 0]}>
-			<mesh castShadow position={[0, 0.14, 0]} receiveShadow>
-				<cylinderGeometry args={[1.2, 1.32, 0.28, 32]} />
-				<ToonMaterial color={LOBBY_3D.portalBase} />
-			</mesh>
-			<mesh castShadow position={[0, 0.34, 0]} receiveShadow>
-				<cylinderGeometry args={[0.9, 1, 0.14, 32]} />
-				<ToonMaterial color={LOBBY_3D.podiumStep} />
-			</mesh>
-			<group position={[0, 1.55, 0]}>
-				<mesh castShadow>
-					<torusGeometry args={[1.08, 0.13, 14, 48]} />
-					<ToonMaterial color={LOBBY_3D.portalRing} rim={0.3} />
-				</mesh>
-				<mesh>
-					<circleGeometry args={[0.98, 40]} />
-					<CurvedBasicMaterial
-						color={night ? LOBBY_3D.portalGlowNight : LOBBY_3D.portalGlow}
-						opacity={0.9}
-						toneMapped={false}
-						transparent
-					/>
-				</mesh>
-				<mesh position={[0, 0, 0.02]}>
-					<circleGeometry args={[0.5, 32]} />
-					<CurvedBasicMaterial
-						blending={ADDITIVE_BLENDING}
-						color={LOBBY_3D.portalCore}
-						depthWrite={false}
-						opacity={0.55}
-						toneMapped={false}
-						transparent
-					/>
-				</mesh>
-				<group ref={sparks}>
-					<InstancedParts items={sparkles}>
-						<sphereGeometry args={[1, 10, 8]} />
-						<meshBasicMaterial toneMapped={false} />
-					</InstancedParts>
-				</group>
-			</group>
-		</group>
-	);
-}
-
-/** The podium: a wide step, the drum, a gold rim and a lit top. */
-function Podium({ night }: { night: boolean }) {
-	return (
-		<group>
-			<mesh castShadow position={[0, 0.08, 0]} receiveShadow>
-				<cylinderGeometry
-					args={[PODIUM_RADIUS + 0.4, PODIUM_RADIUS + 0.5, 0.16, 56]}
-				/>
-				<ToonMaterial color={LOBBY_3D.podiumStep} />
-			</mesh>
-			<mesh castShadow position={[0, PODIUM_HEIGHT / 2, 0]} receiveShadow>
-				<cylinderGeometry
-					args={[PODIUM_RADIUS, PODIUM_RADIUS + 0.06, PODIUM_HEIGHT, 56]}
-				/>
-				<ToonMaterial
-					color={night ? LOBBY_3D.podiumNight : LOBBY_3D.podium}
-					rim={0.2}
-				/>
-			</mesh>
-			<mesh position={[0, PODIUM_HEIGHT + 0.006, 0]} receiveShadow>
-				<cylinderGeometry
-					args={[PODIUM_RADIUS - 0.12, PODIUM_RADIUS - 0.12, 0.02, 56]}
-				/>
-				<ToonMaterial
-					color={night ? LOBBY_3D.podiumTopNight : LOBBY_3D.podiumTop}
-				/>
-			</mesh>
-			<mesh position={[0, PODIUM_HEIGHT, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-				<torusGeometry args={[PODIUM_RADIUS - 0.06, 0.06, 8, 72]} />
-				<ToonMaterial color={LOBBY_3D.podiumRim} rim={0.3} />
-			</mesh>
-		</group>
-	);
-}
-
-/** A lit disc on the podium under the selected member (they stay fully opaque). */
-function SelectedGlow({ at }: { at: [number, number] }) {
-	return (
-		<mesh
-			position={[at[0], PODIUM_HEIGHT + 0.02, at[1]]}
-			rotation={[-Math.PI / 2, 0, 0]}
-		>
-			<circleGeometry args={[0.62, 40]} />
-			<CurvedBasicMaterial
-				blending={ADDITIVE_BLENDING}
-				color={LOBBY_3D.spotlight}
-				depthWrite={false}
-				opacity={0.45}
-				toneMapped={false}
-				transparent
-			/>
-		</mesh>
-	);
-}
 
 export interface LobbyDioramaProps {
 	activeThreadId: string | null;
@@ -416,6 +128,7 @@ export function LobbyDiorama({
 	waiting,
 	world,
 }: LobbyDioramaProps) {
+	const tl = useLiteralMessages();
 	const paint = useMemo(() => {
 		const paving = linearRgb(night ? LOBBY_3D.pavingNight : LOBBY_3D.paving);
 		const alternate = linearRgb(
@@ -618,20 +331,30 @@ export function LobbyDiorama({
 						key={`open-${index}`}
 						label={
 							acts && openSlots > 1
-								? `${openSlots} open slots: add agents from the squad roster`
+								? tl(
+										"{openSlots} open slots: add agents from the squad roster",
+										{
+											openSlots: String(openSlots),
+										}
+									)
 								: "Open slot: add an agent from the squad roster"
 						}
 						onSelect={onInvite}
 					>
 						{acts && openSlots > 1
-							? `+ ${openSlots} open slots`
+							? tl("+ {openSlots} open slots", { openSlots: String(openSlots) })
 							: "+ Open slot"}
 					</IsoMarker>
 				);
 			})}
 			<IsoMarker
 				at={[world.questBoard[0], 2.5, world.questBoard[1]]}
-				label={`Daily quests, ${ready} ready to claim. Open the quest board.`}
+				label={tl(
+					"Daily quests, {ready} ready to claim. Open the quest board.",
+					{
+						ready: String(ready),
+					}
+				)}
 				onSelect={onShowQuests}
 			>
 				<ScrollText aria-hidden="true" className="size-3.5" />
@@ -643,7 +366,9 @@ export function LobbyDiorama({
 			{selected ? (
 				<IsoMarker
 					at={[world.portal[0], 3.15, world.portal[1]]}
-					label={`Play portal: start a new thread with ${selected.agent.name}`}
+					label={tl("Play portal: start a new thread with {name}", {
+						name: selected.agent.name,
+					})}
 					onSelect={() => onStart(selected.agent.id)}
 				>
 					<Sparkles aria-hidden="true" className="size-3.5" />
@@ -657,7 +382,7 @@ export function LobbyDiorama({
 					Recent matches
 					{acts ? null : (
 						<span className="ps-1.5 text-(--gk-ink-muted) text-[12px]">
-							{waiting} waiting
+							{tl("{waiting} waiting", { waiting: String(waiting) })}
 						</span>
 					)}
 				</IsoLabel>

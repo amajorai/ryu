@@ -1,6 +1,7 @@
+import { ArrowExpand01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Card } from "@ryu/ui/components/card.tsx";
-import { Maximize2 } from "lucide-react";
 import type { DragEvent } from "react";
 import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
 import { CellValue } from "./cell-display.tsx";
@@ -73,7 +74,7 @@ export function RowCard({
 					size="icon"
 					variant="ghost"
 				>
-					<Maximize2 className="size-3" />
+					<HugeiconsIcon className="size-3.5" icon={ArrowExpand01Icon} />
 				</Button>
 			</div>
 			{properties.length > 0 && (

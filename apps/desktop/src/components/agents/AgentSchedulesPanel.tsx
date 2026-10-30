@@ -1,7 +1,10 @@
-import { Delete01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import {
+	Delete01Icon,
+	PlusSignIcon,
+	Time04Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -11,6 +14,7 @@ import {
 } from "@ryu/ui/components/native-select.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { QuietEmpty } from "@/src/components/agents/shared/quiet-empty.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -72,7 +76,7 @@ export function AgentSchedulesPanel({
 
 	return (
 		<SettingsSection
-			caption="Each entry becomes its own heartbeat job. Give every firing custom instructions so the same agent can do different work throughout the day."
+			caption="Each entry is its own heartbeat job with its own instructions."
 			headerAction={
 				<Button
 					disabled={disabled || upgradeRequired}
@@ -90,29 +94,31 @@ export function AgentSchedulesPanel({
 				<SettingsCard className="flex items-center justify-between gap-3">
 					<div>
 						<p className="font-medium text-sm">Background runs are locked</p>
-						<p className="text-muted-foreground text-xs">
+						<p className="text-detail text-muted-foreground">
 							Unlock background runs to let this agent run on its schedules.
 						</p>
 					</div>
-					<Button onClick={onRequestUpgrade} size="sm" variant="secondary">
+					<Button onClick={onRequestUpgrade} size="sm" variant="outline">
 						Unlock
 					</Button>
 				</SettingsCard>
 			) : null}
 
 			{!upgradeRequired && schedules.length === 0 ? (
-				<SettingsCard>
-					<p className="text-muted-foreground text-sm">
-						No schedules yet. Add one for a recurring run with custom
-						instructions.
-					</p>
-				</SettingsCard>
+				<QuietEmpty
+					description="Add one for a recurring run with its own instructions."
+					icon={Time04Icon}
+					title="No schedules yet"
+				/>
 			) : null}
 
 			{upgradeRequired
 				? null
 				: schedules.map((entry, index) => (
-						<SettingsCard className="mb-2.5 flex flex-col gap-4" key={entry.id}>
+						<SettingsCard
+							className="flex flex-col gap-4 border-border border-b py-4 last:border-b-0"
+							key={entry.id}
+						>
 							<div className="flex items-start gap-3">
 								<div className="min-w-0 flex-1">
 									<Label htmlFor={`agent-schedule-name-${entry.id}`}>
@@ -286,9 +292,9 @@ export function AgentSchedulesPanel({
 										</p>
 									</div>
 								</div>
-								<Badge className="ml-auto" variant="secondary">
+								<span className="ml-auto text-muted-foreground text-xs">
 									{entry.schedule.kind === "cron" ? "Cron" : "Interval"}
-								</Badge>
+								</span>
 							</div>
 						</SettingsCard>
 					))}

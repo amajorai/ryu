@@ -31,7 +31,7 @@ export function WorkspaceRequiredDialog({
 						Ryu will send it there; ordinary questions do not need a folder.
 					</DialogDescription>
 				</DialogHeader>
-				<div className="flex items-center gap-3 rounded-2xl border border-border/70 bg-muted/30 p-3">
+				<div className="flex items-center gap-3 rounded-2xl border border-border bg-muted/30 p-3">
 					<HugeiconsIcon
 						aria-hidden
 						className="size-5 shrink-0 text-muted-foreground"

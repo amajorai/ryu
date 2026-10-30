@@ -108,7 +108,7 @@ function CustomModelRow({
 	};
 	return (
 		<div>
-			<span className="type-caption px-1.5 pb-1 font-medium text-muted-foreground uppercase tracking-wide">
+			<span className="px-1.5 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
 				Custom model
 			</span>
 			<div className="flex items-center gap-1">

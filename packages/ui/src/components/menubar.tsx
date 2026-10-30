@@ -68,7 +68,7 @@ function MenubarTrigger({
 	return (
 		<DropdownMenuTrigger
 			className={cn(
-				"flex select-none items-center rounded-2xl px-2 py-0.75 font-medium text-sm outline-hidden hover:bg-muted aria-expanded:bg-muted",
+				"flex select-none items-center rounded-lg px-2 py-0.75 font-medium text-sm outline-hidden hover:bg-muted aria-expanded:bg-muted",
 				appearance === "os-desktop" &&
 					"bg-transparent text-white/70 hover:bg-transparent hover:text-white aria-expanded:bg-transparent aria-expanded:text-white",
 				className
@@ -91,7 +91,7 @@ function MenubarContent({
 			align={align}
 			alignOffset={alignOffset}
 			className={cn(
-				"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 relative min-w-48 animate-none! rounded-3xl border border-border/50 bg-popover/70 text-popover-foreground backdrop-blur-2xl backdrop-saturate-150 duration-100 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] data-open:animate-in **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[variant=destructive]:focus:bg-foreground/10!",
+				"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 relative min-w-48 animate-none! rounded-xl border border-border bg-popover text-popover-foreground shadow-(--shadow-popover) duration-100 data-open:animate-in **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[variant=destructive]:focus:bg-foreground/10!",
 				className
 			)}
 			data-slot="menubar-content"
@@ -110,7 +110,7 @@ function MenubarItem({
 	return (
 		<DropdownMenuItem
 			className={cn(
-				"group/menubar-item gap-1.5 rounded-2xl px-2 py-1 font-medium text-sm focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:ps-9.5 data-[variant=destructive]:text-status-destructive data-disabled:opacity-50 data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-status-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-status-destructive!",
+				"group/menubar-item gap-1.5 rounded-lg px-2 py-1 font-medium text-sm focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:ps-9.5 data-[variant=destructive]:text-status-destructive data-disabled:opacity-50 data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-status-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-status-destructive!",
 				className
 			)}
 			data-inset={inset}
@@ -135,7 +135,7 @@ function MenubarCheckboxItem({
 		<MenuPrimitive.CheckboxItem
 			checked={checked}
 			className={cn(
-				"relative flex cursor-default select-none items-center gap-1.5 rounded-2xl py-1 ps-9.5 pe-2 font-medium text-sm outline-hidden focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-disabled:pointer-events-none data-inset:ps-9.5 data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+				"relative flex cursor-default select-none items-center gap-1.5 rounded-lg py-1 ps-9.5 pe-2 font-medium text-sm outline-hidden focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-disabled:pointer-events-none data-inset:ps-9.5 data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 				className
 			)}
 			data-inset={inset}
@@ -170,7 +170,7 @@ function MenubarRadioItem({
 	return (
 		<MenuPrimitive.RadioItem
 			className={cn(
-				"relative flex cursor-default select-none items-center gap-1.5 rounded-2xl py-1 ps-9.5 pe-2 font-medium text-sm outline-hidden focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-disabled:pointer-events-none data-inset:ps-9.5 data-disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+				"relative flex cursor-default select-none items-center gap-1.5 rounded-lg py-1 ps-9.5 pe-2 font-medium text-sm outline-hidden focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-disabled:pointer-events-none data-inset:ps-9.5 data-disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 				className
 			)}
 			data-inset={inset}
@@ -252,7 +252,7 @@ function MenubarSubTrigger({
 	return (
 		<DropdownMenuSubTrigger
 			className={cn(
-				"gap-1.5 rounded-2xl px-2 py-1 font-medium text-sm focus:bg-accent focus:text-accent-foreground data-open:bg-accent data-inset:ps-9.5 data-open:text-accent-foreground [&_svg:not([class*='size-'])]:size-4",
+				"gap-1.5 rounded-lg px-2 py-1 font-medium text-sm focus:bg-accent focus:text-accent-foreground data-open:bg-accent data-inset:ps-9.5 data-open:text-accent-foreground [&_svg:not([class*='size-'])]:size-4",
 				className
 			)}
 			data-inset={inset}
@@ -269,7 +269,7 @@ function MenubarSubContent({
 	return (
 		<DropdownMenuSubContent
 			className={cn(
-				"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative min-w-32 animate-none! rounded-3xl border border-border/50 bg-popover/70 text-popover-foreground backdrop-blur-2xl backdrop-saturate-150 duration-100 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] data-closed:animate-out data-open:animate-in **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[variant=destructive]:focus:bg-foreground/10!",
+				"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative min-w-32 animate-none! rounded-xl border border-border bg-popover text-popover-foreground shadow-(--shadow-popover) duration-100 data-closed:animate-out data-open:animate-in **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[variant=destructive]:focus:bg-foreground/10!",
 				className
 			)}
 			data-slot="menubar-sub-content"

@@ -1,5 +1,4 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -15,6 +14,7 @@ import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { sileo } from "sileo";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -167,7 +167,17 @@ export function AcpRuntimeSection({
 	return (
 		<div data-testid="acp-runtime-settings">
 			<SettingsSection
-				caption="ACP sessions stay warm for faster replies, but old inactive threads are reaped and new processes wait behind a node-wide limit so they cannot accumulate without bound."
+				caption={
+					<CaptionInfo
+						detail={
+							"ACP sessions stay warm for faster replies, but old inactive threads are reaped and new processes wait behind a node-wide limit so they cannot accumulate without bound."
+						}
+					>
+						{
+							"Old idle sessions are reaped, and new ones wait behind a node-wide limit."
+						}
+					</CaptionInfo>
+				}
 				title="ACP agent runtime"
 			>
 				{configQuery.isError ? (
@@ -276,12 +286,12 @@ export function AcpRuntimeSection({
 						}
 					>
 						<div className="flex flex-wrap items-center gap-2 text-xs">
-							<Badge variant="secondary">
+							<span className="text-muted-foreground tabular-nums">
 								{tl("{activeAgents} active / {allowedLimit} allowed", {
 									activeAgents: String(activeAgents),
 									allowedLimit: String(effectiveLimit ?? "—"),
 								})}
-							</Badge>
+							</span>
 							{config.hardware ? (
 								<span className="text-muted-foreground">
 									{tl("{physicalCores} physical · {ramSummary}", {

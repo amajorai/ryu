@@ -10,5 +10,6 @@ test("Agent landing shows the power-user product story", () => {
 	expect(html).toContain("data-product-bento-layout=");
 	expect(html).toContain("Run your agents your way");
 	expect(html).toContain("Control and audit");
-	expect(html).toContain('data-testid="console-workflow-visual"');
+	// The stage hero shows the Anatomy figure in place of the hero visual.
+	expect(html).toContain('data-product-figure="agent-console"');
 });

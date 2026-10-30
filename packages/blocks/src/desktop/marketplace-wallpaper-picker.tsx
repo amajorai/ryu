@@ -1,3 +1,5 @@
+import { Search01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
 import type { RenderableBackdrop } from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
@@ -10,7 +12,6 @@ import {
 } from "@ryu/ui/components/dialog.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import styles from "./marketplace-wallpaper-picker.module.css";
 
@@ -34,7 +35,7 @@ function WallpaperOption({
 				"flex min-w-0 flex-col gap-2 rounded-xl border p-2 text-left transition-colors",
 				selected
 					? "border-primary bg-primary/5"
-					: "border-border/70 hover:bg-muted/60",
+					: "border-border hover:bg-muted/60",
 				busy && "cursor-wait opacity-60"
 			)}
 			data-testid={`banner-wallpaper-${wallpaper.id}`}
@@ -51,7 +52,7 @@ function WallpaperOption({
 			</span>
 			<span className="flex min-w-0 items-start justify-between gap-2">
 				<span className="truncate font-medium text-sm">{wallpaper.label}</span>
-				<span className="type-compact shrink-0 text-muted-foreground">
+				<span className="shrink-0 text-muted-foreground text-xs">
 					{wallpaper.category}
 				</span>
 			</span>
@@ -146,7 +147,10 @@ export function MarketplaceWallpaperPickerDialog({
 				<div className="shrink-0 space-y-3 border-b px-5 py-3">
 					<div className="flex flex-wrap items-center gap-2">
 						<div className="relative min-w-48 flex-1 sm:max-w-sm">
-							<Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+							<HugeiconsIcon
+								className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+								icon={Search01Icon}
+							/>
 							<Input
 								aria-label="Search wallpapers"
 								leadingAdornment="compact"
@@ -201,7 +205,7 @@ export function MarketplaceWallpaperPickerDialog({
 							))}
 						</div>
 					) : (
-						<div className="flex min-h-48 items-center justify-center rounded-xl border border-dashed p-6 text-center">
+						<div className="flex min-h-48 items-center justify-center p-6 text-center">
 							<div className="max-w-sm space-y-2">
 								<p className="font-medium">No wallpapers match those filters</p>
 								<p className="text-muted-foreground text-sm">

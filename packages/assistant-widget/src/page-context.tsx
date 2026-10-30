@@ -1,5 +1,7 @@
 "use client";
 
+import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	Popover,
 	PopoverContent,
@@ -9,7 +11,6 @@ import {
 	PopoverTrigger,
 } from "@ryu/ui/components/popover";
 import { Textarea } from "@ryu/ui/components/textarea";
-import { Plus, X } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import type { BrowserPageContext } from "./browser-context.ts";
 import {
@@ -49,17 +50,17 @@ function ContextChip({
 	if (!included) {
 		return (
 			<button
-				className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
+				className="inline-flex h-6 items-center gap-1 rounded-full px-2 text-muted-foreground text-xs transition-colors duration-(--duration-fast) hover:bg-muted hover:text-foreground"
 				onClick={() => onChange(true)}
 				type="button"
 			>
-				<Plus className="size-3" />
+				<HugeiconsIcon className="size-3.5" icon={Add01Icon} />
 				{addLabel}
 			</button>
 		);
 	}
 	return (
-		<span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+		<span className="inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-full bg-muted ps-2 pe-1 text-muted-foreground text-xs">
 			<Popover>
 				<PopoverTrigger
 					render={
@@ -93,18 +94,18 @@ function ContextChip({
 						) : null}
 					</PopoverHeader>
 					{preview}
-					<p className="text-muted-foreground text-xs">
+					<p className="text-detail text-muted-foreground">
 						Sent to the selected runtime with your next question.
 					</p>
 				</PopoverContent>
 			</Popover>
 			<button
 				aria-label={`Remove ${previewTitle.toLowerCase()} from context`}
-				className="shrink-0 rounded-full p-0.5 hover:bg-background"
+				className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-background hover:text-foreground"
 				onClick={() => onChange(false)}
 				type="button"
 			>
-				<X className="size-3" />
+				<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
 			</button>
 		</span>
 	);
@@ -139,7 +140,7 @@ export function PageContextChips({
 	}
 	return (
 		<fieldset
-			className="m-0 flex min-w-0 flex-wrap items-center gap-1.5 border-0 px-3 pt-2 pb-0"
+			className="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 px-3 pt-2 pb-0"
 			data-testid="assistant-page-context"
 		>
 			<legend className="sr-only">Webpage context</legend>

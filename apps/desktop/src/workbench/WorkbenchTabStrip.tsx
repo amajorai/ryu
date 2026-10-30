@@ -1,33 +1,14 @@
-import {
-	Add01Icon,
-	Cancel01Icon,
-	MoreHorizontalIcon,
-} from "@hugeicons/core-free-icons";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ContextMenu,
-	ContextMenuContent,
-	ContextMenuItem,
-	ContextMenuSeparator,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuSeparator,
-	DropdownMenuSub,
-	DropdownMenuSubContent,
-	DropdownMenuSubTrigger,
-	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu.tsx";
 import { useReorderShift } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type {
-	BottomAlignment,
 	WorkbenchGroup,
 	WorkbenchItem,
 	WorkbenchRegion,
@@ -49,24 +30,11 @@ import {
 	splitTargetGroupId,
 	stripDropIndex,
 } from "./workbench-drop.ts";
-
-const REGION_LABELS = {
-	bottom: "Bottom",
-	center: "Center",
-	left: "Left",
-	right: "Right",
-} satisfies Record<WorkbenchRegion, string>;
-
-const BOTTOM_ALIGNMENT_OPTIONS = [
-	{ label: "Center", value: "center" },
-	{ label: "Full width", value: "full" },
-	{ label: "Left", value: "left" },
-	{ label: "Right", value: "right" },
-] as const satisfies ReadonlyArray<{ label: string; value: BottomAlignment }>;
-
-function isBottomAlignment(value: unknown): value is BottomAlignment {
-	return BOTTOM_ALIGNMENT_OPTIONS.some((option) => option.value === value);
-}
+import {
+	REGION_LABELS,
+	WorkbenchStripActions,
+	WorkbenchTabMenu,
+} from "./workbench-tab-menus.tsx";
 
 interface StripDropTarget {
 	before: boolean;
@@ -90,14 +58,6 @@ interface WorkbenchTabStripProps {
 	group: WorkbenchGroup;
 	items: WorkbenchItem[];
 	onCloseItem?: (item: WorkbenchItem) => void;
-}
-
-function dispatchWorkbenchChromeEvent(type: "add", group: WorkbenchGroup) {
-	window.dispatchEvent(
-		new CustomEvent(`ryu:workbench-${type}`, {
-			detail: { groupId: group.id, region: group.region },
-		})
-	);
 }
 
 /** Index reached by an arrow/Home/End key in a horizontal tab list, if any. */
@@ -129,6 +89,7 @@ export function WorkbenchTabStrip({
 	const { dispatch, moveItem, state } = useDesktopWorkbench();
 	const { addMenu, drag, movableRegions, prepareItemForSplit, renderItemIcon } =
 		useWorkbenchChrome();
+	const tl = useLiteralMessages();
 	const regionLabel = REGION_LABELS[group.region];
 	const tabListRef = useRef<HTMLDivElement | null>(null);
 	const [dropTarget, setDropTarget] = useState<StripDropTarget | null>(null);
@@ -297,9 +258,8 @@ export function WorkbenchTabStrip({
 	return (
 		<div
 			className={cn(
-				"flex h-8 min-w-0 shrink-0 items-center border-border/70 border-b bg-muted/25 px-1",
-				focused && "bg-muted/40",
-				draggingId && dropTarget && "bg-primary/10"
+				"flex h-10 min-w-0 shrink-0 items-center gap-1 border-border border-b px-1",
+				draggingId && dropTarget && "bg-primary/5"
 			)}
 			data-focused={focused}
 			data-group-id={group.id}
@@ -318,7 +278,7 @@ export function WorkbenchTabStrip({
 			onDrop={onStripDrop}
 		>
 			<div
-				aria-label={`${regionLabel} tabs`}
+				aria-label={tl("{regionLabel} tabs", { regionLabel })}
 				aria-orientation="horizontal"
 				className="flex min-w-0 flex-1 items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 				ref={tabListRef}
@@ -340,10 +300,16 @@ export function WorkbenchTabStrip({
 						<ContextMenu key={item.id}>
 							<ContextMenuTrigger
 								className={cn(
-									"group/workbench-tab relative flex h-7 min-w-24 max-w-44 shrink-0 items-center rounded-md",
+									"group/workbench-tab relative flex h-8 min-w-24 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150 hover:duration-0",
+									// The focused group's active tab is the one full-contrast
+									// tab; other groups keep their active fill with muted text,
+									// so focus still reads without a header tint.
 									active
-										? "bg-background text-foreground shadow-xs"
-										: "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+										? cn(
+												"bg-muted",
+												focused ? "text-foreground" : "text-muted-foreground"
+											)
+										: "text-muted-foreground hover:bg-muted hover:text-foreground",
 									draggingId === item.id && "opacity-40"
 								)}
 								data-active={active}
@@ -365,7 +331,7 @@ export function WorkbenchTabStrip({
 								{showBefore ? <DropIndicator side="left" /> : null}
 								<button
 									aria-selected={active}
-									className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+									className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 									onAuxClick={(event) => {
 										// Middle-click closes a tab, as in editor tab strips.
 										if (event.button === 1) {
@@ -397,7 +363,7 @@ export function WorkbenchTabStrip({
 								{item.closable ? (
 									<Button
 										appearance="workbench-tab-close"
-										aria-label={`Close ${item.title}`}
+										aria-label={tl("Close {title}", { title: item.title })}
 										className="mr-0.5"
 										onClick={() => closeItem(item)}
 										size="icon-xs"
@@ -409,181 +375,30 @@ export function WorkbenchTabStrip({
 								) : null}
 								{showAfter ? <DropIndicator side="right" /> : null}
 							</ContextMenuTrigger>
-							<ContextMenuContent>
-								{moveRegionsFor(item).map((region) => (
-									<ContextMenuItem
-										key={region}
-										onClick={() => moveToRegion(item.id, region)}
-									>
-										Move to {REGION_LABELS[region]}
-									</ContextMenuItem>
-								))}
-								<ContextMenuSeparator />
-								<ContextMenuItem
-									disabled={!canSplit(item.id)}
-									onClick={() => splitItem(item.id, "right")}
-								>
-									Split Right
-								</ContextMenuItem>
-								<ContextMenuItem
-									disabled={!canSplit(item.id)}
-									onClick={() => splitItem(item.id, "down")}
-								>
-									Split Down
-								</ContextMenuItem>
-								<ContextMenuSeparator />
-								<ContextMenuItem
-									disabled={!item.closable}
-									onClick={() => closeItem(item)}
-								>
-									Close
-								</ContextMenuItem>
-								<ContextMenuItem
-									disabled={others.length === 0}
-									onClick={() => {
-										for (const other of others) {
-											closeItem(other);
-										}
-									}}
-								>
-									Close Others
-								</ContextMenuItem>
-								<ContextMenuItem
-									disabled={toTheRight.length === 0}
-									onClick={() => {
-										for (const right of toTheRight) {
-											closeItem(right);
-										}
-									}}
-								>
-									Close to the Right
-								</ContextMenuItem>
-							</ContextMenuContent>
+							<WorkbenchTabMenu
+								canSplit={canSplit}
+								closeItem={closeItem}
+								item={item}
+								moveRegions={moveRegionsFor(item)}
+								moveToRegion={moveToRegion}
+								others={others}
+								splitItem={splitItem}
+								toTheRight={toTheRight}
+							/>
 						</ContextMenu>
 					);
 				})}
 			</div>
-			{addMenu && addMenu.tools.length > 0 && group.region !== "center" ? (
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								aria-label={`Add tab to ${regionLabel}`}
-								className="size-6 shrink-0"
-								size="icon-xs"
-								variant="ghost-muted"
-							/>
-						}
-					>
-						<HugeiconsIcon icon={Add01Icon} />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent>
-						<DropdownMenuItem
-							onClick={() => dispatchWorkbenchChromeEvent("add", group)}
-						>
-							New chat
-						</DropdownMenuItem>
-						<DropdownMenuSeparator />
-						{addMenu.tools.map((tool) => (
-							<DropdownMenuItem
-								key={tool.id}
-								onClick={() => addMenu.openTool(tool.id, group.id)}
-							>
-								{tool.label}
-							</DropdownMenuItem>
-						))}
-					</DropdownMenuContent>
-				</DropdownMenu>
-			) : (
-				<Button
-					aria-label={`Add tab to ${regionLabel}`}
-					className="size-6 shrink-0"
-					onClick={() => dispatchWorkbenchChromeEvent("add", group)}
-					size="icon-xs"
-					variant="ghost-muted"
-				>
-					<HugeiconsIcon icon={Add01Icon} />
-				</Button>
-			)}
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							aria-label={`More ${regionLabel} tab actions`}
-							className="size-6 shrink-0"
-							size="icon-xs"
-							variant="ghost-muted"
-						/>
-					}
-				>
-					<HugeiconsIcon icon={MoreHorizontalIcon} />
-				</DropdownMenuTrigger>
-				<DropdownMenuContent>
-					{moveRegionsFor(activeItem).map((region) => (
-						<DropdownMenuItem
-							disabled={!group.activeItemId}
-							key={region}
-							onClick={() => {
-								if (group.activeItemId) {
-									moveToRegion(group.activeItemId, region);
-								}
-							}}
-						>
-							Move to {REGION_LABELS[region]}
-						</DropdownMenuItem>
-					))}
-					{group.region === "bottom" ? (
-						<DropdownMenuSub>
-							<DropdownMenuSubTrigger>Align Bottom</DropdownMenuSubTrigger>
-							<DropdownMenuSubContent>
-								<DropdownMenuRadioGroup
-									onValueChange={(value) => {
-										if (isBottomAlignment(value)) {
-											dispatch({ type: "bottom/align", alignment: value });
-										}
-									}}
-									value={state.bottomAlignment}
-								>
-									{BOTTOM_ALIGNMENT_OPTIONS.map((option) => (
-										<DropdownMenuRadioItem
-											key={option.value}
-											value={option.value}
-										>
-											{option.label}
-										</DropdownMenuRadioItem>
-									))}
-								</DropdownMenuRadioGroup>
-							</DropdownMenuSubContent>
-						</DropdownMenuSub>
-					) : null}
-					<DropdownMenuSeparator />
-					{group.region === "center" ? null : (
-						<DropdownMenuItem
-							onClick={() => {
-								if (group.region !== "center") {
-									dispatch({ type: "region/hide", region: group.region });
-								}
-							}}
-						>
-							Hide {regionLabel}
-						</DropdownMenuItem>
-					)}
-					{canClosePane ? (
-						<DropdownMenuItem
-							onClick={() =>
-								dispatch({ type: "center/remove-group", groupId: group.id })
-							}
-						>
-							{group.itemIds.length > 0
-								? "Close pane and keep its tabs"
-								: "Close pane"}
-						</DropdownMenuItem>
-					) : null}
-					<DropdownMenuItem onClick={() => dispatch({ type: "layout/reset" })}>
-						Reset layout
-					</DropdownMenuItem>
-				</DropdownMenuContent>
-			</DropdownMenu>
+			<WorkbenchStripActions
+				addMenu={addMenu}
+				canClosePane={canClosePane}
+				dispatch={dispatch}
+				group={group}
+				moveRegions={moveRegionsFor(activeItem)}
+				moveToRegion={moveToRegion}
+				regionLabel={regionLabel}
+				state={state}
+			/>
 		</div>
 	);
 }

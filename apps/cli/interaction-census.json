@@ -2119,7 +2119,7 @@
       "area": "CLI parity additions",
       "control": "Type new password after verified step-up",
       "status": "covered",
-      "source": "src/overlays/settings/account-security.tsx",
+      "source": "src/overlays/settings/account-security-view.tsx",
       "source_anchor": "New password",
       "tests": [
         "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
@@ -2163,7 +2163,7 @@
       "area": "CLI parity additions",
       "control": "Type new email address",
       "status": "covered",
-      "source": "src/overlays/settings/account-security.tsx",
+      "source": "src/overlays/settings/account-security-view.tsx",
       "source_anchor": "New email address",
       "tests": [
         "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
@@ -2207,7 +2207,7 @@
       "area": "CLI parity additions",
       "control": "Type password for enable, backup regeneration and disable",
       "status": "covered",
-      "source": "src/overlays/settings/account-security.tsx",
+      "source": "src/overlays/settings/account-security-view.tsx",
       "source_anchor": "Current password",
       "tests": [
         "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
@@ -2915,7 +2915,7 @@
       "area": "CLI parity additions",
       "control": "Replace organization map with concurrency rejection and retry/readback",
       "status": "covered",
-      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source": "src/overlays/gateway/advanced-policy-model.ts",
       "source_anchor": "firewall_org_overlays",
       "tests": [
         "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway conflict protects newer policy and rejected map writes retain identical retry"
@@ -2926,7 +2926,7 @@
       "area": "CLI parity additions",
       "control": "Replace agent map with normalized readback; mismatch refuses success",
       "status": "covered",
-      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source": "src/overlays/gateway/advanced-policy-model.ts",
       "source_anchor": "firewall_agent_overlays",
       "tests": [
         "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway normalized agent overlays confirm authored fields, while retained removed IDs fail readback"

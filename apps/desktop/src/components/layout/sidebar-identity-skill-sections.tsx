@@ -80,7 +80,7 @@ export function IdentitiesSection({
 					<ContextMenuTrigger>
 						{/* sidebar row combines nested controls with drag/middle-click */}
 						<div
-							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
+							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 							onAuxClick={(e) => {
 								if (e.button === 1) {
 									e.preventDefault();
@@ -111,10 +111,7 @@ export function IdentitiesSection({
 					</ContextMenuTrigger>
 					<ContextMenuContent>
 						<ContextMenuItem onClick={() => openIdentity(row.id, true)}>
-							<HugeiconsIcon
-								className="mr-2 size-4"
-								icon={ArrowUpRight01Icon}
-							/>
+							<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 							Open in new tab
 						</ContextMenuItem>
 						<OpenInNewWindowContextMenuItem
@@ -154,7 +151,7 @@ export function IdentitiesSection({
 				/>
 			)}
 			{!error && profiles.length === 0 && (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
+				<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 					{emptyMessage}
 				</p>
 			)}
@@ -241,7 +238,7 @@ export function SkillsSection({
 					<ContextMenuTrigger>
 						{/* sidebar row combines nested controls with drag/middle-click */}
 						<div
-							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
+							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 							onAuxClick={(e) => {
 								if (e.button === 1) {
 									e.preventDefault();
@@ -272,10 +269,7 @@ export function SkillsSection({
 					</ContextMenuTrigger>
 					<ContextMenuContent>
 						<ContextMenuItem onClick={() => openSkills(true)}>
-							<HugeiconsIcon
-								className="mr-2 size-4"
-								icon={ArrowUpRight01Icon}
-							/>
+							<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 							Open in new tab
 						</ContextMenuItem>
 						<OpenInNewWindowContextMenuItem
@@ -311,7 +305,7 @@ export function SkillsSection({
 				/>
 			)}
 			{!skillsQuery.isError && skills.length === 0 && (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
+				<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 					{emptyMessage}
 				</p>
 			)}

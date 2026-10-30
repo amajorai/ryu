@@ -11,10 +11,13 @@
 @import "shadcn/tailwind.css";
 @import "./classic-theme-icon.css";
 @import "./css-backdrops.css";
-@import "./globals/base-utilities.css";
-@import "./globals/theme-tokens.css";
+@import "./globals/base.css";
+@import "./globals/theme-utilities.css";
+@import "./globals/colors.css";
 @import "./globals/transitions.css";
-@import "./globals/micro-interactions.css";
-@import "./globals/adaptive-and-type.css";
+@import "./globals/transitions-reveals.css";
+@import "./globals/accessibility.css";
+@import "./globals/typography.css";
+
 @source "../../../apps/**/*.{ts,tsx}";
 @source "../**/*.{ts,tsx}";

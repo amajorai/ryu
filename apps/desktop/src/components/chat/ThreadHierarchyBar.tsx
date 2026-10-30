@@ -19,6 +19,7 @@ import {
 	BreadcrumbSeparator,
 } from "@ryu/ui/components/breadcrumb.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { Item } from "@ryu/ui/components/item.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
@@ -134,7 +135,7 @@ export function ThreadHierarchyBar({
 
 	return (
 		<div
-			className="flex shrink-0 items-center justify-between gap-3 border-border/40 border-b px-4 py-1.5"
+			className="flex h-10 shrink-0 items-center justify-between gap-3 px-6"
 			data-testid="thread-hierarchy-bar"
 		>
 			<Breadcrumb className="min-w-0">
@@ -168,7 +169,7 @@ export function ThreadHierarchyBar({
 					))}
 				</BreadcrumbList>
 			</Breadcrumb>
-			<div className="flex shrink-0 items-center gap-1.5">
+			<div className="flex shrink-0 items-center gap-1">
 				{isMain && hierarchy?.ownerKind === "agent" && !projectId && agentId ? (
 					<PrimaryBotControl
 						agentId={agentId}
@@ -219,27 +220,32 @@ export function ThreadHierarchyBar({
 							}
 						/>
 						<PopoverContent align="end" className="w-80">
-							<div className="flex flex-col gap-1" data-testid="sessions-panel">
-								<p className="px-1 font-medium text-sm">Sessions</p>
+							<div className="flex flex-col" data-testid="sessions-panel">
+								<p className="flex h-7 items-center px-2 font-semibold text-sm">
+									Sessions
+								</p>
 								{sessionsError ? (
-									<p className="px-1 text-destructive text-xs" role="alert">
+									<p
+										className="text-(length:--text-detail) px-2 text-status-destructive"
+										role="alert"
+									>
 										{sessionsError}
 									</p>
 								) : null}
 								{sessions.length === 0 && !sessionsError ? (
-									<p className="px-1 text-muted-foreground text-xs">
-										No sessions yet. When this thread delegates work, each
-										activity appears here.
+									<p className="text-(length:--text-detail) px-2 text-muted-foreground">
+										No sessions yet. Delegated work appears here.
 									</p>
 								) : null}
 								{sessions.map((session) => (
-									<button
-										className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+									<Item
+										className="h-8 justify-between gap-2 rounded-lg px-2 py-0 text-left text-sm transition-colors duration-150 hover:bg-muted hover:duration-0"
 										key={session.id}
 										onClick={() =>
 											onOpenConversation(session.id, session.title ?? undefined)
 										}
-										type="button"
+										render={<button type="button" />}
+										size="sm"
 									>
 										<span
 											className="truncate"
@@ -250,7 +256,7 @@ export function ThreadHierarchyBar({
 										<span className="shrink-0 text-muted-foreground text-xs">
 											{sessionStatusLabel(session.run_status)}
 										</span>
-									</button>
+									</Item>
 								))}
 							</div>
 						</PopoverContent>

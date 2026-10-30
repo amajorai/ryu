@@ -37,7 +37,7 @@ function Story() {
 			<output data-testid="sent-message">{sentMessage}</output>
 			{portalContainer
 				? createPortal(
-						<div className={`dark ${copilotClasses.panel}`}>
+						<div className={`panel ${copilotClasses.panel}`}>
 							<div className={copilotClasses.head}>
 								<span className={copilotClasses.brand}>
 									Ryu in-page copilot

@@ -6,7 +6,7 @@ export default defineConfig({
 	testDir: ".",
 	// Pays the cold Vite compile of the Store story once, outside every test.
 	globalSetup: "./harness/marketplace-store-warmup.global-setup.ts",
-	testMatch: /marketplace-store-interactions\.spec\.ts/,
+	testMatch: /marketplace-store-interactions(\.bundles)?\.spec\.ts/,
 	fullyParallel: false,
 	retries: 0,
 	reporter: "list",

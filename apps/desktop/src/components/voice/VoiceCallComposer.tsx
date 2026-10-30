@@ -9,14 +9,18 @@
 // transcript in voice mode" desktop setting (`ryu:voice-show-transcript`,
 // default ON), so the composer never needs its own transcript panel.
 
-import { CallDisabled02Icon } from "@hugeicons/core-free-icons";
+import {
+	CallDisabled02Icon,
+	Mic01Icon,
+	MicOff01Icon,
+	StopIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatVoiceMode } from "@ryu/blocks/desktop/agent-elements/types.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { VoiceGlow } from "@ryu/ui/components/voice-glow.tsx";
 import type { UIMessage } from "ai";
-import { Mic, MicOff, Square } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { widgetDefinition } from "@/src/components/dashboard/widgets/registry.tsx";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
@@ -137,26 +141,26 @@ export function VoiceCallContent({ voice }: { voice: VoiceMode }) {
 			aria-label={tl("Voice call with {agentName}", {
 				agentName: voice.agentName,
 			})}
-			className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-1"
+			className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-1"
 			data-testid="voice-call-screen"
 		>
 			<span
 				aria-hidden="true"
-				className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 font-medium text-primary text-xs"
+				className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-muted-foreground text-xs"
 			>
 				{getVoiceCallInitials(voice.agentName)}
 			</span>
 			<div className="min-w-0 flex-1 leading-tight">
 				<div className="flex min-w-0 items-baseline gap-2">
 					<span
-						className="truncate font-medium text-sm tracking-tight"
+						className="truncate font-medium text-sm"
 						title={voice.agentName}
 					>
 						{voice.agentName}
 					</span>
 					<span
 						aria-label="Call duration"
-						className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums"
+						className="shrink-0 text-muted-foreground text-xs tabular-nums"
 						data-testid="voice-call-duration"
 					>
 						{formatVoiceCallDuration(voice.elapsedSeconds)}
@@ -196,30 +200,27 @@ export function VoiceCallActions({ voice }: { voice: VoiceMode }) {
 				appearance={voice.muted ? "voice-call-muted" : undefined}
 				aria-label={voice.muted ? "Unmute microphone" : "Mute microphone"}
 				aria-pressed={voice.muted}
-				className="size-8"
 				onClick={voice.toggleMute}
-				size="icon"
+				size="icon-sm"
 				title={voice.muted ? "Unmute" : "Mute"}
 				type="button"
 				variant="ghost-muted"
 			>
-				{voice.muted ? (
-					<MicOff className="size-4" />
-				) : (
-					<Mic className="size-4" />
-				)}
+				<HugeiconsIcon
+					className="size-4"
+					icon={voice.muted ? MicOff01Icon : Mic01Icon}
+				/>
 			</Button>
 			{canInterrupt && (
 				<Button
 					aria-label="Interrupt response"
-					className="size-8"
 					onClick={voice.interrupt}
-					size="icon"
+					size="icon-sm"
 					title="Interrupt"
 					type="button"
 					variant="ghost-muted"
 				>
-					<Square className="size-3.5 fill-current" />
+					<HugeiconsIcon className="size-3.5" icon={StopIcon} />
 				</Button>
 			)}
 			<Button
@@ -253,12 +254,12 @@ export function VoiceCallWidgets({
 		>
 			{widgets.map((item) => (
 				<div
-					className="min-h-24 overflow-hidden rounded-xl border border-border/60 bg-background p-3"
+					className="min-h-24 overflow-hidden rounded-xl bg-muted p-3"
 					key={item.id}
 				>
 					{item.widget.title && (
 						<div
-							className="mb-2 truncate font-medium text-sm tracking-tight"
+							className="mb-2 truncate font-medium text-sm"
 							title={item.widget.title}
 						>
 							{item.widget.title}

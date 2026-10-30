@@ -8,7 +8,7 @@ import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useCallback, useMemo, useState } from "react";
 import { ResourceVisibilityConfirmationDialog } from "@/src/components/layout/ResourceVisibilityConfirmationDialog.tsx";
 import { AddToSpaceDialog } from "@/src/components/spaces/AddToSpaceDialog.tsx";
-import { CreateSpaceDialog } from "@/src/components/spaces/CreateSpaceDialog.tsx";
+import { CreateSpaceDialog } from "@/src/components/spaces/LazyCreateSpaceDialog.tsx";
 import { DestructiveConfirmDialog } from "@/src/components/ui/DestructiveConfirmDialog.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
@@ -444,7 +444,7 @@ export function SpacesSection({
 					/>
 				)}
 				{!error && visibleSpaces.length === 0 && (
-					<p className="px-2 py-2 text-muted-foreground text-xs">
+					<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 						{emptyMessage}
 					</p>
 				)}
@@ -483,7 +483,9 @@ export function SpacesSection({
 						? `"${pendingDelete.name}" and all its documents will be permanently deleted. This can't be undone.`
 						: ""
 				}
-				label={`Delete ${pendingDelete?.name ?? "this Space"}`}
+				label={tl("Delete {name}", {
+					name: pendingDelete?.name ?? tl("this Space"),
+				})}
 				onConfirm={confirmDelete}
 				onOpenChange={(open) => {
 					if (!(open || deleting)) {

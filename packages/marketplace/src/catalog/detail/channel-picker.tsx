@@ -18,7 +18,7 @@ import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 //     than served by the marketplace — can never be installed, so it is shown as
 //     context and never as a choice.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Select,
@@ -167,6 +167,7 @@ export function ChannelSwitchSummary({
 	target: string | null;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const name = channelLabel(target ?? STABLE_CHANNEL);
 	const targetVersion =
 		channels.find((c) => c.channel === (target ?? STABLE_CHANNEL))?.version ??
@@ -194,8 +195,17 @@ export function ChannelSwitchSummary({
 
 	return (
 		<>
-			{name} currently holds <strong>{targetVersion}</strong>
-			{installedVersion ? <> — you have {installedVersion}</> : null}.{" "}
+			{installedVersion
+				? tlRich(
+						"{name} currently holds <strong>{targetVersion}</strong> — you have {installedVersion}.",
+						{ installedVersion, name, targetVersion },
+						{ strong: (content) => <strong>{content}</strong> }
+					)
+				: tlRich(
+						"{name} currently holds <strong>{targetVersion}</strong>.",
+						{ name, targetVersion },
+						{ strong: (content) => <strong>{content}</strong> }
+					)}{" "}
 			{goesBackwards
 				? "That is OLDER than what you are running: every prerelease ranks below its stable release, so this moves the app backwards. Switching back later installs whatever that channel holds then, not the build you have now."
 				: "Later updates will follow this channel instead of the one you are on now."}

@@ -45,6 +45,13 @@ import {
 } from "@ryu/app-host/third-party-plugin";
 import { browserRecordingHost } from "@ryu/blocks/companion/browser-recording";
 import { useI18n, useLiteralMessages } from "@ryu/i18n/react";
+import {
+	Empty,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyTitle,
+} from "@ryu/ui/components/empty.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import type { PluginCompanion } from "../../shared/ipc.ts";
@@ -409,32 +416,40 @@ export function IslandPluginHost({
 			bundle.coreGeneration !== companion.coreGeneration)
 	) {
 		return (
-			<div className="flex h-full items-center justify-center p-6 text-muted-foreground text-sm">
-				Loading app…
+			<div
+				aria-busy="true"
+				aria-label="Loading app"
+				className="flex h-full flex-col gap-2 p-3"
+			>
+				<Skeleton className="h-8 w-2/3 rounded-lg" />
+				<Skeleton className="h-8 w-full rounded-lg" />
+				<Skeleton className="h-8 w-5/6 rounded-lg" />
 			</div>
 		);
 	}
 
 	if (!srcdoc) {
 		return (
-			<div className="flex h-full items-center justify-center p-6 text-muted-foreground text-sm">
-				This app does not provide a runnable UI.
-			</div>
+			<Empty className="h-full py-12">
+				<EmptyHeader>
+					<EmptyTitle>Nothing to show here</EmptyTitle>
+					<EmptyDescription>
+						This app does not provide a runnable UI.
+					</EmptyDescription>
+				</EmptyHeader>
+			</Empty>
 		);
 	}
 
 	return (
-		<div className="flex h-full flex-col overflow-hidden">
-			{/* Visible attribution: this is app content, namespaced, never system
-			    chrome. */}
-			<div className="flex items-center gap-2 border-border border-b bg-card px-3 py-2">
-				<span className="font-medium text-foreground text-sm">
-					{tl("App · {name}", { name: companion.label || companion.name })}
-				</span>
-				<span className="ml-auto text-muted-foreground text-xs">
-					{connected ? "sandboxed · connected" : "sandboxed · starting…"}
-				</span>
-			</div>
+		// The tab strip names the app; the frame is sandboxed app content, so it
+		// carries no extra attribution bar or inner border. `aria-busy` marks the
+		// frame until its bridge connects.
+		<div
+			aria-busy={!connected}
+			className="flex h-full flex-col overflow-hidden"
+			data-app-connected={connected ? "true" : "false"}
+		>
 			<div className="min-h-0 flex-1">
 				<ExtensionHost
 					granted={granted}

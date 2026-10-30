@@ -38,8 +38,11 @@ export default defineConfig({
 					"apps/desktop/e2e/harness/provider-routing-regressions-proof.tsx",
 					"apps/desktop/src/components/agents/RyuPiConfig.tsx",
 					"apps/desktop/src/components/gateway/GatewayProviderKeyRow.tsx",
+					"apps/desktop/src/components/gateway/provider-key-row",
 					"apps/desktop/src/components/settings/OAuthAccountPoolControls.tsx",
 					"packages/blocks/src/desktop/agent-edit.tsx",
+					"packages/blocks/src/desktop/agent-edit-pi-config.tsx",
+					"packages/blocks/src/desktop/agent-edit-pi-model-picker.tsx",
 					"packages/ui/src",
 				];
 				const css = (await readFile(shared, "utf8"))

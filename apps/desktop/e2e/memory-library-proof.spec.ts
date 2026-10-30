@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 interface CapturedRequest {
 	auth: string | null;
@@ -114,8 +114,23 @@ async function chooseOption(
 	label: string,
 	option: string | RegExp
 ): Promise<void> {
-	await page.getByRole("combobox", { name: label }).click();
+	const combobox = page.getByRole("combobox", { name: label });
+	// Scope, category and tag filters live in one Filters popover.
+	if (!(await combobox.isVisible())) {
+		await page.getByRole("button", { name: "Filters" }).click();
+	}
+	await combobox.click();
 	await page.getByRole("option", { name: option }).click();
+}
+
+/** Run a row action from the row's hover `⋯` menu. */
+async function rowAction(
+	page: Page,
+	row: Locator,
+	action: "Edit memory" | "Delete memory"
+): Promise<void> {
+	await row.getByRole("button", { name: "Memory actions" }).click();
+	await page.getByRole("menuitem", { name: action }).click();
 }
 
 test.describe.configure({ timeout: 60_000 });
@@ -300,7 +315,7 @@ test("cancels an edit without leaking its draft, preserves failed updates, retri
 		exact: true,
 	});
 	const row = page.locator("li").filter({ has: original });
-	await row.getByRole("button", { name: "Edit memory" }).click();
+	await rowAction(page, row, "Edit memory");
 	let dialog = page.getByRole("dialog", { name: "Edit memory" });
 	await expect(page.getByLabel("Memory", { exact: true })).toHaveValue(
 		"Project Atlas ships on Fridays"
@@ -310,7 +325,7 @@ test("cancels an edit without leaking its draft, preserves failed updates, retri
 		.fill("Discard this edit draft");
 	await page.keyboard.press("Escape");
 	await expect(dialog).toBeHidden();
-	await row.getByRole("button", { name: "Edit memory" }).click();
+	await rowAction(page, row, "Edit memory");
 	dialog = page.getByRole("dialog", { name: "Edit memory" });
 	await expect(page.getByLabel("Memory", { exact: true })).toHaveValue(
 		"Project Atlas ships on Fridays"
@@ -395,7 +410,7 @@ test("keeps a memory when delete is cancelled or fails, then retries the confirm
 	await openLibrary(page);
 	const target = page.getByText("Lives near a coastal city", { exact: true });
 	const row = page.locator("li").filter({ has: target });
-	await row.getByRole("button", { name: "Delete memory" }).click();
+	await rowAction(page, row, "Delete memory");
 	let confirmation = page.getByRole("alertdialog");
 	await expect(
 		confirmation.getByRole("heading", { name: "Delete this memory?" })
@@ -409,14 +424,14 @@ test("keeps a memory when delete is cancelled or fails, then retries the confirm
 	).toHaveLength(0);
 	await expect(target).toBeVisible();
 
-	await row.getByRole("button", { name: "Delete memory" }).click();
+	await rowAction(page, row, "Delete memory");
 	confirmation = page.getByRole("alertdialog");
 	await armFailure(page, "DELETE", "/api/memory/memory-coastal-city", 503);
 	await confirmation.getByRole("button", { name: "Delete" }).click();
 	await expect(page.getByText("Couldn't delete that memory")).toBeVisible();
 	await expect(target).toBeVisible();
 
-	await row.getByRole("button", { name: "Delete memory" }).click();
+	await rowAction(page, row, "Delete memory");
 	confirmation = page.getByRole("alertdialog");
 	await confirmation.getByRole("button", { name: "Delete" }).click();
 	await expect(confirmation).toBeHidden();

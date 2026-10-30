@@ -1,5 +1,14 @@
 "use client";
 
+import {
+	ArrowDown01Icon,
+	Cancel01Icon,
+	FileEditIcon,
+	GitBranchIcon,
+	SparklesIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+
 import { Button } from "@ryu/ui/components/button";
 import { ButtonGroup } from "@ryu/ui/components/button-group.tsx";
 import {
@@ -9,13 +18,6 @@ import {
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	IconChevronDown,
-	IconFilePencil,
-	IconGitBranch,
-	IconSparkles,
-	IconX,
-} from "@tabler/icons-react";
 import { memo, useState } from "react";
 import type { SuggestedTask } from "./suggested-task.ts";
 
@@ -72,14 +74,18 @@ export const SuggestedTaskCard = memo(function SuggestedTaskCard({
 		<section
 			aria-label="Suggested task"
 			className={cn(
-				"w-full max-w-sm rounded-xl border bg-card text-card-foreground shadow-md",
+				"w-full max-w-sm rounded-xl border border-border bg-card text-card-foreground",
 				className
 			)}
 			data-suggested-task={task.id}
 		>
 			<header className="flex items-center justify-between gap-2 ps-4 pe-2 pt-2">
 				<span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-					<IconSparkles aria-hidden="true" className="size-3.5" />
+					<HugeiconsIcon
+						aria-hidden="true"
+						className="size-3.5"
+						icon={SparklesIcon}
+					/>
 					Suggested task
 				</span>
 				<Button
@@ -89,7 +95,7 @@ export const SuggestedTaskCard = memo(function SuggestedTaskCard({
 					type="button"
 					variant="ghost-muted"
 				>
-					<IconX aria-hidden="true" />
+					<HugeiconsIcon aria-hidden="true" icon={Cancel01Icon} />
 				</Button>
 			</header>
 			<div className="px-4 pt-1">
@@ -101,7 +107,7 @@ export const SuggestedTaskCard = memo(function SuggestedTaskCard({
 					<summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
 						Show prompt
 					</summary>
-					<p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 font-mono text-[0.7rem] leading-relaxed">
+					<p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-muted px-2 py-1.5 font-mono text-xs leading-relaxed">
 						{task.prompt}
 					</p>
 				</details>
@@ -123,7 +129,11 @@ export const SuggestedTaskCard = memo(function SuggestedTaskCard({
 						type="button"
 						variant="ghost"
 					>
-						<IconFilePencil aria-hidden="true" data-icon="inline-start" />
+						<HugeiconsIcon
+							aria-hidden="true"
+							data-icon="inline-start"
+							icon={FileEditIcon}
+						/>
 						{saving ? "Saving…" : "Save to Drafts"}
 					</Button>
 				) : null}
@@ -144,7 +154,7 @@ export const SuggestedTaskCard = memo(function SuggestedTaskCard({
 										size="sm"
 										type="button"
 									>
-										<IconChevronDown aria-hidden="true" />
+										<HugeiconsIcon aria-hidden="true" icon={ArrowDown01Icon} />
 									</Button>
 								}
 							/>
@@ -153,7 +163,11 @@ export const SuggestedTaskCard = memo(function SuggestedTaskCard({
 									Start in a new chat
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => onStart(task, "worktree")}>
-									<IconGitBranch aria-hidden="true" className="size-4" />
+									<HugeiconsIcon
+										aria-hidden="true"
+										className="size-4"
+										icon={GitBranchIcon}
+									/>
 									Start in a worktree
 								</DropdownMenuItem>
 							</DropdownMenuContent>

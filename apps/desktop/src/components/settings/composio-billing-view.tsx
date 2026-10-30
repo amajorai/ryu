@@ -62,8 +62,8 @@ export function ComposioBillingView({
 					)}
 				/>
 			</SettingsGroup>
-			<div className="mx-3 space-y-2 rounded-lg border border-dashed px-4 py-3 text-muted-foreground text-xs">
-				<p className="font-medium text-foreground">Shared project privacy</p>
+			<div className="mt-2 space-y-2 text-detail text-muted-foreground">
+				<p className="text-foreground">Shared project privacy</p>
 				<p>
 					The platform controls Composio ZDR for the shared project. Activation
 					requires the upstream add-on and applies to every organization
@@ -76,7 +76,7 @@ export function ComposioBillingView({
 					separate policies.
 				</p>
 				<a
-					className="underline underline-offset-4"
+					className="text-primary underline-offset-4 hover:underline"
 					href="https://docs.composio.dev/docs/security/zero-data-retention"
 					rel="noopener noreferrer"
 					target="_blank"

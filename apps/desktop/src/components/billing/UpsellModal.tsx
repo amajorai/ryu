@@ -16,8 +16,6 @@
 // PaywallModal with plans + license-key entry); this modal is the gentle nudge,
 // that one is the checkout surface.
 
-import { SparklesIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import type { UpsellCard } from "@ryu/auth/lib/upsell";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -72,28 +70,21 @@ export function UpsellModal({
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
-					<div className="flex items-center gap-2">
-						<HugeiconsIcon
-							className="text-status-warning"
-							icon={SparklesIcon}
-							strokeWidth={2}
-						/>
-						<DialogTitle>You're getting a lot out of Ryu</DialogTitle>
-					</div>
+					<DialogTitle>You're getting a lot out of Ryu</DialogTitle>
 					<DialogDescription>
 						Here's what you've built so far. Upgrade to Pro to keep it growing
 						with cloud sync, parallel runs, and Ryu-managed inference.
 					</DialogDescription>
 				</DialogHeader>
 
-				<ul className="flex flex-col gap-2">
+				<ul className="flex flex-col">
 					{cards.map((card) => (
 						<li
-							className="flex flex-col gap-0.5 rounded-lg border bg-muted/40 px-3 py-2.5"
+							className="flex flex-col gap-0.5 border-border border-b py-3 last:border-b-0"
 							key={card.id}
 						>
 							<span className="font-medium text-sm">{card.headline}</span>
-							<span className="text-muted-foreground text-xs">
+							<span className="text-(length:--text-detail) text-muted-foreground leading-(--text-detail--line-height)">
 								{card.subtext}
 							</span>
 						</li>
@@ -108,7 +99,7 @@ export function UpsellModal({
 					>
 						Maybe later
 					</Button>
-					<Button onClick={handleUpgrade} type="button">
+					<Button onClick={handleUpgrade} type="button" variant="mono">
 						Upgrade to Pro
 					</Button>
 				</DialogFooter>

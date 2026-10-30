@@ -21,6 +21,7 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
 import { type SubmitEvent, useEffect, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import {
 	COORDINATION_OPTIONS,
@@ -174,14 +175,14 @@ export function TeamDialog({
 						<div className="flex flex-col gap-1.5">
 							<Label>Members</Label>
 							{members.length === 0 ? (
-								<p className="text-muted-foreground text-xs">
+								<p className="text-detail text-muted-foreground">
 									No members yet. Add agents below.
 								</p>
 							) : (
 								<ul className="scroll-fade flex max-h-40 flex-col gap-1 overflow-y-auto">
 									{members.map((memberId) => (
 										<li
-											className="flex h-8 items-center gap-2 rounded-md bg-muted/40 px-2"
+											className="flex h-8 items-center gap-2 rounded-lg bg-muted px-2"
 											key={memberId}
 										>
 											<AgentAvatar
@@ -199,31 +200,35 @@ export function TeamDialog({
 											>
 												{agentName(memberId)}
 											</span>
-											<button
+											<Button
 												aria-label={tl("Remove {agentName}", {
 													agentName: agentName(memberId),
 												})}
-												className="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+												className="size-6 shrink-0"
 												onClick={() => removeMember(memberId)}
+												size="icon-sm"
 												type="button"
+												variant="ghost-muted"
 											>
 												<HugeiconsIcon
 													className="size-3.5"
 													icon={Cancel01Icon}
 												/>
-											</button>
+											</Button>
 										</li>
 									))}
 								</ul>
 							)}
 							{candidates.length > 0 ? (
 								<div className="flex flex-col gap-1">
-									<p className="text-muted-foreground text-xs">Add an agent</p>
+									<p className="text-detail text-muted-foreground">
+										Add an agent
+									</p>
 									<ul className="scroll-fade flex max-h-40 flex-col gap-1 overflow-y-auto">
 										{candidates.map((agent) => (
 											<li key={agent.id}>
 												<button
-													className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left transition-colors hover:bg-muted"
+													className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-muted"
 													onClick={() => addMember(agent.id)}
 													type="button"
 												>
@@ -309,9 +314,7 @@ export function TeamDialog({
 								</p>
 							</div>
 						) : null}
-						{error ? (
-							<p className="text-sm text-status-destructive">{error}</p>
-						) : null}
+						{error ? <ErrorLine message={error} /> : null}
 					</div>
 					<DialogFooter>
 						<Button onClick={onClose} type="button" variant="ghost">

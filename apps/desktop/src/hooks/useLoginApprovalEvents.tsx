@@ -7,8 +7,7 @@ import {
 	loginApprovalRetryDelay,
 	streamLoginApprovals,
 } from "@ryu/auth/lib/login-approval-client";
-import { LoginApprovalPrompt } from "@ryu/blocks/web/login-approval.tsx";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
 	BACKEND_URL,
 	getActiveToken,
@@ -16,6 +15,13 @@ import {
 	useSession,
 } from "@/lib/auth-client.ts";
 import { abortableDelay } from "@/src/lib/abortable-delay.ts";
+
+// The approval prompt (with its QR code renderer) loads when a request arrives.
+const LoginApprovalPrompt = lazy(() =>
+	import("@ryu/blocks/web/login-approval.tsx").then((module) => ({
+		default: module.LoginApprovalPrompt,
+	}))
+);
 
 function activeToken(): string | null {
 	try {
@@ -199,18 +205,20 @@ export function LoginApprovalEvents() {
 		return null;
 	}
 	return (
-		<LoginApprovalPrompt
-			approving={approving}
-			error={error}
-			onApprove={() => resolve("approve")}
-			onDeny={() => resolve("deny")}
-			onOpenChange={(open) => {
-				if (!(open || approving)) {
-					dismiss(activeRequest.id);
-				}
-			}}
-			open
-			request={activeRequest}
-		/>
+		<Suspense fallback={null}>
+			<LoginApprovalPrompt
+				approving={approving}
+				error={error}
+				onApprove={() => resolve("approve")}
+				onDeny={() => resolve("deny")}
+				onOpenChange={(open) => {
+					if (!(open || approving)) {
+						dismiss(activeRequest.id);
+					}
+				}}
+				open
+				request={activeRequest}
+			/>
+		</Suspense>
 	);
 }

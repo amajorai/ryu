@@ -4,12 +4,16 @@ import type { ReactNode } from "react";
 import { useReducedMotion } from "../hooks/use-reduced-motion.ts";
 
 const PAGE_EASE = [0.16, 1, 0.3, 1] as const;
-const ENTER_DURATION = 0.24;
-const EXIT_DURATION = 0.16;
-const REDUCED_ENTER_DURATION = 0.18;
-const REDUCED_EXIT_DURATION = 0.14;
+const ENTER_DURATION = 0.2;
+const EXIT_DURATION = 0.15;
+const REDUCED_ENTER_DURATION = 0.09;
+const REDUCED_EXIT_DURATION = 0.09;
 
-/** Morph one page inside the existing Island surface, without adding a modal shell. */
+/**
+ * Swap one page inside the existing Island surface, without adding a modal
+ * shell: opacity and a small y offset, no blur filter (opacity only under
+ * reduced motion).
+ */
 export function IslandMorphingPage({
 	children,
 	className,
@@ -31,12 +35,7 @@ export function IslandMorphingPage({
 			animate={
 				reduceMotion
 					? { opacity: 1, transition: enterTransition }
-					: {
-							opacity: 1,
-							y: 0,
-							filter: "blur(0px)",
-							transition: enterTransition,
-						}
+					: { opacity: 1, y: 0, transition: enterTransition }
 			}
 			aria-hidden={!isPresent}
 			className={cn(
@@ -46,19 +45,10 @@ export function IslandMorphingPage({
 			exit={
 				reduceMotion
 					? { opacity: 0, transition: exitTransition }
-					: {
-							opacity: 0,
-							y: -8,
-							filter: "blur(4px)",
-							transition: exitTransition,
-						}
+					: { opacity: 0, y: -8, transition: exitTransition }
 			}
 			inert={!isPresent}
-			initial={
-				reduceMotion
-					? { opacity: 0 }
-					: { opacity: 0, y: 8, filter: "blur(4px)" }
-			}
+			initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
 			layout
 		>
 			{children}

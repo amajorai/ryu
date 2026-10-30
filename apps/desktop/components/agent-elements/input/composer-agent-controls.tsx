@@ -1,5 +1,25 @@
 "use client";
 
+import { CpuIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { acpHarnessSuffix } from "@ryu/blocks/composer/composer-trigger-summary.ts";
+import { useMemo } from "react";
+import { CapabilityBadges } from "@/components/agent-elements/input/capability-badges.tsx";
+import {
+	ComposerSettingsMenu,
+	type ComposerSettingsSection,
+} from "@/components/agent-elements/input/composer-settings-menu.tsx";
+import { PickerSettingsMenu } from "@/components/agent-elements/input/manage-models-button.tsx";
+import {
+	ModeMenuContent,
+	type ModeOption,
+} from "@/components/agent-elements/input/mode-selector.tsx";
+import { ProviderCommandDialog } from "@/components/agent-elements/input/provider-command-dialog.tsx";
+import { AUTO_AGENT_ID } from "@/components/agent-elements/input/universal-picker-body.tsx";
+import { UsageBar } from "@/components/agent-elements/input/usage-bar.tsx";
+import { useUniversalPicker } from "@/components/agent-elements/input/use-universal-picker.ts";
+import type { InputBarInfoBar } from "@/components/agent-elements/input-bar.tsx";
+import { isComposerPluginSectionKey } from "@/src/components/composer/plugin-composer-controls.ts";
 // The one place the chat composer's LEFT control cluster is defined.
 //
 // ChatPage, the launchpad (empty-tabs home), and the Ask Ryu dock all render the
@@ -24,268 +44,38 @@
 // chain + approval/config sections) feed those in via `modelSection`/`extraSections`.
 // The capability badges + usage meters are derived from `agentId` inside the hook, so
 // every surface that names an agent gets them for free.
-
-import { Add01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import type { ComposerModelSection } from "@ryu/blocks/composer/composer-acp-sections.ts";
-import { acpHarnessSuffix } from "@ryu/blocks/composer/composer-trigger-summary.ts";
-import { IconCpu, IconGitBranch } from "@tabler/icons-react";
-import { type ReactNode, useMemo } from "react";
-import { CapabilityBadges } from "@/components/agent-elements/input/capability-badges.tsx";
-import {
-	ComposerSettingsMenu,
-	type ComposerSettingsSection,
-} from "@/components/agent-elements/input/composer-settings-menu.tsx";
-import {
-	ConfigureAutoButton,
-	ManageModelsButton,
-} from "@/components/agent-elements/input/manage-models-button.tsx";
-import {
-	ModeMenuContent,
-	type ModeOption,
-} from "@/components/agent-elements/input/mode-selector.tsx";
-import { ProviderCommandDialog } from "@/components/agent-elements/input/provider-command-dialog.tsx";
-import { AUTO_AGENT_ID } from "@/components/agent-elements/input/universal-picker-body.tsx";
-import { UsageBar } from "@/components/agent-elements/input/usage-bar.tsx";
-import { useUniversalPicker } from "@/components/agent-elements/input/use-universal-picker.ts";
-import type { InputBarInfoBar } from "@/components/agent-elements/input-bar.tsx";
-import type { ModelOption } from "@/components/agent-elements/types.ts";
-import { isComposerPluginSectionKey } from "@/src/components/composer/plugin-composer-controls.ts";
 import { useAgentCapabilities } from "@/src/hooks/useAgentCapabilities.ts";
-import type { ChatPickerPlacement } from "@/src/hooks/useChatPickerPlacement.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { usePiConfig } from "@/src/hooks/usePiConfig.ts";
 import { useRoutingAdvice } from "@/src/hooks/useRoutingAdvice.ts";
-import {
-	AgentAvatar,
-	engineForAgent,
-	getAgentIcon,
-	getTeamStackIcon,
-} from "@/src/lib/agent-logos.tsx";
-import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import { filterEnabledModels } from "@/src/lib/api/pi-config.ts";
-import type { Team } from "@/src/lib/api/teams.ts";
-import type { BrowserSurface } from "@/src/lib/extension-host.ts";
 import {
 	showsComposerTuning,
 	showsModelPicker,
 } from "@/src/lib/interface-level.ts";
+import type {
+	ComposerAgentControls,
+	ComposerAgentControlsConfig,
+} from "./composer-agent-controls-types.ts";
+import {
+	AutoModeIcon,
+	CREATE_AGENT_MODE,
+	TEAM_MODE_PREFIX,
+	useComposerAgentModes,
+} from "./composer-agent-modes.tsx";
 
-/** Sentinel `ModeSelector` value that routes to the "create a new agent" flow. */
-export const CREATE_AGENT_MODE = "__create_agent__";
-/** Team ids are namespaced in the picker so they can't collide with agent ids. */
-export const TEAM_MODE_PREFIX = "team:";
-
-/** The "New agent…" leading icon for the agent picker's create sentinel. */
-export function NewAgentModeIcon({ className }: { className?: string }) {
-	return <HugeiconsIcon className={className} icon={Add01Icon} />;
-}
-
-/** The "Auto" leading icon for the composer trigger when the `auto` sentinel is active. */
-function AutoModeIcon({ className }: { className?: string }) {
-	return <IconGitBranch className={className} />;
-}
-
-export interface ComposerAgentModesOptions {
-	/** Append the "New agent…" create sentinel row. Default: true. */
-	includeCreate?: boolean;
-	/** Append a "Groups" section addressable as one target. Default: true. */
-	includeTeams?: boolean;
-}
-
-/**
- * The composer's agent picker options, derived from the live agent/team registry
- * with each entry's engine (or team-stack) logo — never hardcoded. Agents render
- * under an "Agents" group, groups under "Groups", and an optional "New agent…"
- * sentinel closes the list.
- */
-export function useComposerAgentModes(
-	agents: AgentSummary[],
-	teams: Team[] = [],
-	{ includeTeams = true, includeCreate = true }: ComposerAgentModesOptions = {}
-): ModeOption[] {
-	return useMemo(() => {
-		const agentOptions = agents.map<ModeOption>((a) => ({
-			id: a.id,
-			label: a.name,
-			icon: getAgentIcon(
-				a.avatarUrl,
-				engineForAgent(a),
-				undefined,
-				undefined,
-				a.avatarGlyph
-			),
-			description: a.description ?? undefined,
-			group: "Agents",
-		}));
-		const teamOptions =
-			includeTeams && teams.length > 0
-				? teams.map<ModeOption>((t) => ({
-						id: `${TEAM_MODE_PREFIX}${t.id}`,
-						label: t.name,
-						icon: getTeamStackIcon(
-							t.members.map((id) => {
-								const member = agents.find((a) => a.id === id);
-								return member ? engineForAgent(member) : null;
-							})
-						),
-						description: t.description ?? undefined,
-						group: "Groups",
-					}))
-				: [];
-		return [
-			...agentOptions,
-			...teamOptions,
-			...(includeCreate
-				? [
-						{
-							id: CREATE_AGENT_MODE,
-							label: "New agent…",
-							icon: NewAgentModeIcon,
-						} satisfies ModeOption,
-					]
-				: []),
-		];
-	}, [agents, teams, includeTeams, includeCreate]);
-}
-
-// `ComposerModelSection` — the caller-supplied override for the Model section
-// (the ACP-models / config-option / engine-catalog chain) — is owned by
-// `@ryu/blocks/composer/composer-acp-sections`, alongside the derivation that
-// produces it, so desktop and the island cannot drift apart on its shape.
-
-export interface ComposerAgentControlsConfig {
-	/** Currently selected agent id, or null when a team is the active target. */
-	agentId: string | null;
-	/** Live agent registry (drives both the picker options and ACP detection). */
-	agents: AgentSummary[];
-	/**
-	 * True when sending would OPEN a conversation rather than continue one (an
-	 * empty thread, the launchpad). Only affects the threshold-fallback notice:
-	 * a rule that swaps the whole agent applies at a conversation start only,
-	 * because an ACP agent owns its own session state. Defaults to false, the
-	 * conservative read — the notice then says "new conversations will start on
-	 * X" instead of promising a switch to this thread.
-	 */
-	atConversationStart?: boolean;
-	/**
-	 * Responsive compact composer (used once a chat has history). The control
-	 * cluster stays on the leading side of the textarea while it fits on one line,
-	 * then becomes the left side of the normal controls row below when the textarea
-	 * wraps. The settings-menu trigger shortens to `[logo] agent [usage] ⌄` (it
-	 * implies {@link compactTrigger}) and the subscription usage meters fold INTO
-	 * that trigger rather than sitting beside it as a standalone chip.
-	 */
-	compact?: boolean;
-	/**
-	 * Compact the settings-menu trigger to `[logo] agent [usage] ⌄` without
-	 * moving the cluster to the right. Used by narrow surfaces (Ask Ryu floating
-	 * / docked) that keep the roomy stacked textarea but still need the short
-	 * trigger. Ignored when {@link compact} is true (that already includes it).
-	 */
-	compactTrigger?: boolean;
-	/**
-	 * Extra `ComposerSettingsMenu` sections appended after Agent + Model — e.g.
-	 * ChatPage's Approval (permission mode) and any agent-advertised config
-	 * options. Empty sections are auto-hidden by the menu.
-	 */
-	extraSections?: ComposerSettingsSection[];
-	/** Keep the model control visible on setup surfaces at every interface level. */
-	forceModelPicker?: boolean;
-	/** Hide all target/model/provider controls for the managed Bot product. */
-	managedProduct?: boolean;
-	/** Currently selected model id (used when `modelSection` is omitted). */
-	model: string | null;
-	/** Map a model's display name (e.g. friendly mode). Ignored with `modelSection`. */
-	modelLabel?: (raw: string) => string;
-	/** Model options for the active agent (built via `modelsForAgent`). */
-	modelOptions: ModelOption[];
-	/** Fully override the Model section (ChatPage's ACP/config/engine chain). */
-	modelSection?: ComposerModelSection;
-	/** Open the create-agent flow. Omit to hide the "New agent…" sentinel. */
-	onCreateAgent?: () => void;
-	/** Persist a model pick for the active agent (used when `modelSection` omitted). */
-	onModelChange: (modelId: string) => void;
-	/** Observe provider/model picks without replacing the normal provider action. */
-	onProviderModelSelection?: (selection: {
-		modelId: string | null;
-		providerId: string;
-		providerLabel: string;
-	}) => void;
-	/** Pick an agent as the driving target (real agent id only; sentinels handled here). */
-	onSelectAgent: (agentId: string) => void;
-	/** Optional setup-surface override for a concrete provider/model pick. */
-	onSelectProviderModel?: (providerId: string, modelId: string) => void;
-	/** Optional setup-surface override for provider thinking-level picks. */
-	onSelectProviderThinking?: (providerId: string, level: string) => void;
-	/** Pick a group as the driving target. Omit to hide the Groups section. */
-	onSelectTeam?: (teamId: string) => void;
-	/** Optional setup-surface override for a provider pick. */
-	onUseProvider?: (providerId: string, modelId: string | null) => void;
-	/** Put the shared model/agent picker in the chat tab bar instead of the composer. */
-	placement?: ChatPickerPlacement;
-	/** Browser surface key; desktop defaults to the dashboard-compatible no-op host. */
-	surface?: BrowserSurface;
-	/** Currently selected team id, or null when an agent is the active target. */
-	teamId?: string | null;
-	/** Live groups; pass `[]` (or omit `onSelectTeam`) to disable the Groups section. */
-	teams?: Team[];
-}
-
-/**
- * The shared composer controls: `{ leftActions, rightActions }` ready to spread
- * into `InputBar`. This is the ONE definition of the chat bar's left cluster, so
- * ChatPage, the launchpad, and the Ask Ryu dock render an identical bar:
- *
- *   [ Agent · Model · … settings ]  [ capability badges ]  [ usage meters ]
- *
- * `leftActions` merges the agent/model/approval pickers into a single
- * `ComposerSettingsMenu` (Codex-style: one trigger, sections inside), followed by
- * the read-only `CapabilityBadges` and the subscription `UsageBar` — both derived
- * from `agentId`, so every surface that names an agent gets them for free.
- * `rightActions` is `null`: model selection lives in the settings menu.
- */
-export interface ComposerAgentControls {
-	/**
-	 * The threshold-fallback notice for the turn about to be sent, ready to spread
-	 * into `InputBar`'s `infoBar` prop — "Ryu credit is at $3.10 (under your $5.00
-	 * rule) — running this turn on gpt-5-mini."
-	 *
-	 * It lives HERE, next to the agent/model pickers, for the same reason the
-	 * `UsageBar` does: every composer surface derives it from this one hook, so
-	 * the dock and the launchpad cannot silently ship a composer that swaps a
-	 * model without saying so. `undefined` when there is nothing to report, which
-	 * is the case on any node with no rules configured.
-	 */
-	infoBar: InputBarInfoBar | undefined;
-	leftActions: ReactNode;
-	/** The same model/agent picker node, exposed for a host action tray. */
-	picker: ReactNode;
-	/**
-	 * Re-ask Core for the fallback verdict. A host calls this right after sending
-	 * a turn, so the bar reflects the headroom that turn just consumed.
-	 */
-	refreshRoutingAdvice: () => void;
-	/**
-	 * The universal picker body (Ryu (providers nested) · External Agents),
-	 * exposed alongside `sections` so a surface with its own trigger (the
-	 * empty-state agent logo) opens the IDENTICAL dropdown via
-	 * `ComposerSettingsMenu`'s `trigger` + `renderBody` props.
-	 */
-	renderBody: (close: () => void) => ReactNode;
-	rightActions: ReactNode;
-	/**
-	 * The composed Agent · Model · Approval/Thinking sections, exposed so the
-	 * trigger summary (`Ryu · Sonnet · Plan`) stays glanceable on a surface with
-	 * its own trigger. The body itself now comes from `renderBody`.
-	 *
-	 * Personality profiles are assigned on the agent editor, so the composer only
-	 * summarizes the target and its runtime controls.
-	 */
-	sections: ComposerSettingsSection[];
-	/** The sections shown in the trigger summary, excluding plugin-only rows. */
-	triggerSections: ComposerSettingsSection[];
-}
+export type {
+	ComposerAgentControls,
+	ComposerAgentControlsConfig,
+} from "./composer-agent-controls-types.ts";
+export {
+	type ComposerAgentModesOptions,
+	CREATE_AGENT_MODE,
+	NewAgentModeIcon,
+	TEAM_MODE_PREFIX,
+	useComposerAgentModes,
+} from "./composer-agent-modes.tsx";
 
 export function useComposerAgentControls(
 	config: ComposerAgentControlsConfig
@@ -580,12 +370,7 @@ export function useComposerAgentControls(
 		<>
 			<ComposerSettingsMenu
 				compact={compact || compactTrigger}
-				footer={(close) => (
-					<>
-						<ManageModelsButton close={close} />
-						<ConfigureAutoButton close={close} />
-					</>
-				)}
+				footer={(close) => <PickerSettingsMenu close={close} />}
 				leading={leading}
 				renderBody={(close) => renderBody(close, "agents")}
 				sections={triggerSections.filter((section) => section.key !== "model")}
@@ -605,9 +390,10 @@ export function useComposerAgentControls(
 							title={activeModelName}
 							type="button"
 						>
-							<IconCpu
+							<HugeiconsIcon
 								aria-hidden="true"
 								className="composer-model-icon size-3.5 shrink-0"
+								icon={CpuIcon}
 							/>
 							<span className="composer-model-name truncate">
 								{activeModelName}

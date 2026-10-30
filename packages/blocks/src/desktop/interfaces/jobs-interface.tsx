@@ -1,48 +1,48 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
-import { cn } from "@ryu/ui/lib/utils";
-import { ArrowLeft, Plus } from "lucide-react";
-import {
-	type KeyboardEvent,
-	type ReactNode,
-	type RefObject,
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import { isInterfaceCovered } from "./interface-keys.ts";
+import { Plus } from "lucide-react";
+import { type ReactNode, useRef, useState } from "react";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
-import { JobDetail, JobDetailEmpty, JobFullView } from "./jobs-detail.tsx";
+import { JobDetail, JobFullView } from "./jobs-detail.tsx";
 import { FreelancerList, FreelancerProfilePane } from "./jobs-freelancers.tsx";
+import { jobsListHeading, useJobsDerived } from "./jobs-interface-derived.ts";
+import {
+	COMPACT_MAX_WIDTH,
+	DetailSkeleton,
+	FULL_SIDEBAR_MIN_WIDTH,
+	RAIL_MIN_WIDTH,
+	STACKED_MAX_WIDTH,
+	useElementWidth,
+	useJobsThreadSync,
+	useMinuteClock,
+	useRowRegistry,
+	useSlashFocusSearch,
+} from "./jobs-interface-hooks.tsx";
+import {
+	onKeyDownFreelancerHandler,
+	onKeyDownJobHandler,
+	onKeyDownRootHandler,
+} from "./jobs-interface-keys.ts";
+import {
+	FreelancerDetailPlaceholder,
+	JobsDetailBlank,
+	JobsDetailPlaceholder,
+	JobsSplitPanes,
+	JobsStackedDetail,
+} from "./jobs-interface-panes.tsx";
 import { JobsList } from "./jobs-list.tsx";
 import {
 	applySavedSearch,
-	countByCompany,
-	cursorStep,
 	EMPTY_JOB_FILTERS,
 	FREELANCER_FACETS,
 	type FreelancerFacet,
-	filterFreelancers,
-	filterJobs,
 	freelancerJobs,
-	freelancerProfiles,
-	JOB_SAVED_SEARCHES,
 	type JobFilters,
 	type JobSavedSearch,
 	type JobSort,
-	jobCompanies,
-	jobFacetCounts,
-	jobRows,
 	jobStartInput,
-	matchesFreelancerFacet,
-	matchesSavedSearch,
 	PERSONAL_COMPANY_ID,
 	relatedJobs,
-	sortJobs,
-	stepIndex,
 } from "./jobs-model.ts";
 import { type JobPostInput, PostJobDialog } from "./jobs-post.tsx";
 import {
@@ -54,103 +54,6 @@ import {
 	SavedSearchMenu,
 } from "./jobs-rail.tsx";
 import { JobsToolbar } from "./jobs-toolbar.tsx";
-
-const MINUTE = 60_000;
-/** At or above this width the left rail (tabs, saved searches) shows. */
-const RAIL_MIN_WIDTH = 1180;
-/** Below this width the filter pills wrap under the search box. */
-const COMPACT_MAX_WIDTH = 860;
-/** Below this width the list and the detail take turns. */
-const STACKED_MAX_WIDTH = 720;
-/** At or above this width full view keeps its details sidebar. */
-const FULL_SIDEBAR_MIN_WIDTH = 960;
-const UNMEASURED_WIDTH = 1440;
-
-/** Wall clock that ticks once a minute so relative times stay honest. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-/** The element's rendered width, kept current with a ResizeObserver. */
-function useElementWidth(ref: RefObject<HTMLElement | null>): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		setWidth(element.getBoundingClientRect().width);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((entries) => {
-			const next = entries[0]?.contentRect.width;
-			if (next !== undefined) {
-				setWidth(next);
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width || UNMEASURED_WIDTH;
-}
-
-/** True for targets whose keys belong to typing, menus, or the host's chat. */
-function ownsKeys(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[data-testid='jobs-thread-view']") !== null
-	);
-}
-
-function DetailSkeleton() {
-	return (
-		<div
-			aria-hidden="true"
-			className="flex flex-1 flex-col gap-3 px-6 pt-5"
-			data-testid="jobs-detail-skeleton"
-		>
-			<div className="flex items-center gap-2">
-				<Skeleton className="size-8" radius="dense" />
-				<Skeleton className="h-4 w-32" radius="dense" />
-			</div>
-			<Skeleton className="h-6 w-3/5" radius="dense" />
-			<Skeleton className="h-4 w-2/5" radius="dense" />
-			<Skeleton className="mt-4 h-24 w-full" radius="row" />
-		</div>
-	);
-}
-
-function useRowRegistry() {
-	const elements = useRef(new Map<string, HTMLElement>());
-	const register = useCallback((id: string, element: HTMLElement | null) => {
-		if (element) {
-			elements.current.set(id, element);
-		} else {
-			elements.current.delete(id);
-		}
-	}, []);
-	const focus = useCallback((id: string | undefined) => {
-		if (!id) {
-			return;
-		}
-		const element = elements.current.get(id);
-		element?.focus({ preventScroll: true });
-		element?.scrollIntoView?.({ block: "nearest" });
-	}, []);
-	return { elements, focus, register };
-}
 
 /**
  * Jobs: a hiring board over the same threads and agents. Conversations are
@@ -167,6 +70,7 @@ export function JobsInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const composerRef = useRef<HTMLDivElement>(null);
@@ -195,47 +99,24 @@ export function JobsInterface({
 	const compact = width < COMPACT_MAX_WIDTH;
 	const stacked = width < STACKED_MAX_WIDTH;
 
-	const allRows = useMemo(() => jobRows(snapshot), [snapshot]);
-	const rows = useMemo(
-		() => sortJobs(filterJobs(allRows, filters, now), sort),
-		[allRows, filters, now, sort]
-	);
-	const companies = useMemo(() => jobCompanies(snapshot), [snapshot]);
-	const companyCounts = useMemo(() => countByCompany(allRows), [allRows]);
-	const facets = useMemo(
-		() => jobFacetCounts(allRows, filters, now),
-		[allRows, filters, now]
-	);
-	const savedCounts = useMemo(() => {
-		const counts = new Map<string, number>();
-		for (const saved of JOB_SAVED_SEARCHES) {
-			const applied = applySavedSearch(EMPTY_JOB_FILTERS, saved);
-			counts.set(saved.id, filterJobs(allRows, applied, now).length);
-		}
-		return counts;
-	}, [allRows, now]);
-	const allProfiles = useMemo(() => freelancerProfiles(snapshot), [snapshot]);
-	const profiles = useMemo(
-		() => filterFreelancers(allProfiles, freelancerQuery, freelancerFacet),
-		[allProfiles, freelancerQuery, freelancerFacet]
-	);
-	const freelancerFacetCounts = useMemo(() => {
-		const counts: Record<FreelancerFacet, number> = {
-			all: 0,
-			available: 0,
-			working: 0,
-		};
-		for (const facet of FREELANCER_FACETS) {
-			counts[facet.id] = allProfiles.filter((profile) =>
-				matchesFreelancerFacet(profile, facet.id)
-			).length;
-		}
-		return counts;
-	}, [allProfiles]);
-	const agentsByName = useMemo(
-		() => [...snapshot.agents].sort((a, b) => a.name.localeCompare(b.name)),
-		[snapshot.agents]
-	);
+	const {
+		agentsByName,
+		allRows,
+		companies,
+		companyCounts,
+		facets,
+		freelancerFacetCounts,
+		profiles,
+		rows,
+		savedCounts,
+	} = useJobsDerived({
+		filters,
+		freelancerFacet,
+		freelancerQuery,
+		now,
+		snapshot,
+		sort,
+	});
 
 	const conversationOpen = threadView !== null && threadView !== undefined;
 	const activeRow =
@@ -259,19 +140,13 @@ export function JobsInterface({
 	const selectedProfile =
 		profiles.find((profile) => profile.agent.id === freelancerCursor) ?? null;
 
-	// A thread opened from anywhere (host, history, a new post) is a job.
-	useEffect(() => {
-		if (activeThreadId) {
-			setTab("jobs");
-			setCursorId(activeThreadId);
-		}
-	}, [activeThreadId]);
-
-	useEffect(() => {
-		if (!conversationOpen) {
-			setFullView(false);
-		}
-	}, [conversationOpen]);
+	useJobsThreadSync({
+		activeThreadId,
+		conversationOpen,
+		setCursorId,
+		setFullView,
+		setTab,
+	});
 
 	const openJob = (threadId: string) => {
 		setCursorId(threadId);
@@ -351,130 +226,25 @@ export function JobsInterface({
 		setCursorId(null);
 	};
 
-	const onKeyDownJob = (
-		event: KeyboardEvent<HTMLElement>,
-		threadId: string
-	) => {
-		if (event.metaKey || event.ctrlKey || event.altKey) {
-			return;
-		}
-		const step = cursorStep(event.key);
-		if (step) {
-			event.preventDefault();
-			event.stopPropagation();
-			const next =
-				order[stepIndex(step, order.indexOf(threadId), order.length)];
-			if (next) {
-				setCursorId(next);
-				jobRegistry.focus(next);
-			}
-			return;
-		}
-		if (event.key === "Enter" || event.key === " ") {
-			event.preventDefault();
-			event.stopPropagation();
-			openJob(threadId);
-			return;
-		}
-		if (event.key === "Escape" && conversationOpen) {
-			event.preventDefault();
-			event.stopPropagation();
-			closeJob();
-		}
-	};
+	const onKeyDownJob = onKeyDownJobHandler({
+		closeJob,
+		conversationOpen,
+		jobRegistry,
+		openJob,
+		order,
+		setCursorId,
+	});
 
-	const onKeyDownFreelancer = (
-		event: KeyboardEvent<HTMLElement>,
-		agentId: string
-	) => {
-		if (event.metaKey || event.ctrlKey || event.altKey) {
-			return;
-		}
-		if (event.target !== event.currentTarget) {
-			return;
-		}
-		const step = cursorStep(event.key);
-		if (step) {
-			event.preventDefault();
-			event.stopPropagation();
-			const next =
-				freelancerOrder[
-					stepIndex(
-						step,
-						freelancerOrder.indexOf(agentId),
-						freelancerOrder.length
-					)
-				];
-			if (next) {
-				setFreelancerCursorId(next);
-				freelancerRegistry.focus(next);
-			}
-			return;
-		}
-		if (event.key === "Enter" || event.key === " ") {
-			event.preventDefault();
-			event.stopPropagation();
-			hire(agentId);
-		}
-	};
+	const onKeyDownFreelancer = onKeyDownFreelancerHandler({
+		freelancerOrder,
+		freelancerRegistry,
+		hire,
+		setFreelancerCursorId,
+	});
 
-	const onKeyDownRoot = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (
-			event.defaultPrevented ||
-			event.metaKey ||
-			event.ctrlKey ||
-			event.altKey ||
-			ownsKeys(event.target)
-		) {
-			return;
-		}
-		if (event.key === "Escape" && fullView) {
-			event.preventDefault();
-			setFullView(false);
-		}
-	};
+	const onKeyDownRoot = onKeyDownRootHandler({ fullView, setFullView });
 
-	// "/" focuses search from anywhere on the page, not only from inside the
-	// interface: on a fresh load, or after clicking plain text, focus sits on
-	// the body. Typing targets and the host's chat keep their keys.
-	useEffect(() => {
-		const onKeyDownDocument = (event: globalThis.KeyboardEvent) => {
-			if (isInterfaceCovered(rootRef.current)) {
-				return;
-			}
-			if (
-				event.key !== "/" ||
-				event.defaultPrevented ||
-				event.metaKey ||
-				event.ctrlKey ||
-				event.altKey ||
-				ownsKeys(event.target)
-			) {
-				return;
-			}
-			const root = rootRef.current;
-			const search = searchRef.current;
-			if (
-				!(root?.isConnected && search) ||
-				root.getClientRects().length === 0
-			) {
-				return;
-			}
-			const target = event.target;
-			// Inside another surface (a dialog, another pane) the key is theirs.
-			if (
-				target instanceof Node &&
-				target !== document.body &&
-				!root.contains(target)
-			) {
-				return;
-			}
-			event.preventDefault();
-			search.focus();
-		};
-		document.addEventListener("keydown", onKeyDownDocument);
-		return () => document.removeEventListener("keydown", onKeyDownDocument);
-	}, []);
+	useSlashFocusSearch(rootRef, searchRef);
 
 	const postButton = (
 		<Button onClick={() => setPostOpen(true)} size="sm" type="button">
@@ -483,17 +253,7 @@ export function JobsInterface({
 		</Button>
 	);
 
-	const savedMatch = JOB_SAVED_SEARCHES.find(
-		(saved) => saved.id !== "all" && matchesSavedSearch(filters, saved)
-	);
-	const singleCompany =
-		filters.companyIds.length === 1
-			? companies.find((company) => company.id === filters.companyIds[0])
-			: undefined;
-	const query = filters.query.trim();
-	const heading = query
-		? `Results for “${query}”`
-		: (savedMatch?.label ?? singleCompany?.name ?? "All jobs");
+	const heading = jobsListHeading(filters, companies, tl);
 
 	const inlineTabs = railMode ? null : (
 		<JobsInlineTabs
@@ -586,31 +346,9 @@ export function JobsInterface({
 			detail = <DetailSkeleton />;
 		} else if (allRows.length > 0 && rows.length === 0) {
 			// The list explains the empty search; this pane just says so quietly.
-			detail = (
-				<JobDetailEmpty>
-					<p
-						className="text-muted-foreground text-sm"
-						data-testid="jobs-detail-blank"
-					>
-						No job to preview
-					</p>
-				</JobDetailEmpty>
-			);
+			detail = <JobsDetailBlank />;
 		} else {
-			detail = (
-				<JobDetailEmpty>
-					<h2 className="font-sans font-semibold! text-base text-foreground">
-						{allRows.length === 0
-							? "Your jobs show up here"
-							: "No job selected"}
-					</h2>
-					<p className="max-w-xs text-muted-foreground text-sm">
-						{allRows.length === 0
-							? "Post a job and its details, deliverable, and message thread appear in this pane."
-							: "Pick a job from the list to see its details and messages."}
-					</p>
-				</JobDetailEmpty>
-			);
+			detail = <JobsDetailPlaceholder jobCount={allRows.length} />;
 		}
 	} else {
 		middle = (
@@ -646,15 +384,7 @@ export function JobsInterface({
 				profile={selectedProfile}
 			/>
 		) : (
-			<JobDetailEmpty>
-				<h2 className="font-sans font-semibold! text-base text-foreground">
-					No freelancer selected
-				</h2>
-				<p className="max-w-xs text-muted-foreground text-sm">
-					Freelancers are your agents. Pick one to see their record and hire
-					them for a job.
-				</p>
-			</JobDetailEmpty>
+			<FreelancerDetailPlaceholder />
 		);
 	}
 
@@ -678,36 +408,13 @@ export function JobsInterface({
 		);
 	} else if (stacked) {
 		body = stackedShowsDetail ? (
-			<div className="flex min-h-0 flex-1 flex-col">
-				<div className="flex h-11 shrink-0 items-center border-border border-b px-2">
-					<Button
-						onClick={() => setStackedDetail(false)}
-						size="sm"
-						type="button"
-						variant="ghost"
-					>
-						<ArrowLeft aria-hidden="true" data-icon="inline-start" />
-						Freelancers
-					</Button>
-				</div>
-				{detail}
-			</div>
+			<JobsStackedDetail detail={detail} setStackedDetail={setStackedDetail} />
 		) : (
 			<div className="flex min-h-0 flex-1">{middle}</div>
 		);
 	} else {
 		body = (
-			<>
-				<div
-					className={cn(
-						"flex min-h-0 shrink-0 border-border border-r",
-						railMode ? "w-[400px]" : "w-[360px]"
-					)}
-				>
-					{middle}
-				</div>
-				<div className="flex min-h-0 min-w-0 flex-1">{detail}</div>
-			</>
+			<JobsSplitPanes detail={detail} middle={middle} railMode={railMode} />
 		);
 	}
 

@@ -11,6 +11,11 @@ import { Clock01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@ryu/ui/components/popover.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTime } from "@/src/lib/timezone.ts";
@@ -199,7 +204,7 @@ function VersionDiff({
 					: ` ${row.text}`,
 	}));
 	return (
-		<pre className="type-caption max-h-48 overflow-auto rounded bg-muted/40 p-2 font-mono leading-relaxed">
+		<pre className="max-h-48 overflow-auto rounded-lg bg-muted/40 p-2 font-mono text-xs leading-relaxed">
 			{rows.map((r) => (
 				<div className={r.tone} key={r.id}>
 					{r.text}
@@ -388,101 +393,102 @@ export function VersionHistory<TRestoreResult, TSnapshotResult>({
 						Save version
 					</Button>
 				)}
-				<Button
-					onClick={() => setOpen((p) => !p)}
-					size="sm"
-					typography="compact"
-					variant="ghost"
-				>
-					<HugeiconsIcon className="size-3" icon={Clock01Icon} />
-					History
-					{versions.length > 0 ? (
-						<Badge className="ml-1" size="compact" variant="secondary">
-							{versions.length}
-						</Badge>
-					) : null}
-				</Button>
-			</div>
-
-			{open ? (
-				<div className="absolute right-0 z-20 mt-1 max-h-96 w-80 overflow-auto rounded-lg border bg-popover p-2 shadow-md">
-					{error ? (
-						<p className="p-2 text-status-destructive text-xs">{error}</p>
-					) : null}
-					{loading ? (
-						<SkeletonRows inset="comfortable" label="Loading versions…" />
-					) : versions.length === 0 ? (
-						<p className="p-2 text-muted-foreground text-xs">
-							No versions yet. Save one to keep a history you can restore.
-						</p>
-					) : (
-						<ul className="flex flex-col gap-1">
-							{versions.map((v) => (
-								<li
-									className="flex flex-col gap-1 rounded-md border p-2"
-									key={v.id}
-								>
-									<div className="flex items-start gap-2">
-										<div className="min-w-0 flex-1">
-											{v.title ? (
-												<span
-													className="block truncate font-medium text-xs"
-													title={v.title}
-												>
-													{v.title}
-												</span>
-											) : null}
-											<div className="flex flex-wrap items-center gap-2">
-												{v.label ? (
-													<Badge size="compact" variant="secondary">
-														{v.label}
-													</Badge>
+				<Popover onOpenChange={setOpen} open={open}>
+					<PopoverTrigger
+						render={
+							<Button size="sm" typography="compact" variant="ghost">
+								<HugeiconsIcon className="size-3.5" icon={Clock01Icon} />
+								History
+								{versions.length > 0 ? (
+									<span className="text-muted-foreground/70 text-xs tabular-nums">
+										{versions.length}
+									</span>
+								) : null}
+							</Button>
+						}
+					/>
+					<PopoverContent
+						align="end"
+						className="max-h-96 w-80 overflow-auto p-1.5"
+					>
+						{error ? (
+							<p className="p-2 text-status-destructive text-xs">{error}</p>
+						) : null}
+						{loading ? (
+							<SkeletonRows inset="comfortable" label="Loading versions…" />
+						) : versions.length === 0 ? (
+							<p className="p-2 text-muted-foreground text-xs">
+								No versions yet. Save one to keep a history you can restore.
+							</p>
+						) : (
+							<ul className="flex flex-col">
+								{versions.map((v) => (
+									<li
+										className="flex flex-col gap-1 border-border border-b p-2 last:border-b-0"
+										key={v.id}
+									>
+										<div className="flex items-start gap-2">
+											<div className="min-w-0 flex-1">
+												{v.title ? (
+													<span
+														className="block truncate font-medium text-xs"
+														title={v.title}
+													>
+														{v.title}
+													</span>
 												) : null}
-												<span className="text-muted-foreground text-xs">
-													{formatDateTime(v.createdAt)}
-												</span>
+												<div className="flex flex-wrap items-center gap-2">
+													{v.label ? (
+														<Badge size="compact" variant="secondary">
+															{v.label}
+														</Badge>
+													) : null}
+													<span className="text-muted-foreground text-xs">
+														{formatDateTime(v.createdAt)}
+													</span>
+												</div>
 											</div>
-										</div>
-										<div className="flex shrink-0 items-center gap-1">
-											<Button
-												onClick={() => handleToggleDiff(v.id)}
-												size="sm"
-												typography="caption"
-												variant="ghost"
-											>
-												Diff
-											</Button>
-											{disabled ? null : (
+											<div className="flex shrink-0 items-center gap-1">
 												<Button
-													disabled={busy}
-													onClick={() => handleRestore(v.id)}
+													onClick={() => handleToggleDiff(v.id)}
 													size="sm"
 													typography="caption"
 													variant="ghost"
 												>
-													Restore
+													Diff
 												</Button>
-											)}
-										</div>
-									</div>
-									{diffId === v.id ? (
-										diffValue === null ? (
-											<div className="p-1">
-												<SkeletonRows label="Loading diff…" />
+												{disabled ? null : (
+													<Button
+														disabled={busy}
+														onClick={() => handleRestore(v.id)}
+														size="sm"
+														typography="caption"
+														variant="ghost"
+													>
+														Restore
+													</Button>
+												)}
 											</div>
-										) : (
-											<VersionDiff
-												current={currentValue}
-												snapshot={diffValue}
-											/>
-										)
-									) : null}
-								</li>
-							))}
-						</ul>
-					)}
-				</div>
-			) : null}
+										</div>
+										{diffId === v.id ? (
+											diffValue === null ? (
+												<div className="p-1">
+													<SkeletonRows label="Loading diff…" />
+												</div>
+											) : (
+												<VersionDiff
+													current={currentValue}
+													snapshot={diffValue}
+												/>
+											)
+										) : null}
+									</li>
+								))}
+							</ul>
+						)}
+					</PopoverContent>
+				</Popover>
+			</div>
 		</div>
 	);
 }

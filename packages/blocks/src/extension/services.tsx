@@ -1,20 +1,22 @@
 "use client";
 
+import {
+	Loading03Icon,
+	MoreHorizontalIcon,
+	RotateClockwiseIcon,
+	StopIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@ryu/ui/components/dropdown-menu";
 import { cn } from "@ryu/ui/lib/utils";
 import type { CatalogItem as NativeCatalogItem } from "@ryuhq/core-client/catalog.ts";
-import {
-	AlertCircle,
-	AlertTriangle,
-	ArrowUpCircle,
-	Circle,
-	Download,
-	Loader2,
-	Minus,
-	Play,
-	RotateCw,
-	Square,
-} from "lucide-react";
 
 export type SidecarAction = "install" | "start" | "stop" | "restart";
 
@@ -35,158 +37,203 @@ export interface SidecarRowProps {
 	pending?: SidecarAction | null;
 }
 
-function StateGlyph({
-	isInstalling,
+/** The status the dot shows, spelled out for assistive technology. */
+function statusLabel({
+	failed,
 	isInstalled,
+	isInstalling,
 	running,
 }: {
-	isInstalling: boolean;
+	failed: boolean;
 	isInstalled: boolean;
+	isInstalling: boolean;
+	running: boolean;
+}): string {
+	if (isInstalling) {
+		return "Installing";
+	}
+	if (failed) {
+		return "Install failed";
+	}
+	if (!isInstalled) {
+		return "Not installed";
+	}
+	return running ? "Running" : "Stopped";
+}
+
+/** A 6px status dot; nothing for a service that is not installed. */
+function StatusDot({
+	failed,
+	isInstalled,
+	isInstalling,
+	running,
+}: {
+	failed: boolean;
+	isInstalled: boolean;
+	isInstalling: boolean;
 	running: boolean;
 }) {
 	if (isInstalling) {
-		return <Loader2 className="size-3.5 animate-spin text-muted-foreground" />;
+		return (
+			<HugeiconsIcon
+				aria-hidden="true"
+				className="animate-spin text-muted-foreground"
+				icon={Loading03Icon}
+				size={14}
+			/>
+		);
+	}
+	if (failed) {
+		return <span className="size-1.5 rounded-full bg-destructive" />;
 	}
 	if (!isInstalled) {
-		return <Minus className="size-3.5 text-muted-foreground/50" />;
+		return null;
 	}
-	if (running) {
-		return <Circle className="size-3 fill-success text-status-success" />;
+	return (
+		<span
+			className={cn(
+				"size-1.5 rounded-full",
+				running ? "bg-success" : "bg-muted-foreground"
+			)}
+		/>
+	);
+}
+
+/** The single visible action a row offers, or null when it has none. */
+function primaryAction(
+	entry: SidecarRowData,
+	hasUpdate: boolean
+): { action: SidecarAction; label: string } | null {
+	if (entry.installState === "failed") {
+		return { action: "install", label: "Retry" };
 	}
-	return <Circle className="size-3 text-muted-foreground" />;
+	if (entry.installState !== "installed") {
+		return entry.deprecated ? null : { action: "install", label: "Install" };
+	}
+	if (hasUpdate) {
+		return { action: "install", label: "Update" };
+	}
+	return entry.running ? null : { action: "start", label: "Start" };
 }
 
 /**
- * A single sidecar row, presentational. The live extension wraps it with the
- * real `ServiceEntry` mapping and the `services-api` calls; the storyboard
- * drives every state through the `entry` and `pending` props alone.
+ * A single sidecar row, presentational: status dot, name and one line of
+ * description, one inline action, and Stop and Restart behind `⋯`. The live
+ * extension wraps it with the real `ServiceEntry` mapping and the
+ * `services-api` calls; the storyboard drives every state through props.
  */
 export function SidecarRow({
 	entry,
 	pending = null,
 	onAction,
 }: SidecarRowProps) {
+	const tl = useLiteralMessages();
 	const isInstalled = entry.installState === "installed";
 	const isInstalling =
 		entry.installState === "installing" || pending === "install";
-	const isFailed = entry.installState === "failed";
+	const failed = entry.installState === "failed";
 	const hasUpdate = Boolean(
 		isInstalled && entry.hasUpdate && !entry.deprecated
 	);
 	const busy = pending !== null;
 	const dimmed = !isInstalled || entry.deprecated;
+	const primary = isInstalling ? null : primaryAction(entry, hasUpdate);
+	const label = entry.displayName;
+	const status = statusLabel({
+		failed,
+		isInstalled,
+		isInstalling,
+		running: entry.running,
+	});
+	const menuPending = pending === "stop" || pending === "restart";
 
 	return (
-		<div className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40">
-			<div className="flex w-4 shrink-0 items-center justify-center">
-				<StateGlyph
+		<div className="group/row flex min-h-12 items-center gap-3 py-2">
+			<span
+				className="flex size-4 shrink-0 items-center justify-center"
+				title={status}
+			>
+				<span className="sr-only">{status}</span>
+				<StatusDot
+					failed={failed}
 					isInstalled={isInstalled}
 					isInstalling={isInstalling}
 					running={entry.running}
 				/>
-			</div>
+			</span>
 
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
 					<span
 						className={cn(
-							"truncate font-medium text-sm",
+							"truncate text-sm",
 							dimmed && "text-muted-foreground"
 						)}
 					>
-						{entry.displayName}
+						{label}
 					</span>
 					{entry.deprecated ? (
-						<span className="flex items-center gap-1 font-medium text-status-warning text-xs">
-							<AlertTriangle className="size-3" />
+						<span className="shrink-0 text-status-warning text-xs">
 							Deprecated
 						</span>
 					) : null}
 				</div>
 				{entry.description ? (
-					<p className="truncate text-muted-foreground text-xs">
+					<p className="truncate text-detail text-muted-foreground">
 						{entry.description}
 					</p>
 				) : null}
 			</div>
 
-			<div className="flex shrink-0 items-center gap-1.5">
+			<div className="flex shrink-0 items-center gap-1">
 				{isInstalling ? (
 					<span className="text-muted-foreground text-xs">Installing…</span>
-				) : isFailed ? (
+				) : null}
+				{primary ? (
 					<Button
-						appearance="service-retry"
 						disabled={busy}
-						onClick={() => onAction?.("install")}
+						loading={pending === primary.action}
+						onClick={() => onAction?.(primary.action)}
 						size="sm"
-						variant="ghost"
+						variant="outline"
 					>
-						<AlertCircle className="mr-1 size-3.5" />
-						Retry
+						{primary.label}
 					</Button>
-				) : isInstalled || entry.deprecated ? (
-					isInstalled ? (
-						<>
-							{hasUpdate ? (
+				) : null}
+				{/* Stop and Restart sit in a reserved slot, so every row's inline
+				    action lines up whether or not the row has the menu. */}
+				{isInstalled && entry.running ? (
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
 								<Button
-									appearance="service-update"
+									aria-label={tl("More actions for {label}", { label })}
+									className={cn(
+										"transition-opacity duration-150 group-focus-within/row:opacity-100 group-hover/row:opacity-100 group-hover/row:duration-0 data-[popup-open]:opacity-100",
+										menuPending ? "opacity-100" : "opacity-0"
+									)}
 									disabled={busy}
-									onClick={() => onAction?.("install")}
-									size="sm"
-									variant="ghost"
-								>
-									<ArrowUpCircle className="mr-1 size-3.5" />
-									Update
-								</Button>
-							) : null}
-							{entry.running ? (
-								<>
-									<Button
-										appearance="service-action"
-										disabled={busy}
-										onClick={() => onAction?.("stop")}
-										size="sm"
-										variant="ghost"
-									>
-										<Square className="mr-1 size-3.5" />
-										Stop
-									</Button>
-									<Button
-										appearance="service-action"
-										disabled={busy}
-										onClick={() => onAction?.("restart")}
-										size="sm"
-										variant="ghost"
-									>
-										<RotateCw className="mr-1 size-3.5" />
-										Restart
-									</Button>
-								</>
-							) : (
-								<Button
-									appearance="service-action"
-									disabled={busy}
-									onClick={() => onAction?.("start")}
-									size="sm"
-									variant="ghost"
-								>
-									<Play className="mr-1 size-3.5" />
-									Start
-								</Button>
-							)}
-						</>
-					) : null
+									loading={menuPending}
+									size="icon-sm"
+									variant="ghost-muted"
+								/>
+							}
+						>
+							<HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end">
+							<DropdownMenuItem onClick={() => onAction?.("restart")}>
+								<HugeiconsIcon icon={RotateClockwiseIcon} size={16} />
+								Restart
+							</DropdownMenuItem>
+							<DropdownMenuItem onClick={() => onAction?.("stop")}>
+								<HugeiconsIcon icon={StopIcon} size={16} />
+								Stop
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 				) : (
-					<Button
-						appearance="service-action"
-						disabled={busy}
-						onClick={() => onAction?.("install")}
-						size="sm"
-						variant="ghost"
-					>
-						<Download className="mr-1 size-3.5" />
-						Install
-					</Button>
+					<span aria-hidden="true" className="size-8 shrink-0" />
 				)}
 			</div>
 		</div>

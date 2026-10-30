@@ -9,6 +9,9 @@ export default defineConfig({
 	...base,
 	plugins: [...(base.plugins ?? []), viteSingleFile()],
 	build: {
+		// The shared harness's target: the transcript graph ships top-level await
+		// and destructuring the default browser target cannot lower.
+		target: base.build?.target,
 		outDir: path.resolve(import.meta.dirname, "dist"),
 		emptyOutDir: false,
 		rollupOptions: {

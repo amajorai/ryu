@@ -7,6 +7,7 @@ import {
 } from "@ryu/blocks/desktop/agent-elements/input-bar";
 import { MarkdownResponseImages } from "@ryu/blocks/desktop/agent-elements/markdown.tsx";
 import type { AgentChatProps } from "@ryu/blocks/desktop/agent-elements/types";
+import { Logo } from "@ryu/ui/components/logo";
 import type { ReactNode } from "react";
 import {
 	type AssistantWidgetPlacement,
@@ -32,6 +33,8 @@ export interface RyuAssistantChatProps
 	divider?: boolean;
 	emptyStatePosition?: AgentChatProps["emptyStatePosition"];
 	footer?: ReactNode;
+	/** The empty start's greeting on floating surfaces. */
+	greeting?: ReactNode;
 	minimal?: boolean;
 	onClose?: () => void;
 	onSelectRecentChat?: (id: string) => void;
@@ -41,6 +44,21 @@ export interface RyuAssistantChatProps
 	slots?: AgentChatProps["slots"];
 	testId?: string;
 	title?: ReactNode;
+}
+
+/**
+ * The floating surfaces' empty start: §9.1's start page scaled down — one 32px
+ * mark and a `text-lg` greeting above the composer, recent chats below it.
+ */
+function RyuAssistantGreeting({ children }: { children: ReactNode }) {
+	return (
+		<div className="flex flex-col items-center gap-3 pb-6 text-center">
+			<Logo size="32px" tone="foreground" variant="eyes" />
+			<p className="font-semibold text-foreground text-lg tracking-tight">
+				{children}
+			</p>
+		</div>
+	);
 }
 
 /** Shared compact composer used by floating assistant surfaces. */
@@ -67,6 +85,7 @@ export function RyuAssistantChat({
 	density,
 	emptyStatePosition,
 	footer,
+	greeting = "How can I help?",
 	minimal,
 	onClose,
 	onSelectRecentChat,
@@ -93,6 +112,7 @@ export function RyuAssistantChat({
 				{recentFooter}
 			</>
 		) : undefined;
+	const isEmpty = chatProps.messages.length === 0;
 	const resolvedSlots = isMinimal
 		? { ...slots, InputBar: slots?.InputBar ?? RyuAssistantComposer }
 		: slots;
@@ -118,8 +138,13 @@ export function RyuAssistantChat({
 						// transcript keeps its normal inset so bubbles never hug the frame.
 						density={density}
 						emptyStateFooter={emptyStateFooter}
+						emptyStateHeader={
+							isMinimal && isEmpty ? (
+								<RyuAssistantGreeting>{greeting}</RyuAssistantGreeting>
+							) : undefined
+						}
 						emptyStatePosition={
-							emptyStatePosition ?? (isMinimal ? "default" : undefined)
+							emptyStatePosition ?? (isMinimal ? "center" : undefined)
 						}
 						slots={resolvedSlots}
 					/>

@@ -1,19 +1,19 @@
+import {
+	OnboardingActions,
+	OnboardingCta,
+	OnboardingShell,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphPicker } from "@ryu/ui/components/glyph-picker.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
-import { PageHeader } from "@ryu/ui/components/page-header.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { open } from "@tauri-apps/plugin-dialog";
 import { type SubmitEvent, useRef, useState } from "react";
 import { getActiveUserId } from "@/lib/auth-client.ts";
-import {
-	RyuOnboardingAvatar,
-	useRyuOnboardingPersona,
-} from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
+import { useRyuOnboardingPersona } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import { ApiError, type ApiTarget } from "@/src/lib/api/client.ts";
 import { createProject, type ProjectRecord } from "@/src/lib/api/hierarchy.ts";
 import {
@@ -165,137 +165,115 @@ export function FirstProjectStep({
 	};
 
 	return (
-		<div
-			className="scroll-fade h-full w-full overflow-y-auto"
-			data-testid="first-project-step"
+		<OnboardingShell
+			avatar={
+				<GlyphPicker
+					allowed="entity"
+					className="shrink-0"
+					disabled={submitting || acknowledged}
+					onChange={setIcon}
+					previewSize={64}
+					title="Choose a project icon"
+					value={icon}
+				/>
+			}
+			subtitle={tl(
+				"Projects keep a goal, its context and its bots in one place. {agentName} coordinates it.",
+				{ agentName: agentName || "Ryu" }
+			)}
+			title="Create your first project"
 		>
-			<div
-				className="flex min-h-full w-full flex-col items-center justify-center gap-7 px-8 py-10"
-				data-tauri-drag-region="true"
+			<form
+				className="flex w-full flex-col gap-4"
+				data-testid="first-project-step"
+				onSubmit={(event) => void handleSubmit(event)}
 			>
-				<StaggerReveal>
-					<div className="flex flex-col items-center gap-4">
-						<GlyphPicker
-							allowed="entity"
-							className="shrink-0"
-							disabled={submitting || acknowledged}
-							onChange={setIcon}
-							previewSize={72}
-							title="Choose a project icon"
-							value={icon}
-						/>
-						<PageHeader
-							className="w-full max-w-md text-center"
-							stagger={false}
-							subtitle="Projects keep a goal, its context and the bots working on it in one place. Your agent coordinates it."
-							title="Create your first project"
-						/>
-					</div>
-				</StaggerReveal>
-
-				<form
-					className="flex w-full max-w-md flex-col gap-4"
-					onSubmit={(event) => void handleSubmit(event)}
-				>
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="first-project-name">Project name</Label>
-						<Input
-							autoComplete="off"
-							disabled={submitting || acknowledged}
-							id="first-project-name"
-							maxLength={FIRST_PROJECT_NAME_MAX}
-							onChange={(event) => setName(event.target.value)}
-							value={name}
-						/>
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="first-project-about">
-							What is this project about?{" "}
-							<span className="text-muted-foreground">(optional)</span>
-						</Label>
-						<Textarea
-							disabled={submitting || acknowledged}
-							id="first-project-about"
-							maxLength={FIRST_PROJECT_ABOUT_MAX}
-							onChange={(event) => setAbout(event.target.value)}
-							placeholder="The goal, the constraints, anything every bot should know."
-							rows={3}
-							value={about}
-						/>
-					</div>
-					{canPickFolder ? (
-						<div className="flex items-center justify-between gap-3">
-							<p className="min-w-0 truncate text-muted-foreground text-sm">
-								{folder ?? "No folder yet (optional)"}
-							</p>
-							<Button
-								disabled={submitting || acknowledged}
-								onClick={() => void chooseFolder()}
-								size="sm"
-								type="button"
-								variant="outline"
-							>
-								{folder ? "Change folder" : "Add a folder"}
-							</Button>
-						</div>
-					) : null}
-
-					<div className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
-						<RyuOnboardingAvatar size={28} />
-						<p className="text-muted-foreground text-sm">
-							<span className="font-medium text-foreground">
-								{agentName || "Ryu"}
-							</span>{" "}
-							will coordinate this project.
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor="first-project-name">Project name</Label>
+					<Input
+						autoComplete="off"
+						disabled={submitting || acknowledged}
+						id="first-project-name"
+						maxLength={FIRST_PROJECT_NAME_MAX}
+						onChange={(event) => setName(event.target.value)}
+						value={name}
+					/>
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor="first-project-about">
+						What is this project about?{" "}
+						<span className="text-muted-foreground">(optional)</span>
+					</Label>
+					<Textarea
+						disabled={submitting || acknowledged}
+						id="first-project-about"
+						maxLength={FIRST_PROJECT_ABOUT_MAX}
+						onChange={(event) => setAbout(event.target.value)}
+						placeholder="The goal, the constraints, anything every bot should know."
+						rows={3}
+						value={about}
+					/>
+				</div>
+				{canPickFolder ? (
+					<div className="flex items-center justify-between gap-3">
+						<p className="min-w-0 truncate text-muted-foreground text-sm">
+							{folder ?? "No folder yet (optional)"}
 						</p>
-					</div>
-
-					{error ? (
-						<p className="text-center text-destructive text-sm" role="alert">
-							{error}
-						</p>
-					) : null}
-
-					<div className="mt-2 flex items-center justify-center gap-3">
 						<Button
-							disabled={submitting}
-							onClick={() => {
-								skipPending.current = true;
-								try {
-									onSkip();
-									skipPending.current = false;
-								} catch (cause) {
-									setError(
-										cause instanceof Error
-											? cause.message
-											: "Setup could not skip this project. Retry."
-									);
-								}
-							}}
+							disabled={submitting || acknowledged}
+							onClick={() => void chooseFolder()}
+							size="sm"
 							type="button"
-							variant="ghost"
+							variant="outline"
 						>
-							Skip for now
-						</Button>
-						<Button
-							disabled={
-								(!skipPending.current && Boolean(validation)) || submitting
-							}
-							size="lg"
-							type="submit"
-							variant="mono"
-						>
-							{submitting
-								? acknowledged
-									? "Continuing…"
-									: "Creating…"
-								: error
-									? "Retry"
-									: "Create project"}
+							{folder ? "Change folder" : "Add a folder"}
 						</Button>
 					</div>
-				</form>
-			</div>
-		</div>
+				) : null}
+
+				{error ? (
+					<p className="text-sm text-status-destructive" role="alert">
+						{error}
+					</p>
+				) : null}
+
+				<OnboardingActions className="justify-between">
+					<OnboardingCta
+						disabled={submitting}
+						onClick={() => {
+							skipPending.current = true;
+							try {
+								onSkip();
+								skipPending.current = false;
+							} catch (cause) {
+								setError(
+									cause instanceof Error
+										? cause.message
+										: "Setup could not skip this project. Retry."
+								);
+							}
+						}}
+						tone="secondary"
+						type="button"
+					>
+						Skip for now
+					</OnboardingCta>
+					<OnboardingCta
+						disabled={
+							(!skipPending.current && Boolean(validation)) || submitting
+						}
+						type="submit"
+					>
+						{submitting
+							? acknowledged
+								? "Continuing…"
+								: "Creating…"
+							: error
+								? "Retry"
+								: "Create project"}
+					</OnboardingCta>
+				</OnboardingActions>
+			</form>
+		</OnboardingShell>
 	);
 }

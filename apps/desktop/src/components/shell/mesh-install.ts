@@ -64,9 +64,11 @@ export async function watchMeshInstall(
 	target: ApiTarget,
 	backend: MeshBackend,
 	onStatus?: (status: MeshStatus) => void,
-	isCurrent: () => boolean = () => true,
+	isCurrent: () => boolean = () => true
 ): Promise<MeshStatus | null> {
-	if (!isCurrent()) return null;
+	if (!isCurrent()) {
+		return null;
+	}
 	dismissProgress();
 	const isTailcat = backend === MESH_BACKEND_TAILCAT;
 	const clientLabel = isTailcat
@@ -84,7 +86,9 @@ export async function watchMeshInstall(
 
 	const ownedProgressToastId = progressToastId;
 	const dismissOwnedProgress = () => {
-		if (progressToastId === ownedProgressToastId) dismissProgress();
+		if (progressToastId === ownedProgressToastId) {
+			dismissProgress();
+		}
 	};
 	const deadline = Date.now() + INSTALL_DEADLINE_MS;
 	let last: MeshStatus | null = null;
@@ -107,7 +111,7 @@ export async function watchMeshInstall(
 				return last;
 			}
 			installState = await fetchMeshInstallStatus(target, backend).catch(
-				() => null,
+				() => null
 			);
 		} catch {
 			if (!isCurrent()) {

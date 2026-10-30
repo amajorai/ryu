@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { z } from "zod";
 import { UsageCostSection } from "../../src/components/gateway/UsageCostSection.tsx";
+import { AccountKeysDisplay } from "../../src/components/gateway/usage-cost/account-keys-display.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import type { ApiTarget } from "../../src/lib/api/client.ts";
 import type { GatewayMetrics } from "../../src/lib/api/gateway.ts";
@@ -496,6 +497,9 @@ function ProofArtifact() {
 							reachable={reachable}
 							target={TARGET}
 						/>
+						{/* Rendered on the API keys pane in the app; proven here against
+						    the same config fixture. */}
+						<AccountKeysDisplay reachable={reachable} target={TARGET} />
 					</div>
 				</main>
 			</QueryClientProvider>

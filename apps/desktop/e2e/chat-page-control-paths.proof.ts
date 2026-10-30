@@ -251,14 +251,29 @@ test("ChatPage tool details and Copy transcript use the loaded conversation", as
 		origin: STORY_ORIGIN,
 	});
 	const pageErrors = await openChat(page, "copy-transcript");
-	const tools = page.getByText("2 tools", { exact: true });
+	// The chat header keeps Share and the panel toggle; the agent's tools and
+	// Copy transcript live in its "More chat actions" overflow menu (c9b1e90cd).
+	const overflow = page.getByRole("button", {
+		name: "More chat actions",
+		exact: true,
+	});
+	await overflow.click();
+	const tools = page.getByRole("menuitem", { name: "2 tools", exact: true });
 	await expect(tools).toBeVisible();
 	await tools.hover();
+	for (const tool of ["search_web", "read_file"]) {
+		await expect(
+			page.getByRole("menuitem", { name: tool, exact: true })
+		).toBeVisible();
+	}
+	await page.keyboard.press("Escape");
+	await page.keyboard.press("Escape");
 	await expect(
-		page.getByText("search_web, read_file", { exact: true })
-	).toBeVisible();
+		page.getByRole("menuitem", { name: "search_web", exact: true })
+	).toBeHidden();
+	await overflow.click();
 	await page
-		.getByRole("button", { name: "Copy transcript", exact: true })
+		.getByRole("menuitem", { name: "Copy transcript", exact: true })
 		.click();
 	await expect(
 		page.getByText("Copied to clipboard", { exact: true })
@@ -268,9 +283,8 @@ test("ChatPage tool details and Copy transcript use the loaded conversation", as
 		"We need to share the launch plan with the organization."
 	);
 	expect(clipboard).toContain("The organization copy is ready for review.");
-	await page.mouse.move(10, 10);
 	await expect(
-		page.getByText("search_web, read_file", { exact: true })
+		page.getByRole("menuitem", { name: "Copy transcript", exact: true })
 	).toBeHidden();
 	await capture(
 		page,

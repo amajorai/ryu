@@ -44,15 +44,15 @@ export function FocusSummary(props: {
 		"--focus-segment-width": string;
 	} = { "--focus-segment-width": `${distractionPct}%` };
 	return (
-		<div className={`min-w-0 rounded-lg bg-muted/30 p-3 ${className ?? ""}`}>
+		<div className={`min-w-0 ${className ?? ""}`}>
 			<div className="mb-2 flex items-baseline justify-between gap-2">
-				<span className="font-medium text-xs">{title}</span>
-				<span className="font-mono text-lg tabular-nums leading-none">
+				<span className="font-semibold text-sm">{title}</span>
+				<span className="font-medium text-xl tabular-nums leading-none">
 					{ratioPct}
-					<span className="text-muted-foreground text-xs">%</span>
+					<span className="text-muted-foreground text-sm">%</span>
 				</span>
 			</div>
-			<div className="flex h-2 overflow-hidden rounded-full bg-muted">
+			<div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
 				<div
 					className="h-full bg-primary"
 					data-focus-segment=""
@@ -66,13 +66,13 @@ export function FocusSummary(props: {
 					title={distractedLabel}
 				/>
 			</div>
-			<div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground text-xs">
+			<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-detail text-muted-foreground">
 				<span>
-					<span className="inline-block size-2 translate-y-px rounded-full bg-primary" />{" "}
+					<span className="inline-block size-1.5 -translate-y-px rounded-full bg-primary" />{" "}
 					{focusedLabel}
 				</span>
 				<span>
-					<span className="inline-block size-2 translate-y-px rounded-full bg-warning" />{" "}
+					<span className="inline-block size-1.5 -translate-y-px rounded-full bg-warning" />{" "}
 					{distractedLabel}
 				</span>
 				{focus.longest_focus_streak_minutes > 0 && (

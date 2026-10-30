@@ -1,41 +1,18 @@
 import { Robot01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-	currentPlanVersionFor,
-	monthlyPriceMicroUsdForSeats,
-	PLAN_IDS,
-	PLAN_VERSIONS,
-	PLANS,
-	type PlanId,
-	type PlanVersion,
-} from "@ryu/auth/lib/plans";
-import { SELF_SERVE_MAX_SEATS } from "@ryu/auth/lib/seat-tiers";
-import {
 	hostedAgentIncludedCreditUsd,
 	hostedAgentMonthlyPriceUsd,
-	TEAMS_AGENT_STANDARD_USD,
 	TEAMS_MAX_SEATS,
 	TEAMS_MIN_SEATS,
 } from "@ryu/blocks/web/pricing.tsx";
-import { BeforeAfterSummary } from "@ryu/ui/components/before-after-summary.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { CreditBalanceBreakdown } from "@ryu/ui/components/credit-balance-breakdown.tsx";
-import {
-	Dialog,
-	DialogClose,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "@ryu/ui/components/dialog.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
-import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { useBillingStatusStream } from "@/src/hooks/useBillingStatusStream.ts";
@@ -54,158 +31,29 @@ import {
 	TeamsBillingError,
 	updateTeamsSeats,
 } from "@/src/lib/api/teams-billing.ts";
-import { formatDate } from "@/src/lib/timezone.ts";
 import {
 	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "./shared/settings-items.tsx";
+import {
+	formatCreditExpiry,
+	normalizeTeamsSeatCount,
+	planLabel,
+	planMonthlyAmount,
+} from "./TeamsBillingTab-pricing.ts";
+import { TeamsBillingReviewDialog } from "./TeamsBillingTab-review-dialog.tsx";
+import { TeamsBillingSeatsSection } from "./TeamsBillingTab-seats-section.tsx";
+import {
+	TeamsBillingAccessUnavailable,
+	TeamsBillingLoadFailed,
+	TeamsBillingNoOrganization,
+	TeamsBillingSignedOut,
+} from "./TeamsBillingTab-status-cards.tsx";
+import { TeamsBillingWalletSection } from "./TeamsBillingTab-wallet-section.tsx";
 
-/** Where a solo user goes to create or pick an organization. */
-const ORGANIZATIONS_URL = `${FRONTEND_URL.replace(/\/$/, "")}/organizations`;
-
-/** Friendly labels for the internal plan slugs the backend returns. */
-const PLAN_LABELS = new Map<string, string>([
-	["free", "Free"],
-	["hobby", "Hobby"],
-	["max", "Max Plan"],
-	["pro", "Pro Plan"],
-	["teams", "Teams"],
-	["teams-lite", "Teams Lite"],
-	["business", "Business"],
-]);
-
-function planLabel(plan: string | null | undefined): string {
-	if (!plan) {
-		return "No plan";
-	}
-	return PLAN_LABELS.get(plan) ?? plan.charAt(0).toUpperCase() + plan.slice(1);
-}
-
-function normalizeTeamsSeatCount(
-	value: string,
-	minimum = TEAMS_MIN_SEATS
-): number {
-	const parsed = Number.parseInt(value, 10);
-	if (!Number.isFinite(parsed)) {
-		return minimum;
-	}
-	return Math.max(minimum, Math.floor(parsed));
-}
-
-function formatMonthlyUsd(value: number): string {
-	return `${formatMicroUsd(Math.round(value * 1_000_000))}/mo`;
-}
-
-const isCatalogPlanId = (plan: string): plan is PlanId =>
-	(PLAN_IDS as readonly string[]).includes(plan);
-
-/**
- * Stamped rows from retired offers whose charge one catalog row cannot
- * reproduce: the hosted-agent Pro/Max contracts priced a variable agent count
- * on top of the row's base, and the early Teams rows pre-date per-seat billing.
- * The display names no figure for them rather than inventing one.
- */
-const UNPRICEABLE_LEGACY_VERSIONS: Partial<Record<PlanId, readonly number[]>> =
-	{
-		max: [2, 3],
-		pro: [2, 3],
-		teams: [1, 2, 3, 4],
-	};
-
-const isUnpriceableLegacyVersion = (
-	plan: PlanId,
-	version: PlanVersion
-): boolean =>
-	UNPRICEABLE_LEGACY_VERSIONS[plan]?.includes(version.version) ?? false;
-
-/**
- * The monthly amount a subscription pays, from the billing catalog: the
- * stamped (grandfathered) plan version when known, otherwise today's list
- * price, at the billed seat count for organization plans. An unknown stamped
- * version falls back to the current price rather than guessing an older row.
- */
-export function planMonthlyAmount(
-	plan: string | null | undefined,
-	contract: {
-		planVersion?: number | string | null;
-		seats?: number | null;
-	} = {}
-): string {
-	if (plan === "desktop-license") {
-		return "Paid once";
-	}
-	if (!(plan && isCatalogPlanId(plan))) {
-		return "$0/mo";
-	}
-	const catalogPlan = PLANS[plan];
-	const rows = PLAN_VERSIONS[plan];
-	const stamped =
-		contract.planVersion === null ||
-		contract.planVersion === undefined ||
-		contract.planVersion === ""
-			? undefined
-			: rows.find((row) => row.version === Number(contract.planVersion));
-	const version =
-		stamped ??
-		rows.find((row) => row.version === currentPlanVersionFor(plan)) ??
-		rows[0];
-	if (isUnpriceableLegacyVersion(plan, version)) {
-		return "Contract pricing";
-	}
-	const minimumSeats =
-		catalogPlan.seatModel.kind === "per_seat"
-			? catalogPlan.seatModel.minSeats
-			: 1;
-	const perSeat = catalogPlan.seatModel.kind === "per_seat";
-	const billedSeats =
-		perSeat && contract.seats && Number.isFinite(contract.seats)
-			? Math.max(minimumSeats, Math.floor(contract.seats))
-			: null;
-	if (billedSeats !== null && billedSeats > SELF_SERVE_MAX_SEATS) {
-		// Seat counts beyond self-serve are contracted, whatever the row's formula.
-		return "Contract pricing";
-	}
-	let amountMicroUsd: number;
-	try {
-		amountMicroUsd = monthlyPriceMicroUsdForSeats({
-			plan: catalogPlan,
-			seats: billedSeats ?? minimumSeats,
-			version,
-		});
-	} catch {
-		// Seat counts beyond the self-serve price bands are contracted.
-		return "Contract pricing";
-	}
-	const amount = `${formatMicroUsd(amountMicroUsd, "USD", 2)}/mo`;
-	if (!perSeat || billedSeats !== null) {
-		return amount;
-	}
-	return `${amount} minimum`;
-}
-
-/** How an organization plan's shared pool grows with billed seats. */
-function poolBundleRule(plan: OrganizationPlanId | null): string {
-	return plan === "business"
-		? "each completed five-seat bundle"
-		: "each started five-seat bundle";
-}
-
-function formatCreditExpiry(value: string | null): string | null {
-	if (!value) {
-		return null;
-	}
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) {
-		return null;
-	}
-	return `Expires ${formatDate(date, {
-		day: "numeric",
-		month: "short",
-		year: "numeric",
-	})}`;
-}
+export { planMonthlyAmount } from "./TeamsBillingTab-pricing.ts";
 
 /**
  * Desktop mirror of the organization Teams seat-billing surface.
@@ -222,6 +70,7 @@ function TeamsBillingTabForOrg({
 }) {
 	const authed = hasTeamsBillingAuth();
 	const stepUp = useStepUp();
+	const tl = useLiteralMessages();
 
 	const subQuery = useQuery({
 		enabled: authed,
@@ -321,39 +170,12 @@ function TeamsBillingTabForOrg({
 	}, [seatStatus?.billedSeats, seatStatus?.minRequired]);
 
 	if (!authed) {
-		return (
-			<SettingsSection title="Teams">
-				<SettingsCard>
-					<p className="text-center text-muted-foreground text-sm">
-						Sign in to manage your organization&apos;s Teams seats.
-					</p>
-				</SettingsCard>
-			</SettingsSection>
-		);
+		return <TeamsBillingSignedOut />;
 	}
 
 	const noOrg = !activeOrgId;
 	if (noOrg) {
-		return (
-			<SettingsSection title="Teams">
-				<SettingsCard>
-					<div className="flex flex-col items-start gap-3">
-						<p className="text-muted-foreground text-sm">
-							Teams is an organization plan. Create or join an organization to
-							set up shared credits and member seats.
-						</p>
-						<Button
-							onClick={() => {
-								openExternal(ORGANIZATIONS_URL).catch(() => undefined);
-							}}
-							size="sm"
-						>
-							Create or select an organization
-						</Button>
-					</div>
-				</SettingsCard>
-			</SettingsSection>
-		);
+		return <TeamsBillingNoOrganization />;
 	}
 
 	const loadFailed =
@@ -363,28 +185,14 @@ function TeamsBillingTabForOrg({
 		seatQuery.isError;
 	if (loadFailed) {
 		return (
-			<SettingsSection title="Teams">
-				<SettingsCard>
-					<div className="flex flex-col items-start gap-3">
-						<p className="text-muted-foreground text-sm">
-							We couldn&apos;t load your organization billing details. Check
-							your connection and try again.
-						</p>
-						<Button
-							onClick={() => {
-								subQuery.refetch().catch(() => undefined);
-								walletQuery.refetch().catch(() => undefined);
-								roleQuery.refetch().catch(() => undefined);
-								seatQuery.refetch().catch(() => undefined);
-							}}
-							size="sm"
-							variant="ghost"
-						>
-							Try again
-						</Button>
-					</div>
-				</SettingsCard>
-			</SettingsSection>
+			<TeamsBillingLoadFailed
+				onRetry={() => {
+					subQuery.refetch().catch(() => undefined);
+					walletQuery.refetch().catch(() => undefined);
+					roleQuery.refetch().catch(() => undefined);
+					seatQuery.refetch().catch(() => undefined);
+				}}
+			/>
 		);
 	}
 
@@ -417,7 +225,22 @@ function TeamsBillingTabForOrg({
 		organizationPlanId ? { seats: currentSeats } : {}
 	);
 	const currentDetail = isOrganizationPlan
-		? `${currentSeats} billed seats${seatStatus?.bonusSeats ? ` + ${seatStatus.bonusSeats} negotiated` : ""} · ${seatStatus?.memberCount ?? 0} active members · shared workspace access`
+		? seatStatus?.bonusSeats
+			? tl(
+					"{currentSeats} billed seats + {bonusSeats} negotiated · {memberCount} active members · shared workspace access",
+					{
+						bonusSeats: String(seatStatus.bonusSeats),
+						currentSeats: String(currentSeats),
+						memberCount: String(seatStatus?.memberCount ?? 0),
+					}
+				)
+			: tl(
+					"{currentSeats} billed seats · {memberCount} active members · shared workspace access",
+					{
+						currentSeats: String(currentSeats),
+						memberCount: String(seatStatus?.memberCount ?? 0),
+					}
+				)
 		: subQuery.data?.plan
 			? "Existing organization plan"
 			: "No active Teams plan";
@@ -454,7 +277,9 @@ function TeamsBillingTabForOrg({
 	const saveSeats = async () => {
 		if (previewSeatCount > TEAMS_MAX_SEATS) {
 			sileo.error({
-				title: `Teams self-serve covers up to ${TEAMS_MAX_SEATS} seats`,
+				title: tl("Teams self-serve covers up to {maxSeats} seats", {
+					maxSeats: String(TEAMS_MAX_SEATS),
+				}),
 				description: "Contact Enterprise for larger organizations.",
 			});
 			return;
@@ -573,7 +398,21 @@ function TeamsBillingTabForOrg({
 							}
 							description={
 								isOrganizationPlan
-									? `Your organization is on ${planLabel(organizationPlanId)} at ${currentAmount} (${seatStatus?.includedSeats ?? currentSeats} member capacity: ${currentSeats} billed${seatStatus?.bonusSeats ? ` + ${seatStatus.bonusSeats} negotiated` : ""} · ${seatStatus?.memberCount ?? 0} active members).`
+									? tl(
+											seatStatus?.bonusSeats
+												? "Your organization is on {plan} at {amount} ({capacity} member capacity: {currentSeats} billed + {bonusSeats} negotiated · {memberCount} active members)."
+												: "Your organization is on {plan} at {amount} ({capacity} member capacity: {currentSeats} billed · {memberCount} active members).",
+											{
+												amount: currentAmount,
+												bonusSeats: String(seatStatus?.bonusSeats ?? 0),
+												capacity: String(
+													seatStatus?.includedSeats ?? currentSeats
+												),
+												currentSeats: String(currentSeats),
+												memberCount: String(seatStatus?.memberCount ?? 0),
+												plan: planLabel(organizationPlanId),
+											}
+										)
 									: "Subscribe your organization to Teams for shared managed inference and member seats."
 							}
 							title={
@@ -591,150 +430,46 @@ function TeamsBillingTabForOrg({
 					</SettingsGroup>
 				)}
 				{!loading && accessFailed ? (
-					<SettingsCard>
-						<div className="flex flex-col items-start gap-3">
-							<p
-								className="text-sm text-status-destructive"
-								data-testid="teams-billing-access-unavailable"
-								role="alert"
-							>
-								We couldn&apos;t check your billing permissions, so seat and
-								billing controls are hidden. Check your connection and try
-								again.
-							</p>
-							<Button
-								disabled={permissionsQuery.isFetching}
-								onClick={() => {
-									permissionsQuery.refetch().catch(() => undefined);
-								}}
-								size="sm"
-								variant="ghost"
-							>
-								{permissionsQuery.isFetching ? "Retrying…" : "Try again"}
-							</Button>
-						</div>
-					</SettingsCard>
+					<TeamsBillingAccessUnavailable
+						isFetching={permissionsQuery.isFetching}
+						onRetry={() => {
+							permissionsQuery.refetch().catch(() => undefined);
+						}}
+					/>
 				) : null}
 			</SettingsSection>
 
 			{isOrganizationPlan && (
-				<SettingsSection title="Seats">
-					<SettingsGroup>
-						<SettingsItem
-							actions={
-								<span className="text-muted-foreground text-sm tabular-nums">
-									{seatStatus?.allocatedSeats ?? 0} of{" "}
-									{seatStatus?.includedSeats ?? "—"}
-								</span>
-							}
-							description={`${seatStatus?.memberCount ?? 0} active members and ${seatStatus?.pendingInvitations ?? 0} pending invitations reserve seats. ${seatStatus?.allocatedSeats ?? 0} allocated of ${seatStatus?.includedSeats ?? "—"} capacity (${currentSeats} billed${seatStatus?.bonusSeats ? ` + ${seatStatus.bonusSeats} negotiated` : ""}); the shared pool adds $${includedCreditBundle} for ${poolBundleRule(organizationPlanId)}.`}
-							title="Member seats"
-						/>
-					</SettingsGroup>
-				</SettingsSection>
+				<TeamsBillingSeatsSection
+					currentSeats={currentSeats}
+					includedCreditBundle={includedCreditBundle}
+					organizationPlanId={organizationPlanId}
+					seatStatus={seatStatus}
+				/>
 			)}
 
-			<SettingsSection title="Pooled wallet">
-				{walletQuery.isLoading ? (
-					<SettingsCard>
-						<SkeletonRows />
-					</SettingsCard>
-				) : (
-					// Grouped rows straight on the pane: the breakdown draws its own
-					// cards, so wrapping it in another one would nest card in card.
-					<CreditBalanceBreakdown
-						appearance="grouped"
-						balanceBreakdownAvailable={
-							walletQuery.data?.wallet.balanceBreakdownAvailable
-						}
-						currency={walletQuery.data?.wallet.currency}
-						giftCreditsMicroUsd={
-							walletQuery.data?.wallet.giftBalanceMicroUsd ?? null
-						}
-						onDemandCreditsMicroUsd={
-							walletQuery.data?.wallet.topupBalanceMicroUsd ?? null
-						}
-						planAllowanceMicroUsd={
-							subQuery.data?.entitlement.monthlyCreditPoolMicroUsd ?? null
-						}
-						planCreditsMicroUsd={
-							walletQuery.data?.wallet.subscriptionBalanceMicroUsd ?? null
-						}
-						providerAllocations={
-							walletQuery.data?.wallet.balanceBreakdownAvailable === false
-								? (walletQuery.data.wallet.providerAllocations?.map(
-										(allocation) => ({
-											expiresAtLabel: formatCreditExpiry(allocation.expiresAt),
-											id: allocation.poolId,
-											isFreeProvider: allocation.isFreeProvider,
-											label: allocation.label,
-											remainingMicroUsd: allocation.remainingMicroUsd,
-										})
-									) ?? null)
-								: providerAllocations
-						}
-						totalMicroUsd={walletQuery.data?.wallet.balanceMicroUsd ?? null}
-					/>
-				)}
-			</SettingsSection>
+			<TeamsBillingWalletSection
+				providerAllocations={providerAllocations}
+				subQuery={subQuery}
+				walletQuery={walletQuery}
+			/>
 
-			<Dialog
-				onOpenChange={(open) => {
-					setReviewOpen(open);
-					if (!open) {
-						setReviewError(null);
-					}
-				}}
-				open={reviewOpen}
-			>
-				<DialogContent showCloseButton={!reviewPending}>
-					<DialogHeader>
-						<DialogTitle>Review plan change</DialogTitle>
-						<DialogDescription>
-							Review the organization plan and member-seat quantity before Ryu
-							opens the secure checkout.
-						</DialogDescription>
-					</DialogHeader>
-					<BeforeAfterSummary
-						current={{
-							amount: currentAmount,
-							detail: currentDetail,
-							eyebrow: "Current",
-							label: planLabel(currentPlanId),
-						}}
-						footer={{
-							detail: `Shared AI pool: ${formatMicroUsd(Math.round(previewCreditPool * 1_000_000))}/mo. It adds $${includedCreditBundle} for ${poolBundleRule(organizationPlanId)}. Each additional billed member seat is $${TEAMS_AGENT_STANDARD_USD}/mo.`,
-							label: "New allowance",
-							value: `${previewSeatCount} member seats`,
-						}}
-						next={{
-							amount: formatMonthlyUsd(previewMonthlyPrice),
-							detail: `${previewSeatCount} member seats · shared workspace · seat changes prorate and charge now`,
-							eyebrow: "New",
-							label: planLabel(organizationPlanId ?? "teams"),
-						}}
-					/>
-					{reviewError ? (
-						<p className="text-sm text-status-destructive" role="alert">
-							{reviewError}
-						</p>
-					) : null}
-					<DialogFooter>
-						<DialogClose
-							disabled={reviewPending}
-							render={<Button disabled={reviewPending} variant="ghost" />}
-						>
-							Cancel
-						</DialogClose>
-						<Button
-							loading={reviewPending}
-							onClick={() => void startCheckout()}
-						>
-							Continue to checkout
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			<TeamsBillingReviewDialog
+				currentAmount={currentAmount}
+				currentDetail={currentDetail}
+				currentPlanId={currentPlanId}
+				includedCreditBundle={includedCreditBundle}
+				organizationPlanId={organizationPlanId}
+				previewCreditPool={previewCreditPool}
+				previewMonthlyPrice={previewMonthlyPrice}
+				previewSeatCount={previewSeatCount}
+				reviewError={reviewError}
+				reviewOpen={reviewOpen}
+				reviewPending={reviewPending}
+				setReviewError={setReviewError}
+				setReviewOpen={setReviewOpen}
+				startCheckout={startCheckout}
+			/>
 			{stepUp.dialog}
 		</div>
 	);

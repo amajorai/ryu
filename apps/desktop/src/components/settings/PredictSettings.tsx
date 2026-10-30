@@ -101,7 +101,9 @@ function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 				}
 			})
 			.catch(() => {
-				if (!cancelled) setReadError(true);
+				if (!cancelled) {
+					setReadError(true);
+				}
 			});
 		return () => {
 			cancelled = true;
@@ -110,7 +112,9 @@ function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 
 	const persist = useCallback(
 		async (next: PredictConfig) => {
-			if (!loaded || savingRef.current) return;
+			if (!loaded || savingRef.current) {
+				return;
+			}
 			savingRef.current = true;
 			setSaving(true);
 			setFailedChange(null);
@@ -119,12 +123,18 @@ function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 			setDebounceText(String(next.debounceMs));
 			try {
 				const ok = await setPredictConfig(target, next);
-				if (!mounted.current) return;
-				if (!ok) throw new Error("Autocomplete write refused");
+				if (!mounted.current) {
+					return;
+				}
+				if (!ok) {
+					throw new Error("Autocomplete write refused");
+				}
 				savedConfig.current = next;
 				toast.success("Autocomplete settings saved");
 			} catch {
-				if (!mounted.current) return;
+				if (!mounted.current) {
+					return;
+				}
 				const previous = savedConfig.current;
 				if (previous) {
 					setCfg(previous);
@@ -212,16 +222,16 @@ function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 					</Button>
 				</div>
 			) : null}
-			<fieldset disabled={disabled} className="space-y-6">
+			<fieldset className="space-y-6" disabled={disabled}>
 				<SettingsSection
 					caption={
 						<>
 							Inline ghost-text autocomplete in <strong>any</strong> text field.
-							press <kbd className="rounded bg-muted px-1">Tab</kbd> to accept.
-							The companion reads the text before your cursor, asks the model
-							below for a continuation (through the Gateway, like every model
-							call), and shows it inline. Password and secure fields are never
-							read.
+							press <kbd className="rounded-sm bg-muted px-1">Tab</kbd> to
+							accept. The companion reads the text before your cursor, asks the
+							model below for a continuation (through the Gateway, like every
+							model call), and shows it inline. Password and secure fields are
+							never read.
 						</>
 					}
 					title="Autocomplete (everywhere)"
@@ -285,22 +295,22 @@ function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 						<div className="space-y-1.5">
 							<Label htmlFor="predict-allowlist">Allowed apps</Label>
 							<Textarea
-								disabled={disabled}
 								className="min-h-24"
+								disabled={disabled}
 								id="predict-allowlist"
 								onBlur={saveAllowlist}
 								onChange={(e) => setAllowlistText(e.target.value)}
 								placeholder="Leave empty to allow every app. One app name per line."
 								typography="small"
-								variant="code"
 								value={allowlistText}
+								variant="code"
 							/>
 						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor="predict-debounce">Debounce (ms)</Label>
 							<Input
-								disabled={disabled}
 								className="h-9"
+								disabled={disabled}
 								id="predict-debounce"
 								inputMode="numeric"
 								onBlur={(e) => saveDebounce(e.target.value)}

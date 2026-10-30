@@ -276,7 +276,7 @@ test("retries a failed settings read and shows the adapter support note", async 
 	await renderSettings({ adapterSupported: false, engineId: "parakeet" });
 
 	expect(readCalls).toHaveLength(1);
-	expect(alertText()).toContain("Could not load transcription settings.");
+	expect(alertText()).toContain("Couldn't load transcription settings.");
 	expect(buttonNamed("Retry").disabled).toBe(false);
 
 	await clickButton("Retry");
@@ -369,7 +369,7 @@ test("preserves and retries a valid save, then refetches the engine preference",
 
 	await clickButton("Save transcription settings");
 	await waitForCondition(
-		() => alertText().includes("Core write failed; try again."),
+		() => alertText().includes("Couldn't save transcription settings."),
 		"save error"
 	);
 
@@ -379,7 +379,8 @@ test("preserves and retries a valid save, then refetches the engine preference",
 		target: ACTIVE_NODE,
 		value: JSON.stringify(savedConfig),
 	});
-	expect(alertText()).toContain("Core write failed; try again.");
+	// The raw cause stays behind "Copy details".
+	expect(alertText()).not.toContain("Core write failed; try again.");
 	expect(readCalls).toHaveLength(1);
 	expect(fieldNamed("Language").value).toBe("fr");
 	expect(fieldNamed("Prompt").value).toBe("Project names and places.");

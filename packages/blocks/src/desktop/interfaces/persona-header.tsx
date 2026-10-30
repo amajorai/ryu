@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -48,13 +48,28 @@ function StatusMark({ status }: { status: PersonaStatus["status"] }) {
 }
 
 function StepDetail({ thread }: { thread: InterfaceThread }) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<span className="flex flex-col gap-0.5 text-muted-foreground text-xs">
 			<span className="tabular-nums">
-				{countLabel(thread.messageCount, "message")} · last activity{" "}
-				<time dateTime={thread.updatedAt} title={fullTime(thread.updatedAt)}>
-					{dayTime(thread.updatedAt)}
-				</time>
+				{tlRich(
+					"{messageCount, plural, one {{messageCountText} message} other {{messageCountText} messages}} · last activity <time>{lastActivity}</time>",
+					{
+						lastActivity: dayTime(thread.updatedAt),
+						messageCount: thread.messageCount,
+						messageCountText: String(thread.messageCount),
+					},
+					{
+						time: (chunks) => (
+							<time
+								dateTime={thread.updatedAt}
+								title={fullTime(thread.updatedAt)}
+							>
+								{chunks}
+							</time>
+						),
+					}
+				)}
 			</span>
 			{thread.lastMessage ? (
 				<span className="line-clamp-2 text-foreground/80">

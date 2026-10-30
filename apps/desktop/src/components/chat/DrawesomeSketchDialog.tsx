@@ -13,7 +13,7 @@ import {
 } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useCallback, useMemo, useState } from "react";
 import { z } from "zod";
-import { PluginHostPanel } from "@/src/contributions/host/PluginHostPanel.tsx";
+import { PluginHostPanel } from "@/src/contributions/host/LazyPluginHostPanel.tsx";
 import type { PluginCompanion } from "@/src/lib/api/plugins.ts";
 
 const PNG_DATA_URL_PREFIX = "data:image/png;base64,";

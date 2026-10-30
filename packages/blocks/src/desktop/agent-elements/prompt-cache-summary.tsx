@@ -113,9 +113,9 @@ export function PromptCacheSummary({
 				value={statusLabel(status, tl)}
 			/>
 			{caption ? (
-				<p className="type-caption text-muted-foreground">{caption}</p>
+				<p className="text-muted-foreground text-xs">{caption}</p>
 			) : null}
-			<p className="type-caption text-muted-foreground">
+			<p className="text-muted-foreground text-xs">
 				Caches are per model — switching models starts a fresh one.
 			</p>
 		</div>

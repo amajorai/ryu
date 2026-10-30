@@ -1,16 +1,7 @@
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { type InterfaceEvent, localDayKey } from "@ryuhq/protocol/interfaces";
 import { AnimatePresence, motion } from "motion/react";
-import {
-	type CSSProperties,
-	type ReactNode,
-	type PointerEvent as ReactPointerEvent,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { HubAmbient } from "./hub-ambient.tsx";
 import { HubBackdrop } from "./hub-backdrop.tsx";
 import { HubSkeletonCard } from "./hub-card.tsx";
@@ -21,10 +12,15 @@ import {
 	HubWorkingCard,
 } from "./hub-cards.tsx";
 import { HubAgentsCard, HubComposeCard } from "./hub-compose.tsx";
+import { HUB_STYLE, PageDots } from "./hub-interface-chrome.tsx";
 import {
-	HUB_CARD_LABELS,
+	useHubFocusReturn,
+	useHubIdle,
+	useHubKeys,
+} from "./hub-interface-focus.ts";
+import { useHubTrack } from "./hub-interface-track.ts";
+import {
 	HUB_CARDS,
-	HUB_IDLE_MS,
 	type HubKeyAction,
 	hubAgentRuns,
 	hubAgents,
@@ -37,13 +33,11 @@ import {
 	hubGlyph,
 	hubGlyphCount,
 	hubGreeting,
-	hubKeyAction,
 	hubStatusParts,
 	hubThreads,
 	hubTopicPrompt,
 	hubUpcoming,
 	hubWithFailedRuns,
-	isHubTypingTarget,
 	stepHubCard,
 } from "./hub-model.ts";
 import {
@@ -52,100 +46,8 @@ import {
 	HubThreadSheet,
 	useHubClock,
 } from "./hub-parts.tsx";
-import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
-
-interface HubStyle extends CSSProperties {
-	"--hub-card": string;
-	"--hub-card-h": string;
-	"--hub-card-wide": string;
-	"--hub-gutter": string;
-}
-
-const HUB_STYLE: HubStyle = {
-	"--hub-card": "min(calc(100cqw - 3rem), clamp(20rem, 29cqw, 26rem))",
-	// One height for every card: the room under the header and above the
-	// dots, capped so a tall screen does not stretch the cards into posters.
-	"--hub-card-h": "clamp(17rem, calc(100cqh - 14rem), 34rem)",
-	// The last card fills what the card before it leaves, so at the end of the
-	// row both rest between the gutters and nothing is clipped.
-	"--hub-card-wide":
-		"min(56rem, max(min(calc(100cqw - 3rem), clamp(20rem, 40cqw, 36rem)), calc(100cqw - 2 * var(--hub-gutter) - var(--hub-card) - 1rem)))",
-	"--hub-gutter": "clamp(1.5rem, 5cqw, 4.5rem)",
-};
-
-/** Mouse travel before a press on the cards becomes a drag. */
-const DRAG_PX = 6;
-/**
- * Longest a programmatic scroll owns the active card. It normally releases as
- * soon as the row arrives; this only covers a scroll the user interrupts.
- */
-const SCROLL_SETTLE_MS = 2000;
-/** When a smooth scroll that has not arrived is finished without animation. */
-const SCROLL_ASSERT_MS = 900;
-
-/** Mark which ends of the row have cards cut off, for the edge fades. */
-function markTrackEdges(track: HTMLElement) {
-	const start = track.scrollLeft > 1;
-	const end = track.scrollLeft + track.clientWidth < track.scrollWidth - 1;
-	track.dataset.edgeStart = String(start);
-	track.dataset.edgeEnd = String(end);
-}
-
-/** Automation and reduced motion keep the cards up until someone leaves. */
-function idleTimeoutEnabled(reduceMotion: boolean | null): boolean {
-	if (reduceMotion) {
-		return false;
-	}
-	return !(typeof navigator !== "undefined" && navigator.webdriver);
-}
-
-function PageDots({
-	active,
-	hidden,
-	onSelect,
-}: {
-	active: number;
-	hidden: boolean;
-	onSelect: (index: number) => void;
-}) {
-	return (
-		<nav
-			aria-label="Cards"
-			className={cn(
-				// The hit areas are 44px tall; pull the row up so the dots sit
-				// about 32px under the cards.
-				"-mt-3 flex items-center justify-center transition-opacity duration-200 motion-reduce:transition-none",
-				hidden && "invisible opacity-0"
-			)}
-		>
-			{HUB_CARDS.map((card, index) => {
-				const current = index === active;
-				return (
-					<button
-						aria-current={current ? "true" : undefined}
-						aria-label={HUB_CARD_LABELS[card]}
-						className="group flex h-11 items-center justify-center px-2 outline-none"
-						key={card}
-						onClick={() => onSelect(index)}
-						title={HUB_CARD_LABELS[card]}
-						type="button"
-					>
-						<span
-							className={cn(
-								"block h-2 rounded-full transition-[width,background-color] duration-300 group-focus-visible:ring-3 group-focus-visible:ring-ring/40 motion-reduce:transition-none",
-								current
-									? "w-6 bg-foreground"
-									: "w-2 bg-foreground/25 group-hover:bg-foreground/45"
-							)}
-						/>
-					</button>
-				);
-			})}
-		</nav>
-	);
-}
 
 /**
  * Hub: Ryu as a smart display. It rests on an ambient screen (a calm picture,
@@ -160,6 +62,7 @@ export function HubInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const now = useHubClock();
 	const isOpen = threadView !== null && threadView !== undefined;
@@ -176,21 +79,26 @@ export function HubInterface({
 
 	const rootRef = useRef<HTMLDivElement>(null);
 	const sheetRef = useRef<HTMLElement>(null);
-	/** The last control focused outside the sheet: where focus returns. */
-	const returnFocusRef = useRef<HTMLElement | null>(null);
-	const trackRef = useRef<HTMLDivElement>(null);
 	const fieldRef = useRef<HTMLTextAreaElement>(null);
-	const cardRefs = useRef<(HTMLElement | null)[]>([]);
-	const scrollTargetRef = useRef<{ left: number; until: number } | null>(null);
 	const activityRef = useRef(Date.now());
-	const dragRef = useRef<{
-		dragging: boolean;
-		scrollLeft: number;
-		x: number;
-	} | null>(null);
-	const suppressClickRef = useRef(false);
-	const pendingScrollRef = useRef<number | null>(null);
-	const [scrollRequest, setScrollRequest] = useState(0);
+	const {
+		endDrag,
+		goTo,
+		onPointerDown,
+		onPointerMove,
+		onTrackScroll,
+		scrollTargetRef,
+		setCardRef,
+		suppressClickRef,
+		trackRef,
+	} = useHubTrack({
+		activeRef,
+		activityRef,
+		awake,
+		loading,
+		reduceMotion,
+		setActive,
+	});
 
 	const failedRuns = useMemo(
 		() => hubFailedRuns(snapshot.events, now),
@@ -230,65 +138,6 @@ export function HubInterface({
 	const clock = hubClock(now);
 	const clockText = [clock.time, clock.dayPeriod].filter(Boolean).join(" ");
 	const dayKey = localDayKey(new Date(now));
-
-	const scrollToCard = (index: number) => {
-		const track = trackRef.current;
-		const card = cardRefs.current[index];
-		if (!(track && card)) {
-			return;
-		}
-		const gutter = Number.parseFloat(getComputedStyle(track).paddingLeft) || 0;
-		const maxLeft = Math.max(0, track.scrollWidth - track.clientWidth);
-		const left = Math.min(maxLeft, Math.max(0, card.offsetLeft - gutter));
-		const target = { left, until: Date.now() + SCROLL_SETTLE_MS };
-		scrollTargetRef.current = target;
-		track.scrollTo?.({ behavior: reduceMotion ? "auto" : "smooth", left });
-		// A smooth scroll can be cut short (a retarget mid-flight, a busy main
-		// thread); if this one has not landed by now, put the row there.
-		window.setTimeout(() => {
-			if (scrollTargetRef.current === target) {
-				settleTrack(track);
-			}
-		}, SCROLL_ASSERT_MS);
-	};
-
-	const settleTrack = (track: HTMLElement) => {
-		const target = scrollTargetRef.current;
-		if (!target || Math.abs(track.scrollLeft - target.left) <= 2) {
-			return;
-		}
-		track.scrollTo?.({ behavior: "auto", left: target.left });
-	};
-
-	const goTo = (index: number, focus = true) => {
-		const next = stepHubCard(index, 0);
-		activeRef.current = next;
-		setActive(next);
-		// Scroll once the row has rendered: a key pressed right after waking
-		// arrives before the cards have mounted.
-		pendingScrollRef.current = next;
-		setScrollRequest((request) => request + 1);
-		// Keyboard focus follows the card only once it is already among the
-		// cards; arrows from the page move the row without a focus ring.
-		const focused = document.activeElement;
-		if (focus && focused && trackRef.current?.contains(focused)) {
-			cardRefs.current[next]?.focus({ preventScroll: true });
-		}
-	};
-
-	const scrollToCardRef = useRef(scrollToCard);
-	scrollToCardRef.current = scrollToCard;
-	useEffect(() => {
-		const pending = pendingScrollRef.current;
-		if (scrollRequest === 0 || pending === null || !awake || loading) {
-			return;
-		}
-		if (!cardRefs.current[pending]) {
-			return;
-		}
-		pendingScrollRef.current = null;
-		scrollToCardRef.current(pending);
-	}, [awake, loading, scrollRequest]);
 
 	const wake = () => {
 		activityRef.current = Date.now();
@@ -337,243 +186,9 @@ export function HubInterface({
 	const runActionRef = useRef(runAction);
 	runActionRef.current = runAction;
 
-	useEffect(() => {
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (isInterfaceCovered(rootRef.current)) {
-				return;
-			}
-			activityRef.current = Date.now();
-			if (event.defaultPrevented || event.isComposing) {
-				return;
-			}
-			const action = hubKeyAction(event);
-			if (!action || isHubTypingTarget(event.target)) {
-				return;
-			}
-			const target = event.target;
-			// Inside the sheet the host's conversation keeps its keys; only
-			// Escape (when the host has not used it) goes back to the cards.
-			if (
-				target instanceof Node &&
-				sheetRef.current?.contains(target) &&
-				action !== "close"
-			) {
-				return;
-			}
-			const onPage =
-				target === document.body ||
-				target === document.documentElement ||
-				(target instanceof Node && rootRef.current?.contains(target) === true);
-			if (!onPage) {
-				return;
-			}
-			// Enter and Space keep activating focused buttons once awake.
-			if (
-				action === "wake" &&
-				target instanceof Element &&
-				target.closest("button, a, [role='radio']")
-			) {
-				return;
-			}
-			if (runActionRef.current(action, target)) {
-				event.preventDefault();
-			}
-		};
-		document.addEventListener("keydown", onKeyDown);
-		return () => document.removeEventListener("keydown", onKeyDown);
-	}, []);
-
-	// Remember the last control focused outside the sheet, so closing the
-	// sheet returns focus to the row (or field) that opened it.
-	useEffect(() => {
-		const root = rootRef.current;
-		if (!root) {
-			return;
-		}
-		const onFocusIn = (event: FocusEvent) => {
-			const target = event.target;
-			if (
-				target instanceof HTMLElement &&
-				target !== root &&
-				!sheetRef.current?.contains(target)
-			) {
-				returnFocusRef.current = target;
-			}
-		};
-		root.addEventListener("focusin", onFocusIn);
-		return () => root.removeEventListener("focusin", onFocusIn);
-	}, []);
-
-	// The sheet is modal: focus moves into it on open and back out on close.
-	const wasOpenRef = useRef(isOpen);
-	useLayoutEffect(() => {
-		const wasOpen = wasOpenRef.current;
-		wasOpenRef.current = isOpen;
-		if (isOpen) {
-			// The dialog itself takes focus (no ring on the back control until
-			// someone tabs to it); Escape and Tab work from there.
-			sheetRef.current?.focus({ preventScroll: true });
-			return;
-		}
-		if (!wasOpen) {
-			return;
-		}
-		const previous = returnFocusRef.current;
-		if (previous?.isConnected && !previous.closest("[inert]")) {
-			previous.focus({ preventScroll: true });
-		} else {
-			rootRef.current?.focus({ preventScroll: true });
-		}
-	}, [isOpen]);
-
-	// Dim back to the ambient screen after a quiet spell, like the reference.
-	useEffect(() => {
-		if (!(awake && !isOpen && idleTimeoutEnabled(reduceMotion))) {
-			return;
-		}
-		activityRef.current = Date.now();
-		const timer = setInterval(() => {
-			const field = fieldRef.current;
-			const composing =
-				field !== null &&
-				(document.activeElement === field || field.value.trim() !== "");
-			if (composing || document.visibilityState === "hidden") {
-				activityRef.current = Date.now();
-				return;
-			}
-			if (Date.now() - activityRef.current >= HUB_IDLE_MS) {
-				setAwake(false);
-			}
-		}, 5000);
-		return () => clearInterval(timer);
-	}, [awake, isOpen, reduceMotion]);
-
-	const onTrackScroll = () => {
-		activityRef.current = Date.now();
-		const track = trackRef.current;
-		if (!track) {
-			return;
-		}
-		markTrackEdges(track);
-		if (dragRef.current?.dragging) {
-			return;
-		}
-		// A row moving to a chosen card keeps that card active until it lands.
-		const target = scrollTargetRef.current;
-		if (target) {
-			const landed = Math.abs(track.scrollLeft - target.left) <= 2;
-			if (landed || Date.now() > target.until) {
-				scrollTargetRef.current = null;
-			}
-			return;
-		}
-		const current = activeRef.current;
-		const gutter = Number.parseFloat(getComputedStyle(track).paddingLeft) || 0;
-		const atEnd = track.scrollLeft >= track.scrollWidth - track.clientWidth - 4;
-		const viewRight = track.scrollLeft + track.clientWidth;
-		const fullyVisible = (card: HTMLElement | null | undefined) =>
-			card !== null &&
-			card !== undefined &&
-			card.offsetLeft >= track.scrollLeft &&
-			card.offsetLeft + card.offsetWidth <= viewRight + 1;
-		if (atEnd && fullyVisible(cardRefs.current[current])) {
-			return;
-		}
-		let nearest = 0;
-		let distance = Number.POSITIVE_INFINITY;
-		for (const [index, card] of cardRefs.current.entries()) {
-			if (!card) {
-				continue;
-			}
-			const gap = Math.abs(card.offsetLeft - gutter - track.scrollLeft);
-			if (gap < distance) {
-				distance = gap;
-				nearest = index;
-			}
-		}
-		activeRef.current = nearest;
-		setActive(nearest);
-	};
-
-	// When a scroll ends short of the chosen card, finish the move.
-	const settleTrackRef = useRef(settleTrack);
-	settleTrackRef.current = settleTrack;
-	useEffect(() => {
-		const track = trackRef.current;
-		if (!(awake && track)) {
-			return;
-		}
-		const onScrollEnd = () => settleTrackRef.current(track);
-		track.addEventListener("scrollend", onScrollEnd);
-		return () => track.removeEventListener("scrollend", onScrollEnd);
-	}, [awake]);
-
-	// Fade whichever edge has a card cut off behind it.
-	useEffect(() => {
-		const track = trackRef.current;
-		if (!(awake && track)) {
-			return;
-		}
-		markTrackEdges(track);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver(() => markTrackEdges(track));
-		observer.observe(track);
-		return () => observer.disconnect();
-	}, [awake]);
-
-	// Mouse drag scrolls the row; touch and trackpads scroll it natively.
-	const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-		activityRef.current = Date.now();
-		scrollTargetRef.current = null;
-		const track = trackRef.current;
-		if (event.pointerType !== "mouse" || event.button !== 0 || !track) {
-			dragRef.current = null;
-			return;
-		}
-		if (isHubTypingTarget(event.target)) {
-			dragRef.current = null;
-			return;
-		}
-		dragRef.current = {
-			dragging: false,
-			scrollLeft: track.scrollLeft,
-			x: event.clientX,
-		};
-	};
-	const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-		const drag = dragRef.current;
-		const track = trackRef.current;
-		if (!(drag && track)) {
-			return;
-		}
-		const dx = event.clientX - drag.x;
-		if (!drag.dragging && Math.abs(dx) < DRAG_PX) {
-			return;
-		}
-		if (!drag.dragging) {
-			drag.dragging = true;
-			track.style.scrollSnapType = "none";
-			track.setPointerCapture?.(event.pointerId);
-		}
-		track.scrollLeft = drag.scrollLeft - dx;
-	};
-	const endDrag = () => {
-		const drag = dragRef.current;
-		dragRef.current = null;
-		const track = trackRef.current;
-		if (!(drag?.dragging && track)) {
-			return;
-		}
-		suppressClickRef.current = true;
-		track.style.scrollSnapType = "";
-		const moved = track.scrollLeft - drag.scrollLeft;
-		const from = activeRef.current;
-		const width = cardRefs.current[from]?.offsetWidth ?? 1;
-		const steps = Math.round(moved / width) || Math.sign(moved);
-		goTo(stepHubCard(from, steps), false);
-	};
+	useHubKeys({ activityRef, rootRef, runActionRef, sheetRef });
+	useHubFocusReturn({ isOpen, rootRef, sheetRef });
+	useHubIdle({ activityRef, awake, fieldRef, isOpen, reduceMotion, setAwake });
 
 	const composeIndex = HUB_CARDS.indexOf("compose");
 	const pickAgent = (agentId: string) => {
@@ -593,9 +208,6 @@ export function HubInterface({
 	const askAboutRun = (run: InterfaceEvent) =>
 		toComposer(run.agentId ?? undefined, run.title);
 	const onOpenThread = (threadId: string) => port.openThread(threadId);
-	const setCardRef = (index: number) => (element: HTMLElement | null) => {
-		cardRefs.current[index] = element;
-	};
 	const threadCardProps = { now, onOpenThread, snapshot };
 
 	let cards: ReactNode;
@@ -711,7 +323,7 @@ export function HubInterface({
 							</div>
 							<button
 								aria-keyshortcuts="Escape"
-								aria-label={`${clockText}, ambient screen`}
+								aria-label={tl("{clockText}, ambient screen", { clockText })}
 								className="-mt-1.5 -mr-3 inline-flex h-12 shrink-0 items-baseline gap-1.5 rounded-full px-3 pt-1.5 text-[28px] text-foreground tabular-nums leading-9 tracking-[-0.01em] outline-none transition-colors duration-150 hover:bg-foreground/5 focus-visible:ring-3 focus-visible:ring-ring/40 active:bg-foreground/10"
 								data-testid="hub-header-clock"
 								onClick={sleep}

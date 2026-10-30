@@ -7,7 +7,7 @@ import {
 	motion,
 	type Transition,
 	useReducedMotion,
-} from "framer-motion";
+} from "motion/react";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import layout from "./chat-layout.module.css";
@@ -88,11 +88,10 @@ export function BotChatHeader({
 			{/* Reserves the expanded bubble's height so the transcript never jumps. */}
 			<div className="flex h-12 items-start justify-center">
 				<motion.div
-					className="flex max-w-[18rem] flex-col items-center bg-muted/80 px-4 py-1.5 text-foreground shadow-sm ring-1 ring-border/30"
+					className="flex max-w-[18rem] flex-col items-center rounded-3xl bg-muted px-4 py-1.5 text-foreground"
 					data-state={state}
 					data-testid="bot-chat-header-name"
 					layout
-					style={{ borderRadius: 20 }}
 					transition={transition}
 				>
 					<motion.span
@@ -110,7 +109,7 @@ export function BotChatHeader({
 								className={cn(
 									"block max-w-full truncate text-xs leading-4",
 									state === "error"
-										? "text-destructive"
+										? "text-status-destructive"
 										: "text-muted-foreground"
 								)}
 								data-testid="bot-chat-header-status"

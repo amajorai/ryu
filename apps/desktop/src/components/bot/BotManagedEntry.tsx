@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import Layout from "@/src/components/layout/Layout.tsx";
 import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -67,10 +68,10 @@ function BotEntryCard({
 	return (
 		<Card className="w-full max-w-md">
 			<CardHeader appearance="bot-entry">
-				<Logo size="48px" variant="outline" />
+				<Logo size="32px" variant="outline" />
 				<PageHeader
 					className="text-center"
-					stagger={false}
+					size="app"
 					subtitle={
 						checking
 							? "Checking your Ryu subscription."
@@ -83,12 +84,7 @@ function BotEntryCard({
 			</CardHeader>
 			<CardContent inset="bot-entry">
 				{error ? (
-					<p
-						className="text-center text-sm text-status-destructive"
-						role="alert"
-					>
-						{error}
-					</p>
+					<ErrorLine className="justify-center" message={error} />
 				) : checking ? (
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
 						<Spinner /> Checking your subscription…

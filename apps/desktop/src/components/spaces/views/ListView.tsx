@@ -1,6 +1,7 @@
+import { ArrowExpand01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Maximize2, Plus } from "lucide-react";
 import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
 import { CellValue } from "./cell-display.tsx";
 
@@ -61,10 +62,11 @@ export function ListView({
 									/>
 								))}
 							</div>
-							<Maximize2
+							<HugeiconsIcon
 								className={cn(
 									"size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100"
 								)}
+								icon={ArrowExpand01Icon}
 							/>
 						</button>
 					);
@@ -83,7 +85,7 @@ export function ListView({
 						size="sm"
 						variant="ghost-muted"
 					>
-						<Plus className="size-3.5" />
+						<HugeiconsIcon className="size-3.5" icon={PlusSignIcon} />
 						New row
 					</Button>
 				</div>

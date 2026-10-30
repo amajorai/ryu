@@ -217,8 +217,25 @@ test("a persisted Gateway clear refreshes to no key and surfaces the keychain mi
 	gatewayKey = "sk-openai-existing";
 	await mount();
 	expect(openaiRow().textContent).toContain("Key set");
+	// Clear lives in the row's ⋯ menu.
+	const menuTrigger = openaiRow().querySelector(
+		'button[aria-label="OpenAI key actions"]'
+	);
+	if (!(menuTrigger instanceof HTMLElement)) {
+		throw new Error("Missing key actions menu");
+	}
 	await act(async () => {
-		rowButton("Clear").click();
+		menuTrigger.click();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	});
+	const clearItem = [...document.querySelectorAll('[role="menuitem"]')].find(
+		(item) => item.textContent?.trim() === "Clear"
+	);
+	if (!(clearItem instanceof HTMLElement)) {
+		throw new Error("Missing Clear menu item");
+	}
+	await act(async () => {
+		clearItem.click();
 	});
 	await settle();
 

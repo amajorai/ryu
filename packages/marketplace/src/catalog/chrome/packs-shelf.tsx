@@ -17,6 +17,10 @@ import visualStyles from "../../marketplace-visual.module.css";
 
 import { ArrowLeft01Icon, PackageIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	STORE_LOAD_ERROR_SENTENCE,
+	StoreErrorDetails,
+} from "@ryu/blocks/desktop/store-error-details.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -117,7 +121,7 @@ function PacksShelfBody({
 	// Opened pack: reveal the member skills, with a back affordance.
 	if (opened) {
 		return (
-			<section className="border-border/60 border-b pb-4">
+			<section className="border-border border-b pb-4">
 				<div className="mx-auto w-full max-w-4xl px-4">
 					<div className="mb-3 flex items-center gap-2">
 						<Button
@@ -166,7 +170,7 @@ function PacksShelfBody({
 
 	if (loading && packs.length === 0) {
 		return (
-			<section className="border-border/60 border-b pb-4">
+			<section className="border-border border-b pb-4">
 				<div className="flex items-center justify-center gap-2 p-4 text-muted-foreground text-sm">
 					<Spinner className="size-4" />
 					Loading packs…
@@ -177,19 +181,20 @@ function PacksShelfBody({
 
 	if (error && packs.length === 0) {
 		return (
-			<section className="border-border/60 border-b pb-4">
+			<section className="border-border border-b pb-4">
 				<Empty spacing="snug">
 					<EmptyHeader>
 						<EmptyMedia variant="icon">
 							<HugeiconsIcon icon={PackageIcon} />
 						</EmptyMedia>
 						<EmptyTitle>Couldn't load packs</EmptyTitle>
-						<EmptyDescription>{error}</EmptyDescription>
+						<EmptyDescription>{STORE_LOAD_ERROR_SENTENCE}</EmptyDescription>
 					</EmptyHeader>
 					<EmptyContent>
-						<Button onClick={refresh} size="sm" variant="ghost">
+						<Button onClick={refresh} size="sm" variant="outline">
 							Try again
 						</Button>
+						<StoreErrorDetails message={error} />
 					</EmptyContent>
 				</Empty>
 			</section>
@@ -201,11 +206,11 @@ function PacksShelfBody({
 	}
 
 	return (
-		<section className="border-border/60 border-b pb-4">
+		<section className="border-border border-b pb-4">
 			<div className="mx-auto w-full max-w-4xl px-4">
 				<div className="mb-2 flex items-end justify-between gap-3">
 					<div>
-						<h3 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+						<h3 className="text-detail text-muted-foreground">
 							Featured skill packs
 						</h3>
 						<p className="mt-1 text-muted-foreground text-xs">

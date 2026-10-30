@@ -11,10 +11,10 @@ import {
 	minimumStartWords,
 } from "@ryu/blocks/session-box/wire.ts";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -132,7 +132,7 @@ export function SessionBoxComputerTargetSetting({
 					actions={
 						<select
 							aria-label="Where computer use runs in a conversation"
-							className="rounded-md border bg-background px-1.5 py-1 text-xs"
+							className="h-8 rounded-lg border-0 bg-muted/50 px-2 text-foreground text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							disabled={
 								!(reachable && canConfigure) || saving || value === null
 							}
@@ -150,10 +150,8 @@ export function SessionBoxComputerTargetSetting({
 						"With the session's own Box, the first computer or browser action in a conversation starts a Box with its own screen, billed from credits by the minute with a 5-minute minimum per start. Automations without a conversation always use this device."
 					}
 					title={
-						<span className="flex items-center gap-2.5">
-							<span className="contents" data-slot="settings-icon-tile">
-								<SettingsIconTile icon={MonitorDotIcon} tint="green" />
-							</span>
+						<span className="flex items-center gap-2">
+							<SettingsIconTile icon={MonitorDotIcon} />
 							Computer use in conversations
 						</span>
 					}
@@ -237,7 +235,9 @@ export function SessionBoxCostSetting({ target }: { target: ApiTarget }) {
 		return (
 			<SettingsGroup>
 				<SettingsItem
-					actions={<Badge variant="secondary">Allowed</Badge>}
+					actions={
+						<span className="text-muted-foreground text-sm">Allowed</span>
+					}
 					description={allowedText(tl, state)}
 					title="Session Box cost"
 				/>
@@ -389,9 +389,15 @@ export function ComputerUseSettings({
 	return (
 		<SettingsSection
 			caption={
-				canConfigure
-					? "These permissions belong to the selected device. The Gateway stores the policy; Ghost still has to pass the operating system's safety and permission checks."
-					: "These permissions belong to the selected device. The Gateway stores the policy; Ghost still has to pass the operating system's safety and permission checks. You can view this policy, but you need device configuration access to change it."
+				<CaptionInfo
+					detail={
+						"The Gateway stores the policy; Ghost still has to pass the operating system's safety and permission checks."
+					}
+				>
+					{canConfigure
+						? "These permissions belong to the selected device."
+						: "View only: changing them needs device configuration access."}
+				</CaptionInfo>
 			}
 			title="Device control"
 		>
@@ -423,9 +429,6 @@ export function ComputerUseSettings({
 				<SettingsItem
 					actions={
 						<div className="flex items-center gap-2">
-							<Badge variant={lockedUse ? "default" : "secondary"}>
-								{lockedUse ? "Allowed" : "Off"}
-							</Badge>
 							<Switch
 								aria-label="Allow locked use"
 								checked={lockedUse}
@@ -438,11 +441,8 @@ export function ComputerUseSettings({
 					}
 					description="Allow Ghost to request a locked-session path on this device. Turning this on does not unlock the device or bypass local safety controls."
 					title={
-						<span className="flex items-center gap-2.5">
-							{/* Tagged so the group's hairline starts at the label. */}
-							<span className="contents" data-slot="settings-icon-tile">
-								<SettingsIconTile icon={SquareLock01Icon} tint="blue" />
-							</span>
+						<span className="flex items-center gap-2">
+							<SettingsIconTile icon={SquareLock01Icon} />
 							Allow locked use
 						</span>
 					}
@@ -450,9 +450,6 @@ export function ComputerUseSettings({
 				<SettingsItem
 					actions={
 						<div className="flex items-center gap-2">
-							<Badge variant={securityKey ? "default" : "secondary"}>
-								{securityKey ? "Allowed" : "Off"}
-							</Badge>
 							<Switch
 								aria-label="Allow hardware security key"
 								checked={securityKey}
@@ -469,10 +466,8 @@ export function ComputerUseSettings({
 							: "Records whether features that use a security key connected to this device may do so. No current feature uses a security key, and the key always requires its own touch or PIN."
 					}
 					title={
-						<span className="flex items-center gap-2.5">
-							<span className="contents" data-slot="settings-icon-tile">
-								<SettingsIconTile icon={Key01Icon} tint="yellow" />
-							</span>
+						<span className="flex items-center gap-2">
+							<SettingsIconTile icon={Key01Icon} />
 							Allow hardware security key
 						</span>
 					}

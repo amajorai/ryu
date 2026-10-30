@@ -109,7 +109,7 @@ export function MapBody({
 
 	return (
 		<div
-			className="h-full w-full overflow-hidden rounded-md"
+			className="h-full w-full overflow-hidden rounded-lg"
 			ref={containerRef}
 		/>
 	);

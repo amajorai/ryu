@@ -20,6 +20,7 @@
 // Per the Core-vs-Gateway rule this is a Core-facing concern (it decides *what
 // runs*, i.e. which build). No Gateway policy is evaluated here.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { sileo } from "sileo";
@@ -38,111 +39,35 @@ import {
 	updateInstalledPlugin,
 } from "@/src/lib/api/plugins.ts";
 import { installSkill, listSkillUpdates } from "@/src/lib/api/skills.ts";
-import {
-	checkForUpdate,
-	type UpdateCheck,
-	updateCheckFailed,
-} from "@/src/lib/api/update.ts";
+import { checkForUpdate, updateCheckFailed } from "@/src/lib/api/update.ts";
 import { getAppVersion } from "@/src/lib/app-version.ts";
 import { fetchCatalog, installSidecar } from "@/src/lib/services-api.ts";
 import { isLocalNode, useNodeStore } from "@/src/store/useNodeStore.ts";
+import {
+	AGENT_CATALOG_KEY,
+	APP_KEY,
+	APP_VERSION_KEY,
+	APPS_KEY,
+	catalogKind,
+	MCP_UPDATES_KEY,
+	MODEL_UPDATES_KEY,
+	PLUGINS_CATALOG_KEY,
+	SIDECAR_CATALOG_KEY,
+	SKILL_UPDATES_KEY,
+	UPDATES_STALE_MS,
+} from "./useAvailableUpdates-keys.ts";
+import { invalidateAfterApply } from "./useAvailableUpdates-settle.ts";
+import type {
+	ApplyOutcome,
+	AvailableUpdate,
+	UseAvailableUpdatesResult,
+} from "./useAvailableUpdates-types.ts";
 
-/** The artifact families that can carry an available update. */
-export type UpdateKind =
-	| "app"
-	| "agent"
-	| "engine"
-	| "tool"
-	| "voice"
-	| "media"
-	| "plugin"
-	| "skill"
-	| "mcp"
-	| "model";
-
-/** One artifact with a newer version available. `key` is globally unique. */
-export interface AvailableUpdate {
-	/** App updates carry the raw verdict so apply can hand off to the native updater. */
-	appVerdict?: UpdateCheck;
-	currentVersion: string | null;
-	/** The id/name the apply endpoint expects (agent id, sidecar name, plugin id). */
-	id: string;
-	/** `${kind}:${id}` — stable across refetches, used as the React key + apply id. */
-	key: string;
-	kind: UpdateKind;
-	latestVersion: string | null;
-	/** Extra apply payload for models (needs both repo + filename to re-download). */
-	model?: { repoId: string; file: string };
-	name: string;
-	/** Release notes / changelog, when the source provides them (app only today). */
-	notes?: string | null;
-	/** Installed skill slug (skills only), to look up the skill's enabled state. */
-	slug?: string;
-	/** Catalog source that must apply the update (skills, MCP servers). */
-	source?: string;
-}
-
-// Match the owning Store sections' react-query keys so no duplicate fetch fires.
-const APP_KEY = (url: string) => ["update", "check", url] as const;
-const AGENT_CATALOG_KEY = (url: string) => ["agents", "catalog", url] as const;
-const SIDECAR_CATALOG_KEY = (url: string) =>
-	["catalog", "sidecars", url] as const;
-const APPS_KEY = (url: string) => ["apps", "list", url] as const;
-const PLUGINS_CATALOG_KEY = (url: string) =>
-	["plugins", "catalog", "all", url] as const;
-const MODEL_UPDATES_KEY = (url: string) => ["models", "updates", url] as const;
-const SKILL_UPDATES_KEY = (url: string) => ["skills", "updates", url] as const;
-const MCP_UPDATES_KEY = (url: string) => ["mcp", "updates", url] as const;
-const APP_VERSION_KEY = ["app", "version"] as const;
-
-// Upstream version checks are cheap on Core (VersionCache) but still remote;
-// keep them fresh for a minute so re-opening the popup is instant.
-const UPDATES_STALE_MS = 60_000;
-
-// When Core does the work in the background, re-check on this ladder after an
-// apply so the row reflects reality instead of the pre-press snapshot.
-const BACKGROUND_RECHECK_MS = [4000, 15_000, 45_000];
-
-/** A catalog category maps to the update kind shown in the UI. */
-function catalogKind(category: string): UpdateKind {
-	switch (category) {
-		case "provider":
-			return "engine";
-		case "voice":
-			return "voice";
-		case "media":
-			return "media";
-		case "agent":
-			return "agent";
-		default:
-			return "tool";
-	}
-}
-
-/**
- * What an apply achieved, so the result can be reported rather than guessed at.
- *
- * `silent` marks the one path that owns its own user-facing progress — the
- * native desktop updater, which toasts download progress and then relaunches.
- * Everything else reports through this hook, so there is exactly one place that
- * decides what an update press says.
- */
-interface ApplyOutcome {
-	detail: string | null;
-	silent: boolean;
-}
-
-export interface UseAvailableUpdatesResult {
-	/** Keys currently being applied (for per-row spinners). */
-	applyingKeys: Set<string>;
-	/** Apply one update; resolves when the update action completes. */
-	applyUpdate: (update: AvailableUpdate) => Promise<void>;
-	/** True while the first fetch of any source is in flight. */
-	loading: boolean;
-	/** Re-run every source's check. */
-	refresh: () => void;
-	updates: AvailableUpdate[];
-}
+export type {
+	AvailableUpdate,
+	UpdateKind,
+	UseAvailableUpdatesResult,
+} from "./useAvailableUpdates-types.ts";
 
 export function useAvailableUpdates(): UseAvailableUpdatesResult {
 	const getNode = useNodeStore((s) => s.getActiveNode);
@@ -154,6 +79,7 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 	const url = node.url;
 	const token = node.token ?? null;
 	const qc = useQueryClient();
+	const tl = useLiteralMessages();
 
 	const queries = useMemo(
 		() =>
@@ -409,13 +335,18 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 						// Reporting the latter as up-to-date is what made the row look
 						// stuck: the version never moved and the toast said it had.
 						return {
-							detail: res.hint ?? `${update.name} is already up to date.`,
+							detail:
+								res.hint ??
+								tl("{name} is already up to date.", { name: update.name }),
 							silent: false,
 						};
 					}
 					return {
 						detail: res.installedVersion
-							? `${update.name} updated to ${res.installedVersion}.`
+							? tl("{name} updated to {installedVersion}.", {
+									name: update.name,
+									installedVersion: res.installedVersion,
+								})
 							: `${update.name} updated.`,
 						silent: false,
 					};
@@ -424,7 +355,10 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 					const res = await updateInstalledPlugin(target, update.id);
 					return {
 						detail: res.version
-							? `${update.name} updated to ${res.version}.`
+							? tl("{name} updated to {version}.", {
+									name: update.name,
+									version: res.version,
+								})
 							: `${update.name} updated.`,
 						silent: false,
 					};
@@ -448,7 +382,9 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 					// Core installs in the background and streams bytes through the
 					// download center, so this resolves at the START of the work.
 					return {
-						detail: `Downloading ${update.name} — progress is in Downloads.`,
+						detail: tl("Downloading {name} — progress is in Downloads.", {
+							name: update.name,
+						}),
 						silent: false,
 					};
 				}
@@ -464,7 +400,9 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 						update.model.file
 					);
 					return {
-						detail: `Downloading ${update.name} — progress is in Downloads.`,
+						detail: tl("Downloading {name} — progress is in Downloads.", {
+							name: update.name,
+						}),
 						silent: false,
 					};
 				}
@@ -497,55 +435,13 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 		},
 		onError: (err, update) => {
 			sileo.error({
-				title: `Couldn't update ${update.name}`,
+				title: tl("Couldn't update {name}", { name: update.name }),
 				description: err instanceof Error ? err.message : String(err),
 				duration: null,
 			});
 		},
 		onSettled: (_data, _err, update) => {
-			// Revalidate the source that owned this update so the row clears once
-			// the new version is installed.
-			const invalidate = (key: readonly unknown[]) =>
-				Promise.resolve(qc.invalidateQueries({ queryKey: key })).catch(
-					() => undefined
-				);
-			// Kinds Core installs in the BACKGROUND resolve their request the moment
-			// the work is queued, so an immediate refetch still reports the old
-			// version and the row stays put looking like nothing happened. Re-check
-			// on a short ladder: the first pass catches the "installing" state (which
-			// drops the row), the later ones catch the finished version.
-			const recheck = (key: readonly unknown[]) => {
-				invalidate(key);
-				for (const delayMs of BACKGROUND_RECHECK_MS) {
-					setTimeout(() => invalidate(key), delayMs);
-				}
-			};
-			switch (update.kind) {
-				case "app":
-					invalidate(APP_KEY(url));
-					break;
-				case "agent":
-					invalidate(AGENT_CATALOG_KEY(url));
-					// The Agents page's per-row control reads a DIFFERENT key, so
-					// without this it kept offering an update already applied here.
-					invalidate(["agent-update", url, update.id]);
-					break;
-				case "plugin":
-					invalidate(APPS_KEY(url));
-					invalidate(PLUGINS_CATALOG_KEY(url));
-					break;
-				case "model":
-					recheck(MODEL_UPDATES_KEY(url));
-					break;
-				case "skill":
-					invalidate(SKILL_UPDATES_KEY(url));
-					break;
-				case "mcp":
-					invalidate(MCP_UPDATES_KEY(url));
-					break;
-				default:
-					recheck(SIDECAR_CATALOG_KEY(url));
-			}
+			invalidateAfterApply(qc, url, update);
 		},
 	});
 

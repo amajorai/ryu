@@ -27,11 +27,11 @@ test("proves the managed Bot desktop shell keeps Build controls hidden", async (
 	await expect(
 		page.getByText("Plan my weekend", { exact: true })
 	).toBeVisible();
-	await expect(page.getByRole("button", { name: "New section" })).toHaveCount(
+	await expect(page.getByRole("menuitem", { name: "New section" })).toHaveCount(
 		0
 	);
 	await expect(
-		page.getByRole("button", { name: "Import a past agent thread" })
+		page.getByRole("menuitem", { name: "Import a past agent thread" })
 	).toHaveCount(0);
 	await expect(
 		page.getByRole("button", { name: "Agent, model and mode settings" })

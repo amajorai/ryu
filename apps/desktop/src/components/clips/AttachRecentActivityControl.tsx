@@ -12,6 +12,8 @@
 // the frames already carry inline data URLs (no per-frame fetch), so there is no
 // persistence or clip-id involved. It is a "what was I just doing" context grab.
 
+import { Alert02Icon, Clock04Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -22,7 +24,6 @@ import {
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { IconAlertTriangle, IconHistory } from "@tabler/icons-react";
 import { useCallback, useId, useState } from "react";
 import type { ComposerSendFile } from "@/src/components/assistant/useComposerSlot.tsx";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -120,7 +121,10 @@ export function AttachRecentActivityControl({
 					/>
 				}
 			>
-				<IconHistory className="size-4 text-muted-foreground" />
+				<HugeiconsIcon
+					className="size-4 text-muted-foreground"
+					icon={Clock04Icon}
+				/>
 			</PopoverTrigger>
 			<PopoverContent
 				align="start"
@@ -158,7 +162,10 @@ export function AttachRecentActivityControl({
 
 				{error ? (
 					<p className="flex items-start gap-1.5 text-status-destructive text-xs">
-						<IconAlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+						<HugeiconsIcon
+							className="mt-0.5 size-3.5 shrink-0"
+							icon={Alert02Icon}
+						/>
 						<span>{error}</span>
 					</p>
 				) : null}

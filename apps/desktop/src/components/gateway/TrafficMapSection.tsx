@@ -5,6 +5,11 @@
 // (safety filters through `PUT /v1/config`, named policies through the
 // control plane), so a change made on the map is the same change.
 
+import {
+	ArrowExpand02Icon,
+	ArrowShrink02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { GatewayCanvas } from "@ryu/blocks/desktop/gateway-canvas/gateway-canvas.tsx";
 import {
 	type CanvasAssignment,
@@ -19,6 +24,7 @@ import type {
 	PolicyScopeOptions,
 	PolicyView,
 } from "@ryu/blocks/desktop/guardrails/policy-model.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -26,7 +32,6 @@ import {
 	DialogDescription,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { Maximize2, Minimize2 } from "lucide-react";
 import {
 	type ReactNode,
 	useCallback,
@@ -36,7 +41,8 @@ import {
 	useState,
 } from "react";
 import { BACKEND_URL } from "@/lib/auth-client.ts";
-import { GuardrailPoliciesSection } from "@/src/components/gateway/GuardrailPoliciesSection.tsx";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
+import { nodeEditor } from "@/src/components/gateway/TrafficMapSection-node-editor.tsx";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -75,34 +81,6 @@ interface TrafficMapSectionProps {
 	renderSafetyFilters: () => ReactNode;
 	status: GatewayStatus | null;
 	target: ApiTarget;
-}
-
-function Copy({ children }: { children: ReactNode }) {
-	return (
-		<p className="text-muted-foreground text-sm leading-snug">{children}</p>
-	);
-}
-
-function GoTo({
-	label,
-	onNavigate,
-	section,
-}: {
-	label: string;
-	onNavigate: (section: string) => void;
-	section: string;
-}) {
-	return (
-		<Button
-			className="w-fit"
-			onClick={() => onNavigate(section)}
-			size="sm"
-			type="button"
-			variant="secondary"
-		>
-			{label}
-		</Button>
-	);
 }
 
 function emptyScopeOptions(orgId: string): PolicyScopeOptions {
@@ -246,6 +224,7 @@ export function TrafficMapSection({
 	const orgPolicies = useOrgPolicies();
 	const assignedPolicies = orgPolicies.counts;
 	const signedIn = hasOrgAuth();
+	const tl = useLiteralMessages();
 
 	useEffect(() => {
 		if (!reachable) {
@@ -317,8 +296,9 @@ export function TrafficMapSection({
 				canConfigure,
 				onNavigate,
 				renderSafetyFilters,
+				tl,
 			}),
-		[canConfigure, onNavigate, renderSafetyFilters]
+		[canConfigure, onNavigate, renderSafetyFilters, tl]
 	);
 
 	const adapter = useMemo<GatewayCanvasAdapter>(
@@ -340,7 +320,7 @@ export function TrafficMapSection({
 			toolbar={
 				<Button
 					aria-label={expanded ? "Shrink map" : "Expand map"}
-					className="size-7 text-muted-foreground"
+					className="text-muted-foreground"
 					data-traffic-map-expand=""
 					onClick={() => setExpanded((open) => !open)}
 					size="icon-sm"
@@ -348,9 +328,17 @@ export function TrafficMapSection({
 					variant="ghost"
 				>
 					{expanded ? (
-						<Minimize2 aria-hidden="true" className="size-4" />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className="size-4"
+							icon={ArrowShrink02Icon}
+						/>
 					) : (
-						<Maximize2 aria-hidden="true" className="size-4" />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className="size-4"
+							icon={ArrowExpand02Icon}
+						/>
 					)}
 				</Button>
 			}
@@ -359,15 +347,13 @@ export function TrafficMapSection({
 
 	return (
 		<div className="flex flex-col gap-3">
-			<p className="px-3.5 text-muted-foreground text-sm leading-snug">
-				{TRAFFIC_MAP_CAPTION}
+			<p className="text-detail text-muted-foreground">
+				<CaptionInfo detail={TRAFFIC_MAP_CAPTION}>
+					{canViewTraffic
+						? "Select any part of the map for its numbers and settings."
+						: "Live requests need audit-log access; routing still shows."}
+				</CaptionInfo>
 			</p>
-			{canViewTraffic ? null : (
-				<p className="px-3.5 text-muted-foreground text-sm leading-snug">
-					Watching live requests needs permission to view the audit log on this
-					node. The map still shows how requests are routed.
-				</p>
-			)}
 			<div
 				className="h-[min(620px,calc(85vh-180px))] min-h-[360px] overflow-hidden rounded-xl border border-border bg-muted/20"
 				data-traffic-map=""
@@ -404,161 +390,5 @@ export function TrafficMapSection({
 			</Dialog>
 			{orgPolicies.stepUpDialog}
 		</div>
-	);
-}
-
-interface EditorContext {
-	canConfigure: boolean;
-	onNavigate: (section: string) => void;
-	renderSafetyFilters: () => ReactNode;
-}
-
-function nodeEditor(node: CanvasNode, context: EditorContext): ReactNode {
-	const { onNavigate } = context;
-	if (node.kind === "scope") {
-		return (
-			<div className="flex flex-col gap-3">
-				<Copy>
-					Policies assigned to the organization, a team, a member, a key or an
-					agent apply to requests through your organization's gateways and keys.
-					Each layer can only tighten the ones above it.
-				</Copy>
-				<GuardrailPoliciesSection />
-			</div>
-		);
-	}
-	switch (node.id) {
-		case "stage:node":
-		case "stage:inspector":
-		case "stage:evaluator":
-			return (
-				<div className="flex flex-col gap-3">
-					<Copy>
-						{context.canConfigure
-							? "These are this node's own safety filters. Saving here saves the same settings as the Safety filters section."
-							: "These are this node's own safety filters. You can view them; changing them needs permission to configure this gateway."}
-					</Copy>
-					<GoTo
-						label="Open Safety filters"
-						onNavigate={onNavigate}
-						section="guardrails"
-					/>
-					{context.renderSafetyFilters()}
-				</div>
-			);
-		case "stage:platform_floor":
-			return (
-				<div className="flex flex-col gap-3">
-					<Copy>
-						Managed by Ryu. The platform floor screens requests that spend a
-						Ryu-held credential, such as Ryu credits. It cannot be changed or
-						turned off here.
-					</Copy>
-					<Copy>
-						Requests that use your own provider keys or subscriptions are not
-						screened by it, so on a self-hosted node it usually sees nothing.
-					</Copy>
-				</div>
-			);
-		case "stage:standing":
-			return (
-				<Copy>
-					Ryu can warn, slow down, restrict or suspend Ryu-managed traffic for
-					an account that breaks the usage policy. Requests through your own
-					keys are not affected. Banning a person is always a human decision.
-				</Copy>
-			);
-		case "stage:rate_limit":
-			return (
-				<div className="flex flex-col gap-3">
-					<Copy>
-						Requests over a key's or client's rate limit are refused before any
-						other check runs.
-					</Copy>
-					<GoTo label="Open API keys" onNavigate={onNavigate} section="keys" />
-				</div>
-			);
-		case "stage:budget":
-			return (
-				<div className="flex flex-col gap-3">
-					<Copy>
-						Requests past a spending cap are refused or downgraded, as the cap
-						says.
-					</Copy>
-					<GoTo
-						label="Open Spending limits"
-						onNavigate={onNavigate}
-						section="budgets"
-					/>
-				</div>
-			);
-		case "stage:route":
-			return (
-				<div className="flex flex-col gap-3">
-					<Copy>
-						The router picks the provider for each request and answers repeats
-						from the cache.
-					</Copy>
-					<GoTo
-						label="Open Model routing"
-						onNavigate={onNavigate}
-						section="routing"
-					/>
-				</div>
-			);
-		default:
-			break;
-	}
-	if (node.kind === "provider") {
-		return (
-			<div className="flex flex-col gap-3">
-				<Copy>
-					{node.id === "provider:other"
-						? "Requests served by a provider the gateway did not list at startup."
-						: "Requests this provider served. Its health comes from the gateway's circuit breaker: a provider that keeps failing is paused and retried."}
-				</Copy>
-				<GoTo
-					label="Open AI providers"
-					onNavigate={onNavigate}
-					section="providers"
-				/>
-			</div>
-		);
-	}
-	if (node.kind === "surface") {
-		return (
-			<div className="flex flex-col gap-3">
-				<Copy>
-					Requests that arrived on {node.detail ?? "these routes"}. Point a
-					client at this node from API and traffic.
-				</Copy>
-				<GoTo
-					label="Open API and traffic"
-					onNavigate={onNavigate}
-					section="api"
-				/>
-			</div>
-		);
-	}
-	if (node.id === "infra:control_plane") {
-		return (
-			<Copy>
-				Your organization's named policies and account standing come from the
-				Ryu control plane.
-			</Copy>
-		);
-	}
-	if (node.id === "infra:core") {
-		return (
-			<Copy>
-				Ryu Core relays this gateway's live feed to the desktop. The feed names
-				layers and codes only, never request text.
-			</Copy>
-		);
-	}
-	return (
-		<Copy>
-			Every request to this node passes through here before any check runs.
-		</Copy>
 	);
 }

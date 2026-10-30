@@ -1,6 +1,7 @@
+import { PencilEdit01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { FileDiff } from "@ryu/ui/components/agents/file-diff";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
-import { Pencil } from "lucide-react";
 import { memo, useMemo } from "react";
 import { useToolComplete } from "../hooks/use-tool-complete.ts";
 import type { StepState, TimelineStep } from "../types/timeline.ts";
@@ -122,7 +123,13 @@ export function EditToolDiffCard({
 					collapseOnComplete={isCollapsible && !isPending}
 					defaultOpen={!isCollapsible || isPending}
 					file={hasFileName ? fileName : "file"}
-					icon={<Pencil aria-hidden className="size-4" />}
+					icon={
+						<HugeiconsIcon
+							aria-hidden
+							className="size-4"
+							icon={PencilEdit01Icon}
+						/>
+					}
 					language={languageForFile(fileName ?? "file")}
 					lines={diff.lines}
 					maxHeight={360}

@@ -15,6 +15,7 @@ import {
 } from "@ryu/ui/components/select.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import type { ReactNode } from "react";
+import { InlineErrorRow } from "@/src/components/chat/InlineErrorRow.tsx";
 
 let fieldSeq = 0;
 const nextId = (prefix: string): string => {
@@ -264,5 +265,43 @@ export function FieldGroup({
 			</div>
 			{children}
 		</section>
+	);
+}
+
+/**
+ * The one load-failure row for the inference editors: one sentence and Retry.
+ * The raw cause is copied by "Copy details", never rendered.
+ */
+export function InferenceLoadError({
+	error,
+	message,
+	onRetry,
+}: {
+	error?: unknown;
+	message: string;
+	onRetry: () => void;
+}) {
+	return (
+		<InlineErrorRow
+			details={error instanceof Error ? error.message : null}
+			message={message}
+			onRetry={onRetry}
+		/>
+	);
+}
+
+/** A failed save: one sentence, with the raw cause behind "Copy details". */
+export function InferenceSaveError({
+	error,
+	message,
+}: {
+	error: unknown;
+	message: string;
+}) {
+	return (
+		<InlineErrorRow
+			details={error instanceof Error ? error.message : null}
+			message={message}
+		/>
 	);
 }

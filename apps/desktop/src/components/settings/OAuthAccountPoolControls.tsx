@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -71,6 +72,7 @@ function ScopedOAuthAccountPoolControls({
 	target,
 	scope,
 }: Props & { target: ApiTarget; scope: string }) {
+	const tl = useLiteralMessages();
 	const strategies = STRATEGIES.filter((strategy) =>
 		capabilities.strategies.includes(strategy.value)
 	);
@@ -175,23 +177,20 @@ function ScopedOAuthAccountPoolControls({
 		}
 	}, [query.data, policyScope]);
 
-	if (query.isPending) {
-		return (
-			<p className="text-muted-foreground text-xs">Loading account routing…</p>
-		);
-	}
 	if (query.isError) {
 		return (
-			<p className="text-status-destructive text-xs" role="alert">
+			<p className="text-detail text-status-destructive" role="alert">
 				Could not load account routing.
 			</p>
 		);
 	}
-	if (!draft) {
-		// The policy arrived but the effect above has not copied it into the draft
-		// yet (first commit after the read, or a mount over a cached policy).
+	if (query.isPending || !draft) {
+		// Also while the policy has arrived but the effect above has not copied it
+		// into the draft yet (first commit after the read, or a cached policy).
 		return (
-			<p className="text-muted-foreground text-xs">Loading account routing…</p>
+			<p className="text-detail text-muted-foreground">
+				Loading account routing…
+			</p>
 		);
 	}
 
@@ -271,12 +270,12 @@ function ScopedOAuthAccountPoolControls({
 
 	return (
 		<fieldset
-			className="min-w-0 space-y-3 rounded-md border border-border/70 bg-muted/20 p-3"
+			className="min-w-0 space-y-3 border-border border-t pt-3"
 			disabled={saving}
 		>
 			<div>
 				<h4 className="font-medium text-sm">Account routing</h4>
-				<p className="text-muted-foreground text-xs">
+				<p className="text-detail text-muted-foreground">
 					Applies to new conversations. Healthy conversations keep their account
 					for prompt caching.{" "}
 					{capabilities.quotaObservations
@@ -312,13 +311,13 @@ function ScopedOAuthAccountPoolControls({
 					>
 						{quotaRefresh.isPending ? "Refreshing quota…" : "Refresh quota"}
 					</Button>
-					<p aria-live="polite" className="text-muted-foreground text-xs">
+					<p aria-live="polite" className="text-detail text-muted-foreground">
 						{quotaRefresh.data?.scope === policyScope
 							? `Account-wide usage returned for ${quotaRefresh.data.available} of ${quotaRefresh.data.checked} accounts. Missing readings remain unknown.`
 							: "Reads each enabled account separately. Quota readings expire after five minutes."}
 					</p>
 					{quotaRefresh.isError ? (
-						<p className="text-status-destructive text-xs" role="alert">
+						<p className="text-detail text-status-destructive" role="alert">
 							Could not refresh account quota. Existing logins are unchanged.
 						</p>
 					) : null}
@@ -385,20 +384,21 @@ function ScopedOAuthAccountPoolControls({
 				) : null}
 			</div>
 			{accounts.length > 0 ? (
-				<div className="space-y-2">
-					<p className="font-medium text-xs">Accounts</p>
+				<div>
+					<p className="font-medium text-sm">Accounts</p>
 					{accounts.map((account) => {
 						const rule = draft.accounts[account.accountId] ?? {
 							enabled: true,
 							priority: 0,
 						};
+						const names = { label: account.label, provider: providerId };
 						return (
 							<div
-								className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 px-2 py-1.5"
+								className="flex flex-wrap items-center gap-2 border-border border-b py-2 last:border-b-0"
 								key={account.accountId}
 							>
 								<span
-									className="min-w-24 flex-1 truncate text-xs"
+									className="min-w-24 flex-1 truncate text-sm"
 									title={account.label}
 								>
 									{account.label}
@@ -411,7 +411,7 @@ function ScopedOAuthAccountPoolControls({
 									Use
 									<span className="sr-only">
 										{" "}
-										{account.label} for {providerId}
+										{tl("{label} for {provider}", names)}
 									</span>
 								</Label>
 								<Switch
@@ -429,7 +429,7 @@ function ScopedOAuthAccountPoolControls({
 									Priority
 								</Label>
 								<Input
-									aria-label={`Priority for ${account.label} on ${providerId}`}
+									aria-label={tl("Priority for {label} on {provider}", names)}
 									className="w-16"
 									id={`oauth-priority-${account.accountId}`}
 									max={100}
@@ -475,7 +475,7 @@ function ScopedOAuthAccountPoolControls({
 							</div>
 						);
 					})}
-					<p className="text-muted-foreground text-xs">
+					<p className="mt-2 text-detail text-muted-foreground">
 						Lower priority numbers are tried first.
 						{capabilities.quotaObservations
 							? " Blank inherits the provider drain point; 0 disables proactive drain. Fully exhausted accounts remain unavailable."
@@ -488,6 +488,7 @@ function ScopedOAuthAccountPoolControls({
 					disabled={!(changed && valid) || saving}
 					onClick={save}
 					size="sm"
+					variant="outline"
 				>
 					{saving ? "Saving…" : "Save routing"}
 				</Button>

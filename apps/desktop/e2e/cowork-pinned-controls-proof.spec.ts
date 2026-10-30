@@ -296,6 +296,8 @@ test("real Environment keeps no-folder state read-only and selects branch and ru
 	await expect(page.getByTestId("pinned-summary-folder")).toHaveText(
 		"No project folder"
 	);
+	// The explanation lives in the folder row's tooltip, not under it.
+	await page.getByTestId("pinned-summary-folder").hover();
 	await expect(
 		page.getByText(
 			"No project folder is attached to this chat yet. A local-file request will ask you to choose one."

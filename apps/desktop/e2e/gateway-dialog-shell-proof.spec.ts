@@ -1,19 +1,12 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import {
+	evidencePath,
+	openDialog,
+	readSnapshot,
+	STORY_URL,
+	waitForSettingsBody,
+} from "./gateway-dialog-shell-proof.helpers.ts";
 
-// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
-// the tracked proof ledger; without it the committed evidence is refreshed.
-function evidencePath(ledgerPath: string): string {
-	const override = process.env.RYU_PROOF_EVIDENCE_DIR;
-	return override
-		? path.join(override, ledgerPath)
-		: fileURLToPath(
-				new URL(`../../../docs/proof/${ledgerPath}`, import.meta.url)
-			);
-}
-
-const STORY_URL = "/gateway-dialog-shell-proof.html";
 const RESET_EVIDENCE_PATH = evidencePath(
 	"security-cloud-20261006/model-defaults-reset.png"
 );
@@ -32,45 +25,6 @@ const KEYS_EVIDENCE_PATH = evidencePath(
 const LAZY_ENTRY_EVIDENCE_PATH = evidencePath(
 	"test-coverage-sweep-20260924/evidence/gateway-dialog-lazy-entry.png"
 );
-
-interface GatewayDialogShellSnapshot {
-	calls: { body: unknown; method: string; path: string }[];
-	preferences: Record<string, string>;
-	tauriCalls: { args: unknown; command: string }[];
-}
-
-interface GatewayDialogShellWindow extends Window {
-	__gatewayDialogShellProof: { snapshot: () => GatewayDialogShellSnapshot };
-}
-
-async function readSnapshot(page: import("@playwright/test").Page) {
-	return page.evaluate(() =>
-		/* SAFETY: gateway-dialog-shell-proof.tsx installs __gatewayDialogShellProof before this proof page is evaluated. */ (
-			window as GatewayDialogShellWindow
-		).__gatewayDialogShellProof.snapshot()
-	);
-}
-
-/** The settings body is a lazy chunk. Until it resolves, its Suspense fallback
- *  renders the same dialog shell with an "Opening settings" description, so
- *  wait for the real body before asserting on its contents. */
-async function waitForSettingsBody(page: import("@playwright/test").Page) {
-	await expect(page.getByText("Opening settings", { exact: true })).toHaveCount(
-		0,
-		{ timeout: 60_000 }
-	);
-}
-
-async function openDialog(
-	page: import("@playwright/test").Page,
-	query = "reset=true&gatewayDown=true&freezeStatusPoll=true"
-) {
-	await page.goto(`${STORY_URL}?${query}`);
-	await expect(
-		page.locator('[data-slot="dialog-content"]').first()
-	).toBeVisible();
-	await waitForSettingsBody(page);
-}
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -111,11 +65,12 @@ test("recovers the Gateway status panel after a failed Core request", async ({
 	const gatewayDialog = page.locator('[data-slot="dialog-content"]').first();
 	await expect(gatewayDialog).toBeVisible();
 	await waitForSettingsBody(page);
+	const unreachable = "Couldn't reach Core on this computer.";
+	await expect(gatewayDialog.getByText(unreachable)).toBeVisible();
+	// The raw status line is only copied, never rendered.
+	await expect(gatewayDialog.getByText(/status failed: 503/)).toHaveCount(0);
 	await expect(
-		gatewayDialog.getByText("Could not reach Core", { exact: true })
-	).toBeVisible();
-	await expect(
-		gatewayDialog.getByText(/\/api\/gateway\/status failed: 503/)
+		gatewayDialog.getByRole("button", { name: "Copy details" })
 	).toBeVisible();
 	const failedRead = await readSnapshot(page);
 	expect(
@@ -134,9 +89,7 @@ test("recovers the Gateway status panel after a failed Core request", async ({
 				).length
 		)
 		.toBe(2);
-	await expect(
-		gatewayDialog.getByText("Could not reach Core", { exact: true })
-	).toHaveCount(0);
+	await expect(gatewayDialog.getByText(unreachable)).toHaveCount(0);
 	await expect(
 		gatewayDialog.getByRole("heading", {
 			name: "Gateway unreachable",
@@ -477,7 +430,8 @@ test("Gateway key cards show, save, clear, retry, and persist exact preference w
 			async () => (await readSnapshot(page)).preferences["composio-api-key"]
 		)
 		.toBe("comp_button_key");
-	await composio.getByRole("button", { name: "Clear", exact: true }).click();
+	await composio.getByRole("button", { name: "Composio key actions" }).click();
+	await page.getByRole("menuitem", { name: "Clear", exact: true }).click();
 	await expect
 		.poll(
 			async () => (await readSnapshot(page)).preferences["composio-api-key"]
@@ -523,7 +477,8 @@ test("Gateway key cards show, save, clear, retry, and persist exact preference w
 	await expect
 		.poll(async () => (await readSnapshot(page)).preferences["fal-api-key"])
 		.toBe("fal_new_key");
-	await fal.getByRole("button", { name: "Clear", exact: true }).click();
+	await fal.getByRole("button", { name: "Fal key actions" }).click();
+	await page.getByRole("menuitem", { name: "Clear", exact: true }).click();
 	await expect
 		.poll(async () => (await readSnapshot(page)).preferences["fal-api-key"])
 		.toBe("");

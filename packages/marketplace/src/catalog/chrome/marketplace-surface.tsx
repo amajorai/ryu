@@ -24,6 +24,7 @@ export default function MarketplaceSurface({
 	fullBleed = false,
 	onSearch,
 	onSelect,
+	primarySections,
 	query,
 	sections,
 	showGlobalSearch = true,
@@ -37,6 +38,8 @@ export default function MarketplaceSurface({
 	fullBleed?: boolean;
 	onSearch: (value: string) => void;
 	onSelect: (value: string) => void;
+	/** Sections shown as tabs; the rest move into the strip's "More" menu. */
+	primarySections?: readonly string[];
 	query: string;
 	sections: StoreSectionTab[];
 	/** Hide global catalog search for desktop-local sections with their own search. */
@@ -73,6 +76,7 @@ export default function MarketplaceSurface({
 						active={active}
 						inset="store-sections"
 						onSelect={onSelect}
+						primaryValues={primarySections}
 						sections={sections}
 					/>
 				) : null}

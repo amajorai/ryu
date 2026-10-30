@@ -102,7 +102,7 @@ function ContributionList({ items }: { items: CatalogContribution[] }) {
 	return (
 		<ul className="flex flex-col gap-1.5">
 			{items.map((item) => (
-				<li className="rounded-md bg-muted px-3 py-2" key={item.id}>
+				<li className="rounded-lg bg-muted px-3 py-2" key={item.id}>
 					<div className="flex items-baseline justify-between gap-3">
 						<span className="min-w-0 truncate font-medium text-sm">
 							{item.name ?? item.id}
@@ -132,7 +132,7 @@ function McpServerList({ servers }: { servers: CatalogMcpServer[] }) {
 	return (
 		<ul className="flex flex-col gap-1.5">
 			{servers.map((server) => (
-				<li className="rounded-md bg-muted px-3 py-2" key={server.name}>
+				<li className="rounded-lg bg-muted px-3 py-2" key={server.name}>
 					<div className="flex items-baseline justify-between gap-3">
 						<span className="min-w-0 truncate font-medium text-sm">
 							{server.name}
@@ -170,7 +170,7 @@ function SidecarList({ sidecars }: { sidecars: CatalogSidecar[] }) {
 	return (
 		<ul className="flex flex-col gap-2">
 			{sidecars.map((sidecar) => (
-				<li className="rounded-md bg-muted px-3 py-2" key={sidecar.name}>
+				<li className="rounded-lg bg-muted px-3 py-2" key={sidecar.name}>
 					<div className="flex flex-wrap items-baseline gap-2">
 						<span className="font-medium text-sm">{sidecar.name}</span>
 						{sidecar.lazy ? (
@@ -330,7 +330,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 							<ul className="flex flex-col gap-1.5">
 								{turnHooks.map((hook) => (
 									<li
-										className="rounded-md bg-muted px-3 py-2"
+										className="rounded-lg bg-muted px-3 py-2"
 										key={hook.id ?? hook.event}
 									>
 										<div className="flex items-baseline justify-between gap-3">
@@ -365,7 +365,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 					<ul className="flex flex-col gap-1.5">
 						{(surface.views ?? []).map((view) => (
 							<li
-								className="flex items-baseline justify-between gap-3 rounded-md bg-muted px-3 py-2"
+								className="flex items-baseline justify-between gap-3 rounded-lg bg-muted px-3 py-2"
 								key={`view:${view.id}`}
 							>
 								<span className="min-w-0 truncate text-sm">
@@ -380,7 +380,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 						))}
 						{(surface.settingsTabs ?? []).map((tab) => (
 							<li
-								className="flex items-baseline justify-between gap-3 rounded-md bg-muted px-3 py-2"
+								className="flex items-baseline justify-between gap-3 rounded-lg bg-muted px-3 py-2"
 								key={`tab:${tab.id}`}
 							>
 								<span className="min-w-0 truncate text-sm">
@@ -393,7 +393,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 						))}
 						{(surface.composerControls ?? []).map((control) => (
 							<li
-								className="flex items-baseline justify-between gap-3 rounded-md bg-muted px-3 py-2"
+								className="flex items-baseline justify-between gap-3 rounded-lg bg-muted px-3 py-2"
 								key={`control:${control.id}`}
 							>
 								<span className="min-w-0 truncate text-sm">
@@ -422,7 +422,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 					<ul className="flex flex-col gap-1.5">
 						{surface.provides.map((entry) => (
 							<li
-								className="flex items-baseline justify-between gap-3 rounded-md bg-muted px-3 py-2"
+								className="flex items-baseline justify-between gap-3 rounded-lg bg-muted px-3 py-2"
 								key={entry.capability}
 							>
 								<code className="min-w-0 truncate font-mono text-sm">
@@ -449,7 +449,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 					<ul className="flex flex-col gap-1.5">
 						{surface.runnables.map((runnable) => (
 							<li
-								className="flex items-baseline justify-between gap-3 rounded-md bg-muted px-3 py-2"
+								className="flex items-baseline justify-between gap-3 rounded-lg bg-muted px-3 py-2"
 								key={runnable.id}
 							>
 								<span className="min-w-0 truncate text-sm">

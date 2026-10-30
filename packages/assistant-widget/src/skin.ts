@@ -1,21 +1,21 @@
 /**
- * The Ask Ryu glass: a vertical gradient that fades toward transparent, a hairline
- * ring, and a heavy backdrop blur, matching the island's translucent skin. Desktop's
- * launcher, floating window, and every public-site widget wear these exact classes so
- * the assistant reads as one surface everywhere.
+ * The Ask Ryu surface: the host's popover token at 95% with a light backdrop blur,
+ * a hairline `ring-border`, and the floating-layer shadow the Dialog primitive
+ * uses. Desktop's launcher, floating window, and every public-site widget wear
+ * these exact classes so the assistant reads as one surface everywhere.
  *
- * The palette follows the host theme through the class-based `dark:` variant: light
- * glass in light mode, near-black glass in dark mode. Content inside keeps using the
- * host's shadcn tokens, so nothing needs re-scoping to a forced theme.
+ * Every colour is a theme token, so the surface follows the host's resolved theme
+ * (its `.dark` class and token values) with no gradient or raw palette colour.
+ * Under `prefers-reduced-transparency` the fill turns solid and the blur drops.
  */
 
-/** Glass gradient fill and text colour. Use as the surface background. */
+/** Surface fill and text colour. Use as the surface background. */
 export const ASSISTANT_GLASS_FILL =
-	"bg-gradient-to-b from-white/85 via-white/65 to-neutral-100/35 text-neutral-900 dark:from-neutral-950/85 dark:via-neutral-950/65 dark:to-neutral-900/35 dark:text-neutral-100";
+	"bg-popover/95 text-popover-foreground [@media(prefers-reduced-transparency:reduce)]:bg-popover";
 
-/** Glass chrome: themed hairline ring, backdrop blur, and drop shadow. */
+/** Surface chrome: hairline ring, backdrop blur, and the floating shadow. */
 export const ASSISTANT_GLASS_CHROME =
-	"ring-1 ring-black/10 shadow-2xl backdrop-blur-2xl dark:ring-white/10";
+	"shadow-xl ring-1 ring-border backdrop-blur-xl [@media(prefers-reduced-transparency:reduce)]:backdrop-blur-none";
 
 /**
  * Public-site launchers sit in a very high stacking layer so host page chrome cannot

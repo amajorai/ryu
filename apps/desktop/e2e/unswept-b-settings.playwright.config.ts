@@ -34,7 +34,7 @@ export default defineConfig({
 		},
 		{
 			name: "search-and-lazy",
-			testMatch: /unswept-b-settings\.spec\.ts$/,
+			testMatch: /unswept-b-settings(-dialog)?\.spec\.ts$/,
 			use: browser,
 		},
 		{

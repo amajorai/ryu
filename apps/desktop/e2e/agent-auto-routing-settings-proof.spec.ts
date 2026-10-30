@@ -77,7 +77,12 @@ async function openAutoDialog(page: Page) {
 	await menu.getByRole("menuitem", { name: "Auto", exact: true }).click();
 	await expect(page.getByTestId("selected-agent")).toHaveText("auto");
 	await page.getByRole("button", { name: /Chat settings.*Auto/u }).click();
-	const configure = page.getByRole("menu").getByRole("menuitem", {
+	// Model management and Auto routing share the picker's one "Settings…" row.
+	await page
+		.getByRole("menu")
+		.getByRole("menuitem", { name: "Settings…", exact: true })
+		.click();
+	const configure = page.getByRole("menuitem", {
 		name: "Configure Auto",
 		exact: true,
 	});

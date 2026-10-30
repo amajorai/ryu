@@ -1,0 +1,18 @@
+/* Window navigation cluster (back / forward / sidebar toggle / search) layering.
+
+   The cluster is `fixed z-[60]` so the sidebar toggle stays reachable above the
+   phone-width navigation Sheet (z-50) it opens and closes. Every other modal
+   layer must cover it: while a dialog, alert dialog, drawer or non-navigation
+   sheet is open the cluster drops below the overlay scrim (z-50) so it reads as
+   part of the dimmed window instead of floating crisp over the backdrop or over
+   a narrow dialog's top edge. Native macOS traffic lights are drawn by the OS and
+   are unaffected; the overlay already covered the title-bar drag region before
+   this rule, so window dragging behaves as it did.
+
+   `useModalLayerOpen` (components/layout/use-modal-layer-open.ts) sets the
+   attribute. Do not express this as `html:has(<layer>) <cluster>`: a document-
+   level `:has()` subject restyles the whole page on every DOM insertion, which
+   made each streamed chat chunk cost ~175 ms of style recalc. */
+[data-slot="window-navigation-cluster"][data-modal-layer-open] {
+	z-index: 40;
+}

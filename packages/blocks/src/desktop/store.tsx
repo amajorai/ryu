@@ -1,7 +1,4 @@
 "use client";
-import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
-import styles from "./store.module.css";
-
 // Presentational layer of the desktop Store. The live Store shell
 // (`apps/desktop/src/pages/StorePage.tsx`) and the Agents catalog section
 // (`apps/desktop/src/components/store/AgentsCatalogSection.tsx`) consume these
@@ -15,16 +12,13 @@ import styles from "./store.module.css";
 // nav, the generic catalog card + its install/lifecycle action button, the card
 // grid, and the "coming soon" placeholder. The storyboard's Store screen renders a
 // generic catalog grid via these, which faithfully matches the section shell.
+//
+// The search field lives in `store-search.tsx` and the generic catalog cards in
+// `store-catalog-card.tsx`; both are re-exported here so import paths stay stable.
 
-import {
-	Cancel01Icon,
-	Search01Icon,
-	StarIcon,
-} from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLocalizedString, useOptionalI18n } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -35,25 +29,34 @@ import {
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { noop } from "./store-catalog-card.tsx";
+import { StoreSectionMore, splitStoreSections } from "./store-section-more.tsx";
+
+export type {
+	StoreCatalogCardData,
+	StoreItemState,
+} from "./store-catalog-card.tsx";
+export {
+	StoreCardGrid,
+	StoreCardRating,
+	StoreCatalogCard,
+	StoreItemAction,
+	StoreLoadingGrid,
+} from "./store-catalog-card.tsx";
+export { StoreGlobalSearch, StoreSearchButton } from "./store-search.tsx";
 
 export interface StoreSectionTab {
 	/** Total items in the section. This is intentionally separate from the
 	 * currently loaded page length so paginated catalogs can report an
 	 * authoritative total without lying in the tab chrome. */
 	count?: number;
-	/**
-	 * Optional cluster key. Adjacent sections sharing a group render together; a
-	 * thin divider is drawn where the group changes, so the wrapped pill reads as
-	 * labelled clusters (Discover · Build · Manage · Account) without needing a
-	 * separate grouped-nav component.
-	 */
+	/** Optional cluster key (Discover, Money, …). Kept for callers that order or
+	 *  filter by it; the strip itself no longer draws dividers between groups. */
 	group?: string;
 	/**
 	 * The pill glyph. A `IconSvgElement` for the shell's own sections (authored
@@ -97,10 +100,6 @@ function SectionTabIcon({
 	return <HugeiconsIcon className="size-4 shrink-0" icon={icon} />;
 }
 
-const noop = () => {
-	// Default no-op handler for the presentational layer.
-};
-
 /**
  * The section tabs for a multi-section shell (the Store, the Library), rendered
  * INLINE at the top of the page as an ordinary element.
@@ -121,20 +120,17 @@ const noop = () => {
  * row stays reachable. That was the old bar's actual sin; being at the bottom
  * was not.
  *
- * The strip is the shared `pills` tab variant (`@ryu/ui/components/tabs.tsx`)
- * rather than hand-rolled buttons, so it wears the same active pill as every
- * other tab strip in the app and inherits Base UI's roving arrow-key navigation.
- * `pills`, not `pills-lg`: this is an open-ended, horizontally scrolling section
- * nav under a page title, not the primary control of the surface, and a
- * 56px-tall pill × a dozen sections reads as a toolbar, not a nav. The shared
- * `TabsList` owns the overflow behavior: it stays on one line, fades only the
- * edges that still have content, hides the native scrollbar, and reveals a
- * compact hover popover with fully rounded back/forward buttons. That keeps the
- * behavior at the tab primitive instead of making Library and Store each carry
- * a second scrolling wrapper.
+ * The strip is the shared `muted-pills` tab variant
+ * (`@ryu/ui/components/tabs.tsx`) rather than hand-rolled buttons, so it inherits
+ * Base UI's roving arrow-key navigation. The active section is a muted wash, not
+ * an inverted pill: the strip is navigation under the search, not the loudest
+ * control on the page. Counts show only when there is something to count, at the
+ * tertiary muted tone.
  *
- * A thin divider is drawn wherever `group` changes, so clusters still read as
- * clusters without a second component.
+ * `primaryValues` caps the strip: only those sections show as tabs, the rest sit
+ * behind a "More" menu ({@link StoreSectionMore}), and an active overflow section
+ * is promoted into the strip so the selected tab is always visible. Without it the
+ * strip lists every section and the shared `TabsList` scrolls the overflow.
  */
 export function StoreSectionTabs({
 	sections,
@@ -142,255 +138,62 @@ export function StoreSectionTabs({
 	onSelect = noop,
 	className,
 	inset,
+	primaryValues,
 }: {
 	active: string;
 	className?: string;
 	inset?: "store-sections" | "library-sections";
 	onSelect?: (value: string) => void;
+	/** Sections shown as tabs; everything else moves into "More". */
+	primaryValues?: readonly string[];
 	sections: StoreSectionTab[];
 }) {
 	const i18n = useOptionalI18n();
 	const localizedSectionsLabel = useLocalizedString("Sections");
-	return (
-		<Tabs
-			className={cn("w-full min-w-0", className)}
-			inset={inset}
-			onValueChange={(value) => onSelect(String(value))}
-			value={active}
-		>
-			<TabsList
-				aria-label={localizedSectionsLabel}
-				className="w-full flex-nowrap"
-				data-slot="store-section-tabs-scroller"
-				manageLayout={false}
-				variant="pills"
-			>
-				{sections.map((s, i) => {
-					const prev = i > 0 ? sections[i - 1] : undefined;
-					const showDivider = Boolean(prev && prev.group !== s.group);
-					return (
-						<Fragment key={s.value}>
-							{showDivider ? (
-								<span
-									aria-hidden
-									className="mx-1 h-4 w-px shrink-0 self-center bg-border"
-								/>
-							) : null}
-							<TabsTrigger
-								className="shrink-0"
-								spacing="store-section"
-								value={s.value}
-							>
-								<SectionTabIcon icon={s.icon} iconNode={s.iconNode} />
-								<span className="whitespace-nowrap">
-									{i18n?.t(`marketplace.section.${s.value}`, {}, s.label) ??
-										s.label}
-								</span>
-								{s.count === undefined ? null : (
-									<span
-										className="text-muted-foreground tabular-nums"
-										data-slot="store-section-tab-count"
-									>
-										{formatCount(s.count) ?? "—"}
-									</span>
-								)}
-							</TabsTrigger>
-						</Fragment>
-					);
-				})}
-			</TabsList>
-		</Tabs>
+	const { overflow, visible } = splitStoreSections(
+		sections,
+		active,
+		primaryValues
 	);
-}
-
-/**
- * The Store's / Library's GLOBAL search: one large muted pill, in the page flow,
- * ABOVE the section tabs.
- *
- * It used to float at the bottom of the page (`StoreBottomSearch`), pinned
- * `absolute` over a padded content column. Two things were wrong with that. The
- * control that searches EVERYTHING sat below the tabs that scope a search to one
- * realm, so the page read bottom-up; and it forced every section in the shell to
- * reserve height for it whether or not it was scrolled to. Above the tabs it
- * reads in the order it works — search everything, or pick a realm — and the
- * shell's title row, which said nothing the tab strip did not already say, is
- * gone with it.
- *
- * `size="lg"` is the default because this is the primary control of the surface;
- * the compact expanding {@link StoreSearchButton} still exists for per-section
- * toolbars, which are scoped searches sitting beside a list.
- *
- * The row's trailing slot (`trailing`) holds the section's own filter/source
- * controls, so the search and the things that narrow it stay on one line.
- */
-export function StoreGlobalSearch({
-	value,
-	onChange,
-	placeholder = "Search…",
-	className,
-	trailing,
-	size = "lg",
-}: {
-	className?: string;
-	onChange: (value: string) => void;
-	placeholder?: string;
-	size?: "default" | "lg";
-	/** Filter / source controls rendered beside the field, outside its pill. */
-	trailing?: ReactNode;
-	value: string;
-}) {
-	const localizedPlaceholder = useLocalizedString(placeholder);
 	return (
-		<div className={cn("flex w-full min-w-0 items-center gap-2", className)}>
-			<div
-				className={cn(
-					"flex min-w-0 flex-1 items-center gap-2 rounded-full bg-muted px-4",
-					size === "lg" ? "h-11" : "h-9"
-				)}
+		<div className={cn("flex w-full min-w-0 items-center gap-1", className)}>
+			<Tabs
+				className="min-w-0 shrink"
+				inset={inset}
+				onValueChange={(value) => onSelect(String(value))}
+				value={active}
 			>
-				<HugeiconsIcon
-					aria-hidden
-					className="size-4 shrink-0 text-muted-foreground"
-					icon={Search01Icon}
-				/>
-				<input
-					aria-label={localizedPlaceholder}
-					// `type=search` for the semantics (role=searchbox), with the native
-					// WebKit clear glyph suppressed — the row already has an explicit
-					// Clear button, and two clear affordances in one field is chrome the
-					// bare-input brief exists to avoid.
-					className="h-full w-full min-w-0 border-none bg-transparent text-sm outline-none placeholder:text-muted-foreground focus:outline-none focus-visible:outline-none [&::-webkit-search-cancel-button]:appearance-none"
-					data-slot="store-global-search"
-					onChange={(e) => onChange(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Escape" && value.length > 0) {
-							onChange("");
-						}
-					}}
-					placeholder={localizedPlaceholder}
-					type="search"
-					value={value}
-				/>
-				{value ? (
-					<Button
-						aria-label="Clear search"
-						onClick={() => onChange("")}
-						size="sm"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
-					</Button>
-				) : null}
-			</div>
-			{trailing}
-		</div>
-	);
-}
-
-/**
- * A search control shaped like the toolbar buttons beside it: a compact button
- * that expands into its input in place, and collapses again on Escape / an
- * outside click / blur while empty.
- *
- * A permanently-open full-width field is the wrong default for these pages — most
- * visits browse rather than search, and the field pushed the source and filter
- * buttons onto their own row. Expanding in place keeps one toolbar row and keeps
- * a non-empty query visible (it never auto-collapses while it has text).
- */
-export function StoreSearchButton({
-	value,
-	onChange,
-	placeholder = "Search…",
-	className,
-}: {
-	className?: string;
-	onChange: (value: string) => void;
-	placeholder?: string;
-	value: string;
-}) {
-	const localizedPlaceholder = useLocalizedString(placeholder);
-	const localizedSearch = useLocalizedString("Search");
-	const [open, setOpen] = useState(false);
-	const rootRef = useRef<HTMLDivElement>(null);
-	const inputRef = useRef<HTMLInputElement>(null);
-	const expanded = open || value.length > 0;
-
-	useEffect(() => {
-		if (open) {
-			inputRef.current?.focus();
-		}
-	}, [open]);
-
-	useEffect(() => {
-		if (!open) {
-			return;
-		}
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				setOpen(false);
-			}
-		};
-		const onPointer = (e: MouseEvent) => {
-			// SAFETY: this Document mousedown listener receives native DOM-node targets,
-			// the same-realm native Node receiver accepted by contains.
-			if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-				setOpen(false);
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		document.addEventListener("mousedown", onPointer);
-		return () => {
-			document.removeEventListener("keydown", onKey);
-			document.removeEventListener("mousedown", onPointer);
-		};
-	}, [open]);
-
-	return (
-		<div className={cn("flex items-center", className)} ref={rootRef}>
-			<Button
-				aria-label="Search"
-				onClick={() => setOpen((prev) => !prev)}
-				size="sm"
-				spacing="regular"
-				variant={expanded ? "secondary" : "ghost"}
-			>
-				<HugeiconsIcon className="size-3.5" icon={Search01Icon} />
-				{expanded ? null : localizedSearch}
-			</Button>
-			<div
-				className={cn(
-					"grid duration-200 ease-out",
-					styles.panel,
-					expanded ? "grid-cols-[1fr]" : "grid-cols-[0fr]"
-				)}
-			>
-				<div className="min-w-0 overflow-hidden">
-					<Input
-						aria-hidden={!expanded}
-						aria-label={localizedPlaceholder}
-						className="w-56 max-w-[40vw]"
-						onChange={(e) => onChange(e.target.value)}
-						placeholder={localizedPlaceholder}
-						ref={inputRef}
-						tabIndex={expanded ? 0 : -1}
-						value={value}
-						variant="store-search"
-					/>
-				</div>
-			</div>
-			{value ? (
-				<Button
-					aria-label="Clear search"
-					onClick={() => {
-						onChange("");
-						setOpen(false);
-					}}
-					size="sm"
-					variant="ghost"
+				<TabsList
+					aria-label={localizedSectionsLabel}
+					className="max-w-full flex-nowrap"
+					data-slot="store-section-tabs-scroller"
+					manageLayout={false}
+					variant="muted-pills"
 				>
-					<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
-				</Button>
-			) : null}
+					{visible.map((s) => (
+						<TabsTrigger
+							className="h-8 shrink-0 gap-2 px-3! py-0! text-sm!"
+							key={s.value}
+							value={s.value}
+						>
+							<SectionTabIcon icon={s.icon} iconNode={s.iconNode} />
+							<span className="whitespace-nowrap">
+								{i18n?.t(`marketplace.section.${s.value}`, {}, s.label) ??
+									s.label}
+							</span>
+							{s.count !== undefined && s.count > 0 ? (
+								<span
+									className="text-muted-foreground/70 text-xs tabular-nums"
+									data-slot="store-section-tab-count"
+								>
+									{formatCount(s.count)}
+								</span>
+							) : null}
+						</TabsTrigger>
+					))}
+				</TabsList>
+			</Tabs>
+			<StoreSectionMore items={overflow} onSelect={onSelect} />
 		</div>
 	);
 }
@@ -440,209 +243,5 @@ export function StoreComingSoon({
 				</EmptyContent>
 			) : null}
 		</Empty>
-	);
-}
-
-export type StoreItemState =
-	| "available"
-	| "installing"
-	| "installed"
-	| "failed";
-
-/** The install / lifecycle action cluster for a generic catalog card. */
-export function StoreItemAction({
-	state,
-	progressLabel,
-	onInstall = noop,
-	onUninstall = noop,
-	onRetry = noop,
-}: {
-	state: StoreItemState;
-	/** Optional progress text shown while installing (e.g. "Adding 48%"). */
-	progressLabel?: string;
-	onInstall?: () => void;
-	onUninstall?: () => void;
-	onRetry?: () => void;
-}) {
-	const i18n = useOptionalI18n();
-	if (state === "installing") {
-		return (
-			<span className="flex items-center gap-2 text-muted-foreground text-xs">
-				<Spinner className="size-3.5" />{" "}
-				{progressLabel ??
-					i18n?.t("marketplace.adding", undefined, "Adding…") ??
-					"Adding…"}
-			</span>
-		);
-	}
-	if (state === "installed") {
-		return (
-			<div className="flex items-center gap-2">
-				<Badge variant="secondary">
-					{i18n?.t("common.added", undefined, "Added") ?? "Added"}
-				</Badge>
-				<Button onClick={onUninstall} size="sm" variant="ghost">
-					{i18n?.t("common.remove") ?? "Remove"}
-				</Button>
-			</div>
-		);
-	}
-	if (state === "failed") {
-		return (
-			<div className="flex items-center gap-2">
-				<Badge variant="destructive">
-					{i18n?.t("common.failed", undefined, "Failed") ?? "Failed"}
-				</Badge>
-				<Button onClick={onRetry} size="sm" variant="ghost">
-					{i18n?.t("common.retry") ?? "Retry"}
-				</Button>
-			</div>
-		);
-	}
-	return (
-		<Button
-			className="self-start"
-			onClick={onInstall}
-			size="sm"
-			variant="ghost"
-		>
-			{i18n?.t("common.add") ?? "Add"}
-		</Button>
-	);
-}
-
-export interface StoreCatalogCardData {
-	/** Store-taxonomy category (unused by the card chrome, carried for callers). */
-	category?: string | null;
-	description: string;
-	/** Resolvable logo URL; falls back to the item's initial when null/absent. */
-	iconUrl?: string | null;
-	name: string;
-	progressLabel?: string;
-	/** Mean review rating; the compact star row renders when `ratingCount > 0`. */
-	ratingAverage?: number;
-	/** Number of reviews behind the average. */
-	ratingCount?: number;
-	state: StoreItemState;
-	/** Short category/kind chip rendered top-right. */
-	tag?: string;
-}
-
-/** Item logo, or an initial-letter placeholder when no icon URL is set. */
-function StoreCardLogo({
-	iconUrl,
-	name,
-}: {
-	iconUrl?: string | null;
-	name: string;
-}) {
-	const safeIconUrl = safeMediaUrl(iconUrl);
-	if (safeIconUrl) {
-		return (
-			<img
-				alt={`${name} logo`}
-				className="size-9 shrink-0 rounded-lg border border-border object-cover"
-				loading="lazy"
-				src={safeIconUrl}
-			/>
-		);
-	}
-	return (
-		<span
-			aria-hidden="true"
-			className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted font-medium text-muted-foreground text-sm uppercase"
-		>
-			{name.trim().charAt(0) || "?"}
-		</span>
-	);
-}
-
-/** Compact "★ 4.5 (12)" rating row; renders only when there are reviews. */
-export function StoreCardRating({
-	average,
-	count,
-}: {
-	average?: number;
-	count?: number;
-}) {
-	if (!count || count <= 0) {
-		return null;
-	}
-	return (
-		<span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
-			<HugeiconsIcon
-				aria-hidden="true"
-				className="size-3.5 text-status-warning"
-				icon={StarIcon}
-			/>
-			<span className="font-medium text-foreground tabular-nums">
-				{(Math.round((average ?? 0) * 10) / 10).toFixed(1)}
-			</span>
-			<span className="tabular-nums">({formatCount(count) ?? "—"})</span>
-		</span>
-	);
-}
-
-/** A generic catalog card: logo, name, kind chip, rating, description, action. */
-export function StoreCatalogCard({
-	item,
-	onInstall = noop,
-	onUninstall = noop,
-	onRetry = noop,
-}: {
-	item: StoreCatalogCardData;
-	onInstall?: () => void;
-	onUninstall?: () => void;
-	onRetry?: () => void;
-}) {
-	return (
-		<div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
-			<div className="flex items-start justify-between gap-2">
-				<div className="flex min-w-0 items-center gap-2.5">
-					<StoreCardLogo iconUrl={item.iconUrl} name={item.name} />
-					<div className="min-w-0">
-						<span className="block truncate font-medium" title={item.name}>
-							{item.name}
-						</span>
-						<StoreCardRating
-							average={item.ratingAverage}
-							count={item.ratingCount}
-						/>
-					</div>
-				</div>
-				{item.tag ? <Badge variant="outline">{item.tag}</Badge> : null}
-			</div>
-			<p className="flex-1 text-muted-foreground text-sm">{item.description}</p>
-			<StoreItemAction
-				onInstall={onInstall}
-				onRetry={onRetry}
-				onUninstall={onUninstall}
-				progressLabel={item.progressLabel}
-				state={item.state}
-			/>
-		</div>
-	);
-}
-
-/** Two-column responsive grid for catalog cards. */
-export function StoreCardGrid({ children }: { children: ReactNode }) {
-	return <div className="grid grid-cols-2 gap-3">{children}</div>;
-}
-
-/** Skeleton card grid for the loading state. */
-export function StoreLoadingGrid({ count = 4 }: { count?: number }) {
-	return (
-		<div className="scroll-fade grid flex-1 grid-cols-2 gap-3 overflow-auto p-4">
-			{Array.from({ length: count }, (_, i) => i).map((i) => (
-				<div
-					className="space-y-3 rounded-xl border border-border bg-card p-4"
-					key={i}
-				>
-					<div className="h-4 w-1/2 rounded bg-muted motion-safe:animate-pulse" />
-					<div className="h-3 w-3/4 rounded bg-muted/60 motion-safe:animate-pulse" />
-					<div className="h-7 w-20 rounded bg-muted/60 motion-safe:animate-pulse" />
-				</div>
-			))}
-		</div>
 	);
 }

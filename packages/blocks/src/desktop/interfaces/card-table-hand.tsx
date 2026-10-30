@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	InterfaceSnapshot,
 	InterfaceThread,
@@ -31,7 +32,6 @@ import {
 	type HandLayout,
 	handPose,
 	jitter,
-	plural,
 	type StageSize,
 	type TableGeometry,
 } from "./card-table-model.ts";
@@ -167,6 +167,7 @@ export function CardTableHand({
 	/** How far the tucked fan sits below its open place (px); 0 is open. */
 	tucked?: number;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const verdicts = useContext(CardVerdictsContext);
 	const [hovered, setHovered] = useState<string | null>(null);
@@ -253,7 +254,16 @@ export function CardTableHand({
 	return (
 		<ul
 			aria-describedby={HAND_HINT_ID}
-			aria-label={`Your hand: ${plural(cards.length, "card")}${held > 0 ? `, ${held} more held back` : ""}`}
+			aria-label={
+				held > 0
+					? tl(
+							"Your hand: {cardCount, plural, one {{cardCount} card} other {{cardCount} cards}}, {heldCount} more held back",
+							{ cardCount: cards.length, heldCount: held }
+						)
+					: tl("Your hand: {cardCount, plural, one {{cardCount} card} other {{cardCount} cards}}", {
+							cardCount: cards.length,
+						})
+			}
 			className="pointer-events-none absolute inset-0 z-20"
 			data-hand-tucked={tucked > 0 ? "" : undefined}
 			data-testid="card-table-hand"
@@ -309,7 +319,16 @@ export function CardTableHand({
 						>
 							<button
 								aria-current={isActive ? "true" : undefined}
-								aria-label={`${title}. ${reading.label}, ${[agent?.name ?? "no agent", reading.age].filter(Boolean).join(", ")}. Play card`}
+								aria-label={tl(
+									"{title}. {readingLabel}, {cardDetails}. Play card",
+									{
+										cardDetails: [agent?.name ?? "no agent", reading.age]
+											.filter(Boolean)
+											.join(", "),
+										readingLabel: reading.label,
+										title,
+									}
+								)}
 								className="group/card block size-full cursor-pointer rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
 								data-card={thread.id}
 								onBlur={() =>

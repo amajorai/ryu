@@ -21,12 +21,13 @@
   },
   "dependencies": {
     "@ai-sdk/react": "catalog:",
+    "@hugeicons/core-free-icons": "^4.3.5",
+    "@hugeicons/react": "^1.1.10",
     "@ryu/blocks": "workspace:*",
     "@ryu/browser-local-ai": "workspace:*",
     "@ryu/ui": "workspace:*",
     "@ryuhq/protocol": "workspace:*",
     "ai": "catalog:",
-    "lucide-react": "catalog:",
     "motion": "^12.38.0",
     "zod": "catalog:"
   },

@@ -1,3 +1,14 @@
+import {
+	ArrowDown01Icon,
+	Delete02Icon,
+	GridViewIcon,
+	KanbanIcon,
+	LeftToRightListBulletIcon,
+	PlusSignIcon,
+	Settings02Icon,
+	Table01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -15,17 +26,7 @@ import {
 } from "@ryu/ui/components/dropdown-menu.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	ChevronDown,
-	KanbanSquare,
-	LayoutGrid,
-	List,
-	Plus,
-	Settings2,
-	Table as TableIcon,
-	Trash2,
-} from "lucide-react";
-import { type ComponentType, useState } from "react";
+import { useState } from "react";
 import type {
 	DbColumn,
 	DbView,
@@ -35,20 +36,20 @@ import type {
 const VIEW_KINDS: Array<{
 	kind: DbViewKind;
 	label: string;
-	icon: ComponentType<{ className?: string }>;
+	icon: IconSvgElement;
 }> = [
-	{ kind: "table", label: "Table", icon: TableIcon },
-	{ kind: "board", label: "Board", icon: KanbanSquare },
-	{ kind: "gallery", label: "Gallery", icon: LayoutGrid },
-	{ kind: "list", label: "List", icon: List },
+	{ kind: "table", label: "Table", icon: Table01Icon },
+	{ kind: "board", label: "Board", icon: KanbanIcon },
+	{ kind: "gallery", label: "Gallery", icon: GridViewIcon },
+	{ kind: "list", label: "List", icon: LeftToRightListBulletIcon },
 ];
 
 const KIND_ICON = {
-	table: TableIcon,
-	board: KanbanSquare,
-	gallery: LayoutGrid,
-	list: List,
-} satisfies Record<DbViewKind, ComponentType<{ className?: string }>>;
+	table: Table01Icon,
+	board: KanbanIcon,
+	gallery: GridViewIcon,
+	list: LeftToRightListBulletIcon,
+} satisfies Record<DbViewKind, IconSvgElement>;
 
 /**
  * The view switcher above a database: one chip per saved view, an add-view menu,
@@ -95,16 +96,16 @@ export function ViewBar({
 	};
 
 	return (
-		<div className="flex shrink-0 items-center gap-1 border-b px-2">
+		<div className="flex h-10 shrink-0 items-center gap-1 border-border border-b px-2">
 			{views.map((view) => {
-				const Icon = KIND_ICON[view.kind];
+				const icon = KIND_ICON[view.kind];
 				const active = view.id === activeViewId;
 				if (renamingId === view.id) {
 					return (
 						<Input
 							aria-label={tl("Rename view {viewName}", { viewName: view.name })}
 							autoFocus
-							className="my-1 h-7 w-28"
+							className="h-8 w-28"
 							key={view.id}
 							onBlur={() => commitRename(view.id)}
 							onChange={(e) => setRenameValue(e.target.value)}
@@ -121,14 +122,9 @@ export function ViewBar({
 				}
 				return (
 					<div className="flex items-center" key={view.id}>
-						<button
+						<Button
 							aria-pressed={active}
-							className={cn(
-								"flex items-center gap-1.5 rounded-md px-2 py-1.5 font-medium text-sm transition-colors",
-								active
-									? "text-foreground"
-									: "text-muted-foreground hover:text-foreground"
-							)}
+							className={cn("gap-1.5", active && "bg-muted text-foreground")}
 							onClick={() => onSelect(view.id)}
 							onDoubleClick={() => {
 								if (!readOnly) {
@@ -136,22 +132,26 @@ export function ViewBar({
 									setRenamingId(view.id);
 								}
 							}}
+							size="sm"
 							type="button"
+							variant={active ? "ghost" : "ghost-muted"}
 						>
-							<Icon className="size-3.5" />
+							<HugeiconsIcon className="size-3.5" icon={icon} />
 							{view.name}
-						</button>
+						</Button>
 						{active && !readOnly && (
 							<DropdownMenu>
 								<DropdownMenuTrigger
 									render={
 										<Button
 											aria-label="View options"
-											className="size-6"
-											size="icon"
+											size="icon-sm"
 											variant="ghost-muted"
 										>
-											<ChevronDown className="size-3.5" />
+											<HugeiconsIcon
+												className="size-3.5"
+												icon={ArrowDown01Icon}
+											/>
 										</Button>
 									}
 								/>
@@ -173,7 +173,7 @@ export function ViewBar({
 												key={option.kind}
 												value={option.kind}
 											>
-												<option.icon className="size-3.5" />
+												<HugeiconsIcon className="size-4" icon={option.icon} />
 												{option.label}
 											</DropdownMenuRadioItem>
 										))}
@@ -183,7 +183,10 @@ export function ViewBar({
 											<DropdownMenuSeparator />
 											<DropdownMenuSub>
 												<DropdownMenuSubTrigger>
-													<Settings2 className="size-3.5" />
+													<HugeiconsIcon
+														className="size-4"
+														icon={Settings02Icon}
+													/>
 													Group by
 												</DropdownMenuSubTrigger>
 												<DropdownMenuSubContent>
@@ -228,7 +231,7 @@ export function ViewBar({
 										onClick={() => onRemoveView(view.id)}
 										variant="destructive"
 									>
-										<Trash2 className="size-3.5" />
+										<HugeiconsIcon className="size-4" icon={Delete02Icon} />
 										Delete view
 									</DropdownMenuItem>
 								</DropdownMenuContent>
@@ -243,11 +246,10 @@ export function ViewBar({
 						render={
 							<Button
 								aria-label="Add view"
-								className="size-7"
-								size="icon"
+								size="icon-sm"
 								variant="ghost-muted"
 							>
-								<Plus className="size-4" />
+								<HugeiconsIcon className="size-4" icon={PlusSignIcon} />
 							</Button>
 						}
 					/>
@@ -257,7 +259,7 @@ export function ViewBar({
 								key={option.kind}
 								onClick={() => onAddView(option.kind)}
 							>
-								<option.icon className="size-3.5" />
+								<HugeiconsIcon className="size-4" icon={option.icon} />
 								{option.label}
 							</DropdownMenuItem>
 						))}

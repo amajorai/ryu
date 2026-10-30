@@ -54,11 +54,23 @@ function textareaContentHeight(textarea: HTMLTextAreaElement): number {
 		return 0;
 	}
 	const charsPerLine = Math.max(1, Math.floor(width / CHAR_WIDTH));
+	// An empty textarea lays out its placeholder, which can wrap.
+	const text = textarea.value || textarea.placeholder;
 	let lines = 0;
-	for (const line of textarea.value.split("\n")) {
+	for (const line of text.split("\n")) {
 		lines += Math.max(1, Math.ceil(line.length / charsPerLine));
 	}
 	return lines * LINE_HEIGHT;
+}
+
+// `scrollHeight` never reports less than the box's own height: a textarea that
+// is not collapsed first measures max(content, current height).
+function textareaScrollHeight(textarea: HTMLTextAreaElement): number {
+	const content = textareaContentHeight(textarea);
+	if (content === 0) {
+		return 0;
+	}
+	return Math.max(content, Number.parseFloat(textarea.style.height) || 0);
 }
 
 function boxHeight(element: Element): number {
@@ -85,7 +97,7 @@ const originalResizeObserver = globalThis.ResizeObserver;
 Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
 	configurable: true,
 	get(this: HTMLTextAreaElement) {
-		return textareaContentHeight(this);
+		return textareaScrollHeight(this);
 	},
 });
 Element.prototype.getBoundingClientRect = function getBoundingClientRect(
@@ -385,4 +397,37 @@ test("unmounting a composer disconnects the resize observer that watched its pan
 			)
 		)
 	).toBe(false);
+});
+
+test("typing at the end of the draft grows the box, and deleting shrinks it", async () => {
+	// 240px holds 30 characters per line.
+	layout.paneWidth = 240;
+	await act(async () => root.render(<Composer initial={"x".repeat(20)} />));
+	await frame();
+	const textarea = composerTextarea();
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT}px`);
+
+	await act(async () => setDraft("x".repeat(40)));
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT * 2}px`);
+	await act(async () => setDraft("x".repeat(70)));
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT * 3}px`);
+
+	await act(async () => setDraft("x".repeat(25)));
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT}px`);
+	await act(async () => setDraft(""));
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT}px`);
+});
+
+test("the first keystroke after a wrapping placeholder shrinks the box to the typed text", async () => {
+	// 80px holds 10 characters per line, so "Ask a follow up" takes two.
+	layout.paneWidth = 80;
+	await act(async () => root.render(<Composer />));
+	await frame();
+	const textarea = composerTextarea();
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT * 2}px`);
+
+	await act(async () => setDraft("a"));
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT}px`);
+	await act(async () => setDraft("ab"));
+	expect(textarea.style.height).toBe(`${LINE_HEIGHT}px`);
 });

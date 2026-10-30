@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	askAriaLabel,
@@ -11,19 +11,13 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { ArrowLeft, X } from "lucide-react";
-import {
-	type KeyboardEvent,
-	type ReactNode,
-	type SyntheticEvent,
-	useEffect,
-	useId,
-	useRef,
-	useState,
-} from "react";
+import { type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
 import { plainText } from "./interface-ask-card.tsx";
 import { compactAge } from "./interface-renderer.ts";
+import { DialogComposer } from "./world-3d-dialog-composer.tsx";
+import { ROW, STATUS_TEXT } from "./world-3d-dialog-styles.ts";
+import { ThreadPanel } from "./world-3d-dialog-thread-panel.tsx";
 import { HUD_SURFACE, Keycap } from "./world-3d-hud.tsx";
 import {
 	actLine,
@@ -34,6 +28,7 @@ import {
 	spokenLine,
 } from "./world-3d-model.ts";
 
+export { THREAD_PANEL_WIDTH } from "./world-3d-dialog-styles.ts";
 export { spokenLine } from "./world-3d-model.ts";
 
 /**
@@ -51,29 +46,10 @@ export { spokenLine } from "./world-3d-model.ts";
  * The whole dialogue is one region labeled "Talking to <name>".
  */
 
-const MAX_PROMPT_LENGTH = 8000;
-/** Panel width when a conversation is open; the interface shifts the view by it. */
-export const THREAD_PANEL_WIDTH = "clamp(360px, 46vw, 680px)";
 /** Height of the dialogue box; the interface lifts the view by half of it. */
 export const BAND_HEIGHT = 210;
 /** Width the choices take on the right of the dialogue (`w-80`). */
 export const CHOICES_WIDTH = 320;
-
-/**
- * A choice row, inset from the list's edges so its radius sits inside the
- * panel's; hover and keyboard focus both fill it, as menu items do.
- */
-const ROW =
-	"mx-1 flex h-10 w-[calc(100%-0.5rem)] items-center gap-3 rounded-md px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground";
-
-/** Only what asks for the user is colored; the rest reads as metadata. */
-const STATUS_TEXT: Record<ThreadStatus, string> = {
-	attention: "text-destructive",
-	quiet: "text-muted-foreground",
-	waiting: "text-muted-foreground",
-	working: "text-muted-foreground",
-	"your-turn": "text-primary",
-};
 
 /**
  * What the agent's presence word says: working while it runs, else what its
@@ -121,81 +97,6 @@ function StatusLine({
 				</>
 			) : null}
 		</p>
-	);
-}
-
-/** Composer for a new conversation, inside the dialogue box. */
-function DialogComposer({
-	agent,
-	onCancel,
-	onSubmit,
-}: {
-	agent: InterfaceAgent;
-	onCancel: () => void;
-	onSubmit: (prompt: string) => void;
-}) {
-	const fieldId = useId();
-	const hintId = useId();
-	const [prompt, setPrompt] = useState("");
-	const field = useRef<HTMLTextAreaElement>(null);
-	// Opening the composer is an explicit request to type: focus the field.
-	useEffect(() => {
-		field.current?.focus();
-	}, []);
-	const trimmed = prompt.trim();
-	const submit = () => {
-		if (!trimmed) {
-			return;
-		}
-		onSubmit(trimmed);
-		setPrompt("");
-	};
-	const onFormSubmit = (event: SyntheticEvent<HTMLFormElement>) => {
-		event.preventDefault();
-		submit();
-	};
-	const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-		if (event.key === "Escape") {
-			event.preventDefault();
-			event.stopPropagation();
-			onCancel();
-			return;
-		}
-		if (
-			event.key === "Enter" &&
-			!event.shiftKey &&
-			!event.nativeEvent.isComposing
-		) {
-			event.preventDefault();
-			submit();
-		}
-	};
-	return (
-		<form className="flex w-full flex-col gap-2" onSubmit={onFormSubmit}>
-			<label className="sr-only" htmlFor={fieldId}>
-				Say something to {agent.name}
-			</label>
-			<textarea
-				aria-describedby={hintId}
-				className="max-h-28 min-h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-foreground text-sm leading-5 outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-				id={fieldId}
-				maxLength={MAX_PROMPT_LENGTH}
-				onChange={(event) => setPrompt(event.target.value)}
-				onKeyDown={onKeyDown}
-				placeholder={`Say something to ${agent.name}`}
-				ref={field}
-				rows={2}
-				value={prompt}
-			/>
-			<div className="flex items-center justify-between gap-3">
-				<p className="text-muted-foreground text-xs" id={hintId}>
-					Enter to send · Shift+Enter for a new line · Esc to cancel
-				</p>
-				<Button disabled={!trimmed} size="sm" type="submit">
-					Send
-				</Button>
-			</div>
-		</form>
 	);
 }
 
@@ -276,6 +177,7 @@ function Choices({
 	onOpen: (threadId: string) => void;
 	threads: InterfaceThread[];
 }) {
+	const tl = useLiteralMessages();
 	const headingId = useId();
 	return (
 		<nav
@@ -286,7 +188,7 @@ function Choices({
 			{acts?.asks.map((ask) => (
 				<button
 					// The visible words lead the name (label in name).
-					aria-label={`${sentence(`Answer: ${answerText(ask, acts.privacy)}`)} ${askAriaLabel(
+					aria-label={`${sentence(tl("Answer: {answer}", { answer: answerText(ask, acts.privacy) }))} ${askAriaLabel(
 						ask,
 						acts.agentName,
 						acts.nowMs,
@@ -299,7 +201,9 @@ function Choices({
 					type="button"
 				>
 					<span className="min-w-0 flex-1 truncate font-medium">
-						Answer: {answerText(ask, acts.privacy)}
+						{tl("Answer: {answer}", {
+							answer: answerText(ask, acts.privacy),
+						})}
 					</span>
 				</button>
 			))}
@@ -423,104 +327,6 @@ function DialogueBand({
 }
 
 /**
- * Who the open conversation is with and where it stands: the agent, then
- * the thread's own status (not the agent's presence, which can differ).
- */
-function ThreadSubline({
-	acted = false,
-	agent,
-	thread,
-}: {
-	/** The act layer is on: no thread status word (the acts say it). */
-	acted?: boolean;
-	agent: InterfaceAgent;
-	thread: InterfaceThread | undefined;
-}) {
-	const status = thread ? threadStatus(thread) : null;
-	return (
-		<p className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs leading-4">
-			<span className="min-w-0 truncate">{agent.name}</span>
-			{status && status !== "quiet" && !acted ? (
-				<>
-					<span aria-hidden="true">·</span>
-					<span
-						className={cn(
-							"inline-flex shrink-0 items-center gap-1.5",
-							isUrgent(status) && "font-medium",
-							STATUS_TEXT[status]
-						)}
-					>
-						{status === "working" ? <BoardStatusDot status="working" /> : null}
-						{thread ? shortStatusLabel(thread) : SHORT_STATUS_LABELS[status]}
-					</span>
-				</>
-			) : null}
-		</p>
-	);
-}
-
-/** The host's thread view in a panel on the right, titled by the thread. */
-function ThreadPanel({
-	acted = false,
-	agent,
-	onClose,
-	port,
-	thread,
-	threadView,
-}: {
-	acted?: boolean;
-	agent: InterfaceAgent;
-	onClose: () => void;
-	port: InterfacePort;
-	thread: InterfaceThread | undefined;
-	threadView: ReactNode;
-}) {
-	return (
-		<div
-			className="pointer-events-auto absolute top-0 right-0 bottom-0 flex max-w-full flex-col overflow-hidden border-border border-l bg-card text-card-foreground"
-			data-testid="world-3d-thread-panel"
-			style={{ width: THREAD_PANEL_WIDTH }}
-		>
-			{/* The back arrow's glyph lands on the thread's 16px gutter. */}
-			<header className="flex h-14 shrink-0 items-center gap-1 border-border border-b px-4">
-				<Button
-					aria-label="Back to conversations"
-					className="-ml-2"
-					onClick={port.closeThread}
-					size="icon-sm"
-					title="Back to conversations"
-					type="button"
-					variant="ghost-muted"
-				>
-					<ArrowLeft aria-hidden="true" />
-				</Button>
-				<div className="flex min-w-0 flex-1 flex-col">
-					<h2 className="truncate font-semibold text-foreground text-sm leading-5">
-						{thread ? thread.title || "Untitled" : agent.name}
-					</h2>
-					<ThreadSubline acted={acted} agent={agent} thread={thread} />
-				</div>
-				<Button
-					aria-keyshortcuts="Escape"
-					aria-label="Walk away"
-					className="-mr-2"
-					onClick={onClose}
-					size="icon-sm"
-					title="Walk away (Esc)"
-					type="button"
-					variant="ghost-muted"
-				>
-					<X aria-hidden="true" />
-				</Button>
-			</header>
-			<div className="min-h-0 flex-1 overflow-hidden bg-background text-foreground">
-				{threadView}
-			</div>
-		</div>
-	);
-}
-
-/**
  * The dialogue for the agent the player is talking to. Escape anywhere in
  * it walks away (the composer's own Escape only closes the composer).
  */
@@ -543,6 +349,7 @@ export function World3dDialog({
 	threads: InterfaceThread[];
 	threadView: ReactNode | null;
 }) {
+	const tl = useLiteralMessages();
 	const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
 		if (event.key === "Escape" && !event.defaultPrevented) {
 			event.preventDefault();
@@ -551,7 +358,7 @@ export function World3dDialog({
 	};
 	return (
 		<aside
-			aria-label={`Talking to ${agent.name}`}
+			aria-label={tl("Talking to {name}", { name: agent.name })}
 			className="@container pointer-events-none absolute inset-0 z-[500] font-sans [&_button]:pointer-events-auto [&_form]:pointer-events-auto [&_nav]:pointer-events-auto [&_section]:pointer-events-auto"
 			data-testid="world-agent-panel"
 			onKeyDown={onKeyDown}

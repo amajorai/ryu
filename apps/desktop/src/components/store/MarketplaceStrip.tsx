@@ -353,7 +353,7 @@ export default function MarketplaceStrip({
 	}
 
 	return (
-		<section className="border-border/60 border-t px-4 py-4">
+		<section className="border-border border-t px-4 py-4">
 			<div className="mb-3 flex items-center gap-2">
 				<HugeiconsIcon
 					className="size-4 text-muted-foreground"

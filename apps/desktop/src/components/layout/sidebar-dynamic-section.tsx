@@ -1,4 +1,4 @@
-import { ArrowUpRight01Icon, Package01Icon } from "@hugeicons/core-free-icons";
+import { Package01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	DECLARATIVE_HTTP_GRANT,
@@ -10,20 +10,11 @@ import {
 	type ViewSourceRow,
 	viewSourceRowSchema,
 } from "@ryu/app-host/views";
-import {
-	ContextMenu,
-	ContextMenuContent,
-	ContextMenuItem,
-	ContextMenuTrigger,
-} from "@ryu/ui/components/context-menu.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { asGlyphValue } from "@ryu/ui/components/glyph.ts";
-import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
-import { SidebarMenu, SidebarMenuItem } from "@ryu/ui/components/sidebar.tsx";
-import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
-import { OpenInNewWindowContextMenuItem } from "@/src/components/layout/OpenInNewWindowMenuItem.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { parseContributedTarget } from "@/src/contributions/contributed-target.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -34,11 +25,7 @@ import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 import type { PluginSidebarSection } from "@/src/lib/api/plugins.ts";
 import { rowStamp } from "@/src/lib/sidebar/date-buckets.ts";
 import { openEntityInNewWindow } from "@/src/lib/window-routing.ts";
-import {
-	SidebarItemPreview,
-	SidebarPreviewMeta,
-	SidebarPreviewTitle,
-} from "./sidebar-item-preview.tsx";
+import { renderContributedSectionRows } from "./sidebar-dynamic-section-rows.tsx";
 import {
 	SectionAddButton,
 	type SectionProps,
@@ -49,7 +36,7 @@ import {
 	DateGroupedRows,
 	dateBucketStorageKeys,
 } from "./sidebar-subsection.tsx";
-import { EntityRowGlyph, useContributedRowsFor } from "./tab-entity-menu.tsx";
+import { useContributedRowsFor } from "./tab-entity-menu.tsx";
 
 /**
  * An app-REGISTERED sidebar section, rendered generically from a `sidebar_sections`
@@ -83,6 +70,7 @@ export function DynamicSidebarSection({
 	pageSize,
 	sort,
 }: SectionProps & { contribution: PluginSidebarSection }) {
+	const tl = useLiteralMessages();
 	const openTab = useTabSelector((state) => state.openTab);
 	const node = useActiveNode();
 	const queryClient = useQueryClient();
@@ -227,7 +215,8 @@ export function DynamicSidebarSection({
 			const { path, options } = parseContributedTarget(spec.create.target);
 			openTab(path, {
 				...options,
-				title: spec.create.label ?? `New ${contribution.title}`,
+				title:
+					spec.create.label ?? tl("New {title}", { title: contribution.title }),
 			});
 			return;
 		}
@@ -289,230 +278,26 @@ export function DynamicSidebarSection({
 	const sectionKey: SectionKey = `plugin:${contribution.plugin}:${contribution.id}`;
 	const itemActions = canUseDeclarativeHttp ? (spec?.itemActions ?? []) : [];
 
-	// "messaging" draws the avatar-led two-line row the shell's own Agents section
-	// draws (see MessagingAgentRowBody): a 36px round avatar, the title and a stamp
-	// on the first line, a preview below. A section that declares it keeps that
-	// shape for every row, including rows whose feed resolved no picture — a list
-	// whose height changed row by row would scan as two lists.
+	// "messaging" draws the avatar-led row the shell's own Agents section draws
+	// (see MessagingAgentRowBody): a 20px round avatar, the title and a stamp on
+	// one 32px line, the preview in the hover card. A section that declares it
+	// keeps that shape for every row, including rows whose feed resolved no
+	// picture.
 	const messagingRows = spec?.rowStyle === "messaging";
 
 	// One row of the contributed feed, extracted so the flat list and each date
 	// bucket render the IDENTICAL row rather than a copy that drifts.
-	const renderContributedRows = (list: SourceItem[]) => (
-		<SidebarMenu>
-			{list.map((row) => {
-				const title = row.item.title;
-				// A row with supporting text (its project, say) is a TALLER two-line
-				// row; one without keeps the single-line height, so a section that
-				// mixes both still scans as one list.
-				const subtitle = row.item.subtitle;
-				const open = (forceNew = false) => openTarget(row.raw, title, forceNew);
-				const entityRows = spec?.entity ? entityRowsFor(row.item.id) : [];
-				return (
-					<SidebarMenuItem key={row.item.id}>
-						<ContextMenu>
-							<ContextMenuTrigger>
-								{/* sidebar row combines nested controls with drag/middle-click */}
-								<div
-									className={
-										messagingRows
-											? "group/row flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-muted"
-											: `group/row flex cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted ${
-													subtitle ? "h-11" : "h-8"
-												}`
-									}
-									onAuxClick={(e) => {
-										if (e.button === 1) {
-											e.preventDefault();
-											open(true);
-										}
-									}}
-									onClick={() => open()}
-									onKeyDown={(e) => {
-										if (e.key === "Enter") {
-											open();
-										}
-									}}
-									role="button"
-									tabIndex={0}
-								>
-									{(() => {
-										// `row.item.icon` is the MAPPED glyph, which defaults to the
-										// raw row's `icon` key — the field this read directly before
-										// the map could name it. Unmapped feeds are unaffected.
-										const glyph = asGlyphValue(row.item.icon) ?? null;
-										const sectionGlyph = contribution.icon ? (
-											<Icon
-												className={messagingRows ? "size-4" : "size-4 shrink-0"}
-												icon={contribution.icon}
-												size={16}
-												tone="muted"
-											/>
-										) : null;
-										if (!messagingRows) {
-											return (
-												<GlyphDisplay
-													className="size-4 shrink-0"
-													fallback={sectionGlyph}
-													size={16}
-													tone="muted"
-													value={glyph}
-												/>
-											);
-										}
-										// The avatar-led lead: the row's own picture when the feed
-										// has one, else the same glyph in the circle the picture
-										// would have filled, so the column stays aligned.
-										const safeAvatar = safeMediaUrl(row.item.avatar);
-										return safeAvatar ? (
-											<img
-												alt=""
-												className="size-9 shrink-0 rounded-full bg-muted object-cover"
-												src={safeAvatar}
-											/>
-										) : (
-											<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
-												<GlyphDisplay
-													className="size-4"
-													fallback={sectionGlyph}
-													size={16}
-													tone="muted"
-													value={glyph}
-												/>
-											</span>
-										);
-									})()}
-									<SidebarItemPreview
-										content={
-											<SidebarPreviewTitle
-												title={
-													spec?.itemPreview?.title
-														? renderTemplate(
-																spec.itemPreview.title,
-																{ item: row.raw },
-																{}
-															)
-														: title
-												}
-											>
-												{spec?.itemPreview?.description ? (
-													<p className="line-clamp-4 text-muted-foreground text-xs leading-relaxed">
-														{renderTemplate(
-															spec.itemPreview.description,
-															{ item: row.raw },
-															{}
-														)}
-													</p>
-												) : null}
-												{spec?.itemPreview?.meta?.map((meta) => (
-													<SidebarPreviewMeta
-														key={meta.label}
-														label={meta.label}
-														value={renderTemplate(
-															meta.value,
-															{ item: row.raw },
-															{}
-														)}
-													/>
-												))}
-											</SidebarPreviewTitle>
-										}
-									>
-										<span className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden">
-											{messagingRows ? (
-												<span className="flex min-w-0 items-center gap-2">
-													<span className="min-w-0 flex-1 truncate text-sm leading-tight">
-														{title}
-													</span>
-													{/* The mapped `accessory` is the stamp on this shape —
-													    the same slot the shell's agent row gives the time
-													    of the last message. */}
-													{row.item.accessory ? (
-														<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
-															{row.item.accessory}
-														</span>
-													) : null}
-												</span>
-											) : (
-												<span className="truncate text-sm leading-tight">
-													{title}
-												</span>
-											)}
-											{subtitle || messagingRows ? (
-												// A messaging row always draws its second line, muted
-												// when the feed had nothing to preview, so the list keeps
-												// one height.
-												<span
-													className={`truncate text-xs leading-tight ${
-														subtitle
-															? "text-muted-foreground"
-															: "text-muted-foreground/60 italic"
-													}`}
-												>
-													{subtitle ?? "No messages yet"}
-												</span>
-											) : null}
-										</span>
-									</SidebarItemPreview>
-								</div>
-							</ContextMenuTrigger>
-							<ContextMenuContent>
-								{spec?.itemTarget ? (
-									<>
-										<ContextMenuItem onClick={() => open(true)}>
-											<HugeiconsIcon
-												className="mr-2 size-4"
-												icon={ArrowUpRight01Icon}
-											/>
-											Open in new tab
-										</ContextMenuItem>
-										<OpenInNewWindowContextMenuItem
-											onClick={() => openTargetInNewWindow(row.raw, title)}
-										/>
-									</>
-								) : null}
-								{itemActions.map((action) =>
-									action.http ? (
-										<ContextMenuItem
-											key={action.id}
-											onClick={() => {
-												if (action.http) {
-													void runAction(action.http, row.raw);
-												}
-											}}
-											variant={
-												action.style === "danger" ? "destructive" : undefined
-											}
-										>
-											{action.icon ? (
-												<Icon
-													className="mr-2 size-4"
-													icon={action.icon}
-													size={16}
-												/>
-											) : null}
-											{action.label}
-										</ContextMenuItem>
-									) : null
-								)}
-								{entityRows.map((entityRow) => (
-									<ContextMenuItem
-										key={entityRow.id}
-										onClick={entityRow.onSelect}
-									>
-										<span className="mr-2 inline-flex">
-											<EntityRowGlyph row={entityRow} />
-										</span>
-										{entityRow.label}
-									</ContextMenuItem>
-								))}
-							</ContextMenuContent>
-						</ContextMenu>
-					</SidebarMenuItem>
-				);
-			})}
-		</SidebarMenu>
-	);
+	const renderContributedRows = (list: SourceItem[]) =>
+		renderContributedSectionRows(list, {
+			contribution,
+			entityRowsFor,
+			itemActions,
+			messagingRows,
+			openTarget,
+			openTargetInNewWindow,
+			runAction,
+			spec,
+		});
 
 	return (
 		<SidebarSection
@@ -520,7 +305,10 @@ export function DynamicSidebarSection({
 				canCreate && spec?.create ? (
 					<SectionAddButton
 						onClick={runCreate}
-						title={spec.create.label ?? `New ${contribution.title}`}
+						title={
+							spec.create.label ??
+							tl("New {title}", { title: contribution.title })
+						}
 					/>
 				) : undefined
 			}
@@ -552,9 +340,9 @@ export function DynamicSidebarSection({
 				<div className="px-2 py-2">
 					<p className="text-muted-foreground text-xs">
 						{/* `null` is the queryFn's marker for a non-2xx answer (a route
-							    gated behind a disabled app, a node that is down) — reporting
-							    that as "nothing here" states something the shell never
-							    learned. `undefined` is merely the in-flight first load. */}
+						    gated behind a disabled app, a node that is down) — reporting
+						    that as "nothing here" states something the shell never
+						    learned. `undefined` is merely the in-flight first load. */}
 						{payload === null && spec.emptyState.unavailable
 							? spec.emptyState.unavailable
 							: spec.emptyState.title}

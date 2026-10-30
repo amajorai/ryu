@@ -21,7 +21,6 @@ import {
 import { Logo as OrbLogo } from "@ryu/ui/components/logo.tsx";
 import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { SidebarInset, SidebarProvider } from "@ryu/ui/components/sidebar.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
 import { useCallback, useEffect, useState } from "react";
 import { closeCurrentWindow } from "@/lib/tauri-bridge.ts";
@@ -48,17 +47,16 @@ function StartupState({
 }) {
 	return (
 		<div className="flex size-full items-center justify-center bg-background">
-			<StaggerReveal>
-				<div className="flex w-full max-w-md flex-col items-center gap-6 p-8">
-					<OrbLogo size="56px" variant="shimmer" />
-					<PageHeader
-						className="w-full text-center"
-						subtitle={description}
-						title={title}
-						titleClassName="text-center"
-					/>
-				</div>
-			</StaggerReveal>
+			<div className="fade-in flex w-full max-w-md animate-in flex-col items-center gap-6 p-8 duration-(--duration-base) ease-enter">
+				<OrbLogo size="56px" variant="shimmer" />
+				<PageHeader
+					className="w-full text-center"
+					size="app"
+					subtitle={description}
+					title={title}
+					titleClassName="text-center"
+				/>
+			</div>
 		</div>
 	);
 }
@@ -85,7 +83,11 @@ function UnavailableStandaloneApp({
 				</EmptyDescription>
 			</EmptyHeader>
 			<EmptyContent>
-				<Button onClick={() => closeCurrentWindow().catch(() => undefined)}>
+				<Button
+					onClick={() => closeCurrentWindow().catch(() => undefined)}
+					size="sm"
+					variant="outline"
+				>
 					Close window
 				</Button>
 			</EmptyContent>

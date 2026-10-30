@@ -84,3 +84,37 @@ describe("ConnectionStatusToast", () => {
 		expect(html).not.toContain("ring-1 ring-inset");
 	});
 });
+
+describe("ConnectionStatusToast layout=strip", () => {
+	test("renders nothing while online", () => {
+		expect(
+			renderToStaticMarkup(
+				<ConnectionStatusToast layout="strip" nodeName="Local" phase="online" />
+			)
+		).toBe("");
+	});
+
+	test("renders one inline sentence and one Retry action, with no pill chrome", () => {
+		const html = renderToStaticMarkup(
+			<ConnectionStatusToast
+				layout="strip"
+				nodeName="Design node"
+				onRetry={() => undefined}
+				phase="node-unreachable"
+			/>
+		);
+		expect(html).toContain('data-slot="status-strip"');
+		expect(html).toContain('data-tone="warning"');
+		expect(html).toContain("Node offline.");
+		expect(html).toContain("Can’t reach Design node");
+		expect(html).toContain('data-slot="connection-status-retry"');
+		expect(html).toContain(">Retry<");
+		const stripClass = /class="([^"]*)" data-slot="status-strip"/.exec(
+			html
+		)?.[1];
+		expect(stripClass).toContain("h-8");
+		expect(stripClass).not.toContain("shadow");
+		expect(stripClass).not.toContain("backdrop-blur");
+		expect(stripClass).not.toContain("rounded");
+	});
+});

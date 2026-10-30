@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import {
 	Card,
@@ -72,6 +72,7 @@ function StandaloneProductPricingCard({
 }: {
 	entry: StandaloneProductPricing;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const isGatewayPayg = entry.slug === "gateway";
 	const card = (
 		<Card
@@ -98,7 +99,11 @@ function StandaloneProductPricingCard({
 					className="mt-auto inline-flex min-h-10 items-center self-start font-medium text-foreground text-sm underline-offset-4 hover:underline"
 					href={productHref(entry.slug)}
 				>
-					Details<span className="sr-only"> for {entry.name}</span>
+					{tlRich(
+						"Details<srOnly> for {name}</srOnly>",
+						{ name: entry.name },
+						{ srOnly: (content) => <span className="sr-only">{content}</span> }
+					)}
 					&nbsp;<span aria-hidden="true">→</span>
 				</Link>
 			</CardContent>
@@ -125,6 +130,7 @@ function StandaloneProductPricingCard({
 }
 
 export function StandaloneProductPricingSection({ slug }: { slug: string }) {
+	const tl = useLiteralMessages();
 	const entry = getStandaloneProductPricing(slug);
 	if (!entry) {
 		return null;
@@ -134,13 +140,16 @@ export function StandaloneProductPricingSection({ slug }: { slug: string }) {
 
 	return (
 		<section
-			aria-label={`${entry.name} pricing`}
+			aria-label={tl("{productName} pricing", { productName: entry.name })}
 			// A short block: a reduced shell keeps it from floating between full section gaps.
 			className={cn(landingSectionClass, "md:py-20 lg:py-20")}
 			data-testid={`standalone-pricing-${slug}`}
 			id="standalone-pricing"
 		>
-			<SectionHeading className="mb-4" title={`${entry.name} pricing`} />
+			<SectionHeading
+				className="mb-4"
+				title={tl("{productName} pricing", { productName: entry.name })}
+			/>
 			<div className="max-w-2xl">
 				{/* "Available" needs no note, and "Early access" already sits in the
 				    product hero's eyebrow; only pricing statuses such as "Included"

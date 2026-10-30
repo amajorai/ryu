@@ -15,7 +15,7 @@ import "./LiveActivityDock.css";
 import type { LiveActivity } from "@ryu/app-host/live-activity";
 import { Icon } from "@ryu/ui/components/icon.tsx";
 import { SPRING_MORPH } from "@ryu/ui/lib/ease.ts";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useLiveActivities } from "@/src/store/useLiveActivityStore.ts";
@@ -63,27 +63,21 @@ function ActivityCard({
 	onOpen: (a: LiveActivity) => void;
 }) {
 	const tone = STATUS_TONE[activity.status] ?? "var(--primary)";
-	const activityTintVariables1: CSSProperties & {
-		"--live-activity-tint": string;
-	} = { "--live-activity-tint": tone };
 	const activityTintVariables2: CSSProperties & {
 		"--live-activity-tint": string;
 	} = { "--live-activity-tint": tone };
 	return (
 		<motion.div
-			className="flex w-64 flex-col gap-2 rounded-2xl border border-border/70 bg-popover/95 p-3 text-left shadow-lg backdrop-blur-md"
+			className="flex w-64 flex-col gap-2 rounded-xl border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg"
 			layout
 			transition={SPRING_MORPH}
 		>
-			<div className="flex items-start gap-2.5">
+			<div className="flex items-start gap-2">
 				<span
 					aria-hidden
-					className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md"
-					data-live-activity-tile=""
-					data-live-activity-tint=""
-					style={activityTintVariables1}
+					className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
 				>
-					<Icon className="size-3.5" icon={activity.icon ?? "activity-03"} />
+					<Icon className="size-4" icon={activity.icon ?? "activity-03"} />
 				</span>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-1.5">
@@ -93,11 +87,11 @@ function ActivityCard({
 						>
 							{activity.title}
 						</span>
-						<span className="type-micro shrink-0 rounded-full bg-muted px-1.5 py-px text-muted-foreground uppercase tracking-wide">
+						<span className="shrink-0 text-muted-foreground text-xs">
 							{statusLabel(activity.status)}
 						</span>
 					</div>
-					<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground leading-snug">
+					<p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs leading-snug">
 						{activity.detail}
 					</p>
 				</div>
@@ -115,7 +109,7 @@ function ActivityCard({
 			)}
 			{activity.action && (
 				<button
-					className="type-caption mt-1 flex items-center justify-center gap-1 rounded-lg bg-muted/70 py-1.5 font-medium text-foreground transition-colors hover:bg-muted"
+					className="mt-1 flex h-8 items-center justify-center gap-1 rounded-lg bg-muted font-medium text-foreground text-xs transition-colors duration-150 hover:bg-accent hover:duration-0"
 					onClick={() => onOpen(activity)}
 					type="button"
 				>
@@ -142,13 +136,10 @@ function ActivityPill({
 	const activityTintVariables3: CSSProperties & {
 		"--live-activity-tint": string;
 	} = { "--live-activity-tint": tone };
-	const activityTintVariables4: CSSProperties & {
-		"--live-activity-tint": string;
-	} = { "--live-activity-tint": tone };
 	return (
 		<motion.button
 			aria-expanded={expanded}
-			className="group flex h-8 items-center gap-1.5 rounded-full border border-border/60 bg-popover/90 px-3 shadow-sm backdrop-blur-md transition-colors hover:bg-popover"
+			className="group flex h-8 items-center gap-1.5 rounded-full border border-border bg-popover px-3 shadow-lg transition-colors duration-150 hover:bg-accent hover:duration-0"
 			layout
 			onClick={() => onToggle(activity)}
 			type="button"
@@ -162,14 +153,6 @@ function ActivityPill({
 					data-live-activity-tint=""
 					style={activityTintVariables3}
 				/>
-				{activity.status === "running" && (
-					<span
-						aria-hidden
-						className="absolute size-1.5 rounded-full opacity-60 motion-safe:animate-ping"
-						data-live-activity-tint=""
-						style={activityTintVariables4}
-					/>
-				)}
 			</span>
 			<span
 				className="max-w-28 truncate font-medium text-foreground text-xs"
@@ -178,14 +161,14 @@ function ActivityPill({
 				{activity.title}
 			</span>
 			{activity.progress !== undefined && (
-				<span className="type-compact text-muted-foreground tabular-nums">
+				<span className="text-muted-foreground text-xs tabular-nums">
 					{Math.round(activity.progress * 100)}%
 				</span>
 			)}
 			{expanded && (
 				<span
 					aria-hidden
-					className="type-micro ml-0.5 rounded-full bg-muted px-1.5 py-px text-muted-foreground"
+					className="ml-0.5 text-muted-foreground/70 text-xs tabular-nums"
 				>
 					{statusLabel(activity.status)}
 				</span>
@@ -199,7 +182,7 @@ function ActivityPill({
 						onOpen(activity);
 					}}
 				>
-					<Icon className="size-3" icon="arrow-up-right-01" />
+					<Icon className="size-3.5" icon="arrow-up-right-01" />
 				</span>
 			)}
 		</motion.button>

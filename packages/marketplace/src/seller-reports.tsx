@@ -122,17 +122,17 @@ export function SellerReportsPanel({
 						const busy = busyId === report.id;
 						return (
 							<li
-								className="flex flex-col gap-2 rounded-md border px-3 py-3"
+								className="flex flex-col gap-2 rounded-lg border px-3 py-3"
 								key={report.id}
 							>
 								<div className="flex flex-wrap items-center gap-2">
 									<span className="font-medium text-sm">
 										{report.itemName ?? report.itemId}
 									</span>
-									<span className="type-compact rounded-full bg-muted px-2 py-0.5 text-muted-foreground uppercase">
+									<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
 										{report.itemKind}
 									</span>
-									<span className="type-compact rounded-full bg-warning/15 px-2 py-0.5 text-status-warning">
+									<span className="rounded-full bg-warning/15 px-2 py-0.5 text-status-warning text-xs">
 										{REASON_LABEL.get(report.reason) ?? report.reason}
 									</span>
 								</div>

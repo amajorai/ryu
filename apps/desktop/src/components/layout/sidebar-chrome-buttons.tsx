@@ -75,19 +75,19 @@ function ChromeMenuItems({
 				disabled={!menu.canMove(chromeKey, "up")}
 				onClick={() => menu.onMove(chromeKey, "up")}
 			>
-				<HugeiconsIcon className="mr-2 size-4" icon={ArrowUp01Icon} />
+				<HugeiconsIcon className="size-4" icon={ArrowUp01Icon} />
 				Move up
 			</ContextMenuItem>
 			<ContextMenuItem
 				disabled={!menu.canMove(chromeKey, "down")}
 				onClick={() => menu.onMove(chromeKey, "down")}
 			>
-				<HugeiconsIcon className="mr-2 size-4" icon={ArrowDown01Icon} />
+				<HugeiconsIcon className="size-4" icon={ArrowDown01Icon} />
 				Move down
 			</ContextMenuItem>
 			<ContextMenuSeparator />
 			<ContextMenuItem onClick={() => menu.onHide(chromeKey)}>
-				<HugeiconsIcon className="mr-2 size-4" icon={ViewOffSlashIcon} />
+				<HugeiconsIcon className="size-4" icon={ViewOffSlashIcon} />
 				{tl("Hide {label}", { label })}
 			</ContextMenuItem>
 		</>
@@ -273,7 +273,7 @@ export function NavTabButton({
 			</ContextMenuTrigger>
 			<ContextMenuContent>
 				<ContextMenuItem onClick={() => open(true)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={ArrowUpRight01Icon} />
+					<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 					Open in new tab
 				</ContextMenuItem>
 				<OpenInNewWindowContextMenuItem onClick={openInNewWindow} />
@@ -344,7 +344,7 @@ export function DynamicSidebarButton({
 			</ContextMenuTrigger>
 			<ContextMenuContent>
 				<ContextMenuItem onClick={() => open(true)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={ArrowUpRight01Icon} />
+					<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 					Open in new tab
 				</ContextMenuItem>
 				<OpenInNewWindowContextMenuItem onClick={openInNewWindow} />

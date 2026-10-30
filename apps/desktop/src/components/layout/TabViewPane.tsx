@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties, ReactNode } from "react";
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
@@ -88,13 +89,14 @@ export function TabViewPane({
 									This tab is unloaded to save memory.
 								</p>
 							</div>
-							<button
-								className="rounded-full border border-border/70 bg-background px-3 py-1.5 font-medium text-xs shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							<Button
 								onClick={onFocus}
+								size="sm"
 								type="button"
+								variant="outline"
 							>
 								Reload tab
-							</button>
+							</Button>
 						</div>
 					) : (
 						<div className="min-h-0 min-w-0 flex-1 overflow-hidden">

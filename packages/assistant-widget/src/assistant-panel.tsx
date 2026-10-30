@@ -16,24 +16,8 @@ import {
 import { nodeSummary } from "./session-helpers.ts";
 import type { WebMcpPageTool, WebMcpPageToolsState } from "./webmcp.ts";
 
-/** Where the next prompt goes, in the quiet type of Desktop's recent-chats label. */
-function runtimeNote(
-	mode: AssistantMode,
-	nodeHealth: LocalNodeHealth | undefined
-): string {
-	if (mode === "browser") {
-		return "Answers run in this tab with a small local model. No prompt is sent to Ryu servers.";
-	}
-	if (mode === "guest") {
-		return "Prompts go through Ryu's hosted gateway, which screens them for safety and enforces guest limits. Page context is not sent.";
-	}
-	const summary = nodeHealth ? nodeSummary(nodeHealth) : "Core online";
-	return `${summary} · Questions go directly from this tab to your node and stay out of its chat history.`;
-}
-
 export interface AssistantPanelProps extends RuntimeSetupProps {
 	browserContext: BrowserPageContext;
-	error?: Error;
 	guestAvailable: boolean;
 	includePageContext: boolean;
 	includeSelectionContext: boolean;
@@ -64,10 +48,12 @@ export interface AssistantPanelProps extends RuntimeSetupProps {
  * renders (quiet title row, transcript, minimal composer). Public-only concerns —
  * runtime choice, setup, and page context — use Desktop's slots for the same jobs:
  * the header settings button, the composer prompt, and composer context chips.
+ * Where prompts go is said once, in each runtime's description in the settings
+ * popover, rather than in a footer under every conversation. Errors arrive as
+ * one sentence in the info bar (with Retry and Copy details), never as raw text.
  */
 export function AssistantPanel({
 	browserContext,
-	error,
 	includePageContext,
 	includeSelectionContext,
 	infoBar,
@@ -112,6 +98,7 @@ export function AssistantPanel({
 						guestAvailable={guestAvailable}
 						mode={mode}
 						nodeConnected={nodeConnected}
+						nodeSummary={nodeHealth ? nodeSummary(nodeHealth) : undefined}
 						onDisconnect={onDisconnect}
 						onModeChange={onModeChange}
 					/>
@@ -138,18 +125,10 @@ export function AssistantPanel({
 							id: `runtime-setup:${mode}`,
 						}
 			}
-			error={error}
 			footer={
-				runtimeReady || poweredByRyu ? (
-					<div className="flex shrink-0 flex-col items-center gap-2 px-4 pb-2">
-						{runtimeReady ? (
-							<p className="self-stretch text-muted-foreground text-xs leading-relaxed">
-								{runtimeNote(mode, nodeHealth)}
-							</p>
-						) : null}
-						{poweredByRyu ? (
-							<PoweredByRyuBadge source="assistant-widget" />
-						) : null}
+				poweredByRyu ? (
+					<div className="flex shrink-0 justify-center px-4 pb-2">
+						<PoweredByRyuBadge source="assistant-widget" />
 					</div>
 				) : undefined
 			}

@@ -114,7 +114,9 @@ test("overview routes to the correct chat actions and remembers collapse state",
 	const browserErrors = watchBrowserErrors(page);
 	const card = await openProof(page);
 	await expect(card.getByTitle("Preparing the launch checklist")).toBeVisible();
-	await expect(card.getByText("Working", { exact: true })).toBeVisible();
+	await expect(card.getByTestId("bot-profile-summary")).toContainText(
+		"1 working"
+	);
 	await expect(card.getByRole("tab", { name: "Overview" })).toHaveAttribute(
 		"aria-selected",
 		"true"

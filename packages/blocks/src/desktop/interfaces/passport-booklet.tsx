@@ -181,7 +181,7 @@ export function Booklet({
 	single: boolean;
 	/** False with reduced motion: crossfade, never turn. */
 	smooth: boolean;
-	spreads: PassportSpread[];
+	spreads: readonly PassportSpread[];
 	tabs: BookTab[];
 	turn: PageTurn | null;
 	view: number;

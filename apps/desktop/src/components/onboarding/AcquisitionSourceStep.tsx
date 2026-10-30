@@ -1,11 +1,7 @@
-import { Button } from "@ryu/ui/components/button.tsx";
 import {
-	Card,
-	CardContent,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card.tsx";
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group.tsx";
 import { useState } from "react";
@@ -45,62 +41,51 @@ export function AcquisitionSourceStep({
 			subtitle="This helps us understand how people find Ryu."
 			title="Where did you hear about us?"
 		>
-			<Card
-				appearance="onboarding"
-				borderTone="subtle"
-				className="w-full max-w-xl"
+			<RadioGroup
+				aria-label="Where did you hear about us?"
+				onValueChange={(value) => {
+					const selected = ONBOARDING_SOURCES.find(
+						(source) => source === value
+					);
+					if (selected) {
+						setSource(selected);
+					}
+				}}
+				value={source ?? ""}
 			>
-				<CardHeader>
-					<CardTitle>One quick question</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<RadioGroup
-						aria-label="Where did you hear about us?"
-						onValueChange={(value) => {
-							const selected = ONBOARDING_SOURCES.find(
-								(source) => source === value
-							);
-							if (selected) {
-								setSource(selected);
-							}
-						}}
-						value={source ?? ""}
-					>
-						{ONBOARDING_SOURCES.map((value) => {
-							const id = `onboarding-source-${value}`;
-							return (
-								<div className="flex items-center gap-3" key={value}>
-									<RadioGroupItem id={id} value={value} />
-									<Label htmlFor={id} typography="field-choice">
-										{SOURCE_LABELS[value]}
-									</Label>
-								</div>
-							);
-						})}
-					</RadioGroup>
-					{error ? (
-						<p className="mt-4 text-sm text-status-destructive" role="alert">
-							{error}
-						</p>
-					) : null}
-				</CardContent>
-				<CardFooter appearance="onboarding-step" className="justify-between">
-					<Button disabled={busy} onClick={onSkip} variant="ghost">
-						Skip for now
-					</Button>
-					<Button
-						disabled={busy || source === null}
-						loading={busy}
-						onClick={() => {
-							if (source) {
-								onContinue(source);
-							}
-						}}
-					>
-						Continue
-					</Button>
-				</CardFooter>
-			</Card>
+				{ONBOARDING_SOURCES.map((value) => {
+					const id = `onboarding-source-${value}`;
+					return (
+						<div className="flex items-center gap-3" key={value}>
+							<RadioGroupItem id={id} value={value} />
+							<Label htmlFor={id} typography="field-choice">
+								{SOURCE_LABELS[value]}
+							</Label>
+						</div>
+					);
+				})}
+			</RadioGroup>
+			{error ? (
+				<p className="text-sm text-status-destructive" role="alert">
+					{error}
+				</p>
+			) : null}
+			<OnboardingActions className="justify-between">
+				<OnboardingCta disabled={busy} onClick={onSkip} tone="secondary">
+					Skip for now
+				</OnboardingCta>
+				<OnboardingCta
+					disabled={busy || source === null}
+					loading={busy}
+					onClick={() => {
+						if (source) {
+							onContinue(source);
+						}
+					}}
+				>
+					Continue
+				</OnboardingCta>
+			</OnboardingActions>
 		</ActivationStepShell>
 	);
 }

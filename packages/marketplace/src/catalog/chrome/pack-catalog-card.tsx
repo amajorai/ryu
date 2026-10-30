@@ -75,7 +75,7 @@ function FanCards({ pack }: { pack: SkillPackCard }) {
 				return (
 					<div
 						className={cn(
-							"absolute inset-0 rounded-lg border border-border/70 bg-card shadow-sm",
+							"absolute inset-0 rounded-lg border border-border bg-card",
 							visualStyles.transform
 						)}
 						key={i}
@@ -173,7 +173,7 @@ export default function PackCatalogCard({
 	return (
 		<div
 			className={cn(
-				"group relative flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card transition-colors hover:border-foreground/25",
+				"group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-foreground/25",
 				selected && "border-foreground/30 bg-accent",
 				className
 			)}
@@ -197,10 +197,7 @@ export default function PackCatalogCard({
 				tabIndex={openTabIndex}
 				type="button"
 			>
-				<div className="relative h-1/2 w-full overflow-hidden">
-					{faceMark}
-					<div className="absolute inset-0 bg-gradient-to-b from-black/10 to-black/5" />
-				</div>
+				<div className="relative h-1/2 w-full overflow-hidden">{faceMark}</div>
 				<div className="flex flex-1 flex-col justify-between gap-1 p-3">
 					<div className="min-w-0">
 						<p className="truncate font-medium text-sm" title={pack.name}>
@@ -211,7 +208,7 @@ export default function PackCatalogCard({
 						</p>
 					</div>
 					<div className="flex items-center justify-between">
-						<span className="type-compact font-medium text-muted-foreground uppercase tracking-wide">
+						<span className="text-detail text-muted-foreground">
 							{tl("{memberCount, plural, one {# skill} other {# skills}}", {
 								memberCount: pack.memberCount,
 							})}
@@ -231,7 +228,7 @@ export default function PackCatalogCard({
 				<div className="absolute right-2 bottom-2 z-20">
 					<button
 						aria-label={tl("Install the {name} pack", { name: pack.name })}
-						className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-border/70 bg-background/90 font-medium text-xs shadow-sm backdrop-blur transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/40"
+						className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-border bg-background font-medium text-xs transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/40"
 						onClick={(event) => {
 							event.stopPropagation();
 							onInstall();

@@ -34,20 +34,17 @@
 
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
-import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.tsx";
-import { Spinner } from "@/components/ui/spinner.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
-import { HINT, type KeyHint } from "../core/keymap.ts";
 import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
 import {
 	loadServices,
 	type ServicesSnapshot,
 } from "../core/services-snapshot.ts";
+import { tf } from "../i18n/translate.ts";
 import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
@@ -56,66 +53,20 @@ import {
 	useStatusContribution,
 } from "../ui/StatusContext.tsx";
 import { useToast } from "../ui/toast.tsx";
+import {
+	CATEGORY_WIDTH,
+	categoryOf,
+	LIST_HEIGHT,
+	NAME_WIDTH,
+	type PendingConfirm,
+	POLL_MS,
+	postAction,
+	rowStatus,
+	SERVICES_HINTS,
+	SIDECAR_ORDER,
+	StatusCell,
+} from "./services-rows.tsx";
 import type { TabProps } from "./types.ts";
-
-// The fixed sidecar order, verbatim from apps/cli/src/app.rs SIDECAR_ORDER.
-const SIDECAR_ORDER = [
-	"temporal",
-	"spider",
-	"screenpipe",
-	"llmfit",
-	"qmd",
-	"shadow",
-	"ghost",
-	"llamacpp",
-	"ollama",
-	"vllm",
-	"zeroclaw",
-	"openclaw",
-	"nanoclaw",
-	"picoclaw",
-	"nemoclaw",
-	"ironclaw",
-] as const;
-
-type Category = "provider" | "tool" | "agent";
-
-// Name -> category, matching the inline switch in ui.rs render_services_content
-// (note: shadow/ghost render as "agent" there even though app.rs tags them Tool;
-// we follow the UI's name-based mapping for visual parity).
-const PROVIDERS = new Set(["llamacpp", "ollama", "vllm"]);
-const TOOLS = new Set(["temporal", "spider", "screenpipe", "llmfit", "qmd"]);
-
-function categoryOf(name: string): Category {
-	if (PROVIDERS.has(name)) {
-		return "provider";
-	}
-	if (TOOLS.has(name)) {
-		return "tool";
-	}
-	return "agent";
-}
-
-const POLL_MS = 2500;
-const NAME_WIDTH = 12;
-const CATEGORY_WIDTH = 8;
-const LIST_HEIGHT = 16;
-
-async function postAction(target: ApiTarget, path: string): Promise<boolean> {
-	try {
-		await request(target, path, { method: "POST" }, appResponseValueSchema);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-interface RowStatus {
-	color: string;
-	downloading: boolean;
-	icon: string;
-	text: string;
-}
 
 export function ServicesTab({ active }: TabProps) {
 	const { target } = useCore();
@@ -254,14 +205,20 @@ export function ServicesTab({ active }: TabProps) {
 			.then((ok) => {
 				if (ok) {
 					setQueued((prev) => new Set(prev).add(name));
-					notify(`Queued install: ${name}`, "info");
+					notify(tf("Queued install: {name}", { name }), "info");
 				} else {
-					notify(`Install failed: ${name}`, "error");
+					notify(tf("Install failed: {name}", { name }), "error");
 				}
 				runLoad(false);
 			})
 			.catch((err) =>
-				notify(`Install failed: ${name} - ${nativeErrorMessage(err)}`, "error")
+				notify(
+					tf("Install failed: {name} - {error}", {
+						name,
+						error: nativeErrorMessage(err),
+					}),
+					"error"
+				)
 			);
 	}, [index, queued, isInstalled, target, notify, runLoad]);
 
@@ -469,96 +426,4 @@ export function ServicesTab({ active }: TabProps) {
 			) : null}
 		</box>
 	);
-}
-
-// Published to the shell's status bar (Services renders inside the Settings
-// overlay, which owns the keyboard while open). Lower priority survives narrow bars.
-const SERVICES_HINTS: KeyHint[] = [
-	{ ...HINT.move, priority: 0 },
-	{ keys: "d", label: "install", priority: 1 },
-	{ keys: "s", label: "start", priority: 1 },
-	{ keys: "x", label: "stop", priority: 1 },
-	{ keys: "r", label: "restart", priority: 2 },
-	{ keys: "A", label: "all start", priority: 3 },
-	{ keys: "Z", label: "all stop", priority: 3 },
-	{ keys: "D", label: "uninstall", priority: 2 },
-];
-
-function StatusCell({ status }: { status: RowStatus }) {
-	if (status.downloading) {
-		return <Spinner color={status.color} label={status.text} type="dots" />;
-	}
-	return (
-		<box flexDirection="row" gap={1}>
-			<text fg={status.color}>{status.icon}</text>
-			<text fg={status.color}>{status.text}</text>
-		</box>
-	);
-}
-
-// A bulk or destructive action held until the user answers the ConfirmPrompt.
-interface PendingConfirm {
-	confirmLabel: string;
-	consequence: string;
-	run: () => void;
-	title: string;
-}
-
-interface ThemeLike {
-	colors: {
-		error: string;
-		mutedForeground: string;
-		primary: string;
-		success: string;
-		warning: string;
-	};
-}
-
-interface RowFlags {
-	downloading: boolean;
-	installed: boolean;
-	installFailed: boolean;
-	running: boolean;
-}
-
-// Status icon/text/color, matching the precedence in ui.rs render_services_content.
-function rowStatus(theme: ThemeLike, flags: RowFlags): RowStatus {
-	if (flags.installFailed) {
-		return {
-			icon: "✗",
-			text: "install failed",
-			color: theme.colors.error,
-			downloading: false,
-		};
-	}
-	if (flags.downloading) {
-		return {
-			icon: "",
-			text: "downloading",
-			color: theme.colors.primary,
-			downloading: true,
-		};
-	}
-	if (!flags.installed) {
-		return {
-			icon: " ",
-			text: "—",
-			color: theme.colors.mutedForeground,
-			downloading: false,
-		};
-	}
-	if (flags.running) {
-		return {
-			icon: "●",
-			text: "running",
-			color: theme.colors.success,
-			downloading: false,
-		};
-	}
-	return {
-		icon: "○",
-		text: "stopped",
-		color: theme.colors.warning,
-		downloading: false,
-	};
 }

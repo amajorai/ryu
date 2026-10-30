@@ -22,6 +22,8 @@ const LEAD_PRODUCT_IDS: readonly string[] = ["gateway", "console", "bot"];
 const NO_HIDDEN_PRODUCTS: readonly string[] = [];
 
 interface ProductCardData {
+	/** The menu's one-line summary; read to assistive tech, as the scene is decorative. */
+	description: string;
 	href: string;
 	id: string;
 	label: string;
@@ -32,10 +34,21 @@ function cardFor(item: ProductNavItem): ProductCardData | null {
 	const id = productNavKey(item);
 	const realm = PRODUCT_REALMS.find((candidate) => candidate.id === item.id);
 	if (realm) {
-		return { href: realm.href, id, label: realm.label, realm };
+		return {
+			description: item.description,
+			href: realm.href,
+			id,
+			label: realm.label,
+			realm,
+		};
 	}
 	if (isCatalogSceneId(id)) {
-		return { href: item.href, id, label: CATALOG_SCENE_NAMES[id] };
+		return {
+			description: item.description,
+			href: item.href,
+			id,
+			label: CATALOG_SCENE_NAMES[id],
+		};
 	}
 	return null;
 }
@@ -88,12 +101,17 @@ function xlSpans(total: number, leadCount: number): string[] {
 	return [...lead, ...spans];
 }
 
+/**
+ * The card's one link. It covers the whole card (above the decorative scene,
+ * below the hover border) so every point of the card opens the product; the
+ * label and "Explore" cue stay pinned to the bottom edge.
+ */
 function ProductExploreLink({ card }: { card: ProductCardData }) {
 	const os = card.id === "os";
 	return (
 		<Link
 			className={cn(
-				`absolute inset-x-0 bottom-0 z-20 flex items-end justify-between gap-3 px-5 pt-20 pb-5 text-foreground ${styles.explore} focus-visible:outline-2 focus-visible:outline-ring`,
+				`absolute inset-0 z-20 flex items-end justify-between gap-3 rounded-3xl px-5 pb-5 text-foreground ${styles.explore} focus-visible:outline-2 focus-visible:outline-ring`,
 				os && "text-white"
 			)}
 			data-testid={`realm-card-${card.id}`}
@@ -107,6 +125,7 @@ function ProductExploreLink({ card }: { card: ProductCardData }) {
 			>
 				{card.label}
 			</span>
+			<span className="sr-only">{card.description}</span>
 			<span
 				className={cn(
 					"inline-flex items-center gap-1 text-muted-foreground text-xs opacity-60 transition-opacity duration-500 group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:opacity-100 motion-reduce:transition-none",
@@ -146,7 +165,7 @@ function ProductCard({
 			)}
 			data-testid={`product-card-${card.id}`}
 		>
-			<div className="absolute inset-0">
+			<div className="pointer-events-none absolute inset-0">
 				<ProductCardScene card={card} />
 			</div>
 			<div
@@ -154,7 +173,7 @@ function ProductCard({
 				className={
 					card.id === "os"
 						? "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-14 bg-gradient-to-t from-black/70 to-transparent"
-						: `pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-muted via-muted/85 to-transparent ${styles.scrim}`
+						: `pointer-events-none absolute inset-x-0 bottom-0 z-10 h-14 bg-gradient-to-t from-muted via-muted/85 to-transparent ${styles.scrim}`
 				}
 			/>
 			<ProductExploreLink card={card} />

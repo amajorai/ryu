@@ -60,7 +60,7 @@ function AnnouncementAction({
 	return (
 		<button
 			aria-label={label}
-			className="type-compact relative z-20 flex h-6 items-center gap-1 rounded-lg px-1.5 font-medium text-primary transition-colors hover:bg-primary/10"
+			className="relative z-20 flex h-6 items-center gap-1 rounded-lg px-1.5 font-medium text-primary text-xs transition-colors hover:bg-primary/10"
 			data-notification-action="true"
 			onClick={onClick}
 			type="button"

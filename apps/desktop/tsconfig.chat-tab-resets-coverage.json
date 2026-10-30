@@ -11,7 +11,10 @@
     "e2e/chat-page-native-http.host.test.ts",
     "e2e/chat-page-native-http-background.ts",
     "e2e/chat-page-native-http-state.ts",
+    "e2e/chat-page-native-http-tab-resets.ts",
     "e2e/chat-page-native-http-tab-resets.spec.ts",
+    "e2e/chat-page-native-http-tab-resets-review.spec.ts",
+    "e2e/chat-page-native-http-tab-resets-threads.spec.ts",
     "e2e/harness/vite.performance-proof.config.ts",
     "../../packages/blocks/src/desktop/agent-elements/markdown.tsx"
   ]

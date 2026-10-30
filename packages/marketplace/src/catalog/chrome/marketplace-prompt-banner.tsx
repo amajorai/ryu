@@ -1,5 +1,7 @@
 "use client";
 
+import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { ditherAvatarHue } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { ShaderBackground } from "@ryu/ui/components/motion/shader-background.tsx";
 import {
@@ -14,7 +16,6 @@ import {
 	WARP_SWIRL,
 } from "@ryu/ui/components/pass-card-shell.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { ArrowRight } from "lucide-react";
 import { useMemo } from "react";
 import { safeCssBackground } from "../safe-url.ts";
 import type { CatalogBanner } from "../types.ts";
@@ -135,7 +136,7 @@ export function MarketplacePromptBanner({
 							aria-hidden="true"
 							className="flex size-6 shrink-0 items-center justify-center rounded-full bg-white/15 transition-transform motion-safe:group-hover:translate-x-0.5"
 						>
-							<ArrowRight className="size-3.5" />
+							<HugeiconsIcon className="size-3.5" icon={ArrowRight02Icon} />
 						</span>
 					</button>
 				))}

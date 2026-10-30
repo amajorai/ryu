@@ -1,6 +1,7 @@
+import { Mic01Icon, StopIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
-import { IconMicrophone, IconPlayerStopFilled } from "@tabler/icons-react";
 
 export interface VoiceInputButtonProps {
 	className?: string;
@@ -25,12 +26,12 @@ export function VoiceInputButton({
 			<Button
 				appearance="dictation-pending"
 				aria-label="Transcribing"
-				className={cn(className)}
+				className={cn("size-8", className)}
 				loading
-				size="icon"
+				size="icon-sm"
 				title="Transcribing…"
 				type="button"
-				variant="ghost"
+				variant="ghost-muted"
 			/>
 		);
 	}
@@ -39,14 +40,14 @@ export function VoiceInputButton({
 			<Button
 				appearance="dictation-recording"
 				aria-label="Stop recording"
-				className={cn(className)}
+				className={cn("size-8", className)}
 				onClick={onStop}
-				size="icon"
+				size="icon-sm"
 				title="Stop recording"
 				type="button"
-				variant="ghost"
+				variant="ghost-muted"
 			>
-				<IconPlayerStopFilled className="size-3.5" />
+				<HugeiconsIcon className="size-3.5" icon={StopIcon} />
 			</Button>
 		);
 	}
@@ -54,15 +55,15 @@ export function VoiceInputButton({
 		<Button
 			appearance="dictation-ready"
 			aria-label="Start voice input"
-			className={cn(className)}
+			className={cn("size-8", className)}
 			disabled={disabled}
 			onClick={onStart}
-			size="icon"
+			size="icon-sm"
 			title="Voice input"
 			type="button"
-			variant="ghost"
+			variant="ghost-muted"
 		>
-			<IconMicrophone className="size-4" />
+			<HugeiconsIcon className="size-4" icon={Mic01Icon} />
 		</Button>
 	);
 }

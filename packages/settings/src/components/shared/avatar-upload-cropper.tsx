@@ -1,13 +1,7 @@
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "@ryu/ui/components/dialog.tsx";
-import { Slider } from "@ryu/ui/components/slider.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type CSSProperties,
@@ -20,27 +14,11 @@ import { sileo } from "sileo";
 import { z } from "zod";
 import { useFileUpload } from "../../hooks/useFileUpload.ts";
 import { settingsApi } from "../../utils/api-client.ts";
+import { AvatarCropDialog } from "./avatar-crop-dialog.tsx";
+import { type Area, createImage, getCroppedImg } from "./avatar-crop-image.ts";
 
 interface AvatarImageStyle extends CSSProperties {
 	"--avatar-image": string;
-}
-interface CropPreviewStyle extends CSSProperties {
-	"--crop-image": string;
-	"--crop-zoom": number;
-}
-interface CropAreaStyle extends CSSProperties {
-	"--crop-height": string;
-	"--crop-left": string;
-	"--crop-top": string;
-	"--crop-width": string;
-}
-
-// Define type for pixel crop area
-interface Area {
-	height: number;
-	width: number;
-	x: number;
-	y: number;
 }
 
 interface AvatarUploadCropperProps {
@@ -56,60 +34,6 @@ interface AvatarUploadCropperProps {
 	 *  signed-in user. The cropping, validation, and toasts are identical. */
 	upload?: (file: File) => Promise<{ message?: string }>;
 	userName?: string | null;
-}
-
-// Helper function to create a cropped image blob
-const createImage = (url: string): Promise<HTMLImageElement> =>
-	new Promise((resolve, reject) => {
-		const image = new Image();
-		image.addEventListener("load", () => resolve(image));
-		image.addEventListener("error", (error) => reject(error));
-		image.setAttribute("crossOrigin", "anonymous"); // Needed for canvas Tainted check
-		image.src = url;
-	});
-
-async function getCroppedImg(
-	imageSrc: string,
-	pixelCrop: Area,
-	outputWidth: number = pixelCrop.width,
-	outputHeight: number = pixelCrop.height
-): Promise<Blob | null> {
-	try {
-		const image = await createImage(imageSrc);
-		const canvas = document.createElement("canvas");
-		const ctx = canvas.getContext("2d");
-
-		if (!ctx) {
-			return null;
-		}
-
-		// Set canvas size to desired output size
-		canvas.width = outputWidth;
-		canvas.height = outputHeight;
-
-		// Draw the cropped image onto the canvas
-		ctx.drawImage(
-			image,
-			pixelCrop.x,
-			pixelCrop.y,
-			pixelCrop.width,
-			pixelCrop.height,
-			0,
-			0,
-			outputWidth,
-			outputHeight
-		);
-
-		// Convert canvas to blob
-		return new Promise((resolve) => {
-			canvas.toBlob((blob) => {
-				resolve(blob);
-			}, "image/jpeg");
-		});
-	} catch (error) {
-		console.error("Error in getCroppedImg:", error);
-		return null;
-	}
 }
 
 export function AvatarUploadCropper({
@@ -325,18 +249,6 @@ export function AvatarUploadCropper({
 	const avatarImageStyle: AvatarImageStyle = {
 		"--avatar-image": `url(${finalImageUrl})`,
 	};
-	const cropPreviewStyle: CropPreviewStyle = {
-		"--crop-image": `url(${previewUrl})`,
-		"--crop-zoom": zoom,
-	};
-	const cropAreaStyle: CropAreaStyle | undefined = croppedAreaPixels
-		? {
-				"--crop-left": `${croppedAreaPixels.x}px`,
-				"--crop-top": `${croppedAreaPixels.y}px`,
-				"--crop-width": `${croppedAreaPixels.width}px`,
-				"--crop-height": `${croppedAreaPixels.height}px`,
-			}
-		: undefined;
 
 	return (
 		<div className={cn("flex flex-col items-center gap-2", className)}>
@@ -357,6 +269,9 @@ export function AvatarUploadCropper({
 					onDrop={handleDrop}
 					type="button"
 				>
+					{isUploading ? (
+						<Skeleton className="absolute inset-0" radius="pill" />
+					) : null}
 					{finalImageUrl ? (
 						<div
 							aria-label={`${userName ?? "User"} avatar`}
@@ -374,27 +289,14 @@ export function AvatarUploadCropper({
 				{finalImageUrl && removeImage && (
 					<Button
 						aria-label="Remove image"
-						className="absolute -top-1 -right-1"
+						className="absolute -top-1 -right-1 rounded-full"
 						disabled={disabled || isUploading || isRemoving}
 						onClick={handleRemoveFinalImage}
-						size="icon"
+						size="icon-xs"
 						type="button"
+						variant="secondary"
 					>
-						<svg
-							aria-hidden="true"
-							className="size-3.5"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-							xmlns="http://www.w3.org/2000/svg"
-						>
-							<path
-								d="M6 18L18 6M6 6l12 12"
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								strokeWidth={2}
-							/>
-						</svg>
+						<HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={2} />
 					</Button>
 				)}
 				<input
@@ -414,8 +316,10 @@ export function AvatarUploadCropper({
 				/>
 			</div>
 
-			{/* Cropper Dialog */}
-			<Dialog
+			<AvatarCropDialog
+				croppedAreaPixels={croppedAreaPixels}
+				onApply={handleApply}
+				onCancel={() => setIsDialogOpen(false)}
 				onOpenChange={(open) => {
 					setIsDialogOpen(open);
 					if (!open && previewUrl) {
@@ -423,117 +327,15 @@ export function AvatarUploadCropper({
 						setPreviewUrl(null);
 					}
 				}}
+				onZoomChange={setZoom}
 				open={isDialogOpen}
-			>
-				<DialogContent className="sm:max-w-140" showCloseButton={false}>
-					<DialogDescription className="sr-only">
-						Crop image dialog
-					</DialogDescription>
-					<DialogHeader className="contents text-left">
-						<DialogTitle className="flex items-center justify-between">
-							<div className="flex items-center gap-2">
-								<Button
-									aria-label="Cancel"
-									className="-my-1"
-									onClick={() => setIsDialogOpen(false)}
-									size="icon"
-									type="button"
-									variant="ghost"
-								>
-									<svg
-										aria-hidden="true"
-										className="size-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-										xmlns="http://www.w3.org/2000/svg"
-									>
-										<path
-											d="M19 12H5M12 19l-7-7 7-7"
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											strokeWidth={2}
-										/>
-									</svg>
-								</Button>
-								<span>Crop image</span>
-							</div>
-							<Button
-								autoFocus
-								disabled={!(previewUrl && croppedAreaPixels)}
-								onClick={handleApply}
-							>
-								Apply
-							</Button>
-						</DialogTitle>
-					</DialogHeader>
-					{previewUrl && (
-						<div className="relative flex h-96 items-center justify-center overflow-hidden sm:h-120">
-							<div
-								aria-label="Crop preview"
-								className="bg-(image:--crop-image) size-full scale-(--crop-zoom) bg-center bg-contain bg-no-repeat"
-								role="img"
-								style={cropPreviewStyle}
-							/>
-							{croppedAreaPixels && (
-								<div
-									className="pointer-events-none absolute top-(--crop-top) left-(--crop-left) h-(--crop-height) w-(--crop-width) border-2 border-primary bg-primary/10"
-									style={cropAreaStyle}
-								/>
-							)}
-						</div>
-					)}
-					<DialogFooter>
-						<div className="mx-auto flex w-full max-w-80 items-center gap-4">
-							<svg
-								aria-hidden="true"
-								className="size-4 shrink-0 opacity-60"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								xmlns="http://www.w3.org/2000/svg"
-							>
-								<path
-									d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7"
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									strokeWidth={2}
-								/>
-							</svg>
-							<Slider
-								aria-label="Zoom slider"
-								defaultValue={[1]}
-								max={3}
-								min={1}
-								onValueChange={(value) =>
-									setZoom(Array.isArray(value) ? value[0] : value)
-								}
-								step={0.1}
-								value={[zoom]}
-							/>
-							<svg
-								aria-hidden="true"
-								className="size-4 shrink-0 opacity-60"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								xmlns="http://www.w3.org/2000/svg"
-							>
-								<path
-									d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									strokeWidth={2}
-								/>
-							</svg>
-						</div>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+				previewUrl={previewUrl}
+				zoom={zoom}
+			/>
 
 			{/* Upload progress indicator */}
 			{isUploading && (
-				<div className="animate-pulse text-muted-foreground text-sm">
+				<div className="text-detail text-muted-foreground" role="status">
 					Uploading avatar…
 				</div>
 			)}

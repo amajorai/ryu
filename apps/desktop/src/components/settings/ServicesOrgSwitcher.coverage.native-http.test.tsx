@@ -318,6 +318,13 @@ function triggerText(): string {
 	return (trigger().textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+function personalReady(): Promise<void> {
+	return until(
+		() => triggerText() === "Ada's Workspace" && grants() === "Ryu Fast 5.00",
+		"personal workspace"
+	);
+}
+
 function grants(): string {
 	return document.querySelector("[data-grants]")?.textContent ?? "";
 }
@@ -400,34 +407,38 @@ test("signed out, the picker renders nothing and never asks the control plane fo
 	).toEqual([]);
 });
 
-test("a single workspace is named with its plan but offers no menu to switch", async () => {
+test("a single workspace is named and offers no menu to switch", async () => {
 	members = [PERSONAL];
 	await signedInMount();
-	await until(() => triggerText().includes("PLUS"), "plan badge");
-	expect(triggerText()).toBe("Ada's WorkspacePLUS");
+	await personalReady();
+	expect(triggerText()).toBe("Ada's Workspace");
 	expect(isDisabled(trigger())).toBe(true);
 	await act(async () => trigger().click());
 	await flush(4);
 	expect(menuItems()).toHaveLength(0);
 	expect(
-		trigger().querySelectorAll("svg.lucide-chevrons-up-down")
+		trigger().querySelectorAll("[data-org-switcher-chevron]")
 	).toHaveLength(0);
 });
 
 test("with no active org on the session the picker shows the earliest membership, checked, and the menu lists every workspace with its role", async () => {
 	activeOrganizationId = null;
 	await signedInMount();
-	await until(() => triggerText().includes("PLUS"), "plan badge");
-	expect(triggerText()).toBe("Ada's WorkspacePLUS");
+	await personalReady();
+	expect(triggerText()).toBe("Ada's Workspace");
 	expect(grants()).toBe("Ryu Fast 5.00");
 	expect(isDisabled(trigger())).toBe(false);
 	expect(
-		trigger().querySelectorAll("svg.lucide-chevrons-up-down")
+		trigger().querySelectorAll("[data-org-switcher-chevron]")
 	).toHaveLength(1);
 
 	await openMenu();
+	await until(
+		() => menuItems()[0]?.textContent?.includes("PLUS") ?? false,
+		"plan badge in the menu"
+	);
 	const rows = menuItems().map((item) => ({
-		checked: item.querySelector("svg.lucide-check") !== null,
+		checked: item.querySelector("[data-org-switcher-check]") !== null,
 		text: (item.textContent ?? "").replace(/\s+/g, " ").trim(),
 	}));
 	expect(rows).toEqual([
@@ -447,7 +458,7 @@ test("with no active org on the session the picker shows the earliest membership
 
 test("switching rescopes the server session, keys org-scoped reads to the new org as soon as the server answers the switch, and never shows the previous org's numbers", async () => {
 	await signedInMount();
-	await until(() => triggerText().includes("PLUS"), "plan badge");
+	await personalReady();
 	expect(grants()).toBe("Ryu Fast 5.00");
 	const personalKey = ["credit-grants", PERSONAL];
 	const personalGrants = dialogClient.getQueryData(personalKey);
@@ -463,7 +474,7 @@ test("switching rescopes the server session, keys org-scoped reads to the new or
 	await act(async () => itemFor("Acme Robotics").click());
 	await until(() => isDisabled(trigger()), "picker locked while switching");
 	expect(
-		trigger().querySelectorAll("svg.lucide-chevrons-up-down")
+		trigger().querySelectorAll("[data-org-switcher-chevron]")
 	).toHaveLength(0);
 	expect(activeOrganizationId).toBe(PERSONAL);
 	release();
@@ -489,7 +500,7 @@ test("switching rescopes the server session, keys org-scoped reads to the new or
 	expect<unknown>(dialogClient.getQueryData(personalKey)).toBe(personalGrants);
 	gateRelease();
 
-	await until(() => triggerText() === "Acme RoboticsMAX", "switched picker");
+	await until(() => triggerText() === "Acme Robotics", "switched picker");
 	await until(() => grants() === "Ryu Frontier 9.00", "Acme grants");
 	await until(() => !isDisabled(trigger()), "picker unlocked");
 	expect(activeOrganizationId).toBe(ACME);
@@ -524,7 +535,7 @@ test("switching rescopes the server session, keys org-scoped reads to the new or
 	await openMenu();
 	await act(async () => itemFor("Ada's Workspace").click());
 	await until(() => grants() === "Ryu Fast 3.00", "personal grants again");
-	await until(() => triggerText() === "Ada's WorkspacePLUS", "picker back");
+	await until(() => triggerText() === "Ada's Workspace", "picker back");
 	// Never a paint of the stale personal figure on the way back.
 	expect(grantRenders.slice(renderMark)).not.toContain("Ryu Fast 5.00");
 	expect(activeOrganizationId).toBe(PERSONAL);
@@ -537,13 +548,13 @@ test("switching rescopes the server session, keys org-scoped reads to the new or
 	appQueryClient.clear();
 	await mount();
 	await until(() => maybeTrigger() !== null, "fresh picker");
-	await until(() => triggerText() === "Zeta LabsPRO", "server-scoped picker");
+	await until(() => triggerText() === "Zeta Labs", "server-scoped picker");
 	await until(() => grants() === "Ryu Fast 1.25", "Zeta grants");
 });
 
 test("a refused switch keeps the current workspace and its data, explains why, and re-enables the picker", async () => {
 	await signedInMount();
-	await until(() => triggerText().includes("PLUS"), "plan badge");
+	await personalReady();
 	// Membership is revoked after the list was read.
 	members = [PERSONAL, ZETA];
 	await openMenu();
@@ -554,7 +565,7 @@ test("a refused switch keeps the current workspace and its data, explains why, a
 		"refusal toast"
 	);
 	await until(() => !isDisabled(trigger()), "picker unlocked");
-	expect(triggerText()).toBe("Ada's WorkspacePLUS");
+	expect(triggerText()).toBe("Ada's Workspace");
 	expect(grants()).toBe("Ryu Fast 5.00");
 	expect(activeOrganizationId).toBe(PERSONAL);
 	expect(routesSince(before)).toEqual([
@@ -564,7 +575,7 @@ test("a refused switch keeps the current workspace and its data, explains why, a
 
 test("the picker opens and switches from the keyboard", async () => {
 	await signedInMount();
-	await until(() => triggerText().includes("PLUS"), "plan badge");
+	await personalReady();
 	await act(async () => trigger().focus());
 	await press("ArrowDown", trigger());
 	await until(() => menuItems().length === 3, "menu from keyboard");
@@ -580,7 +591,7 @@ test("the picker opens and switches from the keyboard", async () => {
 	}
 	expect(document.activeElement?.textContent).toContain("Zeta Labs");
 	await press("Enter");
-	await until(() => triggerText() === "Zeta LabsPRO", "switched by keyboard");
+	await until(() => triggerText() === "Zeta Labs", "switched by keyboard");
 	expect(activeOrganizationId).toBe(ZETA);
 	await until(() => grants() === "Ryu Fast 1.25", "Zeta grants");
 });

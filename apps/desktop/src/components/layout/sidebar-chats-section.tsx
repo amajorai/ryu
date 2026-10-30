@@ -38,7 +38,6 @@ import {
 	useNestedSections,
 } from "./sidebar-nested-sections.ts";
 import {
-	SectionActionButton,
 	SectionAddButton,
 	type SectionProps,
 	SidebarSection,
@@ -229,42 +228,7 @@ export function ChatsSection({
 	return (
 		<>
 			<SidebarSection
-				action={
-					// Two actions, spaced exactly like every single-action section: each
-					// button carries the same `mr-1` {@link SectionAddButton} puts between
-					// itself and the overflow "…" trigger, so import → + → … are evenly
-					// pitched instead of the + hugging the import button.
-					<>
-						{botMode && !managedProduct ? (
-							<span className="mr-1">
-								<SectionActionButton
-									icon={FolderAddIcon}
-									onClick={openCreateSection}
-									title="New section"
-								/>
-							</span>
-						) : null}
-						{onImport ? (
-							<span className="mr-1">
-								<SectionActionButton
-									icon={Upload01Icon}
-									onClick={onImport}
-									title="Import a past agent thread"
-								/>
-							</span>
-						) : null}
-						{onImportSetup ? (
-							<span className="mr-1">
-								<SectionActionButton
-									icon={Settings03Icon}
-									onClick={onImportSetup}
-									title="Import agent setup from a folder"
-								/>
-							</span>
-						) : null}
-						<SectionAddButton onClick={onNew} title="New chat" />
-					</>
-				}
+				action={<SectionAddButton onClick={onNew} title="New chat" />}
 				chatDrop={
 					botMode ? undefined : handlers.bulk?.dropTarget({ kind: "chats" })
 				}
@@ -275,6 +239,40 @@ export function ChatsSection({
 				dnd={dnd}
 				label={sectionLabel}
 				menu={menu}
+				// New section and the imports live in the ⋯ menu, so the header
+				// shows only "+" and "⋯" on hover.
+				menuActions={[
+					...(botMode && !managedProduct
+						? [
+								{
+									icon: FolderAddIcon,
+									id: "new-section",
+									label: "New section",
+									onSelect: openCreateSection,
+								},
+							]
+						: []),
+					...(onImport
+						? [
+								{
+									icon: Upload01Icon,
+									id: "import-thread",
+									label: "Import a past agent thread",
+									onSelect: onImport,
+								},
+							]
+						: []),
+					...(onImportSetup
+						? [
+								{
+									icon: Settings03Icon,
+									id: "import-setup",
+									label: "Import agent setup from a folder",
+									onSelect: onImportSetup,
+								},
+							]
+						: []),
+				]}
 				onToggleCollapsed={onToggleCollapsed}
 				pageSize={pageSize}
 				sectionKey="chats"
@@ -303,12 +301,8 @@ export function ChatsSection({
 						sections={botChatSections.sections}
 						sessionSource={sessionSource}
 					/>
-				) : loose.length === 0 ? (
-					<p className="px-2 py-2 text-muted-foreground text-xs">
-						No chats yet
-					</p>
-				) : filteredLoose.length === 0 ? (
-					<p className="px-2 py-2 text-muted-foreground text-xs">
+				) : loose.length === 0 ? null : filteredLoose.length === 0 ? (
+					<p className="flex h-8 items-center px-2 text-detail text-muted-foreground">
 						No chats match the filters
 					</p>
 				) : view.groupBy === "default" || view.groupBy === "visibility" ? (

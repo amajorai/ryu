@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
+import { humanizeError } from "../core/native-errors.ts";
 /* @jsxImportSource @opentui/react */
 // Plugins tab — the REAL plugin lifecycle surface, backed by Core's `/api/plugins`
 // (a manifest.json bundle + its installed/enabled record), NOT the sidecar catalog
@@ -29,9 +28,6 @@ import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
 import { useKeyboard } from "@opentui/react";
 import {
 	type AppInfo,
-	type AppLifecycleError,
-	type DependencyError,
-	dependencyErrorSchema,
 	disableApp,
 	enableApp,
 	fetchApps,
@@ -42,93 +38,20 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
+import { tf } from "../i18n/translate.ts";
 import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
-import { ListPosition, SelectableRow } from "../ui/SelectableRow.tsx";
 import { useToast } from "../ui/toast.tsx";
-import { useListWindow } from "../ui/useListWindow.ts";
+import {
+	asLifecycleError,
+	blockedByDependents,
+	type LifecycleErrorLike,
+	type PendingCascade,
+	type PendingConfirm,
+} from "./plugins-lifecycle.ts";
+import { PluginList } from "./plugins-list.tsx";
 import type { TabProps } from "./types.ts";
-
-const NAME_WIDTH = 20;
-const STATE_WIDTH = 12;
-
-type ThemeValue = ReturnType<typeof useTheme>;
-
-// A destructive action the dependency graph refused, remembered so pressing C can
-// retry the SAME action with cascade:true (disable/uninstall the dependents too).
-interface PendingCascade {
-	/** Ids Core named as blocking the action; the cascade also acts on these. */
-	dependents: string[];
-	id: string;
-	kind: "disable" | "uninstall";
-	name: string;
-}
-
-// A destructive action held until the user answers the inline ConfirmPrompt.
-interface PendingConfirm {
-	confirmLabel: string;
-	consequence: string;
-	run: () => void;
-	title: string;
-}
-
-// The shape core-client throws: `Object.assign(new Error(msg), AppLifecycleError)`.
-// We read the typed fields to decide which follow-up to OFFER (the readable line is
-// already `err.message`), never by string-parsing prose.
-type LifecycleErrorLike = Partial<AppLifecycleError> & { message: string };
-
-const nativeErrorAdmissionSchema = z.instanceof(Error);
-const nativeLifecycleErrorSchema = z.object({
-	builtIn: z.boolean().optional().catch(undefined),
-	dependencyError: dependencyErrorSchema.nullable().optional().catch(null),
-	hint: z.string().nullable().optional().catch(null),
-	gatewayUnreachable: z.boolean().optional().catch(undefined),
-	grantsDenied: z.boolean().optional().catch(undefined),
-});
-
-function asLifecycleError(
-	err: Parameters<typeof nativeLifecycleErrorSchema.safeParse>[0]
-): LifecycleErrorLike {
-	const admitted = nativeErrorAdmissionSchema.safeParse(err);
-	const parsed = nativeLifecycleErrorSchema.safeParse(err);
-	if (!(admitted.success && parsed.success)) {
-		return { message: nativeErrorMessage(err) };
-	}
-	const e = parsed.data;
-	return {
-		message: admitted.data.message,
-		builtIn: e.builtIn,
-		dependencyError: e.dependencyError ?? null,
-		hint: e.hint ?? null,
-		gatewayUnreachable: e.gatewayUnreachable,
-		grantsDenied: e.grantsDenied,
-	};
-}
-
-/** True when the refusal was a 409 `blocked_by_dependents` — the one case a cascade
- *  retry resolves. */
-function blockedByDependents(err: LifecycleErrorLike): boolean {
-	const dep: DependencyError | null | undefined = err.dependencyError;
-	return dep?.code === "blocked_by_dependents";
-}
-
-// ── State labelling ───────────────────────────────────────────────────────────
-
-interface StateChip {
-	color: (t: ThemeValue) => string;
-	label: string;
-}
-
-function chipFor(app: AppInfo): StateChip {
-	if (!app.installed) {
-		return { label: "available", color: (t) => t.colors.mutedForeground };
-	}
-	if (app.enabled) {
-		return { label: "enabled", color: (t) => t.colors.success };
-	}
-	return { label: "disabled", color: (t) => t.colors.mutedForeground };
-}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -201,11 +124,22 @@ export function PluginsTab({ active }: TabProps) {
 					kind: verb,
 					name: app.name,
 				};
-				notify(`${e.message} — press C to ${verb} dependents too.`, "warning");
+				notify(
+					tf("{message} — press C to {verb} dependents too.", {
+						message: e.message,
+						verb,
+					}),
+					"warning"
+				);
 				return;
 			}
 			if (e.builtIn) {
-				notify(`${e.message} — it is built in; disable it instead.`, "warning");
+				notify(
+					tf("{message} — it is built in; disable it instead.", {
+						message: e.message,
+					}),
+					"warning"
+				);
 				return;
 			}
 			const hint = e.hint ? ` (${e.hint})` : "";
@@ -244,7 +178,7 @@ export function PluginsTab({ active }: TabProps) {
 	const doInstall = useCallback(
 		(app: AppInfo) => {
 			if (app.installed) {
-				notify(`${app.name} is already installed`, "info");
+				notify(tf("{name} is already installed", { name: app.name }), "info");
 				return;
 			}
 			mutate("install", app, () => installApp(target, app.id));
@@ -255,7 +189,12 @@ export function PluginsTab({ active }: TabProps) {
 	const doToggle = useCallback(
 		(app: AppInfo) => {
 			if (!app.installed) {
-				notify(`${app.name} is not installed — press i to install`, "info");
+				notify(
+					tf("{name} is not installed — press i to install", {
+						name: app.name,
+					}),
+					"info"
+				);
 				return;
 			}
 			if (app.enabled) {
@@ -270,7 +209,7 @@ export function PluginsTab({ active }: TabProps) {
 	const doUninstall = useCallback(
 		(app: AppInfo) => {
 			if (!app.installed) {
-				notify(`${app.name} is not installed`, "info");
+				notify(tf("{name} is not installed", { name: app.name }), "info");
 				return;
 			}
 			mutate("uninstall", app, () => uninstallApp(target, app.id), {
@@ -293,7 +232,7 @@ export function PluginsTab({ active }: TabProps) {
 	const doUpdate = useCallback(
 		(app: AppInfo) => {
 			if (!app.installed) {
-				notify(`${app.name} is not installed`, "info");
+				notify(tf("{name} is not installed", { name: app.name }), "info");
 				return;
 			}
 			mutate("update", app, () => updateApp(target, app.id));
@@ -350,7 +289,7 @@ export function PluginsTab({ active }: TabProps) {
 			return;
 		}
 		if (!selected.installed) {
-			notify(`${selected.name} is not installed`, "info");
+			notify(tf("{name} is not installed", { name: selected.name }), "info");
 			return;
 		}
 		const app = selected;
@@ -378,7 +317,10 @@ export function PluginsTab({ active }: TabProps) {
 				? pending.dependents.join(", ")
 				: `every plugin that depends on ${pending.name}`;
 		setConfirm({
-			title: `${verb} ${pending.name} and its dependents?`,
+			title: tf("{verb} {name} and its dependents?", {
+				verb,
+				name: pending.name,
+			}),
 			consequence: `Also ${verbs} ${who}.`,
 			confirmLabel: `${verb} all`,
 			run: doCascade,
@@ -461,107 +403,5 @@ export function PluginsTab({ active }: TabProps) {
 				</box>
 			)}
 		</box>
-	);
-}
-
-function PluginRow({
-	app,
-	selected,
-	busy,
-	theme,
-}: {
-	app: AppInfo;
-	busy: boolean;
-	selected: boolean;
-	theme: ThemeValue;
-}) {
-	const chip = chipFor(app);
-	const name = app.name.padEnd(NAME_WIDTH);
-	const stateText = (busy ? "working" : chip.label).padEnd(STATE_WIDTH);
-	const version = app.installedVersion ?? app.version ?? "";
-	const muted = selected
-		? theme.colors.selectionForeground
-		: theme.colors.mutedForeground;
-	// State tones are tuned for the page background and fall below text
-	// contrast on the selection background; the label still carries the state.
-	const toneColor = busy ? theme.colors.info : chip.color(theme);
-	const stateColor = selected ? theme.colors.selectionForeground : toneColor;
-	return (
-		<SelectableRow selected={selected}>
-			<text
-				fg={
-					selected ? theme.colors.selectionForeground : theme.colors.foreground
-				}
-				flexShrink={0}
-			>
-				{selected ? <b>{name}</b> : name}
-			</text>
-			<text fg={stateColor} flexShrink={0}>
-				{stateText}
-			</text>
-			{app.builtIn ? (
-				<text fg={muted} flexShrink={0}>
-					[built-in]
-				</text>
-			) : null}
-			{version ? (
-				<text fg={muted} truncate wrapMode="none">
-					{version}
-				</text>
-			) : null}
-		</SelectableRow>
-	);
-}
-
-function PluginList({
-	apps,
-	index,
-	busy,
-	theme,
-}: {
-	apps: AppInfo[];
-	busy: string | null;
-	index: number;
-	theme: ThemeValue;
-}) {
-	// Window the rows to the measured space so the selection stays visible
-	// without a focus-capturing scrollbox (which would fight the shell for arrow
-	// keys) — parity with apps.tsx.
-	const { start, end, onSizeChange } = useListWindow({
-		count: apps.length,
-		index,
-		linesPerRow: 1,
-	});
-	const visible = apps.slice(start, end);
-
-	return (
-		<>
-			<box
-				flexBasis={0}
-				flexDirection="column"
-				flexGrow={1}
-				minHeight={0}
-				onSizeChange={onSizeChange}
-				overflow="hidden"
-			>
-				{visible.map((app, i) => {
-					const absolute = start + i;
-					return (
-						<PluginRow
-							app={app}
-							busy={busy === app.id}
-							key={app.id}
-							selected={absolute === index}
-							theme={theme}
-						/>
-					);
-				})}
-			</box>
-			<ListPosition
-				count={apps.length}
-				index={index}
-				visible={visible.length}
-			/>
-		</>
 	);
 }

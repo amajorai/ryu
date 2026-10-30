@@ -272,7 +272,7 @@ function DependencyRows({
 		<ul className="flex flex-col gap-1.5">
 			{nodes.map((node) => (
 				<li key={node.id}>
-					<div className="flex items-center gap-2.5 rounded-md bg-muted px-3 py-2">
+					<div className="flex items-center gap-2.5 rounded-lg bg-muted px-3 py-2">
 						<HugeiconsIcon
 							className="size-4 shrink-0 text-muted-foreground"
 							icon={PackageIcon}

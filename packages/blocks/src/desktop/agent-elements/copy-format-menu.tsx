@@ -1,3 +1,9 @@
+import {
+	ArrowDown01Icon,
+	Copy01Icon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	DropdownMenu,
@@ -7,7 +13,6 @@ import {
 } from "@ryu/ui/components/dropdown-menu";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import { IconCheck, IconChevronDown, IconCopy } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 
 export type ClipboardValue = Blob | string;
@@ -101,12 +106,24 @@ export function CopyFormatMenu({
 						variant="ghost"
 					>
 						{copied ? (
-							<IconCheck aria-hidden="true" className="size-3.5" />
+							<HugeiconsIcon
+								aria-hidden="true"
+								className="size-3.5"
+								icon={Tick02Icon}
+							/>
 						) : (
-							<IconCopy aria-hidden="true" className="size-3.5" />
+							<HugeiconsIcon
+								aria-hidden="true"
+								className="size-3.5"
+								icon={Copy01Icon}
+							/>
 						)}
 						<span className="hidden sm:inline">Copy</span>
-						<IconChevronDown aria-hidden="true" className="size-3" />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className="size-3"
+							icon={ArrowDown01Icon}
+						/>
 					</Button>
 				}
 			/>

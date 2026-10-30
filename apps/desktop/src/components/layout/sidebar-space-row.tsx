@@ -144,7 +144,7 @@ export function SpaceSidebarRow({
 				<ContextMenuTrigger>
 					{/* sidebar row combines nested controls with drag/middle-click */}
 					<div
-						className="group/row group/subsection flex h-8 cursor-grab items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted active:cursor-grabbing"
+						className="group/row group/subsection flex h-8 cursor-grab items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 active:cursor-grabbing"
 						draggable={!space.system}
 						onAuxClick={(e) => {
 							if (e.button === 1) {
@@ -218,24 +218,21 @@ export function SpaceSidebarRow({
 				</ContextMenuTrigger>
 				<ContextMenuContent>
 					<ContextMenuItem onClick={onOpen}>
-						<HugeiconsIcon
-							className="mr-2 size-4"
-							icon={DeliverySecure01Icon}
-						/>
+						<HugeiconsIcon className="size-4" icon={DeliverySecure01Icon} />
 						Open space page
 					</ContextMenuItem>
 					<ContextMenuItem onClick={onOpenInNewTab}>
-						<HugeiconsIcon className="mr-2 size-4" icon={ArrowUpRight01Icon} />
+						<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 						Open in new tab
 					</ContextMenuItem>
 					<OpenInNewWindowContextMenuItem onClick={onOpenInNewWindow} />
 					<ContextMenuItem onClick={() => setIconDialogOpen(true)}>
-						<HugeiconsIcon className="mr-2 size-4" icon={ImageAdd01Icon} />
+						<HugeiconsIcon className="size-4" icon={ImageAdd01Icon} />
 						Change icon…
 					</ContextMenuItem>
 					{space.system ? null : (
 						<ContextMenuItem onClick={() => setRenameOpen(true)}>
-							<HugeiconsIcon className="mr-2 size-4" icon={PencilEdit01Icon} />
+							<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
 							Rename space
 						</ContextMenuItem>
 					)}
@@ -253,7 +250,7 @@ export function SpaceSidebarRow({
 							}
 						>
 							<HugeiconsIcon
-								className="mr-2 size-4"
+								className="size-4"
 								icon={
 									resourceVisibilityGroup(space.visibility) === "team"
 										? ViewOffSlashIcon
@@ -280,7 +277,7 @@ export function SpaceSidebarRow({
 						<Tooltip>
 							<TooltipTrigger render={<span className="block" />}>
 								<ContextMenuItem disabled variant="destructive">
-									<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+									<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 									Delete space
 								</ContextMenuItem>
 							</TooltipTrigger>
@@ -292,13 +289,13 @@ export function SpaceSidebarRow({
 						</Tooltip>
 					) : (
 						<ContextMenuItem onClick={onRequestDelete} variant="destructive">
-							<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+							<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 							Delete space
 						</ContextMenuItem>
 					)}
 					{spaceContributedRows(space.id).map((row) => (
 						<ContextMenuItem key={row.id} onClick={row.onSelect}>
-							<span className="mr-2 inline-flex">
+							<span className="inline-flex">
 								<EntityRowGlyph row={row} />
 							</span>
 							{row.label}

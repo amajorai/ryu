@@ -1,9 +1,10 @@
+import { AppWindowIcon, Delete02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { formatDistanceToNow } from "date-fns";
-import { AppWindow, Trash2 } from "lucide-react";
 import type { OAuthApp } from "../../utils/api-client.ts";
 import {
-	SettingsCard,
+	SETTINGS_ROW_REVEAL_CLASS,
 	SettingsGroup,
 	SettingsItem,
 } from "../shared/settings-rows.tsx";
@@ -26,11 +27,7 @@ export function AuthorizedOAuthAppList({
 }) {
 	if (apps.length === 0) {
 		return (
-			<SettingsCard>
-				<p className="text-center text-muted-foreground text-sm">
-					No authorized apps.
-				</p>
-			</SettingsCard>
+			<p className="py-3 text-muted-foreground text-sm">No authorized apps.</p>
 		);
 	}
 
@@ -49,7 +46,7 @@ export function AuthorizedOAuthAppList({
 						actions={
 							isConfirming ? (
 								<div className="flex flex-wrap items-center justify-end gap-2">
-									<span className="text-muted-foreground text-xs">
+									<span className="text-detail text-muted-foreground">
 										Revoke access?
 									</span>
 									<Button
@@ -72,33 +69,38 @@ export function AuthorizedOAuthAppList({
 							) : (
 								<Button
 									aria-label={`Revoke access for ${app.clientName}`}
-									className="size-8 shrink-0"
+									className={SETTINGS_ROW_REVEAL_CLASS}
 									disabled={isRevoking}
 									onClick={() => onStartRevoke(app.clientId)}
-									size="icon"
-									variant="ghost"
+									size="icon-sm"
+									variant="ghost-muted"
 								>
-									<Trash2 className="size-4" />
+									<HugeiconsIcon icon={Delete02Icon} size={16} />
 								</Button>
 							)
+						}
+						description={
+							<>
+								{scopeList || "No scopes"} · Authorized{" "}
+								{formatDistanceToNow(new Date(app.grantedAt), {
+									addSuffix: true,
+								})}
+							</>
 						}
 						key={app.clientId}
 						title={
 							<span className="flex min-w-0 items-center gap-2">
-								<AppWindow className="size-4 shrink-0 text-muted-foreground" />
+								<HugeiconsIcon
+									className="shrink-0 text-muted-foreground"
+									icon={AppWindowIcon}
+									size={16}
+								/>
 								<span className="truncate" title={app.clientName}>
 									{app.clientName}
 								</span>
 							</span>
 						}
-					>
-						<p className="text-muted-foreground text-xs">
-							{scopeList || "No scopes"} · Authorized{" "}
-							{formatDistanceToNow(new Date(app.grantedAt), {
-								addSuffix: true,
-							})}
-						</p>
-					</SettingsItem>
+					/>
 				);
 			})}
 		</SettingsGroup>

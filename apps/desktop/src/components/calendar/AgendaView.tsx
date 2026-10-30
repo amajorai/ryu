@@ -5,13 +5,13 @@
 // mode of origin-space/event-calendar.
 
 import { CalendarCheckIn01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	RunStatusTimeline,
 	RunStatusTimelineLegend,
 } from "@ryu/ui/components/run-status-timeline.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import { QuietEmpty } from "@/src/components/agents/shared/quiet-empty.tsx";
 import { EventRow } from "@/src/components/calendar/event-display.tsx";
 import { useCalendarLocale } from "@/src/components/calendar/use-calendar-locale.ts";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
@@ -121,7 +121,7 @@ function JobStatusRow({
 	const count = runCount(events);
 
 	return (
-		<div className="flex flex-col gap-2 px-3 py-3" role="listitem">
+		<div className="flex flex-col gap-2 py-3" role="listitem">
 			<div className="flex items-center gap-3">
 				<div className="min-w-0 flex-1">
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -179,7 +179,7 @@ function StatusPageOverview({
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div className="min-w-0">
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-						<h3 className="font-medium text-sm">All scheduled jobs</h3>
+						<h3 className="font-semibold text-sm">All scheduled jobs</h3>
 						<StatusPill status={status} />
 					</div>
 					<p className="text-muted-foreground text-xs">
@@ -207,12 +207,12 @@ function StatusPageOverview({
 				startAt={dayStart.getTime()}
 			/>
 			<div className="flex items-baseline justify-between gap-3 border-t pt-3">
-				<h3 className="font-medium text-sm">Jobs</h3>
+				<h3 className="font-semibold text-sm">Jobs</h3>
 				<span className="text-muted-foreground text-xs tabular-nums">
 					{tl("{jobCount} tracked", { jobCount: jobs.length })}
 				</span>
 			</div>
-			<div className="divide-y rounded-lg border" role="list">
+			<div className="divide-y divide-border" role="list">
 				{jobs.map((job, index) => (
 					<JobStatusRow
 						day={day}
@@ -247,10 +247,10 @@ function DayRunTimeline({
 	return (
 		<div className="flex flex-col gap-1">
 			<div className="flex items-center justify-between gap-3">
-				<span className="type-compact font-medium text-muted-foreground uppercase tracking-widest">
+				<span className="text-detail text-muted-foreground">
 					24h run status
 				</span>
-				<span className="type-compact text-muted-foreground tabular-nums">
+				<span className="text-muted-foreground/70 text-xs tabular-nums">
 					{runCount} {runCount === 1 ? "run" : "runs"}
 				</span>
 			</div>
@@ -286,19 +286,17 @@ export function AgendaView({
 
 	if (!overviewDay || (populated.length === 0 && jobs.length === 0)) {
 		return (
-			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-				<HugeiconsIcon
-					className="size-6 opacity-50"
-					icon={CalendarCheckIn01Icon}
-				/>
-				<p className="text-sm">No runs in this period</p>
-			</div>
+			<QuietEmpty
+				className="min-h-0 flex-1"
+				icon={CalendarCheckIn01Icon}
+				title="No runs in this period"
+			/>
 		);
 	}
 
 	return (
 		<div className="scroll-fade min-h-0 flex-1 overflow-auto">
-			<div className="mx-auto flex max-w-2xl flex-col gap-5 p-4">
+			<div className="mx-auto flex max-w-2xl flex-col gap-6 p-4">
 				<StatusPageOverview
 					day={overviewDay}
 					events={eventsByDay.get(civilDayKey(overviewDay)) ?? []}

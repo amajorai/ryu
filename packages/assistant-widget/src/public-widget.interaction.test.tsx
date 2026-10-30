@@ -77,6 +77,6 @@ test("opening Ask Ryu mounts the session, which checks guest chat once", async (
 		await Promise.resolve();
 	});
 
-	expect(container.textContent).toContain("New chat");
+	expect(container.textContent).toContain("How can I help?");
 	expect(fetchMock).toHaveBeenCalledTimes(1);
 });

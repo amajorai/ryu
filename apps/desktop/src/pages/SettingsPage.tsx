@@ -13,6 +13,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useI18n } from "@ryu/i18n/react";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback } from "react";
 import { NavLink } from "react-router-dom";
@@ -126,92 +127,94 @@ export default function SettingsPage() {
 	];
 
 	return (
-		<div className="mx-auto max-w-2xl px-6 py-8">
-			<h1 className="mb-8 font-medium text-xl">
-				{t("settings.page.title", {}, "Settings")}
-			</h1>
+		<div className="mx-auto max-w-3xl px-6 pt-6 pb-12">
+			<PageHeader
+				className="mb-8"
+				size="app"
+				title={t("settings.page.title", {}, "Settings")}
+			/>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.updates", {}, "Updates")}
 				</h2>
 				<UpdatesSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.language", {}, "Language")}
 				</h2>
 				<LanguageSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.audio", {}, "Audio")}
 				</h2>
 				<AudioDevicesSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					{t("settings.page.voice_recognition", {}, "Voice Recognition")}
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
+					{t("settings.page.voice_recognition", {}, "Voice recognition")}
 				</h2>
 				<VoiceInputSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.read_back", {}, "Read back responses")}
 				</h2>
 				<VoiceReadbackSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.audio", {}, "Audio")}
 				</h2>
 				<TtsEngineSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					{t("settings.page.editor_embeddings", {}, "Editor & Embeddings")}
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
+					{t("settings.page.editor_embeddings", {}, "Editor and embeddings")}
 				</h2>
 				<EditorEmbeddingSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.agent_networking", {}, "Agent networking")}
 				</h2>
 				<A2aSettings />
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.advanced", {}, "Advanced")}
 				</h2>
-				<div className="space-y-1 overflow-hidden rounded-lg bg-card">
+				<div className="flex flex-col">
 					{advancedLinks.map(({ to, onClick, label, icon, description }) => {
 						const inner = (
 							<div className="flex items-center gap-3">
 								<HugeiconsIcon
 									className="text-muted-foreground"
 									icon={icon}
-									size={14}
+									size={16}
 								/>
 								<div>
 									<p className="font-medium text-sm group-hover:text-foreground">
 										{translateLink(label, "label")}
 									</p>
-									<p className="text-muted-foreground text-xs">
+									<p className="text-detail text-muted-foreground">
 										{translateLink(description, "description")}
 									</p>
 								</div>
 							</div>
 						);
 						const className =
-							"group flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-muted";
+							"group flex min-h-12 w-full items-center justify-between border-border border-b py-3 text-left transition-colors last:border-b-0 hover:text-foreground";
 						// Entries with an onClick (e.g. Channels) open a dialog rather
 						// than navigate to a route.
 						return onClick ? (
@@ -232,17 +235,17 @@ export default function SettingsPage() {
 				</div>
 			</section>
 
-			<section className="mb-8">
-				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+			<section className="mt-8 first-of-type:mt-0">
+				<h2 className="mb-1 font-semibold text-sm">
 					{t("settings.page.developer", {}, "Developer")}
 				</h2>
-				<div className="rounded-lg bg-card p-4">
-					<div className="flex items-center justify-between">
+				<div className="py-3">
+					<div className="flex items-center justify-between gap-6">
 						<div>
 							<p className="font-medium text-sm">
 								{t("settings.page.developer_mode", {}, "Developer mode")}
 							</p>
-							<p className="text-muted-foreground text-xs">
+							<p className="text-detail text-muted-foreground">
 								{t(
 									"settings.page.developer_mode_description",
 									{},
@@ -263,10 +266,10 @@ export default function SettingsPage() {
 				</div>
 
 				{developerMode && (
-					<div className="mt-2 space-y-1 overflow-hidden rounded-lg bg-card">
+					<div className="flex flex-col border-border border-t">
 						{developerLinks.map(({ to, label, icon, description }) => (
 							<NavLink
-								className="group flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted"
+								className="group flex min-h-12 items-center justify-between border-border border-b py-3 transition-colors last:border-b-0"
 								key={to}
 								to={to}
 							>
@@ -274,13 +277,13 @@ export default function SettingsPage() {
 									<HugeiconsIcon
 										className="text-muted-foreground"
 										icon={icon}
-										size={14}
+										size={16}
 									/>
 									<div>
 										<p className="font-medium text-sm">
 											{translateLink(label, "label")}
 										</p>
-										<p className="text-muted-foreground text-xs">
+										<p className="text-detail text-muted-foreground">
 											{translateLink(description, "description")}
 										</p>
 									</div>

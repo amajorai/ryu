@@ -134,7 +134,7 @@ export function GoalBar({
 	};
 
 	return (
-		<div className="flex flex-col gap-1 rounded-t-2xl border-border/60 border-b bg-muted px-3 py-2">
+		<div className="flex flex-col gap-1 rounded-t-2xl border-border border-b bg-muted px-3 py-2">
 			<div className="flex items-center gap-2">
 				<HugeiconsIcon
 					className={cn(
@@ -177,11 +177,11 @@ export function GoalBar({
 
 				<div className="flex shrink-0 items-center gap-0.5">
 					{!editing && elapsed && (
-						<span className="mr-1 inline-flex items-center gap-1 text-muted-foreground/80 text-xs">
+						<span className="mr-1 inline-flex items-center gap-1 text-muted-foreground text-xs">
 							<HugeiconsIcon className="size-3" icon={Clock01Icon} />
 							{elapsed}
 							{isNativeNumber(turns) && turns > 0 && (
-								<span className="text-muted-foreground/60">
+								<span className="text-muted-foreground/70">
 									· {turns} {turns === 1 ? "turn" : "turns"}
 								</span>
 							)}

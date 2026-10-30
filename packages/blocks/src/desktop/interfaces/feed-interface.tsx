@@ -1,23 +1,12 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Logo } from "@ryu/ui/components/logo.tsx";
-import {
-	Tabs,
-	TabsContent,
-	TabsIndicator,
-	TabsList,
-	TabsTrigger,
-} from "@ryu/ui/components/tabs.tsx";
+import { Tabs, TabsContent } from "@ryu/ui/components/tabs.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type FeedParams,
-	type FeedPost,
-	projectFeed,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import { type FeedParams, projectFeed } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "motion/react";
 import {
-	type KeyboardEvent,
 	type ReactNode,
 	useEffect,
 	useLayoutEffect,
@@ -26,8 +15,21 @@ import {
 	useState,
 } from "react";
 import { FeedComposer } from "./feed-composer.tsx";
+import { FeedAside } from "./feed-interface-aside.tsx";
+import {
+	FeedEmpty,
+	type HomeTab,
+	HomeTabs,
+	isHomeTab,
+	matchesQuery,
+	onTimelineKeyDown,
+	postsForView,
+	StickyHeader,
+	VIEW_TITLES,
+	ViewTitle,
+} from "./feed-interface-chrome.tsx";
 import { FeedMobileNav } from "./feed-mobile-nav.tsx";
-import { feedPostStatus, needsYou } from "./feed-model.ts";
+import { feedPostStatus } from "./feed-model.ts";
 import { FeedNavRail, type FeedView } from "./feed-nav.tsx";
 import {
 	FEED_FOCUS,
@@ -49,168 +51,6 @@ import { FeedSkeleton } from "./feed-skeleton.tsx";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
-type HomeTab = "for-you" | "needs-you";
-
-const HOME_TABS: { id: HomeTab; label: string }[] = [
-	{ id: "for-you", label: "For you" },
-	{ id: "needs-you", label: "Needs you" },
-];
-
-const VIEW_TITLES: Record<Exclude<FeedView, "home" | "search">, string> = {
-	agents: "Agents",
-	pinned: "Pinned",
-	working: "Working",
-};
-
-function matchesQuery(post: FeedPost, query: string): boolean {
-	return (
-		post.title.toLowerCase().includes(query) ||
-		post.excerpt.toLowerCase().includes(query)
-	);
-}
-
-function postsForView(
-	posts: FeedPost[],
-	view: FeedView,
-	homeTab: HomeTab,
-	statuses: ReadonlyMap<string, ThreadStatus>
-): FeedPost[] {
-	if (view === "pinned") {
-		return posts.filter((post) => post.pinned);
-	}
-	if (view === "working") {
-		return posts.filter((post) => post.running);
-	}
-	if (view === "home" && homeTab === "needs-you") {
-		return posts.filter((post) =>
-			needsYou(statuses.get(post.threadId) ?? "quiet")
-		);
-	}
-	return posts;
-}
-
-/** Bold headline, one plain sentence, optional primary pill. */
-function FeedEmpty({
-	action,
-	body,
-	title,
-}: {
-	action?: { label: string; onClick: () => void };
-	body: string;
-	title: string;
-}) {
-	return (
-		<div className="mx-auto flex max-w-[400px] flex-col items-start px-8 py-10">
-			<h2 className="font-heading font-semibold! text-3xl text-foreground leading-9 tracking-tight">
-				{title}
-			</h2>
-			<p className={cn("mt-2 text-[15px] leading-5", FEED_META)}>{body}</p>
-			{action ? (
-				<Button
-					className="mt-7 h-12 rounded-full px-8 font-semibold text-base"
-					onClick={action.onClick}
-					type="button"
-				>
-					{action.label}
-				</Button>
-			) : null}
-		</div>
-	);
-}
-
-/** Sticky column header on the solid page background. */
-function StickyHeader({
-	bordered = true,
-	children,
-}: {
-	bordered?: boolean;
-	children: ReactNode;
-}) {
-	return (
-		<div
-			className={cn(
-				"sticky top-0 z-20 bg-background",
-				bordered && "border-border border-b"
-			)}
-		>
-			{children}
-		</div>
-	);
-}
-
-function isHomeTab(value: unknown): value is HomeTab {
-	return HOME_TABS.some((item) => item.id === value);
-}
-
-/**
- * For you / Needs you, on the design system's line tabs. As on X, the active
- * bar sits under the label and takes its width, so it is drawn on the label
- * span rather than the half-width trigger. Keyboard focus fills the cell like
- * hover does and rings the label, so no hard rectangle crosses the hairline.
- */
-function HomeTabs() {
-	return (
-		<TabsList
-			activateOnFocus
-			aria-label="Timeline"
-			className="w-full gap-0 p-0 group-data-horizontal/tabs:h-[53px]"
-			manageLayout={false}
-			persistLayout={false}
-			variant="line"
-		>
-			{HOME_TABS.map(({ id, label }) => (
-				<TabsTrigger
-					className="group/tab after:hidden! h-full! flex-1! rounded-none! px-4 py-0! font-normal text-[15px] text-foreground outline-none! ring-0! hover:bg-muted/60 hover:text-foreground focus-visible:border-transparent! focus-visible:bg-muted/60 data-active:font-semibold data-active:text-foreground dark:text-foreground dark:data-active:text-foreground"
-					data-tab={id}
-					key={id}
-					value={id}
-				>
-					<span className="relative inline-flex h-full items-center after:absolute after:inset-x-0 after:bottom-0 after:h-1 after:rounded-full after:bg-primary after:opacity-0 group-data-active/tab:after:opacity-100">
-						<span className="-mx-1 rounded-sm px-1 group-focus-visible/tab:ring-2 group-focus-visible/tab:ring-ring">
-							{label}
-						</span>
-					</span>
-				</TabsTrigger>
-			))}
-			{/* TabsList adds a full-width indicator when none is given; the bar lives on the label instead. */}
-			<TabsIndicator className="hidden!" />
-		</TabsList>
-	);
-}
-
-function ViewTitle({ title }: { title: string }) {
-	return (
-		<div className="flex h-[53px] items-center px-4">
-			<h2 className="font-heading font-semibold! text-foreground text-xl leading-6">
-				{title}
-			</h2>
-		</div>
-	);
-}
-
-/** Move focus between posts with j / k, the timeline's own shortcut keys. */
-function onTimelineKeyDown(event: KeyboardEvent<HTMLElement>) {
-	if (event.key !== "j" && event.key !== "k") {
-		return;
-	}
-	const target = event.target;
-	if (!(target instanceof HTMLElement && target.dataset.feedPost)) {
-		return;
-	}
-	const buttons = [
-		...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-			"button[data-feed-post]"
-		),
-	];
-	const index = buttons.indexOf(target as HTMLButtonElement);
-	const next = buttons[index + (event.key === "j" ? 1 : -1)];
-	if (next) {
-		event.preventDefault();
-		next.focus();
-		next.scrollIntoView({ block: "nearest" });
-	}
-}
-
 /**
  * Social-timeline interface: every thread is a post, newest activity first,
  * and opening a post shows its conversation as the reply chain — laid out
@@ -224,6 +64,7 @@ export function FeedInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<FeedParams>) {
+	const tl = useLiteralMessages();
 	const posts = useMemo(
 		() => projectFeed(snapshot, params),
 		[snapshot, params]
@@ -363,7 +204,11 @@ export function FeedInterface({
 							? "Try searching for something else."
 							: "Create an agent and it shows up here, ready to message."
 					}
-					title={needle ? `No results for “${query.trim()}”` : "No agents yet"}
+					title={
+						needle
+							? tl("No results for “{query}”", { query: query.trim() })
+							: "No agents yet"
+					}
 				/>
 			) : null;
 	} else if (visiblePosts.length === 0) {
@@ -373,7 +218,7 @@ export function FeedInterface({
 			emptyState = (
 				<FeedEmpty
 					body="Try searching for something else, or clear the search."
-					title={`No results for “${query.trim()}”`}
+					title={tl("No results for “{query}”", { query: query.trim() })}
 				/>
 			);
 		} else if (posts.length === 0) {
@@ -615,45 +460,16 @@ export function FeedInterface({
 							</motion.section>
 						) : null}
 					</main>
-					<aside
-						aria-label="Search and trends"
-						className="@min-[1080px]:ml-[30px] ml-6 @min-[1000px]:flex hidden h-full @min-[1080px]:w-[350px] w-[290px] shrink-0 flex-col @max-[1079px]:pr-4"
-					>
-						{/* The search box stays put; the cards scroll beneath it. */}
-						<div className="flex h-[53px] shrink-0 items-center">
-							<div className="w-full">
-								<FeedSearch onChange={setQuery} query={query} />
-							</div>
-						</div>
-						{/*
-						 * Native scrolling rather than @ryu/ui ScrollArea: Base UI's
-						 * viewport calls getAnimations() on a timer, which the unit-test
-						 * DOM lacks, so every feed test would log uncaught errors. The
-						 * scrollbar still takes the theme's border colour.
-						 */}
-						<div
-							className={cn(
-								"min-h-0 flex-1 overflow-y-auto overscroll-contain",
-								FEED_SCROLLBAR
-							)}
-						>
-							<div className="flex flex-col gap-4 pt-[11px] pb-16">
-								<WhatsHappening
-									onOpen={(threadId) => port.openThread(threadId)}
-									posts={posts}
-									snapshot={snapshot}
-								/>
-								{/* The Agents page already lists everyone; X hides "Who to follow" there too. */}
-								{view === "agents" ? null : (
-									<AgentsCard
-										agents={snapshot.agents}
-										onMessage={messageAgent}
-										onShowAll={() => selectView("agents")}
-									/>
-								)}
-							</div>
-						</div>
-					</aside>
+					<FeedAside
+						messageAgent={messageAgent}
+						port={port}
+						posts={posts}
+						query={query}
+						selectView={selectView}
+						setQuery={setQuery}
+						snapshot={snapshot}
+						view={view}
+					/>
 				</div>
 				<FeedMobileNav
 					onPost={focusComposer}

@@ -4,8 +4,9 @@
 // (`@/src/lib/island-availability.ts`) is on, so enabling Island is one flag
 // flip, not a new visibility implementation.
 
+import { LaptopIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
-import { Laptop } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
 	getIslandVisibility,
@@ -55,7 +56,7 @@ export function IslandVisibilityMenuItem() {
 			disabled={busy}
 			onClick={() => toggle().catch(() => undefined)}
 		>
-			<Laptop className="mr-2 size-4" />
+			<HugeiconsIcon className="size-4" icon={LaptopIcon} />
 			{visible ? "Hide Island" : "Show Island"}
 		</DropdownMenuItem>
 	);

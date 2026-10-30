@@ -89,6 +89,7 @@ function useContainerWidth(): [React.RefObject<HTMLDivElement | null>, number] {
 }
 
 export default function StoreCatalogLayout({
+	actions,
 	search,
 	filter,
 	list,
@@ -99,6 +100,8 @@ export default function StoreCatalogLayout({
 	detailOnly = false,
 	previewMode = "dialog",
 }: {
+	/** Trailing controls for the toolbar row, such as a section's `⋯` menu. */
+	actions?: ReactNode;
 	/** The giant search field pinned to the top. Omit for sections without search. */
 	search?: {
 		value: string;
@@ -165,7 +168,7 @@ export default function StoreCatalogLayout({
 					    buttons rather than a full-width field that pushed them onto
 					    a second line. Sticky, so it stays reachable while scrolling. */}
 						<div className="scroll-fade min-h-0 flex-1 overflow-auto">
-							{search || filter ? (
+							{search || filter || actions ? (
 								<div className="sticky top-0 z-10 mx-auto flex w-full max-w-4xl items-center justify-end gap-1 bg-background px-4 pb-2">
 									{search ? (
 										<StoreSearchButton
@@ -178,14 +181,18 @@ export default function StoreCatalogLayout({
 										<Popover>
 											<PopoverTrigger
 												render={
-													<Button size="sm" spacing="regular" variant="ghost">
+													<Button
+														size="sm"
+														spacing="regular"
+														variant={filter.activeCount ? "secondary" : "ghost"}
+													>
 														<HugeiconsIcon
-															className="size-3.5"
+															className="size-4"
 															icon={filter.icon ?? SlidersHorizontalIcon}
 														/>
 														{filter.label ?? "Filters"}
 														{filter.activeCount ? (
-															<span className="type-compact ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-background">
+															<span className="text-muted-foreground text-xs tabular-nums">
 																{filter.activeCount}
 															</span>
 														) : null}
@@ -201,6 +208,7 @@ export default function StoreCatalogLayout({
 											</PopoverContent>
 										</Popover>
 									) : null}
+									{actions}
 								</div>
 							) : null}
 							<div className="mx-auto w-full max-w-4xl px-4 pb-24">{list}</div>
@@ -208,16 +216,18 @@ export default function StoreCatalogLayout({
 					</div>
 
 					{showSidePane ? (
-						<aside className="w-[26rem] shrink-0 py-2 pr-2">
-							<div className="scroll-fade relative flex size-full flex-col overflow-auto rounded-3xl border border-border/60 bg-sidebar shadow-sm dark:bg-sidebar/50">
-								<button
+						<aside className="flex w-[26rem] shrink-0 flex-col border-border border-l bg-sidebar">
+							<div className="flex h-10 shrink-0 items-center justify-end px-2">
+								<Button
 									aria-label="Close preview"
-									className="absolute top-3 right-3 z-10 flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 									onClick={onCloseDetail}
-									type="button"
+									size="icon-sm"
+									variant="ghost-muted"
 								>
 									<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
-								</button>
+								</Button>
+							</div>
+							<div className="scroll-fade relative flex min-h-0 flex-1 flex-col overflow-auto">
 								{detail}
 							</div>
 						</aside>
@@ -254,7 +264,7 @@ export default function StoreCatalogLayout({
 					    `lg:w-72`, leaving the main column ~130px — the squashed preview.
 					    Matching `sm:` here removes `sm:max-w-md` from the output entirely. */}
 					<DialogContent
-						className="max-h-[85vh] w-[min(80rem,94vw)] max-w-[min(80rem,94vw)] overflow-hidden sm:max-w-[min(80rem,94vw)]"
+						className="max-h-[85vh] w-[min(80rem,94vw)] max-w-[min(80rem,94vw)] overflow-hidden bg-background sm:max-w-[min(80rem,94vw)]"
 						spacing="flush"
 					>
 						<DialogTitle className="sr-only">{detailTitle}</DialogTitle>

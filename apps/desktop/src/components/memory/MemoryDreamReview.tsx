@@ -1,3 +1,12 @@
+import {
+	ArrowRight02Icon,
+	Cancel01Icon,
+	Clock01Icon,
+	Refresh01Icon,
+	SparklesIcon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -12,14 +21,6 @@ import { Label } from "@ryu/ui/components/label.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import {
-	ArrowRight,
-	Check,
-	Clock3,
-	RefreshCw,
-	Sparkles,
-	X,
-} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { ApiError } from "@/src/lib/api/client.ts";
@@ -53,7 +54,7 @@ function ProposalDiff({ proposal }: { proposal: MemoryProposal }) {
 		<div className="flex flex-col gap-2">
 			<div className="flex items-center gap-2 text-muted-foreground text-xs">
 				<span>{previous ? "Update" : "New memory"}</span>
-				<ArrowRight className="size-3.5" />
+				<HugeiconsIcon className="size-3.5" icon={ArrowRight02Icon} />
 				<span>{proposal.proposed.category.replaceAll("_", " ")}</span>
 			</div>
 			{previous ? (
@@ -130,17 +131,17 @@ function ProposalCard({
 			</CardHeader>
 			<CardContent layout="spaced-stack" topSpacing="comfortable">
 				<ProposalDiff proposal={proposal} />
-				<div className="flex flex-wrap justify-end gap-2 border-border/60 border-t pt-3">
+				<div className="flex flex-wrap justify-end gap-2 border-border border-t pt-3">
 					<Button
 						disabled={busy}
 						onClick={() => onReject(proposal)}
 						variant="ghost"
 					>
-						<X className="size-4" />
+						<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 						Reject
 					</Button>
 					<Button disabled={busy} onClick={() => onAccept(proposal)}>
-						<Check className="size-4" />
+						<HugeiconsIcon className="size-4" icon={Tick02Icon} />
 						Accept memory
 					</Button>
 				</div>
@@ -269,7 +270,7 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 	};
 
 	return (
-		<div className="mx-auto flex max-w-3xl flex-col gap-4">
+		<div className="flex w-full flex-col gap-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div>
 					<h1 className="font-medium text-lg">Dream review</h1>
@@ -279,7 +280,9 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					</p>
 				</div>
 				<Button disabled={loading} loading={running} onClick={run}>
-					{!running && <RefreshCw className="size-4" />}
+					{!running && (
+						<HugeiconsIcon className="size-4" icon={Refresh01Icon} />
+					)}
 					{running ? "Reviewing…" : "Run Dream now"}
 				</Button>
 			</div>
@@ -288,7 +291,7 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 				<CardContent layout="summary-actions" topSpacing="generous">
 					<div className="flex items-start gap-3">
 						<div className="rounded-full bg-primary/10 p-2 text-primary">
-							<Clock3 className="size-4" />
+							<HugeiconsIcon className="size-4" icon={Clock01Icon} />
 						</div>
 						<div>
 							<Label htmlFor="dream-automatic">Automatic review</Label>
@@ -374,7 +377,7 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 						</EmptyDescription>
 					</EmptyHeader>
 					<Button disabled={running} onClick={run}>
-						<Sparkles className="size-4" />
+						<HugeiconsIcon className="size-4" icon={SparklesIcon} />
 						Run Dream now
 					</Button>
 				</Empty>

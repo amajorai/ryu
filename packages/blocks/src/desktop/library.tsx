@@ -47,7 +47,7 @@ import {
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactElement, ReactNode } from "react";
 
@@ -164,7 +164,7 @@ export function LibraryToolbar({
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						render={
-							<Button size="sm" variant="outline">
+							<Button size="sm" variant="ghost">
 								{activeSort?.label ?? "Sort"}
 								<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
 							</Button>
@@ -198,7 +198,7 @@ export function LibraryToolbar({
 				)
 			) : null}
 			{ctaLabel && onCta ? (
-				<Button onClick={onCta} size="sm">
+				<Button onClick={onCta} size="sm" variant="outline">
 					{ctaIcon ? <HugeiconsIcon className="size-4" icon={ctaIcon} /> : null}
 					{ctaLabel}
 				</Button>
@@ -426,13 +426,9 @@ export function LibraryCard({
 	);
 }
 
-/** Centered spinner for a tab still loading its collection. */
+/** Row skeletons at the final row height for a tab still loading. */
 export function LibraryLoading() {
-	return (
-		<div className="flex items-center justify-center py-12">
-			<Spinner />
-		</div>
-	);
+	return <SkeletonRows rows={6} spacing="library" />;
 }
 
 /** Empty state shown when a tab resolves to no items. */

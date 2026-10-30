@@ -1,15 +1,14 @@
 import {
-	Delete01Icon,
 	EyeIcon,
 	Key01Icon,
 	ViewOffSlashIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { useState } from "react";
+import { OverflowMenu } from "@/src/components/gateway/quiet.tsx";
 import { SettingsItem } from "@/src/components/settings/shared/settings-items.tsx";
 import type { ByokProvider } from "@/src/lib/api/gateway.ts";
 
@@ -92,25 +91,24 @@ export function ProviderRow({
 		<SettingsItem
 			actions={
 				<div className="flex items-center gap-2">
-					{readOnly ? (
-						<Badge variant="secondary">Ryu Cloud</Badge>
-					) : isSet ? (
-						<Badge variant="default">Key set</Badge>
-					) : (
-						<Badge variant="secondary">No key</Badge>
-					)}
+					<span className="text-muted-foreground text-sm">
+						{readOnly ? "Ryu Cloud" : isSet ? "Key set" : "No key"}
+					</span>
 					{!readOnly && canConfigure && isSet && (
-						<Button
-							loading={clearing}
-							onClick={() => handleClear()}
-							size="sm"
-							variant="ghost"
-						>
-							{!clearing && (
-								<HugeiconsIcon className="size-3" icon={Delete01Icon} />
-							)}
-							Clear
-						</Button>
+						<OverflowMenu
+							items={[
+								{
+									id: "clear",
+									label: "Clear",
+									destructive: true,
+									disabled: clearing,
+									onSelect: () => void handleClear(),
+								},
+							]}
+							label={tl("{providerLabel} key actions", {
+								providerLabel: label,
+							})}
+						/>
 					)}
 				</div>
 			}
@@ -163,6 +161,7 @@ export function ProviderRow({
 						loading={saving}
 						onClick={() => void handleSave()}
 						size="sm"
+						variant="outline"
 					>
 						Save
 					</Button>

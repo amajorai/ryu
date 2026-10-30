@@ -49,7 +49,7 @@ describe("RyuAssistantWidget", () => {
 		expect(html).not.toContain("Loading Ask Ryu");
 	});
 
-	test("matches Desktop's floating header: title, settings, no mode tabs", () => {
+	test("matches Desktop's floating header: settings, no mode tabs, a greeting instead of a title", () => {
 		const html = renderToStaticMarkup(
 			<RyuAssistantWidget
 				initialMode="node"
@@ -59,7 +59,8 @@ describe("RyuAssistantWidget", () => {
 			/>
 		);
 
-		expect(html).toContain("New chat");
+		expect(html).not.toContain("New chat");
+		expect(html).toContain("How can I help?");
 		expect(html).toContain('aria-label="Assistant settings"');
 		expect(html).not.toContain('aria-label="Assistant mode"');
 		expect(html).not.toContain("Choose a runtime");
@@ -101,7 +102,7 @@ describe("RyuAssistantWidget", () => {
 		expect(composer).toContain('aria-label="Ryu Core access token"');
 	});
 
-	test("keeps page context off the screened guest path", () => {
+	test("keeps page context off the screened guest path and its disclosure in settings", () => {
 		const html = renderToStaticMarkup(
 			<RyuAssistantWidget
 				initialMode="guest"
@@ -111,7 +112,10 @@ describe("RyuAssistantWidget", () => {
 			/>
 		);
 
-		expect(html).toContain("Prompts go through Ryu&#x27;s hosted gateway");
+		// The guest disclosure lives in the runtime choice inside the settings
+		// popover (one tap away), not in a footer under the conversation.
+		expect(html).not.toContain("Prompts go through Ryu&#x27;s hosted gateway");
+		expect(html).toContain('aria-label="Assistant settings"');
 		expect(html).not.toContain("OpenCode");
 		expect(html).toContain('placeholder="Send a message"');
 		expect(html).not.toContain('data-testid="assistant-runtime-setup"');

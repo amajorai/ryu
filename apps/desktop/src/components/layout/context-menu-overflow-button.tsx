@@ -41,7 +41,7 @@ export function ContextMenuOverflowButton({
 			aria-label={tl("{label} options", { label })}
 			className={cn(
 				cn(
-					"flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/hdr:opacity-100 group-hover/row:opacity-100 group-hover/subsection:opacity-100 group-hover/tab:opacity-100",
+					"flex size-5 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/hdr:opacity-100 group-hover/row:opacity-100 group-hover/subsection:opacity-100 group-hover/tab:opacity-100",
 					layoutStyles.authored1
 				),
 				className

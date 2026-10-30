@@ -82,7 +82,9 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 			title: tab.title,
 		});
 	};
-	const rowState = isActive ? "bg-muted" : "hover:bg-muted/60";
+	const rowState = isActive
+		? "bg-sidebar-accent"
+		: "hover:bg-sidebar-accent/60 hover:duration-0";
 	const textState = isActive ? "text-foreground" : "text-muted-foreground";
 	const {
 		isEditing,
@@ -100,7 +102,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 				<ContextMenuTrigger>
 					{/* sidebar row combines nested controls with drag/middle-click */}
 					<div
-						className={`group/row relative flex h-8 cursor-pointer items-center gap-2 rounded-md pr-2 pl-2 transition-colors ${rowState} ${tab.unloaded ? "opacity-60" : ""} ${isDragging ? "opacity-40" : ""}`}
+						className={`group/row relative flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 transition-colors duration-150 ${rowState} ${tab.unloaded ? "opacity-60" : ""} ${isDragging ? "opacity-40" : ""}`}
 						onClick={() => activateTab(tab.id)}
 						onDoubleClick={canRename ? startEditing : undefined}
 						onFocus={prefetchColdChat}
@@ -190,7 +192,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 				<ContextMenuContent>
 					<ContextMenuItem onClick={() => togglePin(tab.id)}>
 						<HugeiconsIcon
-							className="mr-2 size-4"
+							className="size-4"
 							icon={tab.pinned ? PinOffIcon : PinIcon}
 						/>
 						{tab.pinned ? "Unpin tab" : "Pin tab"}
@@ -203,7 +205,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 					</ContextMenuItem>
 					{inSplit ? (
 						<ContextMenuItem onClick={() => unsplit(tab.id)}>
-							<HugeiconsIcon className="mr-2 size-4" icon={GridIcon} />
+							<HugeiconsIcon className="size-4" icon={GridIcon} />
 							Unsplit
 						</ContextMenuItem>
 					) : (
@@ -213,7 +215,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 								splitTabs([tab.id, id]);
 							}}
 						>
-							<HugeiconsIcon className="mr-2 size-4" icon={GridIcon} />
+							<HugeiconsIcon className="size-4" icon={GridIcon} />
 							Split with new chat
 						</ContextMenuItem>
 					)}
@@ -232,7 +234,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 							})
 						}
 					>
-						<HugeiconsIcon className="mr-2 size-4" icon={ArrowUpRight01Icon} />
+						<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 						Duplicate tab
 					</ContextMenuItem>
 					<OpenInNewWindowContextMenuItem onClick={openTabInNewWindow} />
@@ -240,7 +242,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 					<TabLayoutMenuItems onChange={setTabLayout} value={tabLayout} />
 					<ContextMenuSeparator />
 					<ContextMenuItem onClick={() => closeTab(tab.id)}>
-						<HugeiconsIcon className="mr-2 size-4" icon={Cancel01Icon} />
+						<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 						Close tab
 					</ContextMenuItem>
 				</ContextMenuContent>
@@ -283,7 +285,7 @@ function VerticalSplitBlock({
 		split.root.orientation === "columns" ? "Side by side" : "Stacked";
 	return (
 		<div
-			className="rounded-lg bg-primary/5 p-0.5 ring-1 ring-primary/25"
+			className="rounded-lg bg-sidebar-accent/60 p-0.5"
 			ref={bracketShift.ref}
 			style={bracketShift.style}
 		>
@@ -294,7 +296,7 @@ function VerticalSplitBlock({
 				<ContextMenuTrigger>
 					{/* drag-and-drop join target; the same action exists in the tab context menus */}
 					<div
-						className={`flex h-6 items-center gap-1.5 rounded-md px-2 text-primary/70 ${joinHover ? "bg-primary/20 text-primary" : ""}`}
+						className={`flex h-6 items-center gap-1.5 rounded-lg px-2 text-muted-foreground ${joinHover ? "bg-accent text-foreground" : ""}`}
 						onDragLeave={() => setJoinHover(false)}
 						onDragOver={(e: ReactDragEvent) => {
 							if (!canJoin) {
@@ -316,14 +318,14 @@ function VerticalSplitBlock({
 							dnd.onEnd();
 						}}
 					>
-						<HugeiconsIcon className="size-3" icon={Folder01Icon} />
-						<span className="font-medium text-xs">
+						<HugeiconsIcon className="size-3.5" icon={Folder01Icon} />
+						<span className="text-xs">
 							{canJoin && joinHover
 								? "Drop to add"
 								: `${label} · ${formatCount(members.length) ?? "—"}`}
 						</span>
 						<button
-							className="ml-auto rounded px-1 text-muted-foreground text-xs hover:text-foreground"
+							className="ml-auto rounded-lg px-1 text-muted-foreground text-xs hover:text-foreground"
 							onClick={() => unsplit(members[0]?.id ?? "")}
 							type="button"
 						>
@@ -350,7 +352,7 @@ function VerticalSplitBlock({
 					<SplitPresetMenuItems split={split} />
 					<ContextMenuSeparator />
 					<ContextMenuItem onClick={() => unsplit(members[0]?.id ?? "")}>
-						<HugeiconsIcon className="mr-2 size-4" icon={GridIcon} />
+						<HugeiconsIcon className="size-4" icon={GridIcon} />
 						Unsplit
 					</ContextMenuItem>
 				</ContextMenuContent>
@@ -434,7 +436,9 @@ export function TabsSection({
 			sort={sort}
 		>
 			{tabs.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">No tabs open</p>
+				<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
+					No tabs open
+				</p>
 			) : (
 				<SidebarMenu>{items}</SidebarMenu>
 			)}

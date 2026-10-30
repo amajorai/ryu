@@ -1,9 +1,5 @@
-import {
-	fitBlockReason,
-	isBlockedFit,
-	isSlowFit,
-	SLOW_FIT_WARNING,
-} from "@ryu/blocks/desktop/model-fit.ts";
+import { fitBlockReason, isBlockedFit } from "@ryu/blocks/desktop/model-fit.ts";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -21,10 +17,7 @@ import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistribut
 import { bundleSkillChanges } from "@/src/components/skills/skill-set-change.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import {
-	fetchDetail,
-	type MarketplaceDetail,
-} from "@/src/lib/api/marketplace.ts";
+import { fetchDetail } from "@/src/lib/api/marketplace.ts";
 import {
 	describeBundleManualSteps,
 	installMarketplaceBundle,
@@ -32,226 +25,27 @@ import {
 import {
 	fetchModelDetail,
 	installModelFile,
-	type ModelDetail,
-	type SetActiveModelResult,
 	setActiveModel,
 } from "@/src/lib/api/models.ts";
 import {
-	type AppInfo,
 	fetchApps,
 	fetchPluginCatalogDetail,
 	installApp,
-	type PluginCatalogDetail,
 } from "@/src/lib/api/plugins.ts";
-import { fetchSkillDetail, type SkillDetail } from "@/src/lib/api/skills.ts";
+import { fetchSkillDetail } from "@/src/lib/api/skills.ts";
 import { pickRecommendedQuant } from "@/src/lib/deep-link.ts";
 import { useDeepLinkStore } from "@/src/store/useDeepLinkStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
-
-interface DialogBody {
-	/** Why the confirm action is disabled (e.g. the model won't fit this node). */
-	blockedReason?: string;
-	confirm?: string;
-	description: string;
-	error?: boolean;
-	onConfirm?: () => void;
-	title: string;
-	/** A non-blocking caution shown above the actions (e.g. "may be slow"). */
-	warning?: string;
-}
-
-interface DetailQuery<T> {
-	data: T | undefined;
-	error: unknown;
-	isLoading: boolean;
-}
-
-/** Honest switch-result wording: the served-model override only affects
- * llama.cpp, so only claim "Now serving" when that engine actually reloaded. */
-function switchTitle(name: string, res: SetActiveModelResult): string {
-	if (res.restarted && res.engine === "llamacpp") {
-		return `Now serving ${name}`;
-	}
-	if (res.engine && res.engine !== "llamacpp") {
-		return `${name} selected (applies when llama.cpp is the active engine)`;
-	}
-	return `${name} selected (takes effect on next engine start)`;
-}
-
-/** The dialog content for a model intent, derived from the detail query state. */
-function modelBody(
-	intent: { id: string },
-	q: DetailQuery<ModelDetail>,
-	run: () => void
-): DialogBody {
-	if (q.isLoading) {
-		return { title: "Loading model…", description: intent.id };
-	}
-	if (q.error || !q.data) {
-		return {
-			title: "Model not found",
-			description: `Could not load "${intent.id}".`,
-			error: true,
-		};
-	}
-	const { card, files } = q.data;
-	if (card.installed) {
-		return {
-			title: `Switch to ${card.name}?`,
-			description: `${card.name} is installed. Switch the local engine to serve it now?`,
-			confirm: "Switch",
-			onConfirm: run,
-		};
-	}
-	const quant = pickRecommendedQuant(files);
-	if (!quant) {
-		return {
-			title: `Install ${card.name}?`,
-			description: "This model has no downloadable GGUF file.",
-			error: true,
-		};
-	}
-	const fit = quant.fitLabel ? ` · ${quant.fitLabel}` : "";
-	// The recommended quant is blocked only when every quant is: Core would
-	// refuse the install, so the confirm stays disabled with the reason shown.
-	const blockedReason = fitBlockReason(
-		quant.fit,
-		quant.fitLabel,
-		q.data.device
-	);
-	return {
-		title: `Install ${card.name}?`,
-		description: `Download ${quant.filename} (${quant.sizeHuman}${fit}) and use it as the active model.`,
-		confirm: "Install & use",
-		onConfirm: run,
-		...(blockedReason ? { blockedReason } : {}),
-		...(isSlowFit(quant.fit) ? { warning: SLOW_FIT_WARNING } : {}),
-	};
-}
-
-/** The dialog content for a skill intent. */
-function skillBody(
-	intent: { id: string },
-	q: DetailQuery<SkillDetail>,
-	run: () => void
-): DialogBody {
-	if (q.isLoading) {
-		return { title: "Loading skill…", description: intent.id };
-	}
-	if (q.error || !q.data) {
-		return {
-			title: "Skill not found",
-			description: `Could not load "${intent.id}".`,
-			error: true,
-		};
-	}
-	const { card, description } = q.data;
-	if (card.installed) {
-		return {
-			title: `${card.name} is installed`,
-			description: "This skill is already installed.",
-		};
-	}
-	return {
-		title: `Install ${card.name}?`,
-		description: description ?? `Install the ${card.name} skill.`,
-		confirm: "Install",
-		onConfirm: run,
-	};
-}
-
-/** The dialog content for an app intent. Installed state comes from `/api/apps`
- *  (the lifecycle record) rather than the catalog detail, which carries no
- *  installed flag. */
-function appBody(
-	intent: { id: string },
-	q: DetailQuery<PluginCatalogDetail>,
-	installed: AppInfo | undefined,
-	run: () => void
-): DialogBody {
-	if (q.isLoading) {
-		return { title: "Loading app…", description: intent.id };
-	}
-	const name = q.data?.name ?? installed?.name ?? intent.id;
-	if (installed?.installed) {
-		return {
-			title: `${name} is installed`,
-			description: "This app is already installed.",
-		};
-	}
-	if (q.error || !q.data) {
-		return {
-			title: "App not found",
-			description: `Could not load "${intent.id}".`,
-			error: true,
-		};
-	}
-	return {
-		title: `Install ${name}?`,
-		description: q.data.description ?? `Install the ${name} app.`,
-		confirm: "Install",
-		onConfirm: run,
-	};
-}
-
-/** The confirmation copy for a Marketplace bundle action. */
-function bundleBody(
-	intent: { id: string },
-	q: DetailQuery<MarketplaceDetail>,
-	run: () => void
-): DialogBody {
-	if (q.isLoading) {
-		return { title: "Loading bundle…", description: intent.id };
-	}
-	if (q.error || !q.data) {
-		return {
-			title: "Bundle not found",
-			description: `Could not load "${intent.id}".`,
-			error: true,
-		};
-	}
-	const required = q.data.bundleMembers.filter(
-		(member) => member.required
-	).length;
-	return {
-		title: `Install ${q.data.name}?`,
-		description: `Install ${q.data.bundleMembers.length} Marketplace items (${required} required) through their existing trusted installers. Packages remain disabled until you review their permissions.`,
-		confirm: "Install bundle",
-		onConfirm: run,
-	};
-}
-
-const HTTP_PREFIX = /^https?:\/\//;
-const TRAILING_SLASH = /\/$/;
-
-/** Compare two node base URLs ignoring a trailing slash. */
-function sameUrl(a: string, b: string): boolean {
-	return a.replace(TRAILING_SLASH, "") === b.replace(TRAILING_SLASH, "");
-}
-
-/** The dialog content for a node-connect intent. */
-function nodeBody(
-	intent: { name: string; url: string; token: string | null },
-	alreadyKnown: boolean,
-	run: () => void
-): DialogBody {
-	const host = intent.url.replace(HTTP_PREFIX, "");
-	if (alreadyKnown) {
-		return {
-			title: `Switch to ${intent.name}?`,
-			description: `${host} is already a saved node. Make it the active node?`,
-			confirm: "Switch",
-			onConfirm: run,
-		};
-	}
-	const auth = intent.token ? " (authenticated)" : "";
-	return {
-		title: `Connect to ${intent.name}?`,
-		description: `Add ${host}${auth} as a node and make it active. Only connect to nodes you trust.`,
-		confirm: "Connect",
-		onConfirm: run,
-	};
-}
+import {
+	appBody,
+	bundleBody,
+	type DialogBody,
+	modelBody,
+	nodeBody,
+	sameUrl,
+	skillBody,
+	switchTitle,
+} from "./DeepLinkConfirmDialog-bodies.ts";
 
 // Confirmation surface for an inbound `ryu://` deep link. This dialog is the
 // security boundary: a link from any website can request an install/switch, but
@@ -268,6 +62,8 @@ export function DeepLinkConfirmDialog() {
 	const addNode = useNodeStore((s) => s.addNode);
 	const setDefaultNode = useNodeStore((s) => s.setDefault);
 	const [busy, setBusy] = useState(false);
+	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 
 	const intent = pending?.intent ?? null;
 	const open = intent !== null;
@@ -353,7 +149,7 @@ export function DeepLinkConfirmDialog() {
 		try {
 			if (card.installed) {
 				const res = await setActiveModel(target, intent.id);
-				sileo.success({ title: switchTitle(card.name, res) });
+				sileo.success({ title: switchTitle(card.name, res, tl) });
 			} else {
 				const quant = pickRecommendedQuant(files);
 				if (!quant) {
@@ -375,7 +171,7 @@ export function DeepLinkConfirmDialog() {
 				const res = await setActiveModel(target, intent.id).catch(() => null);
 				sileo.success({
 					title: res
-						? `Installed — ${switchTitle(card.name, res).toLowerCase()}`
+						? `Installed — ${switchTitle(card.name, res, tl).toLowerCase()}`
 						: `Installed ${card.name}`,
 				});
 			}
@@ -472,12 +268,16 @@ export function DeepLinkConfirmDialog() {
 				});
 			} else if (manualNote) {
 				sileo.warning({
-					title: `Installed ${result.completed.length} bundle items`,
+					title: tl("Installed {length} bundle items", {
+						length: String(result.completed.length),
+					}),
 					description: manualNote,
 				});
 			} else {
 				sileo.success({
-					title: `Installed ${result.completed.length} bundle items`,
+					title: tl("Installed {length} bundle items", {
+						length: String(result.completed.length),
+					}),
 				});
 			}
 			Promise.resolve(
@@ -506,7 +306,9 @@ export function DeepLinkConfirmDialog() {
 		try {
 			if (existingNode) {
 				await setDefaultNode(existingNode.name);
-				sileo.success({ title: `Switched to ${existingNode.name}` });
+				sileo.success({
+					title: tl("Switched to {name}", { name: existingNode.name }),
+				});
 			} else {
 				// Avoid a name clash with an unrelated saved node (Core rejects dupes).
 				const taken = new Set(nodes.map((n) => n.name));
@@ -516,7 +318,7 @@ export function DeepLinkConfirmDialog() {
 				}
 				await addNode(name, intent.url, intent.token ?? undefined);
 				await setDefaultNode(name);
-				sileo.success({ title: `Connected to ${name}` });
+				sileo.success({ title: tl("Connected to {name}", { name }) });
 			}
 			clear();
 		} catch (e) {
@@ -530,15 +332,15 @@ export function DeepLinkConfirmDialog() {
 
 	let body: DialogBody | null = null;
 	if (intent?.kind === "model") {
-		body = modelBody(intent, modelDetail, runModel);
+		body = modelBody(intent, modelDetail, runModel, tl);
 	} else if (intent?.kind === "skill") {
-		body = skillBody(intent, skillDetail, runSkill);
+		body = skillBody(intent, skillDetail, runSkill, tl);
 	} else if (intent?.kind === "app") {
-		body = appBody(intent, appDetail, installedApp, runApp);
+		body = appBody(intent, appDetail, installedApp, runApp, tl);
 	} else if (intent?.kind === "bundle") {
-		body = bundleBody(intent, bundleDetail, runBundle);
+		body = bundleBody(intent, bundleDetail, runBundle, tl);
 	} else if (intent?.kind === "node") {
-		body = nodeBody(intent, existingNode !== undefined, runNode);
+		body = nodeBody(intent, existingNode !== undefined, runNode, tl);
 	}
 
 	if (!(open && body)) {
@@ -552,28 +354,35 @@ export function DeepLinkConfirmDialog() {
 					<DialogTitle>{body.title}</DialogTitle>
 					<DialogDescription>{body.description}</DialogDescription>
 				</DialogHeader>
-				{intent.kind === "model" ||
-				intent.kind === "skill" ||
-				intent.kind === "app" ||
-				intent.kind === "bundle" ? (
-					<p className="text-muted-foreground text-xs">
-						Installing on{" "}
-						<span className="font-medium text-foreground">
-							{installNode.name}
-						</span>
-						{hintUnresolved
-							? " — the link named a node you have not added, so your active node is used."
-							: ""}
-					</p>
-				) : null}
+				{/* One note at most: a block wins over a warning, which wins over the
+				    install target. */}
 				{body.blockedReason ? (
 					<p className="text-sm text-status-destructive" role="note">
-						{body.blockedReason} It can't be installed on this node.
+						{tl("{blockedReason} It can't be installed on this node.", {
+							blockedReason: body.blockedReason,
+						})}
 					</p>
-				) : null}
-				{body.warning && !body.blockedReason ? (
+				) : body.warning ? (
 					<p className="text-sm text-status-warning" role="note">
 						{body.warning}
+					</p>
+				) : intent.kind === "model" ||
+					intent.kind === "skill" ||
+					intent.kind === "app" ||
+					intent.kind === "bundle" ? (
+					<p className="text-detail text-muted-foreground">
+						{tlRich(
+							"Installing on <span>{name}</span>{hint, select, unresolved {. The link named a node you haven't added, so your active node is used.} other {}}",
+							{
+								name: installNode.name,
+								hint: hintUnresolved ? "unresolved" : "resolved",
+							},
+							{
+								span: (c) => (
+									<span className="font-medium text-foreground">{c}</span>
+								),
+							}
+						)}
 					</p>
 				) : null}
 				<DialogFooter>
@@ -585,6 +394,7 @@ export function DeepLinkConfirmDialog() {
 							disabled={busy || body.blockedReason !== undefined}
 							onClick={body.onConfirm}
 							type="button"
+							variant="mono"
 						>
 							<TextSwap>{busy ? "Working…" : body.confirm}</TextSwap>
 						</Button>

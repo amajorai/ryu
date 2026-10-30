@@ -4,6 +4,7 @@
 // composer must be the quiet, disabled send arrow with no voice-mode label (the
 // shared SendButton uses the same upward arrow idle and typing).
 
+import { ArrowUp02Icon } from "@hugeicons/core-free-icons";
 import { expect, test } from "@playwright/test";
 
 test.describe.configure({ timeout: 90_000 });
@@ -36,9 +37,15 @@ test("recovery notices are separators and the idle composer is a disabled send a
 	await expect(send).toBeVisible();
 	await expect(send).toBeDisabled();
 	await expect(send).toHaveText("");
-	await expect(send.locator("svg")).toHaveClass(
-		/(?:^|\s)tabler-icon-arrow-up(?:\s|$)/
-	);
+	// The composer's icons are Hugeicons: the idle send is its up arrow, not
+	// Stop, so its strokes are ArrowUp02Icon's.
+	await expect(send.locator("svg path")).toHaveCount(ArrowUp02Icon.length);
+	for (const [index, [, attributes]] of ArrowUp02Icon.entries()) {
+		await expect(send.locator("svg path").nth(index)).toHaveAttribute(
+			"d",
+			attributes.d
+		);
+	}
 	await expect(
 		composer.getByRole("button", { name: "Start voice mode" })
 	).toHaveCount(0);

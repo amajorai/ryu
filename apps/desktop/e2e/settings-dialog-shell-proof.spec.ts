@@ -188,7 +188,8 @@ test("dialog lifecycle and every desktop settings section render their owned con
 
 	await dialog.getByRole("button", { name: "General", exact: true }).click();
 	await dialog
-		.getByRole("button", { name: "Open Keyboard Shortcuts", exact: true })
+		.getByRole("button", { name: "Keyboard shortcuts", exact: true })
+		.last()
 		.click();
 	await expect(dialog.locator("h2").first()).toHaveText("Keyboard Shortcuts");
 	await expect(dialog.getByTestId("keyboard-shortcuts-filter")).toBeVisible();
@@ -201,7 +202,8 @@ test("dialog lifecycle and every desktop settings section render their owned con
 		timeout: 5000,
 	});
 	await dialog
-		.getByRole("button", { name: "Open Keyboard Shortcuts", exact: true })
+		.getByRole("button", { name: "Keyboard shortcuts", exact: true })
+		.last()
 		.click();
 	await expect(dialog.locator("h2").first()).toHaveText("Keyboard Shortcuts");
 	await expect(dialog.getByTestId("keyboard-shortcuts-filter")).toBeVisible();

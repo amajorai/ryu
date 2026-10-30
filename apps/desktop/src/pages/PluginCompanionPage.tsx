@@ -29,8 +29,8 @@ import {
 	useCurrentTabId,
 	useTabSelector,
 } from "@/src/contexts/TabsContext.tsx";
+import { PluginHostPanel } from "@/src/contributions/host/LazyPluginHostPanel.tsx";
 import { McpAppPanel } from "@/src/contributions/host/McpAppPanel.tsx";
-import { PluginHostPanel } from "@/src/contributions/host/PluginHostPanel.tsx";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 
 /**
@@ -65,7 +65,11 @@ export function CompanionUnavailable() {
 					</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
-					<Button onClick={() => openTab("/apps", { title: "Apps" })} size="sm">
+					<Button
+						onClick={() => openTab("/apps", { title: "Apps" })}
+						size="sm"
+						variant="outline"
+					>
 						Open Apps
 					</Button>
 				</EmptyContent>

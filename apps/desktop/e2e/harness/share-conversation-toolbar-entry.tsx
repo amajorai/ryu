@@ -1,3 +1,6 @@
+// First, so the native bridge exists before any app module loads, as in Tauri.
+// Biome keeps a bare import in place; the named import below reuses it.
+import "./share-conversation-toolbar-bridge.ts";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 
 declare const window: Window;
@@ -9,16 +12,17 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../contexts/auth-context.tsx";
 import { BACKEND_URL } from "../../lib/app-urls.ts";
+import { vaultHydrated } from "../../lib/auth-client.ts";
 import { LanguagePackBridge } from "../../src/components/LanguagePackBridge.tsx";
 import Layout from "../../src/components/layout/Layout.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
+import { hydrateSealedLocalStorage } from "../../src/lib/content-seal.ts";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { LOCAL_FALLBACK, useNodeStore } from "../../src/store/useNodeStore.ts";
 import { useWorkspaceStore } from "../../src/store/useWorkspaceStore.ts";
 import { parseProofJsonRecord } from "../fixture-json.ts";
 import { createChatControlBackground } from "./chat-page-control-background.ts";
-import { createChatPageNativeDependencies } from "./chat-page-native-http-dependencies.ts";
 // Render the shipping Layout and ChatPage with one deterministic Core thread.
 // Only native IPC and Core/control-plane requests are replaced by local fixtures.
 import {
@@ -26,9 +30,14 @@ import {
 	rejectUnexpectedChatProofRequest,
 	type UnexpectedChatProofRequest,
 } from "./chat-page-proof-http.ts";
+import {
+	setToolbarLocalNode,
+	toolbarNativeBridge,
+} from "./share-conversation-toolbar-bridge.ts";
 import "@fontsource-variable/geist";
 import "../../src/index.css";
 
+setToolbarLocalNode(LOCAL_FALLBACK);
 const CONVERSATION_ID = "conversation-toolbar-share-fixture";
 const CONVERSATION_TITLE = "Toolbar share regression fixture";
 const OWNER_ID = "share-owner";
@@ -92,17 +101,8 @@ const fixture: ShareToolbarFixture = {
 		visibility: "private",
 	},
 	calls: [],
-	nativeSnapshot: () => ({
-		callbacks: callbacks.size,
-		listeners: listeners.size,
-		unexpected: [...unexpectedNativeCommands],
-	}),
-	nativeDiagnostics: () => ({
-		listeners: [...listeners].map(([id, listener]) => ({ id, ...listener })),
-		callbackIds: [...callbacks.keys()],
-		unexpected: structuredClone(unexpectedNativeDetails),
-		heldClipsListenerIds: [],
-	}),
+	nativeSnapshot: toolbarNativeBridge.snapshot,
+	nativeDiagnostics: toolbarNativeBridge.diagnostics,
 	unmount: () => {
 		throw new Error("Chat fixture root is not mounted");
 	},
@@ -111,108 +111,6 @@ const fixture: ShareToolbarFixture = {
 };
 
 Object.defineProperty(window, "__shareToolbarFixture", { value: fixture });
-// Match the SDK's callback and listener lifecycle: unlisten first unregisters
-// its JS callback through the event-plugin internals, then invokes native cleanup.
-const callbacks = new Map<number, (payload: unknown) => void>();
-const listeners = new Map<number, { event: string; handler: number }>();
-const unexpectedNativeCommands: string[] = [];
-const unexpectedNativeDetails: Array<{
-	command: string;
-	args: unknown;
-	message: string;
-}> = [];
-const nativeDependencies = createChatPageNativeDependencies(localStorage);
-let nextCallback = 0;
-let nextListener = 0;
-Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
-	value: {
-		unregisterListener: (event: string, id: number) => {
-			const listener = listeners.get(id);
-			if (listener?.event === event) {
-				callbacks.delete(listener.handler);
-			}
-		},
-	},
-});
-Object.defineProperty(window, "__TAURI_INTERNALS__", {
-	value: {
-		metadata: {
-			currentWindow: { label: "main" },
-			currentWebview: { label: "main" },
-		},
-		transformCallback: (callback: (payload: unknown) => void) => {
-			const id = ++nextCallback;
-			callbacks.set(id, callback);
-			return id;
-		},
-		unregisterCallback: (id: number) => {
-			callbacks.delete(id);
-		},
-		invoke: async (command: string, args?: Record<string, unknown>) => {
-			if (command === "plugin:event|listen") {
-				if (
-					typeof args?.event !== "string" ||
-					typeof args.handler !== "number" ||
-					!callbacks.has(args.handler)
-				) {
-					throw new Error("Invalid native event registration");
-				}
-				const id = ++nextListener;
-				listeners.set(id, { event: args.event, handler: args.handler });
-				return id;
-			}
-			if (command === "plugin:event|unlisten") {
-				if (
-					typeof args?.eventId !== "number" ||
-					(listeners.has(args.eventId) &&
-						listeners.get(args.eventId)?.event !== args.event)
-				) {
-					throw new Error("Invalid native event cleanup");
-				}
-				listeners.delete(args.eventId);
-				return null;
-			}
-			// The mounted Layout refreshes the native profile and probes this local
-			// fixture Core. These are the native DTOs consumed by the real stores.
-			if (command === "list_nodes") {
-				return { default: "local", nodes: [{ ...LOCAL_FALLBACK }] };
-			}
-			if (command === "local_node_token") {
-				return { token: null };
-			}
-			if (command === "test_node") {
-				return { online: true };
-			}
-			try {
-				if (command === "get_safe_mode_sentinel") {
-					if (Object.keys(args ?? {}).length) {
-						throw new Error("Unexpected safe-mode sentinel arguments");
-					}
-					return false;
-				}
-				const dependency = nativeDependencies.invoke(command, args);
-				if (dependency.handled) {
-					return dependency.value;
-				}
-			} catch (error) {
-				unexpectedNativeCommands.push(command);
-				unexpectedNativeDetails.push({
-					command,
-					args: structuredClone(args ?? {}),
-					message: error instanceof Error ? error.message : String(error),
-				});
-				throw error;
-			}
-			unexpectedNativeDetails.push({
-				command,
-				args: structuredClone(args ?? {}),
-				message: `Unexpected native command: ${command}`,
-			});
-			unexpectedNativeCommands.push(command);
-			throw new Error(`Unexpected native command: ${command}`);
-		},
-	},
-});
 
 const seedKey = `share-toolbar-entry-seeded:${scenario}`;
 if (sessionStorage.getItem(seedKey) !== "true") {
@@ -657,17 +555,18 @@ globalThis.fetch = async (input, init) => {
 		});
 	}
 	if (url.pathname === "/api/uploads" && method === "POST") {
-		const headers = new Headers(effectiveInit.headers);
 		const body = effectiveInit.body;
+		// `uploadUserFile` sends the name as `?name=` (not a header).
+		const filename = url.searchParams.get("name") ?? "upload";
 		fixture.uploads.push({
-			filename: headers.get("x-filename") ?? "upload",
+			filename,
 			size: body instanceof Blob ? body.size : 0,
 			type: body instanceof Blob ? body.type : "",
 		});
 		recordCall(url.pathname, effectiveInit);
 		return Response.json({
 			content_type: "image/png",
-			file_name: headers.get("x-filename") ?? "upload.png",
+			file_name: filename,
 			id: "uploaded-chat-image",
 			size: body instanceof Blob ? body.size : 0,
 			space_id: "uploads-fixture",
@@ -732,26 +631,30 @@ const root = document.getElementById("root");
 if (root) {
 	const reactRoot = createRoot(root);
 	fixture.unmount = () => reactRoot.unmount();
-	reactRoot.render(
-		<AppSurfaceProvider surface="desktop">
-			<QueryClientProvider client={queryClient}>
-				<ThemeProvider
-					attribute="class"
-					defaultTheme="dark"
-					enableSystem={false}
-				>
-					<LanguagePackBridge>
-						<AuthProvider>
-							<MemoryRouter>
-								<EntitlementProvider>
-									<Layout />
-									<Toaster />
-								</EntitlementProvider>
-							</MemoryRouter>
-						</AuthProvider>
-					</LanguagePackBridge>
-				</ThemeProvider>
-			</QueryClientProvider>
-		</AppSurfaceProvider>
-	);
+	// Like main.tsx, render once the sealed auth vault and sealed localStorage
+	// values hydrate; synchronous readers would otherwise see a signed-out session.
+	void Promise.all([vaultHydrated, hydrateSealedLocalStorage()]).then(() => {
+		reactRoot.render(
+			<AppSurfaceProvider surface="desktop">
+				<QueryClientProvider client={queryClient}>
+					<ThemeProvider
+						attribute="class"
+						defaultTheme="dark"
+						enableSystem={false}
+					>
+						<LanguagePackBridge>
+							<AuthProvider>
+								<MemoryRouter>
+									<EntitlementProvider>
+										<Layout />
+										<Toaster />
+									</EntitlementProvider>
+								</MemoryRouter>
+							</AuthProvider>
+						</LanguagePackBridge>
+					</ThemeProvider>
+				</QueryClientProvider>
+			</AppSurfaceProvider>
+		);
+	});
 }

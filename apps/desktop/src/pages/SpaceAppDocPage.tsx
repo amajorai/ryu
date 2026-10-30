@@ -21,7 +21,7 @@ import {
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
-import { PluginHostPanel } from "@/src/contributions/host/PluginHostPanel.tsx";
+import { PluginHostPanel } from "@/src/contributions/host/LazyPluginHostPanel.tsx";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 
 export default function SpaceAppDocPage({
@@ -64,7 +64,11 @@ export default function SpaceAppDocPage({
 					</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
-					<Button onClick={() => openTab("/apps", { title: "Apps" })} size="sm">
+					<Button
+						onClick={() => openTab("/apps", { title: "Apps" })}
+						size="sm"
+						variant="outline"
+					>
 						Open Apps
 					</Button>
 				</EmptyContent>

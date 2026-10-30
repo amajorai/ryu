@@ -75,7 +75,7 @@ export default function SkillBadgeCard({
 	return (
 		<div
 			className={cn(
-				"group relative overflow-hidden rounded-2xl border border-border/60 bg-card transition-colors hover:border-foreground/25",
+				"group relative overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-foreground/25",
 				selected && "border-foreground/30 bg-accent",
 				className
 			)}
@@ -90,7 +90,6 @@ export default function SkillBadgeCard({
 				{/* Avatar art spans the top half, centered. */}
 				<div className="relative aspect-[5/3] w-full overflow-hidden">
 					{art}
-					<div className="absolute inset-0 bg-gradient-to-b from-black/10 to-transparent" />
 				</div>
 				{/* Name + one-line description below the art. */}
 				<div className="flex min-h-24 flex-col justify-between gap-1 p-3">
@@ -109,7 +108,7 @@ export default function SkillBadgeCard({
 								titleCase(card.slug)}
 						</p>
 					</div>
-					<span className="type-compact truncate font-medium text-muted-foreground uppercase tracking-wide">
+					<span className="truncate text-detail text-muted-foreground">
 						{card.source}
 					</span>
 				</div>
@@ -122,7 +121,7 @@ export default function SkillBadgeCard({
 							? tl("{name} is installed", { name: card.name })
 							: tl("Add {name}", { name: card.name })
 					}
-					className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-border/70 bg-background/90 font-medium text-xs shadow-sm backdrop-blur transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/40"
+					className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-border bg-background font-medium text-xs transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/40"
 					onClick={(event) => {
 						event.stopPropagation();
 						onInstall();

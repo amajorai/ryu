@@ -1,5 +1,4 @@
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
-import { z } from "zod";
 /* @jsxImportSource @opentui/react */
 
 import { useKeyboard } from "@opentui/react";
@@ -9,194 +8,31 @@ import { Card } from "@/components/ui/card.tsx";
 import { TextInput } from "@/components/ui/text-input.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { tf } from "../../i18n/translate.ts";
 import { MemoryAdvancedPanel } from "./memory-advanced.tsx";
 import { MemoryLibraryPanel } from "./memory-library.tsx";
-
-const KEYS = {
-	autoRecall: "auto-recall-enabled",
-	topK: "auto-recall-top-k",
-	contextBudget: "context.max-tokens",
-	contextReserve: "context.max-output-tokens",
-	autoCompact: "context.auto-compact",
-	skills: "skills-disclosure",
-	ranker: "tools.active_ranker",
-} as const;
-
-const ROWS = [
-	"autoRecall",
-	"topK",
-	"contextBudget",
-	"contextReserve",
-	"autoCompact",
-	"skills",
-	"ranker",
-] as const;
-
-type RowId = (typeof ROWS)[number];
-type ContextBudget = "off" | "auto" | `tokens:${number}`;
-type Ranker = "needle2" | "bm25" | "semantic";
-
-interface MemoryPreferences {
-	autoCompact: boolean;
-	autoRecall: boolean;
-	contextBudget: ContextBudget;
-	contextReserve: number;
-	ranker: Ranker;
-	skills: boolean;
-	topK: number;
-}
-
-const preferenceWireSchema = z.object({
-	value: z.string().nullable().catch(null),
-});
-type PreferenceWire = z.infer<typeof preferenceWireSchema>;
-
-interface PreferenceWrite {
-	key: string;
-	value: string;
-}
-
-interface SaveIntent {
-	label: string;
-	next: Partial<MemoryPreferences>;
-	previous: Partial<MemoryPreferences>;
-	writes: readonly PreferenceWrite[];
-}
-
-const DEFAULTS: MemoryPreferences = {
-	autoRecall: true,
-	topK: 5,
-	contextBudget: "off",
-	contextReserve: 1024,
-	autoCompact: false,
-	skills: true,
-	ranker: "needle2",
-};
-
-const TOP_K_MIN = 1;
-const TOP_K_MAX = 50;
-const BUDGET_MIN = 2048;
-const BUDGET_MAX = 2_000_000;
-const RESERVE_MIN = 128;
-const RESERVE_MAX = 32_768;
-const RANKERS: readonly Ranker[] = ["needle2", "bm25", "semantic"];
-
-function raw(wire: PreferenceWire): string | null {
-	return wire.value;
-}
-
-function parseBoolean(value: string | null, fallback: boolean): boolean {
-	if (value === null) {
-		return fallback;
-	}
-	const normalized = value.trim().toLowerCase();
-	if (["true", "1", "on", "yes"].includes(normalized)) {
-		return true;
-	}
-	if (["false", "0", "off", "no"].includes(normalized)) {
-		return false;
-	}
-	return fallback;
-}
-
-function parseAutoRecall(value: string | null): boolean {
-	if (value === null) {
-		return true;
-	}
-	return !["false", "0", "off", "no"].includes(value.trim().toLowerCase());
-}
-
-function parseContextBudget(value: string | null): ContextBudget {
-	const normalized = (value ?? "").trim().toLowerCase();
-	if (normalized === "" || normalized === "0" || normalized === "off") {
-		return "off";
-	}
-	if (normalized === "auto") {
-		return "auto";
-	}
-	if (!/^\+?\d+$/.test(normalized)) {
-		return "off";
-	}
-	const parsed = Number.parseInt(normalized, 10);
-	return Number.isFinite(parsed) && parsed > 0 ? `tokens:${parsed}` : "off";
-}
-
-function parsePreferences(
-	values: ReadonlyMap<string, string | null>
-): MemoryPreferences {
-	const topKRaw = values.get(KEYS.topK);
-	const topKParsed =
-		topKRaw && /^\+?\d+$/.test(topKRaw.trim())
-			? Number.parseInt(topKRaw.trim(), 10)
-			: Number.NaN;
-	const reserveRaw = values.get(KEYS.contextReserve);
-	const reserveParsed =
-		reserveRaw && /^\+?\d+$/.test(reserveRaw.trim())
-			? Number.parseInt(reserveRaw.trim(), 10)
-			: Number.NaN;
-	const rankerRaw = values.get(KEYS.ranker)?.trim().toLowerCase();
-	return {
-		autoRecall: parseAutoRecall(values.get(KEYS.autoRecall) ?? null),
-		topK:
-			Number.isFinite(topKParsed) && topKParsed > 0
-				? topKParsed
-				: DEFAULTS.topK,
-		contextBudget: parseContextBudget(values.get(KEYS.contextBudget) ?? null),
-		contextReserve:
-			Number.isFinite(reserveParsed) && reserveParsed >= 0
-				? reserveParsed
-				: DEFAULTS.contextReserve,
-		autoCompact: parseBoolean(values.get(KEYS.autoCompact) ?? null, false),
-		skills:
-			(values.get(KEYS.skills) ?? "progressive").trim().toLowerCase() !==
-			"full",
-		ranker:
-			rankerRaw === "bm25" || rankerRaw === "semantic" ? rankerRaw : "needle2",
-	};
-}
-
-function contextBudgetValue(budget: ContextBudget): string {
-	if (budget === "off" || budget === "auto") {
-		return budget;
-	}
-	const tokens = Number.parseInt(budget.slice("tokens:".length), 10);
-	return String(Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, tokens)));
-}
-
-function displayBudget(budget: ContextBudget): string {
-	if (budget === "off" || budget === "auto") {
-		return budget === "off" ? "Off" : "Auto";
-	}
-	return `${Number.parseInt(budget.slice("tokens:".length), 10).toLocaleString()} tokens`;
-}
-
-function parseWholeNumber(value: string): number | null {
-	const trimmed = value.trim();
-	if (!/^\+?\d+$/.test(trimmed)) {
-		return null;
-	}
-	const parsed = Number.parseInt(trimmed, 10);
-	return Number.isFinite(parsed) ? parsed : null;
-}
-
-function wireValue(preferences: MemoryPreferences, field: RowId): string {
-	switch (field) {
-		case "autoRecall":
-			return String(preferences.autoRecall);
-		case "topK":
-			return String(preferences.topK);
-		case "contextBudget":
-			return contextBudgetValue(preferences.contextBudget);
-		case "contextReserve":
-			return String(preferences.contextReserve);
-		case "autoCompact":
-			return String(preferences.autoCompact);
-		case "skills":
-			return preferences.skills ? "progressive" : "full";
-		case "ranker":
-			return preferences.ranker;
-	}
-}
+import {
+	BUDGET_MAX,
+	BUDGET_MIN,
+	type ContextBudget,
+	DEFAULTS,
+	KEYS,
+	type MemoryPreferences,
+	parsePreferences,
+	parseWholeNumber,
+	preferenceWireSchema,
+	RANKERS,
+	RESERVE_MAX,
+	RESERVE_MIN,
+	ROWS,
+	type RowId,
+	raw,
+	type SaveIntent,
+	TOP_K_MAX,
+	TOP_K_MIN,
+	wireValue,
+} from "./memory-preferences.ts";
+import { memoryRowLabels } from "./memory-row-labels.ts";
 
 /** Core-backed memory and conversation-context preferences with readback. */
 export function MemoryPanel({
@@ -250,7 +86,10 @@ export function MemoryPanel({
 		} catch (loadError) {
 			setLoadState("error");
 			setError(
-				`Couldn't load Memory preferences: ${loadError instanceof Error ? loadError.message : String(loadError)}. Press r to retry.`
+				tf("Couldn't load Memory preferences: {error}. Press r to retry.", {
+					error:
+						loadError instanceof Error ? loadError.message : String(loadError),
+				})
 			);
 		}
 	}, [target]);
@@ -309,7 +148,13 @@ export function MemoryPanel({
 				setPreferences((current) => ({ ...current, ...intent.previous }));
 				setRetryIntent(intent);
 				setError(
-					`Couldn't save ${intent.label}: ${saveError instanceof Error ? saveError.message : String(saveError)}. Press r to retry.`
+					tf("Couldn't save {label}: {error}. Press r to retry.", {
+						label: intent.label,
+						error:
+							saveError instanceof Error
+								? saveError.message
+								: String(saveError),
+					})
 				);
 			} finally {
 				setBusy(false);
@@ -382,7 +227,13 @@ export function MemoryPanel({
 				}
 				if (nextBudget === null) {
 					setError(
-						`Enter Off, Auto, or a whole-number context budget from ${BUDGET_MIN.toLocaleString()} to ${BUDGET_MAX.toLocaleString()}.`
+						tf(
+							"Enter Off, Auto, or a whole-number context budget from {min} to {max}.",
+							{
+								min: BUDGET_MIN.toLocaleString(),
+								max: BUDGET_MAX.toLocaleString(),
+							}
+						)
 					);
 					return;
 				}
@@ -563,55 +414,7 @@ export function MemoryPanel({
 		);
 	}
 	const color = theme.colors;
-	const labels = {
-		autoRecall: {
-			label: "Automatically recall context",
-			value: preferences.autoRecall ? "ON" : "OFF",
-			description:
-				"Core adds relevant saved memories and earlier chats before a reply.",
-		},
-		topK: {
-			label: "Snippets per reply",
-			value: String(preferences.topK),
-			description: preferences.autoRecall
-				? `Choose ${TOP_K_MIN}–${TOP_K_MAX} recalled snippets.`
-				: "Auto-recall is off; turn it on before changing this limit.",
-		},
-		contextBudget: {
-			label: "Conversation context budget",
-			value: displayBudget(preferences.contextBudget),
-			description:
-				"Off sends the full conversation; Auto needs a local model context size.",
-		},
-		contextReserve: {
-			label: "Reply token reserve",
-			value: String(preferences.contextReserve),
-			description: `Applies with a context budget; editable range ${RESERVE_MIN}–${RESERVE_MAX}.`,
-		},
-		autoCompact: {
-			label: "Summarize older turns",
-			value: preferences.autoCompact ? "ON" : "OFF",
-			description:
-				"Uses a summarizer model when turns fall outside a context budget.",
-		},
-		skills: {
-			label: "Load skills on demand",
-			value: preferences.skills
-				? "ON · progressive"
-				: "OFF · full instructions",
-			description:
-				"Controls whether agents load complete skill instructions only when relevant.",
-		},
-		ranker: {
-			label: "Tool and skill search ranking",
-			value: preferences.ranker,
-			description:
-				"Needle 2, keyword BM25, or embeddings-based semantic search.",
-		},
-	} satisfies Record<
-		RowId,
-		{ label: string; value: string; description: string }
-	>;
+	const labels = memoryRowLabels(preferences);
 	return (
 		<Card
 			subtitle="Node-wide Core preferences used by chat"

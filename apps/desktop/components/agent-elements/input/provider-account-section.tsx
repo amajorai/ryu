@@ -163,7 +163,7 @@ function AccountStatus({
 	return (
 		<span
 			className={cn(
-				"type-compact shrink-0 text-muted-foreground",
+				"shrink-0 text-muted-foreground text-xs",
 				account.needsReauth && "text-destructive"
 			)}
 		>
@@ -422,8 +422,8 @@ export function ProviderAccountSection({
 		return null;
 	}
 	return (
-		<div className="border-border/50 border-t pt-1">
-			<div className="type-caption flex items-center gap-1 px-3 pt-1 pb-0.5 font-medium text-muted-foreground uppercase tracking-wide">
+		<div className="border-border border-t pt-1">
+			<div className="flex items-center gap-1 px-3 pt-1 pb-0.5 font-medium text-muted-foreground text-xs uppercase tracking-wide">
 				<span>Accounts</span>
 				{gatewaySupported && !canSetGateway && (
 					<HugeiconsIcon

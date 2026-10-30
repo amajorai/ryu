@@ -92,7 +92,7 @@ export function AgentPublishDisclosure({
 
 	return (
 		<div className="flex flex-col gap-3">
-			<section className="rounded-2xl bg-secondary/60 p-4">
+			<section className="rounded-xl bg-muted p-4">
 				<h4 className="flex items-center gap-2 font-medium text-sm">
 					<HugeiconsIcon className="size-4" icon={Share08Icon} />
 					Shared with everyone who installs it
@@ -170,7 +170,7 @@ export function AgentPublishDisclosure({
 				</div>
 			</section>
 
-			<section className="rounded-2xl border border-border/60 p-4">
+			<section className="border-border border-t pt-4">
 				<h4 className="flex items-center gap-2 font-medium text-sm">
 					<HugeiconsIcon className="size-4" icon={Key01Icon} />
 					Stays on this machine
@@ -187,7 +187,7 @@ export function AgentPublishDisclosure({
 					))}
 				</ul>
 				{notes.droppedAvatarImage || notes.droppedLocalCommand ? (
-					<ul className="mt-3 flex flex-col gap-1.5 border-border/60 border-t pt-3 text-muted-foreground text-xs">
+					<ul className="mt-3 flex flex-col gap-1.5 border-border border-t pt-3 text-muted-foreground text-xs">
 						{notes.droppedAvatarImage ? (
 							<li>
 								Your uploaded avatar image is stored inline on this node, so it

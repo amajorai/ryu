@@ -10,6 +10,7 @@ import {
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { type SubmitEvent, useEffect, useId, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import type { Space } from "@/src/lib/api/spaces.ts";
 
 /** Rename a user-created Space without leaving the sidebar. */
@@ -82,9 +83,7 @@ export function RenameSpaceDialog({
 							onChange={(event) => setName(event.target.value)}
 							value={name}
 						/>
-						{error ? (
-							<p className="text-sm text-status-destructive">{error}</p>
-						) : null}
+						{error ? <ErrorLine message={error} /> : null}
 					</div>
 					<DialogFooter>
 						<Button

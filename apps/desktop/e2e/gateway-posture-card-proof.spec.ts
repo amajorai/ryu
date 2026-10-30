@@ -46,6 +46,16 @@ async function readProofState(page: Page): Promise<PostureProofSnapshot> {
 	});
 }
 
+/** Doctor's secondary actions live in its ⋯ menu; open it and pick one. */
+async function doctorMenuItem(page: Page, name: string) {
+	await page.getByRole("button", { name: "More Doctor actions" }).click();
+	return page.getByRole("menuitem", { name, exact: true });
+}
+
+async function clickDoctorMenuItem(page: Page, name: string) {
+	await (await doctorMenuItem(page, name)).click();
+}
+
 function requestsFor(
 	snapshot: PostureProofSnapshot,
 	method: string,
@@ -73,7 +83,11 @@ test("retries a failed posture load and Cancel discards a pending selection with
 	page,
 }) => {
 	await page.goto("/gateway-posture-card-proof.html?failRead=true");
-	await expect(page.getByText("/api/gateway/config failed: 503")).toBeVisible();
+	// The raw failure is copied by "Copy details", never rendered.
+	await expect(page.getByText("Couldn't load safety posture.")).toBeVisible();
+	await expect(page.getByText("/api/gateway/config failed: 503")).toHaveCount(
+		0
+	);
 	await page.getByRole("button", { name: "Retry", exact: true }).click();
 	const slider = page.getByRole("slider", {
 		name: "Gateway safety posture",
@@ -325,7 +339,7 @@ test("Run audit refreshes the report, Copy report copies exact JSON, and local a
 	await page.goto("/gateway-posture-card-proof.html");
 	const initial = await readProofState(page);
 	await expect(page.getByText("PII redaction is disabled")).toBeVisible();
-	await page.getByRole("button", { name: "Copy report", exact: true }).click();
+	await clickDoctorMenuItem(page, "Copy report");
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
 		JSON.stringify(initial.doctor, null, 2)
 	);
@@ -353,7 +367,7 @@ test("Run audit refreshes the report, Copy report copies exact JSON, and local a
 		)
 	).toEqual([]);
 
-	await page.getByRole("button", { name: "Copy report", exact: true }).click();
+	await clickDoctorMenuItem(page, "Copy report");
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
 		JSON.stringify(refreshed.doctor, null, 2)
 	);
@@ -394,11 +408,11 @@ test("Doctor safe-fix preview retries after failure, changes nothing until Apply
 }) => {
 	await page.goto("/gateway-posture-card-proof.html");
 	const before = await readProofState(page);
-	const previewButton = page.getByRole("button", {
-		name: "Preview safe fixes",
-		exact: true,
-	});
-	await expect(previewButton).toBeVisible();
+	const previewButton = {
+		click: () => clickDoctorMenuItem(page, "Preview safe fixes"),
+	};
+	await expect(await doctorMenuItem(page, "Preview safe fixes")).toBeVisible();
+	await page.keyboard.press("Escape");
 	await page.evaluate(() => {
 		/* SAFETY: gateway-posture-card-proof.tsx installs __gatewayPostureProof before this proof page is evaluated. */ (
 			window as Window & {
@@ -463,7 +477,8 @@ test("Doctor safe-fix preview retries after failure, changes nothing until Apply
 
 	await page.getByRole("button", { name: "Dismiss", exact: true }).click();
 	await expect(page.getByText("Safe fixes ready to review")).toHaveCount(0);
-	await expect(previewButton).toBeVisible();
+	await expect(await doctorMenuItem(page, "Preview safe fixes")).toBeVisible();
+	await page.keyboard.press("Escape");
 	expect((await readProofState(page)).config.firewall).toEqual(
 		before.config.firewall
 	);
@@ -507,18 +522,18 @@ test("read-only posture disables write controls but permits audit, copy, and Con
 	).toBeDisabled();
 	await expect(page.getByRole("switch").first()).toBeDisabled();
 	await expect(
-		page.getByRole("button", { name: "Preview safe fixes", exact: true })
-	).toHaveCount(0);
-	await expect(
 		page.getByRole("button", { name: "Apply safe fixes", exact: true })
 	).toHaveCount(0);
 	await expect(
 		page.getByRole("button", { name: "Run audit", exact: true })
 	).toBeEnabled();
+	// One open of the menu: a second trigger click would close it again.
+	const copyReport = await doctorMenuItem(page, "Copy report");
+	await expect(copyReport).toBeEnabled();
 	await expect(
-		page.getByRole("button", { name: "Copy report", exact: true })
-	).toBeEnabled();
-	await page.getByRole("button", { name: "Copy report", exact: true }).click();
+		page.getByRole("menuitem", { name: "Preview safe fixes" })
+	).toHaveCount(0);
+	await copyReport.click();
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
 		JSON.stringify(initial.doctor, null, 2)
 	);

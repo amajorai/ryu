@@ -1,6 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -40,10 +40,10 @@ function PluginEvalResultSummary({ result }: { result: PluginEvalRunResult }) {
 					{result.status} · {result.evidenceLevel}
 				</span>
 			</div>
-			<ul className="space-y-1">
+			<ul>
 				{result.cases.map((item) => (
 					<li
-						className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background px-3 py-2"
+						className="flex flex-wrap items-center justify-between gap-2 border-border border-b py-2 last:border-b-0"
 						key={item.id}
 					>
 						<span className="min-w-0 truncate" title={item.name}>
@@ -57,10 +57,6 @@ function PluginEvalResultSummary({ result }: { result: PluginEvalRunResult }) {
 					</li>
 				))}
 			</ul>
-			<p className="text-[11px] text-muted-foreground">
-				The no-plugin baseline is intentionally not run because Ryu never
-				disables a live installation to manufacture an ablation.
-			</p>
 		</div>
 	);
 }
@@ -170,7 +166,7 @@ export function InstalledPluginEvalCard({
 
 	return (
 		<section
-			className="flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/5 p-4"
+			className="flex flex-col gap-3 border-border border-t pt-4"
 			data-testid="plugin-evals-card"
 		>
 			<div className="flex flex-wrap items-start justify-between gap-3">

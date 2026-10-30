@@ -6,6 +6,13 @@
 // hover via the Card's `group` — the whole header is draggable regardless of the
 // grip's opacity. The actions menu opts out of dragging with `nodrag nopan`.
 
+import {
+	Delete02Icon,
+	DragDropVerticalIcon,
+	MoreVerticalIcon,
+	Refresh01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Card, CardContent } from "@ryu/ui/components/card.tsx";
@@ -16,13 +23,8 @@ import {
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	GripVerticalIcon,
-	MoreVerticalIcon,
-	RefreshCwIcon,
-	Trash2Icon,
-} from "lucide-react";
 import { useState } from "react";
+import { InlineErrorRow } from "@/src/components/chat/InlineErrorRow.tsx";
 import type { Widget } from "@/src/lib/api/dashboard.ts";
 import { widgetDefinition } from "./widgets/registry.tsx";
 
@@ -66,12 +68,15 @@ export function WidgetCard({
 			motionEnabled={motionEnabled}
 		>
 			<div
-				className="flex cursor-grab select-none items-center gap-1.5 border-b bg-muted/20 px-3 py-2 active:cursor-grabbing"
+				className="flex h-10 cursor-grab select-none items-center gap-1.5 px-3 active:cursor-grabbing"
 				data-widget-drag-handle=""
 			>
-				<GripVerticalIcon className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+				<HugeiconsIcon
+					className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+					icon={DragDropVerticalIcon}
+				/>
 				<span
-					className="flex-1 truncate font-medium text-sm tracking-tight"
+					className="flex-1 truncate font-medium text-sm"
 					title={widget.title || "Untitled"}
 				>
 					{widget.title || "Untitled"}
@@ -85,7 +90,7 @@ export function WidgetCard({
 				    `ghost-muted` variant keeps the trigger's muted resting color. */}
 				<div
 					className={cn(
-						"nodrag nopan opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+						"nodrag nopan opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 group-hover:duration-0",
 						actionsOpen && "opacity-100"
 					)}
 					data-widget-actions=""
@@ -100,17 +105,18 @@ export function WidgetCard({
 							onPointerDown={(event) => event.stopPropagation()}
 							render={<Button size="icon-sm" variant="ghost-muted" />}
 						>
-							<MoreVerticalIcon className="size-4" />
+							<HugeiconsIcon className="size-4" icon={MoreVerticalIcon} />
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem onClick={() => onRefresh()}>
-								<RefreshCwIcon className="size-4" /> Refresh
+								<HugeiconsIcon className="size-4" icon={Refresh01Icon} />{" "}
+								Refresh
 							</DropdownMenuItem>
 							<DropdownMenuItem
 								onClick={() => onRemove()}
 								variant="destructive"
 							>
-								<Trash2Icon className="size-4" /> Remove
+								<HugeiconsIcon className="size-4" icon={Delete02Icon} /> Remove
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -118,8 +124,11 @@ export function WidgetCard({
 			</div>
 			<CardContent className="min-h-0 flex-1 overflow-hidden" inset="widget">
 				{error ? (
-					<div className="flex h-full items-center justify-center text-center text-status-destructive text-xs">
-						{error}
+					<div className="flex h-full items-center justify-center">
+						<InlineErrorRow
+							details={error}
+							message="This widget could not load."
+						/>
 					</div>
 				) : (
 					<WidgetBody value={value} widget={widget} />

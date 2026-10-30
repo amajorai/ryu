@@ -31,7 +31,7 @@ export function BotConnectionBadge() {
 		>
 			<span className="relative inline-flex size-4 shrink-0 items-center justify-center">
 				<HugeiconsIcon
-					className="size-4 text-muted-foreground/70"
+					className="size-4 text-muted-foreground"
 					icon={CloudServerIcon}
 					size={16}
 				/>
@@ -40,8 +40,8 @@ export function BotConnectionBadge() {
 				/>
 			</span>
 			<span className="min-w-0 truncate">
-				<span className="block truncate font-medium text-xs">Ryu Cloud</span>
-				<span className="type-compact block truncate text-muted-foreground">
+				<span className="block truncate font-medium text-sm">Ryu Cloud</span>
+				<span className="block truncate text-detail text-muted-foreground">
 					{activeNode.managed ? statusLabel : "Preparing managed workspace"}
 				</span>
 			</span>

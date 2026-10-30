@@ -1,7 +1,13 @@
+import {
+	ArrowLeft01Icon,
+	ArrowRight01Icon,
+	MinusSignIcon,
+	PlusSignIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
-import { ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import { useEffect, useRef, useState } from "react";
 
@@ -114,7 +120,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col bg-muted/30">
-			<div className="flex h-11 shrink-0 items-center justify-center gap-1 border-border border-b bg-background px-3">
+			<div className="flex h-10 shrink-0 items-center justify-center gap-1 border-border border-b bg-background px-3">
 				<Button
 					aria-label="Previous page"
 					disabled={pageNumber <= 1}
@@ -122,7 +128,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					size="icon-sm"
 					variant="ghost"
 				>
-					<ChevronLeft />
+					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
 				</Button>
 				<Input
 					aria-label="Page number"
@@ -154,7 +160,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					size="icon-sm"
 					variant="ghost"
 				>
-					<ChevronRight />
+					<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
 				</Button>
 				<div className="mx-2 h-5 w-px bg-border" />
 				<Button
@@ -164,7 +170,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					size="icon-sm"
 					variant="ghost"
 				>
-					<Minus />
+					<HugeiconsIcon className="size-4" icon={MinusSignIcon} />
 				</Button>
 				<span className="w-12 text-center text-muted-foreground text-xs">
 					{Math.round(scale * 100)}%
@@ -176,7 +182,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					size="icon-sm"
 					variant="ghost"
 				>
-					<Plus />
+					<HugeiconsIcon className="size-4" icon={PlusSignIcon} />
 				</Button>
 			</div>
 			<div className="min-h-0 flex-1 overflow-auto p-6">

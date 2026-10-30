@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
@@ -7,7 +7,6 @@ import {
 	type TimelineDay,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
 	type CSSProperties,
 	useCallback,
@@ -34,6 +33,10 @@ import {
 	threadTitle,
 } from "./timeline-parts.tsx";
 import { TIMELINE_STATUS_BAR, TimelineStatusDot } from "./timeline-status.tsx";
+import {
+	type HiddenDays,
+	TimelineWeekReveal,
+} from "./timeline-week-reveal.tsx";
 
 /** DOM id of a week column's heading, so "Today" can move focus to it. */
 export function timelineWeekHeadingId(key: string): string {
@@ -138,11 +141,6 @@ function NowLine({ top }: { top: number }) {
 	);
 }
 
-interface HiddenDays {
-	after: number;
-	before: number;
-}
-
 /**
  * Days scrolled out of view on either side of a sideways-scrolling grid, so
  * the gutter can say they exist and bring them back.
@@ -214,10 +212,6 @@ function useHiddenDays(compact: boolean) {
 	};
 
 	return { fillPx, hidden, measure, reveal, scrollerRef };
-}
-
-function dayCount(count: number): string {
-	return `${count} ${count === 1 ? "day" : "days"}`;
 }
 
 /** Gutter labels and rules for the hour rows, shared by every day column. */
@@ -317,6 +311,7 @@ export function TimelineWeekGrid({
 	snapshot: InterfaceSnapshot;
 	threadsById: ReadonlyMap<string, InterfaceThread>;
 }) {
+	const tl = useLiteralMessages();
 	const todayKey = localDayKey(now);
 	const columns = days.map((day) =>
 		day.threadIds.flatMap((id) => {
@@ -367,34 +362,7 @@ export function TimelineWeekGrid({
 							className="sticky left-0 z-[1] flex flex-col items-center justify-center gap-1 bg-background"
 							data-week-gutter=""
 						>
-							{hidden.before > 0 ? (
-								<Button
-									aria-label={`Show ${dayCount(hidden.before)} earlier`}
-									className="px-1.5 tabular-nums"
-									onClick={() => reveal("before")}
-									size="xs"
-									title={`${dayCount(hidden.before)} earlier`}
-									type="button"
-									variant="ghost-muted"
-								>
-									<ChevronLeft aria-hidden="true" data-icon="inline-start" />
-									{hidden.before}
-								</Button>
-							) : null}
-							{hidden.after > 0 ? (
-								<Button
-									aria-label={`Show ${dayCount(hidden.after)} later`}
-									className="px-1.5 tabular-nums"
-									onClick={() => reveal("after")}
-									size="xs"
-									title={`${dayCount(hidden.after)} later`}
-									type="button"
-									variant="ghost-muted"
-								>
-									{hidden.after}
-									<ChevronRight aria-hidden="true" data-icon="inline-end" />
-								</Button>
-							) : null}
+							<TimelineWeekReveal hidden={hidden} onReveal={reveal} />
 						</div>
 						{days.map((day, index) => {
 							const label = weekColumnLabel(day.key);
@@ -457,7 +425,11 @@ export function TimelineWeekGrid({
 							const isLast = columnIndex === days.length - 1;
 							return (
 								<section
-									aria-label={isToday ? `Today, ${label.full}` : label.full}
+									aria-label={
+										isToday
+											? tl("Today, {dayLabel}", { dayLabel: label.full })
+											: label.full
+									}
 									className={cn(
 										"relative min-w-0 border-border border-l transition-colors duration-500 motion-reduce:transition-none",
 										highlighted && "bg-primary/5"

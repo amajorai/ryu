@@ -40,7 +40,7 @@ export function SkillListRow({
 }) {
 	return (
 		<button
-			className={`w-full rounded-md px-3 py-2 text-left transition-colors ${
+			className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${
 				selected ? "bg-accent" : "hover:bg-accent/50"
 			}`}
 			onClick={onSelect}

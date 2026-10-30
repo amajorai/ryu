@@ -2,8 +2,13 @@
 @layer properties, theme, base, components, utilities;
 
 @layer components {
+	/*
+	 * The link covers the whole card, which clips anything outside it, so its
+	 * focus ring is drawn inside. Important so the site-wide public-content
+	 * focus offset (unlayered) cannot push the ring out of view.
+	 */
 	.explore {
-		outline-offset: -3px;
+		outline-offset: -3px !important;
 	}
 	.card::after {
 		border-radius: inherit;

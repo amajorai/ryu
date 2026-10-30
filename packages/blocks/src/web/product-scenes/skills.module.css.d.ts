@@ -1,19 +1,12 @@
 declare const styles: {
 	readonly bar: string;
-	readonly dot: string;
 	readonly fan: string;
-	readonly folderBack: string;
-	readonly folderLabel: string;
-	readonly folderPocket: string;
-	readonly ghost: string;
-	readonly hairline: string;
+	readonly fold: string;
+	readonly install: string;
 	readonly lift: string;
-	readonly mono: string;
 	readonly pill: string;
+	readonly pocket: string;
 	readonly root: string;
 	readonly sheet: string;
-	readonly stage: string;
-	readonly titleBar: string;
-	readonly trackedDot: string;
 };
 export default styles;

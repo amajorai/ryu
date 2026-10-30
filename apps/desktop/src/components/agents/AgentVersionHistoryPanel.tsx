@@ -20,15 +20,15 @@ export function AgentVersionHistoryPanel<TRestoreResult, TSnapshotResult>({
 }: AgentVersionHistoryPanelProps<TRestoreResult, TSnapshotResult>) {
 	return (
 		<SettingsSection
-			caption="Saved checkpoints include the agent's model, tools, safety posture, persona, and instructions. Runs, credentials, and provider state are never part of a version."
+			caption="Checkpoints of model, tools, safety, persona and instructions. Never runs or credentials."
 			title="Agent configuration history"
 		>
 			<div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-card p-4">
 				<div className="max-w-2xl">
 					<p className="font-medium">Compare, test, and roll back</p>
-					<p className="text-muted-foreground text-sm">
-						Save a checkpoint after a meaningful change, compare it with the
-						current definition, or restore it before rerunning Quality tests.
+					<p className="text-detail text-muted-foreground">
+						Save a checkpoint, compare it with the current definition, or
+						restore it.
 					</p>
 				</div>
 				<VersionHistory

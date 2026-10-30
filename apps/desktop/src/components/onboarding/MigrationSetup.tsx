@@ -8,15 +8,17 @@
 
 import { FolderOpenIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { SvglIcon } from "@ryu/blocks/web/svgl-icon.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NodeFolderBrowser } from "@/src/components/chat/NodeFolderBrowser.tsx";
-import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import {
 	detectMigrationSources,
 	MIGRATION_SOURCES,
@@ -65,7 +67,7 @@ function SourceRow({
 	const checkboxId = `migrate-${scan.root}`;
 	const logo = migrationSourceLogo(scan.source);
 	return (
-		<div className="flex flex-col gap-2 rounded-lg bg-muted/40 px-3 py-2.5">
+		<div className="flex flex-col gap-2 border-border border-b py-3 last:border-b-0">
 			<div className="flex items-start gap-3">
 				<Checkbox
 					checked={checked}
@@ -80,18 +82,18 @@ function SourceRow({
 							{migrationSourceLabel(scan.source)}
 						</span>
 						{present > 0 ? (
-							<Badge variant="secondary">
+							<span className="text-detail text-muted-foreground">
 								{tl("{present} already in Ryu", { present: String(present) })}
-							</Badge>
+							</span>
 						) : null}
 					</span>
 					<span
-						className="block truncate font-mono text-muted-foreground text-xs"
+						className="block truncate font-mono text-muted-foreground/70 text-xs"
 						title={scan.root}
 					>
 						{scan.root}
 					</span>
-					<span className="mt-1 block text-muted-foreground text-xs">
+					<span className="mt-1 block text-detail text-muted-foreground">
 						{pending.length > 0
 							? summarizeMigrationItems(pending)
 							: "Everything here is already in Ryu"}
@@ -99,7 +101,7 @@ function SourceRow({
 				</label>
 			</div>
 			{scan.warnings.length > 0 ? (
-				<details className="pl-7 text-xs">
+				<details className="pl-7 text-detail">
 					<summary className="cursor-pointer text-status-warning">
 						{tl(
 							"{warningCount, plural, one {{warningCountLabel} thing} other {{warningCountLabel} things}} to set up again",
@@ -109,7 +111,7 @@ function SourceRow({
 							}
 						)}
 					</summary>
-					<ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">
+					<ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
 						{scan.warnings.map((warning) => (
 							<li key={warning}>{warning}</li>
 						))}
@@ -253,7 +255,7 @@ export function MigrationSetup({
 
 	return (
 		<div className="flex flex-col gap-4">
-			<SettingsCard className="flex flex-col gap-4">
+			<div className="flex flex-col gap-4">
 				{detecting ? (
 					<div
 						className="flex items-center gap-2 text-muted-foreground text-sm"
@@ -288,7 +290,7 @@ export function MigrationSetup({
 						scan={scan}
 					/>
 				))}
-				<div className="flex flex-wrap items-center justify-between gap-2 border-border/70 border-t pt-3">
+				<div className="flex flex-wrap items-center justify-between gap-2">
 					<div className="flex min-w-0 items-center gap-2">
 						<span
 							aria-hidden="true"
@@ -298,7 +300,7 @@ export function MigrationSetup({
 								<SvglIcon key={source.id} size={14} spec={source.logo} />
 							))}
 						</span>
-						<p className="text-muted-foreground text-xs">
+						<p className="text-detail text-muted-foreground">
 							{tl("Coming from {otherSources}? Choose its folder.", {
 								otherSources,
 							})}
@@ -322,10 +324,7 @@ export function MigrationSetup({
 					</Button>
 				</div>
 				{error ? (
-					<p
-						className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-status-destructive"
-						role="alert"
-					>
+					<p className="text-sm text-status-destructive" role="alert">
 						{error}
 					</p>
 				) : null}
@@ -341,7 +340,7 @@ export function MigrationSetup({
 						)}
 					</p>
 				) : null}
-				<p className="text-muted-foreground text-xs">
+				<p className="text-pretty text-detail text-muted-foreground">
 					Ryu copies your chats, projects, personas, memory, skills, and MCP
 					servers. Your original files are never changed, and credentials are
 					never copied.
@@ -351,18 +350,16 @@ export function MigrationSetup({
 					onSelect={(path) => void scanPickedFolder(path)}
 					open={browseOpen}
 				/>
-			</SettingsCard>
-			<div className="flex items-center justify-between gap-3">
-				<Button disabled={importing} onClick={onSkip} variant="ghost">
+			</div>
+			<OnboardingActions className="justify-between">
+				<OnboardingCta disabled={importing} onClick={onSkip} tone="secondary">
 					Skip for now
-				</Button>
-				<Button
+				</OnboardingCta>
+				<OnboardingCta
 					disabled={busy}
 					onClick={
 						pendingCount > 0 && !totals ? () => void importChosen() : onContinue
 					}
-					size="lg"
-					variant="mono"
 				>
 					{importing
 						? "Importing…"
@@ -372,8 +369,8 @@ export function MigrationSetup({
 									{ pendingCount, pendingCountLabel: String(pendingCount) }
 								)
 							: "Continue"}
-				</Button>
-			</div>
+				</OnboardingCta>
+			</OnboardingActions>
 		</div>
 	);
 }

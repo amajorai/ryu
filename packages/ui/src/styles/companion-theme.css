@@ -25,6 +25,9 @@
 	--card-foreground: oklch(0.145 0 0);
 	--popover: var(--muted);
 	--popover-foreground: var(--foreground);
+	/* Same floating-layer shadow as globals/colors.css, so shared menus and
+	   popovers keep `shadow-(--shadow-popover)` inside Companion apps. */
+	--shadow-popover: 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 8%);
 	--primary: #0099ff;
 	--primary-foreground: oklch(0.985 0 0);
 	--secondary: oklch(0.97 0 0);
@@ -251,11 +254,7 @@ html[data-inverted-backgrounds]
 		[data-slot="menubar-content"],
 		[data-slot="navigation-menu-popup"]
 	) {
-	background-color: color-mix(
-		in oklch,
-		var(--background) 86%,
-		transparent
-	) !important;
+	background-color: var(--background) !important;
 }
 
 html[data-pointer-cursor="true"]

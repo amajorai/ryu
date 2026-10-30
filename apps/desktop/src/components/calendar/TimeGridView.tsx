@@ -91,7 +91,7 @@ function TimeGridEvent({
 				render={
 					<button
 						className={cn(
-							"type-caption absolute overflow-hidden rounded-sm border-l-2 px-1 py-0.5 text-left leading-tight transition-colors hover:brightness-110",
+							"absolute overflow-hidden rounded-lg px-1.5 py-0.5 text-left text-xs leading-tight transition-colors hover:brightness-95 dark:hover:brightness-125",
 							eventTone(event)
 						)}
 						data-calendar-event=""
@@ -211,7 +211,7 @@ export function TimeGridView({
 								data-calendar-hour=""
 								key={hour}
 							>
-								<span className="type-compact absolute -top-2 right-1.5 text-muted-foreground tabular-nums">
+								<span className="absolute -top-2 right-1.5 text-muted-foreground/70 text-xs tabular-nums">
 									{hour === 0
 										? ""
 										: format(new Date(2000, 0, 1, hour), "HH:mm")}

@@ -224,6 +224,7 @@ export default function SpaceFileViewerPage({
 					<Button
 						onClick={() => setReloadNonce((value) => value + 1)}
 						size="sm"
+						variant="outline"
 					>
 						Try again
 					</Button>
@@ -273,7 +274,12 @@ export default function SpaceFileViewerPage({
 					Download
 				</Button>
 				{editable ? (
-					<Button disabled={!dirty || saving} onClick={() => save()} size="sm">
+					<Button
+						disabled={!dirty || saving}
+						onClick={() => save()}
+						size="sm"
+						variant="mono"
+					>
 						<HugeiconsIcon icon={FloppyDiskIcon} />
 						{saving ? "Saving…" : "Save"}
 					</Button>

@@ -1,18 +1,16 @@
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
-import { TextMorph } from "@ryu/ui/components/text-morph.tsx";
-import { EASE_OUT_CSS } from "@ryu/ui/lib/ease.ts";
 import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils.ts";
 import { usePrefersReducedMotion } from "@/src/hooks/usePrefersReducedMotion.ts";
 
-const MORPH_DURATION_MS = 380;
-const TRANSITION_STATE_MS = 760;
+/** Matches `--duration-fast`: the new title fades in over the old one's slot. */
+const TRANSITION_STATE_MS = 150;
 
 /**
- * Desktop title transition backed by Torph's per-character text morph. The
- * component keeps the app-level animation preference separate from Torph's OS
- * reduced-motion preference and retains the settled/transitioning state used by
- * browser proof and title consumers.
+ * Desktop title transition: a quiet 150ms opacity crossfade when the text
+ * changes (no per-character morph). It honours the app-level animation
+ * preference and the OS reduced-motion preference, and keeps the
+ * settled/transitioning state used by browser proof and title consumers.
  */
 export function AnimatedTitle({
 	className,
@@ -56,15 +54,16 @@ export function AnimatedTitle({
 			data-animated-title
 			data-animated-title-state={transitioning ? "transitioning" : "settled"}
 		>
-			<TextMorph
-				className="whitespace-pre"
-				disabled={!motionEnabled}
-				duration={MORPH_DURATION_MS}
-				ease={EASE_OUT_CSS}
-				numbers={false}
+			<span
+				className={cn(
+					"whitespace-pre",
+					transitioning &&
+						"fade-in-0 animate-in duration-(--duration-fast) ease-enter"
+				)}
+				key={motionEnabled ? text : undefined}
 			>
 				{text}
-			</TextMorph>
+			</span>
 		</span>
 	);
 }

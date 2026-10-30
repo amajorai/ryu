@@ -94,9 +94,7 @@ function StatRow({ label, value }: { label: string; value: number }) {
 			<span className="font-medium text-sm tabular-nums">
 				{formatCount(value)}
 			</span>
-			<span className="type-compact text-muted-foreground uppercase tracking-wide">
-				{label}
-			</span>
+			<span className="text-detail text-muted-foreground">{label}</span>
 		</div>
 	);
 }
@@ -128,7 +126,7 @@ function ChipList({
 			</Tooltip>
 			{shown.map((item) => (
 				<span
-					className="type-caption max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-muted-foreground"
+					className="max-w-full truncate rounded-lg bg-muted px-1.5 py-0.5 text-muted-foreground text-xs"
 					key={item}
 					title={item}
 				>
@@ -136,7 +134,7 @@ function ChipList({
 				</span>
 			))}
 			{hidden > 0 && (
-				<span className="type-caption text-muted-foreground">+{hidden}</span>
+				<span className="text-muted-foreground text-xs">+{hidden}</span>
 			)}
 		</div>
 	);
@@ -146,19 +144,14 @@ function FileRow({ touch }: { touch: MissionFileTouch }) {
 	const meta = TOUCH_META[touch.kind];
 	return (
 		<div className="flex items-center gap-2 py-0.5">
-			<span
-				className={cn(
-					"type-compact w-8 shrink-0 uppercase tracking-wide",
-					meta.className
-				)}
-			>
+			<span className={cn("w-8 shrink-0 text-xs", meta.className)}>
 				{meta.label}
 			</span>
 			<span className="min-w-0 flex-1 truncate text-xs" title={touch.path}>
 				{touch.path}
 			</span>
 			{touch.count > 1 && (
-				<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
+				<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 					×{formatCount(touch.count) ?? "—"}
 				</span>
 			)}
@@ -177,7 +170,7 @@ function CommandRow({ command }: { command: MissionCommand }) {
 				icon={CodeIcon}
 			/>
 			<code
-				className="type-caption min-w-0 flex-1 truncate font-mono text-muted-foreground"
+				className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs"
 				title={command.description ?? command.command}
 			>
 				{command.command}
@@ -207,9 +200,7 @@ function ProseBlock({
 				accent ? "border-primary/40" : "border-border"
 			)}
 		>
-			<div className="type-compact text-muted-foreground uppercase tracking-wide">
-				{label}
-			</div>
+			<div className="text-detail text-muted-foreground">{label}</div>
 			<p className="whitespace-pre-wrap text-xs leading-relaxed">{body}</p>
 		</div>
 	);
@@ -228,7 +219,7 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 		turn.thinking.length > 0;
 
 	return (
-		<div className="rounded-lg border border-border/60 bg-card/40 p-2.5">
+		<div className="rounded-lg border border-border bg-card/40 p-2.5">
 			<div className="flex items-start gap-2">
 				<Tooltip>
 					<TooltipTrigger
@@ -244,7 +235,7 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 				</Tooltip>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-baseline gap-1.5">
-						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
+						<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 							{turn.index}
 						</span>
 						<span className="min-w-0 flex-1 font-medium text-xs">
@@ -252,7 +243,7 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 						</span>
 					</div>
 					{turn.request.length > 0 && (
-						<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground">
+						<p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">
 							{turn.request}
 						</p>
 					)}
@@ -272,7 +263,10 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 						render={<button type="button" />}
 					>
 						<HugeiconsIcon
-							className={cn("size-3 transition-transform", open && "rotate-90")}
+							className={cn(
+								"size-3.5 transition-transform",
+								open && "rotate-90"
+							)}
 							icon={ArrowRight01Icon}
 						/>
 						{open ? tl("Hide what it touched") : tl("Show what it touched")}
@@ -313,7 +307,7 @@ function TodoSection({ todos }: { todos: MissionTodo[] }) {
 		return null;
 	}
 	return (
-		<div className="rounded-lg border border-border/60 bg-card/40 p-2.5">
+		<div className="rounded-lg border border-border bg-card/40 p-2.5">
 			<div className="mb-1.5 flex items-center gap-1.5">
 				<HugeiconsIcon
 					className="size-3.5 text-muted-foreground"
@@ -376,7 +370,7 @@ export function MissionControlPanel({
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
-			<div className="grid shrink-0 grid-cols-4 gap-2 border-border/60 border-b px-3 py-2.5">
+			<div className="grid shrink-0 grid-cols-4 gap-2 border-border border-b px-3 py-2.5">
 				<StatRow label="Turns" value={digest.totals.turns} />
 				<StatRow label="Files" value={digest.totals.writes} />
 				<StatRow label="Commands" value={digest.totals.commands} />

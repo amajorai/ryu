@@ -1,18 +1,19 @@
+import {
+	CancelCircleIcon,
+	CheckmarkCircle02Icon,
+	Comment01Icon,
+	GithubIcon,
+	GitMergeIcon,
+	GitPullRequestClosedIcon,
+	GitPullRequestDraftIcon,
+	GitPullRequestIcon,
+	Loading03Icon,
+	MinusSignIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	IconBrandGithub,
-	IconCircleCheck,
-	IconCircleX,
-	IconGitMerge,
-	IconGitPullRequest,
-	IconGitPullRequestClosed,
-	IconGitPullRequestDraft,
-	IconLoader2,
-	IconMessageCircle,
-	IconMinus,
-} from "@tabler/icons-react";
 import {
 	checkBucket,
 	failingPullRequestChecks,
@@ -32,7 +33,7 @@ export function GitPullRequestStatusIcon({
 	const status = gitPullRequestStatus(pullRequest);
 	const label = gitPullRequestStatusLabel(status);
 	const className = cn("size-4 shrink-0", statusColorClass(status));
-	const Icon = statusIcon(status);
+	const icon = statusIcon(status);
 	return (
 		<span
 			aria-label={label}
@@ -42,58 +43,73 @@ export function GitPullRequestStatusIcon({
 			role="img"
 			title={label}
 		>
-			<Icon aria-hidden className={className} />
+			<HugeiconsIcon aria-hidden className={className} icon={icon} />
 		</span>
 	);
 }
 
 function statusIcon(status: GitPullRequestStatus) {
 	if (status === "merged") {
-		return IconGitMerge;
+		return GitMergeIcon;
 	}
 	if (status === "closed") {
-		return IconGitPullRequestClosed;
+		return GitPullRequestClosedIcon;
 	}
 	if (status === "draft") {
-		return IconGitPullRequestDraft;
+		return GitPullRequestDraftIcon;
 	}
-	return IconGitPullRequest;
+	return GitPullRequestIcon;
 }
 
 function statusColorClass(status: GitPullRequestStatus): string {
 	if (status === "merged") {
-		return "text-[#8250df] dark:text-[#a371f7]";
+		return "text-status-info";
 	}
 	if (status === "closed") {
-		return "text-[#cf222e] dark:text-[#f85149]";
+		return "text-status-destructive";
 	}
 	if (status === "draft") {
-		return "text-[#656d76] dark:text-[#8b949e]";
+		return "text-muted-foreground";
 	}
-	return "text-[#1f883d] dark:text-[#3fb950]";
+	return "text-status-success";
 }
 
 function CheckIcon({ check }: { check: PullRequestCheck }) {
 	const bucket = checkBucket(check);
 	if (bucket === "pass") {
 		return (
-			<IconCircleCheck aria-hidden className="size-3.5 text-status-success" />
+			<HugeiconsIcon
+				aria-hidden
+				className="size-3.5 text-status-success"
+				icon={CheckmarkCircle02Icon}
+			/>
 		);
 	}
 	if (bucket === "fail") {
 		return (
-			<IconCircleX aria-hidden className="size-3.5 text-status-destructive" />
+			<HugeiconsIcon
+				aria-hidden
+				className="size-3.5 text-status-destructive"
+				icon={CancelCircleIcon}
+			/>
 		);
 	}
 	if (bucket === "pending") {
 		return (
-			<IconLoader2
+			<HugeiconsIcon
 				aria-hidden
 				className="size-3.5 animate-spin text-status-warning"
+				icon={Loading03Icon}
 			/>
 		);
 	}
-	return <IconMinus aria-hidden className="size-3.5 text-muted-foreground" />;
+	return (
+		<HugeiconsIcon
+			aria-hidden
+			className="size-3.5 text-muted-foreground"
+			icon={MinusSignIcon}
+		/>
+	);
 }
 
 function checkLabel(check: PullRequestCheck): string {
@@ -180,7 +196,11 @@ export function GitPullRequestSummary({
 				{showStatusIcon ? (
 					<GitPullRequestStatusIcon pullRequest={pullRequest} />
 				) : (
-					<IconBrandGithub aria-hidden className="size-4 shrink-0" />
+					<HugeiconsIcon
+						aria-hidden
+						className="size-4 shrink-0"
+						icon={GithubIcon}
+					/>
 				)}
 				<span
 					className="min-w-0 truncate font-medium"
@@ -199,7 +219,7 @@ export function GitPullRequestSummary({
 				</span>
 				{onFix && failed.length > 0 ? (
 					<button
-						className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						className="ml-auto shrink-0 rounded-lg px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={(event) => {
 							event.preventDefault();
 							event.stopPropagation();
@@ -216,9 +236,10 @@ export function GitPullRequestSummary({
 					className="flex min-w-0 items-center gap-1.5 text-xs"
 					data-testid={`pull-request-merge-conflicts-${pullRequest.number}`}
 				>
-					<IconCircleX
+					<HugeiconsIcon
 						aria-hidden
 						className="size-3.5 shrink-0 text-status-destructive"
+						icon={CancelCircleIcon}
 					/>
 					<span className="min-w-0 truncate text-muted-foreground">
 						Merge conflicts
@@ -228,7 +249,7 @@ export function GitPullRequestSummary({
 							aria-label={tl("Fix merge conflicts in pull request #{number}", {
 								number: String(pullRequest.number),
 							})}
-							className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							className="ml-auto shrink-0 rounded-lg px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={(event) => {
 								event.preventDefault();
 								event.stopPropagation();
@@ -251,7 +272,11 @@ export function GitPullRequestSummary({
 					rel="noopener noreferrer"
 					target="_blank"
 				>
-					<IconMessageCircle aria-hidden className="size-3.5 shrink-0" />
+					<HugeiconsIcon
+						aria-hidden
+						className="size-3.5 shrink-0"
+						icon={Comment01Icon}
+					/>
 					<span>
 						{tl(
 							"{commentsCount, plural, one {{commentsLabel} comment} other {{commentsLabel} comments}}",
@@ -264,10 +289,10 @@ export function GitPullRequestSummary({
 				</a>
 			)}
 			{!compact && checkCount > 0 ? (
-				<div className="flex flex-col gap-1 border-border/60 border-t pt-1.5">
+				<div className="flex flex-col gap-1 border-border border-t pt-1.5">
 					{pullRequest.statusCheckRollup.slice(0, 6).map((check, index) => (
 						<div
-							className="type-caption flex min-w-0 items-center gap-1.5"
+							className="flex min-w-0 items-center gap-1.5 text-xs"
 							key={`${checkLabel(check)}-${index}`}
 						>
 							<CheckIcon check={check} />
@@ -280,7 +305,7 @@ export function GitPullRequestSummary({
 						</div>
 					))}
 					{checkCount > 6 ? (
-						<span className="type-compact text-muted-foreground">
+						<span className="text-muted-foreground text-xs">
 							{tl("+{extraCount} more checks", {
 								extraCount: String(checkCount - 6),
 							})}

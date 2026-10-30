@@ -40,7 +40,7 @@ const MORPH_CONTENT_HEIGHT = 620;
 const MORPH_CONTENT_WIDTH = 400;
 const LAUNCHER_EYES_SIZE = "34px";
 /** The panel's corner radius once open, matching `RyuAssistantMorph`. */
-const INLINE_PANEL_RADIUS = "rounded-[22px]";
+const INLINE_PANEL_RADIUS = "rounded-2xl";
 
 /** The visitor's page selection, for the live region and the context chips. */
 function usePageSelection(): string | null {

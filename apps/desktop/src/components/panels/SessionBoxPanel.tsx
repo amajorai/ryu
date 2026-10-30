@@ -248,14 +248,14 @@ export function SessionBoxPanel({
 
 	return (
 		<div className="flex h-full min-h-0 flex-col" data-session-box-key={key}>
-			<div className="flex shrink-0 flex-wrap items-center gap-2 border-border/60 border-b bg-sidebar px-2 py-1.5">
+			<div className="flex shrink-0 flex-wrap items-center gap-2 border-border border-b bg-sidebar px-2 py-1.5">
 				{boxes.length > 1 ? (
 					<>
 						<label className="sr-only" htmlFor={selectId}>
 							Box
 						</label>
 						<select
-							className="max-w-36 rounded-md border bg-background px-1.5 py-0.5 text-xs"
+							className="max-w-36 rounded-lg border bg-background px-1.5 py-0.5 text-xs"
 							id={selectId}
 							onChange={(event) =>
 								setChild(
@@ -367,7 +367,7 @@ export function SessionBoxChildScreens({
 	return (
 		<section
 			aria-label="Sub-agent screens"
-			className="flex shrink-0 flex-col gap-1 border-border/60 border-b px-3 py-2"
+			className="flex shrink-0 flex-col gap-1 border-border border-b px-3 py-2"
 		>
 			<h3 className="font-medium text-muted-foreground text-xs">
 				Sub-agent screens

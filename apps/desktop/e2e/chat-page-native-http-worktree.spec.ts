@@ -67,7 +67,13 @@ async function handOff(page: Page, branch: string) {
 }
 async function saved(page: Page) {
 	return page.evaluate(() => {
-		const tabs = JSON.parse(localStorage.getItem("ryu_session_tabs") ?? "{}");
+		const tabs = JSON.parse(
+			(
+				Reflect.get(window, "__chatPageNativeFixture") as {
+					sealedLocalItem: (key: string) => string | null;
+				}
+			).sealedLocalItem("ryu_session_tabs") ?? "{}"
+		);
 		return {
 			branch: localStorage.getItem("ryu_workspace_worktree_branch"),
 			mode: localStorage.getItem("ryu_workspace_worktree_mode"),

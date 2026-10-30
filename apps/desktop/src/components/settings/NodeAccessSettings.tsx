@@ -1,12 +1,10 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
-import { OTPCodeDisplay } from "@ryu/ui/components/motion/otp-input.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
-import { z } from "zod";
 import { SettingsNotice } from "@/src/components/gateway/SettingsNotice.tsx";
 import {
 	SettingsCard,
@@ -16,17 +14,20 @@ import {
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { type ApiTarget, request } from "@/src/lib/api/client.ts";
-import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 import { isTauriReady } from "@/src/lib/tauri-ready.ts";
+import type { PairedClient } from "./NodeAccessSettings.model.ts";
 import {
-	canRevokePairedClient,
-	describePairingConstraints,
-	formatPairingTimestamp,
-	getPairedClientStatus,
-	narrowPairingScopes,
-	type PairedClient,
-	type PairingConstraints,
-} from "./NodeAccessSettings.model.ts";
+	responseCodec1,
+	responseCodec2,
+	responseCodec3,
+	responseCodec4,
+	responseCodec5,
+} from "./NodeAccessSettings-codecs.ts";
+import { PairedClientItem } from "./NodeAccessSettings-paired-client.tsx";
+import {
+	type PairingRequest,
+	PendingRequestItem,
+} from "./NodeAccessSettings-pending-request.tsx";
 
 /**
  * Who is allowed to talk to this node.
@@ -42,45 +43,6 @@ import {
  */
 
 type TokenSource = "env" | "file" | "none";
-
-interface PairingRequest {
-	client_name: string;
-	created_at: number;
-	requested_constraints?: PairingConstraints;
-	requested_expires_at?: number | null;
-	requested_scopes?: string[];
-	user_code: string;
-}
-
-function ScopeList({
-	emptyLabel,
-	label,
-	scopes,
-}: {
-	emptyLabel: string;
-	label: string;
-	scopes?: string[];
-}) {
-	return (
-		<div className="mt-2">
-			<p className="text-muted-foreground text-xs">{label}</p>
-			{scopes && scopes.length > 0 ? (
-				<ul aria-label={label} className="mt-1 flex flex-wrap gap-1">
-					{scopes.map((scope) => (
-						<li
-							className="type-caption rounded bg-muted px-1.5 py-0.5 font-mono"
-							key={scope}
-						>
-							{scope}
-						</li>
-					))}
-				</ul>
-			) : (
-				<p className="mt-1 text-muted-foreground text-xs">{emptyLabel}</p>
-			)}
-		</div>
-	);
-}
 
 /** Poll interval for pending requests, in ms. Short: a human is waiting. */
 const PENDING_POLL_MS = 3000;
@@ -99,6 +61,7 @@ function isTauri(): boolean {
 }
 
 export function NodeAccessSettings() {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const target: ApiTarget = {
 		url: node.url,
@@ -262,7 +225,9 @@ export function NodeAccessSettings() {
 			toast.success("Owner token rotated", {
 				id: "rotate-node-token",
 				description: result.restart_required
-					? `${result.message} Restart Core to finish.`
+					? tl("{message} Restart Core to finish.", {
+							message: result.message,
+						})
 					: result.message,
 			});
 			await loadToken();
@@ -318,7 +283,7 @@ export function NodeAccessSettings() {
 	if (inBrowser) {
 		return (
 			<SettingsSection
-				caption="Your Ryu node only accepts devices you have approved. Start below, then approve the code in the Ryu desktop app under Devices & access."
+				caption="Approve the code in the Ryu desktop app under Devices & access."
 				title="Connect this browser"
 			>
 				{pairingCode ? (
@@ -378,7 +343,7 @@ export function NodeAccessSettings() {
 				</SettingsNotice>
 			) : null}
 			<SettingsSection
-				caption="A phone, browser, or another device asking to use this node. Check the code matches what that device is showing before you approve."
+				caption="Approve only when the code matches the one the device shows."
 				title="Devices waiting to connect"
 			>
 				{accessListsReady ? (
@@ -388,119 +353,16 @@ export function NodeAccessSettings() {
 						</SettingsCard>
 					) : (
 						<SettingsCard className="px-0 py-0">
-							<ul className="mx-3.5 divide-y divide-border/60">
+							<ul className="divide-y divide-border">
 								{pending.map((req) => (
-									<li
-										className="flex items-start justify-between gap-3 py-2.5"
+									<PendingRequestItem
+										busy={busy}
+										decide={decide}
 										key={req.user_code}
-									>
-										<div className="min-w-0">
-											<p className="truncate text-sm" title={req.client_name}>
-												{req.client_name}
-											</p>
-											<div className="mt-1">
-												<OTPCodeDisplay
-													aria-label={`${req.client_name} pairing code`}
-													code={req.user_code}
-													size="compact"
-												/>
-											</div>
-											{req.requested_scopes &&
-											req.requested_scopes.length > 0 ? (
-												<fieldset className="mt-2">
-													<legend className="text-muted-foreground text-xs">
-														Grant access
-													</legend>
-													<p className="type-caption text-muted-foreground">
-														Clear anything this device should not use.
-													</p>
-													<div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-														{req.requested_scopes.map((scope, scopeIndex) => {
-															const checkboxId = `pair-${req.user_code}-scope-${scopeIndex}`;
-															const selected =
-																selectedScopes[req.user_code] ??
-																req.requested_scopes ??
-																[];
-															return (
-																<label
-																	className="type-caption flex cursor-pointer items-center gap-1.5 font-mono"
-																	htmlFor={checkboxId}
-																	key={scope}
-																>
-																	<Checkbox
-																		checked={selected.includes(scope)}
-																		disabled={busy}
-																		id={checkboxId}
-																		onCheckedChange={(checked) =>
-																			setSelectedScopes((current) => {
-																				const currentSelection =
-																					current[req.user_code] ??
-																					req.requested_scopes ??
-																					[];
-																				return {
-																					...current,
-																					[req.user_code]: narrowPairingScopes({
-																						checked: checked === true,
-																						requested:
-																							req.requested_scopes ?? [],
-																						scope,
-																						selected: currentSelection,
-																					}),
-																				};
-																			})
-																		}
-																	/>
-																	{scope}
-																</label>
-															);
-														})}
-													</div>
-												</fieldset>
-											) : (
-												<ScopeList
-													emptyLabel={
-														req.requested_scopes
-															? "No capabilities requested"
-															: "Default read-only access"
-													}
-													label="Requested access"
-													scopes={req.requested_scopes}
-												/>
-											)}
-											<p className="mt-2 text-muted-foreground text-xs">
-												Binding:{" "}
-												{describePairingConstraints(
-													req.requested_constraints
-												).join(", ")}
-											</p>
-											{req.requested_expires_at == null ? null : (
-												<p className="text-muted-foreground text-xs">
-													Expires{" "}
-													{formatPairingTimestamp(req.requested_expires_at) ??
-														"at an invalid time"}
-												</p>
-											)}
-										</div>
-										<div className="flex shrink-0 gap-2">
-											<Button
-												aria-label={`Deny ${req.client_name}`}
-												disabled={busy}
-												onClick={() => void decide(req.user_code, false)}
-												size="sm"
-												variant="ghost"
-											>
-												Deny
-											</Button>
-											<Button
-												aria-label={`Approve ${req.client_name} with requested access`}
-												disabled={busy}
-												onClick={() => void decide(req.user_code, true)}
-												size="sm"
-											>
-												Approve
-											</Button>
-										</div>
-									</li>
+										req={req}
+										selectedScopes={selectedScopes}
+										setSelectedScopes={setSelectedScopes}
+									/>
 								))}
 							</ul>
 						</SettingsCard>
@@ -509,7 +371,7 @@ export function NodeAccessSettings() {
 			</SettingsSection>
 
 			<SettingsSection
-				caption="Devices you have already approved. Revoking one signs it out immediately without affecting anything else."
+				caption="Revoking a device signs it out at once."
 				title="Connected devices"
 			>
 				{accessListsReady ? (
@@ -519,58 +381,14 @@ export function NodeAccessSettings() {
 						</SettingsCard>
 					) : (
 						<SettingsCard className="px-0 py-0">
-							<ul className="mx-3.5 divide-y divide-border/60">
+							<ul className="divide-y divide-border">
 								{clients.map((client) => (
-									<li
-										className="flex items-start justify-between gap-3 py-2.5"
+									<PairedClientItem
+										busy={busy}
+										client={client}
 										key={client.id}
-									>
-										<div className="min-w-0">
-											<div className="flex flex-wrap items-center gap-2">
-												<p className="truncate text-sm" title={client.name}>
-													{client.name}
-												</p>
-												<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-													{getPairedClientStatus(client)}
-												</span>
-											</div>
-											<ScopeList
-												emptyLabel={
-													client.granted_scopes === undefined &&
-													(client.schema_version ?? 0) < 2
-														? "Legacy read-only access"
-														: "No capabilities granted"
-												}
-												label="Granted access"
-												scopes={client.granted_scopes}
-											/>
-											<p className="mt-2 text-muted-foreground text-xs">
-												Binding:{" "}
-												{describePairingConstraints(client.constraints).join(
-													", "
-												)}
-											</p>
-											<p className="text-muted-foreground text-xs">
-												{client.expires_at == null
-													? "Does not expire"
-													: `Expires ${formatPairingTimestamp(client.expires_at) ?? "at an invalid time"}`}
-												{client.revoked_at == null
-													? ""
-													: ` · Revoked ${formatPairingTimestamp(client.revoked_at) ?? "at an invalid time"}`}
-											</p>
-										</div>
-										{canRevokePairedClient(client) ? (
-											<Button
-												aria-label={`Revoke ${client.name}`}
-												disabled={busy}
-												onClick={() => void revoke(client)}
-												size="sm"
-												variant="ghost"
-											>
-												Revoke
-											</Button>
-										) : null}
-									</li>
+										revoke={revoke}
+									/>
 								))}
 							</ul>
 						</SettingsCard>
@@ -579,7 +397,7 @@ export function NodeAccessSettings() {
 			</SettingsSection>
 
 			<SettingsSection
-				caption="Apps on this device pick this up automatically. You only need to copy it by hand for something that cannot ask to be approved, like a headless server you reach over SSH."
+				caption="Apps on this device use it automatically. Copy it only for a headless node."
 				title="This node's access token"
 			>
 				<SettingsGroup>
@@ -607,9 +425,7 @@ export function NodeAccessSettings() {
 						description={
 							source === "env" ? (
 								<>
-									This token comes from the <code>RYU_TOKEN</code> environment
-									variable, which takes priority over the stored one. To change
-									it, change that variable; rotating here would have no effect.
+									Set by <code>RYU_TOKEN</code>, so rotating here has no effect.
 								</>
 							) : undefined
 						}
@@ -648,53 +464,3 @@ export function NodeAccessSettings() {
 		</div>
 	);
 }
-
-// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
-const pairingConstraintsResponseCodec = z
-	.object({
-		agent_id: z.string().optional(),
-		client_id: z.string().optional(),
-		node_id: z.string().optional(),
-		org_id: z.string().optional(),
-		plugin_id: z.string().optional(),
-		resource_id: z.string().optional(),
-		subject_id: z.string().optional(),
-		team_id: z.string().optional(),
-		tool_name: z.string().optional(),
-	})
-	.catchall(gatewayJsonValueSchema);
-const pairingRequestResponseCodec = z
-	.object({
-		client_name: z.string(),
-		created_at: z.number(),
-		requested_constraints: pairingConstraintsResponseCodec.optional(),
-		requested_expires_at: z.union([z.number(), z.null()]).optional(),
-		requested_scopes: z.array(z.string()).optional(),
-		user_code: z.string(),
-	})
-	.catchall(gatewayJsonValueSchema);
-const responseCodec1 = z
-	.object({ requests: z.array(pairingRequestResponseCodec) })
-	.catchall(gatewayJsonValueSchema);
-const pairedClientResponseCodec = z
-	.object({
-		active: z.boolean().optional(),
-		constraints: pairingConstraintsResponseCodec.optional(),
-		created_at: z.number(),
-		expires_at: z.union([z.number(), z.null()]).optional(),
-		granted_scopes: z.array(z.string()).optional(),
-		id: z.string(),
-		last_seen: z.number(),
-		name: z.string(),
-		revoked_at: z.union([z.number(), z.null()]).optional(),
-		schema_version: z.number().optional(),
-	})
-	.catchall(gatewayJsonValueSchema);
-const responseCodec2 = z
-	.object({ clients: z.array(pairedClientResponseCodec) })
-	.catchall(gatewayJsonValueSchema);
-const responseCodec3 = gatewayJsonValueSchema.optional();
-const responseCodec4 = gatewayJsonValueSchema.optional();
-const responseCodec5 = z
-	.object({ message: z.string(), restart_required: z.boolean() })
-	.catchall(gatewayJsonValueSchema);

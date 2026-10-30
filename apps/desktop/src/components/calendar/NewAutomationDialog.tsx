@@ -15,6 +15,7 @@ import {
 } from "@ryu/ui/components/native-select.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useMemo, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
@@ -385,7 +386,7 @@ export function NewAutomationDialog({
 						/>
 					</div>
 
-					{error && <p className="text-sm text-status-destructive">{error}</p>}
+					{error && <ErrorLine message={error} />}
 				</div>
 
 				<DialogFooter>

@@ -1,5 +1,5 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import {
 	ToggleGroup,
 	ToggleGroupItem,
@@ -23,24 +23,23 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { displayWallDate } from "./calendar-model.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
+import { TimelineDayList, timelineDayHeadingId } from "./timeline-day.tsx";
 import {
-	TIMELINE_DAY_ROW_GRID,
-	TIMELINE_RAIL_LINE,
-	TimelineDayHeadingRow,
-	TimelineDayList,
-	timelineDayHeadingId,
-} from "./timeline-day.tsx";
+	EVENT_SELECTOR,
+	moveInDayList,
+	moveInWeek,
+	useNow,
+	useTransientHighlight,
+} from "./timeline-interface-navigation.ts";
 import {
-	displayWallSnapshot,
-	weekColumnLabel,
-	weekRangeLabel,
-} from "./timeline-model.ts";
+	DayListSkeleton,
+	TimelineEmptyRail,
+} from "./timeline-interface-placeholders.tsx";
+import { displayWallSnapshot, weekRangeLabel } from "./timeline-model.ts";
 import { TimelineThreadPanel } from "./timeline-panel.tsx";
 import { TIMELINE_EVENT_ATTRIBUTE } from "./timeline-parts.tsx";
-import { TimelineStatusDot } from "./timeline-status.tsx";
 import {
 	TIMELINE_NOW_ATTRIBUTE,
 	TimelineWeekGrid,
@@ -60,205 +59,6 @@ const SEGMENT =
 	"h-6 rounded-sm px-2.5 text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-xs aria-pressed:ring-1 aria-pressed:ring-border dark:aria-pressed:bg-foreground/15 dark:aria-pressed:ring-0";
 
 const NAV_HINT_ID = "timeline-nav-hint";
-const EVENT_SELECTOR = `[${TIMELINE_EVENT_ATTRIBUTE}]`;
-/** How long a jumped-to day stays tinted. */
-const HIGHLIGHT_MS = 1200;
-
-/** A day key that is tinted briefly after a jump, then clears itself. */
-function useTransientHighlight(): [string | null, (key: string) => void] {
-	const [key, setKey] = useState<string | null>(null);
-	useEffect(() => {
-		if (!key) {
-			return;
-		}
-		const timer = window.setTimeout(() => setKey(null), HIGHLIGHT_MS);
-		return () => window.clearTimeout(timer);
-	}, [key]);
-	// A repeated jump to the same day restarts the tint.
-	const flash = useCallback((next: string) => {
-		setKey(null);
-		requestAnimationFrame(() => setKey(next));
-	}, []);
-	return [key, flash];
-}
-
-/**
- * The current time as the display time zone's wall clock, refreshed every half
- * minute so "Today" and "now" stay true, and at once when the zone changes.
- */
-function useNow(revision: string): Date {
-	const [now, setNow] = useState(() => displayWallDate(Date.now()));
-	// biome-ignore lint/correctness/useExhaustiveDependencies: a new display-timezone revision moves the wall clock now, not on the next tick.
-	useEffect(() => {
-		setNow(displayWallDate(Date.now()));
-		const timer = window.setInterval(
-			() => setNow(displayWallDate(Date.now())),
-			30_000
-		);
-		return () => window.clearInterval(timer);
-	}, [revision]);
-	return now;
-}
-
-function focusEvent(target: HTMLElement | null | undefined): boolean {
-	if (!target) {
-		return false;
-	}
-	target.focus();
-	target.scrollIntoView({ block: "nearest", inline: "nearest" });
-	return true;
-}
-
-/** Arrow keys in the day list: step through threads in reading order. */
-function moveInDayList(root: HTMLElement, from: HTMLElement, key: string) {
-	const events = [...root.querySelectorAll<HTMLElement>(EVENT_SELECTOR)];
-	const index = events.indexOf(from);
-	const next: Record<string, number> = {
-		ArrowDown: index + 1,
-		ArrowUp: index - 1,
-		End: events.length - 1,
-		Home: 0,
-	};
-	const target = next[key];
-	if (target === undefined) {
-		return false;
-	}
-	focusEvent(events[target]);
-	return true;
-}
-
-function chipAt(root: HTMLElement, column: number, row: number) {
-	return root.querySelector<HTMLElement>(
-		`${EVENT_SELECTOR}[data-column="${column}"][data-row="${row}"]`
-	);
-}
-
-/**
- * Arrow keys in the week grid: up/down through a day by time, left/right to
- * the nearest thread in the next day that has any.
- */
-function moveInWeek(root: HTMLElement, from: HTMLElement, key: string) {
-	const column = Number(from.dataset.column);
-	const row = Number(from.dataset.row);
-	if (key === "ArrowDown" || key === "ArrowUp") {
-		focusEvent(chipAt(root, column, row + (key === "ArrowDown" ? 1 : -1)));
-		return true;
-	}
-	if (key !== "ArrowLeft" && key !== "ArrowRight") {
-		return false;
-	}
-	const step = key === "ArrowRight" ? 1 : -1;
-	for (let next = column + step; next >= 0 && next < 7; next += step) {
-		const count = root.querySelectorAll(
-			`${EVENT_SELECTOR}[data-column="${next}"]`
-		).length;
-		if (count > 0) {
-			focusEvent(chipAt(root, next, Math.min(row, count - 1)));
-			return true;
-		}
-	}
-	return true;
-}
-
-function RailLine() {
-	return <span className={TIMELINE_RAIL_LINE} />;
-}
-
-const SKELETON_ROWS = [
-	{ excerpt: "w-4/5", key: "one", title: "w-2/5" },
-	{ excerpt: "w-3/5", key: "two", title: "w-1/3" },
-	{ excerpt: "w-2/3", key: "three", title: "w-1/2" },
-	{ excerpt: "w-3/4", key: "four", title: "w-2/5" },
-	{ excerpt: "w-1/2", key: "five", title: "w-1/3" },
-] as const;
-
-/** The day rail's shape while threads load: same grid, rail and heading. */
-function DayListSkeleton() {
-	return (
-		<div className="flex w-full max-w-3xl flex-col">
-			<div className="px-2">
-				<TimelineDayHeadingRow first>
-					<Skeleton className="h-3.5 w-28" radius="dense" />
-				</TimelineDayHeadingRow>
-			</div>
-			<div className="flex flex-col px-2">
-				{SKELETON_ROWS.map((row) => (
-					<div className={TIMELINE_DAY_ROW_GRID} key={row.key}>
-						<div className="flex justify-end pt-3.5 max-sm:hidden">
-							<Skeleton className="h-2.5 w-12" radius="dense" />
-						</div>
-						<div className="relative flex justify-center">
-							<RailLine />
-							<span className="relative mt-2 flex size-5 items-center justify-center bg-background">
-								<Skeleton className="size-2.5" radius="pill" />
-							</span>
-						</div>
-						<div className="flex gap-3 px-3 py-2">
-							<Skeleton className="size-5 shrink-0" radius="pill" />
-							<div className="flex flex-1 flex-col gap-2 pt-1 pb-1.5">
-								<Skeleton className={cn("h-3", row.title)} radius="dense" />
-								<Skeleton className="h-2.5 w-1/4" radius="dense" />
-								<Skeleton className={cn("h-3", row.excerpt)} radius="dense" />
-							</div>
-						</div>
-					</div>
-				))}
-			</div>
-		</div>
-	);
-}
-
-/**
- * No threads yet: the day rail itself, empty, with one quiet mark where the
- * first thread will land and a way to start it.
- */
-function TimelineEmptyRail({
-	now,
-	onStart,
-}: {
-	now: Date;
-	onStart: () => void;
-}) {
-	return (
-		<div className="flex w-full max-w-3xl flex-col">
-			<div className="px-2">
-				<TimelineDayHeadingRow first>
-					<h2 className="font-medium text-sm leading-5">Today</h2>
-					<span className="text-muted-foreground text-xs leading-5">
-						{weekColumnLabel(localDayKey(now)).full}
-					</span>
-				</TimelineDayHeadingRow>
-			</div>
-			<div className="px-2">
-				<div className={TIMELINE_DAY_ROW_GRID}>
-					<span aria-hidden="true" className="max-sm:hidden" />
-					<span aria-hidden="true" className="relative flex justify-center">
-						<span className="absolute top-0 bottom-1/2 w-px bg-border" />
-						<span className="relative mt-2 flex size-5 items-center justify-center bg-background">
-							<TimelineStatusDot status="quiet" />
-						</span>
-					</span>
-					<div className="flex min-w-0 flex-col items-start px-3 py-2">
-						<p className="font-medium text-sm leading-5">No threads yet</p>
-						<p className="text-muted-foreground text-xs leading-5">
-							Threads show up here by their latest activity.
-						</p>
-						<Button
-							className="mt-2 -ml-2 h-7 rounded-md px-2 text-xs"
-							onClick={onStart}
-							size="sm"
-							type="button"
-							variant="ghost"
-						>
-							<Plus aria-hidden="true" data-icon="inline-start" />
-							New thread
-						</Button>
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
 
 /**
  * Timeline: threads across days and weeks. The Day scale is a reverse-
@@ -275,6 +75,7 @@ export function TimelineInterface({
 	snapshot: hostSnapshot,
 	threadView,
 }: InterfaceRendererProps<TimelineParams>) {
+	const tl = useLiteralMessages();
 	const [scale, setScale] = useInterfaceSetting<Scale>(
 		port,
 		"scale",
@@ -494,9 +295,13 @@ export function TimelineInterface({
 							)}
 							onClick={showEarlier}
 							size="sm"
-							title={`Open ${timeline.earlierCount} earlier ${
-								timeline.earlierCount === 1 ? "thread" : "threads"
-							} in Day view`}
+							title={tl(
+								"Open {earlierCount, plural, one {{earlierCountLabel} earlier thread} other {{earlierCountLabel} earlier threads}} in Day view",
+								{
+									earlierCount: timeline.earlierCount,
+									earlierCountLabel: String(timeline.earlierCount),
+								}
+							)}
 							type="button"
 							variant="ghost"
 						>
@@ -576,10 +381,13 @@ export function TimelineInterface({
 					>
 						<p className="sr-only" id={NAV_HINT_ID}>
 							{scale === "day"
-								? "Use the up and down arrow keys to move between threads."
-								: "Use the arrow keys to move between threads and days."}{" "}
-							Press Enter to open a thread and Escape to close it. Tab leaves
-							the timeline.
+								? tl("Use the up and down arrow keys to move between threads.")
+								: tl(
+										"Use the arrow keys to move between threads and days."
+									)}{" "}
+							{tl(
+								"Press Enter to open a thread and Escape to close it. Tab leaves the timeline."
+							)}
 						</p>
 						{loading ? <DayListSkeleton /> : null}
 						{!loading && scale === "day" ? (

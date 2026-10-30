@@ -36,26 +36,26 @@ export function AgentUiSurfaceChip({
 	const label = surface.title ?? "Generated screen";
 	return (
 		<div
-			className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-2.5 py-1.5"
+			className="flex h-8 min-w-0 items-center gap-2 rounded-lg bg-muted px-2"
 			data-slot="agent-ui-surface-chip"
 		>
 			<span
 				aria-hidden
 				className={cn(
 					"size-1.5 shrink-0 rounded-full",
-					onScreen ? "bg-primary" : "bg-muted-foreground/40"
+					onScreen ? "bg-primary" : "bg-muted-foreground"
 				)}
 			/>
-			<span className="min-w-0 flex-1 truncate text-foreground/80 text-xs">
+			<span className="min-w-0 flex-1 truncate text-foreground text-xs">
 				{label}
 			</span>
 			{onScreen ? (
-				<span className="type-compact shrink-0 text-muted-foreground">
+				<span className="shrink-0 text-muted-foreground text-xs">
 					On screen
 				</span>
 			) : (
 				<button
-					className="type-compact shrink-0 rounded-md px-1.5 py-0.5 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
+					className="shrink-0 rounded-lg px-2 py-0.5 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
 					onClick={() => host.open(surface)}
 					type="button"
 				>

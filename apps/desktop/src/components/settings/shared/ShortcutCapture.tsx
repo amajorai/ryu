@@ -230,7 +230,7 @@ export function ShortcutCapture({
 		<div className="flex items-center gap-2">
 			<button
 				aria-label={ariaLabel}
-				className="flex min-w-40 items-center justify-center gap-1 rounded-md bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+				className="flex min-w-40 items-center justify-center gap-1 rounded-lg bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
 				onBlur={() => setCapturing(false)}
 				onClick={() => setCapturing(true)}
 				onKeyDown={handleKeyDown}
@@ -241,7 +241,7 @@ export function ShortcutCapture({
 				) : (
 					acceleratorTokens(value).map((token) => (
 						<kbd
-							className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
+							className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-xs"
 							key={token}
 						>
 							{token}

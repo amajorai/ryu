@@ -58,13 +58,17 @@ export function CustomAppSecuritySettings({ target }: { target: ApiTarget }) {
 				await setEnforceCustomAppCsp(requestTarget, next);
 			} catch {
 				// A response from a former node or credential cannot alter this panel.
-				if (revision !== requestRevision.current) return;
+				if (revision !== requestRevision.current) {
+					return;
+				}
 				setEnforced(previous);
 				toast.error("Couldn't save the custom-app CSP setting", {
 					description: "Check your connection and try again.",
 				});
 			} finally {
-				if (revision === requestRevision.current) setSaving(false);
+				if (revision === requestRevision.current) {
+					setSaving(false);
+				}
 			}
 		},
 		[enforced, requestTarget]
@@ -91,7 +95,7 @@ export function CustomAppSecuritySettings({ target }: { target: ApiTarget }) {
 				/>
 			</SettingsGroup>
 			<a
-				className="px-3.5 text-primary text-sm underline underline-offset-2"
+				className="text-primary text-sm underline underline-offset-2"
 				href="https://developers.openai.com/plugins/build/chatgpt-ui#content-security-policy-csp"
 				rel="noopener"
 				target="_blank"

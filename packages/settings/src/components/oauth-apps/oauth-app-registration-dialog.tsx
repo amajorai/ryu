@@ -1,3 +1,5 @@
+import { Copy01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -12,7 +14,6 @@ import { Label } from "@ryu/ui/components/label.tsx";
 import { SensitiveValue } from "@ryu/ui/components/sensitive-value.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Copy } from "lucide-react";
 import { useState } from "react";
 import { sileo } from "sileo";
 import type {
@@ -129,7 +130,7 @@ export function OAuthAppRegistrationDialog({
 					<DialogDescription>
 						{createdApp
 							? "Save these credentials before closing. Ryu will not show the secret again."
-							: "OAuth 2.1 clients use authorization code flow with PKCE. Choose the scopes this app may request."}
+							: "Authorization code flow with PKCE. Choose the scopes this app may request."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -137,14 +138,14 @@ export function OAuthAppRegistrationDialog({
 					<div className="space-y-4">
 						<div className="space-y-1.5">
 							<Label>Client ID</Label>
-							<code className="block break-all rounded-md border bg-muted p-3 font-mono text-xs">
+							<code className="block break-all rounded-lg bg-muted p-3 font-mono text-xs">
 								{createdApp.clientId}
 							</code>
 						</div>
 						{createdApp.clientSecret ? (
 							<div className="space-y-1.5">
 								<Label>Client secret</Label>
-								<div className="flex items-center gap-2 rounded-md border bg-muted p-3">
+								<div className="flex items-center gap-2 rounded-lg bg-muted p-3">
 									<code className="flex-1 break-all font-mono text-xs">
 										<SensitiveValue
 											label="client secret"
@@ -157,12 +158,16 @@ export function OAuthAppRegistrationDialog({
 										size="sm"
 										variant="ghost"
 									>
-										{copied ? "Copied" : <Copy className="size-4" />}
+										{copied ? (
+											"Copied"
+										) : (
+											<HugeiconsIcon icon={Copy01Icon} size={16} />
+										)}
 									</Button>
 								</div>
 							</div>
 						) : (
-							<p className="rounded-md bg-muted p-3 text-muted-foreground text-sm">
+							<p className="text-muted-foreground text-sm">
 								This public client has no client secret. Keep using PKCE.
 							</p>
 						)}
@@ -192,10 +197,6 @@ export function OAuthAppRegistrationDialog({
 								rows={3}
 								value={redirectUris}
 							/>
-							<p className="text-muted-foreground text-xs">
-								Better Auth validates every URI for the selected web or native
-								app type.
-							</p>
 						</div>
 
 						<div className="grid gap-3 sm:grid-cols-2">
@@ -209,7 +210,7 @@ export function OAuthAppRegistrationDialog({
 											onClick={() => setApplicationType(value)}
 											size="sm"
 											variant={
-												applicationType === value ? "default" : "outline"
+												applicationType === value ? "secondary" : "outline"
 											}
 										>
 											{value[0]?.toUpperCase() ?? ""}
@@ -228,7 +229,7 @@ export function OAuthAppRegistrationDialog({
 											key={value}
 											onClick={() => setClientType(value)}
 											size="sm"
-											variant={clientType === value ? "default" : "outline"}
+											variant={clientType === value ? "secondary" : "outline"}
 										>
 											{value[0]?.toUpperCase() ?? ""}
 											{value.slice(1)}
@@ -240,7 +241,7 @@ export function OAuthAppRegistrationDialog({
 
 						<div className="space-y-2">
 							<Label>Allowed scopes</Label>
-							<div className="flex max-h-44 flex-wrap gap-2 overflow-y-auto rounded-md border p-3">
+							<div className="flex max-h-44 flex-wrap gap-2 overflow-y-auto">
 								{OAUTH_SCOPE_CATALOG.map((scope) => {
 									const active = selectedScopes.includes(scope);
 									return (
@@ -249,7 +250,7 @@ export function OAuthAppRegistrationDialog({
 											key={scope}
 											onClick={() => toggleScope(scope)}
 											size="sm"
-											variant={active ? "default" : "outline"}
+											variant={active ? "secondary" : "outline"}
 										>
 											{scopeLabel(scope)}
 										</Button>
@@ -271,7 +272,9 @@ export function OAuthAppRegistrationDialog({
 
 				<DialogFooter>
 					{createdApp ? (
-						<Button onClick={close}>Done</Button>
+						<Button onClick={close} variant="mono">
+							Done
+						</Button>
 					) : (
 						<>
 							<Button onClick={close} variant="ghost">
@@ -281,6 +284,7 @@ export function OAuthAppRegistrationDialog({
 								disabled={!canCreate || createMutation.isPending}
 								loading={createMutation.isPending}
 								onClick={createOAuthApp}
+								variant="mono"
 							>
 								Create app
 							</Button>

@@ -1,194 +1,96 @@
-import { Stage } from "../iso/kit/react/live.tsx";
-import { Scene } from "./scene.tsx";
+import { Chip, Label, Packet, SceneCanvas, Wire } from "./scene.tsx";
 import styles from "./sdk.module.css";
 
 /**
- * Homepage card scene for the Ryu SDK: code becomes an agent. Each TypeScript
- * line on the left materialises its part of a running system on the right
- * (the agent, a model reached through the Gateway, a tool over MCP, a skill),
- * and once the code is complete a request runs through the Gateway and back.
+ * Homepage card scene for the Ryu SDK: code becomes an agent. Each line of a
+ * real `defineAgent` call on the left materialises its part of the running
+ * agent on the right (the agent, its chat model, memory, and an MCP tool), and
+ * once the call is closed, work flows between the agent and its parts.
  *
- * The markup is the finished, reduced-motion pose. `sdk.module.css` adds the
- * build-and-run loop only while the card is in view and motion is allowed, so
- * the server render, offscreen cards and still viewers all see the full graph.
+ * The markup is the still (the whole call written, the agent wired up); the
+ * 9s loop in `sdk.module.css` erases it and rewrites it line by line, each
+ * part appearing with the line that defines it.
  */
 
-/** Line centres for the four keyword lines, 22 units apart below the prompt. */
-const CODE_LINES = [
-	{ bar: 62, className: styles.line2, keyword: "agent", y: 56 },
-	{ bar: 54, className: styles.line3, keyword: "model", y: 78 },
-	{ bar: 68, className: styles.line4, keyword: "tool", y: 100 },
-	{ bar: 50, className: styles.line5, keyword: "skill", y: 122 },
+const LINE_X = 18;
+const AGENT = { x: 186, y: 92 } as const;
+const AGENT_HALF = 15;
+const PART_X = 254;
+const PART_WIDTH = 60;
+
+/** The call, one line per part; SVG collapses spaces, so indent is an offset. */
+const LINES = [
+	{ indent: 0, text: "defineAgent({" },
+	{ indent: 12, text: "chat," },
+	{ indent: 12, text: "memory: true," },
+	{ indent: 12, text: "tools: [mcp]," },
+	{ indent: 0, text: "})" },
 ] as const;
 
-const MODEL_EDGE = "M244 66 L272 42";
-const MCP_EDGE = "M231 94 V127 Q231 137 220 137";
-const SKILL_EDGE = "M252 84 H268 Q278 84 278 94 V124";
+const PARTS = [
+	{ label: "chat", line: 1, y: 44 },
+	{ label: "memory", line: 2, y: 92 },
+	{ label: "mcp", line: 3, y: 140 },
+] as const;
 
-function CodePanel() {
-	return (
-		<g>
-			<rect
-				className={styles.panel}
-				height={146}
-				rx={6}
-				width={140}
-				x={12}
-				y={12}
-			/>
-			<rect
-				className={styles.cursor}
-				height={14}
-				rx={3}
-				width={132}
-				x={16}
-				y={27}
-			/>
-			<text className={styles.prompt} dominantBaseline="central" x={22} y={34}>
-				$ create-ryu-app
-			</text>
-			<rect className={styles.caret} height={9} width={4} x={107} y={29.5} />
-			<g className={styles.reset}>
-				{CODE_LINES.map((line) => (
-					<g className={line.className} key={line.keyword}>
-						<text
-							className={styles.keyword}
-							dominantBaseline="central"
-							x={22}
-							y={line.y}
-						>
-							{line.keyword}
-						</text>
-						<rect
-							className={styles.bar}
-							height={4}
-							rx={2}
-							width={line.bar}
-							x={54}
-							y={line.y - 2}
-						/>
-					</g>
-				))}
-			</g>
-		</g>
-	);
-}
-
-function Chip({
-	className,
-	label,
-	width,
-	x,
-	y,
-}: {
-	className: string;
-	label: string;
-	width: number;
-	x: number;
-	y: number;
-}) {
-	return (
-		<g className={className}>
-			<rect
-				className={styles.chip}
-				height={18}
-				rx={9}
-				width={width}
-				x={x}
-				y={y}
-			/>
-			<text
-				className={styles.chipText}
-				dominantBaseline="central"
-				textAnchor="middle"
-				x={x + width / 2}
-				y={y + 9}
-			>
-				{label}
-			</text>
-		</g>
-	);
-}
-
-function SystemGraph() {
-	return (
-		<g className={styles.reset}>
-			<path
-				className={`${styles.edge} ${styles.modelEdge}`}
-				d={MODEL_EDGE}
-				pathLength={100}
-			/>
-			<path
-				className={`${styles.edge} ${styles.mcpEdge}`}
-				d={MCP_EDGE}
-				pathLength={100}
-			/>
-			<path
-				className={`${styles.edge} ${styles.skillEdge}`}
-				d={SKILL_EDGE}
-				pathLength={100}
-			/>
-			<g className={styles.gateway}>
-				<path
-					className={styles.diamond}
-					d="M258 50 L262 54 L258 58 L254 54 Z"
-				/>
-			</g>
-			<path className={styles.packet} d={MODEL_EDGE} pathLength={100} />
-			<g className={styles.agent}>
-				<rect
-					className={styles.node}
-					height={28}
-					rx={8}
-					width={28}
-					x={224}
-					y={66}
-				/>
-				<circle className={styles.ink} cx={234} cy={79} r={1.6} />
-				<circle className={styles.ink} cx={242} cy={79} r={1.6} />
-			</g>
-			<Chip className={styles.model} label="model" width={44} x={258} y={24} />
-			<Chip className={styles.mcp} label="mcp" width={34} x={176} y={128} />
-			<g className={styles.plug}>
-				<rect
-					className={styles.ink}
-					height={7}
-					rx={1}
-					width={5}
-					x={215}
-					y={133.5}
-				/>
-				<path className={styles.prongs} d="M211 135.5 H215 M211 138.5 H215" />
-			</g>
-			<g className={styles.skill}>
-				<path className={styles.sheet} d="M270 124 H281 L286 129 V144 H270 Z" />
-				<path className={styles.fold} d="M281 124 V129 H286" />
-				<path
-					className={styles.fold}
-					d="M273 133 H283 M273 136.5 H281 M273 140 H282"
-				/>
-			</g>
-		</g>
-	);
-}
+/** The motion class that writes line `index` and the part it defines. */
+const LINE_CLASSES = [
+	styles.l0,
+	styles.l1,
+	styles.l2,
+	styles.l3,
+	styles.l4,
+] as const;
 
 export function SdkScene() {
 	return (
-		<Scene id="sdk">
-			<Stage
-				className={`${styles.stage} absolute inset-x-0 top-0 flex justify-center px-2 pt-2`}
-			>
-				<svg
-					aria-hidden="true"
-					className="h-auto max-h-44 w-full"
-					focusable="false"
-					preserveAspectRatio="xMidYMin meet"
-					viewBox="0 0 320 172"
-				>
-					<CodePanel />
-					<SystemGraph />
-				</svg>
-			</Stage>
-		</Scene>
+		<SceneCanvas className={styles.root} id="sdk">
+			<rect
+				className={styles.panel}
+				height={152}
+				rx={8}
+				width={140}
+				x={8}
+				y={12}
+			/>
+			<Label anchor="start" muted x={LINE_X} y={28}>
+				agent.ts
+			</Label>
+			<line className={styles.rule} x1={8} x2={148} y1={40} y2={40} />
+			{LINES.map((line, index) => (
+				<g className={LINE_CLASSES[index]} key={line.text}>
+					<Label anchor="start" x={LINE_X + line.indent} y={58 + index * 20}>
+						{line.text}
+					</Label>
+				</g>
+			))}
+
+			{PARTS.map((part) => {
+				const from = { x: AGENT.x + AGENT_HALF, y: AGENT.y };
+				const to = { x: PART_X - PART_WIDTH / 2, y: part.y };
+				return (
+					<g className={LINE_CLASSES[part.line]} key={part.label}>
+						<Wire from={from} to={to} />
+						<Packet delay={part.line * 0.5} from={from} loop to={to} />
+						<Chip label={part.label} width={PART_WIDTH} x={PART_X} y={part.y} />
+					</g>
+				);
+			})}
+
+			<g className={LINE_CLASSES[0]}>
+				<rect
+					className={styles.agent}
+					height={AGENT_HALF * 2}
+					rx={9}
+					width={AGENT_HALF * 2}
+					x={AGENT.x - AGENT_HALF}
+					y={AGENT.y - AGENT_HALF}
+				/>
+				<circle className={styles.dot} cx={AGENT.x} cy={AGENT.y} r={4.5} />
+				<Label x={AGENT.x} y={AGENT.y + 28}>
+					agent
+				</Label>
+			</g>
+		</SceneCanvas>
 	);
 }

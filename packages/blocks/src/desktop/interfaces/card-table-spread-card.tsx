@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	InterfaceSnapshot,
@@ -124,6 +125,7 @@ function SpreadCard({
 	tabbable: boolean;
 	thread: InterfaceThread;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const { exposed, faceUp, interactive, last, mini, pose, size, visible } =
 		placement;
@@ -160,7 +162,13 @@ function SpreadCard({
 		>
 			<button
 				aria-current={active ? "true" : undefined}
-				aria-label={`${title}. ${reading.label}, ${[agent?.name ?? "no agent", reading.age].filter(Boolean).join(", ")}. Play card`}
+				aria-label={tl("{title}. {readingLabel}, {cardDetails}. Play card", {
+					cardDetails: [agent?.name ?? "no agent", reading.age]
+						.filter(Boolean)
+						.join(", "),
+					readingLabel: reading.label,
+					title,
+				})}
 				className="group/card perspective-[1200px] block size-full cursor-pointer rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
 				data-card={thread.id}
 				onBlur={() => onHover(null)}
@@ -269,6 +277,7 @@ export function SpreadCards({
 	stage: StageSize;
 }) {
 	const { activeThreadId, now, onOpen, snapshot } = actions;
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const fannedId = fanned?.id ?? null;
 	const previous = useRef(new Map<string, { index: number; zone: Zone }>());
@@ -351,7 +360,9 @@ export function SpreadCards({
 		<ul
 			aria-describedby={fanned ? SPREAD_HINT_ID : undefined}
 			aria-hidden={fanned ? undefined : true}
-			aria-label={fanned ? `${fanned.name}'s cards` : undefined}
+			aria-label={
+				fanned ? tl("{deckName}'s cards", { deckName: fanned.name }) : undefined
+			}
 			className="pointer-events-none absolute inset-0 z-20"
 			data-testid="card-table-spread-cards"
 			onKeyDown={onKeyDown}

@@ -12,17 +12,10 @@ import type {
 	UsageScope,
 } from "@ryu/blocks/desktop/usage-analytics.ts";
 import { usagePresetRange } from "@ryu/blocks/desktop/usage-range-days.ts";
-import { PlanBadge } from "@ryu/ui/components/plan-badge.tsx";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import {
-	SettingsGroup,
-	SettingsItem,
-	SettingsSection,
-} from "@/src/components/settings/shared/settings-items.tsx";
 import { SubscriptionUsageDashboard } from "@/src/components/usage/SubscriptionUsageDashboard.tsx";
 import { UsageHistoryDashboard } from "@/src/components/usage/UsageHistoryDashboard.tsx";
 import { useLlmProviders } from "@/src/hooks/useLlmProviders.ts";
-import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import { useSubscriptionCostUsage } from "@/src/hooks/useSubscriptionCostUsage.ts";
 import { useSubscriptionUsage } from "@/src/hooks/useSubscriptionUsage.ts";
 import { useUsageStatement } from "@/src/hooks/useUsageStatement.ts";
@@ -42,29 +35,6 @@ function errorMessageFor<TError>(error: TError): string {
 	return error instanceof Error
 		? error.message
 		: "Unable to load usage analytics.";
-}
-
-/**
- * The organization these credits belong to, as one grouped settings row. Not
- * the bordered `OrgBillingContext` banner: inside the Settings pane that read as
- * a box above the cards instead of one of them.
- */
-function BillingOrganizationSection({ caption }: { caption: string }) {
-	const { organization, plan } = useOrgBillingStatus();
-	return (
-		<SettingsSection caption={caption} title="Billing organization">
-			<SettingsGroup>
-				<SettingsItem
-					actions={<PlanBadge plan={plan} size="sm" />}
-					// User-controlled text, passed as a node so the settings formatter
-					// does not read braces in the name as placeholders.
-					title={
-						<span>{organization?.name ?? "No organization selected"}</span>
-					}
-				/>
-			</SettingsGroup>
-		</SettingsSection>
-	);
 }
 
 export default function UsageTab() {
@@ -222,8 +192,9 @@ export default function UsageTab() {
 	);
 
 	return (
+		// No "Billing organization" section: the nav's org switcher names the
+		// organization beside this pane, so saying it again here is noise.
 		<div className="space-y-6">
-			<BillingOrganizationSection caption="Credits stay scoped to the organization; usage analytics also include BYOK, self-hosted, and local traffic." />
 			<UsageHistoryDashboard target={activeNodeTarget} />
 			<SubscriptionUsageDashboard
 				accounts={subscriptionUsage.accounts}

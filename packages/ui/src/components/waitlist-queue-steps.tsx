@@ -2,6 +2,7 @@
 
 import { Ticket01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { BorderBeam } from "border-beam";
 import { goalGradient } from "../lib/goal-gradient.ts";
 import { formatCount } from "../lib/number-format.ts";
@@ -93,7 +94,10 @@ export function WaitlistHandleStep({
 	);
 }
 
-function referralGoalMessage(goal: ReturnType<typeof goalGradient>): string {
+function referralGoalMessage(
+	goal: ReturnType<typeof goalGradient>,
+	tl: LiteralMessage
+): string {
 	if (goal.complete) {
 		return "You reached the 10-referral checkpoint. Keep sharing as new people join.";
 	}
@@ -103,7 +107,9 @@ function referralGoalMessage(goal: ReturnType<typeof goalGradient>): string {
 	if (goal.current === 0) {
 		return "Invite one friend to start moving up the queue.";
 	}
-	return `${goal.remaining} more friends reach your next checkpoint.`;
+	return tl("{remaining} more friends reach your next checkpoint.", {
+		remaining: String(goal.remaining),
+	});
 }
 
 export function WaitlistShareStep({
@@ -121,6 +127,7 @@ export function WaitlistShareStep({
 	referralCount: number;
 	referralUrl: string;
 }) {
+	const tl = useLiteralMessages();
 	const link = splitReferralUrl(referralUrl);
 	const referralGoal = goalGradient(referralCount, WAITLIST_REFERRAL_GOALS);
 	return (
@@ -142,13 +149,13 @@ export function WaitlistShareStep({
 					<div className="min-w-0">
 						<p className="font-medium text-sm">Your next queue goal</p>
 						<p className="mt-1 text-muted-foreground text-sm">
-							{referralGoalMessage(referralGoal)}
+							{referralGoalMessage(referralGoal, tl)}
 						</p>
 					</div>
 					<span className="shrink-0 rounded-full bg-background/70 px-2.5 py-1 font-medium text-primary text-xs">
 						{referralGoal.complete
 							? "Checkpoint reached"
-							: `${referralGoal.remaining} to go`}
+							: tl("{remaining} to go", { remaining: referralGoal.remaining })}
 					</span>
 				</div>
 				<Progress className="mt-4 gap-2" value={referralGoal.progressPercent}>
@@ -206,8 +213,13 @@ export function WaitlistShareStep({
 				/>
 				{referralGoal.nearGoal ? "Finish the checkpoint" : "Share your pass"}
 				<span className="text-primary-foreground/70 tabular-nums">
-					({formatCount(referralCount) ?? "—"}{" "}
-					{referralCount === 1 ? "friend" : "friends"} referred)
+					{tl(
+						"({formattedCount} {referralCount, plural, one {friend} other {friends}} referred)",
+						{
+							formattedCount: formatCount(referralCount) ?? "—",
+							referralCount,
+						}
+					)}
 				</span>
 			</Button>
 		</div>

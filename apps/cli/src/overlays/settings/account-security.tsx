@@ -1,5 +1,11 @@
 /* @jsxImportSource @opentui/react */
+
+import { useKeyboard } from "@opentui/react";
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
+import { type ApiTarget, request } from "@ryuhq/core-client/client";
+import { passwordValidationMessage } from "@ryuhq/protocol/password-policy";
+import { useEffect, useRef, useState } from "react";
+import { tf } from "../../i18n/translate.ts";
 import {
 	type SecurityEmailChangeResponse,
 	type SecuritySessionResponse,
@@ -15,24 +21,15 @@ import {
 	securityStepUpVerifyResponseSchema,
 	securityVerifyTotpResponseSchema,
 } from "./account-security-response-contracts.ts";
+import {
+	type Operation,
+	SCOPE,
+	type Stage,
+	type UnloadedEmailChange,
+	type UnloadedSecuritySession,
+} from "./account-security-types.ts";
+import { AccountSecurityView } from "./account-security-view.tsx";
 
-interface UnloadedSecuritySession {
-	user?: undefined;
-}
-interface UnloadedEmailChange {
-	hasActive?: undefined;
-}
-
-import { useKeyboard } from "@opentui/react";
-import { type ApiTarget, request } from "@ryuhq/core-client/client";
-import { passwordValidationMessage } from "@ryuhq/protocol/password-policy";
-import { useEffect, useRef, useState } from "react";
-import { Card } from "@/components/ui/card.tsx";
-import { useTheme } from "@/components/ui/theme-provider.tsx";
-
-type Operation = "password" | "email" | "enable" | "disable" | "backup";
-type Stage = "idle" | "factor" | "value" | "totp" | "backup";
-const SCOPE = "account.security";
 export function AccountSecurity({
 	active,
 	authTarget,
@@ -44,7 +41,6 @@ export function AccountSecurity({
 	onEditingChange: (editing: boolean) => void;
 	onRefresh: () => void;
 }) {
-	const theme = useTheme();
 	const [stage, setStage] = useState<Stage>("idle");
 	const [operation, setOperation] = useState<Operation>("password");
 	const [session, setSession] = useState<
@@ -80,7 +76,9 @@ export function AccountSecurity({
 		} catch (error) {
 			if (!controller.signal.aborted) {
 				setMessage(
-					`Could not complete action: ${error instanceof Error ? error.message : String(error)}`
+					tf("Could not complete action: {error}", {
+						error: error instanceof Error ? error.message : String(error),
+					})
 				);
 			}
 		} finally {
@@ -125,7 +123,9 @@ export function AccountSecurity({
 		controllerRef.current = controller;
 		void read(controller.signal).catch((error) => {
 			if (!controller.signal.aborted) {
-				setMessage(`Could not load security: ${String(error)}`);
+				setMessage(
+					tf("Could not load security: {error}", { error: String(error) })
+				);
 			}
 		});
 		return () => {
@@ -483,90 +483,18 @@ export function AccountSecurity({
 		}
 	});
 	return (
-		<Card title="Account security">
-			{stage === "idle" ? (
-				<>
-					<text>
-						w set/change password · u change email · t{" "}
-						{session?.user?.twoFactorEnabled ? "disable" : "enable"} two-factor
-					</text>
-					<text>
-						{session?.user?.twoFactorEnabled
-							? "b regenerate backup codes · "
-							: ""}
-						{session?.user?.emailVerified
-							? "Email verified"
-							: "v request verification email"}
-					</text>
-					{emailChange.hasActive ? (
-						<text>
-							Changing to {emailChange.emailChange?.newEmail} · c cancel request
-						</text>
-					) : null}
-				</>
-			) : null}
-			{stage === "factor" ? (
-				<text>
-					Verify identity: {methods[methodIndex]} · ←/→ method
-					{["otp", "magic-link"].includes(methods[methodIndex] ?? "")
-						? " · Ctrl+s request verification"
-						: ""}
-				</text>
-			) : null}
-			{stage === "factor" && methods[methodIndex] === "magic-link" ? (
-				<text>
-					Request a link, then paste its token or complete verification URL from
-					your inbox.
-				</text>
-			) : null}
-			{stage === "value" ? (
-				<text>
-					{operation === "password"
-						? "New password (other sessions will be revoked)"
-						: operation === "email"
-							? "New email address (requires confirmation from both addresses)"
-							: "Current password"}
-				</text>
-			) : null}
-			{stage === "totp" ? (
-				<>
-					<text>Add this URI to your authenticator: {uri}</text>
-					<text>Enter the authenticator code to finish setup.</text>
-				</>
-			) : null}
-			{stage !== "idle" && stage !== "backup" ? (
-				<text fg={theme.colors.foreground}>
-					{operation === "email" && stage === "value"
-						? value
-						: "•".repeat(value.length)}
-					▏
-				</text>
-			) : null}
-			{stage === "backup" ? (
-				<>
-					<text>Store these codes privately before continuing.</text>
-					{codes.map((code) => (
-						<text key={code}>{code}</text>
-					))}
-					<text>Enter acknowledge and clear</text>
-				</>
-			) : null}
-			{message ? (
-				<text
-					fg={
-						message.startsWith("Could not")
-							? theme.colors.error
-							: theme.colors.success
-					}
-				>
-					{message}
-				</text>
-			) : null}
-			{busy ? (
-				<text>Working…</text>
-			) : stage === "idle" ? null : (
-				<text>Type · Enter submit · Tab cancel</text>
-			)}
-		</Card>
+		<AccountSecurityView
+			busy={busy}
+			codes={codes}
+			emailChange={emailChange}
+			message={message}
+			methodIndex={methodIndex}
+			methods={methods}
+			operation={operation}
+			session={session}
+			stage={stage}
+			uri={uri}
+			value={value}
+		/>
 	);
 }

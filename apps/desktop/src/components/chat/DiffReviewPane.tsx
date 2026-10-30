@@ -5,34 +5,30 @@
 // plus Apply (merge) and Open PR buttons to land the changes.
 
 import {
-	Add01Icon,
-	AlertCircleIcon,
 	ArrowDown01Icon,
-	ArrowRight01Icon,
-	CheckmarkCircle02Icon,
 	FileCodeIcon,
-	FolderOpenIcon,
-	GitMergeIcon,
-	InformationCircleIcon,
-	Loading01Icon,
-	MinusSignIcon,
 	Search01Icon,
-	Share08Icon,
-	WorkflowCircle06Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { FileContents } from "@pierre/diffs";
-import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@ryu/ui/components/tooltip.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-	DiffFilePreviewPopover,
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+} from "react";
+import {
+	type ApplyState,
+	DiffReviewApplyActions,
+} from "@/src/components/chat/DiffReviewPane-apply-actions.tsx";
+import { FileSummaryRow } from "@/src/components/chat/DiffReviewPane-file-summary-row.tsx";
+import {
 	patchForFile,
 	RichPatchDiff,
 } from "@/src/components/diffs/RichPatchDiff.tsx";
@@ -48,7 +44,7 @@ import {
 	useWorktreeStatus,
 } from "@/src/hooks/useGitStatus.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import type { ApplyResult, FileSummary } from "@/src/lib/api/git.ts";
+import type { ApplyResult } from "@/src/lib/api/git.ts";
 import { applyWorktree } from "@/src/lib/api/git.ts";
 import {
 	joinPath,
@@ -60,6 +56,12 @@ import {
 interface DiffReviewPaneProps {
 	runId: string;
 	target: ApiTarget;
+	/**
+	 * Optional run-trace waterfall. It renders inside the pane's disclosure, so
+	 * collapsing the review hides the trace with it instead of stacking a second
+	 * framed box under the pane.
+	 */
+	trace?: ReactNode;
 }
 
 interface FullDiffFiles {
@@ -67,116 +69,16 @@ interface FullDiffFiles {
 	oldFile: FileContents | null;
 }
 
-// ── Per-file summary row ──────────────────────────────────────────────────────
-
-function FileSummaryRow({
-	file,
-	patch,
-	selected,
-	onSelect,
-}: {
-	file: FileSummary;
-	patch: string;
-	onSelect: () => void;
-	selected: boolean;
-}) {
-	const filename = file.path.split("/").at(-1) ?? file.path;
-	const kindLabel =
-		file.kind === "added"
-			? "A"
-			: file.kind === "deleted"
-				? "D"
-				: file.kind === "renamed"
-					? "R"
-					: "M";
-	const kindClass =
-		file.kind === "added"
-			? "text-status-success"
-			: file.kind === "deleted"
-				? "text-status-destructive"
-				: "text-muted-foreground";
-
-	const row = (
-		<button
-			className={cn(
-				"flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/50",
-				selected && "bg-muted text-foreground"
-			)}
-			onClick={onSelect}
-			type="button"
-		>
-			<span className={`w-3 shrink-0 font-medium font-mono ${kindClass}`}>
-				{kindLabel}
-			</span>
-			<HugeiconsIcon
-				aria-hidden
-				className="size-3 shrink-0 text-muted-foreground"
-				icon={FileCodeIcon}
-			/>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<span className="truncate font-mono text-foreground">
-							{filename}
-						</span>
-					}
-				/>
-				<TooltipContent>{file.path}</TooltipContent>
-			</Tooltip>
-			{(file.additions > 0 || file.deletions > 0) && (
-				<span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-muted-foreground tabular-nums">
-					{file.additions > 0 && (
-						<span className="flex items-center gap-0.5 text-status-success">
-							<HugeiconsIcon
-								aria-hidden
-								className="size-2.5"
-								icon={Add01Icon}
-							/>
-							{formatCount(file.additions)}
-						</span>
-					)}
-					{file.deletions > 0 && (
-						<span className="flex items-center gap-0.5 text-status-destructive">
-							<HugeiconsIcon
-								aria-hidden
-								className="size-2.5"
-								icon={MinusSignIcon}
-							/>
-							{formatCount(file.deletions)}
-						</span>
-					)}
-				</span>
-			)}
-		</button>
-	);
-	return patch ? (
-		<DiffFilePreviewPopover filePath={file.path} patch={patch}>
-			{row}
-		</DiffFilePreviewPopover>
-	) : (
-		row
-	);
-}
-
-// ── Apply state ───────────────────────────────────────────────────────────────
-
-type ApplyState =
-	| { status: "idle" }
-	| { status: "loading"; mode: "merge" | "pr" }
-	| { status: "merged"; commit: string | null }
-	| { status: "pr"; prUrl: string }
-	| { status: "conflict"; conflictedFiles: string[] }
-	| { status: "error"; message: string };
-
 // ── Main pane ─────────────────────────────────────────────────────────────────
 
-export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
+export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 	// The shared query, not a one-shot fetch on mount: this pane used to show
 	// whatever the diff was the first time it rendered, for as long as it stayed
 	// mounted — including after the change had been committed outside the app.
 	const diff = useWorktreeDiff(target, runId);
 	const worktreeStatus = useWorktreeStatus(target, runId);
 	const diffPrefs = useDiffViewPrefs();
+	const tl = useLiteralMessages();
 	const diffOptions = useMemo(
 		() => diffViewPrefsToOptions(diffPrefs),
 		[diffPrefs]
@@ -310,37 +212,32 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 	}
 
 	return (
-		<div className="@container overflow-hidden rounded-2xl border border-border/70 bg-background text-sm shadow-sm">
-			<div className="flex items-center border-border/60 border-b">
+		<div className="@container overflow-hidden rounded-xl border border-border bg-background text-sm">
+			<div className="flex h-10 items-center gap-1 pr-2">
 				<button
 					aria-expanded={expanded}
-					className="flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/30"
+					className="flex h-10 min-w-0 flex-1 items-center gap-2 px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 					onClick={() => setExpanded((prev) => !prev)}
 					type="button"
 				>
-					{expanded ? (
-						<HugeiconsIcon
-							aria-hidden
-							className="size-3.5 shrink-0 text-muted-foreground"
-							icon={ArrowDown01Icon}
-						/>
-					) : (
-						<HugeiconsIcon
-							aria-hidden
-							className="size-3.5 shrink-0 text-muted-foreground"
-							icon={ArrowRight01Icon}
-						/>
-					)}
 					<HugeiconsIcon
 						aria-hidden
-						className="size-3.5 shrink-0 text-muted-foreground"
-						icon={WorkflowCircle06Icon}
+						className={cn(
+							"size-4 shrink-0 text-muted-foreground transition-transform duration-(--duration-base) ease-move",
+							expanded ? "rotate-0" : "-rotate-90"
+						)}
+						icon={ArrowDown01Icon}
 					/>
 					<span className="font-medium text-sm">
-						{formatCount(diff.files.length) ?? "—"} file
-						{diff.files.length === 1 ? "" : "s"} changed
+						{tl(
+							"{fileCount, plural, one {{fileCountLabel} file changed} other {{fileCountLabel} files changed}}",
+							{
+								fileCount: diff.files.length,
+								fileCountLabel: formatCount(diff.files.length) ?? "—",
+							}
+						)}
 					</span>
-					<span className="ml-auto flex items-center gap-2 font-mono text-muted-foreground text-xs tabular-nums">
+					<span className="ml-auto flex items-center gap-2 text-muted-foreground text-xs tabular-nums">
 						{totalAdditions > 0 && (
 							<span className="text-status-success">
 								+{formatCount(totalAdditions)}
@@ -353,36 +250,22 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 						)}
 					</span>
 				</button>
-				<button
+				<Button
 					aria-pressed={editMode}
-					className={cn(
-						"mr-3 rounded-md px-2 py-1 text-xs transition-colors",
-						editMode
-							? "bg-primary text-primary-foreground"
-							: "text-muted-foreground hover:bg-muted"
-					)}
+					className="aria-pressed:bg-muted aria-pressed:text-foreground"
 					onClick={() => setEditMode((current) => !current)}
-					type="button"
+					size="sm"
+					variant="ghost-muted"
 				>
 					{editMode ? "Editing" : "Edit"}
-				</button>
+				</Button>
 			</div>
 
 			{expanded && (
 				<div className="border-border border-t">
-					<div className="m-3 flex items-center gap-2 rounded-xl border border-info/20 bg-info/8 px-3 py-2.5 text-foreground/80 text-xs">
-						<HugeiconsIcon
-							aria-hidden
-							className="size-4 shrink-0 text-status-info"
-							icon={InformationCircleIcon}
-						/>
-						<span className="min-w-0 flex-1">
-							Reviewing one file at a time for a cleaner, faster diff.
-						</span>
-					</div>
 					<div className="grid min-h-72 @4xl:grid-cols-[minmax(0,1fr)_15rem]">
-						<div className="min-w-0 overflow-hidden border-border/60 @4xl:border-r">
-							<div className="flex items-center gap-2 border-border/60 border-b px-3 py-2 text-xs">
+						<div className="min-w-0 overflow-hidden border-border @4xl:border-r">
+							<div className="flex h-10 items-center gap-2 border-border border-b px-3 text-xs">
 								<HugeiconsIcon
 									aria-hidden
 									className="size-3.5 text-muted-foreground"
@@ -395,7 +278,7 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 									{selectedFile?.path ?? "Changes"}
 								</span>
 								{selectedFile && (
-									<span className="flex shrink-0 gap-1.5 font-mono tabular-nums">
+									<span className="flex shrink-0 gap-1.5 tabular-nums">
 										<span className="text-status-success">
 											+{formatCount(selectedFile.additions)}
 										</span>
@@ -405,7 +288,7 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 									</span>
 								)}
 							</div>
-							<div className="max-h-[34rem] overflow-auto bg-muted/10 p-2">
+							<div className="max-h-[34rem] overflow-auto p-2">
 								<RichPatchDiff
 									editMode={editMode}
 									filePath={selectedFile?.path}
@@ -417,25 +300,25 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 								/>
 							</div>
 						</div>
-						<aside className="border-border/60 border-t @4xl:border-t-0 bg-muted/10 p-2">
+						<aside className="border-border border-t @4xl:border-t-0 p-2">
 							<div className="relative mb-2">
 								<HugeiconsIcon
 									aria-hidden
-									className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+									className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
 									icon={Search01Icon}
 								/>
-								<input
+								<Input
 									aria-label="Filter changed files"
-									className="h-8 w-full rounded-lg border border-input bg-background pl-8 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+									className="pl-8 text-xs"
 									onChange={(event) => setFilter(event.target.value)}
 									placeholder="Filter files…"
+									size="settings-search"
 									value={filter}
 								/>
 							</div>
-							<div className="mb-1 flex items-center gap-2 px-2 py-1 text-muted-foreground text-xs">
-								<HugeiconsIcon className="size-3.5" icon={FolderOpenIcon} />
+							<div className="flex h-8 items-center gap-2 px-2 text-muted-foreground text-xs">
 								<span>Changed files</span>
-								<span className="ml-auto tabular-nums">
+								<span className="ml-auto text-muted-foreground/70 tabular-nums">
 									{formatCount(visibleFiles.length) ?? "—"}
 								</span>
 							</div>
@@ -457,126 +340,18 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 							</div>
 						</aside>
 					</div>
+					{trace ? (
+						<div className="border-border border-t p-2">{trace}</div>
+					) : null}
 				</div>
 			)}
 
-			{/* Apply / Open PR actions */}
-			<div className="flex flex-col gap-1.5 border-border border-t px-4 py-3">
-				{applyState.status === "idle" && (
-					<div className="flex items-center gap-2">
-						<button
-							className="flex items-center gap-1.5 rounded bg-primary px-2.5 py-1 font-medium text-primary-foreground text-xs transition-colors hover:bg-primary/90"
-							onClick={() => handleApply("merge")}
-							type="button"
-						>
-							<HugeiconsIcon
-								aria-hidden
-								className="size-3"
-								icon={GitMergeIcon}
-							/>
-							Apply (merge)
-						</button>
-						<button
-							className="flex items-center gap-1.5 rounded px-2.5 py-1 font-medium text-xs transition-colors hover:bg-muted/30"
-							onClick={() => handleApply("pr")}
-							type="button"
-						>
-							<HugeiconsIcon
-								aria-hidden
-								className="size-3"
-								icon={Share08Icon}
-							/>
-							Open PR
-						</button>
-					</div>
-				)}
-
-				{applyState.status === "loading" && (
-					<div className="flex items-center gap-1.5 text-muted-foreground text-xs">
-						<HugeiconsIcon
-							aria-hidden
-							className="size-3 animate-spin"
-							icon={Loading01Icon}
-						/>
-						{applyState.mode === "merge" ? "Merging…" : "Opening PR…"}
-					</div>
-				)}
-
-				{applyState.status === "merged" && (
-					<div className="flex items-center gap-1.5 text-status-success text-xs">
-						<HugeiconsIcon
-							aria-hidden
-							className="size-3"
-							icon={CheckmarkCircle02Icon}
-						/>
-						Merged
-						{applyState.commit && (
-							<span className="font-mono text-muted-foreground">
-								{applyState.commit.slice(0, 8)}
-							</span>
-						)}
-					</div>
-				)}
-
-				{applyState.status === "pr" && (
-					<div className="flex items-center gap-1.5 text-xs">
-						<HugeiconsIcon
-							aria-hidden
-							className="size-3 text-status-success"
-							icon={CheckmarkCircle02Icon}
-						/>
-						<a
-							className="truncate text-status-info underline underline-offset-2"
-							href={safeHttpUrl(applyState.prUrl) ?? undefined}
-							rel="noopener noreferrer"
-							target="_blank"
-							title={applyState.prUrl}
-						>
-							{applyState.prUrl}
-						</a>
-					</div>
-				)}
-
-				{applyState.status === "conflict" && (
-					<div className="flex flex-col gap-1 text-xs">
-						<div className="flex items-center gap-1.5 text-status-warning">
-							<HugeiconsIcon
-								aria-hidden
-								className="size-3"
-								icon={AlertCircleIcon}
-							/>
-							Merge conflict — worktree cleaned up safely
-						</div>
-						{applyState.conflictedFiles.length > 0 && (
-							<ul className="ml-4 list-disc font-mono text-muted-foreground">
-								{applyState.conflictedFiles.map((f: string) => (
-									<li key={f}>{f}</li>
-								))}
-							</ul>
-						)}
-					</div>
-				)}
-
-				{applyState.status === "error" && (
-					<div className="flex items-center gap-1.5 text-status-destructive text-xs">
-						<HugeiconsIcon
-							aria-hidden
-							className="size-3"
-							icon={AlertCircleIcon}
-						/>
-						{applyState.message}
-						{!applied && (
-							<button
-								className="ml-1 underline underline-offset-2"
-								onClick={() => setApplyState({ status: "idle" })}
-								type="button"
-							>
-								Retry
-							</button>
-						)}
-					</div>
-				)}
-			</div>
+			<DiffReviewApplyActions
+				applied={applied}
+				applyState={applyState}
+				handleApply={handleApply}
+				setApplyState={setApplyState}
+			/>
 		</div>
 	);
 }

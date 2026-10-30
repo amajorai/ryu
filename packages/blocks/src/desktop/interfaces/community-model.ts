@@ -5,6 +5,8 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { PROFILE_KEY } from "./community-model-keys.ts";
+import { sortPosts } from "./community-model-ranking.ts";
 
 /**
  * Where a community comes from: a project or team (the user's groups), an
@@ -74,8 +76,6 @@ export type CommunityScope =
 	| { kind: "popular" };
 
 export type CommunityVote = -1 | 1;
-
-export const PROFILE_KEY = "profile:you";
 
 const HANDLE_LIMIT = 21;
 
@@ -316,68 +316,6 @@ export function buildPosts(
 	});
 }
 
-/** Score with the user's own vote applied. */
-export function displayScore(
-	post: CommunityPost,
-	vote: CommunityVote | undefined
-): number {
-	return post.score + (vote ?? 0);
-}
-
-/** Reddit's epoch for hot ranking (Dec 8, 2005). */
-const HOT_EPOCH_SECONDS = 1_134_028_003;
-/** Seconds that equal one order of magnitude of score. */
-const HOT_DECAY_SECONDS = 45_000;
-
-/**
- * Reddit's hot rank: the log of the score plus time, so a post needs ten
- * times the score to hold its place against one 12.5 hours newer.
- */
-export function hotRank(score: number, iso: string): number {
-	const time = Date.parse(iso);
-	const seconds = Number.isNaN(time) ? 0 : time / 1000 - HOT_EPOCH_SECONDS;
-	const order = Math.log10(Math.max(Math.abs(score), 1));
-	const sign = Math.sign(score);
-	return sign * order + seconds / HOT_DECAY_SECONDS;
-}
-
-function byRecency(a: CommunityPost, b: CommunityPost): number {
-	return (
-		b.thread.updatedAt.localeCompare(a.thread.updatedAt) ||
-		a.thread.id.localeCompare(b.thread.id)
-	);
-}
-
-/**
- * Orders posts. Votes never reorder a feed while the user is looking at it,
- * so ranking reads the base score only. Pinned posts lead a community's Hot
- * feed, the way stickied posts do.
- */
-export function sortPosts(
-	posts: readonly CommunityPost[],
-	sort: CommunitySort,
-	pinPinned = false
-): CommunityPost[] {
-	const ranked = [...posts];
-	switch (sort) {
-		case "new":
-			ranked.sort(byRecency);
-			break;
-		case "top":
-			ranked.sort((a, b) => b.score - a.score || byRecency(a, b));
-			break;
-		default:
-			ranked.sort(
-				(a, b) =>
-					(pinPinned ? Number(b.thread.pinned) - Number(a.thread.pinned) : 0) ||
-					hotRank(b.score, b.thread.updatedAt) -
-						hotRank(a.score, a.thread.updatedAt) ||
-					byRecency(a, b)
-			);
-	}
-	return ranked;
-}
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Popular: posts active in the last day. */
@@ -484,164 +422,31 @@ export function nextVote(
 	return current === pressed ? undefined : pressed;
 }
 
-export const TITLE_LIMIT = 300;
-
-export interface CommunityDraft {
-	body: string;
-	/** The chosen community's key, or null before one is picked. */
-	communityKey: string | null;
-	title: string;
-}
-
-export function emptyDraft(communityKey: string | null = null): CommunityDraft {
-	return { body: "", communityKey, title: "" };
-}
-
-/** The one message a post sends: its title, then any body text. */
-export function draftPrompt(draft: CommunityDraft): string {
-	const title = draft.title.trim().slice(0, TITLE_LIMIT);
-	const body = draft.body.trim();
-	if (!title) {
-		return "";
-	}
-	return body ? `${title}\n\n${body}` : title;
-}
-
-export interface CommunityStartInput {
-	agentId?: string;
-	projectId?: string;
-	prompt?: string;
-	teamId?: string;
-}
-
-/** Port input that files a new thread in a community. */
-export function communityTarget(community: Community): CommunityStartInput {
-	switch (community.kind) {
-		case "project":
-			return { projectId: community.sourceId };
-		case "team":
-			return { teamId: community.sourceId };
-		case "agent":
-			return { agentId: community.sourceId };
-		default:
-			return {};
-	}
-}
-
-/** The port call for a draft, or null until it has a title and a community. */
-export function draftStartInput(
-	draft: CommunityDraft,
-	communities: readonly Community[]
-): CommunityStartInput | null {
-	const prompt = draftPrompt(draft);
-	const community = draft.communityKey
-		? communities.find((candidate) => candidate.key === draft.communityKey)
-		: undefined;
-	if (!(prompt && (community || draft.communityKey === PROFILE_KEY))) {
-		return null;
-	}
-	return { ...(community ? communityTarget(community) : {}), prompt };
-}
-
-/** Port input for "Message": an empty thread with one agent, filed here. */
-export function messageInput(
-	community: Community,
-	agentId: string
-): CommunityStartInput {
-	if (community.kind === "project") {
-		return { agentId, projectId: community.sourceId };
-	}
-	if (community.kind === "team") {
-		return { agentId, teamId: community.sourceId };
-	}
-	return { agentId };
-}
-
-const AGE_STEPS: readonly [number, string, string][] = [
-	[60, "min.", "min."],
-	[24, "hr.", "hr."],
-	[30, "day", "days"],
-	[12, "mo.", "mo."],
-	[Number.POSITIVE_INFINITY, "yr.", "yr."],
-];
-
-/** Reddit's relative time: "just now", "5 min. ago", "2 days ago". */
-export function redditAge(iso: string, now: number): string {
-	const time = Date.parse(iso);
-	if (Number.isNaN(time)) {
-		return "";
-	}
-	let value = Math.floor(Math.max(0, now - time) / 60_000);
-	if (value < 1) {
-		return "just now";
-	}
-	for (const [size, one, many] of AGE_STEPS) {
-		if (value < size) {
-			return `${value} ${value === 1 ? one : many} ago`;
-		}
-		value = Math.floor(value / size);
-	}
-	return "";
-}
-
-/** Reddit's short counts: 999, 1k, 1.2k, 12k. */
-export function shortCount(value: number): string {
-	if (Math.abs(value) < 1000) {
-		return String(value);
-	}
-	const thousands = value / 1000;
-	const rounded =
-		Math.abs(thousands) >= 10
-			? Math.round(thousands)
-			: Math.round(thousands * 10) / 10;
-	return `${rounded}k`;
-}
-
-export function plural(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-/** The short flair a post carries for its status. */
-export const STATUS_FLAIR: Record<ThreadStatus, string> = {
-	attention: "Run failed",
-	quiet: "Not started",
-	waiting: "Waiting on agent",
-	working: "Working",
-	"your-turn": "Your turn",
-};
-
-/** A post's flair text: interrupted runs say so instead of "failed". */
-export function flairLabel(post: CommunityPost): string {
-	if (post.status === "attention" && post.thread.runState === "interrupted") {
-		return "Interrupted";
-	}
-	return STATUS_FLAIR[post.status];
-}
-
-/** `r/WebsiteRedesign`, `u/you`. */
-export function communityLabel(community: Community): string {
-	return `${community.prefix}${community.handle}`;
-}
-
-/** `u/forge` for an agent poster, `u/you` with none. */
-export function posterLabel(agent: InterfaceAgent | null): string {
-	if (!agent) {
-		return "u/you";
-	}
-	const handle = agent.name.toLowerCase().replace(/[^a-z0-9_]+/g, "");
-	return `u/${handle || "agent"}`;
-}
-
-const ABSOLUTE = new Intl.DateTimeFormat("en", {
-	day: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-	month: "short",
-	year: "numeric",
-});
-
-/** A full timestamp for `title` attributes. */
-export function absoluteTime(iso: string): string {
-	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : ABSOLUTE.format(time);
-}
+export type {
+	CommunityDraft,
+	CommunityStartInput,
+} from "./community-model-draft.ts";
+export {
+	communityTarget,
+	draftPrompt,
+	draftStartInput,
+	emptyDraft,
+	messageInput,
+	TITLE_LIMIT,
+} from "./community-model-draft.ts";
+export {
+	absoluteTime,
+	communityLabel,
+	flairLabel,
+	plural,
+	posterLabel,
+	redditAge,
+	STATUS_FLAIR,
+	shortCount,
+} from "./community-model-format.ts";
+export { PROFILE_KEY } from "./community-model-keys.ts";
+export {
+	displayScore,
+	hotRank,
+	sortPosts,
+} from "./community-model-ranking.ts";

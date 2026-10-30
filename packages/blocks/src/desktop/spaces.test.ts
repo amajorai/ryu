@@ -1,4 +1,3 @@
-import { requireTestValue } from "./test-required.ts";
 // packages/blocks/src/desktop/spaces.test.ts
 //
 // The Spaces retrieval copy, held to what Core actually does.
@@ -27,101 +26,19 @@ import { requireTestValue } from "./test-required.ts";
 // its two call sites — a scope line living in a caller is a scope line the other
 // caller can ship without.
 //
-// ── Why this reads the file instead of importing it ──────────────────────────
-//
-// `spaces.tsx` imports `@ryu/ui/components/*` without file extensions. That subpath
-// resolves under the desktop app's bundler and does NOT resolve under `bun test`,
-// so `import { RETRIEVAL_MODE_SCOPE } from "./spaces.tsx"` fails at module load —
-// verified, not assumed. Reading the literal out of the source is the honest
-// alternative for an assertion about a *string*: {@link copyLiteral} THROWS when a
-// constant is missing or re-spelled, so a renamed export reads as "go fix this
-// test", never as a silently-passing scan of a file that no longer says anything.
+// The source readers (and why these tests read the files instead of importing
+// them) live in `spaces-test-source.ts`; the index-state copy is pinned in
+// `spaces-index-copy.test.ts`.
 
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
-const SOURCE_FILE = "packages/blocks/src/desktop/spaces.tsx";
-const SOURCE = readFileSync(join(import.meta.dir, "spaces.tsx"), "utf8");
-
-/**
- * Pull the value of an exported single-string constant out of the source.
- *
- * Throws rather than returning `""`: every assertion below is about what a
- * sentence says, and an empty string satisfies most `not.toMatch` checks. The
- * failure names the constant and the file so whoever renamed it knows where to go.
- */
-function copyLiteral(name: string): string {
-	const match = new RegExp(
-		`(?:export )?const ${name}\\s*(?::[^=]+)?=\\s*"((?:[^"\\\\]|\\\\.)*)"`
-	).exec(SOURCE);
-	if (!match) {
-		throw new Error(
-			`copy test lost its target: \`${name}\` is no longer a single-string ` +
-				`const in ${SOURCE_FILE}. These tests assert what that sentence claims ` +
-				"about Core's retrieval_mode scope; re-point them (and re-check the " +
-				"new copy against apps/desktop/src/lib/api/spaces.test.ts, which pins " +
-				"what Core actually reads the column for)."
-		);
-	}
-	return requireTestValue(match[1], `copy literal ${name}`);
-}
-
-/**
- * Every blurb in `RETRIEVAL_MODE_OPTIONS`, keyed by mode. Throws if a mode is gone.
- *
- * `field` selects the technical blurb or the friendly-mode one. Both are asserted
- * against the same claims below, because the friendly copy is not a summary of the
- * technical copy — friendly mode ships default-ON, so it is the copy nearly every
- * user actually reads, and a consequence dropped from it is a consequence dropped
- * from the product for almost everybody.
- */
-function modeBlurb(
-	value: "graph" | "vector",
-	field: "blurb" | "friendlyBlurb" = "blurb"
-): string {
-	const options = SOURCE.slice(
-		SOURCE.indexOf("export const RETRIEVAL_MODE_OPTIONS"),
-		SOURCE.indexOf("export const RETRIEVAL_MODE_SCOPE")
-	);
-	// `blurb:` is matched with a preceding boundary so it cannot also match the
-	// tail of `friendlyBlurb:` (and vice versa) once both fields are present.
-	const match = new RegExp(
-		`value: "${value}",[\\s\\S]*?(?:^|\\s)${field}:\\s*((?:\\s*"(?:[^"\\\\]|\\\\.)*")+)`,
-		"m"
-	).exec(options);
-	if (!match) {
-		throw new Error(
-			`copy test lost its target: no \`${value}\` entry with a \`${field}\` in ` +
-				`RETRIEVAL_MODE_OPTIONS (${SOURCE_FILE}).`
-		);
-	}
-	// Blurbs are prettier-wrapped into adjacent string literals; rejoin them.
-	return [
-		...requireTestValue(match[1], "wrapped copy literal").matchAll(
-			/"((?:[^"\\]|\\.)*)"/g
-		),
-	]
-		.map((m) => requireTestValue(m[1], "copy string fragment"))
-		.join("");
-}
+import {
+	copyLiteral,
+	modeBlurb,
+	RENDERED,
+	SOURCE,
+} from "./spaces-test-source.ts";
 
 const SCOPE = copyLiteral("RETRIEVAL_MODE_SCOPE");
-
-/**
- * The source with comments removed — what the user can actually be shown.
- *
- * The distinction is load-bearing here, not pedantry. The doc comments in
- * `spaces.tsx` deliberately QUOTE the retired overclaim, because a reader who does
- * not know what the old sentence promised cannot tell why the new one is worded so
- * carefully. Scanning raw source would make keeping that explanation impossible;
- * scanning the rendered half lets the file explain its own history while still
- * failing if the history comes back as shipping copy.
- */
-const RENDERED = SOURCE.replaceAll(/\/\*[\s\S]*?\*\//g, "").replaceAll(
-	/^\s*\/\/.*$/gm,
-	""
-);
 
 describe("RETRIEVAL_MODE_SCOPE", () => {
 	it("names each surface that reaches the one branch point in Core", () => {
@@ -280,179 +197,6 @@ describe("the retrieval copy as a whole", () => {
 		// The words it exists to avoid.
 		expect(friendly).not.toMatch(/entity graph/i);
 		expect(friendly).not.toMatch(/re-embedded/i);
-	});
-});
-
-// ── "This file is stored, but its contents are not searchable" ────────────────
-//
-// The overclaim being retired here is not a sentence — it is a NUMBER. Every
-// document row carried a `<n> chunks` badge, files included, and a file whose text
-// was never read gets exactly one chunk: `title` + mime, the descriptor
-// `SpaceStore::create_file` embeds. So a 300-page PDF read "1 chunk", beside pages
-// whose badge counts real extracted text, in a list headed by a search box. Nothing
-// said the PDF's prose had never been read, and a user who searched for a phrase
-// they knew was in it got an empty result with no reason.
-//
-// Core now records WHY, in five states (`space_file_index.rs`), and the notes below
-// exist because those five states carry FOUR different user actions. The tests pin
-// that they stay distinguishable — collapsing them back into one "not searchable"
-// sentence would leave a user with a fixable problem no way to learn it is fixable,
-// which is the same shape of defect as the badge itself.
-//
-// One negative is load-bearing and scoped rather than global: `unattempted` must NOT
-// tell the user to install anything (nobody has looked yet — installing a reader
-// does not retroactively read the file), while `skipped` MUST (nothing on this node
-// can read the format, and that is exactly what installing fixes). An earlier
-// revision of this file banned "install" across all of the copy, which was correct
-// while no ingestion path called `document.parse` and became wrong the moment
-// `create_file_indexed` landed.
-
-/** The value of one entry in the `FILE_INDEX_NOTES` record. Throws if it is gone. */
-function indexNote(state: string): string {
-	const notes = SOURCE.slice(SOURCE.indexOf("export const FILE_INDEX_NOTES"));
-	const match = new RegExp(
-		`\\n\\t${state}:\\s*((?:\\s*"(?:[^"\\\\]|\\\\.)*")+)`
-	).exec(notes);
-	if (!match) {
-		throw new Error(
-			`copy test lost its target: no \`${state}\` entry in FILE_INDEX_NOTES ` +
-				`(${SOURCE_FILE}). Core's IndexState has five wire states and each ` +
-				"not-indexed one needs a sentence saying what the user can do about it."
-		);
-	}
-	return [
-		...requireTestValue(match[1], "wrapped copy literal").matchAll(
-			/"((?:[^"\\]|\\.)*)"/g
-		),
-	]
-		.map((m) => requireTestValue(m[1], "copy string fragment"))
-		.join("");
-}
-
-const UNATTEMPTED = indexNote("unattempted");
-const SKIPPED = indexNote("skipped");
-const FAILED = indexNote("failed");
-const PENDING = indexNote("pending");
-const NOT_INDEXED_BADGE = copyLiteral("FILE_CONTENTS_NOT_INDEXED_BADGE");
-
-describe("every not-indexed state says what a search will and will not find", () => {
-	it("says the file is still stored and still opens", () => {
-		// The scope limit is not a loss. Copy that reads like a failure invites a
-		// re-upload that changes nothing (or, worse, a delete).
-		for (const note of [UNATTEMPTED, SKIPPED, FAILED]) {
-			expect(note).toMatch(/stored/i);
-			expect(note).toMatch(/open/i);
-		}
-	});
-
-	it("names what IS matched, so the limit is concrete", () => {
-		for (const note of [UNATTEMPTED, SKIPPED, FAILED]) {
-			expect(note).toMatch(/name and file type/i);
-		}
-	});
-
-	it("uses no jargon a non-expert has to decode to act on it", () => {
-		for (const note of [UNATTEMPTED, SKIPPED, FAILED, PENDING]) {
-			expect(note).not.toMatch(/chunk|embed|vector|extract|parse|index/i);
-		}
-	});
-});
-
-describe("the four states carry four different actions", () => {
-	it("skipped — and only skipped — tells the user to install a reader", () => {
-		// True BECAUSE `create_file_indexed` routes every upload through the
-		// `document.parse` facade: binding a provider changes the outcome of the next
-		// upload. It was false, and banned here, while nothing called the facade.
-		expect(SKIPPED).toMatch(/install a document reader/i);
-		expect(SKIPPED).toMatch(/upload the file again/i);
-		// No app is named: which providers exist is the Store's business, and a
-		// sentence listing four of them goes stale when a fifth ships.
-		expect(SKIPPED).not.toMatch(/markitdown|docling|unstructured|mineru/i);
-	});
-
-	it("unattempted does NOT — nobody has looked, so there is nothing to install", () => {
-		// The scoped negative. Telling this user to install a reader would send them
-		// to the Store to fix a problem they do not have.
-		expect(UNATTEMPTED).not.toMatch(/install/i);
-		expect(UNATTEMPTED).toMatch(/nothing has tried to read these yet/i);
-		// The remedy that works from this screen is the shared file drop zone above
-		// the table, which sends the file through Core's extraction path.
-		expect(UNATTEMPTED).toMatch(/Drop files here/);
-	});
-
-	it("failed points at the per-file reason rather than guessing at one", () => {
-		expect(FAILED).toMatch(/upload the file again/i);
-		expect(FAILED).toMatch(/shown on each file/i);
-		expect(FAILED).not.toMatch(/install/i);
-	});
-
-	it("pending is not written as a failure — the text is on its way", () => {
-		expect(PENDING).toMatch(/being read now/i);
-		expect(PENDING).toMatch(/becomes searchable/i);
-		expect(PENDING).not.toMatch(/not searchable|cannot|could not|fail/i);
-	});
-
-	it("no state's copy reads as data loss", () => {
-		for (const note of [UNATTEMPTED, SKIPPED, FAILED, PENDING]) {
-			expect(note).not.toMatch(/deleted|lost|discard/i);
-		}
-	});
-});
-
-describe("the document list", () => {
-	it("replaces the chunk count instead of showing both", () => {
-		// "1 chunk · Name only" invites the reading that one chunk of the file's
-		// TEXT is indexed — the same wrong belief in a smaller font. `indexBadgeLabel`
-		// returns null for "say nothing", and null is the ONLY branch that renders a
-		// count.
-		expect(RENDERED).toMatch(
-			/badge === null \?[\s\S]{0,300}doc\.chunkCount[\s\S]{0,300}\) : \([\s\S]{0,200}\{badge\}/
-		);
-	});
-
-	it("treats an unknown state as 'say nothing', not as 'not searchable'", () => {
-		// `indexState` is optional: the storyboard's mock rows omit it, every
-		// non-file document omits it, and any row Core has not answered for omits it.
-		// A truthiness test would badge the entire list "Name only" on those surfaces.
-		expect(RENDERED).not.toMatch(/!\s*doc\.indexState/);
-		expect(RENDERED).toMatch(
-			/state === undefined \|\| state === "indexed"[\s\S]{0,80}return null/
-		);
-	});
-
-	it("badges pending differently from the three not-searchable states", () => {
-		expect(RENDERED).toContain("FILE_CONTENTS_PENDING_BADGE");
-		expect(copyLiteral("FILE_CONTENTS_PENDING_BADGE")).not.toBe(
-			NOT_INDEXED_BADGE
-		);
-	});
-
-	it("shows each explanation only when a row is actually in that state", () => {
-		// A space of pages must be untouched; a space of PDFs gets one sentence per
-		// state present, in a fixed order so the notes do not reshuffle as files
-		// finish parsing.
-		expect(RENDERED).toContain(
-			"documents.some((doc) => doc.indexState === state)"
-		);
-	});
-
-	it("surfaces a failed file's reason and an indexed file's warnings per row", () => {
-		// Both differ per document, so a per-list note cannot carry them. A retry the
-		// user cannot diagnose is a retry they will make twice; a parse that half
-		// worked and says nothing is the silent-drop bug wearing a hat.
-		expect(RENDERED).toMatch(
-			/doc\.indexState === "failed"[\s\S]{0,140}doc\.indexMessage/
-		);
-		expect(RENDERED).toMatch(
-			/doc\.indexState === "indexed" && warnings\.length > 0/
-		);
-	});
-
-	it("keeps the badge short enough to sit at the end of a row", () => {
-		expect(NOT_INDEXED_BADGE.length).toBeLessThanOrEqual(16);
-		// Names what IS indexed rather than what is missing, so the row is readable
-		// on its own and the note carries the consequence.
-		expect(NOT_INDEXED_BADGE).toMatch(/name/i);
 	});
 });
 

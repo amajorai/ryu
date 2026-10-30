@@ -14,6 +14,7 @@ import {
 	OsDesktopSurface,
 	type OsWindow,
 } from "../../src/components/os/OsDesktopSurface.tsx";
+import { ShellSettingsDialog } from "../../src/components/shell/shell-settings-dialog.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { SystemStatusProvider } from "../../src/contexts/SystemStatusContext.tsx";
@@ -155,6 +156,8 @@ function Story() {
 						onOpenApp={openApp}
 						windows={windows}
 					/>
+					{/* The shell owns the window's one Settings dialog. */}
+					<ShellSettingsDialog />
 				</main>
 			</TooltipProvider>
 		</ThemeProvider>

@@ -107,14 +107,17 @@ function DialogOverlay({
 
 const dialogContentAppearance = {
 	default: "",
+	// The settings frame (desktop settings, GatewayDialog): a fixed 880 x 640
+	// sheet that shrinks with the window, full screen on mobile.
 	"gateway-settings":
-		"!w-[85vw] !max-w-7xl max-md:!w-screen max-md:!max-w-none [&>[data-slot=dialog-close]]:!top-5 [&>[data-slot=dialog-close]]:!right-5 h-[85vh] gap-0 overflow-hidden p-0 max-md:h-[100dvh] max-md:rounded-none",
+		"!w-[min(880px,calc(100vw-48px))] !max-w-none max-md:!w-screen max-md:!max-w-none [&>[data-slot=dialog-close]]:!top-5 [&>[data-slot=dialog-close]]:!right-5 h-[min(640px,calc(100vh-48px))] gap-0 overflow-hidden rounded-2xl p-0 max-md:h-[100dvh] max-md:rounded-none",
 	"marketplace-guide":
 		"max-h-[min(90vh,42rem)] max-w-xl overflow-y-auto p-0 sm:max-w-xl",
 	"license-browser":
 		"!w-[min(70rem,calc(100vw-2rem))] !max-w-none flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0",
+	// The settings frame's loading stand-in: same footprint, so nothing jumps.
 	"deferred-settings":
-		"!w-[85vw] !max-w-7xl max-md:!w-screen max-md:!max-w-none h-[85vh] max-md:h-[100dvh] max-md:rounded-none",
+		"!w-[min(880px,calc(100vw-48px))] !max-w-none max-md:!w-screen max-md:!max-w-none h-[min(640px,calc(100vh-48px))] rounded-2xl max-md:h-[100dvh] max-md:rounded-none",
 	announcement:
 		"max-h-[min(90vh,48rem)] max-w-2xl overflow-y-auto p-0 sm:max-w-2xl",
 	"media-lightbox":

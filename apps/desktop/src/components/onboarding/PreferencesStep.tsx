@@ -12,11 +12,11 @@
 // the registration once on a fresh machine — see the effect below for why
 // onboarding is the right (and only) place for that.
 
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
-import { Button } from "@ryu/ui/components/button.tsx";
-import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -25,7 +25,6 @@ import {
 	isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import { useEffect, useRef, useState } from "react";
-import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -36,6 +35,7 @@ import {
 	usePointerCursor,
 } from "@/src/hooks/usePointerCursor.ts";
 import { useSidebarVariant } from "@/src/hooks/useSidebarVariant.ts";
+import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
 /**
  * One-shot marker for the launch-at-login opt-in below. Deliberately its own key
@@ -166,98 +166,67 @@ export function PreferencesStep({
 	};
 
 	return (
-		// Mirrors the shared OnboardingShell: the outer box owns the scroll and the
-		// inner column uses `min-h-full` so it centres when it fits and grows when it
-		// doesn't (the page wrapper is `h-screen overflow-hidden`).
-		<div className="scroll-fade h-full w-full overflow-y-auto">
-			<div
-				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
-				data-tauri-drag-region="true"
-			>
-				<StaggerReveal>
-					<div className="shrink-0">
-						<RyuOnboardingAvatar />
-					</div>
-					<PageHeader
-						stagger={false}
-						subtitle="A few general settings to start with. You can change any of them later in Settings."
-						title="Set your preferences"
-					/>
-				</StaggerReveal>
-
-				{/* The content picks the cascade back up where the header left it, so
-				    the settings card and the Continue row arrive one after another
-				    instead of as one block. Outside the reveal above on purpose:
-				    revealing this column there AND its rows here would apply the
-				    travel and the blur twice to the same rows. */}
-				<div className="flex w-full max-w-md flex-col gap-6">
-					<StaggerReveal startDelay={ONBOARDING_CONTENT_DELAY_MS} wrap>
-						<SettingsGroup>
-							<SettingsItem
-								actions={
-									<Switch
-										checked={sidebarVariant === "inset"}
-										id="onboarding-inset-sidebar"
-										onCheckedChange={(checked) =>
-											setSidebarVariant(checked ? "inset" : "floating")
-										}
-									/>
-								}
-								description="Sit the sidebar flush against the window edge and pull the main content in as its own rounded card. Turn off to float the sidebar as a rounded card over a flush canvas."
-								title="Inset sidebar"
-							/>
-							<SettingsItem
-								actions={
-									<Switch
-										checked={pointerCursorEnabled}
-										id="onboarding-pointer-cursor"
-										onCheckedChange={setPointerCursor}
-									/>
-								}
-								description="Show a pointer cursor when hovering over interactive elements."
-								title="Pointer cursor"
-							/>
-							{canManageDesktopLifecycle ? (
-								<>
-									<SettingsItem
-										actions={
-											<Switch
-												checked={launchAtLogin}
-												id="onboarding-launch-at-login"
-												onCheckedChange={handleLaunchAtLogin}
-											/>
-										}
-										description="Start Ryu automatically when you sign in to your device, so your agents and background work are ready without opening it yourself."
-										title="Start Ryu on startup"
-									/>
-									<SettingsItem
-										actions={
-											<Switch
-												checked={closeToTray}
-												id="onboarding-close-to-tray"
-												onCheckedChange={handleCloseToTray}
-											/>
-										}
-										description="Closing the window leaves Ryu running in the tray so background agents keep going. Quit from the tray menu to stop it completely."
-										title="Stay in tray on close"
-									/>
-								</>
-							) : null}
-						</SettingsGroup>
-
-						<div className="flex items-center justify-end">
-							<Button
-								disabled={busy}
-								onClick={onContinue}
-								size="lg"
-								variant="mono"
-							>
-								{busy ? "Finishing…" : "Continue"}
-							</Button>
-						</div>
-					</StaggerReveal>
-				</div>
-			</div>
-		</div>
+		<ActivationStepShell
+			subtitle="You can change any of these later in Settings."
+			title="Set your preferences"
+		>
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<Switch
+							checked={sidebarVariant === "inset"}
+							id="onboarding-inset-sidebar"
+							onCheckedChange={(checked) =>
+								setSidebarVariant(checked ? "inset" : "floating")
+							}
+						/>
+					}
+					description="Sit the sidebar flush against the window, with the content as its own card."
+					title="Inset sidebar"
+				/>
+				<SettingsItem
+					actions={
+						<Switch
+							checked={pointerCursorEnabled}
+							id="onboarding-pointer-cursor"
+							onCheckedChange={setPointerCursor}
+						/>
+					}
+					description="Show a pointer cursor when hovering over interactive elements."
+					title="Pointer cursor"
+				/>
+				{canManageDesktopLifecycle ? (
+					<>
+						<SettingsItem
+							actions={
+								<Switch
+									checked={launchAtLogin}
+									id="onboarding-launch-at-login"
+									onCheckedChange={handleLaunchAtLogin}
+								/>
+							}
+							description="Start Ryu when you sign in, so your agents are ready."
+							title="Start Ryu on startup"
+						/>
+						<SettingsItem
+							actions={
+								<Switch
+									checked={closeToTray}
+									id="onboarding-close-to-tray"
+									onCheckedChange={handleCloseToTray}
+								/>
+							}
+							description="Closing the window keeps Ryu and its background agents running."
+							title="Stay in tray on close"
+						/>
+					</>
+				) : null}
+			</SettingsGroup>
+			<OnboardingActions>
+				<OnboardingCta disabled={busy} onClick={onContinue}>
+					{busy ? "Finishing…" : "Continue"}
+				</OnboardingCta>
+			</OnboardingActions>
+		</ActivationStepShell>
 	);
 }

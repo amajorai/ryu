@@ -26,10 +26,20 @@ ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
 #
 # It is a crates.io dependency — see the matching note in crates/core/stt for why
 # "git-only" was not a harmless stale word here.
+#
+# Declared for every target EXCEPT Intel macOS, where ONNX Runtime ships no
+# prebuilt and ort-sys fails the build. There `voice-vad` still resolves but
+# enables nothing native, `src/silero.rs` compiles its unavailable arm, and the
+# VAD runs the always-compiled energy backend (see the matching note in
+# crates/core/stt/Cargo.toml).
+[target.'cfg(not(all(target_os = "macos", target_arch = "x86_64")))'.dependencies]
 transcribe-rs = { version = "0.3.11", default-features = false, features = ["onnx"], optional = true }
-# Only the feature-gated Silero ONNX backend uses anyhow; keep it out of the lean
+
+[dependencies.anyhow]
+# Only the feature-gated Silero backend uses anyhow; keep it out of the lean
 # default build alongside transcribe-rs.
-anyhow = { version = "1", optional = true }
+version = "1"
+optional = true
 
 [features]
 # Off by default (keep `cargo test`/CI lean, same posture as Core's pre-extraction

@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Progress } from "@ryu/ui/components/progress.tsx";
 import {
@@ -6,6 +6,7 @@ import {
 	type RnpWorkspaceInspectionV0,
 	type RnpWorkspaceUntrackedCandidateV0,
 } from "@ryuhq/protocol/continuity";
+import type { ReactNode } from "react";
 import type { WorkspaceRelayProgress } from "@/src/lib/api/continuity-workspace.ts";
 
 // The "Bring working tree" review inside ContinueOnNodeDialog. Presentational
@@ -68,6 +69,10 @@ function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+function renderCode(chunks: ReactNode): ReactNode {
+	return <code>{chunks}</code>;
+}
+
 export function ContinueOnNodeWorkspace({
 	enabled,
 	inspection,
@@ -78,7 +83,14 @@ export function ContinueOnNodeWorkspace({
 	selectedUntracked,
 }: ContinueOnNodeWorkspaceProps) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const { repo } = inspection;
+	const treeValues = {
+		commit: repo.baseCommit.slice(0, 10),
+		repoName: repo.name,
+		unpushedCount: Math.max(inspection.unpushedCommits, 0),
+		unpushedText: String(inspection.unpushedCommits),
+	};
 	const untrackedBytes = selectedUntrackedBytes(inspection, selectedUntracked);
 	const overCap =
 		untrackedBytes > RNP_WORKSPACE_LIMITS.untrackedTotalBytes ||
@@ -109,12 +121,17 @@ export function ContinueOnNodeWorkspace({
 						Bring working tree
 					</span>
 					<span className="text-muted-foreground text-xs">
-						{repo.name}
-						{repo.branch ? ` on ${repo.branch}` : ""} at{" "}
-						<code>{repo.baseCommit.slice(0, 10)}</code>
-						{inspection.unpushedCommits > 0
-							? `, ${inspection.unpushedCommits} unpushed commit${inspection.unpushedCommits === 1 ? "" : "s"}`
-							: ", no unpushed commits"}
+						{repo.branch
+							? tlRich(
+									"{repoName} on {branch} at <code>{commit}</code>, {unpushedCount, plural, =0 {no unpushed commits} one {{unpushedText} unpushed commit} other {{unpushedText} unpushed commits}}",
+									{ ...treeValues, branch: repo.branch },
+									{ code: renderCode }
+								)
+							: tlRich(
+									"{repoName} at <code>{commit}</code>, {unpushedCount, plural, =0 {no unpushed commits} one {{unpushedText} unpushed commit} other {{unpushedText} unpushed commits}}",
+									treeValues,
+									{ code: renderCode }
+								)}
 					</span>
 				</span>
 			</label>

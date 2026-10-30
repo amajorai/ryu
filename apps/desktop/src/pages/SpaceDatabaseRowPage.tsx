@@ -2,7 +2,7 @@ import { LibraryIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { jsonResponseValueSchema } from "@ryu/app-host/json-values";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+
 import {
 	Empty,
 	EmptyContent,
@@ -13,21 +13,12 @@ import {
 } from "@ryu/ui/components/empty.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { Textarea } from "@ryu/ui/components/textarea.tsx";
-import { getOptionColorClass } from "@ryu/ui/lib/data-grid.ts";
-import {
-	computeFormulaColumns,
-	isFormulaError,
-} from "@ryu/ui/lib/data-grid-formula.ts";
-import {
-	isNativeBoolean,
-	isNativeNumber,
-	isNativeText,
-} from "@ryu/ui/lib/native-primitive-observation.ts";
-import { cn } from "@ryu/ui/lib/utils.ts";
-import type { CellSelectOption } from "@ryu/ui/types/data-grid.ts";
+
+import { computeFormulaColumns } from "@ryu/ui/lib/data-grid-formula.ts";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { z } from "zod";
+
 import { MarkdownEditor } from "@/src/components/editor/MarkdownEditor.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import {
@@ -48,165 +39,11 @@ import {
 	parseDatabaseDoc,
 	setRowPageId,
 } from "@/src/lib/realtime/yjs-database.ts";
-
-const SAVE_DEBOUNCE_MS = 800;
-
-/** Drop the reserved collaborative `__id` before serializing to JSON. */
-function stripRowIds(rows: DbRow[]): DbRow[] {
-	return rows.map(({ __id, ...rest }) => rest);
-}
-
-/** Colored option pills for a select / multi-select property. */
-function OptionPills({
-	options,
-	selected,
-	onToggle,
-	readOnly,
-}: {
-	options: CellSelectOption[];
-	selected: Set<string>;
-	onToggle: (value: string) => void;
-	readOnly: boolean;
-}) {
-	return (
-		<div className="flex flex-wrap gap-1">
-			{options.map((option) => {
-				const isSelected = selected.has(option.value);
-				return (
-					<button
-						aria-pressed={isSelected}
-						className={cn(
-							"rounded-full px-2 py-0.5 text-xs",
-							isSelected
-								? getOptionColorClass(option.color) || "bg-secondary"
-								: "border text-muted-foreground hover:bg-accent"
-						)}
-						disabled={readOnly}
-						key={option.value}
-						onClick={() => onToggle(option.value)}
-						type="button"
-					>
-						{option.label}
-					</button>
-				);
-			})}
-		</div>
-	);
-}
-
-/** One editable property field, dispatched by the column's cell type. */
-function PropertyField({
-	column,
-	value,
-	readOnly,
-	onChange,
-}: {
-	column: DbColumn;
-	value: unknown;
-	readOnly: boolean;
-	onChange: (
-		value: Parameters<typeof applyCellEdits>[1][number]["value"]
-	) => void;
-}) {
-	const { cell } = column;
-	if (cell.variant === "formula") {
-		return (
-			<span
-				className={cn(
-					"block pt-1.5 text-sm",
-					isFormulaError(value) && "text-destructive"
-				)}
-			>
-				{isNativeBoolean(value)
-					? String(value).toUpperCase()
-					: String(value ?? "")}
-			</span>
-		);
-	}
-	if (cell.variant === "checkbox") {
-		return (
-			<Checkbox
-				aria-label={column.label}
-				checked={value === true}
-				disabled={readOnly}
-				onCheckedChange={(checked) => onChange(checked === true)}
-			/>
-		);
-	}
-	if (cell.variant === "long-text") {
-		return (
-			<Textarea
-				aria-label={column.label}
-				className="min-h-16"
-				disabled={readOnly}
-				onChange={(e) => onChange(e.target.value)}
-				value={isNativeText(value) ? value : ""}
-			/>
-		);
-	}
-	if (cell.variant === "number") {
-		return (
-			<Input
-				aria-label={column.label}
-				disabled={readOnly}
-				onChange={(e) =>
-					onChange(e.target.value === "" ? null : Number(e.target.value))
-				}
-				type="number"
-				value={isNativeNumber(value) ? String(value) : ""}
-			/>
-		);
-	}
-	if (cell.variant === "date") {
-		return (
-			<Input
-				aria-label={column.label}
-				disabled={readOnly}
-				onChange={(e) => onChange(e.target.value || null)}
-				type="date"
-				value={isNativeText(value) ? value.slice(0, 10) : ""}
-			/>
-		);
-	}
-	if (cell.variant === "select") {
-		const current = isNativeText(value) ? value : null;
-		return (
-			<OptionPills
-				onToggle={(v) => onChange(current === v ? null : v)}
-				options={cell.options}
-				readOnly={readOnly}
-				selected={new Set(current ? [current] : [])}
-			/>
-		);
-	}
-	if (cell.variant === "multi-select") {
-		const current = z.array(z.string()).catch([]).parse(value);
-		return (
-			<OptionPills
-				onToggle={(v) =>
-					onChange(
-						current.includes(v)
-							? current.filter((x) => x !== v)
-							: [...current, v]
-					)
-				}
-				options={cell.options}
-				readOnly={readOnly}
-				selected={new Set(current)}
-			/>
-		);
-	}
-	// short-text / url / fallback
-	return (
-		<Input
-			aria-label={column.label}
-			disabled={readOnly}
-			onChange={(e) => onChange(e.target.value)}
-			type={cell.variant === "url" ? "url" : "text"}
-			value={isNativeText(value) ? value : ""}
-		/>
-	);
-}
+import {
+	PropertyField,
+	SAVE_DEBOUNCE_MS,
+	stripRowIds,
+} from "./SpaceDatabaseRowPage.fields.tsx";
 
 /**
  * A Notion-style database "row page": the row's columns rendered as an editable
@@ -536,10 +373,10 @@ export default function SpaceDatabaseRowPage({
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
-			<div className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-auto px-8 py-6">
+			<div className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-auto px-6 pt-6">
 				{dbSaveError && (
 					<div
-						className="mb-3 flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm"
+						className="mb-3 flex items-center justify-between gap-3 text-sm text-status-destructive"
 						role="alert"
 					>
 						<span>{dbSaveError}</span>

@@ -30,6 +30,7 @@ import { useShallow } from "zustand/react/shallow";
 import { AvailableUpdates } from "@/src/components/downloads/AvailableUpdates.tsx";
 import { DownloadConcurrencyControl } from "@/src/components/downloads/DownloadConcurrencyControl.tsx";
 import { DownloadRow } from "@/src/components/downloads/DownloadRow.tsx";
+import { PageMoreMenu, PageTop } from "@/src/components/views/page-layout.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAvailableUpdates } from "@/src/hooks/useAvailableUpdates.ts";
@@ -112,62 +113,63 @@ export default function DownloadsPage() {
 
 	return (
 		<PullToRefresh className="h-full" edgeFade onRefresh={onRefresh}>
-			<div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
-				<header className="flex items-center justify-between gap-3">
-					<div>
-						<h1 className="font-medium text-xl">Downloads</h1>
-						<p className="text-muted-foreground text-sm">
-							Updates, active downloads, and everything you've downloaded
-							before.
-						</p>
-					</div>
-					<div className="flex shrink-0 items-center gap-2">
-						{unfinished.length > 0 && (
+			<div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 pt-6 pb-12">
+				<PageTop
+					actions={
+						<>
+							{/* Refresh reports itself. Both feeds it kicks off resolve in
+							    well under a second on a local node, so without a held state
+							    the button looked inert on every press. The state is driven
+							    by the queries' own in-flight flags plus a floor. */}
 							<Button
-								disabled={clearing}
+								aria-label={refreshing ? "Refreshing…" : "Refresh"}
+								loading={refreshing}
 								onClick={() => {
-									clearUnfinished().catch(() => undefined);
+									onRefresh();
 								}}
-								size="sm"
-								variant="ghost"
+								size="icon-sm"
+								variant="ghost-muted"
 							>
-								Clear unfinished
+								<HugeiconsIcon icon={Refresh01Icon} size={16} />
 							</Button>
-						)}
-						{history.length > 0 && (
-							<Button
-								disabled={clearing}
-								onClick={() => {
-									// Refetch after: History is served by this query, and clearing
-									// the durable log server-side does not invalidate its cache.
-									clearFinished()
-										.then(() => historyQuery.refetch())
-										.catch(() => undefined);
-								}}
-								size="sm"
-								variant="ghost"
-							>
-								Clear finished
-							</Button>
-						)}
-						{/* Refresh reports itself. Both feeds it kicks off resolve in well
-				    under a second on a local node, so without a held state the button
-				    looked inert on every press — the list simply redrew identical
-				    content. The state is driven by the queries' own in-flight flags
-				    plus a floor, so it is never a lie about work that already ended. */}
-						<Button
-							loading={refreshing}
-							onClick={() => {
-								onRefresh();
-							}}
-							size="sm"
-							variant="ghost"
-						>
-							<HugeiconsIcon icon={Refresh01Icon} />
-							{refreshing ? "Refreshing…" : "Refresh"}
-						</Button>
-					</div>
-				</header>
+							<PageMoreMenu
+								items={[
+									...(unfinished.length > 0
+										? [
+												{
+													disabled: clearing,
+													id: "clear-unfinished",
+													label: "Clear unfinished",
+													onSelect: () => {
+														clearUnfinished().catch(() => undefined);
+													},
+												},
+											]
+										: []),
+									...(history.length > 0
+										? [
+												{
+													disabled: clearing,
+													id: "clear-finished",
+													label: "Clear finished",
+													// Refetch after: History is served by this query, and
+													// clearing the durable log server-side does not
+													// invalidate its cache.
+													onSelect: () => {
+														clearFinished()
+															.then(() => historyQuery.refetch())
+															.catch(() => undefined);
+													},
+												},
+											]
+										: []),
+								]}
+							/>
+						</>
+					}
+					subtitle="Updates, active downloads, and everything you've downloaded before."
+					title="Downloads"
+				/>
 
 				{nothing ? (
 					<Empty spacing="comfortable">
@@ -185,6 +187,7 @@ export default function DownloadsPage() {
 							<Button
 								onClick={() => openTab("/store", { title: "Store" })}
 								size="sm"
+								variant="outline"
 							>
 								Browse the Store
 							</Button>
@@ -192,17 +195,13 @@ export default function DownloadsPage() {
 					</Empty>
 				) : (
 					<>
-						{updates.length > 0 && (
-							<div className="rounded-2xl bg-card">
-								<AvailableUpdates />
-							</div>
-						)}
+						{updates.length > 0 && <AvailableUpdates />}
 
 						{/* "How many at once" sits beside the queue it governs: "why is
 					    this slow" and "can it go faster" are the same moment. */}
 						<Section action={<DownloadConcurrencyControl />} title="Active">
 							{active.length > 0 ? (
-								<div className="flex flex-col rounded-2xl bg-card p-1">
+								<div className="flex flex-col">
 									{active.map((task) => (
 										<DownloadRow
 											friendly={friendly}
@@ -220,7 +219,7 @@ export default function DownloadsPage() {
 
 						{history.length > 0 && (
 							<Section title="History">
-								<div className="flex flex-col rounded-2xl bg-card p-1">
+								<div className="flex flex-col">
 									{history.map((task) => (
 										<DownloadRow
 											friendly={friendly}
@@ -249,8 +248,8 @@ function Section({
 }) {
 	return (
 		<section className="flex flex-col gap-2">
-			<div className="flex items-start justify-between gap-3">
-				<h2 className="font-medium text-muted-foreground text-sm">{title}</h2>
+			<div className="mb-1 flex items-center justify-between gap-3">
+				<h2 className="font-semibold text-sm">{title}</h2>
 				{action}
 			</div>
 			{children}

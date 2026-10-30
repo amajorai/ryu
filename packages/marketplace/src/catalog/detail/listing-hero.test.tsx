@@ -102,14 +102,11 @@ describe("ListingHero", () => {
 		expect(page).toContain("<h1");
 		expect(page).not.toContain("<h2");
 	});
-	test("an art-less hero paints the dark default under its white copy", () => {
-		// `bg-muted` is near-white in light theme; the title and tagline are fixed
-		// white in both themes.
+	test("an art-less hero paints no generated wash and uses theme colours", () => {
 		const html = renderToStaticMarkup(<ListingHero name="Example" />);
-		expect(html).toContain(
-			`--marketplace-background:${LISTING_HERO_NO_ART_BACKGROUND}`
-		);
-		expect(html).not.toContain('class="absolute inset-0 bg-muted"');
+		expect(html).not.toContain(LISTING_HERO_NO_ART_BACKGROUND);
+		expect(html).not.toContain('data-testid="listing-hero-scrim"');
+		expect(html).toContain("text-foreground");
 	});
 	test("a caller's own background still outranks the dark default", () => {
 		const html = renderToStaticMarkup(
@@ -132,6 +129,7 @@ describe("ListingHero", () => {
 		const html = renderToStaticMarkup(
 			<ListingHero
 				actions={<button type="button">Get</button>}
+				iconBackground="#123456"
 				name="Example"
 			/>
 		);

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	INTERFACE_PROTOCOL_VERSION,
 	type InterfacePort,
@@ -168,6 +169,7 @@ export function LifeDemo({
 	/** Stations on the island (a seat-capped game's cap); the rest are off stage. */
 	capacity?: number;
 }) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const headingRef = useRef<HTMLHeadingElement>(null);
 	const reduced = useReducedMotion();
@@ -247,7 +249,9 @@ export function LifeDemo({
 				actAgent: act.agentId,
 				bubble: bubbleId ? shownIds.has(bubbleId) : true,
 				id: act.agentId,
-				label: asking ? `${act.ariaLabel} Answer their ask.` : act.ariaLabel,
+				label: asking
+					? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+					: act.ariaLabel,
 				// Queue plates keep their words ("Ada · 14m") on narrow stages.
 				iconOnly: asking && spots.slot ? false : undefined,
 				life: actLife(act, spots, SKIN, { reduced }),
@@ -292,6 +296,7 @@ export function LifeDemo({
 		shownIds,
 		slots.slots,
 		stations,
+		tl,
 	]);
 	const shape = useMemo(() => islandFor(18, 13, 1), []);
 	const onAsk = (askId: string, opener?: HTMLElement) =>

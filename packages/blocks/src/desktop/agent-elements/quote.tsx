@@ -1,7 +1,9 @@
 "use client";
 
+import { Cancel01Icon, QuoteDownIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+
 import { cn } from "@ryu/ui/lib/utils";
-import { IconQuote, IconX } from "@tabler/icons-react";
 import {
 	Fragment,
 	type RefObject,
@@ -299,7 +301,7 @@ export function SelectionQuoteToolbar({
 			className={cn(
 				styles.anchor,
 				styles.width,
-				"fixed z-[60] -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md",
+				"fixed z-[60] -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg",
 				draft.placement === "above" && "-translate-y-full",
 				className
 			)}
@@ -320,7 +322,7 @@ export function SelectionQuoteToolbar({
 				Note about the selected text
 			</label>
 			<textarea
-				className="block max-h-40 min-h-14 w-full resize-none bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground"
+				className="block max-h-40 min-h-14 w-full resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
 				data-testid="selection-annotate-note"
 				id={noteId}
 				onChange={(event) => setNote(event.target.value)}
@@ -366,7 +368,7 @@ export function SelectionQuoteToolbar({
 						}
 						type="button"
 					>
-						<IconQuote className="size-3.5" />
+						<HugeiconsIcon className="size-3.5" icon={QuoteDownIcon} />
 						Quote
 					</button>
 				)}
@@ -416,23 +418,26 @@ export function ComposerQuotePreview({
 	return (
 		<div
 			className={cn(
-				"mx-2.5 mt-2.5 flex items-start gap-2 rounded-md border-primary/50 border-l-2 bg-foreground/5 py-1.5 pr-1.5 pl-2.5",
+				"mx-2 mt-2 flex items-start gap-2 rounded-lg border-border border-l-2 bg-muted py-1.5 pr-1.5 pl-2",
 				className
 			)}
 			data-slot="composer-quote-preview"
 		>
-			<IconQuote className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+			<HugeiconsIcon
+				className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+				icon={QuoteDownIcon}
+			/>
 			<p className="type-detail line-clamp-3 min-w-0 flex-1 whitespace-pre-wrap text-muted-foreground leading-snug">
 				{text}
 			</p>
 			{onDismiss && (
 				<button
 					aria-label="Remove quote"
-					className="shrink-0 rounded-md p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
+					className="shrink-0 rounded-lg p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					onClick={onDismiss}
 					type="button"
 				>
-					<IconX className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
 				</button>
 			)}
 		</div>
@@ -453,7 +458,7 @@ export function QuoteBlock({ text, className }: QuoteBlockProps) {
 	return (
 		<p
 			className={cn(
-				"type-detail mb-1.5 line-clamp-4 whitespace-pre-wrap border-foreground/25 border-l-2 pl-2 text-muted-foreground leading-snug",
+				"type-detail mb-1.5 line-clamp-4 whitespace-pre-wrap border-border border-l-2 pl-2 text-muted-foreground leading-snug",
 				className
 			)}
 		>

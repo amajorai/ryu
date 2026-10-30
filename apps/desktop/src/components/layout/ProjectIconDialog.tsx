@@ -4,13 +4,20 @@
 
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
-import { GlyphPicker } from "@ryu/ui/components/glyph-picker.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { ReactNode } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
 	type ProjectIcon,
 	useWorkspaceStore,
 } from "@/src/store/useWorkspaceStore.ts";
+
+// The picker loads the first time the dialog opens (see EntityIconDialog).
+const GlyphPicker = lazy(() =>
+	import("@ryu/ui/components/glyph-picker.tsx").then((module) => ({
+		default: module.GlyphPicker,
+	}))
+);
 
 /**
  * Render a project's glyph: its custom emoji/image/icon/dicebear if set,
@@ -51,26 +58,40 @@ export function ProjectIconDialog({
 	open: boolean;
 	path: string;
 }) {
-	const { projectIcons, setProjectIcon, clearProjectIcon } =
-		useWorkspaceStore();
+	const { projectIcons, setProjectIcon, clearProjectIcon } = useWorkspaceStore(
+		useShallow((s) => ({
+			projectIcons: s.projectIcons,
+			setProjectIcon: s.setProjectIcon,
+			clearProjectIcon: s.clearProjectIcon,
+		}))
+	);
 	const current = projectIcons[path] ?? null;
+	const [opened, setOpened] = useState(open);
+	if (open && !opened) {
+		setOpened(true);
+	}
+	if (!opened) {
+		return null;
+	}
 
 	return (
-		<GlyphPicker
-			allowed="entity"
-			description={name}
-			onChange={(next: GlyphValue) => {
-				if (next) {
-					setProjectIcon(path, next);
-				} else {
-					clearProjectIcon(path);
-				}
-				onOpenChange(false);
-			}}
-			onOpenChange={onOpenChange}
-			open={open}
-			title="Project icon"
-			value={current}
-		/>
+		<Suspense fallback={null}>
+			<GlyphPicker
+				allowed="entity"
+				description={name}
+				onChange={(next: GlyphValue) => {
+					if (next) {
+						setProjectIcon(path, next);
+					} else {
+						clearProjectIcon(path);
+					}
+					onOpenChange(false);
+				}}
+				onOpenChange={onOpenChange}
+				open={open}
+				title="Project icon"
+				value={current}
+			/>
+		</Suspense>
 	);
 }

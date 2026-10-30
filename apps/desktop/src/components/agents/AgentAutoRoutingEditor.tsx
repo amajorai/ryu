@@ -10,9 +10,7 @@
 // Mounted once (next to the Gateway dialog in NodeSelector) and driven by the
 // `useAgentAutoDialog` store, so it lives clear of the picker dropdown's portal.
 
-import { Add01Icon, Delete01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -34,21 +32,16 @@ import {
 } from "@ryu/ui/components/select.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	CLASSIFY_MODEL_ID,
 	CLASSIFY_TIER_COPY,
-	type ClassifyTierState,
 	classifyTierCannotServeModel,
-	classifyTierServable,
-	deriveClassifyTierState,
-	fetchClassifyWeightsPresent,
 	type RouteStrategy,
 	routeStrategyCopy,
 } from "@/src/lib/api/gateway.ts";
@@ -58,123 +51,15 @@ import {
 	getAgentAutoRouting,
 	setAgentAutoRouting,
 } from "@/src/lib/api/preferences.ts";
-import { fetchSidecarStatus } from "@/src/lib/api/system.ts";
 import { useAgentAutoDialog } from "@/src/store/useAgentAutoDialog.ts";
-
-/** Editing row for one agent-auto rule, with a stable client-side id for keys. */
-interface AutoRuleRow {
-	agentId: string;
-	description: string;
-	id: string;
-}
-
-// Same cadences the gateway's Smart routing card polls at: the run state flips
-// whenever the lazy sidecar starts, the weights land once after a download.
-const CLASSIFY_STATUS_POLL_MS = 5000;
-const CLASSIFY_WEIGHTS_POLL_MS = 30_000;
-
-/**
- * The one copy for "on, with no classifier picked". Informational, not a warning:
- * Core's `de_classifier_model` (`agent_routing/auto.rs`) resolves a blank to the
- * classify tier's id, so the feature runs on the local classifier rather than not
- * at all. Deliberately the gateway Smart routing card's sentence with the one
- * noun this plane changes.
- *
- * It previously read "…so it never runs, and every turn falls back to the default
- * agent" — true of the old plain `#[serde(default)] String`, false once the field
- * gained its deserializer.
- */
-const CLASSIFIER_DEFAULTED_COPY = `No classifier model is picked, so auto routing uses this node's local classifier (${CLASSIFY_MODEL_ID}). Enter a model id to route with something else.`;
-
-/**
- * Live state of the local classify tier on the node this config is written to,
- * from the same two independent probes the gateway's Smart routing card crosses:
- *
- *  - `/api/sidecar/status` — is the sidecar registered, and is it resident? Read
- *    from Core, not the gateway, because the sidecar is Core's and no gateway
- *    route reports it.
- *  - `/api/models/installed` — are its WEIGHTS on disk? Registered-but-idle is the
- *    sidecar's normal resting state, so the run state alone cannot tell a lazy
- *    tier apart from one whose non-fatal onboarding download failed and which will
- *    therefore bail on every start attempt.
- *
- * `undefined` for either probe while pending OR on failure (an older Core has no
- * `/api/models/installed`), which keeps the row silent instead of crying "not
- * downloaded" — {@link deriveClassifyTierState}, not this hook, decides what that
- * means. Only polled while the dialog is open, and keyed by node URL so it shares
- * one poll with every other card on the same node.
- */
-function useClassifyTier(
-	target: ApiTarget,
-	enabled: boolean
-): ClassifyTierState {
-	const status = useQuery({
-		enabled,
-		queryKey: ["sidecar-status", target.url],
-		queryFn: () => fetchSidecarStatus(target),
-		refetchInterval: CLASSIFY_STATUS_POLL_MS,
-	});
-	const weights = useQuery({
-		enabled,
-		queryKey: ["classify-weights", target.url],
-		queryFn: () => fetchClassifyWeightsPresent(target),
-		refetchInterval: CLASSIFY_WEIGHTS_POLL_MS,
-	});
-	return deriveClassifyTierState({
-		sidecarStatus: status.isSuccess ? status.data : undefined,
-		weightsPresent: weights.isSuccess ? weights.data : undefined,
-	});
-}
-
-/**
- * Badge tone per tier state: `running` reads as active, `unweighted` is the one
- * state that is a genuine fault on this node, and `idle`/`absent` are neutral
- * facts.
- */
-function classifyBadgeVariant(
-	state: Exclude<ClassifyTierState, "unknown">
-): "default" | "destructive" | "secondary" {
-	if (state === "running") {
-		return "default";
-	}
-	if (state === "unweighted") {
-		return "destructive";
-	}
-	return "secondary";
-}
-
-/**
- * Status + one-click adopt row for the local classify tier, rendered under the
- * classifier field. The button only appears when this node can actually serve the
- * tier and it isn't already the selected value — offering it otherwise would hand
- * the user a model id whose call is guaranteed to fail.
- */
-function ClassifyTierNote({
-	onUse,
-	state,
-	value,
-}: {
-	onUse: () => void;
-	state: ClassifyTierState;
-	value: string;
-}) {
-	if (state === "unknown") {
-		return null;
-	}
-	const copy = CLASSIFY_TIER_COPY[state];
-	const servable = classifyTierServable(state);
-	return (
-		<div className="flex flex-wrap items-center gap-2">
-			<Badge variant={classifyBadgeVariant(state)}>{copy.badge}</Badge>
-			<span className="text-muted-foreground text-xs">{copy.hint}</span>
-			{servable && value.trim() !== CLASSIFY_MODEL_ID ? (
-				<Button onClick={onUse} size="sm" type="button" variant="ghost">
-					Use it
-				</Button>
-			) : null}
-		</div>
-	);
-}
+import {
+	ClassifyTierNote,
+	useClassifyTier,
+} from "./AgentAutoRoutingEditor-classify-tier.tsx";
+import {
+	AgentAutoRoutingRulesSection,
+	type AutoRuleRow,
+} from "./AgentAutoRoutingEditor-rules-section.tsx";
 
 export function AgentAutoRoutingEditor() {
 	const open = useAgentAutoDialog((s) => s.open);
@@ -191,6 +76,7 @@ export function AgentAutoRoutingEditor() {
 	const [friendly] = useFriendlyMode();
 	const strategyCopy = routeStrategyCopy(friendly);
 
+	const tl = useLiteralMessages();
 	const [draft, setDraft] = useState<AgentAutoRoutingConfig>(
 		DEFAULT_AGENT_AUTO_ROUTING
 	);
@@ -279,7 +165,25 @@ export function AgentAutoRoutingEditor() {
 		classifyTier === "absent" || classifyTier === "unweighted"
 			? CLASSIFY_TIER_COPY[classifyTier].reason
 			: null;
-	const classifierUnservedCopy = `Auto routing is on with the local classify tier as its classifier, but ${classifierUnservedReason}, so the classification call will fail and every turn will quietly fall back to the default agent. Pick a model this node can reach.`;
+	const classifierUnservedCopy = tl(
+		"Auto routing is on with the local classify tier as its classifier, but {classifierUnservedReason}, so the classification call will fail and every turn will quietly fall back to the default agent. Pick a model this node can reach.",
+		{ classifierUnservedReason }
+	);
+	/**
+	 * The one copy for "on, with no classifier picked". Informational, not a warning:
+	 * Core's `de_classifier_model` (`agent_routing/auto.rs`) resolves a blank to the
+	 * classify tier's id, so the feature runs on the local classifier rather than not
+	 * at all. Deliberately the gateway Smart routing card's sentence with the one
+	 * noun this plane changes.
+	 *
+	 * It previously read "…so it never runs, and every turn falls back to the default
+	 * agent" — true of the old plain `#[serde(default)] String`, false once the field
+	 * gained its deserializer.
+	 */
+	const classifierDefaultedCopy = tl(
+		"No classifier model is picked, so auto routing uses this node's local classifier ({CLASSIFY_MODEL_ID}). Enter a model id to route with something else.",
+		{ CLASSIFY_MODEL_ID }
+	);
 
 	const patch = (p: Partial<AgentAutoRoutingConfig>) => {
 		setDraft((prev) => ({ ...prev, ...p }));
@@ -429,13 +333,12 @@ export function AgentAutoRoutingEditor() {
 									placeholder="e.g. gemma-local, or a cheap routable model"
 									value={draft.classifier_model}
 								/>
-								<p className="text-muted-foreground text-xs">
-									A cheap, fast model used only to sort requests. Any routable
-									model id works (including local models or openrouter/ slugs).
+								<p className="text-detail text-muted-foreground">
+									A cheap, fast model used only to sort requests.
 								</p>
 								{classifierDefaulted ? (
 									<p className="text-muted-foreground text-xs">
-										{CLASSIFIER_DEFAULTED_COPY}
+										{classifierDefaultedCopy}
 									</p>
 								) : null}
 								{classifierUnserved ? (
@@ -478,73 +381,13 @@ export function AgentAutoRoutingEditor() {
 							</>
 						) : null}
 
-						<div className="flex flex-col gap-2">
-							<div className="flex items-center justify-between">
-								<Label>Rules</Label>
-								<Button onClick={addRule} size="sm" variant="ghost">
-									<HugeiconsIcon className="size-4" icon={Add01Icon} />
-									Add rule
-								</Button>
-							</div>
-							{rules.length === 0 ? (
-								<p className="text-muted-foreground text-sm">
-									No rules yet. Add one like “writing or debugging code” →
-									Claude Code.
-								</p>
-							) : (
-								<div className="flex flex-col gap-3">
-									{rules.map((rule, idx) => (
-										<div className="flex items-start gap-2" key={rule.id}>
-											<div className="flex flex-1 flex-col gap-1.5">
-												<Input
-													aria-label={`Rule ${idx + 1} description`}
-													onChange={(e) =>
-														updateRule(rule.id, "description", e.target.value)
-													}
-													placeholder="When the request is about… (plain language)"
-													value={rule.description}
-												/>
-												<Select
-													items={routableAgents.map((a) => ({
-														value: a.id,
-														label: a.name,
-													}))}
-													onValueChange={(v) =>
-														v && updateRule(rule.id, "agentId", v)
-													}
-													value={rule.agentId}
-												>
-													<SelectTrigger>
-														<SelectValue placeholder="Route to agent" />
-													</SelectTrigger>
-													<SelectContent>
-														{routableAgents.map((a) => (
-															<SelectItem key={a.id} value={a.id}>
-																<span className="font-medium">{a.name}</span>
-																<span className="ml-1 text-muted-foreground text-xs">
-																	— {a.id}
-																</span>
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-											</div>
-											<Button
-												onClick={() => removeRule(rule.id)}
-												size="icon"
-												variant="ghost"
-											>
-												<HugeiconsIcon
-													className="size-3.5 text-status-destructive"
-													icon={Delete01Icon}
-												/>
-												<span className="sr-only">Remove rule {idx + 1}</span>
-											</Button>
-										</div>
-									))}
-								</div>
-							)}
-						</div>
+						<AgentAutoRoutingRulesSection
+							addRule={addRule}
+							removeRule={removeRule}
+							routableAgents={routableAgents}
+							rules={rules}
+							updateRule={updateRule}
+						/>
 
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor="auto-default-agent">
@@ -600,7 +443,9 @@ export function AgentAutoRoutingEditor() {
 				) : loadError ? (
 					<div className="flex flex-col items-start gap-3 py-6" role="alert">
 						<p className="text-sm text-status-destructive">
-							Auto routing settings could not be loaded. {loadError}
+							{tl("Auto routing settings could not be loaded. {loadError}", {
+								loadError,
+							})}
 						</p>
 						<Button
 							onClick={() => setLoadAttempt((attempt) => attempt + 1)}

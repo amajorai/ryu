@@ -37,7 +37,11 @@ test("saved plan rows open the selected rendered artifact", async ({
 	page,
 }) => {
 	await page.goto("/plan-pinned-summary-proof.html");
-	await page.getByRole("button", { name: /Plans/ }).click();
+	const plansTrigger = page.getByRole("button", { name: /Plans/ });
+	if ((await plansTrigger.getAttribute("aria-expanded")) !== "true") {
+		await plansTrigger.click();
+	}
+	await expect(plansTrigger).toHaveAttribute("aria-expanded", "true");
 	const rows = page.getByTestId("pinned-summary-plan");
 	await expect(rows).toHaveCount(2);
 	await rows.nth(1).click();

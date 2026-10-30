@@ -16,6 +16,8 @@ import {
 	BoolField,
 	FieldGrid,
 	FieldGroup,
+	InferenceLoadError,
+	InferenceSaveError,
 	NumberField,
 	TextField,
 } from "./fields.tsx";
@@ -117,8 +119,8 @@ function EngineTranscriptionEditor({
 		});
 
 	return (
-		<SettingsSection caption="Defaults for transcriptions routed to this engine. Blank values keep the engine's own defaults.">
-			<SettingsCard className="flex flex-col gap-5">
+		<SettingsSection caption="Blank values keep the engine's own defaults.">
+			<SettingsCard className="flex flex-col gap-4">
 				<FieldGroup
 					description="Whisper.cpp and audio.cpp apply these fields per transcription request."
 					title="Recognition"
@@ -244,6 +246,7 @@ function EngineTranscriptionEditor({
 						disabled={save.isPending || Boolean(extraError)}
 						loading={save.isPending}
 						onClick={() => save.mutate(draft)}
+						variant="outline"
 					>
 						Save transcription settings
 					</Button>
@@ -253,11 +256,10 @@ function EngineTranscriptionEditor({
 						</span>
 					) : null}
 					{save.isError ? (
-						<p className="text-status-destructive text-xs" role="alert">
-							{save.error instanceof Error
-								? save.error.message
-								: "Could not save transcription settings"}
-						</p>
+						<InferenceSaveError
+							error={save.error}
+							message="Couldn't save transcription settings."
+						/>
 					) : null}
 				</div>
 			</SettingsCard>
@@ -297,23 +299,11 @@ export function SttTranscriptionSettings({
 	}
 	if (query.isError && !query.data) {
 		return (
-			<div
-				className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
-				role="alert"
-			>
-				<p className="text-sm text-status-destructive">
-					Could not load transcription settings.
-				</p>
-				<Button
-					disabled={query.isFetching}
-					loading={query.isFetching}
-					onClick={() => void query.refetch()}
-					size="sm"
-					variant="outline"
-				>
-					Retry
-				</Button>
-			</div>
+			<InferenceLoadError
+				error={query.error}
+				message="Couldn't load transcription settings."
+				onRetry={() => void query.refetch()}
+			/>
 		);
 	}
 
@@ -326,9 +316,7 @@ export function SttTranscriptionSettings({
 	return (
 		<div className="flex flex-col gap-2">
 			{settingsNote ? (
-				<p className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs">
-					{settingsNote}
-				</p>
+				<p className="py-2 text-muted-foreground text-xs">{settingsNote}</p>
 			) : null}
 			{query.data ? (
 				<EngineTranscriptionEditor

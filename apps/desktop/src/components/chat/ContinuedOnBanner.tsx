@@ -1,6 +1,9 @@
+import { ComputerIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
+import { ShellBanner } from "@/src/components/shell/shell-banner.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	clearRnpContinued,
@@ -21,7 +24,7 @@ export function ContinuedOnBadge({
 	const tl = useLiteralMessages();
 	return (
 		<span
-			className="type-compact max-w-24 shrink-0 truncate rounded bg-muted px-1 text-muted-foreground"
+			className="max-w-24 shrink-0 truncate text-muted-foreground/70 text-xs"
 			title={tl("Continued on {nodeLabel}", {
 				nodeLabel: continuedOn.nodeLabel,
 			})}
@@ -46,6 +49,7 @@ export function ContinuedOnBanner({
 	onTakenBack,
 	target,
 }: ContinuedOnBannerProps) {
+	const tl = useLiteralMessages();
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -63,28 +67,36 @@ export function ContinuedOnBanner({
 	};
 
 	return (
-		<div
-			className="flex flex-wrap items-center gap-2 rounded-xl border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-sm"
-			data-testid="continued-on-banner"
-			role="status"
-		>
-			<span className="min-w-0 flex-1">
-				Continued on <strong>{continuedOn.nodeLabel}</strong>. This copy is
-				paused so two computers do not edit the same branch.
-			</span>
-			<Button
-				disabled={pending}
-				onClick={() => void takeBack()}
-				size="sm"
-				variant="outline"
-			>
-				{pending ? "Taking back…" : "Take back here"}
-			</Button>
+		<>
+			{/* The shell's one banner pattern: a muted icon, one sentence (the
+			    reason reads in full on hover and to screen readers) and one
+			    action. */}
+			<ShellBanner
+				action={
+					<Button
+						disabled={pending}
+						onClick={() => void takeBack()}
+						size="sm"
+						variant="ghost"
+					>
+						{pending ? "Taking back…" : "Take back here"}
+					</Button>
+				}
+				data-testid="continued-on-banner"
+				detail="This copy is paused so two computers do not edit the same branch."
+				icon={<HugeiconsIcon icon={ComputerIcon} />}
+				title={tl("Continued on {nodeLabel}.", {
+					nodeLabel: continuedOn.nodeLabel,
+				})}
+			/>
 			{error ? (
-				<p className="w-full text-status-destructive text-xs" role="alert">
+				<p
+					className="text-(length:--text-detail) px-4 py-1 text-status-destructive"
+					role="alert"
+				>
 					{error}
 				</p>
 			) : null}
-		</div>
+		</>
 	);
 }

@@ -56,13 +56,10 @@ export function ContextPill({
 				title={context.appName ?? ""}
 			>
 				<span
-					className={`relative flex size-2 shrink-0 ${wrap ? "mt-1.5" : ""}`}
-				>
-					<span className="absolute inline-flex size-full rounded-full bg-info opacity-70 motion-safe:animate-ping" />
-					<span className="relative inline-flex size-2 rounded-full bg-info" />
-				</span>
+					className={`size-2 shrink-0 rounded-full bg-info ${wrap ? "mt-1.5" : ""}`}
+				/>
 				<span
-					className={`font-medium text-sm ${wrap ? "min-w-0 break-words" : "max-w-[150px] truncate"}`}
+					className={`font-medium text-sm ${wrap ? "min-w-0 break-words" : "max-w-36 truncate"}`}
 				>
 					{titleCaseAppName(context.appName ?? "")}
 				</span>

@@ -19,6 +19,7 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useSafeMode } from "@/src/hooks/useSafeMode.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { ShellBanner } from "./shell-banner.tsx";
 
 /**
  * Re-read cadence. Slow on purpose: the state only changes across a Core restart,
@@ -60,37 +61,41 @@ export function SafeModeBanner() {
 			? null
 			: state.preferenceEnabled);
 
+	const suppressed = tl(
+		"{plugins, plural, one {# app} other {# apps}}, {skills, plural, one {# skill} other {# skills}} and {mcpServers, plural, one {# MCP server} other {# MCP servers}} aren't loaded.",
+		{ mcpServers, plugins, skills }
+	);
+
 	return (
-		<div className="pointer-events-auto fixed top-12 right-4 z-50 flex items-center gap-3 rounded-xl border border-warning/40 bg-warning/15 px-3 py-2 shadow-lg backdrop-blur-xl">
-			<HugeiconsIcon
-				className="size-4 shrink-0 text-status-warning dark:text-status-warning"
-				icon={Alert01Icon}
-			/>
-			<div className="flex flex-col leading-tight">
-				<span className="font-medium text-xs">Safe Mode</span>
-				<span className="text-muted-foreground text-xs">
-					{restartPending === false && !local
-						? "Saved. Restart the remote node to leave Safe Mode. "
-						: null}
-					{tl(
-						"{plugins, plural, one {# app} other {# apps}}, {skills, plural, one {# skill} other {# skills}} and {mcpServers, plural, one {# MCP server} other {# MCP servers}} aren't loaded",
-						{ mcpServers, plugins, skills }
-					)}
-				</span>
-			</div>
-			{/* An env-forced node can only be cleared by unsetting the variable, so
-			    offer the button only where it can actually work. */}
-			{state.userClearable ? (
-				<Button
-					className="h-7"
-					disabled={leaving || restartPending === false}
-					onClick={handleLeave}
-					size="sm"
-					variant="ghost"
-				>
-					Leave
-				</Button>
-			) : null}
-		</div>
+		<ShellBanner
+			action={
+				// An env-forced node can only be cleared by unsetting the variable,
+				// so offer the button only where it can actually work.
+				state.userClearable ? (
+					<Button
+						disabled={leaving || restartPending === false}
+						onClick={handleLeave}
+						size="sm"
+						variant="ghost"
+					>
+						Leave
+					</Button>
+				) : null
+			}
+			data-testid="safe-mode-banner"
+			detail={
+				restartPending === false && !local
+					? tl(
+							"Saved. Restart the remote node to leave Safe Mode. {suppressed}",
+							{
+								suppressed,
+							}
+						)
+					: suppressed
+			}
+			icon={<HugeiconsIcon icon={Alert01Icon} />}
+			title="Safe Mode."
+			tone="warning"
+		/>
 	);
 }

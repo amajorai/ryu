@@ -1,13 +1,15 @@
 declare const styles: {
-	readonly arrow: string;
-	readonly blink: string;
-	readonly caret: string;
-	readonly char: string;
-	readonly check: string;
-	readonly dim: string;
-	readonly lift: string;
-	readonly query: string;
+	readonly button: string;
+	readonly doneA: string;
+	readonly doneB: string;
+	readonly doneC: string;
+	readonly getA: string;
+	readonly getB: string;
+	readonly getC: string;
+	readonly glass: string;
 	readonly ring: string;
 	readonly root: string;
+	readonly search: string;
+	readonly tile: string;
 };
 export default styles;

@@ -1,29 +1,19 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { AppleHelloEffect } from "@ryu/ui/components/apple-hello-effect.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRyuOnboardingPersona } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import { useMotionAllowed } from "@/src/hooks/useSeasonalEffects.ts";
 
-const WELCOME_MS = 3500;
-const HELLO_LANGUAGE_MS = 2400;
-const SENTENCE_MS = 3200;
-const FADE_SECONDS = 0.8;
+const WELCOME_MS = 3000;
+const SENTENCE_MS = 2400;
+/** `--duration-base`: one quiet fade between the two beats. */
+const FADE_SECONDS = 0.2;
 
-const HELLO_LANGUAGES = [
-	{ language: "English", text: "hello" },
-	{ language: "Hindi", text: "नमस्ते" },
-	{ language: "Spanish", text: "hola" },
-	{ language: "Vietnamese", text: "xin chào" },
-] as const;
+type Beat = { kind: "welcome" } | { kind: "sentence"; text: string };
 
-type Beat =
-	| { kind: "welcome" }
-	| { kind: "hello"; language: string; text: string }
-	| { kind: "sentence"; text: string };
-
-const HEADER_CLASS = "text-center font-medium text-2xl sm:text-3xl";
+const HEADER_CLASS =
+	"text-balance text-center font-medium text-2xl tracking-tight";
 
 function RyuWelcomeWordmark({ reducedMotion }: { reducedMotion: boolean }) {
 	return (
@@ -42,17 +32,11 @@ function RyuWelcomeWordmark({ reducedMotion }: { reducedMotion: boolean }) {
 }
 
 function beatKey(beat: Beat) {
-	if (beat.kind === "welcome") {
-		return "welcome";
-	}
-	return beat.kind === "hello" ? `hello-${beat.language}` : beat.text;
+	return beat.kind === "welcome" ? "welcome" : beat.text;
 }
 
 function beatDuration(beat: Beat) {
-	if (beat.kind === "welcome") {
-		return WELCOME_MS;
-	}
-	return beat.kind === "hello" ? HELLO_LANGUAGE_MS : SENTENCE_MS;
+	return beat.kind === "welcome" ? WELCOME_MS : SENTENCE_MS;
 }
 
 interface WelcomeStepProps {
@@ -60,8 +44,8 @@ interface WelcomeStepProps {
 }
 
 /**
- * The first-run welcome: one line at a time, each fading into the next, ending
- * on "Welcome to Ryu" and one pass of the hello loop, then straight into setup.
+ * The first-run welcome: two beats, the agent's greeting and then "Welcome to
+ * Ryu", each fading into the next, then straight into setup.
  * Skip (or Enter or Escape) goes straight to setup. With motion off (the app's
  * animations setting or the system's reduced-motion preference) it shows only
  * the welcome line.
@@ -80,13 +64,8 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 			reducedMotion
 				? [{ kind: "welcome" }]
 				: [
-						{ kind: "sentence", text: "Let's personalize your experience." },
 						{ kind: "sentence", text: tl("Hi, I'm {name}.", { name }) },
-						{ kind: "sentence", text: "I help you get real work done." },
 						{ kind: "welcome" },
-						...HELLO_LANGUAGES.map(
-							(hello): Beat => ({ kind: "hello", ...hello })
-						),
 					],
 		[name, reducedMotion, tl]
 	);
@@ -134,7 +113,6 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 				aria-live="polite"
 				className="flex h-24 w-full max-w-xl items-center justify-center"
 				data-beat={beat.kind}
-				data-language={beat.kind === "hello" ? beat.language : undefined}
 				data-testid="onboarding-welcome-beat"
 			>
 				<AnimatePresence initial={false} mode="wait">
@@ -146,7 +124,7 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 						key={beatKey(beat)}
 						transition={{
 							duration: reducedMotion ? 0 : FADE_SECONDS,
-							ease: "easeInOut",
+							ease: [0.19, 1, 0.22, 1],
 						}}
 					>
 						{beat.kind === "welcome" ? (
@@ -163,15 +141,6 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 								</span>
 							</h1>
 						) : null}
-						{beat.kind === "hello" ? (
-							<div className="text-5xl text-foreground sm:text-6xl">
-								<AppleHelloEffect
-									className="flex h-24 items-center justify-center"
-									durationScale={reducedMotion ? 0 : 0.7}
-									text={beat.language === "English" ? undefined : beat.text}
-								/>
-							</div>
-						) : null}
 						{beat.kind === "sentence" ? (
 							<h1 className={HEADER_CLASS}>{beat.text}</h1>
 						) : null}
@@ -180,10 +149,10 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 			</div>
 			<Button
 				aria-label="Skip the introduction"
-				className="absolute right-6 bottom-6"
+				className="absolute right-6 bottom-6 h-10 px-4"
 				data-testid="onboarding-welcome-skip"
 				onClick={finish}
-				variant="ghost"
+				variant="ghost-muted"
 			>
 				Skip
 			</Button>

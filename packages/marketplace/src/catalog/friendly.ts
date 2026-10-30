@@ -7,183 +7,19 @@
 // desktop-only surfaces (Download Center labels, model pickers, search
 // haystacks). Nothing here hits the network or React.
 
+import { type BadgeTone, CATALOG_TOKENS } from "./friendly-tokens.ts";
 import type { SkillCard } from "./types.ts";
 
-/** Visual tone for a badge — maps to a Tailwind class set in the badge UI. */
-export type BadgeTone =
-	| "neutral"
-	| "blue"
-	| "violet"
-	| "amber"
-	| "rose"
-	| "emerald";
-
-/** A recognized name-token rendered as a labeled, filterable badge. */
-export interface CatalogToken {
-	/** Lowercase word aliases matched against name segments + tags. */
-	aliases: string[];
-	/** Stable filter id (also the badge key). */
-	id: string;
-	/** Human label shown on the badge. */
-	label: string;
-	tone: BadgeTone;
-	/** Hover explanation. */
-	tooltip: string;
-}
-
-/**
- * Token vocabulary, scanned against a model's name segments and its Hub tags.
- * Order matters only for display grouping; matching is alias-exact per segment.
- */
-export const CATALOG_TOKENS: CatalogToken[] = [
-	{
-		id: "instruct",
-		aliases: ["it", "instruct", "inst"],
-		label: "Instruct",
-		tooltip: "Instruction-tuned — follows chat-style prompts",
-		tone: "blue",
-	},
-	{
-		id: "chat",
-		aliases: ["chat"],
-		label: "Chat",
-		tooltip: "Tuned for conversation",
-		tone: "blue",
-	},
-	{
-		id: "base",
-		aliases: ["base", "pt", "pretrain", "pretrained"],
-		label: "Base",
-		tooltip: "Pretrained base model — not chat-tuned",
-		tone: "neutral",
-	},
-	{
-		id: "reasoning",
-		aliases: ["reasoning", "thinking", "think", "reason"],
-		label: "Reasoning",
-		tooltip: "Tuned to think step-by-step before answering",
-		tone: "violet",
-	},
-	{
-		id: "r1",
-		aliases: ["r1"],
-		label: "R1",
-		tooltip: "DeepSeek-R1 style reasoning distillation",
-		tone: "violet",
-	},
-	{
-		id: "cot",
-		aliases: ["cot"],
-		label: "Chain-of-Thought",
-		tooltip: "Trained to show its chain-of-thought reasoning",
-		tone: "violet",
-	},
-	{
-		id: "mtp",
-		aliases: ["mtp"],
-		label: "Multi-Token",
-		tooltip: "Multi-token prediction — can decode faster",
-		tone: "violet",
-	},
-	{
-		id: "uncensored",
-		aliases: ["uncensored", "abliterated", "abliter", "unfiltered", "dolphin"],
-		label: "Uncensored",
-		tooltip: "Safety alignment reduced or removed (e.g. abliterated/Dolphin)",
-		tone: "rose",
-	},
-	{
-		id: "qat",
-		aliases: ["qat"],
-		label: "Quality-Tuned",
-		tooltip: "Quantization-aware training — keeps quality high when compressed",
-		tone: "emerald",
-	},
-	{
-		id: "finetuned",
-		aliases: ["dpo", "sft", "rlhf", "orpo", "kto", "ft", "finetune"],
-		label: "Fine-Tuned",
-		tooltip: "Further fine-tuned (DPO/SFT/RLHF and similar)",
-		tone: "emerald",
-	},
-	{
-		id: "distilled",
-		aliases: ["distill", "distilled", "distillation"],
-		label: "Distilled",
-		tooltip: "Distilled from a larger model — smaller, faster",
-		tone: "emerald",
-	},
-	{
-		id: "merged",
-		aliases: ["merge", "merged", "slerp", "frankenmerge"],
-		label: "Merged",
-		tooltip: "A merge of several models",
-		tone: "neutral",
-	},
-	{
-		id: "vision",
-		aliases: ["vl", "vision", "multimodal", "omni", "image"],
-		label: "Vision",
-		tooltip: "Understands images as well as text",
-		tone: "blue",
-	},
-	{
-		id: "coder",
-		aliases: ["coder", "code", "codestral", "starcoder"],
-		label: "Coder",
-		tooltip: "Specialized for writing and understanding code",
-		tone: "blue",
-	},
-	{
-		id: "math",
-		aliases: ["math", "maths", "mathstral"],
-		label: "Math",
-		tooltip: "Specialized for mathematical reasoning",
-		tone: "blue",
-	},
-	{
-		id: "moe",
-		aliases: ["moe"],
-		label: "Mixture-of-Experts",
-		tooltip: "Mixture-of-Experts — only part of the model runs per token",
-		tone: "violet",
-	},
-	{
-		id: "precision",
-		aliases: ["fp16", "f16", "bf16", "fp32", "f32"],
-		label: "Full precision",
-		tooltip: "Uncompressed weights — highest quality, largest size",
-		tone: "neutral",
-	},
-	{
-		id: "gguf",
-		aliases: ["gguf", "ggml"],
-		label: "GGUF",
-		tooltip: "Local-friendly model file format",
-		tone: "neutral",
-	},
-	{
-		id: "format",
-		aliases: ["onnx", "awq", "gptq", "exl2", "mlx", "safetensors"],
-		label: "Other format",
-		tooltip: "An alternate weight format",
-		tone: "neutral",
-	},
-	{
-		id: "preview",
-		aliases: ["preview", "experimental", "beta", "alpha", "rc"],
-		label: "Preview",
-		tooltip: "Early / experimental release",
-		tone: "amber",
-	},
-	{
-		id: "longcontext",
-		aliases: ["128k", "256k", "512k", "1m", "long", "longcontext"],
-		label: "Long context",
-		tooltip: "Handles unusually long inputs",
-		tone: "blue",
-	},
-];
+export type { Modality, ModalityFlow } from "./friendly-modalities.ts";
+export { parsePipelineModalities } from "./friendly-modalities.ts";
+export type { QuantInfo } from "./friendly-quant.ts";
+export {
+	friendlyQuant,
+	QUANT_QUALITY_MAX,
+	quantVariantRank,
+} from "./friendly-quant.ts";
+export type { BadgeTone, CatalogToken } from "./friendly-tokens.ts";
+export { CATALOG_TOKENS } from "./friendly-tokens.ts";
 
 /**
  * Friendly-mode overrides per token: a simpler label for non-technical users, or
@@ -433,100 +269,12 @@ export function skillOrg(card: SkillCard): string {
 	return (card.source || card.id).split("/")[0] ?? "";
 }
 
-// ── Input/output modalities (from the HF pipeline tag) ──────────────────────
-
-/** A data modality a model accepts or produces. */
-export type Modality = "text" | "image" | "pdf" | "video" | "audio";
-
-/** What a model takes in and puts out, derived from its pipeline tag. */
-export interface ModalityFlow {
-	inputs: Modality[];
-	outputs: Modality[];
-}
-
-// ---------------------------------------------------------------------------
-// Model-catalog display helpers (moved from apps/desktop with the Models
-// section). Pure, framework-free — used by the shared Models catalog section.
-// ---------------------------------------------------------------------------
-
-/** Number of segments in the friendly quality meter. */
-export const QUANT_QUALITY_MAX = 5;
-
-/** Plain-language compression level for a GGUF quant. */
-export interface QuantInfo {
-	/** Plain-language level (e.g. "Balanced (recommended)"). */
-	label: string;
-	/**
-	 * Quality on a 1..{@link QUANT_QUALITY_MAX} scale, for the friendly meter
-	 * ("more bars = better"). `null` when the quant is unknown — callers must omit
-	 * the meter entirely in that case rather than render an empty (zero-quality)
-	 * bar, which would read as a worse lie than the raw label.
-	 */
-	quality: number | null;
-	/** Hover explanation, always including the raw quant. */
-	tooltip: string;
-}
-
 // Every alias across the token vocabulary, for stripping consumed segments from
 // a friendly model name.
 const ALL_ALIASES = new Set<string>(CATALOG_TOKENS.flatMap((t) => t.aliases));
 
 // A whole segment that is just a param-size token (e.g. "27b", "a3b", "270m").
 const STANDALONE_SIZE_RE = /^[ae]?\d+(?:\.\d+)?[bm]$/;
-
-/** One friendly compression tier, matched against the uppercased quant string. */
-interface QuantTier {
-	blurb: string;
-	label: string;
-	/** 1..{@link QUANT_QUALITY_MAX} bars on the quality meter. */
-	quality: number;
-	test: RegExp;
-}
-
-// Quant-label families, in increasing quality. Order matters: the IQ (importance-
-// matrix) families are tried before the plain K-quants.
-const QUANT_TIERS: QuantTier[] = [
-	{
-		test: /^IQ[12]/,
-		label: "Tiny",
-		quality: 1,
-		blurb:
-			"Most compressed — smallest file and fastest, with the biggest quality loss vs this model's full version.",
-	},
-	{
-		test: /^(Q[23]|IQ3)/,
-		label: "Smallest",
-		quality: 2,
-		blurb:
-			"Heavily compressed — small and fast, with noticeable quality loss vs this model's full version.",
-	},
-	{
-		test: /^(Q4|IQ4)/,
-		label: "Balanced (recommended)",
-		quality: 3,
-		blurb: "The best size-to-quality trade-off for most people.",
-	},
-	{
-		test: /^Q[56]/,
-		label: "High quality",
-		quality: 4,
-		blurb:
-			"Lightly compressed — larger file, very close to this model's full version.",
-	},
-	{
-		test: /^Q8/,
-		label: "Near-original",
-		quality: 5,
-		blurb:
-			"Barely compressed — nearly identical to this model's full version (size depends on the model, so this can still be small for a small model).",
-	},
-	{
-		test: /^(F|BF)(16|32)/,
-		label: "Full quality (largest)",
-		quality: 5,
-		blurb: "Uncompressed original weights — best quality, biggest download.",
-	},
-];
 
 /**
  * Friendly model name: strip every segment consumed by a recognized token or by
@@ -545,61 +293,6 @@ export function friendlyModelName(name: string, _tags: string[] = []): string {
 	});
 	const joined = kept.map(titleSegment).join(" ").trim();
 	return joined.length > 0 ? joined : titleCase(name);
-}
-
-/**
- * Plain-language compression level for a GGUF quant label (`Q4_K_M`, `Q8_0`,
- * `F16`, …). The raw label is always echoed in the tooltip so power users keep
- * the exact value. Unknown labels pass through unchanged.
- */
-export function friendlyQuant(quant: string | null): QuantInfo {
-	if (!quant) {
-		return {
-			label: "Custom",
-			tooltip:
-				"A custom or mixed quantization — the compression level varies across the file, so it can't be placed on the scale.",
-			quality: null,
-		};
-	}
-	const q = quant.toUpperCase();
-	const raw = `Exact format: ${quant}`;
-	for (const tier of QUANT_TIERS) {
-		if (tier.test.test(q)) {
-			return {
-				label: tier.label,
-				tooltip: `${tier.blurb} ${raw}`,
-				quality: tier.quality,
-			};
-		}
-	}
-	return { label: quant, tooltip: raw, quality: null };
-}
-
-const QUANT_VARIANT_SUFFIXES: [RegExp, number][] = [
-	[/_K_M$/, 0],
-	[/_K_S$/, 1],
-	[/_K_L$/, 2],
-	[/_K$/, 3],
-	[/_0$/, 4],
-	[/_1$/, 5],
-];
-
-/**
- * Canonical-variant preference for one GGUF quant within its friendly tier —
- * LOWER is more canonical. Returns a large number for anything unrecognized (or a
- * missing quant) so it sorts last.
- */
-export function quantVariantRank(quant: string | null): number {
-	if (!quant) {
-		return 99;
-	}
-	const q = quant.toUpperCase();
-	for (const [re, rank] of QUANT_VARIANT_SUFFIXES) {
-		if (re.test(q)) {
-			return rank;
-		}
-	}
-	return 10;
 }
 
 /** A non-quant role for a GGUF file that pairs with a base model. */
@@ -637,106 +330,6 @@ export function ggufFileRole(filename: string): GgufRole | null {
 			tooltip:
 				"A small companion model used to speed up a larger one (speculative decoding). Not the main model.",
 		};
-	}
-	return null;
-}
-
-// ── Input/output modalities (from the HF pipeline tag) ──────────────────────
-
-/** Canonical display order for modality icon rows. */
-const MODALITY_ORDER: Modality[] = ["text", "image", "pdf", "video", "audio"];
-
-/** Pipeline tags that don't follow the `<in>-to-<out>` shape. */
-interface PipelineModalityLookup {
-	[pipelineTag: string]: ModalityFlow | undefined;
-}
-
-const FIXED_MODALITIES: PipelineModalityLookup = {
-	"text-generation": { inputs: ["text"], outputs: ["text"] },
-	"text2text-generation": { inputs: ["text"], outputs: ["text"] },
-	"fill-mask": { inputs: ["text"], outputs: ["text"] },
-	summarization: { inputs: ["text"], outputs: ["text"] },
-	translation: { inputs: ["text"], outputs: ["text"] },
-	"question-answering": { inputs: ["text"], outputs: ["text"] },
-	"table-question-answering": { inputs: ["text"], outputs: ["text"] },
-	"feature-extraction": { inputs: ["text"], outputs: ["text"] },
-	"sentence-similarity": { inputs: ["text"], outputs: ["text"] },
-	"text-ranking": { inputs: ["text"], outputs: ["text"] },
-	"text-classification": { inputs: ["text"], outputs: ["text"] },
-	"token-classification": { inputs: ["text"], outputs: ["text"] },
-	"zero-shot-classification": { inputs: ["text"], outputs: ["text"] },
-	"automatic-speech-recognition": { inputs: ["audio"], outputs: ["text"] },
-	"audio-classification": { inputs: ["audio"], outputs: ["text"] },
-	"image-classification": { inputs: ["image"], outputs: ["text"] },
-	"image-segmentation": { inputs: ["image"], outputs: ["text"] },
-	"object-detection": { inputs: ["image"], outputs: ["text"] },
-	"zero-shot-image-classification": { inputs: ["image"], outputs: ["text"] },
-	"image-feature-extraction": { inputs: ["image"], outputs: ["text"] },
-	"video-classification": { inputs: ["video"], outputs: ["text"] },
-	"visual-question-answering": { inputs: ["text", "image"], outputs: ["text"] },
-	"document-question-answering": {
-		inputs: ["text", "pdf"],
-		outputs: ["text"],
-	},
-};
-
-/** Map one tag word to a modality (returns `null` for non-modality words). */
-function wordToModality(word: string): Modality | null {
-	switch (word) {
-		case "text":
-			return "text";
-		case "image":
-			return "image";
-		case "audio":
-		case "speech":
-			return "audio";
-		case "video":
-			return "video";
-		case "document":
-		case "pdf":
-			return "pdf";
-		default:
-			return null;
-	}
-}
-
-/** Modalities named in one side of a pipeline tag (`any` → every modality). */
-function segmentModalities(segment: string): Modality[] {
-	if (segment === "any") {
-		return [...MODALITY_ORDER];
-	}
-	const found = new Set<Modality>();
-	for (const word of segment.split("-")) {
-		const m = wordToModality(word);
-		if (m) {
-			found.add(m);
-		}
-	}
-	return MODALITY_ORDER.filter((m) => found.has(m));
-}
-
-/**
- * Derive the input and output modalities from a Hugging Face `pipeline_tag`.
- * Returns `null` when the tag is missing or unrecognized, so callers omit the row.
- */
-export function parsePipelineModalities(
-	pipelineTag: string | null
-): ModalityFlow | null {
-	if (!pipelineTag) {
-		return null;
-	}
-	const tag = pipelineTag.toLowerCase().trim();
-	const fixed = FIXED_MODALITIES[tag];
-	if (fixed) {
-		return fixed;
-	}
-	const idx = tag.indexOf("-to-");
-	if (idx !== -1) {
-		const inputs = segmentModalities(tag.slice(0, idx));
-		const outputs = segmentModalities(tag.slice(idx + "-to-".length));
-		if (inputs.length > 0 && outputs.length > 0) {
-			return { inputs, outputs };
-		}
 	}
 	return null;
 }

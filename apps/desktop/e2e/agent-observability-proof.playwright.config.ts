@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: path.resolve(import.meta.dirname),
-	testMatch: "agent-observability-proof.spec.ts",
+	testMatch: /agent-observability-proof(\.retry)?\.spec\.ts$/,
 	use: {
 		baseURL: "http://127.0.0.1:5189",
 		trace: "on-first-retry",

@@ -21,7 +21,7 @@ const {act}=await import("react");const {createRoot}=await import("react-dom/cli
 const handlers=new Map();const changes=new Set();const terminal=[];let props;
 mock.module(${JSON.stringify(Bun.resolveSync("electron", import.meta.dirname))},()=>({app:{getPath:()=>${JSON.stringify(root)}},ipcMain:{handle:(key,value)=>handlers.set(key,value)}}));
 mock.module(${JSON.stringify(Bun.resolveSync("@ryu/app-host/ExtensionHost", import.meta.dirname))},()=>({ExtensionHost:p=>{props=p;return <iframe title={p.title} srcDoc={p.srcdoc}/>;}}));
-mock.module(${JSON.stringify(Bun.resolveSync("@ryu/i18n/react", import.meta.dirname))},()=>({useI18n:()=>({getSnapshot:()=>({locale:"en",direction:"ltr"}),subscribe:()=>()=>{},t:key=>key})}));
+mock.module(${JSON.stringify(Bun.resolveSync("@ryu/i18n/react", import.meta.dirname))},()=>({useI18n:()=>({getSnapshot:()=>({locale:"en",direction:"ltr"}),subscribe:()=>()=>{},t:key=>key}),useLocalizedText:(value)=>value}));
 const {saveConfig}=await import(${JSON.stringify(join(import.meta.dirname, "config.ts"))});
 const {registerPluginsIpc}=await import(${JSON.stringify(join(import.meta.dirname, "../ipc/plugins.ts"))});
 const {IPC}=await import(${JSON.stringify(join(import.meta.dirname, "../../shared/ipc.ts"))});

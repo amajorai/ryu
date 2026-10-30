@@ -29,7 +29,7 @@ function LinkPreviewPopup({ children }: { children: React.ReactNode }) {
 				<PreviewCard.Popup
 					className={cn(
 						styles.previewPopup,
-						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 w-80 max-w-[min(20rem,calc(100vw-2rem))] origin-(--transform-origin) overflow-hidden rounded-2xl border border-border/50 bg-popover/70 p-0 text-popover-foreground text-sm outline-hidden backdrop-blur-2xl backdrop-saturate-150 duration-(--dropdown-open-dur) ease-(--dropdown-ease) before:pointer-events-none before:absolute before:inset-0 before:-z-1 data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur)"
+						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 w-80 max-w-[min(20rem,calc(100vw-2rem))] origin-(--transform-origin) overflow-hidden rounded-xl border border-border bg-popover p-0 text-popover-foreground text-sm shadow-lg outline-hidden duration-(--dropdown-open-dur) ease-(--dropdown-ease) before:pointer-events-none before:absolute before:inset-0 before:-z-1 data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur)"
 					)}
 					data-slot="hover-card-content"
 					dir={direction}
@@ -88,7 +88,7 @@ function WebsitePreviewCard({
 		}
 	})();
 	return (
-		<div className="overflow-hidden rounded-2xl">
+		<div className="overflow-hidden rounded-xl">
 			{safeImage ? (
 				<img
 					alt=""
@@ -96,15 +96,15 @@ function WebsitePreviewCard({
 					src={safeImage}
 				/>
 			) : (
-				<div className="flex h-20 items-center justify-center bg-muted/60">
+				<div className="flex h-20 items-center justify-center bg-muted">
 					<HugeiconsIcon
-						className="size-6 text-muted-foreground"
+						className="size-5 text-muted-foreground"
 						icon={Globe02Icon}
 					/>
 				</div>
 			)}
 			<div className="space-y-1 p-3">
-				<p className="type-compact flex items-center gap-1.5 text-muted-foreground uppercase tracking-wide">
+				<p className="flex items-center gap-1.5 text-muted-foreground text-xs">
 					{data?.siteName || hostname}
 				</p>
 				<p className="line-clamp-2 font-medium text-sm leading-5">
@@ -116,7 +116,7 @@ function WebsitePreviewCard({
 					</p>
 				) : null}
 				<p
-					className="type-compact truncate pt-0.5 text-muted-foreground/70"
+					className="truncate pt-0.5 text-muted-foreground/70 text-xs"
 					title={url}
 				>
 					{url}
@@ -135,23 +135,20 @@ function FilePreviewCard({
 }) {
 	const name = data?.name ?? path.split(/[\\/]/).at(-1) ?? path;
 	return (
-		<div className="overflow-hidden rounded-2xl">
-			<div className="flex items-center gap-2 border-border/60 border-b px-3 py-2.5">
+		<div className="overflow-hidden rounded-xl">
+			<div className="flex items-center gap-2 border-border border-b px-3 py-2">
 				<FileTypeIcon className="size-5" path={path} />
 				<div className="min-w-0">
 					<p className="truncate font-medium text-sm" title={name}>
 						{name}
 					</p>
-					<p
-						className="type-compact truncate text-muted-foreground"
-						title={path}
-					>
+					<p className="truncate text-muted-foreground text-xs" title={path}>
 						{path}
 					</p>
 				</div>
 			</div>
-			<div className="relative max-h-48 overflow-hidden bg-muted/35">
-				<pre className="type-compact overflow-hidden whitespace-pre-wrap p-3 font-mono text-foreground/75 leading-4">
+			<div className="relative max-h-48 overflow-hidden bg-muted">
+				<pre className="overflow-hidden whitespace-pre-wrap p-3 font-mono text-muted-foreground text-xs leading-4">
 					{data?.snippet || "Preview unavailable"}
 				</pre>
 				<div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-popover" />

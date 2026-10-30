@@ -31,6 +31,7 @@ function runtimeState(runtime: I18nRuntime): DomLocalizerState {
 		availablePacks: runtime.availablePacks,
 		hasOverlayMessage: (id) => runtime.overlayMessage(id) !== undefined,
 		t: (id, values, fallback) => runtime.translate(id, values, fallback),
+		templateMessage: (text) => runtime.templateMessage(text),
 	};
 }
 

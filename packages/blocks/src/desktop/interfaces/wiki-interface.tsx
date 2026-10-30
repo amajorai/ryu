@@ -3,7 +3,6 @@ import { motion } from "motion/react";
 import {
 	type KeyboardEvent,
 	type ReactNode,
-	type RefObject,
 	useCallback,
 	useEffect,
 	useId,
@@ -14,30 +13,24 @@ import {
 } from "react";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
-import { AgentArticle, GroupArticle, ThreadArticle } from "./wiki-articles.tsx";
 import { WikiHeader, WikiMainMenu } from "./wiki-chrome.tsx";
+import { PageHeader, type TabSpec } from "./wiki-interface-page-header.tsx";
 import {
-	byRecency,
+	ChatTalk,
+	RouteArticle,
+	RouteTalk,
+} from "./wiki-interface-route-bodies.tsx";
+import {
 	routeHasTalk,
 	WIKI_MAIN,
 	type WikiRoute,
 	type WikiTab,
-	wikiAgent,
 	wikiGroup,
 	wikiPageHeading,
-	wikiRouteTitle,
 	wikiThread,
 	wikiThreadTitle,
 } from "./wiki-model.ts";
-import {
-	CategoryPage,
-	HistoryPage,
-	MainPage,
-	RecentChangesPage,
-	SearchPage,
-	TalkPage,
-	ThreadListPage,
-} from "./wiki-pages.tsx";
+import { HistoryPage } from "./wiki-pages.tsx";
 import { type WikiNav, WikiNavProvider, WikiSkeleton } from "./wiki-parts.tsx";
 
 const MINUTE = 60_000;
@@ -100,99 +93,6 @@ function isTyping(target: EventTarget | null): boolean {
 			target.tagName === "INPUT" ||
 			target.tagName === "TEXTAREA" ||
 			target.tagName === "SELECT")
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Page header: title, Article / Talk, Read / View history, tagline
-// ---------------------------------------------------------------------------
-
-interface TabSpec {
-	id: string;
-	label: string;
-	onSelect: () => void;
-	selected: boolean;
-}
-
-function TabButton({ tab }: { tab: TabSpec }) {
-	return (
-		<li>
-			<button
-				aria-current={tab.selected ? "page" : undefined}
-				className={cn(
-					"relative h-10 cursor-pointer rounded-t-[2px] px-2 text-sm outline-none transition-colors after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-					tab.selected
-						? "text-foreground after:bg-foreground"
-						: "text-primary hover:after:bg-border"
-				)}
-				onClick={tab.onSelect}
-				type="button"
-			>
-				{tab.label}
-			</button>
-		</li>
-	);
-}
-
-function PageHeader({
-	heading,
-	headingRef,
-	hideTitle,
-	leftTabs,
-	rightTabs,
-	tagline,
-}: {
-	heading: string;
-	headingRef: RefObject<HTMLHeadingElement | null>;
-	hideTitle?: boolean;
-	leftTabs: TabSpec[];
-	rightTabs: TabSpec[];
-	tagline: boolean;
-}) {
-	return (
-		<header className="shrink-0">
-			{hideTitle ? (
-				<h1 className="sr-only" ref={headingRef} tabIndex={-1}>
-					{heading}
-				</h1>
-			) : (
-				<h1
-					className="border-border border-b pt-6 pb-1 font-normal font-serif text-[28px] text-foreground leading-9 outline-none [overflow-wrap:anywhere]"
-					ref={headingRef}
-					tabIndex={-1}
-				>
-					{heading}
-				</h1>
-			)}
-			<div
-				className={cn(
-					"flex items-end justify-between gap-4",
-					hideTitle && "border-border border-b pt-2"
-				)}
-			>
-				<nav aria-label="Namespaces">
-					<ul className="-ml-2 flex">
-						{leftTabs.map((tab) => (
-							<TabButton key={tab.id} tab={tab} />
-						))}
-					</ul>
-				</nav>
-				{rightTabs.length > 0 ? (
-					<nav aria-label="Views">
-						<ul className="-mr-2 flex">
-							{rightTabs.map((tab) => (
-								<TabButton key={tab.id} tab={tab} />
-							))}
-						</ul>
-					</nav>
-				) : null}
-			</div>
-			{tagline ? (
-				<p className="mt-2 text-[13px] text-muted-foreground leading-5">
-					From the workspace wiki
-				</p>
-			) : null}
-		</header>
 	);
 }
 
@@ -537,194 +437,5 @@ export function WikiInterface({
 				</div>
 			</div>
 		</WikiNavProvider>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Route bodies
-// ---------------------------------------------------------------------------
-
-function RouteArticle({
-	now,
-	onOpenTalk,
-	onSearch,
-	onStart,
-	route,
-	snapshot,
-}: {
-	now: number;
-	onOpenTalk: () => void;
-	onSearch: (query: string) => void;
-	onStart: (input: { agentId?: string; prompt: string }) => void;
-	route: WikiRoute;
-	snapshot: InterfaceRendererProps<Record<string, never>>["snapshot"];
-}) {
-	switch (route.kind) {
-		case "agent":
-			return (
-				<div className="pt-4">
-					<AgentArticle agentId={route.id} now={now} snapshot={snapshot} />
-				</div>
-			);
-		case "group":
-			return (
-				<div className="pt-4">
-					<GroupArticle groupId={route.id} now={now} snapshot={snapshot} />
-				</div>
-			);
-		case "thread":
-			return (
-				<div className="pt-4">
-					<ThreadArticle
-						now={now}
-						onOpenTalk={onOpenTalk}
-						snapshot={snapshot}
-						threadId={route.id}
-					/>
-				</div>
-			);
-		case "index":
-			return route.index === "threads" ? (
-				<ThreadListPage now={now} snapshot={snapshot} />
-			) : (
-				<CategoryPage index={route.index} snapshot={snapshot} />
-			);
-		case "changes":
-			return <RecentChangesPage snapshot={snapshot} />;
-		case "search":
-			return (
-				<SearchPage
-					key={route.query}
-					onSearch={onSearch}
-					query={route.query}
-					snapshot={snapshot}
-				/>
-			);
-		default:
-			return <MainPage now={now} onStart={onStart} snapshot={snapshot} />;
-	}
-}
-
-function RouteTalk({
-	now,
-	onOpenThread,
-	onStart,
-	route,
-	snapshot,
-}: {
-	now: number;
-	onOpenThread: (threadId: string) => void;
-	onStart: (input: { agentId?: string; prompt: string }) => void;
-	route: WikiRoute;
-	snapshot: InterfaceRendererProps<Record<string, never>>["snapshot"];
-}) {
-	const title = wikiRouteTitle(snapshot, route);
-	if (route.kind === "agent") {
-		const agent = wikiAgent(snapshot, route.id);
-		return (
-			<TalkPage
-				intro={
-					<>
-						This is the talk page for <b className="font-semibold">{title}</b>.
-						Each topic is a thread with {title}; adding a topic sends its first
-						message to {agent ? title : "the agent"} right away.
-					</>
-				}
-				now={now}
-				onOpenThread={onOpenThread}
-				onStart={onStart}
-				pageTitle={title}
-				snapshot={snapshot}
-				threads={snapshot.threads
-					.filter((thread) => thread.agentIds.includes(route.id))
-					.sort(byRecency)}
-			/>
-		);
-	}
-	if (route.kind === "group") {
-		const group = wikiGroup(snapshot, route.id);
-		const noun = group?.kind === "team" ? "team" : "project";
-		return (
-			<TalkPage
-				intro={
-					<>
-						This is the talk page for the{" "}
-						<b className="font-semibold">{title}</b> {noun}. Each topic is a
-						thread filed under it; adding a topic starts one right away.
-					</>
-				}
-				now={now}
-				onOpenThread={onOpenThread}
-				onStart={onStart}
-				pageTitle={title}
-				snapshot={snapshot}
-				threads={snapshot.threads
-					.filter((thread) =>
-						group?.kind === "team"
-							? thread.teamId === route.id
-							: thread.projectId === route.id
-					)
-					.sort(byRecency)}
-			/>
-		);
-	}
-	return (
-		<TalkPage
-			agents={snapshot.agents}
-			intro={
-				<>
-					This is the talk page for the{" "}
-					<b className="font-semibold">Main Page</b>. Topics here are threads
-					not assigned to an agent; adding a topic starts a thread right away.
-				</>
-			}
-			now={now}
-			onOpenThread={onOpenThread}
-			onStart={onStart}
-			pageTitle="the workspace"
-			snapshot={snapshot}
-			threads={snapshot.threads
-				.filter((thread) => thread.agentIds.length === 0)
-				.sort(byRecency)}
-		/>
-	);
-}
-
-/** A thread's Talk tab: the host's own conversation surface, framed. */
-function ChatTalk({
-	snapshot,
-	threadId,
-	threadView,
-}: {
-	snapshot: InterfaceRendererProps<Record<string, never>>["snapshot"];
-	threadId: string | null;
-	threadView: ReactNode;
-}) {
-	const thread = wikiThread(snapshot, threadId);
-	const names = (thread?.agentIds ?? [])
-		.map((id) => wikiAgent(snapshot, id)?.name)
-		.filter((name) => name !== undefined);
-	const home =
-		wikiGroup(snapshot, thread?.projectId) ??
-		wikiGroup(snapshot, thread?.teamId);
-	let note = "A new conversation. Your first message starts the thread.";
-	if (thread) {
-		note =
-			names.length > 0
-				? `Conversation with ${names.join(", ")}${home ? `, filed under ${home.name}` : ""}.`
-				: `Conversation${home ? ` filed under ${home.name}` : ""}.`;
-	}
-	return (
-		<>
-			<p className="mt-1 mb-3 text-[13px] text-muted-foreground leading-5">
-				{note}
-			</p>
-			<div
-				className="flex min-h-0 flex-1 flex-col overflow-hidden border border-border"
-				data-testid="wiki-talk-thread"
-			>
-				{threadView}
-			</div>
-		</>
 	);
 }

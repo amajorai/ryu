@@ -47,7 +47,7 @@ function BandRow({
 	total: NativeTokenOperand;
 }) {
 	return (
-		<div className="flex items-start gap-2.5 py-1.5">
+		<div className="flex items-start gap-2 py-1.5">
 			<span
 				aria-hidden="true"
 				className={cn(
@@ -61,9 +61,7 @@ function BandRow({
 					// Wraps rather than truncates: the detail is where the "why" lives
 					// (what the unattributed band is, how many servers the tools came
 					// from), and a clipped explanation is worse than a second line.
-					<div className="type-caption text-muted-foreground">
-						{band.detail}
-					</div>
+					<div className="text-muted-foreground text-xs">{band.detail}</div>
 				) : null}
 			</div>
 			<div className="shrink-0 text-right">
@@ -71,7 +69,7 @@ function BandRow({
 					{formatCount(band.tokens)}
 				</div>
 				{isPositiveContextCount(total) ? (
-					<div className="type-caption font-mono text-muted-foreground tabular-nums">
+					<div className="font-mono text-muted-foreground text-xs tabular-nums">
 						{formatContextPct(contextPct(band.tokens, total))}
 					</div>
 				) : null}
@@ -226,7 +224,7 @@ export function ContextBreakdownPanel({
 					) : null}
 				</div>
 				<BreakdownBar bands={bands} window={windowSize} />
-				<p className="type-caption text-muted-foreground">
+				<p className="text-muted-foreground text-xs">
 					{breakdown.plane === "acp"
 						? "Estimated — this agent builds part of its own prompt, so Core can only measure what it supplied."
 						: "Estimated from the prompt Core assembled for the last turn."}

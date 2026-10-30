@@ -1,16 +1,11 @@
-import type { CSSProperties } from "react";
-
-interface LaunchpadStyle extends CSSProperties {
-	"--launchpad-columns": number;
-	"--launchpad-rows": number;
-}
-
 // apps/desktop/src/components/chat/AppLaunchpad.tsx
 //
-// The macOS-Launchpad grid on the empty chat start page: every app the user can
-// actually open, as pages of icon tiles under the composer.
+// The app row on the empty chat start page: up to six apps the user can actually
+// open, as quiet icon tiles under the composer. It is OFF by default (D5); the
+// composer's "+" menu turns it on ("Apps on start page", see
+// launchpad-preference.ts), and every app stays reachable from the sidebar.
 //
-// Three decisions are load-bearing.
+// Two decisions are load-bearing.
 //
 // WHAT IS LISTED. The source is `usePluginContributions().companions` — the
 // full-page surfaces of ENABLED apps, already enabled-filtered server-side —
@@ -21,19 +16,11 @@ interface LaunchpadStyle extends CSSProperties {
 // call as the sidebar's Apps section — this is a second door onto that surface,
 // not a second definition of it.
 //
-// HOW IT SCROLLS. Real Launchpad pages sideways, and that is also the only shape
-// that fits here: the start page is a centred column inside the nested split-view
-// tree, so a grid that grows DOWNWARD pushes the composer off-centre and clips
-// against short panes. Paging horizontally pins the height at two rows whatever
-// the app count, and the page size is MEASURED rather than assumed so a narrow
-// split still gets whole pages instead of a half-cut column.
-//
 // WHY THE GRID IS SPLIT OUT. {@link AppLaunchpadGrid} takes its items as a prop
 // and is exported, so `e2e/harness/app-launchpad-story.tsx` can mount the real
-// component in real Chromium. The deliverable here is a laid-out, paginated grid —
-// a rendered-geometry fact a type-check cannot see — and the hooks the wrapper
+// component in real Chromium. The deliverable here is a laid-out row — a
+// rendered-geometry fact a type-check cannot see — and the hooks the wrapper
 // uses need the app's whole node/provider tree, which a story cannot supply.
-import { useLiteralMessages } from "@ryu/i18n/react";
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import { iconCacheKey } from "@ryu/marketplace/catalog/icon-cache";
 import type { CardDither } from "@ryu/marketplace/catalog/types";
@@ -45,14 +32,7 @@ import {
 } from "@ryu/ui/components/context-menu.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useCallback, useMemo } from "react";
 import { StandaloneAppContextMenuItems } from "@/src/components/apps/standalone-app-menu.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useApps } from "@/src/hooks/useApps.ts";
@@ -62,16 +42,11 @@ import {
 } from "@/src/hooks/usePluginContributions.ts";
 import { useStandaloneApps } from "@/src/hooks/useStandaloneApps.ts";
 import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
-import layout from "./chat-layout.module.css";
+import { useChatLaunchpadEnabled } from "./launchpad-preference.ts";
 
-/** Two rows, like Launchpad's own grid — enough to read as a grid, short enough
+/** One row, at most six tiles: enough to reach the apps used most, short enough
  *  that the composer above it stays the centre of the page. */
-const ROWS = 2;
-/** Nominal tile footprint, used only to derive the column count from the measured
- *  width. The tiles themselves are `1fr`, so this sets density, not size. */
-const TILE_WIDTH = 92;
-const MIN_COLUMNS = 3;
-const MAX_COLUMNS = 8;
+const MAX_TILES = 6;
 
 /** One tile. Everything the shared {@link AppIcon} needs to paint an app exactly
  *  as the sidebar and the Store paint it, plus the label and the launch id. */
@@ -97,24 +72,6 @@ export interface LaunchpadItem {
 	version?: string;
 }
 
-/** Column count that fits `width`, clamped so a very narrow split still gets a
- *  grid and a very wide one does not spread into a single sparse row. */
-function columnsForWidth(width: number): number {
-	if (width <= 0) {
-		return MIN_COLUMNS;
-	}
-	const fits = Math.floor(width / TILE_WIDTH);
-	return Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, fits));
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-	const pages: T[][] = [];
-	for (let i = 0; i < items.length; i += size) {
-		pages.push(items.slice(i, i + size));
-	}
-	return pages;
-}
-
 export interface AppLaunchpadGridProps {
 	className?: string;
 	items: LaunchpadItem[];
@@ -126,7 +83,7 @@ export interface AppLaunchpadGridProps {
 }
 
 /**
- * The presentational grid. Renders nothing for an empty list, so the start page
+ * The presentational row. Renders nothing for an empty list, so the start page
  * never grows a stray strip under the composer for a user whose apps are all off.
  */
 export function AppLaunchpadGrid({
@@ -137,173 +94,75 @@ export function AppLaunchpadGrid({
 	onOpenStandalone,
 	onRemoveStandalone,
 }: AppLaunchpadGridProps) {
-	const tl = useLiteralMessages();
-	const scrollerRef = useRef<HTMLDivElement | null>(null);
-	const [width, setWidth] = useState(0);
-	const [page, setPage] = useState(0);
-
-	const columns = columnsForWidth(width);
-	const pages = useMemo(() => chunk(items, columns * ROWS), [items, columns]);
-
-	// `useLayoutEffect`, not `useEffect`: the column count is derived from a
-	// measurement, and the pre-measurement value is `MIN_COLUMNS`. Measuring after
-	// paint would show every new chat a 3-column grid for one frame before it
-	// re-chunked to the 7 that fit — a visible pop on the start page.
-	useLayoutEffect(() => {
-		const el = scrollerRef.current;
-		if (!el) {
-			return;
-		}
-		setWidth(el.clientWidth);
-		const observer = new ResizeObserver((entries) => {
-			for (const entry of entries) {
-				setWidth(entry.contentRect.width);
-			}
-		});
-		observer.observe(el);
-		return () => observer.disconnect();
-	}, []);
-
-	// Re-measuring changes the page size, so a stale index can point past the end.
-	useEffect(() => {
-		setPage((current) => Math.min(current, Math.max(0, pages.length - 1)));
-	}, [pages.length]);
-
-	const handleScroll = useCallback(() => {
-		const el = scrollerRef.current;
-		if (!el || el.clientWidth === 0) {
-			return;
-		}
-		setPage(Math.round(el.scrollLeft / el.clientWidth));
-	}, []);
-
-	const goToPage = useCallback((index: number) => {
-		const el = scrollerRef.current;
-		if (!el) {
-			return;
-		}
-		el.scrollTo({ left: index * el.clientWidth, behavior: "smooth" });
-	}, []);
-
 	if (items.length === 0) {
 		return null;
 	}
-
-	const pageGeometry: LaunchpadStyle = {
-		"--launchpad-columns": columns,
-		"--launchpad-rows": ROWS,
-	};
 	return (
-		// Deliberately NOT height-constrained. An earlier revision tried to make this
-		// the child that gives way in a short pane (`min-h-0` + `1fr` rows), which
-		// does nothing: `1fr` resolves against a definite height, and the scroller
-		// above it is height-auto, so the tiles simply spilled and were sliced in
-		// half by the pane edge. The start-page column scrolls instead — see the
-		// `my-auto` note in `agent-chat.tsx`.
-		<div className={cn("mt-4 w-full", className)}>
-			{/* `overflow-x-auto` with mandatory snapping: a trackpad swipe lands on a
-			    whole page, exactly as Launchpad does. The scrollbar is hidden because
-			    the dots below already say where you are. */}
-			<div
-				className="scroll-fade-x flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-				data-testid="launchpad-scroller"
-				onScroll={handleScroll}
-				ref={scrollerRef}
-			>
-				{pages.map((pageItems) => (
-					<div
-						className={cn(
-							layout.launchpadPage,
-							"grid w-full shrink-0 snap-start gap-x-1 gap-y-2"
-						)}
-						data-testid="launchpad-page"
-						key={pageItems[0]?.id ?? "page"}
-						style={pageGeometry}
-					>
-						{pageItems.map((item) => (
-							<ContextMenu key={item.id}>
-								<ContextMenuTrigger>
-									<button
-										className="group flex flex-col items-center gap-1.5 rounded-xl px-1 py-2 transition-colors hover:bg-muted/60"
-										onAuxClick={(e) => {
-											if (e.button === 1) {
-												e.preventDefault();
-												onOpen(item, true);
-											}
-										}}
-										onClick={() => onOpen(item, false)}
-										title={item.label}
-										type="button"
-									>
-										{/* Identical resolution order and seed to the sidebar's Apps
-								    rows and the Store's cards, so one app tiles the same way
-								    wherever it is seen. */}
-										<AppIcon
-											cacheKey={item.cacheKey}
-											className="size-12 group-active:scale-95"
-											dither={item.dither}
-											iconBackground={item.iconBackground}
-											iconId={item.iconId}
-											iconPadding={item.iconPadding}
-											iconUrl={item.iconUrl}
-											name={item.label}
-											seedId={item.seedId}
-											size={22}
-										/>
-										<span className="type-caption w-full truncate text-center text-muted-foreground leading-tight group-hover:text-foreground">
-											{item.label}
-										</span>
-									</button>
-								</ContextMenuTrigger>
-								<ContextMenuContent>
-									<ContextMenuItem onClick={() => onOpen(item, false)}>
-										Open
-									</ContextMenuItem>
-									<StandaloneAppContextMenuItems
-										enabled
-										hasCompanion={Boolean(item.appId)}
-										installed={item.standaloneInstalled ?? false}
-										onInstall={
-											onInstallStandalone
-												? () => onInstallStandalone(item)
-												: undefined
-										}
-										onOpen={
-											onOpenStandalone
-												? () => onOpenStandalone(item)
-												: undefined
-										}
-										onRemove={
-											onRemoveStandalone
-												? () => onRemoveStandalone(item)
-												: undefined
-										}
-									/>
-								</ContextMenuContent>
-							</ContextMenu>
-						))}
-					</div>
-				))}
-			</div>
-
-			{pages.length > 1 ? (
-				<div className="mt-2 flex items-center justify-center gap-1.5">
-					{pages.map((pageItems, index) => (
+		<div
+			className={cn(
+				"mt-4 flex w-full flex-wrap justify-center gap-1",
+				className
+			)}
+			data-testid="launchpad-scroller"
+		>
+			{items.slice(0, MAX_TILES).map((item) => (
+				<ContextMenu key={item.id}>
+					<ContextMenuTrigger>
 						<button
-							aria-label={tl("Apps page {pageNumber}", {
-								pageNumber: index + 1,
-							})}
-							className={cn(
-								"size-1.5 rounded-full transition-colors",
-								index === page ? "bg-foreground/60" : "bg-foreground/20"
-							)}
-							key={pageItems[0]?.id ?? `page-${index}`}
-							onClick={() => goToPage(index)}
+							className="group flex w-20 flex-col items-center gap-1.5 rounded-xl px-1 py-2 transition-colors duration-150 hover:bg-muted hover:duration-0"
+							onAuxClick={(e) => {
+								if (e.button === 1) {
+									e.preventDefault();
+									onOpen(item, true);
+								}
+							}}
+							onClick={() => onOpen(item, false)}
+							title={item.label}
 							type="button"
+						>
+							{/* Identical resolution order and seed to the sidebar's Apps
+							    rows and the Store's cards, so one app tiles the same way
+							    wherever it is seen. */}
+							<AppIcon
+								cacheKey={item.cacheKey}
+								className="size-10"
+								dither={item.dither}
+								iconBackground={item.iconBackground}
+								iconId={item.iconId}
+								iconPadding={item.iconPadding}
+								iconUrl={item.iconUrl}
+								name={item.label}
+								seedId={item.seedId}
+								size={20}
+							/>
+							<span className="w-full truncate text-center text-muted-foreground text-xs group-hover:text-foreground">
+								{item.label}
+							</span>
+						</button>
+					</ContextMenuTrigger>
+					<ContextMenuContent>
+						<ContextMenuItem onClick={() => onOpen(item, false)}>
+							Open
+						</ContextMenuItem>
+						<StandaloneAppContextMenuItems
+							enabled
+							hasCompanion={Boolean(item.appId)}
+							installed={item.standaloneInstalled ?? false}
+							onInstall={
+								onInstallStandalone
+									? () => onInstallStandalone(item)
+									: undefined
+							}
+							onOpen={
+								onOpenStandalone ? () => onOpenStandalone(item) : undefined
+							}
+							onRemove={
+								onRemoveStandalone ? () => onRemoveStandalone(item) : undefined
+							}
 						/>
-					))}
-				</div>
-			) : null}
+					</ContextMenuContent>
+				</ContextMenu>
+			))}
 		</div>
 	);
 }
@@ -312,8 +171,14 @@ export interface AppLaunchpadProps {
 	className?: string;
 }
 
-/** Wires the grid to the live contribution list and to `openTab`. */
+/** Wires the row to the live contribution list and to `openTab`; renders
+ *  nothing until the user turns the row on from the composer's "+" menu. */
 export function AppLaunchpad({ className }: AppLaunchpadProps) {
+	const enabled = useChatLaunchpadEnabled();
+	return enabled ? <EnabledAppLaunchpad className={className} /> : null;
+}
+
+function EnabledAppLaunchpad({ className }: AppLaunchpadProps) {
 	const { companions } = usePluginContributions();
 	const { apps } = useApps();
 	const {

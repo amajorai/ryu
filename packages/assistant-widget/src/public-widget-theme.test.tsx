@@ -18,7 +18,14 @@ describe("RyuAssistantWidget theme", () => {
 		expect(markup).toContain(ASSISTANT_GLASS_FILL);
 		expect(markup).toContain(ASSISTANT_GLASS_CHROME);
 		expect(markup).not.toContain('class="dark ');
-		expect(markup).not.toContain("bg-background");
-		expect(markup).toContain("New chat");
+		// The surface itself wears theme tokens only: no forced background, no
+		// gradient and no raw palette colour. (The composer inside keeps its own
+		// token fill.)
+		const surface = markup.slice(0, markup.indexOf(">"));
+		expect(surface).not.toContain("bg-background");
+		expect(surface).not.toContain("gradient");
+		expect(surface).not.toContain("neutral-");
+		// The session chunk rendered: the empty start greets instead of a title.
+		expect(markup).toContain("How can I help?");
 	});
 });

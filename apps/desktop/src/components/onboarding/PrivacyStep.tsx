@@ -14,16 +14,16 @@
 // PrivacySettings: no analytics SDK, crash reporter, or OTLP exporter is wired
 // here.
 
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
-import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import {
 	acknowledgePrivacyDisclosure,
 	PRIVACY_DOCS_PATH,
@@ -46,6 +46,7 @@ import {
 	setProductAnalyticsEnabled,
 } from "@/src/lib/api/preferences.ts";
 import { setCrashReportingEnabled } from "@/src/lib/crash.ts";
+import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
 interface PrivacyStepProps {
 	/** Onboarding is finishing; the step locks so the user can't double-submit. */
@@ -272,169 +273,128 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 	}, [onContinue, target]);
 
 	return (
-		// Mirrors the shared OnboardingShell: the outer box owns the scroll and the
-		// inner column uses `min-h-full` so it centres when it fits and grows when it
-		// doesn't (the page wrapper is `h-screen overflow-hidden`).
-		<div className="scroll-fade h-full w-full overflow-y-auto">
-			<div
-				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
-				data-tauri-drag-region="true"
-			>
-				<StaggerReveal>
-					<div className="shrink-0">
-						<RyuOnboardingAvatar />
+		<ActivationStepShell
+			subtitle="Change these choices any time in Settings."
+			title="Your privacy choices"
+		>
+			<div className="flex flex-col gap-4" data-testid="onboarding-final-step">
+				{loadError ? (
+					<div className="flex items-center justify-between gap-6" role="alert">
+						<p className="text-sm">{loadError}</p>
+						<Button
+							onClick={() => {
+								ready.current = null;
+								setReadyTarget(null);
+								setLoadError(null);
+								setLoadAttempt((attempt) => attempt + 1);
+							}}
+							size="sm"
+							variant="outline"
+						>
+							Retry
+						</Button>
 					</div>
-					<PageHeader
-						stagger={false}
-						subtitle="Change these choices any time in Settings."
-						title="Your privacy choices"
+				) : readyTarget === target ? null : (
+					<p aria-live="polite" className="text-muted-foreground text-sm">
+						Loading privacy choices…
+					</p>
+				)}
+				{failedWrite ? (
+					<div className="flex items-center justify-between gap-6" role="alert">
+						<p className="text-sm">
+							Couldn't save your privacy choice. Your previous choice is
+							restored.
+						</p>
+						<Button
+							disabled={busy || saving}
+							onClick={() =>
+								void saveChoice(failedWrite.choice, failedWrite.next, true)
+							}
+							size="sm"
+							variant="outline"
+						>
+							Retry saving
+						</Button>
+					</div>
+				) : null}
+				{saving ? (
+					<p aria-live="polite" className="text-muted-foreground text-sm">
+						Saving privacy choice…
+					</p>
+				) : null}
+
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Product analytics"
+								checked={productAnalytics}
+								disabled={locked}
+								id="onboarding-product-analytics"
+								onCheckedChange={handleProductAnalytics}
+							/>
+						}
+						description="Anonymous product events; no prompts or agent content."
+						title="Product analytics"
 					/>
-				</StaggerReveal>
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Community stats"
+								checked={communityStats}
+								disabled={locked}
+								id="onboarding-community-stats"
+								onCheckedChange={handleCommunityStats}
+							/>
+						}
+						description="Anonymous token-savings totals for the community."
+						title="Community stats"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Crash reports"
+								checked={crashReports}
+								disabled={locked}
+								id="onboarding-crash-reports"
+								onCheckedChange={handleCrashReports}
+							/>
+						}
+						description="Scrubbed error stacks; no prompts or content."
+						title="Crash reports"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Diagnostics export"
+								checked={diagnosticsExport}
+								disabled={locked}
+								id="onboarding-diagnostics-export"
+								onCheckedChange={handleDiagnosticsExport}
+							/>
+						}
+						description="Off by default. With an endpoint set, redacted traces go there. The same opt-in sends a small Core/Gateway summary from Ryu Cloud-enrolled nodes to Ryu Axiom."
+						title="Diagnostics export"
+					/>
+				</SettingsGroup>
 
-				{/* Keep consent choices together in one compact section. */}
-				<div
-					className="flex w-full max-w-lg flex-col gap-6"
-					data-testid="onboarding-final-step"
-				>
-					<StaggerReveal startDelay={ONBOARDING_CONTENT_DELAY_MS} wrap>
-						<div className="flex flex-col gap-5">
-							{loadError ? (
-								<div
-									className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"
-									role="alert"
-								>
-									<p className="text-sm">{loadError}</p>
-									<Button
-										className="mt-2"
-										onClick={() => {
-											ready.current = null;
-											setReadyTarget(null);
-											setLoadError(null);
-											setLoadAttempt((attempt) => attempt + 1);
-										}}
-										size="sm"
-										variant="outline"
-									>
-										Retry
-									</Button>
-								</div>
-							) : readyTarget === target ? null : (
-								<p aria-live="polite" className="text-muted-foreground text-sm">
-									Loading privacy choices…
-								</p>
-							)}
-							{failedWrite ? (
-								<div
-									className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"
-									role="alert"
-								>
-									<p className="text-sm">
-										Couldn't save your privacy choice. Your previous choice is
-										restored.
-									</p>
-									<Button
-										className="mt-2"
-										disabled={busy || saving}
-										onClick={() =>
-											void saveChoice(
-												failedWrite.choice,
-												failedWrite.next,
-												true
-											)
-										}
-										size="sm"
-										variant="outline"
-									>
-										Retry saving
-									</Button>
-								</div>
-							) : null}
-							{saving ? (
-								<p aria-live="polite" className="text-muted-foreground text-sm">
-									Saving privacy choice…
-								</p>
-							) : null}
-
-							<div>
-								<SettingsGroup>
-									<SettingsItem
-										actions={
-											<Switch
-												aria-label="Product analytics"
-												checked={productAnalytics}
-												disabled={locked}
-												id="onboarding-product-analytics"
-												onCheckedChange={handleProductAnalytics}
-											/>
-										}
-										description="Anonymous product events; no prompts or agent content."
-										title="Product analytics"
-									/>
-									<SettingsItem
-										actions={
-											<Switch
-												aria-label="Community stats"
-												checked={communityStats}
-												disabled={locked}
-												id="onboarding-community-stats"
-												onCheckedChange={handleCommunityStats}
-											/>
-										}
-										description="Anonymous token-savings totals for the community."
-										title="Community stats"
-									/>
-									<SettingsItem
-										actions={
-											<Switch
-												aria-label="Crash reports"
-												checked={crashReports}
-												disabled={locked}
-												id="onboarding-crash-reports"
-												onCheckedChange={handleCrashReports}
-											/>
-										}
-										description="Scrubbed error stacks; no prompts or content."
-										title="Crash reports"
-									/>
-									<SettingsItem
-										actions={
-											<Switch
-												aria-label="Diagnostics export"
-												checked={diagnosticsExport}
-												disabled={locked}
-												id="onboarding-diagnostics-export"
-												onCheckedChange={handleDiagnosticsExport}
-											/>
-										}
-										description="Off by default. With an endpoint set, redacted traces go there. The same opt-in sends a small Core/Gateway summary from Ryu Cloud-enrolled nodes to Ryu Axiom."
-										title="Diagnostics export"
-									/>
-								</SettingsGroup>
-							</div>
-
-							<div className="flex items-center justify-end gap-3">
-								<Button
-									data-testid="onboarding-privacy-details"
-									onClick={openDocs}
-									size="lg"
-									variant="ghost"
-								>
-									Full privacy details
-								</Button>
-								<Button
-									data-testid="onboarding-final-continue"
-									disabled={locked}
-									onClick={handleContinue}
-									size="lg"
-									variant="mono"
-								>
-									{busy ? "Finishing…" : "Get started"}
-								</Button>
-							</div>
-						</div>
-					</StaggerReveal>
-				</div>
+				<OnboardingActions>
+					<OnboardingCta
+						data-testid="onboarding-privacy-details"
+						onClick={openDocs}
+						tone="secondary"
+					>
+						Full privacy details
+					</OnboardingCta>
+					<OnboardingCta
+						data-testid="onboarding-final-continue"
+						disabled={locked}
+						onClick={handleContinue}
+					>
+						{busy ? "Finishing…" : "Get started"}
+					</OnboardingCta>
+				</OnboardingActions>
 			</div>
-		</div>
+		</ActivationStepShell>
 	);
 }

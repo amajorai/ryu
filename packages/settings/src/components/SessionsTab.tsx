@@ -1,3 +1,5 @@
+import { ComputerIcon, Delete02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -8,17 +10,15 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@ryu/ui/components/alert-dialog.tsx";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { Monitor, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../utils/api-client.ts";
 import {
-	SettingsCard,
+	SETTINGS_ROW_REVEAL_CLASS,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -58,26 +58,20 @@ export function SessionsTab() {
 	} | null>(null);
 
 	if (isLoading) {
-		return (
-			<div className="space-y-6">
-				<SettingsCard className="flex justify-center py-6">
-					<Spinner className="size-5" />
-				</SettingsCard>
-			</div>
-		);
+		return <SkeletonRows label="Loading sessions" />;
 	}
 
 	const sessions = data?.sessions ?? [];
 
 	return (
-		<div className="space-y-6">
+		<div>
 			<SettingsSection
-				caption="Manage where you're signed in and revoke devices you don't recognize."
+				caption="Revoke any device you don't recognize."
 				headerAction={
 					sessions.length > 1 &&
 					(confirmRevokeAll ? (
 						<div className="flex flex-wrap items-center justify-end gap-2">
-							<span className="text-muted-foreground text-xs">
+							<span className="text-detail text-muted-foreground">
 								Revoke all other sessions?
 							</span>
 							<Button
@@ -112,28 +106,25 @@ export function SessionsTab() {
 				title="Active sessions"
 			>
 				{sessions.length === 0 ? (
-					<SettingsCard>
-						<p className="text-muted-foreground text-sm">No active sessions.</p>
-					</SettingsCard>
+					<p className="py-3 text-muted-foreground text-sm">
+						No active sessions.
+					</p>
 				) : (
 					<SettingsGroup>
 						{sessions.map((session) => {
 							const isCurrent = session.isCurrent === true;
 
 							return (
-								// `contents` keeps the row a direct flex child of the group;
-								// the wrapper only carries the row's test hook.
-								<div
-									className="contents"
-									data-testid="session-row"
-									key={session.id}
-								>
+								// A block wrapper, not `display: contents`: the flush group
+								// draws its hairlines on its direct children, and a
+								// `contents` box paints no border.
+								<div data-testid="session-row" key={session.id}>
 									<SettingsItem
 										actions={
 											isCurrent ? null : (
 												<Button
 													aria-label="Revoke session"
-													className="size-8 shrink-0"
+													className={SETTINGS_ROW_REVEAL_CLASS}
 													disabled={revokeMutation.isPending}
 													onClick={() =>
 														setPendingRevoke({
@@ -143,37 +134,42 @@ export function SessionsTab() {
 																: "Unknown device",
 														})
 													}
-													size="icon"
-													variant="ghost"
+													size="icon-sm"
+													variant="ghost-muted"
 												>
-													<Trash2 className="size-4" />
+													<HugeiconsIcon icon={Delete02Icon} size={16} />
 												</Button>
 											)
 										}
+										description={
+											<>
+												{session.ipAddress && `${session.ipAddress} · `}
+												Created{" "}
+												{formatDistanceToNow(new Date(session.createdAt), {
+													addSuffix: true,
+												})}
+											</>
+										}
 										title={
 											<span className="flex min-w-0 items-center gap-2">
-												<Monitor className="size-4 shrink-0 text-muted-foreground" />
+												<HugeiconsIcon
+													className="shrink-0 text-muted-foreground"
+													icon={ComputerIcon}
+													size={16}
+												/>
 												<span className="truncate">
 													{session.userAgent
 														? parseUserAgent(session.userAgent)
 														: "Unknown device"}
 												</span>
 												{isCurrent && (
-													<Badge className="shrink-0" variant="secondary">
+													<span className="shrink-0 font-normal text-detail text-muted-foreground">
 														This device
-													</Badge>
+													</span>
 												)}
 											</span>
 										}
-									>
-										<p className="text-muted-foreground text-xs">
-											{session.ipAddress && `${session.ipAddress} · `}
-											Created{" "}
-											{formatDistanceToNow(new Date(session.createdAt), {
-												addSuffix: true,
-											})}
-										</p>
-									</SettingsItem>
+									/>
 								</div>
 							);
 						})}

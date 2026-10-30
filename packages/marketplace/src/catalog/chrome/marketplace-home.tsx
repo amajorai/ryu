@@ -1,7 +1,9 @@
 "use client";
 
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
+	EmptyContent,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
@@ -71,9 +73,9 @@ export default function MarketplaceHome({
 	/** The host's shelf feeds failed to load. With nothing to show, Home then says
 	 * so (and offers `onRetry`) instead of implying the store is empty. */
 	failed?: boolean;
-	/** Drop shelves that finished loading with no items. Off by default so the
-	 * desktop keeps every canonical shelf mounted; the public web opts in so a
-	 * signed-out visitor never sees a stack of empty placeholders. */
+	/** Drop shelves that finished loading with no items, so the page-level
+	 * `Empty` is the only empty state. Desktop and the public web both opt in;
+	 * off by default for hosts that want every canonical shelf mounted. */
 	hideEmptyShelves?: boolean;
 	loading?: boolean;
 	onRetry?: () => void;
@@ -113,20 +115,19 @@ export default function MarketplaceHome({
 					<Empty data-slot="marketplace-home-error" spacing="snug">
 						<EmptyHeader>
 							<EmptyTitle>Couldn't load the Marketplace</EmptyTitle>
-							<EmptyDescription>
-								{onRetry ? (
-									<button
-										className="font-medium text-foreground underline-offset-4 hover:underline"
-										onClick={onRetry}
-										type="button"
-									>
-										Try again →
-									</button>
-								) : (
-									"Reload the page, or browse a category above."
-								)}
-							</EmptyDescription>
+							{onRetry ? null : (
+								<EmptyDescription>
+									Reload the page, or browse a category above.
+								</EmptyDescription>
+							)}
 						</EmptyHeader>
+						{onRetry ? (
+							<EmptyContent>
+								<Button onClick={onRetry} size="sm" variant="outline">
+									Try again
+								</Button>
+							</EmptyContent>
+						) : null}
 					</Empty>
 				) : null}
 				{orderedShelves.length === 0 && !failed ? (
@@ -175,12 +176,12 @@ function MarketplaceHomeShelfView({ shelf }: { shelf: MarketplaceHomeShelf }) {
 				</div>
 			) : null}
 			{shelf.items.length === 0 && !shelf.loading ? (
-				<div
-					className="flex min-h-16 items-center justify-center rounded-lg border border-dashed px-4 text-muted-foreground text-sm"
+				<p
+					className="text-detail text-muted-foreground"
 					data-slot="marketplace-home-empty"
 				>
-					<span>{shelf.emptyLabel ?? definition.emptyLabel}</span>
-				</div>
+					{shelf.emptyLabel ?? definition.emptyLabel}
+				</p>
 			) : null}
 		</section>
 	);

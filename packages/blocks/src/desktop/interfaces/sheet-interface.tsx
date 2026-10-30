@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	THREAD_STATUS_LABELS,
 	type ThreadStatus,
@@ -6,7 +7,6 @@ import { Plus } from "lucide-react";
 import { AnimatePresence, MotionConfig } from "motion/react";
 import {
 	type KeyboardEvent,
-	type RefObject,
 	useCallback,
 	useEffect,
 	useId,
@@ -24,6 +24,13 @@ import {
 	SheetSummaryBar,
 } from "./sheet-grid.tsx";
 import {
+	keyIsOurs,
+	markScrolled,
+	ownsKeys,
+	useElementWidth,
+	useMinuteClock,
+} from "./sheet-interface-dom.ts";
+import {
 	buildSheetRows,
 	countSheetStatuses,
 	defaultSheetWidths,
@@ -40,15 +47,12 @@ import { SheetThreadPanel } from "./sheet-panel.tsx";
 import { SheetStatusBar } from "./sheet-statusbar.tsx";
 import { type SheetStartInput, SheetToolbar } from "./sheet-toolbar.tsx";
 
-const MINUTE = 60_000;
 /** Below this width the default Title column narrows. */
 const NARROW_WIDTH = 640;
 /** Below this width an open thread covers the grid instead of sitting beside it. */
 const OVERLAY_WIDTH = 760;
 /** Below this grid width the footer status tabs drop to dot + count. */
 const COMPACT_TABS_WIDTH = 672;
-/** Width assumed before the first measurement (and where layout is absent). */
-const UNMEASURED_WIDTH = 1440;
 /** The cursor key that stands for the header row. */
 const HEADER_KEY = "\u0000header";
 
@@ -56,84 +60,6 @@ interface SheetCursorState {
 	col: number;
 	/** A thread id, or HEADER_KEY for the header row. */
 	key: string;
-}
-
-/** Wall clock that ticks once a minute so relative times stay honest. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-/** The element's rendered width, kept current with a ResizeObserver. */
-function useElementWidth(ref: RefObject<HTMLElement | null>): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		setWidth(element.getBoundingClientRect().width);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((entries) => {
-			const next = entries[0]?.contentRect.width;
-			if (next !== undefined) {
-				setWidth(next);
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width || UNMEASURED_WIDTH;
-}
-
-/** True for targets whose keys belong to typing or to the host's chat. */
-function ownsKeys(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[data-sheet-thread-view]") !== null
-	);
-}
-
-/** True when a document-level key event belongs to this sheet (or to nobody). */
-function keyIsOurs(root: HTMLElement | null, target: EventTarget | null) {
-	if (!root) {
-		return false;
-	}
-	if (target === document.body || target === document.documentElement) {
-		return true;
-	}
-	return target instanceof Node && root.contains(target);
-}
-
-/** Mirror the scroll offsets onto the container for the frozen-edge shadows. */
-function markScrolled(element: HTMLElement) {
-	const x = String(element.scrollLeft > 0);
-	const y = String(element.scrollTop > 0);
-	// Columns cut off at the right edge: a cast shadow says there is more.
-	const right = String(
-		element.scrollWidth - element.clientWidth - element.scrollLeft > 1
-	);
-	if (element.dataset.scrolledX !== x) {
-		element.dataset.scrolledX = x;
-	}
-	if (element.dataset.scrolledY !== y) {
-		element.dataset.scrolledY = y;
-	}
-	if (element.dataset.overflowRight !== right) {
-		element.dataset.overflowRight = right;
-	}
 }
 
 /**
@@ -153,6 +79,7 @@ export function SheetInterface({
 }: InterfaceRendererProps<Record<string, never>>) {
 	// The host's "animations off" counts, not only the system preference.
 	const reducedMotion = useReducedMotion();
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const gridRef = useRef<HTMLTableElement>(null);
@@ -368,13 +295,16 @@ export function SheetInterface({
 		empty = <span className="text-muted-foreground">No threads yet</span>;
 	} else if (showEmpty) {
 		const statusLabel = status ? THREAD_STATUS_LABELS[status] : "";
-		let message = `No threads match “${trimmedQuery}”`;
+		let message = tl("No threads match “{trimmedQuery}”", { trimmedQuery });
 		let clearLabel = "Clear search";
 		if (status && trimmedQuery) {
-			message = `No “${statusLabel}” threads match “${trimmedQuery}”`;
+			message = tl("No “{statusLabel}” threads match “{trimmedQuery}”", {
+				statusLabel,
+				trimmedQuery,
+			});
 			clearLabel = "Clear search and filter";
 		} else if (status) {
-			message = `No threads are “${statusLabel}”`;
+			message = tl("No threads are “{statusLabel}”", { statusLabel });
 			clearLabel = "Clear filter";
 		}
 		empty = (

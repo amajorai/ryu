@@ -22,6 +22,14 @@ const providers = [
 const BYOK_ROW_COUNT = 25;
 
 /** The card lists every BYOK provider; scope each assertion to one row. */
+/** Clear lives in each row's "<label> key actions" menu. */
+async function clearKey(page: Page, label: string) {
+	await providerRow(page, label)
+		.getByRole("button", { name: `${label} key actions`, exact: true })
+		.click();
+	await page.getByRole("menuitem", { name: "Clear", exact: true }).click();
+}
+
 function providerRow(page: Page, label: string) {
 	return page.locator('[data-slot="item"]').filter({
 		has: page.getByRole("textbox", { name: `${label} API key`, exact: true }),
@@ -81,7 +89,7 @@ test("retains the credential when Gateway clear fails and removes both stores on
 		"/gateway-byok-integration-proof.html?configured=true&failGateway=true"
 	);
 	const openaiRow = providerRow(page, "OpenAI");
-	await openaiRow.getByRole("button", { name: "Clear", exact: true }).click();
+	await clearKey(page, "OpenAI");
 	await expect(
 		openaiRow.getByText("Gateway config write denied", { exact: true })
 	).toBeVisible();
@@ -107,10 +115,10 @@ test("retains the credential when Gateway clear fails and removes both stores on
 	await page.evaluate(() => {
 		window.__gatewayByokIntegrationProof.failGatewayWrite = false;
 	});
-	await openaiRow.getByRole("button", { name: "Clear", exact: true }).click();
+	await clearKey(page, "OpenAI");
 	await expect(openaiRow.getByText("No key", { exact: true })).toBeVisible();
 	await expect(
-		openaiRow.getByRole("button", { name: "Clear", exact: true })
+		openaiRow.getByRole("button", { name: "OpenAI key actions", exact: true })
 	).toHaveCount(0);
 	const clearedEffects = await page.evaluate(() => ({
 		gatewayWrites: window.__gatewayByokIntegrationProof.gatewayWrites,
@@ -235,7 +243,9 @@ test("managed and permission-limited Gateway cards make no credential writes", a
 			.first()
 	).toBeVisible();
 	await expect(page.getByRole("textbox")).toHaveCount(0);
-	await expect(page.getByRole("button", { name: "Clear" })).toHaveCount(0);
+	await expect(
+		page.getByRole("button", { name: / key actions$/u })
+	).toHaveCount(0);
 
 	await page.goto(
 		"/gateway-byok-integration-proof.html?canConfigure=false&configured=true"
@@ -247,7 +257,7 @@ test("managed and permission-limited Gateway cards make no credential writes", a
 			row.getByRole("button", { name: "Replace first key", exact: true })
 		).toBeDisabled();
 		await expect(
-			row.getByRole("button", { name: "Clear", exact: true })
+			row.getByRole("button", { name: `${label} key actions`, exact: true })
 		).toBeDisabled();
 	}
 	const geminiRow = providerRow(page, "Gemini");
@@ -261,7 +271,7 @@ test("managed and permission-limited Gateway cards make no credential writes", a
 		})
 	).toBeDisabled();
 	await expect(
-		page.getByRole("button", { name: "Clear", exact: true })
+		page.getByRole("button", { name: / key actions$/u })
 	).toHaveCount(providers.length);
 	await expect(
 		page.getByRole("button", { name: "Replace first key", exact: true })

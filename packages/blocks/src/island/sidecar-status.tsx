@@ -73,9 +73,7 @@ export function SidecarStatusView({
 						recording={snapshot.recording}
 					/>
 				) : (
-					<span className="type-caption text-muted-foreground">
-						Capture off
-					</span>
+					<span className="text-muted-foreground text-xs">Capture off</span>
 				)}
 			</div>
 

@@ -17,9 +17,11 @@ import {
 	CheckmarkCircle02Icon,
 	Download01Icon,
 	GiftIcon,
+	MoreHorizontalIcon,
 	ShoppingCart01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -30,16 +32,16 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { EmployeeBadge } from "@ryu/ui/components/employee-badge.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { useQuery } from "@tanstack/react-query";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useTheme } from "next-themes";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-	Component,
-	lazy,
-	type ReactNode,
 	Suspense,
 	useCallback,
 	useEffect,
@@ -47,179 +49,33 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { AGENT_IDENTITY_MODE_OPTIONS } from "@/src/components/agents/AgentIdentityModePicker.tsx";
-import { AgentCatalogLogo } from "@/src/lib/agent-catalog-logo.tsx";
 import {
 	buildMysteryPool,
 	drawMysteryAgent,
 	MYSTERY_RARITY_STYLES,
 	type MysteryAgent,
-	mysteryAgentDescription,
 	mysteryAgentId,
 	mysteryAgentName,
 	mysteryRarity,
 	mysteryRarityReason,
 } from "@/src/lib/agent-mystery-box.ts";
 import type { AgentCatalogEntry } from "@/src/lib/api/agents.ts";
-import { ApiError } from "@/src/lib/api/client.ts";
 import {
-	fetchDetail,
 	formatPricingLabel,
 	type MarketplaceCard,
 } from "@/src/lib/api/marketplace.ts";
-import { communityAgentNotice } from "./CommunityAgents.tsx";
-
-const MysteryBoxScene = lazy(
-	() => import("@ryu/ui/components/mystery-box/mystery-box-scene.tsx")
-);
-
-/** Ribbon color of a closed box — neutral, so the tier is a surprise. */
-const CLOSED_ACCENT = "#d4d4d8";
-/** How long after the lid pops the card starts flying out. */
-const REVEAL_DELAY_MS = 180;
-/** The flat fallback box's rattle, standing in for the scene's `onBurst`. */
-const FLAT_BOX_OPEN_MS = 900;
-
-type Phase = "closed" | "opening" | "revealed" | "added";
-
-/** WebGL can be missing (remote desktops, disabled GPU): show a flat box. */
-class SceneBoundary extends Component<
-	{ children: ReactNode; fallback: ReactNode; onError: () => void },
-	{ failed: boolean }
-> {
-	state = { failed: false };
-
-	static getDerivedStateFromError() {
-		return { failed: true };
-	}
-
-	componentDidCatch() {
-		this.props.onError();
-	}
-
-	render() {
-		return this.state.failed ? this.props.fallback : this.props.children;
-	}
-}
-
-function FlatBox({
-	accent,
-	opening,
-	onActivate,
-}: {
-	accent: string;
-	opening: boolean;
-	onActivate: () => void;
-}) {
-	return (
-		<div className="flex h-full items-center justify-center">
-			<motion.button
-				animate={
-					opening
-						? { rotate: [0, -8, 8, -12, 12, 0], scale: [1, 1.05, 1.1, 0.4] }
-						: { rotate: 0, scale: 1 }
-				}
-				aria-label="Open the mystery box"
-				className="flex size-36 items-center justify-center rounded-3xl bg-secondary font-bold text-6xl shadow-xl"
-				disabled={opening}
-				onClick={onActivate}
-				style={{ boxShadow: `0 0 48px ${accent}55`, color: accent }}
-				transition={{ duration: 0.9 }}
-				type="button"
-			>
-				?
-			</motion.button>
-		</div>
-	);
-}
-
-function errorMessage(cause: unknown): string {
-	if (cause instanceof ApiError && cause.serverMessage) {
-		return cause.serverMessage;
-	}
-	return cause instanceof Error ? cause.message : String(cause);
-}
-
-function PrizeCard({
-	agent,
-	accent,
-	ringed,
-}: {
-	agent: MysteryAgent;
-	accent: string;
-	/** The animated metal ring is its own WebGL instance: off without WebGL. */
-	ringed: boolean;
-}) {
-	const { resolvedTheme } = useTheme();
-	const id = mysteryAgentId(agent);
-	return (
-		<div className="relative w-56">
-			{/* The halo the card rises out of. */}
-			<div
-				aria-hidden="true"
-				className="absolute -inset-10 rounded-full opacity-70 blur-3xl"
-				style={{ background: accent }}
-			/>
-			<div className="relative overflow-hidden rounded-2xl">
-				<EmployeeBadge
-					employeeId={id}
-					logo={
-						agent.kind === "runtime" ? (
-							<AgentCatalogLogo
-								className="size-20"
-								entry={agent.entry}
-								size="80px"
-							/>
-						) : undefined
-					}
-					metalTheme={resolvedTheme === "light" ? "light" : "dark"}
-					name={mysteryAgentName(agent)}
-					ringed={ringed}
-					role={mysteryAgentDescription(agent) ?? undefined}
-				/>
-				{/* One holographic sweep across the face, like a foil card. */}
-				<motion.div
-					animate={{ x: "160%" }}
-					aria-hidden="true"
-					className="pointer-events-none absolute inset-y-0 -left-full w-full skew-x-[-20deg] mix-blend-overlay"
-					initial={{ x: "0%" }}
-					style={{
-						background: `linear-gradient(90deg, transparent, ${accent}aa, #ffffffcc, ${accent}aa, transparent)`,
-					}}
-					transition={{ delay: 0.55, duration: 0.9, ease: "easeInOut" }}
-				/>
-			</div>
-		</div>
-	);
-}
-
-/**
- * What an Agent Template will do with the user's accounts, shown before Add:
- * its Identity setting (from the listing's detail read, the same one the Store
- * detail panel makes) and the trust notice the Store shows above Install.
- */
-function TemplateDisclosure({ card }: { card: MarketplaceCard }) {
-	const detailQuery = useQuery({
-		queryKey: ["marketplace", "detail", "agent", card.id],
-		queryFn: () => fetchDetail("agent", card.id),
-	});
-	const identityMode = detailQuery.data?.identityMode ?? null;
-	return (
-		<div
-			className="mt-1 flex max-w-md flex-col gap-1"
-			data-testid="mystery-template-disclosure"
-		>
-			{identityMode ? (
-				<p className="font-medium text-xs">
-					Identity: {AGENT_IDENTITY_MODE_OPTIONS[identityMode].title}
-				</p>
-			) : null}
-			<p className="text-muted-foreground text-xs">
-				{communityAgentNotice(identityMode)}
-			</p>
-		</div>
-	);
-}
+import {
+	CLOSED_ACCENT,
+	errorMessage,
+	FLAT_BOX_OPEN_MS,
+	FlatBox,
+	MysteryBoxScene,
+	type Phase,
+	PrizeCard,
+	REVEAL_DELAY_MS,
+	SceneBoundary,
+	TemplateDisclosure,
+} from "./mystery-box/MysteryBoxParts.tsx";
 
 export interface AgentMysteryBoxProps {
 	/** Add a runtime from the catalog. Rejects on failure. */
@@ -245,6 +101,7 @@ export function AgentMysteryBox({
 	runtimes,
 	templates,
 }: AgentMysteryBoxProps) {
+	const tl = useLiteralMessages();
 	const reducedMotion = useReducedMotion() ?? false;
 	const [phase, setPhase] = useState<Phase>("closed");
 	const [round, setRound] = useState(0);
@@ -324,7 +181,9 @@ export function AgentMysteryBox({
 		try {
 			if (prize.kind === "runtime") {
 				await onAddRuntime(prize.entry.id);
-				toast.success(`${prize.entry.name} is now one of your agents`);
+				toast.success(
+					tl("{name} is now one of your agents", { name: prize.entry.name })
+				);
 			} else {
 				await onAddTemplate(prize.card);
 			}
@@ -361,7 +220,7 @@ export function AgentMysteryBox({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="relative h-80 overflow-hidden rounded-3xl bg-gradient-to-b from-muted/40 to-muted/5">
+				<div className="relative h-80 overflow-hidden rounded-xl bg-muted">
 					{pool.length === 0 ? (
 						<div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
 							<HugeiconsIcon
@@ -442,11 +301,7 @@ export function AgentMysteryBox({
 														}
 											}
 										>
-											<PrizeCard
-												accent={style.accent}
-												agent={prize}
-												ringed={!sceneFailed}
-											/>
+											<PrizeCard agent={prize} ringed={!sceneFailed} />
 										</motion.div>
 									) : null}
 								</AnimatePresence>
@@ -462,7 +317,10 @@ export function AgentMysteryBox({
 
 				<p aria-live="polite" className="sr-only">
 					{showPrize
-						? `You pulled ${mysteryAgentName(prize)}, ${style.label}.`
+						? tl("You pulled {name}, {label}.", {
+								name: mysteryAgentName(prize),
+								label: style.label,
+							})
 						: ""}
 				</p>
 
@@ -470,7 +328,7 @@ export function AgentMysteryBox({
 					<div className="flex flex-col items-center gap-1 text-center">
 						<div className="flex items-center gap-2">
 							<span
-								className="font-semibold text-xs uppercase tracking-widest"
+								className="text-detail text-muted-foreground"
 								style={{ color: style.accent }}
 							>
 								{style.label}
@@ -478,10 +336,12 @@ export function AgentMysteryBox({
 							<Badge typography="normal" variant="outline">
 								{prize.kind === "runtime"
 									? "Agent"
-									: `Agent Template · ${prize.card.author ?? "Community"}`}
+									: tl("Agent Template · {author}", {
+											author: prize.card.author ?? "Community",
+										})}
 							</Badge>
 						</div>
-						<p className="font-heading font-medium text-lg">
+						<p className="font-semibold text-lg tracking-tight">
 							{mysteryAgentName(prize)}
 						</p>
 						{reason ? (
@@ -551,31 +411,32 @@ export function AgentMysteryBox({
 	);
 }
 
-/** The invitation at the top of the Agents tab. */
-export function AgentMysteryBoxBanner({ onOpen }: { onOpen: () => void }) {
+/** The Agents tab's `⋯`: the Mystery Box lives here rather than as a banner
+ *  over the list, so the catalog opens on the agents themselves. */
+export function AgentsOverflowMenu({
+	onOpenMysteryBox,
+}: {
+	onOpenMysteryBox: () => void;
+}) {
 	return (
-		<button
-			className="group mb-6 flex w-full items-center gap-4 rounded-2xl border border-border bg-gradient-to-r from-accent/60 via-background to-background p-4 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring/30"
-			onClick={onOpen}
-			type="button"
-		>
-			<span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-110">
-				<HugeiconsIcon className="size-6" icon={GiftIcon} />
-			</span>
-			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span className="font-medium">Not sure which agent to get?</span>
-				<span className="text-muted-foreground text-sm">
-					Open a Mystery Box to pull a random agent from the Store — keep it or
-					skip to the next one.
-				</span>
-			</span>
-			<span className="hidden shrink-0 items-center gap-1 font-medium text-sm sm:flex">
-				Open a box
-				<HugeiconsIcon
-					className="size-4 transition-transform group-hover:translate-x-0.5"
-					icon={ArrowRight01Icon}
-				/>
-			</span>
-		</button>
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						aria-label="More agent actions"
+						size="icon-sm"
+						variant="ghost-muted"
+					>
+						<HugeiconsIcon className="size-4" icon={MoreHorizontalIcon} />
+					</Button>
+				}
+			/>
+			<DropdownMenuContent align="end" className="min-w-52">
+				<DropdownMenuItem onClick={onOpenMysteryBox}>
+					<HugeiconsIcon className="size-4" icon={GiftIcon} />
+					Open a Mystery Box
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }

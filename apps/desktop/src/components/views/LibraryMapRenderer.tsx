@@ -40,7 +40,7 @@ function markerElement(
 	const button = document.createElement("button");
 	button.type = "button";
 	button.className =
-		"max-w-40 truncate rounded-full border border-border bg-card px-2 py-0.5 text-foreground text-xs shadow-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring";
+		"max-w-40 truncate rounded-full border border-border bg-background px-2 py-0.5 text-foreground text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring";
 	button.textContent = title;
 	button.title = title;
 	button.setAttribute("aria-label", label);

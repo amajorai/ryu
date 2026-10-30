@@ -1,8 +1,9 @@
 .heading,
 .folderTrigger {
-	font-family: var(--font-heading);
-	font-size: 28px;
-	font-weight: 400;
+	font-family: var(--font-sans);
+	font-size: var(--text-2xl);
+	font-weight: 500;
+	line-height: var(--text-2xl--line-height);
 	color: var(--foreground);
 	letter-spacing: -0.025em;
 }
@@ -34,39 +35,48 @@
 	outline-offset: 4px;
 }
 
-.logoTrigger {
-	position: relative;
-	top: calc(var(--spacing) * 5);
-	z-index: 0;
+/* The mark's box is reserved at its final size, so the greeting below never
+   shifts while a logo image loads. */
+.markHost {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: var(--spacing);
-	border-radius: var(--radius-2xl);
-	transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+	min-width: calc(var(--spacing) * 8);
+	height: calc(var(--spacing) * 8);
+}
+
+.logoTrigger {
+	padding: 0;
+	cursor: pointer;
+	background: transparent;
+	border: 0;
+	border-radius: var(--radius-lg);
+	transition: opacity var(--duration-fast, 150ms) ease;
 }
 
 .logoTrigger:hover {
-	transform: scale(1.03);
+	opacity: 0.8;
+	transition-duration: 0ms;
 }
 
-.logoTrigger:active {
-	transform: scale(0.97);
+.logoTrigger:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 4px;
 }
 
 .fan {
-	--spread: 46px;
-	--tilt: 6deg;
-	--rise: -3px;
+	--spread: 24px;
+	--tilt: 4deg;
+	--rise: -2px;
 	position: relative;
-	width: calc(var(--spacing) * 80);
-	height: calc(var(--spacing) * 16);
+	width: calc(var(--spacing) * 40);
+	height: calc(var(--spacing) * 8);
 }
 
-.fan[data-hovered="true"] {
-	--spread: 60px;
-	--tilt: 12deg;
-	--rise: -6px;
+.markHost:hover .fan {
+	--spread: 30px;
+	--tilt: 8deg;
+	--rise: -3px;
 }
 
 .fanMark {
@@ -79,7 +89,8 @@
 			calc(-50% + var(--distance) * var(--rise))
 		)
 		rotate(calc(var(--offset) * var(--tilt)));
-	transition: transform 200ms ease-in-out;
+	transition: transform var(--duration-base, 200ms)
+		var(--ease-move, cubic-bezier(0.65, 0, 0.35, 1));
 }
 
 .fanMark[data-offset="-2"] {

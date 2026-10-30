@@ -19,9 +19,11 @@ const CONTENT_PANEL_ID = "content";
 // labels ("Appearance", "Notifications", "Agent defaults") wrapped or truncated,
 // which is what made both settings dialogs read as cramped. 22% fits the longest
 // shipped label on a laptop screen without taking real space from the content
-// pane, and the divider is still draggable either way.
-const DEFAULT_SIDEBAR_SIZE = 22;
-const DEFAULT_CONTENT_SIZE = 78;
+// pane, and the divider is still draggable either way. 24% of the 880px
+// settings frame (~210px) keeps "Keyboard Shortcuts" and "Sessions & devices"
+// whole now that the nav column is flush with the dialog edge.
+const DEFAULT_SIDEBAR_SIZE = 24;
+const DEFAULT_CONTENT_SIZE = 76;
 // Keep the sidebar usable but bounded: the content panel's minSize caps how
 // wide the sidebar can grow (100 - CONTENT_MIN_SIZE).
 const SIDEBAR_MIN_SIZE = 16;
@@ -65,11 +67,12 @@ export default function ResizableSettingsLayout({
 	/** Ref to the content pane's scroller (the element that scrolls). */
 	contentScrollRef?: React.Ref<HTMLDivElement>;
 	/**
-	 * `dialog` (default): a rounded sidebar frame beside a raised content card,
-	 * with a draggable divider, in the desktop Settings and Gateway dialogs.
-	 * `page`: a floating rounded muted sidebar card, inset from the edges,
-	 * beside plain content, for a settings page that already sits on the app's
-	 * background (the web settings pages). It is one CSS-responsive tree with a
+	 * `dialog` (default): a flush `bg-sidebar` nav column beside a flush
+	 * `bg-background` content pane, split by a divider that shows on hover, in
+	 * the desktop Settings and Gateway dialogs.
+	 * `page`: a flush nav column beside a flush content pane, split by a
+	 * hairline, for a settings page that already sits on the app's background
+	 * (the web settings pages). It is one CSS-responsive tree with a
 	 * fixed-width sidebar, so crossing the phone breakpoint never remounts the
 	 * open section (its dialogs and unsaved edits survive a rotation) and the
 	 * server's HTML matches the first client render.
@@ -116,39 +119,27 @@ export default function ResizableSettingsLayout({
 		return (
 			<SidebarProvider
 				appearance="settings-frame"
-				className="!min-h-0 h-full flex-col overflow-hidden"
+				className="!min-h-0 h-full flex-col overflow-hidden rounded-none"
 			>
-				<div className="max-h-[38%] min-h-0 shrink-0 overflow-hidden p-2 pb-0">
-					<Sidebar
-						appearance="settings-navigation"
-						className="h-full w-full"
-						collapsible="none"
+				<Sidebar
+					className="max-h-[38%] min-h-0 w-full shrink-0 p-2 pb-0"
+					collapsible="none"
+				>
+					{/* Stacked, the nav starts at the dialog's top edge — which is
+					    also where the close button sits. Start the list below it. */}
+					<SidebarContent
+						className="overflow-x-hidden"
+						spacing="settings-mobile"
 					>
-						{/* Stacked, the nav starts at the dialog's top edge — which is
-						    also where the close button sits. Start the list below it. */}
-						<SidebarContent
-							className="overflow-x-hidden"
-							spacing="settings-mobile"
-						>
-							{sidebar}
-						</SidebarContent>
-					</Sidebar>
-				</div>
-				<div className="min-h-0 flex-1 overflow-hidden p-2">
-					<div className="grouped-pane relative h-full min-w-0 overflow-hidden rounded-xl shadow-sm">
-						<div
-							className={cn(
-								"h-full w-full overflow-x-hidden",
-								contentScrollable
-									? "scroll-fade overflow-y-auto"
-									: "overflow-y-hidden"
-							)}
-							ref={contentScrollRef}
-						>
-							{content}
-						</div>
-					</div>
-				</div>
+						{sidebar}
+					</SidebarContent>
+				</Sidebar>
+				<ContentPane
+					contentScrollable={contentScrollable}
+					contentScrollRef={contentScrollRef}
+				>
+					{content}
+				</ContentPane>
 			</SidebarProvider>
 		);
 	}
@@ -156,7 +147,7 @@ export default function ResizableSettingsLayout({
 	return (
 		<SidebarProvider
 			appearance="settings-frame"
-			className="!min-h-0 h-full overflow-hidden"
+			className="!min-h-0 h-full overflow-hidden rounded-none"
 		>
 			<ResizablePanelGroup
 				className="h-full w-full"
@@ -170,45 +161,62 @@ export default function ResizableSettingsLayout({
 					id={SIDEBAR_PANEL_ID}
 					minSize={SIDEBAR_MIN_SIZE}
 				>
-					<div className="h-full min-w-0 overflow-hidden p-2 pr-0">
-						<Sidebar
-							appearance="settings-navigation"
-							className="h-full w-full"
-							collapsible="none"
-						>
-							<SidebarContent className="overflow-x-hidden" spacing="compact">
-								{sidebar}
-							</SidebarContent>
-						</Sidebar>
-					</div>
+					{/* Flush with the dialog edge: the nav is set off from the pane by
+					    tone alone (bg-sidebar against bg-background), no card or gap. */}
+					<Sidebar className="h-full w-full py-2" collapsible="none">
+						<SidebarContent className="overflow-x-hidden" spacing="compact">
+							{sidebar}
+						</SidebarContent>
+					</Sidebar>
 				</ResizablePanel>
-				{/* Thin transparent handle: keeps the seamless look of the floating
-				    cards while exposing a draggable hit area between the panes. */}
-				<ResizableHandle className="w-1" />
+				{/* Invisible until pointed at: the tone change already marks the edge,
+				    so the draggable divider only shows a hairline on hover or drag. */}
+				<ResizableHandle
+					appearance="transparent"
+					className="transition-colors duration-(--duration-fast) hover:bg-border data-[separator=active]:bg-border"
+				/>
 				<ResizablePanel
 					className="min-w-0 overflow-hidden"
 					defaultSize={DEFAULT_CONTENT_SIZE}
 					id={CONTENT_PANEL_ID}
 					minSize={CONTENT_MIN_SIZE}
 				>
-					<div className="h-full min-w-0 overflow-hidden p-2 pl-0">
-						<div className="grouped-pane relative h-full min-w-0 overflow-hidden rounded-xl shadow-sm">
-							<div
-								className={cn(
-									"h-full w-full overflow-x-hidden",
-									contentScrollable
-										? "scroll-fade overflow-y-auto"
-										: "overflow-y-hidden"
-								)}
-								ref={contentScrollRef}
-							>
-								{content}
-							</div>
-						</div>
-					</div>
+					<ContentPane
+						contentScrollable={contentScrollable}
+						contentScrollRef={contentScrollRef}
+					>
+						{content}
+					</ContentPane>
 				</ResizablePanel>
 			</ResizablePanelGroup>
 		</SidebarProvider>
+	);
+}
+
+/** The flush content pane of the dialog frame: the page tone, one scroller. */
+function ContentPane({
+	children,
+	contentScrollable,
+	contentScrollRef,
+}: {
+	children: React.ReactNode;
+	contentScrollable: boolean;
+	contentScrollRef?: React.Ref<HTMLDivElement>;
+}) {
+	return (
+		<div className="relative h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-background">
+			<div
+				className={cn(
+					"h-full w-full overflow-x-hidden",
+					contentScrollable
+						? "scroll-fade overflow-y-auto [scrollbar-gutter:stable]"
+						: "overflow-y-hidden"
+				)}
+				ref={contentScrollRef}
+			>
+				{children}
+			</div>
+		</div>
 	);
 }
 
@@ -229,10 +237,10 @@ function PageSettingsLayout({
 			appearance="settings-frame"
 			className="!min-h-0 h-full flex-col overflow-hidden rounded-none bg-transparent md:flex-row"
 		>
-			<div className="max-h-[38%] min-h-0 shrink-0 overflow-hidden p-3 pb-0 md:h-full md:max-h-none md:w-[clamp(15rem,22%,20rem)] md:pr-0 md:pb-3">
+			<div className="max-h-[38%] min-h-0 shrink-0 overflow-hidden border-b md:h-full md:max-h-none md:w-[clamp(15rem,22%,20rem)] md:border-r md:border-b-0">
 				<Sidebar
 					appearance="settings-navigation"
-					className="h-full w-full rounded-xl bg-muted/50"
+					className="h-full w-full bg-transparent py-2"
 					collapsible="none"
 				>
 					<SidebarContent className="overflow-x-hidden" spacing="compact">
@@ -240,10 +248,9 @@ function PageSettingsLayout({
 					</SidebarContent>
 				</Sidebar>
 			</div>
-			{/* The content is a grouped pane, inset like the sidebar card, so web
-			    settings read as the desktop Settings window does: grey grouped
-			    background with white settings cards in light mode. */}
-			<div className="grouped-pane m-3 min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl md:ml-2">
+			{/* Flush like the desktop Settings window's content pane: no inset,
+			    rounding or second surface. */}
+			<div className="min-h-0 min-w-0 flex-1 overflow-hidden">
 				<div
 					className={cn(
 						"h-full w-full overflow-x-hidden",

@@ -16,6 +16,11 @@ import {
 	type LocalNodeHealth,
 	validateNodeUrl,
 } from "./local-node.ts";
+import {
+	type WidgetError,
+	widgetError,
+	widgetInfoBar,
+} from "./public-widget-errors.ts";
 import { type AssistantMode, DEFAULT_NODE_URL } from "./runtime-controls.tsx";
 import {
 	type ActiveRequest,
@@ -52,7 +57,7 @@ export function useAssistantSession({
 	// Optimistic for a guest-first embed; corrected by the site's status check.
 	const [guestAvailable, setGuestAvailable] = useState(initialMode === "guest");
 	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	const [error, setError] = useState<WidgetError | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [runtimeStatus, setRuntimeStatus] = useState<BrowserRuntimeStatus>();
 	const [nodeUrl, setNodeUrl] = useState(DEFAULT_NODE_URL);
@@ -131,11 +136,7 @@ export function useAssistantSession({
 				"The model is cached in this browser. Questions stay in this tab."
 			);
 		} catch (cause) {
-			setError(
-				cause instanceof Error
-					? cause.message
-					: "The browser model could not load."
-			);
+			setError(widgetError("browser-model", cause));
 		} finally {
 			setBusy(false);
 		}
@@ -147,8 +148,11 @@ export function useAssistantSession({
 			setError(null);
 			setNotice(null);
 			setBusy(true);
+			// Address validation already speaks in sentences; a failed check does not.
+			let checking = false;
 			try {
 				const baseUrl = validateNodeUrl(nodeUrl, allowRemote);
+				checking = true;
 				const config: LocalNodeConfig = {
 					baseUrl,
 					token: nodeToken.trim() || null,
@@ -164,11 +168,7 @@ export function useAssistantSession({
 			} catch (cause) {
 				setNodeConnected(false);
 				setNodeHealth(undefined);
-				setError(
-					cause instanceof Error
-						? cause.message
-						: "The node could not be connected."
-				);
+				setError(widgetError(checking ? "node" : "node-address", cause));
 			} finally {
 				setBusy(false);
 			}
@@ -272,11 +272,7 @@ export function useAssistantSession({
 				if (cause instanceof Error && cause.name === "AbortError") {
 					return;
 				}
-				setError(
-					cause instanceof Error
-						? cause.message
-						: "The assistant could not answer."
-				);
+				setError(widgetError("answer", cause, question));
 			} finally {
 				if (isCurrentRequest()) {
 					activeRequestRef.current = null;
@@ -310,28 +306,29 @@ export function useAssistantSession({
 		[busy]
 	);
 
-	const infoBar = error
-		? {
-				description: error,
-				onClose: () => setError(null),
-				variant: "destructive" as const,
-			}
-		: notice
-			? {
-					description: notice,
-					onClose: () => setNotice(null),
-				}
-			: undefined;
+	const retryQuestion = error?.question;
+	let retry: (() => void) | undefined;
+	if (retryQuestion !== undefined) {
+		retry = () => void submitQuestion(retryQuestion);
+	} else if (error?.kind === "browser-model") {
+		retry = () => void prepareBrowserModel();
+	}
+	const infoBar = widgetInfoBar({
+		clearError: () => setError(null),
+		clearNotice: () => setNotice(null),
+		error,
+		notice,
+		retry,
+	});
 
+	// No title until there is a thread: the empty start greets instead.
 	const title =
-		messages.find((message) => message.role === "user")?.text.trim() ||
-		"New chat";
+		messages.find((message) => message.role === "user")?.text.trim() ?? "";
 
 	return {
 		allowRemote,
 		browserStatus,
 		busy,
-		error: error ? new Error(error) : undefined,
 		guestAvailable,
 		includePageContext,
 		includeSelectionContext,

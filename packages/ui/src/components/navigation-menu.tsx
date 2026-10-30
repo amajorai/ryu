@@ -127,7 +127,7 @@ function NavigationMenuPositioner({
 				{...props}
 			>
 				<NavigationMenuPrimitive.Popup
-					className="relative h-(--popup-height) w-(--popup-width) origin-(--transform-origin) rounded-3xl border border-border/50 bg-popover/70 text-popover-foreground outline-none backdrop-blur-2xl backdrop-saturate-150 transition-[opacity,transform,width,height,scale,translate] duration-[0.35s] ease-[cubic-bezier(0.22,1,0.36,1)] before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] data-ending-style:scale-90 data-starting-style:scale-90 data-ending-style:opacity-0 data-starting-style:opacity-0 data-ending-style:duration-150 data-[ending-style]:ease-[ease]"
+					className="relative h-(--popup-height) w-(--popup-width) origin-(--transform-origin) rounded-xl border border-border bg-popover text-popover-foreground shadow-(--shadow-popover) outline-none transition-[opacity,transform,width,height,scale,translate] duration-[0.35s] ease-[cubic-bezier(0.22,1,0.36,1)] data-ending-style:scale-90 data-starting-style:scale-90 data-ending-style:opacity-0 data-starting-style:opacity-0 data-ending-style:duration-150 data-[ending-style]:ease-[ease]"
 					data-slot="navigation-menu-popup"
 					dir={direction}
 				>
@@ -145,7 +145,7 @@ function NavigationMenuLink({
 	return (
 		<NavigationMenuPrimitive.Link
 			className={cn(
-				"flex items-center gap-1.5 in-data-[slot=navigation-menu-content]:rounded-2xl rounded-3xl p-3 text-sm outline-none transition-[color,background-color,box-shadow] hover:bg-muted focus:bg-muted focus-visible:outline-1 focus-visible:ring-3 focus-visible:ring-ring data-[active=true]:bg-muted/50 data-[active=true]:focus:bg-muted data-[active=true]:hover:bg-muted [&_svg:not([class*='size-'])]:size-4",
+				"flex items-center gap-1.5 in-data-[slot=navigation-menu-content]:rounded-lg rounded-3xl p-3 text-sm outline-none transition-[color,background-color,box-shadow] hover:bg-muted focus:bg-muted focus-visible:outline-1 focus-visible:ring-3 focus-visible:ring-ring data-[active=true]:bg-muted/50 data-[active=true]:focus:bg-muted data-[active=true]:hover:bg-muted [&_svg:not([class*='size-'])]:size-4",
 				className
 			)}
 			data-slot="navigation-menu-link"

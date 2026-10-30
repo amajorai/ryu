@@ -1,10 +1,13 @@
-import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
+import {
+	Door01Icon,
+	DoorIcon,
+	LinkSquare02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import PageHeader from "@ryu/ui/components/page-header.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import type { MfaEnrollmentAccess } from "@ryuhq/core-client/mfa-enrollment.ts";
-import { DoorClosed, DoorOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { clearSessionToken, signOut } from "@/lib/auth-client.ts";
 
@@ -92,7 +95,8 @@ export default function MfaEnrollmentPage({
 			<div className="relative flex min-h-full items-center justify-center px-4 py-12">
 				<div className="flex w-full max-w-md flex-col gap-4">
 					<PageHeader
-						subtitle="Your Ryu account needs a passkey or an authenticator app before it can continue. Email codes don't count as a second factor."
+						size="app"
+						subtitle="Add a passkey or an authenticator app to continue. Email codes don't count."
 						title="Set up two-factor authentication"
 					/>
 
@@ -107,23 +111,22 @@ export default function MfaEnrollmentPage({
 					) : null}
 
 					<Button
-						className="w-full"
+						className="h-10 w-full"
 						onClick={openSetup}
-						size="lg"
 						type="button"
+						variant="mono"
 					>
-						<HugeiconsIcon icon={LinkSquare02Icon} size={18} />
+						<HugeiconsIcon icon={LinkSquare02Icon} size={16} />
 						Open setup in browser
 					</Button>
 
 					<div className="flex flex-col gap-2 sm:flex-row">
 						<Button
-							className="flex-1"
+							className="h-10 flex-1"
 							disabled={checking}
 							onClick={checkAgain}
-							size="lg"
 							type="button"
-							variant="secondary"
+							variant="ghost"
 						>
 							{checking ? (
 								<span className="flex items-center gap-2">
@@ -135,15 +138,20 @@ export default function MfaEnrollmentPage({
 							)}
 						</Button>
 						<Button
-							className="group flex-1"
+							className="group h-10 flex-1 text-status-destructive"
 							disabled={signingOut}
 							onClick={handleSignOut}
-							size="lg"
 							type="button"
-							variant="destructive"
+							variant="ghost"
 						>
-							<DoorClosed className="size-4 transition-all duration-200 group-hover:hidden" />
-							<DoorOpen className="hidden size-4 transition-all duration-200 group-hover:block" />
+							<HugeiconsIcon
+								className="size-4 transition-all duration-200 group-hover:hidden"
+								icon={DoorIcon}
+							/>
+							<HugeiconsIcon
+								className="hidden size-4 transition-all duration-200 group-hover:block"
+								icon={Door01Icon}
+							/>
 							{signingOut ? "Signing out…" : "Sign out"}
 						</Button>
 					</div>

@@ -38,7 +38,12 @@ import { useIslandComposerContext } from "../../context/island-composer-context.
 import { useComposerShortcutBindings } from "../../hooks/use-composer-shortcut-bindings.ts";
 import { IslandWidgetHost } from "../../host/IslandWidgetHost.tsx";
 import { useIslandState } from "../../store/island-state.ts";
-import { CommandIcon } from "../icons.tsx";
+import {
+	IslandChatHeader,
+	IslandChatProblem,
+	IslandNotesStrip,
+	threadTitle,
+} from "./IslandChatChrome.tsx";
 import { useIslandChat } from "./use-island-chat.ts";
 
 const agentUiSubmitContentSchema = z.union([
@@ -81,20 +86,9 @@ export function IslandChat() {
 	const clearAttachments = useIslandState((store) => store.clearAttachments);
 	const attachAndOpen = useIslandState((store) => store.attachAndOpen);
 	const [reachability, setReachability] = useState<Reachability>("checking");
-	const { availablePacks, selectPack, selectedPackId, t } = useI18n();
-	const commandPaletteLabel = t(
-		"island.open-command-palette",
-		undefined,
-		"Open command palette"
-	);
-	const minimizeLabel = t("island.minimize", undefined, "Minimize");
+	const { t } = useI18n();
 
-	// The island is a short composer bar until a conversation exists, then it grows
-	// to the full panel height.
 	const hasHistory = messages.length > 0;
-	useEffect(() => {
-		setExpandedTall(hasHistory);
-	}, [hasHistory, setExpandedTall]);
 
 	const probe = useCallback(async (): Promise<void> => {
 		setReachability("checking");
@@ -108,6 +102,15 @@ export function IslandChat() {
 
 	const offline = reachability === "offline";
 
+	// The island is a short composer bar until a conversation exists (or a note
+	// or problem strip needs room above the composer), then it grows to the full
+	// panel height.
+	const needsPanel =
+		hasHistory || offline || Boolean(error) || notes.length > 0;
+	useEffect(() => {
+		setExpandedTall(needsPanel);
+	}, [needsPanel, setExpandedTall]);
+
 	const onComposerKeyDown = useCallback(
 		(event: ComposerShortcutEvent): boolean =>
 			handleComposerSettingsShortcut(event, sections, composerShortcuts),
@@ -119,6 +122,12 @@ export function IslandChat() {
 			.then(attachAndOpen)
 			.catch(() => undefined);
 	}, [attachAndOpen]);
+	// Retry resends the thread's last question; the raw failure stays behind
+	// "Copy details" instead of printing in the transcript.
+	const lastQuestion = useMemo(() => {
+		const userTurns = messages.filter((message) => message.role === "user");
+		return threadTitle(userTurns.slice(-1));
+	}, [messages]);
 	const sendTurn = useCallback(
 		(text: string) => {
 			const attachments = useIslandState.getState().pendingAttachments;
@@ -129,6 +138,7 @@ export function IslandChat() {
 		},
 		[clearAttachments, send]
 	);
+	const retryLastTurn = lastQuestion ? () => sendTurn(lastQuestion) : undefined;
 	const inputBarPropsRef = useRef<{
 		onAttach: () => void;
 		onComposerKeyDown: (event: ComposerShortcutEvent) => boolean;
@@ -245,99 +255,35 @@ export function IslandChat() {
 
 	return (
 		<div className="flex h-full w-full flex-col gap-2">
-			<header className="relative z-20 flex shrink-0 items-center justify-between px-1 pt-1">
-				<div className="flex min-w-0 items-center gap-2">
-					<span className="font-medium text-foreground text-sm">
-						{t("chat.new")}
-					</span>
-					<select
-						aria-label={t("language.current")}
-						className="type-compact max-w-32 truncate rounded-full border border-border bg-card px-1.5 py-0.5 text-muted-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-						onChange={(event) => selectPack(event.target.value || null)}
-						value={selectedPackId ?? ""}
-					>
-						<option value="">{t("common.english")}</option>
-						{availablePacks
-							.filter((pack) => pack.enabled !== false)
-							.map((pack) => (
-								<option key={pack.id} value={pack.id}>
-									{pack.name}
-								</option>
-							))}
-					</select>
-				</div>
-				<div className="flex items-center gap-0.5">
-					<button
-						aria-label={commandPaletteLabel}
-						className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-						onClick={openCommand}
-						title={commandPaletteLabel}
-						type="button"
-					>
-						<CommandIcon size={15} />
-					</button>
-					<button
-						aria-label={t("island.minimize-ryu", undefined, "Minimize Ryu")}
-						className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-						onClick={toggleCollapse}
-						title={minimizeLabel}
-						type="button"
-					>
-						<span aria-hidden="true" className="text-lg leading-none">
-							−
-						</span>
-					</button>
-				</div>
-			</header>
-			{notes.length > 0 ? (
-				<div className="relative z-20 shrink-0 rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-1.5">
-					<div className="flex items-start justify-between gap-2">
-						<span className="type-compact font-medium text-status-warning/90 uppercase tracking-wide">
-							{t("island.note", undefined, "Note")}
-						</span>
-						<button
-							aria-label={t("island.dismiss-notes", undefined, "Dismiss notes")}
-							className="shrink-0 text-status-warning/70 hover:text-status-warning"
-							onClick={clearNotes}
-							type="button"
-						>
-							<svg
-								aria-hidden="true"
-								fill="none"
-								height="10"
-								stroke="currentColor"
-								strokeLinecap="round"
-								strokeWidth="2"
-								viewBox="0 0 24 24"
-								width="10"
-							>
-								<path d="M18 6 6 18M6 6l12 12" />
-							</svg>
-						</button>
-					</div>
-					{notes.map((note, index) => (
-						<p
-							className="mt-0.5 text-status-warning/90 text-xs leading-snug"
-							// notes are append-only, ephemeral, and never reordered
-							key={index}
-						>
-							{note}
-						</p>
-					))}
-				</div>
-			) : null}
-			<div className="flex min-h-0 flex-1 flex-col">
+			<IslandChatHeader
+				onMinimize={toggleCollapse}
+				onOpenCommand={openCommand}
+				title={hasHistory ? threadTitle(messages) : ""}
+			/>
+			<IslandNotesStrip notes={notes} onDismiss={clearNotes} />
+			<div className="flex min-h-0 flex-1 flex-col gap-2">
 				{offline ? (
-					<p className="relative z-10 shrink-0 text-muted-foreground text-xs">
-						{t("island.core-unreachable", undefined, "Can't reach Ryu Core.")}{" "}
-						<button
-							className="text-foreground underline underline-offset-2 hover:text-foreground"
-							onClick={probe}
-							type="button"
-						>
-							{t("common.retry")}
-						</button>
-					</p>
+					<IslandChatProblem
+						onRetry={() => {
+							probe().catch(() => setReachability("offline"));
+						}}
+						sentence={t(
+							"island.core-unreachable",
+							undefined,
+							"Can't reach Ryu Core."
+						)}
+					/>
+				) : null}
+				{error ? (
+					<IslandChatProblem
+						details={error}
+						onRetry={retryLastTurn}
+						sentence={t(
+							"island.reply-failed",
+							undefined,
+							"The reply didn't finish."
+						)}
+					/>
 				) : null}
 				<div className="min-h-0 flex-1">
 					<IslandWidgetHost>
@@ -355,7 +301,6 @@ export function IslandChat() {
 								composerDisabled={offline}
 								composerMenuGroups={composerMenuGroups}
 								density="compact"
-								error={error ? new Error(error) : undefined}
 								mentionItems={mentionItems}
 								messages={messages}
 								onAgentUiSubmit={handleAgentUiSubmit}

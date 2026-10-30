@@ -1,3 +1,6 @@
+"use client";
+
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
@@ -29,6 +32,7 @@ const SURFACES = [
 ] as const;
 
 export function ProductSurfaceCards({ className }: { className?: string }) {
+	const tl = useLiteralMessages();
 	return (
 		<div className={cn("grid gap-10 md:grid-cols-3", className)}>
 			{SURFACES.map((surface) => (
@@ -43,7 +47,7 @@ export function ProductSurfaceCards({ className }: { className?: string }) {
 						data-product-visual
 					>
 						<div
-							aria-label={`${surface.label} example`}
+							aria-label={tl("{label} example", { label: surface.label })}
 							className="w-full min-w-0"
 						>
 							<surface.Visual />

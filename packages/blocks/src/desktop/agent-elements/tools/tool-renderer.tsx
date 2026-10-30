@@ -1,9 +1,9 @@
+import { SparklesIcon } from "@hugeicons/core-free-icons";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	isNativeNumber,
 	isNativeText,
 } from "@ryu/ui/lib/native-primitive-observation.ts";
-import { IconSparkles } from "@tabler/icons-react";
 import type React from "react";
 import { memo } from "react";
 import { AgentUI } from "../agent-ui/agent-ui.tsx";
@@ -13,6 +13,7 @@ import {
 	useAgentUiSurfaceHost,
 } from "../agent-ui/surface-context.tsx";
 import { useChatDisplayPrefs } from "../chat-display-prefs.tsx";
+import { hugeiconComponent } from "../icons/hugeicon-component.tsx";
 import { QuestionTool } from "../question/question-tool.tsx";
 import type {
 	AgentMessageContext,
@@ -52,6 +53,8 @@ import {
 	toolRegistry,
 } from "./tool-registry.ts";
 import { ToolTimingProvider } from "./tool-timing.tsx";
+
+const IconSparkles = hugeiconComponent(SparklesIcon);
 
 export interface ToolRendererProps {
 	agentMessageContext?: AgentMessageContext;

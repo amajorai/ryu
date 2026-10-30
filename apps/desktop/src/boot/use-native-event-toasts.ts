@@ -1,5 +1,6 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 // Boot effects fire before Tauri is guaranteed to have injected
 // `window.__TAURI_INTERNALS__`, and `listen()` reaches into it for
 // `transformCallback` — the single most frequent production error on 0.1.11.
@@ -20,6 +21,11 @@ function ignoreSubscribeFailure<TError>(error: TError): void {
 
 /** Toasts for native events: background installer progress and Quick Capture. */
 export function useNativeEventToasts(botProduct: boolean): void {
+	// `tl` is a fresh function each render; read it through a ref so the
+	// subscription is not torn down and re-made on every render.
+	const tlCurrent = useLiteralMessages();
+	const tlRef = useRef(tlCurrent);
+	tlRef.current = tlCurrent;
 	useEffect(() => {
 		if (botProduct) {
 			return;
@@ -32,6 +38,7 @@ export function useNativeEventToasts(botProduct: boolean): void {
 			if (isOnboardingActive()) {
 				return;
 			}
+			const tl = tlRef.current;
 			const label = installerComponentLabel(payload.component);
 			const progress =
 				payload.percent === undefined
@@ -39,7 +46,7 @@ export function useNativeEventToasts(botProduct: boolean): void {
 					: `${payload.percent}% of setup`;
 			if (payload.phase === "binary" && payload.status === "started") {
 				toast.show({
-					title: `Installing ${label}`,
+					title: tl("Installing {componentLabel}", { componentLabel: label }),
 					description: progress,
 					type: "loading",
 					duration: null,
@@ -50,8 +57,10 @@ export function useNativeEventToasts(botProduct: boolean): void {
 			) {
 				toast.success(
 					payload.status === "skipped"
-						? `${label} is already installed`
-						: `${label} installed`
+						? tl("{componentLabel} is already installed", {
+								componentLabel: label,
+							})
+						: tl("{componentLabel} installed", { componentLabel: label })
 				);
 			} else if (payload.phase === "core" && payload.status === "started") {
 				toast.show({

@@ -1,3 +1,6 @@
+"use client";
+
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
@@ -254,6 +257,7 @@ export function BoxNetworkVisual() {
  * attempts. Labels are cumulative time since the first attempt.
  */
 export function RetryTimelineVisual() {
+	const tl = useLiteralMessages();
 	const attempts = [
 		{ at: "Now", result: "Failed" },
 		{ at: "+30 s", result: "Failed" },
@@ -265,7 +269,10 @@ export function RetryTimelineVisual() {
 			{attempts.map((attempt, index) => (
 				<li key={attempt.at}>
 					<StatusRow
-						label={`Attempt ${index + 1} · ${attempt.at}`}
+						label={tl("Attempt {attemptNumber} · {at}", {
+							at: attempt.at,
+							attemptNumber: index + 1,
+						})}
 						strong={attempt.result === "Delivered"}
 						value={attempt.result}
 					/>

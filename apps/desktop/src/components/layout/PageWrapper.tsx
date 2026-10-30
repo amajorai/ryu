@@ -118,13 +118,13 @@ export function PageWrapper({ children }: PageWrapperProps) {
 	return (
 		<div
 			className={cn(
-				"relative flex h-screen w-full overflow-hidden bg-background backdrop-blur-xl",
+				"relative flex h-screen w-full overflow-hidden bg-background",
 				// Maximized/fullscreen sits flush against the screen edges, where a
 				// hairline would read as a stray line rather than a window edge, so
 				// the border rides with the rounded corners.
 				edgeToEdge
 					? "rounded-none"
-					: cn("border border-border/30", layoutStyles.authored1)
+					: cn("border border-border", layoutStyles.authored1)
 			)}
 			data-ryu-window-root="true"
 			ref={rootRef}

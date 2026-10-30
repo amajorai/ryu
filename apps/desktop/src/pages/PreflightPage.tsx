@@ -11,29 +11,17 @@
 // SystemStatusProvider above it) and targets the active node directly, degrading
 // every probe to "unknown" when Core is unreachable.
 
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	OnboardingCta,
+	OnboardingShell,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo.tsx";
-import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { relaunch } from "@tauri-apps/plugin-process";
-import {
-	type ReactNode,
-	useCallback,
-	useEffect,
-	useId,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import {
-	getRyuStatus,
-	restartRyuCore,
-	startRyuCore,
-} from "@/lib/tauri-bridge.ts";
+import { useState } from "react";
+import { restartRyuCore, startRyuCore } from "@/lib/tauri-bridge.ts";
 import {
 	SettingsGroup,
 	SettingsSection,
@@ -53,237 +41,26 @@ import {
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useEngines } from "@/src/hooks/useEngines.ts";
 import { useSafeMode } from "@/src/hooks/useSafeMode.ts";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
-import {
-	fetchHealth,
-	fetchSystemStatus,
-	restartGateway,
-} from "@/src/lib/api/system.ts";
-import { checkForUpdate, type UpdateCheck } from "@/src/lib/api/update.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
+import { restartGateway } from "@/src/lib/api/system.ts";
+
 import { ISLAND_ENABLED } from "@/src/lib/island-availability.ts";
 import { restartSidecar, startSidecar } from "@/src/lib/services-api.ts";
-import { useAppStore } from "@/src/store/useAppStore.ts";
+
 import { isLocalNode } from "@/src/store/useNodeStore.ts";
-
-/** The Island Electron companion's loopback control server (see apps/island). */
-const ISLAND_CONTROL_URL = "http://127.0.0.1:7989/control";
-const POLL_INTERVAL_MS = 2500;
-
-type Tone = "ok" | "warn" | "bad" | "pending";
-
-const TONE_CLASS = {
-	ok: "bg-success",
-	warn: "bg-warning",
-	bad: "bg-destructive",
-	pending: "bg-muted-foreground/40",
-} satisfies Record<Tone, string>;
-
-function StatusDot({ tone }: { tone: Tone }) {
-	return (
-		<span
-			className={cn(
-				"size-2 shrink-0 rounded-full",
-				TONE_CLASS[tone],
-				tone === "pending" && "motion-safe:animate-pulse"
-			)}
-		/>
-	);
-}
-
-/**
- * One component as a disclosure row of the embedded (Settings) card: the status
- * line is the trigger, its controls open beneath it inside the same row. The
- * trigger's accessible name starts with the component name and carries
- * `aria-expanded`, which the preflight proof drives.
- */
-function ComponentRow({
-	children,
-	onToggle,
-	open,
-	title,
-}: {
-	children: ReactNode;
-	onToggle: () => void;
-	open: boolean;
-	title: ReactNode;
-}) {
-	const id = useId();
-	return (
-		<div>
-			<button
-				aria-controls={`${id}-panel`}
-				aria-expanded={open}
-				className="flex min-h-11 w-full min-w-0 items-center gap-3 px-3.5 py-2.5 text-left text-sm outline-none focus-visible:bg-muted/40"
-				id={`${id}-trigger`}
-				onClick={onToggle}
-				type="button"
-			>
-				<span className="min-w-0 flex-1">{title}</span>
-				<HugeiconsIcon
-					aria-hidden
-					className={cn(
-						"size-4 shrink-0 text-muted-foreground transition-transform",
-						open && "rotate-180"
-					)}
-					icon={ArrowDown01Icon}
-				/>
-			</button>
-			<div
-				aria-labelledby={`${id}-trigger`}
-				className="px-3.5 pb-3 text-muted-foreground text-sm"
-				hidden={!open}
-				id={`${id}-panel`}
-				role="region"
-			>
-				{children}
-			</div>
-		</div>
-	);
-}
-
-/** The full health snapshot the page polls into. */
-interface Health {
-	coreState: "running" | "starting" | "stopped";
-	coreUpdate: UpdateCheck | null;
-	coreVersion: string | null;
-	gatewayReachable: boolean | null;
-	islandReachable: boolean | null;
-	loading: boolean;
-	/** name -> running, from /api/system/status. */
-	sidecars: { name: string; running: boolean }[];
-}
-
-const INITIAL_HEALTH: Health = {
-	coreState: "starting",
-	coreVersion: null,
-	coreUpdate: null,
-	gatewayReachable: null,
-	islandReachable: null,
-	loading: true,
-	sidecars: [],
-};
-
-/** Probe the Island loopback control server; best-effort (may CORS-fail). */
-async function probeIsland(): Promise<boolean> {
-	try {
-		const resp = await fetch(ISLAND_CONTROL_URL, { method: "GET" });
-		return resp.ok;
-	} catch {
-		return false;
-	}
-}
-
-function usePreflightHealth(target: ApiTarget) {
-	const scope = useMemo(
-		() => ({
-			target: { ...target },
-			controller: new AbortController(),
-			autoStarted: false,
-			poll: 0,
-			polling: new Set<AbortSignal>(),
-		}),
-		[target.url, target.token, target.userJwt]
-	);
-	const current = useRef(scope);
-	current.current = scope;
-	const [result, setResult] = useState<{
-		scope: typeof scope;
-		health: Health;
-	}>();
-	const setCoreStatus = useAppStore((store) => store.setCoreStatus);
-	const poll = useCallback(async () => {
-		const signal = scope.controller.signal;
-		if (scope.polling.has(signal)) {
-			return;
-		}
-		scope.polling.add(signal);
-		try {
-			const sequence = ++scope.poll;
-			const owns = () =>
-				current.current === scope && !signal.aborted && sequence === scope.poll;
-			const target = scope.target;
-			const local = isLocalNode(target);
-			const status = local
-				? await getRyuStatus().catch(() => "stopped")
-				: await fetchHealth(target, signal)
-						.then(() => "running")
-						.catch(() => "stopped");
-			if (!owns()) {
-				return;
-			}
-			const coreRunning = status === "running";
-			if (local && !(coreRunning || scope.autoStarted)) {
-				scope.autoStarted = true;
-				void startRyuCore().catch(() => undefined);
-			}
-			if (!coreRunning) {
-				const island = await probeIsland();
-				if (owns()) {
-					setResult({
-						scope,
-						health: {
-							...INITIAL_HEALTH,
-							coreState: "stopped",
-							islandReachable: island,
-							loading: false,
-						},
-					});
-				}
-				return;
-			}
-			const [sys, health, update, island] = await Promise.all([
-				fetchSystemStatus(target).catch(() => null),
-				fetchHealth(target, signal).catch(() => null),
-				checkForUpdate(target, { signal }).catch(() => null),
-				probeIsland(),
-			]);
-			if (!owns()) {
-				return;
-			}
-			setCoreStatus("running");
-			setResult({
-				scope,
-				health: {
-					coreState: "running",
-					coreVersion: health?.version ?? null,
-					coreUpdate: update,
-					gatewayReachable: sys?.gatewayReachable ?? false,
-					islandReachable: island,
-					loading: false,
-					sidecars: sys
-						? Object.entries(sys.sidecars).map(([name, running]) => ({
-								name,
-								running,
-							}))
-						: [],
-				},
-			});
-		} finally {
-			scope.polling.delete(signal);
-		}
-	}, [scope, setCoreStatus]);
-	useEffect(() => {
-		scope.controller = new AbortController();
-		void poll().catch(() => undefined);
-		const timer = setInterval(() => {
-			void poll().catch(() => undefined);
-		}, POLL_INTERVAL_MS);
-		return () => {
-			scope.controller.abort();
-			clearInterval(timer);
-		};
-	}, [scope, poll]);
-	return {
-		health: result?.scope === scope ? result.health : INITIAL_HEALTH,
-		refresh: poll,
-	};
-}
+import {
+	ISLAND_CONTROL_URL,
+	POLL_INTERVAL_MS,
+	usePreflightHealth,
+} from "./PreflightPage.health.ts";
+import { ComponentRow, StatusDot, type Tone } from "./PreflightPage.parts.tsx";
 
 export function PreflightPage({
 	embedded = false,
 }: {
 	embedded?: boolean;
 } = {}) {
+	const tl = useLiteralMessages();
 	const { engines } = useEngines();
 	const [open, setOpen] = useState<string | null>("core");
 	const node = useActiveNode();
@@ -346,13 +123,14 @@ export function PreflightPage({
 			<span className={cn("text-foreground", !embedded && "font-medium")}>
 				{name}
 			</span>
-			<span className="truncate text-muted-foreground text-xs" title={detail}>
+			<span
+				className="truncate text-detail text-muted-foreground"
+				title={detail}
+			>
 				{detail}
 			</span>
 			{badge ? (
-				<span className="type-compact rounded-full bg-primary/10 px-2 py-0.5 text-primary">
-					{badge}
-				</span>
+				<span className="shrink-0 text-detail text-status-info">{badge}</span>
 			) : null}
 		</span>
 	);
@@ -485,10 +263,14 @@ export function PreflightPage({
 						) : null}
 					</div>
 					{health.coreState === "running" && visibleSidecars.length > 0 ? (
-						<div className="flex flex-col gap-2 border-border/60 border-t pt-3">
-							<span className="text-foreground text-xs">
-								Helpers ({visibleSidecars.length - failedSidecars.length}/
-								{visibleSidecars.length} running)
+						<div className="flex flex-col gap-2 border-border border-t pt-3">
+							<span className="text-detail text-foreground">
+								{tl("Helpers ({running}/{total} running)", {
+									running: String(
+										visibleSidecars.length - failedSidecars.length
+									),
+									total: String(visibleSidecars.length),
+								})}
 							</span>
 							{visibleSidecars.map((sc) => (
 								<div
@@ -657,8 +439,8 @@ export function PreflightPage({
 		);
 	}
 
-	// Full-window boot matches Login / onboarding: GhostOrb + PageHeader +
-	// staggered reveal.
+	// Full-window boot matches onboarding: the shared OnboardingShell (persona
+	// mark, centered header, one fade).
 	const body = (
 		<>
 			<BouncyAccordion
@@ -671,9 +453,7 @@ export function PreflightPage({
 			<div className="flex items-center justify-between gap-2">
 				<PreflightDiagnosticsActions target={target} />
 				{health.coreState === "running" ? (
-					<Button onClick={() => refresh()} size="sm" variant="default">
-						Continue
-					</Button>
+					<OnboardingCta onClick={() => refresh()}>Continue</OnboardingCta>
 				) : null}
 			</div>
 		</>
@@ -683,29 +463,19 @@ export function PreflightPage({
 		// Full-window boot screen renders outside Layout, so it has no TitleBar
 		// drag region — mark the background draggable so the window can still be
 		// moved. Interactive children override it.
-		<div
-			className="flex h-full w-full flex-col items-center justify-center gap-8 overflow-y-auto bg-background p-8"
-			data-tauri-drag-region="true"
-		>
-			<StaggerReveal>
-				<div className="shrink-0">
-					<GhostOrb size="50px" variant="outline" />
-				</div>
-				<PageHeader
-					stagger={false}
-					subtitle={
-						health.coreState === "running"
-							? "Core is up. Check any component below, then continue."
-							: "Core isn't running yet. It should start automatically, or start it below."
-					}
-					title={
-						health.coreState === "running"
-							? "Almost there"
-							: "Getting Ryu ready"
-					}
-				/>
-				<div className="flex w-full max-w-md flex-col gap-5">{body}</div>
-			</StaggerReveal>
+		<div className="size-full bg-background">
+			<OnboardingShell
+				subtitle={
+					health.coreState === "running"
+						? "Core is up. Check any component below, then continue."
+						: "Core isn't running yet. It should start automatically, or start it below."
+				}
+				title={
+					health.coreState === "running" ? "Almost there" : "Getting Ryu ready"
+				}
+			>
+				{body}
+			</OnboardingShell>
 		</div>
 	);
 }

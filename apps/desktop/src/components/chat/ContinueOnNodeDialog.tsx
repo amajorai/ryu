@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -14,15 +15,9 @@ import {
 } from "@ryu/ui/components/native-select.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
-	createRnpContextBundle,
-	normalizeRnpNodeUrl,
-	parseRnpContinuityBundle,
 	RNP_WORKSPACE_LIMITS,
 	type RnpContinuityBundleV0,
-	type RnpResumeResultV0,
-	type RnpWorkspaceDestinationV0,
 	type RnpWorkspaceInspectionV0,
-	type RnpWorkspaceManifestV0,
 	type RnpWorkspaceResumeResultV0,
 } from "@ryuhq/protocol/continuity";
 import { buildRyuDeepLink } from "@ryuhq/protocol/deep-link";
@@ -47,88 +42,17 @@ import {
 	workspaceErrorMessage,
 } from "@/src/lib/api/continuity-workspace.ts";
 import type { Node } from "@/src/store/useNodeStore.ts";
+import {
+	type AttemptedWorkspace,
+	buildResumeBundle,
+	type ContinueOnNodeDialogProps,
+	currentNode,
+	errorMessage,
+	NEW_CLONE_DESTINATION,
+	sameNode,
+} from "./ContinueOnNodeDialog-bundle.ts";
 
-/**
- * v1 resumes into a new clone only. A worktree added to an existing, trusted
- * checkout would inherit that checkout's workspace trust, so the destination
- * refuses existing-checkout mode until handed-off worktrees are excluded.
- */
-const NEW_CLONE_DESTINATION: RnpWorkspaceDestinationV0 = { mode: "new-clone" };
-
-/** The working-tree half of a frozen handoff: resent unchanged on retry. */
-interface AttemptedWorkspace {
-	destination: RnpWorkspaceDestinationV0;
-	manifest: RnpWorkspaceManifestV0;
-}
-
-export interface ContinueOnNodeDialogProps {
-	conversationId: string;
-	conversationTitle: string;
-	nodes: readonly Node[];
-	onCompleted: (
-		node: Node,
-		result: RnpResumeResultV0,
-		workspace?: RnpWorkspaceResumeResultV0
-	) => Promise<void> | void;
-	onOpenChange: (open: boolean) => void;
-	open: boolean;
-	resolveNodes?: () => readonly Node[];
-	sourceNode: Node;
-	sourceUpdatedAt?: number;
-}
-
-function errorMessage<TError>(error: TError): string {
-	return error instanceof Error
-		? error.message
-		: "The handoff could not finish.";
-}
-
-function sameNode(left: Node, right: Node): boolean {
-	return normalizeRnpNodeUrl(left.url) === normalizeRnpNodeUrl(right.url);
-}
-
-function currentNode(
-	reference: Node,
-	nodes: readonly Node[]
-): Node | undefined {
-	return nodes.find((node) => sameNode(node, reference));
-}
-
-function buildResumeBundle(
-	preview: RnpContinuityBundleV0,
-	contextNote: string,
-	includeAgentHint: boolean
-): RnpContinuityBundleV0 {
-	const context = contextNote
-		? createRnpContextBundle({
-				items: [
-					{
-						id: "operator-note",
-						kind: "text",
-						label: "Operator note",
-						mediaType: "text/plain",
-						text: contextNote,
-						source: { kind: "manual" },
-					},
-				],
-			})
-		: { version: 0 as const, items: [] };
-	const source = includeAgentHint
-		? preview.source
-		: {
-				conversationId: preview.source.conversationId,
-				updatedAt: preview.source.updatedAt,
-				...(preview.source.checkpointMessageId
-					? { checkpointMessageId: preview.source.checkpointMessageId }
-					: undefined),
-				...(preview.source.title ? { title: preview.source.title } : undefined),
-			};
-	const parsed = parseRnpContinuityBundle({ ...preview, source, context });
-	if (!parsed.ok) {
-		throw new Error(`The reviewed handoff is invalid: ${parsed.error.message}`);
-	}
-	return parsed.value;
-}
+export type { ContinueOnNodeDialogProps } from "./ContinueOnNodeDialog-bundle.ts";
 
 export function ContinueOnNodeDialog({
 	conversationId,
@@ -141,6 +65,7 @@ export function ContinueOnNodeDialog({
 	sourceNode,
 	sourceUpdatedAt,
 }: ContinueOnNodeDialogProps) {
+	const tl = useLiteralMessages();
 	const destinations = useMemo(
 		() => nodes.filter((node) => !sameNode(node, sourceNode)),
 		[nodes, sourceNode]
@@ -398,10 +323,10 @@ export function ContinueOnNodeDialog({
 				<DialogHeader>
 					<DialogTitle>Continue on another node</DialogTitle>
 					<DialogDescription>
-						Review the exact visible transcript from {sourceNode.name} before
-						copying it. Node credentials, structured authentication data, tool
-						state, workspace paths, and the running agent session stay behind.
-						Files move only when you bring the reviewed working tree.
+						{tl(
+							"Review the exact visible transcript from {name} before copying it. Node credentials, structured authentication data, tool state, workspace paths, and the running agent session stay behind. Files move only when you bring the reviewed working tree.",
+							{ name: sourceNode.name }
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -433,7 +358,11 @@ export function ContinueOnNodeDialog({
 						<div className="flex items-center justify-between gap-3">
 							<Label>Reviewed transcript</Label>
 							<span className="text-muted-foreground text-xs">
-								{preview ? `${preview.messages.length} messages` : "Loading…"}
+								{preview
+									? tl("{length} messages", {
+											length: String(preview.messages.length),
+										})
+									: "Loading…"}
 							</span>
 						</div>
 						<div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border bg-muted/30 p-3">
@@ -455,12 +384,15 @@ export function ContinueOnNodeDialog({
 							)}
 						</div>
 						<p className="text-muted-foreground text-xs">
-							“{reviewedTitle}” from {sourceNode.name}
 							{preview?.selection.omittedEarlierMessages
-								? "; earlier messages are omitted"
-								: "; no earlier visible messages are omitted"}
-							. Visible messages can contain pasted secrets, so review them
-							before continuing.
+								? tl(
+										"“{reviewedTitle}” from {name}; earlier messages are omitted. Visible messages can contain pasted secrets, so review them before continuing.",
+										{ name: sourceNode.name, reviewedTitle }
+									)
+								: tl(
+										"“{reviewedTitle}” from {name}; no earlier visible messages are omitted. Visible messages can contain pasted secrets, so review them before continuing.",
+										{ name: sourceNode.name, reviewedTitle }
+									)}
 						</p>
 					</div>
 

@@ -6,7 +6,7 @@
 // the shared Right/Bottom panes, and the chat publishes its live data for those
 // tabs to read. Only the chat column and its Pinned summary render here.
 
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type CSSProperties,
 	useCallback,
@@ -223,7 +223,7 @@ function PinnedSummaryLayout({
 		titleBarClearsContent && floatingChrome
 			? "top-[58px]"
 			: titleBarClearsContent
-				? "top-12"
+				? "top-14"
 				: "top-0";
 
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -283,8 +283,8 @@ function PinnedSummaryLayout({
 			>
 				<div
 					className={cn(
-						"h-full overflow-y-auto pl-1",
-						floatingChrome ? "py-2 pr-2" : "pr-0"
+						"h-full overflow-y-auto border-border border-l px-3 pt-6",
+						floatingChrome && "pb-2"
 					)}
 				>
 					{pinnedDocked && renderPinnedSummary?.({ floating: false })}

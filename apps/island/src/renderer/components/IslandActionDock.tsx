@@ -16,11 +16,12 @@ export interface IslandAction {
 }
 
 // Each circle is a sibling shape of the detail island (so it sits outside the
-// composer's clip and carries its own ring + shadow + blur), the same size and
-// glass look as the logo circle. They overlap like an avatar group — the ring on
+// composer's clip), the same size as the logo circle, with the Island's token
+// fill and hairline ring. The group's one shadow belongs to the Island shapes,
+// so the circles carry none. They overlap like an avatar group — the ring on
 // each shows the stacking seam so part of every circle stays visible.
 const DOCK_CIRCLE =
-	"island-surface-height island-row-offset island-stack-layer relative flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-card/80 text-foreground shadow-xl ring-1 ring-border backdrop-blur-2xl transition-colors hover:bg-card/90";
+	"island-surface-height island-row-offset island-stack-layer relative flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-popover/85 text-foreground ring-1 ring-border transition-colors duration-(--duration-fast) hover:bg-muted";
 
 interface IslandActionGeometry extends CSSProperties {
 	"--island-row-offset": string;
@@ -30,10 +31,11 @@ interface IslandActionGeometry extends CSSProperties {
 
 /**
  * The quick-action islands beside the composer input (text mode): a stacked
- * avatar-group of round islands the same size as the logo circle. Each splits out
- * with the same width-grow morph the detail island uses leaving idle (staggered so
- * they pop one by one), and overlaps the previous by {@link ACTION_OVERLAP} via a
- * negative margin. The leftmost (nearest the input) stacks on top.
+ * avatar-group of round islands the same size as the logo circle. They split out
+ * together with the same width-grow morph the detail island uses leaving idle (no
+ * stagger, no hover scale), and each overlaps the previous by
+ * {@link ACTION_OVERLAP} via a negative margin. The leftmost (nearest the input)
+ * stacks on top.
  *
  * Kept as its own component so the actions map stays out of the Island render's
  * complexity budget — the same split the SuggestionActionPills made.
@@ -57,9 +59,8 @@ export function IslandActionDock({ actions }: { actions: IslandAction[] }) {
 						onClick={action.onClick}
 						style={geometry}
 						title={action.label}
-						transition={{ ...ISLAND_SPRING, delay: index * 0.05 }}
+						transition={ISLAND_SPRING}
 						type="button"
-						whileHover={{ scale: 1.08 }}
 					>
 						{action.icon}
 					</motion.button>

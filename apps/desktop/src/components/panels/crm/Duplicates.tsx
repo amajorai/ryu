@@ -132,7 +132,7 @@ export function Duplicates({
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex items-start justify-between gap-2 border-b px-4 py-3">
 				<div>
-					<h2 className="font-medium text-base capitalize">
+					<h2 className="font-semibold text-sm capitalize">
 						{tl("Duplicate {objectPlural}", {
 							objectPlural: subject.object.plural,
 						})}
@@ -179,7 +179,7 @@ export function Duplicates({
 					const columns = differingFields(records);
 					return (
 						<section
-							className="rounded-md border bg-card p-3"
+							className="rounded-lg border bg-card p-3"
 							// a duplicate group has no id of its own; the list is fully replaced on every rescan
 							key={`group-${index}`}
 						>

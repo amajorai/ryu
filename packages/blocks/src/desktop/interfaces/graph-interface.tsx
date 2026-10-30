@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -6,13 +7,9 @@ import {
 	EmptyHeader,
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import {
-	type GraphEdge,
-	type GraphNode,
 	type InterfaceAgent,
 	type InterfaceParamsByRenderer,
-	type InterfaceSnapshot,
 	projectGraph,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
@@ -28,6 +25,15 @@ import {
 	useState,
 } from "react";
 import { GraphCanvas, usePrefersReducedMotion } from "./graph-canvas.tsx";
+import { GraphLoading } from "./graph-interface-loading.tsx";
+import {
+	agentsFor,
+	EDGE_LAYER,
+	isEditableTarget,
+	NODE_STYLE,
+	nodeDescription,
+	plural,
+} from "./graph-interface-model.ts";
 import {
 	GRAPH_NODE_SIZE,
 	type GraphEmphasis,
@@ -53,87 +59,6 @@ import {
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 
-const NODE_STYLE = { pointerEvents: "all" } as const;
-
-/** Edges paint in this order, so live spokes sit above memberships. */
-const EDGE_LAYER: Record<GraphEdge["kind"], number> = {
-	collaborates: 1,
-	member: 0,
-	talks: 2,
-};
-
-function isEditableTarget(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target.tagName === "INPUT" ||
-		target.tagName === "TEXTAREA" ||
-		target.tagName === "SELECT"
-	);
-}
-
-function agentsFor(
-	snapshot: InterfaceSnapshot,
-	ids: readonly string[]
-): InterfaceAgent[] {
-	const wanted = new Set(ids);
-	return snapshot.agents.filter((agent) => wanted.has(agent.id));
-}
-
-function plural(count: number, one: string): string {
-	return `${count} ${one}${count === 1 ? "" : "s"}`;
-}
-
-function nodeDescription(
-	snapshot: InterfaceSnapshot,
-	node: GraphNode,
-	agent: InterfaceAgent | undefined,
-	linkedCount: number
-): string {
-	switch (node.kind) {
-		case "agent":
-			return agent?.description.trim() || "Agent";
-		case "team":
-			return `Team · ${plural(linkedCount, "member")}`;
-		case "project":
-			return `Project · ${plural(linkedCount, "agent")}`;
-		default:
-			return `Everyone you work with · ${plural(snapshot.agents.length, "agent")}`;
-	}
-}
-
-function GraphLoading() {
-	return (
-		<div
-			aria-busy="true"
-			aria-label="Loading the map"
-			className="relative flex size-full items-center justify-center bg-background"
-			data-testid="interface-graph"
-			role="status"
-		>
-			<div aria-hidden="true" className="relative size-80">
-				<Skeleton className="absolute top-1/2 left-1/2 size-24 -translate-x-1/2 -translate-y-1/2 rounded-full" />
-				{[0, 1, 2, 3, 4, 5].map((index) => {
-					const angle = (index / 6) * Math.PI * 2 - Math.PI / 2;
-					return (
-						<Skeleton
-							className="absolute size-12 -translate-x-1/2 -translate-y-1/2 rounded-full"
-							key={index}
-							style={{
-								left: `${50 + Math.cos(angle) * 40}%`,
-								top: `${50 + Math.sin(angle) * 40}%`,
-							}}
-						/>
-					);
-				})}
-			</div>
-			<span className="sr-only">Loading the map…</span>
-		</div>
-	);
-}
-
 /**
  * Graph interface: a live map of who works with whom. You sit at the hub,
  * agents ring around you (spoke weight = threads together), and teams and
@@ -147,6 +72,7 @@ export function GraphInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["graph"]>) {
+	const tl = useLiteralMessages();
 	const summaryId = useId();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const headingRef = useRef<HTMLHeadingElement>(null);
@@ -425,7 +351,7 @@ export function GraphInterface({
 			<GraphThreadPanel
 				backLabel={
 					backTarget && backTarget.kind !== "you"
-						? `Back to ${backTarget.label}`
+						? tl("Back to {label}", { label: backTarget.label })
 						: "Back to the map"
 				}
 				headingRef={headingRef}
@@ -456,7 +382,13 @@ export function GraphInterface({
 				activeThreadId={activeThreadId}
 				agent={agent}
 				composerAgents={composerAgents}
-				description={nodeDescription(snapshot, selected, agent, linked.length)}
+				description={nodeDescription(
+					snapshot,
+					selected,
+					agent,
+					linked.length,
+					tl
+				)}
 				headingRef={headingRef}
 				linkedAgents={selected.kind === "you" ? [] : linked}
 				linkedLabel={linkedLabel}

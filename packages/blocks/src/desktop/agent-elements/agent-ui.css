@@ -94,108 +94,18 @@
 }
 
 /* Chat bubble entrance — a message sent or received while the transcript is
- * on screen springs into place from the edge it belongs to: the user's own
- * bubble rises out of the composer from its bottom-right corner, a reply grows
- * from the bottom-left. `message-list-entrance.ts` decides which rows carry
+ * on screen fades in and settles 4px, on the shared entrance curve and with no
+ * overshoot. `message-list-entrance.ts` decides which rows carry
  * `data-bubble-enter`; loaded history never does. The fill is `backwards`
  * only, so nothing lingers on the bubble once it lands. */
-@keyframes ryu-bubble-send {
-	from {
-		transform: translate3d(0, 22px, 0) scale(0.84);
-	}
-	to {
-		transform: none;
-	}
-}
-
-@keyframes ryu-bubble-receive {
-	from {
-		transform: translate3d(0, 12px, 0) scale(0.94);
-	}
-	to {
-		transform: none;
-	}
-}
-
-@keyframes ryu-bubble-fade {
+@keyframes ryu-bubble-enter {
 	from {
 		opacity: 0;
-		filter: blur(4px);
+		transform: translate3d(0, 4px, 0);
 	}
 	to {
 		opacity: 1;
-		filter: none;
-	}
-}
-
-:root {
-	--ryu-bubble-send-ease: cubic-bezier(0.34, 1.4, 0.64, 1);
-	--ryu-bubble-receive-ease: cubic-bezier(0.22, 1.12, 0.36, 1);
-}
-
-/* Real damped springs (ζ≈0.62 and ζ≈0.78) where `linear()` is supported. */
-@supports (animation-timing-function: linear(0, 1)) {
-	:root {
-		--ryu-bubble-send-ease: linear(
-			0,
-			0.049,
-			0.167,
-			0.321,
-			0.484,
-			0.639,
-			0.774,
-			0.883,
-			0.966,
-			1.024,
-			1.06,
-			1.079,
-			1.084,
-			1.079,
-			1.069,
-			1.056,
-			1.043,
-			1.03,
-			1.019,
-			1.009,
-			1.003,
-			0.998,
-			0.995,
-			0.993,
-			0.993,
-			0.994,
-			0.995,
-			1
-		);
-		--ryu-bubble-receive-ease: linear(
-			0,
-			0.031,
-			0.107,
-			0.209,
-			0.321,
-			0.435,
-			0.542,
-			0.64,
-			0.725,
-			0.797,
-			0.856,
-			0.903,
-			0.94,
-			0.968,
-			0.988,
-			1.002,
-			1.011,
-			1.017,
-			1.019,
-			1.02,
-			1.019,
-			1.018,
-			1.015,
-			1.013,
-			1.011,
-			1.009,
-			1.005,
-			1
-		);
+		transform: none;
 	}
 }
 
@@ -205,21 +115,21 @@
 		[data-slot="message-attachments"],
 		[data-slot="chat-typing-indicator"]
 	) {
-	transform-origin: bottom left;
-	animation:
-		ryu-bubble-receive 520ms var(--ryu-bubble-receive-ease) backwards,
-		ryu-bubble-fade 220ms ease-out backwards;
+	animation: ryu-bubble-enter var(--duration-slow, 280ms)
+		var(--ease-enter, cubic-bezier(0.19, 1, 0.22, 1)) backwards;
 }
 
-[data-bubble-enter]
-	:is(
-		[data-slot="bubble"],
-		[data-slot="message-attachments"]
-	)[data-align="end"] {
-	transform-origin: bottom right;
-	animation:
-		ryu-bubble-send 480ms var(--ryu-bubble-send-ease) backwards,
-		ryu-bubble-fade 180ms ease-out backwards;
+/* Chat prose reads at the comfortable size (15/24) in full foreground. The
+ * markdown components default to the 14px interface size, which stays right
+ * for tool output and side panels; the transcript opts in through
+ * `data-chat-prose` on the message body. */
+[data-chat-prose] .an-markdown :is(p, li, ul, ol) {
+	font-size: var(--text-comfortable, 0.9375rem);
+	line-height: var(--text-comfortable--line-height, 1.5rem);
+}
+
+[data-chat-prose] .an-markdown :is(p, li) {
+	color: var(--foreground);
 }
 
 @media (prefers-reduced-motion: reduce) {

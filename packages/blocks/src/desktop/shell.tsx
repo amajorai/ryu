@@ -22,12 +22,9 @@ import styles from "./shell.module.css";
 
 import {
 	Activity01Icon,
-	Add01Icon,
 	ArrowDown01Icon,
 	Calendar03Icon,
-	GitBranchIcon,
 	LibraryIcon,
-	Mic01Icon,
 	PencilEdit01Icon,
 	Search01Icon,
 	Store01Icon,
@@ -36,14 +33,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Avatar, AvatarFallback } from "@ryu/ui/components/avatar";
-import { EntityAvatar } from "@ryu/ui/components/entity-avatar.tsx";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo";
 import {
 	Sidebar,
 	SidebarContent,
 	SidebarFooter,
-	SidebarGroup,
-	SidebarGroupContent,
 	SidebarHeader,
 	SidebarInset,
 	SidebarMenu,
@@ -51,8 +45,18 @@ import {
 	SidebarMenuItem,
 	SidebarProvider,
 } from "@ryu/ui/components/sidebar";
-import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
+import {
+	IconRow,
+	LogoRow,
+	MeetingRow,
+	NavButton,
+	Section,
+} from "./shell-rows.tsx";
+import {
+	BotModeSidebarContent,
+	TrustModeSidebarContent,
+} from "./shell-sidebar-modes.tsx";
 
 const RECENT_CHATS = [
 	"Refactor the auth flow",
@@ -69,328 +73,6 @@ const MEETINGS: { name: string; recording?: boolean }[] = [
 	{ name: "Design review" },
 ];
 const WORKFLOWS = ["Daily digest"];
-
-const BOT_MODE_AGENTS = [
-	{
-		id: "ryu",
-		name: "Ryu",
-		preview: "Follow-up draft is ready",
-		stamp: "9:41 AM",
-		threads: ["Refactor the auth flow", "Auth flow follow-up"],
-	},
-	{
-		id: "claude-code",
-		name: "Claude Code",
-		preview: "Reviewed the launch checklist",
-		stamp: "Yesterday",
-		threads: ["Plan the launch checklist", "Launch checklist review"],
-	},
-	{
-		id: "codex",
-		name: "Codex",
-		preview: "Found two files to update",
-		stamp: "Mon",
-		threads: ["Debug the SSE stream", "SSE fix follow-up"],
-	},
-] as const;
-
-const TRUST_MODE_AI = [
-	{
-		id: "chatgpt",
-		name: "ChatGPT",
-		preview: "Subscription connected",
-		stamp: "Now",
-	},
-	{
-		id: "claude",
-		name: "Claude",
-		preview: "Context protected",
-		stamp: "Now",
-	},
-	{
-		id: "local",
-		name: "Ryu local",
-		preview: "Private fallback",
-		stamp: "Local",
-	},
-] as const;
-
-const TRUST_MODE_HISTORY = [
-	"Acme follow-up",
-	"Inbox review",
-	"Weekly update",
-	"Expense report",
-] as const;
-
-/** A reorderable header nav button, mirroring the live sidebar's chrome row. */
-function NavButton({
-	icon,
-	label,
-	shortcut,
-	active,
-	onClick,
-}: {
-	icon: typeof Store01Icon;
-	label: string;
-	shortcut?: string;
-	active?: boolean;
-	onClick?: () => void;
-}) {
-	return (
-		<SidebarMenuItem>
-			<SidebarMenuButton className="h-8" isActive={active} onClick={onClick}>
-				<HugeiconsIcon className="size-4" icon={icon} />
-				<span>{label}</span>
-				{shortcut ? (
-					<span className="ml-auto text-muted-foreground text-xs">
-						{shortcut}
-					</span>
-				) : null}
-			</SidebarMenuButton>
-		</SidebarMenuItem>
-	);
-}
-
-/** A content section (Agents / Teams / Spaces / …), mirroring the live sidebar's
- *  `SidebarSection`: a draggable muted-xs label with a hover collapse chevron,
- *  and a "+" add button revealed on section hover. */
-function Section({ label, children }: { label: string; children: ReactNode }) {
-	return (
-		<SidebarGroup className="group/section" spacing="compact">
-			<div className="relative flex items-center">
-				<div className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground text-xs">
-					<span className="min-w-0 truncate">{label}</span>
-					<HugeiconsIcon
-						className="-ml-1 size-3 shrink-0 opacity-0 transition group-hover/section:opacity-100"
-						icon={ArrowDown01Icon}
-					/>
-				</div>
-				<div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
-					<span className="mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/section:opacity-100">
-						<HugeiconsIcon icon={Add01Icon} size={14} />
-					</span>
-				</div>
-			</div>
-			<SidebarGroupContent>
-				<SidebarMenu>{children}</SidebarMenu>
-			</SidebarGroupContent>
-		</SidebarGroup>
-	);
-}
-
-function LogoRow({ name }: { name: string }) {
-	return (
-		<SidebarMenuItem>
-			<SidebarMenuButton className="h-8">
-				<RyuLogo
-					className="shrink-0"
-					size="16px"
-					tone="foreground"
-					variant="outline"
-				/>
-				<span className="truncate">{name}</span>
-			</SidebarMenuButton>
-		</SidebarMenuItem>
-	);
-}
-
-function IconRow({ icon, name }: { icon: typeof LibraryIcon; name: string }) {
-	return (
-		<SidebarMenuItem>
-			<SidebarMenuButton className="h-8">
-				<HugeiconsIcon className="size-4 text-muted-foreground" icon={icon} />
-				<span className="truncate">{name}</span>
-			</SidebarMenuButton>
-		</SidebarMenuItem>
-	);
-}
-
-/** A meeting row — Mic icon + title, with a pulsing red dot only while a meeting
- *  is recording (matching the live `MeetingsSection`). */
-function MeetingRow({
-	name,
-	recording,
-}: {
-	name: string;
-	recording?: boolean;
-}) {
-	return (
-		<SidebarMenuItem>
-			<SidebarMenuButton className="h-8">
-				<HugeiconsIcon
-					className="size-4 text-muted-foreground"
-					icon={Mic01Icon}
-				/>
-				<span className="min-w-0 flex-1 truncate">{name}</span>
-				{recording ? (
-					<>
-						<span
-							aria-hidden="true"
-							className="size-2 shrink-0 rounded-full bg-destructive motion-safe:animate-pulse"
-						/>
-						<span className="sr-only">Recording</span>
-					</>
-				) : null}
-			</SidebarMenuButton>
-		</SidebarMenuItem>
-	);
-}
-
-function BotModeAgentRow({
-	id,
-	name,
-	preview,
-	stamp,
-	threads,
-}: (typeof BOT_MODE_AGENTS)[number]) {
-	return (
-		<SidebarMenuItem>
-			<button
-				aria-label={`Chat with ${name}`}
-				className="group/agent-row flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-				data-testid={`hero-bot-agent-${id}`}
-				type="button"
-			>
-				<EntityAvatar className="size-9 shrink-0" name={name} />
-				<span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-					<span className="flex min-w-0 items-center gap-2">
-						<span className="min-w-0 flex-1 truncate text-sm">{name}</span>
-						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
-							{stamp}
-						</span>
-					</span>
-					<span className="truncate text-muted-foreground text-xs">
-						{preview}
-					</span>
-				</span>
-			</button>
-			<div className="relative ml-7 border-sidebar-border/70 border-l pl-2">
-				<div className="type-compact px-2 py-1 text-muted-foreground uppercase tracking-(--tracking-eyebrow)">
-					Threads
-				</div>
-				<SidebarMenu>
-					{threads.map((thread) => (
-						<SidebarMenuItem key={thread}>
-							<SidebarMenuButton className="h-8" purpose="showcase-thread">
-								<HugeiconsIcon
-									className="size-3.5 text-muted-foreground"
-									icon={GitBranchIcon}
-								/>
-								<span className="truncate">{thread}</span>
-							</SidebarMenuButton>
-						</SidebarMenuItem>
-					))}
-				</SidebarMenu>
-			</div>
-		</SidebarMenuItem>
-	);
-}
-
-function TrustModeAiRow({
-	id,
-	name,
-	preview,
-	stamp,
-}: (typeof TRUST_MODE_AI)[number]) {
-	return (
-		<SidebarMenuItem>
-			<button
-				aria-label={`Use ${name}`}
-				className="group/ai-row flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-				data-testid={`hero-trust-ai-${id}`}
-				type="button"
-			>
-				<EntityAvatar className="size-9 shrink-0" name={name} />
-				<span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-					<span className="flex min-w-0 items-center gap-2">
-						<span className="min-w-0 flex-1 truncate text-sm">{name}</span>
-						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
-							{stamp}
-						</span>
-					</span>
-					<span className="truncate text-muted-foreground text-xs">
-						{preview}
-					</span>
-				</span>
-			</button>
-		</SidebarMenuItem>
-	);
-}
-
-function TrustModeHistoryRow({ title }: { title: string }) {
-	return (
-		<SidebarMenuItem>
-			<SidebarMenuButton className="h-10">
-				<span className="min-w-0 truncate text-sidebar-foreground/85">
-					{title}
-				</span>
-			</SidebarMenuButton>
-		</SidebarMenuItem>
-	);
-}
-
-function TrustModeSidebarContent() {
-	const [activeTab, setActiveTab] = useState<"ai" | "history">("ai");
-
-	return (
-		<div
-			className="flex min-h-0 flex-1 flex-col"
-			data-testid="hero-trust-mode-sidebar"
-		>
-			<Tabs
-				className="min-h-0 flex-1"
-				onValueChange={(value) => {
-					if (value === "ai" || value === "history") {
-						setActiveTab(value);
-					}
-				}}
-				value={activeTab}
-			>
-				<div className="px-2 pt-1">
-					<TabsList className="w-full" manageLayout={false}>
-						<TabsTrigger className="flex-1" value="ai">
-							AI tools
-						</TabsTrigger>
-						<TabsTrigger className="flex-1" value="history">
-							History
-						</TabsTrigger>
-					</TabsList>
-				</div>
-
-				<div className="scroll-fade no-scrollbar min-h-0 flex-1 overflow-auto px-2 pt-2">
-					{activeTab === "ai" ? (
-						<SidebarMenu>
-							{TRUST_MODE_AI.map((item) => (
-								<TrustModeAiRow key={item.id} {...item} />
-							))}
-						</SidebarMenu>
-					) : (
-						<SidebarMenu>
-							{TRUST_MODE_HISTORY.map((title) => (
-								<TrustModeHistoryRow key={title} title={title} />
-							))}
-						</SidebarMenu>
-					)}
-				</div>
-			</Tabs>
-		</div>
-	);
-}
-
-function BotModeSidebarContent() {
-	return (
-		<div
-			className="scroll-fade no-scrollbar min-h-0 flex-1 overflow-auto px-2 pt-2"
-			data-testid="hero-bot-mode-sidebar"
-		>
-			<Section label="Agents">
-				{BOT_MODE_AGENTS.map((agent) => (
-					<BotModeAgentRow key={agent.name} {...agent} />
-				))}
-			</Section>
-		</div>
-	);
-}
 
 /** The compact node-selector pill shown in the live header's top row
  *  (`NodeSelector mode="compact-dropdown"`): a status dot + node name + chevron. */

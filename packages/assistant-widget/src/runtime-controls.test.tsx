@@ -21,7 +21,7 @@ describe("RuntimeSettingsMenu", () => {
 		expect(html).toContain("Browser");
 		expect(html).toContain("Ryu guest");
 		expect(html).toContain("Local node");
-		expect(html).toContain("screened by Ryu&#x27;s gateway");
+		expect(html).toContain("Prompts go through Ryu&#x27;s hosted gateway");
 		expect(html).not.toContain("OpenCode");
 		expect(html).not.toContain("Disconnect this tab");
 	});

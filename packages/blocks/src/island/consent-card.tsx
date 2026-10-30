@@ -58,7 +58,7 @@ export function ConsentCardView({
 								<p className="font-medium text-foreground text-xs">
 									{cap.title}
 								</p>
-								<p className="type-caption mt-0.5 text-muted-foreground">
+								<p className="mt-0.5 text-muted-foreground text-xs">
 									{cap.body}
 								</p>
 							</div>
@@ -84,7 +84,7 @@ export function ConsentCardView({
 									Decline
 								</Button>
 								{answered ? (
-									<span className="type-caption ml-auto self-center text-muted-foreground">
+									<span className="ml-auto self-center text-muted-foreground text-xs">
 										{value ? "Allowed" : "Declined"}
 									</span>
 								) : null}

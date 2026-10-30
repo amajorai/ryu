@@ -6,8 +6,9 @@
 // scroll, it is a short list of rows that PUSH a sub-page with a back button.
 // This file is that half.
 //
-// - `SettingsIconTile` — the rounded-square tinted glyph Apple puts left of every
-//   Settings row. Purely decorative: it is a landmark for the eye, so a row is
+// - `SettingsIconTile` — the glyph left of a settings row. Plain by default: a
+//   muted 16px icon that follows the row's foreground. `tone="tint"` opts back
+//   into Apple's coloured rounded square. Purely decorative either way: a row is
 //   still fully described by its label alone.
 // - `SettingsNavRow` — a `SettingsItem`-shaped row that navigates: tile, title,
 //   optional right-hand value, chevron.
@@ -75,13 +76,20 @@ const TINT_CLASS = {
 interface SettingsIconTileProps {
 	className?: string;
 	icon: IconSvgElement;
-	/** `sm` for a sidebar row, `md` for a pane's nav list. */
+	/** `sm` for a sidebar row, `md` for a pane's nav list. Tinted tiles only. */
 	size?: "md" | "sm";
+	/** The tile colour under `tone="tint"`; ignored by a plain tile. */
 	tint?: SettingsTint;
+	/**
+	 * `plain` (default): no fill, a muted 16px glyph that turns foreground when
+	 * its sidebar row is hovered or active. `tint`: the coloured tile, opt-in.
+	 */
+	tone?: "plain" | "tint";
 }
 
 /**
- * The tinted rounded square that sits left of a settings row's label.
+ * The glyph that sits left of a settings row's label: a plain muted icon by
+ * default, or the tinted rounded square under `tone="tint"`.
  *
  * `aria-hidden` and no label of its own: every caller renders a text title next
  * to it, so announcing the glyph too would just double every row for a screen
@@ -91,29 +99,41 @@ export const SettingsIconTile = ({
 	className,
 	icon,
 	size = "md",
+	tone = "plain",
 	tint = "gray",
-}: SettingsIconTileProps) => (
-	<span
-		aria-hidden="true"
-		className={cn(
-			"flex shrink-0 items-center justify-center text-white",
-			size === "sm"
-				? "size-[18px] rounded-(--radius-artwork-compact)"
-				: "size-6 rounded-sm",
-			TINT_CLASS[tint],
-			className
-		)}
-	>
-		{/* Important: a sidebar row sizes every descendant svg (`[&_svg]:size-4`),
+}: SettingsIconTileProps) =>
+	tone === "plain" ? (
+		<span
+			aria-hidden="true"
+			className={cn(
+				"flex size-4 shrink-0 items-center justify-center text-muted-foreground transition-colors group-hover/menu-button:text-foreground group-data-active/menu-button:text-foreground",
+				className
+			)}
+		>
+			<HugeiconsIcon className="size-4!" icon={icon} size={16} />
+		</span>
+	) : (
+		<span
+			aria-hidden="true"
+			className={cn(
+				"flex shrink-0 items-center justify-center text-white",
+				size === "sm"
+					? "size-[18px] rounded-(--radius-artwork-compact)"
+					: "size-6 rounded-sm",
+				TINT_CLASS[tint],
+				className
+			)}
+		>
+			{/* Important: a sidebar row sizes every descendant svg (`[&_svg]:size-4`),
 		    which would blow the glyph up to fill the tile and lose its inset. */}
-		<HugeiconsIcon
-			className={size === "sm" ? "size-2.5!" : "size-4!"}
-			icon={icon}
-			size={size === "sm" ? 10 : 16}
-			strokeWidth={2}
-		/>
-	</span>
-);
+			<HugeiconsIcon
+				className={size === "sm" ? "size-2.5!" : "size-4!"}
+				icon={icon}
+				size={size === "sm" ? 10 : 16}
+				strokeWidth={2}
+			/>
+		</span>
+	);
 
 interface SettingsNavRowProps {
 	className?: string;
@@ -143,12 +163,12 @@ export const SettingsNavRow = ({
 }: SettingsNavRowProps) => (
 	<SettingsItem
 		actions={
-			<span className="flex items-center gap-1.5">
+			<span className="flex items-center gap-2">
 				{value ? (
 					<span className="text-muted-foreground text-sm">{value}</span>
 				) : null}
 				<HugeiconsIcon
-					className="size-4 text-muted-foreground/70"
+					className="size-4 text-muted-foreground"
 					icon={ArrowRight01Icon}
 				/>
 			</span>
@@ -164,7 +184,7 @@ export const SettingsNavRow = ({
 		navigation
 		title={
 			<button
-				className="flex w-full items-center gap-2.5 text-left"
+				className="flex w-full items-center gap-2 text-left"
 				onClick={onClick}
 				type="button"
 			>
@@ -248,6 +268,7 @@ export const SettingsSubpages = ({
 	const current = pages.find((p) => p.id === currentId) ?? null;
 	const localizedCurrentTitle = useLocalizedString(current?.title);
 	const localizedCurrentHint = useLocalizedString(current?.hint);
+	const localizedBackLabel = useLocalizedString(backLabel);
 
 	const setPage = (id: string | null) => {
 		if (!controlled) {
@@ -278,24 +299,24 @@ export const SettingsSubpages = ({
 		return (
 			<div className={cn("flex flex-col gap-4", className)}>
 				<div className="flex flex-col gap-1">
-					<Button
-						appearance="settings-back"
-						className="-ml-2 w-fit"
-						onClick={() => setPage(null)}
-						size="sm"
-						variant="ghost-muted"
-					>
-						<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
-						{backLabel}
-					</Button>
-					<div className="flex items-center gap-2.5 px-0.5">
-						{current.icon ? (
-							<SettingsIconTile icon={current.icon} tint={current.tint} />
-						) : null}
-						<h3 className="font-medium text-base">{localizedCurrentTitle}</h3>
+					{/* One back row: the back control and the page's single title. The
+					    pane's own name is the button's accessible label. */}
+					<div className="-ml-2 flex items-center gap-1">
+						<Button
+							aria-label={localizedBackLabel}
+							onClick={() => setPage(null)}
+							size="icon-sm"
+							title={localizedBackLabel}
+							variant="ghost-muted"
+						>
+							<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+						</Button>
+						<h3 className="font-semibold text-lg tracking-tight">
+							{localizedCurrentTitle}
+						</h3>
 					</div>
 					{localizedCurrentHint ? (
-						<p className="px-0.5 text-muted-foreground text-sm leading-snug">
+						<p className="text-detail text-muted-foreground">
 							{localizedCurrentHint}
 						</p>
 					) : null}

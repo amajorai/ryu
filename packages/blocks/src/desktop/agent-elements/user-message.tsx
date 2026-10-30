@@ -1,8 +1,8 @@
-import { CallIcon, Target01Icon } from "@hugeicons/core-free-icons";
+import { CallIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Avatar, AvatarFallback, AvatarImage } from "@ryu/ui/components/avatar";
 import { Bubble } from "@ryu/ui/components/bubble";
-import { Button } from "@ryu/ui/components/button";
 import {
 	DitherAvatar,
 	ditherAvatarSeed,
@@ -23,122 +23,37 @@ import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { formatDateTime, formatTime } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type { UIMessage } from "ai";
-import { memo, type ReactNode, useEffect, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { CollapsibleText } from "./collapsible-text.tsx";
-import { isImeComposingKeyEvent } from "./composer-send-shortcut.ts";
 import { ImageLightbox } from "./image-lightbox.tsx";
 import { FileAttachment } from "./input/file-attachment.tsx";
-import type { LinkPreviewResolvers } from "./link-preview.tsx";
 import { Markdown } from "./markdown.tsx";
 import { getMessageAttachments } from "./message-attachments.ts";
 import { getAuthor } from "./message-author.ts";
-import {
-	type MessageGroupPosition,
-	messageBubbleRadius,
-} from "./message-bubble.ts";
 import { MessageReactionBadge } from "./message-reaction-badge.tsx";
-import {
-	MessageReadReceipt,
-	type MessageReadReceiptState,
-} from "./message-read-receipt.tsx";
+import { MessageReadReceipt } from "./message-read-receipt.tsx";
 import { stripQuestionAnswerMarkers } from "./question/async-question.ts";
 import {
 	messageSelectableProps,
 	QuoteBlock,
 	splitLeadingQuote,
 } from "./quote.tsx";
-import type {
-	ContributedMessageAction,
-	MentionItem,
-	MessageActionContext,
-	MessageActionRuntimeState,
-} from "./types.ts";
 import { getWidgetMessageAttribution } from "./types.ts";
 import styles from "./user-message.module.css";
+import { UserMessageEditor } from "./user-message-editor.tsx";
+import type { UserMessageProps } from "./user-message-props.ts";
+import {
+	MESSAGE_TIME_OPTIONS,
+	MESSAGE_TOOLTIP_OPTIONS,
+} from "./user-message-time-options.ts";
 import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
 
-export interface UserMessageProps {
-	/**
-	 * Hover actions (copy / edit / branch) for this turn. The message row places
-	 * them beside the bubble: on the outside edge for the local user and the
-	 * opposite edge for a remote sender.
-	 */
-	actions?: ReactNode;
-	className?: string;
-	/** Current signed-in user info for displaying avatar/name on own messages. */
-	currentUser?: {
-		avatar?: string;
-		name?: string;
-		id?: string;
-	};
-	/** When true, the bubble is replaced by an inline editor (ChatGPT/Claude-style
-	 * message editing). Saving calls `onEditSubmit`; Escape/Cancel calls
-	 * `onEditCancel`. */
-	editing?: boolean;
-	/**
-	 * When true (default) clicking an attached image opens a fullscreen
-	 * lightbox preview. Set to false to render images as plain thumbnails.
-	 */
-	enableImagePreview?: boolean;
-	/**
-	 * Where this row sits in its sender RUN — consecutive messages from the same
-	 * speaker with no reply and no day boundary between them. Computed by the
-	 * transcript across sibling scroll items (`userRunPositions` in
-	 * message-list.tsx), because a run spans turns and therefore cannot be a
-	 * wrapper element.
-	 *
-	 * It drives the whole messaging convention: the avatar and the timestamp are
-	 * drawn once, on the row that CLOSES the run, and a remote sender is named
-	 * once, on the row that OPENS it. Everything else about the row is unchanged,
-	 * including its hover toolbar and its edit affordance.
-	 *
-	 * Defaults to `"single"`, which is the ungrouped behaviour every other
-	 * surface (island, storyboard, subagent panel) gets for free.
-	 */
-	groupPosition?: MessageGroupPosition;
-	mentionItems?: MentionItem[];
-	message: UIMessage;
-	/** Runtime state keyed for the message-action renderers. */
-	messageActionState?: MessageActionRuntimeState;
-	/** Message actions contributed by enabled plugins. */
-	messageActions?: readonly ContributedMessageAction[];
-	onAnnotateImage?: (image: {
-		filename?: string;
-		id: string;
-		url: string;
-	}) => void;
-	/** Dispatch a contributed action back to the shell. */
-	onContributedMessageAction?: (
-		action: ContributedMessageAction,
-		context: MessageActionContext
-	) => void;
-	onEditCancel?: () => void;
-	onEditSubmit?: (text: string) => void;
-	onOpenFile?: (path: string) => void;
-	onOpenLink?: (url: string) => void;
-	onOpenMention?: (item: MentionItem) => void;
-	previewResolvers?: LinkPreviewResolvers;
-	/** Durable per-person read state for this message. */
-	readReceipt?: MessageReadReceiptState;
-}
-
-/** Compact transcript annotation shown beneath a goal-setting user message. */
-export function GoalMessageAnnotation() {
-	return (
-		<span
-			className="inline-flex items-center gap-1 text-muted-foreground/70 text-xs"
-			data-testid="goal-message-annotation"
-			title="This message was sent as a goal"
-		>
-			<HugeiconsIcon
-				aria-hidden="true"
-				className="size-3.5"
-				icon={Target01Icon}
-			/>
-			<span>Sent as goal</span>
-		</span>
-	);
-}
+export { GoalMessageAnnotation } from "./user-message-goal-annotation.tsx";
+export type { UserMessageProps } from "./user-message-props.ts";
+export {
+	MESSAGE_TIME_OPTIONS,
+	MESSAGE_TOOLTIP_OPTIONS,
+} from "./user-message-time-options.ts";
 
 type MessagePart = UIMessage["parts"][number];
 
@@ -154,127 +69,6 @@ function isTextPart(part: MessagePart): part is { type: "text"; text: string } {
  */
 interface LegacyTimestampObservation {
 	readonly createdAt?: NativeSdkValue;
-}
-
-/**
- * A per-message stamp is CLOCK TIME, with the full date in its tooltip — the
- * messaging shape, now that the DATE is carried by the day separators above
- * each run (date-separator.tsx) instead of being repeated on every row.
- *
- * Both go through `@ryu/ui/lib/timezone.ts`, so they follow Appearance →
- * "Date & time" like every other timestamp in the product. They replaced the
- * last two zone-naive formatters in the transcript: a hand-rolled "5m ago"
- * relative age and a hardcoded `en-GB` full stamp, neither of which could
- * follow the setting.
- *
- * Exported so the assistant header in message-list.tsx renders the identical
- * pair; two rows of the same turn showing different clock formats is exactly
- * the drift a shared constant prevents. (The import goes this way — message-list
- * already imports `UserMessage` from here, so the reverse would be a cycle.)
- */
-export const MESSAGE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
-	hour: "numeric",
-	minute: "2-digit",
-};
-
-export const MESSAGE_TOOLTIP_OPTIONS: Intl.DateTimeFormatOptions = {
-	dateStyle: "medium",
-	timeStyle: "short",
-};
-
-/**
- * Inline editor shown in place of a user bubble while editing. Enter saves
- * (Shift+Enter inserts a newline), Escape cancels. Mirrors the composer's
- * right-aligned bubble styling so the edit feels in-place.
- */
-function UserMessageEditor({
-	initialText,
-	onSubmit,
-	onCancel,
-}: {
-	initialText: string;
-	onSubmit?: (text: string) => void;
-	onCancel?: () => void;
-}) {
-	const [value, setValue] = useState(initialText);
-	const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-	useEffect(() => {
-		const el = textareaRef.current;
-		if (el) {
-			el.focus();
-			// Place the caret at the end and grow to fit the content.
-			el.setSelectionRange(el.value.length, el.value.length);
-			el.style.height = "auto";
-			el.style.height = `${el.scrollHeight}px`;
-		}
-	}, []);
-
-	const submit = () => {
-		const trimmed = value.trim();
-		if (trimmed) {
-			onSubmit?.(trimmed);
-		}
-	};
-
-	// No width cap of its own: the field fills the bubble column, which already
-	// carries the message's max width. The old `max-w-[calc(95%-40px)]` was a
-	// second, different basis, so the editor was visibly wider than the bubble it
-	// replaced.
-	return (
-		<div className="flex w-full flex-col items-end gap-2">
-			<div
-				className="w-full rounded-2xl bg-muted px-3.5 py-2"
-				data-slot="user-message-editor"
-			>
-				<textarea
-					aria-label="Edit message"
-					className="w-full resize-none bg-transparent text-foreground text-sm leading-5 outline-none"
-					onChange={(event) => {
-						setValue(event.target.value);
-						event.target.style.height = "auto";
-						event.target.style.height = `${event.target.scrollHeight}px`;
-					}}
-					onKeyDown={(event) => {
-						// Leave Enter/Escape to the IME while a CJK composition is open.
-						if (isImeComposingKeyEvent(event.nativeEvent)) {
-							return;
-						}
-						if (event.key === "Enter" && !event.shiftKey) {
-							event.preventDefault();
-							submit();
-						} else if (event.key === "Escape") {
-							event.preventDefault();
-							onCancel?.();
-						}
-					}}
-					ref={textareaRef}
-					rows={1}
-					value={value}
-				/>
-			</div>
-			<div className="flex items-center gap-2">
-				<Button
-					onClick={onCancel}
-					radius="pill"
-					size="compact"
-					type="button"
-					variant="ghost"
-				>
-					Cancel
-				</Button>
-				<Button
-					disabled={!value.trim()}
-					onClick={submit}
-					radius="pill"
-					size="compact"
-					type="button"
-				>
-					Send
-				</Button>
-			</div>
-		</div>
-	);
 }
 
 export const UserMessage = memo(function UserMessage({
@@ -296,6 +90,7 @@ export const UserMessage = memo(function UserMessage({
 	previewResolvers,
 	readReceipt,
 }: UserMessageProps) {
+	const tl = useLiteralMessages();
 	const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 	const lightboxOriginRef = useRef<HTMLElement | null>(null);
 	const textParts = message.parts?.filter(isTextPart) ?? [];
@@ -386,7 +181,9 @@ export const UserMessage = memo(function UserMessage({
 							);
 							return (
 								<button
-									aria-label={`Open ${attachment.filename}`}
+									aria-label={tl("Open {filename}", {
+										filename: attachment.filename,
+									})}
 									className={cn(
 										styles.image,
 										enableImagePreview && "cursor-zoom-in"
@@ -435,31 +232,21 @@ export const UserMessage = memo(function UserMessage({
 				/>
 			)}
 			{text && (
-				// `Bubble` + `BubbleContent` (@ryu/ui/components/bubble), overridden
-				// back to the shipped geometry: the primitive defaults to
-				// `max-w-[80%] rounded-3xl py-2.5`, and all three of those are wrong
-				// here. The width cap belongs to the COLUMN below (`max-w-[90%]`), not
-				// to the bubble — that is what makes the bubble, its attachments and
-				// its hover toolbar agree on one left edge — so the bubble itself is
-				// uncapped.
+				// `Bubble` + `BubbleContent` (@ryu/ui/components/bubble). The width cap
+				// belongs to the ROW below (`max-w-[70%]`), not to the bubble — that
+				// is what makes the bubble, its attachments and its hover toolbar agree
+				// on one edge — so the bubble itself is uncapped.
 				//
-				// The fill is not set here: it comes from the variant's
-				// `*:data-[slot=bubble-content]:bg-*` selector, which is why
-				// `data-slot` must stay the primitive's own and the e2e hook is a
-				// `data-testid` instead.
-				//
-				// `default` = the theme's primary. The agent side took over the neutral
-				// `muted` fill this bubble used to carry, so the user's own turn is the
-				// one thing in the transcript painted in the brand colour — which is
-				// what makes it findable when scrolling back through a long thread.
-				// `text-foreground` is dropped for the same reason: the variant pairs
-				// `bg-primary` with `text-primary-foreground`, and forcing the plain
-				// foreground on top of it would leave dark text on a saturated fill.
+				// The fill comes from the `muted` variant's
+				// `*:data-[slot=bubble-content]:bg-*` selector, which is why `data-slot`
+				// must stay the primitive's own and the e2e hook is a `data-testid`. The
+				// user's turn is a quiet neutral surface; the assistant's reply has no
+				// bubble at all, so the two sides separate by fill rather than colour.
 				<Bubble
 					align={isOwnMessage ? "end" : "start"}
 					// Room above the bubble for the reaction badge pinned to its corner.
 					className={cn("max-w-full", reactionBuckets.length > 0 && "mt-3")}
-					variant="default"
+					variant="muted"
 				>
 					<MessageReactionBadge
 						align={isOwnMessage ? "end" : "start"}
@@ -467,9 +254,9 @@ export const UserMessage = memo(function UserMessage({
 					/>
 					<div
 						className={cn(
-							"wrap-break-word w-fit min-w-0 max-w-full overflow-hidden rounded-3xl border border-transparent px-3.5 py-1.5 text-sm leading-5 transition-colors group-data-[align=end]/bubble:self-end",
-							messageBubbleRadius(isOwnMessage ? "end" : "start", groupPosition)
+							"wrap-break-word text-(length:--text-comfortable) w-fit min-w-0 max-w-full overflow-hidden rounded-3xl border border-transparent px-4 py-2 text-foreground leading-(--text-comfortable--line-height) transition-colors group-data-[align=end]/bubble:self-end"
 						)}
+						data-chat-prose=""
 						data-slot="bubble-content"
 						data-testid="user-message-bubble"
 					>
@@ -477,9 +264,9 @@ export const UserMessage = memo(function UserMessage({
 						{body && (
 							<CollapsibleText
 								collapsedMaxHeightClass="max-h-[120px]"
-								contentClassName="wrap-break-word whitespace-pre-wrap leading-5"
+								contentClassName="wrap-break-word whitespace-pre-wrap"
 								contentKey={body}
-								fadeToClass="to-primary"
+								fadeToClass="to-muted"
 							>
 								<div
 									className={
@@ -498,17 +285,13 @@ export const UserMessage = memo(function UserMessage({
 										/>
 									)}
 									<Markdown
-										className={cn(
-											"[&_a]:text-primary-foreground [&_button]:text-primary-foreground [&_p]:text-primary-foreground",
-											isCallEnded && "[&_p]:whitespace-nowrap"
-										)}
+										className={cn(isCallEnded && "[&_p]:whitespace-nowrap")}
 										content={body}
 										mentionItems={mentionItems}
 										onOpenFile={onOpenFile}
 										onOpenLink={onOpenLink}
 										onOpenMention={onOpenMention}
 										previewResolvers={previewResolvers}
-										tone="primary"
 										wideBlocks
 									/>
 								</div>
@@ -533,21 +316,32 @@ export const UserMessage = memo(function UserMessage({
 		MessageBubble
 	);
 
-	const AvatarNode = author ? (
-		<Avatar className="size-8 shrink-0">
-			<AvatarImage src={author.avatar} />
-			<AvatarFallback appearance="artwork" className="overflow-hidden">
-				<DitherAvatar
-					className="size-full"
-					name={ditherAvatarSeed({ id: author.id, name: author.name })}
-				/>
-			</AvatarFallback>
-		</Avatar>
-	) : null;
+	// Your own turn needs no face: it is the right-aligned bubble. Only a remote
+	// sender (a teammate in a shared room) carries an avatar.
+	const AvatarNode =
+		author && !isOwnMessage ? (
+			<Avatar className="size-5 shrink-0">
+				<AvatarImage src={author.avatar} />
+				<AvatarFallback appearance="artwork" className="overflow-hidden">
+					<DitherAvatar
+						className="size-full"
+						name={ditherAvatarSeed({ id: author.id, name: author.name })}
+					/>
+				</AvatarFallback>
+			</Avatar>
+		) : null;
 
+	// A remote sender is named once per run, on the row that OPENS it.
+	const showName =
+		!isOwnMessage &&
+		Boolean(author?.name) &&
+		(groupPosition === "single" || groupPosition === "first");
+	const showWidgetAttribution =
+		Boolean(widgetAttribution) &&
+		(groupPosition === "single" || groupPosition === "first");
 	// Messaging grouping: one avatar per RUN, on the row that closes it. The
 	// gutter on every OTHER row stays occupied — `Message` is `flex gap-2` and
-	// `MessageAvatar` is the only thing holding the 32px column open, so REMOVING
+	// `MessageAvatar` is the only thing holding the 20px column open, so REMOVING
 	// it collapses the gutter and slides the bubble sideways. `chat-message-align`
 	// asserts the row's left edge against the composer to 1px, which is exactly
 	// the regression that would catch. `invisible` keeps the box, drops the paint.
@@ -558,24 +352,25 @@ export const UserMessage = memo(function UserMessage({
 			// `self-start`, not the primitive's `self-end`: a turn can be metres
 			// tall (code blocks, tool cards), and a bottom-anchored avatar ends up
 			// far below the message it belongs to. Matches the assistant side.
-			className={cn("size-8 self-start", showAvatar ? null : "invisible")}
+			// The primitive lifts the avatar above a footer and holds a 32px
+			// column; the footer here is absolutely placed under the bubble, so
+			// neither applies to a 20px avatar.
+			className={cn(
+				"size-5 min-w-5 self-start group-has-data-[slot=message-footer]/message:translate-y-0",
+				// Sit level with the bubble's first line, below the name row when
+				// one opens the run.
+				showName || showWidgetAttribution ? "mt-8" : "mt-2",
+				showAvatar ? null : "invisible"
+			)}
 			variant="transparent"
 		>
 			{AvatarNode}
 		</MessageAvatar>
 	) : null;
 
-	// A remote sender is named once per run, on the row that OPENS it.
-	const showName =
-		!isOwnMessage &&
-		Boolean(author?.name) &&
-		(groupPosition === "single" || groupPosition === "first");
-	const showWidgetAttribution =
-		Boolean(widgetAttribution) &&
-		(groupPosition === "single" || groupPosition === "first");
 	// The name is on the OPENING row and the time is on the CLOSING row. The time
-	// sits below the message body, which keeps the attachment strip and the text
-	// easy to scan while matching the usual messaging-app reading order.
+	// and the read receipt sit below the body and appear on hover only (the day
+	// separator already dates the run), so a quiet transcript shows content alone.
 	const showTimestamp =
 		Boolean(TimestampNode) &&
 		(groupPosition === "single" || groupPosition === "last");
@@ -592,26 +387,29 @@ export const UserMessage = memo(function UserMessage({
 					<span
 						className="text-muted-foreground"
 						data-testid="widget-message-attribution"
-						title={`Widget instance ${widgetAttribution.widget_instance_id}`}
+						title={tl("Widget instance {widget_instance_id}", {
+							widget_instance_id: widgetAttribution.widget_instance_id,
+						})}
 					>
-						Widget · {widgetAttribution.origin_server}
+						{tl("Widget · {origin_server}", {
+							origin_server: widgetAttribution.origin_server,
+						})}
 					</span>
 				) : null}
 			</MessageHeader>
 		) : null;
 
-	// One shrink-to-fit column holding the body. The width cap stays here rather
-	// than on the bubble so the action row can sit beside a short bubble without
-	// changing the bubble's own edge.
+	// One shrink-to-fit column holding the body, inside a row that carries the
+	// 70% cap. The cap lives on the ROW because the row's parent has a definite
+	// width; a percentage on the shrink-to-fit column would resolve against its
+	// own content and wrap the text early.
 	const BubbleColumn = (
 		<div
 			className={cn(
-				"flex w-fit min-w-0 max-w-[90%] flex-col gap-1",
-				isCallEnded && "max-w-none",
+				"flex w-fit min-w-0 max-w-full flex-col gap-1",
 				isOwnMessage ? "items-end" : "items-start",
 				// A textarea has no content width to shrink to, so while editing the
-				// column takes the whole row and the 90% cap does the framing — which
-				// is the width the bubble had.
+				// column takes the whole row and the 70% cap does the framing.
 				editing && "w-full"
 			)}
 		>
@@ -621,7 +419,9 @@ export const UserMessage = memo(function UserMessage({
 	const MessageRow = (
 		<div
 			className={cn(
-				"flex w-fit max-w-full items-center gap-2",
+				"flex w-fit min-w-0 max-w-[70%] items-center gap-2",
+				isCallEnded && "max-w-none",
+				editing && "w-full",
 				isOwnMessage ? "flex-row-reverse" : "flex-row"
 			)}
 		>
@@ -649,7 +449,7 @@ export const UserMessage = memo(function UserMessage({
 			{AvatarSlot}
 			<div
 				className={cn(
-					"wrap-break-word flex w-full min-w-0 flex-col gap-1 group-data-[align=end]/message:*:data-slot:self-end",
+					"wrap-break-word relative flex w-full min-w-0 flex-col gap-1 group-data-[align=end]/message:*:data-slot:self-end",
 					isOwnMessage ? "items-end" : "items-start"
 				)}
 				data-slot="message-content"
@@ -657,8 +457,13 @@ export const UserMessage = memo(function UserMessage({
 				{HeaderNode}
 				{MessageRow}
 				{showTimestamp || showReadReceipt ? (
+					// A reserved, absolutely placed slot in the gap under the bubble, so
+					// revealing it on hover never reflows the transcript. Its 4px offset
+					// is padding, not margin: the slot starts right at the row's edge, so
+					// a pointer moving down from the bubble to the read receipt never
+					// crosses a gap that ends the hover and hides the slot.
 					<div
-						className="flex min-h-5 min-w-0 max-w-full items-center gap-2 font-medium text-muted-foreground text-xs group-data-[align=end]/message:justify-end"
+						className="pointer-events-none absolute inset-x-0 top-full flex h-6 min-w-0 items-center gap-2 pt-1 text-muted-foreground text-xs opacity-0 transition-opacity duration-150 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/message:duration-0 group-data-[align=end]/message:justify-end"
 						data-slot="message-footer"
 					>
 						{showReadReceipt ? (

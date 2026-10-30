@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readSharedGlobals } from "../styles/read-shared-globals.ts";
 import {
 	builtinVariants,
 	type CustomTokens,
@@ -470,14 +471,10 @@ describe("Ryu brand colour", () => {
 		});
 	}
 
-	// Presets only reach surfaces that run the theme engine. Web, extension,
-	// fumadocs and storyboard just `@import` globals.css, so they render its base
-	// `:root` / `.dark` block (from globals/theme-tokens.css). Assert it directly.
+	// Surfaces without the theme engine (web, extension, fumadocs) render the
+	// base `:root` / `.dark` block of globals.css. Assert it directly.
 	describe("globals.css base block", () => {
-		const css = readFileSync(
-			new URL("../styles/globals/theme-tokens.css", import.meta.url),
-			"utf8"
-		);
+		const css = readSharedGlobals();
 
 		/** Body of the first top-level `selector { … }` block (no nesting inside). */
 		function blockBody(selector: string): string {

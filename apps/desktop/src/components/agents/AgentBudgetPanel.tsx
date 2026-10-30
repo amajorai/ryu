@@ -176,7 +176,7 @@ export function AgentBudgetPanel({
 
 	return (
 		<SettingsSection
-			caption="Set this agent's lifetime charged-spend cap and choose whether model, media, or paid-tool charges count. The Gateway Budgets view remains available for managing every user and agent rule together."
+			caption="This agent's lifetime spend cap, and which charges count toward it."
 			title="Budget"
 		>
 			{loading ? (

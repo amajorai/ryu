@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	InputGroup,
@@ -259,6 +259,7 @@ export function BankFeed({
 	transactions: InterfaceAccountTransaction[];
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const searchRef = useRef<HTMLInputElement>(null);
 	const headingRef = useRef<HTMLHeadingElement>(null);
 	const monthKey = month?.key ?? null;
@@ -364,8 +365,15 @@ export function BankFeed({
 						ref={headingRef}
 						tabIndex={-1}
 					>
-						Transactions
-						{month ? <span className="sr-only"> in {month.label}</span> : null}
+						{month
+							? tlRich(
+									"Transactions<srOnly> in {monthLabel}</srOnly>",
+									{ monthLabel: month.label },
+									{
+										srOnly: (chunk) => <span className="sr-only">{chunk}</span>,
+									}
+								)
+							: "Transactions"}
 					</h2>
 					{month ? (
 						<Button

@@ -3,6 +3,7 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { ItemSeparator } from "@ryu/ui/components/item.tsx";
 import { useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -95,6 +96,7 @@ function Connection({
 							loading={busy}
 							onClick={submitContext}
 							size="sm"
+							variant="outline"
 						>
 							Save connection
 						</Button>
@@ -276,12 +278,12 @@ function Connection({
 				/>
 			)}
 			{provider.activation_error ? (
-				<p className="px-3.5 pb-2.5 text-muted-foreground text-xs">
+				<p className="px-3 pb-2 text-muted-foreground text-xs">
 					{provider.activation_error}
 				</p>
 			) : null}
 			{provider.auth_kind === "bearer_token" ? (
-				<p className="px-3.5 pb-2.5 text-muted-foreground text-xs">
+				<p className="px-3 pb-2 text-muted-foreground text-xs">
 					Supply a current token. Saving it does not set up OAuth login or
 					automatic refresh.
 				</p>
@@ -314,7 +316,15 @@ export function GatewaySdkAccounts({
 	}
 	return (
 		<SettingsSection
-			caption="Manage API-key and token accounts independently. Existing native connections keep their own settings. These upstream credentials are separate from Gateway client keys."
+			caption={
+				<CaptionInfo
+					detail={
+						"Manage API-key and token accounts independently. Existing native connections keep their own settings. These upstream credentials are separate from Gateway client keys."
+					}
+				>
+					{"API-key and token accounts, separate from Gateway client keys."}
+				</CaptionInfo>
+			}
 			headerAction={
 				<Button onClick={onRefresh} size="sm" variant="ghost">
 					Refresh accounts

@@ -304,7 +304,7 @@ export function BoardView({
 										// the draggable wrapper carries the drag handlers; the button inside is the keyboard-reachable control
 										<div
 											className={cn(
-												"rounded-md border bg-card p-2 shadow-sm",
+												"rounded-lg border border-border bg-card p-2",
 												dragging === record.id && "opacity-50"
 											)}
 											draggable

@@ -13,9 +13,8 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@ryu/ui/components/tabs.tsx";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { AgentPassportPanel } from "@/src/components/agents/AgentPassportPanel.tsx";
-import { AgentRunHistoryView } from "@/src/components/agents/AgentRunHistoryView.tsx";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
@@ -27,6 +26,14 @@ import type {
 import type { ConnectionPhase } from "@/src/lib/connectivity.ts";
 import { ownedCompanionId } from "@/src/lib/plugin-file-handlers.ts";
 import PluginCompanionPage from "@/src/pages/PluginCompanionPage.tsx";
+
+// Run history projects cron schedules (cron-parser + luxon); it loads with the
+// Activity tab rather than with the chat page that hosts this panel.
+const AgentRunHistoryView = lazy(() =>
+	import("@/src/components/agents/AgentRunHistoryView.tsx").then((module) => ({
+		default: module.AgentRunHistoryView,
+	}))
+);
 
 type NativeProfileView = "activity" | "identity" | "passport";
 
@@ -283,7 +290,9 @@ export function AgentActivityPanel({
 						inset="agent-activity"
 						value="activity"
 					>
-						<AgentRunHistoryView agentId={agent.id} compact />
+						<Suspense fallback={null}>
+							<AgentRunHistoryView agentId={agent.id} compact />
+						</Suspense>
 					</TabsContent>
 				) : null}
 				{activeView === "passport" ? (

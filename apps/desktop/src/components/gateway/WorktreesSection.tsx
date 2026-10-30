@@ -5,6 +5,7 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -212,7 +213,13 @@ export function WorktreesSection({
 	return (
 		<div className="space-y-6">
 			<SettingsSection
-				caption="Managed worktrees keep agent changes isolated from the project folder. Filesystem paths belong to the node that owns them."
+				caption={
+					<CaptionInfo
+						detail={"Filesystem paths belong to the node that owns them."}
+					>
+						{"Worktrees keep agent changes out of the project folder."}
+					</CaptionInfo>
+				}
 				title="Worktrees"
 			>
 				{query.isPending ? (
@@ -371,7 +378,7 @@ export function WorktreesSection({
 				</SettingsGroup>
 			</SettingsSection>
 			<SettingsSection
-				caption="Stored in Core for this Ryu node. An explicit isolate option on a worker message takes precedence."
+				caption="An isolate option on a worker message takes precedence."
 				title="Coordinator workers"
 			>
 				{isolationQuery.isError ? (
@@ -407,7 +414,13 @@ export function WorktreesSection({
 				</SettingsGroup>
 			</SettingsSection>
 			<SettingsSection
-				caption="The active project environment still owns setup scripts, variables, and actions. Open a project below to edit those details."
+				caption={
+					<CaptionInfo detail={"Open a project below to edit those details."}>
+						{
+							"Setup scripts, variables and actions stay with the project environment."
+						}
+					</CaptionInfo>
+				}
 				title="Environment handoff"
 			>
 				<SettingsCard className="flex items-center gap-2 text-muted-foreground text-sm">

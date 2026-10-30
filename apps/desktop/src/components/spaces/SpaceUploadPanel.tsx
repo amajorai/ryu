@@ -10,18 +10,16 @@ export function SpaceUploadPanel({
 	return (
 		<section
 			aria-labelledby="space-upload-title"
-			className="rounded-lg border bg-card p-4"
+			className="flex flex-col gap-3"
 			data-testid="space-upload-panel"
 		>
-			<h2 className="font-medium text-sm" id="space-upload-title">
+			<h2 className="font-semibold text-sm" id="space-upload-title">
 				Add files
 			</h2>
-			<div className="mt-3">
-				<SpaceFileDropzone
-					onUploadComplete={onUploadComplete}
-					spaceId={spaceId}
-				/>
-			</div>
+			<SpaceFileDropzone
+				onUploadComplete={onUploadComplete}
+				spaceId={spaceId}
+			/>
 		</section>
 	);
 }

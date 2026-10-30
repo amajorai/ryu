@@ -57,7 +57,7 @@ const LAYOUT_STYLES = {
 	grid: {
 		avatarSize: "32px",
 		grid: "grid-cols-3",
-		label: "type-caption",
+		label: "text-xs",
 		tile: "min-h-[76px] flex-col justify-center gap-1 p-1.5",
 	},
 } satisfies Record<
@@ -170,12 +170,12 @@ export function PinnedAppStage({
 		>
 			<div
 				className={cn(
-					"type-compact flex items-center gap-1.5 px-1 text-muted-foreground uppercase",
+					"flex items-center gap-1.5 px-1 text-muted-foreground text-xs uppercase",
 					layoutStyles.authored2
 				)}
 			>
 				<span>Apps</span>
-				<span className="text-muted-foreground/60 tabular-nums">
+				<span className="text-muted-foreground/70 tabular-nums">
 					{apps.length}
 				</span>
 			</div>

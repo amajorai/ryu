@@ -1,21 +1,22 @@
-import {
-	assertNativeWindowLifetime,
-	persistNativeLifetimeDiagnostics,
-} from "./chat-page-native-http-lifetime.ts";
 // Actual Layout/PinnedSummaryPanel/ChatPage callers and native browser HTTP.
 // Core is a finite transport fixture: this proves next-turn handoff policy, not
 // filesystem checkout or a model provider completing the requested response.
 import {
+	type APIRequestContext,
 	expect,
 	type Page,
-	type APIRequestContext,
 	test,
 } from "@playwright/test";
 import {
+	assertNativeWindowLifetime,
+	persistNativeLifetimeDiagnostics,
+} from "./chat-page-native-http-lifetime.ts";
+import {
+	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
 	chatPageControl,
 	chatPageState,
-	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
 } from "./chat-page-native-http-support.ts";
+
 const CONVERSATION = "conversation-toolbar-share-fixture";
 const FOLDER = "/tmp/ryu-chat-controls-project";
 function isChatOrGitMutation(call: { method: string; path: string }) {
@@ -40,10 +41,10 @@ async function open(page: Page) {
 	await expect(
 		page.getByText("We need to share the launch plan with the organization.", {
 			exact: true,
-		}),
+		})
 	).toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "Environment", exact: true }),
+		page.getByRole("button", { name: "Environment", exact: true })
 	).toBeVisible();
 }
 async function dialog(page: Page) {
@@ -51,8 +52,9 @@ async function dialog(page: Page) {
 		name: "Environment",
 		exact: true,
 	});
-	if ((await section.getAttribute("aria-expanded")) !== "true")
+	if ((await section.getAttribute("aria-expanded")) !== "true") {
 		await section.click();
+	}
 	await expect(section).toHaveAttribute("aria-expanded", "true");
 	await page.getByTestId("open-worktree-handoff").click();
 	const result = page.getByRole("dialog", {
@@ -70,13 +72,19 @@ async function handOff(page: Page, branch: string) {
 }
 async function saved(page: Page) {
 	return page.evaluate(() => {
-		const tabs = JSON.parse(localStorage.getItem("ryu_session_tabs") ?? "{}");
+		const tabs = JSON.parse(
+			(
+				Reflect.get(window, "__chatPageNativeFixture") as {
+					sealedLocalItem: (key: string) => string | null;
+				}
+			).sealedLocalItem("ryu_session_tabs") ?? "{}"
+		);
 		return {
 			branch: localStorage.getItem("ryu_workspace_worktree_branch"),
 			mode: localStorage.getItem("ryu_workspace_worktree_mode"),
 			tab: tabs.tabs?.find(
 				(t: { conversationId?: string }) =>
-					t.conversationId === "conversation-toolbar-share-fixture",
+					t.conversationId === "conversation-toolbar-share-fixture"
 			)?.worktreeMode,
 		};
 	});
@@ -84,7 +92,7 @@ async function saved(page: Page) {
 async function send(page: Page, prompt: string) {
 	await page.getByPlaceholder("Ask a follow up").fill(prompt);
 	await expect(
-		page.getByRole("button", { name: "Send", exact: true }),
+		page.getByRole("button", { name: "Send", exact: true })
 	).toBeEnabled();
 	await page.getByRole("button", { name: "Send", exact: true }).click();
 }
@@ -117,11 +125,15 @@ test.afterEach(async ({ page, request }, testInfo) => {
 		expect(errors.get(page) ?? []).toEqual([]);
 		const mounted = await page.evaluate(() => {
 			const fixture = Reflect.get(window, "__chatPageNativeFixture");
-			if (!fixture) return false;
+			if (!fixture) {
+				return false;
+			}
 			fixture.unmount();
 			return true;
 		});
-		if (mounted) await assertNativeWindowLifetime(page);
+		if (mounted) {
+			await assertNativeWindowLifetime(page);
+		}
 	} finally {
 		await persistNativeLifetimeDiagnostics(testInfo, {
 			beforeCleanup,
@@ -158,17 +170,17 @@ test("actual running handoff cancels the authenticated old turn and genuine brow
 	const opening = page.waitForRequest(
 		(req) =>
 			req.method() === "POST" &&
-			req.url() === "http://127.0.0.1:5591/api/chat/stream",
+			req.url() === "http://127.0.0.1:5591/api/chat/stream"
 	);
 	await send(page, "Keep this response open until handoff.");
 	const streamRequest = await opening;
 	await expect(
-		page.getByText("Owned live response in progress.", { exact: true }),
+		page.getByText("Owned live response in progress.", { exact: true })
 	).toBeVisible();
-	const before = await saved(page),
-		d = await dialog(page);
+	const before = await saved(page);
+	const d = await dialog(page);
 	await expect(d.getByRole("alert")).toContainText(
-		"This chat is running, so handing it off will interrupt the current response",
+		"This chat is running, so handing it off will interrupt the current response"
 	);
 	await d.press("Escape");
 	await expect(d).toBeHidden();
@@ -185,8 +197,8 @@ test("actual running handoff cancels the authenticated old turn and genuine brow
 	]);
 	expect(
 		(await chatPageState(request)).calls.filter(
-			(call) => call.path === "/api/chat/cancel",
-		),
+			(call) => call.path === "/api/chat/cancel"
+		)
 	).toEqual([]);
 	const closed = page.waitForEvent("requestfailed", {
 		predicate: (req) => req === streamRequest,
@@ -207,23 +219,23 @@ test("actual running handoff cancels the authenticated old turn and genuine brow
 	await expect
 		.poll(() => saved(page))
 		.toEqual({ branch: "ryu/running-handoff-proof", mode: "true", tab: true });
-	const stopped = await chatPageState(request),
-		cancellations = stopped.calls.filter(
-			(call) => call.path === "/api/chat/cancel",
-		);
+	const stopped = await chatPageState(request);
+	const cancellations = stopped.calls.filter(
+		(call) => call.path === "/api/chat/cancel"
+	);
 	expect(cancellations).toHaveLength(1);
 	expect(cancellations[0]).toMatchObject({
 		node: "a",
 		method: "POST",
-		authorization: "Bearer " + CHAT_PAGE_NATIVE_NODE_A_TOKEN,
+		authorization: `Bearer ${CHAT_PAGE_NATIVE_NODE_A_TOKEN}`,
 		userJwt: null,
 		body: { conversation_id: CONVERSATION },
 		responseStatus: 200,
 	});
 	expect(
 		stopped.calls.filter(
-			(call) => call.node === "b" && isChatOrGitMutation(call),
-		),
+			(call) => call.node === "b" && isChatOrGitMutation(call)
+		)
 	).toEqual([]);
 	await expect(page.getByPlaceholder("Ask a follow up")).toBeEditable();
 	await send(page, "Continue the next turn in the handed-off worktree.");
@@ -231,16 +243,16 @@ test("actual running handoff cancels the authenticated old turn and genuine brow
 		.poll(
 			async () =>
 				(await chatPageState(request)).calls.filter(
-					(call) => call.path === "/api/chat/stream",
-				).length,
+					(call) => call.path === "/api/chat/stream"
+				).length
 		)
 		.toBe(2);
 	const turns = (await chatPageState(request)).calls.filter(
-		(call) => call.path === "/api/chat/stream",
+		(call) => call.path === "/api/chat/stream"
 	);
 	expect(turns[0]).toMatchObject({
 		node: "a",
-		authorization: "Bearer " + CHAT_PAGE_NATIVE_NODE_A_TOKEN,
+		authorization: `Bearer ${CHAT_PAGE_NATIVE_NODE_A_TOKEN}`,
 		userJwt: null,
 		body: expect.objectContaining({
 			conversation_id: CONVERSATION,
@@ -249,7 +261,7 @@ test("actual running handoff cancels the authenticated old turn and genuine brow
 	});
 	expect(turns[1]).toMatchObject({
 		node: "a",
-		authorization: "Bearer " + CHAT_PAGE_NATIVE_NODE_A_TOKEN,
+		authorization: `Bearer ${CHAT_PAGE_NATIVE_NODE_A_TOKEN}`,
 		userJwt: null,
 		responseStatus: 503,
 		body: expect.objectContaining({

@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import {
@@ -6,10 +7,11 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import type { InterfaceThread, ThreadStatus } from "@ryuhq/protocol/interfaces";
+import type { InterfaceThread } from "@ryuhq/protocol/interfaces";
 import { LoaderCircle, MessageSquarePlus } from "lucide-react";
 import type { ReactNode } from "react";
 import { ArenaAvatar } from "./arena-avatar.tsx";
+import { Counts, plural } from "./arena-card-counts.tsx";
 import {
 	ARENA_STATE_LABELS,
 	type ArenaAgentState,
@@ -40,43 +42,6 @@ const STATE_DOT: Record<Exclude<ArenaAgentState, "working">, string> = {
 	"needs-you": "bg-primary",
 };
 
-interface CountToken {
-	label: string;
-	status: ThreadStatus;
-	/** Number and label tone; only a failed count leaves the neutral scale. */
-	tone: { label: string; value: string };
-}
-
-const NEUTRAL_TONE = {
-	label: "text-muted-foreground",
-	value: "text-foreground",
-};
-
-const COUNT_TOKENS: readonly CountToken[] = [
-	{
-		label: "failed",
-		status: "attention",
-		tone: {
-			label: "text-status-destructive",
-			value: "text-status-destructive",
-		},
-	},
-	{ label: "your turn", status: "your-turn", tone: NEUTRAL_TONE },
-	{ label: "waiting", status: "waiting", tone: NEUTRAL_TONE },
-];
-
-const COUNT_ARIA: Record<ThreadStatus, string> = {
-	attention: "failed run",
-	quiet: "unstarted thread",
-	waiting: "thread waiting on the agent",
-	working: "running thread",
-	"your-turn": "reply waiting for you",
-};
-
-function plural(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
 function threadTitle(thread: InterfaceThread): string {
 	return thread.title.trim() || "Untitled thread";
 }
@@ -91,14 +56,18 @@ function withLabel(focusWith: string): string {
 	return `with ${count} ${count === 1 ? "other" : "others"}`;
 }
 
-function activityLabel(card: ArenaCardView, now: number): ReactNode {
+function activityLabel(
+	card: ArenaCardView,
+	now: number,
+	tl: LiteralMessage
+): ReactNode {
 	const age = card.lastActivityAt ? compactAge(card.lastActivityAt, now) : "";
 	if (!(card.lastActivityAt && age)) {
 		return "No activity yet";
 	}
 	return (
 		<time dateTime={card.lastActivityAt}>
-			{age === "now" ? "Just now" : `${age} ago`}
+			{age === "now" ? "Just now" : tl("{age} ago", { age })}
 		</time>
 	);
 }
@@ -166,6 +135,7 @@ function FocusThread({
 	onOpen: (threadId: string) => void;
 	tabIndex: number;
 }) {
+	const tl = useLiteralMessages();
 	const focus = focusOf(card, inPanel);
 	const thread = focus.thread;
 	if (!thread) {
@@ -189,7 +159,14 @@ function FocusThread({
 	) : (
 		<button
 			{...{ [ARENA_NAV_ATTRIBUTE]: "" }}
-			aria-label={`Open ${card.name}'s ${thread.running ? "live" : "latest"} thread: ${title}`}
+			aria-label={
+				thread.running
+					? tl("Open {name}'s live thread: {title}", { name: card.name, title })
+					: tl("Open {name}'s latest thread: {title}", {
+							name: card.name,
+							title,
+						})
+			}
 			className={cn(
 				titleClass,
 				"rounded-md outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:ring-2 focus-visible:ring-ring"
@@ -230,84 +207,6 @@ function FocusThread({
 				</p>
 			) : null}
 		</div>
-	);
-}
-
-function Counts({
-	card,
-	compact,
-	onOpen,
-	tabIndex,
-}: {
-	card: ArenaCardView;
-	compact: boolean;
-	onOpen: (threadId: string) => void;
-	tabIndex: number;
-}) {
-	const shown = COUNT_TOKENS.filter((token) => card.counts[token.status] > 0);
-	if (shown.length === 0) {
-		return (
-			<p
-				className={cn(
-					"truncate text-[13px] text-muted-foreground leading-6",
-					compact && "hidden"
-				)}
-			>
-				{card.threadCount === 0
-					? "Ready for a first message"
-					: `${plural(card.threadCount, "thread")}, nothing waiting on you`}
-			</p>
-		);
-	}
-	return (
-		<ul
-			aria-label={`${card.name}'s threads`}
-			className="-ms-1.5 flex min-w-0 flex-wrap items-center"
-		>
-			{shown.map((token, index) => {
-				const count = card.counts[token.status];
-				const shared = card.shared[token.status] ?? 0;
-				const threadId = card.latestByStatus[token.status];
-				const sharedNote =
-					shared > 0
-						? `, ${shared} shared with other agents and counted on their cards too`
-						: "";
-				return (
-					<li className="flex shrink-0 items-center" key={token.status}>
-						{index > 0 ? (
-							<span
-								aria-hidden="true"
-								className="text-[13px] text-muted-foreground"
-							>
-								·
-							</span>
-						) : null}
-						<button
-							aria-label={`Open ${card.name}'s latest ${COUNT_ARIA[token.status]} (${count} total${sharedNote})`}
-							className={cn(
-								"relative z-10 inline-flex h-6 items-baseline gap-1 rounded-md px-1.5 text-[13px] leading-6 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
-							)}
-							disabled={!threadId}
-							onClick={() => (threadId ? onOpen(threadId) : undefined)}
-							tabIndex={tabIndex}
-							title={
-								shared > 0
-									? `Includes ${plural(shared, "shared thread")}, also counted on teammates' cards`
-									: undefined
-							}
-							type="button"
-						>
-							<span
-								className={cn("font-medium tabular-nums", token.tone.value)}
-							>
-								{count}
-							</span>
-							<span className={token.tone.label}>{token.label}</span>
-						</button>
-					</li>
-				);
-			})}
-		</ul>
 	);
 }
 
@@ -385,6 +284,7 @@ export function ArenaAgentCard({
 	onOpen,
 	tabbable,
 }: ArenaAgentCardProps) {
+	const tl = useLiteralMessages();
 	const nameId = `arena-agent-${card.agentId}`;
 	const tabIndex = tabbable ? 0 : -1;
 	// With no thread title to open (none yet, or it is the one in the panel),
@@ -449,7 +349,7 @@ export function ArenaAgentCard({
 				<div className="relative flex shrink-0 items-center justify-end">
 					{secondaryMessage ? (
 						<span className="text-[13px] text-muted-foreground tabular-nums leading-6 transition-opacity group-focus-within/card:opacity-0 group-hover/card:opacity-0">
-							{activityLabel(card, now)}
+							{activityLabel(card, now, tl)}
 						</span>
 					) : null}
 					<div
@@ -460,7 +360,7 @@ export function ArenaAgentCard({
 					>
 						<IconAction
 							icon={<MessageSquarePlus aria-hidden="true" />}
-							label={`Message ${card.name}`}
+							label={tl("Message {name}", { name: card.name })}
 							navigable={messageIsNav}
 							onClick={() => onMessage(card.agentId)}
 							revealOnHover={secondaryMessage}

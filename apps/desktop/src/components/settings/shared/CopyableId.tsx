@@ -49,7 +49,7 @@ export function CopyableId({
 		>
 			<TitleTooltip content={value}>
 				<code
-					className={`max-w-[240px] select-all truncate rounded bg-muted px-2 py-1 font-mono text-muted-foreground text-xs duration-150 ${previewStyles.identifier}`}
+					className={`max-w-[240px] select-all truncate rounded-lg bg-muted px-2 py-1 font-mono text-muted-foreground text-xs duration-150 ${previewStyles.identifier}`}
 				>
 					{value}
 				</code>

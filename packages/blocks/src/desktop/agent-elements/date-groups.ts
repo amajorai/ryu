@@ -212,6 +212,26 @@ export function separatorKeyByTurnIndex(
 }
 
 /**
+ * Identity of the rendered day dividers: each one's day plus the key of the
+ * turn row that carries it. The floating date pill rebuilds its observer when
+ * this changes. Day keys alone are not enough: paging in older turns of the
+ * SAME day moves that day's divider onto a newly mounted row while the run of
+ * days stays identical, which would leave the observer on a detached node.
+ */
+export function dayDividersKey(
+	groups: readonly DayGroup[],
+	turnKeyAt: (turnIndex: number) => string
+): string {
+	const parts: string[] = [];
+	for (const group of groups) {
+		if (group.dayKey !== null) {
+			parts.push(`${group.dayKey}@${turnKeyAt(group.startIndex)}`);
+		}
+	}
+	return parts.join("|");
+}
+
+/**
  * The day key of the group CONTAINING `turnIndex` — what the floating header
  * needs, since the scroller's current anchor names a turn, not a group.
  *

@@ -23,6 +23,7 @@ import {
 	cardHop,
 	cardStagger,
 } from "@ryu/blocks/desktop/interfaces/card-motion.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -123,6 +124,7 @@ function CardTable({
 	const reduceMotion = useReducedMotion() ?? false;
 	const stageRef = useRef<HTMLDivElement>(null);
 	const stage = useStageSize(stageRef);
+	const tl = useLiteralMessages();
 	const [dealtAt] = useState(() => Date.now());
 	const [pile, setPile] = useState<string[]>([]);
 	const [flying, setFlying] = useState<string[]>([]);
@@ -295,8 +297,12 @@ function CardTable({
 			setStatus({
 				message:
 					result.failed.length === ids.length
-						? `Nothing was sent. ${first}`
-						: `${result.sent.length} sent, ${result.failed.length} came back. ${first}`,
+						? tl("Nothing was sent. {firstError}", { firstError: first })
+						: tl("{sentCount} sent, {failedCount} came back. {firstError}", {
+								failedCount: String(result.failed.length),
+								firstError: first,
+								sentCount: String(result.sent.length),
+							}),
 				tone: "error",
 			});
 			return;
@@ -305,7 +311,10 @@ function CardTable({
 			message:
 				result.sent.length === 1
 					? "1 draft handed to the outbox. It goes out on the next dispatch."
-					: `${result.sent.length} drafts handed to the outbox. They go out one per dispatch.`,
+					: tl(
+							"{draftCount} drafts handed to the outbox. They go out one per dispatch.",
+							{ draftCount: String(result.sent.length) }
+						),
 			tone: "done",
 		});
 	};
@@ -415,9 +424,12 @@ function CardTable({
 						send().catch(() => undefined);
 					}}
 					size="sm"
+					variant="mono"
 				>
 					<HugeiconsIcon className="mr-1 size-4" icon={SentIcon} />
-					{pileCards.length > 1 ? `Send ${pileCards.length}` : "Send"}
+					{pileCards.length > 1
+						? tl("Send {draftCount}", { draftCount: String(pileCards.length) })
+						: "Send"}
 				</Button>
 			</DialogFooter>
 		</>

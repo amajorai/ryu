@@ -81,10 +81,8 @@ export function ProviderControlCenter({
 					}
 					description="Chat and media providers, credentials, integrations, and routing defaults, in one searchable place."
 					title={
-						<span className="flex items-center gap-2.5">
-							<span className="contents" data-slot="settings-icon-tile">
-								<SettingsIconTile icon={CpuIcon} tint="purple" />
-							</span>
+						<span className="flex items-center gap-2">
+							<SettingsIconTile icon={CpuIcon} />
 							<span className="min-w-0 truncate">Provider command center</span>
 						</span>
 					}

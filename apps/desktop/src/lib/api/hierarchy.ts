@@ -1,4 +1,3 @@
-import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { z } from "zod";
 import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/hierarchy.ts
@@ -16,6 +15,44 @@ import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts"
 // thread). The work happens in SESSIONS those threads spawn.
 
 import { type ApiTarget, request } from "./client.ts";
+import { acknowledgedMainThreadId } from "./hierarchy-main-thread-id.ts";
+import {
+	type DefaultSource,
+	type DefaultsRole,
+	defaultsResponseSchema,
+	type EffectiveDefaults,
+	type OwnerKind,
+	type ScopeDefault,
+} from "./hierarchy-scope-default.ts";
+
+export {
+	addProjectMember,
+	createProject,
+	ensureProjectMainThread,
+	fetchProjects,
+	type NewProjectInput,
+	type ProjectMember,
+	type ProjectMemberKind,
+	type ProjectRecord,
+	saveProjectDefaults,
+} from "./hierarchy-projects.ts";
+export type {
+	DefaultSource,
+	DefaultsRole,
+	EffectiveDefaults,
+	OwnerKind,
+	ResolvedDefault,
+	ScopeDefault,
+} from "./hierarchy-scope-default.ts";
+export {
+	EMPTY_SCOPE_DEFAULT,
+	GLOBAL_SCOPE,
+} from "./hierarchy-scope-default.ts";
+export {
+	fetchScopeGuidance,
+	type ScopeGuidance,
+	setScopeGuidance,
+} from "./hierarchy-scope-guidance.ts";
 
 const ensureMainThreadResponseSchema = z.looseObject({
 	conversation_id: z.string().optional(),
@@ -36,14 +73,6 @@ const sessionsResponseSchema = z.looseObject({
 });
 const fetchThreadSessionsResponseSchema = z.looseObject({
 	sessions: z.array(sessionsResponseSchema).optional(),
-});
-const defaultsResponseSchema = z.looseObject({
-	coordinatorEffort: z.string().optional(),
-	coordinatorModel: z.string().optional(),
-	coordinatorProvider: z.string().optional(),
-	effort: z.string(),
-	model: z.string(),
-	provider: z.string(),
 });
 const fetchScopeDefaultsResponseSchema = z.looseObject({
 	defaults: z.record(z.string(), defaultsResponseSchema).optional(),
@@ -89,92 +118,6 @@ const fetchEffectiveDefaultsResponseSchema = z.looseObject({
 const rekeyProjectMemoryResponseSchema = z.looseObject({
 	moved: z.number().optional(),
 });
-const membersResponseSchema = z.looseObject({
-	id: z.string(),
-	kind: z.union([z.literal("agent"), z.literal("group"), z.literal("user")]),
-	mainThreadId: z.union([z.null(), z.string()]).optional(),
-	name: z.string(),
-});
-const projectsResponseSchema = z.looseObject({
-	coordinatorAgent: z.union([z.null(), z.string()]).optional(),
-	coordinatorConversationId: z.union([z.null(), z.string()]).optional(),
-	cwd: z.union([z.null(), z.string()]).optional(),
-	defaults: defaultsResponseSchema.optional(),
-	description: z.string(),
-	icon: gatewayJsonValueSchema.optional(),
-	id: z.string(),
-	instructions: z.string().optional(),
-	members: z.array(membersResponseSchema).optional(),
-	name: z.string(),
-	status: z.string(),
-	updatedAt: z.number().optional(),
-});
-const fetchProjectsResponseSchema = z.looseObject({
-	projects: z.array(projectsResponseSchema).optional(),
-});
-const ensureProjectMainThreadResponseSchema = z.looseObject({
-	conversationId: z.string(),
-});
-
-export type OwnerKind = "agent" | "group" | "project";
-
-/**
- * One scope's model default. Empty strings mean "not set at this level".
- *
- * `provider`/`model`/`effort` are the thread defaults (every thread in the
- * scope). The `coordinator*` fields override them for main threads only.
- */
-export interface ScopeDefault {
-	coordinatorEffort?: string;
-	coordinatorModel?: string;
-	coordinatorProvider?: string;
-	effort: string;
-	model: string;
-	provider: string;
-}
-
-/** Which defaults a thread reads: main threads coordinate, sessions work. */
-export type DefaultsRole = "coordinator" | "thread";
-
-/** The node-wide scope set in Settings › Models. */
-export const GLOBAL_SCOPE = "global";
-
-/** The level a resolved default came from, most specific first. */
-export type DefaultSource =
-	| "session"
-	| "project_agent"
-	| "agent"
-	| "agent_binding"
-	| "project"
-	| "settings"
-	| "global";
-
-export interface ResolvedDefault {
-	effort: string;
-	effort_source: DefaultSource | null;
-	model: string;
-	model_source: DefaultSource | null;
-	provider: string;
-}
-
-export interface EffectiveDefaults {
-	levels: {
-		agent: ScopeDefault | null;
-		agent_binding_model: string | null;
-		global: ScopeDefault | null;
-		project: ScopeDefault | null;
-		project_agent: ScopeDefault | null;
-		session: ScopeDefault | null;
-		settings: ScopeDefault | null;
-	};
-	resolved: ResolvedDefault;
-}
-
-export const EMPTY_SCOPE_DEFAULT: ScopeDefault = {
-	effort: "",
-	model: "",
-	provider: "",
-};
 
 /** `project:<id>`. */
 export function projectScope(projectId: string): string {
@@ -226,15 +169,6 @@ function query(params: Record<string, string | undefined | null | boolean>) {
 	}
 	const text = search.toString();
 	return text ? `?${text}` : "";
-}
-
-function acknowledgedMainThreadId<TValue>(value: TValue): string {
-	if (!(isNativeText(value) && value.trim()) || value !== value.trim()) {
-		throw new Error(
-			"The node returned no main thread id. Reload the project before opening its thread."
-		);
-	}
-	return value;
 }
 
 /** Find or create the main thread of `(project, owner)`. */
@@ -395,74 +329,6 @@ export async function fetchScopeDefaults(
 	return response.defaults ?? {};
 }
 
-/**
- * One scope's prompt guidance (Core's `scope_guidance`): an optional goal and
- * an optional brief-replies toggle. Core injects both into the system prompt of
- * every thread in the scope, so a change is a one-time prompt-cache miss for
- * those threads; confirm with `promptEditCacheWarning` before saving.
- */
-export interface ScopeGuidance {
-	/** `null`/absent inherits (brief replies are on by default). */
-	briefReplies?: boolean | null;
-	goal: string;
-}
-
-const scopeGuidanceResponseSchema = z.looseObject({
-	guidance: z
-		.looseObject({
-			briefReplies: z.boolean().nullish(),
-			goal: z.string().optional(),
-		})
-		.optional(),
-});
-const scopeGuidanceWriteSchema = z.looseObject({
-	promptChanged: z.boolean().optional(),
-});
-
-/** Keep opaque scope keys within the guidance route during URL parsing. */
-function scopeGuidancePath(scope: string): string {
-	if (scope === "." || scope === "..") {
-		throw new Error("Scope cannot be a URL dot segment");
-	}
-	return `/api/scope-guidance/${encodeURIComponent(scope)}`;
-}
-
-/** Read one scope's guidance (empty when unset). */
-export async function fetchScopeGuidance(
-	target: ApiTarget,
-	scope: string
-): Promise<ScopeGuidance> {
-	const response = await request(
-		target,
-		scopeGuidancePath(scope),
-		undefined,
-		scopeGuidanceResponseSchema
-	);
-	return {
-		briefReplies: response.guidance?.briefReplies ?? null,
-		goal: response.guidance?.goal ?? "",
-	};
-}
-
-/**
- * Write one scope's guidance. Omitted fields keep their stored value. Resolves
- * to whether the system prompt actually changed (and so whether the scope's
- * threads take a cache miss on their next turn).
- */
-export async function setScopeGuidance(
-	target: ApiTarget,
-	scope: string,
-	value: Partial<ScopeGuidance>
-): Promise<boolean> {
-	const response = await request(
-		target,
-		scopeGuidancePath(scope),
-		{ method: "PUT", body: value },
-		scopeGuidanceWriteSchema
-	);
-	return response.promptChanged ?? true;
-}
-
 /** The effective defaults for `(project, agent)` and where each value comes from. */
 export function fetchEffectiveDefaults(
 	target: ApiTarget,
@@ -506,123 +372,4 @@ export async function rekeyProjectMemory(
 		rekeyProjectMemoryResponseSchema
 	);
 	return response.moved ?? 0;
-}
-
-// ---------------------------------------------------------------------------
-// Projects app (`@ryu/projects`)
-// ---------------------------------------------------------------------------
-
-export type ProjectMemberKind = "agent" | "group" | "user";
-
-export interface ProjectMember {
-	id: string;
-	kind: ProjectMemberKind;
-	mainThreadId?: string | null;
-	name: string;
-}
-
-export interface ProjectRecord {
-	coordinatorAgent?: string | null;
-	/** The project's coordinator main thread. */
-	coordinatorConversationId?: string | null;
-	cwd?: string | null;
-	defaults?: ScopeDefault;
-	description: string;
-	icon?: unknown;
-	id: string;
-	instructions?: string;
-	members?: ProjectMember[];
-	name: string;
-	status: string;
-	updatedAt?: number;
-}
-
-export interface NewProjectInput {
-	coordinatorAgent?: string;
-	cwd?: string;
-	defaults?: ScopeDefault;
-	description?: string;
-	icon?: unknown;
-	instructions?: string;
-	name: string;
-}
-
-/** The node's projects, newest first. */
-export async function fetchProjects(
-	target: ApiTarget
-): Promise<ProjectRecord[]> {
-	const response = await request(
-		target,
-		"/api/projects/projects",
-		undefined,
-		fetchProjectsResponseSchema
-	);
-	return response.projects ?? [];
-}
-
-/** Create a project. Its coordinator main thread is created with it. */
-export function createProject(
-	target: ApiTarget,
-	input: NewProjectInput
-): Promise<ProjectRecord> {
-	return request(
-		target,
-		"/api/projects/projects",
-		{
-			method: "POST",
-			body: {
-				name: input.name,
-				description: input.description ?? "",
-				instructions: input.instructions ?? "",
-				icon: input.icon ?? null,
-				coordinatorAgent: input.coordinatorAgent,
-				cwd: input.cwd,
-				defaults: input.defaults ?? EMPTY_SCOPE_DEFAULT,
-				executionMode: "auto",
-			},
-		},
-		projectsResponseSchema
-	);
-}
-
-/** Ensure (and return) the project's coordinator main thread. */
-export async function ensureProjectMainThread(
-	target: ApiTarget,
-	projectId: string
-): Promise<string> {
-	const response = await request(
-		target,
-		`/api/projects/projects/${encodeURIComponent(projectId)}/main-thread`,
-		{ method: "POST" },
-		ensureProjectMainThreadResponseSchema
-	);
-	return acknowledgedMainThreadId(response.conversationId);
-}
-
-/** Add a bot, Group, or person to a project. */
-export function addProjectMember(
-	target: ApiTarget,
-	projectId: string,
-	member: { id: string; kind: ProjectMemberKind; name?: string }
-): Promise<ProjectRecord> {
-	return request(
-		target,
-		`/api/projects/projects/${encodeURIComponent(projectId)}/members`,
-		{ method: "POST", body: member },
-		projectsResponseSchema
-	);
-}
-
-/** Save a project's model defaults (written through to Core). */
-export function saveProjectDefaults(
-	target: ApiTarget,
-	projectId: string,
-	defaults: ScopeDefault
-): Promise<ProjectRecord> {
-	return request(
-		target,
-		`/api/projects/projects/${encodeURIComponent(projectId)}/defaults`,
-		{ method: "PUT", body: defaults },
-		projectsResponseSchema
-	);
 }

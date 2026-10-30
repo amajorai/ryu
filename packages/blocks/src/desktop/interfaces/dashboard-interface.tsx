@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -6,8 +7,6 @@ import {
 	EmptyHeader,
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
-import { cn } from "@ryu/ui/lib/utils";
 import { AnimatePresence } from "motion/react";
 import {
 	type ReactNode,
@@ -17,25 +16,26 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { BOARD_STATUS_EMPTY } from "./board-status.tsx";
-import { ActivityChart } from "./dashboard-activity.tsx";
 import { DashboardHeader } from "./dashboard-header.tsx";
 import {
 	useDashboardLayout,
 	useNow,
 	useWidgetDrag,
 } from "./dashboard-hooks.ts";
-import { AgentList, ThreadList, UpcomingList } from "./dashboard-lists.tsx";
+import {
+	GRID,
+	LoadingGrid,
+	type WidgetContext,
+	widgetContent,
+} from "./dashboard-interface-widgets.tsx";
 import {
 	addWidget,
 	availableWidgets,
 	buildDashboard,
 	cycleWidgetSize,
-	type DashboardView,
 	DEFAULT_LAYOUT,
 	type LayoutItem,
 	moveWidget,
-	plural,
 	removeWidget,
 	sameLayout,
 	WIDGET_SIZE_NAMES,
@@ -43,18 +43,12 @@ import {
 	widgetSpec,
 } from "./dashboard-model.ts";
 import { DashboardScrim, DashboardThreadPanel } from "./dashboard-panel.tsx";
-import { StatValue } from "./dashboard-stat.tsx";
-import { DashboardWidget, widgetSpanClass } from "./dashboard-widget.tsx";
+import { DashboardWidget } from "./dashboard-widget.tsx";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 
 /** Relative ages and the hourly buckets refresh on this beat. */
 const TICK_MS = 30_000;
-/**
- * The grid: 12 columns of 84px rows. Dense flow lets number tiles fill the
- * holes beside a taller panel instead of leaving them empty.
- */
-const GRID = "grid grid-flow-row-dense auto-rows-[84px] grid-cols-12 gap-3";
 const MOVE_HINT_ID = "dashboard-move-hint";
 
 /** Escape inside a text field belongs to the field (or the host's composer). */
@@ -65,178 +59,6 @@ function isEditable(target: EventTarget | null): boolean {
 	return (
 		target.isContentEditable ||
 		target.closest("input, textarea, select, [contenteditable='true']") !== null
-	);
-}
-
-interface WidgetContent {
-	body: ReactNode;
-	meta?: ReactNode;
-}
-
-interface WidgetContext {
-	activeThreadId: string | null;
-	now: number;
-	onOpen: (threadId: string) => void;
-	onStart: (agentId: string) => void;
-	snapshot: InterfaceRendererProps<unknown>["snapshot"];
-	view: DashboardView;
-}
-
-function threadsWord(count: number): string {
-	return count === 1 ? "thread" : "threads";
-}
-
-/** Each tile: one figure and the noun it counts. */
-function statContent(id: WidgetId, view: DashboardView): WidgetContent {
-	const { stats } = view;
-	const tiles: Record<string, { context: string; value: number }> = {
-		"stat-agents": {
-			context: `of ${plural(stats.agents, "agent")}`,
-			value: stats.agentsWorking,
-		},
-		"stat-attention": {
-			context:
-				stats.failedRuns > 0
-					? `${plural(stats.attention, "thread")}, ${plural(stats.failedRuns, "run")}`
-					: threadsWord(stats.attention),
-			value: stats.attention + stats.failedRuns,
-		},
-		"stat-scheduled": {
-			context: view.upcoming ? "scheduled runs" : "no schedules",
-			value: stats.scheduled24h,
-		},
-		"stat-updated": {
-			context: `of ${plural(stats.threads, "thread")}`,
-			value: stats.updated24h,
-		},
-		"stat-working": {
-			context: threadsWord(stats.working),
-			value: stats.working,
-		},
-		"stat-your-turn": {
-			context: threadsWord(stats.yourTurn),
-			value: stats.yourTurn,
-		},
-	};
-	const tile = tiles[id] ?? { context: "", value: 0 };
-	return { body: <StatValue context={tile.context} value={tile.value} /> };
-}
-
-function threadWidget(
-	context: WidgetContext,
-	id: "attention" | "pinned" | "recent" | "working" | "your-turn"
-): WidgetContent {
-	const { activeThreadId, now, onOpen, snapshot, view } = context;
-	const lists = {
-		attention: {
-			empty: BOARD_STATUS_EMPTY.attention,
-			threads: view.byStatus.attention,
-			variant: "attention",
-		},
-		pinned: {
-			empty: "Pin a thread to keep it here.",
-			threads: view.pinned,
-			variant: "mixed",
-		},
-		recent: {
-			empty: "No threads yet.",
-			threads: view.recent,
-			variant: "mixed",
-		},
-		working: {
-			empty: BOARD_STATUS_EMPTY.working,
-			threads: view.byStatus.working,
-			variant: "working",
-		},
-		"your-turn": {
-			empty: BOARD_STATUS_EMPTY["your-turn"],
-			threads: view.byStatus["your-turn"],
-			variant: "your-turn",
-		},
-	} as const;
-	const list = lists[id];
-	const runs = id === "attention" ? view.failedRuns : [];
-	const count = list.threads.length + runs.length;
-	return {
-		body: (
-			<ThreadList
-				activeThreadId={activeThreadId}
-				empty={list.empty}
-				label={widgetSpec(id).title}
-				now={now}
-				onOpen={onOpen}
-				runs={runs}
-				snapshot={snapshot}
-				threads={list.threads}
-				variant={list.variant}
-			/>
-		),
-		meta: count > 0 ? count : undefined,
-	};
-}
-
-function widgetContent(id: WidgetId, context: WidgetContext): WidgetContent {
-	const { activeThreadId, now, onOpen, onStart, snapshot, view } = context;
-	switch (id) {
-		case "attention":
-		case "pinned":
-		case "recent":
-		case "working":
-		case "your-turn":
-			return threadWidget(context, id);
-		case "agents":
-			return {
-				body: (
-					<AgentList
-						activeThreadId={activeThreadId}
-						now={now}
-						onOpen={onOpen}
-						onStart={onStart}
-						rows={view.agents}
-					/>
-				),
-				meta:
-					view.stats.agents > 0
-						? `${view.stats.agentsWorking} of ${view.stats.agents} working`
-						: undefined,
-			};
-		case "activity":
-			return {
-				body: (
-					<ActivityChart
-						activity={view.activity}
-						onOpen={onOpen}
-						snapshot={snapshot}
-					/>
-				),
-				meta: `${plural(view.activity.total, "thread")} · last 24h`,
-			};
-		case "upcoming":
-			return {
-				body: (
-					<UpcomingList events={view.upcoming} now={now} snapshot={snapshot} />
-				),
-				meta:
-					view.upcoming && view.upcoming.length > 0
-						? view.upcoming.length
-						: undefined,
-			};
-		default:
-			return statContent(id, view);
-	}
-}
-
-function LoadingGrid() {
-	return (
-		<div aria-hidden="true" className={GRID}>
-			{DEFAULT_LAYOUT.map((item) => (
-				<Skeleton
-					className={cn(widgetSpanClass(item), "rounded-lg")}
-					key={item.id}
-					radius="row"
-				/>
-			))}
-		</div>
 	);
 }
 
@@ -254,6 +76,7 @@ export function DashboardInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const now = useNow(TICK_MS);
 	const view = useMemo(() => buildDashboard(snapshot, now), [snapshot, now]);
 	const { layout, reset, update } = useDashboardLayout();
@@ -343,10 +166,14 @@ export function DashboardInterface({
 		(item: LayoutItem, toIndex: number) => {
 			update((current) => moveWidget(current, item.id, toIndex));
 			setAnnouncement(
-				`${widgetSpec(item.id).title} moved to position ${toIndex + 1} of ${layout.length}.`
+				tl("{title} moved to position {position} of {count}.", {
+					count: String(layout.length),
+					position: String(toIndex + 1),
+					title: widgetSpec(item.id).title,
+				})
 			);
 		},
-		[layout.length, update]
+		[layout.length, tl, update]
 	);
 	const cycleSize = useCallback(
 		(item: LayoutItem) => {
@@ -354,11 +181,14 @@ export function DashboardInterface({
 			const next = cycleWidgetSize([item], item.id)[0];
 			if (next) {
 				setAnnouncement(
-					`${widgetSpec(item.id).title} is now ${WIDGET_SIZE_NAMES[next.size]}.`
+					tl("{title} is now {size}.", {
+						size: WIDGET_SIZE_NAMES[next.size],
+						title: widgetSpec(item.id).title,
+					})
 				);
 			}
 		},
-		[update]
+		[tl, update]
 	);
 	const remove = useCallback(
 		(item: LayoutItem, index: number) => {

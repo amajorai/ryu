@@ -1,17 +1,22 @@
 "use client";
 
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from "@ryu/ui/components/tooltip.tsx";
-import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Info } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
-import { isNativeNumber } from "../lib/native-primitive-observation.ts";
-import { Item, ItemGroup, ItemSeparator } from "./item.tsx";
+import {
+	amountLabel,
+	BucketCard,
+	FREE_CREDIT_USAGE_LINE,
+	FreeCreditRow,
+	finiteAmount,
+	GROUPED_CAPTION_CLASS,
+	GroupedCard,
+	GroupedRow,
+	InfoTooltip,
+	nearestExpiryLabel,
+} from "./credit-balance-breakdown-parts.tsx";
+
+export { FREE_CREDIT_USAGE_LINE } from "./credit-balance-breakdown-parts.tsx";
 
 /**
  * One free-credit grant balance ready for display. The breakdown folds every
@@ -61,210 +66,6 @@ export interface CreditBalanceBreakdownProps {
 	totalMicroUsd: number | null;
 }
 
-function finiteAmount(value: number | null | undefined): number | null {
-	if (!(isNativeNumber(value) && Number.isFinite(value))) {
-		return null;
-	}
-	return value;
-}
-
-function amountLabel(
-	value: number | null | undefined,
-	currency: string
-): string {
-	const amount = finiteAmount(value);
-	return amount === null ? "—" : formatMicroUsd(amount, currency, 2);
-}
-
-function InfoTooltip({ label, children }: { label: string; children: string }) {
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				aria-label={label}
-				className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-				type="button"
-			>
-				<Info aria-hidden="true" className="size-3.5" />
-			</TooltipTrigger>
-			<TooltipContent className="max-w-80 whitespace-normal leading-relaxed">
-				<p>{children}</p>
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
-function BucketCard({
-	amount,
-	detail,
-	flat,
-	label,
-	tooltip,
-}: {
-	amount: string;
-	detail: string;
-	flat: boolean;
-	label: string;
-	tooltip: string;
-}) {
-	return (
-		<div
-			className={cn(
-				"rounded-lg p-3",
-				flat ? "bg-background/70" : "border bg-background/60"
-			)}
-		>
-			<div className="flex items-start justify-between gap-2">
-				<p className="font-medium text-sm">{label}</p>
-				<InfoTooltip label={`About ${label.toLowerCase()}`}>
-					{tooltip}
-				</InfoTooltip>
-			</div>
-			<p className="mt-2 font-medium font-mono text-xl tabular-nums">
-				{amount}
-			</p>
-			<p className="mt-1 text-muted-foreground text-xs leading-relaxed">
-				{detail}
-			</p>
-		</div>
-	);
-}
-
-/** The one line free credit is explained with, wherever it is shown. */
-export const FREE_CREDIT_USAGE_LINE =
-	"Used automatically on models marked Free";
-
-/**
- * The expiry label of the allocation that lapses soonest: by ISO `expiresAt`
- * when callers provide it, else the first allocation that carries a label.
- */
-function nearestExpiryLabel(
-	allocations: readonly CreditAllocationView[]
-): string | null {
-	let nearest: CreditAllocationView | null = null;
-	for (const allocation of allocations) {
-		const at = allocation.expiresAt
-			? Date.parse(allocation.expiresAt)
-			: Number.NaN;
-		if (Number.isNaN(at)) {
-			continue;
-		}
-		const best = nearest?.expiresAt
-			? Date.parse(nearest.expiresAt)
-			: Number.NaN;
-		if (Number.isNaN(best) || at < best) {
-			nearest = allocation;
-		}
-	}
-	return (
-		nearest?.expiresAtLabel ??
-		allocations.find((allocation) => allocation.expiresAtLabel)
-			?.expiresAtLabel ??
-		null
-	);
-}
-
-function FreeCreditRow({
-	amountMicroUsd,
-	currency,
-	expiresAtLabel,
-	flat,
-}: {
-	amountMicroUsd: number;
-	currency: string;
-	expiresAtLabel: string | null;
-	flat: boolean;
-}) {
-	const details = [FREE_CREDIT_USAGE_LINE, expiresAtLabel].filter(Boolean);
-	return (
-		<div
-			className={cn(
-				"flex items-start justify-between gap-3 rounded-lg px-3 py-2.5",
-				flat ? "bg-background/70" : "border bg-background/50"
-			)}
-		>
-			<div className="min-w-0">
-				<p className="break-words font-medium text-sm">Free credit</p>
-				<p className="text-muted-foreground text-xs leading-relaxed">
-					{details.join(" · ")}
-				</p>
-			</div>
-			<span className="shrink-0 font-medium font-mono text-sm tabular-nums">
-				{amountLabel(amountMicroUsd, currency)}
-			</span>
-		</div>
-	);
-}
-
-/** One grouped card of hairline-separated rows (desktop Settings look). */
-function GroupedCard({ rows }: { rows: { key: string; node: ReactNode }[] }) {
-	return (
-		<ItemGroup appearance="settings-group" spacing="flush">
-			{rows.map((row, index) => (
-				<Fragment key={row.key}>
-					{index > 0 ? <ItemSeparator className="my-0" /> : null}
-					{row.node}
-				</Fragment>
-			))}
-		</ItemGroup>
-	);
-}
-
-function GroupedRow({
-	amount,
-	amountClassName,
-	detail,
-	label,
-	tooltip,
-	tooltipLabel,
-	trailing,
-}: {
-	amount: string;
-	amountClassName?: string;
-	detail?: string;
-	label: string;
-	tooltip?: string;
-	tooltipLabel?: string;
-	trailing?: ReactNode;
-}) {
-	return (
-		<Item purpose="settings-row" size="sm">
-			<div className="flex w-full items-center justify-between gap-3">
-				<div className="min-w-0 flex-1">
-					<div className="flex items-center gap-1.5">
-						<p className="text-sm">{label}</p>
-						{tooltip ? (
-							<InfoTooltip
-								label={tooltipLabel ?? `About ${label.toLowerCase()}`}
-							>
-								{tooltip}
-							</InfoTooltip>
-						) : null}
-					</div>
-					{detail ? (
-						<p className="text-muted-foreground text-xs leading-snug">
-							{detail}
-						</p>
-					) : null}
-				</div>
-				<div className="flex shrink-0 items-center gap-2">
-					{trailing}
-					<span
-						className={cn(
-							"font-medium font-mono tabular-nums",
-							amountClassName ?? "text-sm"
-						)}
-					>
-						{amount}
-					</span>
-				</div>
-			</div>
-		</Item>
-	);
-}
-
-const GROUPED_CAPTION_CLASS =
-	"px-3.5 text-muted-foreground text-xs leading-snug";
-
 export function CreditBalanceBreakdown({
 	balanceBreakdownAvailable = true,
 	currency = "usd",
@@ -278,6 +79,7 @@ export function CreditBalanceBreakdown({
 	appearance = "default",
 	className,
 }: CreditBalanceBreakdownProps) {
+	const tl = useLiteralMessages();
 	const flat = appearance === "settings";
 	const allocations = (providerAllocations ?? []).filter(
 		(allocation) => (finiteAmount(allocation.remainingMicroUsd) ?? 0) > 0
@@ -297,7 +99,10 @@ export function CreditBalanceBreakdown({
 		planAmount === null
 			? "Remaining plan balance is not available yet."
 			: planAllowance !== null && planAllowance > 0
-				? `${amountLabel(planAmount, currency)} left of ${amountLabel(planAllowance, currency)} this billing period`
+				? tl("{remaining} left of {allowance} this billing period", {
+						remaining: amountLabel(planAmount, currency),
+						allowance: amountLabel(planAllowance, currency),
+					})
 				: "Resets each billing period · unused credit does not roll over";
 
 	if (appearance === "grouped") {

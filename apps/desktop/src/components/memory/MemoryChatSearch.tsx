@@ -5,7 +5,11 @@
 // current node's visibility checks; this component is the Memory Library's
 // user-facing window into that existing index.
 
-import { Message01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import {
+	Message01Icon,
+	Search01Icon,
+	SparklesIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
@@ -21,7 +25,6 @@ import {
 import { Input } from "@ryu/ui/components/input.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import { Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -86,7 +89,7 @@ function ChatSearchHitRow({
 
 	return (
 		<li
-			className="rounded-lg border border-border/60 bg-muted/30"
+			className="rounded-lg border border-border bg-muted/30"
 			data-testid="memory-chat-result"
 		>
 			<Button
@@ -281,7 +284,7 @@ export function MemoryChatSearch({
 								size="sm"
 								variant="outline"
 							>
-								<Sparkles className="size-3.5" />
+								<HugeiconsIcon className="size-3.5" icon={SparklesIcon} />
 								Review in Dream
 							</Button>
 						</div>

@@ -1,4 +1,4 @@
-import { FileTreePanel } from "@/src/components/panels/WorkspacePanels.tsx";
+import { FileTreePanel } from "@/src/components/panels/workspace-panels/file-tree-panel.tsx";
 
 export default function ProjectFilesPage({ folder }: { folder: string }) {
 	return (

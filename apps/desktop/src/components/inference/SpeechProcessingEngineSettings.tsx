@@ -15,7 +15,13 @@ import {
 	type SpeechProcessingPrefs,
 	setSpeechProcessingPrefs,
 } from "@/src/lib/api/preferences.ts";
-import { EnumField, FieldGrid, FieldGroup } from "./fields.tsx";
+import {
+	EnumField,
+	FieldGrid,
+	FieldGroup,
+	InferenceLoadError,
+	InferenceSaveError,
+} from "./fields.tsx";
 
 const SPEECH_STYLES = [
 	{ value: "casual", label: "Casual" },
@@ -61,8 +67,8 @@ function SpeechProcessingEditor({
 	}));
 
 	return (
-		<SettingsSection caption="These node-wide defaults are shared with the Speech Processing layer on the Computer dialog's Voice & sandbox page and Dictation settings.">
-			<SettingsCard className="flex flex-col gap-5">
+		<SettingsSection caption="Shared with the Speech Processing layer and Dictation settings.">
+			<SettingsCard className="flex flex-col gap-4">
 				<FieldGroup title="Engine">
 					<EnumField
 						label="Speech Processing engine"
@@ -130,6 +136,7 @@ function SpeechProcessingEditor({
 						disabled={save.isPending}
 						loading={save.isPending}
 						onClick={() => save.mutate(draft)}
+						variant="outline"
 					>
 						Save Speech Processing settings
 					</Button>
@@ -137,11 +144,10 @@ function SpeechProcessingEditor({
 						<span className="text-muted-foreground text-xs">Saved</span>
 					) : null}
 					{save.isError ? (
-						<p className="text-status-destructive text-xs" role="alert">
-							{save.error instanceof Error
-								? save.error.message
-								: "Could not save Speech Processing settings"}
-						</p>
+						<InferenceSaveError
+							error={save.error}
+							message="Couldn't save Speech Processing settings."
+						/>
 					) : null}
 				</div>
 			</SettingsCard>
@@ -171,23 +177,11 @@ export function SpeechProcessingEngineSettings() {
 	}
 	if (query.isError && !query.data) {
 		return (
-			<div
-				className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
-				role="alert"
-			>
-				<p className="text-sm text-status-destructive">
-					Could not load Speech Processing settings.
-				</p>
-				<Button
-					disabled={query.isFetching}
-					loading={query.isFetching}
-					onClick={() => void query.refetch()}
-					size="sm"
-					variant="outline"
-				>
-					Retry
-				</Button>
-			</div>
+			<InferenceLoadError
+				error={query.error}
+				message="Couldn't load Speech Processing settings."
+				onRetry={() => void query.refetch()}
+			/>
 		);
 	}
 	return query.data ? (

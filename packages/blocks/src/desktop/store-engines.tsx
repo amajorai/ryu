@@ -44,6 +44,10 @@ import {
 import { Spinner } from "@ryu/ui/components/spinner";
 import { Switch } from "@ryu/ui/components/switch";
 import type { ReactNode } from "react";
+import {
+	STORE_LOAD_ERROR_SENTENCE,
+	StoreErrorDetails,
+} from "./store-error-details.tsx";
 
 export type EngineInstallState = CatalogItem["install_state"];
 
@@ -301,15 +305,16 @@ export function EnginesErrorState({
 					<HugeiconsIcon icon={LayerIcon} />
 				</EmptyMedia>
 				<EmptyTitle>Could not load engines</EmptyTitle>
-				<EmptyDescription>{message}</EmptyDescription>
+				<EmptyDescription>{STORE_LOAD_ERROR_SENTENCE}</EmptyDescription>
 			</EmptyHeader>
-			{onRetry ? (
-				<EmptyContent>
-					<Button onClick={onRetry} size="sm" variant="ghost">
+			<EmptyContent>
+				{onRetry ? (
+					<Button onClick={onRetry} size="sm" variant="outline">
 						Try again
 					</Button>
-				</EmptyContent>
-			) : null}
+				) : null}
+				<StoreErrorDetails message={message} />
+			</EmptyContent>
 		</Empty>
 	);
 }

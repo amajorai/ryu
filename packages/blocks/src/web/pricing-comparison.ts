@@ -1,35 +1,57 @@
-import {
-	BUSINESS_INCLUDED_SEATS,
-	businessIncludedCreditUsd,
-	businessMonthlyPriceUsd,
-} from "./business-pricing.ts";
+import { formatMessage } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
+import { BUSINESS_INCLUDED_SEATS } from "./business-pricing.ts";
 import {
 	formatBps,
 	formatCount,
 	PRICING_COPY,
 	PUBLISHED_PRICING,
-	type PublishedMailAllowance,
 } from "./data/standalone-pricing.ts";
+import { MAX_FAMILY_SHARING_MEMBERS } from "./pricing.tsx";
 import {
-	annualTotalPrice,
-	hostedAgentIncludedCreditUsd,
-	hostedAgentMonthlyPriceUsd,
-	MARKETPLACE_PASS_MONTHLY_USD,
-	MARKETPLACE_PASS_YEARLY_USD,
-	MAX_FAMILY_SHARING_MEMBERS,
-	MAX_INCLUDED_USD,
-	MAX_MONTHLY_USD,
-	PLUS_INCLUDED_USD,
-	PLUS_MONTHLY_USD,
-	PRO_INCLUDED_USD,
-	PRO_MONTHLY_USD,
-	type PricingAudience,
-} from "./pricing.tsx";
+	CONTRACTED,
+	type ComparisonOptions,
+	type ComparisonPlan,
+	type ComparisonPlanId,
+	type ComparisonSection,
+	PLAN_CAPABILITIES,
+	PLAN_NAMES,
+	RUNNING_BOXES_BY_PLAN,
+	SPACE_STORAGE_GB_BY_PLAN,
+} from "./pricing-comparison-plans.ts";
+import {
+	catalogRow,
+	creditsRow,
+	DEPOSIT_FEE_BPS_BY_PLAN,
+	gb,
+	gib,
+	hasManagedServer,
+	MAIL_BY_PLAN,
+	mail,
+	onlyRow,
+	priceRow,
+} from "./pricing-comparison-rows.ts";
 import {
 	normalizeTeamsSeatCount,
 	TEAMS_MAX_SEATS,
 	TEAMS_MIN_SEATS,
 } from "./pricing-seat-model.ts";
+
+export type {
+	ComparisonCatalogPlanId,
+	ComparisonCell,
+	ComparisonOptions,
+	ComparisonPlan,
+	ComparisonPlanId,
+	ComparisonRow,
+	ComparisonSection,
+} from "./pricing-comparison-plans.ts";
+export {
+	DESKTOP_LICENSE_LAUNCH_USD,
+	PLAN_CAPABILITIES,
+	RUNNING_BOXES_BY_PLAN,
+	SPACE_STORAGE_GB_BY_PLAN,
+} from "./pricing-comparison-plans.ts";
 
 /**
  * The detailed plan comparison under the public pricing cards.
@@ -49,158 +71,6 @@ import {
  * restate the plan cards' own bullets and the public billing docs; nothing
  * here is a capability the cards and docs do not already promise.
  */
-
-/** A plan column the comparison can show. Private plans other than Plus never appear. */
-export type ComparisonPlanId =
-	| "business"
-	| "desktop-license"
-	| "enterprise"
-	| "marketplace-membership"
-	| "max"
-	| "plus"
-	| "pro"
-	| "teams";
-
-/** A catalog plan id (everything but the unpriced Enterprise column). */
-export type ComparisonCatalogPlanId = Exclude<ComparisonPlanId, "enterprise">;
-
-export interface ComparisonPlan {
-	readonly id: ComparisonPlanId;
-	readonly name: string;
-}
-
-/** `true` renders a check, `false` a dash, and a string renders as the value. */
-export type ComparisonCell = boolean | string;
-
-export interface ComparisonRow {
-	/** Short qualifier shown under the row label. */
-	readonly hint?: string;
-	readonly id: string;
-	readonly label: string;
-	readonly values: Readonly<Record<ComparisonPlanId, ComparisonCell>>;
-}
-
-export interface ComparisonSection {
-	readonly id: string;
-	readonly rows: readonly ComparisonRow[];
-	readonly title: string;
-}
-
-export interface ComparisonOptions {
-	/** A Major Pass is listed only while it is open for sale. */
-	readonly aMajorPassEnabled?: boolean;
-	/** Which shelf the page is showing; columns follow it. */
-	readonly audience: PricingAudience;
-	/** Max's family-sharing row follows the `billing.family_sharing` rollout. */
-	readonly familySharingEnabled?: boolean;
-	readonly isYearly?: boolean;
-	/** Plus is a column only when `plans.plus_public` opens it. */
-	readonly plusPublicEnabled?: boolean;
-	/** Published product count; the row is omitted when it is unknown. */
-	readonly productCount?: number;
-	/** The organization seat count chosen on the page's seat selector. */
-	readonly seats?: number;
-}
-
-/** One-time launch price of the local desktop license (`LIFETIME_LAUNCH_PRICE_USD`). */
-export const DESKTOP_LICENSE_LAUNCH_USD = 129;
-
-/**
- * Ryu Boxes one organization may run at once, by plan
- * (`PLAN_BOX_CONCURRENCY[...].running`). The desktop license and A Major Pass
- * carry no managed capacity, so they keep the trial row.
- */
-export const RUNNING_BOXES_BY_PLAN = {
-	"desktop-license": 1,
-	"marketplace-membership": 1,
-	plus: 2,
-	pro: 2,
-	max: 4,
-	teams: 10,
-	business: 20,
-} as const satisfies Record<ComparisonCatalogPlanId, number>;
-
-/** Hosted Space storage in GB (`planLimit(plan, "spaceStorageLimitGb")`). */
-export const SPACE_STORAGE_GB_BY_PLAN = {
-	"desktop-license": 20,
-	"marketplace-membership": 1,
-	plus: PUBLISHED_PRICING.spaceStorageGb.pro,
-	pro: PUBLISHED_PRICING.spaceStorageGb.pro,
-	max: 50,
-	teams: 50,
-	business: 50,
-} as const satisfies Record<ComparisonCatalogPlanId, number>;
-
-/**
- * Plan capability flags, mirroring `PLANS[plan]`: `managedInference`,
- * `marketplaceApps`, `emailBrandingRemovable`, and organization audience.
- */
-export const PLAN_CAPABILITIES = {
-	"desktop-license": {
-		brandingRemovable: false,
-		managedAi: false,
-		marketplaceApps: false,
-		organization: false,
-	},
-	"marketplace-membership": {
-		brandingRemovable: false,
-		managedAi: false,
-		marketplaceApps: true,
-		organization: false,
-	},
-	plus: {
-		brandingRemovable: true,
-		managedAi: true,
-		marketplaceApps: true,
-		organization: false,
-	},
-	pro: {
-		brandingRemovable: true,
-		managedAi: true,
-		marketplaceApps: true,
-		organization: false,
-	},
-	max: {
-		brandingRemovable: true,
-		managedAi: true,
-		marketplaceApps: true,
-		organization: false,
-	},
-	teams: {
-		brandingRemovable: true,
-		managedAi: true,
-		marketplaceApps: true,
-		organization: true,
-	},
-	business: {
-		brandingRemovable: true,
-		managedAi: true,
-		marketplaceApps: true,
-		organization: true,
-	},
-} as const satisfies Record<
-	ComparisonCatalogPlanId,
-	{
-		brandingRemovable: boolean;
-		managedAi: boolean;
-		marketplaceApps: boolean;
-		organization: boolean;
-	}
->;
-
-/** Enterprise numbers and terms are written into each contract. */
-const CONTRACTED = "Contracted";
-
-const PLAN_NAMES = {
-	pro: "Pro",
-	plus: "Plus",
-	max: "Max",
-	"desktop-license": "Local Desktop",
-	"marketplace-membership": "A Major Pass",
-	teams: "Teams",
-	business: "Business",
-	enterprise: "Enterprise",
-} as const satisfies Record<ComparisonPlanId, string>;
 
 /**
  * The columns for the shelf on screen: the managed individual plans first
@@ -235,110 +105,9 @@ export function comparisonSeats(seats: number | undefined): number {
 	);
 }
 
-const usd = (amount: number): string => `$${formatCount(amount)}`;
-
-const recurring = (monthly: number, isYearly: boolean): string =>
-	isYearly ? `${usd(annualTotalPrice(monthly))}/yr` : `${usd(monthly)}/mo`;
-
-const gib = (value: number): string => `${formatCount(value)} GiB`;
-const gb = (value: number): string => `${formatCount(value)} GB`;
-
-const { mail } = PUBLISHED_PRICING;
-
-/** The hosted-mail allowance each plan uses (`emailQuotaForPlan`). */
-const MAIL_BY_PLAN = {
-	"desktop-license": mail.free,
-	"marketplace-membership": mail.free,
-	plus: mail.pro,
-	pro: mail.pro,
-	max: mail.max,
-	teams: mail.organization,
-	business: mail.organization,
-} as const satisfies Record<ComparisonCatalogPlanId, PublishedMailAllowance>;
-
-const DEPOSIT_FEE_BPS_BY_PLAN = {
-	"desktop-license": PUBLISHED_PRICING.depositFee.baseBps,
-	"marketplace-membership": PUBLISHED_PRICING.depositFee.baseBps,
-	plus: PUBLISHED_PRICING.depositFee.proBps,
-	pro: PUBLISHED_PRICING.depositFee.proBps,
-	max: PUBLISHED_PRICING.depositFee.teamBps,
-	teams: PUBLISHED_PRICING.depositFee.teamBps,
-	business: PUBLISHED_PRICING.depositFee.teamBps,
-} as const satisfies Record<ComparisonCatalogPlanId, number>;
-
-/** A row whose catalog plans read one mirror and whose Enterprise cell is fixed. */
-function catalogRow(
-	read: (plan: ComparisonCatalogPlanId) => ComparisonCell,
-	enterprise: ComparisonCell
-): Record<ComparisonPlanId, ComparisonCell> {
-	return {
-		"desktop-license": read("desktop-license"),
-		"marketplace-membership": read("marketplace-membership"),
-		plus: read("plus"),
-		pro: read("pro"),
-		max: read("max"),
-		teams: read("teams"),
-		business: read("business"),
-		enterprise,
-	};
-}
-
-/** A row that only the listed plans carry. */
-function onlyRow(
-	plans: readonly ComparisonPlanId[]
-): Record<ComparisonPlanId, ComparisonCell> {
-	return {
-		"desktop-license": plans.includes("desktop-license"),
-		"marketplace-membership": plans.includes("marketplace-membership"),
-		plus: plans.includes("plus"),
-		pro: plans.includes("pro"),
-		max: plans.includes("max"),
-		teams: plans.includes("teams"),
-		business: plans.includes("business"),
-		enterprise: plans.includes("enterprise"),
-	};
-}
-
-const hasManagedServer = (plan: ComparisonCatalogPlanId): boolean =>
-	PLAN_CAPABILITIES[plan].managedAi;
-
-function priceRow(isYearly: boolean, seats: number): ComparisonRow {
-	return {
-		id: "price",
-		label: isYearly ? "Price, billed yearly" : "Price, billed monthly",
-		...(isYearly ? { hint: "Yearly billing includes two months free" } : {}),
-		values: {
-			pro: recurring(PRO_MONTHLY_USD, isYearly),
-			plus: recurring(PLUS_MONTHLY_USD, isYearly),
-			max: recurring(MAX_MONTHLY_USD, isYearly),
-			"desktop-license": `${usd(DESKTOP_LICENSE_LAUNCH_USD)} once`,
-			"marketplace-membership": isYearly
-				? `${usd(MARKETPLACE_PASS_YEARLY_USD)}/yr`
-				: `${usd(MARKETPLACE_PASS_MONTHLY_USD)}/mo`,
-			teams: `${recurring(hostedAgentMonthlyPriceUsd("teams", seats), isYearly)} for ${seats} seats`,
-			business: `${recurring(businessMonthlyPriceUsd(seats), isYearly)} for ${seats} seats`,
-			enterprise: "Custom",
-		},
-	};
-}
-
-function creditsRow(seats: number): ComparisonRow {
-	return {
-		id: "included-credits",
-		label: "Included AI credits each month",
-		hint: "Organization pools are shared and grow with seats",
-		values: {
-			pro: usd(PRO_INCLUDED_USD),
-			plus: usd(PLUS_INCLUDED_USD),
-			max: usd(MAX_INCLUDED_USD),
-			"desktop-license": false,
-			"marketplace-membership": false,
-			teams: usd(hostedAgentIncludedCreditUsd("teams", seats)),
-			business: usd(businessIncludedCreditUsd(seats)),
-			enterprise: CONTRACTED,
-		},
-	};
-}
+/** English formatting for callers outside a React tree (tests, plain code). */
+const englishLiteral: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 
 /**
  * The comparison rows for the columns on screen. A row none of those columns
@@ -346,7 +115,8 @@ function creditsRow(seats: number): ComparisonRow {
  * individual table with dashes and personal extras stay off the organization one.
  */
 export function comparisonSections(
-	options: ComparisonOptions
+	options: ComparisonOptions,
+	tl: LiteralMessage = englishLiteral
 ): readonly ComparisonSection[] {
 	const isYearly = options.isYearly ?? false;
 	const seats = comparisonSeats(options.seats);
@@ -362,7 +132,13 @@ export function comparisonSections(
 				{
 					id: "deposit-fee",
 					label: "Credit top-up deposit fee",
-					hint: `${PRICING_COPY.depositFeeMinimum} minimum; Ryu keeps at most ${PRICING_COPY.depositFeeCap} per top-up`,
+					hint: tl(
+						"{depositFeeMinimum} minimum; Ryu keeps at most {depositFeeCap} per top-up",
+						{
+							depositFeeMinimum: PRICING_COPY.depositFeeMinimum,
+							depositFeeCap: PRICING_COPY.depositFeeCap,
+						}
+					),
 					values: catalogRow(
 						(plan) => formatBps(DEPOSIT_FEE_BPS_BY_PLAN[plan]),
 						CONTRACTED

@@ -85,7 +85,7 @@ export function ConnectionPermissionDialog({
 				showCloseButton={!saving}
 			>
 				<DialogHeader>
-					<div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-widest">
+					<div className="flex items-center gap-2 text-detail text-muted-foreground">
 						<HugeiconsIcon className="size-4" icon={Shield01Icon} />
 						<span>Connection review</span>
 					</div>
@@ -102,7 +102,7 @@ export function ConnectionPermissionDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="flex items-start gap-3 rounded-xl border border-warning/35 bg-warning/10 px-3 py-3 text-sm">
+				<div className="flex items-start gap-3 rounded-xl bg-warning/10 px-3 py-3 text-sm">
 					<HugeiconsIcon
 						className="mt-0.5 size-4 shrink-0 text-status-warning"
 						icon={InformationCircleIcon}
@@ -132,10 +132,8 @@ export function ConnectionPermissionDialog({
 						const isSelected = selected === option.id;
 						return (
 							<label
-								className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition-colors ${
-									isSelected
-										? "border-primary/60 bg-primary/5"
-										: "border-border/70 hover:bg-muted/40"
+								className={`flex cursor-pointer items-start gap-3 rounded-xl px-3 py-3 transition-colors duration-(--duration-fast) hover:duration-0 ${
+									isSelected ? "bg-accent" : "hover:bg-muted"
 								}`}
 								htmlFor={id}
 								key={option.id}

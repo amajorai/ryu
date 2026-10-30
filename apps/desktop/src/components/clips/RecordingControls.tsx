@@ -9,6 +9,19 @@
 // clock over the pause. On Stop the finalized `ClipContext` is handed back via
 // `onClipReady` so the composer can turn it into an attachment.
 
+import {
+	ArrowDown01Icon,
+	BrowserIcon,
+	ComputerIcon,
+	Mic01Icon,
+	PauseIcon,
+	PlayIcon,
+	StopIcon,
+	Tick02Icon,
+	Video01Icon,
+	VolumeHighIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -21,18 +34,6 @@ import {
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	IconAppWindow,
-	IconCheck,
-	IconChevronDown,
-	IconDeviceDesktop,
-	IconMicrophone,
-	IconPlayerPause,
-	IconPlayerPlay,
-	IconPlayerStopFilled,
-	IconVideo,
-	IconVolume,
-} from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
@@ -57,25 +58,25 @@ function formatElapsed(ms: number): string {
 
 /** One glyph for each audio input toggle, in display order. */
 const AUDIO_META: {
-	icon: typeof IconMicrophone;
+	icon: IconSvgElement;
 	key: keyof ClipCaptureSources;
 	label: string;
 }[] = [
-	{ key: "mic", label: "Microphone", icon: IconMicrophone },
-	{ key: "systemAudio", label: "System audio", icon: IconVolume },
+	{ key: "mic", label: "Microphone", icon: Mic01Icon },
+	{ key: "systemAudio", label: "System audio", icon: VolumeHighIcon },
 ];
 
 /** Resolve the label + glyph for the currently-selected video surface. */
 function describeTarget(target: ClipTarget, sources: ClipSources | null) {
 	if (target.kind === "display") {
 		const display = sources?.displays.find((d) => d.id === target.displayId);
-		return { label: display?.label ?? "Display", Icon: IconDeviceDesktop };
+		return { label: display?.label ?? "Display", Icon: ComputerIcon };
 	}
 	if (target.kind === "window") {
 		const win = sources?.windows.find((w) => w.id === target.windowId);
-		return { label: win?.title ?? "Window", Icon: IconAppWindow };
+		return { label: win?.title ?? "Window", Icon: BrowserIcon };
 	}
-	return { label: "Screen", Icon: IconDeviceDesktop };
+	return { label: "Screen", Icon: ComputerIcon };
 }
 
 export interface RecordingControlsProps {
@@ -245,9 +246,9 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					variant="ghost"
 				>
 					{isPaused ? (
-						<IconPlayerPlay className="size-4" />
+						<HugeiconsIcon className="size-4" icon={PlayIcon} />
 					) : (
-						<IconPlayerPause className="size-4" />
+						<HugeiconsIcon className="size-4" icon={PauseIcon} />
 					)}
 				</Button>
 				<Button
@@ -261,7 +262,7 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					type="button"
 					variant="ghost"
 				>
-					<IconPlayerStopFilled className="size-4" />
+					<HugeiconsIcon className="size-4" icon={StopIcon} />
 				</Button>
 			</div>
 		);
@@ -289,9 +290,9 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 						/>
 					}
 				>
-					<TargetIcon className="size-4" />
+					<HugeiconsIcon className="size-4" icon={TargetIcon} />
 					<span className="max-w-24 truncate text-xs">{targetLabel}</span>
-					<IconChevronDown className="size-3" />
+					<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start" className="min-w-56" sideOffset={6}>
 					{sourcesLoading ? (
@@ -312,10 +313,13 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					<DropdownMenuItem
 						onClick={() => setCaptureTarget({ kind: "screen" })}
 					>
-						<IconDeviceDesktop className="size-4 shrink-0 text-muted-foreground" />
+						<HugeiconsIcon
+							className="size-4 shrink-0 text-muted-foreground"
+							icon={ComputerIcon}
+						/>
 						<span className="flex-1 truncate">Primary screen</span>
 						{captureTarget.kind === "screen" ? (
-							<IconCheck className="size-4 shrink-0" />
+							<HugeiconsIcon className="size-4 shrink-0" icon={Tick02Icon} />
 						) : null}
 					</DropdownMenuItem>
 
@@ -337,13 +341,19 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 											})
 										}
 									>
-										<IconDeviceDesktop className="size-4 shrink-0 text-muted-foreground" />
+										<HugeiconsIcon
+											className="size-4 shrink-0 text-muted-foreground"
+											icon={ComputerIcon}
+										/>
 										<span className="flex-1 truncate">
 											{display.label}
 											{display.primary ? " (primary)" : ""}
 										</span>
 										{activeDisplay ? (
-											<IconCheck className="size-4 shrink-0" />
+											<HugeiconsIcon
+												className="size-4 shrink-0"
+												icon={Tick02Icon}
+											/>
 										) : null}
 									</DropdownMenuItem>
 								);
@@ -366,12 +376,18 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 											setCaptureTarget({ kind: "window", windowId: win.id })
 										}
 									>
-										<IconAppWindow className="size-4 shrink-0 text-muted-foreground" />
+										<HugeiconsIcon
+											className="size-4 shrink-0 text-muted-foreground"
+											icon={BrowserIcon}
+										/>
 										<span className="flex-1 truncate" title={win.title}>
 											{win.title}
 										</span>
 										{activeWindow ? (
-											<IconCheck className="size-4 shrink-0" />
+											<HugeiconsIcon
+												className="size-4 shrink-0"
+												icon={Tick02Icon}
+											/>
 										) : null}
 									</DropdownMenuItem>
 								);
@@ -397,7 +413,7 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 						type="button"
 						variant={active ? "secondary" : "ghost-muted"}
 					>
-						<Icon className="size-4" />
+						<HugeiconsIcon className="size-4" icon={Icon} />
 					</Button>
 				);
 			})}
@@ -412,7 +428,7 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 				type="button"
 				variant="ghost"
 			>
-				<IconVideo className="size-4" />
+				<HugeiconsIcon className="size-4" icon={Video01Icon} />
 			</Button>
 		</div>
 	);

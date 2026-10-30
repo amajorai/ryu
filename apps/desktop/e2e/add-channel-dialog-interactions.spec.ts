@@ -109,9 +109,7 @@ test("switch between managed and manual setup and discard drafts on Cancel or Es
 		.getByRole("button", { name: "Create a bot for me" })
 		.first()
 		.click();
-	await expect(
-		page.getByText("Telegram creates a bot you own and hands Ryu its token")
-	).toBeVisible();
+	await expect(page.getByText("Telegram creates a bot you own.")).toBeVisible();
 	await expect(page.getByPlaceholder("Paste value…")).toHaveCount(0);
 	await expect(
 		page.getByRole("button", { name: "Create a bot for me" }).last()

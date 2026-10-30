@@ -13,14 +13,9 @@ import styles from "./tools.module.css";
 // state. Everything that needs the backend (servers, tools, agents, calling a
 // tool, creating a server) is passed in as props.
 
-import {
-	Add01Icon,
-	ArrowDown01Icon,
-	ComputerTerminal01Icon,
-	ServerStack01Icon,
-	Wrench01Icon,
-} from "@hugeicons/core-free-icons";
+import { ServerStack01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -30,15 +25,6 @@ import {
 	CardTitle,
 } from "@ryu/ui/components/card";
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-	DialogTrigger,
-} from "@ryu/ui/components/dialog";
-import {
 	Empty,
 	EmptyContent,
 	EmptyDescription,
@@ -46,7 +32,6 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
 import {
 	Select,
@@ -56,69 +41,22 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select";
 import { Spinner } from "@ryu/ui/components/spinner";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import type { callMcpTool, McpCallResult } from "@ryuhq/core-client/mcp";
-import { type ChangeEvent, useMemo, useState } from "react";
+import { AddServerDialog } from "./tools-add-server-dialog.tsx";
+import { ToolRow } from "./tools-tool-row.tsx";
+import type { ToolsViewProps } from "./tools-types.ts";
+
+export type {
+	AgentOption,
+	CreateServerInput,
+	CreateServerResult,
+	McpServerRow,
+	McpToolRow,
+	ToolCallResult,
+	ToolsViewProps,
+} from "./tools-types.ts";
 
 const ALL_AGENTS = "__all__";
-
-export interface McpServerRow {
-	args: string[];
-	available?: boolean;
-	command: string;
-	description?: string | null;
-	enabled: boolean;
-	name: string;
-}
-
-export interface McpToolRow {
-	description?: string | null;
-	id: string;
-	name: string;
-	server: string;
-}
-
-export interface AgentOption {
-	id: string;
-	name: string;
-}
-
-/** The actual native Core MCP call result, including its opaque output slot. */
-export type ToolCallResult = McpCallResult;
-
-/** The existing Core call serialization input; no decoded arguments DTO. */
-type McpCallArguments = Parameters<typeof callMcpTool>[1]["arguments"];
-
-export interface CreateServerResult {
-	error?: string;
-	ok: boolean;
-}
-
-export interface CreateServerInput {
-	args: string[];
-	command: string;
-	description?: string;
-	name: string;
-}
-
-export interface ToolsViewProps {
-	agentFilter?: string | null;
-	agents: AgentOption[];
-	error?: string | null;
-	loading?: boolean;
-	onAgentFilterChange?: (agentId: string | null) => void;
-	onCallTool?: (
-		tool: string,
-		agentId: string,
-		args: McpCallArguments
-	) => Promise<ToolCallResult>;
-	onCreateServer?: (input: CreateServerInput) => Promise<CreateServerResult>;
-	onRetry?: () => void;
-	servers: McpServerRow[];
-	tools: McpToolRow[];
-}
 
 export function ToolsView({
 	loading,
@@ -132,6 +70,7 @@ export function ToolsView({
 	onCallTool,
 	onRetry,
 }: ToolsViewProps) {
+	const tlRich = useRichLiteralMessages();
 	if (loading) {
 		return (
 			<div className="flex h-full items-center justify-center">
@@ -267,10 +206,11 @@ export function ToolsView({
 				<section>
 					<h2 className="mb-2 flex items-center gap-2 font-medium text-sm">
 						<HugeiconsIcon className="size-4 opacity-70" icon={Wrench01Icon} />
-						Tools
-						<Badge variant="secondary">
-							{formatCount(tools.length) ?? "—"}
-						</Badge>
+						{tlRich(
+							"Tools<badge>{count}</badge>",
+							{ count: formatCount(tools.length) ?? "—" },
+							{ badge: (c) => <Badge variant="secondary">{c}</Badge> }
+						)}
 						{agentFilter ? (
 							<span className="text-muted-foreground text-xs">
 								filtered by allowlist
@@ -319,355 +259,5 @@ export function ToolsView({
 				</section>
 			</div>
 		</div>
-	);
-}
-
-function AddServerDialog({
-	onCreateServer,
-}: {
-	onCreateServer?: (input: CreateServerInput) => Promise<CreateServerResult>;
-}) {
-	const [open, setOpen] = useState(false);
-	const [name, setName] = useState("");
-	const [command, setCommand] = useState("");
-	const [argsText, setArgsText] = useState("");
-	const [description, setDescription] = useState("");
-	const [submitting, setSubmitting] = useState(false);
-	const [formError, setFormError] = useState<string | null>(null);
-
-	const reset = () => {
-		setName("");
-		setCommand("");
-		setArgsText("");
-		setDescription("");
-		setFormError(null);
-	};
-
-	const handleSubmit = async () => {
-		setFormError(null);
-
-		const trimmedName = name.trim();
-		const trimmedCommand = command.trim();
-
-		if (!trimmedName) {
-			setFormError("Name is required.");
-			return;
-		}
-		if (trimmedName.includes("__")) {
-			setFormError("Name must not contain '__' (reserved legacy separator).");
-			return;
-		}
-		if (!trimmedCommand) {
-			setFormError("Command is required.");
-			return;
-		}
-
-		const args = argsText
-			.split(/\s+/)
-			.map((s) => s.trim())
-			.filter(Boolean);
-
-		setSubmitting(true);
-		try {
-			const result = await onCreateServer?.({
-				name: trimmedName,
-				command: trimmedCommand,
-				args,
-				description: description.trim() || undefined,
-			});
-			if (result?.ok) {
-				reset();
-				setOpen(false);
-			} else {
-				setFormError(result?.error ?? "Failed to add server.");
-			}
-		} catch (e) {
-			setFormError(e instanceof Error ? e.message : "Failed to add server.");
-		} finally {
-			setSubmitting(false);
-		}
-	};
-
-	return (
-		<Dialog
-			onOpenChange={(v) => {
-				setOpen(v);
-				if (!v) {
-					reset();
-				}
-			}}
-			open={open}
-		>
-			<DialogTrigger render={<Button size="sm" variant="ghost" />}>
-				<HugeiconsIcon className="size-4" icon={Add01Icon} />
-				Add server
-			</DialogTrigger>
-			<DialogContent className="sm:max-w-md">
-				<DialogHeader>
-					<DialogTitle>Add MCP server</DialogTitle>
-					<DialogDescription>
-						Register a new MCP server. The entry is saved to{" "}
-						<code className="text-xs">~/.ryu/mcp.json</code> and takes effect
-						immediately, no restart required.
-					</DialogDescription>
-				</DialogHeader>
-
-				<div className="flex flex-col gap-4 py-2">
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="mcp-name">Name</Label>
-						<Input
-							id="mcp-name"
-							onChange={(e: ChangeEvent<HTMLInputElement>) =>
-								setName(e.target.value)
-							}
-							placeholder="e.g. filesystem"
-							value={name}
-						/>
-					</div>
-
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="mcp-command">Command</Label>
-						<Input
-							id="mcp-command"
-							onChange={(e: ChangeEvent<HTMLInputElement>) =>
-								setCommand(e.target.value)
-							}
-							placeholder="e.g. npx"
-							value={command}
-						/>
-					</div>
-
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="mcp-args">
-							Arguments{" "}
-							<span className="text-muted-foreground text-xs">
-								(space-separated)
-							</span>
-						</Label>
-						<Input
-							id="mcp-args"
-							onChange={(e: ChangeEvent<HTMLInputElement>) =>
-								setArgsText(e.target.value)
-							}
-							placeholder="e.g. -y @modelcontextprotocol/server-filesystem /tmp"
-							value={argsText}
-						/>
-					</div>
-
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="mcp-description">
-							Description{" "}
-							<span className="text-muted-foreground text-xs">(optional)</span>
-						</Label>
-						<Textarea
-							id="mcp-description"
-							onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
-								setDescription(e.target.value)
-							}
-							placeholder="What does this server do?"
-							rows={2}
-							value={description}
-						/>
-					</div>
-
-					{formError ? (
-						<p className="text-sm text-status-destructive">{formError}</p>
-					) : null}
-				</div>
-
-				<DialogFooter>
-					<Button
-						disabled={submitting}
-						onClick={() => {
-							setOpen(false);
-							reset();
-						}}
-						type="button"
-						variant="ghost"
-					>
-						Cancel
-					</Button>
-					<Button loading={submitting} onClick={handleSubmit} type="button">
-						Add server
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
-function ToolRow({
-	tool,
-	agents,
-	onCallTool,
-}: {
-	tool: McpToolRow;
-	agents: AgentOption[];
-	onCallTool?: (
-		tool: string,
-		agentId: string,
-		args: McpCallArguments
-	) => Promise<ToolCallResult>;
-}) {
-	const [open, setOpen] = useState(false);
-	const [argsText, setArgsText] = useState("{}");
-	const [agentId, setAgentId] = useState<string>(() => agents[0]?.id ?? "");
-	const [running, setRunning] = useState(false);
-	const [result, setResult] = useState<ToolCallResult | null>(null);
-	const [parseError, setParseError] = useState<string | null>(null);
-
-	const resultText = useMemo(() => {
-		if (!result) {
-			return null;
-		}
-		if (!result.ok) {
-			return result.error ?? "Tool call failed";
-		}
-		return isNativeText(result.output)
-			? result.output
-			: JSON.stringify(result.output, null, 2);
-	}, [result]);
-
-	const runCall = async () => {
-		setParseError(null);
-		setResult(null);
-		if (!agentId) {
-			setParseError("Choose an agent to run this tool as.");
-			return;
-		}
-		let parsed: McpCallArguments;
-		try {
-			parsed = argsText.trim() ? JSON.parse(argsText) : {};
-		} catch {
-			setParseError("Arguments must be valid JSON.");
-			return;
-		}
-		setRunning(true);
-		try {
-			const res = await onCallTool?.(tool.id, agentId, parsed);
-			setResult(res ?? { ok: false, error: "No handler" });
-		} catch (e) {
-			setResult({
-				ok: false,
-				error: e instanceof Error ? e.message : "Tool call failed",
-			});
-		} finally {
-			setRunning(false);
-		}
-	};
-
-	return (
-		<Card>
-			<CardHeader
-				aria-expanded={open}
-				className="cursor-pointer"
-				onClick={() => setOpen((o) => !o)}
-				onKeyDown={(e) => {
-					if (e.key === "Enter" || e.key === " ") {
-						e.preventDefault();
-						setOpen((o) => !o);
-					}
-				}}
-				role="button"
-				tabIndex={0}
-			>
-				<CardTitle layout="badge-row" variant="section">
-					<HugeiconsIcon
-						className="size-4 opacity-70"
-						icon={ComputerTerminal01Icon}
-					/>
-					{tool.name}
-					<Badge variant="secondary">{tool.server}</Badge>
-					<HugeiconsIcon
-						className={`ml-auto size-4 opacity-70 transition-transform ${
-							open ? "rotate-180" : ""
-						}`}
-						icon={ArrowDown01Icon}
-					/>
-				</CardTitle>
-				{tool.description ? (
-					<p
-						className={cn(
-							"text-muted-foreground text-sm",
-							styles.toolDescription
-						)}
-						data-slot="card-description"
-					>
-						{tool.description}
-					</p>
-				) : null}
-			</CardHeader>
-			{open ? (
-				<CardContent layout="stack">
-					{agents.length === 0 ? (
-						<p className="rounded bg-muted px-3 py-2 text-muted-foreground text-xs">
-							Create an agent first, then come back here to try this tool. Tools
-							always run as one of your agents.
-						</p>
-					) : (
-						<>
-							<div className="flex items-center gap-2">
-								<Label htmlFor={`agent-${tool.id}`} size="compact" tone="muted">
-									Run as
-								</Label>
-								<Select
-									items={agents.map((a) => ({ value: a.id, label: a.name }))}
-									onValueChange={(value) => setAgentId(value ?? "")}
-									value={agentId}
-								>
-									<SelectTrigger
-										className="w-48"
-										id={`agent-${tool.id}`}
-										size="sm"
-									>
-										<SelectValue placeholder="Select an agent" />
-									</SelectTrigger>
-									<SelectContent>
-										{agents.map((agent) => (
-											<SelectItem key={agent.id} value={agent.id}>
-												{agent.name}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="flex flex-col gap-1">
-								<Label htmlFor={`args-${tool.id}`} size="compact" tone="muted">
-									Arguments (JSON)
-								</Label>
-								<Textarea
-									id={`args-${tool.id}`}
-									onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
-										setArgsText(e.target.value)
-									}
-									rows={3}
-									value={argsText}
-									variant="code-caption"
-								/>
-							</div>
-							{parseError ? (
-								<p className="text-status-destructive text-xs">{parseError}</p>
-							) : null}
-							<div>
-								<Button loading={running} onClick={runCall} size="sm">
-									Test call
-								</Button>
-							</div>
-						</>
-					)}
-					{resultText === null ? null : (
-						<pre
-							className={`max-h-60 overflow-auto rounded border px-3 py-2 text-xs ${
-								result?.ok
-									? "bg-muted"
-									: "border-destructive/40 bg-destructive/10 text-status-destructive"
-							}`}
-						>
-							{resultText}
-						</pre>
-					)}
-				</CardContent>
-			) : null}
-		</Card>
 	);
 }

@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	InterfaceAgentAct,
@@ -97,7 +98,10 @@ export function DeckAvatar({ deck }: { deck: Deck }) {
 }
 
 /** The deck's strongest signal: a failure, a live run, or replies for you. */
-function deckSignal(deck: Deck): { text: string; tone: string } | null {
+function deckSignal(
+	deck: Deck,
+	tl: LiteralMessage
+): { text: string; tone: string } | null {
 	if (deck.attention > 0) {
 		return {
 			text: `${deck.attention} failed`,
@@ -108,7 +112,10 @@ function deckSignal(deck: Deck): { text: string; tone: string } | null {
 		return { text: "Working", tone: "font-medium text-status-success" };
 	}
 	if (deck.yourTurn > 0) {
-		return { text: `${deck.yourTurn} for you`, tone: "text-foreground" };
+		return {
+			text: tl("{yourTurnCount} for you", { yourTurnCount: deck.yourTurn }),
+			tone: "text-foreground",
+		};
 	}
 	return null;
 }
@@ -117,8 +124,12 @@ function deckSignal(deck: Deck): { text: string; tone: string } | null {
  * The deck's strongest signal, or how long since its newest card moved, or
  * that it has no cards yet.
  */
-function deckDetail(deck: Deck, now: number): { text: string; tone: string } {
-	const signal = deckSignal(deck);
+function deckDetail(
+	deck: Deck,
+	now: number,
+	tl: LiteralMessage
+): { text: string; tone: string } {
+	const signal = deckSignal(deck, tl);
 	if (signal) {
 		return signal;
 	}
@@ -141,9 +152,10 @@ export function DeckTitle({
 	deck: Deck;
 	now: number;
 }) {
+	const tl = useLiteralMessages();
 	const acts = useContext(SpreadActsContext);
 	// With acts the status line under the label says it all.
-	const detail = acts ? null : deckDetail(deck, now);
+	const detail = acts ? null : deckDetail(deck, now, tl);
 	return (
 		<div className="flex min-w-0 flex-1 flex-col">
 			<Heading className="flex min-w-0 items-baseline gap-1.5 leading-5">

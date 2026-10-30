@@ -45,6 +45,14 @@ const MUTED_DERIVED_VARS = new Set(["--popover", "--popover-foreground"]);
 export const DEFAULT_CONTRAST = 50;
 export const DEFAULT_RADIUS = 0.625;
 
+/**
+ * The spacing unit (rem) for each density. Comfortable is the desktop default,
+ * so `size-4` renders a true 16px; compact keeps the earlier 0.24rem unit.
+ * Pass either to {@link applySpacing}.
+ */
+export const COMFORTABLE_SPACING = 0.25;
+export const COMPACT_SPACING = 0.24;
+
 /** Set the shared spacing unit used by Tailwind v4 utilities. */
 export function applySpacing(spacingRem: number) {
 	document.documentElement.style.setProperty("--spacing", `${spacingRem}rem`);

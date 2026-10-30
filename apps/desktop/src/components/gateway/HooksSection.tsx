@@ -8,7 +8,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Collapsible,
@@ -20,6 +19,7 @@ import { Switch } from "@ryu/ui/components/switch.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { CaptionInfo, StatusText } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -88,7 +88,7 @@ function HookMetadata({ hook }: { hook: HookInventoryItem }) {
 				{hook.matcher ? JSON.stringify(hook.matcher) : "All matching events"}
 			</dd>
 			<dt className="text-muted-foreground">Priority</dt>
-			<dd className="font-mono tabular-nums">{hook.priority}</dd>
+			<dd className="tabular-nums">{hook.priority}</dd>
 			<dt className="text-muted-foreground">Hook ID</dt>
 			<dd className="break-all font-mono">{hook.id}</dd>
 		</dl>
@@ -127,7 +127,7 @@ function HookRow({
 
 	return (
 		<Collapsible onOpenChange={setOpen} open={open}>
-			<div className="min-h-11 px-3.5 py-2.5">
+			<div className="min-h-12 py-3">
 				<div className="flex min-w-0 items-center gap-2">
 					<CollapsibleTrigger
 						appearance="gateway-hook"
@@ -142,9 +142,7 @@ function HookRow({
 							{hook.id}
 						</span>
 						{inherited ? (
-							<span className="type-caption text-muted-foreground">
-								Inherited
-							</span>
+							<span className="text-muted-foreground text-xs">Inherited</span>
 						) : null}
 						<HugeiconsIcon
 							aria-hidden
@@ -198,7 +196,7 @@ function HookRow({
 // beneath, then the phase's hooks follow as sibling rows of the same group.
 function HookPhaseHeader({ phase }: { phase: HookPhaseGroup }) {
 	return (
-		<div className="flex items-center gap-3 px-3.5 py-2">
+		<div className="flex items-center gap-3 px-3 py-2">
 			<div className="min-w-0 flex-1">
 				<h4 className="font-medium text-foreground/70 text-xs">
 					{phase.title}
@@ -268,9 +266,17 @@ export function HooksSection({
 	};
 
 	return (
-		<div className="space-y-6">
+		<div className="flex flex-col gap-8 [&>*]:mt-0">
 			<SettingsSection
-				caption="Review lifecycle automation from your configuration and installed plugins. Trust and enablement are enforced by Core before a hook can run."
+				caption={
+					<CaptionInfo
+						detail={
+							"Trust and enablement are enforced by Core before a hook can run."
+						}
+					>
+						{"Lifecycle automation from your config and installed plugins."}
+					</CaptionInfo>
+				}
 				headerAction={
 					<Button
 						aria-label="Refresh hooks"
@@ -354,7 +360,7 @@ export function HooksSection({
 				) : null}
 				{!(hooksQuery.isLoading || hooksQuery.error) && groups.length === 0 ? (
 					<SettingsCard>
-						<p className="text-center text-muted-foreground text-sm">
+						<p className="py-3 text-muted-foreground text-sm">
 							No hooks installed. Hooks from configuration and enabled plugins
 							will appear here.
 						</p>
@@ -375,24 +381,18 @@ export function HooksSection({
 											})}
 										</span>
 										{owner.reviewCount > 0 ? (
-											<Badge variant="outline">
-												<HugeiconsIcon
-													className="size-3.5 text-status-warning"
-													icon={Alert02Icon}
-												/>
+											<StatusText tone="warning">
 												{tl(
 													"{reviewCount, plural, one {# needs review} other {# need review}}",
 													{ reviewCount: owner.reviewCount }
 												)}
-											</Badge>
-										) : (
-											<Badge variant="secondary">Reviewed</Badge>
-										)}
+											</StatusText>
+										) : null}
 									</span>
 								}
 								title={
-									<span className="flex min-w-0 items-center gap-2.5">
-										<SettingsIconTile icon={CodeCircleIcon} tint="indigo" />
+									<span className="flex min-w-0 items-center gap-2">
+										<SettingsIconTile icon={CodeCircleIcon} />
 										<span className="truncate" title={owner.ownerName}>
 											{owner.ownerName}
 										</span>

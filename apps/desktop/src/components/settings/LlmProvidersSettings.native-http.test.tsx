@@ -327,7 +327,7 @@ function sectionLabels(headingId: string): string[] {
 		throw new Error(`Missing section ${headingId}`);
 	}
 	return Array.from(
-		section.querySelectorAll<HTMLElement>("span.font-medium.text-sm")
+		section.querySelectorAll<HTMLElement>('[data-slot="provider-label"]')
 	).map((label) => label.textContent ?? "");
 }
 

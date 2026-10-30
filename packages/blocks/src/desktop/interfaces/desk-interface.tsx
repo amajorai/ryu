@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type DeskView,
@@ -9,11 +10,9 @@ import {
 import {
 	type KeyboardEvent,
 	type ReactNode,
-	type RefObject,
 	useCallback,
 	useEffect,
 	useEffectEvent,
-	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -24,6 +23,8 @@ import {
 	DeskNoSelection,
 } from "./desk-conversation.tsx";
 import { DeskDetails } from "./desk-details.tsx";
+import { useElementWidth, useMinuteClock } from "./desk-interface-hooks.ts";
+import { isPageTarget, ownsKeys } from "./desk-interface-key-targets.ts";
 import { DeskConversationList, deskCursorStep } from "./desk-list.tsx";
 import {
 	DESK_NEEDS_YOU_VIEW_ID,
@@ -40,80 +41,24 @@ import { useAutoOpenFirstThread } from "./interface-auto-open.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 
-const MINUTE = 60_000;
 /** At or above this width the views rail shows; below it, a select. */
 const RAIL_MIN_WIDTH = 1080;
 /** At or above this width details sit beside the chat and open by default. */
 const DETAILS_INLINE_MIN_WIDTH = 1320;
 /** Below this width the list and the conversation take turns. */
 const STACKED_MAX_WIDTH = 720;
-/** Width assumed before the first measurement (and where layout is absent). */
-const UNMEASURED_WIDTH = 1440;
-
-/** Wall clock that ticks once a minute so relative times stay honest. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-/** The element's rendered width, kept current with a ResizeObserver. */
-function useElementWidth(ref: RefObject<HTMLElement | null>): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		setWidth(element.getBoundingClientRect().width);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((entries) => {
-			const next = entries[0]?.contentRect.width;
-			if (next !== undefined) {
-				setWidth(next);
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width || UNMEASURED_WIDTH;
-}
 
 /** How the empty pane names a scoped view: "Atlas's inbox", "Launch Crew". */
-function noSelectionViewLabel(view: DeskView | undefined): string | null {
+function noSelectionViewLabel(
+	view: DeskView | undefined,
+	tl: LiteralMessage
+): string | null {
 	if (!view || view.kind === "all" || view.id === DESK_NEEDS_YOU_VIEW_ID) {
 		return null;
 	}
-	return view.kind === "agent" ? `${view.label}'s inbox` : view.label;
-}
-
-/** True for targets whose keys belong to typing or to the host's chat. */
-function ownsKeys(target: EventTarget): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[data-testid='desk-thread-view']") !== null
-	);
-}
-
-/** True when no element holds focus, so page-level keys belong to the desk. */
-function isPageTarget(target: EventTarget | null): boolean {
-	return (
-		target === null ||
-		target === document ||
-		target === document.body ||
-		target === document.documentElement
-	);
+	return view.kind === "agent"
+		? tl("{label}'s inbox", { label: view.label })
+		: view.label;
 }
 
 /**
@@ -131,6 +76,7 @@ export function DeskInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["desk"]>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const conversationRef = useRef<HTMLElement>(null);
 	const rowElements = useRef(new Map<string, HTMLElement>());
@@ -481,7 +427,7 @@ export function DeskInterface({
 					onStart={startThread}
 					startLabel={startLabel}
 					statusCounts={statusCounts}
-					viewLabel={noSelectionViewLabel(view)}
+					viewLabel={noSelectionViewLabel(view, tl)}
 				/>
 			</div>
 		);

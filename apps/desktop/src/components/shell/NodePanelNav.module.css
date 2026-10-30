@@ -20,7 +20,12 @@
 	background-color: var(--border);
 }
 
-/* Row padding (0.875rem) + Settings icon tile (1.5rem) + gap (0.625rem). */
-.group > * + *:has([data-slot="settings-icon-tile"])::before {
-	inset-inline-start: 3rem;
+/* Row padding (0.875rem) + plain row icon (1rem) + gap (0.625rem). Rows from
+   other panes still tag their leading icon with the older slot name. */
+.group > *
+	+ *:has(
+		[data-slot="panel-row-icon"],
+		[data-slot="settings-icon-tile"]
+	)::before {
+	inset-inline-start: 2.5rem;
 }

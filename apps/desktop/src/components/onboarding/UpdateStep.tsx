@@ -1,14 +1,14 @@
 import { Download01Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
-import { Button } from "@ryu/ui/components/button.tsx";
-import { PageHeader } from "@ryu/ui/components/page-header.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useState } from "react";
 import { sileo } from "sileo";
-import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import {
 	installUpdate,
 	prepareUpdate,
@@ -32,6 +32,7 @@ import {
 } from "@/src/lib/app-update-preparation.ts";
 import { verdictAppliesToApp } from "@/src/lib/app-version.ts";
 import { isLocalNode, type Node } from "@/src/store/useNodeStore.ts";
+import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
 export type UpdateStepStatus =
 	| "available"
@@ -110,94 +111,70 @@ export function UpdateStepView({
 	const isError = status === "error";
 
 	return (
-		<div className="scroll-fade h-full w-full overflow-y-auto">
+		<ActivationStepShell
+			subtitle="Let's make sure this desktop app is ready to go."
+			title="Before we get started"
+		>
 			<div
-				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
-				data-tauri-drag-region="true"
+				aria-live="polite"
+				className="flex items-start gap-3"
+				data-testid="desktop-update-status"
 			>
-				<StaggerReveal>
-					<div className="shrink-0">
-						<RyuOnboardingAvatar />
-					</div>
-					<PageHeader
-						stagger={false}
-						subtitle="Let's make sure this desktop app is ready to go."
-						title="Before we get started"
-					/>
-				</StaggerReveal>
-
-				<div className="flex w-full max-w-md flex-col gap-5">
-					<div
-						aria-live="polite"
-						className="flex flex-col items-center gap-3 text-center"
-						data-testid="desktop-update-status"
-					>
-						<div
-							className={cn(
-								"flex size-16 items-center justify-center rounded-2xl bg-muted/60 text-muted-foreground",
-								isAvailable && "bg-primary/10 text-primary",
-								isError && "bg-destructive/10 text-status-destructive"
-							)}
-						>
-							<HugeiconsIcon
-								aria-hidden="true"
-								className={cn("size-7", checking && "animate-spin")}
-								icon={isAvailable ? Download01Icon : Refresh01Icon}
-							/>
-						</div>
-						<div className="space-y-1">
-							<h1 className="font-medium text-lg tracking-tight">
-								{copy.title}
-							</h1>
-							<p className="text-muted-foreground text-sm">
-								{copy.description}
-							</p>
-						</div>
-					</div>
-
-					<div className="flex items-center justify-between gap-4 rounded-xl bg-muted/50 px-4 py-3">
-						<div className="min-w-0">
-							<p className="font-medium text-sm">{APP_UPDATE_DOWNLOAD_TITLE}</p>
-							<p className="text-muted-foreground text-xs">
-								{APP_UPDATE_DOWNLOAD_DESCRIPTION}
-							</p>
-						</div>
-						<Switch
-							aria-label={APP_UPDATE_DOWNLOAD_ARIA_LABEL}
-							checked={automaticDownload}
-							onCheckedChange={onToggleAutomaticDownload}
-						/>
-					</div>
-
-					<div className="flex flex-wrap items-center justify-center gap-2">
-						{isAvailable && onInstall ? (
-							<Button
-								disabled={downloading}
-								onClick={onInstall}
-								variant="default"
-							>
-								{downloading
-									? "Preparing…"
-									: prepared
-										? APP_UPDATE_INSTALL_ACTION
-										: "Download and install"}
-							</Button>
-						) : null}
-						{isError && onCheck ? (
-							<Button disabled={checking} onClick={onCheck} variant="outline">
-								{checking ? "Checking…" : "Try again"}
-							</Button>
-						) : null}
-						<Button
-							onClick={onContinue}
-							variant={isAvailable ? "outline" : "default"}
-						>
-							Continue
-						</Button>
-					</div>
+				<HugeiconsIcon
+					aria-hidden="true"
+					className={cn(
+						"mt-0.5 shrink-0 text-muted-foreground",
+						checking && "animate-spin",
+						isError && "text-status-destructive"
+					)}
+					icon={isAvailable ? Download01Icon : Refresh01Icon}
+					size={16}
+				/>
+				<div className="min-w-0">
+					<h2 className="font-medium text-sm">{copy.title}</h2>
+					<p className="text-pretty text-detail text-muted-foreground">
+						{copy.description}
+					</p>
 				</div>
 			</div>
-		</div>
+
+			<div className="flex items-center justify-between gap-6 border-border border-t pt-4">
+				<div className="min-w-0">
+					<p className="font-medium text-sm">{APP_UPDATE_DOWNLOAD_TITLE}</p>
+					<p className="text-detail text-muted-foreground">
+						{APP_UPDATE_DOWNLOAD_DESCRIPTION}
+					</p>
+				</div>
+				<Switch
+					aria-label={APP_UPDATE_DOWNLOAD_ARIA_LABEL}
+					checked={automaticDownload}
+					onCheckedChange={onToggleAutomaticDownload}
+				/>
+			</div>
+
+			<OnboardingActions>
+				{isError && onCheck ? (
+					<OnboardingCta disabled={checking} onClick={onCheck} tone="secondary">
+						{checking ? "Checking…" : "Try again"}
+					</OnboardingCta>
+				) : null}
+				<OnboardingCta
+					onClick={onContinue}
+					tone={isAvailable && onInstall ? "secondary" : "primary"}
+				>
+					Continue
+				</OnboardingCta>
+				{isAvailable && onInstall ? (
+					<OnboardingCta disabled={downloading} onClick={onInstall}>
+						{downloading
+							? "Preparing…"
+							: prepared
+								? APP_UPDATE_INSTALL_ACTION
+								: "Download and install"}
+					</OnboardingCta>
+				) : null}
+			</OnboardingActions>
+		</ActivationStepShell>
 	);
 }
 

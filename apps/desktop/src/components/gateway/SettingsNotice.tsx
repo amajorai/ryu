@@ -26,7 +26,7 @@ export function SettingsNotice({
 	secondary?: ReactNode;
 }) {
 	return (
-		<SettingsCard className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2.5">
+		<SettingsCard className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2">
 			<div
 				className={
 					role === "status"

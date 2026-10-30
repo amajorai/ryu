@@ -9,6 +9,11 @@ const desktopRoot = path.resolve(harnessDir, "../..");
 export default defineConfig({
 	base: "./",
 	clearScreen: false,
+	// The pricing card's graph reaches the web marketing data
+	// (`@ryu/blocks/web/data/resources.tsx`), which reads Next's
+	// `process.env.NEXT_PUBLIC_*`. Like the ChatPage harness, give the browser an
+	// empty one so those reads fall back to their defaults.
+	define: { "process.env": {} },
 	css: {
 		postcss: {
 			plugins: [tailwindcss()],

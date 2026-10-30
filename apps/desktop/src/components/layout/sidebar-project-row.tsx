@@ -177,10 +177,8 @@ export function ProjectRow({
 						}
 					>
 						{bucket.sourceFolders.length > 1 && (
-							<div className="type-compact mb-1 space-y-0.5 px-2 text-muted-foreground">
-								<div className="font-medium uppercase tracking-wide">
-									Sources
-								</div>
+							<div className="mb-1 space-y-0.5 px-2 text-muted-foreground text-xs">
+								<div className="text-detail">Sources</div>
 								{bucket.sourceFolders.map((source) => (
 									<div
 										className="truncate font-mono"
@@ -208,23 +206,23 @@ export function ProjectRow({
 				</ContextMenuTrigger>
 				<ContextMenuContent>
 					<ContextMenuItem onClick={() => setSettingsOpen(true)}>
-						<HugeiconsIcon className="mr-2 size-4" icon={PencilEdit01Icon} />
+						<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
 						Edit project…
 					</ContextMenuItem>
 					<ContextMenuItem onClick={() => onSetActive(bucket.path)}>
-						<HugeiconsIcon className="mr-2 size-4" icon={FolderOpenIcon} />
+						<HugeiconsIcon className="size-4" icon={FolderOpenIcon} />
 						Set as active project
 					</ContextMenuItem>
 					<ContextMenuItem onClick={() => setIconDialogOpen(true)}>
-						<HugeiconsIcon className="mr-2 size-4" icon={ImageAdd01Icon} />
+						<HugeiconsIcon className="size-4" icon={ImageAdd01Icon} />
 						Change icon…
 					</ContextMenuItem>
 					<ContextMenuItem onClick={() => openProjectView("graph")}>
-						<HugeiconsIcon className="mr-2 size-4" icon={GitBranchIcon} />
+						<HugeiconsIcon className="size-4" icon={GitBranchIcon} />
 						Open Git graph
 					</ContextMenuItem>
 					<ContextMenuItem onClick={() => setHistoryOpen(true)}>
-						<HugeiconsIcon className="mr-2 size-4" icon={GitBranchIcon} />
+						<HugeiconsIcon className="size-4" icon={GitBranchIcon} />
 						Conversation history
 					</ContextMenuItem>
 					<ContextMenuSeparator />
@@ -233,7 +231,7 @@ export function ProjectRow({
 						onClick={() => setConfirmDeleteOpen(true)}
 						variant="destructive"
 					>
-						<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 						Delete all chats
 						{count > 0 && (
 							<span className="ml-auto pl-2 text-muted-foreground/70">
@@ -245,7 +243,7 @@ export function ProjectRow({
 						onClick={() => onRemove(bucket.path)}
 						variant="destructive"
 					>
-						<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 						Remove from app
 					</ContextMenuItem>
 				</ContextMenuContent>

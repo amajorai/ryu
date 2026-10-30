@@ -62,7 +62,7 @@ export function TabSearchRow({
 
 	return (
 		<CommandItem
-			className="min-h-12"
+			className="h-12"
 			data-active={isActive}
 			data-tab-search-id={tab.id}
 			onSelect={() => {
@@ -71,7 +71,7 @@ export function TabSearchRow({
 			}}
 			value={`${tab.title} ${tab.path}`}
 		>
-			<span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground">
+			<span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
 				{tab.icon ? (
 					<GlyphDisplay size={16} value={tab.icon} />
 				) : (
@@ -79,7 +79,7 @@ export function TabSearchRow({
 				)}
 			</span>
 			<span className="min-w-0 flex-1 text-left">
-				<span className="block truncate font-medium text-sm">
+				<span className="block truncate text-sm">
 					<AnimatedTitle text={tab.title} />
 				</span>
 				<span
@@ -90,13 +90,11 @@ export function TabSearchRow({
 				</span>
 			</span>
 			{isActive && (
-				<span className="type-compact shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">
-					Current
-				</span>
+				<span className="shrink-0 text-muted-foreground text-xs">Current</span>
 			)}
 			<button
 				aria-label={tl("Close {title}", { title: tab.title })}
-				className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+				className="flex size-6 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0"
 				data-tab-search-close
 				onClick={(event) => {
 					event.preventDefault();
@@ -136,7 +134,7 @@ export function TabSearchDialog({
 					<button
 						aria-label="Search open tabs"
 						className={cn(
-							"ml-0.5 flex size-7 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground",
+							"ml-0.5 flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0",
 							floatingTabs ? "rounded-full" : "rounded-t-lg"
 						)}
 						data-tab-search-trigger

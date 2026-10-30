@@ -1,23 +1,16 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
-import { Button } from "@ryu/ui/components/button.tsx";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card.tsx";
+	Download01Icon,
+	FolderOpenIcon,
+	GitBranchIcon,
+	GitCommitIcon,
+	Refresh01Icon,
+	Upload01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { open } from "@tauri-apps/plugin-dialog";
-import {
-	Download,
-	FolderOpen,
-	GitBranch,
-	GitCommitHorizontal,
-	RefreshCw,
-	Upload,
-} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -50,11 +43,21 @@ import { isLocalNode } from "@/src/store/useNodeStore.ts";
 const MEMORY_GIT_PATH_KEY = "ryu.memory.git-root.v1";
 const MEMORY_GIT_ROOT_PREF_KEY = "memory.git-root";
 
+/** The Git folder bound to Memory on this device, or "" when none is chosen.
+ *  The Memory page shows its one-line source status only when this is set. */
+export function storedMemoryGitRoot(): string {
+	return storedRoot();
+}
+
 function storedRoot(): string {
 	if (globalThis.window === undefined) {
 		return "";
 	}
-	return window.localStorage.getItem(MEMORY_GIT_PATH_KEY) ?? "";
+	try {
+		return window.localStorage.getItem(MEMORY_GIT_PATH_KEY) ?? "";
+	} catch {
+		return "";
+	}
 }
 
 function statusLabel(status: GitStatus | null): string {
@@ -270,53 +273,47 @@ export function MemoryGitSourceCard({
 
 	if (!(canUseNativeShell && isLocalNode(activeNode))) {
 		return (
-			<Card appearance="memory-source" borderTone="subtle">
-				<CardHeader>
-					<CardTitle>Git-backed memory</CardTitle>
-					<CardDescription>
-						{canUseNativeShell
-							? "Select the local node to manage a Git-backed memory source on this device."
-							: "Memory can be exported as source-only Markdown under memory/ in a local Git repository. This control is available in the desktop app."}
-					</CardDescription>
-				</CardHeader>
-			</Card>
+			<section className="flex flex-col gap-1" data-slot="memory-git-source">
+				<h3 className="font-semibold text-sm">Git-backed memory</h3>
+				<p className="text-detail text-muted-foreground">
+					{canUseNativeShell
+						? "Select the local node to manage a Git-backed memory source on this device."
+						: "Export memory as source-only Markdown in a local Git repository. Available in the desktop app."}
+				</p>
+			</section>
 		);
 	}
 
 	return (
-		<Card appearance="memory-source" borderTone="subtle">
-			<CardHeader spacing="chart">
-				<div className="flex items-start justify-between gap-3">
-					<div>
-						<CardTitle layout="badge-row">
-							<GitBranch className="size-4" />
-							Git-backed memory
-						</CardTitle>
-						<CardDescription className="mt-1">
-							Track durable memory as reviewable Markdown. The encrypted store,
-							vectors, and conversation provenance never enter Git.
-						</CardDescription>
-					</div>
-					{status?.is_repo ? (
-						<Badge variant="secondary">{status.branch ?? "Git"}</Badge>
+		<section className="flex flex-col gap-3" data-slot="memory-git-source">
+			<div className="flex flex-col gap-1">
+				<h3 className="flex items-center gap-2 font-semibold text-sm">
+					<HugeiconsIcon
+						className="size-4 text-muted-foreground"
+						icon={GitBranchIcon}
+					/>
+					Git-backed memory
+				</h3>
+				<p className="text-detail text-muted-foreground">
+					Track memory as reviewable Markdown. Vectors and provenance never
+					enter Git.
+				</p>
+				<p className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
+					<HugeiconsIcon className="size-3.5 shrink-0" icon={FolderOpenIcon} />
+					<span className="truncate">{root || "No repository selected"}</span>
+					{root ? (
+						<span className="shrink-0">· {statusLabel(status)}</span>
 					) : null}
-				</div>
-				<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-					<FolderOpen className="size-3.5" />
-					<span className="max-w-full truncate">
-						{root || "No repository selected"}
-					</span>
-					{root ? <span>· {statusLabel(status)}</span> : null}
-				</div>
-			</CardHeader>
-			<CardContent layout="memory-actions">
+				</p>
+			</div>
+			<div className="flex flex-wrap items-center gap-2">
 				<Button
 					disabled={busy}
 					onClick={() => void chooseFolder()}
 					size="sm"
 					variant="outline"
 				>
-					<FolderOpen className="size-4" />
+					<HugeiconsIcon className="size-4" icon={FolderOpenIcon} />
 					{root ? "Change folder" : "Choose Git folder"}
 				</Button>
 				{root && !status?.is_repo ? (
@@ -326,7 +323,7 @@ export function MemoryGitSourceCard({
 						size="sm"
 						variant="outline"
 					>
-						<GitBranch className="size-4" />
+						<HugeiconsIcon className="size-4" icon={GitBranchIcon} />
 						Initialize Git
 					</Button>
 				) : null}
@@ -336,8 +333,9 @@ export function MemoryGitSourceCard({
 							disabled={busy}
 							onClick={() => void exportSource()}
 							size="sm"
+							variant="outline"
 						>
-							<Download className="size-4" />
+							<HugeiconsIcon className="size-4" icon={Download01Icon} />
 							Export Markdown
 						</Button>
 						<Button
@@ -346,7 +344,7 @@ export function MemoryGitSourceCard({
 							size="sm"
 							variant="outline"
 						>
-							<Upload className="size-4" />
+							<HugeiconsIcon className="size-4" icon={Upload01Icon} />
 							Import changes
 						</Button>
 						<Button
@@ -355,27 +353,27 @@ export function MemoryGitSourceCard({
 							size="sm"
 							variant="outline"
 						>
-							<GitCommitHorizontal className="size-4" />
+							<HugeiconsIcon className="size-4" icon={GitCommitIcon} />
 							Commit
 						</Button>
 						<Button
 							aria-label="Refresh Git status"
 							disabled={busy}
 							onClick={() => void refreshStatus()}
-							size="icon"
-							variant="ghost"
+							size="icon-sm"
+							variant="ghost-muted"
 						>
-							<RefreshCw className="size-4" />
+							<HugeiconsIcon className="size-4" icon={Refresh01Icon} />
 						</Button>
 					</>
 				) : null}
-				{notice ? (
-					<p className="basis-full text-muted-foreground text-xs">{notice}</p>
-				) : null}
-				{error ? (
-					<p className="basis-full text-status-destructive text-xs">{error}</p>
-				) : null}
-			</CardContent>
-		</Card>
+			</div>
+			{notice ? (
+				<p className="text-detail text-muted-foreground">{notice}</p>
+			) : null}
+			{error ? (
+				<p className="text-detail text-status-destructive">{error}</p>
+			) : null}
+		</section>
 	);
 }

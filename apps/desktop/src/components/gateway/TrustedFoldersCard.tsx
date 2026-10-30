@@ -1,5 +1,6 @@
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -76,7 +77,15 @@ export function TrustedFoldersCard({
 
 	return (
 		<SettingsSection
-			caption="Agents working in a folder you have not trusted keep asking before they run commands, cannot use modes that skip those prompts, and run in a sandbox that hides your credentials and limits their network to the Ryu Gateway. Trust a folder from the notice in its chat. A trusted folder covers every folder inside it."
+			caption={
+				<CaptionInfo
+					detail={
+						"Agents working in a folder you have not trusted keep asking before they run commands, cannot use modes that skip those prompts, and run in a sandbox that hides your credentials and limits their network to the Ryu Gateway. Trust a folder from the notice in its chat. A trusted folder covers every folder inside it."
+					}
+				>
+					{"Untrusted folders keep approval prompts and run sandboxed."}
+				</CaptionInfo>
+			}
 			title="Trusted folders"
 		>
 			<div className="flex flex-col gap-3">

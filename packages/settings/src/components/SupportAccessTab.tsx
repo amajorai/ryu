@@ -1,19 +1,19 @@
+import { SecurityCheckIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Item, ItemActions, ItemTitle } from "@ryu/ui/components/item.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../utils/api-client.ts";
 import {
 	SETTINGS_SECTION_HEADER_CLASS,
-	SettingsCard,
 	SettingsGroup,
 	SettingsSection,
 } from "./shared/settings-rows.tsx";
@@ -98,11 +98,7 @@ export function SupportAccessTab() {
 	});
 
 	if (isLoading) {
-		return (
-			<div className="flex items-center justify-center py-8">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows label="Loading support access" />;
 	}
 
 	const grant = statusData?.grant ?? null;
@@ -119,14 +115,18 @@ export function SupportAccessTab() {
 		"Let Ryu support temporarily act on your account to help you. Off by default, scoped to what you choose, auto-expires within an hour, and revocable any time. Every support session is logged below.";
 
 	return (
-		<div className="space-y-6">
+		<div>
 			{isActive && grant ? (
 				<SettingsSection caption={intro}>
 					<SettingsGroup>
 						<Item purpose="settings-row" size="sm">
 							<div className="flex w-full items-center justify-between gap-3">
 								<div className="flex min-w-0 flex-1 items-center gap-2">
-									<ShieldCheck className="size-4 shrink-0 text-status-warning" />
+									<HugeiconsIcon
+										className="shrink-0 text-status-warning"
+										icon={SecurityCheckIcon}
+										size={16}
+									/>
 									<ItemTitle typography="settings-label">
 										Support access is active
 									</ItemTitle>
@@ -145,7 +145,7 @@ export function SupportAccessTab() {
 									</Button>
 								</ItemActions>
 							</div>
-							<p className="text-muted-foreground text-xs leading-snug">
+							<p className="text-detail text-muted-foreground">
 								Scopes: {grant.scopes.join(", ") || "none"}. Expires{" "}
 								{formatDistanceToNow(new Date(grant.expiresAt), {
 									addSuffix: true,
@@ -168,6 +168,7 @@ export function SupportAccessTab() {
 								}
 								onClick={() => grantMutation.mutate()}
 								size="sm"
+								variant="mono"
 							>
 								Grant support access
 							</Button>
@@ -189,7 +190,7 @@ export function SupportAccessTab() {
 											<ItemTitle typography="settings-label">
 												{scope.label}
 											</ItemTitle>
-											<span className="text-muted-foreground text-xs leading-snug">
+											<span className="text-detail text-muted-foreground">
 												{scope.description}
 											</span>
 										</div>
@@ -206,7 +207,7 @@ export function SupportAccessTab() {
 						</SettingsGroup>
 					</SettingsSection>
 
-					<div className="space-y-1.5">
+					<div className="mt-8 flex flex-col gap-2">
 						<Label
 							className={SETTINGS_SECTION_HEADER_CLASS}
 							htmlFor="support-note"
@@ -230,11 +231,9 @@ export function SupportAccessTab() {
 				titleId="support-session-log"
 			>
 				{audit.length === 0 ? (
-					<SettingsCard>
-						<p className="text-muted-foreground text-sm">
-							No support sessions yet.
-						</p>
-					</SettingsCard>
+					<p className="py-3 text-muted-foreground text-sm">
+						No support sessions yet.
+					</p>
 				) : (
 					<SettingsGroup>
 						{audit.map((entry) => (
@@ -243,11 +242,15 @@ export function SupportAccessTab() {
 									<ItemTitle typography="settings-label">
 										{entry.actorEmail}
 									</ItemTitle>
-									<Badge variant={entry.endedAt ? "outline" : "secondary"}>
-										{entry.endedAt ? (entry.endedReason ?? "ended") : "active"}
-									</Badge>
+									{entry.endedAt ? (
+										<span className="text-detail text-muted-foreground">
+											{entry.endedReason ?? "ended"}
+										</span>
+									) : (
+										<Badge variant="secondary">active</Badge>
+									)}
 								</div>
-								<div className="space-y-0.5 text-muted-foreground text-xs leading-snug">
+								<div className="space-y-0.5 text-detail text-muted-foreground">
 									<p>{entry.reason}</p>
 									<p>
 										Scopes: {entry.scopes.join(", ") || "none"} ·{" "}

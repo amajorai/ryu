@@ -13,6 +13,8 @@ import visualStyles from "./marketplace-visual.module.css";
 // restrained sparkle acknowledgement, and a keyboard-complete radiogroup rather
 // than a row of unrelated pressed buttons.
 
+import { StarIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	isNativeNumber,
@@ -20,7 +22,6 @@ import {
 } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Star, StarHalf } from "lucide-react";
 import { useRef, useState } from "react";
 
 const STAR_VALUES = [1, 2, 3, 4, 5] as const;
@@ -41,20 +42,28 @@ function DisplayStar({
 	if (half) {
 		return (
 			<span className={cn("relative inline-flex", className)}>
-				<Star className="size-full text-muted-foreground/40" />
-				<StarHalf className="absolute inset-0 size-full fill-warning text-status-warning" />
+				<HugeiconsIcon
+					className="size-full text-muted-foreground/70"
+					icon={StarIcon}
+				/>
+				{/* The left half of a filled star over the outline. */}
+				<HugeiconsIcon
+					className="absolute inset-0 size-full fill-warning text-status-warning [clip-path:inset(0_50%_0_0)]"
+					icon={StarIcon}
+				/>
 			</span>
 		);
 	}
 	return (
-		<Star
+		<HugeiconsIcon
 			className={cn(
 				"size-full",
 				filled
 					? "fill-warning text-status-warning"
-					: "fill-transparent text-muted-foreground/40",
+					: "fill-transparent text-muted-foreground/70",
 				className
 			)}
+			icon={StarIcon}
 		/>
 	);
 }
@@ -176,7 +185,7 @@ export function StarRatingInput({
 								{ position }
 							)}
 							className={cn(
-								"rounded transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 motion-safe:hover:scale-110",
+								"rounded-lg transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 motion-safe:hover:scale-110",
 								size
 							)}
 							disabled={disabled}
@@ -213,13 +222,14 @@ export function StarRatingInput({
 							}
 							type="button"
 						>
-							<Star
+							<HugeiconsIcon
 								className={cn(
 									"size-full",
 									filled
 										? "fill-warning text-status-warning"
-										: "fill-transparent text-muted-foreground/40"
+										: "fill-transparent text-muted-foreground/70"
 								)}
+								icon={StarIcon}
 							/>
 						</button>
 					</span>

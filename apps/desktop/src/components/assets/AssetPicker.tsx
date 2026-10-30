@@ -6,6 +6,8 @@
 // satellite owns its own picker in apps-store/canvas/ui/src/AssetPicker.tsx.
 // Icons + logos need no configuration; GIFs need a free provider key on the node.
 
+import { Search01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	Dialog,
 	DialogContent,
@@ -21,7 +23,6 @@ import {
 	TabsTrigger,
 } from "@ryu/ui/components/tabs.tsx";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
-import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TitleTooltip } from "@/src/components/layout/overflow-tooltip.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -224,7 +225,11 @@ export function AssetPicker({
 						<TabsTrigger value="gifs">GIFs</TabsTrigger>
 					</TabsList>
 					<div className="relative mt-3">
-						<Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground"
+							icon={Search01Icon}
+						/>
 						<Input
 							aria-label="Search assets"
 							autoFocus

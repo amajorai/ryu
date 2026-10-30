@@ -9,7 +9,7 @@ import type * as React from "react";
 import { TOOLBAR_CLICK_OUTSIDE_MARKER } from "../interaction-markers.ts";
 
 const editorContainerVariants = cva(
-	"scroll-fade relative w-full cursor-text select-text overflow-y-auto caret-primary selection:bg-primary/25 focus-visible:outline-none [&_.slate-selection-area]:z-50 [&_.slate-selection-area]:border [&_.slate-selection-area]:border-primary/25 [&_.slate-selection-area]:bg-primary/15",
+	"scroll-fade relative w-full cursor-text select-text overflow-y-auto caret-foreground selection:bg-primary/25 focus-visible:outline-none [&_.slate-selection-area]:z-50 [&_.slate-selection-area]:border [&_.slate-selection-area]:border-primary/25 [&_.slate-selection-area]:bg-primary/15",
 	{
 		defaultVariants: {
 			variant: "default",

@@ -146,7 +146,7 @@ function renderBlocks(text: string): ReactNode[] {
 			if (inFence) {
 				blocks.push(
 					<pre
-						className="text-(length:--text-image-viewer-caption) overflow-x-auto rounded-lg bg-black/40 p-2 font-mono text-foreground"
+						className="text-(length:--text-image-viewer-caption) overflow-x-auto rounded-lg bg-muted p-2 font-mono text-foreground"
 						key={`code-${blockKey++}`}
 					>
 						<code>{fenceLines.join("\n")}</code>
@@ -174,7 +174,7 @@ function renderBlocks(text: string): ReactNode[] {
 	if (inFence && fenceLines.length > 0) {
 		blocks.push(
 			<pre
-				className="text-(length:--text-image-viewer-caption) overflow-x-auto rounded-lg bg-black/40 p-2 font-mono text-foreground"
+				className="text-(length:--text-image-viewer-caption) overflow-x-auto rounded-lg bg-muted p-2 font-mono text-foreground"
 				key={`code-${blockKey++}`}
 			>
 				<code>{fenceLines.join("\n")}</code>

@@ -32,6 +32,15 @@ tracing = "0.1"
 # registry access) can build `--features voice-parakeet` at all, and three public
 # workflows now pass exactly that flag.
 once_cell = { version = "1", optional = true }
+
+# ONNX Runtime ships no prebuilt for Intel macOS (`x86_64-apple-darwin`), so ort-sys
+# fails the build there whatever feature set is asked for. transcribe-rs is
+# therefore declared for every OTHER target only: on an Intel Mac `voice-parakeet`
+# still resolves (the shipped feature string stays identical at every build site)
+# but enables nothing native, and `src/parakeet.rs` compiles its "not available on
+# this platform" arm, so parakeet reports Unhealthy and the default STT engine is
+# whisper there. Keep this cfg in sync with `PARAKEET_INFERENCE` in parakeet.rs.
+[target.'cfg(not(all(target_os = "macos", target_arch = "x86_64")))'.dependencies]
 transcribe-rs = { version = "0.3.11", default-features = false, features = ["onnx"], optional = true }
 
 [dev-dependencies]

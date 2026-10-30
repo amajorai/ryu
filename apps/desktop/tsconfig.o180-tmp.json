@@ -1,0 +1,1 @@
+{ "extends": "./tsconfig.json", "include": [], "files": ["src/vite-env.d.ts","src/sileo.d.ts","src/lanyard-env.d.ts","src/lanyard-jsx.d.ts","src/components/layout/sidebar-conversation-rows.tsx"] }

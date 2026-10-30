@@ -151,18 +151,10 @@ function LicenseBadges({ license }: { license: OwnedLicense }) {
 	const isActive = license.status === "active";
 	return (
 		<>
-			<Badge casing="uppercase" typography="micro" variant="outline">
-				{license.itemKind}
-			</Badge>
-			{isActive ? null : (
-				<Badge typography="micro" variant="destructive">
-					{license.status}
-				</Badge>
-			)}
+			<Badge variant="outline">{license.itemKind}</Badge>
+			{isActive ? null : <Badge variant="destructive">{license.status}</Badge>}
 			{isActive && license.cancelAtPeriodEnd ? (
-				<Badge typography="micro" variant="secondary">
-					Renewal off
-				</Badge>
+				<Badge variant="secondary">Renewal off</Badge>
 			) : null}
 		</>
 	);
@@ -194,7 +186,7 @@ function LicenseActions({
 	const manageable = Boolean(onManage) && licenseIsManageable(license);
 	return (
 		<div className="flex shrink-0 items-center gap-3">
-			<span className="font-heading font-medium text-sm tabular-nums">
+			<span className="font-medium text-sm tabular-nums">
 				{formatPrice(license.priceMinor, license.currency)}
 			</span>
 			{manageable ? (

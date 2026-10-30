@@ -1,7 +1,8 @@
 "use client";
 
+import { Wrench01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Popover,
 	PopoverContent,
@@ -10,342 +11,17 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
-import { ChevronLeft, Wrench } from "lucide-react";
-import type { SubmitEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { z } from "zod";
+import { useState } from "react";
+import { PageToolForm } from "./page-tools-form.tsx";
+import { displayTitle, toolCategory } from "./page-tools-schema.ts";
 import { ASSISTANT_POPUP_LAYER } from "./skin.ts";
 import type { WebMcpPageTool } from "./webmcp.ts";
 import type { WebMcpRecord } from "./webmcp-contract.ts";
-
-interface ToolField {
-	description?: string;
-	enumValues?: string[];
-	key: string;
-	maximum?: number;
-	minimum?: number;
-	required: boolean;
-	type: "boolean" | "integer" | "number" | "string";
-}
-
-type ToolValue = boolean | string;
-
-function fieldLabel(value: string): string {
-	return value
-		.replace(/([a-z])([A-Z])/g, "$1 $2")
-		.replace(/[-_.]+/g, " ")
-		.replace(/^./, (character) => character.toUpperCase());
-}
-
-function toolFields(tool: WebMcpPageTool): ToolField[] {
-	const schema = tool.inputSchema;
-	const properties = schema.properties;
-	const required = new Set(schema.required ?? []);
-	const fields: ToolField[] = [];
-	for (const [key, value] of Object.entries(properties).slice(0, 12)) {
-		const enumValues = value.enum?.slice(0, 20);
-		const rawType = value.type;
-		const type: ToolField["type"] =
-			rawType === "boolean"
-				? "boolean"
-				: rawType === "integer"
-					? "integer"
-					: rawType === "number"
-						? "number"
-						: "string";
-		fields.push({
-			description: value.description?.slice(0, 150),
-			enumValues,
-			key,
-			maximum: value.maximum,
-			minimum: value.minimum,
-			required: required.has(key),
-			type,
-		});
-	}
-	return fields;
-}
-
-function buildToolInput(
-	fields: readonly ToolField[],
-	values: Record<string, ToolValue>
-): WebMcpRecord {
-	const input: WebMcpRecord = {};
-	for (const field of fields) {
-		const rawValue = values[field.key];
-		if (field.type === "boolean") {
-			if (rawValue === true || field.required) {
-				input[field.key] = rawValue === true;
-			}
-			continue;
-		}
-		const parsedValue = z.string().safeParse(rawValue);
-		if (!(parsedValue.success && parsedValue.data.trim())) {
-			if (field.required) {
-				throw new Error(`${fieldLabel(field.key)} is required.`);
-			}
-			continue;
-		}
-		const value = parsedValue.data;
-		if (field.type === "number" || field.type === "integer") {
-			const number = Number(value);
-			if (!Number.isFinite(number)) {
-				throw new Error(`${fieldLabel(field.key)} must be a number.`);
-			}
-			if (field.type === "integer" && !Number.isSafeInteger(number)) {
-				throw new Error(
-					`The value for ${fieldLabel(field.key)} must be a whole number.`
-				);
-			}
-			if (
-				(field.minimum !== undefined && number < field.minimum) ||
-				(field.maximum !== undefined && number > field.maximum)
-			) {
-				throw new Error(
-					`${fieldLabel(field.key)} is outside the allowed range.`
-				);
-			}
-			input[field.key] = number;
-			continue;
-		}
-		if (field.enumValues && !field.enumValues.includes(value)) {
-			throw new Error(`${fieldLabel(field.key)} is not a supported value.`);
-		}
-		input[field.key] = value.trim();
-	}
-	return input;
-}
-
-function toolIsWrite(tool: WebMcpPageTool): boolean {
-	return (
-		tool.annotations?.consequentialHint === true ||
-		tool.annotations?.readOnlyHint !== true
-	);
-}
-
-function displayTitle(tool: WebMcpPageTool): string {
-	return tool.title?.trim() || tool.name;
-}
-
-function toolCategory(tool: WebMcpPageTool): string {
-	const category = toolIsWrite(tool) ? "Action" : "Read-only";
-	return tool.annotations?.debugging === true
-		? `${category} · Developer tool`
-		: category;
-}
 
 export interface PageToolsPopoverProps {
 	onExecute: (tool: WebMcpPageTool, input: WebMcpRecord) => Promise<string>;
 	onResult: (tool: WebMcpPageTool, result: string) => void;
 	tools: readonly WebMcpPageTool[];
-}
-
-function PageToolForm({
-	onBack,
-	onExecute,
-	onResult,
-	tool,
-}: PageToolsPopoverProps & { onBack: () => void; tool: WebMcpPageTool }) {
-	const fields = useMemo(() => toolFields(tool), [tool]);
-	const [values, setValues] = useState<Record<string, ToolValue>>({});
-	const [busy, setBusy] = useState(false);
-	const [confirming, setConfirming] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const isWrite = toolIsWrite(tool);
-
-	useEffect(() => {
-		setValues({});
-		setBusy(false);
-		setConfirming(false);
-		setError(null);
-	}, [tool]);
-
-	const submit = async (event: SubmitEvent<HTMLFormElement>) => {
-		event.preventDefault();
-		setError(null);
-		let input: WebMcpRecord;
-		try {
-			input = buildToolInput(fields, values);
-		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "Check the arguments.");
-			return;
-		}
-		if (isWrite && !confirming) {
-			setConfirming(true);
-			return;
-		}
-		setBusy(true);
-		try {
-			const result = await onExecute(tool, input);
-			onResult(tool, result);
-			onBack();
-		} catch (cause) {
-			setError(
-				cause instanceof Error ? cause.message : "The page tool could not run."
-			);
-		} finally {
-			setBusy(false);
-		}
-	};
-
-	return (
-		<form
-			data-testid="assistant-page-tool-form"
-			onSubmit={(event) => void submit(event)}
-		>
-			<div className="mb-3 flex items-center gap-2">
-				<Button
-					aria-label="Back to page tools"
-					className="size-7"
-					onClick={onBack}
-					size="icon-xs"
-					type="button"
-					variant="ghost"
-				>
-					<ChevronLeft />
-				</Button>
-				<div className="min-w-0">
-					<p className="truncate font-medium text-xs">{displayTitle(tool)}</p>
-					<p
-						className="truncate text-muted-foreground text-xs"
-						title={tool.name}
-					>
-						{tool.name}
-					</p>
-					<p className="truncate text-muted-foreground/80 text-xs">
-						{tool.origin ?? "Current page"}
-					</p>
-				</div>
-			</div>
-			<p className="mb-3 text-muted-foreground text-xs leading-relaxed">
-				{tool.description}
-			</p>
-			{isWrite ? (
-				<p className="mb-3 rounded-xl bg-warning/10 px-2.5 py-2 text-status-warning text-xs leading-relaxed">
-					This page tool may change state or have real-world effects. Review the
-					arguments and confirm before it runs.
-				</p>
-			) : null}
-			<div className="flex flex-col gap-2.5">
-				{fields.map((field) => {
-					const value = values[field.key];
-					const label = fieldLabel(field.key);
-					if (field.type === "boolean") {
-						return (
-							<label
-								className="flex items-start gap-2 text-muted-foreground text-xs"
-								key={field.key}
-							>
-								<input
-									checked={value === true}
-									className="mt-0.5"
-									disabled={busy}
-									onChange={(event) =>
-										setValues((current) => ({
-											...current,
-											[field.key]: event.target.checked,
-										}))
-									}
-									type="checkbox"
-								/>
-								<span>
-									{label}
-									{field.required ? " *" : ""}
-									{field.description ? (
-										<span className="mt-0.5 block text-muted-foreground/80 text-xs">
-											{field.description}
-										</span>
-									) : null}
-								</span>
-							</label>
-						);
-					}
-					if (field.enumValues && field.enumValues.length > 0) {
-						return (
-							<label
-								className="flex flex-col gap-1 text-muted-foreground text-xs"
-								key={field.key}
-							>
-								{label}
-								<select
-									aria-label={label}
-									className="h-8 rounded-2xl border border-border/60 bg-background/70 px-2 text-foreground text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-									disabled={busy}
-									onChange={(event) =>
-										setValues((current) => ({
-											...current,
-											[field.key]: event.target.value,
-										}))
-									}
-									value={z.string().catch("").parse(value)}
-								>
-									<option value="">Choose…</option>
-									{field.enumValues.map((option) => (
-										<option key={option} value={option}>
-											{option}
-										</option>
-									))}
-								</select>
-								{field.description ? (
-									<span className="text-muted-foreground/80 text-xs">
-										{field.description}
-									</span>
-								) : null}
-							</label>
-						);
-					}
-					return (
-						<label
-							className="flex flex-col gap-1 text-muted-foreground text-xs"
-							key={field.key}
-						>
-							{label}
-							{field.required ? " *" : ""}
-							<Input
-								aria-label={label}
-								className="h-8"
-								disabled={busy}
-								max={field.maximum}
-								min={field.minimum}
-								onChange={(event) =>
-									setValues((current) => ({
-										...current,
-										[field.key]: event.target.value,
-									}))
-								}
-								placeholder={field.description ?? label}
-								type={
-									field.type === "number" || field.type === "integer"
-										? "number"
-										: "text"
-								}
-								value={z.string().catch("").parse(value)}
-							/>
-							{field.description ? (
-								<span className="text-muted-foreground/80 text-xs">
-									{field.description}
-								</span>
-							) : null}
-						</label>
-					);
-				})}
-			</div>
-			{error ? (
-				<p className="mt-3 text-status-destructive text-xs" role="alert">
-					{error}
-				</p>
-			) : null}
-			<Button
-				className="mt-4 w-full"
-				disabled={busy}
-				loading={busy}
-				type="submit"
-			>
-				{isWrite && !confirming ? "Review and run" : "Run page tool"}
-			</Button>
-		</form>
-	);
 }
 
 /** Small, explicit affordance for the current page's WebMCP tools. */
@@ -376,17 +52,17 @@ export function PageToolsPopover({
 				render={
 					<Button
 						aria-label={`Page tools (${tools.length})`}
-						size="xs"
+						size="icon-sm"
+						title="Page tools"
 						variant="ghost-muted"
 					>
-						<Wrench className="size-3" />
-						Page tools
+						<HugeiconsIcon className="size-4" icon={Wrench01Icon} />
 					</Button>
 				}
 			/>
 			<PopoverContent
 				align="end"
-				className={cn("max-h-[calc(100svh-6rem)] overflow-y-auto", "w-80")}
+				className="max-h-[calc(100svh-6rem)] w-80 overflow-y-auto"
 				data-lenis-prevent=""
 				data-ryu-assistant-widget="true"
 				onMouseDown={(event) => event.stopPropagation()}
@@ -398,37 +74,30 @@ export function PageToolsPopover({
 						onExecute={onExecute}
 						onResult={onResult}
 						tool={selected}
-						tools={tools}
 					/>
 				) : (
 					<>
 						<PopoverHeader>
 							<PopoverTitle>Page tools</PopoverTitle>
 							<PopoverDescription>
-								{tools.length} tool{tools.length === 1 ? "" : "s"} registered by
-								this page.
+								Registered by this page. Results are untrusted, and tools that
+								change things ask before they run.
 							</PopoverDescription>
 						</PopoverHeader>
-						<p className="mt-3 rounded-xl bg-muted/60 px-2.5 py-2 text-muted-foreground text-xs leading-relaxed">
-							Page metadata and results are untrusted. Read-only tools run once
-							selected; write tools require a second review click.
-						</p>
-						<div className="mt-3 flex flex-col gap-1">
+						<div className="mt-2 flex flex-col">
 							{tools.map((tool) => (
 								<button
-									className="rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted"
+									className="flex min-w-0 flex-col rounded-lg px-2 py-1.5 text-left outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10"
 									key={tool.id}
 									onClick={() => setSelectedId(tool.id)}
+									title={tool.name}
 									type="button"
 								>
-									<span className="block truncate font-medium text-xs">
+									<span className="truncate font-medium text-sm">
 										{displayTitle(tool)}
 									</span>
-									<span className="mt-0.5 block truncate text-muted-foreground text-xs">
-										{toolCategory(tool)} · {tool.name}
-									</span>
-									<span className="block truncate text-muted-foreground/80 text-xs">
-										{tool.origin ?? "Current page"}
+									<span className="truncate text-detail text-muted-foreground">
+										{toolCategory(tool)} · {tool.origin ?? "Current page"}
 									</span>
 								</button>
 							))}

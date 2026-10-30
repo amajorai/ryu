@@ -41,7 +41,7 @@ export default function StoreCategoryPage<T>({
 					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
 					<span>Categories</span>
 				</Button>
-				<span aria-hidden="true" className="text-muted-foreground/60">
+				<span aria-hidden="true" className="text-muted-foreground/70">
 					/
 				</span>
 				<span aria-current="page" className="truncate text-foreground">
@@ -49,7 +49,7 @@ export default function StoreCategoryPage<T>({
 				</span>
 			</nav>
 
-			<h2 className="px-1 font-medium text-base tracking-tight">{category}</h2>
+			<h2 className="px-1 font-semibold text-sm">{category}</h2>
 			<StoreCardGrid>
 				{Children.toArray(items.map((item) => renderItem(item)))}
 			</StoreCardGrid>

@@ -2,6 +2,15 @@
 // recent posts/releases (public feed, same source as the marketing site), then
 // the running build's version and when it shipped.
 
+import {
+	ArrowUpRight01Icon,
+	BookOpen01Icon,
+	BrowserIcon,
+	HelpCircleIcon,
+	Mail01Icon,
+	SparklesIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenuGroup,
@@ -14,14 +23,6 @@ import {
 } from "@ryu/ui/components/dropdown-menu.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
-import {
-	AppWindow,
-	ArrowUpRight,
-	BookOpen,
-	CircleHelp,
-	Mail,
-	Sparkles,
-} from "lucide-react";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useRecentUpdates } from "@/src/hooks/useRecentUpdates.ts";
@@ -125,19 +126,19 @@ export function HelpSubmenu() {
 	return (
 		<DropdownMenuSub>
 			<DropdownMenuSubTrigger>
-				<CircleHelp className="mr-2 size-4" />
+				<HugeiconsIcon className="size-4" icon={HelpCircleIcon} />
 				Help
 			</DropdownMenuSubTrigger>
 			<DropdownMenuSubContent className="max-h-80 min-w-72 max-w-80 overflow-y-auto">
 				<DropdownMenuItem onClick={openDocs}>
-					<BookOpen className="mr-2 size-4" />
+					<HugeiconsIcon className="size-4" icon={BookOpen01Icon} />
 					Documentation
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={openSupport}>
-					<Mail className="mr-2 size-4" />
+					<HugeiconsIcon className="size-4" icon={Mail01Icon} />
 					<span className="flex min-w-0 flex-1 flex-col">
 						<span>Get support</span>
-						<span className="type-caption font-normal text-muted-foreground">
+						<span className="font-normal text-muted-foreground text-xs">
 							{SUPPORT_EMAIL}
 						</span>
 					</span>
@@ -145,7 +146,7 @@ export function HelpSubmenu() {
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
 					<DropdownMenuLabel layout="icon">
-						<Sparkles className="size-3.5" />
+						<HugeiconsIcon className="size-3.5" icon={SparklesIcon} />
 						What&rsquo;s new?
 					</DropdownMenuLabel>
 					{loading ? (
@@ -161,7 +162,7 @@ export function HelpSubmenu() {
 						    start/stop rather than a clipped line. */}
 							<span
 								aria-hidden
-								className="absolute top-4 bottom-4 left-[11px] w-px bg-border/70"
+								className="absolute top-4 bottom-4 left-[11px] w-px bg-border"
 							/>
 							{whatsNew.map((item) => (
 								<DropdownMenuItem
@@ -176,28 +177,31 @@ export function HelpSubmenu() {
 											text={item.title}
 										/>
 										<OverflowTooltip
-											className="type-caption min-w-0 flex-1 overflow-hidden whitespace-nowrap text-muted-foreground"
+											className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-muted-foreground text-xs"
 											fade
 											text={itemMeta(item)}
 										/>
 									</span>
-									<ArrowUpRight className="ml-2 size-3.5 shrink-0 text-muted-foreground" />
+									<HugeiconsIcon
+										className="ml-2 size-3.5 shrink-0 text-muted-foreground"
+										icon={ArrowUpRight01Icon}
+									/>
 								</DropdownMenuItem>
 							))}
 						</DropdownMenuGroup>
 					)}
 				</DropdownMenuGroup>
 				<DropdownMenuItem onClick={openAllReleases}>
-					<ArrowUpRight className="mr-2 size-4" />
+					<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 					View all releases
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem disabled purpose="app-version">
-					<AppWindow className="mr-2 size-4" />
+					<HugeiconsIcon className="size-4" icon={BrowserIcon} />
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 						<span className="text-sm">App Version</span>
 						{updatedLabel ? (
-							<span className="type-caption text-muted-foreground">
+							<span className="text-muted-foreground text-xs">
 								{updatedLabel}
 							</span>
 						) : null}

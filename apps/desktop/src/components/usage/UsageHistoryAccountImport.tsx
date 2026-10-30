@@ -63,7 +63,7 @@ export function UsageHistoryAccountImport({
 	};
 	return (
 		<SettingsSection
-			caption="Import one page from the provider's official usage API. Organization admin access is required."
+			caption="Import one page from the provider's usage API. Needs org admin access."
 			title="Authorized provider reports"
 		>
 			<SettingsCard>
@@ -75,7 +75,7 @@ export function UsageHistoryAccountImport({
 						<label className="flex flex-col gap-1.5 text-xs">
 							Provider report
 							<select
-								className="h-9 rounded-lg border border-input bg-background px-2 text-xs"
+								className="h-8 rounded-lg border-0 bg-muted/50 px-2 text-foreground text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 								disabled={pending}
 								onChange={(event) => setSourceId(event.target.value)}
 								value={sourceId}
@@ -154,6 +154,7 @@ export function UsageHistoryAccountImport({
 							);
 						}}
 						size="sm"
+						variant="outline"
 					>
 						{pending
 							? "Importing report…"

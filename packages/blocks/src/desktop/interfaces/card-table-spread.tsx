@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { AnimatePresence } from "motion/react";
@@ -133,6 +134,7 @@ export function CardTableSpread({
 }) {
 	const { activeThreadId, now, onDeal, snapshot } = actions;
 	const baize = spreadFelt(useCardTableLook().felt);
+	const tl = useLiteralMessages();
 	const stageRef = useRef<HTMLDivElement>(null);
 	const deckRefs = useRef(new Map<string, HTMLButtonElement>());
 	const cardRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -186,8 +188,11 @@ export function CardTableSpread({
 		const act = deck.agent ? acts?.act(deck.agent.id) : undefined;
 		setAnnouncement(
 			act
-				? `${deck.name}'s deck fanned out`
-				: `${deck.name}'s deck fanned out: ${deckSummary(deck)}`
+				? tl("{deckName}'s deck fanned out", { deckName: deck.name })
+				: tl("{deckName}'s deck fanned out: {deckSummary}", {
+						deckName: deck.name,
+						deckSummary: deckSummary(deck),
+					})
 		);
 		stageRef.current?.scrollTo?.({ top: 0 });
 	};
@@ -203,7 +208,9 @@ export function CardTableSpread({
 		setDeckCursor(fanned.id);
 		setFannedId(null);
 		setHoveredCard(null);
-		setAnnouncement(`${fanned.name}'s deck gathered`);
+		setAnnouncement(
+			tl("{deckName}'s deck gathered", { deckName: fanned.name })
+		);
 	};
 
 	// After a fan or gather, focus follows the cards: into the fan when it was

@@ -12,10 +12,17 @@ function ItemGroup({
 	className,
 	spacing = "default",
 	appearance = "default",
+	variant = "default",
 	...props
 }: React.ComponentProps<"div"> & {
 	spacing?: "default" | "flush";
 	appearance?: "default" | "settings-group" | "hardware-summary";
+	/**
+	 * `flush` is the quiet list: no fill, no radius, rows separated by
+	 * full-width `border-border` hairlines (none after the last row). It wins
+	 * over any `appearance`, and replaces `ItemSeparator`s, which it hides.
+	 */
+	variant?: "default" | "flush";
 }) {
 	return (
 		<div
@@ -30,9 +37,12 @@ function ItemGroup({
 					"rounded-xl bg-grouped-card shadow-none has-data-[size=sm]:gap-0 has-data-[size=xs]:gap-0 [&>[data-slot=item-separator]:has(+*_[data-slot=settings-icon-tile])]:ms-12 [&>[data-slot=item-separator]]:ms-3.5 [&>[data-slot=item-separator]]:me-3.5 [&>[data-slot=item-separator]]:w-auto!",
 				appearance === "hardware-summary" &&
 					"rounded-lg bg-muted/50 shadow-none",
+				variant === "flush" &&
+					"gap-0 rounded-none bg-transparent shadow-none has-data-[size=sm]:gap-0 has-data-[size=xs]:gap-0 [&>*:last-child]:border-b-0 [&>*:not(:last-child)]:border-b [&>*:not(:last-child)]:border-b-border [&>[data-slot=item-separator]]:hidden [&>[data-slot=item]]:rounded-none [&>[data-slot=item]]:border-x-0 [&>[data-slot=item]]:border-t-0",
 				className
 			)}
 			data-slot="item-group"
+			data-variant={variant === "flush" ? variant : undefined}
 			role="list"
 			{...props}
 		/>
@@ -54,7 +64,7 @@ function ItemSeparator({
 }
 
 const itemVariants = cva(
-	"group/item flex w-full flex-wrap items-center rounded-2xl border text-sm outline-none transition-colors duration-100 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring [a]:transition-colors [a]:hover:bg-muted",
+	"group/item flex w-full flex-wrap items-center rounded-2xl border text-sm outline-none transition-colors duration-(--duration-fast) hover:duration-0 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring [a]:transition-colors [a]:hover:bg-muted",
 	{
 		variants: {
 			variant: {
@@ -71,8 +81,11 @@ const itemVariants = cva(
 				// 44px rows, as in Apple's Settings. A row placed straight in a
 				// section (no `SettingsGroup`) still gets its own grouped card, so no
 				// settings row floats card-less on the grouped background.
+				//
+				// Inside a `variant="flush"` group the row drops its card inset: a
+				// 48px row with no side padding, set off only by the group hairline.
 				"settings-row":
-					"min-h-11 flex-col items-stretch justify-center gap-2 not-in-data-[slot=item-group]:rounded-xl rounded-none border-0 not-in-data-[slot=item-group]:bg-grouped-card px-3.5 py-2.5",
+					"min-h-11 flex-col items-stretch justify-center gap-2 not-in-data-[slot=item-group]:rounded-xl rounded-none border-0 not-in-data-[slot=item-group]:bg-grouped-card px-3.5 py-2.5 group-data-[variant=flush]/item-group:min-h-12 group-data-[variant=flush]/item-group:px-0 group-data-[variant=flush]/item-group:py-3",
 			},
 		},
 		defaultVariants: {

@@ -1,181 +1,56 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceParamsByRenderer,
-	type InterfaceThread,
 	resolveInterfaceParams,
 } from "@ryuhq/protocol/interfaces";
-import { MessageCircleQuestion, RotateCcw, Trophy } from "lucide-react";
-import { AnimatePresence, MotionConfig } from "motion/react";
-import {
-	type KeyboardEvent,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import { keepsActOverlay } from "./act-settings.ts";
-import {
-	GAME_PLATE,
-	GameAction,
-	GameIconButton,
-	GameTitlePlate,
-} from "./game-hud.tsx";
-import { GameHudSlot, GameShell, gameSheetCover } from "./game-shell.tsx";
-import {
-	actHasBlocker,
-	actOverlays,
-	actSummaryLine,
-	actTotals,
-	overlayBudget,
-	stageAgents,
-	youSpotSlots,
-} from "./game3d-acts.ts";
+import { MotionConfig } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { GameShell, gameSheetCover } from "./game-shell.tsx";
+import { actTotals, stageAgents, youSpotSlots } from "./game3d-acts.ts";
 import { islandFor } from "./game3d-ground.tsx";
-import { useGameKitSettings } from "./game3d-settings.tsx";
-import {
-	IsoStage,
-	IsoZoomControls,
-	useGameNight,
-	useIsoView,
-	useReducedMotion,
-} from "./game3d-stage.tsx";
+import { useGameNight, useIsoView, useReducedMotion } from "./game3d-stage.tsx";
 import { useVillagerLooks } from "./game3d-villager.tsx";
 import {
-	ActAgentList,
 	ActAnnouncer,
-	ActStatus,
 	AskQueueList,
 	askOwners,
-	BlindSpotCaption,
-	NeedYouButton,
-	openQueue,
-	QueueButton,
 	useActCards,
 } from "./interface-ask-card.tsx";
-import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
-import type { QuizActView } from "./quiz-acts.tsx";
-import {
-	focusTile,
-	QuizBoardCells,
-	QuizBoardFrame,
-	QuizBoardSkeleton,
-	revealTile,
-	type TileHandlers,
-} from "./quiz-board.tsx";
+import { QuizBoardFrame, QuizBoardSkeleton } from "./quiz-board.tsx";
 import { QuizAnswerBooth } from "./quiz-booth.tsx";
+import { QuizEmptyCard } from "./quiz-cards.tsx";
+import { useQuizActViews } from "./quiz-interface-acts.tsx";
 import {
-	QuizClueCard,
-	QuizEmptyCard,
-	QuizFinalQuestion,
-} from "./quiz-cards.tsx";
-import { QuizContestants } from "./quiz-contestants.tsx";
+	quizTileHandlers,
+	useQuizEscape,
+	useQuizFocusMove,
+} from "./quiz-interface-focus.ts";
+import { QuizHud } from "./quiz-interface-hud.tsx";
+import { QuizOverlayCards, QuizStage } from "./quiz-interface-stage.tsx";
+import {
+	COMPACT_BELOW,
+	type FocusTarget,
+	ISLAND_RIM,
+	type Overlay,
+	readRevealed,
+	useQuizBoardState,
+	writeRevealed,
+} from "./quiz-interface-state.ts";
 import {
 	boardTiles,
 	buildContestants,
-	buildQuizBoard,
-	isBoardKey,
 	isRevealed,
-	moveOnBoard,
-	parseRevealed,
 	plural,
 	pruneRevealed,
 	QUIZ_PODIUMS,
 	type QuizTile,
-	REVEALED_STORAGE_KEY,
 	type RevealedMap,
-	tileAt,
-	tilePosition,
 } from "./quiz-model.ts";
-import {
-	BOARD_BEZEL,
-	QUIZ_EFFECT_VARS,
-	QUIZ_STAGE_VARS,
-} from "./quiz-palette.ts";
-import { AUDIENCE_IDS, HOST_ID, QuizStudio } from "./quiz-studio.tsx";
-import { STUDIO_BOUNDS, STUDIO_TOP } from "./quiz-world.ts";
+import { QUIZ_EFFECT_VARS, QUIZ_STAGE_VARS } from "./quiz-palette.ts";
+import { AUDIENCE_IDS, HOST_ID } from "./quiz-studio.tsx";
+import { STUDIO_BOUNDS } from "./quiz-world.ts";
 import { useActAnnouncement, useActClockOptions, useActs } from "./use-acts.ts";
-
-function readRevealed(): RevealedMap {
-	try {
-		return parseRevealed(
-			globalThis.localStorage?.getItem(REVEALED_STORAGE_KEY)
-		);
-	} catch {
-		return {};
-	}
-}
-
-function writeRevealed(revealed: RevealedMap) {
-	try {
-		if (Object.keys(revealed).length === 0) {
-			globalThis.localStorage?.removeItem(REVEALED_STORAGE_KEY);
-		} else {
-			globalThis.localStorage?.setItem(
-				REVEALED_STORAGE_KEY,
-				JSON.stringify(revealed)
-			);
-		}
-	} catch {
-		// Storage can be full or blocked; the board still plays for this visit.
-	}
-}
-
-/** Escape inside a text field belongs to the field. */
-function isEditable(target: EventTarget): boolean {
-	return (
-		target instanceof HTMLElement &&
-		(target.isContentEditable ||
-			target.closest("input, textarea, select, [contenteditable='true']") !==
-				null)
-	);
-}
-
-type Overlay =
-	| { kind: "clue"; threadId: string }
-	| { agentId?: string; kind: "final" };
-
-type FocusTarget =
-	| { kind: "answer" }
-	| { kind: "booth" }
-	| { kind: "final" }
-	| { kind: "restore" }
-	| { kind: "tile"; threadId: string };
-
-/** Below this stage width the HUD plates go compact. */
-const COMPACT_BELOW = 720;
-/** The island's rim round the studio. */
-const ISLAND_RIM = 2.2;
-
-/** A clue's status word from the act layer, for its tile's name. */
-function clueWord(
-	thread: InterfaceThread,
-	state: {
-		asked: Set<string>;
-		blocking: Set<string>;
-		stopped: Map<string, string>;
-	},
-	/** A delivered answer's headline: the flipped tile says it. */
-	headline?: string
-): string {
-	if (state.blocking.has(thread.id)) {
-		return "Needs you";
-	}
-	if ((thread.unread ?? 0) > 0) {
-		return headline ? `Answer ready: ${headline}` : "Answer ready";
-	}
-	if (thread.running) {
-		return "Working";
-	}
-	const stopped = state.stopped.get(thread.id);
-	if (stopped) {
-		return stopped;
-	}
-	return state.asked.has(thread.id) ? "Waiting on you" : "Done";
-}
-
-/** World units kept round the plates when the act layer frames the set. */
-const QUIZ_ACT_PLATE_FIT = { above: 4.2, below: 1, max: 2.2, side: 1 };
 
 /**
  * Quiz Show: the workspace as a TV quiz board in a studio, on the shared
@@ -204,94 +79,16 @@ export function QuizInterface({
 		"quiz",
 		params
 	) as Required<InterfaceParamsByRenderer["quiz"]>;
+	const tl = useLiteralMessages();
 	const reducedMotion = useReducedMotion();
 	const animate = !reducedMotion;
 	const actsView = useActs(snapshot);
 	const { acts, enabled: withActs, nowMs, privacy, unowned } = actsView;
-	// What the act layer says about each clue's thread: an open ask (a
-	// blocking one lights the clue), a run, a counted stop, an answer to read.
-	const clueState = useMemo(() => {
-		// Only a blocking ask or an answer to read keeps a clue up; a
-		// suggestion does not.
-		const asked = new Set<string>();
-		const blocking = new Set<string>();
-		const stopped = new Map<string, string>();
-		for (const ask of snapshot.asks ?? []) {
-			if (ask.threadId && (ask.blocking || ask.kind === "reply")) {
-				asked.add(ask.threadId);
-				if (ask.blocking) {
-					blocking.add(ask.threadId);
-				}
-			}
-		}
-		// A counted stop's word is its act's: sitting out, paused or stopped.
-		for (const act of acts.values()) {
-			for (const thread of snapshot.threads) {
-				if (!(thread.blocker && actHasBlocker(act, thread))) {
-					continue;
-				}
-				let word = "Stopped";
-				if (act.act === "limited") {
-					word = "Sitting out";
-				} else if (thread.blocker.kind === "interrupted") {
-					word = "Paused";
-				}
-				stopped.set(thread.id, word);
-			}
-			// A limit on the agent (not on a thread) sits out the clue it was
-			// on; its played clues stay played.
-			if (act.act === "limited" && act.threadId && !stopped.has(act.threadId)) {
-				stopped.set(act.threadId, "Sitting out");
-			}
-		}
-		return { asked, blocking, stopped };
-	}, [acts, snapshot.asks, snapshot.threads]);
-	// With acts, a delivered answer flips its clue to the answer's headline.
-	const headlines = useMemo(() => {
-		const out = new Map<string, string>();
-		if (!withActs) {
-			return out;
-		}
-		for (const act of acts.values()) {
-			const thread = act.threadId
-				? snapshot.threads.find((item) => item.id === act.threadId)
-				: undefined;
-			const headline = thread?.outcome?.headline;
-			if (act.act === "delivering" && thread && headline) {
-				out.set(thread.id, headline);
-			}
-		}
-		return out;
-	}, [acts, snapshot.threads, withActs]);
-	const legacyBoard = useMemo(
-		() => buildQuizBoard(snapshot, round),
-		[round, snapshot]
-	);
-	// With acts a clue is lit (needs you) only while a blocking ask waits on it.
-	const board = useMemo(
-		() =>
-			withActs
-				? {
-						...legacyBoard,
-						columns: legacyBoard.columns.map((category) =>
-							category
-								? {
-										...category,
-										tiles: category.tiles.map((tile) => ({
-											...tile,
-											needsYou: clueState.blocking.has(tile.thread.id),
-											statusWord: clueWord(
-												tile.thread,
-												clueState,
-												headlines.get(tile.thread.id)
-											),
-										})),
-									}
-								: category
-						),
-					}
-				: legacyBoard,
-		[clueState, headlines, legacyBoard, withActs]
+	const { board, clueState, headlines } = useQuizBoardState(
+		snapshot,
+		acts,
+		withActs,
+		round
 	);
 	// With acts the podiums go to the most urgent agents (asking first), not
 	// to the busiest ones.
@@ -463,37 +260,16 @@ export function QuizInterface({
 	};
 	const newGame = () => commitRevealed({});
 
-	// Move focus with whatever just opened or closed, so it never drops to <body>.
-	useLayoutEffect(() => {
-		const target = focusRef.current;
-		if (!target) {
-			return;
-		}
-		if (target.kind === "booth" && !panelOpen) {
-			return; // Wait for the host to open the thread.
-		}
-		focusRef.current = null;
-		if (target.kind === "answer") {
-			answerRef.current?.focus();
-		} else if (target.kind === "final") {
-			finalFieldRef.current?.focus();
-		} else if (target.kind === "booth") {
-			boothHeadingRef.current?.focus();
-			// Keep the clue being answered in sight beside the booth.
-			if (activeThreadId) {
-				revealTile(rootRef.current, activeThreadId);
-			}
-		} else if (
-			!(target.kind === "tile" && focusTile(rootRef.current, target.threadId))
-		) {
-			const opener = restoreRef.current;
-			restoreRef.current = null;
-			if (opener?.isConnected) {
-				opener.focus();
-			} else if (tabStopId) {
-				focusTile(rootRef.current, tabStopId);
-			}
-		}
+	useQuizFocusMove({
+		activeThreadId,
+		answerRef,
+		boothHeadingRef,
+		finalFieldRef,
+		focusRef,
+		panelOpen,
+		restoreRef,
+		rootRef,
+		tabStopId,
 	});
 
 	useEffect(() => {
@@ -517,92 +293,37 @@ export function QuizInterface({
 		}
 	}, [overlay, clueTile]);
 
-	const stepBack = () => {
-		if (overlay) {
-			backToBoard();
-			return true;
-		}
-		if (panelOpen) {
-			closeBooth();
-			return true;
-		}
-		return false;
-	};
-	const escapeRef = useRef(stepBack);
-	escapeRef.current = stepBack;
+	const onRootKeyDown = useQuizEscape({
+		backToBoard,
+		closeBooth,
+		overlay,
+		panelOpen,
+		rootRef,
+	});
 
-	// Escape with focus nowhere (after clicking plain text) still steps back.
-	const steppable = overlay !== null || panelOpen;
-	useEffect(() => {
-		if (!steppable) {
-			return;
-		}
-		const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
-			if (isInterfaceCovered(rootRef.current)) {
-				return;
-			}
-			if (
-				event.key === "Escape" &&
-				!event.defaultPrevented &&
-				event.target === document.body &&
-				escapeRef.current()
-			) {
-				event.preventDefault();
-			}
-		};
-		document.addEventListener("keydown", onDocumentKeyDown);
-		return () => document.removeEventListener("keydown", onDocumentKeyDown);
-	}, [steppable]);
+	const handlers = quizTileHandlers({
+		board,
+		pick,
+		rootRef,
+		setRovingId,
+		withActs,
+	});
 
-	const onRootKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (event.key !== "Escape" || event.defaultPrevented) {
-			return;
-		}
-		const inField = isEditable(event.target);
-		// In the final question, Escape leaves the card even from the text field.
-		if (inField && overlay?.kind !== "final") {
-			return;
-		}
-		if (stepBack()) {
-			event.preventDefault();
-		}
-	};
-
-	const handlers: TileHandlers = {
-		clueFirst: withActs,
-		onFocusTile: setRovingId,
-		onKeyDown: (event, threadId) => {
-			// In the studio the stage already moved focus, in reading order.
-			if (event.defaultPrevented) {
-				return;
+	let boardLabel: string;
+	if (loading) {
+		boardLabel = "Game board, loading";
+	} else if (board.offBoard > 0) {
+		boardLabel = tl(
+			"Game board, {round}, {count, plural, one {{countText} conversation} other {{countText} conversations}} not on the board",
+			{
+				count: board.offBoard,
+				countText: String(board.offBoard),
+				round: board.round,
 			}
-			const toBoardEdge = event.ctrlKey || event.metaKey;
-			const edgeKey = event.key === "Home" || event.key === "End";
-			if (event.altKey || (toBoardEdge && !edgeKey) || !isBoardKey(event.key)) {
-				return;
-			}
-			const from = tilePosition(board, threadId);
-			if (!from) {
-				return;
-			}
-			event.preventDefault();
-			const to = moveOnBoard(board, from, event.key, toBoardEdge);
-			const next = tileAt(board, to);
-			if (next) {
-				setRovingId(next.thread.id);
-				focusTile(rootRef.current, next.thread.id);
-			}
-		},
-		onPick: pick,
-	};
-
-	const offBoardNote =
-		board.offBoard > 0
-			? `, ${plural(board.offBoard, "conversation", "conversations")} not on the board`
-			: "";
-	const boardLabel = loading
-		? "Game board, loading"
-		: `Game board, ${board.round}${offBoardNote}`;
+		);
+	} else {
+		boardLabel = tl("Game board, {round}", { round: board.round });
+	}
 
 	const needYou = tiles.filter((tile) => tile.needsYou && !shown(tile)).length;
 	const tally =
@@ -616,199 +337,59 @@ export function QuizInterface({
 				.join(" \u00b7 ");
 	const canReset = !loading && Object.keys(revealed).length > 0;
 
-	// The kit settings (overlay density, work bubbles) for its own pieces too.
-	const kitSettings = useGameKitSettings();
-	const budget = overlayBudget(stageWidth > 0 ? stageWidth : 1280, {
-		domTargets: true,
+	const { actView, contestantActs, onAsk, onBlocker } = useQuizActViews({
+		actCards,
+		acts,
+		clock,
+		nowMs,
+		offStage,
+		onStage,
+		owners,
+		port,
+		privacy,
+		queueOpener,
+		reducedMotion,
+		slots,
+		snapshot,
+		stageWidth,
+		withActs,
 	});
-	const shownKey = withActs
-		? [
-				...budget.fill(
-					actOverlays(
-						onStage,
-						slots,
-						offStage,
-						onStage.find((act) => act.act === "working")?.agentId ?? null,
-						{ reduced: reducedMotion }
-					).filter((item) => keepsActOverlay(item, kitSettings))
-				),
-			]
-				.sort()
-				.join("|")
-		: "";
-	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the chosen ids, not the set's identity.
-	const shownIds = useMemo(() => new Set(shownKey.split("|")), [shownKey]);
-	const onAsk = (askId: string, opener?: HTMLElement) =>
-		actCards.openAsk(askId, opener);
-	const onBlocker = (
-		threadId: string,
-		agentName: string,
-		opener?: HTMLElement
-	) => actCards.openBlocker(threadId, agentName, opener);
-	const actView: QuizActView | null = withActs
-		? {
-				acts,
-				clock,
-				iconOnly: budget.iconOnly,
-				nowMs,
-				offStage,
-				onAsk: (askId) => actCards.openAsk(askId),
-				onBlocker: (threadId, agentName) =>
-					actCards.openBlocker(threadId, agentName),
-				onQueue: () => openQueue(queueOpener),
-				owners,
-				privacy,
-				shown: shownIds,
-				slots,
-				snapshot,
-			}
-		: null;
-	const offStageActs = new Map(
-		[...acts].filter(([id]) => !onStage.some((act) => act.agentId === id))
-	);
-	const contestantActs = withActs
-		? {
-				offStage:
-					offStageActs.size > 0 ? (
-						<section
-							aria-label="Off the podiums"
-							className={`${GAME_PLATE} mt-3 p-3`}
-						>
-							<ActAgentList
-								acts={offStageActs}
-								clock={clock}
-								nowMs={nowMs}
-								onAsk={onAsk}
-								onBlocker={onBlocker}
-								onOpenThread={port.openThread}
-								snapshot={snapshot}
-							/>
-						</section>
-					) : null,
-				row: (agentId: string) => {
-					const act = acts.get(agentId);
-					return act
-						? {
-								label: act.ariaLabel,
-								status: (
-									<ActStatus
-										act={act}
-										clock={clock}
-										nowMs={nowMs}
-										onAsk={onAsk}
-										onBlocker={onBlocker}
-										snapshot={snapshot}
-									/>
-								),
-							}
-						: null;
-				},
-			}
-		: undefined;
 	const hud = (
-		<>
-			<GameHudSlot
-				at="top-left"
-				className={
-					withActs
-						? "max-w-[calc(100%-7.5rem)] flex-col items-start [&>*]:max-w-full"
-						: undefined
-				}
-			>
-				<GameTitlePlate
-					compact={compact}
-					icon={<Trophy aria-hidden="true" />}
-					keepStatus={withActs}
-					status={withActs ? actSummaryLine(totals) : status}
-					title="Quiz Show"
-				/>
-				{withActs ? (
-					<>
-						<BlindSpotCaption snapshot={snapshot} />
-						<div className="flex gap-2">
-							<NeedYouButton
-								onAsk={onAsk}
-								snapshot={snapshot}
-								totals={totals}
-							/>
-							<QueueButton
-								acts={acts}
-								clock={clock}
-								narrow={compact}
-								nowMs={nowMs}
-								onAsk={onAsk}
-								onBlocker={onBlocker}
-								openRef={queueOpener}
-								snapshot={snapshot}
-								totals={totals}
-								unowned={unowned}
-							/>
-						</div>
-					</>
-				) : null}
-			</GameHudSlot>
-			<GameHudSlot at="top-right" className="items-center">
-				{/* With acts the board follows the agents; there is no game to reset. */}
-				{withActs ? null : (
-					<GameIconButton
-						disabled={!canReset}
-						label="New game"
-						onClick={newGame}
-						title={
-							canReset
-								? "New game: put every clue back on the board"
-								: "No clues played yet"
-						}
-					>
-						<RotateCcw
-							aria-hidden="true"
-							className="size-5"
-							strokeWidth={2.5}
-						/>
-					</GameIconButton>
-				)}
-				<GameAction
-					compact={compact}
-					disabled={loading}
-					icon={<MessageCircleQuestion aria-hidden="true" />}
-					label="Final question"
-					onClick={() => openFinal()}
-				/>
-			</GameHudSlot>
-			{loading || isEmpty ? null : (
-				<GameHudSlot at="bottom-right">
-					<IsoZoomControls view={isoView} />
-				</GameHudSlot>
-			)}
-		</>
+		<QuizHud
+			acts={acts}
+			canReset={canReset}
+			clock={clock}
+			compact={compact}
+			isEmpty={isEmpty}
+			isoView={isoView}
+			loading={loading}
+			newGame={newGame}
+			nowMs={nowMs}
+			onAsk={onAsk}
+			onBlocker={onBlocker}
+			openFinal={openFinal}
+			queueOpener={queueOpener}
+			snapshot={snapshot}
+			status={status}
+			totals={totals}
+			unowned={unowned}
+			withActs={withActs}
+		/>
 	);
 
 	const cards = (
-		<AnimatePresence>
-			{clueTile ? (
-				<QuizClueCard
-					animate={animate}
-					answerRef={answerRef}
-					key={`clue-${clueTile.thread.id}`}
-					onAnswer={answer}
-					onBack={backToBoard}
-					snapshot={snapshot}
-					tile={clueTile}
-				/>
-			) : null}
-			{overlay?.kind === "final" ? (
-				<QuizFinalQuestion
-					agents={snapshot.agents}
-					animate={animate}
-					defaultAgentId={overlay.agentId ?? contestants[0]?.agent.id}
-					featuredIds={contestants.map((entry) => entry.agent.id)}
-					fieldRef={finalFieldRef}
-					key="final"
-					onCancel={backToBoard}
-					onSubmit={submitFinal}
-				/>
-			) : null}
-		</AnimatePresence>
+		<QuizOverlayCards
+			animate={animate}
+			answerRef={answerRef}
+			clueTile={clueTile}
+			contestants={contestants}
+			finalFieldRef={finalFieldRef}
+			onAnswer={answer}
+			onBack={backToBoard}
+			onSubmitFinal={submitFinal}
+			overlay={overlay}
+			snapshot={snapshot}
+		/>
 	);
 
 	return (
@@ -873,80 +454,33 @@ export function QuizInterface({
 							</QuizBoardFrame>
 						</div>
 					) : (
-						<div className="relative min-h-0 flex-1">
-							<IsoStage
-								bounds={{ ...STUDIO_BOUNDS, top: STUDIO_TOP }}
-								fallback={
-									<div className="absolute inset-0 flex flex-col overflow-y-auto @min-[672px]/game:pt-24 pt-20">
-										<div className="flex min-h-[420px] flex-1 @min-[672px]/game:px-8 px-3 pb-4 [container:set/size]">
-											<QuizBoardFrame
-												cells={
-													<QuizBoardCells
-														animate={animate}
-														board={board}
-														handlers={handlers}
-														inPlayId={inPlayId}
-														isRevealed={shown}
-														openId={clueTile ? clueTile.thread.id : null}
-														tabStopId={tabStopId}
-													/>
-												}
-												className="m-auto @max-[35rem]/set:h-auto h-[min(100cqh,calc(100cqw/1.75))] @max-[35rem]/set:w-full w-[min(100cqw,calc(100cqh*1.75))] @max-[35rem]/set:[container-type:inline-size]"
-												label={boardLabel}
-												rows={board.rows}
-											/>
-										</div>
-										<QuizContestants
-											acts={contestantActs}
-											contestants={contestants}
-											onAsk={openFinal}
-										/>
-									</div>
-								}
-								// With acts, zoom on to the board, the podiums and the lectern.
-								fitPlates={withActs ? QUIZ_ACT_PLATE_FIT : undefined}
-								insets={insets}
-								label={`${boardLabel}. The studio: the board's wall of tiles, the contestants at their podiums and the host. Tab or the arrow keys move between the clues and the contestants; drag to pan, plus and minus to zoom.`}
-								night={night}
-								reducedMotion={reducedMotion}
-								view={isoView}
-							>
-								{({ quality, theme }) => (
-									<QuizStudio
-										acts={actView ? { onStage, view: actView } : null}
-										audience={audience}
-										board={board}
-										contestants={contestants}
-										handlers={handlers}
-										headlines={headlines}
-										inPlayId={inPlayId}
-										isRevealed={shown}
-										looks={looks}
-										night={night}
-										onAsk={openFinal}
-										openId={clueTile ? clueTile.thread.id : null}
-										quality={quality}
-										reducedMotion={reducedMotion}
-										shape={shape}
-										theme={theme}
-									/>
-								)}
-							</IsoStage>
-							{/* The clue and the final question come up on a screen over the set. */}
-							{clueTile || overlay?.kind === "final" ? (
-								<div
-									className="pointer-events-none absolute inset-0 z-40 grid place-items-center @min-[672px]/game:px-8 px-3 @min-[672px]/game:pt-24 pt-20 pb-6"
-									style={{ paddingRight: sheetCover + 12 }}
-								>
-									<div
-										className="pointer-events-auto relative h-[min(100%,460px)] w-[min(100%,780px)] rounded-[10px] bg-(--quiz-frame) [container:board/size]"
-										style={{ boxShadow: BOARD_BEZEL }}
-									>
-										{cards}
-									</div>
-								</div>
-							) : null}
-						</div>
+						<QuizStage
+							actView={actView}
+							animate={animate}
+							audience={audience}
+							board={board}
+							boardLabel={boardLabel}
+							cards={cards}
+							clueTile={clueTile}
+							contestantActs={contestantActs}
+							contestants={contestants}
+							finalOpen={overlay?.kind === "final"}
+							handlers={handlers}
+							headlines={headlines}
+							inPlayId={inPlayId}
+							insets={insets}
+							isoView={isoView}
+							looks={looks}
+							night={night}
+							onStage={onStage}
+							openFinal={openFinal}
+							reducedMotion={reducedMotion}
+							shape={shape}
+							sheetCover={sheetCover}
+							shown={shown}
+							tabStopId={tabStopId}
+							withActs={withActs}
+						/>
 					)}
 				</div>
 				{withActs ? <ActAnnouncer sentence={sentence} /> : null}

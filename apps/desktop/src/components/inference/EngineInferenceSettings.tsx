@@ -1,4 +1,3 @@
-import { Button } from "@ryu/ui/components/button.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -10,6 +9,7 @@ import {
 	saveEngineSamplingConfig,
 } from "@/src/lib/api/inference.ts";
 import { AdvancedInferenceSection } from "./AdvancedInferenceSection.tsx";
+import { InferenceLoadError } from "./fields.tsx";
 import { EngineLaunchConfigSection } from "./ModelLaunchConfigSection.tsx";
 
 const ENGINES_WITH_LAUNCH_ADAPTER = new Set([
@@ -132,23 +132,11 @@ export function EngineInferenceSettings({ engineId }: { engineId: string }) {
 					Loading engine defaults…
 				</div>
 			) : samplingQuery.isError && !samplingQuery.data ? (
-				<div
-					className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
-					role="alert"
-				>
-					<p className="text-sm text-status-destructive">
-						Could not load this engine's sampling defaults.
-					</p>
-					<Button
-						disabled={samplingQuery.isFetching}
-						loading={samplingQuery.isFetching}
-						onClick={() => void samplingQuery.refetch()}
-						size="sm"
-						variant="outline"
-					>
-						Retry
-					</Button>
-				</div>
+				<InferenceLoadError
+					error={samplingQuery.error}
+					message="Couldn't load this engine's sampling defaults."
+					onRetry={() => void samplingQuery.refetch()}
+				/>
 			) : samplingQuery.data ? (
 				<EngineSamplingEditor
 					engineId={engineId}
@@ -160,7 +148,7 @@ export function EngineInferenceSettings({ engineId }: { engineId: string }) {
 			) : null}
 
 			{launchAdapter && !ENGINE_LAUNCH_NOTES.has(engineId) ? null : (
-				<div className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs">
+				<div className="py-2 text-muted-foreground text-xs">
 					{ENGINE_LAUNCH_NOTES.get(engineId) ??
 						"This engine manages its own process and model loading. Ryu still applies chat request defaults and raw request fields supported by the server."}
 				</div>

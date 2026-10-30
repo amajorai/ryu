@@ -1,14 +1,19 @@
+import { ArrowDown01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { useLiteralMessages, useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo.tsx";
-import { Check, ChevronDown, Sparkles, Wrench } from "lucide-react";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ReactNode, useState } from "react";
 import {
 	AGENT_IDENTITY_MODE_OPTIONS,
 	AgentIdentityModePicker,
 } from "@/src/components/agents/AgentIdentityModePicker.tsx";
-import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import { suggestionIdentityMode } from "@/src/lib/agent-suggestion.ts";
 import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
 import type { OnboardingAgentSuggestion } from "@/src/lib/api/onboarding-profile.ts";
@@ -100,7 +105,7 @@ function RyuExpressiveAvatar({
 	return (
 		<span
 			aria-hidden="true"
-			className="relative flex size-12 shrink-0 items-center justify-center"
+			className="relative flex size-8 shrink-0 items-center justify-center"
 			data-avatar-colors={`${palette.c1}|${palette.c2}|${palette.c3}`}
 			data-testid={`agent-suggestion-avatar-${suggestionId}`}
 		>
@@ -113,7 +118,7 @@ function RyuExpressiveAvatar({
 					className="size-full"
 					colors={palette}
 					showEyes={false}
-					size="42px"
+					size="28px"
 					variant="default"
 				/>
 			</span>
@@ -128,7 +133,7 @@ function RyuExpressiveAvatar({
 					colors={palette}
 					expression="random"
 					eyeScale={2}
-					size="42px"
+					size="28px"
 					variant="expressive"
 				/>
 			</span>
@@ -158,9 +163,9 @@ function SuggestionIdentity({
 			className="flex flex-col gap-2"
 			data-testid={`agent-suggestion-identity-${suggestion.id}`}
 		>
-			<div className="flex items-center gap-2 text-xs">
+			<div className="flex items-center gap-2 text-detail">
 				<span className="text-muted-foreground">Identity</span>
-				<span className="rounded-full bg-muted px-3 py-1 font-medium">
+				<span className="font-medium">
 					{AGENT_IDENTITY_MODE_OPTIONS[identityMode].title}
 				</span>
 				<Button
@@ -223,79 +228,102 @@ function SuggestionCard({
 	const description = useLocalizedText(suggestion.description, {
 		literal: true,
 	});
+	const [expanded, setExpanded] = useState(false);
+	// Selecting a draft opens its details: the review below is what adds it.
+	const open = expanded || selected;
 	return (
-		<div data-testid={`agent-suggestion-${suggestion.id}`}>
-			<SettingsCard
-				className={
-					selected ? "bg-primary/10 ring-1 ring-primary/30" : undefined
-				}
-			>
+		<div
+			className={cn(
+				"rounded-lg px-3 py-2 transition-colors duration-150",
+				selected && "bg-accent"
+			)}
+			data-testid={`agent-suggestion-${suggestion.id}`}
+		>
+			<div className="flex items-center gap-3">
 				<button
-					aria-label={`${selected ? "Deselect" : "Select"} ${suggestion.name}`}
+					aria-label={
+						selected
+							? tl("Deselect {name}", { name: suggestion.name })
+							: tl("Select {name}", { name: suggestion.name })
+					}
 					aria-pressed={selected}
-					className="flex w-full items-center gap-3 text-left"
+					className="flex min-w-0 flex-1 items-center gap-3 text-left"
 					disabled={disabled}
 					onClick={onToggle}
 					type="button"
 				>
-					<RyuExpressiveAvatar palette={palette} suggestionId={suggestion.id} />
-					<div className="min-w-0 flex-1 space-y-1">
-						<h2 className="font-medium text-base">{title}</h2>
-						<p className="font-medium text-muted-foreground text-sm leading-relaxed">
-							{description}
-						</p>
-					</div>
 					<span
-						className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40"}`}
+						aria-hidden="true"
+						className={cn(
+							"flex size-4 shrink-0 items-center justify-center rounded-full border",
+							selected
+								? "border-primary bg-primary text-primary-foreground"
+								: "border-border"
+						)}
 					>
-						{selected ? <Check className="size-3.5" /> : null}
+						{selected ? (
+							<HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
+						) : null}
+					</span>
+					<RyuExpressiveAvatar palette={palette} suggestionId={suggestion.id} />
+					{/* Phrasing content only: this sits inside the toggle button. */}
+					<span className="block min-w-0 flex-1">
+						<span className="block font-medium text-sm">{title}</span>
+						<span className="block truncate text-detail text-muted-foreground">
+							{description}
+						</span>
 					</span>
 				</button>
+				<Button
+					aria-expanded={open}
+					disabled={selected}
+					onClick={() => setExpanded((current) => !current)}
+					size="sm"
+					type="button"
+					variant="ghost-muted"
+				>
+					Details
+					<HugeiconsIcon
+						className={cn("transition-transform", open && "rotate-180")}
+						icon={ArrowDown01Icon}
+						size={14}
+					/>
+				</Button>
+			</div>
 
-				{connectedApps.length > 0 ? (
-					<div className="mt-3 ml-14 flex flex-wrap items-center gap-1.5">
-						<span className="type-caption mr-1 text-muted-foreground">
-							Connected apps
-						</span>
-						{connectedApps.map((app) => (
-							<span
-								className="type-caption inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/60 px-2 py-1 text-muted-foreground"
-								data-testid={`connected-app-${app.slug}`}
-								key={app.slug}
-							>
-								<span className="flex size-4 shrink-0 items-center justify-center overflow-hidden [&_img]:size-4">
-									{app.logo}
-								</span>
-								<span>{app.name}</span>
-							</span>
-						))}
-					</div>
-				) : null}
-
-				<div className="mt-3 ml-14 flex flex-col gap-3">
-					<div className="rounded-lg bg-background/50 px-3 py-2">
-						<div className="type-caption flex items-center gap-1.5 font-medium text-muted-foreground uppercase tracking-wide">
-							<Sparkles className="size-3" />
-							Why this showed up
-						</div>
-						<p className="mt-1 text-xs leading-relaxed">{suggestion.reason}</p>
+			{open ? (
+				<div className="mt-3 ml-18 flex flex-col gap-3 text-detail">
+					<div>
+						<p className="text-muted-foreground">Why this showed up</p>
+						<p className="text-pretty">{suggestion.reason}</p>
 					</div>
 
-					<div className="flex items-start gap-2">
-						<Wrench className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-						<div
-							className="flex min-w-0 flex-wrap gap-1.5"
-							data-testid="suggested-tools"
-						>
-							{suggestion.tools.map((tool) => (
+					{connectedApps.length > 0 ? (
+						<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+							<span className="text-muted-foreground">Connected apps</span>
+							{connectedApps.map((app) => (
 								<span
-									className="type-caption rounded-full border border-border/70 bg-background/60 px-2 py-1 text-muted-foreground"
-									key={tool}
+									className="inline-flex items-center gap-1"
+									data-testid={`connected-app-${app.slug}`}
+									key={app.slug}
 								>
-									{toolLabel(tool)}
+									<span className="flex size-4 shrink-0 items-center justify-center overflow-hidden [&_img]:size-4">
+										{app.logo}
+									</span>
+									<span>{app.name}</span>
 								</span>
 							))}
 						</div>
+					) : null}
+
+					<div
+						className="flex min-w-0 flex-wrap gap-x-3 gap-y-1"
+						data-testid="suggested-tools"
+					>
+						<span className="text-muted-foreground">Tools</span>
+						{suggestion.tools.map((tool) => (
+							<span key={tool}>{toolLabel(tool)}</span>
+						))}
 					</div>
 
 					<SuggestionIdentity
@@ -305,23 +333,17 @@ function SuggestionCard({
 						suggestion={suggestion}
 					/>
 
-					<details
-						className="group rounded-lg border border-border/60 bg-background/40"
-						open
-					>
-						<summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-muted-foreground text-xs [&::-webkit-details-marker]:hidden">
-							<span>Review prompt setup</span>
-							<ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-						</summary>
+					<div>
+						<p className="text-muted-foreground">Review prompt setup</p>
 						<p
-							className="max-h-40 overflow-y-auto whitespace-pre-wrap border-border/60 border-t px-3 py-2 text-muted-foreground text-xs leading-relaxed"
+							className="max-h-40 overflow-y-auto whitespace-pre-wrap text-pretty"
 							data-testid="suggested-prompt"
 						>
 							{suggestion.systemPrompt}
 						</p>
-					</details>
+					</div>
 
-					<div className="flex items-start gap-2 text-muted-foreground text-xs leading-relaxed">
+					<label className="flex items-start gap-2 text-muted-foreground">
 						<Checkbox
 							aria-label={tl("I reviewed {name}", { name: suggestion.name })}
 							checked={reviewed}
@@ -331,9 +353,9 @@ function SuggestionCard({
 						<span>
 							I reviewed this draft&apos;s prompt and tools before adding it.
 						</span>
-					</div>
+					</label>
 				</div>
-			</SettingsCard>
+			) : null}
 		</div>
 	);
 }
@@ -372,8 +394,8 @@ export function AgentSuggestionsStep({
 		(suggestion) => selected.has(suggestion.id) && !reviewed.has(suggestion.id)
 	).length;
 	return (
-		<div className="flex w-full max-w-xl flex-col gap-3 pb-4">
-			<div className="flex flex-col gap-3">
+		<>
+			<div className="flex flex-col gap-1">
 				{suggestions.map((suggestion) => (
 					<SuggestionCard
 						connectedApps={connectedApps}
@@ -393,21 +415,19 @@ export function AgentSuggestionsStep({
 			</div>
 
 			{error ? (
-				<p className="text-status-destructive text-xs" role="alert">
+				<p className="text-sm text-status-destructive" role="alert">
 					{error}
 				</p>
 			) : null}
 
-			<div className="sticky bottom-0 flex items-center justify-between gap-3 bg-background/80 py-2 backdrop-blur-sm">
-				<Button disabled={busy} onClick={onSkip} variant="ghost">
+			<OnboardingActions className="sticky bottom-0 justify-between bg-background py-2">
+				<OnboardingCta disabled={busy} onClick={onSkip} tone="secondary">
 					Skip for now
-				</Button>
-				<Button
+				</OnboardingCta>
+				<OnboardingCta
 					disabled={selectedCount === 0 || pendingReviewCount > 0 || busy}
 					loading={busy}
 					onClick={onCreate}
-					size="lg"
-					variant="mono"
 				>
 					{pendingReviewCount > 0
 						? tl(
@@ -420,8 +440,8 @@ export function AgentSuggestionsStep({
 									{ selectedCount }
 								)
 							: "Select an agent"}
-				</Button>
-			</div>
-		</div>
+				</OnboardingCta>
+			</OnboardingActions>
+		</>
 	);
 }

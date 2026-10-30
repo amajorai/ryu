@@ -28,34 +28,19 @@ test.describe("onboarding welcome step", () => {
 		}
 	});
 
-	test("fades sentence by sentence into the welcome and hello loop, then advances", async ({
+	test("fades from the greeting into the welcome, then advances", async ({
 		page,
 	}) => {
-		test.setTimeout(60_000);
+		test.setTimeout(30_000);
 		await page.goto(STORY_URL);
 
-		const beat = page.getByTestId("onboarding-welcome-beat");
 		const heading = page.getByRole("heading");
-		await expect(heading).toHaveText("Let's personalize your experience.");
+		await expect(heading).toHaveText("Hi, I'm Ryu.");
 		await expect(page.getByRole("button")).toHaveCount(1);
 		await expect(
 			page.getByRole("button", { name: "Skip the introduction" })
 		).toBeVisible();
-		await expect(heading).toHaveText("Hi, I'm Ryu.", { timeout: 6000 });
-		await expect(heading).toHaveText("I help you get real work done.", {
-			timeout: 6000,
-		});
-		await expect(heading).toContainText("Welcome to", { timeout: 6000 });
-
-		await expect(beat).toHaveAttribute("data-language", "English", {
-			timeout: 7000,
-		});
-		await expect(beat).toHaveAttribute("data-language", "Hindi", {
-			timeout: 5000,
-		});
-		await expect(beat).toHaveAttribute("data-language", "Vietnamese", {
-			timeout: 8000,
-		});
+		await expect(heading).toContainText("Welcome to", { timeout: 5000 });
 		await expect(page.getByTestId("onboarding-status")).toHaveText(
 			"completed",
 			{ timeout: 6000 }
@@ -111,9 +96,7 @@ test.describe("onboarding welcome step", () => {
 		await page.goto(STORY_URL);
 		const prism = page.getByTestId("onboarding-prism-background");
 		await expect(prism.locator("canvas")).toHaveCount(1);
-		await expect(page.getByRole("heading")).toHaveText(
-			"Let's personalize your experience."
-		);
+		await expect(page.getByRole("heading")).toHaveText("Hi, I'm Ryu.");
 		await page.evaluate(
 			() =>
 				new Promise<void>((resolve) => {

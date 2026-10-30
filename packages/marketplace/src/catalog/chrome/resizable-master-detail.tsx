@@ -102,20 +102,17 @@ export default function ResizableMasterDetail({
 					<div className="min-h-0 flex-1 overflow-hidden">{list}</div>
 				</div>
 			</ResizablePanel>
-			{/* No visible divider — the floating detail card's edge separates the
-			    panes. The handle stays draggable via its invisible hit area. */}
+			{/* The detail pane's own hairline separates the panes. The handle stays
+			    draggable via its invisible hit area. */}
 			<ResizableHandle appearance="transparent" className="w-2" />
 			<ResizablePanel
 				defaultSize={DEFAULT_DETAIL_SIZE}
 				id={DETAIL_PANEL_ID}
 				minSize={40}
 			>
-				{/* Floating, rounded detail surface — mirrors the left app sidebar's
-				    floating variant and the chat workspace's right panel. */}
-				<div className="h-full p-2 pl-0">
-					<div className="scroll-fade flex size-full flex-col overflow-auto rounded-3xl border border-border/60 bg-sidebar shadow-sm dark:bg-sidebar/50">
-						{detail}
-					</div>
+				{/* Flush detail pane: a hairline and the sidebar tone, no floating card. */}
+				<div className="scroll-fade flex size-full flex-col overflow-auto border-border border-l bg-sidebar">
+					{detail}
 				</div>
 			</ResizablePanel>
 		</ResizablePanelGroup>

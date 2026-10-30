@@ -1,3 +1,5 @@
+import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { MarketplaceWallpaperPickerDialog } from "@ryu/blocks/desktop/marketplace-wallpaper-picker.tsx";
 import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
 import {
@@ -7,7 +9,15 @@ import {
 	toMarketplaceWallpaperSelection,
 } from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
 import { Button } from "@ryu/ui/components/button.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@ryu/ui/components/dropdown-menu.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useMemo, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { getPreference, setPreference } from "@/src/lib/api/preferences.ts";
 import { usePluginBackgrounds } from "@/src/lib/plugin-backgrounds.ts";
@@ -110,33 +120,30 @@ export function SpaceWallpaperCover({
 	return (
 		<section aria-label="Space cover" className="space-y-2">
 			<div
-				className="relative isolate h-44 overflow-hidden rounded-xl border bg-muted sm:h-52"
+				className="group/cover relative isolate h-44 overflow-hidden rounded-xl bg-muted sm:h-52"
 				data-testid="space-marketplace-cover"
 			>
 				{wallpaper ? (
-					<Backdrop
-						className="absolute inset-0"
-						definition={wallpaper}
-						live={false}
-						params={wallpaper.initialParams}
-					/>
-				) : (
-					<div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-muted to-background" />
-				)}
-				<div className="absolute inset-0 bg-gradient-to-r from-background/40 via-transparent to-background/10" />
-				<div className="absolute inset-0 bg-gradient-to-t from-background/75 via-background/10 to-transparent" />
-				<div className="absolute inset-0 bg-gradient-to-t from-background/75 via-background/10 to-transparent" />
-				<div className="absolute inset-x-3 top-3 flex flex-wrap justify-end gap-2">
-					{wallpaper ? (
-						<Button
-							disabled={saving || loading}
-							onClick={() => void clearWallpaper()}
-							size="sm"
-							variant="secondary"
-						>
-							Remove cover
-						</Button>
-					) : null}
+					<>
+						<Backdrop
+							className="absolute inset-0"
+							definition={wallpaper}
+							live={false}
+							params={wallpaper.initialParams}
+						/>
+						{/* One bottom scrim keeps the label legible over any cover. */}
+						<div className="absolute inset-0 bg-gradient-to-t from-background/75 via-background/10 to-transparent" />
+					</>
+				) : null}
+				{/* With a cover set, its actions wait for hover; an empty cover's only
+				    job is to be chosen, so "Choose cover" stays visible. An open menu
+				    keeps its trigger shown while the pointer is in the popup. */}
+				<div
+					className={cn(
+						"absolute top-3 right-3 flex items-center gap-1 transition-opacity duration-150 focus-within:opacity-100 group-hover/cover:opacity-100 group-hover/cover:duration-0 has-[[data-popup-open]]:opacity-100",
+						wallpaper ? "opacity-0" : "opacity-100"
+					)}
+				>
 					<Button
 						disabled={saving || loading}
 						onClick={() => setPickerOpen(true)}
@@ -145,21 +152,43 @@ export function SpaceWallpaperCover({
 					>
 						{wallpaper ? "Change cover" : "Choose cover"}
 					</Button>
+					{wallpaper ? (
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								render={
+									<Button
+										aria-label="More cover options"
+										disabled={saving || loading}
+										size="icon-sm"
+										variant="secondary"
+									>
+										<HugeiconsIcon
+											className="size-4"
+											icon={MoreHorizontalIcon}
+										/>
+									</Button>
+								}
+							/>
+							<DropdownMenuContent align="end">
+								<DropdownMenuItem onClick={() => void clearWallpaper()}>
+									Remove cover
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					) : null}
 				</div>
-				<div className="absolute inset-x-4 bottom-4 text-foreground drop-shadow-sm">
-					<p className="font-medium">{wallpaper?.label ?? "Space cover"}</p>
-					<p className="text-foreground/80 text-sm">
-						{loading
-							? "Loading cover from this node…"
-							: "Saved on this node for every device connected to it."}
+				<div className="absolute inset-x-4 bottom-4 text-foreground">
+					<p className="font-medium text-sm">
+						{wallpaper?.label ?? "Space cover"}
 					</p>
+					{loading ? (
+						<p className="text-detail text-muted-foreground">
+							Loading cover from this node…
+						</p>
+					) : null}
 				</div>
 			</div>
-			{storageError ? (
-				<p className="text-sm text-status-destructive" role="alert">
-					{storageError}
-				</p>
-			) : null}
+			{storageError ? <ErrorLine message={storageError} /> : null}
 			<MarketplaceWallpaperPickerDialog
 				onOpenChange={setPickerOpen}
 				onSelect={saveWallpaper}

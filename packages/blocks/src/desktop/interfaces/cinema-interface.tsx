@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import { AnimatePresence } from "motion/react";
 import {
@@ -17,6 +18,19 @@ import {
 	useCinemaSize,
 } from "./cinema-hooks.ts";
 import {
+	BILLBOARD_COMPACT_MAX_WIDTH,
+	billboardHeightFor,
+	COLLECTION_EMPTY,
+	NAV_COMPACT_MAX_WIDTH,
+	PANEL_SPLIT_MIN_WIDTH,
+	PREVIEW_DELAY,
+	PREVIEW_GRACE,
+	type PreviewState,
+	panelWidthFor,
+	RELATED_LIMIT,
+} from "./cinema-interface-layout.ts";
+import { CinemaInterfaceSearchEmpty } from "./cinema-interface-search-empty.tsx";
+import {
 	type CinemaCollectionId,
 	type CinemaTitle,
 	cinemaCardWidth,
@@ -35,55 +49,12 @@ import { CinemaNav, type CinemaPage } from "./cinema-nav.tsx";
 import { CINEMA_SURFACE } from "./cinema-palette.ts";
 import { CinemaPanel } from "./cinema-panel.tsx";
 import { CINEMA_POSTER_ATTRIBUTE } from "./cinema-poster.tsx";
-import { CinemaPreview, type CinemaRect } from "./cinema-preview.tsx";
+import { CinemaPreview } from "./cinema-preview.tsx";
 import { CinemaRow } from "./cinema-row.tsx";
 import { CinemaEmpty, CinemaSkeleton } from "./cinema-states.tsx";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
-
-/** How long the pointer rests on a poster before its preview grows. */
-const PREVIEW_DELAY = 450;
-/** Grace period for the pointer to travel from a poster onto its preview. */
-const PREVIEW_GRACE = 90;
-/** Below this the thread panel covers the catalogue instead of sitting beside it. */
-const PANEL_SPLIT_MIN_WIDTH = 900;
-/** Below this the nav folds its links into Browse. */
-const NAV_COMPACT_MAX_WIDTH = 760;
-/** Below this the billboard switches to its phone layout. */
-const BILLBOARD_COMPACT_MAX_WIDTH = 640;
-const RELATED_LIMIT = 6;
-
-const COLLECTION_EMPTY: Record<string, string> = {
-	attention: "Nothing needs attention. Every run finished cleanly.",
-	continue: "You're all caught up. Threads land here when an agent replies.",
-	list: "Pin a thread and it shows up here.",
-	live: "No agent is working right now.",
-};
-
-function panelWidthFor(width: number): number {
-	if (width >= 1280) {
-		return 480;
-	}
-	if (width >= 1100) {
-		return 440;
-	}
-	return 400;
-}
-
-function billboardHeightFor(width: number, frameHeight: number): number {
-	if (width < BILLBOARD_COMPACT_MAX_WIDTH) {
-		return Math.round(
-			Math.min(Math.max(width * 1.1, 440), Math.max(440, frameHeight * 0.86))
-		);
-	}
-	return Math.round(Math.min(width * 0.5625, Math.max(440, frameHeight * 0.8)));
-}
-
-interface PreviewState {
-	rect: CinemaRect;
-	threadId: string;
-}
 
 /**
  * Cinema: threads as a streaming catalogue, after Netflix on the web. A
@@ -110,6 +81,7 @@ export function CinemaInterface({
 	const hoverTimer = useRef<number | null>(null);
 	const closeTimer = useRef<number | null>(null);
 
+	const tl = useLiteralMessages();
 	const size = useCinemaSize(rootRef);
 	const now = useCinemaClock();
 	const reduceMotion = useReducedMotion();
@@ -363,24 +335,9 @@ export function CinemaInterface({
 			<CinemaGrid
 				{...posterHandlers}
 				agent={null}
-				empty={
-					<div className="flex flex-col gap-3 text-sm leading-6">
-						<p className="text-foreground">
-							Your search for &ldquo;{query.trim()}&rdquo; did not have any
-							matches.
-						</p>
-						<div className="text-muted-foreground">
-							<p>Suggestions:</p>
-							<ul className="list-disc pl-5">
-								<li>Try different keywords</li>
-								<li>Search for an agent, project, or team name</li>
-								<li>Try a word from the latest message</li>
-							</ul>
-						</div>
-					</div>
-				}
+				empty={<CinemaInterfaceSearchEmpty query={query.trim()} />}
 				gutter={gutter}
-				heading={`Results for “${query.trim()}”`}
+				heading={tl("Results for “{query}”", { query: query.trim() })}
 				onNew={startThread}
 				perRow={perRow}
 				subheading={

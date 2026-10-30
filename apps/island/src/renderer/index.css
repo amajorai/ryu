@@ -85,33 +85,14 @@
 	background: transparent;
 }
 
-/* Siri-style bottom-lit border (iOS/iPadOS/macOS 26+ look). Instead of a uniform
-   `ring`, the outline is brightest along the bottom edge and fades to invisible
-   as it wraps up the left/right sides, so the whole border only reads at the
-   bottom. Implemented as a masked gradient ring: a `::after` fills the shape,
-   paints a radial highlight anchored below-center, then a border-box XOR mask
-   punches out the interior so only a 1.5px rim remains. `border-radius: inherit`
-   tracks the parent's animated radius; `pointer-events: none` keeps it inert. */
-.island-siri-border::after {
-	position: absolute;
-	inset: 0;
-	z-index: 2;
-	padding: 1.5px;
-	pointer-events: none;
-	content: "";
-	background: radial-gradient(
-		130% 150% at 50% 118%,
-		color-mix(in srgb, var(--ring) 90%, transparent) 0%,
-		color-mix(in srgb, var(--ring) 45%, transparent) 28%,
-		color-mix(in srgb, var(--ring) 12%, transparent) 48%,
-		transparent 64%
-	);
-	border-radius: inherit;
-	-webkit-mask:
-		linear-gradient(#000 0 0) content-box,
-		linear-gradient(#000 0 0);
-	-webkit-mask-composite: xor;
-	mask-composite: exclude;
+/* Reduced transparency: the Island's shapes drop their blur and their token
+   fill turns solid (the fill classes carry their own solid fallback). */
+@media (prefers-reduced-transparency: reduce) {
+	[data-island-material-shape],
+	[data-island-material-shape] * {
+		-webkit-backdrop-filter: none !important;
+		backdrop-filter: none !important;
+	}
 }
 
 @utility island-gap {
@@ -119,9 +100,6 @@
 }
 @utility island-row-offset {
 	margin-left: var(--island-row-offset);
-}
-@utility island-stack-offset {
-	margin-top: var(--island-stack-offset);
 }
 @utility island-surface-width {
 	width: var(--island-surface-width);

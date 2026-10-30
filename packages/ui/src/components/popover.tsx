@@ -205,7 +205,7 @@ function PopoverContent({
 			>
 				<PopoverPrimitive.Popup
 					className={cn(
-						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 flex w-72 origin-(--transform-origin) flex-col gap-4 rounded-3xl border border-border/50 bg-popover/70 p-4 text-popover-foreground text-sm outline-hidden backdrop-blur-2xl backdrop-saturate-150 duration-(--dropdown-open-dur) ease-(--dropdown-ease) before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur)",
+						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 flex w-72 origin-(--transform-origin) flex-col gap-4 rounded-xl border border-border bg-popover p-4 text-popover-foreground text-sm shadow-(--shadow-popover) outline-hidden duration-(--dropdown-open-dur) ease-(--dropdown-ease) data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur)",
 						spacing === "compact" && "gap-2 p-2",
 						spacing === "rail" && "p-3",
 						spacing === "flush" && "p-0",
@@ -215,12 +215,10 @@ function PopoverContent({
 						spacing === "small-inset" && "p-1",
 						spacing === "choice-grid" && "gap-1 p-2",
 						spacing === "form" && "gap-3",
-						corners === "rounded" && "rounded-2xl",
+						corners === "rounded" && "rounded-xl",
 						appearance === "message-read-list" && "gap-3 bg-popover p-3",
 						appearance === "agent-recipient-list" &&
 							"w-72 gap-1 bg-popover p-1.5",
-						appearance === "composer-menu" &&
-							"border-border/70 bg-popover/95 shadow-xl",
 						className
 					)}
 					data-slot="popover-content"

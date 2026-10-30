@@ -10,7 +10,14 @@ import {
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { getPreference, setPreference } from "@/src/lib/api/preferences.ts";
-import { EnumField, FieldGrid, FieldGroup, NumberField } from "./fields.tsx";
+import {
+	EnumField,
+	FieldGrid,
+	FieldGroup,
+	InferenceLoadError,
+	InferenceSaveError,
+	NumberField,
+} from "./fields.tsx";
 
 const PREFERENCE_KEY = "engine.audiocpp.runtime";
 
@@ -82,8 +89,8 @@ function AudioCppSettingsEditor({
 	});
 
 	return (
-		<SettingsSection caption="Configure audio.cpp's hardware use. Changes take effect when the audio.cpp sidecar next starts.">
-			<SettingsCard className="flex flex-col gap-5">
+		<SettingsSection caption="audio.cpp hardware use. Applies when the sidecar next starts.">
+			<SettingsCard className="flex flex-col gap-4">
 				<FieldGroup title="Runtime">
 					<FieldGrid>
 						<EnumField
@@ -144,6 +151,7 @@ function AudioCppSettingsEditor({
 						disabled={save.isPending}
 						loading={save.isPending}
 						onClick={() => save.mutate(draft)}
+						variant="outline"
 					>
 						Save audio.cpp settings
 					</Button>
@@ -151,11 +159,10 @@ function AudioCppSettingsEditor({
 						<span className="text-muted-foreground text-xs">Saved</span>
 					) : null}
 					{save.isError ? (
-						<p className="text-status-destructive text-xs" role="alert">
-							{save.error instanceof Error
-								? save.error.message
-								: "Could not save audio.cpp settings"}
-						</p>
+						<InferenceSaveError
+							error={save.error}
+							message="Couldn't save audio.cpp settings."
+						/>
 					) : null}
 				</div>
 			</SettingsCard>
@@ -182,23 +189,11 @@ export function AudioCppEngineSettings() {
 	}
 	if (query.isError && !query.data) {
 		return (
-			<div
-				className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
-				role="alert"
-			>
-				<p className="text-sm text-status-destructive">
-					Could not load audio.cpp settings.
-				</p>
-				<Button
-					disabled={query.isFetching}
-					loading={query.isFetching}
-					onClick={() => void query.refetch()}
-					size="sm"
-					variant="outline"
-				>
-					Retry
-				</Button>
-			</div>
+			<InferenceLoadError
+				error={query.error}
+				message="Couldn't load audio.cpp settings."
+				onRetry={() => void query.refetch()}
+			/>
 		);
 	}
 	return query.data ? (

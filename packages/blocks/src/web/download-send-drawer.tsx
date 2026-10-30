@@ -8,7 +8,7 @@ import {
 	DrawerFooter,
 	DrawerHeader,
 	DrawerTitle,
-} from "@ryu/ui/components/drawer";
+} from "@ryu/ui/components/drawer.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { Check, Copy, Mail, MessageCircle, Share } from "lucide-react";

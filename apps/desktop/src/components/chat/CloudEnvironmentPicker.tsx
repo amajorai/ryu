@@ -1,6 +1,5 @@
 import { CLOUD_TASKS_BOX_BACKEND_FLAG } from "@ryu/auth/lib/feature-flags";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -15,8 +14,8 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
-import { useEffect, useState } from "react";
-import { CloudEnvironmentsSettings } from "@/src/components/gateway/CloudEnvironmentsSettings.tsx";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { WORKSPACE_SELECT_TRIGGER } from "@/components/agent-elements/input/composer-select.ts";
 import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -30,6 +29,14 @@ import {
 	useCloudTaskSelections,
 } from "@/src/lib/cloud-task-selection.ts";
 import { CloudGithubConnectionDialog } from "./CloudGithubConnectionDialog.tsx";
+import { InlineErrorRow } from "./InlineErrorRow.tsx";
+
+// The environment editor only renders inside the Manage dialog.
+const CloudEnvironmentsSettings = lazy(() =>
+	import("@/src/components/gateway/CloudEnvironmentsSettings.tsx").then(
+		(module) => ({ default: module.CloudEnvironmentsSettings })
+	)
+);
 
 export function CloudEnvironmentPicker({
 	target,
@@ -113,6 +120,8 @@ export function CloudEnvironmentPicker({
 			<div className="flex flex-wrap items-center gap-1">
 				<Button
 					aria-pressed={cloud}
+					// The same chip as the computer and project triggers beside it.
+					className={`${WORKSPACE_SELECT_TRIGGER} font-normal text-muted-foreground`}
 					disabled={
 						!scope ||
 						locked ||
@@ -148,6 +157,7 @@ export function CloudEnvironmentPicker({
 							render={
 								<Button
 									aria-label="Choose cloud environment"
+									className={WORKSPACE_SELECT_TRIGGER}
 									size="sm"
 									variant="ghost"
 								/>
@@ -172,16 +182,11 @@ export function CloudEnvironmentPicker({
 									</p>
 								) : null}
 								{error ? (
-									<div className="space-y-2 text-sm" role="alert">
-										<p>{error}</p>
-										<Button
-											onClick={() => setReload((value) => value + 1)}
-											size="sm"
-											variant="outline"
-										>
-											Retry
-										</Button>
-									</div>
+									<InlineErrorRow
+										details={error}
+										message="Couldn't load cloud environments."
+										onRetry={() => setReload((value) => value + 1)}
+									/>
 								) : null}
 								<div className="max-h-60 space-y-1 overflow-y-auto">
 									{profiles
@@ -236,16 +241,16 @@ export function CloudEnvironmentPicker({
 													) : null}
 													{boxBackendEnabled &&
 													profile.runtime?.backend === "box" ? (
-														<Badge typography="micro" variant="secondary">
+														<span className="text-muted-foreground text-xs">
 															Fresh box
-														</Badge>
+														</span>
 													) : null}
 													{boxBackendEnabled &&
 													profile.runtime &&
 													profile.runtime.executor !== "ryu" ? (
-														<Badge typography="micro" variant="secondary">
+														<span className="text-muted-foreground text-xs">
 															{CLOUD_EXECUTOR_LABELS[profile.runtime.executor]}
-														</Badge>
+														</span>
 													) : null}
 												</Button>
 											);
@@ -308,22 +313,18 @@ export function CloudEnvironmentPicker({
 					</Popover>
 				) : null}
 				{selection.mode === "loading" ? (
-					<p className="text-muted-foreground text-xs" role="status">
+					<p className="text-detail text-muted-foreground" role="status">
 						Loading chat environment…
 					</p>
 				) : null}
 				{selection.mode === "error" ? (
-					<div
-						className="space-y-1 text-status-destructive text-xs"
-						role="alert"
-					>
-						<p>{selection.message}</p>
-						{onRetry ? (
-							<Button onClick={onRetry} size="sm" variant="outline">
-								Reload chat environment
-							</Button>
-						) : null}
-					</div>
+					// One sentence plus Retry; the raw failure (status line, URL)
+					// stays behind "Copy details".
+					<InlineErrorRow
+						details={selection.message}
+						message="Couldn't load the chat environment."
+						onRetry={onRetry}
+					/>
 				) : null}
 			</div>
 			<Dialog
@@ -344,12 +345,14 @@ export function CloudEnvironmentPicker({
 						</DialogDescription>
 					</DialogHeader>
 					{manage ? (
-						<CloudEnvironmentsSettings
-							initialRepository={repositoryDraft?.repository}
-							initialVaultKey={repositoryDraft?.vaultKey}
-							startCreate={manage === "create"}
-							target={target}
-						/>
+						<Suspense fallback={null}>
+							<CloudEnvironmentsSettings
+								initialRepository={repositoryDraft?.repository}
+								initialVaultKey={repositoryDraft?.vaultKey}
+								startCreate={manage === "create"}
+								target={target}
+							/>
+						</Suspense>
 					) : null}
 				</DialogContent>
 			</Dialog>

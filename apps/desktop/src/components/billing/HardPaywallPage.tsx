@@ -4,8 +4,9 @@
 // this is a full-page, non-dismissible gate rendered INSTEAD of the app shell
 // once the trial has expired with no active subscription and no valid desktop
 // license key (`verdict.paywalled`). The user cannot use the app until they:
-//   - activate a desktop license key (validated via the control plane → Polar),
 //   - buy Lifetime access or subscribe to Pro (the two headline options),
+//   - activate a desktop license key (a quiet footer action; validated via the
+//     control plane → Polar),
 //   - expand "Want to run ryu 24/7?" for the Max plan (+ Ryu Cloud hosting), or
 //   - expand "Other plans" for the Teams agent plan.
 //
@@ -33,11 +34,9 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { FieldSeparator } from "@ryu/ui/components/field.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Logo as OrbLogo } from "@ryu/ui/components/logo.tsx";
 import { PageHeader } from "@ryu/ui/components/page-header.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
 import { useState } from "react";
 import { sileo } from "sileo";
@@ -184,34 +183,19 @@ export function HardPaywallPage({ onApplyLicenseKey }: HardPaywallPageProps) {
 				data-tauri-drag-region="true"
 			/>
 			<div className="scroll-fade min-h-0 flex-1 overflow-y-auto">
-				<div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center gap-8 px-6 pt-10 pb-16">
-					<StaggerReveal>
-						<div className="flex w-full max-w-md flex-col items-center gap-6">
-							<div className="shrink-0">
-								<OrbLogo size="50px" variant="outline" />
-							</div>
-
-							<PageHeader
-								className="w-full text-center"
-								stagger={false}
-								subtitle="Get Lifetime or Pro to keep sync, pro agents, and cloud models on every device."
-								title="Choose a plan"
-								titleClassName="text-center"
-							/>
+				<div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center gap-8 px-6 pt-12 pb-16">
+					<div className="flex w-full max-w-md flex-col items-center gap-6">
+						<div className="shrink-0">
+							<OrbLogo size="32px" variant="outline" />
 						</div>
-					</StaggerReveal>
 
-					<div className="mx-auto flex w-full max-w-xs flex-col items-center gap-4">
-						<Button
-							className="w-full"
-							onClick={() => setLicenseDialogOpen(true)}
-							size="lg"
-							type="button"
-							variant="mono"
-						>
-							I have a license key
-						</Button>
-						<FieldSeparator className="">or</FieldSeparator>
+						<PageHeader
+							className="w-full text-center"
+							size="app"
+							subtitle="Lifetime or Pro keeps sync, pro agents and cloud models on every device."
+							title="Choose a plan"
+							titleClassName="text-balance text-center"
+						/>
 					</div>
 
 					<Dialog onOpenChange={setLicenseDialogOpen} open={licenseDialogOpen}>
@@ -243,6 +227,7 @@ export function HardPaywallPage({ onApplyLicenseKey }: HardPaywallPageProps) {
 									onClick={() => {
 										handleValidate().catch(() => undefined);
 									}}
+									variant="mono"
 								>
 									<TextSwap>{validating ? "Checking…" : "Activate"}</TextSwap>
 								</Button>
@@ -282,7 +267,16 @@ export function HardPaywallPage({ onApplyLicenseKey }: HardPaywallPageProps) {
 						/>
 					</div>
 
-					<footer className="flex items-center justify-center gap-4 text-sm">
+					<footer className="flex flex-wrap items-center justify-center gap-2 text-sm">
+						{/* The license path is for people who already bought: a quiet
+						    footer action, not the first thing on the page. */}
+						<Button
+							onClick={() => setLicenseDialogOpen(true)}
+							type="button"
+							variant="ghost"
+						>
+							I have a license key
+						</Button>
 						<Button
 							disabled={switchingAccount}
 							onClick={() => {

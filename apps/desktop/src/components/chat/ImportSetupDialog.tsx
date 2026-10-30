@@ -30,6 +30,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { Empty, EmptyDescription } from "@ryu/ui/components/empty.tsx";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useState } from "react";
@@ -276,7 +277,7 @@ export function ImportSetupDialog({
 				)}
 
 				{error && (
-					<p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
+					<p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
 						{error}
 					</p>
 				)}
@@ -329,9 +330,11 @@ export function ImportSetupDialog({
 						)}
 
 						{items.length === 0 ? (
-							<p className="rounded-xl border border-border border-dashed px-3 py-8 text-center text-muted-foreground text-sm">
-								Nothing importable found in this folder.
-							</p>
+							<Empty spacing="compact">
+								<EmptyDescription>
+									Nothing importable found in this folder.
+								</EmptyDescription>
+							</Empty>
 						) : (
 							<ScrollArea className="h-72 min-w-0">
 								<div className="flex flex-col gap-3 pr-2">

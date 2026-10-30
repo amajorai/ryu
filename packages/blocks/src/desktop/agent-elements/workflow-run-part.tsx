@@ -145,7 +145,7 @@ function WorkflowResumePrompt({
 			aria-label={tl("Resume workflow {workflowName}", {
 				workflowName: run.workflowName,
 			})}
-			className="mt-2 flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/20 p-3"
+			className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-3"
 			onSubmit={submit}
 		>
 			<p className="font-medium text-sm">This workflow is waiting for input.</p>

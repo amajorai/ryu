@@ -83,22 +83,22 @@ export function ChatSearchBar({
 	return (
 		<div
 			aria-label="Chat search"
-			className="pointer-events-auto absolute top-2 right-4 z-30 flex max-w-[calc(100%-2rem)] items-center gap-1 rounded-xl border border-border/70 bg-popover/95 p-1 shadow-lg backdrop-blur-xl"
+			className="pointer-events-auto absolute top-2 right-4 z-30 flex max-w-[calc(100%-2rem)] items-center gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-lg"
 			data-testid="chat-search-bar"
 			role="search"
 		>
 			<div
 				aria-label="Search mode"
-				className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/70 p-0.5"
+				className="flex shrink-0 items-center gap-0.5"
 				role="group"
 			>
 				<button
 					aria-pressed={mode === "chat"}
 					className={cn(
-						"flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition-colors",
+						"flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm transition-colors duration-150 hover:duration-0",
 						mode === "chat"
-							? "bg-background text-foreground shadow-sm"
-							: "text-muted-foreground hover:text-foreground"
+							? "bg-accent text-foreground"
+							: "text-muted-foreground hover:bg-muted hover:text-foreground"
 					)}
 					data-testid="chat-search-mode-chat"
 					onClick={() => onModeChange("chat")}
@@ -110,10 +110,10 @@ export function ChatSearchBar({
 				<button
 					aria-pressed={mode === "files"}
 					className={cn(
-						"flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition-colors",
+						"flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm transition-colors duration-150 hover:duration-0",
 						mode === "files"
-							? "bg-background text-foreground shadow-sm"
-							: "text-muted-foreground hover:text-foreground"
+							? "bg-accent text-foreground"
+							: "text-muted-foreground hover:bg-muted hover:text-foreground"
 					)}
 					data-testid="chat-search-mode-files"
 					onClick={() => onModeChange("files")}
@@ -124,7 +124,7 @@ export function ChatSearchBar({
 				</button>
 			</div>
 
-			<div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1 focus-within:ring-1 focus-within:ring-ring">
+			<div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 focus-within:ring-1 focus-within:ring-ring">
 				<HugeiconsIcon
 					className="size-4 shrink-0 text-muted-foreground"
 					icon={Search01Icon}
@@ -133,7 +133,7 @@ export function ChatSearchBar({
 					aria-label={
 						mode === "chat" ? "Search chat messages" : "Search project files"
 					}
-					className="h-8 min-w-24 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+					className="h-8 min-w-24 flex-1 bg-transparent text-sm caret-foreground outline-none placeholder:text-muted-foreground"
 					data-testid="chat-search-input"
 					onChange={(event) => onQueryChange(event.target.value)}
 					onKeyDown={handleKeyDown}
@@ -144,7 +144,7 @@ export function ChatSearchBar({
 				/>
 				<span
 					aria-live="polite"
-					className="shrink-0 whitespace-nowrap text-muted-foreground text-xs"
+					className="shrink-0 whitespace-nowrap text-muted-foreground/70 text-xs tabular-nums"
 					data-testid="chat-search-status"
 				>
 					{status}
@@ -155,41 +155,39 @@ export function ChatSearchBar({
 				<div className="flex shrink-0 items-center gap-0.5">
 					<Button
 						aria-label="Previous chat match"
-						className="size-7"
 						disabled={!chatHasMatches}
 						onClick={onPreviousMatch}
-						size="icon"
+						size="icon-sm"
 						type="button"
-						variant="ghost"
+						variant="ghost-muted"
 					>
-						<HugeiconsIcon className="size-3.5" icon={ArrowUp01Icon} />
+						<HugeiconsIcon className="size-4" icon={ArrowUp01Icon} />
 					</Button>
 					<Button
 						aria-label="Next chat match"
-						className="size-7"
 						disabled={!chatHasMatches}
 						onClick={onNextMatch}
-						size="icon"
+						size="icon-sm"
 						type="button"
-						variant="ghost"
+						variant="ghost-muted"
 					>
-						<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
+						<HugeiconsIcon className="size-4" icon={ArrowDown01Icon} />
 					</Button>
 				</div>
 			)}
 
-			<span className="type-compact hidden shrink-0 px-1 text-muted-foreground lg:inline">
+			<span className="hidden shrink-0 px-1 text-muted-foreground/70 text-xs lg:inline">
 				Ctrl/Cmd+F switches
 			</span>
 			<Button
 				aria-label="Close chat search"
-				className="size-7 shrink-0"
+				className="shrink-0"
 				onClick={onClose}
-				size="icon"
+				size="icon-sm"
 				type="button"
-				variant="ghost"
+				variant="ghost-muted"
 			>
-				<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
+				<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 			</Button>
 		</div>
 	);

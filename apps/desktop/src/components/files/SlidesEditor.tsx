@@ -126,7 +126,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 							aria-label={tl("Open slide {slideNumber}", {
 								slideNumber: String(index + 1),
 							})}
-							className={`mb-2 w-full rounded-md border p-1 text-left transition-colors ${
+							className={`mb-2 w-full rounded-lg border p-1 text-left transition-colors ${
 								index === activeSlide
 									? "border-primary bg-primary/5"
 									: "border-border bg-background hover:bg-muted"

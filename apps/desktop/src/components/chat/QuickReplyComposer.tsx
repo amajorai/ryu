@@ -55,7 +55,7 @@ export function QuickReplyComposer({
 					className="!px-0 !pb-0"
 					compact
 					composerHeader={
-						<div className="flex min-w-0 items-center justify-between gap-3 border-border/50 border-b px-3 py-2">
+						<div className="flex min-w-0 items-center justify-between gap-3 border-border border-b px-3 py-2">
 							<div className="flex min-w-0 items-center gap-2 text-xs">
 								<HugeiconsIcon
 									className="size-3.5 shrink-0 text-primary"

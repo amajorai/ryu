@@ -40,7 +40,7 @@ function OnOffToggle({
 	return (
 		<fieldset
 			aria-label={ariaLabel}
-			className="m-0 inline-flex min-w-0 items-center rounded-md border p-0.5"
+			className="m-0 inline-flex min-w-0 items-center rounded-lg border p-0.5"
 		>
 			{ON_OFF.map((opt) => (
 				<Button
@@ -98,7 +98,7 @@ export function OrchestrationPanel({
 
 	return (
 		<SettingsSection
-			caption="Whether this agent can hand work to other agents, and whether it may create new ones. Delegation targets a real agent (its own tools and persona); creation is gated because a created agent can be granted tools."
+			caption="Whether this agent can hand work to other agents, or create new ones."
 			title="Orchestration"
 		>
 			<SettingsGroup>

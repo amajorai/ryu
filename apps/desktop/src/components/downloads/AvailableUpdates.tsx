@@ -114,7 +114,7 @@ function PageUpdateRow({
 					</Badge>
 				</div>
 				{version && (
-					<span className="type-caption truncate text-muted-foreground tabular-nums leading-tight">
+					<span className="truncate text-muted-foreground text-xs tabular-nums leading-tight">
 						{version}
 					</span>
 				)}

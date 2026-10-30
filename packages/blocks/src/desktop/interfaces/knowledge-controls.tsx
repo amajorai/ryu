@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	InputGroup,
@@ -5,8 +6,6 @@ import {
 	InputGroupButton,
 	InputGroupInput,
 } from "@ryu/ui/components/input-group.tsx";
-import { Slider } from "@ryu/ui/components/slider.tsx";
-import { Switch } from "@ryu/ui/components/switch.tsx";
 import {
 	ToggleGroup,
 	ToggleGroupItem,
@@ -17,10 +16,8 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { ChevronRight, RotateCcw, Search, Settings2, X } from "lucide-react";
+import { RotateCcw, Search, Settings2, X } from "lucide-react";
 import {
-	type KeyboardEvent,
-	type ReactNode,
 	type RefObject,
 	useCallback,
 	useId,
@@ -28,12 +25,9 @@ import {
 	useRef,
 	useState,
 } from "react";
-import {
-	displayLabel,
-	KIND_LABELS,
-	type KnowledgeNode,
-	type KnowledgeSettings,
-} from "./knowledge-model.ts";
+import { Section, SliderRow, ToggleRow } from "./knowledge-controls-rows.tsx";
+import { SearchResults } from "./knowledge-controls-search.tsx";
+import type { KnowledgeNode, KnowledgeSettings } from "./knowledge-model.ts";
 import { HintButton } from "./knowledge-parts.tsx";
 
 /**
@@ -52,232 +46,6 @@ const SLIDER_SECTIONS: Partial<Record<SectionKey, SectionKey>> = {
 	display: "forces",
 	forces: "display",
 };
-
-const SLIDER =
-	"[&_[data-slot=slider-thumb]]:size-3.5 [&_[data-slot=slider-thumb]]:rounded-full [&_[data-slot=slider-track]]:h-1";
-
-function Section({
-	children,
-	onToggle,
-	open,
-	title,
-}: {
-	children: ReactNode;
-	onToggle: () => void;
-	open: boolean;
-	title: string;
-}) {
-	const contentId = useId();
-	return (
-		<section className="border-border border-t first:border-t-0">
-			<h4>
-				<button
-					aria-controls={contentId}
-					aria-expanded={open}
-					className="flex h-9 w-full items-center gap-1.5 px-3 text-left font-medium text-foreground text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-					onClick={onToggle}
-					type="button"
-				>
-					<ChevronRight
-						aria-hidden="true"
-						className={cn(
-							"size-3.5 text-foreground/55 transition-transform duration-150 motion-reduce:transition-none",
-							open && "rotate-90"
-						)}
-					/>
-					{title}
-				</button>
-			</h4>
-			{open ? (
-				<div className="flex flex-col gap-1 px-3 pt-0.5 pb-3" id={contentId}>
-					{children}
-				</div>
-			) : null}
-		</section>
-	);
-}
-
-function ToggleRow({
-	checked,
-	inset = false,
-	label,
-	name,
-	onChange,
-}: {
-	checked: boolean;
-	/** A sub-option of the row above it. */
-	inset?: boolean;
-	label: string;
-	name: string;
-	onChange: (checked: boolean) => void;
-}) {
-	const id = useId();
-	return (
-		<div
-			className={cn(
-				"flex h-8 items-center justify-between gap-3",
-				inset && "ms-1.5 border-border border-s ps-3"
-			)}
-		>
-			<label className="min-w-0 truncate text-foreground text-sm" htmlFor={id}>
-				{label}
-			</label>
-			<Switch
-				aria-label={name}
-				checked={checked}
-				className="data-unchecked:bg-foreground/20"
-				id={id}
-				onCheckedChange={(next) => onChange(next)}
-				size="sm"
-			/>
-		</div>
-	);
-}
-
-function SliderRow({
-	label,
-	max,
-	min,
-	onChange,
-	step,
-	value,
-}: {
-	label: string;
-	max: number;
-	min: number;
-	onChange: (value: number) => void;
-	step: number;
-	value: number;
-}) {
-	const id = useId();
-	return (
-		<div className="flex flex-col gap-2 py-1.5">
-			<span className="text-foreground text-sm" id={id}>
-				{label}
-			</span>
-			<Slider
-				aria-labelledby={id}
-				className={SLIDER}
-				max={max}
-				min={min}
-				onValueChange={(next) => {
-					const value = Array.isArray(next) ? next[0] : next;
-					if (typeof value === "number") {
-						onChange(value);
-					}
-				}}
-				step={step}
-				value={value}
-			/>
-		</div>
-	);
-}
-
-/** Matches shown under the search field; the rest are counted. */
-const MAX_RESULTS = 6;
-
-/** A result's name with the matched part set in the foreground. */
-function Highlighted({ query, text }: { query: string; text: string }) {
-	const needle = query.trim().toLowerCase();
-	const at = needle ? text.toLowerCase().indexOf(needle) : -1;
-	if (at < 0) {
-		return <>{text}</>;
-	}
-	return (
-		<>
-			{text.slice(0, at)}
-			<mark className="bg-transparent font-medium text-foreground">
-				{text.slice(at, at + needle.length)}
-			</mark>
-			{text.slice(at + needle.length)}
-		</>
-	);
-}
-
-const RESULTS_SURFACE =
-	"mt-1 rounded-md border border-border bg-background/70 p-1";
-
-/**
- * Search hits, inline under the field (the settings below move down rather
- * than being covered), reachable by name: Arrow Down from the field moves
- * into the list.
- */
-function SearchResults({
-	listRef,
-	onPick,
-	query,
-	results,
-	searchRef,
-}: {
-	listRef: RefObject<HTMLUListElement | null>;
-	onPick: (id: string) => void;
-	query: string;
-	results: readonly KnowledgeNode[];
-	searchRef: RefObject<HTMLInputElement | null>;
-}) {
-	if (results.length === 0) {
-		return (
-			<p
-				className={cn(
-					RESULTS_SURFACE,
-					"flex h-9 items-center px-2 text-muted-foreground text-xs"
-				)}
-			>
-				No matching nodes
-			</p>
-		);
-	}
-	const move = (event: KeyboardEvent<HTMLButtonElement>, step: 1 | -1) => {
-		event.preventDefault();
-		const buttons = [
-			...(listRef.current?.querySelectorAll("button") ?? []),
-		] as HTMLButtonElement[];
-		const index = buttons.indexOf(event.currentTarget);
-		const next = buttons[index + step];
-		if (next) {
-			next.focus();
-		} else if (step === -1) {
-			searchRef.current?.focus();
-		}
-	};
-	const extra = results.length - MAX_RESULTS;
-	return (
-		<ul
-			aria-label="Matching nodes"
-			className={cn(RESULTS_SURFACE, "flex flex-col")}
-			ref={listRef}
-		>
-			{results.slice(0, MAX_RESULTS).map((node) => (
-				<li key={node.id}>
-					<button
-						className="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-						onClick={() => onPick(node.id)}
-						onKeyDown={(event) => {
-							if (event.key === "ArrowDown") {
-								move(event, 1);
-							} else if (event.key === "ArrowUp") {
-								move(event, -1);
-							}
-						}}
-						type="button"
-					>
-						<span className="min-w-0 flex-1 truncate text-foreground/80 text-sm">
-							<Highlighted query={query} text={displayLabel(node)} />
-						</span>
-						<span className="shrink-0 text-muted-foreground text-xs">
-							{KIND_LABELS[node.kind]}
-						</span>
-					</button>
-				</li>
-			))}
-			{extra > 0 ? (
-				<li className="flex h-6 items-center px-2 text-muted-foreground text-xs tabular-nums">
-					{extra} more
-				</li>
-			) : null}
-		</ul>
-	);
-}
 
 export function KnowledgeControls({
 	hasSelection,
@@ -309,6 +77,7 @@ export function KnowledgeControls({
 	/** Topics in the workspace graph (before filters). */
 	topicCount: number;
 }) {
+	const tl = useLiteralMessages();
 	const listRef = useRef<HTMLUListElement>(null);
 	const matchCount = results.length;
 	const local = settings.mode === "local";
@@ -481,7 +250,7 @@ export function KnowledgeControls({
 								>
 									{(["1", "2"] as const).map((depth) => (
 										<ToggleGroupItem
-											aria-label={`Depth ${depth}`}
+											aria-label={tl("Depth {depth}", { depth })}
 											className="h-6 min-w-8 px-2 text-foreground/70 tabular-nums opacity-100 hover:text-foreground aria-pressed:bg-muted aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-none"
 											density="segmented"
 											key={depth}

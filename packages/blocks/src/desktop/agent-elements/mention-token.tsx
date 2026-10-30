@@ -1,5 +1,6 @@
+import { AtIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { IconAt } from "@tabler/icons-react";
 import type { CSSProperties, ReactNode } from "react";
 import styles from "./elements-one.module.css";
 import type { MentionItem } from "./types.ts";
@@ -47,7 +48,7 @@ export function MentionToken({ children, className, item }: MentionTokenProps) {
 				aria-hidden="true"
 				className="inline-flex size-3.5 shrink-0 items-center justify-center [&>svg]:size-3.5"
 			>
-				{icon ?? <IconAt className="size-3.5" />}
+				{icon ?? <HugeiconsIcon className="size-3.5" icon={AtIcon} />}
 			</span>
 			<span className="min-w-0 truncate">{children}</span>
 		</span>

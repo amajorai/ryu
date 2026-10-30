@@ -47,11 +47,11 @@ export const DETAIL_SIZES = {
 	idle: { width: 96, height: 40, radius: 20 },
 	context: { width: 200, height: 40, radius: 20 },
 	recording: { width: 200, height: 40, radius: 20 },
-	// Slimmer than before: the Accept/Snooze/Dismiss actions no longer sit inside
-	// the chip. They split out as their own mini-islands in the row beneath it, so
-	// the chip only carries the title + body + auto-collapse bar now.
+	// The chip carries the title, body and its one row of actions (Accept,
+	// Dismiss, More); it measures its content and grows past this floor.
 	suggestion: { width: 300, height: 62, radius: 20 },
-	expanded: { width: 400, height: 480, radius: 28 },
+	// `rounded-2xl`: the one radius the open widget and the Island panel share.
+	expanded: { width: 400, height: 480, radius: 16 },
 } satisfies Record<DetailState, IslandSize>;
 
 /**
@@ -101,33 +101,21 @@ export function pillOverflows(contentHeight: number): boolean {
  * row) and MAX (a few rows, after which the textarea scrolls internally).
  */
 export const EXPANDED_COMPACT_WIDTH = 400;
-export const EXPANDED_COMPACT_RADIUS = 22;
+export const EXPANDED_COMPACT_RADIUS = 16;
 /** Vertical padding (px) added around the composer — matches the content `py-2`. */
 export const EXPANDED_COMPACT_VPAD = 16;
+/** The chat's `h-10` header plus the `gap-2` under it, above the composer. */
+export const EXPANDED_COMPACT_HEADER = 48;
 /** Floor: a single composer row. */
 export const EXPANDED_COMPACT_MIN_H = 44;
 /** Ceiling: after this the textarea scrolls instead of growing the island. */
 export const EXPANDED_COMPACT_MAX_H = 140;
 
-/**
- * The action mini-islands that split out in a row below the suggestion chip.
- * Each is a sibling shape of the detail island (outside its clip) that morphs
- * open with the same width-grow as the long island does from idle, so the row
- * reads as "buttons splitting out of the chip". Fixed width keeps the acrylic
- * footprint deterministic (no label-length guessing) and lets the width animate
- * from 0 to a known target the way the detail island animates open.
- */
-export const ACTION_PILL_WIDTH = 72;
-/** Height (px) of each action mini-island. */
-export const ACTION_PILL_HEIGHT = 30;
-/** Vertical gap (px) between the suggestion chip and the action-pill row. */
-export const SUGGESTION_STACK_GAP = 8;
-
 /** Native blur follows each painted shape, leaving the split gaps transparent. */
 export function islandMaterialContours(
 	showCircle: boolean,
 	detail: IslandSize | null,
-	state: IslandState
+	_state: IslandState
 ): IslandMaterialContour[] {
 	const contours: IslandMaterialContour[] = [];
 	if (showCircle) {
@@ -139,22 +127,6 @@ export function islandMaterialContours(
 			y: 0,
 			...detail,
 		});
-	}
-	if (state === "suggestion" && detail) {
-		const y =
-			Math.max(LOGO_CIRCLE.height, detail.height) + SUGGESTION_STACK_GAP;
-		for (let index = 0; index < 3; index += 1) {
-			contours.push({
-				x:
-					LOGO_CIRCLE.width +
-					SPLIT_GAP +
-					index * (ACTION_PILL_WIDTH + SPLIT_GAP),
-				y,
-				width: ACTION_PILL_WIDTH,
-				height: ACTION_PILL_HEIGHT,
-				radius: ACTION_PILL_HEIGHT / 2,
-			});
-		}
 	}
 	return contours;
 }

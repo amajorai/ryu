@@ -1,7 +1,6 @@
 import { Logo } from "@ryu/ui/components/logo.tsx";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
-import { AssistantPanel } from "./AssistantPanel.tsx";
 import { MorphPopover } from "./MorphPopover.tsx";
 import { ISLAND_CHROME, ISLAND_FILL } from "./skin.ts";
 
@@ -14,6 +13,17 @@ const EYES_SIZE = "34px";
 const PANEL_WIDTH = 400;
 const PANEL_MAX_HEIGHT = 620;
 const PANEL_VIEWPORT_MARGIN = 32;
+
+// The panel (and its chat graph) loads on first open, not with the shell. The
+// shell's docked layout lazy-loads the same module, so both share one chunk.
+const loadAssistantPanel = () =>
+	import("./AssistantPanel.tsx").then((module) => ({
+		default: module.AssistantPanel,
+	}));
+const AssistantPanel = lazy(loadAssistantPanel);
+function warmAssistantPanel(): void {
+	loadAssistantPanel().catch(() => undefined);
+}
 
 /**
  * The always-present Ask Ryu surface. When closed it's a round button wearing the
@@ -74,12 +84,21 @@ export function AssistantDock() {
 			trigger={
 				// The island's exact eyes: 34px in a 40px circle, drawn in the skin's
 				// light text color (currentColor) on the dark glass.
-				<Logo size={EYES_SIZE} tone="inherit" variant="eyes" />
+				// Pointing at the launcher warms the panel chunk, so the morph opens
+				// onto the real panel rather than an empty frame.
+				<span
+					className="flex items-center justify-center"
+					onPointerEnter={warmAssistantPanel}
+				>
+					<Logo size={EYES_SIZE} tone="inherit" variant="eyes" />
+				</span>
 			}
 			triggerLabel="Ask Ryu"
 			triggerSize={TRIGGER_SIZE}
 		>
-			<AssistantPanel bare />
+			<Suspense fallback={null}>
+				<AssistantPanel bare />
+			</Suspense>
 		</MorphPopover>
 	);
 }

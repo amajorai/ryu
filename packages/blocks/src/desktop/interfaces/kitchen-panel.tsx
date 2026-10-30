@@ -1,15 +1,14 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	InterfaceAgentAct,
 	InterfaceThread,
 } from "@ryuhq/protocol/interfaces";
-import { threadStatus } from "@ryuhq/protocol/interfaces";
-import { type ReactNode, type Ref, useState } from "react";
+import type { ReactNode, Ref } from "react";
 import { GameAgentCard } from "./game-hud.tsx";
 import { GameSheet } from "./game-shell.tsx";
 import { InterfaceComposer } from "./interface-composer.tsx";
-import { ChefAvatar } from "./kitchen-avatar.tsx";
 import { useNow } from "./kitchen-hooks.ts";
 import {
 	cookProgress,
@@ -17,13 +16,21 @@ import {
 	type KitchenTicket,
 	roughDuration,
 	TICKET_LABELS,
-	TICKET_STATE,
 	type TicketAct,
 	type TicketState,
 	ticketLabel,
 	ticketTimer,
 } from "./kitchen-model.ts";
+import {
+	ChefLeading,
+	chefActStatus,
+	STATION_NAMES,
+} from "./kitchen-panel-chef.tsx";
+import { NewOrderPane } from "./kitchen-panel-new-order.tsx";
+import { ThreadPane } from "./kitchen-panel-thread.tsx";
 import { CookRing, STATE_TEXT, StateMark } from "./kitchen-parts.tsx";
+
+export { chefActStatus } from "./kitchen-panel-chef.tsx";
 
 /**
  * The side sheet (the game kit's GameSheet). A chef shows who they are and every ticket they have had
@@ -40,46 +47,6 @@ export type KitchenPanelView =
 			station: KitchenStation | undefined;
 			thread: InterfaceThread | undefined;
 	  };
-
-const STATION_NAMES = {
-	board: "Chopping board",
-	grill: "Grill",
-	stove: "Stove",
-} as const;
-
-/** The chef's face in a sheet header. */
-function ChefLeading({ agentId }: { agentId: string }) {
-	return (
-		<span className="grid size-11 place-items-center rounded-full border-(--gk-edge) border-2 bg-(--gk-plate-sunk)">
-			<ChefAvatar agentId={agentId} size={34} />
-		</span>
-	);
-}
-
-/** A chef's status words and mark from its act (the line and its pane). */
-export function chefActStatus(act: InterfaceAgentAct): {
-	label: string;
-	state: TicketState;
-} {
-	switch (act.act) {
-		case "asking":
-			return { label: "Needs you", state: "needs" };
-		case "working":
-			return { label: act.stalled ? "Stalled?" : "Cooking", state: "cooking" };
-		case "blocked":
-			return act.blockers[0]?.kind === "interrupted"
-				? { label: "Pulled", state: "burnt" }
-				: { label: "Burnt order", state: "burnt" };
-		case "limited":
-			return { label: "86'd", state: "limited" };
-		case "delivering":
-			return { label: "Dish ready", state: "ready" };
-		case "waiting":
-			return { label: "Waiting", state: "queued" };
-		default:
-			return { label: "Idle", state: "served" };
-	}
-}
 
 export function KitchenPanel({
 	acts = null,
@@ -165,6 +132,7 @@ function ChefPane({
 	orders: KitchenTicket[];
 	station: KitchenStation;
 }) {
+	const tl = useLiteralMessages();
 	const now = useNow();
 	const { agent } = station;
 	const open = orders.filter((order) => order.state !== "served");
@@ -184,14 +152,14 @@ function ChefPane({
 			footer={
 				<InterfaceComposer
 					defaultAgentId={agent.id}
-					label={`New order for ${agent.name}`}
+					label={tl("New order for {name}", { name: agent.name })}
 					onSubmit={onOrder}
-					placeholder={`Describe a task for ${agent.name}`}
+					placeholder={tl("Describe a task for {name}", { name: agent.name })}
 					submitLabel="Place order"
 				/>
 			}
 			headingRef={headingRef}
-			label={`Chef ${agent.name}`}
+			label={tl("Chef {name}", { name: agent.name })}
 			leading={<ChefLeading agentId={agent.id} />}
 			onClose={onClose}
 			sheetKey={`chef:${agent.id}`}
@@ -224,19 +192,26 @@ function ChefPane({
 								<span className="font-medium text-sm">
 									{progress.over
 										? "Taking longer than usual"
-										: `About ${Math.round(progress.fraction * 100)}% through`}
+										: tl("About {percent}% through", {
+												percent: Math.round(progress.fraction * 100),
+											})}
 								</span>
 								<span className="text-[13px] text-muted-foreground">
-									Estimate from a usual run of about{" "}
-									{roughDuration(station.typicalMs)}
-									{station.typicalFromHistory ? "" : " (no run history yet)"}
+									{station.typicalFromHistory
+										? tl("Estimate from a usual run of about {duration}", {
+												duration: roughDuration(station.typicalMs),
+											})
+										: tl(
+												"Estimate from a usual run of about {duration} (no run history yet)",
+												{ duration: roughDuration(station.typicalMs) }
+											)}
 								</span>
 							</div>
 						</div>
 					) : null}
 					<TicketSection
 						actViews={actViews}
-						empty={`No open orders with ${agent.name}.`}
+						empty={tl("No open orders with {name}.", { name: agent.name })}
 						now={now}
 						onOpen={onOpen}
 						tickets={open}
@@ -330,186 +305,5 @@ function TicketSection({
 				</ul>
 			)}
 		</section>
-	);
-}
-
-function NewOrderPane({
-	acts,
-	agentId,
-	headingRef,
-	onClose,
-	onOrder,
-	stations,
-}: {
-	acts: ReadonlyMap<string, InterfaceAgentAct> | null;
-	agentId: string | undefined;
-	headingRef: Ref<HTMLHeadingElement>;
-	onClose: () => void;
-	onOrder: (input: { agentId?: string; prompt: string }) => void;
-	stations: KitchenStation[];
-}) {
-	const [picked, setPicked] = useState(agentId);
-	const chosen =
-		stations.find((station) => station.agent.id === picked) ?? stations[0];
-	return (
-		<GameSheet
-			data-kitchen-panel=""
-			footer={
-				chosen ? (
-					<InterfaceComposer
-						defaultAgentId={chosen.agent.id}
-						key={chosen.agent.id}
-						label={`New order for ${chosen.agent.name}`}
-						onSubmit={onOrder}
-						placeholder={`Describe a task for ${chosen.agent.name}`}
-						submitLabel="Place order"
-					/>
-				) : undefined
-			}
-			headingRef={headingRef}
-			label="New order"
-			onClose={onClose}
-			sheetKey="new"
-			subtitle="Pick a chef, then describe the task"
-			title="New order"
-		>
-			<ScrollArea className="min-h-0 flex-1">
-				<div className="flex flex-col gap-1 px-4 py-4">
-					<h3
-						className="flex items-center gap-2 px-1 font-semibold text-[13px] text-muted-foreground leading-6"
-						id="kitchen-new-order-chef"
-					>
-						Chef
-					</h3>
-					{stations.length === 0 ? (
-						<p className="px-1 text-muted-foreground text-sm">
-							There are no agents to take orders yet.
-						</p>
-					) : (
-						<ul
-							aria-labelledby="kitchen-new-order-chef"
-							className="-mx-1 flex flex-col gap-0.5"
-						>
-							{stations.map((station) => (
-								<LineRow
-									act={acts?.get(station.agent.id) ?? null}
-									key={station.agent.id}
-									onPick={setPicked}
-									selected={station.agent.id === chosen?.agent.id}
-									station={station}
-								/>
-							))}
-						</ul>
-					)}
-				</div>
-			</ScrollArea>
-		</GameSheet>
-	);
-}
-
-/** One chef on the line: pick who takes the new order. */
-function LineRow({
-	act,
-	onPick,
-	selected,
-	station,
-}: {
-	act: InterfaceAgentAct | null;
-	onPick: (agentId: string) => void;
-	selected: boolean;
-	station: KitchenStation;
-}) {
-	let status = "Idle";
-	let state: TicketState = "served";
-	if (act) {
-		({ label: status, state } = chefActStatus(act));
-	} else if (station.working) {
-		status = "Cooking";
-		state = "cooking";
-	} else if (station.burnt) {
-		status = "Burnt order";
-		state = "burnt";
-	}
-	const open = station.orders.length;
-	return (
-		<li>
-			<button
-				aria-pressed={selected}
-				className={cn(
-					"flex w-full items-center gap-3 rounded-md px-2 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50",
-					selected && "bg-accent shadow-[inset_2px_0_0_var(--ring)]"
-				)}
-				onClick={() => onPick(station.agent.id)}
-				type="button"
-			>
-				<ChefAvatar agentId={station.agent.id} size={24} />
-				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate font-medium text-foreground text-sm leading-5">
-						{station.agent.name}
-					</span>
-					<span className="truncate text-[13px] text-muted-foreground leading-5">
-						{STATION_NAMES[station.kind]} ·{" "}
-						{open === 0 ? "No open orders" : `${open} open`}
-					</span>
-				</span>
-				<span
-					className={cn(
-						"flex shrink-0 items-center gap-1.5 font-medium text-[13px]",
-						state === "served" ? "text-muted-foreground" : STATE_TEXT[state]
-					)}
-				>
-					{state === "served" ? null : <StateMark state={state} />}
-					{status}
-				</span>
-			</button>
-		</li>
-	);
-}
-
-function ThreadPane({
-	headingRef,
-	onBack,
-	onClose,
-	station,
-	thread,
-	threadView,
-}: {
-	headingRef: Ref<HTMLHeadingElement>;
-	onBack: (() => void) | undefined;
-	onClose: () => void;
-	station: KitchenStation | undefined;
-	thread: InterfaceThread | undefined;
-	threadView: ReactNode;
-}) {
-	const state = thread ? TICKET_STATE[threadStatus(thread)] : null;
-	const backLabel = station
-		? `Back to ${station.agent.name}`
-		: "Back to the kitchen";
-	return (
-		<GameSheet
-			backLabel={backLabel}
-			closeLabel="Close order"
-			data-kitchen-panel=""
-			headingRef={headingRef}
-			label={`Order: ${thread?.title ?? "Conversation"}`}
-			leading={
-				station && !onBack ? (
-					<ChefLeading agentId={station.agent.id} />
-				) : undefined
-			}
-			onBack={onBack}
-			onClose={onClose}
-			sheetKey={`thread:${thread?.id ?? ""}`}
-			subtitle={
-				<>
-					{state ? <StateMark state={state} /> : null}
-					<span>{state ? TICKET_LABELS[state] : "Starting"}</span>
-					{station ? <span>· {station.agent.name}</span> : null}
-				</>
-			}
-			title={thread?.title.trim() || "New order"}
-		>
-			<div className="min-h-0 flex-1">{threadView}</div>
-		</GameSheet>
 	);
 }

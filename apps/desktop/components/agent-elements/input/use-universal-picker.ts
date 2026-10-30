@@ -22,11 +22,7 @@ import { useProviderQueryScope } from "@/src/hooks/provider-query-scope.ts";
 // changing the current target's model still updates the running turn. Non-active
 // external agents are probed lazily inside the body (see `ExternalAgentSettings`).
 
-import {
-	ALL_CREDIT_POOLS,
-	type CreditPool,
-	type CreditPoolId,
-} from "@ryu/auth/lib/credit-pools";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	createElement,
@@ -36,45 +32,38 @@ import {
 	useState,
 } from "react";
 import { sileo } from "sileo";
-import type { ComposerSettingsSection } from "@/components/agent-elements/input/composer-settings-menu.tsx";
-import { totalFreeCredit } from "@/components/agent-elements/input/free-model-tag.ts";
 import { isChatModelStem } from "@/components/agent-elements/input/model-groups.ts";
-import { modelMenuItem } from "@/components/agent-elements/input/model-router.ts";
 import {
-	type ProviderEntry,
 	type TeamEntry,
 	UniversalPickerBody,
 	type UniversalPickerData,
 } from "@/components/agent-elements/input/universal-picker-body.tsx";
+import { buildAccountHandlers } from "@/components/agent-elements/input/use-universal-picker-account-handlers.ts";
+import { useUniversalPickerGrants } from "@/components/agent-elements/input/use-universal-picker-grants.ts";
+import {
+	BROWSER_PROVIDER_ID,
+	buildProviderEntries,
+	GATEWAY_PROVIDER_ID,
+	LOCAL_PROVIDER_ID,
+	RYU_AGENT_ID,
+} from "@/components/agent-elements/input/use-universal-picker-providers.ts";
+import type {
+	UseUniversalPickerParams,
+	UseUniversalPickerResult,
+} from "@/components/agent-elements/input/use-universal-picker-types.ts";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgentsCatalog } from "@/src/hooks/useAgentsCatalog.ts";
-import { useCreditGrants } from "@/src/hooks/useCreditGrants.ts";
 import { useCanManagePermission } from "@/src/hooks/useGatewayConfigurable.ts";
 import { usePiConfig } from "@/src/hooks/usePiConfig.ts";
 import { engineForAgent } from "@/src/lib/agent-logos.tsx";
-import {
-	type AgentSummary,
-	removeAgentAccount,
-	switchAgentAccount,
-} from "@/src/lib/api/agents.ts";
-import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	getActiveModel,
 	listInstalledModels,
 	setActiveModel,
 } from "@/src/lib/api/models.ts";
+import type { PiCatalog } from "@/src/lib/api/pi-config.ts";
 import {
-	filterEnabledModels,
-	gatewayProviderSlug,
-	type PiCatalog,
-	type PiProvider,
-	removeProviderAccount,
-	switchProviderAccount,
-} from "@/src/lib/api/pi-config.ts";
-import type { Team } from "@/src/lib/api/teams.ts";
-import {
-	type BrowserSurface,
 	browserProviderHost,
 	useBrowserProviderSnapshot,
 } from "@/src/lib/extension-host.ts";
@@ -86,138 +75,7 @@ import {
 } from "@/src/lib/picker-favorites.ts";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 
-/** The flagship agent id (mirrors Core `DEFAULT_AGENT_ID`). */
-const RYU_AGENT_ID = "ryu";
-
-/**
- * The synthetic "Local" row's id, and the REAL Pi provider it routes through.
- *
- * There is no `local` provider in Core's `PROVIDERS` table and there should not
- * be: talking to weights on this machine is not a credential-bearing vendor, it
- * is the governed `gateway` route pointed at whichever model the local engine is
- * currently serving. So the row is assembled here from the two endpoints that
- * already own that state — `/api/models/installed` (what is on disk) and
- * `/api/models/active` (what is loaded) — and a pick writes BOTH halves: the
- * served model (`setActiveModel`) and the Pi route (`provider: "gateway"`).
- * Writing only one is the failure mode `RyuPiConfig` already guards against —
- * a config naming a model the engine never loaded.
- */
-const LOCAL_PROVIDER_ID = "local";
-const GATEWAY_PROVIDER_ID = "gateway";
-const BROWSER_PROVIDER_ID = "browser";
-
-/** Map a Pi provider id to the engine key its brand logo is registered under. */
-const PROVIDER_ENGINE_KEY = new Map<string, string>([
-	["google", "gemini"],
-	["claude-pro-max", "claude"],
-	["openai-codex", "codex"],
-	["chatgpt", "chatgpt"],
-	["anthropic", "anthropic"],
-	["openai", "openai"],
-	["mistral", "mistral"],
-	["openrouter", "openrouter"],
-]);
-
-function providerEngineKey(providerId: string): string {
-	return PROVIDER_ENGINE_KEY.get(providerId) ?? providerId;
-}
-
-/**
- * The credit pools a user may be offered as a route ("Ryu Fast", "Ryu Frontier"),
- * straight from the pool catalog. Filtering on `visible` here is the whole point:
- * adding, hiding or renaming a pool is then a data change in
- * `@ryu/auth/lib/credit-pools`, never an edit to this picker. It also
- * deliberately excludes the pass-through `openrouter` pool, which is invisible —
- * that supply is what the ORIGINAL managed Ryu row already sells, and offering it
- * twice under two names would be the same route pretending to be a choice.
- */
-const OFFERED_CREDIT_POOLS: readonly CreditPool[] = ALL_CREDIT_POOLS.filter(
-	(pool) => pool.visible
-);
-
-/**
- * The pool a managed catalog row is backed by, or null for a row that is not
- * pool-backed (today: the default managed OpenRouter route, and every BYO-key
- * provider).
- *
- * `managed` is a REQUIRED part of the match, not an accelerator. A user's own
- * Bedrock or Cloudflare credential is a perfectly ordinary BYO-key provider whose
- * id collides with a pool's `gatewayProviders` entry; treating that as Ryu's
- * donated supply would relabel the user's own account "Ryu Frontier" and gate it
- * behind our subscription upsell.
- *
- * Three id spellings are accepted because Core owns the provider id and this
- * surface does not: whichever of `bedrock` / `managed-bedrock` Core publishes,
- * the row binds. Core publishes the `managed-<poolId>` form for every pool
- * (`managed-vertex`, `managed-openai-credits`, `managed-anthropic-credits`
- * included), so a new pool needs no edit here. A row that matches nothing keeps
- * today's behaviour exactly.
- */
-function creditPoolForProvider(provider: PiProvider): CreditPool | null {
-	if (!provider.managed) {
-		return null;
-	}
-	return (
-		OFFERED_CREDIT_POOLS.find(
-			(pool) =>
-				provider.id === pool.id ||
-				provider.id === `managed-${pool.id}` ||
-				pool.gatewayProviders.includes(provider.id)
-		) ?? null
-	);
-}
-
-/**
- * Upsell copy for a pool row. Names the TIER and nothing else — the pool catalog's
- * standing rule is that a user never reads the name of the provider behind a pool,
- * so the supplier can be swapped without changing what anyone was promised.
- * There is no bring-your-own-key half: Ryu's pooled capacity is not something a
- * user can hold a key for, so offering one would be a dead end.
- */
-function poolUpsellCopy(pool: CreditPool) {
-	return {
-		upgrade: `${pool.label} runs on Ryu's own capacity — included with a Ryu subscription, no API keys.`,
-		byoKey: null,
-	};
-}
-
-export interface UseUniversalPickerParams {
-	/** The active agent's live approval + thinking sections. */
-	activeExtraSections: ComposerSettingsSection[];
-	/** The active agent's live model section (already resolved by the host). */
-	activeModelSection: ComposerSettingsSection | null;
-	agentId: string | null;
-	agents: AgentSummary[];
-	/** Keep model rows visible for setup surfaces at every interface level. */
-	forceModelPicker?: boolean;
-	onCreateAgent?: () => void;
-	/** Observe provider/model picks without replacing the normal provider action. */
-	onProviderModelSelection?: (selection: {
-		modelId: string | null;
-		providerId: string;
-		providerLabel: string;
-	}) => void;
-	onSelectAgent: (id: string) => void;
-	/** Optional host override for a concrete provider/model pick. */
-	onSelectProviderModel?: (providerId: string, modelId: string) => void;
-	/** Optional host override for a provider thinking-level pick. */
-	onSelectProviderThinking?: (providerId: string, level: string) => void;
-	onSelectTeam?: (id: string) => void;
-	/** Optional host override for provider picks (used by setup surfaces). */
-	onUseProvider?: (providerId: string, modelId: string | null) => void;
-	/** Browser-only surface used for the synthetic Browser provider selection. */
-	surface?: BrowserSurface;
-	teamId?: string | null;
-	teams?: Team[];
-}
-
-export interface UseUniversalPickerResult {
-	/** Body renderer for `ComposerSettingsMenu`'s `renderBody` prop. */
-	renderBody: (
-		close: () => void,
-		mode?: "agents" | "models" | "all"
-	) => ReactNode;
-}
+export type { UseUniversalPickerParams, UseUniversalPickerResult };
 
 export function useUniversalPicker(
 	params: UseUniversalPickerParams
@@ -239,6 +97,7 @@ export function useUniversalPicker(
 		forceModelPicker = false,
 		surface = "dashboard",
 	} = params;
+	const tl = useLiteralMessages();
 	const browserSnapshot = useBrowserProviderSnapshot();
 	const [recentRevision, setRecentRevision] = useState(0);
 	const recentRefs = useMemo<PickerRef[]>(
@@ -259,49 +118,8 @@ export function useUniversalPicker(
 	// gates on the entitlement here, not on `configured`. `verdict` is null until the
 	// first resolution; treat unresolved as "no plan" (shows the upsell, flips when ready).
 	const hasManagedPlan = verdict?.managedInference ?? false;
-	// Pools the user holds granted credit in. A campaign grant is the OTHER way a
-	// pool row becomes usable without a paid plan, and it is the whole point of the
-	// frontier ladder: someone handed $50 of "Ryu Frontier" must be shown that
-	// pool's models, not an ad for the subscription that money already substitutes
-	// for. Empty whenever grants are unavailable, which degrades to the plan-only
-	// rule this picker used before pools existed.
-	const { pools: grantPools } = useCreditGrants();
-	// Rows whose label this build cannot map back to a catalog id are skipped: the
-	// upsell rule is a per-pool decision, and a null id names no pool. Skipping
-	// keeps the pre-grant behaviour (the row still upsells) instead of suppressing
-	// the upsell on some other pool's money.
-	const grantedPoolIds = useMemo(
-		() =>
-			new Set(
-				grantPools
-					.map((pool) => pool.poolId)
-					.filter((poolId): poolId is CreditPoolId => poolId !== null)
-			),
-		[grantPools]
-	);
-	// The same grants keyed for DISPLAY: pool id → the dollars left in it and when
-	// they lapse. `useCreditGrants` already drops non-positive pools, so a present
-	// entry always has money in it and the badge never renders "$0.00".
-	const grantByPoolId = useMemo(() => {
-		const index = new Map<
-			CreditPoolId,
-			{ expiresAt: string | null; remainingMicroUsd: number }
-		>();
-		for (const pool of grantPools) {
-			if (pool.poolId !== null) {
-				index.set(pool.poolId, {
-					remainingMicroUsd: pool.remainingMicroUsd,
-					expiresAt: pool.expiresAt,
-				});
-			}
-		}
-		return index;
-	}, [grantPools]);
-
-	// The user's FREE CREDIT — every grant summed, nearest expiry. Free credit is
-	// spent automatically (first) on Ryu Router models Ryu serves from its own
-	// supply, so it is one figure on the Ryu Router row, not a per-pool split.
-	const freeCredit = useMemo(() => totalFreeCredit(grantPools), [grantPools]);
+	const { freeCredit, grantByPoolId, grantedPoolIds } =
+		useUniversalPickerGrants();
 
 	const piProviders = useMemo(() => catalog?.providers ?? [], [catalog]);
 	const thinkingLevels = useMemo(
@@ -463,156 +281,22 @@ export function useUniversalPicker(
 				(e) => !e.added && e.id !== ryuAgent?.id
 			);
 
-			const providers: ProviderEntry[] = shownProviders.map((p) => {
-				const isActive = activeProviderId === p.id;
-				const pool = creditPoolForProvider(p);
-				// The single managed Ryu Router row (not a legacy pool-bound row).
-				const isRyuRouter = Boolean(p.managed) && pool === null;
-				return {
-					id: p.id,
-					// For a pool-backed row the pool catalog owns the name, not Core:
-					// `label` is defined there as the one string a user ever reads for a
-					// pool, so the tier stays consistent wherever it is rendered and the
-					// supplier behind it stays invisible.
-					label: pool ? pool.label : p.label,
-					engineKey: providerEngineKey(p.id),
-					authKind: p.authKind,
-					managed: Boolean(p.managed),
-					supportsDiscovery: p.supportsDiscovery !== false,
-					gatewayAccountSupported:
-						p.authKind === "api-key" && gatewayProviderSlug(p.id) !== null,
-					// Every account the provider holds in the sealed vault (labels
-					// only). Renders the submenu's switchable Account section.
-					accounts: p.accounts ?? [],
-					// Only the default managed row borrows OpenRouter's catalog (it has no
-					// model list of its own and routes there). A pool row enumerates under
-					// its OWN id or not at all — inheriting OpenRouter's list would have it
-					// advertise models its pool cannot serve.
-					discoveryProviderId:
-						p.managed && pool === null ? "openrouter" : undefined,
-					// A managed row is always `configured` server-side (it is wallet-gated
-					// at the Gateway), so the upsell is gated on entitlement, not on
-					// `configured`. A pool row adds two escapes: the free-reach pool is the
-					// give-it-away tier and must never be upsold, and a user already
-					// holding granted credit in this pool has already paid the toll.
-					upsell: pool
-						? !(
-								hasManagedPlan ||
-								pool.tier === "free" ||
-								grantedPoolIds.has(pool.id)
-							)
-						: Boolean(p.managed) && !hasManagedPlan && freeCredit === null,
-					upsellCopy: pool ? poolUpsellCopy(pool) : undefined,
-					// The pool's own remaining granted credit, shown on the row as "$50.00"
-					// so "how much Frontier is left?" is answerable where the choice is
-					// made. Looked up by pool id, so a grant row this build can't map back
-					// to the catalog contributes nothing rather than landing on the wrong
-					// pool — the same rule `grantedPoolIds` applies to the upsell.
-					poolGrant: pool
-						? grantByPoolId.get(pool.id)
-						: isRyuRouter
-							? (freeCredit ?? undefined)
-							: undefined,
-					// "Free" tags come from Core's `freeModels` (the Gateway's own
-					// equivalence table) and show only while free credit remains.
-					freeModelIds:
-						isRyuRouter && freeCredit !== null && p.freeModels?.length
-							? new Set(p.freeModels)
-							: undefined,
-					// Pooled capacity is Ryu's own, so there is no credential for a user
-					// to hold and a pool row is `configured` by definition — the wallet
-					// (and the pool's grant balance) is what gates it, at the Gateway.
-					// Forced rather than trusted because `configured` comes from Core,
-					// where the managed check is still a single-id equality; a pool row
-					// that arrived `false` would fall through to the unconfigured branch
-					// and offer "Sign in with Ryu Frontier", which is a dead end.
-					configured: pool ? true : p.configured,
-					isActive,
-					currentModel: isActive ? (config?.model ?? null) : null,
-					currentThinking: isActive ? (config?.thinkingLevel ?? null) : null,
-					modelOverrides: p.modelOverrides,
-					// Models the user turned off in Settings are not offered here. The
-					// row's own current model is exempt (see `filterEnabledModels`), and
-					// the submenu applies the same rule to the live-discovered list.
-					models: filterEnabledModels(
-						p.suggestedModels.map((m) => modelMenuItem(m)),
-						p.modelOverrides,
-						isActive ? config?.model : null
-					),
-				};
+			const providers = buildProviderEntries({
+				activeProviderId,
+				agentId,
+				browserSnapshot,
+				config,
+				freeCredit,
+				grantByPoolId,
+				grantedPoolIds,
+				hasManagedPlan,
+				localActive,
+				localStems,
+				servedStem,
+				shownProviders,
+				surface,
+				tl,
 			});
-
-			// Browser is a synthetic provider owned by the extension adapter. It sits
-			// beside Core-local and cloud routes in the same universal picker, but its
-			// picks never call `saveProvider` or send an inference request to Core.
-			if (browserSnapshot) {
-				const browserModelId =
-					browserSnapshot.currentModelBySurface[surface] ??
-					browserSnapshot.models[0]?.id ??
-					null;
-				const browserModel = browserSnapshot.models.find(
-					(model) => model.id === browserModelId
-				);
-				if (browserModel) {
-					providers.unshift({
-						id: BROWSER_PROVIDER_ID,
-						label: "Browser",
-						engineKey: "browser",
-						authKind: "none",
-						managed: false,
-						supportsDiscovery: false,
-						configured: true,
-						upsell: false,
-						isActive:
-							browserSnapshot.activeAgentId === agentId &&
-							browserSnapshot.activeSurface === surface,
-						currentModel: browserModelId,
-						currentThinking: null,
-						status: browserModel.status,
-						statusMessage: browserModel.statusMessage,
-						browserCapabilities: browserModel.capabilities,
-						models: browserSnapshot.models.map((model) => ({
-							id: model.id,
-							name: `${model.name} · ${
-								model.status === "ready" ? "Ready" : model.status
-							}`,
-							description: model.capabilities.actionSupport
-								? `Browser actions · ${model.status}`
-								: `Chat-only · ${model.status}`,
-						})),
-					});
-				}
-			}
-
-			// The Local route, offered as its own provider row so "run this on my
-			// machine" is a first-class choice next to the vendors rather than a few
-			// bare stems buried in Ryu's flat model list. Hidden entirely when no
-			// chat-capable weights are installed — an empty row would be a dead end
-			// with no in-place way to fill it (models are installed from the Store).
-			// It leads the list: it is the one route that needs no account at all.
-			if (localStems.length > 0) {
-				providers.unshift({
-					id: LOCAL_PROVIDER_ID,
-					label: "Local",
-					engineKey: LOCAL_PROVIDER_ID,
-					// No credential exists to hold for weights on this disk, so the row is
-					// configured by definition and never upsells.
-					authKind: "none",
-					managed: false,
-					supportsDiscovery: false,
-					configured: true,
-					upsell: false,
-					isActive: localActive,
-					currentModel: localActive ? (config?.model ?? null) : null,
-					currentThinking: localActive ? (config?.thinkingLevel ?? null) : null,
-					// The served model is listed even when it is not a chat stem by name,
-					// so a picker can always show what the engine actually has loaded.
-					models: (servedStem && !localStems.includes(servedStem)
-						? [servedStem, ...localStems]
-						: localStems
-					).map((stem) => ({ id: stem, name: stem })),
-				});
-			}
 
 			const teamEntries: TeamEntry[] = teams.map((t) => ({
 				id: t.id,
@@ -759,96 +443,12 @@ export function useUniversalPicker(
 					}
 					saveProvider(providerId, model, level);
 				},
-				// ── Account switching (multi-account, sealed vault) ──
-				//
-				// Switch/remove fold the refreshed catalog straight into the cache
-				// (the route returns it) so the picker's `configured`/`accounts`
-				// state flips without a second round trip. Agent accounts live in a
-				// separate query keyed by agent id, so those get invalidated instead.
-				onSwitchProviderAccount: (
-					providerId,
-					accountId,
-					accountTarget = "self"
-				) => {
-					providerScope
-						.write(() =>
-							switchProviderAccount(
-								providerScope.target,
-								providerId,
-								accountId,
-								accountTarget
-							)
-						)
-						.then(applyCatalog)
-						.catch((error) => {
-							sileo.error({
-								title:
-									error instanceof Error
-										? error.message
-										: "Could not switch account",
-							});
-						});
-				},
-				onRemoveProviderAccount: (providerId, accountId) => {
-					providerScope
-						.write(() =>
-							removeProviderAccount(providerScope.target, providerId, accountId)
-						)
-						.then(applyCatalog)
-						.catch((error) => {
-							sileo.error({
-								title:
-									error instanceof Error
-										? error.message
-										: "Could not remove account",
-							});
-						});
-				},
-				onSwitchAgentAccount: (agentId, accountId, provider) => {
-					switchAgentAccount(toTarget(node), agentId, { accountId, provider })
-						.then(({ reauthenticate }) => {
-							// Core could not swap this agent's own login in place; the
-							// active account is unchanged until the user signs in again.
-							if (reauthenticate) {
-								sileo.info({
-									title: "Sign in again to use this account",
-									description:
-										"This agent keeps its own login. Run its sign-in again to switch accounts.",
-								});
-							}
-							queryClient
-								.invalidateQueries({
-									queryKey: ["agent-accounts", node.url, agentId],
-								})
-								.catch(() => undefined);
-						})
-						.catch((error) => {
-							sileo.error({
-								title:
-									error instanceof Error
-										? error.message
-										: "Could not switch account",
-							});
-						});
-				},
-				onRemoveAgentAccount: (agentId, accountId) => {
-					removeAgentAccount(toTarget(node), agentId, accountId)
-						.then(() => {
-							queryClient
-								.invalidateQueries({
-									queryKey: ["agent-accounts", node.url, agentId],
-								})
-								.catch(() => undefined);
-						})
-						.catch((error) => {
-							sileo.error({
-								title:
-									error instanceof Error
-										? error.message
-										: "Could not remove account",
-							});
-						});
-				},
+				...buildAccountHandlers({
+					applyCatalog,
+					node,
+					providerScope,
+					queryClient,
+				}),
 			};
 
 			return createElement(UniversalPickerBody, { data, close, mode });
@@ -890,6 +490,7 @@ export function useUniversalPicker(
 			saveProvider,
 			applyCatalog,
 			surface,
+			tl,
 		]
 	);
 

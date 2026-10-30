@@ -12,7 +12,7 @@ import type {
 } from "@ryu/blocks/desktop/agent-elements/turn-end-cards.ts";
 import { TurnEndCards } from "@ryu/blocks/desktop/agent-elements/turn-end-cards.tsx";
 import type { UIMessage } from "ai";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { InlineArtifact } from "../../src/components/chat/InlineArtifact.tsx";
@@ -241,9 +241,12 @@ function Story() {
 		openInTab: (_payload, id) => setAction(`Opened artifact ${id} in tab`),
 		submitFollowUp: (text) => setAction(`Follow-up: ${text}`),
 	};
-	const handleUndo = async (plan: FileEditUndoPlan) => {
+	// Stable like ChatPage's `handleUndoFileEdits`: the card scopes an undo to
+	// the handler that started it, so a new handler identity on every render
+	// would drop the finished undo's "Undone" state.
+	const handleUndo = useCallback(async (plan: FileEditUndoPlan) => {
 		setAction(`Undid ${plan.edits.map((edit) => edit.path).join(", ")}`);
-	};
+	}, []);
 
 	return (
 		<div className="min-h-screen bg-muted/30 text-foreground">

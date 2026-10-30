@@ -3,18 +3,15 @@
 // The centred "Today" / "Yesterday" / "12 March 2026" row that opens each day in
 // the transcript.
 //
-// It is a `Marker` (`@ryu/ui/components/marker`, `variant="separator"`), which is
-// THE single inline-state row style in the transcript — day boundaries,
-// interrupted turns, threshold failover and history notices all draw as one. The
-// pill that used to live here moved to floating-date-header.tsx, its only
-// remaining consumer: in flow the hairlines read better than a chip, and the
-// chip's `bg-background/80 backdrop-blur-sm` only ever existed so the FLOATING
-// copy stayed legible over live transcript text. The label itself cannot drift —
-// both sites call `dayLabel()` from date-groups.ts.
+// A quiet centred caption (`text-xs`, tertiary muted, no rules). The floating
+// pill lives in floating-date-header.tsx (shown only once this row scrolls away); both call `dayLabel()` from
+// date-groups.ts, so the label cannot drift.
 
-import { Marker, MarkerContent } from "@ryu/ui/components/marker";
 import { cn } from "@ryu/ui/lib/utils";
 import { memo } from "react";
+
+/** `data-slot` the floating date pill observes to know when a day scrolled away. */
+export const DATE_SEPARATOR_SLOT = "chat-date-separator";
 
 /**
  * One day boundary in the transcript.
@@ -32,10 +29,7 @@ import { memo } from "react";
  *     carries the day's label, exactly like the old `MessageScrollerItem`-less
  *     separator before it.
  *
- * `Marker` satisfies both — it renders a bare `<div>` through `useRender` with no
- * wrapper of its own, and `data-slot` passed as a prop wins over the primitive's
- * own `state.slot` (`mergeObjects(stateProps, resolvedProps)`), so the e2e
- * selector below is preserved. `chat-date-groups-story.spec.ts:111-122` asserts
+ * A bare `<div>` satisfies both, and keeps the e2e selector below. `chat-date-groups-story.spec.ts:111-122` asserts
  * exactly this shape and must keep passing untouched.
  *
  * It must also stay a DIRECT child of the scroller's Content (the element with
@@ -45,28 +39,28 @@ import { memo } from "react";
  */
 export const DateSeparator = memo(function DateSeparator({
 	className,
+	dayKey,
 	label,
 }: {
 	className?: string;
+	/** The day this divider opens; the floating pill reads it back. */
+	dayKey?: string;
 	label: string;
 }) {
 	return (
-		<Marker
-			// Content is `gap-0` (see message-list.tsx): all vertical rhythm between
-			// its direct children is explicit top margins, so a run of grouped user
-			// messages can sit tighter than the 8px everything else uses. `mt-2`
-			// here reproduces the old `gap-2` above the separator, and the turn
-			// below it brings its own `mt-2` — so the pair around a day boundary is
-			// unchanged at 8px/8px. Tune breathing room with `py-*`, never by
-			// widening a gap that would also push every turn apart.
-			className={cn("mt-2 shrink-0", className)}
-			data-slot="chat-date-separator"
-			spacing="turn"
-			variant="separator"
+		// A centred caption with no rules: the day label is meta, so it takes the
+		// tertiary muted tone and no hairlines compete with the transcript. Content
+		// is `gap-0` (see message-list.tsx), so the top margin here is the only
+		// space above the day boundary; the turn below brings its own.
+		<div
+			className={cn(
+				"mt-6 flex shrink-0 select-none justify-center py-1 text-muted-foreground/70 text-xs",
+				className
+			)}
+			data-day-key={dayKey}
+			data-slot={DATE_SEPARATOR_SLOT}
 		>
-			<MarkerContent className="select-none">
-				<span className="type-caption font-medium">{label}</span>
-			</MarkerContent>
-		</Marker>
+			<span>{label}</span>
+		</div>
 	);
 });

@@ -277,7 +277,7 @@ export function LanguageSettings({
 				</SettingsGroup>
 			</SettingsSection>
 			{operationError ? (
-				<p className="px-3.5 text-status-destructive text-xs" role="alert">
+				<p className="text-detail text-status-destructive" role="alert">
 					{operationError}
 				</p>
 			) : null}
@@ -336,7 +336,7 @@ export function LanguageSettings({
 			</SettingsSection>
 
 			{selectedPack ? (
-				<p className="px-3.5 text-muted-foreground text-xs">
+				<p className="text-detail text-muted-foreground">
 					{t("language.translation_count", {
 						count: Object.keys(selectedPack.messages).length,
 					})}{" "}

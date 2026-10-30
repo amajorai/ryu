@@ -140,13 +140,12 @@ function HoverCardContent({
 			>
 				<PreviewCardPrimitive.Popup
 					className={cn(
-						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 w-72 origin-(--transform-origin) rounded-3xl border border-border/50 bg-popover/70 p-4 text-popover-foreground text-sm outline-hidden backdrop-blur-2xl backdrop-saturate-150 duration-(--dropdown-open-dur) ease-(--dropdown-ease) before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur)",
+						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 w-72 origin-(--transform-origin) rounded-xl border border-border bg-popover p-4 text-popover-foreground text-sm shadow-(--shadow-popover) outline-hidden duration-(--dropdown-open-dur) ease-(--dropdown-ease) data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur)",
 						typography === "compact" && "text-xs",
 						spacing === "rail" && "p-3",
 						appearance === "citation-popup" &&
 							"w-80 max-w-[min(90vw,20rem)] p-0 text-sm",
-						appearance === "composer-preview" &&
-							"rounded-2xl border-border/70 bg-popover/95 p-2 shadow-xl backdrop-blur-xl",
+						appearance === "composer-preview" && "p-2",
 						appearance === "sidebar-preview" &&
 							"w-80 max-w-[min(20rem,calc(100vw-2rem))] p-4 text-sm",
 						spacing === "conversation-preview" && "p-1",

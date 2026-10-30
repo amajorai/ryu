@@ -1,4 +1,12 @@
 "use client";
+import {
+	ArrowDown01Icon,
+	Copy01Icon,
+	Loading03Icon,
+	SourceCodeIcon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { CSSProperties } from "react";
 import css from "./file-diff.module.css";
 
@@ -19,13 +27,6 @@ import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx"
 import { SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	Check,
-	ChevronDown,
-	Copy,
-	FileCode2,
-	LoaderCircle,
-} from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
 	type ReactNode,
@@ -201,38 +202,49 @@ export function FileDiff({
 			<button
 				aria-controls={contentId}
 				aria-expanded={currentOpen}
-				className="group flex min-h-9 w-full items-center gap-2 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+				className="group flex min-h-9 w-full items-center gap-2 rounded-lg py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 				id={triggerId}
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
 			>
 				<span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
-					{icon ?? <FileCode2 aria-hidden="true" className="size-4" />}
+					{icon ?? (
+						<HugeiconsIcon
+							aria-hidden="true"
+							className="size-4"
+							icon={SourceCodeIcon}
+						/>
+					)}
 				</span>
-				<span className="min-w-0 flex-1 truncate font-mono text-foreground/80 text-xs">
+				<span className="min-w-0 flex-1 truncate font-mono text-foreground text-xs">
 					{file}
 				</span>
 				<span className="flex shrink-0 items-center gap-2">
 					<ChangeCount type="added" value={additions} />
 					<ChangeCount type="removed" value={deletions} />
 				</span>
-				<span className="grid size-4 shrink-0 place-items-center text-muted-foreground/60">
+				<span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
 					{streaming ? (
-						<LoaderCircle
+						<HugeiconsIcon
 							aria-label="Applying changes"
 							className={cn("size-3.5", !reduce && "animate-spin")}
+							icon={Loading03Icon}
 						/>
 					) : (
-						<Check aria-label="Changes applied" className="size-3.5" />
+						<HugeiconsIcon
+							aria-label="Changes applied"
+							className="size-3.5"
+							icon={Tick02Icon}
+						/>
 					)}
 				</span>
 				<motion.span
 					animate={{ rotate: currentOpen ? 180 : 0 }}
 					aria-hidden="true"
-					className="shrink-0 text-muted-foreground/45 transition-colors group-hover:text-muted-foreground"
+					className="shrink-0 text-muted-foreground/70 transition-colors group-hover:text-muted-foreground"
 					transition={reduce ? { duration: 0 } : SPRING_SWAP}
 				>
-					<ChevronDown className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
 				</motion.span>
 			</button>
 
@@ -243,7 +255,7 @@ export function FileDiff({
 				role="region"
 			>
 				<div className="pt-1.5 pl-6">
-					<div className="overflow-hidden rounded-xl bg-muted/80">
+					<div className="overflow-hidden rounded-xl bg-muted">
 						<div
 							aria-live="polite"
 							className={[css.inline1, "scrollbar-hide overflow-auto"].join(
@@ -266,15 +278,15 @@ export function FileDiff({
 											)}
 											key={line.id}
 										>
-											<span className="select-none pr-2 text-right text-muted-foreground/40 tabular-nums">
+											<span className="select-none pr-2 text-right text-muted-foreground/70 tabular-nums">
 												{line.oldLine}
 											</span>
-											<span className="select-none pr-2 text-right text-muted-foreground/40 tabular-nums">
+											<span className="select-none pr-2 text-right text-muted-foreground/70 tabular-nums">
 												{line.newLine}
 											</span>
 											<span
 												className={cn(
-													"select-none text-center text-muted-foreground/45",
+													"select-none text-center text-muted-foreground/70",
 													type === "added" && "text-status-success",
 													type === "removed" && "text-status-destructive"
 												)}
@@ -296,7 +308,7 @@ export function FileDiff({
 							<div className="flex justify-end px-2 pt-1 pb-1.5">
 								<motion.button
 									aria-label={copied ? "Copied" : "Copy diff"}
-									className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+									className="grid size-7 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 									onClick={handleCopy}
 									title={copied ? "Copied" : "Copy diff"}
 									transition={SPRING_PRESS}
@@ -304,9 +316,9 @@ export function FileDiff({
 									whileTap={reduce ? undefined : { scale: 0.9 }}
 								>
 									{copied ? (
-										<Check className="size-3.5" />
+										<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 									) : (
-										<Copy className="size-3.5" />
+										<HugeiconsIcon className="size-3.5" icon={Copy01Icon} />
 									)}
 								</motion.button>
 							</div>

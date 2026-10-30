@@ -131,13 +131,9 @@ describe("commitTabRename", () => {
 	});
 });
 
-const TITLE_BAR_SOURCE = readFileSync(
-	join(import.meta.dir, "TitleBar.tsx"),
+const REGULAR_TAB_SOURCE = readFileSync(
+	join(import.meta.dir, "..", "shell", "title-bar", "regular-tab.tsx"),
 	"utf8"
-);
-const REGULAR_TAB_SOURCE = TITLE_BAR_SOURCE.slice(
-	TITLE_BAR_SOURCE.indexOf("function RegularTab("),
-	TITLE_BAR_SOURCE.indexOf("function GroupHeaderPill(")
 );
 const EDITING_BRANCH = REGULAR_TAB_SOURCE.slice(
 	REGULAR_TAB_SOURCE.indexOf("{isEditing ? ("),

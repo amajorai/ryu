@@ -50,8 +50,8 @@ test.describe("onboarding final steps", () => {
 		await expect(page.getByRole("switch")).toHaveCount(4);
 		await expect(getStarted).toHaveText("Get started");
 		await expect(privacyDetails).toHaveClass(/hover:bg-muted/);
-		await expect(privacyDetails).toHaveClass(/h-14/);
-		await expect(getStarted).toHaveClass(/h-14/);
+		await expect(privacyDetails).toHaveClass(/h-10/);
+		await expect(getStarted).toHaveClass(/h-10/);
 
 		const [detailsBounds, getStartedBounds] = await Promise.all([
 			privacyDetails.evaluate((element) => {

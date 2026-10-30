@@ -280,6 +280,7 @@ function ImportBody({
 					disabled={pending || content.trim() === ""}
 					loading={pending}
 					onClick={submit}
+					variant="mono"
 				>
 					Import
 				</Button>
@@ -399,7 +400,12 @@ function ExportBody({
 						</SelectContent>
 					</Select>
 				</div>
-				<Button disabled={pending} loading={pending} onClick={run}>
+				<Button
+					disabled={pending}
+					loading={pending}
+					onClick={run}
+					variant="mono"
+				>
 					Export
 				</Button>
 			</div>

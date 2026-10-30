@@ -14,7 +14,7 @@
 // It shows the random, account-unlinked install id and whether a project is
 // configured, and offers a one-click clear of the egress log.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -48,14 +48,14 @@ function formatProps(props: Record<string, string | number | boolean>): string {
 
 function EgressRow({ entry }: { entry: EgressLogEntry }) {
 	return (
-		<div className="flex flex-col gap-0.5 border-border/50 border-b py-1.5 last:border-b-0">
+		<div className="flex flex-col gap-0.5 border-border border-b py-1.5 last:border-b-0">
 			<div className="flex items-center justify-between gap-2">
 				<code className="font-medium text-xs">{entry.event}</code>
-				<span className="type-compact text-muted-foreground">
+				<span className="text-muted-foreground/70 text-xs tabular-nums">
 					{formatDateTime(entry.at)}
 				</span>
 			</div>
-			<span className="type-caption text-muted-foreground">
+			<span className="text-muted-foreground text-xs">
 				{formatProps(entry.props)}
 			</span>
 		</div>
@@ -64,6 +64,7 @@ function EgressRow({ entry }: { entry: EgressLogEntry }) {
 
 export function AnalyticsInspector() {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [log, setLog] = useState<EgressLogEntry[]>([]);
 
@@ -111,12 +112,20 @@ export function AnalyticsInspector() {
 				<DialogHeader>
 					<DialogTitle>What product analytics sends</DialogTitle>
 					<DialogDescription>
-						Anonymous, content-free events only. Install id (random, not linked
-						to your account):{" "}
-						<code className="type-caption">{getInstallId()}</code>.{" "}
-						{configured
-							? "A project is configured."
-							: "No analytics project is configured, so nothing is sent."}
+						{tlRich(
+							"Anonymous, content-free events only. Install id (random, not linked to your account): <code>{installId}</code>. {configurationStatus}",
+							{
+								installId: getInstallId(),
+								configurationStatus: configured
+									? tl("A project is configured.")
+									: tl(
+											"No analytics project is configured, so nothing is sent."
+										),
+							},
+							{
+								code: (chunks) => <code className="text-xs">{chunks}</code>,
+							}
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -127,7 +136,7 @@ export function AnalyticsInspector() {
 								eventCount: ANALYTICS_EVENT_NAMES.length,
 							})}
 						</h3>
-						<p className="text-muted-foreground text-xs">
+						<p className="text-detail text-muted-foreground">
 							Every event type the app can ever send. There is no free-text or
 							content field in any of them.
 						</p>
@@ -145,7 +154,7 @@ export function AnalyticsInspector() {
 													</Badge>
 												))}
 											</div>
-											<span className="type-caption text-muted-foreground">
+											<span className="text-muted-foreground text-xs">
 												{meta.description}
 											</span>
 										</div>
@@ -179,7 +188,7 @@ export function AnalyticsInspector() {
 								</Button>
 							</div>
 						</div>
-						<p className="text-muted-foreground text-xs">
+						<p className="text-detail text-muted-foreground">
 							A local record of events actually sent from this install, newest
 							first.
 						</p>

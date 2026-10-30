@@ -284,7 +284,7 @@ export function FileAnnotationViewer({
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
-			<div className="flex shrink-0 items-center gap-1 border-border/60 border-b bg-sidebar px-1.5 py-1">
+			<div className="flex h-10 shrink-0 items-center gap-1 border-border border-b px-2">
 				<Button
 					aria-label="Back to files"
 					onClick={onClose}
@@ -328,7 +328,7 @@ export function FileAnnotationViewer({
 				</Button>
 			</div>
 			{load.status === "ready" && notes.length === 0 && !range && (
-				<p className="shrink-0 border-border/60 border-b px-2 py-1 text-muted-foreground text-xs">
+				<p className="shrink-0 border-border border-b px-2 py-1 text-muted-foreground text-xs">
 					Click or drag line numbers to annotate a range.
 				</p>
 			)}
@@ -432,11 +432,11 @@ function SavedNoteCard({
 					aria-label={tl("Remove note on {lineLabel}", {
 						lineLabel: formatLineLabel(note),
 					})}
-					className="ml-auto rounded px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+					className="ml-auto rounded-lg px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					onClick={onRemove}
 					type="button"
 				>
-					<HugeiconsIcon className="size-3" icon={Cancel01Icon} />
+					<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
 				</button>
 			</div>
 			<p className="whitespace-pre-wrap text-foreground">{note.comment}</p>

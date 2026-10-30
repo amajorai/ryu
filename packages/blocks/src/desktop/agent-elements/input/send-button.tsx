@@ -1,18 +1,18 @@
-import { CallIcon } from "@hugeicons/core-free-icons";
+import {
+	ArrowUp02Icon,
+	CallIcon,
+	Mic01Icon,
+	StopIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	IconArrowUp,
-	IconMicrophone,
-	IconPlayerStopFilled,
-} from "@tabler/icons-react";
 
 /**
  * Voice controls handed to the trailing button. When present and the composer is
- * empty (`state === "idle"`), the single trailing button *becomes* the voice-mode
+ * empty (`state === "idle"`), the single trailing button *becomes* the dictation
  * trigger — so an empty composer shows one mic button, and it morphs into the send
- * arrow the moment the user types. This keeps the toolbar to a single trailing
- * action instead of a separate mic + send pair.
+ * arrow the moment the user types. Hosts with live voice mode pass no `voice`
+ * here: dictation then has its own mic button and Send keeps its slot.
  */
 export interface SendButtonVoice {
 	disabled?: boolean;
@@ -23,11 +23,9 @@ export interface SendButtonVoice {
 }
 
 /**
- * Live voice-mode entry handed to the trailing button. When present and the
- * composer is empty, the trailing button *becomes* the realtime voice-mode
- * trigger (opens the compact voice call surface) — the ChatGPT-style continuous
- * loop, distinct from `voice` (push-to-talk STT dictation, which relocates to
- * its own small toolbar button when this owns the trailing slot).
+ * Live voice-mode entry. It no longer owns the send slot: it is its own quiet
+ * `ghost-muted` icon button beside the mic (see {@link VoiceCallButton}), so Send
+ * always stays where the eye expects it.
  */
 export interface SendButtonVoiceMode {
 	disabled?: boolean;
@@ -38,23 +36,33 @@ export interface SendButtonProps {
 	onClick?: () => void;
 	state: "idle" | "typing" | "streaming";
 	/**
-	 * When supplied, the empty-composer state renders the mic (voice mode) in the
-	 * send button's slot instead of a disabled arrow.
+	 * When supplied, the empty-composer state renders the mic (dictation) in the
+	 * send button's slot instead of a dimmed arrow.
 	 */
 	voice?: SendButtonVoice;
-	/**
-	 * When supplied, the empty-composer state renders the live voice-mode waveform
-	 * in the send button's slot. Takes precedence over `voice` for that slot.
-	 */
-	voiceMode?: SendButtonVoiceMode;
 }
 
-export function SendButton({
-	state,
-	onClick,
-	voice,
-	voiceMode,
-}: SendButtonProps) {
+/** Every trailing composer action shares one 32px round footprint. */
+const SLOT = "size-8";
+
+/** The realtime voice-call entry: a quiet icon button, never the send slot. */
+export function VoiceCallButton({ disabled, onStart }: SendButtonVoiceMode) {
+	return (
+		<Button
+			aria-label="Start voice call"
+			disabled={disabled}
+			onClick={onStart}
+			size="icon-sm"
+			title="Start voice call"
+			type="button"
+			variant="ghost-muted"
+		>
+			<HugeiconsIcon className="size-4" icon={CallIcon} />
+		</Button>
+	);
+}
+
+export function SendButton({ state, onClick, voice }: SendButtonProps) {
 	const isStreaming = state === "streaming";
 	const isTyping = state === "typing";
 
@@ -64,48 +72,32 @@ export function SendButton({
 			<Button
 				appearance="composer-stop"
 				aria-label="Stop"
+				className={SLOT}
 				onClick={onClick}
 				size="icon"
 				type="button"
 			>
-				<IconPlayerStopFilled className="size-4" />
+				<HugeiconsIcon className="size-3.5" icon={StopIcon} />
 			</Button>
 		);
 	}
 
-	// Live voice-mode entry owns the empty-composer slot when wired — a mode
-	// trigger that opens the realtime overlay, not STT dictation. STT (`voice`)
-	// relocates to its own small toolbar button when this holds the slot.
-	if (voiceMode && !isTyping) {
-		return (
-			<Button
-				appearance="composer-call"
-				aria-label="Start voice call"
-				disabled={voiceMode.disabled}
-				onClick={voiceMode.onStart}
-				size="icon"
-				title="Start voice call"
-				type="button"
-			>
-				<HugeiconsIcon className="size-4" icon={CallIcon} />
-			</Button>
-		);
-	}
-
-	// Voice mode owns the empty-composer slot. Recording / transcribing are only
-	// reachable from empty (typing hides the mic), so they live here too.
+	// Dictation owns the empty-composer slot when the host has no voice mode.
+	// Recording / transcribing are only reachable from empty (typing hides the
+	// mic), so they live here too.
 	if (voice && !isTyping) {
 		if (voice.isRecording) {
 			return (
 				<Button
 					appearance="composer-recording"
 					aria-label="Stop recording"
+					className={SLOT}
 					onClick={voice.onStop}
 					size="icon"
 					title="Stop recording"
 					type="button"
 				>
-					<IconPlayerStopFilled className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={StopIcon} />
 				</Button>
 			);
 		}
@@ -114,6 +106,7 @@ export function SendButton({
 				<Button
 					appearance="composer-pending"
 					aria-label="Transcribing"
+					className={SLOT}
 					loading
 					size="icon"
 					title="Transcribing…"
@@ -125,32 +118,31 @@ export function SendButton({
 			<Button
 				appearance="composer-dictation"
 				aria-label="Start voice input"
+				className={SLOT}
 				disabled={voice.disabled}
 				onClick={voice.onStart}
 				size="icon"
 				title="Voice input"
 				type="button"
 			>
-				<IconMicrophone className="size-4" />
+				<HugeiconsIcon className="size-4" icon={Mic01Icon} />
 			</Button>
 		);
 	}
 
-	// Send: bright when there's text to send, muted+disabled when empty (no voice).
+	// Send keeps its slot: the accent circle, dimmed to 30% while there is
+	// nothing to send.
 	return (
 		<Button
-			appearance={isTyping ? "composer-send" : "composer-pending"}
+			appearance="composer-send"
 			aria-label="Send"
+			className={isTyping ? SLOT : `${SLOT} disabled:opacity-30`}
 			disabled={!isTyping}
 			onClick={onClick}
 			size="icon"
 			type="button"
 		>
-			{isTyping ? (
-				<IconArrowUp className="size-4" />
-			) : (
-				<IconArrowUp className="size-4" />
-			)}
+			<HugeiconsIcon className="size-4" icon={ArrowUp02Icon} />
 		</Button>
 	);
 }

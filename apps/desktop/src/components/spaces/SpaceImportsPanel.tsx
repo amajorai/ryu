@@ -1,15 +1,11 @@
 import {
 	Archive02Icon,
-	ArrowUpRight01Icon,
 	CloudDownloadIcon,
-	DatabaseIcon,
 	File01Icon,
 	Link01Icon,
 	Table01Icon,
-	Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
@@ -18,28 +14,9 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@ryu/ui/components/card.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import { Label } from "@ryu/ui/components/label.tsx";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@ryu/ui/components/select.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
-import { Textarea } from "@ryu/ui/components/textarea.tsx";
-import {
-	type ChangeEvent,
-	type ComponentProps,
-	type ReactNode,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import { z } from "zod";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import {
 	useComposioActions,
 	useComposioConnections,
@@ -47,10 +24,6 @@ import {
 	useComposioToolkits,
 } from "@/src/hooks/useComposioCatalog.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import type {
-	ComposioAction,
-	ComposioInputProperty,
-} from "@/src/lib/api/composio.ts";
 import {
 	createSpaceComposioImport,
 	createSpaceFileImport,
@@ -58,11 +31,16 @@ import {
 	type SpaceImportRecord,
 	type SpaceImportResultDocument,
 } from "@/src/lib/api/space-imports.ts";
-
-const DOCUMENT_ACCEPT =
-	".txt,.text,.md,.markdown,.mdown,.mkdn,.mkd,.rmd,.html,.htm,.docx,.pdf,.epub,.opml";
-const DATABASE_ACCEPT = ".csv,.tsv,.dsv,.xlsx,.xls,.ods";
-const ARCHIVE_ACCEPT = ".zip";
+import { ComposioImportForm } from "./space-imports/composio-form.tsx";
+import { FileImportCard } from "./space-imports/fields.tsx";
+import { ImportHistorySection } from "./space-imports/history.tsx";
+import {
+	ARCHIVE_ACCEPT,
+	buildArguments,
+	DATABASE_ACCEPT,
+	DOCUMENT_ACCEPT,
+	errorMessage,
+} from "./space-imports/model.ts";
 
 interface SpaceImportsPanelProps {
 	onImportCompleted: () => void;
@@ -70,268 +48,6 @@ interface SpaceImportsPanelProps {
 	onOpenDocument: (document: SpaceImportResultDocument) => void;
 	spaceId: string;
 	target: ApiTarget;
-}
-
-function errorMessage<TError>(error: TError): string {
-	return error instanceof Error
-		? error.message
-		: "The import could not be started.";
-}
-
-function openResultLabel(title: string): string {
-	return /^open\b/i.test(title.trim()) ? title : `Open ${title}`;
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes <= 0) {
-		return "";
-	}
-	if (bytes < 1024) {
-		return `${bytes} B`;
-	}
-	if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)} KB`;
-	}
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatWhen(timestamp: number): string {
-	return new Intl.DateTimeFormat(undefined, {
-		dateStyle: "medium",
-		timeStyle: "short",
-	}).format(new Date(timestamp));
-}
-
-const CONNECTOR_LABELS: Record<string, string> = {
-	confluence: "Confluence",
-	github: "GitHub",
-	google_drive: "Google Drive",
-	notion: "Notion",
-	web: "Web",
-};
-
-function importSourceLabel(item: SpaceImportRecord): string {
-	if (item.sourceType === "composio") {
-		return `Composio · ${item.sourceFormat}`;
-	}
-	if (item.sourceType === "connector") {
-		return CONNECTOR_LABELS[item.sourceFormat] ?? item.sourceFormat;
-	}
-	return item.sourceFormat.toUpperCase();
-}
-
-function statusVariant(
-	status: SpaceImportRecord["status"]
-): ComponentProps<typeof Badge>["variant"] {
-	if (status === "completed") {
-		return "secondary";
-	}
-	if (status === "failed") {
-		return "destructive";
-	}
-	return "outline";
-}
-
-function FileImportCard({
-	accept,
-	description,
-	disabled,
-	icon,
-	id,
-	onFiles,
-	title,
-}: {
-	accept: string;
-	description: string;
-	disabled: boolean;
-	icon: ReactNode;
-	id: string;
-	onFiles: (files: FileList) => void;
-	title: string;
-}) {
-	const input = useRef<HTMLInputElement>(null);
-	return (
-		<Card className="h-full">
-			<CardHeader spacing="chart">
-				<div className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-					{icon}
-				</div>
-				<div>
-					<CardTitle variant="section">{title}</CardTitle>
-					<CardDescription className="mt-1">{description}</CardDescription>
-				</div>
-			</CardHeader>
-			<CardContent>
-				<input
-					accept={accept}
-					aria-label={`${title} files`}
-					className="sr-only"
-					id={id}
-					multiple
-					onChange={(event: ChangeEvent<HTMLInputElement>) => {
-						if (event.target.files?.length) {
-							onFiles(event.target.files);
-						}
-						event.target.value = "";
-					}}
-					ref={input}
-					type="file"
-				/>
-				<Button
-					disabled={disabled}
-					onClick={() => input.current?.click()}
-					size="sm"
-					type="button"
-					variant="outline"
-				>
-					<HugeiconsIcon className="size-4" icon={Upload01Icon} />
-					Choose files
-				</Button>
-			</CardContent>
-		</Card>
-	);
-}
-
-function ArgumentField({
-	name,
-	onChange,
-	property,
-	required,
-	value,
-}: {
-	name: string;
-	onChange: (value: string) => void;
-	property: ComposioInputProperty;
-	required: boolean;
-	value: string;
-}) {
-	const label = property.title ?? name.replaceAll("_", " ");
-	const type = Array.isArray(property.type) ? property.type[0] : property.type;
-	if (property.enum?.length) {
-		return (
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={`composio-${name}`}>{label}</Label>
-				<Select onValueChange={onChange} value={value}>
-					<SelectTrigger id={`composio-${name}`}>
-						<SelectValue placeholder={`Choose ${label}`} />
-					</SelectTrigger>
-					<SelectContent>
-						{property.enum.map((option) => (
-							<SelectItem key={String(option)} value={String(option)}>
-								{String(option)}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-				{property.description ? (
-					<p className="text-muted-foreground text-xs">
-						{property.description}
-					</p>
-				) : null}
-			</div>
-		);
-	}
-	if (type === "boolean") {
-		return (
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={`composio-${name}`}>{label}</Label>
-				<Select onValueChange={onChange} value={value}>
-					<SelectTrigger id={`composio-${name}`}>
-						<SelectValue placeholder={`Choose ${label}`} />
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value="true">True</SelectItem>
-						<SelectItem value="false">False</SelectItem>
-					</SelectContent>
-				</Select>
-				{property.description ? (
-					<p className="text-muted-foreground text-xs">
-						{property.description}
-					</p>
-				) : null}
-			</div>
-		);
-	}
-	if (type === "object" || type === "array") {
-		return (
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={`composio-${name}`}>{label}</Label>
-				<Textarea
-					id={`composio-${name}`}
-					onChange={(event) => onChange(event.target.value)}
-					placeholder={type === "array" ? "[]" : "{}"}
-					required={required}
-					rows={3}
-					value={value}
-				/>
-			</div>
-		);
-	}
-	return (
-		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={`composio-${name}`}>{label}</Label>
-			<Input
-				id={`composio-${name}`}
-				onChange={(event) => onChange(event.target.value)}
-				placeholder={property.description}
-				required={required}
-				type={type === "number" || type === "integer" ? "number" : "text"}
-				value={value}
-			/>
-		</div>
-	);
-}
-
-function defaultArgumentValue(property: ComposioInputProperty): string {
-	if (property.default === undefined || property.default === null) {
-		return "";
-	}
-	if (
-		z
-			.union([z.array(z.json()), z.record(z.string(), z.json())])
-			.safeParse(property.default).success
-	) {
-		return JSON.stringify(property.default);
-	}
-	return String(property.default);
-}
-
-function buildArguments(
-	action: ComposioAction,
-	values: Record<string, string>
-) {
-	const argumentsValue: Record<string, z.infer<ReturnType<typeof z.json>>> = {};
-	const required = new Set(action.inputSchema.required ?? []);
-	for (const [name, property] of Object.entries(
-		action.inputSchema.properties ?? {}
-	)) {
-		const value = (values[name] ?? defaultArgumentValue(property)).trim();
-		if (!value) {
-			if (required.has(name)) {
-				throw new Error(
-					`Enter ${property.title ?? name.replaceAll("_", " ")}.`
-				);
-			}
-			continue;
-		}
-		const type = Array.isArray(property.type)
-			? property.type[0]
-			: property.type;
-		if (type === "number" || type === "integer") {
-			const number = Number(value);
-			if (!Number.isFinite(number)) {
-				throw new Error(`${property.title ?? name} must be a number.`);
-			}
-			argumentsValue[name] = number;
-		} else if (type === "boolean") {
-			argumentsValue[name] = value === "true";
-		} else if (type === "array" || type === "object") {
-			argumentsValue[name] = z.json().parse(JSON.parse(value));
-		} else {
-			argumentsValue[name] = value;
-		}
-	}
-	return argumentsValue;
 }
 
 export function SpaceImportsPanel({
@@ -538,9 +254,7 @@ export function SpaceImportsPanel({
 						<Spinner className="size-3" /> Uploading files…
 					</p>
 				) : null}
-				{uploadError ? (
-					<p className="text-sm text-status-destructive">{uploadError}</p>
-				) : null}
+				{uploadError ? <ErrorLine message={uploadError} /> : null}
 			</section>
 
 			<section className="flex flex-col gap-3">
@@ -565,7 +279,7 @@ export function SpaceImportsPanel({
 					<CardContent layout="spaced-stack">
 						{configured ? (
 							availableToolkits.length === 0 ? (
-								<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
+								<div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm">
 									<span>
 										Connect an app to make its import actions available here.
 									</span>
@@ -578,149 +292,27 @@ export function SpaceImportsPanel({
 									</Button>
 								</div>
 							) : (
-								<>
-									<div className="grid gap-3 md:grid-cols-2">
-										<div className="flex flex-col gap-1.5">
-											<Label htmlFor="space-import-toolkit">
-												Connected app
-											</Label>
-											<Select onValueChange={setToolkit} value={toolkit}>
-												<SelectTrigger id="space-import-toolkit">
-													<SelectValue placeholder="Choose an app">
-														{(value) =>
-															availableToolkits.find(
-																(item) => item.slug === value
-															)?.name ?? value
-														}
-													</SelectValue>
-												</SelectTrigger>
-												<SelectContent>
-													{availableToolkits.map((item) => (
-														<SelectItem key={item.slug} value={item.slug}>
-															{item.name}
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
-										</div>
-										<div className="flex flex-col gap-1.5">
-											<Label htmlFor="space-import-action">Read action</Label>
-											<Select onValueChange={setActionName} value={actionName}>
-												<SelectTrigger id="space-import-action">
-													<SelectValue placeholder="Choose data to import">
-														{(value) =>
-															readActions.find((item) => item.name === value)
-																?.displayName ?? value
-														}
-													</SelectValue>
-												</SelectTrigger>
-												<SelectContent>
-													{readActions.map((item) => (
-														<SelectItem key={item.name} value={item.name}>
-															{item.displayName}
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
-										</div>
-									</div>
-									{selectedAction?.description ? (
-										<p className="text-muted-foreground text-xs">
-											{selectedAction.description}
-										</p>
-									) : null}
-									<div className="grid gap-3 md:grid-cols-2">
-										{Object.entries(
-											selectedAction?.inputSchema.properties ?? {}
-										).map(([name, property]) => (
-											<ArgumentField
-												key={name}
-												name={name}
-												onChange={(value) =>
-													setArgumentValues((current) => ({
-														...current,
-														[name]: value,
-													}))
-												}
-												property={property}
-												required={
-													selectedAction?.inputSchema.required?.includes(
-														name
-													) ?? false
-												}
-												value={
-													argumentValues[name] ?? defaultArgumentValue(property)
-												}
-											/>
-										))}
-										<div className="flex flex-col gap-1.5">
-											<Label htmlFor="space-import-title">Title</Label>
-											<Input
-												id="space-import-title"
-												onChange={(event) => setImportTitle(event.target.value)}
-												placeholder={
-													selectedAction?.displayName ?? "Imported data"
-												}
-												value={importTitle}
-											/>
-										</div>
-										<div className="flex flex-col gap-1.5">
-											<Label htmlFor="space-import-destination">
-												Destination
-											</Label>
-											<Select<"auto" | "page" | "database">
-												onValueChange={(value) => setDestinationKind(value)}
-												value={destinationKind}
-											>
-												<SelectTrigger id="space-import-destination">
-													<SelectValue>
-														{(value) => {
-															if (value === "page") {
-																return "Page";
-															}
-															if (value === "database") {
-																return "Database";
-															}
-															return "Choose from result";
-														}}
-													</SelectValue>
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="auto">
-														Choose from result
-													</SelectItem>
-													<SelectItem value="page">Page</SelectItem>
-													<SelectItem value="database">Database</SelectItem>
-												</SelectContent>
-											</Select>
-										</div>
-									</div>
-									{composioError ? (
-										<p className="text-sm text-status-destructive">
-											{composioError}
-										</p>
-									) : null}
-									<Button
-										disabled={!selectedAction}
-										loading={composioBusy}
-										onClick={() => startComposioImport().catch(() => undefined)}
-										size="sm"
-										type="button"
-									>
-										{composioBusy ? null : (
-											<HugeiconsIcon
-												className="size-4"
-												icon={CloudDownloadIcon}
-											/>
-										)}
-										Import from{" "}
-										{availableToolkits.find((item) => item.slug === toolkit)
-											?.name ?? "app"}
-									</Button>
-								</>
+								<ComposioImportForm
+									actionName={actionName}
+									argumentValues={argumentValues}
+									availableToolkits={availableToolkits}
+									composioBusy={composioBusy}
+									composioError={composioError}
+									destinationKind={destinationKind}
+									importTitle={importTitle}
+									onImport={() => startComposioImport().catch(() => undefined)}
+									readActions={readActions}
+									selectedAction={selectedAction}
+									setActionName={setActionName}
+									setArgumentValues={setArgumentValues}
+									setDestinationKind={setDestinationKind}
+									setImportTitle={setImportTitle}
+									setToolkit={setToolkit}
+									toolkit={toolkit}
+								/>
 							)
 						) : (
-							<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
+							<div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm">
 								<span>Configure Composio in Connections before importing.</span>
 								<Button
 									onClick={onManageConnections}
@@ -736,103 +328,12 @@ export function SpaceImportsPanel({
 				</Card>
 			</section>
 
-			<section className="flex flex-col gap-3">
-				<div className="flex items-center justify-between gap-3">
-					<div>
-						<h3 className="font-medium text-sm">Previous imports</h3>
-						<p className="mt-1 text-muted-foreground text-xs">
-							Newest imports appear first.
-						</p>
-					</div>
-					<Button
-						onClick={() => loadHistory().catch(() => undefined)}
-						size="sm"
-						variant="ghost"
-					>
-						Refresh
-					</Button>
-				</div>
-				{historyError ? (
-					<p className="text-sm text-status-destructive">{historyError}</p>
-				) : null}
-				{imports.length === 0 && !historyError ? (
-					<div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground text-sm">
-						No imports yet.
-					</div>
-				) : (
-					<ul aria-live="polite" className="flex flex-col gap-2">
-						{imports.map((item) => (
-							<li className="rounded-lg border p-3" key={item.id}>
-								<div className="flex flex-wrap items-start justify-between gap-3">
-									<div className="min-w-0">
-										<div className="flex items-center gap-2">
-											<HugeiconsIcon
-												className="size-4 shrink-0 text-muted-foreground"
-												icon={
-													item.destinationKind === "database"
-														? DatabaseIcon
-														: File01Icon
-												}
-											/>
-											<p
-												className="truncate font-medium text-sm"
-												title={item.sourceName}
-											>
-												{item.sourceName}
-											</p>
-											<Badge variant={statusVariant(item.status)}>
-												{item.status}
-											</Badge>
-										</div>
-										<p className="mt-1 text-muted-foreground text-xs">
-											{importSourceLabel(item)}
-											{" · "}
-											{formatWhen(item.createdAt)}
-											{item.byteSize > 0
-												? ` · ${formatBytes(item.byteSize)}`
-												: ""}
-											{item.status === "completed"
-												? ` · ${item.itemCount} item${item.itemCount === 1 ? "" : "s"}`
-												: ""}
-										</p>
-										{item.message ? (
-											<p
-												className={
-													item.status === "failed"
-														? "mt-2 text-status-destructive text-xs"
-														: "mt-2 text-muted-foreground text-xs"
-												}
-											>
-												{item.message}
-											</p>
-										) : null}
-									</div>
-									{item.status === "pending" || item.status === "running" ? (
-										<Spinner className="mt-1 size-4" />
-									) : item.resultDocuments.length ? (
-										<div className="flex flex-wrap gap-2">
-											{item.resultDocuments.map((document) => (
-												<Button
-													key={document.id}
-													onClick={() => onOpenDocument(document)}
-													size="sm"
-													variant="ghost"
-												>
-													{openResultLabel(document.title)}
-													<HugeiconsIcon
-														className="size-4"
-														icon={ArrowUpRight01Icon}
-													/>
-												</Button>
-											))}
-										</div>
-									) : null}
-								</div>
-							</li>
-						))}
-					</ul>
-				)}
-			</section>
+			<ImportHistorySection
+				historyError={historyError}
+				imports={imports}
+				onOpenDocument={onOpenDocument}
+				onRefresh={() => loadHistory().catch(() => undefined)}
+			/>
 		</div>
 	);
 }

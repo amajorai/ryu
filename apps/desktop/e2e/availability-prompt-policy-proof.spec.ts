@@ -217,19 +217,13 @@ test("the configured idle timeout moves Online to Away and activity recovers it"
 	await page.clock.fastForward(5 * 60_000 + 1);
 	await expect(page.getByTestId("availability-status")).toHaveText("away");
 	await expect(
-		page.getByText(
-			"Currently Away from AFK detection. Away, Do not disturb, Gaming, and Streaming keep agents working: their questions wait instead of pausing the chat.",
-			{ exact: true }
-		)
+		page.getByText("Currently Away from AFK detection.", { exact: true })
 	).toBeVisible();
 
 	await page.evaluate(() => window.dispatchEvent(new Event("pointerdown")));
 	await expect(page.getByTestId("availability-status")).toHaveText("online");
 	await expect(
-		page.getByText(
-			"Currently Online by your choice. Away, Do not disturb, Gaming, and Streaming keep agents working: their questions wait instead of pausing the chat.",
-			{ exact: true }
-		)
+		page.getByText("Currently Online by your choice.", { exact: true })
 	).toBeVisible();
 });
 
@@ -295,20 +289,14 @@ test("manual status wins over AFK events, and AFK disablement prevents Away", as
 		"do-not-disturb"
 	);
 	await expect(
-		page.getByText(
-			"Currently Do not disturb by your choice. Away, Do not disturb, Gaming, and Streaming keep agents working: their questions wait instead of pausing the chat.",
-			{ exact: true }
-		)
+		page.getByText("Currently Do not disturb by your choice.", { exact: true })
 	).toBeVisible();
 
 	await chooseOption(page, "availability-manual-status-select", "Online");
 	await page.evaluate(() => window.dispatchEvent(new Event("blur")));
 	await expect(page.getByTestId("availability-status")).toHaveText("away");
 	await expect(
-		page.getByText(
-			"Currently Away from AFK detection. Away, Do not disturb, Gaming, and Streaming keep agents working: their questions wait instead of pausing the chat.",
-			{ exact: true }
-		)
+		page.getByText("Currently Away from AFK detection.", { exact: true })
 	).toBeVisible();
 
 	const afkDetection = page.locator(
@@ -491,7 +479,10 @@ test("a detected game switches to Gaming and reports availability to Core", asyn
 	await expect.poll(() => presence.settingsSaves.length).toBe(1);
 	expect(presence.settingsSaves[0]).toMatchObject({ freeLocalModels: false });
 
-	await page.getByRole("button", { name: "Availability: Gaming" }).click();
+	// The footer shows availability only as the avatar dot; the status and its
+	// caption live in the account menu's Online status submenu.
+	await page.getByRole("button", { name: "Desktop user nav" }).click();
+	await page.getByRole("menuitem", { name: "Online status: Gaming" }).click();
 	await expect(page.getByText("Gaming: Hades is running")).toBeVisible();
 	await page.screenshot({
 		animations: "disabled",

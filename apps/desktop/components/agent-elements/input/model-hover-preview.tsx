@@ -70,7 +70,7 @@ function ScoreBar({
 			: `${label}: ${formatScore(value)} of 5${hint ? `, ${hint}` : ""}`;
 	return (
 		<div className="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3">
-			<span className="type-caption flex min-w-0 items-center gap-1 font-medium text-muted-foreground">
+			<span className="flex min-w-0 items-center gap-1 font-medium text-muted-foreground text-xs">
 				{icon ? (
 					<HugeiconsIcon
 						aria-hidden="true"
@@ -121,11 +121,11 @@ function ModalityRow({
 	}
 	return (
 		<div className="flex flex-wrap items-center gap-1.5">
-			<span className="type-caption text-muted-foreground">Modalities</span>
+			<span className="text-muted-foreground text-xs">Modalities</span>
 			<div className="flex flex-wrap items-center gap-1">
 				{inMods.map((m) => (
 					<span
-						className="type-compact inline-flex items-center gap-1 rounded-md bg-foreground/8 px-1.5 py-0.5 text-foreground/80"
+						className="inline-flex items-center gap-1 rounded-md bg-foreground/8 px-1.5 py-0.5 text-foreground/80 text-xs"
 						key={`in-${m}`}
 						title={MODALITY_META[m].label}
 					>
@@ -133,10 +133,10 @@ function ModalityRow({
 						{MODALITY_META[m].label}
 					</span>
 				))}
-				<span className="type-compact text-muted-foreground">→</span>
+				<span className="text-muted-foreground text-xs">→</span>
 				{outMods.map((m) => (
 					<span
-						className="type-compact inline-flex items-center gap-1 rounded-md bg-foreground/8 px-1.5 py-0.5 text-foreground/80"
+						className="inline-flex items-center gap-1 rounded-md bg-foreground/8 px-1.5 py-0.5 text-foreground/80 text-xs"
 						key={`out-${m}`}
 						title={MODALITY_META[m].label}
 					>
@@ -189,7 +189,7 @@ export function ModelHoverPreview({ insight }: { insight: ModelInsight }) {
 							{insight.name}
 						</p>
 						{insight.description ? (
-							<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground leading-snug">
+							<p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs leading-snug">
 								{insight.description}
 							</p>
 						) : null}
@@ -197,7 +197,7 @@ export function ModelHoverPreview({ insight }: { insight: ModelInsight }) {
 				</div>
 			</div>
 
-			<div className="flex flex-col gap-2.5 border-border/40 border-t pt-3">
+			<div className="flex flex-col gap-2.5 border-border border-t pt-3">
 				<ScoreBar hint={speedHint} label="Speed" score={insight.scoreSpeed} />
 				<ScoreBar
 					hint={intelHint}
@@ -218,9 +218,9 @@ export function ModelHoverPreview({ insight }: { insight: ModelInsight }) {
 			</div>
 
 			{(inputPrice || outputPrice || contextHint) && (
-				<div className="flex flex-col gap-1 border-border/40 border-t pt-2">
+				<div className="flex flex-col gap-1 border-border border-t pt-2">
 					{(inputPrice || outputPrice) && (
-						<div className="type-caption flex items-center gap-1.5 text-muted-foreground">
+						<div className="flex items-center gap-1.5 text-muted-foreground text-xs">
 							<HugeiconsIcon
 								className="size-3 shrink-0"
 								icon={DollarCircleIcon}
@@ -243,7 +243,7 @@ export function ModelHoverPreview({ insight }: { insight: ModelInsight }) {
 						</div>
 					)}
 					{contextHint ? (
-						<div className="type-caption flex items-center gap-1.5 text-muted-foreground">
+						<div className="flex items-center gap-1.5 text-muted-foreground text-xs">
 							<HugeiconsIcon className="size-3 shrink-0" icon={FlashIcon} />
 							<span>
 								{isNativeNumber(insight.maxOutputTokens)
@@ -263,7 +263,7 @@ export function ModelHoverPreview({ insight }: { insight: ModelInsight }) {
 				outputs={insight.modalitiesOutput}
 			/>
 
-			<p className="type-compact text-muted-foreground/70">
+			<p className="text-muted-foreground/70 text-xs">
 				{insight.source === "openrouter"
 					? "Current OpenRouter transaction price"
 					: tl("via {source}", { source: insight.source })}

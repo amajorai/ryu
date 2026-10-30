@@ -13,7 +13,7 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -49,10 +49,10 @@ import {
 	filterPrompts,
 	instructionsFromVersion,
 	isEditablePrompt,
-	labelEntries,
-	versionBody,
 	versionDiffRows,
 } from "@/src/lib/prompt-library.ts";
+import { PromptLibraryPromptList } from "./PromptLibrary-prompt-list.tsx";
+import { PromptLibraryVersionPanel } from "./PromptLibrary-version-panel.tsx";
 
 export interface PromptLibraryProps {
 	/** The editor's current system prompt (committed or saved as a prompt). */
@@ -71,19 +71,13 @@ function message(error: unknown, fallback: string): string {
 	return error instanceof Error ? error.message : fallback;
 }
 
-const DIFF_TONE = {
-	add: "text-status-success",
-	remove: "text-status-destructive",
-	equal: "text-muted-foreground",
-} as const;
-const DIFF_MARK = { add: "+ ", remove: "- ", equal: "  " } as const;
-
 export function PromptLibrary({
 	currentPrompt,
 	locked,
 	onUsePrompt,
 	target,
 }: PromptLibraryProps) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [list, setList] = useState<PromptList | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -253,12 +247,13 @@ export function PromptLibrary({
 					<DialogHeader>
 						<DialogTitle>Prompt library</DialogTitle>
 						<DialogDescription>
-							Versioned prompts on this node
 							{list?.organizationId
-								? ", including your organization's prompts"
-								: ""}
-							. Versions never change; labels such as production point at the
-							version agents should use.
+								? tl(
+										"Versioned prompts on this node, including your organization's prompts. Versions never change; labels such as production point at the version agents should use."
+									)
+								: tl(
+										"Versioned prompts on this node. Versions never change; labels such as production point at the version agents should use."
+									)}
 						</DialogDescription>
 					</DialogHeader>
 
@@ -295,43 +290,11 @@ export function PromptLibrary({
 										No prompts yet. Save the editor text as a prompt below.
 									</p>
 								) : (
-									<ul className="flex flex-col gap-1">
-										{prompts.map((prompt) => (
-											<li key={prompt.name}>
-												<button
-													aria-pressed={prompt.name === selectedName}
-													className="flex w-full flex-col gap-1 rounded-md border p-2 text-left hover:bg-muted/50 aria-pressed:border-primary"
-													onClick={() => setSelectedName(prompt.name)}
-													type="button"
-												>
-													<span className="flex items-center gap-2">
-														<span className="truncate font-medium text-xs">
-															{prompt.name}
-														</span>
-														<Badge size="compact" variant="outline">
-															{prompt.type}
-														</Badge>
-														{prompt.source === "cloud" ? (
-															<Badge size="compact" tint="blue">
-																Organization
-															</Badge>
-														) : null}
-													</span>
-													<span className="flex flex-wrap gap-1">
-														{labelEntries(prompt).map(({ label, version }) => (
-															<Badge
-																key={label}
-																size="compact"
-																variant="secondary"
-															>
-																{label} · v{version}
-															</Badge>
-														))}
-													</span>
-												</button>
-											</li>
-										))}
-									</ul>
+									<PromptLibraryPromptList
+										prompts={prompts}
+										selectedName={selectedName}
+										setSelectedName={setSelectedName}
+									/>
 								)}
 							</ScrollArea>
 							{list?.organizationId ? (
@@ -446,86 +409,17 @@ export function PromptLibrary({
 									</div>
 
 									{current ? (
-										<div className="flex flex-col gap-2">
-											<p className="text-muted-foreground text-xs">
-												{current.commitMessage ?? "No commit message"}
-												{current.variables.length > 0
-													? ` · variables: ${current.variables.join(", ")}`
-													: ""}
-												{current.modelConfig.model
-													? ` · model: ${current.modelConfig.model}`
-													: ""}
-											</p>
-											{diff ? (
-												<div className="flex flex-col gap-1">
-													<pre className="type-caption max-h-72 overflow-auto rounded bg-muted/40 p-2 font-mono leading-relaxed">
-														{diff.rows.map((row) => (
-															<div className={DIFF_TONE[row.op]} key={row.id}>
-																{DIFF_MARK[row.op]}
-																{row.text}
-															</div>
-														))}
-													</pre>
-													{diff.variables.added.length > 0 ||
-													diff.variables.removed.length > 0 ||
-													diff.modelConfig.length > 0 ? (
-														<p className="text-muted-foreground text-xs">
-															{[
-																...diff.variables.added.map(
-																	(name) => `+ variable ${name}`
-																),
-																...diff.variables.removed.map(
-																	(name) => `- variable ${name}`
-																),
-																...diff.modelConfig,
-															].join(" · ")}
-														</p>
-													) : null}
-												</div>
-											) : (
-												<pre className="type-caption max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono leading-relaxed">
-													{versionBody(current)}
-												</pre>
-											)}
-											<div className="flex flex-wrap items-center gap-2">
-												<Button
-													disabled={locked}
-													onClick={handleUse}
-													size="sm"
-													typography="compact"
-												>
-													Use in this agent
-												</Button>
-												{editable ? (
-													<>
-														<Input
-															aria-label="Label"
-															className="w-36"
-															onChange={(event) =>
-																setLabelDraft(event.target.value)
-															}
-															placeholder="production"
-															size="compact"
-															value={labelDraft}
-														/>
-														<Button
-															loading={busy}
-															onClick={handleLabel}
-															size="sm"
-															typography="compact"
-															variant="secondary"
-														>
-															Point label at v{current.version}
-														</Button>
-													</>
-												) : (
-													<span className="text-muted-foreground text-xs">
-														Organization prompts are edited in the organization
-														registry.
-													</span>
-												)}
-											</div>
-										</div>
+										<PromptLibraryVersionPanel
+											busy={busy}
+											current={current}
+											diff={diff}
+											editable={editable}
+											handleLabel={handleLabel}
+											handleUse={handleUse}
+											labelDraft={labelDraft}
+											locked={locked}
+											setLabelDraft={setLabelDraft}
+										/>
 									) : (
 										<SkeletonRows label="Loading versions…" />
 									)}

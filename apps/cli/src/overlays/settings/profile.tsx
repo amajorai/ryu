@@ -88,6 +88,8 @@ export function ProfileTab({
 	);
 	const [saving, setSaving] = useState(false);
 	const [statusMessage, setStatusMessage] = useState<string | null>(null);
+	// The failure text shown, so its color does not depend on the locale.
+	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
 	const setEditMode = useCallback(
 		(next: boolean) => {
@@ -187,7 +189,11 @@ export function ProfileTab({
 			setStatusMessage("Display name updated.");
 			setEditMode(false);
 		} catch (error) {
-			setStatusMessage(`Could not update display name: ${errorText(error)}`);
+			const text = tf("Could not update display name: {error}", {
+				error: errorText(error),
+			});
+			setErrorMessage(text);
+			setStatusMessage(text);
 		} finally {
 			setSaving(false);
 		}
@@ -285,7 +291,7 @@ export function ProfileTab({
 					{statusMessage ? (
 						<text
 							fg={
-								statusMessage.startsWith("Could not") ||
+								statusMessage === errorMessage ||
 								statusMessage.includes("cannot")
 									? theme.colors.error
 									: theme.colors.success

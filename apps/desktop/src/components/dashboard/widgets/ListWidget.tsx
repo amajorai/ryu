@@ -40,7 +40,7 @@ export function ListBody({
 			{items.map((item, i) => (
 				// List order is the data's natural order; index is a stable key here.
 				<li
-					className="flex items-center gap-2 truncate rounded-md px-2 py-1.5 transition-colors hover:bg-muted/60"
+					className="flex items-center gap-2 truncate rounded-lg px-2 py-1.5 transition-colors hover:bg-muted/60"
 					key={i}
 				>
 					<span className="size-1.5 shrink-0 rounded-full bg-primary/40" />

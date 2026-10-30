@@ -15,12 +15,29 @@ const VOICE: VoiceMode = {
 	transcript: "",
 };
 
-test("wraps Island voice mode in the libraries.dev voice glow while thinking", () => {
+test("voice mode keeps one monochrome orb and no edge glow", () => {
 	const markup = renderToStaticMarkup(
 		<VoiceModePanel onClose={() => undefined} voice={VOICE} />
 	);
 
-	expect(markup).toContain("data-voice-beam=");
-	expect(markup).toContain('data-processing="true"');
+	expect(markup).not.toContain("data-voice-beam=");
+	expect(markup).toContain("rounded-full bg-foreground");
+	expect(markup).toContain('aria-live="polite"');
 	expect(markup).toContain("Thinking…");
+	expect(markup).toContain("Interrupt");
+});
+
+test("a voice error reads as one sentence with Retry and Copy details", () => {
+	const markup = renderToStaticMarkup(
+		<VoiceModePanel
+			onClose={() => undefined}
+			voice={{ ...VOICE, error: "ws closed: 1006 upstream_unavailable" }}
+		/>
+	);
+
+	expect(markup).toContain("Voice mode stopped.");
+	expect(markup).toContain("Retry");
+	expect(markup).toContain("Copy details");
+	// The raw failure is only in the Copy details tooltip, not printed.
+	expect(markup.split("ws closed: 1006").length - 1).toBe(1);
 });

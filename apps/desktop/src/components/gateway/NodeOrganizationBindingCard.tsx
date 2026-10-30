@@ -1,19 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import {
-	Alert,
-	AlertDescription,
-	AlertTitle,
-} from "@ryu/ui/components/alert.tsx";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card.tsx";
 import {
 	Field,
 	FieldDescription,
@@ -34,7 +20,14 @@ import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { InlineErrorRow } from "@/src/components/chat/InlineErrorRow.tsx";
+import { StatusText } from "@/src/components/gateway/quiet.tsx";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
+import {
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
@@ -113,25 +106,13 @@ export function NodeOrganizationBindingCard({
 
 	if (statusQuery.error) {
 		return (
-			<Card>
-				<CardHeader>
-					<CardTitle>Organization binding</CardTitle>
-					<CardDescription>
-						Connect this self-hosted node to one organization.
-					</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<Alert variant="destructive">
-						<AlertTitle>Could not read this node</AlertTitle>
-						<AlertDescription>{statusQuery.error.message}</AlertDescription>
-					</Alert>
-				</CardContent>
-				<CardFooter>
-					<Button onClick={() => statusQuery.refetch()} variant="outline">
-						Retry
-					</Button>
-				</CardFooter>
-			</Card>
+			<SettingsSection title="Organization binding">
+				<InlineErrorRow
+					details={statusQuery.error.message}
+					message="Couldn't read this node's binding."
+					onRetry={() => statusQuery.refetch()}
+				/>
+			</SettingsSection>
 		);
 	}
 
@@ -144,7 +125,7 @@ export function NodeOrganizationBindingCard({
 			)?.name ??
 			status.organizationId;
 		return (
-			<Card
+			<section
 				aria-atomic="true"
 				aria-describedby="node-binding-ready-description"
 				aria-labelledby="node-binding-ready-title"
@@ -153,54 +134,48 @@ export function NodeOrganizationBindingCard({
 				data-testid="node-organization-binding-ready"
 				role="status"
 			>
-				<CardHeader>
-					<div className="flex min-w-0 flex-col items-start gap-3 md:flex-row md:justify-between">
-						<div className="flex w-full min-w-0 flex-1 flex-col gap-1">
-							<CardTitle className="break-words" id="node-binding-ready-title">
-								Organization binding
-							</CardTitle>
-							<CardDescription
-								className="break-words"
-								id="node-binding-ready-description"
-							>
-								This node is linked to one organization and cannot be moved
-								without an explicit revoke-and-rebind flow.
-							</CardDescription>
-						</div>
-						<Badge
-							className="max-w-full"
-							variant={status.managedInferenceReady ? "secondary" : "outline"}
-						>
-							{status.managedInferenceReady
-								? "Managed inference ready"
-								: "Binding needs attention"}
-						</Badge>
-					</div>
-				</CardHeader>
-				<CardContent>
-					<dl className="grid min-w-0 gap-4 md:grid-cols-2">
-						<div className="flex min-w-0 flex-col gap-1">
-							<dt className="text-muted-foreground text-sm">Organization</dt>
-							<dd
-								className="min-w-0 break-words font-medium"
-								data-testid="bound-organization"
-							>
+				<div className="mb-1 flex min-w-0 flex-wrap items-center justify-between gap-2">
+					<h3
+						className="break-words font-semibold text-sm"
+						id="node-binding-ready-title"
+					>
+						Organization binding
+					</h3>
+					<StatusText
+						tone={status.managedInferenceReady ? "success" : "warning"}
+					>
+						{status.managedInferenceReady
+							? "Managed inference ready"
+							: "Binding needs attention"}
+					</StatusText>
+				</div>
+				{/* Values sit under their labels so a long organization name or
+				    node id wraps instead of pushing the row wider than the pane. */}
+				<SettingsGroup>
+					<SettingsItem
+						description={
+							<span className="break-words" data-testid="bound-organization">
 								{organizationName}
-							</dd>
-						</div>
-						<div className="flex min-w-0 flex-col gap-1">
-							<dt className="text-muted-foreground text-sm">Node ID</dt>
-							<dd className="break-all font-mono text-sm">{status.nodeId}</dd>
-						</div>
-					</dl>
-				</CardContent>
-				<CardFooter>
-					<p className="text-muted-foreground text-sm">
-						Managed requests use this organization’s live subscription, credits,
-						budgets, and policy at request time.
-					</p>
-				</CardFooter>
-			</Card>
+							</span>
+						}
+						title="Organization"
+					/>
+					<SettingsItem
+						description={
+							<span className="break-all font-mono text-xs">
+								{status.nodeId}
+							</span>
+						}
+						title="Node ID"
+					/>
+				</SettingsGroup>
+				<p
+					className="text-(length:--text-detail) mt-2 break-words text-muted-foreground leading-(--text-detail--line-height)"
+					id="node-binding-ready-description"
+				>
+					Moving it to another organization needs an explicit revoke and rebind.
+				</p>
+			</section>
 		);
 	}
 
@@ -212,133 +187,110 @@ export function NodeOrganizationBindingCard({
 	const nodeNameValidationError = fleetNodeNameError(nodeName);
 
 	return (
-		<Card
+		<section
 			aria-describedby="node-binding-description"
 			aria-labelledby="node-binding-title"
 			className="min-w-0 max-w-full"
 		>
 			{stepUp.dialog}
-			<CardHeader>
-				<CardTitle className="break-words" id="node-binding-title">
-					Bind this node to an organization
-				</CardTitle>
-				<CardDescription className="break-words" id="node-binding-description">
-					Choose the organization whose live subscription and access policy this
-					node should use for managed inference.
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<FieldGroup>
-					<Field>
-						<FieldLabel htmlFor="node-binding-organization">
-							Organization
-						</FieldLabel>
-						<Select onValueChange={setOrganizationId} value={organizationId}>
-							<SelectTrigger
-								aria-label="Organization"
-								className="min-w-0 max-w-full"
-								id="node-binding-organization"
-								variant="default"
-							>
-								<SelectValue placeholder="Select an organization" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectGroup>
-									{organizations.map((organization) => (
-										<SelectItem
-											className="min-w-0 max-w-full"
-											key={organization.id}
-											value={organization.id}
-										>
-											<span className="min-w-0 whitespace-normal break-words">
-												{organization.name}
-											</span>
-										</SelectItem>
-									))}
-								</SelectGroup>
-							</SelectContent>
-						</Select>
+			<h3
+				className="mb-1 break-words font-semibold text-sm"
+				id="node-binding-title"
+			>
+				Bind this node to an organization
+			</h3>
+			<p
+				className="text-(length:--text-detail) mb-4 break-words text-muted-foreground leading-(--text-detail--line-height)"
+				id="node-binding-description"
+			>
+				Managed inference uses this organization's subscription and policy.
+			</p>
+			<FieldGroup>
+				<Field>
+					<FieldLabel htmlFor="node-binding-organization">
+						Organization
+					</FieldLabel>
+					<Select onValueChange={setOrganizationId} value={organizationId}>
+						<SelectTrigger
+							aria-label="Organization"
+							className="min-w-0 max-w-full"
+							id="node-binding-organization"
+							variant="default"
+						>
+							<SelectValue placeholder="Select an organization" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{organizations.map((organization) => (
+									<SelectItem
+										className="min-w-0 max-w-full"
+										key={organization.id}
+										value={organization.id}
+									>
+										<span className="min-w-0 whitespace-normal break-words">
+											{organization.name}
+										</span>
+									</SelectItem>
+								))}
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+				</Field>
+				<Field data-invalid={Boolean(nodeNameValidationError)}>
+					<FieldLabel htmlFor="node-binding-name">Node name</FieldLabel>
+					<Input
+						aria-invalid={Boolean(nodeNameValidationError)}
+						id="node-binding-name"
+						maxLength={FLEET_NODE_NAME_MAX_LENGTH}
+						onChange={(event) => setNodeName(event.target.value)}
+						value={nodeName}
+					/>
+					{nodeNameValidationError ? (
+						<FieldError>{nodeNameValidationError}</FieldError>
+					) : (
 						<FieldDescription>
-							The enrollment code derives the organization on the server. The
-							node cannot supply or override it.
+							{tl("Up to {maxLength} characters.", {
+								maxLength: String(FLEET_NODE_NAME_MAX_LENGTH),
+							})}
 						</FieldDescription>
-					</Field>
-					<Field data-invalid={Boolean(nodeNameValidationError)}>
-						<FieldLabel htmlFor="node-binding-name">Node name</FieldLabel>
-						<Input
-							aria-invalid={Boolean(nodeNameValidationError)}
-							id="node-binding-name"
-							maxLength={FLEET_NODE_NAME_MAX_LENGTH}
-							onChange={(event) => setNodeName(event.target.value)}
-							value={nodeName}
-						/>
-						{nodeNameValidationError ? (
-							<FieldError>{nodeNameValidationError}</FieldError>
-						) : (
-							<FieldDescription>
-								{tl("Up to {maxLength} characters.", {
-									maxLength: String(FLEET_NODE_NAME_MAX_LENGTH),
-								})}
-							</FieldDescription>
-						)}
-					</Field>
-					{organizationId && permissionsQuery.isLoading ? (
-						<p aria-live="polite" className="text-muted-foreground text-sm">
-							Checking access…
-						</p>
-					) : null}
-					{organizationId && permissionsQuery.isError ? (
-						<Alert variant="destructive">
-							<AlertTitle>Could not check access</AlertTitle>
-							<AlertDescription layout="retry-actions">
-								<span>{permissionsQuery.error.message}</span>
-								<Button
-									onClick={() => permissionsQuery.refetch()}
-									size="sm"
-									variant="outline"
-								>
-									Retry access check
-								</Button>
-							</AlertDescription>
-						</Alert>
-					) : null}
-					{permissionDenied ? (
-						<Alert>
-							<AlertTitle>Read-only access</AlertTitle>
-							<AlertDescription>
-								You can inspect this node, but binding it to{" "}
-								<span className="break-words">
-									{selectedOrganization?.name}
-								</span>{" "}
-								requires the gateway.configure permission. Ask an organization
-								owner, admin, or custom-role holder to complete this step.
-							</AlertDescription>
-						</Alert>
-					) : null}
-					{canBind ? (
-						<Alert variant="info">
-							<AlertTitle>One secure enrollment</AlertTitle>
-							<AlertDescription>
-								Desktop creates a 10-minute code and sends it straight to the
-								active Core. It binds Fleet identity and managed inference to{" "}
-								<span className="break-words">
-									{selectedOrganization?.name}
-								</span>
-								; no secret copying is required.
-							</AlertDescription>
-						</Alert>
-					) : null}
-					{bindingMutation.error ? (
-						<Alert variant="destructive">
-							<AlertTitle>Binding failed</AlertTitle>
-							<AlertDescription>
-								{bindingMutation.error.message}
-							</AlertDescription>
-						</Alert>
-					) : null}
-				</FieldGroup>
-			</CardContent>
-			<CardFooter>
+					)}
+				</Field>
+				{organizationId && permissionsQuery.isLoading ? (
+					<p aria-live="polite" className="text-muted-foreground text-sm">
+						Checking access…
+					</p>
+				) : null}
+				{organizationId && permissionsQuery.isError ? (
+					<InlineErrorRow
+						details={permissionsQuery.error.message}
+						message="Could not check access."
+						onRetry={() => permissionsQuery.refetch()}
+						retryLabel="Retry access check"
+					/>
+				) : null}
+				{permissionDenied ? (
+					<p className="text-muted-foreground text-sm">
+						<span className="text-foreground">Read-only access.</span> Binding
+						to <span className="break-words">{selectedOrganization?.name}</span>{" "}
+						needs the{" "}
+						<span className="font-mono text-xs">gateway.configure</span>{" "}
+						permission.
+					</p>
+				) : null}
+				{canBind ? (
+					<p className="text-muted-foreground text-sm">
+						<span className="text-foreground">One secure enrollment.</span>{" "}
+						Desktop sends a 10-minute code straight to Core; no secret copying.
+					</p>
+				) : null}
+				{bindingMutation.error ? (
+					<InlineErrorRow
+						details={bindingMutation.error.message}
+						message="Binding failed. Try again."
+					/>
+				) : null}
+			</FieldGroup>
+			<div className="mt-4 flex justify-end">
 				<Button
 					disabled={
 						bindingMutation.isPending ||
@@ -347,14 +299,14 @@ export function NodeOrganizationBindingCard({
 						Boolean(nodeNameValidationError)
 					}
 					onClick={() => bindingMutation.mutate()}
-					variant="secondary"
+					variant="mono"
 				>
 					{bindingMutation.isPending ? (
 						<Spinner data-icon="inline-start" />
 					) : null}
 					{bindingMutation.isPending ? "Binding node…" : "Bind node"}
 				</Button>
-			</CardFooter>
-		</Card>
+			</div>
+		</section>
 	);
 }

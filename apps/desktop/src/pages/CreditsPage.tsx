@@ -23,7 +23,6 @@ import {
 	CreditsView,
 } from "@ryu/blocks/desktop/credits.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { PlanBadge } from "@ryu/ui/components/plan-badge.tsx";
 import { formatMinorCurrency } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useMemo, useState } from "react";
 import { sileo } from "sileo";
@@ -31,13 +30,7 @@ import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { CreditTransferCard } from "@/src/components/settings/CreditTransferCard.tsx";
-import {
-	SettingsGroup,
-	SettingsItem,
-	SettingsSection,
-} from "@/src/components/settings/shared/settings-items.tsx";
 import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
-import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import {
 	CREDIT_PACKS,
 	type CreditPack,
@@ -105,29 +98,6 @@ function formatExpiry(iso: string | null): string | null {
 
 /** Where a solo user goes to create or pick an organization. */
 const ORGANIZATIONS_URL = `${FRONTEND_URL.replace(/\/$/, "")}/organizations`;
-
-/**
- * The organization these credits belong to, as one grouped settings row. Not
- * the bordered `OrgBillingContext` banner: inside the Settings pane that read as
- * a box above the cards instead of one of them.
- */
-function BillingOrganizationSection({ caption }: { caption: string }) {
-	const { organization, plan } = useOrgBillingStatus();
-	return (
-		<SettingsSection caption={caption} title="Billing organization">
-			<SettingsGroup>
-				<SettingsItem
-					actions={<PlanBadge plan={plan} size="sm" />}
-					// User-controlled text, passed as a node so the settings formatter
-					// does not read braces in the name as placeholders.
-					title={
-						<span>{organization?.name ?? "No organization selected"}</span>
-					}
-				/>
-			</SettingsGroup>
-		</SettingsSection>
-	);
-}
 
 export default function CreditsPage() {
 	const tl = useLiteralMessages();
@@ -262,8 +232,9 @@ export default function CreditsPage() {
 		error !== null && error.kind === "no_org" ? error.message : null;
 
 	return (
+		// No "Billing organization" section: the nav's org switcher names the
+		// organization beside this pane, so saying it again here is noise.
 		<div className="space-y-6">
-			<BillingOrganizationSection caption="Shared credits for managed inference, top-ups, and organization usage." />
 			<CreditsView
 				authed={authed}
 				billingUnavailable={billingUnavailable}

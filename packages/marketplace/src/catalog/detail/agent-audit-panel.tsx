@@ -138,7 +138,7 @@ export function AgentAuditPanel({
 								<ul className="space-y-2">
 									{assessment.recommendations.map((item, index) => (
 										<li
-											className="space-y-1 rounded-md bg-muted p-3 text-xs"
+											className="space-y-1 rounded-lg bg-muted p-3 text-xs"
 											key={`${index}:${item.action}`}
 										>
 											<div className="flex flex-wrap items-center gap-2">

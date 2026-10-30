@@ -119,7 +119,7 @@ export function DesktopStreamPanel({ active = true }: { active?: boolean }) {
 
 	return (
 		<div className="flex h-full flex-col">
-			<div className="flex shrink-0 items-center gap-2 border-border/60 border-b bg-sidebar px-2 py-1.5">
+			<div className="flex h-10 shrink-0 items-center gap-2 border-border border-b px-2">
 				<span
 					className="min-w-0 truncate text-muted-foreground text-xs"
 					title={node.name}
@@ -131,7 +131,7 @@ export function DesktopStreamPanel({ active = true }: { active?: boolean }) {
 				</label>
 				<select
 					aria-label="Bot screen"
-					className="max-w-32 rounded-md border bg-background px-1.5 py-0.5 text-xs"
+					className="max-w-32 rounded-lg border bg-background px-1.5 py-0.5 text-xs"
 					id="desktop-agent-session"
 					onChange={(event) => setSelectedAgentId(event.target.value)}
 					value={selectedAgentId}
@@ -153,7 +153,7 @@ export function DesktopStreamPanel({ active = true }: { active?: boolean }) {
 					title={status}
 				/>
 				<button
-					className="rounded-md px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
+					className="rounded-lg px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
 					onClick={() => setConnection((value) => value + 1)}
 					type="button"
 				>

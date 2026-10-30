@@ -116,7 +116,7 @@ export default function StoreDetailGraph({
 	}
 
 	return (
-		<div className="h-56 w-full overflow-hidden rounded-xl border border-border/60 bg-muted/20">
+		<div className="h-56 w-full overflow-hidden rounded-xl border border-border bg-muted/20">
 			<ReactFlow
 				edges={flowEdges}
 				edgesFocusable={false}

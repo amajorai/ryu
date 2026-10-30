@@ -35,6 +35,7 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Fragment, useEffect, useState } from "react";
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import { type Split, useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import {
 	BUILTIN_PRESETS,
@@ -76,7 +77,9 @@ function suggestName(split: Split, taken: string[]): string {
 export function SaveSplitPresetDialog() {
 	const { splitId, close } = useSaveSplitPresetDialog();
 	const { tabs, splits } = useTabsContext();
-	const { presets, savePreset } = useSplitPresetStore();
+	const { presets, savePreset } = useSplitPresetStore(
+		useShallow((s) => ({ presets: s.presets, savePreset: s.savePreset }))
+	);
 	const split = splits.find((s) => s.id === splitId);
 	const [name, setName] = useState("");
 	const [pinRoutes, setPinRoutes] = useState(false);

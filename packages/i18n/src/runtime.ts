@@ -6,6 +6,7 @@ import {
 	literalCatalogLoader,
 	messageIdForLiteral,
 } from "./literal-catalog.ts";
+import { LiteralTemplateIndex } from "./literal-templates.ts";
 import {
 	canonicalLocale,
 	directionForLocale,
@@ -110,6 +111,8 @@ export class I18nRuntime {
 		string,
 		Map<string, string> | null
 	>();
+	/** Simple-argument templates of each loaded literal catalog, built lazily. */
+	private readonly literalTemplates = new Map<string, LiteralTemplateIndex>();
 	private version = 0;
 
 	constructor(
@@ -168,6 +171,24 @@ export class I18nRuntime {
 		);
 	}
 
+	/**
+	 * Translate dynamic text with no exact catalog entry (`Deleted Q3 plan`)
+	 * through the official literal catalog's simple-argument templates
+	 * (`Deleted {name}`). Captured values are inserted verbatim, never
+	 * re-translated or ICU-parsed. Undefined when no template matches.
+	 */
+	templateMessage(text: string): string | undefined {
+		const loader = literalCatalogLoader();
+		if (loader === null || this.locale === DEFAULT_LOCALE) {
+			return;
+		}
+		const key = localeLanguageAndScript(this.locale);
+		if (!this.literalCatalogs.has(key)) {
+			this.loadLiteralCatalog(key, loader);
+		}
+		return this.literalTemplates.get(key)?.match(text, this.locale);
+	}
+
 	private literalCatalogMessage(key: string, id: string): string | undefined {
 		const loader = literalCatalogLoader();
 		if (loader === null || this.locale === DEFAULT_LOCALE) {
@@ -194,12 +215,14 @@ export class I18nRuntime {
 		if (!(result instanceof Promise)) {
 			const catalog = indexLiteralCatalog(result ?? {});
 			this.literalCatalogs.set(key, catalog);
+			this.literalTemplates.set(key, new LiteralTemplateIndex(result ?? {}));
 			return catalog;
 		}
 		this.literalCatalogs.set(key, null);
 		result
 			.then((catalog) => {
 				this.literalCatalogs.set(key, indexLiteralCatalog(catalog ?? {}));
+				this.literalTemplates.set(key, new LiteralTemplateIndex(catalog ?? {}));
 				if (catalog && localeLanguageAndScript(this.locale) === key) {
 					this.emit();
 				}
@@ -372,7 +395,8 @@ export class I18nRuntime {
 	 * (`t("app.key", {}, "Save draft")`) still reaches the literal catalog.
 	 * A literal id looked up without values (DOM text, host relays) returns
 	 * its translation or fallback verbatim: such text may be data and is
-	 * never run through ICU formatting.
+	 * never run through ICU formatting. With no catalog entry, its fallback
+	 * is tried against the catalog's templates ({@link templateMessage}).
 	 */
 	translate(
 		id: string,
@@ -392,6 +416,18 @@ export class I18nRuntime {
 			if (fallbackId !== id) {
 				message = this.translatedCandidates(fallbackId).find(fits);
 				resolvedId = fallbackId;
+			}
+		}
+		if (
+			message === undefined &&
+			fallback?.trim() &&
+			isLiteralMessageId(id) &&
+			Object.keys(values ?? {}).length === 0
+		) {
+			// Dynamic literal text (DOM, host relays): try the catalog templates.
+			const templated = this.templateMessage(fallback);
+			if (templated !== undefined) {
+				return templated;
 			}
 		}
 		if (message === undefined) {

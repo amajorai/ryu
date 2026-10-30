@@ -26,9 +26,14 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
+import {
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@ryu/ui/components/toggle-group.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { sileo } from "sileo";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -143,7 +148,15 @@ export function AutoRetrySection({
 
 	return (
 		<SettingsSection
-			caption="Only runs when a turn actually fails, and only after Core re-reads the vendor's own 5-hour and weekly windows to confirm the plan really is out of room, so an unrelated failure never moves you off your agent."
+			caption={
+				<CaptionInfo
+					detail={
+						"Only runs when a turn actually fails, and only after Core re-reads the vendor's own 5-hour and weekly windows to confirm the plan really is out of room, so an unrelated failure never moves you off your agent."
+					}
+				>
+					{"Runs only when a turn fails and the plan is confirmed out of room."}
+				</CaptionInfo>
+			}
 			title="Auto-retry on another plan"
 		>
 			{policyQuery.isError ? (
@@ -217,29 +230,40 @@ export function AutoRetrySection({
 								title="Plans it may move to"
 							>
 								{pool.length > 0 ? (
-									<div className="flex flex-wrap gap-2 pb-1">
+									<ToggleGroup
+										aria-label="Plans it may move to"
+										className="flex-wrap pb-1"
+										multiple
+										onValueChange={(values: string[]) => {
+											const toggled =
+												pool.find(
+													(id) =>
+														values.includes(id) !==
+														policy.candidates.includes(id)
+												) ?? null;
+											if (toggled) {
+												toggleCandidate(toggled);
+											}
+										}}
+										spacing={1}
+										value={policy.candidates}
+										variant="default"
+									>
 										{pool.map((id) => {
-											const picked = policy.candidates.includes(id);
 											const order = policy.candidates.indexOf(id) + 1;
 											return (
-												<button
-													aria-pressed={picked}
-													className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
-														picked
-															? "border-primary bg-primary/10 text-foreground"
-															: "border-border text-muted-foreground hover:text-foreground"
-													}`}
+												<ToggleGroupItem
+													className="h-8 rounded-lg px-2 font-normal text-muted-foreground text-sm aria-pressed:bg-accent aria-pressed:text-foreground"
 													disabled={disabled}
 													key={id}
-													onClick={() => toggleCandidate(id)}
-													type="button"
+													value={id}
 												>
-													{picked ? `${order}. ` : ""}
+													{order > 0 ? `${order}. ` : ""}
 													{agentLabel(id, listedLabels)}
-												</button>
+												</ToggleGroupItem>
 											);
 										})}
-									</div>
+									</ToggleGroup>
 								) : null}
 							</SettingsItem>
 						) : null}
@@ -262,7 +286,7 @@ export function AutoRetrySection({
 									value={policy.spent_below_percent}
 								/>
 							</SettingsCard>
-							<p className="px-3.5 text-muted-foreground text-xs leading-snug">
+							<p className="px-3 text-muted-foreground text-xs leading-snug">
 								Also the bar a plan has to clear to receive a retry, so raising
 								it both catches a cap sooner and refuses plans that are nearly
 								out themselves.

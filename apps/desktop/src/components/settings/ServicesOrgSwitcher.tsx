@@ -1,18 +1,20 @@
+// The `.tsx` extension is required: `@ryu/ui` resolves through an `exports`
+// wildcard that is matched literally, so an extensionless specifier resolves to
+// nothing. See the header of `entity-avatar.tsx`.
+import { Tick02Icon, UnfoldMoreIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
-// The `.tsx` extension is required: `@ryu/ui` resolves through an `exports`
-// wildcard that is matched literally, so an extensionless specifier resolves to
-// nothing. See the header of `entity-avatar.tsx`.
 import { EntityAvatar } from "@ryu/ui/components/entity-avatar.tsx";
 import { PlanBadge } from "@ryu/ui/components/plan-badge.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronsUpDown } from "lucide-react";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
 import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import {
@@ -164,11 +166,18 @@ export function ServicesOrgSwitcher() {
 			: { seed: org.id, src: org.logo };
 
 	return (
-		<div className="px-2 pb-1">
+		<div className="pb-1">
 			<DropdownMenu>
+				{/* A ghost nav row, the same height and shape as the tabs below it.
+				    The plan badge lives in the menu, beside each workspace. */}
 				<DropdownMenuTrigger
+					className={cn(
+						"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring enabled:hover:bg-sidebar-accent/60 enabled:hover:duration-0 data-[popup-open]:bg-sidebar-accent",
+						// Dim only while a switch is in flight: with one workspace the
+						// row is a plain label, not a disabled control.
+						switchMutation.isPending && "opacity-60"
+					)}
 					disabled={switchMutation.isPending || orgs.length < 2}
-					variant="organization-picker"
 				>
 					{active ? (
 						<EntityAvatar
@@ -181,13 +190,15 @@ export function ServicesOrgSwitcher() {
 					<span className="min-w-0 flex-1 truncate">
 						{active?.name ?? "Workspace"}
 					</span>
-					{active?.id === billingOrgId ? (
-						<PlanBadge plan={billingPlan} size="sm" />
-					) : null}
 					{switchMutation.isPending ? (
 						<Spinner className="size-3.5 shrink-0" />
 					) : orgs.length > 1 ? (
-						<ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+						<HugeiconsIcon
+							className="size-3.5 shrink-0 text-muted-foreground"
+							data-org-switcher-chevron=""
+							icon={UnfoldMoreIcon}
+							size={14}
+						/>
 					) : null}
 				</DropdownMenuTrigger>
 				{orgs.length > 1 ? (
@@ -206,7 +217,14 @@ export function ServicesOrgSwitcher() {
 							    same billing screen with every control disabled — so it is
 							    worth the line it costs. */}
 								<span className="mr-1 flex size-4 shrink-0 items-center justify-center">
-									{org.id === activeId ? <Check className="size-3.5" /> : null}
+									{org.id === activeId ? (
+										<HugeiconsIcon
+											className="size-3.5"
+											data-org-switcher-check=""
+											icon={Tick02Icon}
+											size={14}
+										/>
+									) : null}
 								</span>
 								<EntityAvatar
 									className="size-4 shrink-0"

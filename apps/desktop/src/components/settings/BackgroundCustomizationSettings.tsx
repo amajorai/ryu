@@ -5,6 +5,7 @@ import {
 	Image01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ColorPicker,
@@ -117,6 +118,7 @@ function GradientStopsEditor({
 	stops: GradientStop[];
 	onChange: (stops: GradientStop[]) => void;
 }) {
+	const tl = useLiteralMessages();
 	const setColor = (index: number, color: string) => {
 		onChange(stops.map((s, i) => (i === index ? { ...s, color } : s)));
 	};
@@ -155,11 +157,11 @@ function GradientStopsEditor({
 		"--settings-preview-image": buildGradientCss(stops, angle),
 	};
 	return (
-		<div className="space-y-2.5">
+		<div className="space-y-3">
 			{/* Live preview of the stops at their current positions. */}
 			<div
 				aria-label="Gradient preview"
-				className={`h-6 w-full rounded-md border border-border/60 ${previewStyles.gradient}`}
+				className={`h-6 w-full rounded-lg border border-border ${previewStyles.gradient}`}
 				role="img"
 				style={gradientStyle}
 			/>
@@ -170,16 +172,20 @@ function GradientStopsEditor({
 					// stable identity and rows keep insertion order.
 					key={i}
 				>
-					<span className="type-caption w-5 shrink-0 text-center font-mono text-muted-foreground">
+					<span className="w-5 shrink-0 text-center text-muted-foreground text-xs tabular-nums">
 						{i + 1}
 					</span>
 					<ColorSwatch
-						ariaLabel={`Gradient stop ${i + 1} color`}
+						ariaLabel={tl("Gradient stop {stopNumber} color", {
+							stopNumber: i + 1,
+						})}
 						onChange={(color) => setColor(i, color)}
 						value={stop.color}
 					/>
 					<FluidSlider
-						aria-label={`Gradient stop ${i + 1} position`}
+						aria-label={tl("Gradient stop {stopNumber} position", {
+							stopNumber: i + 1,
+						})}
 						format={(v) => `${Math.round(v)}%`}
 						label=""
 						max={100}
@@ -190,25 +196,21 @@ function GradientStopsEditor({
 					/>
 					<Button
 						appearance="recipient-remove"
-						aria-label={`Remove gradient stop ${i + 1}`}
-						className="size-7 shrink-0"
+						aria-label={tl("Remove gradient stop {stopNumber}", {
+							stopNumber: i + 1,
+						})}
+						className="size-8 shrink-0"
 						disabled={stops.length <= 2}
 						onClick={() => remove(i)}
 						size="sm"
 						variant="ghost"
 					>
-						<HugeiconsIcon icon={Cancel01Icon} size={12} />
+						<HugeiconsIcon icon={Cancel01Icon} size={14} />
 					</Button>
 				</div>
 			))}
-			<Button
-				className="h-7 w-full"
-				onClick={add}
-				size="sm"
-				typography="compact"
-				variant="secondary"
-			>
-				<HugeiconsIcon className="mr-1" icon={Add01Icon} size={12} />
+			<Button className="w-full" onClick={add} size="sm" variant="outline">
+				<HugeiconsIcon icon={Add01Icon} size={14} />
 				Add stop
 			</Button>
 		</div>
@@ -220,7 +222,8 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 		loadSurfaceBackground(surface)
 	);
 	const fileInputRef = useRef<HTMLInputElement>(null);
-	const surfaceLabel = surface === "sidebar" ? "Sidebar" : "Page";
+	const tl = useLiteralMessages();
+	const surfaceLabel = surface === "sidebar" ? tl("Sidebar") : tl("Page");
 
 	// Reflect external changes (Reset-to-defaults elsewhere in this tab, or
 	// another window) by reloading from the store when one is signaled.
@@ -278,22 +281,24 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 	return (
 		<div className="space-y-4">
 			{/* Gradient */}
-			<div className="space-y-2.5">
+			<div className="space-y-3">
 				<div className="flex items-center justify-between">
 					<div>
 						<p className="font-medium text-sm">Gradient</p>
-						<p className="text-muted-foreground text-xs">
+						<p className="text-detail text-muted-foreground">
 							A linear gradient behind the surface.
 						</p>
 					</div>
 					<Switch
-						aria-label={`${surfaceLabel} gradient background`}
+						aria-label={tl("{surfaceLabel} gradient background", {
+							surfaceLabel,
+						})}
 						checked={bg.gradientEnabled}
 						onCheckedChange={(v) => update({ gradientEnabled: v })}
 					/>
 				</div>
 				{bg.gradientEnabled && (
-					<div className="space-y-3 rounded-lg border border-border/60 p-3">
+					<div className="space-y-3">
 						<GradientStopsEditor
 							angle={bg.gradientAngle}
 							onChange={(stops) => update({ gradientStops: stops })}
@@ -313,22 +318,22 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 			</div>
 
 			{/* Image */}
-			<div className="space-y-2.5">
+			<div className="space-y-3">
 				<div className="flex items-center justify-between">
 					<div>
 						<p className="font-medium text-sm">Image</p>
-						<p className="text-muted-foreground text-xs">
+						<p className="text-detail text-muted-foreground">
 							A custom image, layered over the gradient.
 						</p>
 					</div>
 					<Switch
-						aria-label={`${surfaceLabel} image background`}
+						aria-label={tl("{surfaceLabel} image background", { surfaceLabel })}
 						checked={bg.imageEnabled}
 						onCheckedChange={(v) => update({ imageEnabled: v })}
 					/>
 				</div>
 				{bg.imageEnabled && (
-					<div className="space-y-3 rounded-lg border border-border/60 p-3">
+					<div className="space-y-3">
 						<input
 							accept="image/*"
 							className="hidden"
@@ -343,15 +348,15 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 						/>
 						<div className="flex items-center gap-3">
 							<div
-								className={`h-12 w-20 shrink-0 overflow-hidden rounded bg-muted ${previewStyles.image}`}
+								className={`h-12 w-20 shrink-0 overflow-hidden rounded-lg bg-muted ${previewStyles.image}`}
 								style={imageStyle}
 							/>
 							<Button
 								onClick={() => fileInputRef.current?.click()}
 								size="sm"
-								variant="secondary"
+								variant="outline"
 							>
-								<HugeiconsIcon className="mr-1" icon={Image01Icon} size={14} />
+								<HugeiconsIcon icon={Image01Icon} size={14} />
 								{bg.imageSrc ? "Replace" : "Choose image"}
 							</Button>
 							{bg.imageSrc && (
@@ -377,8 +382,11 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 										value={bg.imageFit}
 									>
 										<SelectTrigger
-											aria-label={`${surfaceLabel} image fit`}
-											className="h-8 w-36"
+											aria-label={tl("{surfaceLabel} image fit", {
+												surfaceLabel,
+											})}
+											className="w-auto shrink-0"
+											size="sm"
 										>
 											<SelectValue />
 										</SelectTrigger>
@@ -404,7 +412,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 									/>
 								)}
 
-								<div className="space-y-2 border-border/50 border-t pt-2">
+								<div className="space-y-2 border-border border-t pt-2">
 									<FieldRow label="Overlay color">
 										<ColorSwatch
 											ariaLabel="Overlay color"
@@ -423,13 +431,13 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 										step={1}
 										value={bg.overlayOpacity}
 									/>
-									<p className="text-muted-foreground text-xs">
+									<p className="text-detail text-muted-foreground">
 										A tint drawn over the image to keep text readable.
 									</p>
 								</div>
 							</>
 						) : (
-							<p className="text-muted-foreground text-xs">
+							<p className="text-detail text-muted-foreground">
 								Choose an image to set its fit, scale, and overlay.
 							</p>
 						)}
@@ -438,14 +446,14 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 			</div>
 
 			{/* Effects — blur / transparency for the whole background layer. */}
-			<div className="space-y-2.5">
+			<div className="space-y-3">
 				<div>
 					<p className="font-medium text-sm">Effects</p>
-					<p className="text-muted-foreground text-xs">
+					<p className="text-detail text-muted-foreground">
 						Softens the layer and lets the theme colors show through.
 					</p>
 				</div>
-				<div className="space-y-2.5 rounded-lg border border-border/60 p-3">
+				<div className="space-y-3">
 					<FluidSlider
 						format={(v) => `${Math.round(v)}%`}
 						label="Transparency"
@@ -455,10 +463,6 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 						step={1}
 						value={bg.transparency}
 					/>
-					<p className="text-muted-foreground text-xs">
-						Fades the gradient and image so the theme colors (and whatever is
-						behind the surface) show through.
-					</p>
 					<FluidSlider
 						format={(v) => `${Math.round(v)}px`}
 						label="Backdrop blur"
@@ -468,10 +472,6 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 						step={1}
 						value={bg.backdropBlur}
 					/>
-					<p className="text-muted-foreground text-xs">
-						Blurs the gradient or image layer into a soft backdrop. Combine with
-						transparency for a frosted look.
-					</p>
 				</div>
 			</div>
 		</div>
@@ -481,7 +481,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 export function BackgroundCustomizationSettings() {
 	return (
 		<SettingsSection
-			caption="Layer a gradient or image over the sidebar and page. Off by default, so the theme colors show through any transparency."
+			caption="A gradient or image behind the sidebar and page. Off by default."
 			title="Backgrounds"
 		>
 			<SettingsCard className="grid grid-cols-1 gap-6 md:grid-cols-2">

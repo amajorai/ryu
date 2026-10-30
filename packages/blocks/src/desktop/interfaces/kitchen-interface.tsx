@@ -1,88 +1,39 @@
-import { Button } from "@ryu/ui/components/button.tsx";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
-import { SquarePen } from "lucide-react";
-import { motion } from "motion/react";
-import {
-	type KeyboardEvent,
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import { flushSync } from "react-dom";
-import { GamePlate } from "./game-hud.tsx";
-import { GameHudSlot, GameShell, gameSheetCover } from "./game-shell.tsx";
-import {
-	actOverlays,
-	actSummaryLine,
-	actTotals,
-	overlayBudget,
-	stageAgents,
-	youSpotSlots,
-} from "./game3d-acts.ts";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { GameShell, gameSheetCover } from "./game-shell.tsx";
+import { actSummaryLine } from "./game3d-acts.ts";
 import { islandFor } from "./game3d-ground.tsx";
 import {
 	type IsoInsets,
 	IsoStage,
-	IsoZoomControls,
 	useFocusOnOpen,
 	useGameNight,
 	useIsoView,
 	useReducedMotion,
 } from "./game3d-stage.tsx";
 import { useVillagerLooks } from "./game3d-villager.tsx";
-import {
-	ActAnnouncer,
-	AskQueueList,
-	askOwners,
-	BlindSpotCaption,
-	NeedYouButton,
-	openQueue,
-	QueueButton,
-	useActCards,
-} from "./interface-ask-card.tsx";
-import { isInterfaceCovered } from "./interface-keys.ts";
+import { ActAnnouncer, AskQueueList } from "./interface-ask-card.tsx";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
-import { kitchenActVillagers, kitchenPaths } from "./kitchen-acts.tsx";
 import { ChefColorsProvider } from "./kitchen-avatar.tsx";
-import {
-	KITCHEN_RIM,
-	type KitchenActScene,
-	KitchenDioramaScene,
-	SLAB,
-} from "./kitchen-diorama.tsx";
+import { KITCHEN_RIM, KitchenDioramaScene } from "./kitchen-diorama.tsx";
 import { useNow, useThemeColors } from "./kitchen-hooks.ts";
-import {
-	type HudDensity,
-	hudDensity,
-	hudInsets,
-	KitchenTitle,
-	NewOrderButton,
-	OrderRail,
-	ServiceClock,
-	ServiceScore,
-} from "./kitchen-hud.tsx";
+import { type HudDensity, hudDensity, hudInsets } from "./kitchen-hud.tsx";
+import { useKitchenActLayer } from "./kitchen-interface-acts.tsx";
+import { KitchenEmptyState } from "./kitchen-interface-empty.tsx";
+import { useKitchenEscape } from "./kitchen-interface-escape.ts";
+import { KitchenLineFallback } from "./kitchen-interface-fallback.tsx";
+import { KitchenInterfaceHud } from "./kitchen-interface-hud.tsx";
+import { useStageSize } from "./kitchen-interface-stage-size.ts";
 import {
 	ACT_SPREAD,
-	actTickets,
 	buildService,
 	chefOrders,
-	floorCentreZ,
-	plural,
 	STATIONS_PER_ROW,
 } from "./kitchen-model.ts";
-import { KitchenLine } from "./kitchen-overlay.tsx";
 import { kitchenPalette } from "./kitchen-palette.ts";
 import { KitchenPanel, type KitchenPanelView } from "./kitchen-panel.tsx";
-import {
-	hasActs,
-	useActAnnouncement,
-	useActClockOptions,
-	useActs,
-} from "./use-acts.ts";
+import { hasActs, useActs } from "./use-acts.ts";
 
 type Selection =
 	| { agentId: string; kind: "chef" }
@@ -90,17 +41,6 @@ type Selection =
 			agentId: string | undefined;
 			kind: "new";
 	  };
-
-/** Escape inside a text field belongs to the field. */
-function escapeIsFree(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return true;
-	}
-	return (
-		!target.isContentEditable &&
-		target.closest("input, textarea, select, [contenteditable='true']") === null
-	);
-}
 
 /**
  * Kitchen: your agents as a kitchen brigade, after the co-op cooking game,
@@ -121,6 +61,7 @@ export function KitchenInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["kitchen"]>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const stageRef = useRef<HTMLElement>(null);
 	const headingRef = useRef<HTMLHeadingElement>(null);
@@ -131,10 +72,7 @@ export function KitchenInterface({
 	const now = useNow();
 	const theme = useThemeColors(rootRef);
 	const palette = useMemo(() => kitchenPalette(theme), [theme]);
-	const [stageSize, setStageSize] = useState<{
-		height: number;
-		width: number;
-	} | null>(null);
+	const stageSize = useStageSize(stageRef);
 	// A phone-shaped stage gets shorter counter lines, so the room is taller
 	// than wide and fills the stage instead of sitting in a thin strip.
 	const perRow =
@@ -159,27 +97,6 @@ export function KitchenInterface({
 	const [hoverId, setHoverId] = useState<string | null>(null);
 	const [announcement, setAnnouncement] = useState("");
 	const [cameFromChef, setCameFromChef] = useState(false);
-
-	useEffect(() => {
-		const stage = stageRef.current;
-		if (!stage || typeof ResizeObserver === "undefined") {
-			return;
-		}
-		// Committed before the browser paints, so the HUD and the diorama
-		// refit in the same frame the stage changes size (a panel opening).
-		const observer = new ResizeObserver(([entry]) => {
-			if (entry) {
-				flushSync(() => {
-					setStageSize({
-						height: entry.contentRect.height,
-						width: entry.contentRect.width,
-					});
-				});
-			}
-		});
-		observer.observe(stage);
-		return () => observer.disconnect();
-	}, []);
 
 	const threadOpen = threadView !== null;
 	const activeThread = activeThreadId
@@ -274,9 +191,11 @@ export function KitchenInterface({
 			const station = service.stations.find(
 				(item) => item.agent.id === agentId
 			);
-			setAnnouncement(station ? `${station.agent.name}'s tickets` : "");
+			setAnnouncement(
+				station ? tl("{name}'s tickets", { name: station.agent.name }) : ""
+			);
 		},
-		[port, service.stations, threadOpen]
+		[port, service.stations, threadOpen, tl]
 	);
 	const serve = useCallback(
 		(threadId: string) => {
@@ -346,41 +265,7 @@ export function KitchenInterface({
 		}
 		return false;
 	};
-	const stepBackRef = useRef(stepBack);
-	stepBackRef.current = stepBack;
-
-	useEffect(() => {
-		const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
-			if (isInterfaceCovered(rootRef.current)) {
-				return;
-			}
-			if (
-				event.key !== "Escape" ||
-				event.defaultPrevented ||
-				event.target !== document.body
-			) {
-				return;
-			}
-			if (stepBackRef.current()) {
-				event.preventDefault();
-			}
-		};
-		document.addEventListener("keydown", onDocumentKeyDown);
-		return () => document.removeEventListener("keydown", onDocumentKeyDown);
-	}, []);
-
-	const onRootKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (
-			event.key !== "Escape" ||
-			event.defaultPrevented ||
-			!escapeIsFree(event.target)
-		) {
-			return;
-		}
-		if (stepBackRef.current()) {
-			event.preventDefault();
-		}
-	};
+	const onRootKeyDown = useKitchenEscape(rootRef, stepBack);
 
 	const isEmpty = !loading && snapshot.agents.length === 0;
 	const shape = useMemo(
@@ -404,139 +289,41 @@ export function KitchenInterface({
 	);
 	const { looks } = useVillagerLooks(stationIds, night);
 
-	// The act layer (when the host sends asks): what each chef acts out, the
-	// queue at the pass, the cards, the HUD summary and the announcer.
-	const fallbackRef = useRef<HTMLHeadingElement>(null);
-	const { acts, nowMs, privacy, unowned } = actsView;
-	const actsOn = actsView.enabled;
-	const sentence = useActAnnouncement(snapshot, actsView);
-	const clock = useActClockOptions();
-	const cards = useActCards({
+	const {
+		actButtons,
+		actScene,
 		acts,
+		actsOn,
+		cards,
 		clock,
-		fallbackFocus: fallbackRef,
+		fallbackRef,
 		nowMs,
+		onAsk,
+		onBlocker,
+		sentence,
+		tally,
+		ticketActs,
+		unowned,
+	} = useKitchenActLayer({
+		actsView,
+		looks,
+		narrow,
 		port,
+		reduced,
+		service,
 		snapshot,
+		stageSize,
 	});
-	const queueOpener = useRef<(() => void) | null>(null);
-	const slots = useMemo(() => youSpotSlots(acts, unowned), [acts, unowned]);
-	const tally = actTotals(snapshot, acts);
-	const owners = useMemo(() => askOwners(acts), [acts]);
-	const budget = overlayBudget(stageSize?.width ?? 1280, { domTargets: true });
-	// Urgency order (the kit's stage order): the budget keeps what matters.
-	const staged = useMemo(
-		() => stageAgents(acts, Number.POSITIVE_INFINITY),
-		[acts]
+	const legacySummary = tl(
+		"Kitchen: {chefCount, plural, one {{chefs} chef} other {{chefs} chefs}}, {cooking} cooking, {ready} ready to serve, {burnt} burnt.",
+		{
+			burnt: String(totals.burnt),
+			chefCount: service.stations.length,
+			chefs: String(service.stations.length),
+			cooking: String(totals.cooking),
+			ready: String(totals.ready),
+		}
 	);
-	const cast = staged.onStage;
-	// A phone has no room beside the plates for a work bubble (it stands
-	// wider than its plate and would run off the stage): the station board
-	// and the act sentence carry the step there.
-	const phone = budget.iconOnly;
-	const shownKey = [
-		...budget.fill(
-			actOverlays(
-				cast,
-				slots,
-				{ count: 0 },
-				cast.find((act) => act.act === "working")?.agentId ?? null,
-				{ reduced }
-			)
-		),
-	]
-		.filter((id) => !(phone && id.startsWith("work:")))
-		.sort()
-		.join("|");
-	const shown = useMemo(() => new Set(shownKey.split("|")), [shownKey]);
-	const centreZ = floorCentreZ(service.floor);
-	const paths = useMemo(
-		() => kitchenPaths(service, centreZ, SLAB),
-		[centreZ, service]
-	);
-	const { openAsk, openBlocker } = cards;
-	const actVillagers = useMemo(
-		() =>
-			actsOn
-				? kitchenActVillagers({
-						acts,
-						centreZ,
-						looks,
-						nowMs,
-						onAsk: (askId) => openAsk(askId),
-						paths,
-						reduced,
-						service,
-						shown,
-						slab: SLAB,
-						slots: slots.slots,
-					})
-				: [],
-		[
-			acts,
-			actsOn,
-			centreZ,
-			looks,
-			nowMs,
-			openAsk,
-			paths,
-			reduced,
-			service,
-			shown,
-			slots.slots,
-		]
-	);
-	const actScene: KitchenActScene | null = actsOn
-		? {
-				acts,
-				handlers: {
-					clock,
-					iconOnly: budget.iconOnly,
-					nowMs,
-					onAsk: (askId) => openAsk(askId),
-					onBlocker: (threadId, agentName) => openBlocker(threadId, agentName),
-					onQueue: () => openQueue(queueOpener),
-					privacy,
-					reduced,
-					shown,
-					snapshot,
-				},
-				offStage: staged.offStage,
-				onStage: cast,
-				owners,
-				paths,
-				slots,
-				villagers: actVillagers,
-			}
-		: null;
-	const ticketActs = useMemo(
-		() => (actsOn ? actTickets(snapshot, acts, nowMs) : null),
-		[acts, actsOn, nowMs, snapshot]
-	);
-	const onAsk = (askId: string, opener?: HTMLElement) => openAsk(askId, opener);
-	const onBlocker = (
-		threadId: string,
-		agentName: string,
-		opener?: HTMLElement
-	) => openBlocker(threadId, agentName, opener);
-	const actButtons = actsOn ? (
-		<>
-			<NeedYouButton onAsk={onAsk} snapshot={snapshot} totals={tally} />
-			<QueueButton
-				acts={acts}
-				clock={clock}
-				narrow={narrow}
-				nowMs={nowMs}
-				onAsk={onAsk}
-				onBlocker={onBlocker}
-				openRef={queueOpener}
-				snapshot={snapshot}
-				totals={tally}
-				unowned={unowned}
-			/>
-		</>
-	) : null;
-	const legacySummary = `Kitchen: ${plural(service.stations.length, "chef")}, ${totals.cooking} cooking, ${totals.ready} ready to serve, ${totals.burnt} burnt.`;
 
 	const sheet = view ? (
 		<KitchenPanel
@@ -552,80 +339,27 @@ export function KitchenInterface({
 		/>
 	) : null;
 	const hud = (
-		<>
-			<div
-				className={cn(
-					"pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start",
-					narrow ? "gap-2.5 p-2.5" : "gap-3 p-4"
-				)}
-			>
-				{/* Shrinks on a narrow stage so the title's status can wrap (K2). */}
-				<div className="flex min-w-0 shrink flex-col items-start gap-2">
-					<KitchenTitle
-						actStatus={actsOn ? actSummaryLine(tally) : undefined}
-						density={density}
-						service={service}
-					/>
-					{actsOn ? <BlindSpotCaption snapshot={snapshot} /> : null}
-				</div>
-				<OrderRail
-					activeThreadId={activeThreadId}
-					className={cn(
-						"order-3 basis-full",
-						density === "wide" && "order-none mx-2 basis-0 self-stretch",
-						density === "wide" && "flex-1"
-					)}
-					density={density}
-					headingRef={fallbackRef}
-					hoverId={hoverId}
-					loading={loading}
-					onHover={setHoverId}
-					onServe={serve}
-					palette={palette}
-					service={service}
-					// With acts the rail holds only what moves; open quiet orders
-					// are not "no open orders".
-					showEmptyRail={
-						!(isEmpty || (ticketActs && snapshot.threads.length > 0))
-					}
-					ticketActs={ticketActs}
-				/>
-				<div className="ms-auto flex shrink-0 flex-col items-end gap-2">
-					<NewOrderButton
-						density={density}
-						disabled={loading}
-						onNewOrder={newOrder}
-					/>
-					{narrow ? null : actButtons}
-				</div>
-			</div>
-			{actsOn && narrow ? (
-				// Clear of the zoom column on the right, and kept while asks exist.
-				<GameHudSlot at="bottom-left" className="right-[68px] flex-wrap">
-					{actButtons}
-				</GameHudSlot>
-			) : null}
-			{loading || isEmpty ? null : (
-				<>
-					{actsOn && narrow ? null : (
-						<GameHudSlot
-							at="bottom-left"
-							className={narrow ? "right-0 justify-center" : undefined}
-						>
-							<ServiceScore
-								actTotals={actsOn ? tally : undefined}
-								density={density}
-								service={service}
-							/>
-						</GameHudSlot>
-					)}
-					<GameHudSlot at="bottom-right">
-						{narrow || params?.serviceClock === false ? null : <ServiceClock />}
-						<IsoZoomControls view={isoView} />
-					</GameHudSlot>
-				</>
-			)}
-		</>
+		<KitchenInterfaceHud
+			actButtons={actButtons}
+			activeThreadId={activeThreadId}
+			actsOn={actsOn}
+			density={density}
+			fallbackRef={fallbackRef}
+			hoverId={hoverId}
+			isEmpty={isEmpty}
+			isoView={isoView}
+			loading={loading}
+			narrow={narrow}
+			newOrder={newOrder}
+			palette={palette}
+			params={params}
+			serve={serve}
+			service={service}
+			setHoverId={setHoverId}
+			snapshot={snapshot}
+			tally={tally}
+			ticketActs={ticketActs}
+		/>
 	);
 
 	return (
@@ -645,7 +379,7 @@ export function KitchenInterface({
 					{loading
 						? "Kitchen, loading"
 						: actsOn
-							? `Kitchen: ${actSummaryLine(tally)}.`
+							? tl("Kitchen: {summary}.", { summary: actSummaryLine(tally) })
 							: legacySummary}
 				</p>
 				{loading ? (
@@ -667,25 +401,17 @@ export function KitchenInterface({
 					bounds={bounds}
 					fallback={
 						loading || isEmpty ? null : (
-							<div
-								className="absolute inset-x-0 overflow-y-auto bg-(--gk-backdrop) px-4"
-								style={{ bottom: insets.bottom, top: insets.top }}
-							>
-								<KitchenLine
-									actLayer={
-										actsOn
-											? { acts, clock, nowMs, onAsk, onBlocker, snapshot }
-											: null
-									}
-									onSelectChef={selectChef}
-									onServe={serve}
-									service={service}
-								/>
-								<p className="mx-auto mt-4 max-w-2xl font-medium text-(--gk-ink-muted) text-sm">
-									The 3D kitchen needs WebGL, which is off here, so the line is
-									shown as a list.
-								</p>
-							</div>
+							<KitchenLineFallback
+								actLayer={
+									actsOn
+										? { acts, clock, nowMs, onAsk, onBlocker, snapshot }
+										: null
+								}
+								insets={insets}
+								onSelectChef={selectChef}
+								onServe={serve}
+								service={service}
+							/>
 						)
 					}
 					insets={insets}
@@ -719,40 +445,13 @@ export function KitchenInterface({
 					)}
 				</IsoStage>
 				{isEmpty ? (
-					<motion.div
-						animate={{ opacity: 1 }}
-						className="absolute inset-x-0 z-20 flex items-center justify-center"
-						initial={reduced ? false : { opacity: 0 }}
-						style={{
-							bottom: insets.bottom,
-							paddingInline: side,
-							top: insets.top,
-						}}
-						transition={{ duration: 0.2, ease: "easeOut" }}
-					>
-						<div className="absolute inset-0 flex items-center justify-center px-6">
-							<GamePlate className="flex max-w-sm flex-col items-center gap-4 px-6 py-6 text-center">
-								<div className="flex flex-col gap-1.5">
-									<h2 className="gk-display text-[24px] leading-7">
-										No chefs on the line
-									</h2>
-									<p className="text-pretty font-medium text-(--gk-ink-muted) text-sm leading-5">
-										{snapshot.threads.length > 0
-											? "These orders have no agent to cook them. Add an agent to staff a station."
-											: "Add an agent to staff a station, or start a conversation."}
-									</p>
-								</div>
-								<Button
-									onClick={() => port.startThread({})}
-									size="sm"
-									type="button"
-								>
-									<SquarePen aria-hidden="true" data-icon="inline-start" />
-									Start a conversation
-								</Button>
-							</GamePlate>
-						</div>
-					</motion.div>
+					<KitchenEmptyState
+						hasThreads={snapshot.threads.length > 0}
+						insets={insets}
+						onStart={() => port.startThread({})}
+						reduced={reduced}
+						side={side}
+					/>
 				) : null}
 				<p aria-live="polite" className="sr-only">
 					{announcement}

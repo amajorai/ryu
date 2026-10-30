@@ -250,7 +250,7 @@ function ChatGroupedRows({
 			})}
 			{groupBy === "custom" ? (
 				<button
-					className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
+					className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-muted-foreground text-xs transition-colors duration-150 hover:bg-sidebar-accent/60 hover:text-foreground hover:duration-0"
 					onClick={() =>
 						setDialog({ id: null, initialName: "", mode: "create" })
 					}

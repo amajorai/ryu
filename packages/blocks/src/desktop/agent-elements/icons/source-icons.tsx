@@ -1,13 +1,22 @@
 import {
-	IconBrandGithub,
-	IconBrandGoogle,
-	IconBrandReddit,
-	IconBrandTwitter,
-	IconBrandYoutube,
-	IconFileText,
-	IconWorld,
-} from "@tabler/icons-react";
+	File01Icon,
+	GithubIcon,
+	Globe02Icon,
+	GoogleIcon,
+	NewTwitterIcon,
+	RedditIcon,
+	YoutubeIcon,
+} from "@hugeicons/core-free-icons";
 import type { ComponentType } from "react";
+import { hugeiconComponent } from "./hugeicon-component.tsx";
+
+const IconBrandGithub = hugeiconComponent(GithubIcon);
+const IconBrandGoogle = hugeiconComponent(GoogleIcon);
+const IconBrandReddit = hugeiconComponent(RedditIcon);
+const IconBrandTwitter = hugeiconComponent(NewTwitterIcon);
+const IconBrandYoutube = hugeiconComponent(YoutubeIcon);
+const IconFileText = hugeiconComponent(File01Icon);
+const IconWorld = hugeiconComponent(Globe02Icon);
 
 export type SourceType =
 	| "web"

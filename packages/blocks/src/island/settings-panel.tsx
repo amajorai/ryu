@@ -139,7 +139,7 @@ export function SettingsPanelView({
 			<section className="flex flex-col gap-2 rounded-2xl bg-card p-3">
 				<h3 className="font-medium text-foreground text-xs">Connections</h3>
 				<label
-					className="type-caption flex flex-col gap-1 text-muted-foreground"
+					className="flex flex-col gap-1 text-muted-foreground text-xs"
 					htmlFor="island-core-url"
 				>
 					Core URL
@@ -152,18 +152,18 @@ export function SettingsPanelView({
 						variant="island-settings"
 					/>
 				</label>
-				<div className="type-caption flex flex-col gap-1 text-muted-foreground">
+				<div className="flex flex-col gap-1 text-muted-foreground text-xs">
 					<span>Shadow URL</span>
 					<span className={`${FIELD_CLASS} text-muted-foreground`}>
 						{settings.shadowUrl}
 					</span>
-					<span className="type-compact text-muted-foreground">
+					<span className="text-muted-foreground text-xs">
 						Local only — Shadow captures this device and can't be repointed at
 						another node.
 					</span>
 				</div>
 				<label
-					className="type-caption flex flex-col gap-1 text-muted-foreground"
+					className="flex flex-col gap-1 text-muted-foreground text-xs"
 					htmlFor="island-core-token"
 				>
 					Core token (optional)
@@ -184,7 +184,7 @@ export function SettingsPanelView({
 					Suggestion engine
 				</h3>
 				<label
-					className="type-caption flex items-center justify-between gap-2 text-muted-foreground"
+					className="flex items-center justify-between gap-2 text-muted-foreground text-xs"
 					htmlFor="island-poll"
 				>
 					Poll interval (s)
@@ -200,7 +200,7 @@ export function SettingsPanelView({
 					/>
 				</label>
 				<label
-					className="type-caption flex items-center justify-between gap-2 text-muted-foreground"
+					className="flex items-center justify-between gap-2 text-muted-foreground text-xs"
 					htmlFor="island-cooldown"
 				>
 					Cooldown (s)
@@ -219,7 +219,7 @@ export function SettingsPanelView({
 
 			<section className="flex flex-col gap-2 rounded-2xl bg-card p-3">
 				<h3 className="font-medium text-foreground text-xs">Updates</h3>
-				<p className="type-caption text-muted-foreground">
+				<p className="text-muted-foreground text-xs">
 					{tl("Version {version}", { version: version ?? "…" })}
 				</p>
 				<label

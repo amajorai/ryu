@@ -131,7 +131,7 @@ function CheckRow({ check }: { check: ScorecardCheck }) {
 	return (
 		<li
 			className={cn(
-				"flex items-start gap-2.5 rounded-md bg-muted px-3 py-2",
+				"flex items-start gap-2.5 rounded-lg bg-muted px-3 py-2",
 				check.status === "unknown" && "opacity-60"
 			)}
 		>
@@ -217,7 +217,7 @@ export function ScorecardPanel({
 								)}
 					</p>
 					<p
-						className="type-caption mt-1 text-muted-foreground"
+						className="mt-1 text-muted-foreground text-xs"
 						data-scorecard-ruleset={scorecard.rulesetVersion}
 					>
 						{rulesetLabel} {scorecard.rulesetVersion}
@@ -278,7 +278,7 @@ export function ScorecardPanel({
 							manifest, lifecycle state, dependencies, permissions, and
 							contribution shape.
 						</p>
-						<code className="rounded-md bg-background px-3 py-2 font-mono text-xs">
+						<code className="rounded-lg bg-background px-3 py-2 font-mono text-xs">
 							{developerCommand}
 						</code>
 						<p className="text-muted-foreground text-xs leading-relaxed">

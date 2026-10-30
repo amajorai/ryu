@@ -1,0 +1,197 @@
+/* Background customization (Settings → Appearance → Backgrounds). Layers an
+   optional gradient/image OVER the theme's solid surface color, and applies
+   transparency + blur to that layer. The CSS vars are set on :root by
+   hooks/useBackgroundCustomization.ts; unset → `none` keeps the default flat
+   look. The sidebar surface is `[data-slot="sidebar-inner"]` (docked) plus the
+   floating panel marker; the page surface is the `[data-slot="sidebar-inset"]`
+   main.
+
+   While any surface is customized (`html[data-ryu-bg-active]`) the background
+   moves onto a ::before layer instead of the element itself. That is what lets
+   the transparency (opacity) and backdrop blur (filter: blur) apply to the
+   backdrop WITHOUT blurring the surface's own content — a filter on the element
+   would soften the sidebar text too. The surface's own Tailwind `bg-*` color is
+   suppressed so the ::before (z-index -1, under the in-flow content, above the
+   parent background) is the only thing painted; it carries the theme color so
+   the flat look survives transparency. */
+[data-slot="sidebar-inner"]::before,
+.ryu-sidebar-surface::before {
+	background-image: var(--ryu-sidebar-bg-image, none);
+	background-repeat: var(--ryu-sidebar-bg-repeat, repeat);
+	background-position: var(--ryu-sidebar-bg-position, 0 0);
+	background-size: var(--ryu-sidebar-bg-size, auto);
+	opacity: var(--ryu-sidebar-bg-opacity, 1);
+	filter: blur(var(--ryu-sidebar-bg-blur, 0px));
+}
+
+[data-slot="sidebar-inset"]::before {
+	background-image: var(--ryu-page-bg-image, none);
+	background-repeat: var(--ryu-page-bg-repeat, repeat);
+	background-position: var(--ryu-page-bg-position, 0 0);
+	background-size: var(--ryu-page-bg-size, auto);
+	opacity: var(--ryu-page-bg-opacity, 1);
+	filter: blur(var(--ryu-page-bg-blur, 0px));
+}
+
+[data-slot="sidebar-inner"]::before,
+.ryu-sidebar-surface::before,
+[data-slot="sidebar-inset"]::before {
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	/* `content` must be non-none or the pseudo-element generates no box and the
+	   whole background layer silently stops rendering — which is what happened:
+	   under `html[data-ryu-bg-active]` the surface's own color goes transparent
+	   and these ::before layers are the ONLY thing painting it, so the inset
+	   card (and sidebar) vanished to the canvas behind it. */
+	content: "";
+	border-radius: inherit;
+}
+
+/* Theme color behind the backdrop layer — matches each surface's own bg-*
+   utility so transparency reveals the same flat color it replaces. */
+[data-slot="sidebar-inner"]::before {
+	background-color: var(--sidebar);
+}
+
+.ryu-sidebar-surface::before {
+	background-color: var(--card);
+}
+
+[data-slot="sidebar-inset"]::before {
+	background-color: var(--background);
+}
+
+html[data-ryu-bg-active] [data-slot="sidebar-inner"],
+html[data-ryu-bg-active] .ryu-sidebar-surface,
+html[data-ryu-bg-active] [data-slot="sidebar-inset"] {
+	/* The ::before above replaces the surface's own flat color; keep the
+	   element transparent so the layer actually shows. `overflow: clip` (not
+	   hidden — that would turn the main into a scroll container and break
+	   sticky headers) keeps the backdrop blur from bleeding past the surface. */
+	overflow: clip;
+	/* The ::before above replaces the surface's own flat color; keep the
+	   element transparent so the layer actually shows. `overflow: clip` (not
+	   hidden — that would turn the main into a scroll container and break
+	   sticky headers) keeps the backdrop blur from bleeding past the surface. */
+	background-color: transparent !important;
+	isolation: isolate;
+}
+
+/* Native window surface transparency. Tauri keeps the actual window clear and
+   macOS installs an NSVisualEffectView below the webview. These two attributes
+   only change which React surfaces reveal that backdrop, so either surface can
+   be enabled without forcing the other one to become translucent. */
+:root {
+	--ryu-sidebar-surface-opacity: 1;
+	--ryu-window-surface-opacity: 1;
+}
+
+html[data-ryu-sidebar-transparency="true"] {
+	--ryu-sidebar-surface-opacity: 0.68;
+}
+
+html[data-ryu-window-transparency="true"] {
+	--ryu-window-surface-opacity: 0.7;
+}
+
+html[data-ryu-sidebar-transparency="true"]:not([data-ryu-bg-active])
+	[data-slot="sidebar-inner"],
+html[data-ryu-sidebar-transparency="true"]:not([data-ryu-bg-active])
+	[data-mobile="true"][data-slot="sidebar"],
+html[data-ryu-sidebar-transparency="true"]:not([data-ryu-bg-active])
+	.ryu-sidebar-surface {
+	background-color: color-mix(
+		in oklab,
+		var(--sidebar) 68%,
+		transparent
+	) !important;
+	-webkit-backdrop-filter: saturate(1.25) blur(24px);
+	backdrop-filter: saturate(1.25) blur(24px);
+}
+
+html[data-ryu-sidebar-transparency="true"] [data-slot="sidebar-wrapper"] {
+	background-color: transparent !important;
+}
+
+html[data-ryu-window-transparency="true"] [data-ryu-window-root],
+html[data-ryu-window-transparency="true"] [data-slot="sidebar-wrapper"] {
+	background-color: transparent !important;
+}
+
+html[data-ryu-window-transparency="true"]:not([data-ryu-bg-active])
+	[data-slot="sidebar-inset"] {
+	background-color: color-mix(
+		in oklab,
+		var(--background) 70%,
+		transparent
+	) !important;
+	-webkit-backdrop-filter: saturate(1.2) blur(28px);
+	backdrop-filter: saturate(1.2) blur(28px);
+}
+
+/* Custom gradients/images render on their own ::before layer. Lower that
+   layer's opacity under the corresponding switch so the native backdrop still
+   reads through it while preserving the user's background customization. */
+html[data-ryu-sidebar-transparency="true"] [data-slot="sidebar-inner"]::before,
+html[data-ryu-sidebar-transparency="true"] .ryu-sidebar-surface::before {
+	opacity: calc(
+		var(--ryu-sidebar-bg-opacity, 1) *
+		var(--ryu-sidebar-surface-opacity)
+	);
+}
+
+html[data-ryu-window-transparency="true"] [data-slot="sidebar-inset"]::before {
+	opacity: calc(
+		var(--ryu-page-bg-opacity, 1) *
+		var(--ryu-window-surface-opacity)
+	);
+}
+
+/* Reduced transparency: every glass layer this file owns goes solid. The blur
+   variables collapse to 0, the customised backdrop layers paint fully opaque,
+   and the native-transparency switches fall back to the solid --sidebar and
+   --background tokens. The selectors mirror the transparency rules
+   above and come later, so they win at equal specificity. */
+@media (prefers-reduced-transparency: reduce) {
+	:root {
+		--ryu-sidebar-bg-blur: 0px;
+		--ryu-page-bg-blur: 0px;
+		--ryu-sidebar-surface-opacity: 1;
+		--ryu-window-surface-opacity: 1;
+	}
+
+	[data-slot="sidebar-inner"]::before,
+	.ryu-sidebar-surface::before,
+	[data-slot="sidebar-inset"]::before {
+		opacity: 1 !important;
+		filter: none;
+	}
+
+	html[data-ryu-sidebar-transparency="true"]:not([data-ryu-bg-active])
+		[data-slot="sidebar-inner"],
+	html[data-ryu-sidebar-transparency="true"]:not([data-ryu-bg-active])
+		[data-mobile="true"][data-slot="sidebar"],
+	html[data-ryu-sidebar-transparency="true"]:not([data-ryu-bg-active])
+		.ryu-sidebar-surface {
+		background-color: var(--sidebar) !important;
+		-webkit-backdrop-filter: none !important;
+		backdrop-filter: none !important;
+	}
+
+	html[data-ryu-window-transparency="true"]:not([data-ryu-bg-active])
+		[data-slot="sidebar-inset"] {
+		background-color: var(--background) !important;
+		-webkit-backdrop-filter: none !important;
+		backdrop-filter: none !important;
+	}
+}
+
+/* While the transcript scrolls, the page glass stops re-blurring every frame.
+   The chat scroller sets `data-scrolling` on <html> for the duration; the
+   `!important` outranks the more specific window-transparency rule above. */
+html[data-scrolling] [data-slot="sidebar-inset"] {
+	-webkit-backdrop-filter: none !important;
+	backdrop-filter: none !important;
+}

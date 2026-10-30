@@ -1,6 +1,6 @@
 import path from "node:path";
-import { LOGIN_APPROVAL_EXPIRES_IN_SECONDS } from "@ryu/auth/lib/login-approval-contract";
 import { expect, type Route, test } from "@playwright/test";
+import { LOGIN_APPROVAL_EXPIRES_IN_SECONDS } from "@ryu/auth/lib/login-approval-contract";
 
 test("account replacement cancels pending snapshots and unmount closes the stream", async ({
 	page,
@@ -61,7 +61,8 @@ test("account replacement cancels pending snapshots and unmount closes the strea
 			],
 		},
 	});
-	await expect(page.getByRole("dialog")).toBeVisible();
+	// The prompt is a lazy chunk; a cold dev server compiles it on first use.
+	await expect(page.getByRole("dialog")).toBeVisible({ timeout: 30_000 });
 	await expect(
 		page.getByText("Performance fixture device", { exact: true })
 	).toBeVisible();

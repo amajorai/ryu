@@ -8,8 +8,8 @@ import { AutoformatKit } from "@ryu/ui/components/editor/plugins/autoformat-kit.
 import { BasicBlocksKit } from "@ryu/ui/components/editor/plugins/basic-blocks-kit.tsx";
 import { BasicMarksKit } from "@ryu/ui/components/editor/plugins/basic-marks-kit.tsx";
 import { CalloutKit } from "@ryu/ui/components/editor/plugins/callout-kit.tsx";
-import { CodeBlockKit } from "@ryu/ui/components/editor/plugins/code-block-kit.tsx";
 import { ColumnKit } from "@ryu/ui/components/editor/plugins/column-kit.tsx";
+import { ComposerCodeBlockKit } from "@ryu/ui/components/editor/plugins/composer-code-block-kit.tsx";
 import { DateKit } from "@ryu/ui/components/editor/plugins/date-kit.tsx";
 import { EmojiKit } from "@ryu/ui/components/editor/plugins/emoji-kit.tsx";
 import { ExitBreakKit } from "@ryu/ui/components/editor/plugins/exit-break-kit.tsx";
@@ -113,7 +113,7 @@ const ComposerMentionKit = [
 
 const ComposerEditorKit = [
 	...BasicBlocksKit,
-	...CodeBlockKit,
+	...ComposerCodeBlockKit,
 	...TableKit,
 	...ToggleKit,
 	...TocKit,

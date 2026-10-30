@@ -1,365 +1,138 @@
 /*
- * The Agents card motion. One 9.6s loop, two layers: signal marches along every
- * wire toward the core, and once per loop the chat model is swapped (30-50%)
- * and the instructions gain a version (60-70%). Base styles are the still the
- * server renders; motion runs only while `Stage` marks the card in view. The
- * 9.6s is written out in each shorthand: a var() there stops CSS modules from
- * scoping the keyframe name, so the animation would never run.
+ * The Agents card motion, one 9.6s loop that starts and ends on the still.
+ * Signal rides every wire on the shared flow loop, the core pulses as it
+ * works, and the model slot swaps twice: model A unplugs outward while model B
+ * plugs in (36-48%), then B hands back to A (84-96%). Base rules are the
+ * still; keyframes animate transform and opacity only.
  */
-
-.stage {
-	color: var(--foreground);
-}
-
-.stage:not([data-inview]) * {
-	animation-play-state: paused;
-}
-
-.wire,
-.flow,
-.trace {
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 0.75;
-	stroke-linecap: round;
-}
-
-.wire {
-	stroke-opacity: 0.16;
-}
-
-.flow {
-	stroke-opacity: 0.55;
-	stroke-dasharray: 2 6;
-	animation: flow 2.4s linear infinite;
-	animation-delay: calc(var(--i, 0) * -0.4s);
-}
-
-.end {
-	opacity: 0.7;
-	fill: currentColor;
-}
 
 .chip {
 	fill: var(--background);
 	stroke: currentColor;
-	stroke-opacity: 0.28;
-	stroke-width: 0.75;
+	stroke-opacity: 0.42;
+	stroke-width: 1;
 }
 
 .glyph {
-	opacity: 0.75;
 	fill: currentColor;
 }
 
 .outline {
 	fill: none;
 	stroke: currentColor;
-	stroke-width: 0.7;
+	stroke-width: 1;
 	stroke-linecap: round;
-}
-
-.label {
-	font-family: inherit;
-	font-size: 7.5px;
-	fill: currentColor;
+	stroke-linejoin: round;
 }
 
 .core {
 	fill: var(--background);
 	stroke: currentColor;
-	stroke-width: 0.9;
+	stroke-width: 1.2;
 }
 
 .dot {
-	fill: currentColor;
+	fill: var(--scene-accent);
 	transform-origin: center;
 	transform-box: fill-box;
-	animation: pulse 9.6s ease-in-out infinite;
 }
 
 .halo {
-	opacity: 0.25;
+	opacity: 0.3;
 	fill: none;
 	stroke: currentColor;
-	stroke-width: 0.6;
-	animation: breathe 9.6s ease-in-out infinite;
+	stroke-width: 1;
+	transform-origin: center;
+	transform-box: fill-box;
 }
 
-.coreLabel {
-	font-family: var(--font-mono, ui-monospace, monospace);
-	font-size: 7.5px;
-	fill: var(--muted-foreground);
-}
-
-/* The chat swap: the old chip unplugs outward, the new one plugs in. */
-.chatOld {
-	animation: chat-old 9.6s ease-in-out infinite;
-}
-
-.chipOut {
-	animation: chip-out 9.6s ease-in-out infinite;
-}
-
-.chatNew {
+.modelB {
 	opacity: 0;
-	animation: chat-new 9.6s ease-in-out infinite;
+	transform: translate(-14px, -6px);
 }
 
-.chipIn {
-	transform: translate(calc(var(--dx) * 2), calc(var(--dy) * 2));
-	animation: chip-in 9.6s ease-out infinite;
-}
-
-.trace {
-	stroke-opacity: 0.4;
-	stroke-dasharray: 1;
-	stroke-dashoffset: 1;
-	animation: trace 9.6s ease-in-out infinite;
-}
-
-.newFlow {
-	opacity: 0;
-	animation:
-		flow 2.4s linear infinite,
-		new-flow 9.6s linear infinite;
-}
-
-.blink {
-	opacity: 0;
-	animation: blink 9.6s linear infinite;
-}
-
-/* The instructions keep their versions: the live one steps back as a new one lands. */
-.doc {
-	fill: var(--background);
-	stroke: currentColor;
-	stroke-width: 0.7;
-	stroke-linejoin: round;
-}
-
-.docFront {
-	animation: doc-front 9.6s ease-in-out infinite;
-}
-
-.docMid {
-	opacity: 0.35;
-	animation: doc-mid 9.6s ease-in-out infinite;
-}
-
-.docBack {
-	opacity: 0.18;
-	animation: doc-back 9.6s ease-in-out infinite;
-}
-
-.docNew {
-	opacity: 0;
-	transform: translateY(-6px);
-	animation: doc-new 9.6s ease-out infinite;
-}
-
-@keyframes flow {
-	to {
-		stroke-dashoffset: -32;
+@keyframes pulse {
+	0%,
+	20%,
+	34%,
+	60%,
+	74%,
+	100% {
+		transform: scale(1);
+	}
+	26%,
+	66% {
+		transform: scale(1.25);
 	}
 }
 
 @keyframes breathe {
 	0%,
 	100% {
-		opacity: 0.25;
-	}
-	50% {
-		opacity: 0.5;
-	}
-}
-
-@keyframes pulse {
-	0%,
-	48%,
-	60%,
-	100% {
+		opacity: 0.3;
 		transform: scale(1);
 	}
-	53% {
-		transform: scale(1.12);
-	}
-}
-
-@keyframes chat-old {
-	0%,
-	30% {
-		opacity: 1;
-	}
-	38% {
-		opacity: 0.3;
-	}
-	44%,
-	88% {
-		opacity: 0;
-	}
-	98%,
-	100% {
-		opacity: 1;
-	}
-}
-
-@keyframes chip-out {
-	0%,
-	30% {
-		transform: translate(0, 0);
-	}
-	40%,
-	88% {
-		transform: translate(var(--dx), var(--dy));
-	}
-	88.5%,
-	100% {
-		transform: translate(0, 0);
-	}
-}
-
-@keyframes chat-new {
-	0%,
-	34% {
-		opacity: 0;
-	}
-	44%,
-	88% {
-		opacity: 1;
-	}
-	97%,
-	100% {
-		opacity: 0;
-	}
-}
-
-@keyframes chip-in {
-	0%,
-	34% {
-		transform: translate(calc(var(--dx) * 2), calc(var(--dy) * 2));
-	}
-	46%,
-	100% {
-		transform: translate(0, 0);
-	}
-}
-
-@keyframes trace {
-	0%,
-	40% {
-		stroke-dashoffset: 1;
-	}
-	50%,
-	100% {
-		stroke-dashoffset: 0;
-	}
-}
-
-@keyframes new-flow {
-	0%,
-	49% {
-		opacity: 0;
-	}
-	53%,
-	100% {
-		opacity: 1;
-	}
-}
-
-@keyframes blink {
-	0%,
-	48% {
-		opacity: 0;
-	}
 	50% {
-		opacity: 1;
-	}
-	53% {
-		opacity: 0.15;
-	}
-	56%,
-	100% {
-		opacity: 0.7;
+		opacity: 0.12;
+		transform: scale(1.08);
 	}
 }
 
-@keyframes doc-front {
+/* Model A: in place at the still, out 36-44%, back in 88-96%. */
+@keyframes model-a {
 	0%,
-	60% {
+	36%,
+	96%,
+	100% {
 		opacity: 1;
 		transform: translate(0, 0);
 	}
-	70%,
-	100% {
-		opacity: 0.35;
-		transform: translate(3px, -3px);
+	44%,
+	88% {
+		opacity: 0;
+		transform: translate(-14px, -6px);
 	}
 }
 
-@keyframes doc-mid {
+/* Model B: out at the still, in 40-48%, out again 84-92%. */
+@keyframes model-b {
 	0%,
-	60% {
-		opacity: 0.35;
+	40%,
+	92%,
+	100% {
+		opacity: 0;
+		transform: translate(-14px, -6px);
+	}
+	48%,
+	84% {
+		opacity: 1;
 		transform: translate(0, 0);
 	}
-	70%,
-	100% {
-		opacity: 0.18;
-		transform: translate(3px, -3px);
-	}
 }
 
-@keyframes doc-back {
-	0%,
-	60% {
-		opacity: 0.18;
-		transform: translate(0, 0);
-	}
-	70%,
-	100% {
-		opacity: 0;
-		transform: translate(3px, -3px);
-	}
-}
-
-@keyframes doc-new {
-	0%,
-	60% {
-		opacity: 0;
-		transform: translateY(-6px);
-	}
-	70%,
-	100% {
-		opacity: 1;
-		transform: translateY(0);
-	}
-}
-
-/* Still: every part connected by a static dashed wire, the swap already made. */
-@media (prefers-reduced-motion: reduce) {
-	.stage * {
-		animation: none !important;
+@media (prefers-reduced-motion: no-preference) {
+	.root[data-inview] .dot,
+	.root[data-inview] .halo,
+	.root[data-inview] .modelA,
+	.root[data-inview] .modelB {
+		animation-duration: 9.6s;
+		animation-timing-function: ease-in-out;
+		animation-iteration-count: infinite;
 	}
 
-	.chatOld {
-		opacity: 0;
+	.root[data-inview] .dot {
+		animation-name: pulse;
 	}
 
-	.chatNew,
-	.newFlow {
-		opacity: 1;
+	.root[data-inview] .halo {
+		animation-name: breathe;
 	}
 
-	.chipIn {
-		transform: none;
+	.root[data-inview] .modelA {
+		animation-name: model-a;
 	}
 
-	.trace {
-		stroke-dashoffset: 0;
-	}
-
-	.blink {
-		opacity: 0.7;
+	.root[data-inview] .modelB {
+		animation-name: model-b;
 	}
 }

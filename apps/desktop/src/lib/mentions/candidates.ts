@@ -4,23 +4,35 @@
 // See docs/rfc-mention-composer.md.
 
 import {
-	IconApps,
-	IconDatabase,
-	IconFileText,
-	IconFolder,
-	IconGitBranch,
-	IconMessages,
-	IconPlug,
-	IconRobot,
-	IconSparkles,
-	IconUsers,
-} from "@tabler/icons-react";
+	BubbleChatIcon,
+	DashboardSquare01Icon,
+	Database01Icon,
+	File01Icon,
+	Folder01Icon,
+	GitBranchIcon,
+	Plug01Icon,
+	RoboticIcon,
+	SparklesIcon,
+	UserGroupIcon,
+} from "@hugeicons/core-free-icons";
+import { hugeiconComponent } from "@ryu/blocks/desktop/agent-elements/icons/hugeicon-component.tsx";
 import type {
 	MentionGroup,
 	MentionItem,
 	MentionKind,
 	MentionSources,
 } from "./types.ts";
+
+const IconApps = hugeiconComponent(DashboardSquare01Icon);
+const IconDatabase = hugeiconComponent(Database01Icon);
+const IconFileText = hugeiconComponent(File01Icon);
+const IconFolder = hugeiconComponent(Folder01Icon);
+const IconGitBranch = hugeiconComponent(GitBranchIcon);
+const IconMessages = hugeiconComponent(BubbleChatIcon);
+const IconPlug = hugeiconComponent(Plug01Icon);
+const IconRobot = hugeiconComponent(RoboticIcon);
+const IconSparkles = hugeiconComponent(SparklesIcon);
+const IconUsers = hugeiconComponent(UserGroupIcon);
 
 export const CHAT_MENTION_KINDS = [
 	"agent",

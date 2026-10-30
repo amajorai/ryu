@@ -96,8 +96,11 @@ test.describe("store section tabs — pills, edges, and the global search", () =
 				'[data-testid="narrow-panel"] [role="tab"][aria-selected="true"]'
 			)
 		).toHaveText(/Home/);
-		// The list is the `pills` variant of the shared primitive.
-		await expect(narrowScroller(page)).toHaveAttribute("data-variant", "pills");
+		// The list is the `muted-pills` variant of the shared primitive.
+		await expect(narrowScroller(page)).toHaveAttribute(
+			"data-variant",
+			"muted-pills"
+		);
 	});
 
 	test("renders authoritative totals as muted bare numbers", async ({

@@ -6,34 +6,22 @@
 // Built once here and hosted by the desktop Gateway dialog and the web
 // console; each host passes an adapter for its topology, feed and editors.
 
-import { Button } from "@ryu/ui/components/button";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@ryu/ui/components/popover";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	Background,
 	BackgroundVariant,
-	type FitViewOptions,
 	Panel,
-	type ProOptions,
 	ReactFlow,
 	ReactFlowProvider,
 	useReactFlow,
 } from "@xyflow/react";
-import { Lock, Maximize, Minus, Plus } from "lucide-react";
 import {
-	type CSSProperties,
 	type KeyboardEvent,
-	type ReactNode,
 	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
 	useState,
-	useSyncExternalStore,
 } from "react";
 import { usePrefersReducedMotion } from "../interfaces/graph-canvas.tsx";
 import {
@@ -44,364 +32,47 @@ import {
 import {
 	CANVAS_EDGE_TYPES,
 	type CanvasFlowEdge,
-	EDGE_STROKE,
-	OUTCOME_COLOR,
 	PulseLayer,
 } from "./edges.tsx";
 import {
-	CANVAS_NODE_WIDTH,
-	type CanvasLayout,
-	layoutTopology,
-	linkEnds,
-} from "./layout.ts";
-import { type CanvasLiveStore, createCanvasLiveStore } from "./live-store.ts";
+	buildEdges,
+	buildNodes,
+	readingOrder,
+} from "./gateway-canvas-build.ts";
 import {
-	type CanvasEdgeKind,
-	type CanvasFeedState,
-	type CanvasNode,
-	type CanvasTopology,
-	formatCount,
-	type GatewayCanvasAdapter,
-	MAX_PULSES_PER_SECOND,
-	OUTCOME_LABELS,
-	type PulseOutcome,
-} from "./model.ts";
+	type CanvasView,
+	EDGE_MARGIN,
+	FIT_VIEW_OPTIONS,
+	FLOW_THEME,
+	type GatewayCanvasProps,
+	OVERLAY,
+	PANEL_CLEARANCE,
+	PRO_OPTIONS,
+	SWEEP_MS,
+} from "./gateway-canvas-constants.ts";
+import {
+	FeedStatus,
+	useNarrow,
+	ViewSwitch,
+	ZoomControls,
+} from "./gateway-canvas-controls.tsx";
+import { CanvasLegend } from "./gateway-canvas-legend.tsx";
+import { CANVAS_NODE_WIDTH, layoutTopology } from "./layout.ts";
+import { createCanvasLiveStore } from "./live-store.ts";
+import type { CanvasNode } from "./model.ts";
 import {
 	CANVAS_NODE_TYPES,
 	CanvasContext,
 	type CanvasContextValue,
 	type CanvasFlowNode,
-	HealthDot,
 } from "./nodes.tsx";
 import { CanvasNodePanel } from "./panel.tsx";
 import { CanvasTableView } from "./table-view.tsx";
 
-// Module level so React Flow never sees new objects (spec 07.5, the
-// getSnapshot loop guard).
-const PRO_OPTIONS: ProOptions = { hideAttribution: true };
-const FIT_VIEW_OPTIONS: FitViewOptions = { maxZoom: 1, padding: 0.06 };
-const FLOW_THEME = {
-	"--xy-background-color": "transparent",
-	"--xy-edge-stroke": "var(--border)",
-	"--xy-node-border-radius": "var(--radius)",
-} as CSSProperties;
-
-/** Below this width the table is the default view and the panel stacks. */
-const NARROW_WIDTH = 640;
-const SWEEP_MS = 400;
-/** The side panel's width plus its margins, in screen pixels. */
-const PANEL_CLEARANCE = 424;
-const EDGE_MARGIN = 24;
-
-const OVERLAY =
-	"m-0 flex min-w-0 items-center rounded-lg border border-border bg-background p-0.5 text-foreground";
-const META = "text-xs";
-
-export type CanvasView = "map" | "table";
-
-export interface GatewayCanvasProps {
-	adapter: GatewayCanvasAdapter;
-	className?: string;
-	/** Defaults to the map, or the table on narrow containers. */
-	defaultView?: CanvasView;
-	feed: CanvasFeedState;
-	/** The canvas's accessible name. */
-	label: string;
-	/**
-	 * Called whenever the React Flow node array is built. A traffic tick must
-	 * never build it; hosts and tests use this to hold that budget.
-	 */
-	onNodesBuilt?: () => void;
-	/** Host actions shown beside the view switch (an expand button). */
-	toolbar?: ReactNode;
-}
-
-/** Reading order: columns left to right, then the infrastructure band. */
-function readingOrder(layout: CanvasLayout): string[] {
-	return Object.entries(layout)
-		.sort(([, a], [, b]) => {
-			const columnA = a.column < 0 ? Number.MAX_SAFE_INTEGER : a.column;
-			const columnB = b.column < 0 ? Number.MAX_SAFE_INTEGER : b.column;
-			return columnA - columnB || a.y - b.y || a.x - b.x;
-		})
-		.map(([id]) => id);
-}
-
-function buildNodes(
-	topology: CanvasTopology,
-	layout: CanvasLayout
-): CanvasFlowNode[] {
-	return topology.nodes.map((node) => ({
-		data: { node },
-		draggable: false,
-		id: node.id,
-		position: { x: layout[node.id]?.x ?? 0, y: layout[node.id]?.y ?? 0 },
-		selectable: false,
-		type: "gateway-canvas",
-	}));
-}
-
-function buildEdges(
-	topology: CanvasTopology,
-	layout: CanvasLayout
-): CanvasFlowEdge[] {
-	const edges: CanvasFlowEdge[] = [];
-	for (const edge of topology.edges) {
-		const from = layout[edge.from];
-		const to = layout[edge.to];
-		if (!(from && to)) {
-			continue;
-		}
-		const { source, target } = linkEnds(from, to);
-		edges.push({
-			data: {
-				d: `M${source.x},${source.y} L${target.x},${target.y}`,
-				kind: edge.kind,
-			},
-			focusable: false,
-			id: edge.id,
-			selectable: false,
-			source: edge.from,
-			target: edge.to,
-			type: "gateway-canvas",
-		});
-	}
-	return edges;
-}
-
-function LegendLine({ kind }: { kind: CanvasEdgeKind }) {
-	return (
-		<svg aria-hidden="true" height="12" viewBox="0 0 24 12" width="24">
-			<line style={EDGE_STROKE[kind]} x1="2" x2="22" y1="6" y2="6" />
-		</svg>
-	);
-}
-
-function LegendDot({ outcome }: { outcome: PulseOutcome }) {
-	return (
-		<span
-			aria-hidden="true"
-			className="size-2 rounded-full"
-			style={{ background: OUTCOME_COLOR[outcome] }}
-		/>
-	);
-}
-
-const LEGEND_OUTCOMES: PulseOutcome[] = [
-	"allow",
-	"redacted",
-	"block",
-	"cache_hit",
-	"degraded",
-	"error",
-];
-
-function CanvasLegend({ motion }: { motion: boolean }) {
-	return (
-		<Popover>
-			<PopoverTrigger
-				render={
-					<Button
-						className={cn(
-							"h-7 px-2 text-muted-foreground hover:text-foreground aria-expanded:text-foreground",
-							META
-						)}
-						size="xs"
-						type="button"
-						variant="ghost"
-					/>
-				}
-			>
-				Legend
-			</PopoverTrigger>
-			<PopoverContent
-				align="start"
-				className="w-64 gap-0 rounded-lg border-border bg-background p-3 shadow-none"
-				side="bottom"
-				sideOffset={6}
-			>
-				<ul aria-label="Legend" className={cn("flex flex-col gap-2", META)}>
-					{LEGEND_OUTCOMES.map((outcome) => (
-						<li className="flex h-4 items-center gap-2" key={outcome}>
-							<span className="flex w-6 justify-center">
-								<LegendDot outcome={outcome} />
-							</span>
-							{OUTCOME_LABELS[outcome]}
-						</li>
-					))}
-					<li className="flex h-4 items-center gap-2">
-						<LegendLine kind="traffic" />
-						Request path
-					</li>
-					<li className="flex h-4 items-center gap-2">
-						<LegendLine kind="control" />
-						Configuration and health
-					</li>
-					<li className="flex h-4 items-center gap-2">
-						<span className="flex w-6 justify-center">
-							<Lock aria-hidden="true" className="size-3" />
-						</span>
-						Fixed by Ryu or the pipeline
-					</li>
-					<li className="flex h-4 items-center gap-2">
-						<span className="flex w-6 justify-center">
-							<HealthDot health="degraded" />
-						</span>
-						Degraded or down
-					</li>
-				</ul>
-				<p className={cn("mt-3 text-muted-foreground", META)}>
-					{motion
-						? `A blocked request stops at the layer that refused it. At most ${MAX_PULSES_PER_SECOND} requests a second are drawn; counts include every request.`
-						: "Motion is reduced, so requests are counted but not animated."}
-				</p>
-			</PopoverContent>
-		</Popover>
-	);
-}
-
-const FEED_LABEL: Record<CanvasFeedState["status"], string> = {
-	aggregated: "Per-minute totals",
-	connecting: "Connecting",
-	denied: "No access to live traffic",
-	live: "Live",
-	off: "No live feed",
-	unavailable: "Feed unavailable",
-};
-
-function FeedStatus({
-	feed,
-	store,
-}: {
-	feed: CanvasFeedState;
-	store: CanvasLiveStore;
-}) {
-	const totals = useSyncExternalStore(
-		store.subscribe,
-		store.totals,
-		store.totals
-	);
-	const live = feed.status === "live";
-	const parts = [feed.message ?? FEED_LABEL[feed.status]];
-	if (live || totals.requests > 0) {
-		if (live) {
-			parts.push(
-				`${totals.perSecond.toFixed(totals.perSecond < 10 ? 1 : 0)}/s`
-			);
-		}
-		parts.push(`${formatCount(totals.requests)} requests`);
-		parts.push(`${formatCount(totals.blocked)} blocked`);
-	}
-	return (
-		<p
-			aria-live="off"
-			className={cn(
-				"flex min-w-0 items-center gap-1.5 truncate px-2 tabular-nums",
-				META
-			)}
-		>
-			<span
-				aria-hidden="true"
-				className={cn(
-					"size-1.5 shrink-0 rounded-full",
-					live ? "bg-success" : "bg-muted-foreground/50"
-				)}
-			/>
-			<span className="truncate">{parts.join(" · ")}</span>
-		</p>
-	);
-}
-
-function ViewSwitch({
-	onChange,
-	view,
-}: {
-	onChange: (view: CanvasView) => void;
-	view: CanvasView;
-}) {
-	return (
-		<fieldset aria-label="View" className="flex items-center gap-0.5">
-			{(["map", "table"] as const).map((option) => (
-				<Button
-					aria-pressed={view === option}
-					className={cn(
-						"h-7 px-2 text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground",
-						META
-					)}
-					key={option}
-					onClick={() => onChange(option)}
-					size="xs"
-					type="button"
-					variant="ghost"
-				>
-					{option === "map" ? "Map" : "Table"}
-				</Button>
-			))}
-		</fieldset>
-	);
-}
-
-function ZoomControls({ duration }: { duration: number }) {
-	const flow = useReactFlow();
-	return (
-		<Panel position="bottom-left">
-			<fieldset aria-label="Zoom" className={OVERLAY}>
-				<Button
-					aria-label="Zoom out"
-					className="size-7 text-muted-foreground"
-					onClick={() => flow.zoomOut({ duration })}
-					size="icon-sm"
-					type="button"
-					variant="ghost"
-				>
-					<Minus aria-hidden="true" className="size-4" />
-				</Button>
-				<Button
-					aria-label="Zoom in"
-					className="size-7 text-muted-foreground"
-					onClick={() => flow.zoomIn({ duration })}
-					size="icon-sm"
-					type="button"
-					variant="ghost"
-				>
-					<Plus aria-hidden="true" className="size-4" />
-				</Button>
-				<span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
-				<Button
-					aria-label="Fit map to view"
-					className="size-7 text-muted-foreground"
-					onClick={() => flow.fitView({ ...FIT_VIEW_OPTIONS, duration })}
-					size="icon-sm"
-					type="button"
-					variant="ghost"
-				>
-					<Maximize aria-hidden="true" className="size-4" />
-				</Button>
-			</fieldset>
-		</Panel>
-	);
-}
-
-/** Tracks whether the canvas is narrower than {@link NARROW_WIDTH}. */
-function useNarrow(ref: React.RefObject<HTMLElement | null>): boolean | null {
-	const [narrow, setNarrow] = useState<boolean | null>(null);
-	useEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		const measure = () =>
-			setNarrow(element.getBoundingClientRect().width < NARROW_WIDTH);
-		measure();
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver(measure);
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return narrow;
-}
+export type {
+	CanvasView,
+	GatewayCanvasProps,
+} from "./gateway-canvas-constants.ts";
 
 function GatewayCanvasInner({
 	adapter,

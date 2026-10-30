@@ -155,10 +155,8 @@ export function SidebarPreviewTitleHistory({
 	}
 	const prior = entries.slice(0, -1);
 	return (
-		<div className="flex flex-col gap-1 border-border/60 border-t pt-2">
-			<p className="type-caption text-muted-foreground uppercase tracking-wide">
-				Title history
-			</p>
+		<div className="flex flex-col gap-1 border-border border-t pt-2">
+			<p className="text-detail text-muted-foreground">Title history</p>
 			<ul className="flex flex-col gap-0.5">
 				{prior.map((entry, index) => (
 					<li

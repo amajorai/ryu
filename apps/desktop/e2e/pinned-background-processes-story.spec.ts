@@ -20,9 +20,9 @@ test("keeps pinned-summary headers text-only", async ({ page }) => {
 	await page.waitForSelector("body[data-harness-ready='1']");
 
 	await expect(page.getByRole("button", { name: "Environment" })).toBeVisible();
-	await expect(
-		page.locator('[data-slot="bouncy-accordion-item-icon"]')
-	).toHaveCount(0);
+	await expect(page.locator('[data-slot="context-section-icon"]')).toHaveCount(
+		0
+	);
 	await expect(page.locator('[data-slot="cowork-section-count"]')).toHaveCount(
 		1
 	);

@@ -7,6 +7,7 @@ import type { ProjectRecord } from "../../src/lib/api/hierarchy.ts";
 // This is browser fetch-fixture coverage, not native transport or background-feature acceptance.
 import {
 	type BackgroundContract,
+	CoreContracts,
 	canonicalPath,
 	createBackgroundContracts,
 } from "../chat-page-native-http-background.ts";
@@ -22,7 +23,7 @@ export function createChatControlBackground(
 	scope: Scope,
 	unexpected: UnexpectedChatProofRequest[]
 ) {
-	const core = new Map<string, BackgroundContract>();
+	const core: Map<string, BackgroundContract> = new CoreContracts();
 	const backend = new Map<string, BackgroundContract>();
 	for (const id of scope.conversationIds) {
 		const contracts = createBackgroundContracts(id, scope.ownerId);
@@ -232,6 +233,44 @@ export function createChatControlBackground(
 				projects.set(project.id, project);
 				return record(Response.json(project, { status: 201 }));
 			}
+			// After creating the project, the desktop asks the Projects app for its
+			// coordinator thread and moves folder-scoped memory onto the project.
+			// As in the native fixture, no Projects app runs here (its documented
+			// 503), and there is no folder memory to move.
+			const mainThread =
+				/^\/api\/projects\/projects\/([^/]+)\/main-thread$/.exec(path);
+			if (isCore && mainThread && request.method === "POST") {
+				if (!projects.has(decodeURIComponent(mainThread[1]))) {
+					return refuse("Unknown owned project");
+				}
+				return record(
+					Response.json(
+						{
+							error:
+								"Core is unavailable; open this project from a connected Ryu node",
+						},
+						{ status: 503 }
+					)
+				);
+			}
+			if (
+				isCore &&
+				path === "/api/hierarchy/memory/rekey-project" &&
+				request.method === "POST"
+			) {
+				const input = parseJson();
+				if (
+					!input ||
+					typeof input !== "object" ||
+					Object.keys(input).length !== 2 ||
+					Reflect.get(input, "from_scope_id") !==
+						"/tmp/ryu-chat-controls-project" ||
+					!projects.has(String(Reflect.get(input, "to_project_id")))
+				) {
+					return refuse("Unknown owned project-memory migration DTO");
+				}
+				return record(Response.json({ moved: 0 }));
+			}
 			for (const id of scope.conversationIds) {
 				if (!isCore || path !== `/api/conversations/${id}/model-selection`) {
 					continue;
@@ -405,6 +444,11 @@ export function createChatControlBackground(
 				for (const id of scope.conversationIds) {
 					if (path === `/api/conversations/${id}/model-selection`) {
 						return record(Response.json({ current: null, changes: [] }));
+					}
+					// Core's `get_agent_ui_state_handler`: no fixture transcript
+					// renders a `ui.render` widget, so no conversation has state.
+					if (path === `/api/conversations/${id}/ui-state`) {
+						return record(Response.json({ states: {} }));
 					}
 					if (path === `/api/worktree/${id}/status`) {
 						return record(

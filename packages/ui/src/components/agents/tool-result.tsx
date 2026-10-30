@@ -1,4 +1,21 @@
 "use client";
+import {
+	ArrowDown01Icon,
+	BookOpen01Icon,
+	CancelCircleIcon,
+	CheckmarkCircle02Icon,
+	CodeIcon,
+	ComputerTerminal01Icon,
+	Copy01Icon,
+	Globe02Icon,
+	Loading03Icon,
+	PencilEdit02Icon,
+	RefreshIcon,
+	Tick02Icon,
+	UnavailableIcon,
+	Wrench01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { CSSProperties } from "react";
 import css from "./tool-result.module.css";
 
@@ -21,22 +38,6 @@ import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx"
 import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll.tsx";
 import { SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	Ban,
-	BookOpen,
-	Braces,
-	Check,
-	ChevronDown,
-	CircleCheck,
-	CircleX,
-	Copy,
-	Globe2,
-	LoaderCircle,
-	Pencil,
-	RotateCcw,
-	SquareTerminal,
-	Wrench,
-} from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
 	type ReactNode,
@@ -113,29 +114,29 @@ function getStatusClass(status: ToolResultStatus) {
 function KindIcon({ kind, tool }: { kind: ToolResultKind; tool: ReactNode }) {
 	const toolName = isNativeText(tool) ? tool.toLowerCase() : "";
 	if (toolName.includes("read")) {
-		return <BookOpen className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={BookOpen01Icon} />;
 	}
 	if (
 		toolName.includes("write") ||
 		toolName.includes("edit") ||
 		toolName.includes("patch")
 	) {
-		return <Pencil className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={PencilEdit02Icon} />;
 	}
 	if (
 		toolName.includes("web") ||
 		toolName.includes("search") ||
 		toolName.includes("fetch")
 	) {
-		return <Globe2 className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={Globe02Icon} />;
 	}
 	if (kind === "terminal") {
-		return <SquareTerminal className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={ComputerTerminal01Icon} />;
 	}
 	if (kind === "request" && toolName.includes("json")) {
-		return <Braces className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={CodeIcon} />;
 	}
-	return <Wrench className="size-4" />;
+	return <HugeiconsIcon className="size-4" icon={Wrench01Icon} />;
 }
 
 function StatusIcon({
@@ -146,15 +147,20 @@ function StatusIcon({
 	reduce: boolean;
 }) {
 	if (status === "running") {
-		return <LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />;
+		return (
+			<HugeiconsIcon
+				className={cn("size-3.5", !reduce && "animate-spin")}
+				icon={Loading03Icon}
+			/>
+		);
 	}
 	if (status === "success") {
-		return <CircleCheck className="size-3" />;
+		return <HugeiconsIcon className="size-3.5" icon={CheckmarkCircle02Icon} />;
 	}
 	if (status === "error") {
-		return <CircleX className="size-3" />;
+		return <HugeiconsIcon className="size-3.5" icon={CancelCircleIcon} />;
 	}
-	return <Ban className="size-3" />;
+	return <HugeiconsIcon className="size-3.5" icon={UnavailableIcon} />;
 }
 
 function ToolResultAction({
@@ -171,7 +177,7 @@ function ToolResultAction({
 	return (
 		<motion.button
 			aria-label={label}
-			className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+			className="grid size-7 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 			onClick={onClick}
 			title={label}
 			transition={SPRING_PRESS}
@@ -191,7 +197,7 @@ export function ToolResultOutput({
 	return (
 		<AgentCode
 			className={cn(
-				"whitespace-pre-wrap break-words text-foreground/80",
+				"whitespace-pre-wrap break-words text-foreground",
 				className
 			)}
 			code={children}
@@ -315,7 +321,7 @@ export function ToolResult({
 			<button
 				aria-controls={contentId}
 				aria-expanded={currentOpen}
-				className="group flex min-h-9 w-full items-center gap-2 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+				className="group flex min-h-9 w-full items-center gap-2 rounded-lg py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 				id={triggerId}
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
@@ -327,21 +333,21 @@ export function ToolResult({
 					{icon ?? <KindIcon kind={kind} tool={tool} />}
 				</span>
 				<span className="flex min-w-0 flex-1 items-baseline gap-2">
-					<span className="min-w-0 truncate font-medium text-foreground/90">
+					<span className="min-w-0 truncate font-medium text-foreground">
 						<ActionSwapRollText value={titleKey}>{title}</ActionSwapRollText>
 					</span>
 					{meta ? (
-						<span className="shrink-0 text-muted-foreground/60 text-xs">
+						<span className="shrink-0 text-muted-foreground text-xs">
 							<ActionSwapRollText value={metaKey}>{meta}</ActionSwapRollText>
 						</span>
 					) : null}
-					<span className="type-caption min-w-0 truncate font-mono text-muted-foreground/55">
+					<span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
 						<ActionSwapRollText value={toolKey}>{tool}</ActionSwapRollText>
 					</span>
 				</span>
 				<span
 					className={cn(
-						"type-caption inline-flex shrink-0 items-center gap-1 font-medium",
+						"inline-flex shrink-0 items-center gap-1 font-medium text-xs",
 						getStatusClass(status)
 					)}
 				>
@@ -351,10 +357,10 @@ export function ToolResult({
 				<motion.span
 					animate={{ rotate: currentOpen ? 180 : 0 }}
 					aria-hidden="true"
-					className="shrink-0 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground"
+					className="shrink-0 text-muted-foreground transition-colors group-hover:text-muted-foreground"
 					transition={reduce ? { duration: 0 } : SPRING_SWAP}
 				>
-					<ChevronDown className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
 				</motion.span>
 			</button>
 
@@ -365,7 +371,7 @@ export function ToolResult({
 				role="region"
 			>
 				<div className="pt-1.5 pl-6">
-					<div className="overflow-hidden rounded-xl bg-muted/80">
+					<div className="overflow-hidden rounded-xl bg-muted">
 						<div
 							aria-live="polite"
 							className={[
@@ -387,18 +393,18 @@ export function ToolResult({
 										onClick={handleCopy}
 									>
 										{copied ? (
-											<Check className="size-3.5" />
+											<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 										) : (
-											<Copy className="size-3.5" />
+											<HugeiconsIcon className="size-3.5" icon={Copy01Icon} />
 										)}
 									</ToolResultAction>
 								) : null}
 								{onRetry ? (
 									<ToolResultAction label="Run again" onClick={onRetry}>
-										<RotateCcw className="size-3.5" />
+										<HugeiconsIcon className="size-3.5" icon={RefreshIcon} />
 									</ToolResultAction>
 								) : null}
-								<span className="type-caption ml-auto text-muted-foreground/55">
+								<span className="ml-auto text-muted-foreground text-xs">
 									<ActionSwapRollText value={status}>
 										{statusLabel}
 									</ActionSwapRollText>

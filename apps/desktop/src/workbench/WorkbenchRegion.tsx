@@ -185,7 +185,7 @@ export function WorkbenchRegion({
 		<section
 			aria-label={label}
 			className={cn(
-				"relative min-h-0 min-w-0 overflow-hidden border-border/70 bg-background",
+				"relative min-h-0 min-w-0 overflow-hidden border-border bg-background",
 				region === "left" && "border-r",
 				region === "right" && "border-l",
 				region === "bottom" && "border-t",
@@ -201,7 +201,7 @@ export function WorkbenchRegion({
 				className={cn(
 					"grid h-full min-h-0 min-w-0",
 					styles.groups,
-					visibleGroups.length > 1 && "divide-x divide-border/70"
+					visibleGroups.length > 1 && "divide-x divide-border"
 				)}
 				style={groupStyle}
 			>

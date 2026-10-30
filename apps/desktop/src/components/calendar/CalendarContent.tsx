@@ -1,29 +1,16 @@
 import {
-	ArrowLeft01Icon,
 	CalendarCheckIn01Icon,
 	PlusSignIcon,
-	Refresh01Icon,
 	ZapIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Empty,
-	EmptyDescription,
-	EmptyHeader,
-	EmptyMedia,
-	EmptyTitle,
-} from "@ryu/ui/components/empty.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { Toggle } from "@ryu/ui/components/toggle.tsx";
 import { useDisplayDayRevision } from "@ryu/ui/lib/display-day.ts";
 import { useTimezoneRevision } from "@ryu/ui/lib/timezone.ts";
 import { useMemo, useState } from "react";
+import { QuietEmpty } from "@/src/components/agents/shared/quiet-empty.tsx";
 import { AgendaView } from "@/src/components/calendar/AgendaView.tsx";
-import {
-	DayPanel,
-	MonthView,
-} from "@/src/components/calendar/CalendarMonthView.tsx";
 import { NewAutomationDialog } from "@/src/components/calendar/NewAutomationDialog.tsx";
 import { TimeGridView } from "@/src/components/calendar/TimeGridView.tsx";
 import { useCalendarLocale } from "@/src/components/calendar/use-calendar-locale.ts";
@@ -39,13 +26,15 @@ import {
 	groupEventsByDay,
 } from "@/src/lib/calendar/events.ts";
 import {
-	CALENDAR_VIEWS,
 	type CalendarView,
 	navigate,
 	viewDays,
 	viewLabel,
 	viewRange,
 } from "@/src/lib/calendar/views.ts";
+import { CalendarToolbar } from "./calendar-toolbar.tsx";
+import { DayPanel } from "./day-panel.tsx";
+import { MonthView } from "./month-view.tsx";
 
 export interface CalendarContentProps {
 	defaultAgentId?: string;
@@ -66,7 +55,7 @@ export function CalendarContent({
 	onReload,
 	defaultAgentId,
 	emptyTitle = "No scheduled runs",
-	emptyDescription = "Create an automation to see agent and workflow runs appear on the calendar.",
+	emptyDescription = "Create an automation to see its runs on the calendar.",
 }: CalendarContentProps) {
 	const locale = useCalendarLocale();
 	const [view, setView] = useState<CalendarView>("month");
@@ -136,47 +125,60 @@ export function CalendarContent({
 
 	if (error) {
 		return (
-			<Empty className="h-full">
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={CalendarCheckIn01Icon} />
-					</EmptyMedia>
-					<EmptyTitle>Could not load calendar</EmptyTitle>
-					<EmptyDescription>
-						Something went wrong while loading your scheduled runs. Check your
-						connection and try again.
-					</EmptyDescription>
-				</EmptyHeader>
-				<Button className="mt-4" loading={loading} onClick={handleRefresh}>
-					<HugeiconsIcon className="size-4" icon={Refresh01Icon} />
-					Try again
-				</Button>
-			</Empty>
+			<QuietEmpty
+				action={
+					<Button
+						loading={loading}
+						onClick={handleRefresh}
+						size="sm"
+						variant="outline"
+					>
+						Try again
+					</Button>
+				}
+				className="h-full"
+				description="Check your connection and try again."
+				icon={CalendarCheckIn01Icon}
+				title="Could not load calendar"
+			/>
 		);
 	}
 
 	return (
 		<div className="relative flex h-full flex-col overflow-hidden">
+			<CalendarToolbar
+				hasSystemJobs={hasSystemJobs}
+				label={viewLabel(view, cursor, locale)}
+				loading={loading}
+				onNewAutomation={() => setNewAutomationOpen(true)}
+				onNext={() => setCursor((c) => navigate(view, c, 1))}
+				onPrevious={() => setCursor((c) => navigate(view, c, -1))}
+				onRefresh={handleRefresh}
+				onShowSystemJobsChange={setShowSystemJobs}
+				onToday={goToday}
+				onViewChange={setView}
+				showSystemJobs={showSystemJobs}
+				view={view}
+			/>
 			{visibleJobs.length === 0 ? (
-				<Empty className="h-full" purpose="calendar">
-					<EmptyHeader>
-						<EmptyMedia variant="icon">
-							<HugeiconsIcon icon={ZapIcon} />
-						</EmptyMedia>
-						<EmptyTitle>{emptyTitle}</EmptyTitle>
-						<EmptyDescription>{emptyDescription}</EmptyDescription>
+				<QuietEmpty
+					action={
 						<Button
-							className="mt-4"
 							onClick={() => setNewAutomationOpen(true)}
 							size="sm"
+							variant="outline"
 						>
 							<HugeiconsIcon className="size-4" icon={PlusSignIcon} />
 							New automation
 						</Button>
-					</EmptyHeader>
-				</Empty>
+					}
+					className="h-full"
+					description={emptyDescription}
+					icon={ZapIcon}
+					title={emptyTitle}
+				/>
 			) : (
-				<div className="flex min-h-0 flex-1 pb-20">
+				<div className="flex min-h-0 flex-1">
 					{view === "month" && (
 						<MonthView
 							cursor={cursor}
@@ -211,101 +213,6 @@ export function CalendarContent({
 					)}
 				</div>
 			)}
-
-			{/* Floating bottom toolbar — beUI-style pill: a centered, rounded,
-			    frosted pill that floats above the calendar, holding the date
-			    navigation, the view switcher and the section actions so nothing sits
-			    above the grid. The Store and the Library used to share this shape and
-			    no longer do (their tabs are inline page furniture now, see
-			    StoreSectionTabs) — this is a per-day toolbar over a fixed grid, not an
-			    open-ended list of sections, so it stays. */}
-			<div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 py-3">
-				<div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-full bg-muted/70 p-1.5 shadow-lg backdrop-blur-md">
-					<Button
-						aria-label="Previous"
-						onClick={() => setCursor((c) => navigate(view, c, -1))}
-						radius="pill"
-						size="icon-sm"
-						title="Previous"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
-					</Button>
-					<Button onClick={goToday} radius="pill" size="sm" variant="ghost">
-						Today
-					</Button>
-					<Button
-						aria-label="Next"
-						onClick={() => setCursor((c) => navigate(view, c, 1))}
-						radius="pill"
-						size="icon-sm"
-						title="Next"
-						variant="ghost"
-					>
-						<HugeiconsIcon
-							className="size-4 rotate-180"
-							icon={ArrowLeft01Icon}
-						/>
-					</Button>
-					<span className="px-2 font-medium text-sm tabular-nums">
-						{viewLabel(view, cursor, locale)}
-					</span>
-
-					<span
-						aria-hidden
-						className="mx-0.5 h-5 w-px shrink-0 self-center bg-border/60"
-					/>
-
-					{CALENDAR_VIEWS.map((option) => (
-						<Button
-							className=""
-							key={option.value}
-							onClick={() => setView(option.value)}
-							size="sm"
-							variant={view === option.value ? "secondary" : "ghost"}
-						>
-							{option.label}
-						</Button>
-					))}
-
-					<span
-						aria-hidden
-						className="mx-0.5 h-5 w-px shrink-0 self-center bg-border/60"
-					/>
-
-					{hasSystemJobs && (
-						<Toggle
-							aria-label="Show system jobs"
-							onPressedChange={setShowSystemJobs}
-							pressed={showSystemJobs}
-							purpose="calendar-filter"
-							size="sm"
-							title="Show Ryu's internal maintenance jobs on the calendar"
-						>
-							System jobs
-						</Toggle>
-					)}
-					<Button
-						aria-label="Refresh"
-						loading={loading}
-						onClick={handleRefresh}
-						radius="pill"
-						size="icon-sm"
-						title="Refresh"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="size-4" icon={Refresh01Icon} />
-					</Button>
-					<Button
-						onClick={() => setNewAutomationOpen(true)}
-						radius="pill"
-						size="sm"
-					>
-						<HugeiconsIcon className="size-4" icon={PlusSignIcon} />
-						New automation
-					</Button>
-				</div>
-			</div>
 
 			<NewAutomationDialog
 				defaultAgentId={defaultAgentId}

@@ -76,27 +76,24 @@ export function GatewayNodeScopePicker({
 	};
 
 	return (
-		<div className="flex flex-col gap-0.5 px-2 pb-1">
-			<span className="type-compact text-muted-foreground">Settings for</span>
+		<div className="pb-1">
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					aria-label={tl("Settings for {computerName}. Choose a computer", {
 						computerName: nodeSettingsLabel(activeNode),
 					})}
-					className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-left font-medium text-sm hover:bg-accent"
+					className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring"
 				>
 					<HugeiconsIcon
-						className="shrink-0 text-muted-foreground"
+						className="size-4 shrink-0 text-muted-foreground"
 						icon={isLocalNode(activeNode) ? LaptopIcon : Link01Icon}
-						size={14}
 					/>
 					<span className="min-w-0 flex-1 truncate">
 						{nodeSettingsLabel(activeNode)}
 					</span>
 					<HugeiconsIcon
-						className="shrink-0 text-muted-foreground"
+						className="size-3.5 shrink-0 text-muted-foreground"
 						icon={ArrowDown01Icon}
-						size={12}
 					/>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start">
@@ -107,16 +104,15 @@ export function GatewayNodeScopePicker({
 							onClick={() => selectNode(node.name)}
 						>
 							<HugeiconsIcon
-								className="mr-2"
+								className="size-4 text-muted-foreground"
 								icon={isLocalNode(node) ? LaptopIcon : Link01Icon}
-								size={12}
 							/>
 							<span className="min-w-0 flex-1 truncate">
 								{nodeSettingsLabel(node)}
 								{node.managed ? " · cloud" : ""}
 							</span>
 							{node.name === activeNode.name ? (
-								<HugeiconsIcon className="ml-2" icon={Tick02Icon} size={12} />
+								<HugeiconsIcon className="size-4" icon={Tick02Icon} />
 							) : null}
 						</DropdownMenuItem>
 					))}
@@ -128,15 +124,19 @@ export function GatewayNodeScopePicker({
 							</DropdownMenuItem>
 						</>
 					)}
-					<p className="type-compact max-w-60 px-2 py-1.5 text-muted-foreground">
-						{tl(
-							"Changes here apply only to {computerName}. Chats keep using {chatComputerName}.",
-							{
-								computerName: nodeSettingsLabel(activeNode),
-								chatComputerName: nodeSettingsLabel(chatNode),
-							}
-						)}
-					</p>
+					{/* Only worth saying when the dialog and chats point at different
+					    computers. */}
+					{activeNode.name === chatNode.name ? null : (
+						<p className="max-w-60 px-2 py-1.5 text-muted-foreground text-xs">
+							{tl(
+								"Changes here apply only to {computerName}. Chats keep using {chatComputerName}.",
+								{
+									computerName: nodeSettingsLabel(activeNode),
+									chatComputerName: nodeSettingsLabel(chatNode),
+								}
+							)}
+						</p>
+					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>

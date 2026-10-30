@@ -5,6 +5,7 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { NodeFolderBrowser } from "@/src/components/chat/NodeFolderBrowser.tsx";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import { ProjectSettingsDialog } from "@/src/components/layout/ProjectSettingsDialog.tsx";
 import {
 	SettingsCard,
@@ -57,9 +58,17 @@ export function EnvironmentsSection() {
 
 	return (
 		<>
-			<div className="space-y-6">
+			<div className="flex flex-col gap-8 [&>*]:mt-0">
 				<SettingsSection
-					caption="Local environments tell Ryu how to set up worktrees for a project. Scripts and variables stay with the project on this node."
+					caption={
+						<CaptionInfo
+							detail={
+								"Scripts and variables stay with the project on this node."
+							}
+						>
+							{"How Ryu sets up worktrees for a project."}
+						</CaptionInfo>
+					}
 					title="Environments"
 				>
 					<GovernanceScopeSwitcher
@@ -83,7 +92,7 @@ export function EnvironmentsSection() {
 				>
 					{paths.length === 0 ? (
 						<SettingsCard>
-							<p className="text-center text-muted-foreground text-sm">
+							<p className="py-3 text-muted-foreground text-sm">
 								No projects yet
 							</p>
 						</SettingsCard>
@@ -94,7 +103,6 @@ export function EnvironmentsSection() {
 									icon={Folder03Icon}
 									key={path}
 									onClick={() => setEditingPath(path)}
-									tint="blue"
 									title={
 										<>
 											{basename(path)}

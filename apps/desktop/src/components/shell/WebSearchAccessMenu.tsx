@@ -90,18 +90,12 @@ export function WebSearchAccessMenu({
 	const errors = (
 		<>
 			{query.isError ? (
-				<p
-					className="type-compact px-2 py-1 text-status-destructive"
-					role="status"
-				>
+				<p className="px-2 py-1 text-status-destructive text-xs" role="status">
 					Couldn't load this computer's web search setting.
 				</p>
 			) : null}
 			{saveFailed ? (
-				<p
-					className="type-compact px-2 py-1 text-status-destructive"
-					role="status"
-				>
+				<p className="px-2 py-1 text-status-destructive text-xs" role="status">
 					Couldn't save the web search setting.
 				</p>
 			) : null}
@@ -163,7 +157,7 @@ export function WebSearchAccessMenu({
 				<DropdownMenuSubContent className="w-72 min-w-72">
 					<div className="px-2 pt-1.5 pb-1">
 						<p className="font-medium text-xs">Web search</p>
-						<p className="type-compact text-muted-foreground/60">
+						<p className="text-muted-foreground/70 text-xs">
 							Choose how this computer can access the web.
 						</p>
 					</div>
@@ -184,7 +178,7 @@ export function WebSearchAccessMenu({
 							>
 								<span className="flex min-w-0 flex-col gap-0.5">
 									<span>{option.label}</span>
-									<span className="type-compact font-normal text-muted-foreground leading-tight">
+									<span className="font-normal text-muted-foreground text-xs leading-tight">
 										{option.description}
 									</span>
 								</span>

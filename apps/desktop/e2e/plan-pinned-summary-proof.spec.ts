@@ -15,7 +15,12 @@ test("lists saved ACP and Pi plans and opens the selected artifact", async ({
 
 	const plansTrigger = page.getByRole("button", { name: /Plans/ });
 	await expect(plansTrigger).toBeVisible();
-	await plansTrigger.click();
+	// The first section opens by default; only click when it is closed, so the
+	// proof never collapses the list it is about to use.
+	if ((await plansTrigger.getAttribute("aria-expanded")) !== "true") {
+		await plansTrigger.click();
+	}
+	await expect(plansTrigger).toHaveAttribute("aria-expanded", "true");
 
 	const planRows = page.getByTestId("pinned-summary-plan");
 	await expect(planRows).toHaveCount(2);
@@ -24,7 +29,7 @@ test("lists saved ACP and Pi plans and opens the selected artifact", async ({
 	await expect(page.getByText("Saved to Artifacts").first()).toBeVisible();
 	await expect(
 		page.locator(
-			'[data-testid="pinned-summary-proof"] [data-slot="bouncy-accordion-item-icon"]'
+			'[data-testid="pinned-summary-proof"] [data-slot="context-section-icon"]'
 		)
 	).toHaveCount(0);
 	await expect(

@@ -1,6 +1,5 @@
 import { ComputerIcon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { surfaceLabel } from "../surface-labels.ts";
 import {
 	extensionSummaries,
@@ -38,19 +37,18 @@ export function SupportExtensionPanel({
 
 	return (
 		<ListingSection icon={ComputerIcon} title="Support & extensions">
-			<p className="max-w-2xl text-muted-foreground text-sm leading-relaxed">
-				Support shows where this listing appears. Extensions show what it adds
-				to Ryu. Implementation shows which boundary owns the work.
+			<p className="max-w-2xl text-detail text-muted-foreground">
+				Where this listing appears, what it adds and who runs the work.
 			</p>
 
 			{support.length > 0 ? (
 				<div
-					className="grid gap-1.5 sm:grid-cols-2"
+					className="grid gap-x-6 sm:grid-cols-2"
 					data-testid="surface-support"
 				>
 					{support.map((row) => (
 						<div
-							className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-muted px-3 py-2"
+							className="flex min-h-10 min-w-0 items-center justify-between gap-3 border-border border-b py-2"
 							key={row.surface}
 						>
 							<div className="min-w-0">
@@ -63,9 +61,9 @@ export function SupportExtensionPanel({
 									</p>
 								) : null}
 							</div>
-							<Badge className="shrink-0" variant="outline">
+							<span className="shrink-0 text-muted-foreground text-xs">
 								{surfaceSupportLabel(row.support)}
-							</Badge>
+							</span>
 						</div>
 					))}
 				</div>
@@ -84,7 +82,7 @@ export function SupportExtensionPanel({
 					<ul className="grid gap-1.5 sm:grid-cols-2">
 						{extensions.map((extension) => (
 							<li
-								className="min-w-0 rounded-md bg-muted px-3 py-2"
+								className="min-w-0 rounded-lg bg-muted px-3 py-2"
 								key={extension.target}
 							>
 								<p className="font-medium text-sm">{extension.label}</p>
@@ -106,7 +104,7 @@ export function SupportExtensionPanel({
 					<ul className="grid gap-1.5 sm:grid-cols-2">
 						{implementation.map((location) => (
 							<li
-								className="min-w-0 rounded-md bg-muted px-3 py-2"
+								className="min-w-0 rounded-lg bg-muted px-3 py-2"
 								key={location.layer}
 							>
 								<p className="font-medium text-sm">{location.label}</p>

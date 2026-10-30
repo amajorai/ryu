@@ -35,8 +35,8 @@ export function WorkbenchGroupDropTarget({ groupId }: { groupId: string }) {
 		<div
 			aria-hidden
 			className={cn(
-				"absolute inset-0 z-30 rounded-md transition-colors motion-reduce:transition-none",
-				hovered && "bg-primary/10 ring-2 ring-primary/50 ring-inset"
+				"absolute inset-0 z-30 rounded-xl transition-colors motion-reduce:transition-none",
+				hovered && "border border-primary border-dashed bg-primary/5"
 			)}
 			data-workbench-drop-target={group.region}
 			onDragLeave={() => setHovered(false)}
@@ -76,8 +76,8 @@ export function WorkbenchEdgeDropTargets({
 		<div
 			aria-hidden
 			className={cn(
-				"absolute z-40 flex items-center justify-center border-2 border-primary/40 border-dashed bg-background/80 font-medium text-primary/80 text-xs backdrop-blur-sm transition-colors motion-reduce:transition-none",
-				hovered === region && "border-primary bg-primary/15"
+				"absolute z-40 flex items-center justify-center rounded-xl border border-primary border-dashed bg-background text-primary text-xs transition-colors motion-reduce:transition-none",
+				hovered === region && "bg-primary/5"
 			)}
 			data-workbench-edge-drop={region}
 			key={region}

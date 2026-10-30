@@ -2,13 +2,14 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RecordingPill } from "./recording-pill.tsx";
 
-test("pairs the push-to-talk status with the shared voice glow", () => {
+test("shows push-to-talk as a static dot and a quiet level meter, no glow", () => {
 	const markup = renderToStaticMarkup(
 		<RecordingPill agentName="Ryu Assistant" canCycle levels={[0.1, 0.7]} />
 	);
 
-	expect(markup).toContain("data-voice-beam=");
-	expect(markup).toContain('data-voice-type="pill"');
+	expect(markup).not.toContain("data-voice-beam=");
+	expect(markup).not.toContain("animate-pulse");
+	expect(markup).toContain("rounded-full bg-destructive");
 	expect(markup).toContain("Ryu Assistant");
 	expect(markup).toContain("⇥");
 });

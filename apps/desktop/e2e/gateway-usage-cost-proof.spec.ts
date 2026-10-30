@@ -80,11 +80,12 @@ test("renders sorted live quotas, account totals and models, BYOK balances, and 
 		.filter({ hasText: "Anthropic" });
 	await expect(anthropicQuota).toContainText("12 / 5,000");
 	await expect(anthropicQuota).toContainText("2m 05s");
-	await expect(anthropicQuota).toContainText("rate limited");
+	await expect(anthropicQuota).toContainText("Rate limited");
 	const openAiQuota = quotaTable.getByRole("row").filter({ hasText: "OpenAI" });
 	await expect(openAiQuota).toContainText("876 / 1,000");
 	await expect(openAiQuota).toContainText("1m 01s");
-	await expect(openAiQuota).toContainText("ok");
+	// A healthy window is the normal state and carries no status text.
+	await expect(openAiQuota).not.toContainText("Rate limited");
 	await page.clock.runFor(1100);
 	await expect(anthropicQuota).toContainText("2m 04s");
 
@@ -107,7 +108,8 @@ test("renders sorted live quotas, account totals and models, BYOK balances, and 
 	await expect(balances).toContainText("Key rejected");
 
 	const keys = section(page, "Additional account keys");
-	await expect(keys.getByText("0 account keys", { exact: true })).toBeVisible();
+	// A count of zero reads as muted "None", not "0 account keys".
+	await expect(keys.getByText("None", { exact: true })).toBeVisible();
 	await expect(keys.getByText("1 account key", { exact: true })).toBeVisible();
 	await expect(keys.getByText("3 account keys", { exact: true })).toBeVisible();
 	await expect(keys).toContainText("OPENAI_API_KEYS");
@@ -137,7 +139,9 @@ test("shows explicit empty quota and zero-usage states without inventing model r
 	page,
 }) => {
 	await page.goto("/gateway-usage-cost-proof.html?quota=empty&stats=empty");
-	await expect(page.getByText("No provider quota observed yet.")).toBeVisible();
+	await expect(
+		page.getByText("Quota appears here once providers report their limits.")
+	).toBeVisible();
 	await expect(page.getByText("No model usage recorded yet.")).toBeVisible();
 	await expect(page.getByText("Total spend")).toBeVisible();
 	await expect(
@@ -154,7 +158,7 @@ test("keeps unreported quota values explicit instead of rendering them as zero",
 	const quota = page.getByRole("table").first();
 	const gemini = quota.getByRole("row").filter({ hasText: "Gemini" });
 	await expect(gemini).toContainText("—");
-	await expect(gemini).toContainText("ok");
+	await expect(gemini).not.toContainText("Rate limited");
 	const openAi = quota.getByRole("row").filter({ hasText: "OpenAI" });
 	await expect(openAi).toContainText("? / 100");
 	await expect(openAi).toContainText("30s");
@@ -245,21 +249,24 @@ test("saves and reloads a cost tier while preserving every unrelated routing fie
 	await expect(
 		page.getByRole("combobox", { name: "Cost tier for vendor_internal" })
 	).toContainText("Free (2)");
-	await openAiTier.click();
-	await page.getByRole("option", { name: "Free (2)" }).click();
-
+	// A tier saves as soon as it changes; arm the failure first.
 	await page.evaluate(() => {
 		/* SAFETY: gateway-usage-cost-proof.tsx installs __usageCostProof before this proof page is evaluated. */ (
 			window as UsageCostProofWindow
 		).__usageCostProof.failNextConfigWrite = true;
 	});
-	const save = page.getByRole("button", { name: "Save", exact: true });
-	await save.click();
-	await expect(page.getByText("/api/gateway/config failed: 503")).toBeVisible();
+	await openAiTier.click();
+	await page.getByRole("option", { name: "Free (2)" }).click();
+	await expect(
+		page.getByText("Couldn't save provider cost tiers.")
+	).toBeVisible();
+	await expect(page.getByText("/api/gateway/config failed: 503")).toHaveCount(
+		0
+	);
 	await expect(openAiTier).toContainText("Free (2)");
 	expect(configRequests(await readProofState(page), "PUT")).toHaveLength(1);
 
-	await save.click();
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
 	await expect(
 		page.getByText("Saved. Restart the gateway for changes to take effect.")
 	).toBeVisible();
@@ -333,9 +340,8 @@ test("retries failed cost-tier and additional-key reads independently instead of
 		page.getByRole("button", { name: "Retry additional account key counts" })
 	).toBeVisible();
 	await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(3);
-	await expect(page.getByText("0 account keys", { exact: true })).toHaveCount(
-		0
-	);
+	const accountKeys = section(page, "Additional account keys");
+	await expect(accountKeys.getByText("None", { exact: true })).toHaveCount(0);
 
 	await page
 		.getByRole("button", { name: "Retry provider cost tier load" })
@@ -346,7 +352,7 @@ test("retries failed cost-tier and additional-key reads independently instead of
 	await page
 		.getByRole("button", { name: "Retry additional account key counts" })
 		.click();
-	await expect(page.getByText("0 account keys", { exact: true })).toBeVisible();
+	await expect(accountKeys.getByText("None", { exact: true })).toBeVisible();
 	await expect(page.getByText("1 account key", { exact: true })).toBeVisible();
 	await expect(page.getByText("3 account keys", { exact: true })).toBeVisible();
 	const state = await readProofState(page);
@@ -375,9 +381,6 @@ test("disables tier editing and marks key counts unavailable when the Gateway ca
 	).toBeVisible();
 	await expect(
 		page.getByRole("combobox", { name: "Cost tier for OpenAI" })
-	).toBeDisabled();
-	await expect(
-		page.getByRole("button", { name: "Save", exact: true })
 	).toBeDisabled();
 	await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(3);
 	const state = await readProofState(page);

@@ -11,11 +11,11 @@ import {
 	type Chord,
 	chordFromElectron,
 	chordTokens,
-	eventToChord,
 	toElectronAccelerator,
 } from "@ryu/hotkeys/chord";
 import { useHotkeysAdmin } from "@ryu/hotkeys/react";
 import { groupByCategory, type HotkeyAction } from "@ryu/hotkeys/registry";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -29,46 +29,29 @@ import {
 } from "@ryu/ui/components/alert-dialog.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
-import { Kbd } from "@ryu/ui/components/kbd.tsx";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@ryu/ui/components/select.tsx";
-import { toast } from "@ryu/ui/components/sileo.tsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useApps } from "@/src/hooks/useApps.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { usePluginShortcutOverrides } from "@/src/hooks/usePluginShortcutOverrides.ts";
-import {
-	QUICK_PREVIEW_MODIFIER_OPTIONS,
-	useQuickPreviewModifier,
-} from "@/src/hooks/useQuickPreviewModifier.ts";
-import {
-	QUICK_REPLY_MODIFIER_OPTIONS,
-	useQuickReplyModifier,
-} from "@/src/hooks/useQuickReplyModifier.ts";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
-import {
-	DEFAULT_DICTATION_PREFS,
-	DEFAULT_ISLAND_COMMAND_SHORTCUT,
-	DEFAULT_VOICE_PREFS,
-	getDictationPrefs,
-	getIslandCommandShortcut,
-	getVoiceInputPrefs,
-	setDictationPrefs,
-	setIslandCommandShortcut,
-	setVoiceInputPrefs,
-} from "@/src/lib/api/preferences.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
+import { DEFAULT_DICTATION_PREFS } from "@/src/lib/api/preferences.ts";
 import {
 	ISLAND_ENABLED,
 	ISLAND_UNAVAILABLE_NOTE,
 } from "@/src/lib/island-availability.ts";
 import { ClipsQuickAttachSettings } from "./ClipsQuickAttachSettings.tsx";
+import { ChordRecorder } from "./KeyboardShortcutsTab-chord-recorder.tsx";
+import { useGlobalWriteScope } from "./KeyboardShortcutsTab-global-scope.ts";
+import { GlobalShortcutsSection } from "./KeyboardShortcutsTab-global-section.tsx";
+import { InAppRow } from "./KeyboardShortcutsTab-in-app-row.tsx";
+import {
+	QUICK_PREVIEW_MODIFIER_DESCRIPTION,
+	QUICK_REPLY_MODIFIER_DESCRIPTION,
+	QuickPreviewModifierRow,
+	QuickReplyModifierRow,
+} from "./KeyboardShortcutsTab-modifier-rows.tsx";
 import { QuickCaptureSettings } from "./QuickCaptureSettings.tsx";
 import {
 	SettingsGroup,
@@ -76,453 +59,12 @@ import {
 	SettingsSection,
 } from "./shared/settings-items.tsx";
 
-/** Render a chord as keycaps, or a muted "Unbound" when null. */
-function ChordCaps({ chord }: { chord: Chord | null }) {
-	if (!chord) {
-		return <span className="text-muted-foreground text-xs">Unbound</span>;
-	}
-	return (
-		<span className="flex items-center gap-1">
-			{chordTokens(chord).map((token, index) => (
-				<Kbd key={`${index}-${token}`}>{token}</Kbd>
-			))}
-		</span>
-	);
-}
-
-interface ChordRecorderProps {
-	conflicting?: boolean;
-	disabled?: boolean;
-	onChange: (chord: Chord) => void;
-	testId?: string;
-	value: Chord | null;
-}
-
-/** A keycap button that records the next chord in canonical cross-platform form. */
-function ChordRecorder({
-	disabled = false,
-	value,
-	onChange,
-	conflicting,
-	testId,
-}: ChordRecorderProps) {
-	const [capturing, setCapturing] = useState(false);
-
-	const handleKeyDown = (e: React.KeyboardEvent) => {
-		if (disabled || !capturing) {
-			return;
-		}
-		e.preventDefault();
-		if (e.key === "Escape") {
-			setCapturing(false);
-			return;
-		}
-		const chord = eventToChord(e.nativeEvent);
-		if (chord) {
-			onChange(chord);
-			setCapturing(false);
-		}
-	};
-
-	return (
-		<button
-			className={`flex min-w-32 items-center justify-center gap-1 rounded-md bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring ${conflicting ? "ring-2 ring-destructive" : ""}`}
-			data-testid={testId}
-			disabled={disabled}
-			onBlur={() => setCapturing(false)}
-			onClick={() => setCapturing(true)}
-			onKeyDown={handleKeyDown}
-			type="button"
-		>
-			{capturing ? (
-				<span className="text-muted-foreground text-xs">Press keys…</span>
-			) : (
-				<ChordCaps chord={value} />
-			)}
-		</button>
-	);
-}
-
-interface InAppRowProps {
-	action: HotkeyAction;
-	binding: Chord | null;
-	conflictLabels: string[];
-	hasOverride: boolean;
-	onChange: (chord: Chord) => void;
-	onClear: () => void;
-	onReset: () => void;
-}
-
-/** One editable in-app shortcut row. */
-function InAppRow({
-	action,
-	binding,
-	hasOverride,
-	conflictLabels,
-	onChange,
-	onClear,
-	onReset,
-}: InAppRowProps) {
-	return (
-		<SettingsItem
-			actions={
-				<div className="flex items-center gap-1.5">
-					<ChordRecorder
-						conflicting={conflictLabels.length > 0}
-						onChange={onChange}
-						testId={`shortcut-recorder-${action.id}`}
-						value={binding}
-					/>
-					<Button
-						data-testid={`shortcut-clear-${action.id}`}
-						disabled={binding === null}
-						onClick={onClear}
-						size="sm"
-						variant="ghost"
-					>
-						Clear
-					</Button>
-					<Button
-						data-testid={`shortcut-reset-${action.id}`}
-						disabled={!hasOverride}
-						onClick={onReset}
-						size="sm"
-						variant="ghost"
-					>
-						Reset
-					</Button>
-				</div>
-			}
-			title={
-				<span className="flex flex-col gap-0.5">
-					<span>{action.label}</span>
-					{conflictLabels.length > 0 ? (
-						<span className="text-status-destructive text-xs">
-							Also bound to {conflictLabels.join(", ")}
-						</span>
-					) : null}
-				</span>
-			}
-		/>
-	);
-}
-
-interface GlobalRowProps {
-	beginWrite: () => boolean;
-	defaultAccelerator: string;
-	description: string;
-	endWrite: () => void;
-	label: string;
-	load: (target: ApiTarget) => Promise<string>;
-	pendingElsewhere: boolean;
-	readVersion: number;
-	save: (target: ApiTarget, accelerator: string) => Promise<boolean>;
-	target: ApiTarget;
-}
-
-/** A system-wide shortcut row, editing the real island/voice preference. */
-function GlobalRow({
-	label,
-	description,
-	defaultAccelerator,
-	target,
-	pendingElsewhere,
-	readVersion,
-	beginWrite,
-	endWrite,
-	load,
-	save,
-}: GlobalRowProps) {
-	const [accelerator, setAccelerator] = useState(defaultAccelerator);
-	const [loading, setLoading] = useState(true);
-	const [readError, setReadError] = useState(false);
-	const [reloadIndex, setReloadIndex] = useState(0);
-	const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
-	const [pending, setPending] = useState(false);
-	const callbacks = useRef({ load, save });
-	callbacks.current = { load, save };
-	const alive = useRef(false);
-	const pendingWrite = useRef(false);
-
-	useEffect(() => {
-		let current = true;
-		alive.current = true;
-		setLoading(true);
-		setReadError(false);
-		void callbacks.current
-			.load(target)
-			.then((value) => {
-				if (current) {
-					setAccelerator(value);
-					setLoadedVersion(readVersion);
-				}
-			})
-			.catch(() => {
-				if (current) {
-					setReadError(true);
-					toast.error({ title: `Couldn't load ${label}` });
-				}
-			})
-			.finally(() => {
-				if (current) {
-					setLoading(false);
-				}
-			});
-		return () => {
-			current = false;
-			alive.current = false;
-		};
-	}, [
-		target.url,
-		target.token,
-		target.userJwt,
-		label,
-		reloadIndex,
-		readVersion,
-	]);
-
-	const persist = async (next: string) => {
-		if (
-			!alive.current ||
-			loading ||
-			loadedVersion !== readVersion ||
-			readError ||
-			pendingWrite.current ||
-			!beginWrite()
-		) {
-			return;
-		}
-		pendingWrite.current = true;
-		setPending(true);
-		const previous = accelerator;
-		setAccelerator(next);
-		try {
-			const ok = await callbacks.current.save(target, next);
-			if (!ok) {
-				throw new Error("Shortcut preference write was refused");
-			}
-		} catch {
-			if (alive.current) {
-				setAccelerator(previous);
-				toast.error({ title: `Couldn't update ${label}` });
-			}
-		} finally {
-			pendingWrite.current = false;
-			endWrite();
-			if (alive.current) {
-				setPending(false);
-			}
-		}
-	};
-
-	return (
-		<SettingsItem
-			actions={
-				<div className="flex items-center gap-1.5">
-					<ChordRecorder
-						disabled={
-							loading ||
-							loadedVersion !== readVersion ||
-							readError ||
-							pending ||
-							pendingElsewhere
-						}
-						onChange={(chord) => persist(toElectronAccelerator(chord))}
-						testId={`global-shortcut-recorder-${label.toLowerCase().replaceAll(" ", "-")}`}
-						value={chordFromElectron(accelerator)}
-					/>
-					<Button
-						data-testid={`global-shortcut-reset-${label.toLowerCase().replaceAll(" ", "-")}`}
-						disabled={
-							loading ||
-							loadedVersion !== readVersion ||
-							readError ||
-							pending ||
-							pendingElsewhere ||
-							accelerator === defaultAccelerator
-						}
-						onClick={() => persist(defaultAccelerator)}
-						size="sm"
-						variant="ghost"
-					>
-						Reset
-					</Button>
-					{readError ? (
-						<Button
-							disabled={loading}
-							onClick={() => setReloadIndex((index) => index + 1)}
-							size="sm"
-							variant="ghost"
-						>
-							Retry {label}
-						</Button>
-					) : null}
-				</div>
-			}
-			title={
-				<span className="flex flex-col gap-0.5">
-					<span>{label}</span>
-					<span className="text-muted-foreground text-xs">{description}</span>
-				</span>
-			}
-		/>
-	);
-}
-
-const QUICK_REPLY_MODIFIER_DESCRIPTION =
-	"Hold this modifier while clicking a chat in the sidebar to open its floating quick-reply bar.";
-const QUICK_PREVIEW_MODIFIER_DESCRIPTION =
-	"Hold this modifier while clicking and holding a chat in the sidebar to preview its messages without opening it.";
-
-interface ModifierRowProps {
-	/**
-	 * Footer caption for the row's card. The enclosing SettingsGroup reads it
-	 * off THIS element, because it cannot see the SettingsItem inside the
-	 * wrapper, so every call site passes it (see settings-items).
-	 */
-	description: string;
-}
-
-function QuickReplyModifierRow({ description }: ModifierRowProps) {
-	const [modifier, setModifier] = useQuickReplyModifier();
-	return (
-		<SettingsItem
-			actions={
-				<Select
-					onValueChange={(value) => {
-						const option = QUICK_REPLY_MODIFIER_OPTIONS.find(
-							(item) => item.value === value
-						);
-						if (option) {
-							setModifier(option.value);
-						}
-					}}
-					value={modifier}
-				>
-					<SelectTrigger
-						aria-label="Quick reply click modifier"
-						className="w-40"
-						size="sm"
-					>
-						<SelectValue>
-							{(value) =>
-								QUICK_REPLY_MODIFIER_OPTIONS.find(
-									(option) => option.value === value
-								)?.label ?? value
-							}
-						</SelectValue>
-					</SelectTrigger>
-					<SelectContent>
-						{QUICK_REPLY_MODIFIER_OPTIONS.map((option) => (
-							<SelectItem key={option.value} value={option.value}>
-								{option.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			}
-			description={description}
-			title="Quick reply click modifier"
-		/>
-	);
-}
-
-function QuickPreviewModifierRow({ description }: ModifierRowProps) {
-	const [modifier, setModifier] = useQuickPreviewModifier();
-	return (
-		<SettingsItem
-			actions={
-				<Select
-					onValueChange={(value) => {
-						const option = QUICK_PREVIEW_MODIFIER_OPTIONS.find(
-							(item) => item.value === value
-						);
-						if (option) {
-							setModifier(option.value);
-						}
-					}}
-					value={modifier}
-				>
-					<SelectTrigger
-						aria-label="Quick preview click modifier"
-						className="w-40"
-						size="sm"
-					>
-						<SelectValue>
-							{(value) =>
-								QUICK_PREVIEW_MODIFIER_OPTIONS.find(
-									(option) => option.value === value
-								)?.label ?? value
-							}
-						</SelectValue>
-					</SelectTrigger>
-					<SelectContent>
-						{QUICK_PREVIEW_MODIFIER_OPTIONS.map((option) => (
-							<SelectItem key={option.value} value={option.value}>
-								{option.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			}
-			description={description}
-			title="Quick preview click modifier"
-		/>
-	);
-}
-
 export function KeyboardShortcutsTab() {
 	const globalNode = useActiveNode();
 	const globalTarget = toTarget(globalNode);
-	const globalScopeSequence = useRef(0);
-	const globalResources = useRef<
-		Array<{ target: ApiTarget; pending: number | null; version: number }>
-	>([]);
-	const globalScope = useMemo(() => {
-		// Keep the shared complete-JSON write resource across A→B→A, but give
-		// each mounted UI scope a new opaque id; credentials never enter keys.
-		let resource = globalResources.current.find(
-			({ target }) =>
-				target.url === globalTarget.url &&
-				target.token === globalTarget.token &&
-				(target.userJwt ?? null) === (globalTarget.userJwt ?? null)
-		);
-		if (!resource) {
-			resource = { target: globalTarget, pending: null, version: 0 };
-			globalResources.current.push(resource);
-		}
-		return {
-			id: ++globalScopeSequence.current,
-			target: globalTarget,
-			resource,
-		};
-	}, [globalTarget.url, globalTarget.token, globalTarget.userJwt]);
-	const globalAlive = useRef(false);
-	useEffect(() => {
-		globalAlive.current = true;
-		return () => {
-			globalAlive.current = false;
-		};
-	}, []);
-	const [, refreshGlobalControls] = useState(0);
-	const beginGlobalWrite = () => {
-		if (!globalAlive.current || globalScope.resource.pending !== null) {
-			return false;
-		}
-		globalScope.resource.pending = globalScope.id;
-		refreshGlobalControls((version) => version + 1);
-		return true;
-	};
-	const endGlobalWrite = () => {
-		if (globalScope.resource.pending !== globalScope.id) {
-			return;
-		}
-		globalScope.resource.pending = null;
-		globalScope.resource.version += 1;
-		if (globalAlive.current) {
-			refreshGlobalControls((version) => version + 1);
-		}
-	};
+	const tl = useLiteralMessages();
+	const { beginGlobalWrite, endGlobalWrite, globalScope } =
+		useGlobalWriteScope(globalTarget);
 
 	const { canUseNativeShell } = useAppSurface();
 	const {
@@ -704,7 +246,6 @@ export function KeyboardShortcutsTab() {
 					data-testid="keyboard-shortcuts-filter"
 					onChange={(event) => setSearch(event.target.value)}
 					placeholder="Search"
-					size="lg"
 					value={search}
 				/>
 
@@ -716,8 +257,7 @@ export function KeyboardShortcutsTab() {
 						render={
 							<Button
 								data-testid="keyboard-shortcuts-reset-all"
-								size="sm"
-								variant="default"
+								variant="outline"
 							>
 								Reset all to defaults
 							</Button>
@@ -781,7 +321,6 @@ export function KeyboardShortcutsTab() {
 							</SettingsGroup>
 						</SettingsSection>
 					))}
-
 					{(showQuickReply || showQuickPreview) && !hasChatGroup ? (
 						<SettingsSection title="Chat">
 							<SettingsGroup>
@@ -800,103 +339,13 @@ export function KeyboardShortcutsTab() {
 					) : null}
 
 					{canUseNativeShell && (showGlobalDictation || showGlobalAgentAsk) ? (
-						<SettingsSection
-							caption={
-								ISLAND_ENABLED
-									? "System-wide shortcuts work anywhere on your desktop and are managed by the island companion."
-									: `${ISLAND_UNAVAILABLE_NOTE} Shortcuts you set here are saved for when it ships.`
-							}
-							title="Global"
-						>
-							<SettingsGroup>
-								{ISLAND_ENABLED ? (
-									<>
-										<GlobalRow
-											beginWrite={beginGlobalWrite}
-											defaultAccelerator={DEFAULT_ISLAND_COMMAND_SHORTCUT}
-											description="Open the island command bar from anywhere."
-											endWrite={endGlobalWrite}
-											key={`${globalScope.id}:island-command`}
-											label="Summon Command Bar"
-											load={(target) => getIslandCommandShortcut(target)}
-											pendingElsewhere={globalScope.resource.pending !== null}
-											readVersion={globalScope.resource.version}
-											save={(target, acc) =>
-												setIslandCommandShortcut(target, acc)
-											}
-											target={globalScope.target}
-										/>
-										<GlobalRow
-											beginWrite={beginGlobalWrite}
-											defaultAccelerator={DEFAULT_VOICE_PREFS.shortcut}
-											description="Hold to dictate a voice message into the island."
-											endWrite={endGlobalWrite}
-											key={`${globalScope.id}:push-to-talk`}
-											label="Push-To-Talk"
-											load={(target) =>
-												getVoiceInputPrefs(target).then((p) => p.shortcut)
-											}
-											pendingElsewhere={globalScope.resource.pending !== null}
-											readVersion={globalScope.resource.version}
-											save={async (target, acc) => {
-												const prefs = await getVoiceInputPrefs(target);
-												return setVoiceInputPrefs(target, {
-													...prefs,
-													shortcut: acc,
-												});
-											}}
-											target={globalScope.target}
-										/>
-									</>
-								) : null}
-								{showGlobalDictation ? (
-									<GlobalRow
-										beginWrite={beginGlobalWrite}
-										defaultAccelerator={DEFAULT_DICTATION_PREFS.shortcut}
-										description="Dictate into the focused app (Dictation plugin)."
-										endWrite={endGlobalWrite}
-										key={`${globalScope.id}:dictation`}
-										label="System-Wide Dictation"
-										load={(target) =>
-											getDictationPrefs(target).then((p) => p.shortcut)
-										}
-										pendingElsewhere={globalScope.resource.pending !== null}
-										readVersion={globalScope.resource.version}
-										save={async (target, acc) => {
-											const prefs = await getDictationPrefs(target);
-											return setDictationPrefs(target, {
-												...prefs,
-												shortcut: acc,
-											});
-										}}
-										target={globalScope.target}
-									/>
-								) : null}
-								{showGlobalAgentAsk ? (
-									<GlobalRow
-										beginWrite={beginGlobalWrite}
-										defaultAccelerator={DEFAULT_DICTATION_PREFS.ask.shortcut}
-										description="Speak a question; paste the agent answer (Dictation → Agent ask)."
-										endWrite={endGlobalWrite}
-										key={`${globalScope.id}:ask`}
-										label="Agent Ask"
-										load={(target) =>
-											getDictationPrefs(target).then((p) => p.ask.shortcut)
-										}
-										pendingElsewhere={globalScope.resource.pending !== null}
-										readVersion={globalScope.resource.version}
-										save={async (target, acc) => {
-											const prefs = await getDictationPrefs(target);
-											return setDictationPrefs(target, {
-												...prefs,
-												ask: { ...prefs.ask, shortcut: acc },
-											});
-										}}
-										target={globalScope.target}
-									/>
-								) : null}
-							</SettingsGroup>
-						</SettingsSection>
+						<GlobalShortcutsSection
+							beginGlobalWrite={beginGlobalWrite}
+							endGlobalWrite={endGlobalWrite}
+							globalScope={globalScope}
+							showGlobalAgentAsk={showGlobalAgentAsk}
+							showGlobalDictation={showGlobalDictation}
+						/>
 					) : null}
 
 					{showPluginsSection ? (
@@ -904,7 +353,12 @@ export function KeyboardShortcutsTab() {
 							caption={
 								ISLAND_ENABLED
 									? "Shortcuts contributed by enabled plugins and apps. Changes apply to the Island global shortcut bridge."
-									: `Shortcuts contributed by enabled plugins and apps. ${ISLAND_UNAVAILABLE_NOTE}`
+									: tl(
+											"Shortcuts contributed by enabled plugins and apps. {note}",
+											{
+												note: ISLAND_UNAVAILABLE_NOTE,
+											}
+										)
 							}
 							title="Plugins and apps"
 						>
@@ -983,20 +437,19 @@ export function KeyboardShortcutsTab() {
 							)}
 						</SettingsSection>
 					) : null}
-
 					{/* The one "shortcut" that is not an accelerator: a bare-modifier double
 			    tap, owned by the native layer rather than the hotkey registry. */}
 					{canUseNativeShell && showQuickCapture ? (
 						<QuickCaptureSettings />
 					) : null}
-
 					{canUseNativeShell && showClipsQuickAttach ? (
 						<ClipsQuickAttachSettings />
 					) : null}
-
 					{query.length > 0 && !hasMatches ? (
 						<p className="px-3 text-muted-foreground text-sm">
-							No keyboard shortcuts match “{search.trim()}”.
+							{tl("No keyboard shortcuts match “{query}”.", {
+								query: search.trim(),
+							})}
 						</p>
 					) : null}
 				</div>

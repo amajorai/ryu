@@ -1,13 +1,7 @@
-import { Button } from "@ryu/ui/components/button.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
+import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import {
-	type InterfaceParamsByRenderer,
-	resolveInterfaceParams,
-} from "@ryuhq/protocol/interfaces";
-import { Orbit, SquarePen } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import {
-	type KeyboardEvent,
 	lazy,
 	Suspense,
 	useCallback,
@@ -18,30 +12,12 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { keepsActOverlay } from "./act-settings.ts";
 import { ensureGameDisplayFont } from "./game-font.ts";
 import { GAME_KIT_CSS } from "./game-palette.ts";
-import {
-	actOverlays,
-	actSummaryLine,
-	actTotals,
-	overlayBudget,
-	stageAgents,
-	youSpotSlots,
-} from "./game3d-acts.ts";
 import { useGameKitSettings } from "./game3d-settings.tsx";
-import {
-	ActAnnouncer,
-	AskQueueList,
-	askOwners,
-	BlindSpotCaption,
-	NeedYouButton,
-	QueueButton,
-	useActCards,
-} from "./interface-ask-card.tsx";
-import { isInterfaceCovered, useInterfaceCovered } from "./interface-keys.ts";
+import { BlindSpotCaption } from "./interface-ask-card.tsx";
+import { useInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
-import type { PlanetsActView } from "./planets-acts.tsx";
 import {
 	useElementSize,
 	useHudLayout,
@@ -54,13 +30,25 @@ import {
 	PlanetsSystemCard,
 } from "./planets-hud.tsx";
 import {
+	PlanetsActA11y,
+	PlanetsActButtons,
+	usePlanetsActLayer,
+} from "./planets-interface-acts.tsx";
+import { usePlanetsKeys } from "./planets-interface-keys.ts";
+import { PlanetsNotices } from "./planets-interface-notices.tsx";
+import {
+	PHONE_WIDTH,
+	planetsSettings,
+	ROOMY_HEIGHT,
+	ROOMY_WIDTH,
+} from "./planets-interface-settings.ts";
+import { planetsView } from "./planets-interface-view.ts";
+import {
 	buildSystem,
 	columnSystem,
-	cyclePlanet,
 	holdOrbits,
 	ORBIT_PACE,
 	OVERVIEW_AZIMUTH,
-	plural,
 } from "./planets-model.ts";
 import {
 	createOverlayRegistry,
@@ -68,45 +56,18 @@ import {
 	STAR_ID,
 } from "./planets-overlay.tsx";
 import { paletteVars, planetsPalette } from "./planets-palette.ts";
-import { PlanetsPanel, type PlanetsPanelView } from "./planets-panel.tsx";
-import { GLASS } from "./planets-parts.tsx";
+import { PlanetsPanel } from "./planets-panel.tsx";
 import {
 	PLACEHOLDER_FADE_MS,
 	PlanetsPlaceholder,
 } from "./planets-placeholder.tsx";
 import type { CameraApi } from "./planets-scene.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
-import { useActAnnouncement, useActClockOptions, useActs } from "./use-acts.ts";
+import { useActs } from "./use-acts.ts";
+
+export { planetsSettings } from "./planets-interface-settings.ts";
 
 const PlanetsScene = lazy(() => import("./planets-scene.tsx"));
-
-/** A scene at least this tall keeps the planet list open on a narrower screen. */
-const ROOMY_HEIGHT = 980;
-const ROOMY_WIDTH = 720;
-/** Below this width a portrait scene is a phone: column and bottom sheet. */
-const PHONE_WIDTH = 560;
-
-/**
- * Escape inside a text field belongs to the field, except in the panel's own
- * composer while it is empty: there it closes the panel, as the Esc hint says.
- */
-function escapeIsFree(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return true;
-	}
-	const editable =
-		target.isContentEditable ||
-		target.closest("input, textarea, select, [contenteditable='true']") !==
-			null;
-	if (!editable) {
-		return true;
-	}
-	return (
-		target instanceof HTMLTextAreaElement &&
-		target.closest("[data-planets-composer]") !== null &&
-		target.value.trim() === ""
-	);
-}
 
 /**
  * Planets: a small solar system of your work. You are the star at the
@@ -117,17 +78,6 @@ function escapeIsFree(target: EventTarget | null): boolean {
  * and a composer. Clicking a moon opens that thread: the host's own
  * conversation, shown in the same panel.
  */
-/** The Planets' own settings, resolved from its live params. */
-export function planetsSettings(
-	params: InterfaceParamsByRenderer["planets"] | undefined
-): Required<InterfaceParamsByRenderer["planets"]> {
-	// SAFETY: resolveInterfaceParams fills every field (each falls back to
-	// its default); only the declared type keeps them optional.
-	return resolveInterfaceParams("planets", params) as Required<
-		InterfaceParamsByRenderer["planets"]
-	>;
-}
-
 export function PlanetsInterface({
 	activeThreadId,
 	loading,
@@ -137,6 +87,7 @@ export function PlanetsInterface({
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["planets"]>) {
 	const { moonLabels, orbitSpeed } = planetsSettings(params);
+	const tl = useLiteralMessages();
 	const kitSettings = useGameKitSettings();
 	const panelId = useId();
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -159,7 +110,7 @@ export function PlanetsInterface({
 	// the planets hold their places so the station's plates can be read,
 	// and the planet list and the ask queue carry the keyboard.
 	const actsView = useActs(snapshot);
-	const { acts, nowMs, privacy, unowned } = actsView;
+	const { acts } = actsView;
 	const actsOn = actsView.enabled && !loading;
 	const system = useMemo(
 		() => buildSystem(snapshot, actsOn ? acts : undefined),
@@ -189,33 +140,13 @@ export function PlanetsInterface({
 	}, [drawn, reduced]);
 
 	const threadOpen = threadView !== null;
-	const activeThread = activeThreadId
-		? snapshot.threads.find((thread) => thread.id === activeThreadId)
-		: undefined;
-	const selectedPlanet = system.planets.find(
-		(planet) => planet.id === selection
-	);
-	// The open thread belongs to the planet it was opened from, else to its
-	// first agent's planet.
-	const threadPlanet =
-		selectedPlanet && activeThread?.agentIds.includes(selectedPlanet.id)
-			? selectedPlanet
-			: system.planets.find((planet) =>
-					activeThread?.agentIds.includes(planet.id)
-				);
-
-	let view: PlanetsPanelView | null = null;
-	if (threadOpen) {
-		view = { kind: "thread", planet: threadPlanet, thread: activeThread };
-	} else if (selectedPlanet) {
-		view = { kind: "planet", planet: selectedPlanet };
-	} else if (selection === STAR_ID) {
-		view = { kind: "star" };
-	}
-	let focusId: string | null = selectedPlanet ? selectedPlanet.id : selection;
-	if (threadOpen) {
-		focusId = threadPlanet?.id ?? STAR_ID;
-	}
+	const { focusId, threadPlanet, view } = planetsView({
+		activeThreadId,
+		selection,
+		snapshot,
+		system,
+		threadOpen,
+	});
 	const viewKey = view
 		? `${view.kind}:${focusId ?? ""}:${activeThreadId ?? ""}`
 		: "";
@@ -284,73 +215,16 @@ export function PlanetsInterface({
 		}
 		return false;
 	};
-	const stepBackRef = useRef(stepBack);
-	stepBackRef.current = stepBack;
-
-	useEffect(() => {
-		const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
-			if (isInterfaceCovered(rootRef.current)) {
-				return;
-			}
-			if (
-				event.key !== "Escape" ||
-				event.defaultPrevented ||
-				event.target !== document.body
-			) {
-				return;
-			}
-			if (stepBackRef.current()) {
-				event.preventDefault();
-			}
-		};
-		document.addEventListener("keydown", onDocumentKeyDown);
-		return () => document.removeEventListener("keydown", onDocumentKeyDown);
-	}, []);
-
-	const onRootKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (
-			event.key !== "Escape" ||
-			event.defaultPrevented ||
-			!escapeIsFree(event.target)
-		) {
-			return;
-		}
-		if (stepBackRef.current()) {
-			event.preventDefault();
-		}
-	};
-
-	/** The scene region's own keys: arrows visit planets, +/- zoom, 0 resets. */
-	const onSceneKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (event.target !== event.currentTarget) {
-			return;
-		}
-		if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-			event.preventDefault();
-			const next = cyclePlanet(
-				system.planets,
-				focusId,
-				event.key === "ArrowRight" ? 1 : -1
-			);
-			if (next) {
-				select(next);
-				// Keep keyboard control in the scene while visiting.
-				focusHeading.current = false;
-			}
-		} else if (event.key === "+" || event.key === "=") {
-			event.preventDefault();
-			cameraApi.current?.zoom(0.72);
-		} else if (event.key === "-" || event.key === "_") {
-			event.preventDefault();
-			cameraApi.current?.zoom(1.38);
-		} else if (event.key === "0") {
-			event.preventDefault();
-			close();
-		} else if (event.key === "Enter" && focusId === null) {
-			event.preventDefault();
-			select(system.planets[0]?.id ?? STAR_ID);
-		}
-	};
+	const { onRootKeyDown, onSceneKeyDown } = usePlanetsKeys({
+		cameraApi,
+		close,
+		focusHeading,
+		focusId,
+		planets: system.planets,
+		rootRef,
+		select,
+		stepBack,
+	});
 
 	const { summary } = system;
 	const isEmpty = !loading && snapshot.agents.length === 0;
@@ -377,95 +251,16 @@ export function PlanetsInterface({
 		return actsOn ? holdOrbits(system) : system;
 	}, [actsOn, phone, system]);
 
-	const fallbackRef = useRef<HTMLHeadingElement>(null);
-	const sentence = useActAnnouncement(snapshot, actsView);
-	const clock = useActClockOptions();
-	const cards = useActCards({
-		acts,
-		clock,
-		fallbackFocus: fallbackRef,
-		nowMs,
+	const actLayer = usePlanetsActLayer({
+		actsOn,
+		actsView,
+		kitSettings,
 		port,
+		reduced,
+		sceneSize,
 		snapshot,
 	});
-	const { openAsk, openBlocker } = cards;
-	const slots = useMemo(() => youSpotSlots(acts, unowned), [acts, unowned]);
-	const tally = actTotals(snapshot, acts);
-	const owners = useMemo(() => askOwners(acts), [acts]);
-	const staged = useMemo(
-		() => stageAgents(acts, Number.POSITIVE_INFINITY),
-		[acts]
-	);
-	const stageWidth = sceneSize.width || 1280;
-	const budget = overlayBudget(stageWidth, { domTargets: false });
-	const shownKey = [
-		...budget.fill(
-			actOverlays(
-				staged.onStage,
-				slots,
-				staged.offStage,
-				staged.onStage.find((item) => item.act === "working")?.agentId ?? null,
-				{ reduced }
-			).filter((item) => keepsActOverlay(item, kitSettings))
-		),
-	]
-		.sort()
-		.join("|");
-	const overlays = useMemo(() => new Set(shownKey.split("|")), [shownKey]);
-	const onAsk = (askId: string, opener?: HTMLElement) => openAsk(askId, opener);
-	const onBlocker = (
-		threadId: string,
-		agentName: string,
-		opener?: HTMLElement
-	) => openBlocker(threadId, agentName, opener);
-	const queueOpener = useRef<(() => void) | null>(null);
-	const onAskRef = useRef(onAsk);
-	onAskRef.current = onAsk;
-	const onBlockerRef = useRef(onBlocker);
-	onBlockerRef.current = onBlocker;
-	const sceneActs = useMemo(
-		(): PlanetsActView | null =>
-			actsOn
-				? {
-						acts,
-						clock,
-						iconOnly: budget.iconOnly,
-						nowMs,
-						offStage: staged.offStage,
-						onAsk: (askId) => onAskRef.current(askId),
-						onBlocker: (threadId, agentName) =>
-							onBlockerRef.current(threadId, agentName),
-						onQueue: () => queueOpener.current?.(),
-						onStage: staged.onStage,
-						owners,
-						privacy,
-						shown: overlays,
-						slots,
-						snapshot,
-						width: stageWidth,
-					}
-				: null,
-		[
-			acts,
-			actsOn,
-			budget.iconOnly,
-			clock,
-			nowMs,
-			overlays,
-			owners,
-			privacy,
-			slots,
-			snapshot,
-			stageWidth,
-			staged,
-		]
-	);
-	/** An asking planet's plate answers its ask; the others visit. */
-	const askOf = (planetId: string): string | null => {
-		const act = actsOn ? acts.get(planetId) : undefined;
-		return act?.act === "asking" && act.ask ? act.ask.id : null;
-	};
-	const actSummary = actSummaryLine(tally);
+	const { actSummary, askOf, onAsk, sceneActs, tally } = actLayer;
 	const systemCard = (
 		<PlanetsSystemCard
 			actLayer={
@@ -509,30 +304,32 @@ export function PlanetsInterface({
 			stacked={phone && actsOn}
 		>
 			{actsOn ? (
-				<>
-					<NeedYouButton onAsk={onAsk} snapshot={snapshot} totals={tally} />
-					<QueueButton
-						acts={acts}
-						clock={clock}
-						narrow={phone}
-						nowMs={nowMs}
-						onAsk={onAsk}
-						onBlocker={onBlocker}
-						openRef={queueOpener}
-						snapshot={snapshot}
-						totals={tally}
-						unowned={unowned}
-					/>
-				</>
+				<PlanetsActButtons
+					actsView={actsView}
+					layer={actLayer}
+					phone={phone}
+					snapshot={snapshot}
+				/>
 			) : null}
 		</PlanetsControls>
 	);
 	const now = Date.now();
-	let sceneLabel = `Solar system: you at the centre, ${plural(summary.agents, "planet")}, ${summary.working} working, ${summary.waitingOnYou} waiting on you. Arrow keys visit planets, plus and minus zoom.`;
+	let sceneLabel = tl(
+		"Solar system: you at the centre, {agents, plural, one {{agentCount} planet} other {{agentCount} planets}}, {working} working, {waitingOnYou} waiting on you. Arrow keys visit planets, plus and minus zoom.",
+		{
+			agentCount: String(summary.agents),
+			agents: summary.agents,
+			waitingOnYou: summary.waitingOnYou,
+			working: summary.working,
+		}
+	);
 	if (loading) {
 		sceneLabel = "Solar system, loading";
 	} else if (actsOn) {
-		sceneLabel = `Solar system: ${actSummary}. Arrow keys visit planets, plus and minus zoom.`;
+		sceneLabel = tl(
+			"Solar system: {actSummary}. Arrow keys visit planets, plus and minus zoom.",
+			{ actSummary }
+		);
 	}
 
 	return (
@@ -646,85 +443,22 @@ export function PlanetsInterface({
 						system={system}
 					/>
 				) : null}
-				<AnimatePresence>
-					{isEmpty ? (
-						<motion.div
-							animate={{ opacity: 1, transform: "translateY(0px)" }}
-							className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center p-6 sm:bottom-6"
-							initial={
-								reduced ? false : { opacity: 0, transform: "translateY(8px)" }
-							}
-							key="empty"
-						>
-							<div
-								className={cn(
-									"pointer-events-auto flex max-w-sm flex-col items-center gap-3 rounded-3xl px-6 py-6 text-center",
-									GLASS
-								)}
-							>
-								<span
-									aria-hidden="true"
-									className="flex size-11 items-center justify-center rounded-2xl bg-primary/12 text-primary"
-								>
-									<Orbit className="size-5" />
-								</span>
-								<div className="flex flex-col gap-1">
-									<h2 className="font-heading font-semibold text-base text-foreground">
-										No planets yet
-									</h2>
-									<p className="text-pretty text-muted-foreground text-sm leading-relaxed">
-										Each agent orbits you as its own planet, with its threads as
-										moons. Add an agent or start a thread to fill the sky.
-									</p>
-								</div>
-								<Button
-									className="mt-1"
-									onClick={() => port.startThread({})}
-									size="sm"
-									type="button"
-								>
-									<SquarePen aria-hidden="true" data-icon="inline-start" />
-									Start a thread
-								</Button>
-							</div>
-						</motion.div>
-					) : null}
-					{!loading && webgl?.supported === false ? (
-						<motion.p
-							animate={{ opacity: 1 }}
-							className={cn(
-								"absolute inset-x-0 bottom-24 z-20 mx-auto w-fit max-w-sm rounded-2xl px-4 py-3 text-center text-muted-foreground text-sm",
-								GLASS
-							)}
-							initial={reduced ? false : { opacity: 0 }}
-							key="no-webgl"
-						>
-							The 3D view needs WebGL, which is off here. Your planets are still
-							listed above.
-						</motion.p>
-					) : null}
-				</AnimatePresence>
+				<PlanetsNotices
+					isEmpty={isEmpty}
+					loading={loading}
+					port={port}
+					reduced={reduced}
+					webgl={webgl}
+				/>
 				<p aria-live="polite" className="sr-only">
 					{announcement}
 				</p>
 				{actsOn ? (
-					<>
-						<h2 className="sr-only" ref={fallbackRef} tabIndex={-1}>
-							Planets: {actSummary}.
-						</h2>
-						<AskQueueList
-							acts={acts}
-							clock={clock}
-							fallbackFocus={fallbackRef}
-							nowMs={nowMs}
-							onAsk={onAsk}
-							onBlocker={onBlocker}
-							snapshot={snapshot}
-							unowned={unowned}
-						/>
-						<ActAnnouncer sentence={sentence} />
-						{cards.element}
-					</>
+					<PlanetsActA11y
+						actsView={actsView}
+						layer={actLayer}
+						snapshot={snapshot}
+					/>
 				) : null}
 			</section>
 			{view ? (

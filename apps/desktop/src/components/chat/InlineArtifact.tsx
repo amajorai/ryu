@@ -102,11 +102,11 @@ export function InlineArtifact({
 		: undefined;
 
 	return (
-		<div className="flex flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm">
+		<div className="flex flex-col overflow-hidden rounded-xl border border-border bg-background">
 			<ArtifactHeader artifact={artifact} compact />
 			<div
 				className={cn(
-					"min-h-0 overflow-hidden border-border/60 border-t",
+					"min-h-0 overflow-hidden",
 					framed
 						? cn(
 								layout.artifactFrame,
@@ -130,12 +130,12 @@ export function InlineArtifact({
 					/>
 				)}
 			</div>
-			<div className="flex shrink-0 items-center justify-end border-border/60 border-t bg-sidebar/50 px-3 py-1.5">
+			<div className="flex h-10 shrink-0 items-center justify-end border-border border-t px-2">
 				<ButtonGroup aria-label="Artifact actions">
 					<Button
 						onClick={() => host?.openInPanel(payload, id)}
 						size="sm"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						Open
 					</Button>
@@ -143,7 +143,7 @@ export function InlineArtifact({
 					<Button
 						onClick={() => host?.openInTab(payload, id)}
 						size="sm"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						Open in tab
 					</Button>

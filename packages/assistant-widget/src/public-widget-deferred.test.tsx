@@ -25,7 +25,7 @@ describe("RyuAssistantWidget code splitting", () => {
 		await stream.allReady;
 		const html = await new Response(stream).text();
 
-		expect(html).toContain("New chat");
+		expect(html).toContain("How can I help?");
 		expect(html).toContain('data-testid="assistant-runtime-setup"');
 		expect(assistantSessionLoadStatus()).toBe("fulfilled");
 	});

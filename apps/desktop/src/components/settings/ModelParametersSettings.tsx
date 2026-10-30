@@ -14,424 +14,42 @@
 // a llama.cpp model and a cloud model.
 
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import { Label } from "@ryu/ui/components/label.tsx";
-import {
-	Select,
-	SelectContent,
-	SelectGroup,
-	SelectItem,
-	SelectLabel,
-	SelectTrigger,
-	SelectValue,
-} from "@ryu/ui/components/select.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	ToggleGroup,
 	ToggleGroupItem,
 } from "@ryu/ui/components/toggle-group.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { sileo } from "sileo";
 import { AgentModelPickerField } from "@/components/agent-elements/input/agent-model-picker-field.tsx";
 import { AdvancedInferenceSection } from "@/src/components/inference/AdvancedInferenceSection.tsx";
 import { ModelLaunchConfigSection } from "@/src/components/inference/ModelLaunchConfigSection.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { useEngineModels } from "@/src/hooks/useEngineModels.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
-	applyInferencePreset,
-	createInferencePreset,
-	deleteInferencePreset,
-	getModelLaunchConfig,
 	getModelSamplingConfig,
 	getSamplingFieldSupport,
-	type InferencePreset,
-	listInferencePresets,
-	type PresetTarget,
 	type SamplingConfig,
 	saveModelSamplingConfig,
-	updateInferencePreset,
 } from "@/src/lib/api/inference.ts";
+import { LocalModelSelect } from "./ModelParametersSettings-local-model-select.tsx";
+import {
+	errorMessage,
+	type ModelKind,
+	type SelectedModel,
+} from "./ModelParametersSettings-model-selection.ts";
+import { PresetBar } from "./ModelParametersSettings-preset-bar.tsx";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
-/** Engine ids Core resolves to a local runtime (`Engine::from_name`). */
-export const LOCAL_ENGINE_IDS = new Set([
-	"llamacpp",
-	"ollama",
-	"vllm",
-	"sglang",
-	"mlx",
-	"mlx-vlm",
-	"mlx-serve",
-	"omlx",
-	"apfel",
-	"mesh-llm",
-]);
-
-export type ModelKind = "local" | "cloud";
-
-export interface SelectedModel {
-	/** Local engine id, for local models. */
-	engine?: string;
-	id: string;
-	kind: ModelKind;
-	label: string;
-	/** Catalog provider id, for cloud models. */
-	provider?: string;
-}
-
-const LOCAL_KEY_SEPARATOR = "\u0000";
-
-function errorMessage(error: unknown, fallback: string): string {
-	return error instanceof Error && error.message ? error.message : fallback;
-}
-
-export function presetsQueryKey(url: string) {
-	return ["inference", "presets", url];
-}
-
-function LocalModelSelect({
-	onSelect,
-	value,
-}: {
-	onSelect: (model: SelectedModel) => void;
-	value: SelectedModel | null;
-}) {
-	const engineModels = useEngineModels();
-	const groups = useMemo(
-		() =>
-			Object.entries(engineModels)
-				.filter(
-					([engine, models]) => LOCAL_ENGINE_IDS.has(engine) && models.length
-				)
-				.sort(([a], [b]) => a.localeCompare(b)),
-		[engineModels]
-	);
-	const selectedKey =
-		value?.kind === "local" && value.engine
-			? `${value.engine}${LOCAL_KEY_SEPARATOR}${value.id}`
-			: null;
-
-	if (groups.length === 0) {
-		return (
-			<p className="text-muted-foreground text-sm">
-				No local models found on this node. Install one from Store → Models.
-			</p>
-		);
-	}
-
-	return (
-		<Select
-			onValueChange={(key: string | null) => {
-				if (!key) {
-					return;
-				}
-				const [engine, id] = key.split(LOCAL_KEY_SEPARATOR);
-				const model = engineModels[engine]?.find((m) => m.id === id);
-				if (engine && id) {
-					onSelect({
-						engine,
-						id,
-						kind: "local",
-						label: model?.name ?? id,
-					});
-				}
-			}}
-			value={selectedKey}
-		>
-			<SelectTrigger aria-label="Local model" className="h-8 w-full">
-				<SelectValue placeholder="Select a local model">
-					{value?.kind === "local" ? value.label : undefined}
-				</SelectValue>
-			</SelectTrigger>
-			<SelectContent>
-				{groups.map(([engine, models]) => (
-					<SelectGroup key={engine}>
-						<SelectLabel>{engine}</SelectLabel>
-						{models.map((model) => (
-							<SelectItem
-								key={`${engine}:${model.id}`}
-								value={`${engine}${LOCAL_KEY_SEPARATOR}${model.id}`}
-							>
-								{model.name || model.id}
-							</SelectItem>
-						))}
-					</SelectGroup>
-				))}
-			</SelectContent>
-		</Select>
-	);
-}
-
-export function presetFitsKind(
-	preset: InferencePreset,
-	kind: ModelKind
-): boolean {
-	return preset.target === "any" || preset.target === kind;
-}
-
-/** Apply, save, update, and delete node presets for the selected model. */
-function PresetBar({
-	draft,
-	fields,
-	model,
-	onApplied,
-	target,
-}: {
-	draft: SamplingConfig;
-	fields: ReadonlySet<string>;
-	model: SelectedModel;
-	onApplied: (sampling: SamplingConfig) => void;
-	target: ApiTarget;
-}) {
-	const queryClient = useQueryClient();
-	const queryKey = presetsQueryKey(target.url);
-	const presetsQuery = useQuery({
-		queryKey,
-		queryFn: () => listInferencePresets(target),
-	});
-	const presets = (presetsQuery.data ?? []).filter((preset) =>
-		presetFitsKind(preset, model.kind)
-	);
-	const [selectedId, setSelectedId] = useState<string | null>(null);
-	const selected = presets.find((preset) => preset.id === selectedId) ?? null;
-	const [name, setName] = useState("");
-	const [includeLaunch, setIncludeLaunch] = useState(false);
-	const [savingAs, setSavingAs] = useState(false);
-	const isLocal = model.kind === "local";
-
-	const refresh = () =>
-		queryClient.invalidateQueries({ queryKey }).catch(() => undefined);
-
-	const apply = useMutation({
-		mutationFn: (preset: InferencePreset) =>
-			applyInferencePreset(
-				target,
-				{ id: model.id, local: isLocal },
-				preset,
-				fields
-			),
-		onSuccess: (sampling, preset) => {
-			queryClient
-				.invalidateQueries({ queryKey: ["models", "launch-config", model.id] })
-				.catch(() => undefined);
-			onApplied(sampling);
-			sileo.success({ title: `Applied “${preset.name}” to ${model.label}` });
-		},
-		onError: (error) =>
-			sileo.error({
-				title: "Could not apply preset",
-				description: errorMessage(error, "Try again."),
-			}),
-	});
-
-	const presetInput = async (presetName: string, kind: PresetTarget) => ({
-		name: presetName,
-		sampling: draft,
-		target: kind,
-		launch:
-			isLocal && includeLaunch
-				? await getModelLaunchConfig(target, model.id)
-				: undefined,
-	});
-
-	const saveAs = useMutation({
-		mutationFn: async () =>
-			createInferencePreset(target, await presetInput(name, model.kind)),
-		onSuccess: async (preset) => {
-			await refresh();
-			setSelectedId(preset.id);
-			setSavingAs(false);
-			setName("");
-			sileo.success({ title: `Saved preset “${preset.name}”` });
-		},
-		onError: (error) =>
-			sileo.error({
-				title: "Could not save preset",
-				description: errorMessage(error, "Try again."),
-			}),
-	});
-
-	const overwrite = useMutation({
-		mutationFn: async (preset: InferencePreset) =>
-			updateInferencePreset(target, preset.id, {
-				...(await presetInput(preset.name, preset.target)),
-				description: preset.description,
-			}),
-		onSuccess: async (preset) => {
-			await refresh();
-			sileo.success({ title: `Updated preset “${preset.name}”` });
-		},
-		onError: (error) =>
-			sileo.error({
-				title: "Could not update preset",
-				description: errorMessage(error, "Try again."),
-			}),
-	});
-
-	const remove = useMutation({
-		mutationFn: (preset: InferencePreset) =>
-			deleteInferencePreset(target, preset.id),
-		onSuccess: async () => {
-			setSelectedId(null);
-			await refresh();
-		},
-		onError: (error) =>
-			sileo.error({
-				title: "Could not delete preset",
-				description: errorMessage(error, "Try again."),
-			}),
-	});
-
-	const busy =
-		apply.isPending ||
-		saveAs.isPending ||
-		overwrite.isPending ||
-		remove.isPending;
-
-	return (
-		<SettingsCard className="flex flex-col gap-3">
-			<div className="flex flex-col gap-1.5">
-				<Label size="compact" tone="muted">
-					Preset
-				</Label>
-				<div className="flex flex-wrap items-center gap-2">
-					<Select
-						onValueChange={(id: string | null) => setSelectedId(id)}
-						value={selectedId}
-					>
-						<SelectTrigger aria-label="Preset" className="h-8 min-w-48 flex-1">
-							<SelectValue
-								placeholder={
-									presetsQuery.isLoading
-										? "Loading presets…"
-										: "Choose a preset"
-								}
-							>
-								{selected?.name}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							{presets.map((preset) => (
-								<SelectItem key={preset.id} value={preset.id}>
-									{preset.builtin ? `${preset.name} (built-in)` : preset.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-					<Button
-						disabled={!selected || busy}
-						loading={apply.isPending}
-						onClick={() => selected && apply.mutate(selected)}
-						size="sm"
-					>
-						Apply
-					</Button>
-					{selected && !selected.builtin ? (
-						<>
-							<Button
-								disabled={busy}
-								loading={overwrite.isPending}
-								onClick={() => overwrite.mutate(selected)}
-								size="sm"
-								variant="outline"
-							>
-								Update from current
-							</Button>
-							<Button
-								disabled={busy}
-								loading={remove.isPending}
-								onClick={() => remove.mutate(selected)}
-								size="sm"
-								variant="ghost"
-							>
-								Delete
-							</Button>
-						</>
-					) : null}
-					{savingAs ? null : (
-						<Button
-							disabled={busy}
-							onClick={() => setSavingAs(true)}
-							size="sm"
-							variant="outline"
-						>
-							Save as preset
-						</Button>
-					)}
-				</div>
-				{selected?.description ? (
-					<p className="text-muted-foreground text-xs">
-						{selected.description}
-					</p>
-				) : null}
-				{presetsQuery.isError ? (
-					<p className="text-status-destructive text-xs" role="alert">
-						Could not load presets from this node.
-					</p>
-				) : null}
-			</div>
-
-			{savingAs ? (
-				<form
-					className="flex flex-col gap-2"
-					onSubmit={(event) => {
-						event.preventDefault();
-						if (name.trim()) {
-							saveAs.mutate();
-						}
-					}}
-				>
-					<div className="flex flex-wrap items-center gap-2">
-						<Input
-							aria-label="Preset name"
-							autoFocus
-							className="h-8 min-w-48 flex-1"
-							onChange={(event) => setName(event.target.value)}
-							placeholder="Preset name"
-							value={name}
-						/>
-						<Button
-							disabled={!name.trim() || busy}
-							loading={saveAs.isPending}
-							size="sm"
-							type="submit"
-						>
-							Save
-						</Button>
-						<Button
-							onClick={() => setSavingAs(false)}
-							size="sm"
-							type="button"
-							variant="ghost"
-						>
-							Cancel
-						</Button>
-					</div>
-					{isLocal ? (
-						<Label className="flex items-center gap-2 text-xs">
-							<Checkbox
-								checked={includeLaunch}
-								onCheckedChange={(checked) =>
-									setIncludeLaunch(checked === true)
-								}
-							/>
-							Include this model's saved launch settings (context size, GPU
-							layers, …)
-						</Label>
-					) : null}
-				</form>
-			) : null}
-			<p className="text-muted-foreground text-xs">
-				Presets are saved on this node. Saving captures the parameters below,
-				including unsaved edits. Applying saves a preset to this model and skips
-				any parameter the model does not accept.
-			</p>
-		</SettingsCard>
-	);
-}
+export {
+	LOCAL_ENGINE_IDS,
+	type ModelKind,
+	type SelectedModel,
+} from "./ModelParametersSettings-model-selection.ts";
+export {
+	presetFitsKind,
+	presetsQueryKey,
+} from "./ModelParametersSettings-preset-bar.tsx";
 
 export function ModelParameterEditor({
 	model,
@@ -482,22 +100,15 @@ export function ModelParameterEditor({
 	});
 
 	if (supportQuery.isLoading || samplingQuery.isLoading) {
-		return (
-			<div className="flex items-center gap-2 py-2 text-muted-foreground text-sm">
-				<Spinner className="size-4" />
-				Loading model parameters…
-			</div>
-		);
+		return <SkeletonRows label="Loading model parameters…" rows={2} />;
 	}
 	if (supportQuery.isError || samplingQuery.isError) {
 		return (
 			<div
-				className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
+				className="flex min-h-12 items-center justify-between gap-6 py-3"
 				role="alert"
 			>
-				<p className="text-sm text-status-destructive">
-					Could not load this model's parameters.
-				</p>
+				<p className="text-sm">Could not load this model's parameters.</p>
 				<Button
 					onClick={() => {
 						supportQuery.refetch().catch(() => undefined);
@@ -549,10 +160,8 @@ export function ModelParameterEditor({
 					subtitle={model.label}
 				/>
 			) : (
-				<p className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs">
-					Cloud models have no launch settings. These parameters apply when Ryu
-					routes the chat through the gateway; external agents such as Claude
-					Code or Codex use their own settings.
+				<p className="text-detail text-muted-foreground">
+					Cloud models have no launch settings. External agents use their own.
 				</p>
 			)}
 		</div>
@@ -572,10 +181,10 @@ export function ModelParametersSettings() {
 
 	return (
 		<SettingsSection
-			caption="Tune generation parameters for any local or cloud model on this node, and save reusable presets. Model parameters override engine defaults; agents and individual requests can still override them."
+			caption="Tune generation for any model on this node and save presets. Agents and requests can still override."
 			title="Model parameters"
 		>
-			<SettingsCard className="flex flex-col gap-3">
+			<SettingsCard className="flex flex-col gap-3 py-3">
 				<ToggleGroup
 					appearance="segmented"
 					aria-label="Model type"

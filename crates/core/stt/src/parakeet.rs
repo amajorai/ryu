@@ -136,6 +136,28 @@ pub fn normalize_wav_to_16k_mono(audio: &[u8]) -> Result<Vec<u8>> {
     Ok(output.into_inner())
 }
 
+// In-process inference needs BOTH the `voice-parakeet` feature AND a target ONNX
+// Runtime ships for. Intel macOS (`x86_64-apple-darwin`) has no ORT prebuilt, so
+// Cargo.toml declares transcribe-rs for every other target only: there the
+// feature resolves (every build site passes the same `--features` string) but
+// this module compiles its "not built" arm, exactly like a lean build, with a
+// reason that names the platform instead of a missing flag.
+
+/// Why [`transcribe`] refuses on a build without in-process inference. Both
+/// arms name the whisper.cpp fallback.
+#[cfg(not(feature = "voice-parakeet"))]
+const NOT_BUILT: &str = "parakeet inference is not built into this build. Rebuild with \
+     `--features voice-parakeet` (pulls ONNX Runtime via transcribe-rs), or use the \
+     whisper.cpp voice engine instead.";
+#[cfg(all(
+    feature = "voice-parakeet",
+    target_os = "macos",
+    target_arch = "x86_64"
+))]
+const NOT_BUILT: &str = "parakeet inference is not built for Intel macOS: ONNX Runtime ships \
+     no x86_64-apple-darwin build, so `voice-parakeet` compiles no engine on this platform. \
+     Use the whisper.cpp voice engine instead.";
+
 /// Transcribe audio bytes (a WAV upload) with parakeet. Used by the STT dispatch
 /// (`transcribe_wav_detailed`) when the parakeet engine is selected. `model_dir`
 /// is the extracted ONNX model directory, resolved and owned by the host.
@@ -143,32 +165,40 @@ pub fn normalize_wav_to_16k_mono(audio: &[u8]) -> Result<Vec<u8>> {
 /// Without the `voice-parakeet` feature this returns a clear, actionable error
 /// rather than silently failing.
 pub async fn transcribe(audio: Vec<u8>, model_dir: std::path::PathBuf) -> anyhow::Result<String> {
-    #[cfg(feature = "voice-parakeet")]
+    #[cfg(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    ))]
     {
         // Inference is CPU-bound and blocking — run it off the async runtime.
         tokio::task::spawn_blocking(move || engine::transcribe_wav_bytes(&audio, &model_dir))
             .await
             .map_err(|e| anyhow::anyhow!("parakeet transcribe task panicked: {e}"))?
     }
-    #[cfg(not(feature = "voice-parakeet"))]
+    #[cfg(not(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    )))]
     {
         let _ = (audio, model_dir);
-        anyhow::bail!(
-            "parakeet inference is not built into this build. Rebuild with \
-             `--features voice-parakeet` (pulls ONNX Runtime via transcribe-rs), or use the \
-             whisper.cpp voice engine instead."
-        )
+        anyhow::bail!(NOT_BUILT)
     }
 }
 
 /// Ensure the parakeet model is loaded into memory (fast first-transcription).
 /// A no-op error-free call when the `voice-parakeet` feature is off.
 pub fn preload(model_dir: &Path) -> anyhow::Result<()> {
-    #[cfg(feature = "voice-parakeet")]
+    #[cfg(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    ))]
     {
         engine::preload(model_dir)
     }
-    #[cfg(not(feature = "voice-parakeet"))]
+    #[cfg(not(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    )))]
     {
         let _ = model_dir;
         Ok(())
@@ -177,7 +207,10 @@ pub fn preload(model_dir: &Path) -> anyhow::Result<()> {
 
 /// Drop the in-memory parakeet model. A no-op when the feature is off.
 pub fn unload() {
-    #[cfg(feature = "voice-parakeet")]
+    #[cfg(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    ))]
     engine::unload();
 }
 
@@ -187,7 +220,10 @@ pub fn unload() {
 // ONNX Runtime. It is added under the `voice-parakeet` feature in Cargo.toml so
 // the default build stays free of the native dependency. This module is the
 // only place that touches it.
-#[cfg(feature = "voice-parakeet")]
+#[cfg(all(
+    feature = "voice-parakeet",
+    not(all(target_os = "macos", target_arch = "x86_64"))
+))]
 mod engine {
     use std::io::Write;
     use std::path::Path;
@@ -319,7 +355,13 @@ mod normalization_tests {
 // fallbacks: `transcribe` returns a clear, actionable error; `preload`/`unload`
 // are safe no-ops. The real-inference path is deliberately not exercised here —
 // it would require downloading and loading a real ONNX model.
-#[cfg(all(test, not(feature = "voice-parakeet")))]
+#[cfg(all(
+    test,
+    not(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    ))
+))]
 mod tests {
     #[test]
     fn rejects_resampling_amplification_before_allocating_output() {

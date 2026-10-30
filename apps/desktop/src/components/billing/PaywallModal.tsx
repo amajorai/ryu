@@ -5,14 +5,10 @@
 //
 // Open-core: this gates Pro features + managed inference, NOT the app shell. It
 // is DISMISSIBLE — closing it drops the user into free local chat (which stays
-// usable forever). The user can: enter a license key (validated via the control
-// plane → Polar), or open the web pricing page to subscribe / buy a license.
+// usable forever). The user can open the web pricing page to subscribe / buy a
+// license (the primary action), or reveal the license field and enter a key
+// (validated via the control plane → Polar).
 
-import {
-	CheckmarkCircle02Icon,
-	SparklesIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { DESKTOP_TRIAL_LABEL, planLimit } from "@ryu/auth/lib/plans";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -26,7 +22,7 @@ import {
 } from "@ryu/ui/components/dialog.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sileo } from "sileo";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
@@ -50,6 +46,15 @@ export function PaywallModal({
 	const tl = useLiteralMessages();
 	const [key, setKey] = useState("");
 	const [validating, setValidating] = useState(false);
+	const [showLicense, setShowLicense] = useState(false);
+	// Revealing the field replaces the button that had focus, so focus follows
+	// into the field instead of dropping to the page.
+	const licenseInputRef = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		if (showLicense) {
+			licenseInputRef.current?.focus();
+		}
+	}, [showLicense]);
 
 	const handleValidate = async () => {
 		const trimmed = key.trim();
@@ -104,20 +109,13 @@ export function PaywallModal({
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
-					<div className="flex items-center gap-2">
-						<HugeiconsIcon
-							className="text-status-warning"
-							icon={SparklesIcon}
-							strokeWidth={2}
-						/>
-						<DialogTitle>
-							{intent === "tabs"
-								? "Open more tabs with a desktop license"
-								: tl("Your {trialLabel} has ended", {
-										trialLabel: DESKTOP_TRIAL_LABEL,
-									})}
-						</DialogTitle>
-					</div>
+					<DialogTitle>
+						{intent === "tabs"
+							? "Open more tabs with a desktop license"
+							: tl("Your {trialLabel} has ended", {
+									trialLabel: DESKTOP_TRIAL_LABEL,
+								})}
+					</DialogTitle>
 					<DialogDescription>
 						{intent === "tabs"
 							? tl(
@@ -128,8 +126,37 @@ export function PaywallModal({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="flex flex-col gap-2">
-					<span className="font-medium text-sm">Have a license key?</span>
+				<ul className="flex list-disc flex-col gap-1 ps-4 text-muted-foreground text-sm">
+					{(intent === "tabs"
+						? [
+								"Unlimited open tabs",
+								"Run work on your own hardware or with your own provider",
+								"One-time desktop purchase; managed AI and hosting are separate",
+							]
+						: [
+								"Unlimited tabs with a desktop license",
+								"Ryu-managed inference with a subscription",
+								"Choose the plan that fits where your work runs",
+							]
+					).map((feature) => (
+						<li key={feature}>{feature}</li>
+					))}
+				</ul>
+
+				<p className="text-muted-foreground text-sm">
+					Already pay for ChatGPT or Claude?{" "}
+					<Button
+						className="h-auto p-0"
+						onClick={handleByos}
+						type="button"
+						variant="link"
+					>
+						Bring your own subscription
+					</Button>
+				</p>
+
+				{/* Most people subscribe; the license field opens on request. */}
+				{showLicense ? (
 					<div className="flex items-center gap-2">
 						<Input
 							aria-label="License key"
@@ -143,6 +170,7 @@ export function PaywallModal({
 								}
 							}}
 							placeholder="RYU-XXXX-XXXX-XXXX"
+							ref={licenseInputRef}
 							value={key}
 						/>
 						<Button
@@ -150,45 +178,22 @@ export function PaywallModal({
 							onClick={() => {
 								handleValidate().catch(() => undefined);
 							}}
+							variant="outline"
 						>
 							<TextSwap>{validating ? "Checking…" : "Activate"}</TextSwap>
 						</Button>
 					</div>
-				</div>
-
-				<ul className="flex flex-col gap-1.5 text-muted-foreground text-sm">
-					{(intent === "tabs"
-						? [
-								"Unlimited open tabs",
-								"Run work on your own hardware or with your own provider",
-								"One-time desktop purchase; managed AI and hosting are separate",
-							]
-						: [
-								"Unlimited tabs with a desktop license",
-								"Ryu-managed inference with a subscription",
-								"Choose the plan that fits where your work runs",
-							]
-					).map((feature) => (
-						<li className="flex items-center gap-2" key={feature}>
-							<HugeiconsIcon
-								className="text-status-success"
-								icon={CheckmarkCircle02Icon}
-								strokeWidth={2}
-							/>
-							{feature}
-						</li>
-					))}
-				</ul>
-
-				<button
-					className="rounded-lg border border-dashed px-3 py-2 text-left text-muted-foreground text-xs transition-colors hover:text-foreground"
-					onClick={handleByos}
-					type="button"
-				>
-					Already pay for ChatGPT or Claude? Bring your own subscription — no
-					extra API keys needed.{" "}
-					<span className="text-foreground underline">Learn more</span>
-				</button>
+				) : (
+					<Button
+						className="self-start"
+						onClick={() => setShowLicense(true)}
+						size="sm"
+						type="button"
+						variant="ghost-muted"
+					>
+						Have a license key?
+					</Button>
+				)}
 
 				<DialogFooter>
 					<Button
@@ -200,7 +205,7 @@ export function PaywallModal({
 							? "Keep my current tabs"
 							: "Continue with free chat"}
 					</Button>
-					<Button onClick={handleSubscribe} type="button">
+					<Button onClick={handleSubscribe} type="button" variant="mono">
 						{intent === "tabs" ? "Get desktop license" : "See plans"}
 					</Button>
 				</DialogFooter>

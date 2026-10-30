@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import {
 	Popover,
@@ -51,8 +52,15 @@ function HandKeys({ visible }: { visible: boolean }) {
  * "6 waiting on you": every card, dealt or held back. With the act layer
  * the HUD counts what needs you, so the hand only counts its cards.
  */
-function handCountLabel(count: number, held: number, acts: boolean): string {
-	return acts ? plural(count + held, "card") : `${count + held} waiting on you`;
+function handCountLabel(
+	count: number,
+	held: number,
+	acts: boolean,
+	tl: LiteralMessage
+): string {
+	return acts
+		? plural(count + held, "card")
+		: tl("{waitingCount} waiting on you", { waitingCount: count + held });
 }
 
 /** The held cards' list: each row opens its thread; `onDone` closes the menu. */
@@ -96,6 +104,7 @@ function HeldCards({
 	actions: SeatActions;
 	threads: InterfaceThread[];
 }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	if (threads.length === 0) {
 		return null;
@@ -105,14 +114,17 @@ function HeldCards({
 			<PopoverTrigger
 				render={
 					<button
-						aria-label={`${plural(threads.length, "card")} held back. Show them`}
+						aria-label={tl(
+							"{heldCount, plural, one {{heldCount} card} other {{heldCount} cards}} held back. Show them",
+							{ heldCount: threads.length }
+						)}
 						className="pointer-events-auto inline-flex h-5 items-center gap-0.5 rounded-full border border-border bg-card px-1.5 font-medium text-[11px] text-foreground tabular-nums leading-none shadow-xs outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/40 aria-expanded:border-ring"
 						data-testid="card-table-held"
 						type="button"
 					/>
 				}
 			>
-				{threads.length} held
+				{tl("{heldCount} held", { heldCount: threads.length })}
 				<ChevronDown
 					aria-hidden="true"
 					className="size-3 text-muted-foreground"
@@ -173,6 +185,7 @@ export function HandLabel({
 	/** Follows a phone's tucked fan down (px). */
 	tucked?: number;
 }) {
+	const tl = useLiteralMessages();
 	const held = heldThreads.length;
 	if (placement.kind === "above") {
 		return (
@@ -187,7 +200,7 @@ export function HandLabel({
 						·
 					</span>
 					<span className="font-semibold text-(--gk-ink-muted) tabular-nums">
-						{handCountLabel(count, held, acts)}
+						{handCountLabel(count, held, acts, tl)}
 					</span>
 				</h2>
 				{held > 0 ? (
@@ -209,7 +222,7 @@ export function HandLabel({
 				<h2 className="flex flex-col items-end gap-0.5">
 					<span className="gk-display text-[18px] leading-6">Your hand</span>
 					<span className="font-semibold text-(--gk-ink-muted) text-[13px] tabular-nums leading-5">
-						{handCountLabel(count, held, acts)}
+						{handCountLabel(count, held, acts, tl)}
 					</span>
 				</h2>
 				<HeldCards actions={actions} threads={heldThreads} />

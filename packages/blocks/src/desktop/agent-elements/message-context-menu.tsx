@@ -1,4 +1,9 @@
-import { Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+	Add01Icon,
+	ArrowTurnBackwardIcon,
+	Copy01Icon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
@@ -14,8 +19,6 @@ import {
 import { EmojiPicker } from "@ryu/ui/components/emoji-picker";
 import { Icon } from "@ryu/ui/components/icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { IconCopy, IconPlus } from "@tabler/icons-react";
-import { Reply as ReplyIcon } from "lucide-react";
 import { Fragment, type ReactNode, useRef, useState } from "react";
 import { isMemoryCitationsAction } from "./message-action-types.ts";
 import {
@@ -136,7 +139,11 @@ function ReactionStrip({
 						aria-label="More emoji"
 						className="size-8 justify-center rounded-full p-0 text-muted-foreground [&>svg:last-child]:hidden"
 					>
-						<IconPlus aria-hidden="true" className={ITEM_ICON_CLASS} />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className={ITEM_ICON_CLASS}
+							icon={Add01Icon}
+						/>
 					</ContextMenuSubTrigger>
 					<ContextMenuSubContent className="p-1">
 						{/* The picker's search box must keep its keystrokes; the menu's
@@ -280,7 +287,11 @@ export function MessageContextMenu({
 				) : null}
 				{onReply ? (
 					<ContextMenuItem onClick={onReply}>
-						<ReplyIcon aria-hidden="true" className={ITEM_ICON_CLASS} />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className={ITEM_ICON_CLASS}
+							icon={ArrowTurnBackwardIcon}
+						/>
 						Reply
 					</ContextMenuItem>
 				) : null}
@@ -288,13 +299,21 @@ export function MessageContextMenu({
 					<ContextMenuItem
 						onClick={() => writeClipboardText(selectedText, onCopied)}
 					>
-						<IconCopy aria-hidden="true" className={ITEM_ICON_CLASS} />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className={ITEM_ICON_CLASS}
+							icon={Copy01Icon}
+						/>
 						Copy selection
 					</ContextMenuItem>
 				) : null}
 				{text ? (
 					<ContextMenuItem onClick={() => writeClipboardText(text, onCopied)}>
-						<IconCopy aria-hidden="true" className={ITEM_ICON_CLASS} />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className={ITEM_ICON_CLASS}
+							icon={Copy01Icon}
+						/>
 						Copy text
 					</ContextMenuItem>
 				) : null}

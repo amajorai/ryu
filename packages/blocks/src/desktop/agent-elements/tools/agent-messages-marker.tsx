@@ -1,3 +1,8 @@
+import {
+	ArrowDataTransferHorizontalIcon,
+	BubbleChatIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { AvatarGroup } from "@ryu/ui/components/avatar.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -18,7 +23,6 @@ import {
 } from "@ryu/ui/components/popover";
 import { formatTime, startOfTodayMs } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import { IconArrowsExchange, IconMessages } from "@tabler/icons-react";
 import { memo, useMemo, useState } from "react";
 import { dayLabel } from "../date-groups.ts";
 import type { AgentMessageContext, AgentMessageIdentity } from "../types.ts";
@@ -89,7 +93,7 @@ function RecipientRow({
 	return (
 		<li>
 			<button
-				className="flex w-full min-w-0 items-center gap-2.5 rounded-2xl px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted focus-visible:bg-muted"
+				className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted focus-visible:bg-muted"
 				data-agent-id={identity.id}
 				data-delivery={conversation.delivery}
 				onClick={onOpen}
@@ -139,9 +143,10 @@ function AgentConversationView({
 				<DialogTitle className="inline-flex max-w-full items-center gap-2 rounded-full bg-muted py-1 ps-1 pe-3 font-sans text-sm leading-normal">
 					<IdentityAvatar className="size-6" identity={sender} />
 					<span className="truncate">{sender.name}</span>
-					<IconArrowsExchange
+					<HugeiconsIcon
 						aria-hidden="true"
 						className="size-4 shrink-0 text-muted-foreground"
+						icon={ArrowDataTransferHorizontalIcon}
 					/>
 					<span className="sr-only">and</span>
 					<IdentityAvatar className="size-6" identity={recipient} />
@@ -231,7 +236,7 @@ export const AgentMessagesMarker = memo(function AgentMessagesMarker({
 				tone={failed && !sending ? "destructive" : "default"}
 			>
 				<MarkerIcon>
-					<IconMessages className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={BubbleChatIcon} />
 				</MarkerIcon>
 				<MarkerContent>
 					{sending
@@ -296,7 +301,7 @@ export const AgentMessagesMarker = memo(function AgentMessagesMarker({
 				spacing="activity"
 			>
 				<MarkerIcon>
-					<IconMessages className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={BubbleChatIcon} />
 				</MarkerIcon>
 				<MarkerContent
 					className="flex min-w-0 flex-wrap items-center"

@@ -1,26 +1,16 @@
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceParamsByRenderer,
 	isSuggestion,
 } from "@ryuhq/protocol/interfaces";
-import {
-	type KeyboardEvent,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
 	actGrowth,
-	benchOf,
-	farmActVillagers,
-	farmPaths,
 	growFocusCrops,
 	overripeReplies,
 	porchSpots,
 } from "./farm-acts.tsx";
-import { type FarmActScene, FarmDioramaScene } from "./farm-diorama.tsx";
+import { FarmDioramaScene } from "./farm-diorama.tsx";
 import { useElementSize, useMinuteClock } from "./farm-hooks.ts";
 import {
 	FarmActions,
@@ -28,29 +18,28 @@ import {
 	FarmLegend,
 	FarmTitle,
 } from "./farm-hud.tsx";
+import { useFarmActLayer } from "./farm-interface-act-layer.tsx";
+import {
+	type Drawer,
+	FIRST_FIELDS,
+	ISLAND_RIM,
+	QUEUE_DEPTH,
+	STAGE_FALLBACK,
+} from "./farm-interface-constants.ts";
+import { useFarmEscapeKey } from "./farm-interface-escape.ts";
+import { LoadingFarm } from "./farm-interface-loading.tsx";
 import { FarmList } from "./farm-list.tsx";
 import {
 	buildFarm,
 	type FarmCrop,
-	type FarmField,
 	farmDay,
 	layoutDiorama,
-	makePlot,
-	OPEN_FIELD_ID,
 	plotForThread,
-	plural,
 } from "./farm-model.ts";
 import { FARM_SCENE_CSS } from "./farm-palette.ts";
 import { FarmPanel, type FarmPanelView } from "./farm-panel.tsx";
 import { GameHudSlot, GameShell, gameSheetCover } from "./game-shell.tsx";
-import {
-	actOverlays,
-	actSummaryLine,
-	actTotals,
-	overlayBudget,
-	stageAgents,
-	youSpotSlots,
-} from "./game3d-acts.ts";
+import { actSummaryLine } from "./game3d-acts.ts";
 import { islandFor } from "./game3d-ground.tsx";
 import {
 	IsoStage,
@@ -64,62 +53,10 @@ import { useVillagerLooks } from "./game3d-villager.tsx";
 import {
 	ActAnnouncer,
 	AskQueueList,
-	askOwners,
 	BlindSpotCaption,
-	NeedYouButton,
-	openQueue,
-	QueueButton,
-	useActCards,
 } from "./interface-ask-card.tsx";
-import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useActAnnouncement, useActClockOptions, useActs } from "./use-acts.ts";
-
-/** Room kept in front of the last queue slot: its farmer and hourglass. */
-const QUEUE_DEPTH = 1.4;
-
-type Drawer = { kind: "barn" } | { kind: "plot"; plotId: string | null };
-
-/** Escape inside a text field belongs to the field. */
-function escapeIsFree(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return true;
-	}
-	return (
-		!target.isContentEditable &&
-		target.closest("input, textarea, select, [contenteditable='true']") === null
-	);
-}
-
-const STAGE_FALLBACK = { height: 808, width: 1200 };
-
-/** An empty farm still has a bed waiting by the barn for the first seed. */
-const FIRST_PLOT_ID = "plot-first";
-const FIRST_FIELDS: FarmField[] = [
-	{
-		fenced: false,
-		id: OPEN_FIELD_ID,
-		name: "Open plots",
-		plots: [{ ...makePlot(FIRST_PLOT_ID, null, []), name: "New plot" }],
-	},
-];
-
-function LoadingFarm() {
-	return (
-		<div className="flex w-full flex-wrap content-center items-start justify-center gap-6 p-8">
-			{["a", "b", "c", "d", "e", "f"].map((key) => (
-				<div className="flex w-60 flex-col gap-3" key={key}>
-					<Skeleton className="h-32 w-full rounded-lg" />
-					<Skeleton className="h-4 w-24" />
-				</div>
-			))}
-			<span className="sr-only">Loading the farm</span>
-		</div>
-	);
-}
-
-/** The farm's island: the laid-out farm plus a rim for trees and shore. */
-const ISLAND_RIM = 2.6;
 
 /**
  * Farm: the workspace as a cosy farm diorama on an island, built on the 3D
@@ -140,6 +77,7 @@ export function FarmInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["farm"]>) {
+	const tl = useLiteralMessages();
 	const reduced = useReducedMotion();
 	const now = useMinuteClock();
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -226,123 +164,24 @@ export function FarmInterface({
 	const hudHeadingRef = useRef<HTMLHeadingElement>(null);
 	const sentence = useActAnnouncement(snapshot, actsView);
 	const clock = useActClockOptions();
-	const cards = useActCards({
-		acts,
-		clock,
-		fallbackFocus: hudHeadingRef,
-		nowMs,
-		port,
-		snapshot,
-	});
-	const { openAsk, openBlocker } = cards;
-	const queueOpener = useRef<(() => void) | null>(null);
-	const slots = useMemo(() => youSpotSlots(acts, unowned), [acts, unowned]);
-	const tally = actTotals(snapshot, acts);
-	const owners = useMemo(() => askOwners(acts), [acts]);
-	const budget = overlayBudget(size.width, { domTargets: true });
-	const staged = useMemo(
-		() => stageAgents(acts, Number.POSITIVE_INFINITY),
-		[acts]
-	);
-	const cast = staged.onStage;
-	const shownKey = [
-		...budget.fill(
-			actOverlays(
-				cast,
-				slots,
-				staged.offStage,
-				cast.find((act) => act.act === "working")?.agentId ?? null,
-				{ reduced }
-			)
-		),
-	]
-		// A phone has no room beside the plates for a work bubble (it stands
-		// wider than its plate): the bed's board and act sentence carry it.
-		.filter((id) => !(budget.iconOnly && id.startsWith("work:")))
-		.sort()
-		.join("|");
-	const shown = useMemo(() => new Set(shownKey.split("|")), [shownKey]);
-	const paths = useMemo(() => farmPaths(diorama), [diorama]);
-	const benches = useMemo(() => benchOf(diorama, acts), [acts, diorama]);
-	const actVillagers = useMemo(
-		() =>
-			actsOn
-				? farmActVillagers({
-						acts,
-						benches,
-						diorama,
-						looks,
-						nowMs,
-						onAsk: (askId) => openAsk(askId),
-						paths,
-						reduced,
-						shown,
-						slots: slots.slots,
-					})
-				: [],
-		[
+	const { actButtons, actScene, cards, onAsk, onBlocker, tally } =
+		useFarmActLayer({
 			acts,
 			actsOn,
-			benches,
+			clock,
+			compact,
 			diorama,
+			hudHeadingRef,
 			looks,
 			nowMs,
-			openAsk,
-			paths,
+			port,
+			privacy,
+			queueOn,
 			reduced,
-			shown,
-			slots,
-		]
-	);
-	const actScene: FarmActScene | null = actsOn
-		? {
-				acts,
-				benches,
-				handlers: {
-					clock,
-					iconOnly: budget.iconOnly,
-					nowMs,
-					onAsk: (askId) => openAsk(askId),
-					onBlocker: (threadId, agentName) => openBlocker(threadId, agentName),
-					onQueue: () => openQueue(queueOpener),
-					privacy,
-					reduced,
-					shown,
-					snapshot,
-				},
-				offStage: staged.offStage,
-				onStage: cast,
-				owners,
-				paths,
-				slots,
-				villagers: actVillagers,
-			}
-		: null;
-	const onAsk = (askId: string, opener?: HTMLElement) => openAsk(askId, opener);
-	const onBlocker = (
-		threadId: string,
-		agentName: string,
-		opener?: HTMLElement
-	) => openBlocker(threadId, agentName, opener);
-	const actButtons = queueOn ? (
-		<>
-			{actsOn ? (
-				<NeedYouButton onAsk={onAsk} snapshot={snapshot} totals={tally} />
-			) : null}
-			<QueueButton
-				acts={acts}
-				clock={clock}
-				narrow={compact}
-				nowMs={nowMs}
-				onAsk={onAsk}
-				onBlocker={onBlocker}
-				openRef={queueOpener}
-				snapshot={snapshot}
-				totals={tally}
-				unowned={unowned}
-			/>
-		</>
-	) : null;
+			size,
+			snapshot,
+			unowned,
+		});
 	const panelHeadingRef = useRef<HTMLHeadingElement>(null);
 	const focusTarget = useRef<"hud" | "panel" | null>(null);
 
@@ -399,9 +238,14 @@ export function FarmInterface({
 		const previous = lastRipe.current;
 		lastRipe.current = ripeCount;
 		if (previous !== null && ripeCount !== null && ripeCount > previous) {
-			setAnnouncement(`${plural(ripeCount, "crop")} ready to harvest`);
+			setAnnouncement(
+				tl(
+					"{count, plural, one {{countText} crop} other {{countText} crops}} ready to harvest",
+					{ count: ripeCount, countText: String(ripeCount) }
+				)
+			);
 		}
-	}, [ripeCount]);
+	}, [ripeCount, tl]);
 
 	const harvest = (threadId: string) => {
 		const crop = model.crops.find((item) => item.thread.id === threadId);
@@ -435,7 +279,9 @@ export function FarmInterface({
 		const plot = input.agentId
 			? model.plots.find((item) => item.id === input.agentId)
 			: undefined;
-		setAnnouncement(plot ? `Planted a seed in ${plot.name}'s plot` : "");
+		setAnnouncement(
+			plot ? tl("Planted a seed in {name}'s plot", { name: plot.name }) : ""
+		);
 		port.startThread(
 			input.agentId
 				? { agentId: input.agentId, prompt: input.prompt }
@@ -460,47 +306,24 @@ export function FarmInterface({
 		}
 		return false;
 	};
-	const stepBackRef = useRef(stepBack);
-	stepBackRef.current = stepBack;
-
-	const onRootKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (
-			event.key !== "Escape" ||
-			event.defaultPrevented ||
-			!escapeIsFree(event.target)
-		) {
-			return;
-		}
-		if (stepBackRef.current()) {
-			event.preventDefault();
-		}
-	};
-	useEffect(() => {
-		const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
-			if (isInterfaceCovered(rootRef.current)) {
-				return;
-			}
-			if (
-				event.key !== "Escape" ||
-				event.defaultPrevented ||
-				event.target !== document.body
-			) {
-				return;
-			}
-			if (stepBackRef.current()) {
-				event.preventDefault();
-			}
-		};
-		document.addEventListener("keydown", onDocumentKeyDown);
-		return () => document.removeEventListener("keydown", onDocumentKeyDown);
-	}, []);
+	const onRootKeyDown = useFarmEscapeKey(rootRef, stepBack);
 
 	const plotName = (crop: FarmCrop) =>
 		model.plots.find((plot) => plot.crops.includes(crop))?.name ?? "";
 	const { totals } = model;
 	const summary = actsOn
 		? `Farm: ${actSummaryLine(tally)}.`
-		: `Farm: ${plural(model.plots.length, "plot")}, ${totals.ripe} ready to harvest, ${totals.growing} growing, ${totals.seeds} seeded, ${totals.withered} withered.`;
+		: tl(
+				"Farm: {plots, plural, one {{plotsText} plot} other {{plotsText} plots}}, {ripe} ready to harvest, {growing} growing, {seeds} seeded, {withered} withered.",
+				{
+					growing: String(totals.growing),
+					plots: model.plots.length,
+					plotsText: String(model.plots.length),
+					ripe: String(totals.ripe),
+					seeds: String(totals.seeds),
+					withered: String(totals.withered),
+				}
+			);
 	const selectedPlotId = view?.kind === "plot" ? (view.plot?.id ?? null) : null;
 
 	const hud = (

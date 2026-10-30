@@ -3,10 +3,11 @@ import { useCallback, useSyncExternalStore } from "react";
 /**
  * How sidebars sit against the main content.
  *
- * - "floating": the default — sidebars are rounded, bordered cards that float
- *   over the window, and the main content fills the rest flush.
- * - "inset": sidebars sit flush (no card chrome) and the main content is pulled
- *   in as its own rounded, shadowed card (an "inset" canvas).
+ * - "inset": the default — sidebars sit flush with the window (no card chrome)
+ *   and the content area is set off by tone alone (Layout drops the primitive's
+ *   inset card margin, radius and shadow).
+ * - "floating": opt-in — sidebars are rounded, bordered cards that float over
+ *   the window, and the main content fills the rest flush.
  *
  * The left rail maps this onto the shadcn `<Sidebar variant>` prop;
  * `<SidebarInset>` already carries the matching `peer-data-[variant=inset]`
@@ -18,21 +19,22 @@ export type SidebarVariant = "floating" | "inset";
 /**
  * Card chrome matching shadcn's `group-data-[variant=floating]` sidebar-inner
  * treatment (`rounded-3xl` tracks the Appearance roundness token). Apply only
- * when the variant is `"floating"`; inset mode is flush.
+ * when the variant is `"floating"`; inset mode is flush. In-flow surfaces carry
+ * no shadow: a hairline and the sidebar tone separate the card.
  */
-export const sidebarFloatingChrome =
-	"ryu-chrome-shadow inset-shadow-sm rounded-3xl border border-background drop-shadow-2xl";
+export const sidebarFloatingChrome = "rounded-3xl border border-border";
 
 export const SIDEBAR_VARIANT_KEY = "ryu:sidebar-variant";
-export const DEFAULT_SIDEBAR_VARIANT: SidebarVariant = "floating";
+export const DEFAULT_SIDEBAR_VARIANT: SidebarVariant = "inset";
 
 const listeners = new Set<() => void>();
 
 function read(): SidebarVariant {
 	try {
-		return localStorage.getItem(SIDEBAR_VARIANT_KEY) === "inset"
-			? "inset"
-			: "floating";
+		// A stored "floating" opt-in is kept; anything else is the flush default.
+		return localStorage.getItem(SIDEBAR_VARIANT_KEY) === "floating"
+			? "floating"
+			: "inset";
 	} catch {
 		return DEFAULT_SIDEBAR_VARIANT;
 	}

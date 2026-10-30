@@ -119,7 +119,7 @@ export function SubSection({
 		// sub-section is the drag-and-drop reorder target; the header button carries the keyboard-reachable affordance
 		// sub-section is the drag-and-drop reorder target; the header button carries the keyboard-reachable affordance
 		<div
-			className={`group/subsection relative ${isDragging ? "opacity-50" : ""} ${dropHighlighted ? "rounded-md bg-primary/5 ring-1 ring-primary/60" : ""}`}
+			className={`group/subsection relative ${isDragging ? "opacity-50" : ""} ${dropHighlighted ? "rounded-lg bg-accent" : ""}`}
 			data-subsection-key={sectionKey}
 			data-testid={testId}
 			onDragLeave={(e) => {
@@ -231,22 +231,18 @@ export function SubSection({
 					className={`reorder-drop-indicator pointer-events-none absolute inset-x-1 z-10 h-0.5 bg-primary ${dropBelow ? "bottom-0" : "top-0"}`}
 				/>
 			)}
-			{dropHighlighted && (
-				<div
-					aria-hidden="true"
-					className="pointer-events-none absolute inset-0 rounded-md border border-primary/50"
-				/>
-			)}
 			{(() => {
 				const headerRow = (
 					<div
-						className={`relative flex items-center rounded-md ${isNestOver ? "bg-primary/10 ring-1 ring-primary/60" : ""}`}
+						className={`relative flex items-center rounded-lg ${isNestOver ? "bg-accent" : ""}`}
 						data-nest-target={isNestOver ? "true" : undefined}
 						ref={headerRef}
 					>
 						<button
-							className={`group/hdr flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-md px-2 text-foreground transition-colors active:cursor-grabbing ${
-								size === "md" ? "h-8 text-sm hover:bg-muted" : "py-1 text-xs"
+							className={`group/hdr flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:duration-0 active:cursor-grabbing ${
+								size === "md"
+									? "h-8 text-foreground text-sm hover:bg-sidebar-accent/60"
+									: "h-7 text-detail text-muted-foreground hover:text-foreground"
 							}`}
 							draggable
 							onClick={() => onToggleCollapsed(sectionKey)}
@@ -267,15 +263,15 @@ export function SubSection({
 								))}
 							<span className="min-w-0 truncate">{localizedLabel}</span>
 							{trailing}
-							{count !== undefined && (
+							{count !== undefined && count > 0 && (
 								<span
-									className={`shrink-0 text-muted-foreground/60 ${action ? "transition-opacity group-hover/subsection:opacity-0" : ""}`}
+									className={`shrink-0 text-muted-foreground/70 text-xs tabular-nums ${action ? "transition-opacity group-hover/subsection:opacity-0" : ""}`}
 								>
-									{formatCount(count) ?? "—"}
+									{formatCount(count)}
 								</span>
 							)}
 							<HugeiconsIcon
-								className={`-ml-0.5 size-3 shrink-0 opacity-0 transition group-hover/hdr:opacity-100 ${collapsed ? "-rotate-90" : ""}`}
+								className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 transition duration-150 group-hover/hdr:opacity-100 group-hover/hdr:duration-0 ${collapsed ? "-rotate-90" : ""}`}
 								icon={ArrowDown01Icon}
 							/>
 						</button>

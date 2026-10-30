@@ -158,7 +158,7 @@ export function OsHome({ visible }: { visible: boolean }) {
 		>
 			{clock && (
 				<time
-					className="font-light text-7xl text-white/90 tabular-nums tracking-tight drop-shadow-lg sm:text-8xl"
+					className="font-normal text-7xl text-white/90 tabular-nums tracking-tight drop-shadow-lg sm:text-8xl"
 					data-testid="os-home-clock"
 					dateTime={new Date(now).toISOString()}
 				>

@@ -37,3 +37,23 @@ describe("input leading adornment", () => {
 		expect(classes).toContain("focus-visible:ring-0");
 	});
 });
+
+describe("settings search size", () => {
+	test("is a borderless, muted, compact field without base-size text", () => {
+		const classes = cn(inputVariants({ size: "settings-search" })).split(" ");
+		for (const expected of [
+			"h-8",
+			"rounded-lg",
+			"border-0",
+			"bg-muted/50",
+			"px-2",
+			"text-sm",
+		]) {
+			expect(classes).toContain(expected);
+		}
+		expect(classes).not.toContain("text-base");
+		expect(classes).not.toContain("rounded-3xl");
+		expect(classes).not.toContain("bg-input/50");
+		expect(classes).toContain("focus-visible:ring-3");
+	});
+});

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { Plus } from "lucide-react";
@@ -60,6 +61,7 @@ function RestingDeck({
 	onHover: (deckId: string | null) => void;
 	tabbable: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const acts = useContext(SpreadActsContext);
 	const act = useDeckAct(deck);
 	const answer = act ? (acts?.answer(act.agentId) ?? null) : null;
@@ -127,7 +129,9 @@ function RestingDeck({
 						// A pointer shortcut: an asking deck's label opens the ask.
 						// The keyboard's way there is the status line's Answer.
 						<button
-							aria-label={`${act.ariaLabel} Answer their ask.`}
+							aria-label={tl("{actLabel} Answer their ask.", {
+								actLabel: act.ariaLabel,
+							})}
 							className="absolute inset-0 cursor-pointer rounded-xl"
 							data-deck-answer={act.agentId}
 							onClick={(event) =>
@@ -189,6 +193,7 @@ function DockedDeck({
 	onGather: () => void;
 	tabbable: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const act = useDeckAct(deck);
 	const empty = deck.threads.length === 0;
@@ -202,9 +207,11 @@ function DockedDeck({
 		: deck.attention > 0;
 	let label = deckLabel(deck, act, "Fan out the deck");
 	if (fanned) {
-		label = `${deck.name}: fanned out. Gather the deck`;
+		label = tl("{deckName}: fanned out. Gather the deck", {
+			deckName: deck.name,
+		});
 	} else if (empty) {
-		label = `${deck.name}: no cards`;
+		label = tl("{deckName}: no cards", { deckName: deck.name });
 	}
 	return (
 		<button

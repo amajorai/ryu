@@ -24,32 +24,49 @@ import { useState } from "react";
 
 const APP_PLUGIN_VISUAL_COLORS = ["#253b80", "#6d4aff", "#da6bff", "#101828"];
 
-/** A compact, plain-language guide for the two easily-confused catalog types. */
-export default function MarketplaceHelpDialog() {
-	const [open, setOpen] = useState(false);
+/** A compact, plain-language guide for the two easily-confused catalog types.
+ *  Uncontrolled by default with its own `?` trigger; pass `open` and
+ *  `onOpenChange` (and `showTrigger={false}`) to open it from an overflow menu. */
+export default function MarketplaceHelpDialog({
+	onOpenChange,
+	open: openProp,
+	showTrigger = true,
+}: {
+	onOpenChange?: (open: boolean) => void;
+	open?: boolean;
+	showTrigger?: boolean;
+} = {}) {
+	const [ownOpen, setOwnOpen] = useState(false);
+	const open = openProp ?? ownOpen;
+	const setOpen = (next: boolean) => {
+		setOwnOpen(next);
+		onOpenChange?.(next);
+	};
 
 	return (
 		<>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							aria-label="About apps and plugins"
-							data-testid="marketplace-help-trigger"
-							onClick={() => setOpen(true)}
-							size="icon-sm"
-							variant="ghost"
-						>
-							<HugeiconsIcon
-								aria-hidden
-								className="size-4"
-								icon={HelpCircleIcon}
-							/>
-						</Button>
-					}
-				/>
-				<TooltipContent>About apps and plugins</TooltipContent>
-			</Tooltip>
+			{showTrigger ? (
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								aria-label="About apps and plugins"
+								data-testid="marketplace-help-trigger"
+								onClick={() => setOpen(true)}
+								size="icon-sm"
+								variant="ghost"
+							>
+								<HugeiconsIcon
+									aria-hidden
+									className="size-4"
+									icon={HelpCircleIcon}
+								/>
+							</Button>
+						}
+					/>
+					<TooltipContent>About apps and plugins</TooltipContent>
+				</Tooltip>
+			) : null}
 
 			<Dialog onOpenChange={setOpen} open={open}>
 				<DialogContent
@@ -63,9 +80,9 @@ export default function MarketplaceHelpDialog() {
 						iconContent={<AppsAndPluginsVisual />}
 						seed="marketplace-apps-and-plugins"
 					/>
-					<div className="flex flex-col gap-5 p-6 sm:p-8">
+					<div className="flex flex-col gap-6 p-6">
 						<DialogHeader purpose="marketplace-guide">
-							<p className="type-compact font-medium text-muted-foreground uppercase tracking-widest">
+							<p className="text-detail text-muted-foreground">
 								Marketplace guide
 							</p>
 							<DialogTitle typography="marketplace-guide">
@@ -78,7 +95,7 @@ export default function MarketplaceHelpDialog() {
 							</DialogDescription>
 						</DialogHeader>
 
-						<div className="grid gap-3 sm:grid-cols-2">
+						<div className="grid gap-6 sm:grid-cols-2">
 							<DefinitionCard
 								icon={Package01Icon}
 								label="Apps"
@@ -113,7 +130,7 @@ function AppsAndPluginsVisual() {
 
 function VisualIcon({ icon }: { icon: IconSvgElement }) {
 	return (
-		<span className="grid size-20 place-items-center rounded-3xl border border-white/35 bg-black/15 shadow-2xl ring-1 ring-black/15 backdrop-blur-sm sm:size-24">
+		<span className="grid size-20 place-items-center rounded-3xl border border-white/35 bg-black/15 sm:size-24">
 			<HugeiconsIcon className="size-10 text-white sm:size-12" icon={icon} />
 		</span>
 	);
@@ -129,8 +146,8 @@ function DefinitionCard({
 	question: string;
 }) {
 	return (
-		<div className="rounded-2xl border border-border/70 bg-muted/45 p-4">
-			<div className="mb-3 flex items-center gap-2">
+		<div>
+			<div className="mb-1 flex items-center gap-2">
 				<HugeiconsIcon
 					aria-hidden
 					className="size-4 text-muted-foreground"
@@ -138,7 +155,7 @@ function DefinitionCard({
 				/>
 				<h3 className="font-medium text-sm">{label}</h3>
 			</div>
-			<p className="text-muted-foreground text-sm leading-5">{question}</p>
+			<p className="text-detail text-muted-foreground">{question}</p>
 		</div>
 	);
 }

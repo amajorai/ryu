@@ -2,11 +2,11 @@ import { Alert02Icon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
-import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -121,9 +121,9 @@ export function AgentExecutionPolicyPanel({
 				</div>
 
 				{warning ? (
-					<div className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground text-xs">
+					<div className="flex items-start gap-2 text-detail text-muted-foreground">
 						<HugeiconsIcon
-							className="mt-0.5 size-4 shrink-0 text-foreground"
+							className="mt-0.5 size-4 shrink-0 text-muted-foreground"
 							icon={lifecycleStatus === "active" ? Shield01Icon : Alert02Icon}
 						/>
 						<span>{warning}</span>
@@ -137,18 +137,12 @@ export function AgentExecutionPolicyPanel({
 					</p>
 				) : null}
 				{postureError ? (
-					<div className="flex items-center gap-2">
-						<p className="text-status-destructive text-xs">{postureError}</p>
-						{onPostureRetry ? (
-							<Button
-								disabled={postureSaving}
-								onClick={onPostureRetry}
-								type="button"
-							>
-								Retry
-							</Button>
-						) : null}
-					</div>
+					<ErrorLine
+						message={postureError}
+						onRetry={
+							onPostureRetry && !postureSaving ? onPostureRetry : undefined
+						}
+					/>
 				) : null}
 			</SettingsCard>
 		</SettingsSection>

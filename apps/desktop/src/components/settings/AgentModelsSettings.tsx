@@ -28,6 +28,7 @@ import {
 	CollapsibleTrigger,
 } from "@ryu/ui/components/collapsible.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useQuery } from "@tanstack/react-query";
@@ -39,7 +40,7 @@ import { fetchAcpConfig, flattenConfigOptions } from "@/src/lib/api/acp.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
 import { agentModelScope } from "@/src/lib/api/pi-config.ts";
-import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
+import { SettingsSection } from "./shared/settings-items.tsx";
 
 /** The flagship agent id (mirrors Core `DEFAULT_AGENT_ID`). */
 const RYU_AGENT_ID = "ryu";
@@ -135,21 +136,21 @@ function AgentCard({
 	};
 
 	return (
-		<SettingsCard className="p-0">
+		<div className="border-border border-b last:border-b-0">
 			<Collapsible onOpenChange={setOpen} open={open}>
 				<CollapsibleTrigger
 					appearance="provider-group"
-					className="flex w-full items-center justify-between text-left"
+					className="flex min-h-12 w-full items-center justify-between px-0 py-3 text-left hover:bg-transparent"
 				>
-					<div className="flex min-w-0 items-center gap-2.5">
+					<div className="flex min-w-0 items-center gap-2">
 						<AgentAvatar
 							className="size-4 shrink-0"
 							engine={engineForAgent(agent)}
 							glyph={agent.avatarGlyph}
 						/>
-						<div className="flex min-w-0 flex-col gap-1">
-							<span className="font-medium text-sm">{agent.name}</span>
-							<span className="text-muted-foreground text-xs">
+						<div className="flex min-w-0 flex-col gap-0.5">
+							<span className="text-sm">{agent.name}</span>
+							<span className="text-detail text-muted-foreground">
 								{hiddenCount > 0
 									? tl(
 											"{hiddenCount, plural, one {# model} other {# models}} hidden",
@@ -165,17 +166,20 @@ function AgentCard({
 					/>
 				</CollapsibleTrigger>
 
-				<CollapsibleContent className="flex flex-col" spacing="model-list">
+				<CollapsibleContent
+					className="flex flex-col px-0 pb-3"
+					spacing="model-list"
+				>
 					{configQuery.isPending ? (
-						<span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-							<Spinner className="size-3" />{" "}
+						<span className="flex items-center gap-1.5 text-detail text-muted-foreground">
+							<Spinner className="size-3.5" />{" "}
 							{tl("Asking {agentName} what it offers…", {
 								agentName: agent.name,
 							})}
 						</span>
 					) : null}
 					{!configQuery.isPending && configQuery.isError ? (
-						<span className="text-status-destructive text-xs">
+						<span className="text-detail text-status-destructive">
 							{tl("Could not read this agent's models: {error}", {
 								error: errMessage(
 									configQuery.error,
@@ -186,21 +190,20 @@ function AgentCard({
 					) : null}
 					{!(configQuery.isPending || configQuery.isError) &&
 					models.length === 0 ? (
-						<span className="text-muted-foreground text-xs">
-							This agent advertises no model list of its own. It picks models
-							itself, so there is nothing to hide here.
+						<span className="text-detail text-muted-foreground">
+							This agent picks its own models, so there is nothing to hide.
 						</span>
 					) : null}
 					{models.length > 0 ? (
 						<div className="flex flex-col gap-1.5">
 							<Label>Visible models</Label>
-							<div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto rounded-md border border-border/60 p-1.5">
+							<div className="flex max-h-64 flex-col overflow-y-auto">
 								{models.map((m) => (
 									<div
-										className="flex items-center justify-between gap-2 px-1.5 py-1"
+										className="flex min-h-9 items-center justify-between gap-2"
 										key={m.id}
 									>
-										<span className="min-w-0 truncate text-xs" title={m.name}>
+										<span className="min-w-0 truncate text-sm" title={m.name}>
 											{m.name}
 										</span>
 										<Switch
@@ -223,7 +226,7 @@ function AgentCard({
 					) : null}
 				</CollapsibleContent>
 			</Collapsible>
-		</SettingsCard>
+		</div>
 	);
 }
 
@@ -260,17 +263,15 @@ export function AgentModelsSettings({
 
 	return (
 		<SettingsSection
-			caption="Hide the models you never use from an agent's picker. External agents report their own model lists, so these switches are separate from the provider lists above, and the agent still keeps every model it was going to pick for itself. Ryu's own models are the provider models above."
+			caption="Hide models you never use from an agent's picker. Separate from the provider lists above."
 			title="Agent models"
 		>
 			{agentsQuery.isPending ? (
-				<div className="flex items-center gap-2 text-muted-foreground text-sm">
-					<Spinner className="size-4" /> Loading agents…
-				</div>
+				<SkeletonRows label="Loading agents…" rows={2} />
 			) : null}
 			{agentsQuery.isError ? (
 				<div
-					className="flex flex-wrap items-center gap-3 text-destructive text-sm"
+					className="flex min-h-12 flex-wrap items-center justify-between gap-6 py-3 text-sm"
 					role="alert"
 				>
 					<span>
@@ -292,9 +293,11 @@ export function AgentModelsSettings({
 				</div>
 			) : null}
 			{agents.length === 0 && !agentsQuery.isPending && !agentsQuery.isError ? (
-				<p className="text-muted-foreground text-sm">No agents installed.</p>
+				<p className="py-3 text-muted-foreground text-sm">
+					No agents installed.
+				</p>
 			) : null}
-			<div className="space-y-2.5">
+			<div className="flex flex-col">
 				{agents.map((agent) => (
 					<AgentCard
 						agent={agent}

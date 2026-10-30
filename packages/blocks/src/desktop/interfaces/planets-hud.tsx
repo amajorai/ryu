@@ -1,34 +1,24 @@
-import { Kbd } from "@ryu/ui/components/kbd.tsx";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceAgentAct,
-	THREAD_STATUS_LABELS,
-	THREAD_STATUS_ORDER,
-} from "@ryuhq/protocol/interfaces";
-import {
-	ChevronDown,
-	Minus,
-	Orbit,
-	Plus,
-	ScanSearch,
-	SquarePen,
-} from "lucide-react";
+import type { InterfaceAgentAct } from "@ryuhq/protocol/interfaces";
+import { ChevronDown, Orbit } from "lucide-react";
 import {
 	type KeyboardEvent,
-	type MouseEvent,
 	type ReactNode,
 	useId,
 	useRef,
 	useState,
 } from "react";
-import {
-	GAME_FOCUS,
-	GAME_PLATE,
-	GameAction,
-	GameIconButton,
-} from "./game-hud.tsx";
+import { GAME_PLATE, GameIconButton } from "./game-hud.tsx";
 import type { ActTotals } from "./game3d-acts.ts";
+import {
+	BodyButton,
+	HudStat,
+	listFold,
+	NeedsYou,
+	starMeta,
+} from "./planets-hud-rows.tsx";
 import {
 	PLANET_KIND_LABELS,
 	type PlanetSystem,
@@ -48,6 +38,9 @@ import {
 	TeamMark,
 } from "./planets-parts.tsx";
 
+export { PlanetsControls } from "./planets-hud-controls.tsx";
+export { PlanetsLegend } from "./planets-hud-legend.tsx";
+
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "End", "Home"]);
 
 /**
@@ -66,14 +59,14 @@ export interface SystemCardActs {
 }
 
 /** A planet row's name with acts: its act sentence and what the row does. */
-export function actRowLabel(act: InterfaceAgentAct): string {
+export function actRowLabel(
+	act: InterfaceAgentAct,
+	tl: LiteralMessage
+): string {
 	return act.act === "asking" && act.ask
-		? `${act.ariaLabel} Answer their ask.`
-		: `${act.ariaLabel} Visit their planet.`;
+		? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+		: tl("{ariaLabel} Visit their planet.", { ariaLabel: act.ariaLabel });
 }
-/** Keys in the legend: bordered so they read on glass in every theme. */
-const KEY =
-	"border-2 border-(--gk-edge) bg-(--gk-plate-sunk) text-(--gk-ink) shadow-none";
 
 /**
  * Top-left: what the system holds (agents, working, waiting on you) and a
@@ -116,6 +109,7 @@ export function PlanetsSystemCard({
 	system: PlanetSystem;
 }) {
 	const { summary } = system;
+	const tl = useLiteralMessages();
 	const listId = useId();
 	// The reader's own choice wins; until then the list opens when there is room.
 	const [chosen, setChosen] = useState<boolean | null>(null);
@@ -185,7 +179,14 @@ export function PlanetsSystemCard({
 							<span data-act-summary="">{actLayer.summary}</span>
 						) : null}
 						{!loading && sheet && !actLayer
-							? `${plural(summary.agents, "planet")} · ${summary.working} working · ${summary.waitingOnYou} for you`
+							? tl(
+									"{agents, plural, one {{agents} planet} other {{agents} planets}} · {working} working · {waitingOnYou} for you",
+									{
+										agents: summary.agents,
+										waitingOnYou: summary.waitingOnYou,
+										working: summary.working,
+									}
+								)
 							: null}
 						{loading || sheet || actLayer ? null : "Your agents in orbit"}
 					</p>
@@ -289,7 +290,10 @@ export function PlanetsSystemCard({
 					<li>
 						<BodyButton
 							active={focusId === STAR_ID}
-							description={`You, the star. ${plural(summary.waitingOnYou, "thread")} waiting on you`}
+							description={tl(
+								"You, the star. {waitingOnYou, plural, one {{waitingOnYou} thread} other {{waitingOnYou} threads}} waiting on you",
+								{ waitingOnYou: summary.waitingOnYou }
+							)}
 							meta={
 								<>
 									<NeedsYou
@@ -329,7 +333,7 @@ export function PlanetsSystemCard({
 									}
 									active={focusId === planet.id}
 									description={
-										act ? actRowLabel(act) : planetDescription(planet)
+										act ? actRowLabel(act, tl) : planetDescription(planet)
 									}
 									meta={
 										<>
@@ -394,312 +398,5 @@ export function PlanetsSystemCard({
 				</div>
 			) : null}
 		</section>
-	);
-}
-
-/**
- * How the planet list folds. Without acts: hidden under 1100px unless
- * opened (or always while folded in a sheet or beside a thread). With
- * acts the folded list is only visually hidden, so every row stays a
- * reachable target.
- */
-function listFold(
-	acts: boolean,
-	expanded: boolean,
-	foldable: boolean
-): string | null {
-	if (expanded) {
-		return null;
-	}
-	if (foldable) {
-		return acts ? "sr-only" : "hidden";
-	}
-	return acts ? "@max-[1100px]:sr-only" : "@max-[1100px]:hidden";
-}
-
-/**
- * "1 needs you · 2 your turn · ": each count in its own status color, so one
- * failed run does not paint the whole line red; nothing when none wait.
- */
-function NeedsYou({
-	attention,
-	trailing = true,
-	yourTurn,
-}: {
-	attention: number;
-	/** Add the separator before whatever follows on the line. */
-	trailing?: boolean;
-	yourTurn: number;
-}) {
-	const parts: ReactNode[] = [];
-	if (attention > 0) {
-		parts.push(
-			<span className="font-medium text-status-destructive" key="attention">
-				{attention} needs you
-			</span>
-		);
-	}
-	if (yourTurn > 0) {
-		parts.push(
-			<span className="font-medium text-(--planets-turn)" key="turn">
-				{yourTurn} your turn
-			</span>
-		);
-	}
-	if (parts.length === 0) {
-		return null;
-	}
-	return (
-		<>
-			{parts[0]}
-			{parts.length > 1 ? <> · {parts[1]}</> : null}
-			{trailing ? " · " : null}
-		</>
-	);
-}
-
-/** The star's line when nothing waits on you. */
-function starMeta(system: PlanetSystem): string {
-	return system.unassigned.length > 0
-		? plural(system.unassigned.length, "own thread")
-		: "Your star";
-}
-
-function HudStat({
-	label,
-	loading,
-	tone,
-	value,
-}: {
-	label: string;
-	loading: boolean;
-	tone?: string;
-	value: number;
-}) {
-	return (
-		<div className="flex min-w-0 flex-col-reverse justify-end gap-0.5 not-first:border-(--gk-plate-sunk) not-first:border-l-2 py-2 pr-4 pl-3.5 last:pr-3.5">
-			<dt className="truncate font-semibold text-(--gk-ink-muted) text-[12px] uppercase leading-4 tracking-wide">
-				{label}
-			</dt>
-			<dd
-				className={cn(
-					"gk-display text-(--gk-ink) text-[26px] tabular-nums leading-7",
-					tone
-				)}
-			>
-				{loading ? <Skeleton className="my-1 h-4 w-6" radius="pill" /> : value}
-			</dd>
-		</div>
-	);
-}
-
-function BodyButton({
-	act = null,
-	active,
-	description,
-	meta,
-	name,
-	onBlur,
-	onClick,
-	onFocus,
-	ref,
-	swatch,
-	tabbable,
-	team,
-	trailing,
-}: {
-	/** With acts: the row is this agent's target; an asking one answers. */
-	act?: { agentId: string; asking: boolean } | null;
-	active: boolean;
-	description: string;
-	meta: ReactNode;
-	name: string;
-	onBlur: () => void;
-	onClick: (event: MouseEvent<HTMLButtonElement>) => void;
-	onFocus: () => void;
-	ref: (element: HTMLButtonElement | null) => void;
-	swatch: ReactNode;
-	tabbable: boolean;
-	team?: ReactNode;
-	trailing: ReactNode;
-}) {
-	return (
-		<button
-			aria-current={active && !act?.asking ? "true" : undefined}
-			aria-label={description}
-			className={cn(
-				"group flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-(--gk-plate-sunk) active:bg-(--gk-plate-sunk) aria-[current=true]:bg-(--gk-plate-sunk)",
-				GAME_FOCUS
-			)}
-			data-act-agent={act?.agentId}
-			onBlur={onBlur}
-			onClick={onClick}
-			onFocus={onFocus}
-			onPointerEnter={onFocus}
-			onPointerLeave={onBlur}
-			ref={ref}
-			tabIndex={tabbable ? 0 : -1}
-			type="button"
-		>
-			{swatch}
-			<span className="flex min-w-0 flex-1 flex-col">
-				<span className="flex min-w-0 items-center gap-1.5">
-					<span className="gk-display truncate text-(--gk-ink) text-[16px] leading-5">
-						{name}
-					</span>
-					{team}
-				</span>
-				<span className="truncate text-[12px] text-muted-foreground leading-4">
-					{meta}
-				</span>
-			</span>
-			{trailing}
-		</button>
-	);
-}
-
-/** Bottom-left: what moon colors mean, team orbit tints, and the controls. */
-export function PlanetsLegend({
-	bare = false,
-	palette,
-	system,
-}: {
-	/** Inside the phone's bottom sheet: no plate of its own, always shown. */
-	bare?: boolean;
-	palette: PlanetsPalette;
-	system: PlanetSystem;
-}) {
-	return (
-		<section
-			aria-label="Legend"
-			className={cn(
-				"pointer-events-auto flex max-w-full flex-col gap-2 px-4 py-2.5",
-				bare ? null : cn(GAME_PLATE, "@max-[620px]:hidden")
-			)}
-			data-planets-hud={bare ? undefined : "legend"}
-		>
-			<div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
-				<span className="gk-display text-(--gk-ink) text-[15px]">Moons</span>
-				<ul className="contents">
-					{THREAD_STATUS_ORDER.map((status) => (
-						<li
-							className="flex items-center gap-1.5 whitespace-nowrap font-semibold text-(--gk-ink) text-[13px]"
-							key={status}
-						>
-							<PlanetsStatusDot status={status} />
-							{THREAD_STATUS_LABELS[status]}
-						</li>
-					))}
-				</ul>
-			</div>
-			<div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 font-medium text-(--gk-ink-muted) text-[13px]">
-				{system.teams.length > 0 ? (
-					<ul aria-label="Team orbits" className="contents">
-						{system.teams.map((team) => (
-							<li
-								className="flex items-center gap-1.5 whitespace-nowrap"
-								key={team.id}
-							>
-								<TeamMark
-									className="w-5"
-									color={teamColor(palette, team.colorIndex)}
-								/>
-								{team.name} orbits
-							</li>
-						))}
-					</ul>
-				) : null}
-				<span className="flex @max-[860px]:hidden items-center gap-1.5 whitespace-nowrap">
-					Drag to orbit · Scroll to zoom ·
-					<span className="flex items-center gap-1">
-						<Kbd className={KEY}>←</Kbd>
-						<Kbd className={KEY}>→</Kbd>
-					</span>
-					visit planets
-				</span>
-			</div>
-		</section>
-	);
-}
-
-/** Top-right: zoom, back to the overview, and a new thread. */
-export function PlanetsControls({
-	children,
-	compact = false,
-	disabled,
-	onNewThread,
-	onOverview,
-	onZoom,
-	showCamera,
-	stacked = false,
-}: {
-	/** The act layer's HUD actions (Need you, Queue), after New thread. */
-	children?: ReactNode;
-	/** Narrow scenes: the action shows its icon only. */
-	compact?: boolean;
-	disabled: boolean;
-	onNewThread: () => void;
-	onOverview: () => void;
-	onZoom: (factor: number) => void;
-	showCamera: boolean;
-	/** A phone with the act layer's actions: one column down the right. */
-	stacked?: boolean;
-}) {
-	return (
-		<div
-			className={cn(
-				"pointer-events-auto flex shrink-0 items-start @min-[672px]:gap-3 gap-2",
-				stacked && "flex-col items-end"
-			)}
-			data-planets-hud="controls"
-		>
-			{showCamera ? (
-				<div
-					aria-label="Camera"
-					className={cn(
-						GAME_PLATE,
-						"flex @max-[560px]:hidden items-center gap-1.5 p-1"
-					)}
-					role="group"
-				>
-					<GameIconButton
-						disabled={disabled}
-						label="Zoom in"
-						onClick={() => onZoom(0.72)}
-						title="Zoom in"
-					>
-						<Plus aria-hidden="true" className="size-5" strokeWidth={2.75} />
-					</GameIconButton>
-					<GameIconButton
-						disabled={disabled}
-						label="Zoom out"
-						onClick={() => onZoom(1.38)}
-						title="Zoom out"
-					>
-						<Minus aria-hidden="true" className="size-5" strokeWidth={2.75} />
-					</GameIconButton>
-					<GameIconButton
-						disabled={disabled}
-						label="Overview"
-						onClick={onOverview}
-						title="Back to the overview"
-					>
-						<ScanSearch
-							aria-hidden="true"
-							className="size-5"
-							strokeWidth={2.5}
-						/>
-					</GameIconButton>
-				</div>
-			) : null}
-			<GameAction
-				compact={compact}
-				disabled={disabled}
-				icon={<SquarePen strokeWidth={2.5} />}
-				label="New thread"
-				onClick={onNewThread}
-			/>
-			{children}
-		</div>
 	);
 }

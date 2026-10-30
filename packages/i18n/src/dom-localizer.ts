@@ -27,6 +27,8 @@ export interface DomLocalizerState {
 	availablePacks: readonly LanguagePack[];
 	hasOverlayMessage(id: string): boolean;
 	t(id: string, values?: MessageValuesInput, fallback?: string): string;
+	/** Dynamic text through the literal catalog's templates, if it matches. */
+	templateMessage?(text: string): string | undefined;
 }
 
 interface DomTranslationRecord {
@@ -55,7 +57,7 @@ export interface DomLocalizerOptions {
 	records?: DomLocalizerRecords;
 	/** Node to scan and observe (an element, document or shadow root).
 	 * Defaults to `document.documentElement`. */
-	root?: Node | null;
+	root?: Node | null | undefined;
 	state: () => DomLocalizerState;
 	/** Changes whenever the runtime's translations may have changed. */
 	translationKey: () => string;
@@ -93,7 +95,8 @@ function queryElements(scanRoot: Node): Element[] {
 
 /**
  * Translate catalog literals under `root` and keep translating as it changes.
- * Named messages and published literal ids resolve synchronously; inside a
+ * Named messages and published literal ids resolve synchronously, as does
+ * dynamic text matching a catalog template; inside a
  * Companion frame, text the frame cannot translate is asked of the host,
  * which owns the official catalog. Unknown text is applied unchanged and is
  * never ICU-formatted. Returns a disposer.
@@ -138,9 +141,16 @@ export function observeDomLocalization(
 			Object.hasOwn(EN_MESSAGES, id) ||
 			current.hasOverlayMessage(id) ||
 			current.availablePacks.some((pack) => Object.hasOwn(pack.messages, id));
+		// Dynamic sentences (`Deleted Q3 plan`) match a catalog template; the
+		// captured values stay as written.
+		const templated = knownLiteral
+			? undefined
+			: current.templateMessage?.(collapsed);
 		// Runtime prose is data, even if it resembles ICU syntax. Cache its
 		// unchanged output so subsequent mutations do not retry translation.
-		if (!(knownLiteral || explicitLiteral || remote)) {
+		if (
+			!(knownLiteral || templated !== undefined || explicitLiteral || remote)
+		) {
 			apply(source);
 			return;
 		}
@@ -150,6 +160,8 @@ export function observeDomLocalization(
 		try {
 			if (knownLiteral) {
 				local = current.t(id, {}, collapsed);
+			} else if (templated !== undefined) {
+				local = templated;
 			}
 		} catch {
 			apply(source);

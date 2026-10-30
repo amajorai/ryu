@@ -34,54 +34,15 @@
 // shows once, under Installed). Searching flattens back to a single grid, the
 // same way the Tools library behaves.
 
-import {
-	Alert01Icon,
-	Delete01Icon,
-	Download01Icon,
-	Target01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { InstallProgressButton } from "@ryu/blocks/desktop/install-button.tsx";
-import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
-import StoreCatalogLayout, {
-	StoreCardGrid,
-	useStoreViewMode,
-} from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
-import StoreItemAction, {
-	storeItemContextMenu,
-} from "@ryu/marketplace/catalog/chrome/store-item-action";
-import StoreShelfHeading from "@ryu/marketplace/catalog/chrome/store-shelf-heading";
-import {
-	ListingAsideCard,
-	ListingDetailShell,
-	ListingHero,
-	ListingInfoGrid,
-	ListingSection,
-	ListingStatStrip,
-} from "@ryu/marketplace/catalog/detail/listing-detail-shell";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import StoreCatalogLayout from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { useInstalledOnly } from "@ryu/marketplace/catalog/installed-filter";
-import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Empty,
-	EmptyContent,
-	EmptyDescription,
-	EmptyHeader,
-	EmptyMedia,
-	EmptyTitle,
-} from "@ryu/ui/components/empty.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import {
-	StatusBadge,
-	UNAVAILABLE_ROW_CLASS,
-} from "@ryu/ui/components/status-badge.tsx";
 import { useMemo, useState } from "react";
-import { AgentBadgeCard } from "@/src/components/agents/AgentBadgeCard.tsx";
 import { useMarketplacePurchase } from "@/src/components/marketplace/useMarketplacePurchase.ts";
-import { NativeProviderAccounts } from "@/src/components/settings/NativeProviderAccounts.tsx";
 import {
 	AgentMysteryBox,
-	AgentMysteryBoxBanner,
+	AgentsOverflowMenu,
 } from "@/src/components/store/AgentMysteryBox.tsx";
 import {
 	CommunityAgentDetail,
@@ -90,461 +51,17 @@ import {
 import { useDebouncedValue } from "@/src/hooks/use-debounced-value.ts";
 import { useAgentsCatalog } from "@/src/hooks/useAgentsCatalog.ts";
 import { useCommunityAgents } from "@/src/hooks/useCommunityAgents.ts";
-import {
-	type PluginSettingsOpener,
-	usePluginSettingsOpener,
-} from "@/src/hooks/usePluginSettingsOpener.ts";
-import { groupAgents } from "@/src/lib/agent-catalog-groups.ts";
-import { AgentCatalogLogo } from "@/src/lib/agent-catalog-logo.tsx";
+import { usePluginSettingsOpener } from "@/src/hooks/usePluginSettingsOpener.ts";
 import type { MysteryAgent } from "@/src/lib/agent-mystery-box.ts";
-import type {
-	AgentCatalogEntry,
-	PublishedAgentInstallResult,
-} from "@/src/lib/api/agents.ts";
+import type { PublishedAgentInstallResult } from "@/src/lib/api/agents.ts";
 import { ApiError } from "@/src/lib/api/client.ts";
 import type { MarketplaceCard } from "@/src/lib/api/marketplace.ts";
-import { useInstallProgress } from "@/src/store/useDownloadsStore.ts";
-
-const SEARCH_DEBOUNCE_MS = 200;
-
-/** The flagship agent: always installed, cannot be uninstalled. */
-const FLAGSHIP_AGENT_ID = "ryu";
-
-/** Why an agent row is dimmed and un-addable. One string, three surfaces (the
- *  card action, the detail header, the detail hero), so the card's tooltip and
- *  the hero's chip cannot drift into two different explanations. */
-const UNAVAILABLE_AGENT_REASON = "Unavailable on this platform";
-
-/** Sort recommended agents first, then by display name. */
-function sortAgents(agents: AgentCatalogEntry[]): AgentCatalogEntry[] {
-	return [...agents].sort((a, b) => {
-		if (a.recommended !== b.recommended) {
-			return a.recommended ? -1 : 1;
-		}
-		return a.name.localeCompare(b.name);
-	});
-}
-
-function InstallButton({
-	entry,
-	busy,
-	onInstall,
-	onUninstall,
-}: {
-	entry: AgentCatalogEntry;
-	busy: boolean;
-	onInstall: () => void;
-	onUninstall: () => void;
-}) {
-	const locked = entry.id === FLAGSHIP_AGENT_ID;
-	const { percent } = useInstallProgress(["agent"], entry.name);
-	if (entry.added) {
-		// The flagship can never be removed, so it gets the shared status glyph
-		// rather than a disabled Remove button — a disabled verb reads as "not
-		// right now" when the answer is "not ever".
-		if (locked) {
-			return <StatusBadge kind="builtin" />;
-		}
-		return (
-			<Button loading={busy} onClick={onUninstall} size="sm" variant="ghost">
-				{!busy && <HugeiconsIcon className="size-4" icon={Delete01Icon} />}
-				Remove
-			</Button>
-		);
-	}
-	if (!entry.available) {
-		return <StatusBadge kind="unavailable" label={UNAVAILABLE_AGENT_REASON} />;
-	}
-	return (
-		<InstallProgressButton
-			idleVariant="ghost"
-			installing={busy}
-			onClick={onInstall}
-			percent={percent}
-		>
-			<HugeiconsIcon className="size-4" icon={Download01Icon} />
-			Add
-		</InstallProgressButton>
-	);
-}
-
-/** Card lifecycle control: locked flagship, unavailable, or install/uninstall. */
-function AgentCardAction({
-	entry,
-	busy,
-	onInstall,
-	onUninstall,
-	onOpenSettings,
-}: {
-	entry: AgentCatalogEntry;
-	busy: boolean;
-	onInstall: () => void;
-	onUninstall: () => void;
-	/** Set only for a listing that is ALSO an installed plugin with settings —
-	 *  most agents are not, and then no Settings row renders. */
-	onOpenSettings?: (() => void) | null;
-}) {
-	const { percent } = useInstallProgress(["agent"], entry.name);
-	if (entry.id === FLAGSHIP_AGENT_ID) {
-		return (
-			<StoreItemAction
-				installed
-				locked
-				lockedLabel="Built in"
-				onOpenSettings={onOpenSettings ?? undefined}
-			/>
-		);
-	}
-	if (!(entry.available || entry.added)) {
-		return <StatusBadge kind="unavailable" label={UNAVAILABLE_AGENT_REASON} />;
-	}
-	return (
-		<StoreItemAction
-			busy={busy}
-			installed={entry.added}
-			onInstall={onInstall}
-			onOpenSettings={onOpenSettings ?? undefined}
-			onUninstall={onUninstall}
-			percent={percent}
-		/>
-	);
-}
-
-function AgentCards({
-	agents,
-	selectedId,
-	pendingId,
-	onSelect,
-	onInstall,
-	onUninstall,
-	settingsOpener,
-}: {
-	agents: AgentCatalogEntry[];
-	selectedId: string | null;
-	pendingId: string | null;
-	onSelect: (id: string) => void;
-	onInstall: (id: string) => void;
-	onUninstall: (id: string) => void;
-	/** Resolves a row to its settings tab; null for anything that is not an
-	 *  installed plugin, which is most agents. */
-	settingsOpener: PluginSettingsOpener;
-}) {
-	const view = useStoreViewMode()?.mode ?? "showcase";
-	return (
-		<StoreCardGrid>
-			{agents.map((entry) => {
-				const action = (
-					<AgentCardAction
-						busy={pendingId === entry.id}
-						entry={entry}
-						onInstall={() => onInstall(entry.id)}
-						onOpenSettings={settingsOpener(entry.id)}
-						onUninstall={() => onUninstall(entry.id)}
-					/>
-				);
-				// Mirrors `AgentCardAction` branch for branch, in its order. The
-				// flagship is checked FIRST and pinned to installed+locked exactly as
-				// the card does — it ships with Ryu whether or not its catalog row
-				// happens to carry `added`, and a right-click offering to "Add" the
-				// built-in agent is the one wrong answer here. Then: an agent this
-				// platform cannot run has no verbs at all, and everything else gets
-				// the same Add/Settings/Remove the card's own control offers.
-				const contextMenu =
-					entry.id === FLAGSHIP_AGENT_ID
-						? storeItemContextMenu({
-								installed: true,
-								locked: true,
-								onOpenSettings: settingsOpener(entry.id) ?? undefined,
-							})
-						: entry.available || entry.added
-							? storeItemContextMenu({
-									installed: entry.added,
-									onInstall: () => onInstall(entry.id),
-									onOpenSettings: settingsOpener(entry.id) ?? undefined,
-									onUninstall: () => onUninstall(entry.id),
-								})
-							: undefined;
-				// An agent that cannot run here is dimmed, never hidden: "why is
-				// Codex not in this list?" is a worse question to leave the user with
-				// than a greyed row whose glyph says which platform it needs.
-				const className =
-					entry.available || entry.added ? undefined : UNAVAILABLE_ROW_CLASS;
-				if (view === "showcase") {
-					return (
-						<AgentBadgeCard
-							action={action}
-							className={className}
-							contextMenu={contextMenu}
-							employeeId={entry.id}
-							key={entry.id}
-							// On the card face, above the name — Claude, Codex and Cursor are
-							// recognised by their marks long before their names are read, and a
-							// 20px glyph in the footer strip under the card read as an
-							// annotation rather than as whose card this is.
-							logo={
-								<AgentCatalogLogo
-									className="size-20"
-									entry={entry}
-									size="80px"
-								/>
-							}
-							name={entry.name}
-							onOpen={() => onSelect(entry.id)}
-							role={entry.description}
-							selected={entry.id === selectedId}
-						/>
-					);
-				}
-				return (
-					<StoreCatalogCard
-						action={action}
-						brandIcon={
-							<AgentCatalogLogo className="size-8" entry={entry} size="32px" />
-						}
-						contextMenu={contextMenu}
-						description={entry.description}
-						dimmed={!(entry.available || entry.added)}
-						iconUrl={entry.iconUrl}
-						key={entry.id}
-						name={entry.name}
-						onClick={() => onSelect(entry.id)}
-						seedId={entry.id}
-						selected={entry.id === selectedId}
-					/>
-				);
-			})}
-		</StoreCardGrid>
-	);
-}
-
-function AgentList({
-	agents,
-	grouped,
-	loading,
-	error,
-	selectedId,
-	pendingId,
-	onSelect,
-	onInstall,
-	onUninstall,
-	onClearSearch,
-	onRetry,
-	settingsOpener,
-}: {
-	agents: AgentCatalogEntry[];
-	/** False while searching: results collapse into a single ungrouped grid. */
-	grouped: boolean;
-	loading: boolean;
-	error: string | null;
-	selectedId: string | null;
-	pendingId: string | null;
-	onSelect: (id: string) => void;
-	onInstall: (id: string) => void;
-	onUninstall: (id: string) => void;
-	onClearSearch: () => void;
-	onRetry: () => void;
-	settingsOpener: PluginSettingsOpener;
-}) {
-	if (loading && agents.length === 0) {
-		return <SkeletonRows inset="catalog" />;
-	}
-	if (error && agents.length === 0) {
-		return (
-			<Empty className="h-full" inset="dense">
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={Target01Icon} />
-					</EmptyMedia>
-					<EmptyTitle>Couldn&apos;t load agents</EmptyTitle>
-					<EmptyDescription>{error}</EmptyDescription>
-				</EmptyHeader>
-				<EmptyContent>
-					<Button onClick={onRetry} size="sm" variant="ghost">
-						Try again
-					</Button>
-				</EmptyContent>
-			</Empty>
-		);
-	}
-	if (agents.length === 0) {
-		return (
-			<Empty className="h-full" inset="dense">
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={Target01Icon} />
-					</EmptyMedia>
-					<EmptyTitle>No agents found</EmptyTitle>
-					<EmptyDescription>Try a different search.</EmptyDescription>
-				</EmptyHeader>
-				<EmptyContent>
-					<Button onClick={onClearSearch} size="sm" variant="ghost">
-						Clear search
-					</Button>
-				</EmptyContent>
-			</Empty>
-		);
-	}
-
-	const cardProps = {
-		onInstall,
-		onSelect,
-		onUninstall,
-		pendingId,
-		selectedId,
-		settingsOpener,
-	};
-	if (!grouped) {
-		return <AgentCards agents={agents} {...cardProps} />;
-	}
-	return (
-		<div>
-			{groupAgents(agents).map((group) => (
-				<section className="mb-6" key={group.key}>
-					<StoreShelfHeading>{group.label}</StoreShelfHeading>
-					<AgentCards agents={group.items} {...cardProps} />
-				</section>
-			))}
-		</div>
-	);
-}
-
-function AgentDetailPanel({
-	entry,
-	busy,
-	error,
-	onInstall,
-	onUninstall,
-}: {
-	entry: AgentCatalogEntry | null;
-	busy: boolean;
-	error: string | null;
-	onInstall: () => void;
-	onUninstall: () => void;
-}) {
-	if (!entry) {
-		return (
-			<Empty className="h-full">
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={Target01Icon} />
-					</EmptyMedia>
-					<EmptyTitle>No agent selected</EmptyTitle>
-					<EmptyDescription>
-						Pick an agent on the left to review its details and install it.
-					</EmptyDescription>
-				</EmptyHeader>
-			</Empty>
-		);
-	}
-
-	const updateAvailable =
-		entry.versionStatus === "behind_latest" ||
-		entry.bridgeVersionStatus === "behind_latest";
-
-	return (
-		<ListingDetailShell
-			actions={
-				<>
-					<InstallButton
-						busy={busy}
-						entry={entry}
-						onInstall={onInstall}
-						onUninstall={onUninstall}
-					/>
-					{error && (
-						<span className="ml-auto flex items-center gap-1.5 text-sm text-status-destructive">
-							<HugeiconsIcon className="size-4 shrink-0" icon={Alert01Icon} />
-							{error}
-						</span>
-					)}
-				</>
-			}
-			aside={
-				<ListingAsideCard title="Information">
-					<ListingInfoGrid
-						rows={[
-							{ label: "Engine", value: entry.engine ?? "—" },
-							{ label: "Transport", value: entry.transport ?? "—" },
-							{ label: "Registry ID", value: entry.registryId ?? "—" },
-							{
-								label: "On PATH",
-								value:
-									entry.detected === null
-										? "Unknown"
-										: entry.detected
-											? "Yes"
-											: "No",
-							},
-							{
-								label: "Gateway",
-								value: entry.gatewayBypass ? "Bypassed" : "Routed",
-							},
-						]}
-					/>
-				</ListingAsideCard>
-			}
-			hero={
-				<ListingHero
-					badges={[
-						entry.added ? "Added" : "Not added",
-						entry.recommended ? "Recommended" : null,
-						entry.available ? null : UNAVAILABLE_AGENT_REASON,
-						updateAvailable ? "Update available" : null,
-					].filter((b): b is string => Boolean(b))}
-					icon={
-						<AgentCatalogLogo className="size-9" entry={entry} size="36px" />
-					}
-					name={entry.name}
-					tagline={entry.description}
-				/>
-			}
-			stats={
-				<ListingStatStrip
-					items={[
-						{
-							label: "Agent",
-							sub: entry.latestVersion
-								? `Latest v${entry.latestVersion}`
-								: undefined,
-							value: entry.installedVersion
-								? `v${entry.installedVersion}`
-								: (entry.latestVersion ?? "—"),
-						},
-						{
-							label: "Bridge",
-							sub: entry.latestBridgeVersion
-								? `Latest v${entry.latestBridgeVersion}`
-								: undefined,
-							value: entry.installedBridgeVersion
-								? `v${entry.installedBridgeVersion}`
-								: (entry.latestBridgeVersion ?? "—"),
-						},
-						{ label: "Engine", value: entry.engine ?? "—" },
-						{ label: "Transport", value: entry.transport ?? "—" },
-						{
-							label: "Status",
-							value: entry.added ? "Added" : "Available",
-						},
-					]}
-				/>
-			}
-		>
-			<ListingSection title="About">
-				<p className="text-muted-foreground text-sm leading-relaxed">
-					{entry.description ?? "No description provided."}
-				</p>
-			</ListingSection>
-			{entry.installHint ? (
-				<ListingSection title="Adding this agent">
-					<p className="text-muted-foreground text-sm">{entry.installHint}</p>
-				</ListingSection>
-			) : null}
-			{entry.added && entry.id !== FLAGSHIP_AGENT_ID ? (
-				<NativeProviderAccounts agentId={entry.id} key={entry.id} />
-			) : null}
-		</ListingDetailShell>
-	);
-}
+import { AgentDetailPanel } from "./agents/AgentDetailPanel.tsx";
+import {
+	AgentList,
+	SEARCH_DEBOUNCE_MS,
+	sortAgents,
+} from "./agents/agent-list.tsx";
 
 export default function AgentsCatalogSection({
 	initialQuery = "",
@@ -559,6 +76,7 @@ export default function AgentsCatalogSection({
 	 *  without tabs omit it and the detail shows no link. */
 	onOpenAgentAccountAccess?: (agent: { id: string; name: string }) => void;
 } = {}) {
+	const tl = useLiteralMessages();
 	const [query, setQuery] = useState(initialQuery);
 	const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
 	// Seeded, not synced: this catalog is fetched whole and filtered client-side,
@@ -662,10 +180,13 @@ export default function AgentsCatalogSection({
 			setInstalledRequires((prev) => ({ ...prev, [card.id]: result }));
 			setSelectedId(null);
 			setSelectedCommunity(card);
-			toast.success(`${result.agent.name} is now one of your agents`, {
-				description:
-					"Open it to grant anything it asked for — nothing was enabled for you.",
-			});
+			toast.success(
+				tl("{name} is now one of your agents", { name: result.agent.name }),
+				{
+					description:
+						"Open it to grant anything it asked for — nothing was enabled for you.",
+				}
+			);
 		} catch (e) {
 			toast.error("Couldn't install this agent", {
 				description: e instanceof Error ? e.message : String(e),
@@ -677,10 +198,13 @@ export default function AgentsCatalogSection({
 	const addTemplateFromBox = async (card: MarketplaceCard) => {
 		const result = await community.install(card.id);
 		setInstalledRequires((prev) => ({ ...prev, [card.id]: result }));
-		toast.success(`${result.agent.name} is now one of your agents`, {
-			description:
-				"Open its details to grant anything it asked for, and to choose which of your accounts it may use under Account access — nothing was enabled for you.",
-		});
+		toast.success(
+			tl("{name} is now one of your agents", { name: result.agent.name }),
+			{
+				description:
+					"Open its details to grant anything it asked for, and to choose which of your accounts it may use under Account access — nothing was enabled for you.",
+			}
+		);
 	};
 
 	const viewFromBox = (agent: MysteryAgent) => {
@@ -694,7 +218,7 @@ export default function AgentsCatalogSection({
 		}
 	};
 
-	const showMysteryBanner =
+	const showMysteryBox =
 		debouncedQuery.trim().length === 0 &&
 		!installedOnly &&
 		(agents.length > 0 || community.agents.length > 0);
@@ -705,6 +229,11 @@ export default function AgentsCatalogSection({
 
 	return (
 		<StoreCatalogLayout
+			actions={
+				showMysteryBox ? (
+					<AgentsOverflowMenu onOpenMysteryBox={() => setMysteryOpen(true)} />
+				) : null
+			}
 			detail={
 				selectedCommunity ? (
 					<CommunityAgentDetail
@@ -754,9 +283,6 @@ export default function AgentsCatalogSection({
 			hasSelection={selectedCommunity != null || selectedEntry != null}
 			list={
 				<>
-					{showMysteryBanner ? (
-						<AgentMysteryBoxBanner onOpen={() => setMysteryOpen(true)} />
-					) : null}
 					<AgentMysteryBox
 						onAddRuntime={install}
 						onAddTemplate={addTemplateFromBox}

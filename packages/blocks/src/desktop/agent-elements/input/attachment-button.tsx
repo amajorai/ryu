@@ -1,5 +1,6 @@
+import { Add01Icon, Attachment01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
-import { IconPaperclip, IconPlus } from "@tabler/icons-react";
 import { memo, type ReactNode } from "react";
 
 export type AttachmentButtonIcon = "plus" | "paperclip";
@@ -30,9 +31,17 @@ export const AttachmentButton = memo(function AttachmentButton({
 	if (isIconName(icon)) {
 		iconNode =
 			icon === "paperclip" ? (
-				<IconPaperclip className={iconClassName} strokeWidth={2} />
+				<HugeiconsIcon
+					className={iconClassName}
+					icon={Attachment01Icon}
+					strokeWidth={2}
+				/>
 			) : (
-				<IconPlus className={iconClassName} strokeWidth={2} />
+				<HugeiconsIcon
+					className={iconClassName}
+					icon={Add01Icon}
+					strokeWidth={2}
+				/>
 			);
 	} else {
 		iconNode = icon;

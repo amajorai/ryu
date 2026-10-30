@@ -6,7 +6,7 @@
 // appears there, which is the only thing a unit test can check without a DOM.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	AGENT_SETTINGS_ENTRIES,
@@ -14,7 +14,17 @@ import {
 	searchAgentSettings,
 } from "./agent-settings-search.ts";
 
-const SOURCE = readFileSync(join(import.meta.dir, "agent-edit.tsx"), "utf8");
+// The editor is split across `agent-edit.tsx` and its `agent-edit-*.tsx` parts.
+const SOURCE = readdirSync(import.meta.dir)
+	.filter(
+		(name) =>
+			(name === "agent-edit.tsx" || name.startsWith("agent-edit-")) &&
+			name.endsWith(".tsx") &&
+			!name.includes(".test.")
+	)
+	.sort()
+	.map((name) => readFileSync(join(import.meta.dir, name), "utf8"))
+	.join("\n");
 
 describe("agent settings index", () => {
 	test("every indexed label still exists in the editor", () => {

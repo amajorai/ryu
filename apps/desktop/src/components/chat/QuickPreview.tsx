@@ -45,7 +45,7 @@ function PreviewMessage({ message }: { message: ChatMessage }) {
 			className={`flex flex-col gap-1 ${isUser ? "items-end" : "items-start"}`}
 			data-testid={`quick-preview-message-${message.id}`}
 		>
-			<span className="type-compact px-2 text-muted-foreground/70">
+			<span className="px-2 text-muted-foreground/70 text-xs">
 				{isUser ? "You" : "Assistant"}
 			</span>
 			<Bubble
@@ -137,7 +137,7 @@ export function QuickPreview({
 						typography="compact-preview"
 					>
 						<span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-							<HugeiconsIcon icon={Message01Icon} size={15} />
+							<HugeiconsIcon icon={Message01Icon} size={16} />
 						</span>
 						<span className="truncate">{title}</span>
 					</DialogTitle>
@@ -146,7 +146,7 @@ export function QuickPreview({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="max-h-[min(32rem,60dvh)] min-h-32 overflow-y-auto rounded-2xl border border-border/60 bg-background/45 p-3">
+				<div className="max-h-[min(32rem,60dvh)] min-h-32 overflow-y-auto rounded-2xl border border-border bg-background/45 p-3">
 					{loading ? (
 						<SkeletonRows label="Loading messages…" spacing="comfortable" />
 					) : failed ? (

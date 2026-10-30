@@ -163,3 +163,65 @@ describe("Companion literals through the host", () => {
 		stop();
 	});
 });
+
+describe("dynamic sentences through catalog templates", () => {
+	const TEMPLATES: Record<string, string> = {
+		...GERMAN,
+		"Deleted {name}": "{name} gelöscht",
+		"Search {scope}": "{scope} durchsuchen",
+	};
+
+	function templateRuntime(): Runtime {
+		registerLiteralCatalogLoader((requested) =>
+			requested.startsWith("de") ? TEMPLATES : null
+		);
+		return new I18nRuntime([], { initialLocale: "de", initialPackId: null });
+	}
+
+	test("translate text and attributes around their values", async () => {
+		const runtime = templateRuntime();
+		document.body.innerHTML = [
+			"<p>Deleted   Q3 (draft) [v2] {x}</p>",
+			'<input aria-label="Search Inbox $1" placeholder="Search *.md">',
+			"<p>Deleted</p><p>Removed Q3 plan</p>",
+		].join("");
+		const stop = localizeDomRoot(runtime, document.body);
+		await settle();
+		const paragraphs = document.querySelectorAll("p");
+		expect(paragraphs[0]?.textContent).toBe("Q3 (draft) [v2] {x} gelöscht");
+		const input = query("input");
+		expect(input.getAttribute("aria-label")).toBe("Inbox $1 durchsuchen");
+		expect(input.getAttribute("placeholder")).toBe("*.md durchsuchen");
+		expect(paragraphs[1]?.textContent).toBe("Deleted");
+		expect(paragraphs[2]?.textContent).toBe("Removed Q3 plan");
+		stop();
+	});
+
+	test("a Companion host answers dynamic text through its templates", async () => {
+		templateRuntime();
+		const hostRuntime = new I18nRuntime([], {
+			initialLocale: "de",
+			initialPackId: null,
+		});
+		const frameRuntime = new I18nRuntime([], {
+			initialLocale: "de",
+			initialPackId: null,
+		});
+		const host: CompanionI18nApi = {
+			get: () => Promise.resolve(hostRuntime.getSnapshot()),
+			subscribe: () => ({ dispose: () => undefined }),
+			translate: ({ defaultMessage, id }) =>
+				Promise.resolve(hostRuntime.translate(id, undefined, defaultMessage)),
+		};
+		document.body.innerHTML = "<p>Deleted report.pdf</p>";
+		const stop = observeDomLocalization({
+			host,
+			state: stateOf(frameRuntime),
+			translationKey: () => String(frameRuntime.getVersion()),
+		});
+		await settle();
+		await settle();
+		expect(query("p").textContent).toBe("report.pdf gelöscht");
+		stop();
+	});
+});

@@ -116,7 +116,7 @@
   },
   "name": "@ryu/blocks",
   "peerDependencies": {
-    "motion": "*",
+    "motion": "^12.38.0",
     "next": "*",
     "next-themes": "^0.4.6",
     "react": "*",

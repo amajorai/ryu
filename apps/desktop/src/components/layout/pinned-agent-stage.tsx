@@ -48,7 +48,7 @@ const LAYOUT_STYLES = {
 	grid: {
 		avatarSize: "32px",
 		grid: "grid-cols-3",
-		name: "type-caption",
+		name: "text-xs",
 		tile: "min-h-[76px] flex-col justify-center gap-1 p-1.5",
 	},
 } satisfies Record<
@@ -127,7 +127,7 @@ function PinnedAgentTile({
 				</div>
 				{showTitle ? (
 					<div
-						className="type-compact mt-0.5 truncate text-muted-foreground"
+						className="mt-0.5 truncate text-muted-foreground text-xs"
 						title={agent.title}
 					>
 						{agent.title}
@@ -202,13 +202,13 @@ export function PinnedAgentStage({
 		>
 			<div
 				className={cn(
-					"type-compact flex items-center gap-1.5 px-1 text-muted-foreground uppercase",
+					"flex items-center gap-1.5 px-1 text-muted-foreground text-xs uppercase",
 					layoutStyles.authored2
 				)}
 			>
 				<HugeiconsIcon className="size-3 text-primary/80" icon={PinIcon} />
 				<span>Pinned</span>
-				<span className="text-muted-foreground/60 tabular-nums">
+				<span className="text-muted-foreground/70 tabular-nums">
 					{agents.length}
 				</span>
 			</div>

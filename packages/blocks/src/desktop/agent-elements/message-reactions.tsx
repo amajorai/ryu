@@ -1,3 +1,5 @@
+import { Add01Icon, SmilePlusIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { EmojiPicker } from "@ryu/ui/components/emoji-picker";
 import {
@@ -8,7 +10,6 @@ import {
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 
-import { IconMoodPlus, IconPlus } from "@tabler/icons-react";
 import { useState } from "react";
 
 export { isServerAssignedMessageId } from "./message-reaction-id.ts";
@@ -101,14 +102,18 @@ export function MessageReactionButton({
 					<button
 						aria-label="Add reaction"
 						className={cn(
-							"flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-60 transition-colors hover:bg-foreground/8 hover:text-foreground hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60",
+							"flex size-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
 							className
 						)}
 						data-slot="message-reaction-button"
 						title="Add reaction"
 						type="button"
 					>
-						<IconMoodPlus aria-hidden="true" className="size-3.5" />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className="size-3.5"
+							icon={SmilePlusIcon}
+						/>
 					</button>
 				}
 			/>
@@ -119,9 +124,9 @@ export function MessageReactionButton({
 							aria-label={`${bucket.emoji} ${formatNumber(bucket.count)}`}
 							aria-pressed={bucket.reactedByMe}
 							className={cn(
-								"flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs leading-none transition-colors hover:bg-foreground/8",
+								"flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs leading-none transition-colors hover:bg-muted",
 								bucket.reactedByMe
-									? "bg-primary/15 text-foreground"
+									? "bg-accent text-foreground"
 									: "text-muted-foreground"
 							)}
 							key={bucket.emoji}
@@ -137,7 +142,7 @@ export function MessageReactionButton({
 							{QUICK_REACTIONS.map((emoji) => (
 								<button
 									aria-label={tl("Add {emoji} reaction", { emoji })}
-									className="rounded-md p-1 text-base leading-none transition-colors hover:bg-foreground/8"
+									className="rounded-lg p-1 text-base leading-none transition-colors hover:bg-muted"
 									key={emoji}
 									onClick={() => handlePick(emoji)}
 									type="button"
@@ -148,12 +153,16 @@ export function MessageReactionButton({
 							<button
 								aria-expanded={showEmojiPicker}
 								aria-label="More emoji"
-								className="flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-foreground/8 hover:text-foreground"
+								className="flex items-center gap-0.5 rounded-lg px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 								onClick={() => setShowEmojiPicker(true)}
 								title="More emoji"
 								type="button"
 							>
-								<IconPlus aria-hidden="true" className="size-3.5" />
+								<HugeiconsIcon
+									aria-hidden="true"
+									className="size-3.5"
+									icon={Add01Icon}
+								/>
 								<span>More</span>
 							</button>
 						</>
@@ -204,11 +213,11 @@ export function MessageReactions({
 					aria-pressed={bucket.reactedByMe}
 					className={cn(
 						"flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs leading-none transition-colors",
-						"hover:bg-foreground/8",
+						"hover:bg-muted",
 						// The caller's own reactions are the only ones tinted, so a glance
 						// answers "did I already react" without counting.
 						bucket.reactedByMe
-							? "bg-primary/15 text-foreground"
+							? "bg-accent text-foreground"
 							: "text-muted-foreground"
 					)}
 					key={bucket.emoji}
@@ -249,10 +258,10 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
 				render={
 					<button
 						aria-label="Add reaction"
-						className="flex items-center rounded-full px-1 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground"
+						className="flex items-center rounded-full px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						type="button"
 					>
-						<IconMoodPlus className="size-3.5" />
+						<HugeiconsIcon className="size-3.5" icon={SmilePlusIcon} />
 					</button>
 				}
 			/>
@@ -261,7 +270,7 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
 					{QUICK_REACTIONS.map((emoji) => (
 						<button
 							aria-label={tl("Add {emoji} reaction", { emoji })}
-							className="rounded-md p-1 text-base leading-none transition-colors hover:bg-foreground/8"
+							className="rounded-lg p-1 text-base leading-none transition-colors hover:bg-muted"
 							key={emoji}
 							onClick={() => handlePick(emoji)}
 							type="button"
@@ -272,12 +281,16 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
 					<button
 						aria-expanded={showEmojiPicker}
 						aria-label="More emoji"
-						className="flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-foreground/8 hover:text-foreground"
+						className="flex items-center gap-0.5 rounded-lg px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 						onClick={() => setShowEmojiPicker(true)}
 						title="More emoji"
 						type="button"
 					>
-						<IconPlus aria-hidden="true" className="size-3.5" />
+						<HugeiconsIcon
+							aria-hidden="true"
+							className="size-3.5"
+							icon={Add01Icon}
+						/>
 						<span>More</span>
 					</button>
 				</div>

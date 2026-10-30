@@ -27,11 +27,9 @@
 // `request-locale-context.ts`, so the same precedence applies there.
 
 import type { AuthEndpointContext } from "@better-auth/core/context";
-import {
-	canonicalEmailLocale,
-	emailLocaleFromAcceptLanguage,
-} from "@ryu/email/i18n/email-locale.ts";
+import { canonicalEmailLocale } from "@ryu/email/i18n/email-locale.ts";
 import { z } from "zod";
+import { acceptLanguageTags, cookieValue } from "./locale-negotiation.ts";
 import { currentRequestLocaleScope } from "./request-locale-context.ts";
 
 /** The website's language cookie, shared with Better Auth's error i18n. */
@@ -45,19 +43,16 @@ export interface RequestLocales {
 	chosen: string | null;
 }
 
-function cookieValue(header: string | null, name: string): string | null {
-	if (!header) {
-		return null;
-	}
-	for (const part of header.split(";")) {
-		const separator = part.indexOf("=");
-		if (separator > 0 && part.slice(0, separator).trim() === name) {
-			const raw = part.slice(separator + 1).trim();
-			try {
-				return decodeURIComponent(raw);
-			} catch {
-				return null;
-			}
+/**
+ * The best `Accept-Language` entry email can render: an unsupported first
+ * choice (`nl`, `zh-TW`) yields to a later supported one instead of being
+ * stored as a language no email is written in.
+ */
+function acceptedEmailLocale(header: string | null): string | null {
+	for (const tag of acceptLanguageTags(header)) {
+		const locale = canonicalEmailLocale(tag);
+		if (locale) {
+			return locale;
 		}
 	}
 	return null;
@@ -70,7 +65,7 @@ export function requestLocales(
 		return { accepted: null, chosen: null };
 	}
 	return {
-		accepted: emailLocaleFromAcceptLanguage(headers.get("accept-language")),
+		accepted: acceptedEmailLocale(headers.get("accept-language")),
 		chosen: canonicalEmailLocale(
 			cookieValue(headers.get("cookie"), LOCALE_COOKIE)
 		),

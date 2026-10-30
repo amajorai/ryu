@@ -20,7 +20,7 @@ import "../../src/index.css";
 const HEADER = {
 	title: "Where should Ryu do the work?",
 	subtitle:
-		"Want the easiest setup? Start with Ryu Cloud. You can also run Ryu here or use a server your team already has.",
+		"Ryu Cloud is the easiest. You can also run Ryu here or on your team's server.",
 };
 
 function Column({

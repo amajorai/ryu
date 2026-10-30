@@ -1,13 +1,18 @@
 /* eslint-disable react/no-unknown-property */
-import {
-	type ClockOptions,
-	type InterfaceActivityKind,
-	type InterfaceAgentAct,
-	type InterfaceAsk,
-	type InterfaceSnapshot,
-	waitBand,
+import type {
+	ClockOptions,
+	InterfaceActivityKind,
+	InterfaceAgentAct,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
-import type { FarmDiorama, FarmField, PlacedBed } from "./farm-model.ts";
+import { Porch, Scarecrow, Sundial } from "./farm-acts-props.tsx";
+import {
+	NOTICE_SHIFT,
+	POST_HEIGHT,
+	POST_OUT,
+	porchSpots,
+} from "./farm-acts-spots.ts";
+import type { FarmDiorama, PlacedBed } from "./farm-model.ts";
 import { FARM_3D, FARM_PIP_SKIN, FARM_TIMER_SKIN } from "./farm-palette.ts";
 import {
 	ActStation,
@@ -40,6 +45,18 @@ import type {
 	VillagerTool,
 } from "./game3d-villager.tsx";
 
+export {
+	actGrowth,
+	growFocusCrops,
+	overripeReplies,
+} from "./farm-acts-growth.ts";
+export {
+	bedsByAgent,
+	benchOf,
+	farmPaths,
+	porchSpots,
+} from "./farm-acts-spots.ts";
+
 /**
  * The farm's act layer (spec §5 farm row): each farmer acts out its
  * agent's act on the kit (`actLife`). An asking farmer carries its letter
@@ -68,247 +85,6 @@ export const FARM_TOOLS: Partial<Record<InterfaceActivityKind, VillagerTool>> =
 export const FARM_SKIN: ActSkin = {
 	deliverable: { accent: FARM_3D.hay, color: FARM_3D.stake, shape: "box" },
 };
-
-/**
- * The queue runs on the lawn past the front bed row toward the porch at
- * the front-right, stepping toward you: on screen each plate sits right of
- * and a plate height plus a gap below the one before (a plate's bubble
- * hangs up and right of it, clear of the next). A notice stands at its own
- * slot shifted right on screen, never back toward the farmer before it.
- */
-const QUEUE_FRONT = 0.9;
-const SLOT_GAP = 2.0;
-/**
- * A notice's plate stands at a post's height, lower than a farmer's: the
- * notice stands right of its slot on screen (+x), away from the farmer
- * queued before it, so its plate never covers that farmer's face.
- */
-const NOTICE_SHIFT: Vec3 = [0.8, 0, 0];
-const SLOT_STEP = 1.1;
-/** Benches by the pond, one per limited farmer (more share the last). */
-const BENCHES = 3;
-const BENCH_GAP = 1.0;
-/** Where a queued farmer's fence post stands, from its slot, and how tall. */
-const POST_OUT: Vec3 = [0.55, 0, 0.25];
-const POST_HEIGHT = 0.42;
-/** The porch deck's top, where the tray's crates stand. */
-const DECK_TOP = 0.24;
-
-/** The gate's places: queue slots, the porch (you-spot, tray, mailbox) and the benches. */
-export function porchSpots(diorama: FarmDiorama): {
-	benches: Vec3[];
-	mailbox: Vec3;
-	porch: Vec3;
-	slots: Vec3[];
-	sundial: Vec3;
-	tray: Vec3;
-	you: Vec3;
-} {
-	const { bounds, pond } = diorama;
-	// From the front edge's middle (well inside a phone's frame) toward
-	// the porch at its right.
-	const z = bounds.maxZ + QUEUE_FRONT;
-	const left = (bounds.minX + bounds.maxX) / 2 + 0.4;
-	const slots: Vec3[] = [0, 1, 2, 3].map((index) => [
-		left + index * SLOT_GAP,
-		0,
-		z + index * SLOT_STEP,
-	]);
-	const last = slots[3] ?? [left, 0, z];
-	const porch: Vec3 = [last[0] + 1.6, 0, last[2] - 1.2];
-	const benchX = pond.x - pond.radius - 0.7;
-	const benches = Array.from(
-		{ length: BENCHES },
-		(_, index): Vec3 => [benchX, 0, pond.z - BENCH_GAP + index * BENCH_GAP]
-	);
-	return {
-		benches,
-		mailbox: [porch[0] - 0.95, 0, porch[2] + 0.45],
-		porch,
-		slots,
-		sundial: [benchX - 0.15, 0, pond.z + BENCH_GAP * 1.9],
-		tray: [porch[0] + 0.25, DECK_TOP, porch[2] + 0.3],
-		you: [porch[0], 0, porch[2] + 0.75],
-	};
-}
-
-/** Each agent's bed, by agent id. */
-export function bedsByAgent(diorama: FarmDiorama): Map<string, PlacedBed> {
-	const beds = new Map<string, PlacedBed>();
-	for (const placed of diorama.beds) {
-		if (placed.plot.agent) {
-			beds.set(placed.plot.agent.id, placed);
-		}
-	}
-	return beds;
-}
-
-/** Which bench (a waypoint id) each limited farmer sits on. */
-export function benchOf(
-	diorama: FarmDiorama,
-	acts: ReadonlyMap<string, InterfaceAgentAct>
-): Map<string, string> {
-	const benches = new Map<string, string>();
-	for (const placed of diorama.beds) {
-		const act = placed.plot.agent ? acts.get(placed.plot.agent.id) : undefined;
-		if (act?.act === "limited") {
-			benches.set(act.agentId, `bench-${Math.min(benches.size, BENCHES - 1)}`);
-		}
-	}
-	return benches;
-}
-
-/**
- * The farmers' waypoints: each farmer's spot, straight down (or up) its
- * strip to the earthen path nearest its row (or the front edge), along it
- * to a spine under the barn door, and down the spine to the gate (the
- * porch, the queue slots, the tray); the benches hang off the spine by the pond.
- */
-export function farmPaths(diorama: FarmDiorama): LifePaths {
-	const points: Record<string, Vec3> = {};
-	const links: [string, string][] = [];
-	const { barn, bounds } = diorama;
-	const spineX = (barn.minX + barn.maxX) / 2;
-	const porch = porchSpots(diorama);
-	const lanes = [
-		...diorama.paths.map((path) => (path.minZ + path.maxZ) / 2),
-		bounds.maxZ + 0.2,
-	].sort((a, b) => a - b);
-	points.you = porch.you;
-	points["you-tray"] = [porch.tray[0], 0, porch.tray[2] + 0.55];
-	for (const [index, slot] of porch.slots.entries()) {
-		points[`you-${index + 1}`] = slot;
-	}
-	links.push(
-		["you", "you-tray"],
-		["you", "you-4"],
-		["you-4", "you-3"],
-		["you-3", "you-2"],
-		["you-2", "you-1"]
-	);
-	// The spine runs from the barn door down to the front edge, then the gate.
-	points["spine-top"] = [spineX, 0, diorama.barn.maxZ + 0.4];
-	let previous = "spine-top";
-	for (const [index, z] of lanes.entries()) {
-		const spine = `spine-${index}`;
-		points[spine] = [spineX, 0, z];
-		links.push([previous, spine]);
-		previous = spine;
-	}
-	links.push([previous, "you"]);
-	for (const [index, bench] of porch.benches.entries()) {
-		points[`bench-${index}`] = [bench[0], 0, bench[2] + 0.45];
-		links.push(["spine-top", `bench-${index}`]);
-	}
-	for (const placed of diorama.beds) {
-		const agent = placed.plot.agent;
-		if (!agent) {
-			continue;
-		}
-		const [x, z] = placed.farmer;
-		const below = lanes.findIndex((lane) => lane > z);
-		const index = below === -1 ? lanes.length - 1 : below;
-		const station = `farmer-${agent.id}`;
-		const lane = `lane-${agent.id}`;
-		points[station] = [x, 0, z];
-		points[lane] = [x, 0, lanes[index] ?? z];
-		links.push([station, lane], [lane, `spine-${index}`]);
-	}
-	return { links, points };
-}
-
-/** An estimate's growth snaps to twelfths, so it re-grows a crop now and then, not every tick. */
-const GROWTH_STEPS = 12;
-
-/**
- * A working act's focus-crop growth (0..1): a plan's exact steps, or an
- * estimate snapped to twelfths (its `done` moves every second); else null.
- */
-export function actGrowth(act: InterfaceAgentAct): number | null {
-	const progress = act.progress;
-	if (!(act.threadId && progress && progress.total > 0)) {
-		return null;
-	}
-	const share = progress.done / progress.total;
-	return progress.kind === "estimate"
-		? Math.round(share * GROWTH_STEPS) / GROWTH_STEPS
-		: share;
-}
-
-/** Fallen fruit for a reply waiting by its wait band (0 fresh to 3 stale). */
-const FALLEN: Record<ReturnType<typeof waitBand>, number> = {
-	expiring: 3,
-	fresh: 0,
-	long: 2,
-	stale: 3,
-	unknown: 0,
-	waiting: 1,
-};
-
-/** How over-ripe each unread reply's crop is, by thread id. */
-export function overripeReplies(
-	asks: readonly InterfaceAsk[] | undefined,
-	nowMs: number
-): Map<string, number> {
-	const fallen = new Map<string, number>();
-	for (const ask of asks ?? []) {
-		if (ask.kind !== "reply" || !ask.threadId) {
-			continue;
-		}
-		const band = waitBand(
-			ask.since ? Date.parse(ask.since) : null,
-			nowMs,
-			ask.expiresAt ? Date.parse(ask.expiresAt) : null
-		);
-		fallen.set(ask.threadId, FALLEN[band]);
-	}
-	return fallen;
-}
-
-/**
- * The fields with each working farmer's focus crop grown to its plan's
- * steps (`growth`: exact steps, or the kit's estimate, since a guess still
- * grows the crop; a run with no progress at all keeps its own height),
- * and each unread reply's crop over-ripened by how long it has waited.
- */
-export function growFocusCrops(
-	fields: readonly FarmField[],
-	acts: ReadonlyMap<string, InterfaceAgentAct>,
-	overripe: ReadonlyMap<string, number> = new Map()
-): FarmField[] {
-	const growth = new Map<string, number>();
-	for (const act of acts.values()) {
-		const value = actGrowth(act);
-		if (act.threadId && value !== null) {
-			growth.set(act.threadId, value);
-		}
-	}
-	if (growth.size === 0 && overripe.size === 0) {
-		return [...fields];
-	}
-	return fields.map((field) => ({
-		...field,
-		plots: field.plots.map((plot) => {
-			const grow = <T extends { thread: { id: string } }>(crop: T) => {
-				const value = growth.get(crop.thread.id);
-				const fallen = overripe.get(crop.thread.id);
-				return {
-					...crop,
-					...(value === undefined ? {} : { growth: value }),
-					...(fallen ? { overripe: fallen } : {}),
-				};
-			};
-			return {
-				...plot,
-				crops: plot.crops.map(grow),
-				planted: plot.planted.map((entry) => ({
-					...entry,
-					crop: grow(entry.crop),
-				})),
-			};
-		}),
-	}));
-}
 
 /** The farmers as act villagers (plus the kids who help). */
 export function farmActVillagers({
@@ -591,141 +367,6 @@ export function FarmPorchActs({
 				snapshot={handlers.snapshot}
 				timerSkin={FARM_TIMER_SKIN}
 			/>
-		</group>
-	);
-}
-
-/** The farmhouse porch at the you-spot: a deck under a little roof, a mailbox, a gate. */
-function Porch({ at, mailbox }: { at: Vec3; mailbox: Vec3 }) {
-	return (
-		<group>
-			<group position={at}>
-				<ToonMesh
-					castShadow
-					color={FARM_3D.porchDeck}
-					ink={PROP_INK}
-					position={[0, DECK_TOP / 2, 0]}
-					receiveShadow
-				>
-					<boxGeometry args={[1.5, DECK_TOP, 1.0]} />
-				</ToonMesh>
-				{[-0.65, 0.65].map((x) => (
-					<ToonMesh
-						castShadow
-						color={FARM_3D.porchPost}
-						key={x}
-						position={[x, DECK_TOP + 0.6, -0.35]}
-					>
-						<boxGeometry args={[0.08, 1.2, 0.08]} />
-					</ToonMesh>
-				))}
-				<ToonMesh
-					castShadow
-					color={FARM_3D.porchRoof}
-					ink={PROP_INK}
-					position={[0, DECK_TOP + 1.5, -0.45]}
-					rotation={[0.45, 0, 0]}
-				>
-					<boxGeometry args={[1.7, 0.08, 0.8]} />
-				</ToonMesh>
-			</group>
-			{/* The mailbox on its post, flag up. */}
-			<group position={mailbox}>
-				<ToonMesh color={FARM_3D.stake} position={[0, 0.35, 0]}>
-					<boxGeometry args={[0.07, 0.7, 0.07]} />
-				</ToonMesh>
-				<ToonMesh
-					castShadow
-					color={FARM_3D.mailbox}
-					ink={PROP_INK}
-					position={[0, 0.78, 0]}
-				>
-					<boxGeometry args={[0.22, 0.2, 0.38]} />
-				</ToonMesh>
-				<ToonMesh color={FARM_3D.mailboxFlag} position={[0.13, 0.9, -0.08]}>
-					<boxGeometry args={[0.02, 0.16, 0.08]} />
-				</ToonMesh>
-			</group>
-			{/* The gate: two posts and a swung-open gate beside the porch. */}
-			<group position={[at[0] - 1.45, 0, at[2] + 0.1]}>
-				{[-0.35, 0.35].map((x) => (
-					<ToonMesh color={FARM_3D.gate} key={x} position={[x, 0.36, 0]}>
-						<boxGeometry args={[0.08, 0.72, 0.08]} />
-					</ToonMesh>
-				))}
-				<group position={[-0.33, 0, 0]} rotation={[0, 0.9, 0]}>
-					{[0.2, 0.5].map((y) => (
-						<ToonMesh color={FARM_3D.gate} key={y} position={[0.3, y, 0]}>
-							<boxGeometry args={[0.6, 0.06, 0.04]} />
-						</ToonMesh>
-					))}
-				</group>
-			</group>
-		</group>
-	);
-}
-
-/** The sundial by the benches. */
-function Sundial({ at }: { at: Vec3 }) {
-	return (
-		<group position={at}>
-			<ToonMesh castShadow color={FARM_3D.sundial} ink={PROP_INK}>
-				<cylinderGeometry args={[0.12, 0.16, 0.5, 12]} />
-			</ToonMesh>
-			<ToonMesh color={FARM_3D.sundial} position={[0, 0.27, 0]}>
-				<cylinderGeometry args={[0.26, 0.26, 0.05, 20]} />
-			</ToonMesh>
-			<ToonMesh
-				color={FARM_3D.gnomon}
-				position={[0, 0.36, 0]}
-				rotation={[0, 0, 0.6]}
-			>
-				<boxGeometry args={[0.03, 0.18, 0.12]} />
-			</ToonMesh>
-		</group>
-	);
-}
-
-/** A scarecrow on a withered bed: straw, coat and hat, a red lantern, a crow. */
-function Scarecrow({ at }: { at: Vec3 }) {
-	return (
-		<group position={at}>
-			<ToonMesh color={FARM_3D.stake} position={[0, 0.5, 0]}>
-				<boxGeometry args={[0.06, 1.0, 0.06]} />
-			</ToonMesh>
-			<ToonMesh color={FARM_3D.stake} position={[0, 0.78, 0]}>
-				<boxGeometry args={[0.7, 0.05, 0.05]} />
-			</ToonMesh>
-			<ToonMesh
-				castShadow
-				color={FARM_3D.scarecrowCoat}
-				ink={PROP_INK}
-				position={[0, 0.7, 0]}
-			>
-				<boxGeometry args={[0.3, 0.32, 0.16]} />
-			</ToonMesh>
-			<ToonMesh color={FARM_3D.straw} position={[0, 0.98, 0]}>
-				<sphereGeometry args={[0.12, 10, 8]} />
-			</ToonMesh>
-			<ToonMesh
-				color={FARM_3D.scarecrowHat}
-				ink={PROP_INK}
-				position={[0, 1.1, 0]}
-			>
-				<coneGeometry args={[0.18, 0.18, 12]} />
-			</ToonMesh>
-			{/* The red lantern hangs from its arm; the crow sits on the other. */}
-			<ToonMesh color={FARM_3D.lantern} position={[0.32, 0.66, 0]}>
-				<boxGeometry args={[0.09, 0.13, 0.09]} />
-			</ToonMesh>
-			<group position={[-0.3, 0.86, 0]}>
-				<ToonMesh color={FARM_3D.crow} ink={PROP_INK}>
-					<sphereGeometry args={[0.07, 10, 8]} />
-				</ToonMesh>
-				<ToonMesh color={FARM_3D.crow} position={[0.06, 0.06, 0]}>
-					<sphereGeometry args={[0.045, 8, 6]} />
-				</ToonMesh>
-			</group>
 		</group>
 	);
 }

@@ -112,7 +112,7 @@ export function TimezoneSetting() {
 
 	return (
 		<SettingsSection
-			caption="Choose the time zone dates and clock times are shown in. This only changes how timestamps are displayed; nothing is rescheduled or re-recorded."
+			caption="Changes how times are shown only; nothing is rescheduled."
 			title="Date & time"
 		>
 			<SettingsGroup>
@@ -130,7 +130,7 @@ export function TimezoneSetting() {
 								<ComboboxValue placeholder="Select time zone" />
 							</ComboboxTrigger>
 							<ComboboxContent aria-label="Select time zone">
-								<div className="border-border/50 border-b p-2">
+								<div className="border-border border-b p-2">
 									<ComboboxInput
 										placeholder="Search a city or zone…"
 										showTrigger={false}
@@ -141,7 +141,6 @@ export function TimezoneSetting() {
 											<HugeiconsIcon
 												className="size-4 text-muted-foreground"
 												icon={Search01Icon}
-												strokeWidth={2}
 											/>
 										</InputGroupAddon>
 									</ComboboxInput>

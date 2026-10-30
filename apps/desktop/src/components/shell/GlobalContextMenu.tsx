@@ -5,11 +5,14 @@ import {
 	ConsoleIcon,
 	Copy01Icon,
 	FullScreenIcon,
+	LaptopIcon,
 	MinusSignIcon,
+	MoonIcon,
 	PlusSignIcon,
 	Refresh01Icon,
 	ScissorIcon,
 	Settings01Icon,
+	SunIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ClassicThemeIcon } from "@ryu/ui/components/classic-theme-icon.tsx";
@@ -27,8 +30,6 @@ import {
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
-import { Laptop, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
 	type ReactNode,
@@ -40,8 +41,6 @@ import {
 import { isDeveloperMode } from "@/src/hooks/useDeveloperMode.ts";
 import {
 	DEFAULT_SCALE,
-	SCALE_MAX,
-	SCALE_MIN,
 	SCALE_STEP,
 	setScale,
 } from "@/src/hooks/useThemePreset.ts";
@@ -49,117 +48,24 @@ import {
 	getConsoleBufferText,
 	isConsoleCaptureActive,
 } from "@/src/lib/console-buffer.ts";
-import { getCrashRoute } from "@/src/lib/crash-context.ts";
 import { toggleFullscreen, useFullscreen } from "@/src/lib/fullscreen.ts";
-import { isTauriReady } from "@/src/lib/tauri-ready.ts";
-import { STORAGE_KEYS } from "@/src/lib/themes/presets.ts";
 import { openFeedbackWidget } from "@/src/lib/userjot.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
+import {
+	buildBugReportContext,
+	canEditSelection,
+	captureViewportPng,
+	clampScale,
+	copyScreenshotToClipboard,
+	isEditableTarget,
+	isMac,
+	mod,
+	readScale,
+	toggleDevtools,
+} from "./GlobalContextMenu-actions.ts";
 
 interface GlobalContextMenuProps {
 	children: ReactNode;
-}
-
-const isMac = "navigator" in globalThis && navigator.userAgent.includes("Mac");
-const mod = isMac ? "⌘" : "Ctrl";
-
-function readScale(): number {
-	return Number(
-		localStorage.getItem(STORAGE_KEYS.scale) ?? String(DEFAULT_SCALE)
-	);
-}
-
-function clampScale(value: number): number {
-	return Math.min(SCALE_MAX, Math.max(SCALE_MIN, value));
-}
-function canEditSelection(): boolean {
-	const active = document.activeElement;
-	if (
-		active instanceof HTMLInputElement ||
-		active instanceof HTMLTextAreaElement
-	) {
-		const start = active.selectionStart;
-		const end = active.selectionEnd;
-		if (isNativeNumber(start) && isNativeNumber(end)) {
-			return start !== end;
-		}
-	}
-	const sel = window.getSelection();
-	return Boolean(sel && !sel.isCollapsed && sel.toString().length > 0);
-}
-
-function isEditableTarget(target: EventTarget | null): target is HTMLElement {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	if (target.isContentEditable) {
-		return true;
-	}
-	const tag = target.tagName;
-	return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-}
-
-async function toggleDevtools(): Promise<void> {
-	if (!isTauriReady()) {
-		toast.info("DevTools are only available in the desktop app.");
-		return;
-	}
-	try {
-		const { invoke } = await import("@tauri-apps/api/core");
-		await invoke("toggle_devtools");
-	} catch {
-		toast.error("Couldn't open DevTools in this build.");
-	}
-}
-
-async function captureViewportPng(): Promise<Blob | null> {
-	try {
-		const { default: html2canvas } = await import("html2canvas-pro");
-		const canvas = await html2canvas(document.body, {
-			backgroundColor: null,
-			logging: false,
-			scale: Math.min(window.devicePixelRatio || 1, 2),
-			useCORS: true,
-			windowWidth: window.innerWidth,
-			windowHeight: window.innerHeight,
-			x: window.scrollX,
-			y: window.scrollY,
-			width: window.innerWidth,
-			height: window.innerHeight,
-		});
-		return await new Promise<Blob | null>((resolve) => {
-			canvas.toBlob((blob) => resolve(blob), "image/png");
-		});
-	} catch {
-		return null;
-	}
-}
-
-async function copyScreenshotToClipboard(blob: Blob): Promise<boolean> {
-	try {
-		await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function buildBugReportContext(): string {
-	const route = getCrashRoute();
-	const lines = [
-		"Ryu bug report context",
-		`Version: ${import.meta.env.VITE_APP_VERSION ?? "dev"}`,
-		`Route: ${route ? `${route.title} (${route.path})` : "(unknown)"}`,
-		`URL: ${window.location.href}`,
-		`Time: ${new Date().toISOString()}`,
-	];
-	if (isConsoleCaptureActive()) {
-		const consoleText = getConsoleBufferText();
-		if (consoleText) {
-			lines.push("", "--- Recent console ---", consoleText.slice(-4000));
-		}
-	}
-	return lines.join("\n");
 }
 
 /**
@@ -430,7 +336,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 							</ContextMenuSubTrigger>
 							<ContextMenuSubContent>
 								<ContextMenuItem onClick={() => setTheme("light")}>
-									<Sun className="h-4 w-4" />
+									<HugeiconsIcon className="h-4 w-4" icon={SunIcon} />
 									Light
 									{theme === "light" ? (
 										<span className="ml-auto text-muted-foreground text-xs">
@@ -439,7 +345,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 									) : null}
 								</ContextMenuItem>
 								<ContextMenuItem onClick={() => setTheme("dark")}>
-									<Moon className="h-4 w-4" />
+									<HugeiconsIcon className="h-4 w-4" icon={MoonIcon} />
 									Dark
 									{theme === "dark" ? (
 										<span className="ml-auto text-muted-foreground text-xs">
@@ -448,7 +354,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 									) : null}
 								</ContextMenuItem>
 								<ContextMenuItem onClick={() => setTheme("system")}>
-									<Laptop className="h-4 w-4" />
+									<HugeiconsIcon className="h-4 w-4" icon={LaptopIcon} />
 									System
 									{theme === "system" ? (
 										<span className="ml-auto text-muted-foreground text-xs">

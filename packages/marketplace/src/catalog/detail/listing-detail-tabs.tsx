@@ -209,14 +209,18 @@ export function ListingDetailTabs({
 			}
 			value={activeTab}
 		>
-			{/* `pills` matches every other tab row in the store. Deliberately NO
-			    <TabsIndicator />: tabs.tsx hands the active background from the
-			    trigger to the indicator whenever one is present, which cancels the
-			    solid pill. h-auto/flex-wrap because `pills` triggers are
-			    `flex-initial`, so a seven-tab row wraps instead of being crushed. */}
-			<TabsList layout="listing-detail" sticky variant="pills">
+			{/* `muted-pills` matches the Store's section strip: the active tab is a
+			    muted wash, not an inverted pill. Deliberately NO <TabsIndicator />:
+			    tabs.tsx hands the active background from the trigger to the
+			    indicator whenever one is present. h-auto/flex-wrap so a seven-tab
+			    row wraps instead of being crushed. */}
+			<TabsList layout="listing-detail" sticky variant="muted-pills">
 				{tabs.map((t) => (
-					<TabsTrigger key={t.id} value={t.id}>
+					<TabsTrigger
+						className="h-8 px-3! py-0! text-sm!"
+						key={t.id}
+						value={t.id}
+					>
 						{t.label}
 					</TabsTrigger>
 				))}

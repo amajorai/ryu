@@ -1,44 +1,22 @@
-import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu.tsx";
-import {
-	Empty,
-	EmptyContent,
-	EmptyDescription,
-	EmptyHeader,
-	EmptyTitle,
-} from "@ryu/ui/components/empty.tsx";
-import { Kbd } from "@ryu/ui/components/kbd.tsx";
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
-import {
-	ToggleGroup,
-	ToggleGroupItem,
-} from "@ryu/ui/components/toggle-group.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useTimezoneRevision } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { type CalendarParams, localDayKey } from "@ryuhq/protocol/interfaces";
+import { AnimatePresence } from "motion/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarEmptyState } from "./calendar-interface-empty.tsx";
+import { CalendarHeader } from "./calendar-interface-header.tsx";
 import {
-	CalendarCheck,
-	ChevronDown,
-	ChevronLeft,
-	ChevronRight,
-	PanelLeft,
-	Plus,
-} from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-	useSyncExternalStore,
-} from "react";
+	type FocusRequest,
+	isEditable,
+	SCALE_KEYS,
+	useMediaMatch,
+	useNow,
+	type Zone,
+	zoneOf,
+} from "./calendar-interface-hooks.ts";
+import { CalendarRailOverlay } from "./calendar-interface-rail-overlay.tsx";
+import { CalendarSkeleton } from "./calendar-interface-skeleton.tsx";
 import {
 	type CalendarLayer,
 	type CalendarScale,
@@ -47,7 +25,6 @@ import {
 	moveDayKey,
 	parseDayKey,
 	rangeTitle,
-	rangeTitleShort,
 	shiftDay,
 	upcomingRuns,
 	visibleDays,
@@ -66,145 +43,6 @@ import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import { useInterfaceSetting } from "./use-interface-setting.ts";
 
-type Zone = "main" | "mini";
-
-interface FocusRequest {
-	key: string;
-	zone: Zone;
-}
-
-/**
- * The scale toggle speaks the toolbar's one button language: an outlined
- * group the height of Today, the chosen segment filled with muted.
- */
-const SEGMENT_CLASS =
-	"h-6.5 rounded-md px-2.5 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-muted aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-none";
-
-/**
- * Header icon buttons share the toolbar's rounded-lg square; the sidebar
- * toggle says it is open through aria-expanded alone, never with a fill.
- */
-const HEADER_ICON_CLASS =
-	"rounded-lg aria-expanded:bg-transparent aria-expanded:text-muted-foreground aria-expanded:hover:bg-muted aria-expanded:hover:text-foreground";
-
-/** "M" and "W" switch the scale, like the reference's shortcuts. */
-const SCALE_KEYS: Partial<Record<string, CalendarScale>> = {
-	m: "month",
-	w: "week",
-};
-
-const SCALE_LABELS: Record<CalendarScale, string> = {
-	month: "Month",
-	week: "Week",
-};
-
-/**
- * The current time on the display zone's wall clock ({@link displayWallDate}),
- * refreshed every half minute, and at once when the display-timezone
- * preference (`revision`) changes, so "today" and "now" stay true.
- */
-function useNow(revision: string): Date {
-	const [now, setNow] = useState(() => displayWallDate(Date.now()));
-	// biome-ignore lint/correctness/useExhaustiveDependencies: a new display-timezone revision moves the wall clock now, not on the next tick.
-	useEffect(() => {
-		setNow(displayWallDate(Date.now()));
-		const timer = window.setInterval(
-			() => setNow(displayWallDate(Date.now())),
-			30_000
-		);
-		return () => window.clearInterval(timer);
-	}, [revision]);
-	return now;
-}
-
-/**
- * Whether a media query matches. Server renders (and tests without layout)
- * assume a wide desktop window, which is where the calendar usually lives.
- */
-function useMediaMatch(query: string): boolean {
-	const subscribe = useCallback(
-		(onChange: () => void) => {
-			if (typeof window === "undefined" || !window.matchMedia) {
-				return () => undefined;
-			}
-			const list = window.matchMedia(query);
-			list.addEventListener("change", onChange);
-			return () => list.removeEventListener("change", onChange);
-		},
-		[query]
-	);
-	return useSyncExternalStore(
-		subscribe,
-		() =>
-			typeof window !== "undefined" && window.matchMedia
-				? window.matchMedia(query).matches
-				: false,
-		() => false
-	);
-}
-
-/** Keys typed into a field belong to the field (or the host's composer). */
-function isEditable(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target.closest("input, textarea, select, [contenteditable='true']") !== null
-	);
-}
-
-function zoneOf(target: HTMLElement): Zone | null {
-	const zone = target.closest<HTMLElement>("[data-calendar-zone]")?.dataset
-		.calendarZone;
-	return zone === "main" || zone === "mini" ? zone : null;
-}
-
-const SKELETON_CELLS = Array.from(
-	{ length: 42 },
-	(_, index) => `cell-${index}`
-);
-const SKELETON_WEEKDAYS = Array.from(
-	{ length: 7 },
-	(_, index) => `day-${index}`
-);
-
-/** The month's own frame (rail, weekday strip, six weeks), so nothing jumps. */
-function CalendarSkeleton() {
-	return (
-		<div aria-hidden="true" className="flex min-h-0 flex-1">
-			<div className="flex w-56 shrink-0 flex-col gap-5 px-3 pt-3 max-lg:hidden xl:w-64">
-				<Skeleton className="h-12 w-36" radius="panel" />
-				<Skeleton className="h-52 w-full" radius="panel" />
-				<div className="flex flex-col gap-2">
-					<Skeleton className="h-3 w-24" radius="dense" />
-					<Skeleton className="h-9 w-full" radius="row" />
-					<Skeleton className="h-9 w-full" radius="row" />
-				</div>
-			</div>
-			<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border lg:border-l">
-				<div className="grid h-9 shrink-0 grid-cols-7 items-center border-border border-b">
-					{SKELETON_WEEKDAYS.map((day) => (
-						<Skeleton className="mx-auto h-2.5 w-7" key={day} radius="dense" />
-					))}
-				</div>
-				<div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6">
-					{SKELETON_CELLS.map((cell) => (
-						<div
-							className="flex flex-col gap-1.5 border-border border-r border-b p-1.5 [&:nth-child(7n)]:border-r-0 [&:nth-last-child(-n+7)]:border-b-0"
-							key={cell}
-						>
-							<Skeleton className="mx-auto h-4 w-5" radius="pill" />
-							<Skeleton className="h-3.5 w-4/5" radius="dense" />
-							<Skeleton className="h-3.5 w-3/5" radius="dense" />
-						</div>
-					))}
-				</div>
-			</div>
-		</div>
-	);
-}
-
 /**
  * Calendar: threads (at their latest activity) and scheduled runs on a month
  * or a week, with a month picker and the next runs in a left rail. Opening a
@@ -219,6 +57,7 @@ export function CalendarInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<CalendarParams>) {
+	const tl = useLiteralMessages();
 	// Day buckets follow the display-timezone preference, so they recompute
 	// when it changes (see `useTimezoneRevision`).
 	const timezoneRevision = useTimezoneRevision();
@@ -524,173 +363,21 @@ export function CalendarInterface({
 			ref={rootRef}
 		>
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
-				<header className="flex h-14 shrink-0 items-center gap-1.5 border-border border-b px-3 sm:gap-3">
-					<Button
-						aria-expanded={railShown}
-						aria-label={railShown ? "Hide sidebar" : "Show sidebar"}
-						className={HEADER_ICON_CLASS}
-						disabled={loading}
-						onClick={toggleRail}
-						ref={railToggleRef}
-						size="icon-sm"
-						title={railShown ? "Hide sidebar" : "Show sidebar"}
-						type="button"
-						variant="ghost-muted"
-					>
-						<PanelLeft aria-hidden="true" />
-					</Button>
-					<h1 className="sr-only">Calendar</h1>
-					<Button
-						className="rounded-lg max-sm:hidden"
-						disabled={loading}
-						onClick={() => selectDay(todayKey)}
-						size="sm"
-						title="Go to today (T)"
-						type="button"
-						variant="outline"
-					>
-						Today
-					</Button>
-					<Button
-						aria-label="Today"
-						className="rounded-lg sm:hidden"
-						disabled={loading}
-						onClick={() => selectDay(todayKey)}
-						size="icon-sm"
-						title="Go to today (T)"
-						type="button"
-						variant="outline"
-					>
-						<CalendarCheck aria-hidden="true" />
-					</Button>
-					<div className="flex items-center">
-						<Button
-							aria-label={
-								scale === "month" ? "Previous month" : "Previous week"
-							}
-							className={HEADER_ICON_CLASS}
-							disabled={loading}
-							onClick={() => step(-1)}
-							size="icon-sm"
-							title={scale === "month" ? "Previous month" : "Previous week"}
-							type="button"
-							variant="ghost-muted"
-						>
-							<ChevronLeft aria-hidden="true" />
-						</Button>
-						<Button
-							aria-label={scale === "month" ? "Next month" : "Next week"}
-							className={HEADER_ICON_CLASS}
-							disabled={loading}
-							onClick={() => step(1)}
-							size="icon-sm"
-							title={scale === "month" ? "Next month" : "Next week"}
-							type="button"
-							variant="ghost-muted"
-						>
-							<ChevronRight aria-hidden="true" />
-						</Button>
-					</div>
-					<h2
-						aria-live="polite"
-						className="min-w-0 flex-1 truncate whitespace-nowrap font-heading font-normal text-base text-foreground sm:text-xl"
-						data-testid="calendar-range-title"
-					>
-						<span className="max-sm:hidden">{title}</span>
-						<span className="sm:hidden">{rangeTitleShort(scale, anchor)}</span>
-					</h2>
-					<p className="items-center gap-1 text-muted-foreground text-xs max-2xl:hidden 2xl:flex">
-						<Kbd>←</Kbd>
-						<Kbd>→</Kbd>
-						<span>days</span>
-						<Kbd className="ms-1.5">T</Kbd>
-						<span>today</span>
-					</p>
-					<ToggleGroup
-						appearance="segmented"
-						aria-label="Calendar scale"
-						className="h-8 border border-border bg-background max-sm:hidden dark:bg-transparent"
-						multiple={false}
-						onValueChange={(values: string[]) => {
-							const value = values[0];
-							if (value === "month" || value === "week") {
-								chooseScale(value);
-							}
-						}}
-						spacing={0}
-						value={[scale]}
-					>
-						<ToggleGroupItem
-							className={SEGMENT_CLASS}
-							density="segmented"
-							title="Month (M)"
-							value="month"
-						>
-							Month
-						</ToggleGroupItem>
-						<ToggleGroupItem
-							className={SEGMENT_CLASS}
-							density="segmented"
-							title="Week (W)"
-							value="week"
-						>
-							Week
-						</ToggleGroupItem>
-					</ToggleGroup>
-					{/* A phone has no room for two segments: one menu, like the reference's mobile view. */}
-					<DropdownMenu>
-						<DropdownMenuTrigger
-							aria-label={`Calendar scale: ${SCALE_LABELS[scale]}`}
-							disabled={loading}
-							render={
-								<button
-									className="flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 font-medium text-foreground text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted sm:hidden"
-									type="button"
-								/>
-							}
-						>
-							{SCALE_LABELS[scale]}
-							<ChevronDown
-								aria-hidden="true"
-								className="size-4 text-muted-foreground"
-							/>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent
-							align="end"
-							className="w-36"
-							drawerLabel="Calendar scale"
-						>
-							<DropdownMenuRadioGroup
-								onValueChange={(value: string) => {
-									if (value === "month" || value === "week") {
-										chooseScale(value);
-									}
-								}}
-								value={scale}
-							>
-								<DropdownMenuRadioItem value="month">
-									Month
-								</DropdownMenuRadioItem>
-								<DropdownMenuRadioItem value="week">Week</DropdownMenuRadioItem>
-							</DropdownMenuRadioGroup>
-						</DropdownMenuContent>
-					</DropdownMenu>
-					{/* With the rail hidden, its New thread action moves into the header, unchanged. */}
-					{newThread && !railInline ? (
-						<Button
-							aria-label="New thread"
-							className="rounded-lg max-md:px-2"
-							onClick={newThread}
-							size="sm"
-							title="New thread"
-							type="button"
-							variant="outline"
-						>
-							<Plus aria-hidden="true" data-icon="inline-start" />
-							<span className="max-md:hidden">New thread</span>
-						</Button>
-					) : null}
-				</header>
+				<CalendarHeader
+					anchor={anchor}
+					chooseScale={chooseScale}
+					loading={loading}
+					newThread={newThread}
+					railInline={railInline}
+					railShown={railShown}
+					railToggleRef={railToggleRef}
+					scale={scale}
+					selectDay={selectDay}
+					step={step}
+					title={title}
+					todayKey={todayKey}
+					toggleRail={toggleRail}
+				/>
 				{loading ? (
 					<CalendarSkeleton />
 				) : (
@@ -714,57 +401,29 @@ export function CalendarInterface({
 								todayKey={todayKey}
 							/>
 						) : null}
-						<AnimatePresence>
-							{railOverlay && railOverlayOpen ? (
-								<motion.div
-									animate={{ opacity: 1 }}
-									className="absolute inset-0 z-20 flex"
-									exit={{ opacity: 0 }}
-									initial={reduceMotion ? false : { opacity: 0 }}
-									key="rail-overlay"
-									transition={{ duration: 0.16 }}
-								>
-									<motion.div
-										animate={{ x: 0 }}
-										className="flex h-full shrink-0 border-border border-r bg-background shadow-xl"
-										exit={reduceMotion ? {} : { x: -16 }}
-										initial={reduceMotion ? false : { x: -16 }}
-										ref={railOverlayRef}
-										transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
-									>
-										<CalendarRail
-											activeDayKeys={activeDayKeys}
-											className="flex"
-											hidden={hidden}
-											miniKey={miniKey}
-											now={now}
-											onMessage={onMessage}
-											onMiniChange={setMiniKey}
-											onNewThread={newThread}
-											onSelectDay={(key) => {
-												closeRailOverlay(false);
-												selectDay(key, "main");
-											}}
-											onToggleLayer={toggleLayer}
-											runs={runs}
-											scale={scale}
-											selectedKey={selectedKey}
-											snapshot={snapshot}
-											todayKey={todayKey}
-										/>
-									</motion.div>
-									<button
-										aria-label="Close sidebar"
-										className="min-w-0 flex-1 cursor-default bg-foreground/15 outline-none dark:bg-background/55"
-										onClick={() => closeRailOverlay(true)}
-										tabIndex={-1}
-										type="button"
-									/>
-								</motion.div>
-							) : null}
-						</AnimatePresence>
+						<CalendarRailOverlay
+							activeDayKeys={activeDayKeys}
+							closeRailOverlay={closeRailOverlay}
+							hidden={hidden}
+							miniKey={miniKey}
+							newThread={newThread}
+							now={now}
+							onMessage={onMessage}
+							railOverlay={railOverlay}
+							railOverlayOpen={railOverlayOpen}
+							railOverlayRef={railOverlayRef}
+							reduceMotion={reduceMotion}
+							runs={runs}
+							scale={scale}
+							selectDay={selectDay}
+							selectedKey={selectedKey}
+							setMiniKey={setMiniKey}
+							snapshot={snapshot}
+							todayKey={todayKey}
+							toggleLayer={toggleLayer}
+						/>
 						<section
-							aria-label={`Calendar, ${title}`}
+							aria-label={tl("Calendar, {title}", { title })}
 							className={cn(
 								"relative flex min-h-0 min-w-0 flex-1 flex-col",
 								railInline && "border-border border-l"
@@ -797,32 +456,10 @@ export function CalendarInterface({
 								/>
 							)}
 							{isEmpty ? (
-								<div className="pointer-events-none absolute inset-x-0 top-9 bottom-0 flex items-center justify-center p-6">
-									<Empty className="pointer-events-auto max-w-sm flex-none bg-background p-4">
-										<EmptyHeader>
-											<EmptyTitle>Nothing on the calendar yet</EmptyTitle>
-											<EmptyDescription>
-												{snapshot.agents.length === 0
-													? "Add an agent to start a thread."
-													: "Threads appear on the day they were last active."}
-											</EmptyDescription>
-										</EmptyHeader>
-										{newThread ? (
-											<EmptyContent>
-												<Button
-													className="rounded-lg"
-													onClick={newThread}
-													size="sm"
-													type="button"
-													variant="outline"
-												>
-													<Plus aria-hidden="true" data-icon="inline-start" />
-													New thread
-												</Button>
-											</EmptyContent>
-										) : null}
-									</Empty>
-								</div>
+								<CalendarEmptyState
+									hasAgents={snapshot.agents.length > 0}
+									newThread={newThread}
+								/>
 							) : null}
 						</section>
 					</div>

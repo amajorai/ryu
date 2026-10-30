@@ -1,5 +1,3 @@
-// packages/marketplace/src/catalog/detail/reviews-panel.tsx
-//
 // The Reviews detail tab: the item's rating aggregate, the user-submitted reviews,
 // and the caller's own write/edit/delete form.
 //
@@ -9,11 +7,9 @@
 // loading/error state instead of receiving reviews as props: the catalog's detail
 // fetch talks to Core and knows nothing about ratings.
 //
-// Failure posture: a signed-out or offline caller still sees whatever reviews
-// loaded, and the write form explains why it is unavailable rather than vanishing.
-// A paid item may reject non-purchasers server-side (403 + `requiresPurchase`)
-// for review eligibility only. That response is not an install/runtime gate; it
-// surfaces here as the message the server sent, and the client never pre-judges it.
+// Failure posture: signed-out or offline callers still see loaded reviews, and
+// the form says why it is unavailable. A paid item's 403 (`requiresPurchase`)
+// gates review eligibility only and shows the server's message, never pre-judged.
 
 import {
 	Alert02Icon,
@@ -21,6 +17,10 @@ import {
 	MessageMultiple01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	STORE_LOAD_ERROR_SENTENCE,
+	StoreErrorDetails,
+} from "@ryu/blocks/desktop/store-error-details.tsx";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -189,12 +189,13 @@ function ListingReviews({
 						<HugeiconsIcon icon={Alert02Icon} />
 					</EmptyMedia>
 					<EmptyTitle>Could not load reviews</EmptyTitle>
-					<EmptyDescription>{state.error}</EmptyDescription>
+					<EmptyDescription>{STORE_LOAD_ERROR_SENTENCE}</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
 					<Button onClick={() => load(null)} size="sm" variant="outline">
 						Try again
 					</Button>
+					<StoreErrorDetails message={state.error} />
 				</EmptyContent>
 			</Empty>
 		);

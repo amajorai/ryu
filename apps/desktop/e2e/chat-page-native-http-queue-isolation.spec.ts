@@ -30,7 +30,11 @@ async function restoreTwoRetainedChats(page: Page) {
 	).toBeVisible();
 	await page.evaluate(
 		({ original, other }) => {
-			localStorage.removeItem("ryu_workbench_layout_v2");
+			(
+				Reflect.get(window, "__chatPageNativeFixture") as {
+					removeSealedLocalItem: (key: string) => void;
+				}
+			).removeSealedLocalItem("ryu_workbench_layout_v2");
 			localStorage.setItem(
 				"ryu_session_tabs",
 				JSON.stringify({

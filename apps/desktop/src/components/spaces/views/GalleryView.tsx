@@ -1,5 +1,6 @@
+import { PlusSignIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Plus } from "lucide-react";
 import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
 import { RowCard } from "./RowCard.tsx";
 
@@ -38,7 +39,7 @@ export function GalleryView({
 						onClick={() => createRow()}
 						variant="ghost-muted"
 					>
-						<Plus className="size-4" />
+						<HugeiconsIcon className="size-4" icon={PlusSignIcon} />
 						New
 					</Button>
 				)}

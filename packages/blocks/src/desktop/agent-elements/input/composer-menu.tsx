@@ -1,6 +1,6 @@
 "use client";
 
-import { PinIcon, PinOffIcon } from "@hugeicons/core-free-icons";
+import { Cancel01Icon, PinIcon, PinOffIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
@@ -21,6 +21,8 @@ export interface ComposerMenuItem {
 	id: string;
 	keywords?: string[];
 	label: string;
+	/** A hover-revealed remove control in place of the pin (e.g. a saved draft). */
+	onRemove?: () => void;
 	trailing?: ReactNode;
 }
 
@@ -174,38 +176,48 @@ export function ComposerMenu({
 				"overflow-y-auto",
 				embedded
 					? "max-h-[min(26rem,55vh)]"
-					: "max-h-[min(26rem,55vh)] w-[min(44rem,calc(100vw-2rem))] rounded-2xl border border-border/70 bg-popover/95 p-1.5 shadow-xl backdrop-blur",
+					: "max-h-[min(26rem,55vh)] w-[min(44rem,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-1.5 shadow-lg",
 				className
 			)}
 			ref={rootRef}
 			role="listbox"
 		>
-			{renderedGroups.map((group) => (
-				<div className="py-0.5" key={group.id}>
-					<div className="px-2 pt-1.5 pb-1 text-muted-foreground text-xs">
-						{group.label}
-					</div>
+			{renderedGroups.map((group, groupIndex) => (
+				<div
+					className={cn(groupIndex > 0 && "mt-1 border-border border-t pt-1")}
+					key={group.id}
+				>
+					{/* Group labels earn their place only once there are more than
+					    two groups; otherwise a hairline separates them. */}
+					{renderedGroups.length > 2 ? (
+						<div className="flex h-7 items-center px-2 text-muted-foreground text-xs">
+							{group.label}
+						</div>
+					) : null}
 					{group.items.map((item) => {
 						rowIndex += 1;
 						const index = rowIndex;
 						return (
 							<div
-								className="group/option flex items-center rounded-xl"
+								className="group/option flex items-center rounded-lg"
 								key={item.id}
 							>
 								<button
 									aria-label={item.label}
 									aria-selected={index === active}
 									className={cn(
-										"flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+										"flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors duration-150 hover:bg-accent hover:duration-0",
 										index === active && "bg-accent",
-										item.disabled && "cursor-not-allowed opacity-45"
+										item.disabled && "cursor-not-allowed opacity-50"
 									)}
 									disabled={item.disabled}
 									onClick={() => onSelect(item)}
 									onMouseDown={(event) => event.preventDefault()}
 									onMouseEnter={() => setActive(index)}
 									role="option"
+									// One line per row: the description is a tooltip, not a
+									// second line under the label.
+									title={item.description}
 									type="button"
 								>
 									{item.icon ? (
@@ -213,22 +225,31 @@ export function ComposerMenu({
 											{item.icon}
 										</span>
 									) : null}
-									<span className="min-w-0 flex-1">
-										<span className="block truncate">{item.label}</span>
-										{item.description ? (
-											<span className="block truncate text-muted-foreground text-xs">
-												{item.description}
-											</span>
-										) : null}
-									</span>
+									<span className="min-w-0 flex-1 truncate">{item.label}</span>
 									{item.badge ? (
-										<span className="type-caption shrink-0 text-muted-foreground">
+										<span className="shrink-0 text-muted-foreground text-xs">
 											{item.badge}
 										</span>
 									) : null}
 									{item.trailing}
 								</button>
-								{onTogglePin ? (
+								{item.onRemove ? (
+									<button
+										aria-label={tl("Delete {label}", { label: item.label })}
+										className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/option:opacity-100 group-hover/option:duration-0"
+										data-composer-pin-control
+										onClick={(event) => {
+											event.stopPropagation();
+											item.onRemove?.();
+										}}
+										onMouseDown={(event) => event.preventDefault()}
+										title={tl("Delete {label}", { label: item.label })}
+										type="button"
+									>
+										<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
+									</button>
+								) : null}
+								{onTogglePin && !item.onRemove ? (
 									<button
 										aria-label={
 											pinnedSet.has(item.id)
@@ -237,9 +258,9 @@ export function ComposerMenu({
 										}
 										aria-pressed={pinnedSet.has(item.id)}
 										className={cn(
-											"flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-											"group-hover/option:opacity-100",
-											pinnedSet.has(item.id) && "text-primary opacity-100"
+											"flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+											"group-hover/option:opacity-100 group-hover/option:duration-0",
+											pinnedSet.has(item.id) && "text-foreground opacity-100"
 										)}
 										data-composer-pin-control
 										onClick={(event) => {
@@ -266,7 +287,7 @@ export function ComposerMenu({
 				</div>
 			))}
 			{flat.length === 0 ? (
-				<div className="px-3 py-8 text-center text-muted-foreground text-sm">
+				<div className="px-3 py-6 text-center text-muted-foreground text-sm">
 					No results found
 				</div>
 			) : null}

@@ -1,3 +1,6 @@
+import { Cancel01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import {
@@ -28,144 +31,17 @@ import type {
 	CellFormatRule,
 	CellOpts,
 } from "@ryu/ui/types/data-grid.ts";
-import { Plus, X } from "lucide-react";
-import { useMemo, useState } from "react";
-
-/** The column types offered in the editor (file is deferred — needs uploads). */
-const COLUMN_TYPE_OPTIONS: Array<{
-	variant: CellOpts["variant"];
-	label: string;
-}> = [
-	{ variant: "short-text", label: "Text" },
-	{ variant: "long-text", label: "Long text" },
-	{ variant: "number", label: "Number" },
-	{ variant: "select", label: "Select" },
-	{ variant: "multi-select", label: "Multi-select" },
-	{ variant: "checkbox", label: "Checkbox" },
-	{ variant: "date", label: "Date" },
-	{ variant: "url", label: "URL" },
-	{ variant: "formula", label: "Formula" },
-];
-
-const OPTION_VARIANTS = new Set<CellOpts["variant"]>([
-	"select",
-	"multi-select",
-]);
-
-interface OptionDraft {
-	color: string;
-	label: string;
-	value: string;
-}
-
-function newOptionValue(): string {
-	return `opt_${crypto.randomUUID().slice(0, 8)}`;
-}
-
-function initialOptions(cell?: CellOpts): OptionDraft[] {
-	if (cell && (cell.variant === "select" || cell.variant === "multi-select")) {
-		return cell.options.map((option) => ({
-			value: option.value,
-			label: option.label,
-			color: option.color ?? SELECT_OPTION_COLOR_KEYS[0] ?? "gray",
-		}));
-	}
-	return [];
-}
-
-function newRuleId(): string {
-	return `rule_${crypto.randomUUID().slice(0, 8)}`;
-}
-
-function variantCell(
-	variant: CellOpts["variant"],
-	options: OptionDraft[],
-	expression: string
-): CellOpts {
-	if (variant === "formula") {
-		return { variant: "formula", expression: expression.trim() };
-	}
-	if (variant === "select" || variant === "multi-select") {
-		return {
-			variant,
-			options: options
-				.filter((option) => option.label.trim())
-				.map((option) => ({
-					value: option.value,
-					label: option.label.trim(),
-					color: option.color,
-				})),
-		};
-	}
-	if (variant === "number") {
-		return { variant: "number" };
-	}
-	if (variant === "file") {
-		return { variant: "file" };
-	}
-	return { variant };
-}
-
-function draftToCell(
-	variant: CellOpts["variant"],
-	options: OptionDraft[],
-	expression: string,
-	rules: CellFormatRule[]
-): CellOpts {
-	const cell = variantCell(variant, options, expression);
-	const operators = new Set(getFormatOperators(variant));
-	const formatRules = rules.filter(
-		(rule) =>
-			operators.has(rule.operator) &&
-			(!formatOperatorTakesValue(rule.operator) || rule.value?.trim())
-	);
-	return formatRules.length > 0 ? { ...cell, formatRules } : cell;
-}
-
-/** Live feedback for a formula draft: an error, or the columns it uses. */
-function FormulaStatus({
-	expression,
-	columns,
-}: {
-	expression: string;
-	columns: Array<{ id: string; label: string }>;
-}) {
-	const status = useMemo(() => {
-		if (!expression.trim()) {
-			return null;
-		}
-		const result = compileFormula(expression);
-		if (!result.ok) {
-			return { error: result.message };
-		}
-		const known = new Set(
-			columns.flatMap((column) => [
-				column.label.trim().toLowerCase(),
-				column.id.toLowerCase(),
-			])
-		);
-		const missing = result.formula.references.filter(
-			(name) => !known.has(name.trim().toLowerCase())
-		);
-		return missing.length > 0
-			? { error: `No column named ${missing.join(", ")}` }
-			: { ok: true };
-	}, [expression, columns]);
-
-	if (!status) {
-		return null;
-	}
-	return (
-		<p
-			className={cn(
-				"text-xs",
-				"error" in status ? "text-destructive" : "text-muted-foreground"
-			)}
-		>
-			{"error" in status ? status.error : "Formula is valid"}
-		</p>
-	);
-}
+import { useState } from "react";
+import {
+	COLUMN_TYPE_OPTIONS,
+	draftToCell,
+	initialOptions,
+	newOptionValue,
+	newRuleId,
+	OPTION_VARIANTS,
+	type OptionDraft,
+} from "./ColumnEditor-draft.ts";
+import { FormulaStatus } from "./ColumnEditor-formula-status.tsx";
 
 /**
  * A Notion-style column (property) editor used for both creating and editing a
@@ -187,6 +63,7 @@ export function ColumnEditor({
 	onSubmit: (label: string, cell: CellOpts) => void;
 	onCancel: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const [label, setLabel] = useState(initial?.label ?? "");
 	const [variant, setVariant] = useState<CellOpts["variant"]>(
 		initial?.cell.variant ?? "short-text"
@@ -302,7 +179,7 @@ export function ColumnEditor({
 											<button
 												aria-label="Option color"
 												className={cn(
-													"size-6 shrink-0 rounded-md border",
+													"size-6 shrink-0 rounded-lg border",
 													getOptionColorClass(option.color)
 												)}
 												type="button"
@@ -319,7 +196,7 @@ export function ColumnEditor({
 												<button
 													aria-label={color}
 													className={cn(
-														"size-6 rounded-md border",
+														"size-6 rounded-lg border",
 														getOptionColorClass(color),
 														option.color === color && "ring-2 ring-ring"
 													)}
@@ -344,7 +221,7 @@ export function ColumnEditor({
 									size="icon"
 									variant="ghost"
 								>
-									<X className="size-4" />
+									<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 								</Button>
 							</div>
 						))}
@@ -354,7 +231,7 @@ export function ColumnEditor({
 							size="sm"
 							variant="ghost-muted"
 						>
-							<Plus className="size-3.5" />
+							<HugeiconsIcon className="size-3.5" icon={PlusSignIcon} />
 							Add option
 						</Button>
 					</div>
@@ -389,8 +266,13 @@ export function ColumnEditor({
 						</div>
 					)}
 					<p className="text-muted-foreground text-xs">
-						Reference columns as {"{Column name}"}. Use + - * / ^, & to join
-						text, comparisons, and {FORMULA_FUNCTION_NAMES.join(", ")}.
+						{tl(
+							"Reference columns as {example}. Use + - * / ^, & to join text, comparisons, and {functions}.",
+							{
+								example: "{Column name}",
+								functions: FORMULA_FUNCTION_NAMES.join(", "),
+							}
+						)}
 					</p>
 				</div>
 			)}
@@ -438,7 +320,7 @@ export function ColumnEditor({
 										<button
 											aria-label="Highlight color"
 											className={cn(
-												"size-6 shrink-0 rounded-md border",
+												"size-6 shrink-0 rounded-lg border",
 												getOptionColorClass(rule.color)
 											)}
 											type="button"
@@ -455,7 +337,7 @@ export function ColumnEditor({
 											<button
 												aria-label={color}
 												className={cn(
-													"size-6 rounded-md border",
+													"size-6 rounded-lg border",
 													getOptionColorClass(color),
 													rule.color === color && "ring-2 ring-ring"
 												)}
@@ -473,7 +355,7 @@ export function ColumnEditor({
 								size="icon"
 								variant="ghost"
 							>
-								<X className="size-4" />
+								<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 							</Button>
 						</div>
 					))}
@@ -483,7 +365,7 @@ export function ColumnEditor({
 						size="sm"
 						variant="ghost-muted"
 					>
-						<Plus className="size-3.5" />
+						<HugeiconsIcon className="size-3.5" icon={PlusSignIcon} />
 						Add highlight rule
 					</Button>
 					{rules.length > 0 && (

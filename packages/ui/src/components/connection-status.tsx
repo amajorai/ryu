@@ -1,8 +1,14 @@
 "use client";
 
+import {
+	RefreshIcon,
+	ServerStack01Icon,
+	Tick02Icon,
+	WifiDisconnected01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type { ConnectionPhase } from "@ryuhq/protocol/connection-status";
-import { Check, RefreshCw, ServerOff, WifiOff } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,6 +16,10 @@ import { cn } from "../lib/utils.ts";
 import { Button } from "./button.tsx";
 import styles from "./connection-status.module.css";
 import { useConnectionStatusStack } from "./connection-status-stack.ts";
+import {
+	StatusStrip,
+	type StatusStripTone,
+} from "./connection-status-strip.tsx";
 import { Spinner } from "./spinner.tsx";
 import {
 	Tooltip,
@@ -42,7 +52,7 @@ export function ConnectionStatusDot({
 			? "bg-success"
 			: state === "offline"
 				? "bg-destructive"
-				: "bg-muted-foreground/40";
+				: "bg-muted-foreground";
 	return (
 		<span
 			aria-label={label}
@@ -126,7 +136,7 @@ function ConnectionStatusText({
 			/>
 			<TooltipContent
 				align="center"
-				className="max-w-[calc(100vw-2rem)] whitespace-normal break-words border-border/50 bg-muted text-muted-foreground"
+				className="max-w-[calc(100vw-2rem)] whitespace-normal break-words"
 				role="tooltip"
 				side="bottom"
 			>
@@ -140,6 +150,12 @@ function ConnectionStatusText({
 export interface ConnectionStatusToastProps {
 	/** Allows a host to add a class without taking over the component geometry. */
 	className?: string;
+	/**
+	 * "toast" (default) is the floating pill web and extension hosts use;
+	 * "strip" is the inline `h-8` banner the desktop shell mounts under its
+	 * header.
+	 */
+	layout?: "strip" | "toast";
 	/** The selected node shown in the node-unreachable and reconnecting copy. */
 	nodeName?: string;
 	/** Optional manual retry action. It is only shown for node-unreachable. */
@@ -185,30 +201,59 @@ function copyForPhase(
 	};
 }
 
-function phaseIcon(phase: ConnectionPhase, restored: boolean): ReactNode {
+function phaseIcon(
+	phase: ConnectionPhase,
+	restored: boolean,
+	className = "size-3.5"
+): ReactNode {
 	if (restored) {
-		return <Check aria-hidden="true" className="size-3.5" />;
+		return (
+			<HugeiconsIcon
+				aria-hidden="true"
+				className={className}
+				icon={Tick02Icon}
+			/>
+		);
 	}
 	if (phase === "offline") {
-		return <WifiOff aria-hidden="true" className="size-3.5" />;
+		return (
+			<HugeiconsIcon
+				aria-hidden="true"
+				className={className}
+				icon={WifiDisconnected01Icon}
+			/>
+		);
 	}
 	if (phase === "node-unreachable") {
-		return <ServerOff aria-hidden="true" className="size-3.5" />;
+		return (
+			<HugeiconsIcon
+				aria-hidden="true"
+				className={className}
+				icon={ServerStack01Icon}
+			/>
+		);
 	}
-	return <Spinner aria-hidden="true" className="size-3.5" />;
+	return <Spinner aria-hidden="true" className={className} />;
+}
+
+function phaseTone(phase: ConnectionPhase, restored: boolean): StatusStripTone {
+	if (restored) {
+		return "success";
+	}
+	if (phase === "node-unreachable") {
+		return "warning";
+	}
+	return "neutral";
 }
 
 function phaseIconClass(phase: ConnectionPhase, restored: boolean): string {
 	if (restored) {
-		return "bg-emerald-400/15 text-emerald-300";
+		return "bg-status-success/15 text-status-success";
 	}
-	if (phase === "checking") {
-		return "bg-sky-400/15 text-sky-300";
+	if (phase === "checking" || phase === "offline") {
+		return "bg-status-info/15 text-status-info";
 	}
-	if (phase === "offline") {
-		return "bg-sky-400/15 text-sky-300";
-	}
-	return "bg-amber-400/15 text-amber-200";
+	return "bg-status-warning/15 text-status-warning";
 }
 
 const STATUS_MOTION = { type: "spring", duration: 0.3, bounce: 0 } as const;
@@ -228,7 +273,55 @@ interface ToastStyle extends CSSProperties {
 	"--toast-z-index"?: number;
 }
 
-export function ConnectionStatusToast({
+export function ConnectionStatusToast(props: ConnectionStatusToastProps) {
+	if (props.layout === "strip") {
+		return <ConnectionStatusStrip {...props} />;
+	}
+	return <ConnectionStatusFloating {...props} />;
+}
+
+/** The inline desktop banner: one sentence and, when unreachable, one Retry. */
+function ConnectionStatusStrip({
+	className,
+	nodeName = "Ryu",
+	onRetry,
+	phase,
+	restored = false,
+	retrying = false,
+}: ConnectionStatusToastProps) {
+	const tl = useLiteralMessages();
+	if (phase === "online" && !restored) {
+		return null;
+	}
+	const copy = copyForPhase(phase, nodeName, restored, tl);
+	return (
+		<StatusStrip
+			action={
+				phase === "node-unreachable" && onRetry ? (
+					<Button
+						data-slot="connection-status-retry"
+						disabled={retrying}
+						onClick={onRetry}
+						size="sm"
+						variant="ghost"
+					>
+						{retrying ? "Checking…" : "Retry"}
+					</Button>
+				) : null
+			}
+			className={className}
+			data-connection-phase={phase}
+			data-connection-restored={restored ? "true" : undefined}
+			data-testid="connection-status-toast"
+			detail={copy.detail}
+			icon={phaseIcon(phase, restored, "size-4")}
+			title={`${copy.title}.`}
+			tone={phaseTone(phase, restored)}
+		/>
+	);
+}
+
+function ConnectionStatusFloating({
 	className,
 	nodeName = "Ryu",
 	onRetry,
@@ -344,12 +437,12 @@ export function ConnectionStatusToast({
 								}
 							>
 								<ConnectionStatusText
-									className="type-caption text-center font-medium leading-[1.2] tracking-[-0.01em]"
+									className="text-center font-medium text-xs"
 									dataSlot="connection-status-title"
 									text={copy.title}
 								/>
 								<ConnectionStatusText
-									className="type-compact text-center text-white/60 leading-[1.25]"
+									className="text-center text-white/60 text-xs"
 									dataSlot="connection-status-detail"
 									text={copy.detail}
 								/>
@@ -366,9 +459,10 @@ export function ConnectionStatusToast({
 									title={retrying ? "Checking connection" : "Retry connection"}
 									variant="ghost"
 								>
-									<RefreshCw
+									<HugeiconsIcon
 										aria-hidden="true"
 										className={cn("size-3.5", retrying && "animate-spin")}
+										icon={RefreshIcon}
 									/>
 									<span className="sr-only">
 										{retrying ? "Checking connection" : "Retry"}

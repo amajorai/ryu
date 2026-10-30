@@ -56,7 +56,7 @@ function ChromeRow({
 	onToggle: (key: string) => void;
 }) {
 	return (
-		<div className="flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-muted">
+		<div className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-muted">
 			<span
 				className={`min-w-0 flex-1 truncate text-sm ${hidden ? "text-muted-foreground line-through" : ""}`}
 			>
@@ -124,7 +124,7 @@ function ReorderableRow({
 		// row is the drag-and-drop reorder target; the nested button carries the keyboard-reachable affordance
 		// row is the drag-and-drop reorder target; the nested button carries the keyboard-reachable affordance
 		<div
-			className={`relative flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-muted ${isDragging ? "opacity-50" : ""}`}
+			className={`relative flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-muted ${isDragging ? "opacity-50" : ""}`}
 			onDragOver={(e) => {
 				if (dnd.draggingKey) {
 					e.preventDefault();
@@ -350,8 +350,8 @@ export function CustomizeSidebarDialog({
 					</DialogDescription>
 				</DialogHeader>
 				<div className="scroll-fade flex max-h-[60vh] flex-col gap-3 overflow-y-auto py-2">
-					<div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
-						<p className="font-medium text-sm">Entire sidebar</p>
+					<div className="flex items-center justify-between gap-2 rounded-lg bg-muted px-2 py-1.5">
+						<p className="text-sm">Entire sidebar</p>
 						<BulkVisibilityActions
 							hideLabel="All off"
 							onHideAll={() => {

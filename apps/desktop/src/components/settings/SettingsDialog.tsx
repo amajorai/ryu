@@ -1,32 +1,12 @@
 import {
-	Analytics01Icon,
-	CloudIcon,
-	Coins01Icon,
-	ColorsIcon,
+	Comment01Icon,
 	ComputerIcon,
-	CreditCardIcon,
-	GiftIcon,
-	KeyboardIcon,
-	Mic01Icon,
 	Package01Icon,
 	PlugSocketIcon,
-	Refresh01Icon,
-	SecurityCheckIcon,
-	Settings01Icon,
-	SourceCodeIcon,
-	UserCircleIcon,
-	UserIcon,
-	UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
-import type { IconSvgElement } from "@hugeicons/react";
 import ResizableSettingsLayout from "@ryu/blocks/desktop/resizable-settings-layout.tsx";
-import {
-	SettingsIconTile,
-	type SettingsTint,
-} from "@ryu/blocks/desktop/settings-nav.tsx";
-import { useI18n, useLocalizedText } from "@ryu/i18n/react";
-import { OAuthAppsTab, ReferralsTab } from "@ryu/settings";
-import { Button } from "@ryu/ui/components/button.tsx";
+import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
+import { useI18n } from "@ryu/i18n/react";
 import { Dialog, DialogContent } from "@ryu/ui/components/dialog.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import {
@@ -39,9 +19,7 @@ import {
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { useSession } from "@/lib/auth-client.ts";
-import { openExternal } from "@/lib/tauri-bridge.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
@@ -53,359 +31,27 @@ import {
 	type ScopedNavEntity,
 	useScopedSettingsNav,
 } from "@/src/hooks/useScopedSettingsNav.ts";
-import { useSettingReveal } from "@/src/hooks/useSettingReveal.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { requestSettingReveal } from "@/src/lib/settings-focus.ts";
 import type { SettingsEntry } from "@/src/lib/settings-index.ts";
 import { openFeedbackWidget } from "@/src/lib/userjot.ts";
-import CreditsTab from "@/src/pages/CreditsPage.tsx";
-import UsageTab from "@/src/pages/UsagePage.tsx";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
-import type { SettingsSectionValue } from "@/src/store/useSettingsDialog.ts";
-import { AccountTab } from "./AccountTab.tsx";
-import { AppearanceTab } from "./AppearanceTab.tsx";
-import { AppUpdatesSettings } from "./AppUpdatesSettings.tsx";
-import { AudioDevicesSettings } from "./AudioDevicesSettings.tsx";
-import { BillingTab } from "./BillingTab.tsx";
-import { DeveloperTab } from "./DeveloperTab.tsx";
 import { EntitySettings } from "./EntitySettings.tsx";
-import { GeneralTab } from "./GeneralTab.tsx";
-import { KeyboardShortcutsTab } from "./KeyboardShortcutsTab.tsx";
-import { ProfileTab } from "./ProfileTab.tsx";
-import { RyuAppsTab } from "./RyuAppsTab.tsx";
-import { ServicesOrgSwitcher } from "./ServicesOrgSwitcher.tsx";
-import { SessionsTab } from "./SessionsTab.tsx";
 import { SettingsSearchResults } from "./SettingsSearchResults.tsx";
-import { SettingsSyncTab } from "./SettingsSyncTab.tsx";
-import { StatsTab } from "./StatsTab.tsx";
-import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
-import { TeamsBillingTab } from "./TeamsBillingTab.tsx";
-import { TtsEngineSettings } from "./TtsEngineSettings.tsx";
-import { VoiceInputSettings } from "./VoiceInputSettings.tsx";
-import { VoiceModeDisplaySettings } from "./VoiceModeDisplaySettings.tsx";
-import { VoiceReadbackSettings } from "./VoiceReadbackSettings.tsx";
+import {
+	KEYBOARD_SHORTCUT_CONTEXT,
+	NAV_GROUPS,
+	type NavGroup,
+	normalizeDefaultSection,
+	type SectionValue,
+} from "./settings-dialog-nav.tsx";
+import {
+	KeyboardShortcutsLink,
+	SectionContent,
+	SettingsContentPane,
+} from "./settings-dialog-sections.tsx";
 
 const queryClient = new QueryClient();
-
-// Static (built-in) sections defined in the store so external openers (the Gateway
-// dialog cross-link, the command palette) can request one without importing this
-// component. Per-app/plugin tabs are dynamic (`app:<id>` / `plugin:<id>`) and are
-// NOT part of this union — they are matched by prefix at render time.
-type SectionValue = SettingsSectionValue;
-
-const KEYBOARD_SHORTCUT_CONTEXT = new Map<string, string>([
-	["general", "Customize shortcuts for app controls, tabs, and navigation."],
-	["voice", "Customize shortcuts for voice mode and other voice actions."],
-]);
-
-interface NavItem {
-	desktopOnly?: boolean;
-	/**
-	 * The tinted tile left of the label, the way iOS/macOS Settings marks a row.
-	 * Optional because the dynamic Apps/Plugins items are built elsewhere and a
-	 * manifest declares a settings tab, not a glyph — the label always carries the
-	 * meaning, the tile only makes the list scannable.
-	 */
-	icon?: IconSvgElement;
-	label: string;
-	tint?: SettingsTint;
-	value: string;
-}
-
-interface NavGroup {
-	/**
-	 * Renders between the group label and its first item. Exists for exactly one
-	 * case — the workspace switcher above Billing — because every item in the
-	 * Services group is org-scoped and the group needed one control saying WHICH
-	 * org, rather than four tabs each repeating (and potentially disagreeing
-	 * about) the answer.
-	 */
-	header?: ReactNode;
-	items: NavItem[];
-	title?: string;
-}
-
-// Desktop-client + user-account sections only. Everything node/gateway-level
-// (meetings, memory, privacy, storage, email/alerts, connections, health,
-// predictive typing, tasks, the Danger Zone, and node-scoped app/plugin settings)
-// now lives in the Gateway dialog — those affect the whole node, not this per-user
-// desktop client, and belong next to the other node settings.
-//
-// Updates is the one tab that exists in both dialogs, and deliberately so: the
-// Gateway one updates the node's Core/Gateway binaries, the one here updates this
-// desktop client. They are separate installs that can sit at different versions.
-//
-// KNOWN HYBRID — `voice` is the one entry below that is NOT the shell's own
-// setting: it belongs to the voice/dictation sidecar stack and could arrive
-// through `contributes.settings_tabs` under the dynamic Apps/Plugins headers
-// (as memory/meetings/quests/predict already do). It is kept here because it is
-// a wrapper around five desktop-client sub-panels that share no single owning
-// app record. `island` and `shadow` were the other two hybrids and are now
-// registered: each declares a manifest `contributes.settings_tabs` view and
-// renders under the dynamic Apps/Plugins headers in the Gateway dialog, so their
-// tabs appear only while the owning app is enabled instead of always.
-const NAV_GROUPS: NavGroup[] = [
-	{
-		items: [
-			{
-				value: "general",
-				label: "General",
-				icon: Settings01Icon,
-				tint: "gray",
-			},
-			{
-				value: "appearance",
-				label: "Appearance",
-				icon: ColorsIcon,
-				tint: "purple",
-			},
-			{
-				value: "keyboard",
-				label: "Keyboard Shortcuts",
-				icon: KeyboardIcon,
-				tint: "indigo",
-				desktopOnly: true,
-			},
-			{ value: "voice", label: "Voice", icon: Mic01Icon, tint: "orange" },
-		],
-	},
-	{
-		title: "Account",
-		items: [
-			{
-				value: "account",
-				label: "Account",
-				icon: UserCircleIcon,
-				tint: "blue",
-			},
-			{
-				value: "profile",
-				label: "Profile",
-				icon: UserIcon,
-				tint: "blue",
-			},
-			{
-				value: "stats",
-				label: "Stats",
-				icon: Analytics01Icon,
-				tint: "purple",
-			},
-			{
-				value: "sessions",
-				label: "Sessions & devices",
-				icon: SecurityCheckIcon,
-				tint: "teal",
-			},
-			{
-				value: "ryu-apps",
-				label: "Ryu apps",
-				icon: Package01Icon,
-				tint: "gray",
-			},
-			{
-				value: "authorized-apps",
-				label: "OAuth apps",
-				icon: UserMultiple02Icon,
-				tint: "gray",
-			},
-		],
-	},
-	{
-		title: "Services",
-		// The scope of everything under this heading, stated once at the top of it.
-		header: <ServicesOrgSwitcher />,
-		items: [
-			{
-				value: "billing",
-				label: "Billing",
-				icon: CreditCardIcon,
-				tint: "green",
-			},
-			{ value: "referrals", label: "Referrals", icon: GiftIcon, tint: "pink" },
-			{
-				value: "teams",
-				label: "Teams",
-				icon: UserMultiple02Icon,
-				tint: "indigo",
-			},
-			{ value: "credits", label: "Credits", icon: Coins01Icon, tint: "green" },
-			// Next to Credits on purpose: the balance and what drew it down are the
-			// same question asked twice, and splitting them across groups is how a
-			// customer ends up asking support what a charge was.
-			{ value: "usage", label: "Usage", icon: Coins01Icon, tint: "green" },
-		],
-	},
-	{
-		// The three tabs nobody opens in a normal week: the client updater, the
-		// developer tools, and cross-machine settings sync. Grouping them demotes
-		// them out of the first block, which is now only the settings a user
-		// actually tunes. Labels must stay byte-identical to
-		// SETTINGS_SECTION_LABELS (lib/settings-index.ts) or the sidebar and the
-		// search-result breadcrumb disagree about the same tab.
-		title: "Advanced",
-		items: [
-			{
-				value: "updates",
-				label: "Updates",
-				icon: Refresh01Icon,
-				tint: "teal",
-				desktopOnly: true,
-			},
-			{
-				value: "developer",
-				label: "Developer",
-				icon: SourceCodeIcon,
-				tint: "gray",
-			},
-			{
-				value: "sync",
-				label: "Settings Sync",
-				icon: CloudIcon,
-				tint: "blue",
-			},
-		],
-	},
-];
-
-/**
- * The Referrals tab, with the two things `ReferralsTab` cannot resolve itself:
- * whose name goes on the invite pass, and which metal ring to paint on it.
- *
- * Its own component rather than inline in `SectionContent`, because both facts
- * come from hooks (`useSession`, `useTheme`) and `SectionContent` is a switch —
- * calling hooks in one arm of it would be a conditional hook.
- */
-function ReferralsSection() {
-	const { data: session } = useSession();
-	const { resolvedTheme } = useTheme();
-	return (
-		<ReferralsTab
-			holderName={session?.user?.name ?? null}
-			// The app's RESOLVED theme, not the OS's: this shell has a manual toggle
-			// that can disagree with `prefers-color-scheme`, and a ring following the
-			// OS would be the one part of the card lit for the wrong scheme.
-			metalTheme={resolvedTheme === "dark" ? "dark" : "light"}
-			onOpenExternal={openExternal}
-		/>
-	);
-}
-
-function KeyboardShortcutsLink({
-	description,
-	onOpen,
-}: {
-	description: string;
-	onOpen: () => void;
-}) {
-	const { t } = useI18n();
-	const localizedDescription = useLocalizedText(description);
-	return (
-		<SettingsSection title={t("settings.keyboard.title")}>
-			<SettingsCard className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<p className="text-muted-foreground text-sm">{localizedDescription}</p>
-				<Button
-					className="shrink-0"
-					onClick={onOpen}
-					size="sm"
-					variant="secondary"
-				>
-					{t("settings.keyboard.open")}
-				</Button>
-			</SettingsCard>
-		</SettingsSection>
-	);
-}
-
-function SectionContent({ value }: { value: string }) {
-	switch (value) {
-		case "general":
-			return <GeneralTab />;
-		case "account":
-			return <AccountTab />;
-		case "profile":
-			return <ProfileTab />;
-		case "stats":
-			return <StatsTab />;
-		case "sessions":
-			return <SessionsTab />;
-		case "ryu-apps":
-			return <RyuAppsTab />;
-		case "authorized-apps":
-			return <OAuthAppsTab />;
-		case "appearance":
-			return <AppearanceTab />;
-		case "keyboard":
-			return <KeyboardShortcutsTab />;
-		case "sync":
-			return <SettingsSyncTab />;
-		case "updates":
-			return <AppUpdatesSettings />;
-		case "billing":
-			return <BillingTab />;
-		case "referrals":
-			return <ReferralsSection />;
-		case "teams":
-			return <TeamsBillingTab />;
-		case "credits":
-			return <CreditsTab />;
-		case "usage":
-			return <UsageTab />;
-		case "developer":
-			return <DeveloperTab />;
-		case "voice":
-			return (
-				<div className="space-y-4">
-					<AudioDevicesSettings />
-					<VoiceModeDisplaySettings />
-					<VoiceInputSettings />
-					<VoiceReadbackSettings />
-					<TtsEngineSettings />
-				</div>
-			);
-		default:
-			return null;
-	}
-}
-
-/**
- * The content pane, and the owner of the settings-search reveal.
- *
- * The reveal hook lives here rather than on `SettingsDialog` because the
- * dialog's popup mounts in a portal one render after the dialog itself. At the
- * dialog level the hook's effect ran before the pane existed: it claimed the
- * pending reveal against the whole document, so a sub-paged section (General,
- * Appearance) never saw the request and stayed on its index, and reopening
- * Settings on the section it already showed claimed nothing at all. Mounted
- * with the pane, the section's own render peeks the request first (to open the
- * right sub-page) and the reveal is then scoped to this pane. The hook also
- * claims a result chosen in the section already on screen, which switches no
- * section and so would otherwise stay pending until the next visit.
- */
-function SettingsContentPane({
-	children,
-	className,
-	section,
-}: {
-	children: ReactNode;
-	className: string;
-	section: string;
-}) {
-	const contentRef = useSettingReveal(section, "app");
-	return (
-		<div className={className} ref={contentRef}>
-			{children}
-		</div>
-	);
-}
-
-function normalizeDefaultSection(
-	defaultSection: SectionValue | (string & {}) | undefined,
-	isDesktop: boolean
-): string {
-	return !isDesktop && defaultSection === "keyboard"
-		? "general"
-		: (defaultSection ?? "general");
-}
 
 interface SettingsDialogProps {
 	/** A static {@link SectionValue}, or a dynamic `app:<id>` / `plugin:<id>` entity
@@ -467,15 +113,14 @@ export function SettingsDialog({
 						label: t(`settings.nav.${item.value}`, {}, item.label),
 					})),
 			})).filter((group) => group.items.length > 0),
-			// One stand-in tile per dynamic header, in grey: a manifest contributes a
-			// settings tab, not a glyph, so the tile says "contributed" rather than
+			// One stand-in glyph per dynamic header: a manifest contributes a
+			// settings tab, not a glyph, so the icon says "contributed" rather than
 			// pretending to identify the app.
 			...buildEntityNavGroups(appEntities, pluginEntities).map((group) => ({
 				title: group.title,
 				items: group.items.map((item) => ({
 					...item,
 					icon: group.title === "Apps" ? Package01Icon : PlugSocketIcon,
-					tint: /* SAFETY: The authored gray literal is a declared SettingsTint; this fixes the local tile tint and does not project any plugin-provided value. */ "gray" as SettingsTint,
 				})),
 			})),
 		],
@@ -561,6 +206,11 @@ export function SettingsDialog({
 	const keyboardShortcutDescription = isDesktop
 		? KEYBOARD_SHORTCUT_CONTEXT.get(activeSection)
 		: undefined;
+	// Opened with the pointer (or programmatically), focus lands on the pane
+	// title, which shows no ring; opened from the keyboard, it lands on the search
+	// so typing filters at once and the focus ring is the expected affordance.
+	const titleRef = useRef<HTMLHeadingElement>(null);
+	const isKeyboard = activeSection === "keyboard";
 
 	return (
 		<QueryClientProvider client={queryClient}>
@@ -569,28 +219,37 @@ export function SettingsDialog({
 				    box with no room for both panes on a phone, so below `md` — the same
 				    768px line `useIsMobile` stacks the panes at — it goes
 				    edge-to-edge, full dynamic viewport height. */}
-				<DialogContent appearance="gateway-settings">
+				<DialogContent
+					appearance="gateway-settings"
+					initialFocus={(openType) =>
+						openType === "keyboard" ? true : titleRef.current
+					}
+				>
 					<ResizableSettingsLayout
 						content={
 							<SettingsContentPane
 								className={
-									activeSection === "keyboard"
-										? "flex h-full min-h-0 flex-col px-4 py-4 md:px-8 md:py-6"
-										: "px-4 py-4 md:px-8 md:py-6"
+									isKeyboard
+										? "flex h-full min-h-0 flex-col px-6 pt-5 pb-8"
+										: "px-6 pt-5 pb-8"
 								}
 								section={activeSection}
 							>
-								<h2 className="mb-6 shrink-0 font-medium text-base">
+								<h2
+									className="mb-6 flex h-8 shrink-0 items-center font-semibold text-lg tracking-tight outline-none"
+									ref={titleRef}
+									tabIndex={-1}
+								>
 									{activeLabel}
 								</h2>
 								{activeEntity ? (
-									<EntitySettings entity={activeEntity} target={target} />
+									<div className="max-w-2xl">
+										<EntitySettings entity={activeEntity} target={target} />
+									</div>
 								) : (
 									<div
 										className={
-											activeSection === "keyboard"
-												? "min-h-0 flex-1"
-												: "space-y-6"
+											isKeyboard ? "min-h-0 max-w-2xl flex-1" : "max-w-2xl"
 										}
 									>
 										<SectionContent value={activeSection} />
@@ -604,7 +263,7 @@ export function SettingsDialog({
 								)}
 							</SettingsContentPane>
 						}
-						contentScrollable={activeSection !== "keyboard"}
+						contentScrollable={!isKeyboard}
 						sidebar={
 							<>
 								<SidebarGroup spacing="compact">
@@ -634,11 +293,7 @@ export function SettingsDialog({
 																}}
 															>
 																{item.icon ? (
-																	<SettingsIconTile
-																		icon={item.icon}
-																		size="sm"
-																		tint={item.tint}
-																	/>
+																	<SettingsIconTile icon={item.icon} />
 																) : null}
 																<span className="truncate" title={item.label}>
 																	{item.label}
@@ -674,11 +329,7 @@ export function SettingsDialog({
 																onClick={() => setActiveSection(item.value)}
 															>
 																{item.icon ? (
-																	<SettingsIconTile
-																		icon={item.icon}
-																		size="sm"
-																		tint={item.tint}
-																	/>
+																	<SettingsIconTile icon={item.icon} />
 																) : null}
 																<span className="truncate" title={item.label}>
 																	{item.label}
@@ -689,33 +340,25 @@ export function SettingsDialog({
 												</SidebarMenu>
 											</SidebarGroup>
 										))}
+								{/* The way out to the node's own settings and the feedback
+								    widget: two plain rows at the foot of the nav, no label. */}
 								<SidebarGroup className="mt-auto" spacing="compact">
 									<SidebarMenu>
 										<SidebarMenuItem>
-											<SidebarMenuButton onClick={handleSendFeedback}>
-												{t("settings.feedback.send")}
-											</SidebarMenuButton>
-										</SidebarMenuItem>
-									</SidebarMenu>
-								</SidebarGroup>
-								<SidebarGroup spacing="compact">
-									<SidebarGroupLabel>
-										{simpleInterface
-											? t("settings.search.device")
-											: t("settings.search.node")}
-									</SidebarGroupLabel>
-									<SidebarMenu>
-										<SidebarMenuItem>
 											<SidebarMenuButton onClick={handleOpenGateway}>
-												<SettingsIconTile
-													icon={ComputerIcon}
-													size="sm"
-													tint="gray"
-												/>
+												<SettingsIconTile icon={ComputerIcon} />
 												<span className="truncate">
 													{simpleInterface
 														? t("settings.search.device_settings")
 														: t("settings.search.gateway_settings")}
+												</span>
+											</SidebarMenuButton>
+										</SidebarMenuItem>
+										<SidebarMenuItem>
+											<SidebarMenuButton onClick={handleSendFeedback}>
+												<SettingsIconTile icon={Comment01Icon} />
+												<span className="truncate">
+													{t("settings.feedback.send")}
 												</span>
 											</SidebarMenuButton>
 										</SidebarMenuItem>

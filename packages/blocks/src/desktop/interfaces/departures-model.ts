@@ -1,11 +1,34 @@
 import {
-	type InterfaceAgent,
 	type InterfaceEvent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
 	localDayKey,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import {
+	airlineCodes,
+	boardDate,
+	boardTime,
+	flightDuration,
+	flightNumber,
+	HOUSE_AIRLINE,
+	parseTime,
+	relativeDay,
+	shortDate,
+	typicalFlightMs,
+} from "./departures-model-format.ts";
+import {
+	AT_GATE_WINDOW_MS,
+	type BoardSection,
+	DEPARTURES_BOARDS,
+	type DeparturesBoard,
+	type DeparturesBoards,
+	FLIGHT_STATUS_LABELS,
+	type Flight,
+	type FlightStatus,
+	LANDED_WINDOW_MS,
+	type RemarkPart,
+} from "./departures-model-types.ts";
 
 /**
  * Departures view model. Conversations are flights on an airport board:
@@ -20,345 +43,41 @@ import {
  * read the same flights.
  */
 
-export type DeparturesBoard = "arrivals" | "departures";
-
-export const DEPARTURES_BOARDS: readonly DeparturesBoard[] = [
-	"departures",
-	"arrivals",
-];
-
-export const BOARD_LABELS: Record<DeparturesBoard, string> = {
-	arrivals: "Arrivals",
-	departures: "Departures",
-};
-
-export type FlightStatus =
-	| "arrived"
-	| "at-gate"
-	| "boarding"
-	| "delayed"
-	| "in-flight"
-	| "landed"
-	| "scheduled";
-
-export const FLIGHT_STATUS_LABELS: Record<FlightStatus, string> = {
-	arrived: "Arrived",
-	"at-gate": "At gate",
-	boarding: "Boarding",
-	delayed: "Delayed",
-	"in-flight": "In flight",
-	landed: "Landed",
-	scheduled: "Scheduled",
-};
-
-/**
- * Three-letter status codes for a narrow board, the way a compact FIDS strip
- * abbreviates. The lamp beside them keeps the colour; the code keeps the word,
- * so the status never rests on colour alone.
- */
-export const FLIGHT_STATUS_CODES: Record<FlightStatus, string> = {
-	arrived: "ARR",
-	"at-gate": "GTE",
-	boarding: "BRD",
-	delayed: "DLY",
-	"in-flight": "DEP",
-	landed: "LND",
-	scheduled: "SCH",
-};
-
-/** The widest status label, so the status flaps keep one width. */
-export const STATUS_FLAP_LENGTH = Math.max(
-	...Object.values(FLIGHT_STATUS_LABELS).map((label) => label.length)
-);
-
-/** The lamp beside the status: which theme signal it takes, and whether it blinks. */
-export type FlightLamp = "alert" | "go" | "hold" | "off" | "idle";
-
-export const FLIGHT_LAMPS: Record<FlightStatus, FlightLamp> = {
-	arrived: "off",
-	"at-gate": "hold",
-	boarding: "hold",
-	delayed: "alert",
-	"in-flight": "go",
-	landed: "go",
-	scheduled: "idle",
-};
-
-/** Statuses whose lamp blinks, the way a board flashes "Boarding". */
-export const BLINKING_STATUSES: ReadonlySet<FlightStatus> = new Set([
-	"boarding",
-	"landed",
-]);
-
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-/** A reply younger than this has "Landed"; older ones wait "At gate". */
-export const LANDED_WINDOW_MS = 30 * MINUTE;
-/**
- * A reply left waiting this long is still at the gate (it still needs you),
- * but its lamp dims and its remark stops shouting "Your turn".
- */
-export const AT_GATE_WINDOW_MS = DAY;
-
-/** One part of a remark; the emphasized part takes the status colour. */
-export interface RemarkPart {
-	emphasis: boolean;
-	text: string;
-}
-
-/**
- * A run of rows under one day divider. A real board prints the date over
- * next-day departures; this board does the same for every day but today, and
- * lists boarding flights left from earlier days last, under "Held".
- */
-export interface BoardSection {
-	key: string;
-	label: string;
-}
-
-export interface Flight {
-	/** Every agent on the thread, gate agent first. */
-	agentIds: string[];
-	/** The board that lists this flight. */
-	board: DeparturesBoard;
-	/** When a finished routine run left, so its timeline can show both ends. */
-	departedAt: number | null;
-	/** Estimated landing time for a flight in the air, from past run lengths. */
-	etaAt: number | null;
-	/** The routine run behind a scheduled flight. */
-	eventId: string | null;
-	/** "AT 1042": the agent's two-letter code and digits from the id. */
-	flightNumber: string;
-	/** The gate agent (the thread's first agent), when there is one. */
-	gateAgentId: string | null;
-	/** Gate column text: the agent name, with "+n" for more agents. */
-	gateLabel: string;
-	/** Stable row key across both boards. */
-	key: string;
-	/** A reply that has waited past AT_GATE_WINDOW_MS: the lamp dims. */
-	parked: boolean;
-	/** A conversation nothing has been said in yet: it never flew. */
-	quiet: boolean;
-	/** Free text for the Remarks column. */
-	remark: string;
-	/** The remark in parts, so the actionable part can take the lamp colour. */
-	remarkParts: RemarkPart[];
-	/** A scheduled run's repeat phrase, e.g. "Weekdays at 9 AM". */
-	schedule: string | null;
-	/** The day divider this row sits under. */
-	section: BoardSection;
-	status: FlightStatus;
-	/** Terminal column text: the team or project, when there is one. */
-	terminal: string | null;
-	/** Team or project id behind the terminal. */
-	terminalId: string | null;
-	terminalKind: "project" | "team" | null;
-	/** The conversation behind a thread flight. */
-	threadId: string | null;
-	/** Scheduled time, departure time, or landing time (epoch ms). */
-	time: number;
-	/** The destination: the conversation title or the routine name. */
-	title: string;
-}
-
-export interface DeparturesBoards {
-	arrivals: Flight[];
-	departures: Flight[];
-}
-
-// ---------------------------------------------------------------------------
-// Flight numbers
-// ---------------------------------------------------------------------------
-
-const LETTERS = /[A-Z]/g;
-
-function lettersOf(name: string): string[] {
-	return name.toUpperCase().match(LETTERS) ?? [];
-}
-
-/** Candidate airline codes for a name, in preference order. */
-function codeCandidates(name: string): string[] {
-	const letters = lettersOf(name);
-	const first = letters[0] ?? "R";
-	const candidates: string[] = [];
-	for (const next of letters.slice(1)) {
-		candidates.push(`${first}${next}`);
-	}
-	for (const next of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-		candidates.push(`${first}${next}`);
-	}
-	return candidates;
-}
-
-/** The code for flights with no agent. */
-export const HOUSE_AIRLINE = "RY";
-
-/**
- * A unique two-letter airline code per agent: its first two letters, or the
- * first letter and a later one when another agent already took the pair.
- * Agents are coded in id order so a code never depends on list order.
- */
-export function airlineCodes(
-	agents: readonly InterfaceAgent[]
-): Map<string, string> {
-	const taken = new Set<string>([HOUSE_AIRLINE]);
-	const codes = new Map<string, string>();
-	const ordered = [...agents].sort((a, b) => a.id.localeCompare(b.id));
-	for (const agent of ordered) {
-		const code =
-			codeCandidates(agent.name).find((candidate) => !taken.has(candidate)) ??
-			HOUSE_AIRLINE;
-		taken.add(code);
-		codes.set(agent.id, code);
-	}
-	return codes;
-}
-
-function hashId(id: string): number {
-	let hash = 0;
-	for (const char of id) {
-		hash = (hash * 33 + (char.codePointAt(0) ?? 0)) % 1_000_003;
-	}
-	return hash;
-}
-
-/** "AT 1042": the airline code and four stable digits from the id. */
-export function flightNumber(code: string, id: string): string {
-	const digits = 1000 + (hashId(id) % 9000);
-	return `${code} ${digits}`;
-}
-
-// ---------------------------------------------------------------------------
-// Times
-// ---------------------------------------------------------------------------
-
-function pad(value: number): string {
-	return String(value).padStart(2, "0");
-}
-
-/** Board clock time, 24-hour like an airport: "09:05". */
-export function boardTime(time: number): string {
-	const date = new Date(time);
-	return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-const DAY_FORMAT = new Intl.DateTimeFormat("en-GB", {
-	day: "numeric",
-	month: "short",
-	weekday: "short",
-});
-
-/** "Wed 14 Oct". */
-export function boardDate(time: number): string {
-	return DAY_FORMAT.format(new Date(time)).replace(",", "");
-}
-
-const SHORT_DAY_FORMAT = new Intl.DateTimeFormat("en-GB", {
-	day: "numeric",
-	month: "short",
-});
-
-/** "5 Oct". */
-export function shortDate(time: number): string {
-	return SHORT_DAY_FORMAT.format(new Date(time));
-}
-
-/** "Today", "Tomorrow", "Yesterday", or "Wed 14 Oct". */
-export function relativeDay(time: number, now: number): string {
-	const key = localDayKey(new Date(time));
-	if (key === localDayKey(new Date(now))) {
-		return "Today";
-	}
-	if (key === localDayKey(new Date(now + DAY))) {
-		return "Tomorrow";
-	}
-	if (key === localDayKey(new Date(now - DAY))) {
-		return "Yesterday";
-	}
-	return boardDate(time);
-}
-
-/** "45s", "12m", "3h 05m", "2d 4h". */
-export function flightDuration(ms: number): string {
-	const total = Math.max(0, ms);
-	if (total < MINUTE) {
-		return `${Math.floor(total / 1000)}s`;
-	}
-	if (total < HOUR) {
-		return `${Math.floor(total / MINUTE)}m`;
-	}
-	if (total < DAY) {
-		const hours = Math.floor(total / HOUR);
-		const minutes = Math.floor((total % HOUR) / MINUTE);
-		return minutes === 0 ? `${hours}h` : `${hours}h ${pad(minutes)}m`;
-	}
-	const days = Math.floor(total / DAY);
-	const hours = Math.floor((total % DAY) / HOUR);
-	return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
-}
-
-function parseTime(iso: string | null | undefined): number | null {
-	if (!iso) {
-		return null;
-	}
-	const time = Date.parse(iso);
-	return Number.isNaN(time) ? null : time;
-}
-
-function median(values: number[]): number | null {
-	if (values.length === 0) {
-		return null;
-	}
-	const sorted = [...values].sort((a, b) => a - b);
-	const middle = Math.floor(sorted.length / 2);
-	const upper = sorted[middle] ?? 0;
-	if (sorted.length % 2 === 1) {
-		return upper;
-	}
-	return ((sorted[middle - 1] ?? upper) + upper) / 2;
-}
-
-function runLengths(events: readonly InterfaceEvent[]): number[] {
-	const lengths: number[] = [];
-	for (const event of events) {
-		if (event.kind !== "past") {
-			continue;
-		}
-		const start = parseTime(event.start);
-		const end = parseTime(event.end);
-		if (start !== null && end !== null && end > start) {
-			lengths.push(end - start);
-		}
-	}
-	return lengths;
-}
-
-/**
- * How long an agent typically takes to answer. Ideally this is the gap
- * between your message and the agent's reply in its other threads, but the
- * snapshot only carries each thread's last update, not per-message times, so
- * that gap cannot be measured. The closest real signal is the length of the
- * agent's finished routine runs: this agent's first, then every agent's when
- * it has none. Null when nothing has finished yet, so the board shows no ETA
- * rather than a made-up one. The panel labels the estimate "from recent runs".
- */
-export function typicalFlightMs(
-	snapshot: InterfaceSnapshot,
-	agentId: string | null
-): number | null {
-	const events = snapshot.events ?? [];
-	if (agentId) {
-		const own = median(
-			runLengths(events.filter((event) => event.agentId === agentId))
-		);
-		if (own !== null) {
-			return own;
-		}
-	}
-	return median(runLengths(events));
-}
+export {
+	airlineCodes,
+	boardDate,
+	boardTime,
+	flightDuration,
+	flightNumber,
+	HOUSE_AIRLINE,
+	relativeDay,
+	shortDate,
+	typicalFlightMs,
+} from "./departures-model-format.ts";
+export {
+	flightTimeline,
+	stampFor,
+	type TimelineState,
+	type TimelineStep,
+} from "./departures-model-timeline.ts";
+export {
+	AT_GATE_WINDOW_MS,
+	BLINKING_STATUSES,
+	BOARD_LABELS,
+	type BoardSection,
+	DEPARTURES_BOARDS,
+	type DeparturesBoard,
+	type DeparturesBoards,
+	FLIGHT_LAMPS,
+	FLIGHT_STATUS_CODES,
+	FLIGHT_STATUS_LABELS,
+	type Flight,
+	type FlightLamp,
+	type FlightStatus,
+	LANDED_WINDOW_MS,
+	type RemarkPart,
+	STATUS_FLAP_LENGTH,
+} from "./departures-model-types.ts";
 
 // ---------------------------------------------------------------------------
 // Flights
@@ -762,233 +481,4 @@ export function flightAccessibleName(flight: Flight): string {
 		parts.push(flight.remark);
 	}
 	return parts.join(", ");
-}
-
-// ---------------------------------------------------------------------------
-// Flight details timeline
-// ---------------------------------------------------------------------------
-
-export type TimelineState = "current" | "done" | "next";
-
-export interface TimelineStep {
-	/** A second line: what the step means, or how long it has lasted. */
-	detail: string | null;
-	key: string;
-	label: string;
-	state: TimelineState;
-	/** The clock time of the step, with the day when it is not today. */
-	time: string | null;
-	/** Which lamp colour the step's marker takes. */
-	tone: FlightLamp;
-}
-
-/** "12:55", or "Mon 5 Oct 12:55" off today. */
-export function stampFor(time: number, now: number): string {
-	return localDayKey(new Date(time)) === localDayKey(new Date(now))
-		? boardTime(time)
-		: `${boardDate(time)} ${boardTime(time)}`;
-}
-
-/** A finished routine run: when it left, and how it came back. */
-function routineRunTimeline(flight: Flight, now: number): TimelineStep[] {
-	const steps: TimelineStep[] = [
-		{
-			detail: flight.schedule,
-			key: "departed",
-			label: "Departed",
-			state: "done",
-			time:
-				flight.departedAt === null ? null : stampFor(flight.departedAt, now),
-			tone: "off",
-		},
-	];
-	if (flight.status === "delayed") {
-		steps.push(
-			{
-				detail: "The run did not finish",
-				key: "delayed",
-				label: "Delayed",
-				state: "current",
-				time: stampFor(flight.time, now),
-				tone: "alert",
-			},
-			{
-				detail: "Write to the gate to run it again now",
-				key: "retry",
-				label: "Rebook",
-				state: "next",
-				time: null,
-				tone: "idle",
-			}
-		);
-		return steps;
-	}
-	steps.push({
-		detail: flight.remark || null,
-		key: "arrived",
-		label: "Arrived",
-		state: "done",
-		time: stampFor(flight.time, now),
-		tone: "off",
-	});
-	return steps;
-}
-
-/**
- * The trip so far, oldest first. Only steps the snapshot can back are timed:
- * a thread carries one timestamp (its last update), so earlier steps are
- * named without a time rather than given an invented one.
- */
-export function flightTimeline(flight: Flight, now: number): TimelineStep[] {
-	if (flight.eventId !== null && flight.status !== "scheduled") {
-		return routineRunTimeline(flight, now);
-	}
-	const at = stampFor(flight.time, now);
-	const elapsed = flightDuration(now - flight.time);
-	const gate = flight.gateLabel || null;
-	switch (flight.status) {
-		case "scheduled":
-			return [
-				{
-					detail: flight.schedule ?? "Runs once",
-					key: "scheduled",
-					label: "Scheduled",
-					state: "done",
-					time: null,
-					tone: "off",
-				},
-				{
-					detail: "The conversation opens when the run starts",
-					key: "departs",
-					label: "Departs",
-					state: "next",
-					time: at,
-					tone: "idle",
-				},
-			];
-		case "boarding":
-			return [
-				{
-					detail: "Your message",
-					key: "boarded",
-					label: "Boarded",
-					state: "done",
-					time: at,
-					tone: "off",
-				},
-				{
-					detail: gate
-						? `Waiting for ${gate} · ${elapsed}`
-						: "No gate assigned",
-					key: "departure",
-					label: "Departure",
-					state: "current",
-					time: null,
-					tone: "hold",
-				},
-			];
-		case "in-flight":
-			return [
-				{
-					detail: gate ? `${gate} started the run` : "The run started",
-					key: "departed",
-					label: "Departed",
-					state: "done",
-					time: at,
-					tone: "off",
-				},
-				{
-					detail: elapsed,
-					key: "airborne",
-					label: "Airborne",
-					state: "current",
-					time: null,
-					tone: "go",
-				},
-				{
-					detail:
-						flight.etaAt === null
-							? "No finished runs to estimate from yet"
-							: "Estimated from recent runs",
-					key: "eta",
-					label:
-						flight.etaAt !== null && flight.etaAt < now ? "Overdue" : "ETA",
-					state: "next",
-					time:
-						flight.etaAt === null ? null : `${boardTime(flight.etaAt)} est.`,
-					tone: "idle",
-				},
-			];
-		case "delayed":
-			return [
-				{
-					detail: flight.remark || "The last run did not finish",
-					key: "delayed",
-					label: "Delayed",
-					state: "current",
-					time: at,
-					tone: "alert",
-				},
-				{
-					detail: "Reply in the conversation to try again",
-					key: "retry",
-					label: "Rebook",
-					state: "next",
-					time: null,
-					tone: "idle",
-				},
-			];
-		case "landed":
-		case "at-gate":
-			return [
-				{
-					detail: gate ? `${gate} replied` : "Reply received",
-					key: "landed",
-					label: "Landed",
-					state: "done",
-					time: at,
-					tone: "off",
-				},
-				{
-					detail: `Waiting on you · ${elapsed}`,
-					key: "gate",
-					label: "At gate",
-					state: "current",
-					time: null,
-					tone: "hold",
-				},
-			];
-		default:
-			if (flight.quiet) {
-				// Nothing was sent, so nothing landed: one step, not a landing.
-				return [
-					{
-						detail: "No messages yet",
-						key: "not-started",
-						label: "Not started",
-						state: "current",
-						time: at,
-						tone: "idle",
-					},
-				];
-			}
-			return [
-				{
-					detail: null,
-					key: "landed",
-					label: "Landed",
-					state: "done",
-					time: at,
-					tone: "off",
-				},
-				{
-					detail: `On the ground ${elapsed}`,
-					key: "arrived",
-					label: "Arrived",
-					state: "done",
-					time: null,
-					tone: "off",
-				},
-			];
-	}
 }

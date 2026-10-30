@@ -129,6 +129,18 @@ const tab: PluginStoreTab = {
 	},
 };
 
+/** Pick a Store section: a visible tab, or the strip's "More" menu for the
+ *  sections that live there. */
+async function selectStoreSection(page: Page, name: string | RegExp) {
+	const tab = page.getByRole("tab", { name });
+	if ((await tab.count()) > 0) {
+		await tab.first().click();
+		return;
+	}
+	await page.getByRole("button", { name: "More sections" }).click();
+	await page.getByRole("menuitem", { name }).first().click();
+}
+
 test("Marketplaces retains custom source after removal refusal and reads back retry", async ({
 	page,
 }) => {
@@ -596,7 +608,11 @@ test("StorePage discovers enabled contributions, dispatches installation and pro
 	await expect(
 		page.getByRole("heading", { name: "Marketplaces", exact: true })
 	).toBeVisible();
-	await expect(contributedPill).toBeVisible();
+	await page.getByRole("button", { name: "More sections" }).click();
+	await expect(
+		page.getByRole("menuitem", { name: /^Local templates/ })
+	).toBeVisible();
+	await page.keyboard.press("Escape");
 	await expect(marketplacePill).toHaveCount(1);
 	for (const title of [disabled.title, uninstalled.title, collision.title]) {
 		await expect(page.getByRole("tab", { name: title })).toHaveCount(0);
@@ -607,7 +623,7 @@ test("StorePage discovers enabled contributions, dispatches installation and pro
 	await expect(
 		page.getByRole("button", { name: /Collision template/ })
 	).toHaveCount(0);
-	await contributedPill.click();
+	await selectStoreSection(page, /^Local templates/);
 	await expect(contributedPill).toHaveAttribute("aria-selected", "true");
 	await page.getByRole("button", { name: /Verified template/ }).click();
 	const readsBeforeInstall = reads;
@@ -629,12 +645,12 @@ test("StorePage discovers enabled contributions, dispatches installation and pro
 		{ template_id: "one" },
 	]);
 	await page.reload();
-	await contributedPill.click();
+	await selectStoreSection(page, /^Local templates/);
 	await expect(
 		page.getByRole("button", { name: "Added", exact: true })
 	).toBeDisabled();
 	await proof(page, "store-host-contributed-install-readback.png");
-	await marketplacePill.click();
+	await selectStoreSection(page, /^Marketplaces/);
 	await expect(marketplacePill).toHaveAttribute("aria-selected", "true");
 	await expect(
 		page.getByRole("heading", { name: "Marketplaces", exact: true })

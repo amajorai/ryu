@@ -61,20 +61,29 @@ function tabGlyphElements(name: string, source: string): string[] {
 }
 
 describe("TabGlyph call sites", () => {
-	const layoutDir = import.meta.dir;
-	const sources = readdirSync(layoutDir)
+	// The shell frame's tab strips were split out of `layout/` into
+	// `shell/<part>/` modules, so scan both trees.
+	const componentsDir = join(import.meta.dir, "..");
+	const sources = ["layout", "shell"]
+		.flatMap((dir) =>
+			readdirSync(join(componentsDir, dir), { recursive: true }).map((name) =>
+				join(dir, String(name))
+			)
+		)
 		.filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
 		.map((name) => ({
 			name,
 			elements: tabGlyphElements(
 				name,
-				readFileSync(join(layoutDir, name), "utf8")
+				readFileSync(join(componentsDir, name), "utf8")
 			),
 		}))
 		.filter(({ elements }) => elements.length > 0);
 
 	test("finds the tab strips that render TabGlyph", () => {
-		expect(sources.map(({ name }) => name)).toContain("TitleBar.tsx");
+		expect(sources.map(({ name }) => name)).toContain(
+			join("shell", "title-bar", "regular-tab.tsx")
+		);
 	});
 
 	test("every call site hands TabGlyph a size class", () => {

@@ -8,7 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { AgentTitleBadge } from "@ryu/ui/components/agent-title-badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -60,7 +60,6 @@ import {
 import { useConversationFlagsStore } from "@/src/store/useConversationFlagsStore.ts";
 import type { Conversation } from "@/types/chat.ts";
 import { AnimatedTitle } from "./animated-title.tsx";
-import { OverflowTooltip } from "./overflow-tooltip.tsx";
 import { SidebarTodoProgress } from "./SidebarTodoProgress.tsx";
 import { SidebarConversationPreview } from "./sidebar-conversation-preview.tsx";
 import type { ChatRowHandlers } from "./sidebar-conversation-rows.tsx";
@@ -129,13 +128,13 @@ function messagingRowStamp(ts: number): string {
 	}
 }
 
-/** The inside of a messaging-style agent row: a two-line-tall avatar, the name
- *  and last-activity stamp on the first line, and a one-line preview of the
- *  newest message below — the WhatsApp/Telegram shape.
+/** The inside of a messaging-style agent row, on one 32px line: a 20px avatar,
+ *  the name, and the last-activity stamp, which swaps for the thread and edit
+ *  actions on hover.
  *
- *  The preview is whatever Core returned on the conversation summary; a fresh
- *  agent with no threads yet shows a muted placeholder rather than an empty
- *  second line, so every row keeps the same height. */
+ *  The newest-message preview (whatever Core returned on the conversation
+ *  summary, or "No messages yet") and the agent's title live in the name's
+ *  tooltip rather than a second line. */
 export function MessagingAgentRowBody({
 	agent,
 	conversation,
@@ -176,6 +175,19 @@ export function MessagingAgentRowBody({
 			conversationStatus?.isRunning || conversationStatus?.needsAttention,
 	});
 
+	const threadLabel = tl(
+		threadsExpanded
+			? "Hide {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}}"
+			: "Show {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}}",
+		{ threadCount, threadCountLabel }
+	);
+	const threadAgentLabel = tl(
+		threadsExpanded
+			? "Hide {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}} for {name}"
+			: "Show {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}} for {name}",
+		{ name: agent.name, threadCount, threadCountLabel }
+	);
+
 	return (
 		<>
 			{conversation && nodeUrl ? (
@@ -186,96 +198,98 @@ export function MessagingAgentRowBody({
 				/>
 			) : null}
 			<AgentAvatar
-				className="size-9 shrink-0"
+				className="size-5 shrink-0"
 				engine={engineForAgent(agent)}
 				glyph={agent.avatarGlyph}
-				presentation="portrait"
-				size="36px"
+				presentation="compact"
+				size="20px"
 			/>
-			<div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-				<div className="flex min-w-0 items-center gap-2">
-					{/* Agent name and title are user data, never UI copy; the usage
-					    bar and stamp stay outside so the DOM localizer reaches them. */}
-					<div
-						className="flex min-w-0 flex-1 items-center gap-2"
-						data-ryu-i18n="off"
-					>
-						<OverflowTooltip
-							className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm"
-							fade
-							text={agent.name}
+			{/* One line: the name. Title, latest message and run state live in the
+			    tooltip, so every agent row has the same 32px height. Agent name and
+			    title are user data, never UI copy, so the DOM localizer skips them;
+			    the preview, usage bar and stamp stay outside that zone. */}
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<span
+							className="fade-text-edge min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm"
+							data-ryu-i18n="off"
 						/>
-						<AgentTitleBadge title={agent.title} />
-					</div>
-					{usageBarVisible ? (
-						<UsageBar
-							agentId={agent.id}
-							className="shrink-0"
-							visible={usageBarVisible}
-						/>
-					) : null}
-					{stamp ? (
-						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
-							{stamp}
+					}
+				>
+					{agent.name}
+				</TooltipTrigger>
+				<TooltipContent align="start" className="max-w-64" side="right">
+					<span className="flex min-w-0 flex-col gap-0.5">
+						<span className="truncate" data-ryu-i18n="off">
+							{agent.title?.trim()
+								? `${agent.name} · ${agent.title.trim()}`
+								: agent.name}
 						</span>
-					) : null}
-				</div>
-				<div className="flex min-w-0 items-center gap-2">
-					<SidebarConversationPreview
-						className={`flex-1 ${conversation?.lastMessage ? "" : "italic"}`}
-						states={previewStates}
-						testId={`agent-chat-preview-${agent.id}`}
-					/>
-					{threadCount > 0 ? (
-						<button
-							aria-expanded={threadsExpanded}
-							aria-label={tl(
-								threadsExpanded
-									? "Hide {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}} for {name}"
-									: "Show {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}} for {name}",
-								{ name: agent.name, threadCount, threadCountLabel }
-							)}
-							className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
-							onClick={(e) => {
-								e.stopPropagation();
-								onToggleThreads();
-							}}
-							title={tl(
-								threadsExpanded
-									? "Hide {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}}"
-									: "Show {threadCount, plural, one {{threadCountLabel} thread} other {{threadCountLabel} threads}}",
-								{ threadCount, threadCountLabel }
-							)}
-							type="button"
-						>
-							<HugeiconsIcon
-								className={`size-3 transition-transform ${threadsExpanded ? "" : "-rotate-90"}`}
-								icon={ArrowDown01Icon}
-							/>
-						</button>
-					) : null}
-					{showEdit && (
-						<Tooltip>
-							<TooltipTrigger
-								render={
-									<button
-										aria-label={tl("Edit {name}", { name: agent.name })}
-										className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
-										onClick={(e) => {
-											e.stopPropagation();
-											onEdit();
-										}}
-										type="button"
-									>
-										<HugeiconsIcon icon={PencilEdit01Icon} size={14} />
-									</button>
-								}
-							/>
-							<TooltipContent>Edit agent</TooltipContent>
-						</Tooltip>
-					)}
-				</div>
-			</div>
+						<SidebarConversationPreview
+							className={conversation?.lastMessage ? "" : "italic"}
+							states={previewStates}
+							testId={`agent-chat-preview-${agent.id}`}
+						/>
+					</span>
+				</TooltipContent>
+			</Tooltip>
+			{usageBarVisible ? (
+				<UsageBar
+					agentId={agent.id}
+					className="shrink-0"
+					visible={usageBarVisible}
+				/>
+			) : null}
+			{stamp ? (
+				<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums group-focus-within/row:hidden group-hover/row:hidden">
+					{stamp}
+				</span>
+			) : null}
+			<span className="hidden shrink-0 items-center gap-0.5 group-focus-within/row:flex group-hover/row:flex">
+				{threadCount > 0 ? (
+					<Button
+						aria-expanded={threadsExpanded}
+						aria-label={threadAgentLabel}
+						className="size-6 rounded-lg"
+						onClick={(e) => {
+							e.stopPropagation();
+							onToggleThreads();
+						}}
+						size="icon-xs"
+						title={threadLabel}
+						type="button"
+						variant="ghost-muted"
+					>
+						<HugeiconsIcon
+							className={`size-3.5 transition-transform duration-150 ${threadsExpanded ? "" : "-rotate-90"}`}
+							icon={ArrowDown01Icon}
+						/>
+					</Button>
+				) : null}
+				{showEdit && (
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<Button
+									aria-label={tl("Edit {name}", { name: agent.name })}
+									className="size-6 rounded-lg"
+									onClick={(e) => {
+										e.stopPropagation();
+										onEdit();
+									}}
+									size="icon-xs"
+									type="button"
+									variant="ghost-muted"
+								>
+									<HugeiconsIcon className="size-3.5" icon={PencilEdit01Icon} />
+								</Button>
+							}
+						/>
+						<TooltipContent>Edit agent</TooltipContent>
+					</Tooltip>
+				)}
+			</span>
 		</>
 	);
 }
@@ -328,7 +342,7 @@ export function AgentThreadRow({
 					{/* thread row owns nested menu controls */}
 					<div
 						aria-label={tl("Open thread: {title}", { title: thread.title })}
-						className="group/thread relative flex min-h-9 w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted"
+						className="group/thread relative flex min-h-9 w-full items-center gap-2 overflow-hidden rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 						data-testid={`agent-thread-row-${thread.id}`}
 						{...sidebarUnreadRowAttributes(isUnread)}
 						onClick={(event) => {
@@ -370,7 +384,7 @@ export function AgentThreadRow({
 							className="absolute top-1/2 -left-[5px] size-2 -translate-y-1/2 rounded-full bg-sidebar-foreground/35 ring-2 ring-sidebar"
 						/>
 						<HugeiconsIcon
-							className={`size-3.5 shrink-0 ${forked ? "text-primary" : "text-muted-foreground"}`}
+							className={`size-3.5 shrink-0 ${forked ? "text-foreground" : "text-muted-foreground"}`}
 							icon={GitBranchIcon}
 						/>
 						<span className="min-w-0 flex-1">
@@ -378,12 +392,12 @@ export function AgentThreadRow({
 								<span className="min-w-0 flex-1 truncate text-foreground/85 text-xs">
 									<AnimatedTitle text={thread.title} />
 								</span>
-								<span className="type-compact shrink-0 text-muted-foreground/60 tabular-nums">
+								<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
 									{compactAge(thread.updatedAt)}
 								</span>
 							</span>
 							{preview ? (
-								<span className="type-compact mt-0.5 block truncate text-muted-foreground/70">
+								<span className="mt-0.5 block truncate text-muted-foreground/70 text-xs">
 									{preview}
 								</span>
 							) : null}
@@ -403,7 +417,7 @@ export function AgentThreadRow({
 									reveal="thread"
 									variant="muted"
 								>
-									<HugeiconsIcon icon={MoreHorizontalIcon} size={12} />
+									<HugeiconsIcon icon={MoreHorizontalIcon} size={14} />
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="end">
 									<DropdownMenuItem
@@ -412,11 +426,7 @@ export function AgentThreadRow({
 											onOpenQuickReply?.(thread.id);
 										}}
 									>
-										<HugeiconsIcon
-											className="mr-2"
-											icon={MailReply01Icon}
-											size={12}
-										/>
+										<HugeiconsIcon className="size-4" icon={MailReply01Icon} />
 										Quick reply
 									</DropdownMenuItem>
 									<DropdownMenuItem
@@ -429,11 +439,7 @@ export function AgentThreadRow({
 											}
 										}}
 									>
-										<HugeiconsIcon
-											className="mr-2"
-											icon={Mail01Icon}
-											size={12}
-										/>
+										<HugeiconsIcon className="size-4" icon={Mail01Icon} />
 										{isUnread ? "Mark as read" : "Mark as unread"}
 									</DropdownMenuItem>
 								</DropdownMenuContent>
@@ -444,7 +450,7 @@ export function AgentThreadRow({
 				{hasActions ? (
 					<ContextMenuContent>
 						<ContextMenuItem onClick={() => onOpenQuickReply?.(thread.id)}>
-							<HugeiconsIcon className="mr-2 size-4" icon={MailReply01Icon} />
+							<HugeiconsIcon className="size-4" icon={MailReply01Icon} />
 							Quick reply
 						</ContextMenuItem>
 						<ContextMenuItem
@@ -452,7 +458,7 @@ export function AgentThreadRow({
 								isUnread ? onMarkRead?.(thread.id) : onMarkUnread?.(thread.id)
 							}
 						>
-							<HugeiconsIcon className="mr-2 size-4" icon={Mail01Icon} />
+							<HugeiconsIcon className="size-4" icon={Mail01Icon} />
 							{isUnread ? "Mark as read" : "Mark as unread"}
 						</ContextMenuItem>
 					</ContextMenuContent>

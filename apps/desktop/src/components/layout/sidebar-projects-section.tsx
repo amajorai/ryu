@@ -1,7 +1,9 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { NodeFolderBrowser } from "@/src/components/chat/NodeFolderBrowser.tsx";
 import {
 	CloneFolderDialog,
@@ -195,7 +197,12 @@ export function ProjectsSection({
 			}))
 			.filter((project) => project.conversations.length > 0);
 	}, [allProjects, view.filters, classify]);
-	const { setFolder, removeProject } = useWorkspaceStore();
+	const { setFolder, removeProject } = useWorkspaceStore(
+		useShallow((s) => ({
+			setFolder: s.setFolder,
+			removeProject: s.removeProject,
+		}))
+	);
 	const openTab = useTabSelector((state) => state.openTab);
 	const [groupedNav] = useSidebarGroupedNav();
 	const projectNames = useWorkspaceStore((state) => state.projectNames);
@@ -271,16 +278,18 @@ export function ProjectsSection({
 			<SidebarSection
 				action={
 					<span className="mr-1">
-						<button
+						<Button
 							aria-haspopup="dialog"
 							aria-label="Add project"
-							className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100 data-[popup-open]:opacity-100"
+							className="size-6 rounded-lg opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/section:opacity-100 group-hover/section:duration-0 data-[popup-open]:opacity-100"
 							data-popup-open={menuOpen ? "" : undefined}
 							onClick={() => setMenuOpen(true)}
+							size="icon-xs"
 							type="button"
+							variant="ghost-muted"
 						>
-							<HugeiconsIcon icon={Add01Icon} size={14} />
-						</button>
+							<HugeiconsIcon className="size-3.5" icon={Add01Icon} />
+						</Button>
 						<ProjectCommandDialog
 							onBrowse={() => setBrowseOpen(true)}
 							onClone={() => setCloneOpen(true)}
@@ -325,12 +334,10 @@ export function ProjectsSection({
 					</DeleteAllChatsMenu>
 				)}
 			>
-				{allProjects.length === 0 ? (
-					<p className="px-2 py-2 text-muted-foreground text-xs">
-						No projects yet. Click + to import a folder.
-					</p>
-				) : projects.length === 0 ? (
-					<p className="px-2 py-2 text-muted-foreground text-xs">
+				{/* No projects: the group collapses to its label, whose hover "+"
+				    imports a folder. */}
+				{allProjects.length === 0 ? null : projects.length === 0 ? (
+					<p className="flex h-8 items-center px-2 text-detail text-muted-foreground">
 						No project chats match the filters
 					</p>
 				) : groupedNav ? (
@@ -432,12 +439,12 @@ export function ArchivedSection({
 			sort={sort}
 		>
 			{archived.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
+				<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 					Drop chats here to archive them
 				</p>
 			) : null}
 			{archived.length > 0 && filtered.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
+				<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 					No archived chats match the filters
 				</p>
 			) : null}

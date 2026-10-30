@@ -58,7 +58,8 @@ test("homepage leads with a centered headline over the shader sky", () => {
 	const setupCta = html.match(
 		/<a class="([^"]+)" data-testid="setup-ryu-button" href="\/setup-ryu\.md"/
 	);
-	expect(setupCta?.[1]).toContain("hover:bg-muted hover:text-foreground");
+	expect(setupCta?.[1]).toContain("hover:bg-muted");
+	expect(setupCta?.[1]).toContain("hover:text-foreground");
 	expect(setupCta?.[1]).not.toContain("bg-secondary text-secondary-foreground");
 	expect(html).not.toContain('data-testid="hero-3d-logo"');
 	expect(html).not.toContain('data-testid="hero-runtime-preview"');

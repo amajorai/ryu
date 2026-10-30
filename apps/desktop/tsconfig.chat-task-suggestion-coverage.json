@@ -19,7 +19,10 @@
     "e2e/chat-page-native-http-state.ts",
     "e2e/chat-page-native-http-live-chat.ts",
     "e2e/chat-page-native-http-live-chat.test.ts",
+    "e2e/chat-page-native-http-task-suggestion.ts",
     "e2e/chat-page-native-http-task-suggestion.spec.ts",
+    "e2e/chat-page-native-http-task-suggestion-tabs.spec.ts",
+    "e2e/chat-page-native-http-task-suggestion-modes.spec.ts",
     "e2e/harness/chat-page-native-http-dependencies.ts",
     "e2e/harness/chat-page-native-http-dependencies.test.ts",
     "../../packages/blocks/src/desktop/agent-elements/markdown.tsx"

@@ -1,5 +1,6 @@
 import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import type { UIMessage } from "ai";
+import { createContext } from "react";
 import type { useAssistantStore } from "../../src/store/useAssistantStore.ts";
 import type { useWorkspaceStore } from "../../src/store/useWorkspaceStore.ts";
 import type { ProofJsonRecord } from "../fixture-json.ts";
@@ -42,6 +43,11 @@ export function useTabsContext() {
 			window.__assistantProof.calls.push({ kind: "tab", path, options }),
 	};
 }
+// Consumers that read the context directly (consent host, posture card)
+// treat a missing provider as "no tabs host", as they do outside the shell.
+export const TabsContext = createContext<ReturnType<
+	typeof useTabsContext
+> | null>(null);
 // The panel renders outside every tab, where the real hook reads no
 // CurrentTabIdContext provider.
 export function useCurrentTabId(): string | undefined {

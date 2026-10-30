@@ -56,7 +56,7 @@ function Choice({
 					aria-hidden="true"
 					className="shrink-0 text-muted-foreground"
 					icon={interfaceIcon(descriptor.renderer)}
-					size={18}
+					size={20}
 				/>
 				<span className="min-w-0 flex-1">
 					<span className="block font-medium" data-ryu-bot-terminology="ignore">
@@ -143,7 +143,7 @@ export function InterfaceSwitcherDialog({
 							aria-hidden="true"
 							className="shrink-0 text-muted-foreground"
 							icon={ArrowLeft01Icon}
-							size={18}
+							size={20}
 						/>
 						<span className="font-medium">Back to chat</span>
 					</button>

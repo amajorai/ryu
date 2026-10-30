@@ -79,7 +79,8 @@ test("plain composer: attachments append chips that can be dragged and renumbere
 		.locator("[data-slot='composer-attachments'] > *")
 		.first();
 	await firstThumb.hover();
-	await firstThumb.getByRole("button").click();
+	// The thumbnail also opens a preview; remove it through its own control.
+	await firstThumb.getByRole("button", { name: /^Remove / }).click();
 	await expect(draft).toHaveText(/^into @image-1 face @file-1\s*$/);
 
 	await page.screenshot({ path: test.info().outputPath("plain.png") });

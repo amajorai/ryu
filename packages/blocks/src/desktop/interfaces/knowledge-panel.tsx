@@ -1,7 +1,6 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { cn } from "@ryu/ui/lib/utils";
 import {
-	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
 	THREAD_STATUS_LABELS,
@@ -9,10 +8,8 @@ import {
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft, SquarePen, X } from "lucide-react";
-import { motion } from "motion/react";
 import type { ReactNode, RefObject } from "react";
-import { BoardAvatar } from "./board-avatar.tsx";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import { agentById } from "./interface-renderer.ts";
 import {
 	displayLabel,
 	KIND_LABELS,
@@ -25,14 +22,15 @@ import {
 	plural,
 	statusCounts,
 } from "./knowledge-model.ts";
+import type { KnowledgePalette } from "./knowledge-palette.ts";
 import {
-	agentColor,
-	cssColor,
-	type KnowledgePalette,
-} from "./knowledge-palette.ts";
+	NodeMark,
+	PanelFrame,
+	SectionHeading,
+	Swatch,
+	ThreadRow,
+} from "./knowledge-panel-parts.tsx";
 import { KnowledgeStatusDot } from "./knowledge-parts.tsx";
-import { nodeColor } from "./knowledge-stage.ts";
-import { useReducedMotion } from "./reduced-motion.ts";
 
 /**
  * The side panel. For an agent, project, team or topic it lists the linked
@@ -63,198 +61,6 @@ const STATUS_SUMMARY: readonly ThreadStatus[] = [
 	"working",
 ];
 
-function Swatch({
-	node,
-	palette,
-	snapshot,
-}: {
-	node: KnowledgeNode;
-	palette: KnowledgePalette;
-	snapshot: InterfaceSnapshot;
-}) {
-	if (node.kind === "agent") {
-		return (
-			<BoardAvatar
-				agent={agentById(snapshot, node.refId)}
-				name={node.label}
-				size={20}
-			/>
-		);
-	}
-	if (node.kind === "conversation" && node.status) {
-		return (
-			<span className="flex size-5 items-center justify-center">
-				<KnowledgeStatusDot palette={palette} status={node.status} />
-			</span>
-		);
-	}
-	return (
-		<span
-			aria-hidden="true"
-			className="flex size-5 items-center justify-center"
-		>
-			<span
-				className="size-2.5 rounded-full"
-				style={{ backgroundColor: cssColor(nodeColor(node, palette)) }}
-			/>
-		</span>
-	);
-}
-
-/**
- * The header's mark beside the name: an agent's avatar ringed in its node
- * colour (so the face and the node read as one), otherwise the node's dot.
- */
-function NodeMark({
-	agent,
-	node,
-	palette,
-}: {
-	agent: InterfaceAgent | undefined;
-	node: KnowledgeNode;
-	palette: KnowledgePalette;
-}) {
-	if (node.kind === "agent") {
-		return (
-			<span
-				aria-hidden="true"
-				className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full"
-				data-knowledge-agent-ring=""
-				style={{
-					boxShadow: `inset 0 0 0 2px ${cssColor(agentColor(node.label, palette))}`,
-				}}
-			>
-				<BoardAvatar agent={agent} name={node.label} size={24} />
-			</span>
-		);
-	}
-	return (
-		<span
-			aria-hidden="true"
-			className="mt-0.5 flex size-8 shrink-0 items-center justify-center"
-		>
-			<span
-				className="size-3 rounded-full"
-				style={{ backgroundColor: cssColor(nodeColor(node, palette)) }}
-			/>
-		</span>
-	);
-}
-
-function ThreadRow({
-	note,
-	now,
-	onOpen,
-	palette,
-	thread,
-}: {
-	/** Why the row is here, when its title does not say (topic panels). */
-	note?: string;
-	now: number;
-	onOpen: (threadId: string) => void;
-	palette: KnowledgePalette;
-	thread: InterfaceThread;
-}) {
-	const status = threadStatus(thread);
-	if (note) {
-		return (
-			<li>
-				<button
-					aria-label={`Open ${thread.title}, ${THREAD_STATUS_LABELS[status]}, ${note.toLowerCase()}`}
-					className="group flex w-full items-start gap-2.5 px-4 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-					onClick={() => onOpen(thread.id)}
-					type="button"
-				>
-					<span className="flex size-5 shrink-0 items-center justify-center">
-						<KnowledgeStatusDot palette={palette} status={status} />
-					</span>
-					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate text-foreground text-sm leading-5">
-							{thread.title}
-						</span>
-						<span className="text-muted-foreground text-xs leading-4">
-							{note}
-						</span>
-					</span>
-					<time
-						className="shrink-0 text-muted-foreground text-xs tabular-nums leading-5"
-						dateTime={thread.updatedAt}
-					>
-						{compactAge(thread.updatedAt, now)}
-					</time>
-				</button>
-			</li>
-		);
-	}
-	return (
-		<li>
-			<button
-				aria-label={`Open ${thread.title}, ${THREAD_STATUS_LABELS[status]}`}
-				className="group flex h-9 w-full items-center gap-2.5 px-4 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-				onClick={() => onOpen(thread.id)}
-				type="button"
-			>
-				<span className="flex size-5 shrink-0 items-center justify-center">
-					<KnowledgeStatusDot palette={palette} status={status} />
-				</span>
-				<span className="min-w-0 flex-1 truncate text-foreground text-sm">
-					{thread.title}
-				</span>
-				<time
-					className="shrink-0 text-muted-foreground text-xs tabular-nums"
-					dateTime={thread.updatedAt}
-				>
-					{compactAge(thread.updatedAt, now)}
-				</time>
-			</button>
-		</li>
-	);
-}
-
-function SectionHeading({
-	children,
-	count,
-}: {
-	children: ReactNode;
-	count: number;
-}) {
-	return (
-		<h4 className="flex h-8 items-center gap-2 px-4 font-medium text-muted-foreground text-xs">
-			{children}
-			<span className="tabular-nums">{count}</span>
-		</h4>
-	);
-}
-
-function PanelFrame({
-	children,
-	label,
-	testId,
-	wide,
-}: {
-	children: ReactNode;
-	label: string;
-	testId: string;
-	wide: boolean;
-}) {
-	const reduced = useReducedMotion();
-	return (
-		<motion.aside
-			animate={{ opacity: 1, transform: "translateX(0px)" }}
-			aria-label={label}
-			className={cn(
-				"absolute @min-[900px]/knowledge:relative inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-border bg-background @min-[900px]/knowledge:shadow-none shadow-lg sm:w-[360px] sm:border-l",
-				wide && "@min-[1200px]/knowledge:w-[480px] sm:w-[440px]"
-			)}
-			data-testid={testId}
-			initial={reduced ? false : { opacity: 0, transform: "translateX(12px)" }}
-			transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
-		>
-			{children}
-		</motion.aside>
-	);
-}
-
 export function KnowledgePanel({
 	graph,
 	headingRef,
@@ -282,6 +88,7 @@ export function KnowledgePanel({
 	threadView: ReactNode | null;
 	view: KnowledgePanelView;
 }) {
+	const tl = useLiteralMessages();
 	if (view.kind === "thread") {
 		const { origin, thread } = view;
 		const title = thread?.title ?? "New conversation";
@@ -290,14 +97,16 @@ export function KnowledgePanel({
 			.filter((agent) => agent !== undefined);
 		return (
 			<PanelFrame
-				label={`Conversation: ${title}`}
+				label={tl("Conversation: {title}", { title })}
 				testId="knowledge-thread-panel"
 				wide
 			>
 				<header className="flex shrink-0 items-start gap-2 border-border border-b px-2 py-2">
 					<Button
 						aria-label={
-							origin ? `Back to ${displayLabel(origin)}` : "Back to graph"
+							origin
+								? tl("Back to {label}", { label: displayLabel(origin) })
+								: "Back to graph"
 						}
 						className="mt-0.5 text-muted-foreground hover:text-foreground"
 						onClick={onBack}
@@ -333,7 +142,7 @@ export function KnowledgePanel({
 						</div>
 					</div>
 					<Button
-						aria-label={`Close ${title}`}
+						aria-label={tl("Close {title}", { title })}
 						className="mt-0.5 text-muted-foreground hover:text-foreground"
 						onClick={onClose}
 						size="icon-sm"
@@ -389,7 +198,7 @@ export function KnowledgePanel({
 						</p>
 					</div>
 					<Button
-						aria-label={`Close ${displayLabel(node)}`}
+						aria-label={tl("Close {label}", { label: displayLabel(node) })}
 						className="-me-2 text-muted-foreground hover:text-foreground"
 						onClick={onClose}
 						size="icon-sm"
@@ -450,7 +259,7 @@ export function KnowledgePanel({
 					}
 					return (
 						<section
-							aria-label={`Linked ${title.toLowerCase()}`}
+							aria-label={tl("Linked {kind}", { kind: title.toLowerCase() })}
 							className="mt-2"
 							key={kind}
 						>
@@ -459,7 +268,10 @@ export function KnowledgePanel({
 								{items.map((item) => (
 									<li key={item.id}>
 										<button
-											aria-label={`Go to ${displayLabel(item)}, ${KIND_LABELS[item.kind].toLowerCase()}`}
+											aria-label={tl("Go to {label}, {kind}", {
+												label: displayLabel(item),
+												kind: KIND_LABELS[item.kind].toLowerCase(),
+											})}
 											className="flex h-9 w-full items-center gap-2.5 px-4 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 											onClick={() => onSelect(item.id)}
 											type="button"

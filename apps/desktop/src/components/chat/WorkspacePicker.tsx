@@ -18,56 +18,17 @@
 // inline chip without truncating it to nothing.
 
 import {
-	Add01Icon,
-	ArrowDown01Icon,
 	ComputerTerminal01Icon,
 	Folder03Icon,
 	FolderTreeIcon,
 	LaptopIcon,
 	PlayIcon,
-	RefreshIcon,
-	Tick02Icon,
 	WorkflowCircle06Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button, ButtonLabel } from "@ryu/ui/components/button.tsx";
-import {
-	Command,
-	CommandDialog,
-	CommandEmpty,
-	CommandGroup,
-	CommandInput,
-	CommandItem,
-	CommandList,
-	CommandLoading,
-	CommandSeparator,
-} from "@ryu/ui/components/command.tsx";
-import {
-	Dialog,
-	DialogClose,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "@ryu/ui/components/dialog.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import { toast } from "@ryu/ui/components/sileo.tsx";
-import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
-import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils.ts";
-import type { ReactNode } from "react";
-import { useCallback, useId, useMemo, useState } from "react";
-import { WORKSPACE_SELECT_TRIGGER } from "@/components/agent-elements/input/composer-select.ts";
+import { useCallback, useMemo, useState } from "react";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import {
 	invalidateGitStatus,
@@ -75,23 +36,17 @@ import {
 	useWorktreeDiff,
 	useWorktreeStatus,
 } from "@/src/hooks/useGitStatus.ts";
-import { useTerminalPanelLocation } from "@/src/hooks/useTerminalPanelLocation.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	checkoutBranch,
 	createBranch,
 	fetchGitBranches,
-	type WorktreeStatus,
 } from "@/src/lib/api/git.ts";
 import {
 	findWorkspaceProject,
 	workspaceProjectName,
 } from "@/src/lib/workspace-projects.ts";
-import { useDockPanelRequestStore } from "@/src/store/useDockPanelRequestStore.ts";
-import type {
-	ProjectEnvironment,
-	ProjectEnvironmentScripts,
-} from "@/src/store/useWorkspaceStore.ts";
+import type { ProjectEnvironment } from "@/src/store/useWorkspaceStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import { NodeFolderBrowser } from "./NodeFolderBrowser.tsx";
 import {
@@ -99,6 +54,24 @@ import {
 	CreateFolderDialog,
 	ProjectCommandDialog,
 } from "./ProjectPicker.tsx";
+import {
+	BranchList,
+	CreateBranchDialog,
+} from "./WorkspacePicker-branch-list.tsx";
+import {
+	DiffStat,
+	EnvironmentList,
+	type LineStat,
+	PickerCommandDialog,
+	PickerRow,
+	PickerTrigger,
+	ReadonlyPickerRow,
+	type WorkspacePickerId,
+} from "./WorkspacePicker-controls.tsx";
+import { useRunEnvironmentAction } from "./WorkspacePicker-environment-action.ts";
+import { RunModeContent } from "./WorkspacePicker-run-mode.tsx";
+
+export { DiffStat, type LineStat } from "./WorkspacePicker-controls.tsx";
 
 interface WorkspacePickerProps {
 	conversationId?: string | null;
@@ -121,52 +94,8 @@ interface WorkspacePickerProps {
 
 const PATH_SEP = /[\\/]/;
 
-export interface LineStat {
-	deletions: number;
-	insertions: number;
-}
-
 const NO_STAT: LineStat = { insertions: 0, deletions: 0 };
 const EMPTY_ENVIRONMENTS: ProjectEnvironment[] = [];
-
-/** +added / −removed line counts, replacing the old dirty dot. Renders nothing
- *  when there is no change. Exported because the pinned summary panel shows the
- *  same counts in its accordion header — it used to carry a second copy of this
- *  component, which is how the two ended up sized differently. */
-export function DiffStat({ stat }: { stat: LineStat }) {
-	if (stat.insertions === 0 && stat.deletions === 0) {
-		return null;
-	}
-	return (
-		<span className="type-caption flex shrink-0 items-center gap-1 font-medium font-mono tabular-nums">
-			{stat.insertions > 0 && (
-				<span className="text-status-success dark:text-status-success/90">
-					+{formatCount(stat.insertions)}
-				</span>
-			)}
-			{stat.deletions > 0 && (
-				<span className="text-status-destructive/90 dark:text-status-destructive/90">
-					−{formatCount(stat.deletions)}
-				</span>
-			)}
-		</span>
-	);
-}
-
-/** Which direct workspace menu is open. */
-type WorkspacePickerId = "folder" | "branch" | "environment" | "mode";
-
-function scriptForCurrentPlatform(scripts: ProjectEnvironmentScripts): string {
-	const platform = navigator.platform.toLowerCase();
-	const override = platform.includes("mac")
-		? scripts.macos
-		: platform.includes("win")
-			? scripts.windows
-			: platform.includes("linux")
-				? scripts.linux
-				: "";
-	return override.trim() || scripts.default.trim();
-}
 
 export function WorkspacePicker({
 	target,
@@ -178,6 +107,7 @@ export function WorkspacePicker({
 	stacked = false,
 	worktreeModeOverride,
 }: WorkspacePickerProps) {
+	const tl = useLiteralMessages();
 	const { canUseNativeShell } = useAppSurface();
 	const storeFolder = useWorkspaceStore((s) => s.folder);
 	const folder = folderOverride === undefined ? storeFolder : folderOverride;
@@ -202,8 +132,6 @@ export function WorkspacePicker({
 	const selectProjectEnvironment = useWorkspaceStore(
 		(s) => s.selectProjectEnvironment
 	);
-	const terminalShell = useWorkspaceStore((s) => s.terminalShell);
-	const [terminalPanelLocation] = useTerminalPanelLocation();
 	const activeEnvironment = projectEnvironments.find(
 		(environment) => environment.id === activeEnvironmentId
 	);
@@ -389,42 +317,11 @@ export function WorkspacePicker({
 		/>
 	) : null;
 
-	const runEnvironmentAction = useCallback(
-		(environment: ProjectEnvironment, actionId: string) => {
-			const action = environment.actions.find((item) => item.id === actionId);
-			const actionCwd = worktreeStatus.path ?? folder;
-			if (!(action && actionCwd)) {
-				return;
-			}
-			const command = scriptForCurrentPlatform(action.scripts);
-			if (!command) {
-				toast.error(`${action.name} has no command for this platform`);
-				return;
-			}
-			const env = Object.fromEntries(
-				environment.variables
-					.filter((variable) => variable.key.trim())
-					.map((variable) => [variable.key.trim(), variable.value])
-			);
-			env.RYU_PROJECT_PATH = folder ?? actionCwd;
-			env.RYU_WORKTREE_PATH = actionCwd;
-			useDockPanelRequestStore
-				.getState()
-				.open("terminal", "Terminal", terminalPanelLocation, {
-					command,
-					cwd: actionCwd,
-					env,
-					shell: terminalShell === "auto" ? null : terminalShell,
-				});
-			closeMenus();
-		},
-		[
-			closeMenus,
-			folder,
-			terminalPanelLocation,
-			terminalShell,
-			worktreeStatus.path,
-		]
+	const runEnvironmentAction = useRunEnvironmentAction(
+		closeMenus,
+		folder,
+		worktreeStatus.path,
+		tl
 	);
 
 	return (
@@ -488,7 +385,7 @@ export function WorkspacePicker({
 						label={branch}
 						onOpen={() => onPickerOpenChange("branch", true)}
 						open={pickerOpen === "branch"}
-						title={`Branch: ${branch}`}
+						title={tl("Branch: {branch}", { branch })}
 						trailing={showLineStats ? <DiffStat stat={folderStat} /> : null}
 					/>
 				)}
@@ -501,7 +398,11 @@ export function WorkspacePicker({
 									runEnvironmentAction(activeEnvironment, action.id);
 								}}
 								size="sm"
-								title={`Run ${action.name} in ${worktreeStatus.path ? "the worktree" : "the project"}`}
+								title={
+									worktreeStatus.path
+										? tl("Run {name} in the worktree", { name: action.name })
+										: tl("Run {name} in the project", { name: action.name })
+								}
 								type="button"
 								variant="ghost"
 							>
@@ -579,559 +480,5 @@ export function WorkspacePicker({
 				open={createBranchOpen}
 			/>
 		</>
-	);
-}
-
-function ReadonlyPickerRow({
-	fullWidth = false,
-	label,
-	title,
-}: {
-	fullWidth?: boolean;
-	label: string;
-	title: string;
-}) {
-	return (
-		<div
-			aria-label={`Project folder: ${label}`}
-			className={cn(
-				WORKSPACE_SELECT_TRIGGER,
-				"flex cursor-default items-center text-muted-foreground",
-				fullWidth && "w-full justify-start"
-			)}
-			data-testid="pinned-summary-folder"
-			title={title}
-		>
-			<HugeiconsIcon className="size-3.5 shrink-0" icon={Folder03Icon} />
-			<span className="min-w-0 flex-1 truncate text-left">{label}</span>
-		</div>
-	);
-}
-
-function EnvironmentList({
-	activeId,
-	disabled,
-	environments,
-	onSelect,
-}: {
-	activeId?: string;
-	disabled: boolean;
-	environments: ProjectEnvironment[];
-	onSelect: (environmentId: string) => void;
-}) {
-	return (
-		<DropdownMenuGroup>
-			<DropdownMenuLabel variant="worktree-heading">
-				Local environment
-			</DropdownMenuLabel>
-			{environments.map((environment) => (
-				<DropdownMenuItem
-					active={activeId === environment.id}
-					disabled={disabled}
-					key={environment.id}
-					onClick={() => onSelect(environment.id)}
-				>
-					<HugeiconsIcon
-						className="size-4 shrink-0 text-muted-foreground"
-						icon={ComputerTerminal01Icon}
-					/>
-					<span className="min-w-0 flex-1 truncate">{environment.name}</span>
-					{activeId === environment.id ? (
-						<HugeiconsIcon className="size-4" icon={Tick02Icon} />
-					) : null}
-				</DropdownMenuItem>
-			))}
-			{disabled ? (
-				<p className="px-2 py-1.5 text-muted-foreground text-xs">
-					This chat already has a worktree. Switch environments before the next
-					worktree is created.
-				</p>
-			) : null}
-		</DropdownMenuGroup>
-	);
-}
-
-/** A workspace control that opens a command dialog rather than a menu. */
-function PickerTrigger({
-	fullWidth = false,
-	icon,
-	label,
-	onOpen,
-	open,
-	title,
-	trailing,
-}: {
-	fullWidth?: boolean;
-	icon: typeof WorkflowCircle06Icon;
-	label: string;
-	onOpen: () => void;
-	open: boolean;
-	title: string;
-	trailing?: ReactNode;
-}) {
-	return (
-		<Button
-			appearance="composer-settings-foreground"
-			aria-expanded={open}
-			aria-haspopup="dialog"
-			className={cn(fullWidth && "w-full justify-start")}
-			onClick={onOpen}
-			size="sm"
-			title={title}
-			type="button"
-			variant="ghost"
-		>
-			<HugeiconsIcon className="size-3.5 shrink-0" icon={icon} />
-			<ButtonLabel className="flex-1 text-left">{label}</ButtonLabel>
-			{trailing}
-		</Button>
-	);
-}
-
-/** Command-dialog shell for the branch and run-location pickers. Filtering is
- *  manual (each body owns its query) so fixed actions stay reachable. */
-function PickerCommandDialog({
-	children,
-	description,
-	onOpenChange,
-	open,
-	title,
-}: {
-	children: ReactNode;
-	description: string;
-	onOpenChange: (open: boolean) => void;
-	open: boolean;
-	title: string;
-}) {
-	return (
-		<CommandDialog
-			className="sm:max-w-lg"
-			description={description}
-			onOpenChange={onOpenChange}
-			open={open}
-			title={title}
-		>
-			<Command shouldFilter={false}>{children}</Command>
-		</CommandDialog>
-	);
-}
-
-/** The environment control: a trigger over its own small menu, so a click lands
- *  on the list it names with no submenu to walk. */
-function PickerRow({
-	children,
-	fullWidth = false,
-	icon,
-	id,
-	label,
-	onOpenChange,
-	open,
-	side,
-	title,
-	trailing,
-}: {
-	children: ReactNode;
-	fullWidth?: boolean;
-	icon: typeof WorkflowCircle06Icon;
-	id: WorkspacePickerId;
-	label: string;
-	onOpenChange: (id: WorkspacePickerId, next: boolean) => void;
-	open: boolean;
-	side: "bottom" | "top";
-	title: string;
-	trailing?: ReactNode;
-}) {
-	return (
-		<DropdownMenu onOpenChange={(next) => onOpenChange(id, next)} open={open}>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						appearance="composer-settings-foreground"
-						className={cn(fullWidth && "w-full justify-start")}
-						size="sm"
-						title={title}
-						type="button"
-						variant="ghost"
-					/>
-				}
-			>
-				<HugeiconsIcon className="size-3.5 shrink-0" icon={icon} />
-				<ButtonLabel className="flex-1 text-left">{label}</ButtonLabel>
-				{trailing}
-			</DropdownMenuTrigger>
-			<DropdownMenuContent
-				align="start"
-				className="min-w-[280px]"
-				side={side}
-				sideOffset={6}
-			>
-				{children}
-			</DropdownMenuContent>
-		</DropdownMenu>
-	);
-}
-
-// How many branches the list renders before it stops and offers "show all". A
-// repo with hundreds of branches would otherwise mount hundreds of menu rows on
-// every open — and nobody scrolls past the first screen anyway. Core sorts by
-// most-recent commit, so the visible head is the branches actually in play; the
-// search box filters the FULL list, so a capped-away branch is always one query
-// away (filter first, cap the filtered result — capping first would hide rows
-// from search, which is the trap this affordance exists to avoid).
-const BRANCH_PAGE = 50;
-
-function BranchList({
-	branches,
-	branch,
-	changedFiles,
-	loading,
-	switching,
-	error,
-	dirty,
-	onClose,
-	onSwitch,
-	onStartCreate,
-	projectName,
-}: {
-	branches: string[];
-	branch: string | null;
-	changedFiles: number;
-	loading: boolean;
-	switching: string | null;
-	error: string | null;
-	/** Working tree has uncommitted changes — creating a branch is disabled. */
-	dirty: boolean;
-	onClose: () => void;
-	onSwitch: (b: string) => void;
-	/** Opens the create-branch dialog (owned by the persistent parent). */
-	onStartCreate: () => void;
-	projectName: string | null;
-}) {
-	const dirtyReasonId = useId();
-	const [query, setQuery] = useState("");
-	const [showAll, setShowAll] = useState(false);
-
-	if (loading) {
-		return (
-			<CommandList>
-				<CommandLoading label="Loading branches">
-					<SkeletonRows spacing="spacious" />
-				</CommandLoading>
-			</CommandList>
-		);
-	}
-	if (branches.length === 0) {
-		return (
-			<CommandList>
-				<CommandEmpty>No branches found.</CommandEmpty>
-			</CommandList>
-		);
-	}
-
-	const q = query.trim().toLowerCase();
-	const filtered = q
-		? branches.filter((b) => b.toLowerCase().includes(q))
-		: branches;
-	const visible = showAll ? filtered : filtered.slice(0, BRANCH_PAGE);
-	const hidden = filtered.length - visible.length;
-
-	return (
-		<>
-			{branches.length > 1 && (
-				<CommandInput
-					onValueChange={setQuery}
-					placeholder={
-						projectName ? `Search ${projectName} branches` : "Search branches"
-					}
-					spellCheck={false}
-					value={query}
-				/>
-			)}
-			{/* Status and error text stay outside the listbox, which may only own
-			    options and groups. The create-branch row keeps the list non-empty,
-			    so cmdk's CommandEmpty cannot carry "No matching branches." */}
-			{error && (
-				<p className="px-2 py-1.5 text-status-destructive text-xs" role="alert">
-					{error}
-				</p>
-			)}
-			{filtered.length === 0 && (
-				<p className="px-2 py-1.5 text-muted-foreground text-sm" role="status">
-					No matching branches.
-				</p>
-			)}
-			<CommandList className="max-h-[min(60vh,520px)]">
-				<CommandGroup heading="Branches">
-					{visible.map((b) => {
-						const isActive = b === branch;
-						return (
-							<CommandItem
-								data-checked={isActive}
-								disabled={switching !== null}
-								key={b}
-								onSelect={() => (isActive ? onClose() : onSwitch(b))}
-								value={`branch:${b}`}
-							>
-								<HugeiconsIcon
-									className="size-4 shrink-0 text-muted-foreground"
-									icon={WorkflowCircle06Icon}
-								/>
-								<span className="min-w-0 flex-1">
-									<span className="block truncate">{b}</span>
-									{isActive && changedFiles > 0 && (
-										<span className="block truncate font-normal text-muted-foreground text-xs">
-											Uncommitted: {formatCount(changedFiles)} file
-											{changedFiles === 1 ? "" : "s"}
-										</span>
-									)}
-								</span>
-								{switching === b && <Spinner className="size-4 shrink-0" />}
-							</CommandItem>
-						);
-					})}
-					{hidden > 0 && (
-						<CommandItem
-							onSelect={() => setShowAll(true)}
-							value="action:show-all-branches"
-						>
-							<HugeiconsIcon
-								className="size-4 shrink-0 text-muted-foreground"
-								icon={ArrowDown01Icon}
-							/>
-							<span className="flex-1 text-muted-foreground">
-								Show {hidden} more branch{hidden === 1 ? "" : "es"}
-							</span>
-						</CommandItem>
-					)}
-				</CommandGroup>
-				<CommandSeparator />
-				<CommandGroup>
-					{/* A dirty tree blocks branch creation; otherwise the row opens the
-					    dialog (which outlives this picker). */}
-					<CommandItem
-						aria-describedby={dirty ? dirtyReasonId : undefined}
-						disabled={dirty}
-						onSelect={onStartCreate}
-						value="action:create-branch"
-					>
-						<HugeiconsIcon
-							className="size-4 shrink-0 text-muted-foreground"
-							icon={Add01Icon}
-						/>
-						<span className="flex-1">Create a new branch</span>
-					</CommandItem>
-					{dirty && (
-						<p
-							className="type-caption px-2 py-1 text-muted-foreground"
-							id={dirtyReasonId}
-							role="note"
-						>
-							Commit those changes first
-						</p>
-					)}
-				</CommandGroup>
-			</CommandList>
-		</>
-	);
-}
-
-/** Dialog to name and create a new git branch off HEAD, then switch to it.
- *  Controlled + rendered by WorkspacePicker so it outlives the branch picker. */
-function CreateBranchDialog({
-	open: dialogOpen,
-	onOpenChange,
-	onCreate,
-	creating,
-}: {
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	/** Create a branch; resolves to an error string, or null on success. */
-	onCreate: (name: string) => Promise<string | null>;
-	creating: boolean;
-}) {
-	const [name, setName] = useState("");
-	const [error, setError] = useState<string | null>(null);
-
-	const handleCreate = useCallback(async () => {
-		const trimmed = name.trim();
-		if (!trimmed || creating) {
-			return;
-		}
-		setError(null);
-		const err = await onCreate(trimmed);
-		if (err) {
-			setError(err);
-		} else {
-			setName("");
-			onOpenChange(false);
-		}
-	}, [name, creating, onCreate, onOpenChange]);
-
-	return (
-		<Dialog onOpenChange={onOpenChange} open={dialogOpen}>
-			<DialogContent className="sm:max-w-sm">
-				<DialogHeader>
-					<DialogTitle>Create a new branch</DialogTitle>
-					<DialogDescription>
-						Branch off the current HEAD and switch to it.
-					</DialogDescription>
-				</DialogHeader>
-				<Input
-					aria-label="Branch name"
-					// dialog opened by explicit user action; focusing the sole field is expected
-					autoFocus
-					disabled={creating}
-					onChange={(e) => {
-						setName(e.target.value);
-						setError(null);
-					}}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") {
-							e.preventDefault();
-							handleCreate();
-						}
-					}}
-					placeholder="feature/my-branch"
-					spellCheck={false}
-					value={name}
-					variant="code"
-				/>
-				{error && <p className="text-status-destructive text-xs">{error}</p>}
-				<DialogFooter>
-					<DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
-					<Button
-						disabled={name.trim().length === 0}
-						loading={creating}
-						onClick={handleCreate}
-						type="button"
-					>
-						Create branch
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
-function RunModeContent({
-	status,
-	worktreeMode,
-	worktreeBranch,
-	onClose,
-	onSetMode,
-	onSetBranch,
-	onRegenerate,
-}: {
-	status: WorktreeStatus;
-	worktreeMode: boolean;
-	worktreeBranch: string;
-	onClose: () => void;
-	onSetMode: (v: boolean) => void;
-	onSetBranch: (v: string) => void;
-	onRegenerate: () => void;
-}) {
-	if (status.active) {
-		// Informational only, so it sits outside a listbox that would expect
-		// options.
-		return (
-			<div className="flex flex-col gap-2 px-2 py-2">
-				<div className="flex items-center gap-2 px-1">
-					<HugeiconsIcon
-						className="size-4 shrink-0 text-muted-foreground"
-						icon={FolderTreeIcon}
-					/>
-					<span
-						className="min-w-0 flex-1 truncate"
-						title={status.branch ?? undefined}
-					>
-						{status.branch}
-					</span>
-				</div>
-				<p className="px-1 text-muted-foreground text-xs">
-					{status.changed_files > 0
-						? `${formatCount(status.changed_files)} changed file${status.changed_files === 1 ? "" : "s"}. Review and apply from the diff panel.`
-						: "This chat runs in its own worktree. Changes are isolated until you apply them from the diff panel."}
-				</p>
-			</div>
-		);
-	}
-	const selectMode = (enabled: boolean) => {
-		onSetMode(enabled);
-		onClose();
-	};
-	return (
-		<CommandList>
-			<CommandGroup heading="Work in">
-				<ModeRow
-					icon={LaptopIcon}
-					onSelect={() => selectMode(false)}
-					selected={!worktreeMode}
-					title="Local"
-				/>
-				<ModeRow
-					icon={FolderTreeIcon}
-					onSelect={() => selectMode(true)}
-					selected={worktreeMode}
-					title="New worktree"
-				/>
-			</CommandGroup>
-			{worktreeMode && (
-				<div className="flex flex-col gap-1.5 px-2.5 pb-2">
-					<span className="type-caption text-muted-foreground">
-						Branch name
-					</span>
-					<div className="flex items-center gap-1.5">
-						<Input
-							aria-label="Branch name"
-							className="flex-1"
-							onChange={(e) => onSetBranch(e.target.value)}
-							onKeyDown={(e) => e.stopPropagation()}
-							placeholder="ryu/my-feature"
-							purpose="picker-code-value"
-							spellCheck={false}
-							value={worktreeBranch}
-							variant="code"
-						/>
-						<Button
-							aria-label="Suggest a new branch name"
-							className="size-7 shrink-0"
-							onClick={onRegenerate}
-							size="icon"
-							title="Suggest a new name"
-							type="button"
-							variant="ghost"
-						>
-							<HugeiconsIcon className="size-4" icon={RefreshIcon} />
-						</Button>
-					</div>
-				</div>
-			)}
-		</CommandList>
-	);
-}
-
-function ModeRow({
-	title,
-	icon,
-	selected,
-	onSelect,
-}: {
-	title: string;
-	icon: typeof WorkflowCircle06Icon;
-	selected: boolean;
-	onSelect: () => void;
-}) {
-	return (
-		<CommandItem
-			data-checked={selected}
-			onSelect={onSelect}
-			value={`mode:${title}`}
-		>
-			<HugeiconsIcon
-				className="size-4 shrink-0 text-muted-foreground"
-				icon={icon}
-			/>
-			<span className="min-w-0 flex-1 truncate">{title}</span>
-		</CommandItem>
 	);
 }

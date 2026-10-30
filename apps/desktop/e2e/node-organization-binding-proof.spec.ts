@@ -74,7 +74,7 @@ test("binds the active Core and proves the saved organization after reload", asy
 	}
 	await page.getByRole("combobox", { name: "Organization" }).click();
 	await page.getByRole("option", { name: "Acme Research" }).click();
-	await expect(page.getByText("One secure enrollment")).toBeVisible();
+	await expect(page.getByText("One secure enrollment.")).toBeVisible();
 	const nodeName = page.getByLabel("Node name");
 	await expect(nodeName).toHaveAttribute("maxlength", "128");
 	await nodeName.fill("   ");
@@ -125,7 +125,7 @@ test("shows a read-only explanation without a binding action", async ({
 	await page.goto(`${STORY_URL}?readonly=1`);
 	await page.getByRole("combobox", { name: "Organization" }).click();
 	await page.getByRole("option", { name: "Acme Research" }).click();
-	await expect(page.getByText("Read-only access")).toBeVisible();
+	await expect(page.getByText("Read-only access.")).toBeVisible();
 	await expect(page.getByText(/gateway\.configure/)).toBeVisible();
 	await expect(page.getByRole("button", { name: "Bind node" })).toBeDisabled();
 	expect(
@@ -146,7 +146,7 @@ test("shows a permission error and recovers through retry", async ({
 	await page.getByRole("option", { name: "Acme Research" }).click();
 	await expect(page.getByText("Could not check access")).toBeVisible();
 	await page.getByRole("button", { name: "Retry access check" }).click();
-	await expect(page.getByText("One secure enrollment")).toBeVisible();
+	await expect(page.getByText("One secure enrollment.")).toBeVisible();
 	const permissionReads = (await readRequests(page)).filter(
 		(request) => request.path === "/api/control-plane/me/permissions"
 	);
@@ -189,18 +189,16 @@ test("supports keyboard-only binding and announces the completed status", async 
 	await expect(organization).toBeFocused();
 	await page.keyboard.press("Tab");
 	await expect(page.getByLabel("Node name")).toBeFocused();
-	await expect(page.getByText("One secure enrollment")).toBeVisible();
+	await expect(page.getByText("One secure enrollment.")).toBeVisible();
 	await page.keyboard.press("Tab");
 	const bindButton = page.getByRole("button", { name: "Bind node" });
 	await expect(bindButton).toBeFocused();
-	await expect(bindButton).toHaveClass(/bg-secondary/);
+	await expect(bindButton).toHaveClass(/bg-foreground/);
 	await page.keyboard.press("Enter");
 	const completed = page.getByRole("status");
 	await expect(completed).toContainText("Managed inference ready");
 	await expect(completed).toHaveAttribute("aria-live", "polite");
-	await expect(page.getByText("Managed inference ready")).toHaveClass(
-		/bg-secondary/
-	);
+	await expect(page.getByText("Managed inference ready")).toBeVisible();
 });
 
 test("reflows a long organization name at 200% in light mode", async ({

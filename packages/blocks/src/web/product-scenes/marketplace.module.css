@@ -1,238 +1,192 @@
-/* Establish the root theme order even when this private module loads first. */
-@layer properties, theme, base, components, utilities;
-
 /*
- * Marketplace card loop, 6.8s. The base rules are the still frame (query
- * typed, four matches lit, the skill installed), shown under reduced motion.
- * Until `Stage` sets `data-inview` the loop is paused on its first keyframe. Every keyframe starts and ends on that
- * frame, so the loop begins without a jump: reset (0.5s), type (1.3s, 90ms per
- * character), dim the other kinds (2.0s, 20ms per tile), install (2.5s), hold.
+ * Marketplace card motion, one 9s loop that starts and ends on the still (the
+ * agent and the skill installed, the skill selected).
+ *   20-26%  the selection moves to the tool, which installs at 30-33%
+ *   56-64%  the picks reset and the selection returns to the agent
+ *   68-80%  the agent installs
+ *   80-91%  the selection moves to the skill, which installs
+ * Base rules are the still; keyframes animate transform and opacity only.
  */
-@layer components {
-	.root svg * {
-		vector-effect: non-scaling-stroke;
-	}
 
-	.dim {
-		opacity: 0.25;
-	}
+.search,
+.tile {
+	fill: var(--background);
+	stroke: currentColor;
+	stroke-opacity: 0.42;
+	stroke-width: 1;
+}
 
-	.lift {
-		transform: translateY(-2px);
-	}
+.glass {
+	fill: none;
+	stroke: currentColor;
+	stroke-opacity: 0.7;
+	stroke-width: 1.2;
+	stroke-linecap: round;
+}
 
-	.arrow {
+.button {
+	fill: none;
+	stroke: currentColor;
+	stroke-opacity: 0.42;
+	stroke-width: 1;
+}
+
+.ring {
+	fill: none;
+	stroke: var(--scene-accent);
+	stroke-width: 1.2;
+}
+
+.getA,
+.getB,
+.doneC {
+	opacity: 0;
+}
+
+@keyframes ring {
+	0%,
+	20%,
+	86%,
+	100% {
+		opacity: 1;
+		transform: translateX(0);
+	}
+	26%,
+	50% {
+		opacity: 1;
+		transform: translateX(94px);
+	}
+	56% {
+		opacity: 0;
+		transform: translateX(94px);
+	}
+	64% {
+		opacity: 0;
+		transform: translateX(-94px);
+	}
+	68%,
+	80% {
+		opacity: 1;
+		transform: translateX(-94px);
+	}
+}
+
+@keyframes done-a {
+	0%,
+	56%,
+	75%,
+	100% {
+		opacity: 1;
+	}
+	60%,
+	72% {
 		opacity: 0;
 	}
+}
 
-	.check {
-		transform-origin: center;
-		transform-box: fill-box;
+@keyframes get-a {
+	0%,
+	56%,
+	75%,
+	100% {
+		opacity: 0;
+	}
+	60%,
+	72% {
+		opacity: 1;
+	}
+}
+
+@keyframes done-b {
+	0%,
+	56%,
+	91%,
+	100% {
+		opacity: 1;
+	}
+	60%,
+	88% {
+		opacity: 0;
+	}
+}
+
+@keyframes get-b {
+	0%,
+	56%,
+	91%,
+	100% {
+		opacity: 0;
+	}
+	60%,
+	88% {
+		opacity: 1;
+	}
+}
+
+@keyframes done-c {
+	0%,
+	30%,
+	60%,
+	100% {
+		opacity: 0;
+	}
+	33%,
+	56% {
+		opacity: 1;
+	}
+}
+
+@keyframes get-c {
+	0%,
+	30%,
+	60%,
+	100% {
+		opacity: 1;
+	}
+	33%,
+	56% {
+		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.root[data-inview] .ring,
+	.root[data-inview] .doneA,
+	.root[data-inview] .getA,
+	.root[data-inview] .doneB,
+	.root[data-inview] .getB,
+	.root[data-inview] .doneC,
+	.root[data-inview] .getC {
+		animation-duration: 9s;
+		animation-timing-function: ease-in-out;
+		animation-iteration-count: infinite;
 	}
 
-	.caret {
-		transform: translateX(32.4px);
+	.root[data-inview] .ring {
+		animation-name: ring;
 	}
 
-	.root .query {
-		animation: marketplace-query 6.8s ease both infinite;
+	.root[data-inview] .doneA {
+		animation-name: done-a;
 	}
 
-	.root .char {
-		animation: marketplace-char 6.8s ease both infinite;
-		animation-delay: calc(var(--i) * 90ms);
+	.root[data-inview] .getA {
+		animation-name: get-a;
 	}
 
-	.root .caret {
-		animation: marketplace-caret 6.8s step-end both infinite;
+	.root[data-inview] .doneB {
+		animation-name: done-b;
 	}
 
-	.root .blink {
-		animation: marketplace-blink 0.85s step-end both infinite;
+	.root[data-inview] .getB {
+		animation-name: get-b;
 	}
 
-	.root .dim {
-		animation: marketplace-dim 6.8s ease both infinite;
-		animation-delay: calc(var(--i) * 20ms);
+	.root[data-inview] .doneC {
+		animation-name: done-c;
 	}
 
-	.root .ring {
-		animation: marketplace-ring 6.8s ease both infinite;
-		animation-delay: calc(var(--i) * 20ms);
-	}
-
-	.root .lift {
-		animation: marketplace-lift 6.8s ease both infinite;
-		animation-delay: calc(var(--i) * 20ms);
-	}
-
-	.root .arrow {
-		animation: marketplace-arrow 6.8s ease both infinite;
-	}
-
-	.root .check {
-		animation: marketplace-check 6.8s ease both infinite;
-	}
-
-	.root:not([data-inview])
-		:is(.query, .char, .caret, .blink, .dim, .ring, .lift, .arrow, .check) {
-		animation-play-state: paused;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.root
-			:is(.query, .char, .caret, .blink, .dim, .ring, .lift, .arrow, .check) {
-			animation: none;
-		}
-	}
-
-	@keyframes marketplace-query {
-		0%,
-		7.353% {
-			opacity: 1;
-		}
-		10.294%,
-		18.382% {
-			opacity: 0;
-		}
-		18.824%,
-		100% {
-			opacity: 1;
-		}
-	}
-
-	@keyframes marketplace-char {
-		0%,
-		10.294% {
-			opacity: 1;
-		}
-		11.029%,
-		19.118% {
-			opacity: 0;
-		}
-		20.882%,
-		100% {
-			opacity: 1;
-		}
-	}
-
-	/* `step-end` holds each stop, so the caret jumps one character at a time. */
-	@keyframes marketplace-caret {
-		0% {
-			transform: translateX(32.4px);
-		}
-		11.029% {
-			transform: translateX(0);
-		}
-		19.118% {
-			transform: translateX(5.4px);
-		}
-		20.441% {
-			transform: translateX(10.8px);
-		}
-		21.765% {
-			transform: translateX(16.2px);
-		}
-		23.088% {
-			transform: translateX(21.6px);
-		}
-		24.412% {
-			transform: translateX(27px);
-		}
-		25.735%,
-		100% {
-			transform: translateX(32.4px);
-		}
-	}
-
-	@keyframes marketplace-blink {
-		0% {
-			opacity: 1;
-		}
-		50%,
-		100% {
-			opacity: 0;
-		}
-	}
-
-	@keyframes marketplace-dim {
-		0%,
-		7.353% {
-			opacity: 0.25;
-		}
-		11.765%,
-		29.412% {
-			opacity: 1;
-		}
-		33.824%,
-		100% {
-			opacity: 0.25;
-		}
-	}
-
-	@keyframes marketplace-ring {
-		0%,
-		7.353% {
-			opacity: 1;
-		}
-		10.294%,
-		29.412% {
-			opacity: 0;
-		}
-		33.824%,
-		100% {
-			opacity: 1;
-		}
-	}
-
-	@keyframes marketplace-lift {
-		0%,
-		7.353% {
-			transform: translateY(-2px);
-		}
-		10.294%,
-		36.765% {
-			transform: translateY(0);
-		}
-		39.706%,
-		100% {
-			transform: translateY(-2px);
-		}
-	}
-
-	@keyframes marketplace-arrow {
-		0%,
-		36.765% {
-			opacity: 0;
-			transform: translateY(0);
-		}
-		39.706%,
-		44.118% {
-			opacity: 1;
-			transform: translateY(0);
-		}
-		48.529%,
-		100% {
-			opacity: 0;
-			transform: translateY(3px);
-		}
-	}
-
-	@keyframes marketplace-check {
-		0%,
-		7.353% {
-			opacity: 1;
-			transform: scale(1);
-		}
-		10.294%,
-		45.588% {
-			opacity: 0;
-			transform: scale(0.6);
-		}
-		50%,
-		100% {
-			opacity: 1;
-			transform: scale(1);
-		}
+	.root[data-inview] .getC {
+		animation-name: get-c;
 	}
 }

@@ -2,6 +2,7 @@
 
 // beui.dev/components/motion/adaptive-stepper
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Liquid,
 	LiquidItem,
@@ -128,6 +129,7 @@ export function AdaptiveStepper({
 	className,
 	"aria-label": ariaLabel = "Quantity",
 }: AdaptiveStepperProps) {
+	const tl = useLiteralMessages();
 	const reduce = useReducedMotion() ?? false;
 	const labelId = useId();
 	const decrementRef = useRef<HTMLButtonElement>(null);
@@ -243,7 +245,10 @@ export function AdaptiveStepper({
 				disabled={disabled}
 			>
 				<legend className="sr-only" id={labelId}>
-					{ariaLabel}. Current value: {valueText}
+					{tl("{label}. Current value: {valueText}", {
+						label: ariaLabel,
+						valueText,
+					})}
 				</legend>
 				<Liquid
 					blur={8}

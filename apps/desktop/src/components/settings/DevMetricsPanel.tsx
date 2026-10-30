@@ -53,7 +53,8 @@ function Stat({ label, value }: { label: string; value: string }) {
 		<div className="flex min-w-0 flex-col gap-0.5">
 			<span className="font-medium text-sm tabular-nums">{value}</span>
 			<span
-				className="type-caption truncate text-muted-foreground"
+				className="truncate text-muted-foreground text-xs"
+				data-slot="stat-label"
 				title={label}
 			>
 				{label}
@@ -132,9 +133,7 @@ export function DevMetricsPanel() {
 
 			{recentTurns.length > 0 ? (
 				<SettingsCard>
-					<p className="mb-2 font-medium text-foreground/70 text-xs">
-						Recent turns
-					</p>
+					<p className="mb-2 text-detail text-muted-foreground">Recent turns</p>
 					<div className="overflow-x-auto">
 						<table className="w-full text-xs">
 							<thead className="text-muted-foreground">
@@ -152,7 +151,7 @@ export function DevMetricsPanel() {
 							<tbody className="tabular-nums">
 								{recentTurns.map((turn) => (
 									<tr
-										className="border-border/50 border-t"
+										className="border-border border-t"
 										key={`${turn.at}-${turn.ms}`}
 									>
 										<td className="py-1 pr-3">{formatTime(turn.at)}</td>
@@ -180,11 +179,11 @@ export function DevMetricsPanel() {
 			) : null}
 
 			<SettingsCard>
-				<p className="mb-2 font-medium text-foreground/70 text-xs">
+				<p className="mb-2 text-detail text-muted-foreground">
 					Core API calls — slowest first
 				</p>
 				{httpStats.length === 0 ? (
-					<p className="text-muted-foreground text-xs">
+					<p className="text-detail text-muted-foreground">
 						Nothing recorded yet. Use the app for a moment and this fills in.
 					</p>
 				) : (
@@ -202,7 +201,7 @@ export function DevMetricsPanel() {
 							</thead>
 							<tbody className="tabular-nums">
 								{httpStats.slice(0, 15).map((stat) => (
-									<tr className="border-border/50 border-t" key={stat.path}>
+									<tr className="border-border border-t" key={stat.path}>
 										<td
 											className="max-w-[22rem] truncate py-1 pr-3 font-mono"
 											title={stat.path}

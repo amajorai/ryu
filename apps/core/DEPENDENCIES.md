@@ -101,6 +101,26 @@ SPECIFICALLY. The same file also carries `declared_features`, which lists all th
 completely featureless build; the first version of the check grepped the whole file and was
 therefore vacuous. Each site's step comment carries the full argument.
 
+#### Intel macOS: the ONNX features compile no engine
+
+ONNX Runtime (through `ort-sys`) ships no prebuilt for `x86_64-apple-darwin` under any feature set,
+so a build that links it fails on the Intel Mac release legs (`macos-15-intel` in (2) and (5)). The
+v0.5.0 public release failed exactly there. `ryu-stt` and `ryu-vad` therefore declare transcribe-rs
+for every target except Intel macOS (`[target.'cfg(not(all(target_os = "macos", target_arch =
+"x86_64")))'.dependencies]`). The feature string stays identical at all seven sites, and the
+fingerprint asserts still pass there, because the features still resolve. They simply enable
+nothing native on that one target. So on Intel Macs the assert does NOT prove ONNX inference; the
+code is honest about it instead:
+
+- `voice-parakeet`: the parakeet sidecar refuses to start and reports `Unhealthy` with a reason
+  naming Intel macOS, `ryu_stt::parakeet::transcribe` returns the same kind of "not built" error,
+  and `default_stt_engine()` resolves to whisper, exactly as on a lean build.
+- `voice-vad`: `ryu_vad::silero::SileroModel::load()` fails, so voice mode runs the energy VAD.
+
+The cfg lives in `crates/core/{stt,vad}/Cargo.toml`, `crates/core/stt/src/{parakeet.rs,lib.rs}`
+(`default_stt_engine`), `crates/core/vad/src/silero.rs` and Core's
+`sidecar/providers/parakeet/mod.rs`; keep them in sync.
+
 ### `sandbox-wasmtime`
 
 Forwards to `ryu-sandbox/sandbox-wasmtime`. The wasmtime backend moved into the extracted

@@ -48,22 +48,14 @@ test("opens both dialogs from platform-aware shortcuts and hides them on mobile"
 		exact: true,
 	});
 	const iconTile = generalButton.locator(':scope > span[aria-hidden="true"]');
-	const iconPadding = await iconTile.evaluate((tile) => {
+	// Nav icons are plain 16px glyphs (no tinted tile), so the glyph fills its
+	// slot exactly.
+	const iconSize = await iconTile.evaluate((tile) => {
 		const icon = tile.querySelector("svg");
-		if (!icon) {
-			return 0;
-		}
-		const tileRect = tile.getBoundingClientRect();
-		const iconRect = icon.getBoundingClientRect();
-		return Math.min(
-			iconRect.left - tileRect.left,
-			tileRect.right - iconRect.right,
-			iconRect.top - tileRect.top,
-			tileRect.bottom - iconRect.bottom
-		);
+		return icon ? icon.getBoundingClientRect().width : 0;
 	});
-	// Allow fractional layout rounding around the intended 4 px gutter.
-	expect(iconPadding).toBeGreaterThanOrEqual(3.9);
+	expect(iconSize).toBeGreaterThanOrEqual(15.5);
+	expect(iconSize).toBeLessThanOrEqual(16.5);
 	await page.screenshot({
 		fullPage: true,
 		path: testInfo.outputPath("settings-dialog-sidebar-icon-padding.png"),
@@ -139,7 +131,7 @@ test("opens both dialogs from platform-aware shortcuts and hides them on mobile"
 		page.getByText("Keyboard Shortcuts", { exact: true })
 	).not.toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "Open Keyboard Shortcuts" })
+		page.getByRole("button", { name: "Keyboard shortcuts", exact: true })
 	).not.toBeVisible();
 
 	expect(browserErrors, `browser errors: ${browserErrors.join(" | ")}`).toEqual(

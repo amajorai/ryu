@@ -21,6 +21,7 @@ import {
 	type PromptCacheConfirmation,
 	PromptCacheConfirmDialog,
 } from "@/src/components/chat/PromptCacheConfirmDialog.tsx";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -185,7 +186,15 @@ function ScopedModelsDefaultsCard({
 
 	return (
 		<SettingsSection
-			caption="Projects, bots and groups talk to you through a main thread that coordinates the work, and each piece of work runs in its own session. Set the models they use everywhere on this node. A project or bot can override these from a thread's Defaults menu."
+			caption={
+				<CaptionInfo
+					detail={
+						"Projects, bots and groups talk to you through a main thread that coordinates the work, and each piece of work runs in its own session. Set the models they use everywhere on this node. A project or bot can override these from a thread's Defaults menu."
+					}
+				>
+					{"The models main threads and work sessions use on this node."}
+				</CaptionInfo>
+			}
 			headerAction={
 				canConfigure && loaded && !loadFailed ? (
 					<div className="flex gap-1">
@@ -211,6 +220,7 @@ function ScopedModelsDefaultsCard({
 								)
 							}
 							size="sm"
+							variant="outline"
 						>
 							Save
 						</Button>
@@ -258,7 +268,7 @@ function ScopedModelsDefaultsCard({
 				/>
 			</SettingsCard>
 			{canConfigure ? null : (
-				<p className="px-3.5 text-muted-foreground text-xs leading-snug">
+				<p className="px-3 text-muted-foreground text-xs leading-snug">
 					Only organization owners and admins can change the node's model
 					defaults.
 				</p>

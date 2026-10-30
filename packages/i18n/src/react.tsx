@@ -19,4 +19,9 @@ export {
 export { localizeDomRoot } from "./react-dom-localizer.tsx";
 export { I18nProvider } from "./react-provider.tsx";
 export type { I18nProviderProps } from "./react-provider-base.tsx";
+export {
+	type RichLiteralMessage,
+	type RichTags,
+	useRichLiteralMessages,
+} from "./react-rich-text.tsx";
 export { type LiteralMessage, useLiteralMessages } from "./react-text.tsx";

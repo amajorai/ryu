@@ -1,13 +1,10 @@
-import {
-	ArrowLeft01Icon,
-	MagicWand01Icon,
-	Refresh01Icon,
-} from "@hugeicons/core-free-icons";
+import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	CHANNEL_LABELS,
 	type ChannelType,
 } from "@ryu/blocks/desktop/channels.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -20,41 +17,37 @@ import { EmployeeBadge } from "@ryu/ui/components/employee-badge.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { Logo } from "@ryu/ui/components/logo.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useTheme } from "next-themes";
-import { useEffect, useId, useState } from "react";
-import {
-	AGENT_IDENTITY_MODE_OPTIONS,
-	AgentIdentityModePicker,
-} from "@/src/components/agents/AgentIdentityModePicker.tsx";
+import { useEffect, useState } from "react";
+import { AGENT_IDENTITY_MODE_OPTIONS } from "@/src/components/agents/AgentIdentityModePicker.tsx";
 import { AgentImageField } from "@/src/components/agents/AgentImageField.tsx";
 import {
 	AgentLaunchWarning,
 	agentModelsLimited,
 	MANAGED_PI_NOTE,
-	NO_SANDBOX_NOTE,
 	RYU_ENGINE_ID,
 	showsNoSandboxNote,
 } from "@/src/components/agents/AgentLaunchWarning.tsx";
 import { AgentSetupComposer } from "@/src/components/agents/AgentSetupComposer.tsx";
+import { CreateAgentChannelsSection } from "@/src/components/agents/CreateAgentDialog-channels-section.tsx";
+import { CreateAgentIdentityStep } from "@/src/components/agents/CreateAgentDialog-identity-step.tsx";
+import { CreateAgentLimitAccountsNote } from "@/src/components/agents/CreateAgentDialog-limit-accounts-note.tsx";
+import {
+	CreateAgentNameField,
+	CreateAgentTitleField,
+} from "@/src/components/agents/CreateAgentDialog-name-fields.tsx";
+import { fetchGeneratedAgentName } from "@/src/components/agents/create-agent/generate-name.ts";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgentLaunchCheck } from "@/src/hooks/useAgentLaunchCheck.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { NO_AGENT_CAPABILITIES } from "@/src/lib/agent-capabilities.ts";
 import { agentEngineOptionId } from "@/src/lib/agent-engine.ts";
-import {
-	buildAgentNamePrompt,
-	extractGeneratedAgentName,
-	pickCommonAgentName,
-} from "@/src/lib/agent-name.ts";
+import { pickCommonAgentName } from "@/src/lib/agent-name.ts";
 import { buildNewAgentChatSeed } from "@/src/lib/agent-onboarding.ts";
 import { glyphToPersonaFields } from "@/src/lib/agent-persona.ts";
 import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
-import { chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
-import { getLaneAgentSelection } from "@/src/lib/api/preferences.ts";
-import { readUiMessageText } from "@/src/lib/ui-message-text-stream.ts";
 import { useChannelSetupDialog } from "@/src/store/useChannelSetupDialog.ts";
 import { useCreateAgentDialog } from "@/src/store/useCreateAgentDialog.ts";
 
@@ -77,12 +70,8 @@ import { useCreateAgentDialog } from "@/src/store/useCreateAgentDialog.ts";
 // Core's reason and offers Ryu's own engine, and Create stays disabled, so a
 // new agent never opens its welcome chat only to fail its first turn.
 //
-// Laid out like the waitlist queue on purpose: the card on the left is the thing
-// worth looking at, the fields on the right are what change it. Same field and
-// button sizes as that screen — `h-16 bg-muted` inputs, `size="lg"` buttons.
-
-const NAME_MAX_LENGTH = 64;
-const TITLE_MAX_LENGTH = 48;
+// The card on the left is the thing worth looking at; the fields on the right
+// are what change it.
 
 // Self-contained, like `AgentAutoRoutingEditor`: it reads its own open state
 // from the store and does its own routing, so the single mount site takes no
@@ -94,8 +83,7 @@ export function CreateAgentDialog() {
 	const { agents, create } = useAgents();
 	const { openChannelSetup } = useChannelSetupDialog();
 	const activeNode = useActiveNode();
-	const nameId = useId();
-	const titleId = useId();
+	const tl = useLiteralMessages();
 
 	const [step, setStep] = useState<"identity" | "details">("identity");
 	const [identityMode, setIdentityMode] =
@@ -179,42 +167,12 @@ export function CreateAgentDialog() {
 		}
 		setGeneratingName(true);
 		try {
-			const target = toTarget(activeNode);
-			const localSelection = await getLaneAgentSelection(target, "local");
-			const response = await fetch(chatStreamUrl(target), {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					...chatHeaders(target),
-				},
-				body: JSON.stringify({
-					agent_id: localSelection.agent_id || "ryu",
-					conversation_id: `agent-name-${crypto.randomUUID()}`,
-					enable_long_term: false,
-					messages: [
-						{
-							content: buildAgentNamePrompt({
-								instructions,
-								title,
-							}),
-							role: "user",
-						},
-					],
-					persist: false,
-				}),
-			});
-			if (!response.ok) {
-				throw new Error(`Local agent returned ${response.status}`);
-			}
-			if (!response.body) {
-				throw new Error("The local agent returned no response body");
-			}
-			const { text: answer } = await readUiMessageText(response.body);
-			const generated = extractGeneratedAgentName(answer);
-			if (!generated) {
-				throw new Error("The local agent did not return a single human name");
-			}
-			setName(generated);
+			setName(
+				await fetchGeneratedAgentName(toTarget(activeNode), {
+					instructions,
+					title,
+				})
+			);
 		} catch {
 			setName((current) => pickCommonAgentName(current));
 			toast.message("Couldn’t generate a name, so I picked another one");
@@ -284,8 +242,14 @@ export function CreateAgentDialog() {
 				const remainingCount = selectedChannelTypes.length - 1;
 				toast.message(
 					remainingCount > 0
-						? `${CHANNEL_LABELS[firstChannelType]} setup is ready. Add the other ${remainingCount} selected channel${remainingCount === 1 ? "" : "s"} from Channels.`
-						: `${CHANNEL_LABELS[firstChannelType]} setup is ready for ${trimmedName}.`
+						? tl(
+								"{channel} setup is ready. Add the other {remainingCount, plural, one {# selected channel} other {# selected channels}} from Channels.",
+								{ channel: CHANNEL_LABELS[firstChannelType], remainingCount }
+							)
+						: tl("{channel} setup is ready for {trimmedName}.", {
+								channel: CHANNEL_LABELS[firstChannelType],
+								trimmedName,
+							})
 				);
 			}
 			if (advanced) {
@@ -318,47 +282,35 @@ export function CreateAgentDialog() {
 		>
 			<DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl">
 				{step === "identity" ? (
-					<>
-						<DialogHeader>
-							<DialogTitle>How should this agent work?</DialogTitle>
-							<DialogDescription>
-								You can change this later in the agent's settings.
-							</DialogDescription>
-						</DialogHeader>
-						<AgentIdentityModePicker
-							onChange={(next) => {
-								setIdentityMode(next);
-								setLimitAccounts(false);
-							}}
-							size="hero"
-							value={identityMode}
-						/>
-						{showsNoSandboxNote(launch.check, modelsLimited) ? (
-							<p
-								className="text-muted-foreground text-sm leading-snug"
-								role="status"
-							>
-								{NO_SANDBOX_NOTE}
-							</p>
-						) : null}
-						<div className="flex justify-end">
-							<Button
-								className="w-full sm:w-auto sm:min-w-40"
-								onClick={() => setStep("details")}
-								size="lg"
-								type="button"
-							>
-								Continue
-							</Button>
-						</div>
-					</>
+					<CreateAgentIdentityStep
+						identityMode={identityMode}
+						onContinue={() => setStep("details")}
+						onIdentityModeChange={(next) => {
+							setIdentityMode(next);
+							setLimitAccounts(false);
+						}}
+						showNoSandboxNote={showsNoSandboxNote(launch.check, modelsLimited)}
+					/>
 				) : (
 					<>
 						<DialogHeader>
-							<DialogTitle>New agent</DialogTitle>
+							<div className="flex items-center gap-1">
+								<Button
+									aria-label="Back"
+									className="-ml-2"
+									disabled={submitting}
+									onClick={() => setStep("identity")}
+									size="icon-sm"
+									title="Back"
+									type="button"
+									variant="ghost-muted"
+								>
+									<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+								</Button>
+								<DialogTitle>New agent</DialogTitle>
+							</div>
 							<DialogDescription>
-								Name it and tell it what to do. Everything else can be
-								configured after.
+								Name it and say what it does. Configure the rest later.
 							</DialogDescription>
 						</DialogHeader>
 
@@ -381,30 +333,14 @@ export function CreateAgentDialog() {
 							</div>
 
 							<div className="flex w-full flex-col gap-4">
-								<div className="flex flex-col gap-2">
-									<label
-										className="text-muted-foreground text-xs"
-										htmlFor={titleId}
-									>
-										Title badge
-									</label>
-									<input
-										autoComplete="off"
-										className="h-12 w-full rounded-3xl border-0 bg-muted px-4 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/30"
-										disabled={submitting}
-										id={titleId}
-										maxLength={TITLE_MAX_LENGTH}
-										onChange={(event) => setTitle(event.target.value)}
-										placeholder="e.g. CTO or Release engineer"
-										value={title}
-									/>
-									<p className="text-muted-foreground text-xs">
-										Shown beside the agent name in chat and the sidebar.
-									</p>
-								</div>
+								<CreateAgentTitleField
+									onTitleChange={setTitle}
+									submitting={submitting}
+									title={title}
+								/>
 
 								<div className="flex flex-col gap-2">
-									<span className="text-muted-foreground text-xs">Avatar</span>
+									<span className="font-medium text-sm">Avatar</span>
 									<AgentImageField
 										disabled={submitting}
 										fallback={<Logo size="24px" variant="outline" />}
@@ -414,10 +350,8 @@ export function CreateAgentDialog() {
 								</div>
 
 								<div className="flex items-center gap-2 text-sm">
-									<span className="text-muted-foreground text-xs">
-										Identity
-									</span>
-									<span className="rounded-full bg-muted px-3 py-1 font-medium text-xs">
+									<span className="font-medium">Identity</span>
+									<span className="text-muted-foreground">
 										{AGENT_IDENTITY_MODE_OPTIONS[identityMode].title}
 									</span>
 									<Button
@@ -431,58 +365,17 @@ export function CreateAgentDialog() {
 									</Button>
 								</div>
 
+								<CreateAgentNameField
+									generatingName={generatingName}
+									instructions={instructions}
+									name={name}
+									onGenerateName={() => void generateName()}
+									onNameChange={setName}
+									onReroll={rerollName}
+									submitting={submitting}
+								/>
 								<div className="flex flex-col gap-2">
-									<label
-										className="text-muted-foreground text-xs"
-										htmlFor={nameId}
-									>
-										Name
-									</label>
-									<div className="flex items-center gap-2">
-										<input
-											autoComplete="off"
-											className="h-16 min-w-0 flex-1 rounded-3xl border-0 bg-muted px-4 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/30"
-											disabled={submitting || generatingName}
-											id={nameId}
-											maxLength={NAME_MAX_LENGTH}
-											onChange={(event) => setName(event.target.value)}
-											placeholder="Release engineer"
-											value={name}
-										/>
-										<Button
-											aria-label="Pick another name"
-											disabled={submitting || generatingName}
-											onClick={rerollName}
-											size="icon-lg"
-											title="Pick another name"
-											variant="secondary"
-										>
-											<HugeiconsIcon icon={Refresh01Icon} />
-										</Button>
-										<Button
-											aria-label="Generate a name from the agent instructions"
-											disabled={
-												submitting || generatingName || !instructions.trim()
-											}
-											onClick={() => void generateName()}
-											size="icon-lg"
-											title="Use this after you set what the agent should do"
-											variant="secondary"
-										>
-											<HugeiconsIcon
-												className={generatingName ? "animate-spin" : undefined}
-												icon={MagicWand01Icon}
-											/>
-										</Button>
-									</div>
-									<p className="text-muted-foreground text-xs">
-										Start with a common name, reroll it, or use the magic wand
-										after writing the instructions.
-									</p>
-								</div>
-
-								<div className="flex flex-col gap-2">
-									<span className="text-muted-foreground text-xs">
+									<span className="font-medium text-sm">
 										Instructions &amp; model
 									</span>
 									<AgentSetupComposer
@@ -515,96 +408,41 @@ export function CreateAgentDialog() {
 										}}
 									/>
 									{limitAccounts ? (
-										<p
-											className="px-3.5 text-muted-foreground text-xs leading-snug"
-											role="status"
-										>
-											This agent will start limited to selected accounts. Choose
-											them in its settings after it's created.{" "}
-											<button
-												className="underline underline-offset-2"
-												disabled={submitting}
-												onClick={() => setLimitAccounts(false)}
-												type="button"
-											>
-												Remove limit
-											</button>
-										</p>
+										<CreateAgentLimitAccountsNote
+											onRemoveLimit={() => setLimitAccounts(false)}
+											submitting={submitting}
+										/>
 									) : null}
 								</div>
 
-								<div className="space-y-3 rounded-2xl border bg-muted/30 p-4">
-									<div>
-										<p className="font-medium text-sm">
-											Set up channels after creation
-										</p>
-										<p className="text-muted-foreground text-xs">
-											The first selected setup opens automatically. Telegram can
-											create a managed bot here; Discord and WhatsApp still need
-											their own platform credentials.
-										</p>
-									</div>
-									<div className="grid gap-2 sm:grid-cols-3">
-										<label className="flex items-center justify-between gap-3 rounded-xl border bg-background px-3 py-2 text-sm">
-											<span>{CHANNEL_LABELS.telegram}</span>
-											<Switch
-												aria-label={`Set up ${CHANNEL_LABELS.telegram} after creation`}
-												checked={autoSetupTelegram}
-												disabled={submitting}
-												onCheckedChange={setAutoSetupTelegram}
-											/>
-										</label>
-										<label className="flex items-center justify-between gap-3 rounded-xl border bg-background px-3 py-2 text-sm">
-											<span>{CHANNEL_LABELS.discord}</span>
-											<Switch
-												aria-label={`Set up ${CHANNEL_LABELS.discord} after creation`}
-												checked={autoSetupDiscord}
-												disabled={submitting}
-												onCheckedChange={setAutoSetupDiscord}
-											/>
-										</label>
-										<label className="flex items-center justify-between gap-3 rounded-xl border bg-background px-3 py-2 text-sm">
-											<span>{CHANNEL_LABELS.whatsapp}</span>
-											<Switch
-												aria-label={`Set up ${CHANNEL_LABELS.whatsapp} after creation`}
-												checked={autoSetupWhatsApp}
-												disabled={submitting}
-												onCheckedChange={setAutoSetupWhatsApp}
-											/>
-										</label>
-									</div>
-								</div>
+								<CreateAgentChannelsSection
+									autoSetupDiscord={autoSetupDiscord}
+									autoSetupTelegram={autoSetupTelegram}
+									autoSetupWhatsApp={autoSetupWhatsApp}
+									setAutoSetupDiscord={setAutoSetupDiscord}
+									setAutoSetupTelegram={setAutoSetupTelegram}
+									setAutoSetupWhatsApp={setAutoSetupWhatsApp}
+									submitting={submitting}
+								/>
 
-								<div className="flex flex-col gap-2 sm:flex-row">
+								<div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
 									<Button
-										disabled={submitting}
-										onClick={() => setStep("identity")}
-										size="lg"
+										disabled={!canSubmit}
+										onClick={() => submit(true)}
 										type="button"
 										variant="ghost"
 									>
-										<HugeiconsIcon icon={ArrowLeft01Icon} />
-										Back
+										Advanced setup
 									</Button>
 									<Button
-										className="flex-1"
+										className="sm:ml-auto"
 										disabled={!canSubmit}
 										loading={submitting}
 										onClick={() => submit(false)}
-										size="lg"
 										type="button"
+										variant="mono"
 									>
 										Create agent
-									</Button>
-									<Button
-										className="flex-1"
-										disabled={!canSubmit}
-										onClick={() => submit(true)}
-										size="lg"
-										type="button"
-										variant="secondary"
-									>
-										Advanced setup
 									</Button>
 								</div>
 							</div>

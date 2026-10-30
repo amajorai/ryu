@@ -13,6 +13,7 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -327,7 +328,7 @@ export function AgentOptimizationsView({
 
 	return (
 		<SettingsSection
-			caption="Find cheaper settings that keep quality. Ryu replays this agent's recent requests on less expensive models, has one judge score each answer against the reply the agent really gave, and flags allowed tools it never calls. Nothing changes until you apply a suggestion, and Versions can undo it."
+			caption="Find cheaper settings that keep quality. Nothing changes until you apply a suggestion."
 			title="Optimizations"
 		>
 			{loading ? (
@@ -394,11 +395,7 @@ export function AgentOptimizationsView({
 						) : null}
 					</SettingsCard>
 
-					{error ? (
-						<p className="text-sm text-status-destructive" role="alert">
-							{error}
-						</p>
-					) : null}
+					{error ? <ErrorLine message={error} /> : null}
 					{state?.historyUnavailable ? (
 						<p className="text-muted-foreground text-sm">
 							Suggestion history is unavailable. Saved changes that need

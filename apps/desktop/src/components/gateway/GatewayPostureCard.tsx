@@ -1,30 +1,16 @@
-import {
-	Alert02Icon,
-	CheckmarkCircle02Icon,
-	Copy01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { AgentAuditPanel } from "@ryu/marketplace/catalog/detail/agent-audit-panel";
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { RangeSlider } from "@ryu/ui/components/motion/range-slider.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
-	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { TabsContext } from "@/src/contexts/TabsContext.tsx";
-import { runCatalogScan } from "@/src/lib/api/catalog-scan.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type {
-	GatewayDoctorFinding,
 	GatewayDoctorFixResult,
 	GatewayDoctorReport,
 } from "@/src/lib/api/gateway.ts";
@@ -39,7 +25,27 @@ import {
 	type GatewayPostureSnapshot,
 	setGatewayCoverage,
 } from "@/src/lib/api/gateway-posture.ts";
-import { LEVEL_RAMP_CLASS, levelFillColor } from "@/src/lib/level-ramp.ts";
+import { DoctorSection } from "./posture-card/doctor-section.tsx";
+import { levelIndex } from "./posture-card/doctor-summary.tsx";
+import { PostureLevelBody } from "./posture-card/posture-level-body.tsx";
+
+/**
+ * A failed write is one sentence in a toast. The raw cause (an HTTP status line
+ * or a codec's validation JSON) is never shown; "Copy details" copies it.
+ */
+function reportFailure(title: string, cause: unknown) {
+	const details = cause instanceof Error ? cause.message : String(cause);
+	toast.error({
+		title,
+		description: "Check that Gateway is running, then try again.",
+		button: {
+			title: "Copy details",
+			onClick: () => {
+				navigator.clipboard.writeText(details).catch(() => undefined);
+			},
+		},
+	});
+}
 
 interface GatewayPostureCardProps {
 	canConfigure?: boolean;
@@ -50,113 +56,6 @@ interface GatewayPostureCardProps {
 	target: ApiTarget;
 }
 
-const levelIndex = (posture: GatewayPosture): number =>
-	GATEWAY_POSTURE_OPTIONS.findIndex((option) => option.level === posture);
-
-function severityVariant(
-	severity: GatewayDoctorFinding["severity"]
-): "destructive" | "secondary" | "default" {
-	return severity === "error"
-		? "destructive"
-		: severity === "warning"
-			? "secondary"
-			: "default";
-}
-
-function DoctorFindingRow({ finding }: { finding: GatewayDoctorFinding }) {
-	return (
-		<div
-			className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0"
-			data-doctor-check-id={finding.checkId}
-		>
-			<HugeiconsIcon
-				className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-				icon={finding.severity === "info" ? CheckmarkCircle02Icon : Alert02Icon}
-			/>
-			<div className="min-w-0 flex-1 space-y-1">
-				<div className="flex flex-wrap items-center gap-2">
-					<Badge variant={severityVariant(finding.severity)}>
-						{finding.severity}
-					</Badge>
-					<span className="font-medium text-sm">{finding.summary}</span>
-				</div>
-				<p className="text-muted-foreground text-xs leading-relaxed">
-					{finding.detail}
-				</p>
-				{finding.settingPath ? (
-					<p className="type-caption font-mono text-muted-foreground/80">
-						{finding.settingPath}
-					</p>
-				) : null}
-				{finding.recommendedAction ? (
-					<p className="text-muted-foreground text-xs">
-						{finding.recommendedAction}
-					</p>
-				) : null}
-			</div>
-		</div>
-	);
-}
-
-function DoctorSummary({
-	report,
-	compact,
-}: {
-	report: GatewayDoctorReport | null;
-	compact: boolean;
-}) {
-	const visibleFindings =
-		report?.findings.slice(0, compact ? 2 : undefined) ?? [];
-	if (!report) {
-		return (
-			<SettingsCard className="flex items-center gap-2 text-muted-foreground text-sm">
-				<Spinner className="size-4" />
-				Running Doctor…
-			</SettingsCard>
-		);
-	}
-
-	return (
-		<div className="space-y-1.5" data-doctor-report="true">
-			<SettingsCard className="flex flex-wrap items-center gap-2">
-				<Badge
-					variant={
-						report.counts.errors > 0
-							? "destructive"
-							: report.counts.warnings > 0
-								? "secondary"
-								: "default"
-					}
-				>
-					{report.counts.errors > 0
-						? `${formatCount(report.counts.errors) ?? "—"} critical issue${report.counts.errors === 1 ? "" : "s"}`
-						: report.counts.warnings > 0
-							? `${formatCount(report.counts.warnings) ?? "—"} warning${report.counts.warnings === 1 ? "" : "s"}`
-							: "Healthy"}
-				</Badge>
-				{report.counts.info > 0 ? (
-					<span className="text-muted-foreground text-xs">
-						{formatCount(report.counts.info) ?? "—"} note
-						{report.counts.info === 1 ? "" : "s"}
-					</span>
-				) : null}
-				{visibleFindings.length > 0 ? null : (
-					<span className="text-muted-foreground text-xs">
-						No configuration, security, or performance issues found.
-					</span>
-				)}
-			</SettingsCard>
-			{visibleFindings.length > 0 ? (
-				<SettingsCard className="divide-y divide-border/60">
-					{visibleFindings.map((finding) => (
-						<DoctorFindingRow finding={finding} key={finding.checkId} />
-					))}
-				</SettingsCard>
-			) : null}
-		</div>
-	);
-}
-
 export function GatewayPostureCard({
 	target,
 	canConfigure = true,
@@ -165,6 +64,7 @@ export function GatewayPostureCard({
 	onContinue,
 	onOpenAuditConversation,
 }: GatewayPostureCardProps) {
+	const tl = useLiteralMessages();
 	const tabsHost = useContext(TabsContext);
 	const [snapshot, setSnapshot] = useState<GatewayPostureSnapshot | null>(null);
 	const [coverage, setCoverage] = useState<GatewayCoverageSnapshot | null>(
@@ -200,9 +100,9 @@ export function GatewayPostureCard({
 			setDoctorFix(null);
 			setPending(null);
 		} catch (cause) {
-			setError(
-				cause instanceof Error ? cause.message : "Doctor is unavailable"
-			);
+			// The raw failure (often a codec's validation JSON) is kept for "Copy
+			// details" and never rendered.
+			setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
 			setLoading(false);
 		}
@@ -235,7 +135,9 @@ export function GatewayPostureCard({
 			setSnapshot(next);
 			setPending(null);
 			toast.success({
-				title: `${GATEWAY_POSTURE_OPTIONS[levelIndex(pending)].label} posture applied`,
+				title: tl("{label} posture applied", {
+					label: GATEWAY_POSTURE_OPTIONS[levelIndex(pending)].label,
+				}),
 				description:
 					pending === "autonomous"
 						? "Approval prompts are off; Gateway scanning and redaction remain on."
@@ -243,10 +145,7 @@ export function GatewayPostureCard({
 			});
 			await refresh();
 		} catch (cause) {
-			toast.error({
-				title: "Could not apply posture",
-				description: cause instanceof Error ? cause.message : "Try again.",
-			});
+			reportFailure("Could not apply posture", cause);
 		} finally {
 			setApplying(false);
 		}
@@ -268,10 +167,7 @@ export function GatewayPostureCard({
 			});
 			await refresh();
 		} catch (cause) {
-			toast.error({
-				title: "Could not update Gateway coverage",
-				description: cause instanceof Error ? cause.message : "Try again.",
-			});
+			reportFailure("Could not update Gateway coverage", cause);
 		} finally {
 			setCoverageSaving(false);
 		}
@@ -314,17 +210,20 @@ export function GatewayPostureCard({
 							: "The Gateway was already using the safe baseline.",
 					title:
 						result.appliedFixes.length > 0
-							? `${result.appliedFixes.length} safe fix${result.appliedFixes.length === 1 ? "" : "es"} applied`
+							? tl(
+									"{count, plural, one {# safe fix applied} other {# safe fixes applied}}",
+									{ count: result.appliedFixes.length }
+								)
 							: "No changes needed",
 				});
 			}
 		} catch (cause) {
-			toast.error({
-				description: cause instanceof Error ? cause.message : "Try again.",
-				title: dryRun
+			reportFailure(
+				dryRun
 					? "Could not preview Doctor fixes"
 					: "Could not apply Doctor fixes",
-			});
+				cause
+			);
 		} finally {
 			setDoctorFixing(false);
 		}
@@ -332,133 +231,36 @@ export function GatewayPostureCard({
 
 	const caption = useMemo(() => {
 		if (activePosture === "custom") {
-			return "Individual settings differ from a preset. Choose a level to review and apply a coordinated baseline.";
+			return "Settings differ from a preset. Pick a level to apply a coordinated baseline.";
 		}
 		if (activePosture === "pending") {
-			return "Core and Gateway are not both reachable yet. The saved posture will apply when Gateway starts.";
+			return "The saved posture applies once Gateway starts.";
 		}
-		return "One control coordinates Gateway guardrails with Core command approvals.";
+		return "One control for Gateway guardrails and Core command approvals.";
 	}, [activePosture]);
 	const autoFixCount =
 		doctor?.findings.filter((finding) => finding.canAutoFix).length ?? 0;
 
 	return (
-		<div className="space-y-4" data-gateway-posture="true">
+		<div data-gateway-posture="true">
 			<SettingsSection caption={caption} title="Safety posture">
-				{loading && !snapshot ? (
-					<SettingsCard>
-						<SkeletonRows label="Loading posture…" spacing="panel" />
-					</SettingsCard>
-				) : error && !snapshot ? (
-					<SettingsGroup>
-						<SettingsItem
-							actions={
-								<Button
-									onClick={() => void refresh()}
-									size="sm"
-									variant="ghost"
-								>
-									Retry
-								</Button>
-							}
-							title={<span className="text-muted-foreground">{error}</span>}
-						/>
-					</SettingsGroup>
-				) : (
-					<>
-						<SettingsCard className="space-y-4">
-							<div className="min-w-0">
-								<div className="flex flex-wrap items-center gap-2">
-									<span className="font-medium text-sm">
-										{shownOption.label}
-									</span>
-									{activePosture === "custom" ? (
-										<Badge variant="secondary">Custom</Badge>
-									) : null}
-								</div>
-								<p className="mt-1 text-muted-foreground text-xs">
-									{shownOption.description}
-								</p>
-							</div>
-							<div className={LEVEL_RAMP_CLASS}>
-								<RangeSlider
-									aria-label="Gateway safety posture"
-									className="h-9"
-									disabled={!canConfigure}
-									fillColor={levelFillColor(
-										levelIndex(shownPosture),
-										GATEWAY_POSTURE_OPTIONS.length
-									)}
-									formatValueText={(value) =>
-										GATEWAY_POSTURE_OPTIONS[Math.round(value)]
-											?.accessibilityLabel ?? String(value)
-									}
-									max={GATEWAY_POSTURE_OPTIONS.length - 1}
-									min={0}
-									onValueChange={(value) => {
-										const next =
-											GATEWAY_POSTURE_OPTIONS[Math.round(value)]?.level;
-										if (next) {
-											setPending(next);
-										}
-									}}
-									step={1}
-									value={levelIndex(shownPosture)}
-								/>
-								<div className="type-caption flex items-center justify-between gap-2 pt-1 text-muted-foreground">
-									{GATEWAY_POSTURE_OPTIONS.map((option) => (
-										<span
-											className={
-												option.level === shownPosture
-													? "font-medium text-foreground"
-													: ""
-											}
-											key={option.level}
-										>
-											{option.label}
-										</span>
-									))}
-								</div>
-							</div>
-							<p className="text-muted-foreground text-xs">
-								{shownOption.risk}
-							</p>
-						</SettingsCard>
-						{pending ? (
-							<SettingsGroup>
-								<SettingsItem
-									actions={
-										<div className="flex flex-wrap gap-2">
-											<Button
-												loading={applying}
-												onClick={() => void apply()}
-												size="sm"
-											>
-												Apply posture
-											</Button>
-											<Button
-												disabled={applying}
-												onClick={() => setPending(null)}
-												size="sm"
-												variant="ghost"
-											>
-												Cancel
-											</Button>
-										</div>
-									}
-									description="This updates Gateway firewall behavior and Core approval mode together."
-									title={`Apply ${GATEWAY_POSTURE_OPTIONS[levelIndex(pending)].label}?`}
-								/>
-							</SettingsGroup>
-						) : null}
-					</>
-				)}
+				<PostureLevelBody
+					activePosture={activePosture}
+					apply={apply}
+					applying={applying}
+					canConfigure={canConfigure}
+					error={error}
+					loading={loading}
+					pending={pending}
+					refresh={refresh}
+					setPending={setPending}
+					shownOption={shownOption}
+					shownPosture={shownPosture}
+					snapshot={snapshot}
+				/>
 			</SettingsSection>
 
-			<SettingsSection
-				caption="Supported subscription agents remain direct until you explicitly change this. Restart the affected agent after changing it."
-				title="Gateway coverage"
-			>
+			<SettingsSection title="Gateway coverage">
 				<SettingsGroup>
 					<SettingsItem
 						actions={
@@ -470,125 +272,44 @@ export function GatewayPostureCard({
 						}
 						description={
 							coverage?.genericAgentCount
-								? `Claude and Codex are ${routeBoth ? "covered" : "not covered"}; ${coverage.genericAgentCount} other agent route${coverage.genericAgentCount === 1 ? " is" : "s are"} enabled.`
-								: `Claude and Codex are ${routeBoth ? "covered" : "not covered"} by Gateway firewall, budget, and audit controls.`
+								? tl(
+										"{genericAgentCount, plural, one {# other agent route is} other {# other agent routes are}} enabled. Restart an agent to apply.",
+										{ genericAgentCount: coverage.genericAgentCount }
+									)
+								: "Applies firewall, budget and audit controls. Restart an agent to apply."
 						}
 						title="Route Claude & Codex through Gateway"
 					/>
 				</SettingsGroup>
 			</SettingsSection>
 
-			<SettingsSection
-				caption="Run checks for configuration, security, performance, connectivity, and agent coverage. Safe fixes are always previewed before they change settings."
-				headerAction={
-					<div className="flex flex-wrap items-center gap-1">
-						<Button
-							disabled={doctorFixing}
-							loading={loading}
-							onClick={() => void refresh()}
-							size="sm"
-							variant="ghost"
-						>
-							Run audit
-						</Button>
-						{canConfigure && autoFixCount > 0 && !doctorFix ? (
-							<Button
-								loading={doctorFixing}
-								onClick={() => void runDoctorFix(true)}
-								size="sm"
-							>
-								Preview safe fixes
-							</Button>
-						) : null}
-						{doctor ? (
-							<Button
-								disabled={doctorFixing}
-								onClick={() => void copyDoctor()}
-								size="sm"
-								variant="ghost"
-							>
-								<HugeiconsIcon className="size-4" icon={Copy01Icon} />
-								Copy report
-							</Button>
-						) : null}
-					</div>
-				}
-				title="Doctor"
-			>
-				<DoctorSummary compact={compact} report={doctor} />
-				{doctor && reachable && !loading ? (
-					<div>
-						<AgentAuditPanel
-							key={JSON.stringify([target.url, doctor])}
-							onOpenConversation={
-								onOpenAuditConversation ??
-								(tabsHost
-									? (conversationId) =>
-											tabsHost.openTab("/chat", { conversationId })
-									: undefined)
-							}
-							runAudit={() =>
-								runCatalogScan(requestTarget, {
-									kind: "gateway",
-									id: "gateway",
-									name: "Gateway health doctor",
-									metadata: { doctor },
-									scorecard: null,
-								})
-							}
-						/>
-					</div>
-				) : null}
-				{doctorFix?.dryRun && doctorFix.plannedFixes.length > 0 ? (
-					<SettingsCard className="space-y-3">
-						<div>
-							<p className="font-medium text-sm">Safe fixes ready to review</p>
-							<p className="mt-1 text-muted-foreground text-xs">
-								Dry run changed nothing. Apply only these protective Gateway
-								settings?
-							</p>
-						</div>
-						<div className="space-y-2">
-							{doctorFix.plannedFixes.map((fix) => (
-								<div className="text-xs" key={fix.checkId}>
-									<span className="font-mono text-muted-foreground">
-										{fix.settingPath}
-									</span>
-									<span className="ml-2">{fix.action}</span>
-								</div>
-							))}
-						</div>
-						<div className="flex flex-wrap gap-2">
-							<Button
-								loading={doctorFixing}
-								onClick={() => void runDoctorFix(false)}
-								size="sm"
-							>
-								Apply safe fixes
-							</Button>
-							<Button
-								disabled={doctorFixing}
-								onClick={() => setDoctorFix(null)}
-								size="sm"
-								variant="ghost"
-							>
-								Dismiss
-							</Button>
-						</div>
-					</SettingsCard>
-				) : null}
-				{doctorFix && !doctorFix.dryRun && doctorFix.appliedFixes.length > 0 ? (
-					<p className="px-3.5 text-status-success text-xs">
-						Applied {doctorFix.appliedFixes.length} safe fix
-						{doctorFix.appliedFixes.length === 1 ? "" : "es"}; the report above
-						is current.
-					</p>
-				) : null}
-			</SettingsSection>
+			<DoctorSection
+				autoFixCount={autoFixCount}
+				canConfigure={canConfigure}
+				compact={compact}
+				copyDoctor={copyDoctor}
+				doctor={doctor}
+				doctorFix={doctorFix}
+				doctorFixing={doctorFixing}
+				loading={loading}
+				onOpenAuditConversation={onOpenAuditConversation}
+				reachable={reachable}
+				refresh={refresh}
+				requestTarget={requestTarget}
+				runDoctorFix={runDoctorFix}
+				setDoctorFix={setDoctorFix}
+				tabsHost={tabsHost}
+				target={target}
+			/>
 
 			{onContinue ? (
 				<div className="flex justify-end pt-2">
-					<Button disabled={loading || applying} onClick={onContinue} size="lg">
+					<Button
+						className="h-10 px-4"
+						disabled={loading || applying}
+						onClick={onContinue}
+						variant="mono"
+					>
 						Continue
 					</Button>
 				</div>

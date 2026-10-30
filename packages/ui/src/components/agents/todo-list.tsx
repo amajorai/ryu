@@ -1,4 +1,6 @@
 "use client";
+import { ArrowDown01Icon, CheckListIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { MotionStyle } from "motion/react";
 import type { CSSProperties } from "react";
@@ -19,7 +21,6 @@ import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx"
 import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll.tsx";
 import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { ChevronDown, ListTodo } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
 	type ReactNode,
@@ -112,7 +113,7 @@ function TodoHeaderIcon({ complete }: { complete: boolean }) {
 						key="todo"
 						transition={reduce ? { duration: 0 } : SPRING_SWAP}
 					>
-						<ListTodo className="size-4" />
+						<HugeiconsIcon className="size-4" icon={CheckListIcon} />
 					</motion.span>
 				)}
 			</AnimatePresence>
@@ -304,20 +305,20 @@ export function TodoList({
 		<section
 			aria-label="Agent task list"
 			className={cn(
-				"w-full overflow-hidden rounded-2xl border border-border/70",
+				"w-full overflow-hidden rounded-xl border border-border",
 				className
 			)}
 		>
 			<button
 				aria-controls={contentId}
 				aria-expanded={currentOpen}
-				className="group flex h-11 w-full items-center gap-2.5 rounded-2xl px-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				className="group flex h-10 w-full items-center gap-2 rounded-xl px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				id={triggerId}
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
 			>
 				<TodoHeaderIcon complete={allComplete} />
-				<h3 className="min-w-0 flex-1 truncate font-medium text-foreground/90 text-sm">
+				<h3 className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
 					{title}
 				</h3>
 				<span
@@ -343,10 +344,10 @@ export function TodoList({
 				<motion.span
 					animate={{ rotate: currentOpen ? 180 : 0 }}
 					aria-hidden="true"
-					className="text-muted-foreground/50 transition-colors group-hover:text-muted-foreground"
+					className="text-muted-foreground/70 transition-colors group-hover:text-muted-foreground"
 					transition={reduce ? { duration: 0 } : SPRING_SWAP}
 				>
-					<ChevronDown className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
 				</motion.span>
 			</button>
 
@@ -372,7 +373,7 @@ export function TodoList({
 									return (
 										<motion.li
 											animate={{ opacity: 1, y: 0 }}
-											className="flex min-h-9 items-center gap-2.5 rounded-xl px-1.5 py-1"
+											className="flex min-h-9 items-center gap-2 rounded-lg px-1.5 py-1"
 											exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
 											initial={reduce ? { opacity: 1 } : { opacity: 0, y: 6 }}
 											key={item.id}
@@ -395,10 +396,10 @@ export function TodoList({
 											<span
 												className={cn(
 													"min-w-0 flex-1 truncate text-sm leading-5",
-													status === "pending" && "text-muted-foreground/65",
+													status === "pending" && "text-muted-foreground",
 													status === "in-progress" && "text-foreground",
-													status === "completed" && "text-muted-foreground/60",
-													status === "cancelled" && "text-muted-foreground/55"
+													status === "completed" && "text-muted-foreground",
+													status === "cancelled" && "text-muted-foreground"
 												)}
 											>
 												<span className="relative inline-block max-w-full">
@@ -424,7 +425,7 @@ export function TodoList({
 												</span>
 											</span>
 											{item.detail ? (
-												<span className="shrink-0 text-muted-foreground/55 text-sm">
+												<span className="shrink-0 text-muted-foreground text-sm">
 													{item.detail}
 												</span>
 											) : null}

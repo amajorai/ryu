@@ -12,6 +12,7 @@
 // to its own history).
 
 import { AnimatePresence } from "motion/react";
+import type { KeyboardEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { PluginView } from "../../shared/ipc.ts";
 import { usePluginContributions } from "../hooks/use-plugin-contributions.ts";
@@ -29,6 +30,33 @@ const CHAT_TAB = "chat";
  *  (`app__…`) or the chat sentinel. */
 function viewTabId(view: PluginView): string {
 	return `view__${view.plugin}__${view.id}`;
+}
+
+/** Arrow keys, Home and End move between tabs (and select them) in the strip. */
+function onTabListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+	const tabs = [
+		...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+	];
+	const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+	if (current < 0) {
+		return;
+	}
+	let next: number | null = null;
+	if (event.key === "ArrowRight") {
+		next = (current + 1) % tabs.length;
+	} else if (event.key === "ArrowLeft") {
+		next = (current - 1 + tabs.length) % tabs.length;
+	} else if (event.key === "Home") {
+		next = 0;
+	} else if (event.key === "End") {
+		next = tabs.length - 1;
+	}
+	if (next === null) {
+		return;
+	}
+	event.preventDefault();
+	tabs[next]?.focus();
+	tabs[next]?.click();
 }
 
 export function CompanionPanel() {
@@ -84,7 +112,12 @@ export function CompanionPanel() {
 
 	return (
 		<div className="flex h-full w-full flex-col gap-2">
-			<div className="flex shrink-0 items-center gap-1 overflow-x-auto">
+			<div
+				aria-label="Island pages"
+				className="flex shrink-0 items-center gap-1 overflow-x-auto"
+				onKeyDown={onTabListKeyDown}
+				role="tablist"
+			>
 				<TabButton
 					active={active === CHAT_TAB}
 					label="Chat"
@@ -112,13 +145,14 @@ export function CompanionPanel() {
 					{activeCompanion ? (
 						// Keep app pages in the same glass shell; the panel height and page
 						// contents morph together as the selected tab changes.
-						<IslandMorphingPage className="h-full w-full" key={active}>
-							<div className="h-full w-full overflow-hidden rounded-lg border border-border">
-								<IslandPluginHost
-									companion={activeCompanion}
-									key={`${activeCompanion.pluginId}:${activeCompanion.id}:${activeCompanion.coreGeneration}`}
-								/>
-							</div>
+						<IslandMorphingPage
+							className="h-full w-full overflow-hidden rounded-lg"
+							key={active}
+						>
+							<IslandPluginHost
+								companion={activeCompanion}
+								key={`${activeCompanion.pluginId}:${activeCompanion.id}:${activeCompanion.coreGeneration}`}
+							/>
 						</IslandMorphingPage>
 					) : activeView ? (
 						<IslandMorphingPage
@@ -149,13 +183,17 @@ function TabButton({
 }) {
 	return (
 		<button
-			aria-pressed={active}
-			className={`type-caption shrink-0 rounded-full border px-2.5 py-0.5 font-medium transition-colors ${
+			aria-selected={active}
+			// The Island surface is the popover token, which equals `muted`, so the
+			// selected and hover fills tint the foreground like the menu primitive.
+			className={`flex h-8 shrink-0 items-center rounded-lg px-2 text-sm outline-none transition-colors duration-(--duration-fast) focus-visible:ring-2 focus-visible:ring-ring ${
 				active
-					? "border-primary/40 bg-primary/20 text-primary"
-					: "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+					? "bg-foreground/10 text-foreground"
+					: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
 			}`}
 			onClick={onSelect}
+			role="tab"
+			tabIndex={active ? 0 : -1}
 			type="button"
 		>
 			{label}

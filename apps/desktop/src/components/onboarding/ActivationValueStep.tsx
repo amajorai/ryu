@@ -1,12 +1,7 @@
-import { Button } from "@ryu/ui/components/button.tsx";
 import {
-	Card,
-	CardContent,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card.tsx";
-import { BriefcaseBusiness, Check, Sparkles } from "lucide-react";
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
 const HIRING_COSTS = [
@@ -38,56 +33,31 @@ export function ActivationValueStep({
 		<ActivationStepShell
 			subtitle="Ryu fits into the tools you already use, so the work can start without a new operating system."
 			title="Put the work in perspective"
+			width="wide"
 		>
-			<Card
-				appearance="onboarding"
-				borderTone="subtle"
-				className="w-full max-w-3xl"
-			>
-				<CardHeader>
-					<CardTitle>Ryu lives where you already work</CardTitle>
-					<p className="text-muted-foreground text-sm">
-						Nothing to change. Connect the work, choose the task, and keep your
-						team in the same tools.
-					</p>
-				</CardHeader>
-				<CardContent>
-					<div className="grid gap-3 md:grid-cols-2">
-						<div className="rounded-3xl border border-border/60 bg-muted/40 p-5">
-							<div className="mb-4 flex items-center gap-2 font-medium">
-								<BriefcaseBusiness className="size-4 text-muted-foreground" />
-								Hire for the workflow
-							</div>
-							<ul className="space-y-3 text-muted-foreground text-sm">
-								{HIRING_COSTS.map((item) => (
-									<li className="flex items-center gap-2" key={item}>
-										<span className="size-1.5 rounded-full bg-muted-foreground/60" />
-										{item}
-									</li>
-								))}
-							</ul>
-						</div>
-						<div className="rounded-3xl border border-primary/30 bg-primary/8 p-5">
-							<div className="mb-4 flex items-center gap-2 font-medium">
-								<Sparkles className="size-4 text-primary" />
-								Start with Ryu
-							</div>
-							<div className="font-heading font-medium text-4xl tracking-tight">
-								{offer.amount}
-							</div>
-							<p className="text-muted-foreground text-sm">{offer.cadence}</p>
-							<div className="my-4 h-px bg-border/70" />
-							<div className="flex items-center gap-2 font-medium text-sm">
-								<Check className="size-4 text-status-success" />
-								{offer.recurring}
-							</div>
-						</div>
+			<div className="grid gap-8 md:grid-cols-2">
+				<section className="flex flex-col gap-3">
+					<h2 className="font-semibold text-sm">Hire for the workflow</h2>
+					<ul className="flex flex-col gap-2 text-muted-foreground text-sm">
+						{HIRING_COSTS.map((item) => (
+							<li key={item}>{item}</li>
+						))}
+					</ul>
+				</section>
+				<section className="flex flex-col gap-3">
+					<h2 className="font-semibold text-sm">Start with Ryu</h2>
+					<div>
+						<p className="font-medium font-sans text-2xl tabular-nums tracking-tight">
+							{offer.amount}
+						</p>
+						<p className="text-muted-foreground text-sm">{offer.cadence}</p>
 					</div>
-				</CardContent>
-				<CardFooter appearance="onboarding-step" className="justify-end">
-					<Button onClick={onContinue}>See your first task</Button>
-				</CardFooter>
-			</Card>
+					<p className="text-detail text-muted-foreground">{offer.recurring}</p>
+				</section>
+			</div>
+			<OnboardingActions>
+				<OnboardingCta onClick={onContinue}>See your first task</OnboardingCta>
+			</OnboardingActions>
 		</ActivationStepShell>
 	);
 }

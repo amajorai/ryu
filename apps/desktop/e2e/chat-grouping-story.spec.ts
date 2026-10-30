@@ -5,6 +5,8 @@
 // The contract under test:
 //   • consecutive user messages with no reply between them form one run, and a
 //     day boundary or an assistant reply closes it;
+//   • the runs are a teammate's (a remote sender): your own turn draws no
+//     avatar at all, so the gutter contract below is a remote sender's;
 //   • the avatar AND the timestamp are drawn once per run, on the closing row;
 //   • every OTHER row in the run still occupies its 32px avatar gutter. This is
 //     the requirement most easily lost: `Message` is `flex gap-2` and
@@ -67,10 +69,10 @@ test("the run draws one avatar and never collapses the gutter", async ({
 	const rows = await page.evaluate(() => {
 		const out: {
 			avatarWidth: number;
-			bubbleRight: number;
+			bubbleLeft: number;
 			hasAvatarSlot: boolean;
 			position: string | null;
-			rowRight: number;
+			rowLeft: number;
 			visible: boolean;
 		}[] = [];
 		for (const item of document.querySelectorAll(
@@ -84,10 +86,10 @@ test("the run draws one avatar and never collapses the gutter", async ({
 			const bubble = row.querySelector('[data-testid="user-message-bubble"]');
 			out.push({
 				avatarWidth: slot ? slot.getBoundingClientRect().width : 0,
-				bubbleRight: bubble ? bubble.getBoundingClientRect().right : Number.NaN,
+				bubbleLeft: bubble ? bubble.getBoundingClientRect().left : Number.NaN,
 				hasAvatarSlot: Boolean(slot),
 				position: item.getAttribute("data-group-position"),
-				rowRight: row.getBoundingClientRect().right,
+				rowLeft: row.getBoundingClientRect().left,
 				// `invisible` is `visibility: hidden` — the box survives, the paint
 				// does not. A REMOVED avatar would report width 0 above instead.
 				visible: slot ? getComputedStyle(slot).visibility !== "hidden" : false,
@@ -109,10 +111,11 @@ test("the run draws one avatar and never collapses the gutter", async ({
 		);
 	}
 
-	// The gutter is identical on every row, so the bubbles' right edges line up
-	// whether or not the avatar is painted. This is the assertion that fails if
-	// a non-closing row drops its `MessageAvatar` instead of hiding it.
-	const insets = rows.map((row) => row.rowRight - row.bubbleRight);
+	// The gutter is identical on every row, so the (start-aligned) bubbles' left
+	// edges line up whether or not the avatar is painted. This is the assertion
+	// that fails if a non-closing row drops its `MessageAvatar` instead of
+	// hiding it.
+	const insets = rows.map((row) => row.bubbleLeft - row.rowLeft);
 	for (const inset of insets) {
 		expect(Math.abs(inset - insets[0])).toBeLessThanOrEqual(EDGE_SLACK_PX);
 	}

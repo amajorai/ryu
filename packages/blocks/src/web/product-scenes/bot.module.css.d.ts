@@ -1,14 +1,17 @@
 declare const styles: {
-	readonly barA: string;
-	readonly barB: string;
-	readonly chip: string;
-	readonly done: string;
-	readonly dotA: string;
-	readonly dotB: string;
-	readonly dotC: string;
-	readonly pending: string;
+	readonly approve: string;
+	readonly avatar: string;
+	readonly bubble: string;
+	readonly button: string;
+	readonly card: string;
+	readonly dot: string;
+	readonly eye: string;
+	readonly frame: string;
+	readonly mine: string;
+	readonly posted: string;
+	readonly press: string;
 	readonly reply: string;
-	readonly scene: string;
+	readonly root: string;
 	readonly thread: string;
 	readonly typing: string;
 	readonly user: string;

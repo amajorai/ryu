@@ -35,7 +35,7 @@ export function RemoteProjectStatus({
 				: "checking";
 	return (
 		<span
-			className="type-compact flex min-w-0 max-w-24 shrink-0 items-center gap-1.5 text-muted-foreground"
+			className="flex min-w-0 max-w-24 shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
 			data-project-connection-status={state}
 			data-project-node-name={label}
 		>

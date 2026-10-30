@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { corePreferenceResponseSchema } from "../../core/settings-response-codecs.ts";
+import { tf } from "../../i18n/translate.ts";
 import { ConfirmPrompt } from "../../ui/ConfirmPrompt.tsx";
 import { aboutYouCacheWarning } from "./prompt-cache-warning.ts";
 
@@ -48,6 +49,8 @@ export function PersonalContext({
 	const [field, setField] = useState(0);
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState("");
+	// The failure text shown, so its color does not depend on the locale.
+	const [errorMessage, setErrorMessage] = useState("");
 	const path = `/api/preferences/${USER_PERSONALIZATION_PREF_KEY}`;
 	const read = useCallback(
 		async (signal?: AbortSignal) => {
@@ -84,9 +87,11 @@ export function PersonalContext({
 			} catch (error) {
 				if (!signal?.aborted) {
 					setFailed(true);
-					setMessage(
-						`Could not load personal context: ${error instanceof Error ? error.message : String(error)}`
-					);
+					const text = tf("Could not load personal context: {error}", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+					setErrorMessage(text);
+					setMessage(text);
 				}
 			} finally {
 				if (!signal?.aborted) {
@@ -129,9 +134,11 @@ export function PersonalContext({
 			setMessage("Personal context saved and confirmed.");
 			edit(false);
 		} catch (error) {
-			setMessage(
-				`Could not save personal context: ${error instanceof Error ? error.message : String(error)}`
-			);
+			const text = tf("Could not save personal context: {error}", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			setErrorMessage(text);
+			setMessage(text);
 		} finally {
 			setBusy(false);
 		}
@@ -195,7 +202,7 @@ export function PersonalContext({
 					))}
 			<text
 				fg={
-					message.startsWith("Could not")
+					message !== "" && message === errorMessage
 						? theme.colors.error
 						: theme.colors.success
 				}

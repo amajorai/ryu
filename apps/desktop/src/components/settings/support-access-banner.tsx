@@ -18,6 +18,7 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ShellBanner } from "@/src/components/shell/shell-banner.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	getSupportAccessLocalEnabled,
@@ -163,31 +164,22 @@ export function SupportAccessBanner() {
 	}
 
 	return (
-		<div className="pointer-events-auto fixed top-12 right-4 z-50 flex items-center gap-3 rounded-xl border border-warning/40 bg-warning/15 px-3 py-2 shadow-lg backdrop-blur-xl">
-			<HugeiconsIcon
-				className="size-4 shrink-0 text-status-warning dark:text-status-warning"
-				icon={ShieldKeyIcon}
-			/>
-			<div className="flex flex-col leading-tight">
-				<span className="font-medium text-xs">Support access active</span>
-				<span className="type-caption text-muted-foreground">
-					{tl(
-						"Support can read redacted diagnostics over the mesh · {remaining}",
-						{
-							remaining: formatRemaining(expiryMs, now),
-						}
-					)}
-				</span>
-			</div>
-			<Button
-				className="h-7"
-				disabled={ending}
-				onClick={handleEnd}
-				size="sm"
-				variant="ghost"
-			>
-				End now
-			</Button>
-		</div>
+		// An inline ShellBanner strip under the header, beside Safe Mode: one
+		// sentence (the scope rides in the detail, whole on hover) and one action.
+		<ShellBanner
+			action={
+				<Button disabled={ending} onClick={handleEnd} size="sm" variant="ghost">
+					End now
+				</Button>
+			}
+			data-testid="support-access-banner"
+			detail={tl(
+				"Support can read redacted diagnostics over the mesh; {remaining}.",
+				{ remaining: formatRemaining(expiryMs, now) }
+			)}
+			icon={<HugeiconsIcon icon={ShieldKeyIcon} />}
+			title="Support access active."
+			tone="warning"
+		/>
 	);
 }

@@ -247,7 +247,7 @@ function ScopedDownloadConcurrencyControl({
 					))}
 				</SelectContent>
 			</Select>
-			<span className="type-caption text-muted-foreground">
+			<span className="text-muted-foreground text-xs">
 				{data.env_locked
 					? "Set by RYU_MAX_CONCURRENT_DOWNLOADS on this node"
 					: describe(data, tl)}

@@ -1,8 +1,9 @@
+import { PlusSignIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DataGridOptionBadge } from "@ryu/ui/components/data-grid/data-grid-option-badge.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Plus } from "lucide-react";
 import { type DragEvent, useMemo, useState } from "react";
 import type {
 	applyCellEdits,
@@ -199,7 +200,7 @@ export function BoardView({
 								size="sm"
 								variant="ghost-muted"
 							>
-								<Plus className="size-3.5" />
+								<HugeiconsIcon className="size-3.5" icon={PlusSignIcon} />
 								New
 							</Button>
 						)}

@@ -24,6 +24,7 @@ import {
 } from "../icons/SidebarToggleIcon.tsx";
 import { CompactRailMenuItem } from "./appearance-context-menu.tsx";
 import { CompactRail } from "./CompactRail.tsx";
+import { useModalLayerOpen } from "./use-modal-layer-open.ts";
 
 interface WindowNavigationClusterProps {
 	canGoBack: boolean;
@@ -57,6 +58,7 @@ export function WindowNavigationCluster({
 	// carries its own way back to the full sidebar (and search), so this
 	// cluster's corner belongs to the rail.
 	const compactRail = useCompactRail(sidebarShown);
+	const modalLayerOpen = useModalLayerOpen();
 	const backLabel = t("shell.go-back", undefined, "Go back");
 	const forwardLabel = t("shell.go-forward", undefined, "Go forward");
 	const navigationLabel = sidebarShown
@@ -92,6 +94,8 @@ export function WindowNavigationCluster({
 							"fixed z-[60] flex flex-row items-center gap-1",
 							navClusterPosition
 						)}
+						data-modal-layer-open={modalLayerOpen ? "" : undefined}
+						data-slot="window-navigation-cluster"
 						data-tauri-drag-region={false}
 						data-testid="window-navigation-cluster"
 					/>

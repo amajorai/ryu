@@ -6,13 +6,14 @@
 // grid of live shaders would evict the desktop's own wallpaper. The selected
 // backdrop gets a live preview and its generated customization controls.
 
+import { Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
 import { BackdropControls } from "@ryu/ui/components/backdrop/backdrop-controls.tsx";
 import { BACKDROP_CATEGORIES } from "@ryu/ui/components/backdrop/definitions.ts";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Check, Search } from "lucide-react";
 import { useState } from "react";
 import {
 	getAvailableBackdrops,
@@ -66,7 +67,7 @@ function BackdropTile({
 				/>
 				{selected ? (
 					<span className="absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
-						<Check className="size-3" />
+						<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 					</span>
 				) : null}
 			</span>
@@ -74,7 +75,7 @@ function BackdropTile({
 				{definition.label}
 			</span>
 			{definition.attribution ? (
-				<span className="type-compact truncate text-muted-foreground">
+				<span className="truncate text-muted-foreground text-xs">
 					By {definition.attribution}
 				</span>
 			) : null}
@@ -149,7 +150,7 @@ export function BackdropTab({
 							live
 							params={preference.backdrop.params}
 						/>
-						<span className="type-compact absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-white">
+						<span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-white text-xs">
 							{selected.label}
 						</span>
 					</div>
@@ -209,9 +210,10 @@ export function BackdropTab({
 				<div className="space-y-3" data-testid="marketplace-wallpaper-filters">
 					<div className="flex flex-wrap items-center gap-2">
 						<div className="relative min-w-48 flex-1 sm:max-w-sm">
-							<Search
+							<HugeiconsIcon
 								aria-hidden="true"
 								className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+								icon={Search01Icon}
 							/>
 							<Input
 								aria-label="Search Marketplace wallpapers"

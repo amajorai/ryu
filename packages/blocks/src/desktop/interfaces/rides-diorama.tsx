@@ -1,28 +1,19 @@
 /* eslint-disable react/no-unknown-property */
-import { RoundedBoxGeometry } from "@react-three/drei";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceAgentAct } from "@ryuhq/protocol/interfaces";
-import { useLayoutEffect, useMemo, useRef } from "react";
-import type { Group } from "three";
+import { useMemo } from "react";
 import { stationLines } from "./game3d-act-stage.tsx";
 import { YOU_SLOTS } from "./game3d-acts.ts";
-import { FlowerClusters, type FlowerPatch } from "./game3d-grass.tsx";
-import { IslandGrass, IsoIsland, MeshGeometry } from "./game3d-ground.tsx";
-import { InstancedParts, type InstanceSpec } from "./game3d-instances.tsx";
-import { type IslandShape, type MeshData, onIsland } from "./game3d-island.ts";
+import { FlowerClusters } from "./game3d-grass.tsx";
+import { IslandGrass, IsoIsland } from "./game3d-ground.tsx";
+import type { IslandShape } from "./game3d-island.ts";
 import type { Rgb } from "./game3d-lawn.ts";
-import {
-	CurvedBasicMaterial,
-	ToonMaterial,
-	ToonMesh,
-} from "./game3d-materials.tsx";
-import { jitter } from "./game3d-math.ts";
+import { CurvedBasicMaterial, ToonMesh } from "./game3d-materials.tsx";
 import type { AgentSwatch, Scene3dTheme } from "./game3d-palette.ts";
 import {
 	Benches,
 	Bushes,
 	PathStones,
-	type PlacedBush,
 	type PlantedTree,
 	Pond,
 	PROP_INK,
@@ -32,25 +23,19 @@ import { IsoLabel, IsoMarker } from "./game3d-stage.tsx";
 import { linearRgb, type RenderQuality } from "./game3d-toon.ts";
 import {
 	RidesActProps,
-	type RidesActTrip,
 	type RidesActView,
 	RidesCarPlate,
 	ridesBoardOffset,
 	ridesCarTarget,
 	ridesYouSpot,
 } from "./rides-acts.tsx";
+import { CityBlocks, inRect, Streets } from "./rides-diorama-city.tsx";
+import { carLabel, pinText, ribbonColor } from "./rides-diorama-labels.ts";
+import { countryside, park } from "./rides-diorama-parkland.ts";
+import { Car, Pins, Routes } from "./rides-diorama-vehicles.tsx";
+import { mapTrips, PICKUP, type RideCity, tripWord } from "./rides-model.ts";
+import type { RidesArt } from "./rides-palette.ts";
 import {
-	chipText,
-	mapTrips,
-	PICKUP,
-	type RideCar,
-	type RideCity,
-	type RideTrip,
-	tripWord,
-} from "./rides-model.ts";
-import { type RidesArt, swatch } from "./rides-palette.ts";
-import {
-	type CarSpot,
 	carSpots,
 	inRiver,
 	RIVER_HALF,
@@ -61,8 +46,9 @@ import {
 	toWorld,
 	tripLanes,
 	type Vec3,
-	type WorldRect,
 } from "./rides-scene.ts";
+
+export { carLabel } from "./rides-diorama-labels.ts";
 
 /**
  * Rides as an isometric diorama on the game kit (game3d-stage.tsx): the
@@ -81,620 +67,6 @@ const PIN_PLATE = 1.75;
 const CAR_PLATE = 1.35;
 /** How much higher a working car's two-line plate stands. */
 const WORKING_LIFT = 0.45;
-/** Cars and pins are drawn a size up, so they read over the rooftops. */
-const CAR_SCALE = 2.4;
-/** Below this the city's slabs and buildings sit; the kerb's height. */
-const KERB = 0.06;
-
-/** A unit triangular prism (base -0.5..0.5 on x at y 0, apex at y 1). */
-function prismData(): MeshData {
-	const position: number[] = [];
-	const normal: number[] = [];
-	const index: number[] = [];
-	const face = (points: Vec3[], n: Vec3) => {
-		const base = position.length / 3;
-		for (const point of points) {
-			position.push(...point);
-			normal.push(...n);
-		}
-		for (let corner = 1; corner < points.length - 1; corner++) {
-			index.push(base, base + corner, base + corner + 1);
-		}
-	};
-	const slope = Math.hypot(1, 0.5);
-	face(
-		[
-			[-0.5, 0, 0.5],
-			[0.5, 0, 0.5],
-			[0, 1, 0.5],
-		],
-		[0, 0, 1]
-	);
-	face(
-		[
-			[0.5, 0, -0.5],
-			[-0.5, 0, -0.5],
-			[0, 1, -0.5],
-		],
-		[0, 0, -1]
-	);
-	face(
-		[
-			[0.5, 0, 0.5],
-			[0.5, 0, -0.5],
-			[0, 1, -0.5],
-			[0, 1, 0.5],
-		],
-		[1 / slope, 0.5 / slope, 0]
-	);
-	face(
-		[
-			[-0.5, 0, -0.5],
-			[-0.5, 0, 0.5],
-			[0, 1, 0.5],
-			[0, 1, -0.5],
-		],
-		[-1 / slope, 0.5 / slope, 0]
-	);
-	return {
-		index: new Uint32Array(index),
-		normal: new Float32Array(normal),
-		position: new Float32Array(position),
-	};
-}
-
-const PRISM = prismData();
-
-function inRect(x: number, z: number, rect: WorldRect, grow = 0): boolean {
-	return (
-		x >= rect.minX - grow &&
-		x <= rect.maxX + grow &&
-		z >= rect.minZ - grow &&
-		z <= rect.maxZ + grow
-	);
-}
-
-interface CityParts {
-	glass: InstanceSpec[];
-	litGlass: InstanceSpec[];
-	prisms: InstanceSpec[];
-	roofs: InstanceSpec[];
-	slabs: InstanceSpec[];
-	walls: InstanceSpec[];
-}
-
-/** Every block's slab, building, roof and window, ready to instance. */
-function cityParts(
-	plan: RidesCityPlan,
-	art: RidesArt,
-	night: boolean
-): CityParts {
-	const parts: CityParts = {
-		glass: [],
-		litGlass: [],
-		prisms: [],
-		roofs: [],
-		slabs: [],
-		walls: [],
-	};
-	for (const { rect } of plan.blocks) {
-		parts.slabs.push({
-			color: art.pavement,
-			position: [
-				(rect.minX + rect.maxX) / 2,
-				KERB / 2,
-				(rect.minZ + rect.maxZ) / 2,
-			],
-			scale: [rect.maxX - rect.minX, KERB, rect.maxZ - rect.minZ],
-		});
-	}
-	for (const lot of plan.lots) {
-		const [x, y, z] = lot.at;
-		const wall = swatch(art.walls, lot.seed);
-		const roof = swatch(art.roofs, lot.seed >> 3);
-		parts.walls.push({
-			color: wall,
-			position: [x, y + lot.height / 2, z],
-			scale: [lot.width, lot.height, lot.depth],
-		});
-		if (lot.kind === "house") {
-			parts.prisms.push({
-				color: wall,
-				position: [x, y + lot.height, z],
-				scale: [lot.width, 0.3, lot.depth],
-			});
-			const tilt = Math.atan2(0.3, lot.width / 2);
-			const slope = Math.hypot(lot.width / 2 + 0.06, 0.3);
-			for (const side of [-1, 1]) {
-				parts.roofs.push({
-					color: roof,
-					position: [
-						x + side * (lot.width / 4 + 0.015),
-						y + lot.height + 0.16,
-						z,
-					],
-					rotation: [0, 0, -side * tilt],
-					scale: [slope, 0.05, lot.depth + 0.1],
-				});
-			}
-		} else {
-			parts.roofs.push({
-				color: roof,
-				position: [x, y + lot.height + 0.03, z],
-				scale: [lot.width + 0.06, 0.06, lot.depth + 0.06],
-			});
-		}
-		// Windows on the two faces the camera sees (+z and +x).
-		const floors =
-			lot.kind === "tower"
-				? Math.max(1, Math.floor((lot.height - 0.2) / 0.27))
-				: 1;
-		for (let floor = 0; floor < floors; floor++) {
-			const wy = y + 0.25 + floor * 0.27;
-			for (const face of ["z", "x"] as const) {
-				const span = face === "z" ? lot.width : lot.depth;
-				const count = Math.max(1, Math.floor((span - 0.08) / 0.2));
-				for (let index = 0; index < count; index++) {
-					const along = -span / 2 + (span / count) * (index + 0.5);
-					const lit = night
-						? jitter(Math.round(x * 10) + index, floor, lot.seed % 7) > 0.25
-						: false;
-					const spec: InstanceSpec =
-						face === "z"
-							? {
-									position: [x + along, wy, z + lot.depth / 2 + 0.006],
-									scale: [0.1, 0.13, 0.012],
-								}
-							: {
-									position: [x + lot.width / 2 + 0.006, wy, z + along],
-									scale: [0.012, 0.13, 0.1],
-								};
-					if (lit) {
-						parts.litGlass.push(spec);
-					} else {
-						parts.glass.push({ ...spec, color: art.glass });
-					}
-				}
-			}
-		}
-	}
-	return parts;
-}
-
-/** The blocks and their buildings, every part instanced. */
-function CityBlocks({
-	art,
-	night,
-	plan,
-}: {
-	art: RidesArt;
-	night: boolean;
-	plan: RidesCityPlan;
-}) {
-	const parts = useMemo(() => cityParts(plan, art, night), [art, night, plan]);
-	return (
-		<group>
-			<InstancedParts
-				ink={PROP_INK * 0.5}
-				inkColor={art.kerb}
-				items={parts.slabs}
-				receiveShadow
-			>
-				<RoundedBoxGeometry args={[1, 1, 1]} radius={0.02} smoothness={2} />
-				<ToonMaterial />
-			</InstancedParts>
-			<InstancedParts
-				castShadow
-				ink={PROP_INK * 0.8}
-				inkColor={art.pinPost}
-				items={parts.walls}
-				receiveShadow
-			>
-				<RoundedBoxGeometry args={[1, 1, 1]} radius={0.04} smoothness={2} />
-				<ToonMaterial />
-			</InstancedParts>
-			<InstancedParts castShadow items={parts.prisms} receiveShadow>
-				<MeshGeometry data={PRISM} />
-				<ToonMaterial />
-			</InstancedParts>
-			<InstancedParts
-				castShadow
-				ink={PROP_INK * 0.7}
-				inkColor={art.pinPost}
-				items={parts.roofs}
-				receiveShadow
-			>
-				<boxGeometry args={[1, 1, 1]} />
-				<ToonMaterial />
-			</InstancedParts>
-			<InstancedParts items={parts.glass}>
-				<boxGeometry args={[1, 1, 1]} />
-				<ToonMaterial emissive={art.glass} emissiveIntensity={0.2} />
-			</InstancedParts>
-			<InstancedParts items={parts.litGlass}>
-				<boxGeometry args={[1, 1, 1]} />
-				<CurvedBasicMaterial color={art.litGlass} toneMapped={false} />
-			</InstancedParts>
-		</group>
-	);
-}
-
-/** Bridges, lane dashes and the little street lamps. */
-function Streets({
-	art,
-	night,
-	plan,
-}: {
-	art: RidesArt;
-	night: boolean;
-	plan: RidesCityPlan;
-}) {
-	const parts = useMemo(() => {
-		const decks: InstanceSpec[] = [];
-		const rails: InstanceSpec[] = [];
-		for (const bridge of plan.bridges) {
-			decks.push({
-				position: [bridge.x, 0.03, bridge.z],
-				scale: [bridge.width, 0.08, bridge.length],
-			});
-			for (const side of [-1, 1]) {
-				rails.push({
-					position: [
-						bridge.x + side * (bridge.width / 2 - 0.03),
-						0.13,
-						bridge.z,
-					],
-					scale: [0.05, 0.12, bridge.length],
-				});
-			}
-		}
-		const dashes = plan.dashes.map<InstanceSpec>(({ along, at }) => ({
-			position: at,
-			scale: along === "z" ? [0.05, 0.01, 0.22] : [0.22, 0.01, 0.05],
-		}));
-		const posts = plan.scenery.lamps.map<InstanceSpec>((at) => ({
-			position: [at[0], at[1] + 0.28, at[2]],
-			scale: [0.025, 0.56, 0.025],
-		}));
-		const bulbs = plan.scenery.lamps.map<InstanceSpec>((at) => ({
-			position: [at[0], at[1] + 0.6, at[2]],
-			scale: 0.055,
-		}));
-		return { bulbs, dashes, decks, posts, rails };
-	}, [plan]);
-	return (
-		<group>
-			<InstancedParts
-				castShadow
-				ink={PROP_INK * 0.7}
-				inkColor={art.pinPost}
-				items={parts.decks}
-				receiveShadow
-			>
-				<boxGeometry args={[1, 1, 1]} />
-				<ToonMaterial color={art.bridge} />
-			</InstancedParts>
-			<InstancedParts castShadow items={parts.rails}>
-				<boxGeometry args={[1, 1, 1]} />
-				<ToonMaterial color={art.bridgeRail} />
-			</InstancedParts>
-			<InstancedParts items={parts.dashes}>
-				<boxGeometry args={[1, 1, 1]} />
-				<ToonMaterial color={art.dash} />
-			</InstancedParts>
-			<InstancedParts castShadow items={parts.posts}>
-				<cylinderGeometry args={[1, 1, 1, 8]} />
-				<ToonMaterial color={art.pinPost} />
-			</InstancedParts>
-			<InstancedParts items={parts.bulbs}>
-				<sphereGeometry args={[1, 10, 8]} />
-				{night ? (
-					<CurvedBasicMaterial color={art.carLight} toneMapped={false} />
-				) : (
-					<ToonMaterial color={art.carLight} />
-				)}
-			</InstancedParts>
-		</group>
-	);
-}
-
-/** The park: trees, a pond, a path and benches. */
-function park(rect: WorldRect) {
-	const trees: PlantedTree[] = [];
-	const stones: Vec3[] = [];
-	const cx = (rect.minX + rect.maxX) / 2;
-	const cz = (rect.minZ + rect.maxZ) / 2;
-	const width = rect.maxX - rect.minX;
-	const depth = rect.maxZ - rect.minZ;
-	for (let index = 0; index < 14; index++) {
-		const x = rect.minX + 0.3 + jitter(index, 1, 3) * (width - 0.6);
-		const z = rect.minZ + 0.3 + jitter(index, 2, 5) * (depth - 0.6);
-		if (Math.hypot(x - cx, z - cz) < 1.1) {
-			continue;
-		}
-		trees.push({
-			at: [x, 0, z],
-			kind: index % 3 === 0 ? "blossom" : index % 3 === 1 ? "fruit" : "cedar",
-			scale: 0.5 + jitter(index, 4, 7) * 0.15,
-			seed: index * 37,
-		});
-	}
-	for (let t = 0; t <= 1; t += 0.06) {
-		stones.push([
-			rect.minX + t * width,
-			0,
-			cz + Math.sin(t * Math.PI * 2) * depth * 0.18,
-		]);
-	}
-	return {
-		benches: [{ at: [cx - 0.9, 0, cz + 0.55] as Vec3, scale: 0.6, yaw: 0 }],
-		pond: {
-			at: [cx + 0.2, 0, cz - 0.15] as Vec3,
-			radius: Math.min(0.75, depth * 0.25),
-		},
-		stones,
-		trees,
-	};
-}
-
-/** Trees, shrubs and flowers on the lawn beyond the city, clear of the river. */
-function countryside(plan: RidesCityPlan, shape: IslandShape) {
-	const trees: PlantedTree[] = [];
-	const bushes: PlacedBush[] = [];
-	const flowers: FlowerPatch[] = [];
-	const columns = Math.ceil(shape.halfWidth);
-	const rows = Math.ceil(shape.halfDepth);
-	for (let y = -rows; y <= rows; y++) {
-		for (let x = -columns; x <= columns; x++) {
-			const fx = x + (jitter(x, y, 5) - 0.5) * 0.6;
-			const fz = y + (jitter(x, y, 7) - 0.5) * 0.6;
-			if (
-				!onIsland(shape, fx, fz, 0.5) ||
-				inRect(fx, fz, plan.rect, 0.4) ||
-				Math.abs(fz - riverAt(plan.frame, fx)) < RIVER_HALF + 0.35
-			) {
-				continue;
-			}
-			const hash = jitter(x, y, 3);
-			if (hash < 0.5) {
-				trees.push({
-					at: [fx, 0, fz],
-					kind: hash < 0.2 ? "cedar" : hash > 0.4 ? "blossom" : "fruit",
-					scale: 0.7 + jitter(x, y, 9) * 0.25,
-					seed: Math.round(hash * 1000),
-				});
-			} else if (hash < 0.65) {
-				bushes.push({ at: [fx, 0, fz], scale: 0.75, seed: x * 17 + y });
-			} else if (hash > 0.85) {
-				flowers.push({ at: [fx, 0, fz], x, y });
-			}
-		}
-	}
-	return { bushes, flowers, trees };
-}
-
-/** What a car's plate says to a screen reader. */
-export function carLabel(car: RideCar, trip: RideTrip | undefined): string {
-	if (car.state === "driving" && trip) {
-		return `${car.agent.name}, driving to ${trip.thread.title}`;
-	}
-	if (car.state === "arrived" && trip) {
-		return `${car.agent.name}, arrived at ${trip.thread.title}`;
-	}
-	if (car.state === "queued" && trip) {
-		return `${car.agent.name}, requested for ${trip.thread.title}`;
-	}
-	return `${car.agent.name}, available. Book a trip with ${car.agent.name}`;
-}
-
-/** A small rounded toon car in its driver's colour, gliding to its spot. */
-function Car({
-	art,
-	body,
-	ghost,
-	night,
-	reducedMotion,
-	spot,
-}: {
-	art: RidesArt;
-	body: string;
-	ghost: boolean;
-	night: boolean;
-	reducedMotion: boolean;
-	spot: CarSpot;
-}) {
-	const ref = useRef<Group>(null);
-	const target = useRef(spot);
-	target.current = spot;
-	const invalidate = useThree((state) => state.invalidate);
-	// Under reduced motion the car is where its plate is on the same frame.
-	useLayoutEffect(() => {
-		const group = ref.current;
-		if (!(reducedMotion && group)) {
-			return;
-		}
-		group.position.set(spot.at[0], spot.at[1], spot.at[2]);
-		group.rotation.y = spot.yaw;
-		invalidate();
-	}, [invalidate, reducedMotion, spot.at, spot.yaw]);
-	useFrame((_, delta) => {
-		const group = ref.current;
-		if (!group) {
-			return;
-		}
-		const { at, yaw } = target.current;
-		const ease = reducedMotion ? 1 : Math.min(1, delta * 2.5);
-		group.position.x += (at[0] - group.position.x) * ease;
-		group.position.z += (at[2] - group.position.z) * ease;
-		group.position.y = at[1];
-		let turn = yaw - group.rotation.y;
-		turn = Math.atan2(Math.sin(turn), Math.cos(turn));
-		group.rotation.y += turn * ease;
-	});
-	const opacity = ghost ? 0.45 : 1;
-	return (
-		<group
-			position={spot.at}
-			ref={ref}
-			rotation={[0, spot.yaw, 0]}
-			scale={CAR_SCALE}
-		>
-			<mesh castShadow position={[0, 0.13, 0]}>
-				<RoundedBoxGeometry
-					args={[0.32, 0.15, 0.6]}
-					radius={0.06}
-					smoothness={3}
-				/>
-				<ToonMaterial color={body} opacity={opacity} transparent={ghost} />
-			</mesh>
-			<mesh castShadow position={[0, 0.24, -0.04]}>
-				<RoundedBoxGeometry
-					args={[0.27, 0.13, 0.32]}
-					radius={0.05}
-					smoothness={3}
-				/>
-				<ToonMaterial
-					color={art.carGlass}
-					opacity={opacity}
-					transparent={ghost}
-				/>
-			</mesh>
-			<mesh position={[0, 0.31, -0.04]}>
-				<boxGeometry args={[0.24, 0.025, 0.26]} />
-				<ToonMaterial color={body} opacity={opacity} transparent={ghost} />
-			</mesh>
-			{/* The roof light: lit while the car is on a trip. */}
-			<mesh position={[0, 0.345, -0.04]}>
-				<boxGeometry args={[0.12, 0.05, 0.07]} />
-				{ghost ? (
-					<ToonMaterial color={art.carLight} opacity={opacity} transparent />
-				) : (
-					<CurvedBasicMaterial color={art.carLight} toneMapped={false} />
-				)}
-			</mesh>
-			{[-1, 1].map((side) =>
-				[-1, 1].map((end) => (
-					<mesh
-						key={`${side}:${end}`}
-						position={[side * 0.15, 0.06, end * 0.19]}
-						rotation={[0, 0, Math.PI / 2]}
-					>
-						<cylinderGeometry args={[0.06, 0.06, 0.05, 12]} />
-						<ToonMaterial
-							color={art.carWheel}
-							opacity={opacity}
-							transparent={ghost}
-						/>
-					</mesh>
-				))
-			)}
-			{[-1, 1].map((side) => (
-				<group key={side}>
-					<mesh position={[side * 0.1, 0.14, 0.3]}>
-						<sphereGeometry args={[0.03, 8, 6]} />
-						{night && !ghost ? (
-							<CurvedBasicMaterial color={art.carLight} toneMapped={false} />
-						) : (
-							<ToonMaterial color={art.carLight} />
-						)}
-					</mesh>
-					<mesh position={[side * 0.11, 0.14, -0.3]}>
-						<boxGeometry args={[0.06, 0.03, 0.01]} />
-						<ToonMaterial color={art.carTail} />
-					</mesh>
-				</group>
-			))}
-		</group>
-	);
-}
-
-/** A trip's destination pin: a post with a flag in the trip's colour. */
-function Pins({
-	art,
-	pins,
-}: {
-	art: RidesArt;
-	pins: readonly { at: Vec3; color: string }[];
-}) {
-	const parts = useMemo(
-		() => ({
-			flags: pins.map<InstanceSpec>(({ at, color }) => ({
-				color,
-				position: [at[0] + 0.24, at[1] + 1.2, at[2]],
-				scale: [0.46, 0.3, 0.05],
-			})),
-			heads: pins.map<InstanceSpec>(({ at }) => ({
-				position: [at[0], at[1] + 1.38, at[2]],
-				scale: 0.08,
-			})),
-			posts: pins.map<InstanceSpec>(({ at }) => ({
-				position: [at[0], at[1] + 0.68, at[2]],
-				scale: [0.05, 1.36, 0.05],
-			})),
-		}),
-		[pins]
-	);
-	return (
-		<group>
-			<InstancedParts castShadow items={parts.posts}>
-				<cylinderGeometry args={[1, 1, 1, 8]} />
-				<ToonMaterial color={art.pinPost} />
-			</InstancedParts>
-			<InstancedParts
-				castShadow
-				ink={PROP_INK * 0.6}
-				inkColor={art.pinPost}
-				items={parts.flags}
-			>
-				<boxGeometry args={[1, 1, 1]} />
-				<ToonMaterial />
-			</InstancedParts>
-			<InstancedParts items={parts.heads}>
-				<sphereGeometry args={[1, 10, 8]} />
-				<ToonMaterial color={art.pinPost} />
-			</InstancedParts>
-		</group>
-	);
-}
-
-/** Routes as flat ribbons on the road, the selected one bright. */
-function Routes({
-	ribbons,
-}: {
-	ribbons: readonly { color: string; path: Vec3[]; width: number }[];
-}) {
-	const items = useMemo(() => {
-		const out: InstanceSpec[] = [];
-		for (const { color, path, width } of ribbons) {
-			for (let index = 1; index < path.length; index++) {
-				const from = path[index - 1];
-				const to = path[index];
-				if (!(from && to)) {
-					continue;
-				}
-				const dx = to[0] - from[0];
-				const dz = to[2] - from[2];
-				const length = Math.hypot(dx, dz);
-				if (length < 0.01) {
-					continue;
-				}
-				out.push({
-					color,
-					position: [(from[0] + to[0]) / 2, from[1], (from[2] + to[2]) / 2],
-					rotation: [0, Math.atan2(dx, dz), 0],
-					scale: [width, 0.012, length + width],
-				});
-			}
-		}
-		return out;
-	}, [ribbons]);
-	return (
-		<InstancedParts items={items}>
-			<boxGeometry args={[1, 1, 1]} />
-			<CurvedBasicMaterial toneMapped={false} />
-		</InstancedParts>
-	);
-}
 
 export interface RidesDioramaProps {
 	/** The act layer (a snapshot with `asks`); without it, today's map. */
@@ -712,33 +84,6 @@ export interface RidesDioramaProps {
 	shape: IslandShape;
 	swatches: ReadonlyMap<string, AgentSwatch>;
 	theme: Scene3dTheme;
-}
-
-/** A route's colour: bright when picked, plain en route (and with acts), else its stage's. */
-function ribbonColor(
-	art: RidesArt,
-	trip: RideTrip,
-	selected: boolean,
-	acted: boolean
-): string {
-	if (selected) {
-		return art.routeSelected;
-	}
-	return acted || trip.stage === "enroute" ? art.route : art.pin[trip.stage];
-}
-
-/** A pin plate's words: the act's word, or the chip's lead and tail. */
-function pinText(
-	trip: RideTrip,
-	acted = false,
-	trips?: ReadonlyMap<string, RidesActTrip>
-): string {
-	const actTrip = trips?.get(trip.id);
-	if (actTrip) {
-		return tripWord(trip, actTrip);
-	}
-	const { lead, tail } = chipText(trip, acted);
-	return tail ? `${lead} ${tail}` : lead;
 }
 
 /** A station board's line height, in world units up (its rows sit 2 px apart). */
@@ -761,6 +106,7 @@ export function RidesDioramaScene({
 	swatches,
 	theme,
 }: RidesDioramaProps) {
+	const tl = useLiteralMessages();
 	const { frame } = plan;
 	const paint = useMemo(() => {
 		const road: Rgb = linearRgb(art.road);
@@ -1065,8 +411,14 @@ export function RidesDioramaScene({
 						label={
 							selected
 								? // The visible words lead the name (label in name).
-									`${pinText(trip, acted, acts?.view.trips)} ${trip.thread.title}. Open the trip`
-								: `${trip.thread.title}, ${tripWord(trip, acts?.view.trips?.get(trip.id))}. Show the trip`
+									tl("{word} {title}. Open the trip", {
+										title: trip.thread.title,
+										word: pinText(trip, acted, acts?.view.trips),
+									})
+								: tl("{title}, {word}. Show the trip", {
+										title: trip.thread.title,
+										word: tripWord(trip, acts?.view.trips?.get(trip.id)),
+									})
 						}
 						onSelect={() =>
 							selected ? onOpenTrip(trip.id) : onSelectTrip(trip.id)

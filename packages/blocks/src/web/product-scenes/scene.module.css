@@ -1,0 +1,100 @@
+/*
+ * The shared look of the homepage product scenes: one canvas size, one label
+ * size, hairline wires and chips, and one accent token. Base rules are the
+ * still. Motion is attached only inside the no-preference block below and only
+ * while `Stage` marks the card in view, and every keyframe animates transform
+ * or opacity alone.
+ */
+
+.stage {
+	/* The one emphasis colour every scene shares: monochrome, like the site. */
+	--scene-accent: var(--foreground);
+	color: var(--foreground);
+}
+
+.svg {
+	overflow: visible;
+	font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.label {
+	font-size: 11px;
+	letter-spacing: 0;
+	fill: currentColor;
+}
+
+.muted {
+	fill: var(--muted-foreground);
+}
+
+.wire {
+	fill: none;
+	stroke: currentColor;
+	stroke-opacity: 0.28;
+	stroke-width: 1;
+}
+
+.frame {
+	fill: var(--background);
+	stroke: currentColor;
+	stroke-opacity: 0.42;
+	stroke-width: 1;
+}
+
+.stroke {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.packet {
+	fill: var(--scene-accent);
+}
+
+.half {
+	transform: translate(calc(var(--dx) * 0.5), calc(var(--dy) * 0.5));
+}
+
+.parked {
+	transform: translate(var(--dx), var(--dy));
+}
+
+/*
+ * The shared wire loop starts and ends halfway along, where the still parks
+ * the packet, and runs linearly so the speed is constant along the wire.
+ */
+@keyframes flow {
+	0%,
+	100% {
+		opacity: 1;
+		transform: translate(calc(var(--dx) * 0.5), calc(var(--dy) * 0.5));
+	}
+	42% {
+		opacity: 1;
+		transform: translate(calc(var(--dx) * 0.92), calc(var(--dy) * 0.92));
+	}
+	50% {
+		opacity: 0;
+		transform: translate(var(--dx), var(--dy));
+	}
+	50.01% {
+		opacity: 0;
+		transform: translate(0, 0);
+	}
+	58% {
+		opacity: 1;
+		transform: translate(calc(var(--dx) * 0.08), calc(var(--dy) * 0.08));
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.stage[data-inview] .flow {
+		animation-name: flow;
+		animation-duration: 2.4s;
+		animation-timing-function: linear;
+		animation-delay: var(--delay, 0s);
+		animation-iteration-count: infinite;
+	}
+}

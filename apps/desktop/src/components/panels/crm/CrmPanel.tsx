@@ -209,7 +209,7 @@ export function CrmPanel() {
 				<HugeiconsIcon
 					className="text-muted-foreground"
 					icon={UserGroupIcon}
-					size={28}
+					size={20}
 				/>
 				<p className="font-medium text-sm">Harbor is not enabled</p>
 				<p className="max-w-sm text-muted-foreground text-xs">
@@ -268,7 +268,7 @@ export function CrmPanel() {
 				<div className="scroll-fade min-h-0 flex-1 overflow-y-auto p-2">
 					{hits ? (
 						<div>
-							<h2 className="mb-1 px-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+							<h2 className="mb-1 px-1 font-semibold text-foreground text-sm">
 								{tl("{resultCount, plural, one {# result} other {# results}}", {
 									resultCount: hits.length,
 								})}
@@ -277,7 +277,7 @@ export function CrmPanel() {
 								{hits.map((hit) => (
 									<li key={hit.record_id}>
 										<button
-											className="w-full rounded px-2 py-1 text-left hover:bg-muted"
+											className="w-full rounded-lg px-2 py-1 text-left hover:bg-muted"
 											onClick={() => {
 												setObjectSlug(hit.object_slug);
 												setMode({
@@ -311,7 +311,7 @@ export function CrmPanel() {
 									<li key={entry.object.id}>
 										<button
 											className={cn(
-												"flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted",
+												"flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-sm hover:bg-muted",
 												active && "bg-muted font-medium"
 											)}
 											onClick={() => {
@@ -337,7 +337,7 @@ export function CrmPanel() {
 													<li key={candidate.id}>
 														<button
 															className={cn(
-																"w-full truncate rounded px-2 py-0.5 text-left text-xs hover:bg-muted",
+																"w-full truncate rounded-lg px-2 py-0.5 text-left text-xs hover:bg-muted",
 																candidate.id === view?.id &&
 																	"bg-muted font-medium"
 															)}

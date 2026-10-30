@@ -1,10 +1,107 @@
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import { InformationCircleIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@ryu/ui/components/tooltip.tsx";
 import { useMemo } from "react";
 import { useApps } from "@/src/hooks/useApps.ts";
+import type { AppInfo } from "@/src/lib/api/plugins.ts";
 import { OAuthConnections } from "../marketplace/ConnectionsTab.tsx";
-import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
+import {
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "./shared/settings-items.tsx";
+
+/** Hidden until the row is hovered or focused; always shown without hover. */
+const ROW_REVEAL =
+	"opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-focus-within/item:opacity-100 group-hover/item:opacity-100 group-hover/item:duration-0 [@media(hover:none)]:opacity-100";
+
+/**
+ * Provenance and wiring that matter only when you go looking: the app id,
+ * whether it ships with Ryu, and the OAuth services it declares.
+ */
+function AppDetails({ app }: { app: AppInfo }) {
+	const tl = useLiteralMessages();
+	const oauth = app.mcpOAuthServers.map((server) => server.name).join(", ");
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Button
+						aria-label={tl("About {appName}", { appName: app.name })}
+						className={ROW_REVEAL}
+						size="icon-sm"
+						variant="ghost-muted"
+					/>
+				}
+			>
+				<HugeiconsIcon icon={InformationCircleIcon} size={16} />
+			</TooltipTrigger>
+			<TooltipContent className="max-w-80">
+				<span className="flex flex-col gap-0.5">
+					{app.builtIn ? <span>Built in</span> : null}
+					<span className="break-all font-mono">{app.id}</span>
+					{oauth ? (
+						<span>
+							{tl("OAuth services declared: {oauthServices}", {
+								oauthServices: oauth,
+							})}
+						</span>
+					) : null}
+				</span>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
+function AppRow({
+	app,
+	onToggle,
+}: {
+	app: AppInfo;
+	onToggle: (enabled: boolean) => void;
+}) {
+	const tl = useLiteralMessages();
+	return (
+		// A block wrapper, not `display: contents`: the flush group draws its
+		// hairlines on its direct children, and a `contents` box paints no border.
+		<div data-app-id={app.id} data-built-in={app.builtIn ? "" : undefined}>
+			<SettingsItem
+				actions={
+					<span className="flex items-center gap-2">
+						<AppDetails app={app} />
+						<Switch
+							aria-label={tl("{appName} enabled", { appName: app.name })}
+							checked={app.enabled}
+							// Core refuses to disable a mandatory app, so its switch stays on.
+							disabled={app.mandatory}
+							onCheckedChange={onToggle}
+						/>
+					</span>
+				}
+				description={
+					<span data-slot="app-permissions">
+						{app.approvedGrants.length > 0
+							? tl("Permissions: {permissions}", {
+									permissions: app.approvedGrants.join(", "),
+								})
+							: tl("Permissions: None approved")}
+					</span>
+				}
+				// A node, not a string: the name is third-party text, so the
+				// settings formatter must not read its braces as placeholders.
+				title={<span>{app.name}</span>}
+			/>
+		</div>
+	);
+}
 
 /**
  * The account-level view of marketplace Ryu Apps. Installation and grants are
@@ -25,96 +122,52 @@ export function RyuAppsTab() {
 	);
 
 	return (
-		<SettingsSection
-			caption="Marketplace apps are installed on this node. Review their permissions and connected services here; removing an app from one node does not remove it from another."
-			title="Ryu Apps"
-		>
-			{loading ? (
-				<SettingsCard>
-					<SkeletonRows
-						label="Loading installed Ryu apps…"
-						spacing="comfortable"
-					/>
-				</SettingsCard>
-			) : error ? (
-				<SettingsCard>
-					<p className="text-sm text-status-destructive">{error}</p>
-				</SettingsCard>
-			) : installedApps.length === 0 ? (
-				<SettingsCard>
-					<p className="text-muted-foreground text-sm">
+		<>
+			<SettingsSection
+				caption={
+					installedApps.length > 0
+						? "Installed on this node. Removing an app here leaves your other nodes alone."
+						: undefined
+				}
+			>
+				{loading ? (
+					<SkeletonRows label="Loading installed Ryu apps…" />
+				) : error ? (
+					<div className="flex flex-col gap-1 py-3">
+						<p className="text-sm">Couldn't load your Ryu apps.</p>
+						<details className="text-detail text-muted-foreground">
+							<summary className="w-fit cursor-pointer hover:text-foreground">
+								Details
+							</summary>
+							<p className="mt-1 break-all font-mono">{error}</p>
+						</details>
+					</div>
+				) : installedApps.length === 0 ? (
+					<p className="py-3 text-muted-foreground text-sm">
 						No marketplace Ryu apps are installed on this node.
 					</p>
-				</SettingsCard>
-			) : (
-				<SettingsCard>
-					<div className="space-y-4">
-						{installedApps.map((app, index) => (
-							<div
-								className={index > 0 ? "border-t pt-4" : undefined}
+				) : (
+					<SettingsGroup>
+						{installedApps.map((app) => (
+							<AppRow
+								app={app}
 								key={app.id}
-							>
-								<div className="flex flex-wrap items-start justify-between gap-3">
-									<div className="min-w-0">
-										<div className="flex flex-wrap items-center gap-2">
-											<p className="font-medium text-sm">{app.name}</p>
-											<Badge variant={app.enabled ? "default" : "secondary"}>
-												{app.enabled ? "Enabled" : "Disabled"}
-											</Badge>
-											{app.builtIn ? (
-												<Badge variant="outline">Built in</Badge>
-											) : null}
-										</div>
-										<p className="mt-1 break-all font-mono text-muted-foreground text-xs">
-											{app.id}
-										</p>
-									</div>
-									{app.mandatory ? null : (
-										<Button
-											onClick={() => void toggle(app.id, !app.enabled)}
-											size="sm"
-											variant="outline"
-										>
-											{app.enabled ? "Disable" : "Enable"}
-										</Button>
-									)}
-								</div>
-
-								<div className="mt-3 space-y-2 text-muted-foreground text-xs">
-									<p>
-										<strong className="font-medium text-foreground">
-											Permissions:
-										</strong>{" "}
-										{app.approvedGrants.length > 0
-											? app.approvedGrants.join(", ")
-											: "None approved"}
-									</p>
-									{app.mcpOAuthServers.length > 0 ? (
-										<p>
-											<strong className="font-medium text-foreground">
-												OAuth services declared:
-											</strong>{" "}
-											{app.mcpOAuthServers
-												.map((server) => server.name)
-												.join(", ")}
-										</p>
-									) : null}
-								</div>
-							</div>
+								onToggle={(enabled) => void toggle(app.id, enabled)}
+							/>
 						))}
-					</div>
-				</SettingsCard>
-			)}
+					</SettingsGroup>
+				)}
+				{toggleError ? (
+					<p className="mt-2 text-detail text-status-destructive" role="alert">
+						{toggleError}
+					</p>
+				) : null}
+			</SettingsSection>
 			{hasOAuthServices ? (
-				<div className="pt-2">
+				<div className="mt-8">
 					<OAuthConnections apps={installedApps} loading={false} />
 				</div>
 			) : null}
-			{toggleError ? (
-				<p className="mt-1.5 px-3.5 text-status-destructive text-xs">
-					{toggleError}
-				</p>
-			) : null}
-		</SettingsSection>
+		</>
 	);
 }

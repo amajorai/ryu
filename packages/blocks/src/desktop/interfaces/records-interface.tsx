@@ -1,26 +1,35 @@
-import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Empty,
-	EmptyContent,
-	EmptyDescription,
-	EmptyHeader,
-	EmptyMedia,
-	EmptyTitle,
-} from "@ryu/ui/components/empty.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import {
 	type KeyboardEvent,
 	type ReactNode,
-	type RefObject,
 	useCallback,
 	useEffect,
-	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { RecordsBoard } from "./records-board.tsx";
+import {
+	RecordsEmptyState,
+	RecordsNoMatchState,
+} from "./records-interface-empty.tsx";
+import {
+	cursorStep,
+	DETAILS_ASIDE_MIN_WIDTH,
+	DETAILS_TWO_COLUMN_MIN_WIDTH,
+	DOCK_MAX,
+	DOCK_MIN,
+	DOCK_MIN_WIDTH,
+	DOCK_SHARE,
+	NAV_MIN_WIDTH,
+	NAV_WIDTH,
+	type OpenRecord,
+	ownsKeys,
+	useElementWidth,
+	useMinuteClock,
+} from "./records-interface-layout.ts";
 import {
 	findRecordsView,
 	RECORDS_DEFAULT_SORT,
@@ -40,7 +49,7 @@ import {
 	recordsStartInput,
 	recordsViewRows,
 } from "./records-model.ts";
-import { RECORDS_OBJECT_ICONS, RecordsNav } from "./records-nav.tsx";
+import { RecordsNav } from "./records-nav.tsx";
 import { RecordsPage, type RecordsRelatedTarget } from "./records-page.tsx";
 import { RecordsThreadPanel } from "./records-parts.tsx";
 import { RecordsTable } from "./records-table.tsx";
@@ -49,96 +58,6 @@ import {
 	type RecordsLayout,
 	RecordsToolbar,
 } from "./records-toolbar.tsx";
-
-const MINUTE = 60_000;
-/** At or above this width the objects rail shows; below it, a menu. */
-const NAV_MIN_WIDTH = 768;
-/** At or above this width an open thread docks; below it, it floats. */
-const DOCK_MIN_WIDTH = 1100;
-/** Content width below which a record's attributes move into the page. */
-const DETAILS_ASIDE_MIN_WIDTH = 760;
-/** Main-column width at which inline attributes split into two columns. */
-const DETAILS_TWO_COLUMN_MIN_WIDTH = 720;
-/** Width of the objects rail (w-56). */
-const NAV_WIDTH = 224;
-/** The docked thread panel's width: clamp(380px, 40%, 560px). */
-const DOCK_MIN = 380;
-const DOCK_MAX = 560;
-const DOCK_SHARE = 0.4;
-/** Width assumed before the first measurement. */
-const UNMEASURED_WIDTH = 1440;
-
-/** Wall clock that ticks once a minute so relative times stay honest. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-/** The element's rendered width, kept current with a ResizeObserver. */
-function useElementWidth(ref: RefObject<HTMLElement | null>): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		setWidth(element.getBoundingClientRect().width);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((entries) => {
-			const next = entries[0]?.contentRect.width;
-			if (next !== undefined) {
-				setWidth(next);
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width || UNMEASURED_WIDTH;
-}
-
-/** True for targets whose keys belong to typing or to the host's chat. */
-function ownsKeys(target: EventTarget): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[data-testid='records-thread-panel']") !== null
-	);
-}
-
-function cursorStep(
-	key: string
-): "first" | "last" | "next" | "previous" | null {
-	switch (key) {
-		case "ArrowDown":
-		case "j":
-			return "next";
-		case "ArrowUp":
-		case "k":
-			return "previous";
-		case "Home":
-			return "first";
-		case "End":
-			return "last";
-		default:
-			return null;
-	}
-}
-
-interface OpenRecord {
-	id: string;
-	object: RecordsObject;
-}
 
 /**
  * Records interface, after Attio and Folk: agents, teams, and projects as CRM
@@ -161,6 +80,7 @@ export function RecordsInterface({
 	const focusRowOnReturn = useRef<string | null>(null);
 	const width = useElementWidth(rootRef);
 	const now = useMinuteClock();
+	const tl = useLiteralMessages();
 
 	const [object, setObject] = useState<RecordsObject>("agents");
 	const [activeViewId, setActiveViewId] = useState<string | null>(null);
@@ -449,62 +369,15 @@ export function RecordsInterface({
 	const labels = RECORDS_OBJECT_LABELS[object];
 	let collection: ReactNode;
 	if (!loading && allRows.length === 0) {
-		const Icon = RECORDS_OBJECT_ICONS[object];
-		collection = (
-			<Empty className="h-full" data-testid="records-empty">
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<Icon aria-hidden="true" />
-					</EmptyMedia>
-					<EmptyTitle className="text-sm">
-						No {labels.plural.toLowerCase()} yet
-					</EmptyTitle>
-					<EmptyDescription className="text-[13px]">
-						{object === "agents"
-							? "Agents you create in Ryu appear here as records, with their threads and status."
-							: `${labels.plural} you create in Ryu appear here, with their members and threads.`}
-					</EmptyDescription>
-				</EmptyHeader>
-				{object === "agents" ? null : (
-					<EmptyContent>
-						<Button
-							onClick={() => resetTo("agents")}
-							size="sm"
-							type="button"
-							variant="outline"
-						>
-							Show agents
-						</Button>
-					</EmptyContent>
-				)}
-			</Empty>
-		);
+		collection = <RecordsEmptyState object={object} resetTo={resetTo} />;
 	} else if (!loading && rows.length === 0) {
 		collection = (
-			<Empty className="h-full" data-testid="records-no-match">
-				<EmptyHeader>
-					<EmptyTitle className="text-sm">
-						No {labels.plural.toLowerCase()} match
-					</EmptyTitle>
-					<EmptyDescription className="text-[13px]">
-						{query
-							? `Nothing matches “${query.trim()}” with the current filters.`
-							: "No records meet every filter in this view."}
-					</EmptyDescription>
-				</EmptyHeader>
-				<EmptyContent>
-					<Button
-						onClick={clearFilters}
-						size="sm"
-						type="button"
-						variant="outline"
-					>
-						{recordsFilterCount(filter) > 0 || query
-							? "Clear filters"
-							: "Show all"}
-					</Button>
-				</EmptyContent>
-			</Empty>
+			<RecordsNoMatchState
+				clearFilters={clearFilters}
+				hasFilters={recordsFilterCount(filter) > 0}
+				object={object}
+				query={query}
+			/>
 		);
 	} else if (layout === "board" && !loading) {
 		collection = (
@@ -609,7 +482,9 @@ export function RecordsInterface({
 							onSearchKeyDown={onSearchKeyDown}
 							onSortChange={changeSort}
 							query={query}
-							searchLabel={`Search ${labels.plural.toLowerCase()}`}
+							searchLabel={tl("Search {plural}", {
+								plural: labels.plural.toLowerCase(),
+							})}
 							searchRef={searchRef}
 							sort={sort}
 						/>

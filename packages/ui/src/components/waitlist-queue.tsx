@@ -2,6 +2,7 @@
 
 import { ArrowLeft02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { type ReactNode, useState } from "react";
 import { cn } from "../lib/utils.ts";
 import { Button } from "./button.tsx";
@@ -149,6 +150,7 @@ export function WaitlistQueue({
 	 * a different panel behind the member's back.
 	 */
 	const [chosenStep, setChosenStep] = useState<string | null>(null);
+	const tl = useLiteralMessages();
 	// Once a handle is claimed, that IS the headline — it is the newest and most
 	// specific thing true about this user, and repeating "you're in line" under it
 	// says nothing the position on the pass does not already say.
@@ -156,7 +158,7 @@ export function WaitlistQueue({
 	if (reserved) {
 		headerTitle = `@${reserved} is reserved`;
 	} else if (userName) {
-		headerTitle = `You're in line, ${userName}`;
+		headerTitle = tl("You're in line, {userName}", { userName });
 	}
 
 	// Where the strip opens when the member has not steered it themselves: the

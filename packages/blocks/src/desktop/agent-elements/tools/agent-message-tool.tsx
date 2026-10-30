@@ -1,3 +1,5 @@
+import { BubbleChatIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLocalizedText } from "@ryu/i18n/react";
 import { badgeVariants } from "@ryu/ui/components/badge";
 import { Bubble, BubbleContent } from "@ryu/ui/components/bubble";
@@ -10,7 +12,6 @@ import {
 	MessageHeader,
 } from "@ryu/ui/components/message";
 import { cn } from "@ryu/ui/lib/utils";
-import { IconMessages } from "@tabler/icons-react";
 import { memo } from "react";
 import type { AgentMessageContext, AgentMessageIdentity } from "../types.ts";
 import { getToolStatus } from "../utils/format-tool.ts";
@@ -230,7 +231,7 @@ export const AgentMessageTool = memo(function AgentMessageTool({
 		>
 			<Marker size="compact" spacing="activity">
 				<MarkerIcon>
-					<IconMessages className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={BubbleChatIcon} />
 				</MarkerIcon>
 				<MarkerContent
 					className="flex min-w-0 flex-wrap items-center"

@@ -60,10 +60,6 @@ export function isOrgAccessNotInSession(value: unknown): boolean {
 	);
 }
 
-const SIGN_IN_AGAIN = "Sign in again: `ryu-cli logout`, then `ryu-cli login`.";
-const CONFIRM_TWO_FACTOR =
-	"If it requires two-factor, confirm with your authenticator app: `ryu-cli secrets confirm CODE --method totp`, then retry. Or sign in again with a passkey or your authenticator app: `ryu-cli logout`, then `ryu-cli login`.";
-
 /**
  * What the CLI says for the control plane's refusals of a request Core
  * forwarded for you (Team and Organization vault values). Core passes these
@@ -72,11 +68,11 @@ const CONFIRM_TWO_FACTOR =
 const CONTROL_PLANE_REFUSAL_HINTS = new Map<string, string>([
 	[
 		"user_jwt_org_not_admitted",
-		`Your sign-in doesn't include access to this node's organization: its access policy refused it. ${CONFIRM_TWO_FACTOR}`,
+		"Your sign-in doesn't include access to this node's organization: its access policy refused it. If it requires two-factor, confirm with your authenticator app: `ryu-cli secrets confirm CODE --method totp`, then retry. Or sign in again with a passkey or your authenticator app: `ryu-cli logout`, then `ryu-cli login`.",
 	],
 	[
 		"org_mfa_session_required",
-		`This node's organization requires a sign-in with two-factor. ${CONFIRM_TWO_FACTOR}`,
+		"This node's organization requires a sign-in with two-factor. If it requires two-factor, confirm with your authenticator app: `ryu-cli secrets confirm CODE --method totp`, then retry. Or sign in again with a passkey or your authenticator app: `ryu-cli logout`, then `ryu-cli login`.",
 	],
 	[
 		"org_mfa_required",
@@ -88,15 +84,15 @@ const CONTROL_PLANE_REFUSAL_HINTS = new Map<string, string>([
 	],
 	[
 		"org_session_expired",
-		`Your sign-in is older than this node's organization allows. ${SIGN_IN_AGAIN}`,
+		"Your sign-in is older than this node's organization allows. Sign in again: `ryu-cli logout`, then `ryu-cli login`.",
 	],
 	[
 		"user_jwt_session_ended",
-		`The sign-in on this machine has ended or was revoked. ${SIGN_IN_AGAIN}`,
+		"The sign-in on this machine has ended or was revoked. Sign in again: `ryu-cli logout`, then `ryu-cli login`.",
 	],
 	[
 		"user_jwt_invalid",
-		`The control plane didn't accept this machine's sign-in token. Ryu gets a new one on the next request, so try again in a minute. If it keeps happening: ${SIGN_IN_AGAIN}`,
+		"The control plane didn't accept this machine's sign-in token. Ryu gets a new one on the next request, so try again in a minute. If it keeps happening: Sign in again: `ryu-cli logout`, then `ryu-cli login`.",
 	],
 	[
 		"personal_node_required",

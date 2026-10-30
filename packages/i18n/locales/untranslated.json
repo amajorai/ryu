@@ -408,6 +408,12 @@
     ],
     "reason": "'Actor' is the Spanish word"
   },
+  "Admission": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Admission' is the French word (glossary Admission)"
+  },
   "Advent": {
     "locales": [
       "de"
@@ -764,6 +770,12 @@
     "reason": "'Aquarium' is the German and French word"
   },
   "Aquarium:": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Aquarium' is the German word"
+  },
+  "Aquarium: {summary}.": {
     "locales": [
       "de"
     ],
@@ -1310,6 +1322,16 @@
     ],
     "reason": "'Bot' is the standard native word in these languages"
   },
+  "Bot · {source}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Bot' is the established term in these locales (glossary Bot)"
+  },
   "Bots": {
     "locales": [
       "de",
@@ -1412,6 +1434,22 @@
     ],
     "reason": "'Budget' is the native word in German, French and Italian; USD is a currency code"
   },
+  "Budget ({defaultCurrency})": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Budget' is the German, French and Italian word"
+  },
+  "Budget {budget}": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Budget' is the German, French and Italian word"
+  },
   "Budgets": {
     "locales": [
       "de",
@@ -1448,6 +1486,16 @@
     ],
     "reason": "Plan tier names Business and Enterprise"
   },
+  "CLI {VERSION}, Core {coreVersion}.": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "CLI and Core are Ryu component names"
+  },
   "Cache": {
     "locales": [
       "de",
@@ -1464,6 +1512,14 @@
       "pt-BR"
     ],
     "reason": "'Cache' is the standard native technical term in these languages"
+  },
+  "Cache: {state}": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Cache' is the established term in these locales (glossary Cache)"
   },
   "Cafe": {
     "locales": [
@@ -1674,6 +1730,14 @@
     ],
     "reason": "'Chef' is a native dictionary word in Spanish, French, Italian and Portuguese"
   },
+  "Chef {name}": {
+    "locales": [
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'chef' is the French word and the standard culinary loanword in Italian and Portuguese (glossary Chef)"
+  },
   "Chile": {
     "locales": [
       "de",
@@ -1704,6 +1768,22 @@
     ],
     "reason": "Product and plan names"
   },
+  "Claude for Startups": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Anthropic program name"
+  },
   "Client": {
     "locales": [
       "de",
@@ -1716,6 +1796,13 @@
       "fr"
     ],
     "reason": "'Client' is the native French word; Acme is a sample name"
+  },
+  "Clients": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Clients' is the German and French plural (glossary Clients)"
   },
   "Cline CLI": {
     "locales": [
@@ -2300,6 +2387,12 @@
     ],
     "reason": "company name"
   },
+  "Define": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Define' is the Spanish imperative of 'definir'"
+  },
   "Description": {
     "locales": [
       "fr"
@@ -2311,6 +2404,12 @@
       "fr"
     ],
     "reason": "Description is the French word"
+  },
+  "Description ({length}/512)": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Description' is the French word"
   },
   "Descriptor": {
     "locales": [
@@ -2660,6 +2759,13 @@
       "it"
     ],
     "reason": "Endpoint is the standard Italian technical term"
+  },
+  "Endpoints": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Endpoints' is the glossary term in these locales"
   },
   "Engine": {
     "locales": [
@@ -3609,6 +3715,22 @@
     ],
     "reason": "Google product name"
   },
+  "Google · {quotaProject}{expiry}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name Google; the rest is placeholders"
+  },
   "Governance": {
     "locales": [
       "de",
@@ -3842,6 +3964,15 @@
     ],
     "reason": "\"Hardware\" is the standard word in these languages"
   },
+  "Hardware · {name}": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Hardware' is the established term in these locales (glossary Hardware)"
+  },
   "Hash": {
     "locales": [
       "de",
@@ -3850,6 +3981,16 @@
       "pt-BR"
     ],
     "reason": "\"Hash\" is the standard technical term in these languages"
+  },
+  "Hash {hash}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Hash' is the established technical term in these locales"
   },
   "Haskell": {
     "locales": [
@@ -4072,6 +4213,12 @@
       "es"
     ],
     "reason": "Ideas is the correct Spanish word"
+  },
+  "Ideas · {count}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Ideas' is the Spanish word"
   },
   "Idris": {
     "locales": [
@@ -4328,6 +4475,12 @@
     ],
     "reason": "Item is the correct Portuguese word"
   },
+  "Item {index}": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'Item' is the Portuguese word (glossary Item)"
+  },
   "JSON UI": {
     "locales": [
       "ar",
@@ -4439,6 +4592,12 @@
       "zh-CN"
     ],
     "reason": "product name"
+  },
+  "Job: {title}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Job' is the established German IT term"
   },
   "Journal": {
     "locales": [
@@ -4773,6 +4932,12 @@
     ],
     "reason": "programming language/format name"
   },
+  "Legal": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Legal' is the Spanish word (glossary Legal)"
+  },
   "Levenshtein": {
     "locales": [
       "de",
@@ -4827,6 +4992,14 @@
       "de"
     ],
     "reason": "both 'Link' and 'optional' are standard German words"
+  },
+  "Link {index}": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Link' is the established noun for a web link in these locales"
   },
   "LinkedIn, Threads": {
     "locales": [
@@ -4983,6 +5156,22 @@
       "zh-CN"
     ],
     "reason": "model/engine name"
+  },
+  "MCP · {tool}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "MCP protocol acronym; the rest is a placeholder"
   },
   "MLX-VLM": {
     "locales": [
@@ -5513,6 +5702,12 @@
       "fr"
     ],
     "reason": "French 'Module' is identical"
+  },
+  "Module {position}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Module' is the French word"
   },
   "Moment": {
     "locales": [
@@ -6498,6 +6693,12 @@
     ],
     "reason": "'Plan' is the Spanish word"
   },
+  "Plan: {plan}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Plan' is the Spanish word"
+  },
   "Planet {description}": {
     "locales": [
       "de"
@@ -6574,12 +6775,27 @@
     ],
     "reason": "glossary keeps 'Plugin' in these locales"
   },
+  "Plugin · {name}": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Plugin' is the glossary term in these locales"
+  },
   "Plugin · {pluginId}": {
     "locales": [
       "it",
       "pt-BR"
     ],
     "reason": "glossary keeps 'Plugin' in these locales"
+  },
+  "Plugin: {name}": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Plugin' is the glossary term in these locales"
   },
   "Plugins": {
     "locales": [
@@ -6659,6 +6875,22 @@
       "zh-CN"
     ],
     "reason": "Amazon Polly product name"
+  },
+  "Polly · {accessKeyHint}•••• · {region}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Amazon Polly product name, masked key and region placeholders"
   },
   "Polygon": {
     "locales": [
@@ -7015,6 +7247,12 @@
     ],
     "reason": "identical spelling is the correct native word in this locale"
   },
+  "Pull request #{number}": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Pull request' is the Italian glossary term"
+  },
   "Qualifications": {
     "locales": [
       "fr"
@@ -7026,6 +7264,12 @@
       "fr"
     ],
     "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Question {number}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Question' is the French word"
   },
   "Question {position}": {
     "locales": [
@@ -8203,6 +8447,22 @@
     ],
     "reason": "engine name plus numeric range hint"
   },
+  "SLA {due}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "SLA acronym is used as-is in these locales; the rest is a placeholder"
+  },
   "Sampling": {
     "locales": [
       "de"
@@ -8445,6 +8705,12 @@
     ],
     "reason": "identical spelling is the correct word in this language"
   },
+  "Sessions ({length})": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Sessions' is the French word"
+  },
   "Sessions ({sessionCount})": {
     "locales": [
       "fr"
@@ -8517,6 +8783,12 @@
     ],
     "reason": "identical spelling is the correct word in this language"
   },
+  "Signal: {signal}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Signal' is the German word (glossary Signal)"
+  },
   "Signature": {
     "locales": [
       "fr"
@@ -8553,6 +8825,19 @@
       "it"
     ],
     "reason": "'Single sign-on' is the standard Italian term"
+  },
+  "Site": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Site' is the French and Portuguese word"
+  },
+  "Site {siteId}, version {versionId}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'site' and 'version' are the French words"
   },
   "Site {siteVersion}": {
     "locales": [
@@ -8621,6 +8906,12 @@
       "zh-CN"
     ],
     "reason": "theme name"
+  },
+  "Slide {slideNumber}": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'slide' is the standard Brazilian Portuguese term for a presentation slide"
   },
   "Slides": {
     "locales": [
@@ -9187,12 +9478,33 @@
     ],
     "reason": "'Team' is the standard native word in German and Italian UI"
   },
+  "Team · {teamName}": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the glossary term in German and Italian"
+  },
+  "Team · {team}": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the glossary term in German and Italian"
+  },
   "Team:": {
     "locales": [
       "de",
       "it"
     ],
     "reason": "'Team' is the standard native word in German and Italian UI"
+  },
+  "Team: {name}": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the glossary term in German and Italian"
   },
   "Team: {teamName}": {
     "locales": [
@@ -9253,6 +9565,18 @@
       "de"
     ],
     "reason": "'Test' is the correct German word"
+  },
+  "Test: {outcome}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Test' is the German noun"
+  },
+  "Test: {outcome} ({detail})": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Test' is the German noun"
   },
   "Tests": {
     "locales": [
@@ -9322,6 +9646,12 @@
     ],
     "reason": "'Token' is the standard native term in these locales"
   },
+  "Token (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Token and optional are the German words (glossary Token)"
+  },
   "Tokens": {
     "locales": [
       "de",
@@ -9337,6 +9667,14 @@
       "pt-BR"
     ],
     "reason": "'Tokens' is the standard native term in these locales"
+  },
+  "Tokens: {tokens}": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Tokens' is the glossary term in these locales"
   },
   "Tokyo Night": {
     "locales": [
@@ -9709,6 +10047,13 @@
       "fr"
     ],
     "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Version {number} {deployed}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Version' is the German and French word"
   },
   "Version {revision} · {codec}": {
     "locales": [
@@ -10403,6 +10748,12 @@
     ],
     "reason": "'agent' is the French word"
   },
+  "agent {id}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'agent' is the French word"
+  },
   "agents": {
     "locales": [
       "fr"
@@ -10430,6 +10781,13 @@
       "zh-CN"
     ],
     "reason": "monome arc device name"
+  },
+  "audit": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "audit is the French and Italian glossary term (glossary Audit)"
   },
   "auto": {
     "locales": [
@@ -10505,6 +10863,54 @@
     ],
     "reason": "'chats' is the standard term in es/pt-BR"
   },
+  "claims@client.co → intake@acme.ryu.mail": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "literal example email addresses"
+  },
+  "claude code": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Claude Code product name (lowercase diagram label)"
+  },
+  "core": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Core component name (lowercase diagram/usage label)"
+  },
   "dev": {
     "locales": [
       "ar",
@@ -10520,6 +10926,12 @@
       "zh-CN"
     ],
     "reason": "release profile name"
+  },
+  "distance {distance}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'distance' is the French word"
   },
   "dlp": {
     "locales": [
@@ -10714,6 +11126,22 @@
     ],
     "reason": "OS/platform names"
   },
+  "mcp": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "MCP protocol acronym (lowercase diagram/section label)"
+  },
   "message": {
     "locales": [
       "fr"
@@ -10809,6 +11237,13 @@
     ],
     "reason": "benchmark metric name"
   },
+  "permission.": {
+    "locales": [
+      "ar",
+      "ru"
+    ],
+    "reason": "sentence tail fragment; these translations move the word into the preceding fragment, leaving only the period"
+  },
   "point": {
     "locales": [
       "fr"
@@ -10884,6 +11319,18 @@
     ],
     "reason": "Ryu brand name"
   },
+  "score {score}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'score' is the French glossary term"
+  },
+  "score {score} · {holdText}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "score is the French glossary term"
+  },
   "secrets": {
     "locales": [
       "fr"
@@ -10902,6 +11349,22 @@
       "pt-BR"
     ],
     "reason": "official glossary uses 'Skill' in it and pt-BR"
+  },
+  "skills/": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "literal directory name"
   },
   "slide": {
     "locales": [
@@ -11029,6 +11492,13 @@
     ],
     "reason": "'via' is used in fr/pt-BR; Artificial Analysis is a company name"
   },
+  "via Artificial Analysis ({matchedName})": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'via' is used in French and Portuguese; Artificial Analysis is a brand name"
+  },
   "via {source}": {
     "locales": [
       "fr",
@@ -11058,6 +11528,25 @@
     ],
     "reason": "brand name YouTube"
   },
+  "{BIN} connect {agentId} --agent <ryu-agent-id> ({detail})": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "literal CLI command syntax that users type as-is"
+  },
+  "{agentName} · {messageCount} messages": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'messages' is the French word"
+  },
   "{amount} micro-USD": {
     "locales": [
       "es",
@@ -11066,6 +11555,28 @@
       "pt-BR"
     ],
     "reason": "currency unit micro-USD"
+  },
+  "{category} · {tags} · impact {impactScore}/100": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'impact' is the French word"
+  },
+  "{consoleCount} consoles": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "consoles is the French and Portuguese plural"
+  },
+  "{cores} vCPU · {memoryGb} GB RAM · {diskGb} GB SSD": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "vCPU, GB, RAM and SSD are unit and hardware abbreviations used as-is"
   },
   "{count, plural, one {# clip} other {# clips}} · {layout}": {
     "locales": [
@@ -11080,11 +11591,75 @@
     ],
     "reason": "French word is 'session(s)'"
   },
+  "{count} chats": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'chats' is the glossary term in these locales"
+  },
+  "{count} commits": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'commits' is the established French Git term"
+  },
+  "{count} downloads": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'downloads' is the Brazilian Portuguese glossary term"
+  },
+  "{count} notes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'notes' is the French word"
+  },
   "{count} notifications. {expandedLabel}.": {
     "locales": [
       "fr"
     ],
     "reason": "French word is 'notifications'"
+  },
+  "{count} participants": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'participants' is the French word"
+  },
+  "{count} proxies": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'proxies' is the established loanword plural in these locales"
+  },
+  "{count} sites": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'sites' is the French and Portuguese plural (glossary Sites)"
+  },
+  "{count} tokens": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'tokens' is the glossary term in these locales"
+  },
+  "{count} versions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'versions' is the French word"
+  },
+  "{createdAt} · Actor {actorId}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Actor' is the Spanish word (glossary Actor)"
   },
   "{diskGb} GB SSD": {
     "locales": [
@@ -11192,6 +11767,12 @@
     ],
     "reason": "'tokens' is the established term in es/pt-BR AI UI"
   },
+  "{length} messages": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'messages' is the French word"
+  },
   "{memberCount, plural, one {# skill} other {# skills}}": {
     "locales": [
       "pt-BR"
@@ -11225,6 +11806,12 @@
       "zh-CN"
     ],
     "reason": "unit abbreviation"
+  },
+  "{modelId} · {count, plural, one {# participant} other {# participants}}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'participant(s)' is the French word"
   },
   "{planName} ({billingPeriod})": {
     "locales": [
@@ -11292,6 +11879,12 @@
     ],
     "reason": "French word is 'importance'"
   },
+  "{sessionId} · {messageCount} messages": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'messages' is the French word"
+  },
   "{speed} tok/s": {
     "locales": [
       "ar",
@@ -11316,11 +11909,45 @@
     ],
     "reason": "'tokens' is the established term in es/fr/pt-BR AI UI"
   },
+  "{tokens} tokens": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'tokens' is the glossary term in these locales"
+  },
+  "{total} annotations": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'annotations' is the French word"
+  },
   "{transactionCount} transactions": {
     "locales": [
       "fr"
     ],
     "reason": "French word is 'transactions'"
+  },
+  "{voteCount} votes · {category}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'votes' is the French word"
+  },
+  "{width} × {height} · {fps} fps": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "zh-CN"
+    ],
+    "reason": "'fps' is the standard frame-rate unit abbreviation in these locales"
   },
   "· Actor": {
     "locales": [
@@ -11375,5 +12002,17 @@
       "it"
     ],
     "reason": "\"cloud\" is the standard dictionary loanword in French and Italian software UI"
+  },
+  "· variables: {variables}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'variables' is the Spanish word"
+  },
+  "· {messageCount} messages": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'messages' is the French word"
   }
 }

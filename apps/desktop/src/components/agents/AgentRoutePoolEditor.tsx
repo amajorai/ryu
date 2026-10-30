@@ -123,7 +123,7 @@ export function AgentRoutePoolEditor({ agentId }: { agentId: string }) {
 	}
 	if (loadError) {
 		return (
-			<div className="flex flex-col gap-3 rounded-md border border-destructive/30 p-4">
+			<div className="flex flex-col gap-3 rounded-lg border border-destructive/30 p-4">
 				<p className="text-sm text-status-destructive" role="alert">
 					{loadError}
 				</p>
@@ -144,11 +144,9 @@ export function AgentRoutePoolEditor({ agentId }: { agentId: string }) {
 		<div className="flex flex-col gap-4">
 			<div className="flex flex-col gap-0.5">
 				<span className="font-medium text-sm">Routing pool</span>
-				<p className="text-muted-foreground text-xs">
-					Limit which models the gateway&apos;s smart routing may pick for this
-					agent&apos;s requests. The node&apos;s Smart routing pool still
-					applies; this can only narrow it. Leave both fields empty to use the
-					node&apos;s pool.
+				<p className="text-detail text-muted-foreground">
+					Narrow the models smart routing may pick for this agent. Empty uses
+					the node&apos;s pool.
 				</p>
 			</div>
 			<RoutePoolFields

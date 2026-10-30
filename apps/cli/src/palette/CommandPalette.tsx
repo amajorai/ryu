@@ -25,128 +25,40 @@ import { useMemo, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useContributions } from "../core/ContributionsContext.tsx";
 import { pluginViewPath, surfaceClaimToken } from "../core/contributions.ts";
-import { GLOBAL_KEYMAP, paletteShortcut } from "../core/keymap.ts";
 import type { ProductMode } from "../core/productMode.ts";
+import { tf } from "../i18n/translate.ts";
 import { useOverlay } from "../overlays/OverlayHost.tsx";
 import { Modal, modalSize } from "../ui/Modal.tsx";
 import { listSurfaces } from "../workspace/router.ts";
 import { useWorkspace } from "../workspace/WorkspaceContext.tsx";
+import {
+	buildNavDestinations,
+	layoutActions,
+} from "./CommandPalette-layout-actions.ts";
+import {
+	extraActions,
+	groupedRows,
+	NAV_DESTINATIONS,
+	type PaletteAction,
+	type PaletteRow,
+	recentIds,
+	rememberRecent,
+	SHORTCUTS,
+} from "./CommandPalette-registry.ts";
 import { rankPaletteEntries } from "./rank.ts";
 import { paletteWindow } from "./window.ts";
 
-export type PaletteGroup = "Suggested" | "Navigation" | "Actions" | "Plugins";
-
-export interface PaletteAction {
-	/** Extra search terms that match without appearing in the label. */
-	aliases?: string[];
-	/** Section shown when the query is empty (extra actions default to Plugins). */
-	group?: PaletteGroup;
-	id: string;
-	label: string;
-	run: () => void;
-	/** Key chord shown muted and right-aligned, e.g. "Ctrl+W". */
-	shortcut?: string;
-}
-
-// Module-level registry for extra palette actions (parity with router.ts). A
-// downstream module calls registerPaletteAction(...) once at import time; the
-// palette folds these in after the built-ins.
-const extraActions: PaletteAction[] = [];
-
-/** Contribute an extra action to the palette. Idempotent by id. */
-export function registerPaletteAction(action: PaletteAction): void {
-	if (!extraActions.some((existing) => existing.id === action.id)) {
-		extraActions.push(action);
-	}
-}
+export type {
+	PaletteAction,
+	PaletteGroup,
+} from "./CommandPalette-registry.ts";
+export {
+	clearPaletteRecents,
+	registerPaletteAction,
+} from "./CommandPalette-registry.ts";
 
 const MAX_VISIBLE = 10;
-const MAX_SUGGESTED = 3;
 const PANEL_MAX_WIDTH = 72;
-// Unfiltered section order; Suggested is filled from recently run ids.
-const GROUP_ORDER: readonly PaletteGroup[] = [
-	"Navigation",
-	"Actions",
-	"Plugins",
-];
-
-// Recently run entry ids, most recent first. Module-level (session-scoped, not
-// persisted) so it survives the palette closing and reopening.
-const recentIds: string[] = [];
-
-function rememberRecent(id: string): void {
-	const existing = recentIds.indexOf(id);
-	if (existing !== -1) {
-		recentIds.splice(existing, 1);
-	}
-	recentIds.unshift(id);
-	recentIds.length = Math.min(recentIds.length, MAX_SUGGESTED * 3);
-}
-
-/** Forget recently run entries (tests isolate the Suggested section with it). */
-export function clearPaletteRecents(): void {
-	recentIds.length = 0;
-}
-
-/** The keymap registry's display keys for a shell binding, so the palette's
- * shortcut column always matches what the shell dispatches. */
-function globalKeys(id: string): string | undefined {
-	return GLOBAL_KEYMAP.find((entry) => entry.id === id)?.keys;
-}
-
-const SHORTCUTS = {
-	closeTab: globalKeys("close-tab"),
-	keymap: paletteShortcut("action:keymap"),
-	newChat: paletteShortcut("action:new-chat"),
-	productMode: paletteShortcut("action:product-mode"),
-	quit: paletteShortcut("action:quit"),
-	reopenTab: globalKeys("restore-tab"),
-	sidebar: paletteShortcut("action:sidebar"),
-	split: globalKeys("split"),
-	switchNode: paletteShortcut("action:node"),
-} as const;
-
-interface PaletteRow {
-	entry: PaletteAction;
-	group: PaletteGroup;
-	key: string;
-}
-
-function groupedRows(entries: readonly PaletteAction[]): PaletteRow[] {
-	const rows: PaletteRow[] = [];
-	for (const id of recentIds) {
-		const entry = entries.find((candidate) => candidate.id === id);
-		if (entry && rows.length < MAX_SUGGESTED) {
-			rows.push({ entry, group: "Suggested", key: `suggested:${entry.id}` });
-		}
-	}
-	for (const group of GROUP_ORDER) {
-		for (const entry of entries) {
-			if ((entry.group ?? "Plugins") === group) {
-				rows.push({ entry, group, key: entry.id });
-			}
-		}
-	}
-	return rows;
-}
-
-// Desktop NAV_ITEMS: label -> path (openTab destinations).
-const NAV_DESTINATIONS: { label: string; path: string }[] = [
-	{ label: "Chat", path: "/chat" },
-	{ label: "Agents", path: "/agents" },
-	{ label: "Engines", path: "/engines" },
-	{ label: "Models", path: "/models" },
-	{ label: "Skills", path: "/skills" },
-	{ label: "Spaces", path: "/spaces" },
-	{ label: "Tools", path: "/tools" },
-	{ label: "Workflows", path: "/workflows" },
-	{ label: "Calendar", path: "/calendar" },
-	{ label: "Timeline", path: "/timeline" },
-	{ label: "Monitors", path: "/monitors" },
-	{ label: "Tasks", path: "/tasks" },
-	{ label: "Inbox", path: "/inbox" },
-	{ label: "Meetings", path: "/meetings" },
-];
 
 export function CommandPalette({
 	mode,
@@ -207,7 +119,7 @@ export function CommandPalette({
 		const nav: PaletteAction[] = destinations.map((dest) => ({
 			id: `nav:${dest.path}`,
 			group: "Navigation",
-			label: `Go to ${dest.label}`,
+			label: tf("Go to {label}", { label: dest.label }),
 			run: () => {
 				openTab(dest.path);
 				close();
@@ -229,7 +141,7 @@ export function CommandPalette({
 			.map((view) => ({
 				id: `view:${view.plugin}:${view.id}`,
 				group: "Plugins",
-				label: `Go to ${view.title ?? view.id}`,
+				label: tf("Go to {label}", { label: view.title ?? view.id }),
 				run: () => {
 					openTab(pluginViewPath(view.plugin, view.id));
 					close();
@@ -477,9 +389,10 @@ export function CommandPalette({
 		setIndex(0);
 		onClose();
 	};
-	const resultHint = `↑↓ select · Enter run · Esc close · ${resultCount} ${
-		resultCount === 1 ? "result" : "results"
-	}`;
+	const resultHint = tf(
+		"↑↓ select · Enter run · Esc close · {resultCount, plural, one {# result} other {# results}}",
+		{ resultCount }
+	);
 	return (
 		<Modal
 			footer={resultHint}
@@ -562,79 +475,4 @@ export function CommandPalette({
 			) : null}
 		</Modal>
 	);
-}
-
-// Merge the static NAV_DESTINATIONS with any registered surface path that is not
-// already listed, so newly registered surfaces are reachable from the palette
-// without editing this file.
-const SIDE_REGIONS = [
-	["right", "Right"],
-	["bottom", "Bottom"],
-] as const;
-
-/** Pane layout actions, matching the Desktop palette's Layout group. */
-function layoutActions(
-	workspace: ReturnType<typeof useWorkspace>,
-	close: () => void
-): PaletteAction[] {
-	const run = (action: () => void) => () => {
-		action();
-		close();
-	};
-	const actions: PaletteAction[] = [];
-	for (const [region, name] of SIDE_REGIONS) {
-		if (workspace.focusedRegion !== region) {
-			actions.push({
-				id: `layout:move-${region}`,
-				group: "Actions",
-				label: `Move tab to ${name}`,
-				run: run(() => workspace.moveActiveTo(region)),
-			});
-		}
-		const hasTabs = workspace.state.groups.some(
-			(group) => group.region === region && group.itemIds.length > 0
-		);
-		if (hasTabs) {
-			const open = workspace.state.openRegions[region];
-			actions.push({
-				id: `layout:toggle-${region}`,
-				group: "Actions",
-				label: `${open ? "Hide" : "Show"} ${name}`,
-				run: run(() =>
-					open ? workspace.hideRegion(region) : workspace.showRegion(region)
-				),
-			});
-		}
-	}
-	if (workspace.focusedRegion !== "center") {
-		actions.push({
-			id: "layout:move-center",
-			group: "Actions",
-			label: "Move tab to Center",
-			run: run(() => workspace.moveActiveTo("center")),
-		});
-	}
-	// Split / join Center is the "action:split" entry (Ctrl+Alt+S shortcut).
-	actions.push({
-		id: "layout:reset",
-		group: "Actions",
-		label: "Reset layout",
-		run: run(workspace.resetLayout),
-	});
-	return actions;
-}
-
-function buildNavDestinations(): { label: string; path: string }[] {
-	const known = new Set(NAV_DESTINATIONS.map((dest) => dest.path));
-	const extra: { label: string; path: string }[] = [];
-	for (const surface of listSurfaces()) {
-		const path = `/${surface.id}`;
-		// Only fold in a surface whose id-path is one it actually owns; deep-link
-		// aliases (e.g. store-models owns /models, not /store-models) are already
-		// covered by the static NAV_DESTINATIONS and would otherwise 404.
-		if (!known.has(path) && surface.match(path)) {
-			extra.push({ label: surface.title, path });
-		}
-	}
-	return [...NAV_DESTINATIONS, ...extra];
 }

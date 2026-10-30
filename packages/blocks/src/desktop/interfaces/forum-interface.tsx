@@ -1,6 +1,5 @@
-import { Button } from "@ryu/ui/components/button.tsx";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import { MessagesSquare, Plus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
 	type ReactNode,
@@ -18,6 +17,14 @@ import {
 	type ForumListView,
 	ForumNav,
 } from "./forum-header.tsx";
+import { ForumEmpty } from "./forum-interface-empty.tsx";
+import {
+	CLOSED_COMPOSER,
+	type ComposerState,
+	ownsKeys,
+	STEP_KEYS,
+	useMinuteClock,
+} from "./forum-interface-state.ts";
 import {
 	composerCategories,
 	draftStartInput,
@@ -41,48 +48,6 @@ import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
-const MINUTE = 60_000;
-
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-/** True for targets whose keys belong to typing, menus, or the host's chat. */
-function ownsKeys(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[role='menu']") !== null ||
-		target.closest("[role='slider']") !== null ||
-		target.closest("[data-testid='forum-thread-view']") !== null ||
-		target.closest("[data-testid='forum-composer']") !== null
-	);
-}
-
-const STEP_KEYS: Record<string, number> = {
-	ArrowDown: 1,
-	ArrowUp: -1,
-	j: 1,
-	k: -1,
-};
-
-interface ComposerState {
-	minimized: boolean;
-	open: boolean;
-}
-
-const CLOSED_COMPOSER: ComposerState = { minimized: false, open: false };
-
 /**
  * Forum: a Discourse-style board over the same agents and threads. Threads
  * are topics filed under categories (projects, teams, then agents); the
@@ -97,6 +62,8 @@ export function ForumInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const now = useMinuteClock();
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -350,31 +317,7 @@ export function ForumInterface({
 	if (loading) {
 		body = <TopicTableSkeleton />;
 	} else if (nothingYet) {
-		body = (
-			<div
-				className="flex flex-col items-center border-border border-t px-6 py-20 text-center"
-				data-testid="forum-empty"
-			>
-				<span className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-					<MessagesSquare
-						aria-hidden="true"
-						className="size-5"
-						strokeWidth={1.75}
-					/>
-				</span>
-				<h2 className="mt-4 font-medium text-base text-foreground">
-					No topics yet
-				</h2>
-				<p className="mt-1 max-w-sm text-muted-foreground text-sm leading-6">
-					Topics are conversations with your agents. Each one is filed under its
-					project, team, or agent.
-				</p>
-				<Button className="mt-5" onClick={openComposer} size="sm">
-					<Plus aria-hidden="true" data-icon="inline-start" />
-					New topic
-				</Button>
-			</div>
-		);
+		body = <ForumEmpty onNewTopic={openComposer} />;
 	} else if (showCategories) {
 		body = (
 			<CategoriesTable
@@ -392,7 +335,7 @@ export function ForumInterface({
 					actions={listFooterActions(true)}
 					message={
 						searching
-							? `No topics match “${search.trim()}”.`
+							? tl("No topics match “{query}”.", { query: search.trim() })
 							: FORUM_SORT_EMPTY[sort]
 					}
 				/>
@@ -484,10 +427,21 @@ export function ForumInterface({
 								aria-live="polite"
 								className="mt-5 text-muted-foreground text-sm"
 							>
-								{plural(topics.length, "result", "results")} for{" "}
-								<span className="font-medium text-foreground">
-									“{search.trim()}”
-								</span>
+								{tlRich(
+									"{count, plural, one {{shown} result} other {{shown} results}} for <term>“{query}”</term>",
+									{
+										count: topics.length,
+										query: search.trim(),
+										shown: String(topics.length),
+									},
+									{
+										term: (chunks) => (
+											<span className="font-medium text-foreground">
+												{chunks}
+											</span>
+										),
+									}
+								)}
 							</p>
 						) : null}
 						<div className={searching ? "mt-2" : "mt-4"}>{body}</div>

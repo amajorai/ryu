@@ -11,7 +11,7 @@ interface OpenInNewWindowMenuItemProps {
 }
 
 export function OpenInNewWindowContextMenuItem({
-	iconClassName = "mr-2 size-4",
+	iconClassName = "size-4",
 	label = "Open in new window",
 	onClick,
 }: OpenInNewWindowMenuItemProps) {
@@ -28,7 +28,7 @@ export function OpenInNewWindowContextMenuItem({
 }
 
 export function OpenInNewWindowDropdownMenuItem({
-	iconClassName = "mr-2 size-4",
+	iconClassName = "size-4",
 	onClick,
 }: OpenInNewWindowMenuItemProps) {
 	if (!useAppSurface().canOpenNativeWindows) {

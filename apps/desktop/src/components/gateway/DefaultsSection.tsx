@@ -23,6 +23,7 @@ import {
 	type PromptCacheConfirmation,
 	PromptCacheConfirmDialog,
 } from "@/src/components/chat/PromptCacheConfirmDialog.tsx";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -255,7 +256,17 @@ function ScopedDefaultsSection({
 
 	return (
 		<SettingsSection
-			caption="Ryu keeps two node-scoped defaults. Normal chats use the cloud lane when it is configured; plugins, side-model calls, and local utilities use the local lane. Ryu can carry its agent, provider, model, and effort together. External ACP agents retain their own controls."
+			caption={
+				<CaptionInfo
+					detail={
+						"Ryu keeps two node-scoped defaults. Normal chats use the cloud lane when it is configured; plugins, side-model calls, and local utilities use the local lane. Ryu can carry its agent, provider, model, and effort together. External ACP agents retain their own controls."
+					}
+				>
+					{
+						"Normal chats use the cloud lane; plugins and utilities use the local lane."
+					}
+				</CaptionInfo>
+			}
 			title="Default agents & models"
 		>
 			{loadError ? (
@@ -309,7 +320,7 @@ function ScopedDefaultsSection({
 			/>
 
 			{canConfigure ? null : (
-				<p className="px-3.5 text-muted-foreground text-xs leading-snug">
+				<p className="px-3 text-muted-foreground text-xs leading-snug">
 					Only organization owners and admins can change the local or Bot realm
 					default.
 				</p>

@@ -40,7 +40,7 @@ function FrameRow({
 					{location}
 				</button>
 			) : (
-				<span className="text-muted-foreground/80">{location}</span>
+				<span className="text-muted-foreground">{location}</span>
 			)}
 		</div>
 	);

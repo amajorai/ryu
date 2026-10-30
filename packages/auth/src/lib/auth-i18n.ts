@@ -8,6 +8,7 @@ import {
 	configureRecipientLocaleResolver,
 } from "@ryu/email/i18n/email-locale.ts";
 import type { AuthContext, BetterAuthPlugin } from "better-auth";
+import { negotiateRequestLocale } from "./locale-negotiation.ts";
 import {
 	isSelfServiceAuthRequest,
 	LOCALE_COOKIE,
@@ -129,11 +130,44 @@ const recipientLocale = {
 export type RyuAuthI18nPlugin = ReturnType<typeof betterAuthI18n> &
 	typeof recipientLocale;
 
+/**
+ * The dictionary one request's auth errors render in. Better Auth keys its
+ * dictionaries by language (`pt`, `zh`) and its cookie strategy compares the
+ * cookie verbatim, so the app's `pt-BR`/`zh-CN` cookie never matched; this
+ * matches by language and script (lib/locale-negotiation.ts) instead. A
+ * signed-in request without the cookie (the desktop app's bearer session)
+ * falls back to the account's stored `user.locale` before `Accept-Language`.
+ */
+export function authErrorLocale(
+	headers: Headers | null | undefined,
+	storedLocale?: unknown
+): string | null {
+	return negotiateRequestLocale({
+		available: RYU_AUTH_I18N_LOCALES,
+		headers,
+		localeCookie: LOCALE_COOKIE,
+		stored: storedLocale,
+	});
+}
+
+function sessionUserLocale(user: unknown): unknown {
+	return typeof user === "object" && user !== null && "locale" in user
+		? user.locale
+		: null;
+}
+
 export function createRyuAuthI18nPlugin(): RyuAuthI18nPlugin {
 	return {
 		...betterAuthI18n({
 			translations: betterAuthLocales,
-			detection: ["cookie", "header"],
+			// One callback covers the cookie, the stored locale, then
+			// `Accept-Language`.
+			detection: ["callback"],
+			getLocale: (ctx) =>
+				authErrorLocale(
+					ctx.headers,
+					sessionUserLocale(ctx.context.session?.user)
+				),
 			defaultLocale: "en",
 			localeCookie: LOCALE_COOKIE,
 		}),

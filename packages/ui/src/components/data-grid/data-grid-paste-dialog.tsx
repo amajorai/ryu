@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -65,6 +65,7 @@ function PasteDialogImpl({
 	onCellsPaste,
 }: PasteDialogProps) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const propsRef = useAsRef({
 		onPasteDialogOpenChange,
 		onCellsPaste,
@@ -93,9 +94,14 @@ function PasteDialogImpl({
 				<DialogHeader>
 					<DialogTitle>Do you want to add more rows?</DialogTitle>
 					<DialogDescription>
-						We need <strong>{pasteDialog.rowsNeeded}</strong> additional row
-						{pasteDialog.rowsNeeded === 1 ? "" : "s"} to paste everything from
-						your clipboard.
+						{tlRich(
+							"{count, plural, one {We need <b>{countText}</b> additional row to paste everything from your clipboard.} other {We need <b>{countText}</b> additional rows to paste everything from your clipboard.}}",
+							{
+								count: pasteDialog.rowsNeeded,
+								countText: String(pasteDialog.rowsNeeded),
+							},
+							{ b: (chunks) => <strong>{chunks}</strong> }
+						)}
 					</DialogDescription>
 				</DialogHeader>
 				<div className="flex flex-col gap-3 py-1">

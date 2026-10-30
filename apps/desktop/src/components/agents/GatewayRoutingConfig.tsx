@@ -179,7 +179,7 @@ export function GatewayRoutingConfig({
 			    credential-moving switch would put the riskier control on top. */}
 			{tools ? (
 				<SettingsSection
-					caption="Whether this agent can call Ryu's tools. Separate from gateway routing below, and on by default — the bridge offers exactly the tools this agent's own allowlist permits and re-checks that allowlist on every call, so it grants nothing you have not already configured. Turning gateway routing off does not take these away."
+					caption="Whether this agent can call Ryu's tools, limited to its own allowlist on every call."
 					title="Ryu tools"
 				>
 					<SettingsGroup>

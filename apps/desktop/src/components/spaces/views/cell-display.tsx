@@ -1,3 +1,5 @@
+import { LinkSquare02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import { DataGridOptionBadge } from "@ryu/ui/components/data-grid/data-grid-option-badge.tsx";
 import { isFormulaError } from "@ryu/ui/lib/data-grid-formula.ts";
@@ -7,7 +9,6 @@ import {
 } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CellOpts, CellSelectOption } from "@ryu/ui/types/data-grid.ts";
-import { Check, ExternalLink } from "lucide-react";
 import type { DbColumn } from "@/src/lib/realtime/yjs-database.ts";
 
 /** Resolve a select option (by value) to its label + color for display. */
@@ -43,9 +44,12 @@ export function CellValue({
 
 	if (cell.variant === "checkbox") {
 		return value ? (
-			<Check className="size-4 text-muted-foreground" />
+			<HugeiconsIcon
+				className="size-4 text-muted-foreground"
+				icon={Tick02Icon}
+			/>
 		) : (
-			<span className="text-muted-foreground/50 text-xs">—</span>
+			<span className="text-muted-foreground/70 text-xs">—</span>
 		);
 	}
 
@@ -84,7 +88,7 @@ export function CellValue({
 				rel="noopener noreferrer"
 				target="_blank"
 			>
-				<ExternalLink className="size-3" />
+				<HugeiconsIcon className="size-3.5" icon={LinkSquare02Icon} />
 				<span className="truncate" title={href}>
 					{href}
 				</span>

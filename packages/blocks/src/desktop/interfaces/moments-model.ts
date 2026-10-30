@@ -3,7 +3,6 @@ import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
 	localDayKey,
-	resolveAgentHandle,
 	THREAD_STATUS_ORDER,
 	type ThreadStatus,
 	threadStatus,
@@ -420,144 +419,12 @@ export function momentsFlowForThread(
 	);
 }
 
-export interface MomentsIntent {
-	/** The agent named with `@name`, when it resolved. */
-	agent: InterfaceAgent | undefined;
-	/** The text to send, without the `@name` token. */
-	prompt: string;
-}
-
-const MENTION = /(^|\s)@([\w.-]+)/;
-
-/** Characters a `@handle` token cannot hold (see `MENTION`). */
-const NOT_HANDLE = /[^\w.-]+/g;
-
-/**
- * The `@handle` text for a picked agent, written so `parseMomentsIntent`
- * reads it back as that agent: the name without characters the mention
- * pattern stops at, or the agent id when the name has none it keeps.
- */
-export function momentsMentionHandle(agent: InterfaceAgent): string {
-	const fromName = agent.name.replace(NOT_HANDLE, "");
-	return /[a-z0-9]/i.test(fromName)
-		? fromName
-		: agent.id.replace(NOT_HANDLE, "");
-}
-
-/** Split an intent line into the `@name` agent it addresses and the prompt. */
-export function parseMomentsIntent(
-	snapshot: InterfaceSnapshot,
-	text: string
-): MomentsIntent {
-	const match = MENTION.exec(text);
-	if (!match) {
-		return { agent: undefined, prompt: text.trim() };
-	}
-	const agent = resolveAgentHandle(snapshot, match[2] ?? "");
-	if (!agent) {
-		return { agent: undefined, prompt: text.trim() };
-	}
-	const prompt = `${text.slice(0, match.index)}${match[1] ?? ""}${text.slice(
-		match.index + match[0].length
-	)}`
-		.replace(/\s+/g, " ")
-		.trim();
-	return { agent, prompt };
-}
-
-/**
- * The `@` word the caret sits in, so the intent bar can suggest agents for
- * it. Returns the query (without `@`) and where the token starts.
- */
-export function momentsMentionQuery(
-	text: string,
-	caret: number
-): { query: string; start: number } | null {
-	const before = text.slice(0, caret);
-	const match = /(^|\s)@([\w.-]*)$/.exec(before);
-	if (!match) {
-		return null;
-	}
-	return {
-		query: match[2] ?? "",
-		start: before.length - (match[2]?.length ?? 0) - 1,
-	};
-}
-
-/** Agents whose name starts with (then contains) the query, at most five. */
-export function momentsMentionMatches(
-	agents: InterfaceAgent[],
-	query: string
-): InterfaceAgent[] {
-	const needle = query.toLowerCase();
-	const starts = agents.filter((agent) =>
-		agent.name.toLowerCase().startsWith(needle)
-	);
-	const contains = agents.filter(
-		(agent) =>
-			!agent.name.toLowerCase().startsWith(needle) &&
-			agent.name.toLowerCase().includes(needle)
-	);
-	return [...starts, ...contains].slice(0, 5);
-}
-
-/** Step an index by delta, clamped to the list. */
-export function momentsStep(index: number, delta: number, length: number) {
-	if (length === 0) {
-		return 0;
-	}
-	return Math.min(length - 1, Math.max(0, index + delta));
-}
-
-/** A card's place on screen, as the timeline grid lays it out. */
-export interface MomentsRect {
-	height: number;
-	left: number;
-	top: number;
-}
-
-/**
- * The card an arrow key moves to in the timeline grid. "row" steps to the
- * nearest card in the next row down (or up), keeping the column; "column"
- * steps to the neighbour in the same row, else the next card in list order.
- * At the grid's edge it stays put. Null when there is no layout to read
- * (nothing measured), so callers fall back to list order.
- */
-export function momentsGridStep(
-	rects: MomentsRect[],
-	index: number,
-	axis: "column" | "row",
-	delta: 1 | -1
-): number | null {
-	const from = rects[index];
-	if (!from || from.height === 0) {
-		return null;
-	}
-	let best: number | null = null;
-	let bestScore = Number.POSITIVE_INFINITY;
-	for (const [candidate, rect] of rects.entries()) {
-		if (candidate === index) {
-			continue;
-		}
-		const sameRow = Math.abs(rect.top - from.top) < from.height / 2;
-		let score = Number.POSITIVE_INFINITY;
-		if (axis === "column") {
-			const dx = (rect.left - from.left) * delta;
-			score = sameRow && dx > 0 ? dx : score;
-		} else {
-			const dy = (rect.top - from.top) * delta;
-			if (!sameRow && dy > 0) {
-				// The nearest row first, then the closest column within it.
-				score = dy * 10_000 + Math.abs(rect.left - from.left);
-			}
-		}
-		if (score < bestScore) {
-			bestScore = score;
-			best = candidate;
-		}
-	}
-	if (best === null && axis === "column") {
-		return Math.min(rects.length - 1, Math.max(0, index + delta));
-	}
-	return best ?? index;
-}
+export type { MomentsRect } from "./moments-model-grid.ts";
+export { momentsGridStep, momentsStep } from "./moments-model-grid.ts";
+export type { MomentsIntent } from "./moments-model-intent.ts";
+export {
+	momentsMentionHandle,
+	momentsMentionMatches,
+	momentsMentionQuery,
+	parseMomentsIntent,
+} from "./moments-model-intent.ts";

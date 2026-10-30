@@ -10,6 +10,7 @@ import {
 	applyScale as applyScaleDom,
 	applySpacing as applySpacingDom,
 	applyVariant as applyVariantDom,
+	COMFORTABLE_SPACING,
 	clearCardSpacing as clearCardSpacingDom,
 	clearVariant,
 	DEFAULT_RADIUS as DEFAULT_THEME_RADIUS,
@@ -19,7 +20,6 @@ import {
 	DEFAULT_CARD_SPACING as DEFAULT_THEME_CARD_SPACING,
 	DEFAULT_THEME_MODE,
 	DEFAULT_SCALE as DEFAULT_THEME_SCALE,
-	DEFAULT_SPACING as DEFAULT_THEME_SPACING,
 	THEME_APPEARANCE_CHANGE_EVENT,
 	THEME_PREFS_VERSION,
 	type ThemeMode,
@@ -63,7 +63,9 @@ export function applyWindowRadius(radius: number) {
 }
 // Base unit (in rem) all Tailwind v4 spacing utilities derive from. Mirrors the
 // `--spacing` value in apps/desktop/src/index.css; acts as a global UI zoom.
-export const DEFAULT_SPACING = DEFAULT_THEME_SPACING;
+// The comfortable density (0.25rem) is the default; a user who chose a value,
+// including the compact 0.24rem, keeps it.
+export const DEFAULT_SPACING = COMFORTABLE_SPACING;
 // True browser-style UI scale (Chrome/Electron zoom). Applied as the CSS `zoom`
 // property on the root element, so it scales EVERYTHING — text, spacing, images,
 // canvas — with reflow, unlike `--spacing` which only rescales spacing-derived
@@ -157,7 +159,7 @@ function buildThemePrefs(localeOverride?: string): ThemePrefs {
 		scale: Number(localStorage.getItem(STORAGE_KEYS.scale) ?? DEFAULT_SCALE),
 		cardSpacing: storedCardSpacing === null ? null : Number(storedCardSpacing),
 		pointerCursor: localStorage.getItem("ryu_pointer_cursor") === "true",
-		chromeShadows: localStorage.getItem("ryu_chrome_shadows") !== "false",
+		chromeShadows: localStorage.getItem("ryu_chrome_shadows") === "true",
 		dialogOverlayBlur:
 			localStorage.getItem("ryu_dialog_overlay_blur") === "true",
 		popupOverlayBlur: localStorage.getItem("ryu_popup_overlay_blur") === "true",
@@ -379,9 +381,12 @@ export function setChatWidth(value: number) {
 }
 
 export const SIDEBAR_WIDTH_KEY = "ryu:sidebar-width";
-export const DEFAULT_SIDEBAR_WIDTH = 360;
-export const MIN_SIDEBAR_WIDTH = 180;
-export const MAX_SIDEBAR_WIDTH = 480;
+// A 260px default keeps the sidebar a quiet column beside the content. A width
+// the user stored earlier stays in storage untouched; it is only clamped to
+// this range when it is next written.
+export const DEFAULT_SIDEBAR_WIDTH = 260;
+export const MIN_SIDEBAR_WIDTH = 220;
+export const MAX_SIDEBAR_WIDTH = 400;
 
 export function setSidebarWidthSetting(value: number) {
 	const clamped = Math.max(

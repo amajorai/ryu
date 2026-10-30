@@ -50,7 +50,7 @@ export function GoalCompletionFooter({
 							render={
 								<span
 									className={cn(
-										"inline-flex shrink-0 text-muted-foreground/80",
+										"inline-flex shrink-0 text-muted-foreground",
 										"tabular-nums"
 									)}
 									data-testid="goal-completion-time"

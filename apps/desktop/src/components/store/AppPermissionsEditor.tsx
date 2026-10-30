@@ -70,7 +70,7 @@ export function AppPermissionsEditor({
 					const on = approved.has(grant);
 					return (
 						<div
-							className="flex items-center justify-between gap-3 rounded-md border px-3 py-1.5"
+							className="flex items-center justify-between gap-3 rounded-lg border px-3 py-1.5"
 							key={grant}
 						>
 							<div className="min-w-0">

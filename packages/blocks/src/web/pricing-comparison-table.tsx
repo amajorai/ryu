@@ -66,7 +66,7 @@ function CellValue({ value }: { value: ComparisonCell }) {
 export function PricingComparisonTable(props: ComparisonOptions) {
 	const tl = useLiteralMessages();
 	const plans = comparisonPlans(props);
-	const sections = comparisonSections(props);
+	const sections = comparisonSections(props, tl);
 	const seats = comparisonSeats(props.seats);
 	const isOrganization = props.audience === "business";
 

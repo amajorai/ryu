@@ -22,6 +22,7 @@ import {
 	useState,
 } from "react";
 import { BACKEND_URL } from "@/lib/auth-client.ts";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import {
 	desktopPolicyWorkspaceClient,
@@ -49,8 +50,17 @@ function emptyOptions(orgId: string): PolicyScopeOptions {
 	};
 }
 
-const SECTION_CAPTION =
-	"Write a policy once and assign it to the organization, a team, a member, a key or an agent. Policies apply to requests through your organization's gateways and keys. This node's own baseline stays under Safety filters.";
+const SECTION_CAPTION = (
+	<CaptionInfo
+		detail={
+			"Policies apply to requests through your organization's gateways and keys. This node's own baseline stays under Safety filters."
+		}
+	>
+		{
+			"Assign a policy to the organization, a team, a member, a key or an agent."
+		}
+	</CaptionInfo>
+);
 
 export function GuardrailPoliciesSection() {
 	const signedIn = hasOrgAuth();
@@ -153,9 +163,7 @@ function OrgGuardrailPolicies({ orgId }: { orgId: string }) {
 
 	return (
 		<div className="flex flex-col gap-4">
-			<p className="px-3.5 text-muted-foreground text-sm leading-snug">
-				{SECTION_CAPTION}
-			</p>
+			<p className="text-detail text-muted-foreground">{SECTION_CAPTION}</p>
 			{body}
 			{stepUp.dialog}
 		</div>

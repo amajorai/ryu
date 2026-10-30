@@ -1,5 +1,6 @@
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -85,9 +86,13 @@ export function GatewayProviderApplication({
 	return (
 		<SettingsSection
 			caption={
-				active
-					? "New requests use the confirmed provider settings. Running requests keep their original connections."
-					: "Apply saved provider settings without re-entering credentials. Running requests keep their original connections."
+				<CaptionInfo
+					detail={"Running requests keep their original connections."}
+				>
+					{active
+						? "New requests use the confirmed provider settings."
+						: "Apply saved provider settings without re-entering credentials."}
+				</CaptionInfo>
 			}
 			title="Provider application"
 		>
@@ -100,6 +105,7 @@ export function GatewayProviderApplication({
 								loading={busy}
 								onClick={apply}
 								size="sm"
+								variant="outline"
 							>
 								Apply saved connections
 							</Button>

@@ -466,8 +466,10 @@ for (const [season, before, latest] of [
 		await clockStamp.evaluate((node) => {
 			Reflect.set(node, "__midnightIdentity", "retained");
 		});
+		// The preview lives in the agent name's tooltip on the one-line row.
+		await row.hover();
 		await expect(
-			row.getByTestId("agent-chat-preview-midnight-agent")
+			page.getByTestId("agent-chat-preview-midnight-agent")
 		).toContainText("Retained agent preview");
 		await page.clock.runFor(2000);
 		const yesterday = row.getByText("Yesterday", { exact: true });
@@ -488,8 +490,10 @@ for (const [season, before, latest] of [
 		expect(
 			await utc.evaluate((node) => Reflect.get(node, "__midnightIdentity"))
 		).toBe("retained");
+		// The preview lives in the agent name's tooltip on the one-line row.
+		await row.hover();
 		await expect(
-			row.getByTestId("agent-chat-preview-midnight-agent")
+			page.getByTestId("agent-chat-preview-midnight-agent")
 		).toContainText("Retained agent preview");
 		await expect(page.getByTestId("immutable-row-stamps")).toHaveText(receipt);
 	});

@@ -1,25 +1,34 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	InterfaceParamsByRenderer,
 	InterfaceThread,
 } from "@ryuhq/protocol/interfaces";
-import { Pencil } from "lucide-react";
 import {
 	type KeyboardEvent,
 	type ReactNode,
-	type RefObject,
 	useCallback,
 	useEffect,
-	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
 import { useAutoOpenFirstThread } from "./interface-auto-open.ts";
-import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { MailCompose } from "./mail-compose.tsx";
 import { MailHeader } from "./mail-header.tsx";
+import {
+	LINE_MIN_LIST_WIDTH,
+	NAV_HIDDEN_BELOW,
+	NAV_RAIL_BELOW,
+	PREVIEW_MIN_WIDTH,
+	SPLIT_MIN_WIDTH,
+	useElementWidth,
+	useMinuteClock,
+} from "./mail-interface-hooks.ts";
+import { MailComposeFab, MailNavOverlay } from "./mail-interface-overlays.tsx";
+import { mailReaderModelFor } from "./mail-interface-reader-model.ts";
+import { useMailShortcuts } from "./mail-interface-shortcuts.ts";
 import { MailEmptyAction, MailList } from "./mail-list.tsx";
 import {
 	findMailFolder,
@@ -27,13 +36,11 @@ import {
 	MAIL_PAGE_SIZE,
 	type MailStartInput,
 	type MailView,
-	mailCursorStep,
 	mailFolderCounts,
 	mailIsUnread,
 	mailLabels,
 	mailLabelUnread,
 	mailListDate,
-	mailLongDate,
 	mailPageCount,
 	mailSenders,
 	mailSnippet,
@@ -44,76 +51,8 @@ import {
 	mailViewThreads,
 } from "./mail-model.ts";
 import { MailNav } from "./mail-nav.tsx";
-import {
-	MailPreview,
-	MailReader,
-	type MailReaderModel,
-} from "./mail-reader.tsx";
+import { MailPreview, MailReader } from "./mail-reader.tsx";
 import type { MailRowModel } from "./mail-row.tsx";
-
-const MINUTE = 60_000;
-/** Below this width the navigation starts as Gmail's icon rail. */
-const NAV_RAIL_BELOW = 1100;
-/** Below this width the navigation hides behind the menu button. */
-const NAV_HIDDEN_BELOW = 720;
-/** At or above this width an open conversation sits beside the list. */
-const SPLIT_MIN_WIDTH = 1100;
-/** At or above this width the reading pane previews the cursor row at rest. */
-const PREVIEW_MIN_WIDTH = 1280;
-/** Rows go stacked when the list is narrower than this. */
-const LINE_MIN_LIST_WIDTH = 600;
-/** Width assumed before the first measurement (and where layout is absent). */
-const UNMEASURED_WIDTH = 1440;
-
-/** Wall clock that ticks once a minute so relative times stay honest. */
-function useMinuteClock(): [number, () => void] {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	const refresh = useCallback(() => setNow(Date.now()), []);
-	return [now, refresh];
-}
-
-/** The element's rendered width, kept current with a ResizeObserver. */
-function useElementWidth(ref: RefObject<HTMLElement | null>): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		setWidth(element.getBoundingClientRect().width);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((entries) => {
-			const next = entries[0]?.contentRect.width;
-			if (next !== undefined) {
-				setWidth(next);
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width || UNMEASURED_WIDTH;
-}
-
-/** True for targets whose keys belong to typing or to the host's chat. */
-function ownsKeys(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[data-testid='mail-thread-view']") !== null ||
-		target.closest("[role='dialog'], [role='menu'], [role='listbox']") !== null
-	);
-}
 
 /**
  * Mail: Gmail's web client over the user's agents. Folders are thread states
@@ -131,6 +70,7 @@ export function MailInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["mail"]>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const readerRef = useRef<HTMLElement>(null);
@@ -207,22 +147,8 @@ export function MailInterface({
 	const activeIndex = activeThread
 		? threads.findIndex((thread) => thread.id === activeThread.id)
 		: -1;
-	const readerModelFor = (thread: InterfaceThread): MailReaderModel => {
-		const index = threads.findIndex((candidate) => candidate.id === thread.id);
-		const participants = thread.agentIds
-			.map((agentId) => snapshot.agents.find((agent) => agent.id === agentId))
-			.filter((agent) => agent !== undefined);
-		return {
-			cc: participants.slice(1),
-			date: mailLongDate(thread.updatedAt, now),
-			labels: mailThreadLabels(snapshot, thread),
-			position: index === -1 ? null : { index, total: threads.length },
-			sender: participants[0] ?? null,
-			status: mailStatusChip(thread),
-			subject: mailSubject(thread),
-			thread,
-		};
-	};
+	const readerModelFor = (thread: InterfaceThread) =>
+		mailReaderModelFor(snapshot, threads, thread, now);
 	const readerModel = activeThread ? readerModelFor(activeThread) : null;
 	// On a wide window the reading pane never sits empty: at rest it previews
 	// the cursor row, the way a desktop mail client's reading pane does.
@@ -365,105 +291,22 @@ export function MailInterface({
 		moveCursorTo(order[target]);
 	};
 
-	const onKeyDownRow = (
-		event: KeyboardEvent<HTMLElement>,
-		threadId: string
-	) => {
-		if (event.metaKey || event.ctrlKey || event.altKey) {
-			return;
-		}
-		const index = order.indexOf(threadId);
-		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-			event.preventDefault();
-			const target =
-				event.key === "ArrowDown"
-					? Math.min(index + 1, order.length - 1)
-					: Math.max(index - 1, 0);
-			moveCursorTo(order[target]);
-			return;
-		}
-		if (event.key === "Home" || event.key === "End") {
-			event.preventDefault();
-			moveCursorTo(event.key === "Home" ? order[0] : order.at(-1));
-		}
-	};
-
-	// Gmail's single-key shortcuts, kept out of typing and the host's chat.
-	const onDocumentKey = useEffectEventLike(
-		(event: globalThis.KeyboardEvent) => {
-			if (
-				event.defaultPrevented ||
-				event.metaKey ||
-				event.ctrlKey ||
-				event.altKey ||
-				ownsKeys(event.target) ||
-				isInterfaceCovered(rootRef.current)
-			) {
-				return;
-			}
-			const root = rootRef.current;
-			const target = event.target;
-			const fromPage =
-				target === document.body || target === document.documentElement;
-			if (
-				!(
-					root &&
-					(fromPage || (target instanceof Node && root.contains(target)))
-				)
-			) {
-				return;
-			}
-			const step = mailCursorStep(event.key);
-			if (step && !event.key.startsWith("Arrow")) {
-				event.preventDefault();
-				if (conversationOpen && activeIndex !== -1) {
-					stepConversation(step);
-				} else {
-					stepCursor(step);
-				}
-				return;
-			}
-			switch (event.key) {
-				case "c":
-					event.preventDefault();
-					openCompose();
-					return;
-				case "/":
-					event.preventDefault();
-					searchRef.current?.focus();
-					return;
-				case "u":
-					if (conversationOpen) {
-						event.preventDefault();
-						closeThread();
-					}
-					return;
-				case "x":
-					if (cursor && showList) {
-						event.preventDefault();
-						toggleSelected(cursor);
-					}
-					return;
-				case "o":
-					if (cursor && showList) {
-						event.preventDefault();
-						openThread(cursor);
-					}
-					return;
-				case "Enter":
-					if (cursor && showList && fromPage) {
-						event.preventDefault();
-						openThread(cursor);
-					}
-					return;
-				default:
-			}
-		}
-	);
-	useEffect(() => {
-		document.addEventListener("keydown", onDocumentKey);
-		return () => document.removeEventListener("keydown", onDocumentKey);
-	}, [onDocumentKey]);
+	const onKeyDownRow = useMailShortcuts({
+		activeIndex,
+		closeThread,
+		conversationOpen,
+		cursor,
+		moveCursorTo,
+		openCompose,
+		openThread,
+		order,
+		rootRef,
+		searchRef,
+		showList,
+		stepConversation,
+		stepCursor,
+		toggleSelected,
+	});
 
 	const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
 		if (event.key === "Escape") {
@@ -491,7 +334,7 @@ export function MailInterface({
 		emptyMessage =
 			currentView.kind === "folder"
 				? findMailFolder(currentView.id).empty
-				: `No conversations labeled ${viewLabel}.`;
+				: tl("No conversations labeled {viewLabel}.", { viewLabel });
 		emptyAction = (
 			<MailEmptyAction
 				label="Show all mail"
@@ -597,7 +440,9 @@ export function MailInterface({
 					) : null}
 					{conversationOpen ? (
 						<MailReader
-							backLabel={`Back to ${searching ? "Search results" : viewLabel}`}
+							backLabel={tl("Back to {view}", {
+								view: searching ? "Search results" : viewLabel,
+							})}
 							model={readerModel}
 							onBack={closeThread}
 							onNewer={
@@ -620,31 +465,13 @@ export function MailInterface({
 					) : null}
 				</main>
 				{navHidden && navOverlayOpen ? (
-					<>
-						<button
-							aria-label="Close menu"
-							className="absolute inset-0 z-20 bg-foreground/15"
-							onClick={() => setNavOverlayOpen(false)}
-							tabIndex={-1}
-							type="button"
-						/>
-						<div className="absolute inset-y-0 left-0 z-30 flex bg-sidebar pt-2 shadow-xl">
-							{nav(false)}
-						</div>
-					</>
+					<MailNavOverlay onClose={() => setNavOverlayOpen(false)}>
+						{nav(false)}
+					</MailNavOverlay>
 				) : null}
 			</div>
 			{navHidden && composeKey === null && !navOverlayOpen ? (
-				<button
-					aria-keyshortcuts="c"
-					className="absolute right-4 bottom-4 isolate z-10 flex h-14 items-center gap-3 rounded-2xl bg-background pr-5 pl-4 font-medium text-foreground text-sm shadow-lg outline-none transition-shadow before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-primary/15 hover:shadow-xl focus-visible:ring-2 focus-visible:ring-ring/60"
-					data-testid="mail-compose-fab"
-					onClick={openCompose}
-					type="button"
-				>
-					<Pencil aria-hidden="true" className="size-5" strokeWidth={1.75} />
-					Compose
-				</button>
+				<MailComposeFab onClick={openCompose} />
 			) : null}
 			{composeKey === null ? null : (
 				<MailCompose
@@ -662,18 +489,4 @@ export function MailInterface({
 			)}
 		</div>
 	);
-}
-
-/**
- * A stable callback that always runs the latest closure, so the document
- * listener is attached once and never reads stale state.
- */
-function useEffectEventLike<Args extends unknown[]>(
-	handler: (...args: Args) => void
-): (...args: Args) => void {
-	const handlerRef = useRef(handler);
-	useLayoutEffect(() => {
-		handlerRef.current = handler;
-	});
-	return useCallback((...args: Args) => handlerRef.current(...args), []);
 }

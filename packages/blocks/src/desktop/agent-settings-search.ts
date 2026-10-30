@@ -13,8 +13,9 @@
 // app around it. Same mechanism, own index.
 //
 // KEEPING IT HONEST: `agent-settings-search.test.ts` re-reads `agent-edit.tsx`
-// and asserts every indexed label still appears there, so a renamed row surfaces
-// as a failing test rather than as search that quietly finds nothing.
+// and its `agent-edit-*.tsx` parts and asserts every indexed label still
+// appears there, so a renamed row surfaces as a failing test rather than as
+// search that quietly finds nothing.
 
 /** The editor tab that owns a setting. Matches the `editorTabs` ids. */
 export type AgentSettingsTab =

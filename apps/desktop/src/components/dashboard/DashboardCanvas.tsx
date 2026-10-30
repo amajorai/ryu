@@ -9,7 +9,10 @@
 // base.css is imported once in index.css (see the WorkflowCanvas note there); the
 // controls reuse the shared `.workflow-controls` styling.
 
+import { PlusSignIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Background,
 	Controls,
@@ -24,7 +27,6 @@ import {
 	useNodesState,
 	useReactFlow,
 } from "@xyflow/react";
-import { PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import { usePrefersReducedMotion } from "@/src/hooks/usePrefersReducedMotion.ts";
 import type { CanvasLayoutRect, Widget } from "@/src/lib/api/dashboard.ts";
@@ -264,18 +266,15 @@ function CanvasInner({
 				<Background />
 				<Controls className="workflow-controls" showInteractive={false} />
 				<MiniMap
-					className="!bottom-2 !right-2 !rounded-lg !bg-muted/40"
+					className="!bottom-2 !right-2 !rounded-lg !bg-muted"
 					pannable
 					zoomable
 				/>
 				<Panel position="top-right">
-					<button
-						className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-popover/90 px-2.5 py-1.5 font-medium text-xs shadow-sm backdrop-blur transition-colors hover:bg-accent"
-						onClick={onAddWidget}
-						type="button"
-					>
-						<PlusIcon className="size-3.5" /> Add widget
-					</button>
+					<Button onClick={onAddWidget} size="sm" variant="outline">
+						<HugeiconsIcon className="size-4" icon={PlusSignIcon} />
+						Add widget
+					</Button>
 				</Panel>
 			</ReactFlow>
 		</div>

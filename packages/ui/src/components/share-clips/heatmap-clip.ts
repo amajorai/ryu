@@ -22,83 +22,30 @@
 
 import { formatNumber } from "../../lib/number-format.ts";
 import { drawGhost, ellipsize } from "../pass-studio/paint.ts";
+import type {
+	HeatmapClipCell,
+	HeatmapClipData,
+	HeatmapClipDay,
+	HeatmapClipLayout,
+	HeatmapClipPalette,
+	HeatmapClipSize,
+	HeatmapClipStat,
+	HeatmapClipTimeline,
+	HeatmapGridLayout,
+} from "./heatmap-clip-types.ts";
 
-export interface HeatmapClipDay {
-	count: number;
-	/** `yyyy-MM-dd`, UTC. */
-	day: string;
-}
-
-export interface HeatmapClipData {
-	/** Days with at least one recorded active day, from the Stats tab. */
-	activeDays?: number | null;
-	days: readonly HeatmapClipDay[];
-	/** The last day the grid shows (`yyyy-MM-dd`). Defaults to the latest day in `days`. */
-	endDay?: string | null;
-	favoriteModel?: string | null;
-	level: number;
-	name: string;
-	peakDay?: { day: string; tokens: number } | null;
-	streakCurrent: number;
-	streakLongest?: number | null;
-	totalTokens: number;
-}
-
-export interface HeatmapClipPalette {
-	background: string;
-	/** The empty-day cell. */
-	empty: string;
-	foreground: string;
-	/** Buckets 1..4, lowest first. */
-	levels: readonly [string, string, string, string];
-	muted: string;
-}
-
-export interface HeatmapClipSize {
-	height: number;
-	width: number;
-}
-
-export interface HeatmapClipCell {
-	count: number;
-	day: string;
-	/** A day after `endDay` that only pads out the final week. */
-	filler: boolean;
-	/** 0 = empty, 1..4 = intensity bucket. */
-	level: number;
-	/** Chronological position among non-filler days, 0-based; -1 for filler. */
-	order: number;
-	week: number;
-	weekday: number;
-}
-
-export interface HeatmapGridLayout {
-	bands: number;
-	cell: number;
-	columns: number;
-	height: number;
-	left: number;
-	pitch: number;
-	top: number;
-	width: number;
-}
-
-export interface HeatmapClipLayout {
-	grid: HeatmapGridLayout;
-	margin: number;
-	statsTop: number;
-	/** Device px per 1080-short-edge px. */
-	unit: number;
-}
-
-export interface HeatmapClipTimeline {
-	/** Whole-scene opacity: fades in at the start and out before the wrap. */
-	alpha: number;
-	/** Fraction of the year's days revealed, 0..1. */
-	fill: number;
-	/** Count-up progress of the headline numbers, 0..1. */
-	stats: number;
-}
+export { HEATMAP_CLIP_PALETTES } from "./heatmap-clip-palettes.ts";
+export type {
+	HeatmapClipCell,
+	HeatmapClipData,
+	HeatmapClipDay,
+	HeatmapClipLayout,
+	HeatmapClipPalette,
+	HeatmapClipSize,
+	HeatmapClipStat,
+	HeatmapClipTimeline,
+	HeatmapGridLayout,
+} from "./heatmap-clip-types.ts";
 
 /** The loop's period. Long enough to watch a year fill in, short enough to repost. */
 export const HEATMAP_CLIP_SECONDS = 8;
@@ -139,23 +86,6 @@ const STAT_ROW_PX = 130;
 const FOOTER_PX = 26;
 const HEADER_BLOCK_PX = 260;
 const SECTION_GAP_PX = 56;
-
-export const HEATMAP_CLIP_PALETTES = {
-	dark: {
-		background: "#09090b",
-		empty: "#18181b",
-		foreground: "#fafafa",
-		levels: ["#064e3b", "#047857", "#10b981", "#34d399"],
-		muted: "#a1a1aa",
-	},
-	light: {
-		background: "#ffffff",
-		empty: "#f4f4f5",
-		foreground: "#09090b",
-		levels: ["#a7f3d0", "#6ee7b7", "#34d399", "#10b981"],
-		muted: "#71717a",
-	},
-} as const satisfies Record<"dark" | "light", HeatmapClipPalette>;
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 const easeOutCubic = (value: number): number => 1 - (1 - clamp01(value)) ** 3;
@@ -351,11 +281,6 @@ export function cellRevealProgress(
 /** A whole number counting up to `value` as `progress` goes 0→1. */
 export function countUp(value: number, progress: number): number {
 	return Math.round(Math.max(0, value) * clamp01(progress));
-}
-
-export interface HeatmapClipStat {
-	label: string;
-	value: string;
 }
 
 /** The four headline stats, every one of them a figure the Stats tab shows. */

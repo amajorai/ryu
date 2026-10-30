@@ -6,6 +6,7 @@
 // the answer. Island hosts the OS surface (shortcut registration, capture, insert);
 // this page persists the cross-process `dictation` preference blob.
 
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import {
@@ -17,25 +18,15 @@ import {
 } from "@ryu/ui/components/select.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
+import { useActiveTarget } from "@/src/hooks/useActiveNode.ts";
 import {
-	useActiveTarget,
-	useActiveTargetGetter,
-} from "@/src/hooks/useActiveNode.ts";
-import {
-	DEFAULT_DICTATION_ASK,
 	DEFAULT_DICTATION_PREFS,
-	DEFAULT_SPEECH_PROCESSING_PREFS,
 	type DictationInsertMode,
 	type DictationMode,
-	type DictationPrefs,
-	getDictationPrefs,
-	getSpeechProcessingPrefs,
 	SPEECH_PROCESSING_ENGINES,
 	type SpeechProcessingPrefs,
-	setDictationPrefs,
-	setSpeechProcessingPrefs,
 	VOICE_ENGINES,
 	type VoiceEngine,
 } from "@/src/lib/api/preferences.ts";
@@ -44,6 +35,13 @@ import {
 	ISLAND_UNAVAILABLE_NOTE,
 } from "@/src/lib/island-availability.ts";
 import { AgentAccessPanel } from "./AgentAccessPanel.tsx";
+import { DictationAgentAskSection } from "./DictationSettings-agent-ask-section.tsx";
+import {
+	DICTATION_INSERT_OPTIONS,
+	DICTATION_MODE_OPTIONS,
+	IS_WINDOWS,
+} from "./DictationSettings-options.ts";
+import { useDictationSettingsPrefs } from "./DictationSettings-prefs.ts";
 import { ShortcutCapture } from "./shared/ShortcutCapture.tsx";
 import {
 	SettingsCard,
@@ -52,134 +50,24 @@ import {
 	SettingsSection,
 } from "./shared/settings-items.tsx";
 
-/** Activation-mode choices for dictation shortcuts. */
-const DICTATION_MODE_OPTIONS: { value: DictationMode; label: string }[] = [
-	{ value: "push-to-talk", label: "Hold to talk" },
-	{ value: "toggle", label: "Press to start / stop" },
-];
-
-/** How dictated text lands in the focused app. */
-const DICTATION_INSERT_OPTIONS: {
-	value: DictationInsertMode;
-	label: string;
-}[] = [
-	{ value: "type", label: "Type (synthetic keystrokes)" },
-	{ value: "paste", label: "Paste (clipboard)" },
-];
-
-const IS_WINDOWS = navigator.userAgent.includes("Windows");
-
-type DictationPrefsUpdate = (current: DictationPrefs) => DictationPrefs;
-type SpeechProcessingPrefsUpdate = (
-	current: SpeechProcessingPrefs
-) => SpeechProcessingPrefs;
-
 export function DictationSettings() {
-	const getTarget = useActiveTargetGetter();
 	// One memoized target per node identity for the child pickers and the access
 	// panel. A fresh object on every render made the access panel reload the
 	// agent, its Spaces and its tools on each keystroke in the prompts.
 	const nodeTarget = useActiveTarget();
-	const [prefs, setPrefs] = useState<DictationPrefs>(DEFAULT_DICTATION_PREFS);
-	const [speechPrefs, setSpeechPrefs] = useState<SpeechProcessingPrefs>(
-		DEFAULT_SPEECH_PROCESSING_PREFS
-	);
-	const [loadingPrefs, setLoadingPrefs] = useState(true);
-	const [loadError, setLoadError] = useState(false);
-	const [loadAttempt, setLoadAttempt] = useState(0);
-	const [saveError, setSaveError] = useState<"dictation" | "speech" | null>(
-		null
-	);
-	const dictationPrefsRef = useRef(prefs);
-	const speechPrefsRef = useRef(speechPrefs);
-	const dictationWriteQueue = useRef(Promise.resolve());
-	const speechWriteQueue = useRef(Promise.resolve());
-
-	useEffect(() => {
-		let cancelled = false;
-		setLoadingPrefs(true);
-		setLoadError(false);
-		Promise.all([
-			getDictationPrefs(getTarget()),
-			getSpeechProcessingPrefs(getTarget()),
-		])
-			.then(([dictation, speechProcessing]) => {
-				if (!cancelled) {
-					dictationPrefsRef.current = dictation;
-					speechPrefsRef.current = speechProcessing;
-					setPrefs(dictation);
-					setSpeechPrefs(speechProcessing);
-				}
-			})
-			.catch(() => {
-				if (!cancelled) {
-					setLoadError(true);
-				}
-			})
-			.finally(() => {
-				if (!cancelled) {
-					setLoadingPrefs(false);
-				}
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [loadAttempt]);
-
-	const writePrefs = useCallback((update: DictationPrefsUpdate) => {
-		const withEnabled = { ...update(dictationPrefsRef.current), enabled: true };
-		const target = getTarget();
-		dictationPrefsRef.current = withEnabled;
-		setPrefs(withEnabled);
-		dictationWriteQueue.current = dictationWriteQueue.current
-			.catch(() => undefined)
-			.then(async () => {
-				await setDictationPrefs(target, withEnabled);
-				setSaveError((current) => (current === "dictation" ? null : current));
-			})
-			.catch(() => setSaveError("dictation"));
-	}, []);
-
-	const writeSpeechPrefs = useCallback(
-		(update: SpeechProcessingPrefsUpdate) => {
-			const next = update(speechPrefsRef.current);
-			const target = getTarget();
-			speechPrefsRef.current = next;
-			setSpeechPrefs(next);
-			speechWriteQueue.current = speechWriteQueue.current
-				.catch(() => undefined)
-				.then(async () => {
-					await setSpeechProcessingPrefs(target, next);
-					setSaveError((current) => (current === "speech" ? null : current));
-				})
-				.catch(() => setSaveError("speech"));
-		},
-		[]
-	);
-
-	const retryFailedSave = () => {
-		if (saveError === "dictation") {
-			const target = getTarget();
-			dictationWriteQueue.current = dictationWriteQueue.current
-				.catch(() => undefined)
-				.then(async () => {
-					await setDictationPrefs(target, dictationPrefsRef.current);
-					setSaveError((current) => (current === "dictation" ? null : current));
-				})
-				.catch(() => setSaveError("dictation"));
-			return;
-		}
-		if (saveError === "speech") {
-			const target = getTarget();
-			speechWriteQueue.current = speechWriteQueue.current
-				.catch(() => undefined)
-				.then(async () => {
-					await setSpeechProcessingPrefs(target, speechPrefsRef.current);
-					setSaveError((current) => (current === "speech" ? null : current));
-				})
-				.catch(() => setSaveError("speech"));
-		}
-	};
+	const {
+		prefs,
+		speechPrefs,
+		loadingPrefs,
+		loadError,
+		setLoadAttempt,
+		saveError,
+		writePrefs,
+		writeSpeechPrefs,
+		retryFailedSave,
+	} = useDictationSettingsPrefs();
+	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 
 	const sttEngineOptions = useMemo(
 		() =>
@@ -232,9 +120,10 @@ export function DictationSettings() {
 					role="alert"
 				>
 					<span>
-						Could not save{" "}
-						{saveError === "dictation" ? "Dictation" : "Speech Processing"}{" "}
-						settings.
+						{tl("Could not save {surface} settings.", {
+							surface:
+								saveError === "dictation" ? "Dictation" : "Speech Processing",
+						})}
 					</span>
 					<Button onClick={retryFailedSave} size="sm" variant="outline">
 						Retry save
@@ -253,13 +142,18 @@ export function DictationSettings() {
 			>
 				<SettingsCard>
 					<p className="text-muted-foreground text-sm">
-						Dictation is on because the <strong>Dictation</strong> plugin is
-						enabled. To turn it off everywhere, disable the plugin in{" "}
-						<strong>Gateway settings → Plugins</strong>.{" "}
-						{ISLAND_ENABLED
-							? "The island companion hosts the OS surface (global shortcuts, capture, insert)."
-							: `${ISLAND_UNAVAILABLE_NOTE} System-wide dictation shortcuts start working once it ships.`}{" "}
-						The settings below tune what it does once it is on.
+						{tlRich(
+							"Dictation is on because the <strong>Dictation</strong> plugin is enabled. To turn it off everywhere, disable the plugin in <strong>Gateway settings → Plugins</strong>. {islandNote} The settings below tune what it does once it is on.",
+							{
+								islandNote: ISLAND_ENABLED
+									? "The island companion hosts the OS surface (global shortcuts, capture, insert)."
+									: tl(
+											"{ISLAND_UNAVAILABLE_NOTE} System-wide dictation shortcuts start working once it ships.",
+											{ ISLAND_UNAVAILABLE_NOTE }
+										),
+							},
+							{ strong: (chunks) => <strong>{chunks}</strong> }
+						)}
 					</p>
 				</SettingsCard>
 			</SettingsSection>
@@ -550,132 +444,11 @@ export function DictationSettings() {
 				) : null}
 			</SettingsSection>
 
-			<SettingsSection
-				caption="Speak a question anywhere; an agent answers and the text is pasted into the focused app. Uses a separate shortcut from plain dictation."
-				title="Agent ask"
-			>
-				<SettingsGroup>
-					<SettingsItem
-						actions={
-							<Switch
-								aria-label="Enable agent ask"
-								checked={prefs.ask.enabled}
-								onCheckedChange={(v) =>
-									writePrefs((current) => ({
-										...current,
-										ask: { ...current.ask, enabled: v },
-									}))
-								}
-							/>
-						}
-						description="Hold the agent-ask shortcut, ask a question, and paste the agent's answer."
-						title="Agent ask"
-					/>
-					{prefs.ask.enabled ? (
-						<SettingsItem
-							actions={
-								<ShortcutCapture
-									ariaLabel="Set agent-ask shortcut"
-									onChange={(acc) =>
-										writePrefs((current) => ({
-											...current,
-											ask: { ...current.ask, shortcut: acc },
-										}))
-									}
-									onReset={() =>
-										writePrefs((current) => ({
-											...current,
-											ask: {
-												...current.ask,
-												shortcut: DEFAULT_DICTATION_ASK.shortcut,
-											},
-										}))
-									}
-									value={prefs.ask.shortcut}
-								/>
-							}
-							description="Global key for agent-ask. Kept separate from the dictation shortcut."
-							title="Agent-ask shortcut"
-						/>
-					) : null}
-					{prefs.ask.enabled ? (
-						<SettingsItem
-							actions={
-								<Select<DictationMode>
-									items={DICTATION_MODE_OPTIONS}
-									onValueChange={(v) =>
-										writePrefs((current) => ({
-											...current,
-											ask: { ...current.ask, mode: v },
-										}))
-									}
-									value={prefs.ask.mode}
-								>
-									<SelectTrigger
-										aria-label="Agent-ask activation mode"
-										className="h-8 w-56"
-									>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{DICTATION_MODE_OPTIONS.map((option) => (
-											<SelectItem key={option.value} value={option.value}>
-												{option.label}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							}
-							description={
-								prefs.ask.mode === "push-to-talk"
-									? "Hold the shortcut to record; release to ask and paste the answer."
-									: "Press once to start, again to stop, ask, and paste the answer."
-							}
-							title="Activation"
-						/>
-					) : null}
-					{prefs.ask.enabled ? (
-						<SettingsItem
-							description="Prefer an agent when you want tool access (Spaces, Ghost, other apps). A model-only pick answers without tools."
-							title="Agent"
-						>
-							<AgentSelectionField
-								ariaLabel="Agent-ask agent or model"
-								onChange={(selection) =>
-									writePrefs((current) => ({
-										...current,
-										ask: { ...current.ask, selection },
-									}))
-								}
-								placeholder="Default local model"
-								target={nodeTarget}
-								value={prefs.ask.selection}
-							/>
-						</SettingsItem>
-					) : null}
-				</SettingsGroup>
-				{/* `bare`, outside the group — same reason as the cleanup prompt. */}
-				{prefs.ask.enabled ? (
-					<SettingsItem
-						bare
-						description="Instructions for the ask agent. It sees this plus your spoken question."
-						title="Ask prompt"
-					>
-						<Textarea
-							aria-label="Agent-ask prompt"
-							className="min-h-24"
-							onChange={(e) =>
-								writePrefs((current) => ({
-									...current,
-									ask: { ...current.ask, prompt: e.target.value },
-								}))
-							}
-							typography="small"
-							value={prefs.ask.prompt}
-						/>
-					</SettingsItem>
-				) : null}
-			</SettingsSection>
+			<DictationAgentAskSection
+				nodeTarget={nodeTarget}
+				prefs={prefs}
+				writePrefs={writePrefs}
+			/>
 
 			{prefs.ask.enabled && prefs.ask.selection.agent_id.trim() ? (
 				<AgentAccessPanel

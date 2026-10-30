@@ -298,7 +298,7 @@ test("filters the MCP inventory across server names and fully-qualified tool ids
 	await expect(
 		page.getByText("Missing command", { exact: true })
 	).toBeVisible();
-	await expect(page.getByText("missing", { exact: true })).toBeVisible();
+	await expect(page.getByText("Missing", { exact: true })).toBeVisible();
 	const toolPanel = page.getByRole("heading", {
 		name: "Available tools",
 		exact: true,

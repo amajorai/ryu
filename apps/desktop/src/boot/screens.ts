@@ -1,7 +1,7 @@
 import { lazy } from "react";
 
 // Every screen past the login page loads on demand, so the first paint (the
-// boot orb, then LoginPage) does not parse the signed-in shell, the chat and
+// boot splash, then LoginPage) does not parse the signed-in shell, the chat and
 // its markdown/diagram/chart stack, onboarding, or the overlay windows.
 const loadSignedInShell = () => import("./SignedInShell.tsx");
 const loadLayout = () => import("../components/layout/Layout.tsx");

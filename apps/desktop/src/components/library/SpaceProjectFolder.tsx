@@ -401,7 +401,7 @@ export function SpaceProjectFolder({
 					}
 					if (documentList.status === "error") {
 						return (
-							<div className="flex min-h-32 flex-col items-start justify-center gap-2 rounded-2xl border border-dashed p-4">
+							<div className="flex min-h-32 flex-col items-start justify-center gap-2 rounded-xl bg-muted p-4">
 								<p className="font-medium text-sm">Couldn’t load documents</p>
 								<p className="text-muted-foreground text-xs">
 									Check the connection and try again.
@@ -416,7 +416,7 @@ export function SpaceProjectFolder({
 						);
 					}
 					return (
-						<div className="flex min-h-32 flex-col items-start justify-center gap-2 rounded-2xl border border-dashed p-4">
+						<div className="flex min-h-32 flex-col items-start justify-center gap-2 rounded-xl bg-muted p-4">
 							<p className="font-medium text-sm">No documents yet</p>
 							<div className="flex flex-wrap gap-2">
 								<Button

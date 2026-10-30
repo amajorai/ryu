@@ -162,7 +162,11 @@ export default function FileEditorPage({ filePath }: { filePath: string }) {
 					<EmptyDescription>{error}</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
-					<Button onClick={() => setLoadNonce((nonce) => nonce + 1)} size="sm">
+					<Button
+						onClick={() => setLoadNonce((nonce) => nonce + 1)}
+						size="sm"
+						variant="outline"
+					>
 						Try again
 					</Button>
 				</EmptyContent>

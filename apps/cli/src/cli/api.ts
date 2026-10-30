@@ -29,6 +29,7 @@ import {
 	uninstallApp,
 } from "@ryuhq/core-client/plugins";
 import { streamChat } from "../core/chatStream.ts";
+import { tf } from "../i18n/translate.ts";
 import { LocalizedError, localize } from "./localizedText.ts";
 import type {
 	CoreApi,
@@ -58,7 +59,9 @@ async function execAppCommand(
 	if (!isSafeCommandPath(cmd.path)) {
 		return {
 			status: 400,
-			body: `refusing to run command: unsafe path '${cmd.path}'`,
+			body: tf("refusing to run command: unsafe path '{path}'", {
+				path: cmd.path,
+			}),
 		};
 	}
 	const method = cmd.method.toUpperCase();

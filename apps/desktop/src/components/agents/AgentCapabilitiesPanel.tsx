@@ -102,7 +102,7 @@ function TriToggle({
 	return (
 		<fieldset
 			aria-label={ariaLabel}
-			className="m-0 inline-flex min-w-0 items-center rounded-md border p-0.5"
+			className="m-0 inline-flex min-w-0 items-center rounded-lg border p-0.5"
 		>
 			{TRI_OPTIONS.map((opt) => (
 				<Button
@@ -150,7 +150,7 @@ export function AgentCapabilitiesPanel({
 
 	return (
 		<SettingsSection
-			caption="What this agent's model supports. Auto-detected from the agent's model; override any of them. These gate the composer controls — a model with tools off shows no tools affordance."
+			caption="Auto-detected from the model. Overrides change which composer controls appear."
 			title="Capabilities"
 		>
 			{loading && !capabilities ? (

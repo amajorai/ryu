@@ -14,10 +14,13 @@
 // component never receives it (see lib/api/managed-bots.ts). That is why the
 // nonce is safe to put in a QR code the user may hold up to a phone camera.
 
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { ExpandableQRCode } from "@ryu/ui/components/qr-code.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
+import { InlineErrorRow } from "@/src/components/chat/InlineErrorRow.tsx";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	beginManagedBotPairing,
@@ -31,68 +34,17 @@ import {
 	type ManagedBotPairingRequest,
 } from "@/src/lib/api/managed-bots.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
-
-/**
- * How often to ask the node whether Telegram is done. The user has to switch
- * apps, read a dialog and confirm, so sub-second polling buys nothing and the
- * node forwards each poll to the manager (which rate-limits per nonce).
- */
-const POLL_MS = 3000;
-/**
- * How many polls in a row may fail before we say so. One flaky request during a
- * 10-minute wait is not worth tearing the flow down, but a node that has gone
- * away must not hide behind the countdown and then surface as "expired".
- */
-const MAX_POLL_FAILURES = 4;
-/** Countdown tick. Independent of the poll so the timer reads smoothly. */
-const TICK_MS = 1000;
-const SECONDS_PER_MINUTE = 60;
-const QR_SIZE = 168;
-
-function safeTelegramDeepLink(value: string): string | null {
-	try {
-		const url = new URL(value);
-		if (
-			url.protocol === "https:" &&
-			new Set(["t.me", "telegram.me", "www.t.me", "www.telegram.me"]).has(
-				url.hostname
-			)
-		) {
-			return url.href;
-		}
-		return url.protocol === "tg:" && url.hostname === "resolve"
-			? url.href
-			: null;
-	} catch {
-		return null;
-	}
-}
-
-type Phase =
-	| "idle"
-	| "starting"
-	| "waiting"
-	/** Telegram made a bot; the node is holding its token until the user says it is
-	 *  theirs. See `confirming` below for why this step is not skippable. */
-	| "confirming"
-	| "completing"
-	| "expired"
-	| "failed";
-
-/** The new bot, as the node describes it while asking whether to keep it. */
-interface CreatedBot {
-	botId: number;
-	botUsername: string;
-	ownerTelegramUserId: number | null;
-}
-
-/** `4:07` — a countdown the user can read against Telegram's 10-minute window. */
-function formatRemaining(ms: number): string {
-	const total = Math.max(0, Math.ceil(ms / TICK_MS));
-	const minutes = Math.floor(total / SECONDS_PER_MINUTE);
-	const seconds = total % SECONDS_PER_MINUTE;
-	return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
+import { BOT_NAME_TAGS } from "./TelegramManagedBotPanel-bot-name-tags.tsx";
+import {
+	type CreatedBot,
+	formatRemaining,
+	MAX_POLL_FAILURES,
+	type Phase,
+	POLL_MS,
+	QR_SIZE,
+	safeTelegramDeepLink,
+	TICK_MS,
+} from "./TelegramManagedBotPanel-pairing.ts";
 
 export function TelegramManagedBotPanel({
 	active,
@@ -120,6 +72,8 @@ export function TelegramManagedBotPanel({
 	 *  manual token fields rather than leaving the user at a dead end. */
 	onUnsupported: (message: string) => void;
 }) {
+	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const getActiveNode = useNodeStore((s) => s.getActiveNode);
 	const node = getActiveNode();
 	// The store hands back a fresh object each render; the poll effect keys off
@@ -364,10 +318,8 @@ export function TelegramManagedBotPanel({
 		const deepLink = safeTelegramDeepLink(pairing.deep_link);
 		if (!deepLink) {
 			return (
-				<div className="space-y-3">
-					<p className="text-status-destructive text-xs">
-						Telegram returned an invalid pairing link. Cancel and start again.
-					</p>
+				<div className="flex flex-col gap-3">
+					<InlineErrorRow message="Telegram returned an invalid pairing link. Cancel and start again." />
 					<Button onClick={cancel} size="xs" variant="ghost">
 						Cancel
 					</Button>
@@ -375,10 +327,9 @@ export function TelegramManagedBotPanel({
 			);
 		}
 		return (
-			<div className="space-y-3">
-				<p className="text-muted-foreground text-xs">
-					Open this in Telegram and tap the button it sends — Telegram creates a
-					bot you own, and Ryu never sees your Telegram login or @BotFather.
+			<div className="flex flex-col gap-3">
+				<p className="text-detail text-muted-foreground">
+					Open this in Telegram and tap the button it sends.
 				</p>
 				<div className="flex flex-col items-center gap-3">
 					<ExpandableQRCode size={QR_SIZE} value={deepLink} />
@@ -392,9 +343,11 @@ export function TelegramManagedBotPanel({
 					</a>
 				</div>
 				<div className="flex items-center justify-between gap-2">
-					<p className="flex items-center gap-2 text-muted-foreground text-xs">
-						<Spinner className="size-3" />
-						Waiting for Telegram — expires in {formatRemaining(remainingMs)}
+					<p className="flex items-center gap-2 text-detail text-muted-foreground tabular-nums">
+						<Spinner className="size-3.5" />
+						{tl("Waiting for Telegram — expires in {remaining}", {
+							remaining: formatRemaining(remainingMs),
+						})}
 					</p>
 					<Button onClick={cancel} size="xs" variant="ghost">
 						Cancel
@@ -406,45 +359,52 @@ export function TelegramManagedBotPanel({
 
 	if (phase === "confirming" && created) {
 		return (
-			<div className="space-y-3">
-				<p className="text-xs">
-					Telegram created{" "}
-					<span className="font-medium">@{created.botUsername}</span>
+			<div className="flex flex-col gap-3">
+				<p className="text-sm">
 					{created.ownerTelegramUserId === null
-						? null
-						: ` for Telegram account ${created.ownerTelegramUserId}`}
-					.
+						? tlRich(
+								"Telegram created <span>@{botUsername}</span>.",
+								{ botUsername: created.botUsername },
+								BOT_NAME_TAGS
+							)
+						: tlRich(
+								"Telegram created <span>@{botUsername}</span> for Telegram account {ownerTelegramUserId}.",
+								{
+									botUsername: created.botUsername,
+									ownerTelegramUserId: String(created.ownerTelegramUserId),
+								},
+								BOT_NAME_TAGS
+							)}
 				</p>
 				{/* The one question only the person sitting here can answer. The setup
 				    link is public — anyone who saw the QR could have opened it first —
 				    so the handle above is what proves this is the bot they just made. */}
-				<p className="text-muted-foreground text-xs">
-					Connect it only if that is the bot you just created. If it isn't,
-					discard it: nothing has been saved yet, and discarding revokes the
-					token Ryu was handed.
+				<p className="text-detail text-muted-foreground">
+					Connect it only if you just created it. Nothing has been saved yet,
+					and discarding revokes its token.
 				</p>
 				{/* The Enabled switch is honoured rather than forced on — same as the
 				    paste-a-token path — so say what that means here, where "Connect"
 				    would otherwise read as a promise the switch overrides. */}
 				{form.enabled === false ? (
-					<p className="text-muted-foreground text-xs">
-						Enabled is off in the form above, so it will be saved switched off
-						and won't answer until you turn it on.
+					<p className="text-detail text-muted-foreground">
+						Enabled is off above, so it will be saved switched off.
 					</p>
 				) : null}
-				{failure ? (
-					<p className="text-status-destructive text-xs">{failure.message}</p>
-				) : null}
+				{failure ? <ErrorLine message={failure.message} /> : null}
 				<div className="flex gap-2">
 					<Button
-						aria-label={`Connect @${created.botUsername}`}
+						aria-label={tl("Connect @{botUsername}", {
+							botUsername: created.botUsername,
+						})}
 						className="whitespace-nowrap"
 						onClick={() => {
 							accept().catch(() => undefined);
 						}}
 						size="sm"
+						variant="mono"
 					>
-						Connect @{created.botUsername}
+						{tl("Connect @{botUsername}", { botUsername: created.botUsername })}
 					</Button>
 					<Button onClick={refuse} size="sm" variant="ghost">
 						Not mine, discard
@@ -456,8 +416,8 @@ export function TelegramManagedBotPanel({
 
 	if (phase === "completing") {
 		return (
-			<p className="flex items-center gap-2 text-muted-foreground text-xs">
-				<Spinner className="size-3" />
+			<p className="flex items-center gap-2 text-detail text-muted-foreground">
+				<Spinner className="size-3.5" />
 				Bot created — saving it now.
 			</p>
 		);
@@ -465,12 +425,14 @@ export function TelegramManagedBotPanel({
 
 	if (phase === "expired") {
 		return (
-			<div className="space-y-3">
-				<p className="text-status-destructive text-xs">
-					{failure?.kind === "expired"
-						? failure.message
-						: "That link expired before the bot was created. Nothing was saved."}
-				</p>
+			<div className="flex flex-col gap-3">
+				<ErrorLine
+					message={
+						failure?.kind === "expired"
+							? failure.message
+							: "That link expired before the bot was created. Nothing was saved."
+					}
+				/>
 				<Button
 					onClick={() => {
 						start().catch(() => undefined);
@@ -486,8 +448,8 @@ export function TelegramManagedBotPanel({
 
 	if (phase === "failed" && failure) {
 		return (
-			<div className="space-y-3">
-				<p className="text-status-destructive text-xs">{failure.message}</p>
+			<div className="flex flex-col gap-3">
+				<ErrorLine message={failure.message} />
 				<Button
 					onClick={() => {
 						start().catch(() => undefined);
@@ -502,10 +464,9 @@ export function TelegramManagedBotPanel({
 	}
 
 	return (
-		<div className="space-y-3">
-			<p className="text-muted-foreground text-xs">
-				Telegram creates a bot you own and hands Ryu its token — you never visit
-				@BotFather, and Ryu never sees your Telegram login.
+		<div className="flex flex-col gap-3">
+			<p className="text-detail text-muted-foreground">
+				Telegram creates a bot you own. Ryu never sees your Telegram login.
 			</p>
 			<Button
 				disabled={nameMissing || openingTargetMissing}
@@ -514,18 +475,17 @@ export function TelegramManagedBotPanel({
 					start().catch(() => undefined);
 				}}
 				size="sm"
-				variant="ghost"
+				variant="outline"
 			>
 				Create a bot for me
 			</Button>
 			{nameMissing ? (
-				<p className="text-muted-foreground text-xs">
-					Give this bot a name above first — it's used as the suggested name in
-					Telegram.
+				<p className="text-detail text-muted-foreground">
+					Give this bot a name above first.
 				</p>
 			) : null}
 			{openingTargetMissing ? (
-				<p className="text-muted-foreground text-xs">
+				<p className="text-detail text-muted-foreground">
 					Choose the approved chat for Ryu's welcome first.
 				</p>
 			) : null}

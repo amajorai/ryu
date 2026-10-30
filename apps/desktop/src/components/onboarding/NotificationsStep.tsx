@@ -6,10 +6,11 @@
 
 import { Notification03Icon, Settings02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
-import { Button } from "@ryu/ui/components/button.tsx";
-import { PageHeader } from "@ryu/ui/components/page-header.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useEffect, useMemo, useState } from "react";
 import {
 	RyuOnboardingAvatar,
@@ -32,6 +33,7 @@ import {
 	canOpenNotificationSettings,
 	openNotificationSettings,
 } from "@/src/lib/os/permissions.ts";
+import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
 type StepStatus = "idle" | "requesting" | "enabled" | "blocked";
 
@@ -56,18 +58,18 @@ function NotificationPreview({ name }: { name: string }) {
 	return (
 		<div
 			aria-hidden="true"
-			className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-md"
+			className="flex w-full items-center gap-3 rounded-xl border border-border p-3"
 		>
 			<RyuOnboardingAvatar size={40} />
 			<div className="min-w-0 flex-1">
 				<p className="truncate font-medium text-sm" title={name}>
 					{name}
 				</p>
-				<p className="truncate text-muted-foreground text-xs">
+				<p className="truncate text-detail text-muted-foreground">
 					Finished your task — ready for you to review.
 				</p>
 			</div>
-			<span className="self-start text-muted-foreground text-xs">now</span>
+			<span className="self-start text-muted-foreground/70 text-xs">now</span>
 		</div>
 	);
 }
@@ -76,6 +78,7 @@ export function NotificationsStep({
 	busy,
 	onContinue,
 }: NotificationsStepProps) {
+	const tl = useLiteralMessages();
 	const { surface } = useAppSurface();
 	const persona = useRyuOnboardingPersona();
 	const platform = useNotificationPlatform();
@@ -136,98 +139,75 @@ export function NotificationsStep({
 	};
 
 	return (
-		<div className="scroll-fade h-full w-full overflow-y-auto">
-			<div
-				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
-				data-tauri-drag-region="true"
-			>
-				<StaggerReveal>
-					<div className="shrink-0">
-						<RyuOnboardingAvatar />
-					</div>
-					<PageHeader
-						stagger={false}
-						subtitle={copy.subtitle}
-						title="Know when your agents reply"
+		<ActivationStepShell
+			subtitle={copy.subtitle}
+			title="Know when your agents reply"
+		>
+			<NotificationPreview name={persona.name} />
+
+			{status === "enabled" && (
+				<div className="flex items-start gap-2 text-sm" role="status">
+					<HugeiconsIcon
+						className="mt-0.5 shrink-0 text-muted-foreground"
+						icon={Notification03Icon}
+						size={16}
 					/>
-				</StaggerReveal>
-
-				<div className="flex w-full max-w-md flex-col gap-6">
-					<StaggerReveal startDelay={ONBOARDING_CONTENT_DELAY_MS} wrap>
-						<NotificationPreview name={persona.name} />
-
-						{status === "enabled" && (
-							<div className="flex items-start gap-2 text-sm" role="status">
-								<HugeiconsIcon
-									className="mt-0.5 shrink-0 text-primary"
-									icon={Notification03Icon}
-									size={16}
-								/>
-								<span className="text-muted-foreground">
-									Notifications are on. We just sent a test one.
-									{platform === "desktop" ? ` ${copy.blockedHelp}` : ""}
-								</span>
-							</div>
-						)}
-
-						{blocked && copy.supported && (
-							<p className="text-sm text-status-destructive" role="alert">
-								{copy.blockedHelp}
-							</p>
-						)}
-
-						<div className="flex flex-wrap items-center justify-end gap-2">
-							{showSettingsLink && (
-								<Button
-									onClick={() => {
-										openNotificationSettings().catch(() => undefined);
-									}}
-									type="button"
-									variant="ghost"
-								>
-									<HugeiconsIcon icon={Settings02Icon} size={16} />
-									Notification settings
-								</Button>
-							)}
-							{status === "enabled" || !copy.supported ? (
-								<Button
-									disabled={busy}
-									onClick={onContinue}
-									size="lg"
-									type="button"
-									variant="mono"
-								>
-									Continue
-								</Button>
-							) : (
-								<>
-									<Button
-										disabled={busy || status === "requesting"}
-										onClick={skip}
-										size="lg"
-										type="button"
-										variant="ghost"
-									>
-										Not now
-									</Button>
-									<Button
-										disabled={busy || status === "requesting"}
-										onClick={() => {
-											enable().catch(() => setStatus("blocked"));
-										}}
-										size="lg"
-										type="button"
-										variant="mono"
-									>
-										<HugeiconsIcon icon={Notification03Icon} size={16} />
-										{enableButtonLabel(status, blocked, copy.enableLabel)}
-									</Button>
-								</>
-							)}
-						</div>
-					</StaggerReveal>
+					<span className="text-muted-foreground">
+						{platform === "desktop"
+							? tl(
+									"Notifications are on. We just sent a test one. {blockedHelp}",
+									{ blockedHelp: copy.blockedHelp }
+								)
+							: tl("Notifications are on. We just sent a test one.")}
+					</span>
 				</div>
-			</div>
-		</div>
+			)}
+
+			{blocked && copy.supported && (
+				<p className="text-sm text-status-destructive" role="alert">
+					{copy.blockedHelp}
+				</p>
+			)}
+
+			<OnboardingActions>
+				{showSettingsLink && (
+					<OnboardingCta
+						onClick={() => {
+							openNotificationSettings().catch(() => undefined);
+						}}
+						tone="secondary"
+						type="button"
+					>
+						<HugeiconsIcon icon={Settings02Icon} size={16} />
+						Notification settings
+					</OnboardingCta>
+				)}
+				{status === "enabled" || !copy.supported ? (
+					<OnboardingCta disabled={busy} onClick={onContinue} type="button">
+						Continue
+					</OnboardingCta>
+				) : (
+					<>
+						<OnboardingCta
+							disabled={busy || status === "requesting"}
+							onClick={skip}
+							tone="secondary"
+							type="button"
+						>
+							Not now
+						</OnboardingCta>
+						<OnboardingCta
+							disabled={busy || status === "requesting"}
+							onClick={() => {
+								enable().catch(() => setStatus("blocked"));
+							}}
+							type="button"
+						>
+							{enableButtonLabel(status, blocked, copy.enableLabel)}
+						</OnboardingCta>
+					</>
+				)}
+			</OnboardingActions>
+		</ActivationStepShell>
 	);
 }

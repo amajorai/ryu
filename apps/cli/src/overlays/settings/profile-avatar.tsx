@@ -10,6 +10,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { tf } from "../../i18n/translate.ts";
 import {
 	securityMessageSuccessResponseSchema,
 	securitySessionResponseSchema,
@@ -36,6 +37,8 @@ export function ProfileAvatar({
 	const [path, setPath] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState("");
+	// The failure text shown, so its color does not depend on the locale.
+	const [errorMessage, setErrorMessage] = useState("");
 	const changeStage = (next: typeof stage) => {
 		setStage(next);
 		onEditingChange(next !== "idle");
@@ -128,9 +131,11 @@ export function ProfileAvatar({
 			if (signal.aborted) {
 				return;
 			}
-			setMessage(
-				`Could not update profile photo: ${error instanceof Error ? error.message : String(error)}`
-			);
+			const text = tf("Could not update profile photo: {error}", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			setErrorMessage(text);
+			setMessage(text);
 		} finally {
 			if (!signal.aborted) {
 				setBusy(false);
@@ -182,7 +187,7 @@ export function ProfileAvatar({
 			{message ? (
 				<text
 					fg={
-						message.startsWith("Could not")
+						message === errorMessage
 							? theme.colors.error
 							: theme.colors.success
 					}

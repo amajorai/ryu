@@ -1,7 +1,8 @@
 import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible";
+import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import { IconChevronRight } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { TextShimmer } from "../text-shimmer.tsx";
 import styles from "./tool-row-base.module.css";
@@ -57,7 +58,7 @@ export function ToolRowBase({
 	const row = (
 		<div
 			className={cn(
-				"flex max-w-full select-none items-center gap-1 rounded-md",
+				"flex max-w-full select-none items-center gap-1 rounded-lg",
 				canToggle ? "cursor-pointer" : "cursor-default"
 			)}
 		>
@@ -82,7 +83,7 @@ export function ToolRowBase({
 					)}
 				</span>
 				{detail && (
-					<span className="min-w-0 flex-1 truncate font-normal text-muted-foreground/60">
+					<span className="min-w-0 flex-1 truncate font-normal text-muted-foreground/70">
 						{detail}
 					</span>
 				)}
@@ -93,12 +94,13 @@ export function ToolRowBase({
 			</div>
 			{expandable && (isComplete || isExpanded || isAnimating) && (
 				<div>
-					<IconChevronRight
+					<HugeiconsIcon
 						className={cn(
 							"shrink-0 text-muted-foreground transition-transform duration-150 ease-out",
 							"size-3",
 							styles.chevron
 						)}
+						icon={ArrowRight01Icon}
 					/>
 				</div>
 			)}

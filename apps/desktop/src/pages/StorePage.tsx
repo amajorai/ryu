@@ -1,62 +1,34 @@
-import {
-	Download01Icon,
-	Image01Icon,
-	Key01Icon,
-	Package01Icon,
-	SlidersHorizontalIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { Image01Icon } from "@hugeicons/core-free-icons";
 import { AGENT_ACCOUNT_ACCESS_SETTING_ID } from "@ryu/blocks/desktop/agent-settings-search.ts";
-import { StoreComingSoon } from "@ryu/blocks/desktop/store.tsx";
-import { type ViewMode, ViewToggle } from "@ryu/blocks/desktop/view-toggle.tsx";
-import MarketplaceHelpDialog from "@ryu/marketplace/catalog/chrome/marketplace-help-dialog";
-import {
-	MARKETPLACE_SECTION_TABS,
-	MARKETPLACE_SECTION_VALUES,
-	type MarketplaceSection,
-} from "@ryu/marketplace/catalog/chrome/marketplace-sections";
+import type { ViewMode } from "@ryu/blocks/desktop/view-toggle.tsx";
+import { MARKETPLACE_SECTION_TABS } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
 import type { StoreSectionTab } from "@ryu/marketplace/catalog/chrome/marketplace-surface";
 import MarketplaceSurface from "@ryu/marketplace/catalog/chrome/marketplace-surface";
 import { StoreViewModeProvider } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { InstalledOnlyProvider } from "@ryu/marketplace/catalog/installed-filter";
-import { CreatorsTab } from "@ryu/marketplace/creators";
 import type { MarketplaceCreatorListing } from "@ryu/marketplace/creators/types";
-import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@ryu/ui/components/popover.tsx";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@ryu/ui/components/tooltip.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ConnectionsTab from "@/src/components/marketplace/ConnectionsTab.tsx";
 import { DesktopMarketplaceHost } from "@/src/components/marketplace/host.tsx";
-import LicensesTab from "@/src/components/marketplace/LicensesTab.tsx";
 import PrivatePackageInstallDialog from "@/src/components/marketplace/PrivatePackageInstallDialog.tsx";
 import PrivatePackageShareDialog from "@/src/components/marketplace/PrivatePackageShareDialog.tsx";
-import SellTab from "@/src/components/marketplace/SellTab.tsx";
-import AgentsCatalogSection from "@/src/components/store/AgentsCatalogSection.tsx";
-import AppsCatalogSection from "@/src/components/store/AppsCatalogSection.tsx";
-import ContributedStoreSection from "@/src/components/store/ContributedStoreSection.tsx";
 import { DesktopCatalogHost } from "@/src/components/store/catalog-host.tsx";
-import EnginesCatalogSection from "@/src/components/store/EnginesCatalogSection.tsx";
-import IntegrationsCatalogSection from "@/src/components/store/IntegrationsCatalogSection.tsx";
-import MarketplaceBrowseSection from "@/src/components/store/MarketplaceBrowseSection.tsx";
-import MarketplacesCatalogSection from "@/src/components/store/MarketplacesCatalogSection.tsx";
-import McpCatalogSection from "@/src/components/store/McpCatalogSection.tsx";
-import ModelsCatalogSection from "@/src/components/store/ModelsCatalogSection.tsx";
-import SkillsCatalogSection from "@/src/components/store/SkillsCatalogSection.tsx";
-import StoreHome from "@/src/components/store/StoreHome.tsx";
+import { StoreContent } from "@/src/components/store/page/store-content.tsx";
+import { StorePageTrailingActions } from "@/src/components/store/page/store-page-trailing.tsx";
+import {
+	BUILTIN_SECTION_VALUES,
+	canonicalStoreSection,
+	isBuiltinSection,
+	STORE_PRIMARY_SECTIONS,
+	STORE_VIEW_SECTIONS,
+	type StoreSection,
+	storeShowcaseSupported,
+	WALLPAPERS_STORE_SECTION,
+} from "@/src/components/store/page/store-sections.ts";
 import StoreSearchResults from "@/src/components/store/StoreSearchResults.tsx";
 import {
 	type StoreToolbarConfig,
 	StoreToolbarProvider,
 } from "@/src/components/store/storeToolbar.tsx";
-import { WallpaperCatalogSection } from "@/src/components/wallpaper/WallpaperCatalogSection.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import {
 	contributedTabForSection,
@@ -72,59 +44,10 @@ import {
 } from "@/src/hooks/useStoreSearch.ts";
 import { useStoreSectionCounts } from "@/src/hooks/useStoreSectionCounts.ts";
 import { useStoreViewMode } from "@/src/hooks/useStoreViewMode.ts";
-import type { PluginStoreTab } from "@/src/lib/api/plugins.ts";
 import {
 	getMarketplaceBackdrops,
 	usePluginBackgrounds,
 } from "@/src/lib/plugin-backgrounds.ts";
-
-/** The built-in section values are shared with the web Marketplace. Everything
- * else in the bar is an app-registered `contributes.store_tabs[]` entry. */
-const WALLPAPERS_STORE_SECTION = "wallpapers" as const;
-
-type BuiltinStoreSection = MarketplaceSection | typeof WALLPAPERS_STORE_SECTION;
-
-/** An active section value: a {@link BuiltinStoreSection}, or a contributed tab's
- *  `plugin:<pluginId>:<tabId>` key. Deliberately open — the Store's section list is
- *  no longer a closed union the shell can enumerate at compile time. */
-type StoreSection = string;
-
-const BUILTIN_SECTION_VALUES = [
-	...MARKETPLACE_SECTION_VALUES,
-	WALLPAPERS_STORE_SECTION,
-] as const;
-
-/** Store sections whose content uses the shared catalog grid/list geometry. */
-const STORE_VIEW_SECTIONS: ReadonlySet<string> = new Set([
-	"bundles",
-	"apps",
-	"plugins",
-	"skills",
-	"mcp",
-	"agents",
-	"engines",
-	"integrations",
-	"workflows",
-	"themes",
-	"browse",
-]);
-
-function storeShowcaseSupported(section: string): boolean {
-	// The Agents tab owns the employee-badge renderer. Other Store tabs keep the
-	// compact catalog card in both Grid and List modes until they gain a real
-	// alternate presentation of their own.
-	return section === "agents";
-}
-
-/** Preserve old `/store/account` deep links while the visible nav uses the same
- * individual money tabs as the web surface. */
-function canonicalStoreSection(value: string): string {
-	return value === "account" ? "connections" : value;
-}
-
-function isBuiltinSection(value: string): value is BuiltinStoreSection {
-	return BUILTIN_SECTION_VALUES.includes(value);
-}
 
 /**
  * Unified Store shell, App Store-shaped: one inline page chrome — the section
@@ -394,108 +317,23 @@ export default function StorePage({
 							fullBleed={fullBleed}
 							onSearch={setSearchQuery}
 							onSelect={selectSection}
+							primarySections={STORE_PRIMARY_SECTIONS}
 							query={searchQuery}
 							sections={navSections}
 							showGlobalSearch={section !== WALLPAPERS_STORE_SECTION}
 							trailing={
 								section === WALLPAPERS_STORE_SECTION ? null : (
-									<>
-										{showStoreView ? (
-											<ViewToggle
-												onChange={setStoredStoreView}
-												showShowcase={storeShowcaseSupported(section)}
-												value={storeView}
-											/>
-										) : null}
-										{sectionFilters?.panel ? (
-											<Popover>
-												<PopoverTrigger
-													render={
-														<Button variant="ghost">
-															<HugeiconsIcon
-																className="size-4"
-																icon={
-																	sectionFilters.panelIcon ??
-																	SlidersHorizontalIcon
-																}
-															/>
-															{sectionFilters.panelLabel ?? "Filters"}
-														</Button>
-													}
-												/>
-												<PopoverContent
-													align="end"
-													className="w-[min(30rem,90vw)]"
-													spacing="flush"
-												>
-													{sectionFilters.panel}
-												</PopoverContent>
-											</Popover>
-										) : null}
-										{section === "marketplaces" ? null : (
-											<Tooltip>
-												<TooltipTrigger
-													render={
-														<Button
-															aria-pressed={installedOnly}
-															onClick={() => setInstalledOnly((on) => !on)}
-															variant={installedOnly ? "secondary" : "ghost"}
-														>
-															<HugeiconsIcon
-																className="size-4"
-																icon={Download01Icon}
-															/>
-															Installed
-														</Button>
-													}
-												/>
-												<TooltipContent>
-													{installedOnly
-														? "Showing only what you have installed"
-														: "Show only what you have installed"}
-												</TooltipContent>
-											</Tooltip>
-										)}
-										<Tooltip>
-											<TooltipTrigger
-												render={
-													<Button
-														onClick={() => setPrivateInstallOpen(true)}
-														variant="ghost"
-													>
-														<HugeiconsIcon
-															className="size-4"
-															icon={Package01Icon}
-														/>
-														Install from code
-													</Button>
-												}
-											/>
-											<TooltipContent>
-												Install a private package with a publisher code
-											</TooltipContent>
-										</Tooltip>
-										<Tooltip>
-											<TooltipTrigger
-												render={
-													<Button
-														onClick={() => setPrivateShareOpen(true)}
-														variant="ghost"
-													>
-														<HugeiconsIcon
-															className="size-4"
-															icon={Key01Icon}
-														/>
-														Share package
-													</Button>
-												}
-											/>
-											<TooltipContent>
-												Create a time-limited private package code
-											</TooltipContent>
-										</Tooltip>
-										<MarketplaceHelpDialog />
-									</>
+									<StorePageTrailingActions
+										installedOnly={installedOnly}
+										onOpenPrivateInstall={() => setPrivateInstallOpen(true)}
+										onOpenPrivateShare={() => setPrivateShareOpen(true)}
+										section={section}
+										sectionFilters={sectionFilters}
+										setInstalledOnly={setInstalledOnly}
+										setStoredStoreView={setStoredStoreView}
+										showStoreView={showStoreView}
+										storeView={storeView}
+									/>
 								)
 							}
 						>
@@ -505,7 +343,9 @@ export default function StorePage({
 									isEmpty={search.isEmpty}
 									loading={search.loading || searchPending}
 									onClearSearch={() => setSearchQuery("")}
-									onOpenRealm={(realm) => openRealm(realm, searchQuery)}
+									onOpenRealm={(realm, itemId) =>
+										openRealm(realm, searchQuery, itemId)
+									}
 								/>
 							) : (
 								<StoreViewModeProvider mode={storeView}>
@@ -537,181 +377,5 @@ export default function StorePage({
 				/>
 			</DesktopCatalogHost>
 		</DesktopMarketplaceHost>
-	);
-}
-
-function StoreContent({
-	section,
-	initialQuery,
-	initialSelectedId,
-	initialMarketplaceItem,
-	onOpenRealm,
-	onOpenConnections,
-	onOpenInstallChat,
-	onOpenMarketplaceItem,
-	onOpenAgentAccountAccess,
-	onBrowseHome,
-	contributedTab,
-}: {
-	/** The app-registered tab this section belongs to, if it is not a built-in. */
-	contributedTab: PluginStoreTab | null;
-	section: StoreSection;
-	/** Seed query carried over from the store-wide search (searchable realms only). */
-	initialQuery?: string;
-	/** Open this item's preview on arrival — a Home shelf card's id. Forwarded only
-	 *  to the six sections that own a per-item preview; Integrations, Engines,
-	 *  Account and app-registered tabs have no such concept. */
-	initialSelectedId?: string;
-	/** One-shot Marketplace result forwarded to the cross-kind paid Browse view. */
-	initialMarketplaceItem?: { id: string; kind: string };
-	onOpenRealm: (
-		realm: StoreSearchRealm,
-		query: string,
-		itemId?: string
-	) => void;
-	onOpenConnections: () => void;
-	onOpenInstallChat: (prompt: string) => void;
-	onOpenMarketplaceItem: (listing: MarketplaceCreatorListing) => void;
-	/** Open an installed Agent Template's editor at Account access. */
-	onOpenAgentAccountAccess: (agent: { id: string; name: string }) => void;
-	onBrowseHome: () => void;
-}) {
-	if (section === WALLPAPERS_STORE_SECTION) {
-		return (
-			<WallpaperCatalogSection initialQuery={initialQuery} mode="marketplace" />
-		);
-	}
-	if (section === "home") {
-		return <StoreHome onOpenRealm={onOpenRealm} />;
-	}
-	if (section === "bundles") {
-		return <MarketplaceBrowseSection onlyKind="bundle" />;
-	}
-	if (section === "integrations") {
-		return (
-			<IntegrationsCatalogSection
-				initialQuery={initialQuery}
-				onOpenConnections={onOpenConnections}
-				onOpenInstallChat={onOpenInstallChat}
-				onOpenRealm={onOpenRealm}
-			/>
-		);
-	}
-	if (section === "apps") {
-		return (
-			<AppsCatalogSection
-				initialQuery={initialQuery}
-				initialSelectedId={initialSelectedId}
-				variant="apps"
-			/>
-		);
-	}
-	if (section === "plugins") {
-		return (
-			<AppsCatalogSection
-				initialQuery={initialQuery}
-				initialSelectedId={initialSelectedId}
-				variant="plugins"
-			/>
-		);
-	}
-	if (section === "models") {
-		return (
-			<ModelsCatalogSection
-				initialQuery={initialQuery}
-				initialSelectedId={initialSelectedId}
-			/>
-		);
-	}
-	if (section === "skills") {
-		return (
-			<SkillsCatalogSection
-				initialQuery={initialQuery}
-				initialSelectedId={initialSelectedId}
-			/>
-		);
-	}
-	if (section === "mcp") {
-		return (
-			<McpCatalogSection
-				initialQuery={initialQuery}
-				initialSelectedId={initialSelectedId}
-			/>
-		);
-	}
-	if (section === "agents") {
-		return (
-			<AgentsCatalogSection
-				initialQuery={initialQuery}
-				initialSelectedId={initialSelectedId}
-				onOpenAgentAccountAccess={onOpenAgentAccountAccess}
-			/>
-		);
-	}
-	if (section === "creators") {
-		return (
-			<div className="mx-auto w-full max-w-4xl px-4 pt-2">
-				<CreatorsTab onOpenListing={onOpenMarketplaceItem} />
-			</div>
-		);
-	}
-	if (section === "engines") {
-		return <EnginesCatalogSection />;
-	}
-	if (section === "workflows") {
-		if (contributedTab) {
-			return (
-				<ContributedStoreSection
-					initialQuery={initialQuery}
-					tab={contributedTab}
-				/>
-			);
-		}
-		return <MarketplaceBrowseSection onlyKind="workflow" />;
-	}
-	if (section === "themes") {
-		return <MarketplaceBrowseSection onlyKind="theme" />;
-	}
-	if (section === "marketplaces") {
-		return <MarketplacesCatalogSection />;
-	}
-	if (section === "browse") {
-		return (
-			<MarketplaceBrowseSection
-				initialItem={initialMarketplaceItem}
-				initialQuery={initialQuery}
-			/>
-		);
-	}
-	if (section === "connections") {
-		return <ConnectionsTab />;
-	}
-	if (section === "licenses") {
-		return <LicensesTab />;
-	}
-	if (section === "sell") {
-		return <SellTab />;
-	}
-	// App-registered tab. EVERY one renders from its declarative spec — there is no
-	// per-plugin component table any more. The Workflows tab was the last holder of
-	// one, purely so its preview could draw the template graph; that is now the
-	// `spec.detail.graph` primitive, which any app can declare (see
-	// `ContributedStoreSection`). A first-party escape hatch here is exactly what
-	// makes a "you can own a Store section" promise untrue for everyone else.
-	if (contributedTab) {
-		return (
-			<ContributedStoreSection
-				initialQuery={initialQuery}
-				tab={contributedTab}
-			/>
-		);
-	}
-	const meta = MARKETPLACE_SECTION_TABS.find((s) => s.value === section);
-	return (
-		<StoreComingSoon
-			icon={meta?.icon ?? Package01Icon}
-			label={meta?.label ?? "This"}
-			onBrowse={onBrowseHome}
-		/>
 	);
 }

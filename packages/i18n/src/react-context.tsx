@@ -72,6 +72,7 @@ function useI18nValue(context: I18nContextValue | null) {
 						subscribe: hostMethods.subscribe,
 						t: (id: string, values?: MessageValuesInput, fallback?: string) =>
 							runtime.translate(id, values, fallback),
+						templateMessage: (text: string) => runtime.templateMessage(text),
 						version,
 					}
 				: null,
@@ -95,7 +96,12 @@ function localizeString(
 	const isPublishedLiteral = i18n.availablePacks.some((pack) =>
 		Object.hasOwn(pack.messages, id)
 	);
-	return isCatalogMessage || isPublishedLiteral ? i18n.t(id, {}, value) : value;
+	if (isCatalogMessage || isPublishedLiteral) {
+		return i18n.t(id, {}, value);
+	}
+	// A dynamic sentence matching a catalog template (`Deleted {name}`)
+	// translates around its values, which stay as written.
+	return i18n.templateMessage(value) ?? value;
 }
 
 export function I18nText({

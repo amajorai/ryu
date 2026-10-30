@@ -5,7 +5,9 @@
 // The contract under test:
 //   • one centred separator per day run, labelled Today / Yesterday / weekday;
 //   • the floating chip names the day you are currently reading and swaps as
-//     you scroll past a boundary;
+//     you scroll past a boundary — but it only appears once that day's own
+//     inline separator has scrolled out of view, and it stays hidden while the
+//     reader rests at the live edge;
 //   • the chip and the pinned-user-message bar never overlap while both show —
 //     that is what `sticky top-9` on the bar buys, and it is a rect question;
 //   • with the pin toggle OFF the chip does not move (its lane is reserved
@@ -17,7 +19,7 @@
 //
 // Everything above needs a real layout — separators are `content-visibility`
 // neighbours, the chip is absolutely positioned, and `currentAnchorId` only
-// exists once the scroller has measured and observed elements — so this is a
+// is driven by an IntersectionObserver on the separators — so this is a
 // browser spec rather than a render test.
 //
 // Deliberately NOT covered here: the grouping RULES (undated turns, midnight,
@@ -122,6 +124,52 @@ test("every day run opens with one centred separator", async ({ page }) => {
 	}
 });
 
+/**
+ * Scroll so the `index`-th separator sits `offset` px above the top edge.
+ *
+ * Turns are `content-visibility: auto` with a placeholder size, so the first
+ * jump lands on estimated heights; the neighbours then render at their real
+ * height and move the separator. Re-aim until it settles.
+ */
+async function scrollPastSeparator(
+	page: Page,
+	index: number,
+	offset: number
+): Promise<void> {
+	await viewport(page).evaluate(
+		async (el, { at, by }) => {
+			const frame = () =>
+				new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+			const settle = async () => {
+				await frame();
+				await new Promise((resolve) => setTimeout(resolve, 150));
+				await frame();
+			};
+			let settledReads = 0;
+			for (let attempt = 0; attempt < 10 && settledReads < 2; attempt += 1) {
+				const separator = el.querySelectorAll(
+					'[data-slot="chat-date-separator"]'
+				)[at];
+				if (!separator) {
+					throw new Error(`no separator ${at}`);
+				}
+				const delta =
+					separator.getBoundingClientRect().top -
+					el.getBoundingClientRect().top +
+					by;
+				if (Math.abs(delta) < 2) {
+					settledReads += 1;
+				} else {
+					settledReads = 0;
+					el.scrollTop += delta;
+				}
+				await settle();
+			}
+		},
+		{ at: index, by: offset }
+	);
+}
+
 test("the floating chip names the day being read and swaps on scroll", async ({
 	page,
 }) => {
@@ -131,16 +179,49 @@ test("the floating chip names the day being read and swaps on scroll", async ({
 	});
 
 	const scroller = viewport(page);
+	// Today's separator scrolled just out of view, reader no longer at rest.
+	await scrollPastSeparator(page, 2, 160);
+	await expect(floatingChip(page)).toHaveText("Today", { timeout: 30_000 });
+
+	// Back at rest on the live edge the transcript carries no floating chrome,
+	// even though today's separator is still out of view above.
 	await scroller.evaluate((el) => {
 		el.scrollTop = el.scrollHeight;
 	});
-	await expect(floatingChip(page)).toHaveText("Today", { timeout: 30_000 });
+	await expect(floatingChip(page)).toHaveCount(0, { timeout: 30_000 });
 
-	// Walk up to the very first turn: the oldest day's label must take over.
+	// Yesterday's separator out of view, today's still below: Yesterday.
+	await scrollPastSeparator(page, 1, 160);
+	await expect(floatingChip(page)).toHaveText("Yesterday", {
+		timeout: 30_000,
+	});
+
+	// The top of the transcript shows the oldest separator inline, so the chip
+	// must not echo it.
 	await scroller.evaluate((el) => {
 		el.scrollTop = 0;
 	});
-	await expect(floatingChip(page)).not.toHaveText("Today", { timeout: 30_000 });
+	await expect(floatingChip(page)).toHaveCount(0, { timeout: 30_000 });
+
+	// Past the oldest separator, its weekday label takes over.
+	await scrollPastSeparator(page, 0, 160);
+	await expect(floatingChip(page)).toBeVisible({ timeout: 30_000 });
+	await expect(floatingChip(page)).not.toHaveText(/Today|Yesterday/);
+});
+
+test("the chip stays hidden while the current day's separator is on screen", async ({
+	page,
+}) => {
+	await openStory(page);
+	await expect(separators(page)).toHaveCount(EXPECTED_SEPARATORS, {
+		timeout: 30_000,
+	});
+	// Yesterday's separator sits 120px BELOW the top edge, and the turns above
+	// it belong to the oldest day: the chip names that day, never "Yesterday".
+	await scrollPastSeparator(page, 1, -120);
+	await expect(separators(page).nth(1)).toBeInViewport();
+	await expect(floatingChip(page)).toBeVisible({ timeout: 30_000 });
+	await expect(floatingChip(page)).not.toHaveText(/Today|Yesterday/);
 });
 
 test("the chip and the pinned bar never overlap while both are shown", async ({

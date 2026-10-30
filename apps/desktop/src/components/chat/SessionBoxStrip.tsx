@@ -56,7 +56,7 @@ export function SessionBoxSummary({
 			data-testid="session-box-strip"
 		>
 			<div className="flex min-w-0 items-center gap-1">
-				<span className="type-compact text-muted-foreground">Session Box</span>
+				<span className="text-muted-foreground text-xs">Session Box</span>
 				<BoxCostChip box={box} />
 				<Button
 					disabled={box.state !== "ready"}

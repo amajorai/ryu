@@ -279,7 +279,7 @@ export function ToolTiming({
 			aria-live={isRunning ? "off" : undefined}
 			className={
 				className ??
-				"shrink-0 whitespace-nowrap font-normal text-muted-foreground/60 text-xs tabular-nums"
+				"shrink-0 whitespace-nowrap font-normal text-muted-foreground/70 text-xs tabular-nums"
 			}
 			title={resolved.title}
 		>

@@ -20,7 +20,8 @@
 // canvas. Every connect attempt carries a generation number; a stale async
 // connect, or a retired client's events, never touch the live session.
 
-import RFB, { type RfbEventDetail } from "@novnc/novnc";
+import type RFB from "@novnc/novnc";
+import type { RfbEventDetail } from "@novnc/novnc";
 import { cn } from "@ryu/ui/lib/utils";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -211,11 +212,21 @@ export function VncCanvas({
 				}
 				return;
 			}
+			// noVNC is fetched with the first stream so it stays out of startup.
+			let Rfb: typeof RFB;
+			try {
+				Rfb = (await import("@novnc/novnc")).default;
+			} catch (failure) {
+				if (attempt === attemptRef.current) {
+					scheduleRetry(messageOf(failure, STATUS_TEXT.error));
+				}
+				return;
+			}
 			const target = screenRef.current;
 			if (attempt !== attemptRef.current || !target) {
 				return;
 			}
-			const rfb = new RFB(target, endpoint.url, {
+			const rfb = new Rfb(target, endpoint.url, {
 				credentials: {},
 				shared: true,
 				wsProtocols: [...endpoint.protocols],

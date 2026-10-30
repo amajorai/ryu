@@ -4,15 +4,12 @@ import {
 	CHANNEL_SETUP,
 	CHANNEL_TYPES,
 	type ChannelType,
-	DEFAULT_GROUP_REPLY_MODE,
-	defaultReactionLearningSettings,
-	GROUP_REPLY_LABELS,
-	GROUP_REPLY_MODES,
 	type GroupReplyMode,
 	REQUIRED_SECRETS,
 	type ReactionLearningSettings,
 	SECRET_LABELS,
 } from "@ryu/blocks/desktop/channels.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Alert, AlertDescription } from "@ryu/ui/components/alert.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -28,70 +25,22 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
-import { Switch } from "@ryu/ui/components/switch.tsx";
-import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import { TelegramManagedBotPanel } from "@/src/components/channels/TelegramManagedBotPanel.tsx";
 import { ScrollFadeEffect } from "@/src/components/ui/scroll-fade-effect.tsx";
-
-const DEFAULT_AGENT = "__default__";
-const TEAM_PREFIX = "team:";
-
-/**
- * How the user supplies a Telegram bot. `managed` is the zero-token path (Ryu's
- * manager bot has Telegram create a bot the user owns — Bot API 9.6); `manual` is
- * the original paste-a-@BotFather-token form, kept as the fallback for every case
- * the managed path can't serve (support switched off server-side, an existing bot
- * the user wants to reuse).
- *
- * Only Telegram has two ways in; every other platform renders `manual` only.
- */
-type ConnectMode = "managed" | "manual";
-
-interface FormState {
-	agentId: string;
-	channelType: ChannelType;
-	enabled: boolean;
-	groupReplyMode: GroupReplyMode;
-	model: string;
-	name: string;
-	proactiveOpening: boolean;
-	proactiveTarget: string;
-	reactionLearning: ReactionLearningSettings;
-	secrets: Record<string, string>;
-	systemPrompt: string;
-}
-
-/**
- * Split the single agent/team picker value into the two mutually-exclusive bindings
- * the server takes. Shared by the manual submit and the managed pairing, so a bot
- * created either way answers as the same thing.
- */
-function splitBinding(value: string) {
-	if (value.startsWith(TEAM_PREFIX)) {
-		return { agentId: null, teamId: value.slice(TEAM_PREFIX.length) };
-	}
-	return {
-		agentId: value === DEFAULT_AGENT ? null : value,
-		teamId: null,
-	};
-}
-
-function emptyForm(): FormState {
-	return {
-		channelType: "telegram",
-		name: "",
-		agentId: DEFAULT_AGENT,
-		model: "",
-		systemPrompt: "",
-		groupReplyMode: DEFAULT_GROUP_REPLY_MODE,
-		proactiveOpening: false,
-		proactiveTarget: "",
-		reactionLearning: defaultReactionLearningSettings(),
-		enabled: false,
-		secrets: {},
-	};
-}
+import {
+	type ConnectMode,
+	emptyForm,
+	type FormState,
+	splitBinding,
+} from "./AddChannelDialog-form.ts";
+import {
+	AddChannelReactionLearningSection,
+	AddChannelStartupSection,
+} from "./AddChannelDialog-options-sections.tsx";
+import { AddChannelRoutingSection } from "./AddChannelDialog-routing-section.tsx";
+import { ManualSecretFields } from "./AddChannelDialog-secret-fields.tsx";
 
 export function AddChannelDialog({
 	open,
@@ -135,6 +84,7 @@ export function AddChannelDialog({
 		enabled: boolean;
 	}) => Promise<boolean>;
 }) {
+	const tl = useLiteralMessages();
 	const [form, setForm] = useState<FormState>(emptyForm);
 	const [saving, setSaving] = useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
@@ -203,9 +153,9 @@ export function AddChannelDialog({
 			const missing = requiredKeys.filter((k) => !secrets[k]);
 			if (missing.length > 0) {
 				setFormError(
-					`Missing required: ${missing
-						.map((k) => SECRET_LABELS[k] ?? k)
-						.join(", ")}`
+					tl("Missing required: {fields}", {
+						fields: missing.map((k) => SECRET_LABELS[k] ?? k).join(", "),
+					})
 				);
 				return false;
 			}
@@ -237,7 +187,7 @@ export function AddChannelDialog({
 				setSaving(false);
 			}
 		},
-		[form, requiredKeys, onCreate, onOpenChange]
+		[form, requiredKeys, onCreate, onOpenChange, tl]
 	);
 
 	/**
@@ -373,30 +323,32 @@ export function AddChannelDialog({
 							</NativeSelect>
 						</div>
 
-						<div className="space-y-3 rounded-lg border bg-card p-4">
-							<p className="font-medium text-sm">Credentials</p>
+						<div className="flex flex-col gap-3 border-border border-t pt-4">
+							<p className="font-semibold text-sm">Credentials</p>
 							{managedAvailable ? (
 								<div className="flex gap-2">
 									<Button
 										onClick={() => setConnectMode("managed")}
 										size="sm"
-										variant={usingManaged ? "default" : "outline"}
+										variant={usingManaged ? "secondary" : "ghost"}
 									>
 										Create a bot for me
 									</Button>
 									<Button
 										onClick={() => setConnectMode("manual")}
 										size="sm"
-										variant={usingManaged ? "outline" : "default"}
+										variant={usingManaged ? "ghost" : "secondary"}
 									>
 										Paste a token
 									</Button>
 								</div>
 							) : null}
 							{managedNotice ? (
-								<p className="text-muted-foreground text-xs">
-									{managedNotice} Create one with @BotFather and paste its token
-									below instead.
+								<p className="text-detail text-muted-foreground">
+									{tl(
+										"{managedNotice} Create one with @BotFather and paste its token below instead.",
+										{ managedNotice }
+									)}
 								</p>
 							) : null}
 							{usingManaged ? (
@@ -409,48 +361,22 @@ export function AddChannelDialog({
 								/>
 							) : null}
 							{usingManaged ? null : (
-								<p className="text-muted-foreground text-xs">{setup.note}</p>
+								<p className="text-detail text-muted-foreground">
+									{setup.note}
+								</p>
 							)}
-							{(usingManaged ? [] : requiredKeys).map((key) => {
-								const help = setup.secretHelp[key];
-								return (
-									<div className="space-y-1.5" key={key}>
-										<Label htmlFor={`dialog-secret-${key}`}>
-											{SECRET_LABELS[key] ?? key}
-										</Label>
-										<Input
-											aria-describedby={
-												help ? `dialog-secret-${key}-help` : undefined
-											}
-											autoComplete="off"
-											id={`dialog-secret-${key}`}
-											name={`dialog-secret-${key}`}
-											onChange={(e) =>
-												setForm((f) => ({
-													...f,
-													secrets: { ...f.secrets, [key]: e.target.value },
-												}))
-											}
-											placeholder="Paste value…"
-											type={
-												key === "openwa_url" || key === "webhook_url"
-													? "url"
-													: "password"
-											}
-											value={form.secrets[key] ?? ""}
-										/>
-										{help ? (
-											<p
-												className="text-muted-foreground text-xs"
-												id={`dialog-secret-${key}-help`}
-											>
-												{help}
-											</p>
-										) : null}
-									</div>
-								);
-							})}
-							<p className="text-muted-foreground text-xs">
+							<ManualSecretFields
+								keys={usingManaged ? [] : requiredKeys}
+								onChange={(key, value) =>
+									setForm((f) => ({
+										...f,
+										secrets: { ...f.secrets, [key]: value },
+									}))
+								}
+								secretHelp={setup.secretHelp}
+								secrets={form.secrets}
+							/>
+							<p className="text-detail text-muted-foreground">
 								Values are stored encrypted and never shown again.
 							</p>
 						</div>
@@ -460,240 +386,23 @@ export function AddChannelDialog({
 							</Alert>
 						) : null}
 
-						<div className="space-y-1.5">
-							<Label htmlFor="channel-agent">Routes to</Label>
-							<NativeSelect
-								id="channel-agent"
-								onChange={(e) =>
-									setForm((f) => ({ ...f, agentId: e.target.value }))
-								}
-								value={form.agentId}
-							>
-								<NativeSelectOption value={DEFAULT_AGENT}>
-									Default agent
-								</NativeSelectOption>
-								{agents.length > 0 ? (
-									<optgroup label="Agents">
-										{agents.map((a) => (
-											<NativeSelectOption key={a.id} value={a.id}>
-												{a.name}
-											</NativeSelectOption>
-										))}
-									</optgroup>
-								) : null}
-								{teams.length > 0 ? (
-									<optgroup label="Groups">
-										{teams.map((t) => (
-											<NativeSelectOption
-												key={t.id}
-												value={`${TEAM_PREFIX}${t.id}`}
-											>
-												{t.name}
-											</NativeSelectOption>
-										))}
-									</optgroup>
-								) : null}
-							</NativeSelect>
-							<p className="text-muted-foreground text-xs">
-								Pick a single agent, or a group — the group's lead agent
-								orchestrates and calls the other members to answer.
-							</p>
-						</div>
-
-						<div className="space-y-1.5">
-							<Label htmlFor="channel-model">Model override (optional)</Label>
-							<Input
-								id="channel-model"
-								onChange={(e) =>
-									setForm((f) => ({ ...f, model: e.target.value }))
-								}
-								placeholder="Leave blank to use the agent's model"
-								value={form.model}
-							/>
-						</div>
-
-						<div className="space-y-1.5">
-							<Label htmlFor="channel-prompt">System prompt (optional)</Label>
-							<Textarea
-								id="channel-prompt"
-								onChange={(e) =>
-									setForm((f) => ({ ...f, systemPrompt: e.target.value }))
-								}
-								placeholder="Override the agent's persona for this bot"
-								rows={3}
-								value={form.systemPrompt}
-							/>
-						</div>
-
-						<div className="space-y-1.5">
-							<Label htmlFor="channel-group-reply">Group replies</Label>
-							<NativeSelect
-								id="channel-group-reply"
-								onChange={(e) =>
-									setForm((f) => ({
-										...f,
-										groupReplyMode:
-											/* SAFETY: This NativeSelect renders only the typed GROUP_REPLY_MODES option values. This is a native UI selection, not a decoder for arbitrary synthetic events. */ e
-												.target.value as GroupReplyMode,
-									}))
-								}
-								value={form.groupReplyMode}
-							>
-								{GROUP_REPLY_MODES.map((mode) => (
-									<NativeSelectOption key={mode} value={mode}>
-										{GROUP_REPLY_LABELS[mode]}
-									</NativeSelectOption>
-								))}
-							</NativeSelect>
-						</div>
+						<AddChannelRoutingSection
+							agents={agents}
+							form={form}
+							setForm={setForm}
+							teams={teams}
+						/>
 
 						{form.channelType === "telegram" ? (
-							<div className="space-y-3 rounded-lg border bg-card p-4">
-								<div className="flex items-center justify-between gap-4">
-									<div>
-										<p className="font-medium text-sm">Reaction learning</p>
-										<p className="text-muted-foreground text-xs">
-											Use reactions on this bot's replies as Good response / Bad
-											response feedback. Off by default.
-										</p>
-									</div>
-									<Switch
-										aria-label="Enable reaction learning"
-										checked={form.reactionLearning.enabled}
-										onCheckedChange={(v) =>
-											setForm((f) => ({
-												...f,
-												reactionLearning: { ...f.reactionLearning, enabled: v },
-											}))
-										}
-									/>
-								</div>
-								<div className="space-y-1.5">
-									<Label htmlFor="channel-add-positive-emojis">
-										Good response emojis
-									</Label>
-									<Input
-										disabled={!form.reactionLearning.enabled}
-										id="channel-add-positive-emojis"
-										onChange={(e) =>
-											setForm((f) => ({
-												...f,
-												reactionLearning: {
-													...f.reactionLearning,
-													positiveEmoji: e.target.value
-														.split(",")
-														.map((value) => value.trim())
-														.filter(Boolean),
-												},
-											}))
-										}
-										placeholder="👍, ❤️, 🎉"
-										value={form.reactionLearning.positiveEmoji.join(", ")}
-									/>
-								</div>
-								<div className="space-y-1.5">
-									<Label htmlFor="channel-add-negative-emojis">
-										Bad response emojis
-									</Label>
-									<Input
-										disabled={!form.reactionLearning.enabled}
-										id="channel-add-negative-emojis"
-										onChange={(e) =>
-											setForm((f) => ({
-												...f,
-												reactionLearning: {
-													...f.reactionLearning,
-													negativeEmoji: e.target.value
-														.split(",")
-														.map((value) => value.trim())
-														.filter(Boolean),
-												},
-											}))
-										}
-										placeholder="👎, 💀, 😴"
-										value={form.reactionLearning.negativeEmoji.join(", ")}
-									/>
-								</div>
-								<div className="flex items-center justify-between gap-4">
-									<div>
-										<p className="text-sm">Allow group reactions</p>
-										<p className="text-muted-foreground text-xs">
-											Off by default because group feedback can represent more
-											than one person.
-										</p>
-									</div>
-									<Switch
-										aria-label="Allow group reaction learning"
-										checked={form.reactionLearning.allowGroup}
-										disabled={!form.reactionLearning.enabled}
-										onCheckedChange={(v) =>
-											setForm((f) => ({
-												...f,
-												reactionLearning: {
-													...f.reactionLearning,
-													allowGroup: v,
-												},
-											}))
-										}
-									/>
-								</div>
-							</div>
-						) : null}
-
-						<div className="space-y-3 rounded-lg border bg-card p-4">
-							<div className="flex items-center justify-between gap-4">
-								<div>
-									<p className="font-medium text-sm">Say hello first</p>
-									<p className="text-muted-foreground text-xs">
-										When this bot starts, Ryu sends one welcome message while it
-										waits for you to write first.
-									</p>
-								</div>
-								<Switch
-									aria-label="Let Ryu say hello first"
-									checked={form.proactiveOpening}
-									onCheckedChange={(v) =>
-										setForm((f) => ({ ...f, proactiveOpening: v }))
-									}
-								/>
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="channel-proactive-target">
-									Where should Ryu say hello?
-								</Label>
-								<Input
-									disabled={!form.proactiveOpening}
-									id="channel-proactive-target"
-									onChange={(e) =>
-										setForm((f) => ({ ...f, proactiveTarget: e.target.value }))
-									}
-									placeholder="The approved chat or phone number"
-									value={form.proactiveTarget}
-								/>
-								<p className="text-muted-foreground text-xs">
-									Enter one approved chat. Ryu never sends a welcome to
-									everyone.
-								</p>
-							</div>
-						</div>
-
-						<div className="flex items-center justify-between rounded-lg border bg-card p-4">
-							<div>
-								<p className="font-medium text-sm">Enabled</p>
-								<p className="text-muted-foreground text-xs">
-									The gateway registers enabled bots when it starts.
-								</p>
-							</div>
-							<Switch
-								aria-label="Enable channel"
-								checked={form.enabled}
-								onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
+							<AddChannelReactionLearningSection
+								form={form}
+								setForm={setForm}
 							/>
-						</div>
-
-						{formError ? (
-							<p className="text-sm text-status-destructive">{formError}</p>
 						) : null}
+
+						<AddChannelStartupSection form={form} setForm={setForm} />
+
+						{formError ? <ErrorLine message={formError} /> : null}
 					</div>
 				</ScrollFadeEffect>
 

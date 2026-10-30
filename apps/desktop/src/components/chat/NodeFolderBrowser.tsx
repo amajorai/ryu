@@ -1,5 +1,4 @@
 "use client";
-import layout from "./chat-layout.module.css";
 
 // apps/desktop/src/components/chat/NodeFolderBrowser.tsx
 //
@@ -15,8 +14,7 @@ import layout from "./chat-layout.module.css";
 // Core resolves into drives); other nodes start at the home directory. Both
 // roots open expanded so the tree shows folders immediately.
 
-import { ArrowRight01Icon, Folder03Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Command,
@@ -24,27 +22,16 @@ import {
 	CommandEmpty,
 	CommandGroup,
 	CommandInput,
-	CommandItem,
 	CommandList,
 	CommandSeparator,
 } from "@ryu/ui/components/command.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	type CSSProperties,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
-
-interface FolderIndentStyle extends CSSProperties {
-	"--folder-indent": string;
-}
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type DirectoryEntry, listDirectory } from "@/src/lib/api/workspace.ts";
+import { FolderRow } from "./NodeFolderBrowser-folder-row.tsx";
 
 interface NodeFolderBrowserProps {
 	/** Called when the command dialog requests to open/close. */
@@ -58,132 +45,6 @@ interface NodeFolderBrowserProps {
 // The Windows "This PC" sentinel Core resolves into a drive listing (git.rs).
 const THIS_PC = "::this-pc";
 
-/** One folder row plus (when expanded) its lazily-loaded sub-folders. Every node
- *  is a directory, so every row is expandable. */
-function FolderRow({
-	node,
-	depth,
-	expanded,
-	childrenByPath,
-	loadingPaths,
-	childErrors,
-	onRetry,
-	selected,
-	onToggle,
-	onSelect,
-}: {
-	node: DirectoryEntry;
-	depth: number;
-	expanded: ReadonlySet<string>;
-	childrenByPath: ReadonlyMap<string, DirectoryEntry[]>;
-	loadingPaths: ReadonlySet<string>;
-	childErrors: ReadonlyMap<string, string>;
-	onRetry: (path: string) => void;
-	selected: string | null;
-	onToggle: (path: string) => void;
-	onSelect: (path: string) => void;
-}) {
-	const rowIndent: FolderIndentStyle = {
-		"--folder-indent": `${depth * 16 + 8}px`,
-	};
-	const noteIndent: FolderIndentStyle = {
-		"--folder-indent": `${(depth + 1) * 16 + 24}px`,
-	};
-	const isOpen = expanded.has(node.path);
-	const isSelected = node.path === selected;
-	const children = childrenByPath.get(node.path);
-	const isLoading = loadingPaths.has(node.path);
-
-	return (
-		<>
-			<CommandItem
-				data-checked={isSelected}
-				onSelect={() => {
-					onSelect(node.path);
-					onToggle(node.path);
-				}}
-				value={node.path}
-			>
-				<span className="w-(--folder-indent) shrink-0" style={rowIndent} />
-				<HugeiconsIcon
-					className={cn(
-						"size-3.5 shrink-0 text-foreground/40 transition-transform",
-						isOpen && "rotate-90"
-					)}
-					icon={ArrowRight01Icon}
-				/>
-				<HugeiconsIcon
-					className="size-4 shrink-0 text-foreground/40"
-					icon={Folder03Icon}
-				/>
-				<span
-					className="min-w-0 flex-1 truncate text-foreground/80"
-					title={node.name}
-				>
-					{node.name}
-				</span>
-			</CommandItem>
-
-			{isOpen && (
-				<>
-					{isLoading && (
-						<p
-							className={cn(
-								layout.folderNote,
-								"type-caption py-1 text-muted-foreground"
-							)}
-							style={noteIndent}
-						>
-							Loading…
-						</p>
-					)}
-					{!isLoading && childErrors.has(node.path) && (
-						<div
-							className="px-3 py-1 text-status-destructive text-xs"
-							role="alert"
-						>
-							{childErrors.get(node.path)}
-							<Button
-								onClick={() => onRetry(node.path)}
-								size="sm"
-								variant="ghost"
-							>
-								Retry folder
-							</Button>
-						</div>
-					)}
-					{!isLoading && children?.length === 0 && (
-						<p
-							className={cn(
-								layout.folderNote,
-								"type-caption py-1 text-muted-foreground"
-							)}
-							style={noteIndent}
-						>
-							No sub-folders.
-						</p>
-					)}
-					{children?.map((child) => (
-						<FolderRow
-							childErrors={childErrors}
-							childrenByPath={childrenByPath}
-							depth={depth + 1}
-							expanded={expanded}
-							key={child.path}
-							loadingPaths={loadingPaths}
-							node={child}
-							onRetry={onRetry}
-							onSelect={onSelect}
-							onToggle={onToggle}
-							selected={selected}
-						/>
-					))}
-				</>
-			)}
-		</>
-	);
-}
-
 /**
  * A command dialog that browses the active node's filesystem as a lazy,
  * expandable tree and confirms a folder. Errors from the node (404/403) surface
@@ -195,6 +56,7 @@ export function NodeFolderBrowser({
 	onSelect,
 }: NodeFolderBrowserProps) {
 	const activeNode = useActiveNode();
+	const tl = useLiteralMessages();
 	const nodeUrl = activeNode.url;
 	const nodeToken = activeNode.token ?? null;
 	const nodeUserJwt = activeNode.userJwt ?? null;
@@ -439,15 +301,21 @@ export function NodeFolderBrowser({
 		}
 	}, [selected, pathInvalid, onSelect, onOpenChange]);
 
-	const locationLabel =
-		activeNode.name === "local"
-			? "this device"
-			: `the "${activeNode.name}" node`;
+	const isLocalNode = activeNode.name === "local";
+	const nodeName = activeNode.name;
+	const browseDescription = isLocalNode
+		? tl("Browse folders on this device and add one as a Ryu project.")
+		: tl('Browse folders on the "{name}" node and add one as a Ryu project.', {
+				name: nodeName,
+			});
+	const foldersHeading = isLocalNode
+		? tl("Folders on this device")
+		: tl('Folders on the "{name}" node', { name: nodeName });
 
 	return (
 		<CommandDialog
 			className="sm:max-w-lg"
-			description={`Browse folders on ${locationLabel} and add one as a Ryu project.`}
+			description={browseDescription}
 			onOpenChange={onOpenChange}
 			open={open}
 			title="Add a project folder to Ryu"
@@ -482,7 +350,7 @@ export function NodeFolderBrowser({
 						<CommandEmpty>No folders found.</CommandEmpty>
 					)}
 					{!(loading || error) && (
-						<CommandGroup heading={`Folders on ${locationLabel}`}>
+						<CommandGroup heading={foldersHeading}>
 							{roots.map((root) => (
 								<FolderRow
 									childErrors={childErrors}

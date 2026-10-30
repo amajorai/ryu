@@ -42,10 +42,8 @@ export function IslandLiveSurface({
 	const reduceMotion = useReducedMotion();
 	const hidden = reduceMotion
 		? { opacity: 0 }
-		: { filter: "blur(6px)", opacity: 0, scale: 0.97, y: -6 };
-	const shown = reduceMotion
-		? { opacity: 1 }
-		: { filter: "blur(0px)", opacity: 1, scale: 1, y: 0 };
+		: { opacity: 0, scale: 0.97, y: -6 };
+	const shown = reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 };
 	return (
 		<AnimatePresence initial={!reduceMotion} mode="popLayout">
 			{surface ? (
@@ -54,7 +52,7 @@ export function IslandLiveSurface({
 					aria-busy={updating}
 					aria-label={surface.title ?? "Generated screen"}
 					className={cn(
-						"relative flex min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-sm",
+						"relative flex min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-border bg-card",
 						className
 					)}
 					data-slot="island-live-surface"
@@ -64,14 +62,14 @@ export function IslandLiveSurface({
 					layout={!reduceMotion}
 					transition={reduceMotion ? { duration: 0.12 } : SURFACE_SPRING}
 				>
-					<header className="flex shrink-0 items-center gap-2 px-3 pt-2 pb-1">
-						<h3 className="min-w-0 flex-1 truncate font-medium text-foreground/80 text-xs">
+					<header className="flex h-10 shrink-0 items-center gap-2 px-3">
+						<h3 className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
 							{surface.title ?? "Generated screen"}
 						</h3>
 						{updating ? (
 							<span
 								aria-live="polite"
-								className="type-compact shrink-0 animate-skeleton text-muted-foreground"
+								className="shrink-0 animate-skeleton text-muted-foreground text-xs"
 								role="status"
 							>
 								Updating…

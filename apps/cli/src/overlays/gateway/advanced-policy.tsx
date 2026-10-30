@@ -4,176 +4,29 @@ import { useKeyboard } from "@opentui/react";
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { request } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { z } from "zod";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { useCliProductMode } from "../../core/ProductModeContext.tsx";
-
-const SECTIONS = [
-	"firewall",
-	"firewall_org_overlays",
-	"firewall_agent_overlays",
-	"custom_evaluators",
-	"claude-gateway-routing",
-	"codex-gateway-routing",
-	"agent-gateway-routing",
-] as const;
-type Section = (typeof SECTIONS)[number];
-const LABELS = [
-	"Node firewall",
-	"Organization overlays",
-	"Agent overlays",
-	"Custom evaluator catalog",
-	"Claude egress preference",
-	"Codex egress preference",
-	"Agent egress preference map",
-];
-const policyJsonSchema = z.json();
-type PolicyValue = z.infer<typeof policyJsonSchema> | undefined;
-const policyRecordSchema = z.record(z.string(), policyJsonSchema);
-type PolicyRecord = z.infer<typeof policyRecordSchema>;
-const policyScalarSchema = z.union([
-	z.string(),
-	z.number(),
-	z.boolean(),
-	z.null(),
-]);
-const policyBooleanSchema = z.boolean();
-const policyBooleanMapSchema = z.record(z.string(), policyBooleanSchema);
-const policyStringSchema = z.string();
-const policyInspectorModelSchema = policyStringSchema.trim().min(1);
-const policyCatalogSchema = z.object({
-	evaluators: policyJsonSchema.optional(),
-});
-const policyPreferenceSchema = z.object({ value: policyJsonSchema.optional() });
-const policyRestartSchema = z.object({
-	success: z.boolean().optional().catch(undefined),
-});
-type Snapshot = Partial<Record<Section, PolicyValue>>;
-function record(value: PolicyValue): value is PolicyRecord {
-	return (
-		value !== undefined &&
-		!Array.isArray(value) &&
-		!policyScalarSchema.safeParse(value).success
-	);
-}
-function canonical(value: PolicyValue): string {
-	if (Array.isArray(value)) {
-		return `[${value.map(canonical).join(",")}]`;
-	}
-	if (record(value)) {
-		return `{${Object.keys(value)
-			.sort()
-			.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
-			.join(",")}}`;
-	}
-	return JSON.stringify(value) ?? "null";
-}
-// Gateway may add serde defaults, but every authored value must survive readback.
-function confirms(expected: PolicyValue, actual: PolicyValue): boolean {
-	if (expected === null) {
-		return actual === null || actual === undefined;
-	}
-	if (Array.isArray(expected)) {
-		return (
-			Array.isArray(actual) &&
-			expected.length === actual.length &&
-			expected.every((item, index) => confirms(item, actual[index]))
-		);
-	}
-	if (record(expected)) {
-		return (
-			record(actual) &&
-			Object.entries(expected).every(([key, value]) =>
-				confirms(value, actual[key])
-			)
-		);
-	}
-	return expected === actual;
-}
-function confirmsSection(
-	section: Section,
-	expected: PolicyValue,
-	actual: PolicyValue
-): boolean {
-	if (
-		(section === "firewall_org_overlays" ||
-			section === "firewall_agent_overlays" ||
-			section === "agent-gateway-routing") &&
-		record(expected) &&
-		record(actual) &&
-		canonical(Object.keys(expected).sort()) !==
-			canonical(Object.keys(actual).sort())
-	) {
-		return false;
-	}
-	return confirms(expected, actual);
-}
-function validate(
-	section: Section,
-	value: PolicyValue,
-	before: PolicyValue
-): void {
-	if (
-		section === "claude-gateway-routing" ||
-		section === "codex-gateway-routing"
-	) {
-		if (!policyBooleanSchema.safeParse(value).success) {
-			throw new Error(
-				"Use true for Gateway routing or false for direct routing."
-			);
-		}
-		return;
-	}
-	if (section === "agent-gateway-routing") {
-		if (!policyBooleanMapSchema.safeParse(value).success) {
-			throw new Error(
-				"Use an agent ID to boolean map. Missing IDs inherit Gateway routing."
-			);
-		}
-		return;
-	}
-	if (section === "custom_evaluators") {
-		if (!Array.isArray(value)) {
-			throw new Error("Provide the complete evaluator array.");
-		}
-		return;
-	}
-	if (!record(value)) {
-		throw new Error("Provide the complete section object.");
-	}
-	if (section === "firewall" && record(before)) {
-		for (const key of Object.keys(before)) {
-			if (!(key in value)) {
-				throw new Error(`Keep served field ${key}; edit its value explicitly.`);
-			}
-		}
-	}
-	const rows = section === "firewall" ? [value] : Object.values(value);
-	for (const row of rows) {
-		if (!record(row)) {
-			throw new Error("Every overlay must be an object.");
-		}
-		if (
-			row.inspector !== undefined &&
-			row.inspector !== null &&
-			!(
-				record(row.inspector) &&
-				policyInspectorModelSchema.safeParse(row.inspector.model).success
-			)
-		) {
-			throw new Error("Inspector requires an explicit nonblank model ID.");
-		}
-		if (
-			section !== "firewall" &&
-			(row.wrap_untrusted_tool_results != null ||
-				(Array.isArray(row.locked_fields) &&
-					row.locked_fields.includes("wrap_untrusted_tool_results")))
-		) {
-			throw new Error("Tool-result wrapping and its lock are node-only.");
-		}
-	}
-}
+import { tf } from "../../i18n/translate.ts";
+import {
+	canonical,
+	confirmsSection,
+	LABELS,
+	type PolicyValue,
+	policyBooleanMapSchema,
+	policyBooleanSchema,
+	policyCatalogSchema,
+	policyJsonSchema,
+	policyPreferenceSchema,
+	policyRecordSchema,
+	policyRestartSchema,
+	policyStringSchema,
+	record,
+	SECTIONS,
+	type Section,
+	type Snapshot,
+	validate,
+} from "./advanced-policy-model.ts";
 
 export function GatewayAdvancedPolicy({
 	onEditingChange,
@@ -302,7 +155,9 @@ export function GatewayAdvancedPolicy({
 		} catch (error) {
 			if (!current.signal.aborted) {
 				setMessage(
-					`Could not load advanced policy: ${error instanceof Error ? error.message : String(error)} · r retry`
+					tf("Could not load advanced policy: {error} · r retry", {
+						error: error instanceof Error ? error.message : String(error),
+					})
 				);
 			}
 		}
@@ -411,7 +266,9 @@ export function GatewayAdvancedPolicy({
 		} catch (error) {
 			if (!current.signal.aborted) {
 				setMessage(
-					`Could not save: ${error instanceof Error ? error.message : String(error)} · y retry · n cancel`
+					tf("Could not save: {error} · y retry · n cancel", {
+						error: error instanceof Error ? error.message : String(error),
+					})
 				);
 			}
 		} finally {
@@ -451,7 +308,9 @@ export function GatewayAdvancedPolicy({
 					setMessage("");
 				} catch (error) {
 					setMessage(
-						`Invalid policy JSON: ${error instanceof Error ? error.message : String(error)}`
+						tf("Invalid policy JSON: {error}", {
+							error: error instanceof Error ? error.message : String(error),
+						})
 					);
 				}
 			}
@@ -499,7 +358,11 @@ export function GatewayAdvancedPolicy({
 				</>
 			) : stage === "edit" ? (
 				<>
-					<text>{LABELS[row]} · complete replacement JSON</text>
+					<text>
+						{tf("{label} · complete replacement JSON", {
+							label: LABELS[row] ?? "",
+						})}
+					</text>
 					<input
 						focused
 						onInput={setDraft}
@@ -510,7 +373,9 @@ export function GatewayAdvancedPolicy({
 				</>
 			) : (
 				<>
-					<text>Replace the entire {section} section?</text>
+					<text>
+						{tf("Replace the entire {section} section?", { section })}
+					</text>
 					<text>
 						Omitted overlay IDs are removed. Other sections stay unchanged.
 					</text>

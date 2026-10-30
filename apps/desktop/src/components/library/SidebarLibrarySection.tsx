@@ -112,7 +112,7 @@ export default function SidebarLibrarySection({
 				{visible.map((item) => (
 					<div className="group relative" key={item.id}>
 						<div
-							className="cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							className="cursor-pointer rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={item.onOpen}
 							onKeyDown={(event) => {
 								if (event.key === "Enter" || event.key === " ") {

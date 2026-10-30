@@ -34,6 +34,17 @@ import { formatMicroUsd as formatSharedMicroUsd } from "@ryu/ui/lib/number-forma
 import { openSse, SseConnectError, type SseMessage } from "@ryuhq/protocol/sse";
 import { z } from "zod";
 import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
+import type {
+	AutoTopupInput,
+	AutoTopupSettings,
+	CreditAlertInput,
+	CreditAlertSettings,
+} from "./credits-settings.ts";
+import type {
+	UsageFilters,
+	UsageResponse,
+	WalletResponse,
+} from "./credits-wallet.ts";
 import {
 	autoTopupSettingsSchema,
 	creditAlertEventSchema,
@@ -67,230 +78,31 @@ export type CreditPack = CreditTopupPackUsd;
 export const MIN_TOPUP_DOLLARS = CREDIT_TOPUP_MIN_CENTS / 100;
 export const MAX_TOPUP_DOLLARS = CREDIT_TOPUP_MAX_CENTS / 100;
 
-/**
- * Why a ledger entry was written. Mirrors the server's `LedgerReason` in
- * `@ryu/db/models/credits.model`. Ledger entries retain the wire reason string, so
- * newly introduced server reasons keep their existing raw-label fallback.
- * These known reasons define the desktop labels and credit classification.
- */
-export type LedgerReason =
-	| "topup"
-	| "plan_grant"
-	| "gateway_usage"
-	| "openrouter"
-	| "composio"
-	| "treg"
-	| "subscription_offset"
-	| "adjustment"
-	| "web_search"
-	| "campaign_grant"
-	| "referral_grant"
-	| "gift_credit"
-	| "gift_card"
-	| "gift_expired"
-	| "gift_reversal"
-	| "managed_agents"
-	| "box"
-	| "sandbox"
-	| "notify"
-	| "passport"
-	| "connect_native"
-	| "connect_vendor"
-	| "connect_composed"
-	| "composed_tool_earnings"
-	| "mail"
-	| "messaging";
-
-/** Reasons that CREDIT the wallet (positive delta). Mirrors the server's
- * `CREDIT_REASONS`; used so the ledger badges a credit consistently. */
-export const CREDIT_LEDGER_REASONS: readonly LedgerReason[] = [
-	"topup",
-	"plan_grant",
-	"campaign_grant",
-	"referral_grant",
-	"gift_credit",
-	"gift_card",
-	"composed_tool_earnings",
-];
-
-/** Human label for each ledger reason, for the ledger list. */
-export const LEDGER_REASON_LABELS = {
-	topup: "Top-up",
-	plan_grant: "Plan credit",
-	gateway_usage: "Gateway usage",
-	openrouter: "OpenRouter usage",
-	composio: "Composio action",
-	treg: "Treg tool",
-	subscription_offset: "Subscription offset",
-	adjustment: "Adjustment",
-	web_search: "Web search",
-	// Campaign and referral money is POOL-RESTRICTED, but the label deliberately
-	// does not say which pool: the pool is a supply-side fact, and the user-facing
-	// promise is one Ryu-native unit. The per-pool breakdown lives on the balance
-	// card, not on every ledger row.
-	campaign_grant: "Campaign credit",
-	referral_grant: "Referral credit",
-	gift_credit: "Gift credits",
-	gift_card: "Gift card",
-	gift_expired: "Gift credits expired",
-	gift_reversal: "Gift credit reversal",
-	managed_agents: "Managed Agents",
-	// Hosted standalone services, settled hourly from each service's usage.
-	box: "Box compute and storage",
-	// A session's Box on a node, metered per tick by the Gateway while it runs.
-	sandbox: "Box session compute",
-	notify: "Notify events",
-	passport: "Passport connections and fetches",
-	connect_native: "Connect tool call",
-	connect_vendor: "Connect vendor call (Ryu key)",
-	connect_composed: "Composed tool fee",
-	composed_tool_earnings: "Composed tool earnings",
-	mail: "Mail overage",
-	messaging: "Messaging (SMS, WhatsApp, voice)",
-} satisfies Record<LedgerReason, string>;
-
-/** Preserve the server reason fallback when a future ledger reason is introduced. */
-export function ledgerReasonLabel(reason: string) {
-	return Object.entries(LEDGER_REASON_LABELS).find(
-		([key]) => key === reason
-	)?.[1];
-}
-export function isCreditLedgerReason(reason: string) {
-	return CREDIT_LEDGER_REASONS.some((known) => known === reason);
-}
-
-/** The materialized prepaid balance for the caller's active org. */
-export interface CreditWallet {
-	/** Unrestricted balance less open credit holds (what a new send can use). */
-	availableMicroUsd?: number;
-	/** False when Polar returns only the aggregate meter balance. */
-	balanceBreakdownAvailable?: boolean;
-	balanceMicroUsd: number;
-	currency: string;
-	/** Remaining redeemed gift credit; each gift has its own expiry. */
-	giftBalanceMicroUsd?: number | null;
-	/** Money held by open credit holds, such as in-flight Messaging sends. */
-	heldMicroUsd?: number;
-	id: string;
-	ownerId: string;
-	ownerType: string;
-	providerAllocations?: CreditProviderAllocation[];
-	/** `polar` means Polar owns the provider balance; `local` is legacy mode. */
-	source?: string;
-	/** Remaining included plan credit for the current billing period. */
-	subscriptionBalanceMicroUsd: number | null;
-	/** Remaining purchased credit; this balance rolls over. */
-	topupBalanceMicroUsd: number | null;
-	/** Polar aggregate meter balance available for any provider. */
-	unrestrictedBalanceMicroUsd?: number;
-	updatedAt: string;
-}
-
-/**
- * Spendable balance for retail managed providers. Pool-restricted grants are
- * deliberately excluded; the provider-specific pool path handles those.
- */
-export function unrestrictedCreditBalanceMicroUsd(
-	wallet: CreditWallet | null
-): number {
-	if (!wallet) {
-		return 0;
-	}
-	if (wallet.unrestrictedBalanceMicroUsd !== undefined) {
-		return Math.max(0, wallet.unrestrictedBalanceMicroUsd);
-	}
-	if (wallet.balanceBreakdownAvailable === false) {
-		return Math.max(0, wallet.balanceMicroUsd);
-	}
-	return Math.max(
-		0,
-		(wallet.subscriptionBalanceMicroUsd ?? 0) +
-			(wallet.topupBalanceMicroUsd ?? 0) +
-			(wallet.giftBalanceMicroUsd ?? 0)
-	);
-}
-
-export interface CreditProviderAllocation {
-	expiresAt: string | null;
-	isFreeProvider: boolean;
-	label: string;
-	poolId: string;
-	remainingMicroUsd: number;
-}
-
-/** One append-only ledger entry (credit or debit). */
-export interface LedgerEntry {
-	balanceAfter: number;
-	createdAt: string;
-	/** Signed micro-USD change: positive for top-ups, negative for usage. */
-	delta: number;
-	/** Wall-clock ms the billed work took; null when not measured. */
-	durationMs: number | null;
-	/** Whether the amount came from a provider/catalog estimate. */
-	estimated: boolean | null;
-	id: string;
-	inputTokens: number | null;
-	/** Model or resource id that produced the charge. */
-	model: string | null;
-	orgId: string | null;
-	outputTokens: number | null;
-	/** Provider Gateway charged through (for example, `openrouter`). */
-	provider: string | null;
-	reason: string;
-	refId: string | null;
-	/** Human-facing label for what the spend was for. */
-	taskLabel: string | null;
-	/** Provider selected behind OpenRouter when it reported routing metadata. */
-	upstreamProvider: string | null;
-	userId: string | null;
-	walletId: string;
-}
-
-/** One grouped row of a usage breakdown. */
-export interface UsageBreakdownRow {
-	/** Micro-USD SPENT, as a positive number. */
-	amountMicroUsd: number;
-	count: number;
-	key: string | null;
-}
-
-/** Aggregates for a usage window. */
-export interface UsageStats {
-	byModel: UsageBreakdownRow[];
-	byProvider: UsageBreakdownRow[];
-	byReason: UsageBreakdownRow[];
-	creditedMicroUsd: number;
-	durationMs: number;
-	inputTokens: number;
-	outputTokens: number;
-	spentMicroUsd: number;
-	transactions: number;
-}
-
-/** The `/usage` response: one keyset page plus the window's aggregates. */
-export interface UsageResponse {
-	entries: LedgerEntry[];
-	/** Pass back as `before` for the next page; null when exhausted. */
-	nextCursor: string | null;
-	stats: UsageStats;
-}
-
-/** Filters accepted by `/usage`. All optional. */
-export interface UsageFilters {
-	before?: string | null;
-	limit?: number;
-	model?: string | null;
-	provider?: string | null;
-	reason?: string | null;
-	since?: string | null;
-	until?: string | null;
-}
-
-/** The `/wallet` response: balance + a newest-first window of the ledger. */
-export interface WalletResponse {
-	ledger: LedgerEntry[];
-	wallet: CreditWallet;
-}
+export {
+	CREDIT_LEDGER_REASONS,
+	isCreditLedgerReason,
+	LEDGER_REASON_LABELS,
+	type LedgerReason,
+	ledgerReasonLabel,
+} from "./credits-ledger.ts";
+export type {
+	AutoTopupInput,
+	AutoTopupSettings,
+	CreditAlertInput,
+	CreditAlertRecipients,
+	CreditAlertSettings,
+} from "./credits-settings.ts";
+export {
+	type CreditProviderAllocation,
+	type CreditWallet,
+	type LedgerEntry,
+	type UsageBreakdownRow,
+	type UsageFilters,
+	type UsageResponse,
+	type UsageStats,
+	unrestrictedCreditBalanceMicroUsd,
+	type WalletResponse,
+} from "./credits-wallet.ts";
 
 /** The Better-Auth session bearer token, or null when signed out / no storage. */
 function authToken(): string | null {
@@ -601,39 +413,6 @@ export async function createTopup(input: TopupInput): Promise<TopupResult> {
 // Polar customer returns 409 ("make a manual top-up first"), and with the
 // product unconfigured returns 503 — both surfaced as tailored messages.
 
-/**
- * The org's auto-recharge settings as the server returns them
- * (`serializeAutoTopup`). All money fields are integer cents / micro-USD; status
- * fields report the last off-session attempt and the running monthly spend.
- */
-export interface AutoTopupSettings {
-	amountCents: number;
-	consecutiveFailures: number;
-	cooldownSec: number;
-	enabled: boolean;
-	lastAttemptAt: string | null;
-	lastError: string | null;
-	/** Total auto-recharge charged so far in the current `monthKey`, micro-USD. */
-	monthChargedMicroUsd: number;
-	/** Calendar-month bucket for {@link monthChargedMicroUsd}, e.g. "2026-07". */
-	monthKey: string | null;
-	/** Per-calendar-month spend cap in cents; 0 = no cap. */
-	monthlyCapCents: number;
-	thresholdCents: number;
-}
-
-/** The `PUT /autotopup` body: enable/disable + the recharge parameters. */
-export interface AutoTopupInput {
-	/** Fixed top-up amount charged each recharge, cents (bounds $5–$1000). */
-	amountCents: number;
-	/** Minimum seconds between off-session charges (server floors at 60). */
-	cooldownSec?: number;
-	enabled: boolean;
-	/** Per-calendar-month spend cap in cents; 0 = no cap. */
-	monthlyCapCents?: number;
-	/** Recharge fires when the balance falls below this, cents (must be > 0). */
-	thresholdCents: number;
-}
 
 /** Coerce the server's `{ settings }` envelope into a typed view (or null). */
 /** Fetch the active org's auto-recharge settings, or null when unset. */
@@ -682,25 +461,6 @@ export async function putAutoTopup(
 // drops below a threshold. `recipients: "none"` is the OFF state. Independent of
 // auto-recharge: no saved card required, and the threshold is its own line.
 
-/** Who is emailed on low balance. Mirrors the server's `CreditAlertRecipients`. */
-export type CreditAlertRecipients = "none" | "owners" | "owners_admins";
-
-/** The org's low-balance alert settings as the server returns them. */
-export interface CreditAlertSettings {
-	/** Non-null once an alert has fired for the current below-threshold episode. */
-	belowSince: string | null;
-	lastError: string | null;
-	notifiedAt: string | null;
-	recipients: CreditAlertRecipients;
-	thresholdCents: number;
-}
-
-/** The `PUT /alert` body: who to email + the balance threshold. */
-export interface CreditAlertInput {
-	recipients: CreditAlertRecipients;
-	/** Alert fires when the balance falls below this, cents (required unless "none"). */
-	thresholdCents: number;
-}
 
 /** Coerce the server's `{ settings }` envelope into a typed view (or null). */
 /** Fetch the active org's low-balance alert settings, or null when unset. */

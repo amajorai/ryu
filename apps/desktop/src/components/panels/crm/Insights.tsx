@@ -20,7 +20,7 @@ interface CrmDataStyle extends CSSProperties {
 
 import { Alert01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
@@ -53,6 +53,7 @@ export function Insights({
 	onOpenRecord: (recordId: string) => void;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [window, setWindow] = useState<Window>("today");
 	const [tasks, setTasks] = useState<Activity[]>([]);
 	const [pipeline, setPipeline] = useState<PipelineReport | null>(null);
@@ -124,7 +125,7 @@ export function Insights({
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-				<h2 className="font-medium text-base">Follow-ups & pipeline</h2>
+				<h2 className="font-semibold text-sm">Follow-ups & pipeline</h2>
 				<Button
 					disabled={loading}
 					onClick={() => void load()}
@@ -171,7 +172,7 @@ export function Insights({
 						<ul className="space-y-1">
 							{tasks.map((task) => (
 								<li
-									className="flex items-start gap-2 rounded-md border bg-card p-2"
+									className="flex items-start gap-2 rounded-lg border bg-card p-2"
 									key={task.id}
 								>
 									<Checkbox
@@ -227,14 +228,22 @@ export function Insights({
 						<div className="mb-2 flex items-baseline justify-between gap-2">
 							<h3 className="font-medium text-sm">Pipeline</h3>
 							<span className="text-muted-foreground text-xs">
-								<span className="font-mono tabular-nums">
-									{formatCents(
-										pipeline.total_value_cents,
-										pipeline.currency_code
-									)}
-								</span>{" "}
-								across {formatNumber(pipeline.total_records)} ·{" "}
-								{Math.round(pipeline.win_rate * 100)}% win rate
+								{tlRich(
+									"<amount>{totalValue}</amount> across {recordCount} · {winRate}% win rate",
+									{
+										totalValue: formatCents(
+											pipeline.total_value_cents,
+											pipeline.currency_code
+										),
+										recordCount: formatNumber(pipeline.total_records),
+										winRate: Math.round(pipeline.win_rate * 100),
+									},
+									{
+										amount: (chunks) => (
+											<span className="font-mono tabular-nums">{chunks}</span>
+										),
+									}
+								)}
 							</span>
 						</div>
 						<ul className="space-y-1">
@@ -280,7 +289,7 @@ export function Insights({
 										</div>
 										{/* A share bar rather than a chart: one dimension, read at a
 									    glance, and no charting dependency for four rows. */}
-										<div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-muted">
+										<div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
 											<div
 												className={cn(crmStyles.share, "h-full bg-primary")}
 												style={shareStyle}
@@ -306,7 +315,7 @@ export function Insights({
 
 function Stat({ label, value }: { label: string; value: number }) {
 	return (
-		<div className="rounded-md border bg-card p-3">
+		<div className="rounded-lg border bg-card p-3">
 			<div className="font-medium text-lg tabular-nums">
 				{formatNumber(value)}
 			</div>

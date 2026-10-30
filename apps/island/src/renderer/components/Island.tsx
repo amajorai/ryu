@@ -1,7 +1,7 @@
 import { GlassScrimCard } from "@ryu/ui/components/glasscn/glass-scrim-card.tsx";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo.tsx";
 import { AnimatePresence, motion } from "motion/react";
-import { type CSSProperties, type ReactNode, useEffect } from "react";
+import { useEffect } from "react";
 import {
 	IslandComposerProvider,
 	useIslandComposerContext,
@@ -14,6 +14,7 @@ import { useDevStateSwitcher } from "../hooks/use-dev-state-switcher.ts";
 import { useDictation } from "../hooks/use-dictation.ts";
 import { useEyeCursor } from "../hooks/use-eye-cursor.ts";
 import { useIslandAppearance } from "../hooks/use-island-appearance.ts";
+import { useIslandFootprintReport } from "../hooks/use-island-footprint-report.ts";
 import { useIslandMaterialMask } from "../hooks/use-island-material-mask.ts";
 import { useIslandPlacement } from "../hooks/use-island-placement.ts";
 import { useIslandTheme } from "../hooks/use-island-theme.ts";
@@ -26,15 +27,14 @@ import { useVoiceInput } from "../hooks/use-voice-input.ts";
 import { useVoiceMode } from "../hooks/use-voice-mode.ts";
 import { useVoiceModeShortcuts } from "../hooks/use-voice-mode-shortcuts.ts";
 import { useWindowDrag } from "../hooks/use-window-drag.ts";
-import type { IslandState } from "../store/island-state.ts";
 import { useIslandState } from "../store/island-state.ts";
 import { IslandContent } from "./IslandContent.tsx";
+import { IslandNotchSurface } from "./IslandNotchSurface.tsx";
+import { PillBody } from "./IslandShellParts.tsx";
 import {
-	ACTION_CIRCLE,
-	ACTION_PILL_HEIGHT,
-	ACTION_PILL_WIDTH,
 	CONTENT_SPRING,
 	DETAIL_SIZES,
+	EXPANDED_COMPACT_HEADER,
 	EXPANDED_COMPACT_MAX_H,
 	EXPANDED_COMPACT_MIN_H,
 	EXPANDED_COMPACT_RADIUS,
@@ -42,246 +42,24 @@ import {
 	EXPANDED_COMPACT_WIDTH,
 	ISLAND_SPRING,
 	type IslandSize,
-	islandMaterialContours,
-	LOGO_CIRCLE,
 	pillHeight,
 	pillOverflows,
 	placementAlignClass,
-	SPLIT_GAP,
-	SUGGESTION_STACK_GAP,
 	TRANSLUCENT_INSET_STYLE,
 } from "./island-config.ts";
-
-// Keep one Island surface and add the top scrim as an overlay inside its shape.
-// Translucent mode keeps its CSS glass blur; acrylic/mica keep the OS material
-// supplied by the existing window underneath the same surface.
-interface IslandGeometryStyle extends CSSProperties {
-	"--island-gap"?: string;
-	"--island-row-offset"?: string;
-	"--island-stack-offset"?: string;
-	"--island-surface-height"?: string;
-	"--island-surface-radius"?: string;
-	"--island-surface-width"?: string;
-}
-const actionRowGeometryStyle: IslandGeometryStyle = {
-	"--island-gap": `${SPLIT_GAP}px`,
-	"--island-row-offset": `${LOGO_CIRCLE.width + SPLIT_GAP}px`,
-	"--island-stack-offset": `${SUGGESTION_STACK_GAP}px`,
-};
-const actionPillGeometryStyle: IslandGeometryStyle = {
-	"--island-surface-height": `${ACTION_PILL_HEIGHT}px`,
-};
-const groupGeometryStyle: IslandGeometryStyle = {
-	"--island-gap": `${SPLIT_GAP}px`,
-};
-const notchSurfaceGeometryStyle: IslandGeometryStyle = {
-	"--island-surface-radius": "0 0 24px 24px",
-};
-const circleGeometryStyle: IslandGeometryStyle = {
-	"--island-surface-width": `${LOGO_CIRCLE.width}px`,
-	"--island-surface-height": `${LOGO_CIRCLE.height}px`,
-	"--island-surface-radius": `${LOGO_CIRCLE.radius}px`,
-};
-
-const SURFACE_BASE =
-	"island-siri-border relative isolate shrink-0 overflow-hidden";
-const TRANSLUCENT_SKIN = "text-foreground shadow-2xl backdrop-blur-2xl";
-const ACRYLIC_SKIN = "text-foreground";
-
-/**
- * The visible footprint (bounding box) of the island group for a given state.
- * The action islands (`dockWidth > 0`, text mode only) sit to the RIGHT of the
- * detail island, widening the row by a gap + the avatar stack. The suggestion
- * state instead splits a row of Accept/Snooze/Dismiss pills out BELOW, adding
- * height. Every other state is just the logo + detail row.
- */
-function islandFootprint(
-	showCircle: boolean,
-	detail: IslandSize | null,
-	state: IslandState,
-	dockWidth: number
-) {
-	const circleWidth = showCircle ? LOGO_CIRCLE.width : 0;
-	const detailWidth = detail ? detail.width : 0;
-	const gap = showCircle && detail ? SPLIT_GAP : 0;
-	const dockGap = dockWidth > 0 ? SPLIT_GAP : 0;
-	const topRowWidth = circleWidth + gap + detailWidth + dockGap + dockWidth;
-	const circleHeight = showCircle ? LOGO_CIRCLE.height : 0;
-	const detailHeight = detail ? detail.height : 0;
-	const dockHeight = dockWidth > 0 ? ACTION_CIRCLE.height : 0;
-	const topRowHeight = Math.max(circleHeight, detailHeight, dockHeight);
-
-	const belowHeight =
-		state === "suggestion" ? SUGGESTION_STACK_GAP + ACTION_PILL_HEIGHT : 0;
-	return {
-		width: topRowWidth,
-		height: topRowHeight + belowHeight,
-	};
-}
-
-/** Drag/grab handle class for the detail island, by surface. */
-function detailHandleClassFor(
-	isTextPill: boolean,
-	state: IslandState,
-	scrolls: boolean
-): string | null {
-	if (isTextPill) {
-		// Text pill: the whole surface drags + taps-to-collapse (just a label) —
-		// unless the label grew past the cap and now scrolls, in which case a full
-		// cover would eat the wheel. Fall back to the expanded panel's top strip so
-		// the body stays scrollable (and the strip still drags + taps).
-		return scrolls ? STRIP_HANDLE : COVER_HANDLE;
-	}
-	if (state === "suggestion") {
-		// No strip, so the chip stays fully clickable; the user drags via the logo.
-		return null;
-	}
-	if (state === "expanded") {
-		// Keep the expanded grab strip above the page header, not over its controls.
-		return EXPANDED_HANDLE;
-	}
-	// Compact non-text surfaces keep the wider strip as their drag handle.
-	return STRIP_HANDLE;
-}
-
-/**
- * Inner-content layout class for the detail island, by surface. The pill surfaces
- * scroll only once their content outgrows `DETAIL_MAX_H` — while the shape is still
- * growing to fit, the container is mid-spring at the *old* height with the content
- * already at full size, so a standing `overflow-y-auto` would flash a scrollbar on
- * every grow and shrink. Centering an overflowing scroll container also clips both
- * ends (the top can never be scrolled to), so the same flag top-aligns it.
- */
-function detailContentClassFor(
-	isExpanded: boolean,
-	state: IslandState,
-	scrolls: boolean
-): string {
-	if (isExpanded) {
-		return "flex h-full w-full items-stretch px-3 pt-4 pb-2";
-	}
-	const scroll = scrolls
-		? "items-start overflow-y-auto"
-		: "items-center overflow-hidden";
-	if (state === "suggestion") {
-		return `flex h-full w-full px-3 ${scroll}`;
-	}
-	return `flex h-full w-full justify-center px-4 ${scroll}`;
-}
-
-// Action mini-island skin. Each pill is a sibling shape of the detail island
-// (so it sits outside the chip's clip and carries its own ring + shadow + blur),
-// matching the glass look of the main shapes. The primary (Accept) pill gets the
-// amber tint; the rest are a quieter dark glass.
-const ACTION_PILL_BASE =
-	"island-siri-border relative flex shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-full font-medium text-xs shadow-xl backdrop-blur-2xl";
-const ACTION_PILL_PRIMARY =
-	"bg-warning/25 text-status-warning hover:bg-warning/40";
-const ACTION_PILL_DEFAULT = "bg-card/70 text-foreground hover:bg-card/85";
-
-const COVER_HANDLE =
-	"absolute inset-0 z-10 cursor-grab bg-transparent active:cursor-grabbing";
-const STRIP_HANDLE =
-	"absolute inset-x-0 top-0 z-10 h-9 w-full cursor-grab bg-transparent active:cursor-grabbing";
-const EXPANDED_HANDLE =
-	"absolute inset-x-0 top-0 z-10 h-3 w-full cursor-grab bg-transparent active:cursor-grabbing";
-
-/**
- * Content holder for the detail island. On the pill surfaces it is the *measured*
- * node: an auto-height wrapper whose natural height drives the shape's height (see
- * `useContentHeight` — measuring anything the island itself sizes would feed the
- * animated height straight back in). The expanded panel sizes itself from the
- * composer, so it renders its children bare and is never observed.
- */
-function PillBody({
-	children,
-	isExpanded,
-	measureRef,
-	state,
-}: {
-	children: ReactNode;
-	isExpanded: boolean;
-	measureRef: (node: HTMLElement | null) => void;
-	state: IslandState;
-}) {
-	if (isExpanded) {
-		return children;
-	}
-	// The suggestion chip lays itself out full-width; the text/recording pills are
-	// centered in the shape, so the wrapper has to re-center them.
-	const layout =
-		state === "suggestion" ? "w-full" : "flex w-full justify-center";
-	return (
-		<div className={layout} ref={measureRef}>
-			{children}
-		</div>
-	);
-}
-
-interface SuggestionAction {
-	key: string;
-	label: string;
-	onClick: () => void;
-	primary?: boolean;
-}
-
-/**
- * The suggestion actions, drawn as a row of mini-islands that split out below
- * the chip. Each pill animates open with the same width-grow morph the long
- * island uses from idle (width 0 to a fixed target, staggered so they pop one by
- * one), and is aligned under the chip (offset past the logo + gap). Accept is the
- * primary (amber) action; Snooze/Dismiss are quieter. For a meeting prompt Snooze
- * maps to dismiss, matching the prior chip behaviour. Kept as its own component
- * so the actions array + map stay out of the Island render's complexity budget.
- */
-function SuggestionActionPills({
-	state,
-	onAccept,
-	onSnooze,
-	onDismiss,
-	onMaterialUpdate,
-}: {
-	state: IslandState;
-	onAccept: () => void;
-	onSnooze: () => void;
-	onDismiss: () => void;
-	onMaterialUpdate: () => void;
-}) {
-	// Rendered only while a suggestion is up, so other states keep their tight
-	// footprint (nothing mounts below the group otherwise).
-	if (state !== "suggestion") {
-		return null;
-	}
-	const actions: SuggestionAction[] = [
-		{ key: "accept", label: "Accept", onClick: onAccept, primary: true },
-		{ key: "snooze", label: "Snooze", onClick: onSnooze },
-		{ key: "dismiss", label: "Dismiss", onClick: onDismiss },
-	];
-	return (
-		<div
-			className="island-gap island-row-offset island-stack-offset flex"
-			style={actionRowGeometryStyle}
-		>
-			{actions.map((action, index) => (
-				<motion.button
-					animate={{ width: ACTION_PILL_WIDTH, opacity: 1 }}
-					className={`${ACTION_PILL_BASE} island-surface-height ${action.primary ? ACTION_PILL_PRIMARY : ACTION_PILL_DEFAULT}`}
-					data-island-material-shape=""
-					initial={{ width: 0, opacity: 0 }}
-					key={action.key}
-					onAnimationComplete={onMaterialUpdate}
-					onClick={action.onClick}
-					onUpdate={onMaterialUpdate}
-					style={actionPillGeometryStyle}
-					transition={{ ...ISLAND_SPRING, delay: index * 0.05 }}
-					type="button"
-				>
-					{action.label}
-				</motion.button>
-			))}
-		</div>
-	);
-}
+import {
+	ACRYLIC_SKIN,
+	COVER_HANDLE,
+	circleGeometryStyle,
+	detailContentClassFor,
+	detailHandleClassFor,
+	groupGeometryStyle,
+	islandFootprint,
+	NATIVE_SCRIM,
+	SURFACE_BASE,
+	TRANSLUCENT_SCRIM,
+	TRANSLUCENT_SKIN,
+} from "./island-shell-geometry.ts";
 
 /*
  * Dynamic-island "split" shell. Unlike a single morphing pill, the island is two
@@ -340,6 +118,7 @@ function IslandShell() {
 	const material =
 		notch === null && (background === "acrylic" || background === "mica");
 	const surfaceClass = `${SURFACE_BASE} ${material ? ACRYLIC_SKIN : TRANSLUCENT_SKIN}`;
+	const scrimClass = material ? NATIVE_SCRIM : TRANSLUCENT_SCRIM;
 	const scheduleMaterialMask = useIslandMaterialMask(material);
 	const placement = useIslandPlacement();
 
@@ -364,7 +143,12 @@ function IslandShell() {
 	const activeSuggestion = proactive?.suggestion ?? suggestion;
 	const onAccept = proactive ? proactive.accept : accept;
 	const onDismiss = proactive ? proactive.dismiss : dismiss;
-	const onSnooze = proactive ? proactive.dismiss : snooze;
+	// Meeting and quest prompts have no snooze; only engine suggestions offer it.
+	const suggestionActions = {
+		onAccept,
+		onDismiss,
+		onSnooze: proactive ? undefined : snooze,
+	};
 	// Push-to-talk voice capture (global shortcut → waveform → transcript → chat).
 	// `toggle` also drives the mic action island (a tap triggers voice mode, the
 	// same as the shortcut); the recording state's waveform is the active indicator.
@@ -411,10 +195,13 @@ function IslandShell() {
 	// The expanded surface is a short composer bar until there is chat history, then
 	// it grows to the full panel height. The compact bar's height tracks the
 	// composer (so it stays tight on one row and grows as the draft wraps), clamped.
-	const compactHeight = Math.min(
-		EXPANDED_COMPACT_MAX_H,
-		Math.max(EXPANDED_COMPACT_MIN_H, composerHeight + EXPANDED_COMPACT_VPAD)
-	);
+	// The chat's header sits above the composer, so the bar holds both.
+	const compactHeight =
+		EXPANDED_COMPACT_HEADER +
+		Math.min(
+			EXPANDED_COMPACT_MAX_H,
+			Math.max(EXPANDED_COMPACT_MIN_H, composerHeight + EXPANDED_COMPACT_VPAD)
+		);
 	const expandedSize: IslandSize = expandedTall
 		? DETAIL_SIZES.expanded
 		: {
@@ -471,45 +258,20 @@ function IslandShell() {
 	const detailWidth = detail?.width ?? 0;
 	const detailHeight = detail?.height ?? 0;
 	const detailRadius = detail?.radius ?? 0;
-	useEffect(() => {
-		// Report nothing until both window facts are known: an early report would
-		// size or mask the window for the wrong Background.
-		if (notch === undefined || background === null) {
-			return;
-		}
-		if (footprintWidth > 0 && footprintHeight > 0) {
-			const detailContour =
-				detailWidth > 0 && detailHeight > 0
-					? {
-							width: detailWidth,
-							height: detailHeight,
-							radius: detailRadius,
-						}
-					: null;
-			window.island.win.setContentSize(
-				footprintWidth,
-				footprintHeight,
-				isExpanded,
-				notch ? [] : islandMaterialContours(showCircle, detailContour, state)
-			);
-			if (material) {
-				scheduleMaterialMask();
-			}
-		}
-	}, [
-		notch,
+	useIslandFootprintReport({
 		background,
-		footprintWidth,
-		footprintHeight,
-		isExpanded,
-		showCircle,
-		detailWidth,
 		detailHeight,
 		detailRadius,
-		state,
+		detailWidth,
+		footprintHeight,
+		footprintWidth,
+		isExpanded,
 		material,
+		notch,
 		scheduleMaterialMask,
-	]);
+		showCircle,
+		state,
+	});
 
 	// Detail-island drag handle + inner layout vary by surface (see helpers).
 	const detailHandleClass = detailHandleClassFor(
@@ -532,68 +294,39 @@ function IslandShell() {
 		return null;
 	}
 	if (notch) {
-		const notchGeometryStyle: IslandGeometryStyle = {
-			"--island-surface-height": `${notch.height}px`,
-		};
 		return (
-			<div className="flex h-full w-full justify-center">
-				<motion.div
-					animate={{ width: footprintWidth, height: footprintHeight }}
-					className="dark island-surface-radius flex flex-col overflow-hidden bg-black text-white"
-					data-island-notch=""
-					initial={false}
-					onPointerEnter={drag.onPointerEnter}
-					onPointerLeave={drag.onPointerLeave}
-					style={notchSurfaceGeometryStyle}
-					transition={ISLAND_SPRING}
+			<IslandNotchSurface
+				appName={context.appName}
+				footprintHeight={footprintHeight}
+				footprintWidth={footprintWidth}
+				isCollapsed={isCollapsed}
+				notchHeight={notch.height}
+				onOpenPanel={openPanel}
+				onPointerEnter={drag.onPointerEnter}
+				onPointerLeave={drag.onPointerLeave}
+				showLauncher={isCollapsed || isTextPill}
+			>
+				<PillBody
+					isExpanded={isExpanded}
+					measureRef={pillContent.ref}
+					state={state}
 				>
-					<div
-						aria-hidden="true"
-						className="island-surface-height shrink-0"
-						style={notchGeometryStyle}
+					<IslandContent
+						composerControls={leftActions}
+						context={context}
+						onVoiceClose={handleVoiceClose}
+						state={state}
+						suggestion={activeSuggestion}
+						suggestionActions={suggestionActions}
+						voice={voiceMode}
+						voiceAgentName={voiceAgentName}
+						voiceCanCycle={voiceCanCycle}
+						voiceError={voiceError}
+						voiceLevels={voiceLevels}
+						wrap={!isExpanded}
 					/>
-					{isCollapsed || isTextPill ? (
-						<button
-							aria-label="Open Island"
-							className="flex min-h-9 w-full flex-1 items-center justify-center gap-2 px-4 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
-							onClick={openPanel}
-							type="button"
-						>
-							<RyuLogo size="24px" variant="eyes" />
-							{isCollapsed ? "" : (context.appName ?? "Ryu")}
-						</button>
-					) : (
-						<div className="flex min-h-0 flex-1 flex-col px-3 pb-2">
-							<PillBody
-								isExpanded={isExpanded}
-								measureRef={pillContent.ref}
-								state={state}
-							>
-								<IslandContent
-									composerControls={leftActions}
-									context={context}
-									onVoiceClose={handleVoiceClose}
-									state={state}
-									suggestion={activeSuggestion}
-									voice={voiceMode}
-									voiceAgentName={voiceAgentName}
-									voiceCanCycle={voiceCanCycle}
-									voiceError={voiceError}
-									voiceLevels={voiceLevels}
-									wrap={!isExpanded}
-								/>
-							</PillBody>
-							<SuggestionActionPills
-								onAccept={onAccept}
-								onDismiss={onDismiss}
-								onMaterialUpdate={scheduleMaterialMask}
-								onSnooze={onSnooze}
-								state={state}
-							/>
-						</div>
-					)}
-				</motion.div>
-			</div>
+				</PillBody>
+			</IslandNotchSurface>
 		);
 	}
 
@@ -609,13 +342,11 @@ function IslandShell() {
 			className={`flex h-full w-full ${placementAlignClass(placement)}`}
 			style={material ? undefined : TRANSLUCENT_INSET_STYLE}
 		>
-			{/* Island column: the two-shape group on top + the action-pill row
-			    beneath it (suggestion only). Pointer enter/leave lives on this
-			    wrapper so the whole island (both shapes, the gap, and the pills)
-			    captures clicks with no flicker as the pointer crosses between
-			    shapes. Outside the suggestion state the row is unmounted, so the
-			    captured box is exactly the group box and idle/collapsed keep their
-			    tight footprint. */}
+			{/* Island column: the two-shape group. Pointer enter/leave lives on
+			    this wrapper so the whole island (both shapes and the gap) captures
+			    clicks with no flicker as the pointer crosses between shapes; the
+			    captured box is exactly the group box. Suggestion actions sit inside
+			    the chip, so nothing mounts below the group. */}
 			<div
 				className="flex flex-col items-start"
 				onPointerEnter={drag.onPointerEnter}
@@ -642,6 +373,7 @@ function IslandShell() {
 									className="h-full w-full"
 									contour="round"
 									material={material ? "native" : "glass"}
+									scrimClassName={scrimClass}
 									surfaceClassName="h-full w-full"
 								>
 									<button
@@ -670,7 +402,7 @@ function IslandShell() {
 									borderRadius: detail.radius,
 									opacity: 1,
 								}}
-								className={`${surfaceClass} corner-squircle`}
+								className={surfaceClass}
 								data-island-material-shape=""
 								exit={{ width: 0, opacity: 0 }}
 								initial={{ width: 0, opacity: 0 }}
@@ -682,8 +414,9 @@ function IslandShell() {
 								<GlassScrimCard
 									appearance="island"
 									className="h-full w-full"
-									contour="squircle"
+									contour="round"
 									material={material ? "native" : "glass"}
+									scrimClassName={scrimClass}
 									surfaceClassName="h-full w-full"
 								>
 									{/* Drag/grab region for the detail island (omitted for the
@@ -719,6 +452,7 @@ function IslandShell() {
 													onVoiceClose={handleVoiceClose}
 													state={state}
 													suggestion={activeSuggestion}
+													suggestionActions={suggestionActions}
 													voice={voiceMode}
 													voiceAgentName={voiceAgentName}
 													voiceCanCycle={voiceCanCycle}
@@ -734,16 +468,6 @@ function IslandShell() {
 						) : null}
 					</AnimatePresence>
 				</div>
-
-				{/* Action mini-islands split out below the chip (renders only in the
-				    suggestion state, so other states keep their tight footprint). */}
-				<SuggestionActionPills
-					onAccept={onAccept}
-					onDismiss={onDismiss}
-					onMaterialUpdate={scheduleMaterialMask}
-					onSnooze={onSnooze}
-					state={state}
-				/>
 			</div>
 		</div>
 	);

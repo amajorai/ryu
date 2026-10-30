@@ -10,48 +10,39 @@
 import {
 	Add01Icon,
 	AiBrain01Icon,
-	Delete01Icon,
-	PencilEdit01Icon,
-	Search01Icon,
+	GitBranchIcon,
+	MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog.tsx";
-import { Badge } from "@ryu/ui/components/badge.tsx";
+	STORE_LOAD_ERROR_SENTENCE,
+	StoreErrorDetails,
+} from "@ryu/blocks/desktop/store-error-details.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
+	Dialog,
+	DialogContent,
+	DialogTitle,
+} from "@ryu/ui/components/dialog.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@ryu/ui/components/dropdown-menu.tsx";
+import {
 	Empty,
+	EmptyContent,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@ryu/ui/components/select.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Skeleton, SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { BarChart3, Network, Sparkles } from "lucide-react";
-import {
-	type ChangeEvent,
-	useCallback,
-	useEffect,
-	useMemo,
-	useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -59,8 +50,6 @@ import {
 	deleteMemory,
 	getMemoryGraph,
 	listMemories,
-	MEMORY_CATEGORIES,
-	MEMORY_SCOPES,
 	type Memory,
 	type MemoryCategory,
 	type MemoryGraphSnapshot,
@@ -68,142 +57,31 @@ import {
 	memoryCategoryLabels,
 	memoryScopeLabels,
 } from "@/src/lib/api/memory.ts";
+import { MemoryDeleteDialog } from "./MemoryDeleteDialog.tsx";
 import { MemoryDreamReview } from "./MemoryDreamReview.tsx";
 import { MemoryEditor } from "./MemoryEditor.tsx";
-import { MemoryGitSourceCard } from "./MemoryGitSourceCard.tsx";
+import {
+	MemoryGitSourceCard,
+	storedMemoryGitRoot,
+} from "./MemoryGitSourceCard.tsx";
 import { MemoryGraph } from "./MemoryGraph.tsx";
+import { MemoryLibraryFilters } from "./MemoryLibraryFilters.tsx";
+import {
+	ALL,
+	MemoryRow,
+	type MemoryView,
+	MemoryViewNav,
+} from "./MemoryLibraryParts.tsx";
 import { MemoryReflectDashboard } from "./MemoryReflectDashboard.tsx";
 
-const ALL = "all";
-export type MemoryView = "library" | "graph" | "dream" | "reflect";
-
-function MemoryViewNav({
-	onChange,
-	value,
-}: {
-	onChange: (value: MemoryView) => void;
-	value: MemoryView;
-}) {
-	return (
-		<div
-			aria-label="Memory views"
-			className="flex flex-wrap gap-1 rounded-lg bg-muted/45 p-1"
-			role="tablist"
-		>
-			{[
-				{ icon: null, label: "Library", value: "library" as const },
-				{ icon: Network, label: "Graph", value: "graph" as const },
-				{ icon: Sparkles, label: "Dream", value: "dream" as const },
-				{ icon: BarChart3, label: "Reflect", value: "reflect" as const },
-			].map((item) => {
-				const Icon = item.icon;
-				return (
-					<button
-						aria-selected={value === item.value}
-						className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 font-medium text-xs transition-colors ${value === item.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-						key={item.value}
-						onClick={() => onChange(item.value)}
-						role="tab"
-						type="button"
-					>
-						{Icon ? <Icon className="size-3.5" /> : null}
-						{item.label}
-					</button>
-				);
-			})}
-		</div>
-	);
-}
-
-// A Select's closed trigger takes its text from `items`, so the sentinel row has
-// to be in here too — otherwise the filter reads "all"/"preference" once picked.
-//
-// Built per render rather than once at module scope: the labels now depend on the
-// app-wide "Friendly names" toggle, and a module-level constant would freeze
-// whichever vocabulary was active when this file was first imported — leaving the
-// closed trigger reading "Node" under a list that says "This device".
-const scopeFilterItems = (labels: Record<MemoryScope, string>) => [
-	{ label: "All scopes", value: ALL },
-	...MEMORY_SCOPES.map((s) => ({ label: labels[s], value: s })),
-];
-const categoryFilterItems = (labels: Record<MemoryCategory, string>) => [
-	{ label: "All categories", value: ALL },
-	...MEMORY_CATEGORIES.map((c) => ({ label: labels[c], value: c })),
-];
-
-/** A single memory row: content, metadata badges, tags, and hover actions. */
-function MemoryRow({
-	memory,
-	onDelete,
-	onEdit,
-}: {
-	memory: Memory;
-	onDelete: (memory: Memory) => void;
-	onEdit: (memory: Memory) => void;
-}) {
-	// Both vocabularies come from the one shared table; which one shows is the
-	// app-wide "Friendly names" toggle.
-	const [friendly] = useFriendlyMode();
-	const scopeLabels = memoryScopeLabels(friendly);
-	const categoryLabels = memoryCategoryLabels(friendly);
-	return (
-		<li className="group/mem rounded-lg border border-border/60 bg-muted/30 p-4">
-			<div className="flex items-start justify-between gap-3">
-				<p className="min-w-0 flex-1 whitespace-pre-wrap text-foreground text-sm">
-					{memory.content}
-				</p>
-				<div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/mem:opacity-100">
-					<Button
-						aria-label="Edit memory"
-						onClick={() => onEdit(memory)}
-						size="icon"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
-					</Button>
-					<Button
-						appearance="dictation-recording"
-						aria-label="Delete memory"
-						onClick={() => onDelete(memory)}
-						size="icon"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
-					</Button>
-				</div>
-			</div>
-
-			{memory.whenToUse ? (
-				<p className="mt-2 text-muted-foreground text-xs">
-					<span className="font-medium">When to use: </span>
-					{memory.whenToUse}
-				</p>
-			) : null}
-
-			<div className="mt-3 flex flex-wrap items-center gap-1.5">
-				<Badge variant="secondary">{scopeLabels[memory.scope]}</Badge>
-				<Badge variant="outline">{categoryLabels[memory.category]}</Badge>
-				<Badge variant="outline">Importance {memory.importance}</Badge>
-				{memory.sensitiveTopics.length > 0 ? (
-					<Badge tint="amber" variant="secondary">
-						Sensitive topic
-					</Badge>
-				) : null}
-				{memory.tags.map((tag) => (
-					<Badge key={tag} variant="secondary">
-						#{tag}
-					</Badge>
-				))}
-			</div>
-		</li>
-	);
-}
+export type { MemoryView } from "./MemoryLibraryParts.tsx";
 
 export function MemoryLibrary({
 	initialView = "library",
 }: {
 	initialView?: MemoryView;
 } = {}) {
+	const tl = useLiteralMessages();
 	const activeNode = useActiveNode();
 	// Both vocabularies come from the one shared table; which one shows is the
 	// app-wide "Friendly names" toggle.
@@ -240,6 +118,10 @@ export function MemoryLibrary({
 	const [editorOpen, setEditorOpen] = useState(false);
 	const [editing, setEditing] = useState<Memory | null>(null);
 	const [pendingDelete, setPendingDelete] = useState<Memory | null>(null);
+	// The Git source lives behind the header's `⋯`; the page shows one status
+	// line only when a folder is bound.
+	const [gitOpen, setGitOpen] = useState(false);
+	const gitRoot = storedMemoryGitRoot();
 
 	const reload = useCallback(() => {
 		let cancelled = false;
@@ -388,14 +270,94 @@ export function MemoryLibrary({
 		});
 	}, [memories, query, scopeFilter, categoryFilter, tagFilter]);
 
+	const gitDialog = (
+		<Dialog onOpenChange={setGitOpen} open={gitOpen}>
+			<DialogContent className="sm:max-w-lg">
+				<DialogTitle className="sr-only">Git-backed memory</DialogTitle>
+				<MemoryGitSourceCard
+					memories={memories}
+					onImported={reload}
+					target={target}
+				/>
+			</DialogContent>
+		</Dialog>
+	);
+
+	const editorAndDelete = (
+		<>
+			<MemoryEditor
+				memory={editing}
+				onClose={() => setEditorOpen(false)}
+				onSaved={handleSaved}
+				open={editorOpen}
+				target={target}
+			/>
+			<MemoryDeleteDialog
+				onConfirm={confirmDelete}
+				pendingDelete={pendingDelete}
+				setPendingDelete={setPendingDelete}
+			/>
+		</>
+	);
+
+	const header = (
+		<div className="flex flex-col gap-4">
+			<div className="flex items-start justify-between gap-3">
+				<PageHeader
+					size="app"
+					subtitle="Durable facts Ryu recalls across your conversations."
+					title="Memory"
+				/>
+				<div className="flex shrink-0 items-center gap-1">
+					<Button onClick={openNew} size="sm" variant="outline">
+						<HugeiconsIcon className="size-4" icon={Add01Icon} />
+						New memory
+					</Button>
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
+								<Button
+									aria-label="More memory actions"
+									size="icon-sm"
+									variant="ghost-muted"
+								>
+									<HugeiconsIcon className="size-4" icon={MoreHorizontalIcon} />
+								</Button>
+							}
+						/>
+						<DropdownMenuContent align="end" className="min-w-48">
+							<DropdownMenuItem onClick={() => setGitOpen(true)}>
+								<HugeiconsIcon className="size-4" icon={GitBranchIcon} />
+								Git source…
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				</div>
+			</div>
+			<MemoryViewNav onChange={setView} value={view} />
+			{gitRoot ? (
+				<button
+					className="flex min-w-0 items-center gap-1.5 self-start text-muted-foreground text-xs hover:text-foreground"
+					onClick={() => setGitOpen(true)}
+					type="button"
+				>
+					<HugeiconsIcon className="size-3.5 shrink-0" icon={GitBranchIcon} />
+					<span className="truncate">
+						{tl("Git source · {root}", { root: gitRoot })}
+					</span>
+				</button>
+			) : null}
+		</div>
+	);
+
 	if (view !== "library") {
 		return (
 			<div className="relative flex h-full flex-col overflow-hidden">
-				<div className="scroll-fade min-h-0 flex-1 overflow-y-auto px-4 pt-12 pb-24">
+				<div className="scroll-fade min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-24">
 					<div className="mx-auto flex max-w-3xl flex-col gap-6">
-						<MemoryViewNav onChange={setView} value={view} />
+						{header}
 						{view === "graph" ? (
-							<div className="h-[min(70vh,680px)] min-h-[460px] overflow-hidden rounded-lg border border-border/60 bg-muted/15">
+							<div className="h-[min(70vh,680px)] min-h-[460px] overflow-hidden rounded-xl border border-border">
 								{graphLoading || !graph ? (
 									<Skeleton
 										aria-label="Loading graph"
@@ -413,123 +375,53 @@ export function MemoryLibrary({
 						)}
 					</div>
 				</div>
+				{gitDialog}
+				{editorAndDelete}
 			</div>
 		);
 	}
 
 	return (
 		<div className="relative flex h-full flex-col overflow-hidden">
-			<div className="scroll-fade min-h-0 flex-1 overflow-y-auto px-4 pt-12 pb-24">
+			<div className="scroll-fade min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-24">
 				<div className="mx-auto flex max-w-3xl flex-col gap-4">
-					<MemoryViewNav onChange={setView} value={view} />
-					<div className="flex items-center justify-between gap-3">
-						<div>
-							<h1 className="font-medium text-lg">Memory</h1>
-							<p className="text-muted-foreground text-sm">
-								Durable facts Ryu recalls across your conversations.
-							</p>
-						</div>
-						<Button onClick={openNew}>
-							<HugeiconsIcon className="size-4" icon={Add01Icon} />
-							New memory
-						</Button>
-					</div>
-					<MemoryGitSourceCard
-						memories={memories}
-						onImported={reload}
-						target={target}
+					{header}
+
+					<MemoryLibraryFilters
+						categoryFilter={categoryFilter}
+						categoryLabels={categoryLabels}
+						presentTags={presentTags}
+						query={query}
+						scopeFilter={scopeFilter}
+						scopeLabels={scopeLabels}
+						setCategoryFilter={setCategoryFilter}
+						setQuery={setQuery}
+						setScopeFilter={setScopeFilter}
+						setTagFilter={setTagFilter}
+						tagFilter={tagFilter}
+						tagFilterItems={tagFilterItems}
 					/>
 
-					{/* Filters */}
-					<div className="flex flex-wrap items-center gap-2">
-						<div className="relative min-w-48 flex-1">
-							<HugeiconsIcon
-								className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-								icon={Search01Icon}
-							/>
-							<Input
-								aria-label="Search memories"
-								leadingAdornment="default"
-								onChange={(e: ChangeEvent<HTMLInputElement>) =>
-									setQuery(e.target.value)
-								}
-								placeholder="Search memories…"
-								value={query}
-							/>
-						</div>
-						<Select<MemoryScope | typeof ALL>
-							items={scopeFilterItems(scopeLabels)}
-							onValueChange={(v) => setScopeFilter(v)}
-							value={scopeFilter}
-						>
-							<SelectTrigger aria-label="Filter by scope">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value={ALL}>All scopes</SelectItem>
-								{MEMORY_SCOPES.map((s) => (
-									<SelectItem key={s} value={s}>
-										{scopeLabels[s]}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-						<Select<MemoryCategory | typeof ALL>
-							items={categoryFilterItems(categoryLabels)}
-							onValueChange={(v) => setCategoryFilter(v)}
-							value={categoryFilter}
-						>
-							<SelectTrigger aria-label="Filter by category">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value={ALL}>All categories</SelectItem>
-								{MEMORY_CATEGORIES.map((c) => (
-									<SelectItem key={c} value={c}>
-										{categoryLabels[c]}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-						{presentTags.length > 0 ? (
-							<Select
-								items={tagFilterItems}
-								onValueChange={(v) => setTagFilter(v)}
-								value={tagFilter}
-							>
-								<SelectTrigger aria-label="Filter by tag">
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value={ALL}>All tags</SelectItem>
-									{presentTags.map((tag) => (
-										<SelectItem key={tag} value={tag}>
-											#{tag}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						) : null}
-					</div>
-
-					{/* Body */}
 					{loading ? (
 						<SkeletonRows spacing="review" />
 					) : loadError ? (
-						<Empty>
+						<Empty className="py-12">
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<HugeiconsIcon icon={AiBrain01Icon} />
 								</EmptyMedia>
 								<EmptyTitle>Couldn't load memories</EmptyTitle>
-								<EmptyDescription>{loadError}</EmptyDescription>
+								<EmptyDescription>{STORE_LOAD_ERROR_SENTENCE}</EmptyDescription>
 							</EmptyHeader>
-							<Button onClick={reload} variant="ghost">
-								Try again
-							</Button>
+							<EmptyContent>
+								<Button onClick={reload} size="sm" variant="outline">
+									Try again
+								</Button>
+								<StoreErrorDetails message={loadError} />
+							</EmptyContent>
 						</Empty>
 					) : visible.length === 0 ? (
-						<Empty>
+						<Empty className="py-12">
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<HugeiconsIcon icon={AiBrain01Icon} />
@@ -539,19 +431,13 @@ export function MemoryLibrary({
 								</EmptyTitle>
 								<EmptyDescription>
 									{memories.length === 0
-										? "Add a memory to give Ryu durable context to recall later."
+										? "Add a fact Ryu should remember across conversations."
 										: "No memories match your filters."}
 								</EmptyDescription>
 							</EmptyHeader>
-							{memories.length === 0 ? (
-								<Button onClick={openNew}>
-									<HugeiconsIcon className="size-4" icon={Add01Icon} />
-									New memory
-								</Button>
-							) : null}
 						</Empty>
 					) : (
-						<ul className="flex flex-col gap-2">
+						<ul className="flex flex-col">
 							{visible.map((memory) => (
 								<MemoryRow
 									key={memory.id}
@@ -564,42 +450,8 @@ export function MemoryLibrary({
 					)}
 				</div>
 			</div>
-
-			<MemoryEditor
-				memory={editing}
-				onClose={() => setEditorOpen(false)}
-				onSaved={handleSaved}
-				open={editorOpen}
-				target={target}
-			/>
-
-			<AlertDialog
-				onOpenChange={(o) => {
-					if (!o) {
-						setPendingDelete(null);
-					}
-				}}
-				open={pendingDelete !== null}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Delete this memory?</AlertDialogTitle>
-						<AlertDialogDescription>
-							{pendingDelete
-								? `"${pendingDelete.content.slice(0, 120)}${
-										pendingDelete.content.length > 120 ? "…" : ""
-									}" will be permanently removed. This cannot be undone.`
-								: ""}
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
-						<AlertDialogAction onClick={confirmDelete} variant="destructive">
-							Delete
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+			{gitDialog}
+			{editorAndDelete}
 		</div>
 	);
 }

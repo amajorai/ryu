@@ -1,13 +1,13 @@
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { PageHeader } from "@ryu/ui/components/page-header.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { type ReactNode, useState } from "react";
 import { TelegramManagedBotPanel } from "@/src/components/channels/TelegramManagedBotPanel.tsx";
-import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
-import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { ManagedBotPairingRequest } from "@/src/lib/api/managed-bots.ts";
+import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
 const TELEGRAM_FORM: Omit<ManagedBotPairingRequest, "name" | "suggested_name"> =
 	{
@@ -29,24 +29,9 @@ function Shell({
 	title: string;
 }) {
 	return (
-		<div className="scroll-fade h-full w-full overflow-y-auto">
-			<div
-				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
-				data-tauri-drag-region="true"
-			>
-				<StaggerReveal>
-					<div className="shrink-0">
-						<RyuOnboardingAvatar />
-					</div>
-					<PageHeader stagger={false} subtitle={subtitle} title={title} />
-				</StaggerReveal>
-				<div className="w-full max-w-xl">
-					<StaggerReveal startDelay={ONBOARDING_CONTENT_DELAY_MS} wrap>
-						{children}
-					</StaggerReveal>
-				</div>
-			</div>
-		</div>
+		<ActivationStepShell stepKey={title} subtitle={subtitle} title={title}>
+			{children}
+		</ActivationStepShell>
 	);
 }
 
@@ -60,18 +45,16 @@ function ContinueRow({
 	onSkip?: () => void;
 }) {
 	return (
-		<div className="flex items-center justify-between gap-3 pt-1">
+		<OnboardingActions className="justify-between">
 			{onSkip ? (
-				<Button onClick={onSkip} variant="ghost">
+				<OnboardingCta onClick={onSkip} tone="secondary">
 					Skip for now
-				</Button>
+				</OnboardingCta>
 			) : (
 				<span />
 			)}
-			<Button onClick={onContinue} size="lg" variant="mono">
-				{continueLabel}
-			</Button>
-		</div>
+			<OnboardingCta onClick={onContinue}>{continueLabel}</OnboardingCta>
+		</OnboardingActions>
 	);
 }
 
@@ -83,20 +66,20 @@ function TelegramLoginOption({
 	opened: boolean;
 }) {
 	return (
-		<div className="space-y-2 border-t pt-3">
-			<div>
-				<p className="font-medium text-sm">Want fewer setup steps?</p>
-				<p className="mt-1 text-muted-foreground text-xs">
-					Use Ryu's hosted bot instead. Log in with Telegram and allow Ryu to
-					message you directly — no new bot to create. This uses Ryu Cloud and
-					does not add a local Gateway channel.
-				</p>
+		<div className="flex flex-col gap-2 border-border border-t pt-4">
+			<div className="flex items-center justify-between gap-6">
+				<div className="min-w-0">
+					<p className="font-medium text-sm">Want fewer setup steps?</p>
+					<p className="text-pretty text-detail text-muted-foreground">
+						Use Ryu's hosted bot on Ryu Cloud instead. No new bot to create.
+					</p>
+				</div>
+				<Button onClick={onOpen} size="sm" variant="outline">
+					Log in with Telegram
+				</Button>
 			</div>
-			<Button onClick={onOpen} size="sm" variant="outline">
-				Log in with Telegram
-			</Button>
 			{opened ? (
-				<p className="text-muted-foreground text-xs" role="status">
+				<p className="text-detail text-muted-foreground" role="status">
 					Telegram Login opened in your browser. Finish there, then open Ryu's
 					bot when it is ready.
 				</p>
@@ -129,7 +112,7 @@ export function TelegramOnboardingStep({
 				subtitle="We could not verify your existing channels, so nothing will be created from onboarding."
 				title="Check your channels"
 			>
-				<SettingsCard
+				<div
 					className="flex flex-col gap-4"
 					data-testid="telegram-check-failed"
 				>
@@ -143,7 +126,7 @@ export function TelegramOnboardingStep({
 						onContinue={onContinue}
 						onSkip={onSkip}
 					/>
-				</SettingsCard>
+				</div>
 			</Shell>
 		);
 	}
@@ -154,7 +137,7 @@ export function TelegramOnboardingStep({
 				subtitle="Ryu found your existing channel setup and will leave it unchanged."
 				title="You already have channels"
 			>
-				<SettingsCard
+				<div
 					className="flex flex-col gap-4"
 					data-testid="telegram-existing-channels"
 				>
@@ -175,7 +158,7 @@ export function TelegramOnboardingStep({
 						onContinue={onContinue}
 						onSkip={onSkip}
 					/>
-				</SettingsCard>
+				</div>
 			</Shell>
 		);
 	}
@@ -186,10 +169,7 @@ export function TelegramOnboardingStep({
 				subtitle="Your Telegram bot is connected and ready to talk to Ryu."
 				title="Telegram is ready"
 			>
-				<SettingsCard
-					className="flex flex-col gap-4"
-					data-testid="telegram-setup-ready"
-				>
+				<div className="flex flex-col gap-4" data-testid="telegram-setup-ready">
 					<div>
 						<p className="font-medium text-sm">Ryu on Telegram</p>
 						<p className="mt-1 text-muted-foreground text-sm">
@@ -202,7 +182,7 @@ export function TelegramOnboardingStep({
 						onContinue={onContinue}
 						onSkip={onSkip}
 					/>
-				</SettingsCard>
+				</div>
 			</Shell>
 		);
 	}
@@ -213,7 +193,7 @@ export function TelegramOnboardingStep({
 				subtitle="This node cannot create a managed Telegram bot yet."
 				title="Telegram setup is optional"
 			>
-				<SettingsCard
+				<div
 					className="flex flex-col gap-4"
 					data-testid="telegram-setup-unavailable"
 				>
@@ -233,7 +213,7 @@ export function TelegramOnboardingStep({
 						onContinue={onContinue}
 						onSkip={onSkip}
 					/>
-				</SettingsCard>
+				</div>
 			</Shell>
 		);
 	}
@@ -243,10 +223,7 @@ export function TelegramOnboardingStep({
 			subtitle="Ryu creates a bot for you and connects it to the default Ryu agent."
 			title="Talk to Ryu on Telegram"
 		>
-			<SettingsCard
-				className="flex flex-col gap-4"
-				data-testid="telegram-setup-step"
-			>
+			<div className="flex flex-col gap-4" data-testid="telegram-setup-step">
 				<div>
 					<p className="font-medium text-sm">Set up your channel</p>
 					<p className="mt-1 text-muted-foreground text-sm">
@@ -269,7 +246,7 @@ export function TelegramOnboardingStep({
 					opened={telegramLoginOpened}
 				/>
 				<ContinueRow continueLabel="Skip for now" onContinue={onSkip} />
-			</SettingsCard>
+			</div>
 		</Shell>
 	);
 }

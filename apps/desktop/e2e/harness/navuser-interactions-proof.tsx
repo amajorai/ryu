@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../contexts/auth-context.tsx";
 import { NavUser } from "../../src/components/layout/NavUser.tsx";
+import { ShellSettingsDialog } from "../../src/components/shell/shell-settings-dialog.tsx";
 import {
 	APP_SURFACES,
 	type AppSurface,
@@ -81,6 +82,8 @@ function ProofSurface() {
 					onHideChrome={onHideChrome}
 				/>
 			</section>
+			{/* The shell owns the window's one Settings dialog. */}
+			<ShellSettingsDialog />
 			<output className="sr-only" data-testid="hidden-chrome">
 				{JSON.stringify(hideHistory)}
 			</output>

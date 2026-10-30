@@ -125,7 +125,11 @@ export function ConnectCallbackDialog({
 						{done ? "Done" : "Cancel"}
 					</Button>
 					{done ? null : (
-						<Button disabled={!selectedUrl || busy || failed} onClick={finish}>
+						<Button
+							disabled={!selectedUrl || busy || failed}
+							onClick={finish}
+							variant="mono"
+						>
 							{busy ? "Verifying account…" : "Verify and connect"}
 						</Button>
 					)}

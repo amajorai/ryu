@@ -1,5 +1,5 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import { AnimatePresence, motion } from "motion/react";
 import {
 	type KeyboardEvent,
 	type ReactNode,
@@ -14,6 +14,19 @@ import { Composer } from "./community-composer.tsx";
 import { FeedList, type PostActions, SortBar } from "./community-feed.tsx";
 import { CommunityHeader, TopBar } from "./community-header.tsx";
 import {
+	handleCommunityKeyDown,
+	useRowRegistry,
+} from "./community-interface-keys.ts";
+import { CommunityNavDrawer } from "./community-interface-nav-drawer.tsx";
+import { usePostReactions } from "./community-interface-reactions.ts";
+import { useCopiedShare } from "./community-interface-share.ts";
+import {
+	type EmptyCopy,
+	readViewMode,
+	useMinuteClock,
+	writeViewMode,
+} from "./community-interface-view-state.ts";
+import {
 	buildCommunities,
 	buildPosts,
 	type Community,
@@ -22,17 +35,13 @@ import {
 	type CommunityScope,
 	type CommunitySort,
 	type CommunityViewMode,
-	type CommunityVote,
 	communityFeed,
 	communityLabel,
 	draftStartInput,
 	emptyDraft,
 	messageInput,
-	nextVote,
 	PROFILE_KEY,
-	plural,
 	rankedCommunities,
-	stepPost,
 } from "./community-model.ts";
 import { CommunityNav } from "./community-nav.tsx";
 import { CommunityEmpty, FeedSkeleton } from "./community-parts.tsx";
@@ -40,66 +49,6 @@ import { PostPage } from "./community-post-page.tsx";
 import { AboutCard, CommunitiesCard } from "./community-sidebar.tsx";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
-
-const MINUTE = 60_000;
-const COPIED_MS = 1600;
-const VIEW_KEY = "ryu.interfaces.community.view";
-
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-function readViewMode(): CommunityViewMode {
-	try {
-		return window.localStorage.getItem(VIEW_KEY) === "compact"
-			? "compact"
-			: "card";
-	} catch {
-		return "card";
-	}
-}
-
-function writeViewMode(mode: CommunityViewMode) {
-	try {
-		window.localStorage.setItem(VIEW_KEY, mode);
-	} catch {
-		// Storage can be blocked; the choice still holds for this session.
-	}
-}
-
-/** True for targets whose keys belong to typing, menus, tabs, or the host's chat. */
-function ownsKeys(target: EventTarget): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[role='menu']") !== null ||
-		target.closest("[role='tablist']") !== null ||
-		target.closest("[data-testid='community-thread-view']") !== null
-	);
-}
-
-const STEP_KEYS: Record<string, number> = {
-	ArrowDown: 1,
-	ArrowUp: -1,
-	j: 1,
-	k: -1,
-};
-
-interface EmptyCopy {
-	action: { label: string; onClick: () => void } | null;
-	body: string;
-	title: string;
-}
 
 /**
  * Community: a Reddit-style front page over the user's threads. Projects,
@@ -114,16 +63,16 @@ export function CommunityInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const now = useMinuteClock();
 	const pageRef = useRef<HTMLElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const titleRef = useRef<HTMLInputElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
-	const rowElements = useRef(new Map<string, HTMLButtonElement>());
+	const { registerRow, rowElements } = useRowRegistry();
 	const lastOpenedId = useRef<string | null>(null);
 	const pendingCommunity = useRef<string | null>(null);
-	const copiedTimer = useRef<number | null>(null);
 	const sortId = useId();
 	const panelId = `${sortId}-panel`;
 	const headingId = `${sortId}-heading`;
@@ -139,9 +88,8 @@ export function CommunityInterface({
 	const [composing, setComposing] = useState(false);
 	const [draft, setDraft] = useState<CommunityDraft>(() => emptyDraft());
 	const [navOpen, setNavOpen] = useState(false);
-	const [votes, setVotes] = useState<Record<string, CommunityVote>>({});
-	const [saved, setSaved] = useState<ReadonlySet<string>>(() => new Set());
-	const [copiedId, setCopiedId] = useState<string | null>(null);
+	const reactions = usePostReactions();
+	const { copiedId, share } = useCopiedShare();
 
 	const communities = useMemo(() => buildCommunities(snapshot), [snapshot]);
 	const posts = useMemo(
@@ -188,32 +136,12 @@ export function CommunityInterface({
 		}
 	}, [composing]);
 
-	useEffect(
-		() => () => {
-			if (copiedTimer.current !== null) {
-				window.clearTimeout(copiedTimer.current);
-			}
-		},
-		[]
-	);
-
 	// A scope whose community disappeared falls back to Home.
 	useEffect(() => {
 		if (scope.kind === "community" && !scopedCommunity) {
 			setScope({ kind: "home" });
 		}
 	}, [scope, scopedCommunity]);
-
-	const registerRow = useCallback(
-		(threadId: string, element: HTMLButtonElement | null) => {
-			if (element) {
-				rowElements.current.set(threadId, element);
-			} else {
-				rowElements.current.delete(threadId);
-			}
-		},
-		[]
-	);
 
 	const leavePage = () => {
 		if (pageOpen) {
@@ -299,100 +227,26 @@ export function CommunityInterface({
 		writeViewMode(next);
 	};
 
-	const share = (post: CommunityPost) => {
-		const text = `${post.thread.title} (${communityLabel(post.community)})`;
-		try {
-			navigator.clipboard?.writeText(text).catch(() => undefined);
-		} catch {
-			// Clipboard access can be denied; the label still confirms the action.
-		}
-		setCopiedId(post.thread.id);
-		if (copiedTimer.current !== null) {
-			window.clearTimeout(copiedTimer.current);
-		}
-		copiedTimer.current = window.setTimeout(() => {
-			setCopiedId(null);
-			copiedTimer.current = null;
-		}, COPIED_MS);
-	};
-
 	const actions: PostActions = {
 		copiedId,
 		onOpen: openPost,
-		onSave: (threadId) =>
-			setSaved((previous) => {
-				const next = new Set(previous);
-				if (next.has(threadId)) {
-					next.delete(threadId);
-				} else {
-					next.add(threadId);
-				}
-				return next;
-			}),
 		onSelectCommunity: selectCommunity,
 		onSelectPoster: selectPoster,
 		onShare: share,
-		onVote: (threadId, vote) =>
-			setVotes((previous) => {
-				const next = { ...previous };
-				const value = nextVote(previous[threadId], vote);
-				if (value === undefined) {
-					delete next[threadId];
-				} else {
-					next[threadId] = value;
-				}
-				return next;
-			}),
-		saved,
-		votes,
+		...reactions,
 	};
 
-	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (
-			event.defaultPrevented ||
-			event.metaKey ||
-			event.ctrlKey ||
-			event.altKey
-		) {
-			return;
-		}
-		if (event.key === "Escape") {
-			if (navOpen) {
-				event.preventDefault();
-				setNavOpen(false);
-				return;
-			}
-			if (pageOpen && !ownsKeys(event.target)) {
-				event.preventDefault();
-				port.closeThread();
-				return;
-			}
-		}
-		if (ownsKeys(event.target)) {
-			return;
-		}
-		if (event.key === "/") {
-			event.preventDefault();
-			searchRef.current?.focus();
-			searchRef.current?.select();
-			return;
-		}
-		const step = STEP_KEYS[event.key];
-		if (step === undefined || pageOpen || composing) {
-			return;
-		}
-		const order = feed.map((post) => post.thread.id);
-		const focused = [...rowElements.current].find(
-			([, element]) => element === document.activeElement
-		)?.[0];
-		const next = stepPost(order, focused ?? null, step);
-		if (next) {
-			event.preventDefault();
-			const element = rowElements.current.get(next);
-			element?.focus();
-			element?.scrollIntoView?.({ block: "nearest" });
-		}
-	};
+	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) =>
+		handleCommunityKeyDown(event, {
+			composing,
+			feed,
+			navOpen,
+			pageOpen,
+			port,
+			rowElements,
+			searchRef,
+			setNavOpen,
+		});
 
 	let empty: EmptyCopy | null = null;
 	if (feed.length === 0) {
@@ -400,7 +254,7 @@ export function CommunityInterface({
 			empty = {
 				action: { label: "Clear search", onClick: () => setQuery("") },
 				body: "Check the spelling, or search for a community or agent name.",
-				title: `No results for “${query.trim()}”`,
+				title: tl("No results for “{query}”", { query: query.trim() }),
 			};
 		} else if (snapshot.threads.length === 0) {
 			empty = {
@@ -415,7 +269,9 @@ export function CommunityInterface({
 			empty = {
 				action: { label: "Create post", onClick: () => create() },
 				body: "Threads filed in this community show up here.",
-				title: `${communityLabel(scopedCommunity)} has no posts yet`,
+				title: tl("{community} has no posts yet", {
+					community: communityLabel(scopedCommunity),
+				}),
 			};
 		} else if (scope.kind === "popular") {
 			empty = {
@@ -464,7 +320,14 @@ export function CommunityInterface({
 					Search results
 				</h1>
 				<p aria-live="polite" className="text-muted-foreground text-sm">
-					{plural(feed.length, "post")} for “{query.trim()}”
+					{tl(
+						"{count, plural, one {{countText} post} other {{countText} posts}} for “{query}”",
+						{
+							count: feed.length,
+							countText: String(feed.length),
+							query: query.trim(),
+						}
+					)}
 				</p>
 			</div>
 		);
@@ -530,35 +393,12 @@ export function CommunityInterface({
 				<div className="@[860px]/community:flex hidden @[1200px]/community:w-[272px] w-[248px] shrink-0 flex-col border-border border-r">
 					{nav}
 				</div>
-				<AnimatePresence>
-					{navOpen ? (
-						<>
-							<motion.button
-								animate={{ opacity: 1 }}
-								aria-label="Close navigation"
-								className="absolute inset-0 z-20 @[860px]/community:hidden bg-foreground/20"
-								exit={{ opacity: 0 }}
-								initial={reduceMotion ? false : { opacity: 0 }}
-								key="scrim"
-								onClick={() => setNavOpen(false)}
-								tabIndex={-1}
-								transition={{ duration: 0.15 }}
-								type="button"
-							/>
-							<motion.div
-								animate={{ x: 0 }}
-								className="absolute inset-y-0 left-0 z-30 flex @[860px]/community:hidden w-[272px] max-w-[85%] flex-col border-border border-r bg-background shadow-lg"
-								data-testid="community-nav-drawer"
-								exit={reduceMotion ? { opacity: 0 } : { x: "-100%" }}
-								initial={reduceMotion ? false : { x: "-100%" }}
-								key="drawer"
-								transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
-							>
-								{nav}
-							</motion.div>
-						</>
-					) : null}
-				</AnimatePresence>
+				<CommunityNavDrawer
+					nav={nav}
+					navOpen={navOpen}
+					onClose={() => setNavOpen(false)}
+					reduceMotion={reduceMotion}
+				/>
 				{pageOpen ? (
 					<PostPage
 						actions={actions}

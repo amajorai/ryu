@@ -8,23 +8,23 @@ import {
 	CancelCircleIcon,
 	CheckmarkCircle02Icon,
 	Clock01Icon,
-	WorkflowCircle06Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import { InlineErrorRow } from "@/src/components/chat/InlineErrorRow.tsx";
 import { eventClock } from "@/src/lib/calendar/display-days.ts";
 import type { CalendarEvent } from "@/src/lib/calendar/events.ts";
 
-/** Border/background tone reflecting an event's kind and outcome. */
+/** Background tone reflecting an event's kind and outcome. Runs are plain
+ *  muted pills (past ones dimmer); only a failure carries a tint. */
 export function eventTone(event: CalendarEvent): string {
 	if (event.kind === "past") {
 		return event.outcome === "success"
-			? "border-l-green-500 bg-success/10 text-foreground"
-			: "border-l-destructive bg-destructive/10 text-foreground";
+			? "bg-muted text-muted-foreground"
+			: "bg-destructive/10 text-foreground";
 	}
-	return "border-l-primary bg-primary/10 text-foreground";
+	return "bg-muted text-foreground";
 }
 
 /**
@@ -38,45 +38,40 @@ export function eventTime(event: CalendarEvent): string {
 	return eventClock(event.start);
 }
 
-/** Badge naming what an event's job runs: system job, agent, or workflow. */
-function targetBadge(event: CalendarEvent) {
+/** Plain label naming what an event's job runs: system job, agent, or workflow. */
+function targetLabel(event: CalendarEvent): string {
 	if (event.system) {
-		return <Badge variant="secondary">System</Badge>;
+		return "System";
 	}
 	if (event.agentId) {
-		return <Badge variant="secondary">{event.agentId}</Badge>;
+		return event.agentId;
 	}
-	return (
-		<Badge variant="secondary">
-			<HugeiconsIcon className="size-3" icon={WorkflowCircle06Icon} />
-			{event.workflowName ?? "Workflow"}
-		</Badge>
-	);
+	return event.workflowName ?? "Workflow";
 }
 
-/** Full detail card for a single event (day panel + agenda list). */
+/** One hairline row for a single event (day panel + agenda list). */
 export function EventRow({ event }: { event: CalendarEvent }) {
 	const tl = useLiteralMessages();
 	let icon = Clock01Icon;
-	let iconColor = "text-primary";
+	let iconColor = "text-muted-foreground";
 	if (event.kind === "past") {
 		icon =
 			event.outcome === "success" ? CheckmarkCircle02Icon : CancelCircleIcon;
 		iconColor =
 			event.outcome === "success"
-				? "text-status-success"
+				? "text-muted-foreground"
 				: "text-status-destructive";
 	}
 
 	return (
-		<div className="flex flex-col gap-1 rounded-md border p-2.5">
+		<div className="flex flex-col gap-0.5 border-border border-b py-2 last:border-b-0">
 			<div className="flex items-center gap-2">
 				<HugeiconsIcon
 					className={cn("size-4 shrink-0", iconColor)}
 					icon={icon}
 				/>
 				<span
-					className="min-w-0 flex-1 truncate font-medium text-sm"
+					className="min-w-0 flex-1 truncate text-sm"
 					data-ryu-i18n="off"
 					title={event.jobName}
 				>
@@ -90,20 +85,15 @@ export function EventRow({ event }: { event: CalendarEvent }) {
 						: eventClock(event.start)}
 				</span>
 			</div>
-			<div className="flex flex-wrap items-center gap-1.5 pl-6">
-				<Badge variant="secondary">
-					<HugeiconsIcon className="size-3" icon={Clock01Icon} />
-					{event.scheduleLabel}
-				</Badge>
-				{targetBadge(event)}
-				{event.kind === "upcoming" ? (
-					<Badge variant="outline">Upcoming</Badge>
-				) : null}
-			</div>
+			<p className="truncate pl-6 text-detail text-muted-foreground">
+				{event.scheduleLabel} · {targetLabel(event)}
+			</p>
 			{event.kind === "past" && event.outcome === "failure" && event.error ? (
-				<p className="line-clamp-2 pl-6 text-status-destructive text-xs">
-					{event.error}
-				</p>
+				<InlineErrorRow
+					className="h-6 pl-6"
+					details={event.error}
+					message="This run failed."
+				/>
 			) : null}
 		</div>
 	);

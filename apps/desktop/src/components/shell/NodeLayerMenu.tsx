@@ -48,14 +48,8 @@
 // to a compile-time target and move with the app, so only the services pass
 // `onUpdate`.
 
-import {
-	Delete02Icon,
-	Download04Icon,
-	PlayIcon,
-	StopIcon,
-	Tick02Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { PlayIcon, StopIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { SettingsTint } from "@ryu/blocks/desktop/settings-nav.tsx";
 import {
 	DropdownMenuItem,
@@ -66,6 +60,12 @@ import {
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils.ts";
 import { AutoScrollText } from "./AutoScrollText.tsx";
+import { OptionRow, PanelOptionRow } from "./NodeLayerMenu-option-rows.tsx";
+import type {
+	LayerAction,
+	LayerRunState,
+	NodeLayerMenuProps,
+} from "./NodeLayerMenu-types.ts";
 import {
 	PanelGroup,
 	PanelPageLink,
@@ -75,87 +75,13 @@ import {
 	useNodeSurface,
 } from "./NodePanelNav.tsx";
 
-/**
- * Run state of a layer:
- *   `true`/`false` — up / down (green / red dot);
- *   `null`         — probed but unknown, or not relevant yet (neutral dot);
- *   omitted        — the layer HAS no run state (a pure preference, like the
- *                    nested voice picker), so no dot is drawn at all. A grey dot
- *                    on something that cannot run reads as "broken".
- */
-export type LayerRunState = boolean | null;
-
-/** A top-of-submenu verb: Start / Stop / Update / Restart / Launch. */
-export interface LayerAction {
-	/** Rendered while `run()` is in flight ("Starting…"). Falls back to `label`. */
-	busyLabel?: string;
-	icon?: IconSvgElement;
-	/** Stable key for the pending state — also the React key. */
-	id: string;
-	label: string;
-	run: () => Promise<void> | void;
-	/** Warning tone for Update, destructive for anything that tears state down. */
-	tone?: "default" | "warning" | "destructive";
-}
-
-/** One swappable / installable option inside a layer's submenu. */
-export interface LayerOption {
-	/** Ticked: the current selection in a `swap` layer, running in a `toggle` one. */
-	active?: boolean;
-	/** Shown while `select()` is in flight; defaults to the layer's mode wording. */
-	busyLabel?: string;
-	/** Right-aligned caption — version, "running", a size, whatever fits. */
-	detail?: string | null;
-	disabled?: boolean;
-	/** Why it is disabled (e.g. "not supported on macOS") — shown as the detail. */
-	disabledReason?: string | null;
-	label: string;
-	/** Stable key: the catalog/engine/backend name. */
-	name: string;
-	/** Picking this option (swap to it, or install it when `available`). */
-	select: () => Promise<void> | void;
-	/** Optional uninstall for an installed option; omitted → no uninstall. */
-	uninstall?: () => Promise<void> | void;
-}
-
-/**
- * How the installed list behaves — this is the ONE place a layer declares its
- * backend semantics, and it must match Core:
- *
- *   `swap`   — mutually exclusive. Exactly one option is active; picking another
- *              moves the layer onto it (Chat, sandbox backend, Audio, Voice Recognition).
- *   `toggle` — independent. Every option runs (or not) on its own; the tick means
- *              "running", and picking one starts/stops just that engine. The
- *              run-alongside engines (speech / image / embeddings) are this — they
- *              have no "current selection" to swap between.
- */
-export type LayerSelectionMode = "swap" | "toggle";
-
-export interface NodeLayerMenuProps {
-	actions?: LayerAction[];
-	/** Options the node does NOT have yet — picking one installs it. */
-	available?: LayerOption[];
-	/** Sub-caption under the submenu header: "Running · 2.1 GB", "Stopped". */
-	caption?: string | null;
-	/** Extra rows appended to the submenu (e.g. a nested voice picker). */
-	children?: ReactNode;
-	/** What the trigger row shows on the right: the current selection's name. */
-	currentLabel: string;
-	icon?: IconSvgElement;
-	/** Options already on the node — picking one swaps the layer onto it. */
-	installed?: LayerOption[];
-	/** The layer's name, shown on the trigger row: "Chat", "Core". */
-	label: string;
-	running?: LayerRunState;
-	/** Semantics of `installed` — see {@link LayerSelectionMode}. Default `swap`. */
-	selectionMode?: LayerSelectionMode;
-	/** Trigger-row right-hand caption. Defaults to `currentLabel` when it differs
-	 *  from `label` (a singleton layer like "Core" names itself, so it passes a
-	 *  live detail — "2.1 GB · 4%" — instead of repeating its own name). */
-	trailing?: string | null;
-	/** Version of the CURRENT selection, badged on the trigger + header. */
-	version?: string | null;
-}
+export type {
+	LayerAction,
+	LayerOption,
+	LayerRunState,
+	LayerSelectionMode,
+	NodeLayerMenuProps,
+} from "./NodeLayerMenu-types.ts";
 
 const DOT_CLASS = {
 	on: "bg-success",
@@ -193,204 +119,6 @@ export function startStopAction(
 	};
 }
 
-/** Default in-flight wording per list, when the option doesn't override it. */
-function busyWording(
-	kind: "installed" | "available",
-	mode: LayerSelectionMode,
-	active: boolean
-): string {
-	if (kind === "available") {
-		return "Installing…";
-	}
-	if (mode === "toggle") {
-		return active ? "Stopping…" : "Starting…";
-	}
-	return "Switching…";
-}
-
-function OptionRow({
-	option,
-	kind,
-	mode,
-	pending,
-	onRun,
-}: {
-	kind: "installed" | "available";
-	mode: LayerSelectionMode;
-	onRun: (key: string, task: () => Promise<void> | void) => void;
-	option: LayerOption;
-	pending: string | null;
-}) {
-	const selectKey = `${kind}:${option.name}`;
-	const uninstallKey = `uninstall:${option.name}`;
-	const busy = pending === selectKey;
-	const uninstalling = pending === uninstallKey;
-	const detail = option.disabled
-		? (option.disabledReason ?? option.detail)
-		: option.detail;
-	const active = option.active ?? false;
-
-	return (
-		<DropdownMenuItem
-			closeOnClick={false}
-			density="compact"
-			disabled={option.disabled || pending !== null}
-			onClick={() => onRun(selectKey, option.select)}
-			purpose="layer-action"
-			spacing="comfortable"
-		>
-			{kind === "installed" ? (
-				<span className="flex size-3 shrink-0 items-center justify-center">
-					{active ? (
-						<HugeiconsIcon
-							className="size-3 text-primary"
-							icon={Tick02Icon}
-							strokeWidth={2.5}
-						/>
-					) : (
-						// A toggle layer has no single "current" row, so an idle engine
-						// keeps an explicit off-dot rather than an empty gutter.
-						mode === "toggle" && (
-							<span
-								aria-hidden
-								className="size-1.5 rounded-full bg-muted-foreground/30"
-							/>
-						)
-					)}
-				</span>
-			) : (
-				<HugeiconsIcon
-					className="size-3 shrink-0 text-muted-foreground/60"
-					icon={Download04Icon}
-				/>
-			)}
-			<AutoScrollText
-				className={cn("min-w-0 flex-1", active && "font-medium")}
-				title={option.label}
-			>
-				{option.label}
-			</AutoScrollText>
-			{busy ? (
-				<span className="type-compact shrink-0 text-muted-foreground/60">
-					{option.busyLabel ?? busyWording(kind, mode, active)}
-				</span>
-			) : (
-				detail && (
-					<span className="type-compact shrink-0 text-muted-foreground/50 tabular-nums">
-						{detail}
-					</span>
-				)
-			)}
-			{option.uninstall && !option.disabled && (
-				<button
-					aria-label={`Uninstall ${option.label}`}
-					className="shrink-0 rounded-md p-0.5 text-muted-foreground/50 hover:bg-destructive/10 hover:text-status-destructive disabled:opacity-50"
-					disabled={pending !== null}
-					onClick={(e) => {
-						// Uninstall is a row-local action: never let it bubble into the
-						// row's own "select this option" handler.
-						e.preventDefault();
-						e.stopPropagation();
-						const task = option.uninstall;
-						if (task) {
-							onRun(uninstallKey, task);
-						}
-					}}
-					title={uninstalling ? "Uninstalling…" : "Uninstall"}
-					type="button"
-				>
-					<HugeiconsIcon className="size-3" icon={Delete02Icon} />
-				</button>
-			)}
-		</DropdownMenuItem>
-	);
-}
-
-/** Panel-surface twin of {@link OptionRow}: a full-width row, the selection
- *  ticked on the right, uninstall as a sibling button (never nested in the row). */
-function PanelOptionRow({
-	option,
-	kind,
-	mode,
-	pending,
-	onRun,
-}: {
-	kind: "installed" | "available";
-	mode: LayerSelectionMode;
-	onRun: (key: string, task: () => Promise<void> | void) => void;
-	option: LayerOption;
-	pending: string | null;
-}) {
-	const selectKey = `${kind}:${option.name}`;
-	const uninstallKey = `uninstall:${option.name}`;
-	const busy = pending === selectKey;
-	const uninstalling = pending === uninstallKey;
-	const detail = option.disabled
-		? (option.disabledReason ?? option.detail)
-		: option.detail;
-	const active = option.active ?? false;
-
-	let status: ReactNode = null;
-	if (busy) {
-		status = (
-			<span className="shrink-0 font-normal text-muted-foreground text-sm">
-				{option.busyLabel ?? busyWording(kind, mode, active)}
-			</span>
-		);
-	} else if (kind === "installed" && active) {
-		status = (
-			<HugeiconsIcon
-				aria-label={mode === "toggle" ? "Running" : "Selected"}
-				className="size-4 shrink-0 text-primary"
-				icon={Tick02Icon}
-				strokeWidth={2.5}
-			/>
-		);
-	} else if (kind === "installed" && mode === "toggle") {
-		// A toggle layer has no single selection, so an idle engine says so —
-		// a blank trailing edge read as "nothing here" rather than "stopped".
-		status = (
-			<span className="shrink-0 font-normal text-muted-foreground text-sm">
-				Off
-			</span>
-		);
-	}
-
-	return (
-		<PanelRow
-			current={kind === "installed" && mode === "swap" ? active : undefined}
-			disabled={option.disabled || pending !== null}
-			icon={kind === "available" ? Download04Icon : undefined}
-			onClick={() => onRun(selectKey, option.select)}
-			pressed={kind === "installed" && mode === "toggle" ? active : undefined}
-			sideAction={
-				option.uninstall && !option.disabled ? (
-					<button
-						aria-label={`Uninstall ${option.label}`}
-						className="relative z-10 shrink-0 rounded-md p-1 text-muted-foreground/70 hover:bg-destructive/10 hover:text-status-destructive disabled:opacity-50"
-						disabled={pending !== null}
-						onClick={() => {
-							const task = option.uninstall;
-							if (task) {
-								onRun(uninstallKey, task);
-							}
-						}}
-						title={uninstalling ? "Uninstalling…" : "Uninstall"}
-						type="button"
-					>
-						<HugeiconsIcon className="size-4" icon={Delete02Icon} />
-					</button>
-				) : undefined
-			}
-			tint="blue"
-			trailing={status}
-			value={detail}
-		>
-			{option.label}
-		</PanelRow>
-	);
-}
-
 /** Tile color per action tone, from Settings' closed tint palette. */
 const ACTION_TINT = {
 	default: "blue",
@@ -400,7 +128,7 @@ const ACTION_TINT = {
 
 function SectionLabel({ children }: { children: ReactNode }) {
 	return (
-		<p className="type-micro px-2 pt-1 pb-0.5 font-medium text-muted-foreground/40">
+		<p className="px-2 pt-1 pb-0.5 font-medium text-muted-foreground/70 text-xs">
 			{children}
 		</p>
 	);
@@ -467,7 +195,7 @@ export function NodeLayerMenu({
 							</span>
 						) : null}
 						{version && (
-							<span className="type-compact shrink-0 tabular-nums">
+							<span className="shrink-0 text-xs tabular-nums">
 								{versionLabel(version)}
 							</span>
 						)}
@@ -492,7 +220,7 @@ export function NodeLayerMenu({
 							/>
 						)}
 						{version && (
-							<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
+							<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 								{versionLabel(version)}
 							</span>
 						)}
@@ -561,7 +289,7 @@ export function NodeLayerMenu({
 			<DropdownMenuSubTrigger purpose="layer-selection">
 				{icon && (
 					<HugeiconsIcon
-						className="size-3 shrink-0 text-muted-foreground/60"
+						className="size-3 shrink-0 text-muted-foreground/70"
 						icon={icon}
 					/>
 				)}
@@ -590,7 +318,7 @@ export function NodeLayerMenu({
 						</AutoScrollText>
 					) : null}
 					{version && (
-						<span className="type-compact shrink-0 text-muted-foreground/50 tabular-nums">
+						<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
 							{versionLabel(version)}
 						</span>
 					)}
@@ -607,12 +335,12 @@ export function NodeLayerMenu({
 							{currentLabel}
 						</AutoScrollText>
 						{version && (
-							<span className="type-compact shrink-0 text-muted-foreground/50 tabular-nums">
+							<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
 								{versionLabel(version)}
 							</span>
 						)}
 					</div>
-					<p className="type-compact truncate text-muted-foreground/60">
+					<p className="truncate text-muted-foreground/70 text-xs">
 						{caption ?? label}
 					</p>
 				</div>

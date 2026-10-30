@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -48,20 +48,24 @@ export function Keycap({ className, ...props }: ComponentProps<"kbd">) {
 }
 
 /** The tracker's spoken name: where it goes, then what is waiting there. */
-export function trackerLabel(goal: TrackerGoal): string {
+export function trackerLabel(goal: TrackerGoal, tl?: LiteralMessage): string {
 	const detail = goal.detail.replaceAll(" · ", ", ");
 	if (!goal.agentName) {
 		return detail ? `${goal.title}: ${detail}` : goal.title;
 	}
 	if (detail) {
-		return `Go to ${goal.agentName}: ${detail}`;
+		return tl
+			? tl("Go to {agentName}: {detail}", { agentName: goal.agentName, detail })
+			: `Go to ${goal.agentName}: ${detail}`;
 	}
 	// An ask's tracker opens the ask: its name says the ask and the wait.
 	if (goal.title.startsWith(`${goal.agentName} asks:`)) {
 		const wait = goal.suffix?.replace(/^·\s*/, "");
 		return `Answer ${goal.agentName}: ${goal.title}${wait ? `, ${wait}` : ""}`;
 	}
-	return `Go to ${goal.agentName}`;
+	return tl
+		? tl("Go to {agentName}", { agentName: goal.agentName })
+		: `Go to ${goal.agentName}`;
 }
 
 /**
@@ -78,6 +82,7 @@ export function QuestTracker({
 	/** Walks to the agent, or opens `goal.askId`; the tracker is the opener. */
 	onGo: (agentId: string, opener: HTMLElement, askId?: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	const { agentId } = goal;
 	const body = (
 		<>
@@ -113,7 +118,7 @@ export function QuestTracker({
 	}
 	return (
 		<button
-			aria-label={trackerLabel(goal)}
+			aria-label={trackerLabel(goal, tl)}
 			className={cn(
 				className,
 				"pointer-events-auto cursor-pointer outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"

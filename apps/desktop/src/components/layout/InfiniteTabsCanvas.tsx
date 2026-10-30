@@ -1,21 +1,12 @@
-import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
-import {
-	ContextMenu,
-	ContextMenuContent,
-	ContextMenuItem,
-	ContextMenuTrigger,
-} from "@ryu/ui/components/context-menu.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Background,
 	Controls,
 	MiniMap,
-	type Node,
-	type NodeProps,
-	NodeResizer,
-	type NodeTypes,
 	type OnMoveEnd,
 	Panel,
 	ReactFlow,
@@ -25,277 +16,28 @@ import {
 	type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TabLayoutMenuItems } from "@/src/components/layout/appearance-context-menu.tsx";
-import { TabViewPane } from "@/src/components/layout/TabViewPane.tsx";
-import type {
-	Split,
-	Tab,
-	TabGroup,
-	TabGroupColor,
-} from "@/src/contexts/TabsContext.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { usePrefersReducedMotion } from "@/src/hooks/usePrefersReducedMotion.ts";
-import { setTabLayout, useTabLayout } from "@/src/hooks/useTabLayout.ts";
-import { pluginValueSchema } from "@/src/lib/api/plugin-wire-values.ts";
+import { useTabLayout } from "@/src/hooks/useTabLayout.ts";
 import layoutStyles from "./InfiniteTabsCanvas.module.css";
-import { OverflowTooltip } from "./overflow-tooltip.tsx";
-import { TabGlyph } from "./TitleBar.tsx";
 import {
-	type CanvasRect,
+	type CanvasNode,
+	type RegionCanvasNode,
+	readStoredSnapshot,
+	rectForNode,
+	regionList,
+	TAB_CANVAS_STORAGE_KEY,
+	type TabCanvasNode,
+	WRITE_DEBOUNCE_MS,
+} from "./InfiniteTabsCanvas-model.ts";
+import { NODE_TYPES } from "./InfiniteTabsCanvas-nodes.tsx";
+import {
 	createInitialTabCanvasSnapshot,
 	reconcileTabCanvasSnapshot,
 	TAB_CANVAS_DEFAULT_HEIGHT,
 	TAB_CANVAS_DEFAULT_WIDTH,
-	TAB_CANVAS_MIN_HEIGHT,
-	TAB_CANVAS_MIN_WIDTH,
 	type TabCanvasSnapshot,
 } from "./tab-canvas-layout.ts";
-
-const TAB_CANVAS_STORAGE_KEY = "ryu:tab-canvas-layout:v1";
-const WRITE_DEBOUNCE_MS = 500;
-
-const GROUP_SURFACE_CLASSES = {
-	grey: "border-slate-500/40 bg-slate-500/10",
-	blue: "border-info/45 bg-info/10",
-	red: "border-destructive/45 bg-destructive/10",
-	yellow: "border-warning/45 bg-warning/10",
-	green: "border-success/45 bg-success/10",
-	pink: "border-pink-500/45 bg-pink-500/10",
-	purple: "border-purple-500/45 bg-purple-500/10",
-	cyan: "border-cyan-500/45 bg-cyan-500/10",
-	orange: "border-orange-500/45 bg-orange-500/10",
-} satisfies Record<TabGroupColor, string>;
-
-interface CanvasRegion {
-	color: TabGroupColor;
-	id: string;
-	label: string;
-	memberCount: number;
-}
-
-interface TabCanvasNodeData extends Record<string, unknown> {
-	focused: boolean;
-	motionEnabled: boolean;
-	onClose: () => void;
-	onFocus: () => void;
-	persist: () => void;
-	tab: Tab;
-	tabLayout: ReturnType<typeof useTabLayout>;
-}
-
-interface RegionCanvasNodeData extends Record<string, unknown> {
-	color: TabGroupColor;
-	id: string;
-	label: string;
-	memberCount: number;
-}
-
-type TabCanvasNode = Node<TabCanvasNodeData, "tab">;
-type RegionCanvasNode = Node<RegionCanvasNodeData, "region">;
-type CanvasNode = TabCanvasNode | RegionCanvasNode;
-
-function readStoredSnapshot() {
-	try {
-		const value = localStorage.getItem(TAB_CANVAS_STORAGE_KEY);
-		return value ? pluginValueSchema.parse(JSON.parse(value)) : null;
-	} catch {
-		return null;
-	}
-}
-
-function regionList(
-	tabs: Tab[],
-	groups: TabGroup[],
-	splits: Split[]
-): CanvasRegion[] {
-	const regions: CanvasRegion[] = [];
-	for (const group of groups) {
-		const memberCount = tabs.filter((tab) => tab.groupId === group.id).length;
-		if (memberCount > 0) {
-			regions.push({
-				color: group.color,
-				id: `group:${group.id}`,
-				label: group.name,
-				memberCount,
-			});
-		}
-	}
-	for (const split of splits) {
-		const memberCount = tabs.filter((tab) => tab.splitId === split.id).length;
-		if (memberCount > 0) {
-			regions.push({
-				color: split.color,
-				id: `split:${split.id}`,
-				label: split.name || "Pane group",
-				memberCount,
-			});
-		}
-	}
-	return regions;
-}
-
-function rectForNode(node: CanvasNode, fallback: CanvasRect): CanvasRect {
-	return {
-		height: node.height ?? fallback.height,
-		width: node.width ?? fallback.width,
-		x: node.position.x,
-		y: node.position.y,
-	};
-}
-
-function CanvasRegionNodeView({ data }: NodeProps<RegionCanvasNode>) {
-	return (
-		<div
-			className={cn(
-				"pointer-events-none h-full w-full rounded-3xl border p-4 shadow-inner",
-				GROUP_SURFACE_CLASSES[data.color]
-			)}
-			data-canvas-region={data.label}
-		>
-			<div className="flex items-center justify-between gap-3">
-				<div className="min-w-0">
-					<p className="truncate font-medium text-sm">{data.label}</p>
-					<p
-						className={cn(
-							"type-compact mt-0.5 text-muted-foreground uppercase",
-							layoutStyles.authored1
-						)}
-					>
-						Pane group
-					</p>
-				</div>
-				<span className="type-compact shrink-0 rounded-full bg-background/70 px-2 py-1 font-medium text-muted-foreground">
-					{data.memberCount} {data.memberCount === 1 ? "tab" : "tabs"}
-				</span>
-			</div>
-		</div>
-	);
-}
-
-function CanvasTabHeader({
-	focused,
-	onClose,
-	onFocus,
-	tab,
-	tabLayout,
-}: {
-	focused: boolean;
-	onClose: () => void;
-	onFocus: () => void;
-	tab: Tab;
-	tabLayout: ReturnType<typeof useTabLayout>;
-}) {
-	return (
-		<ContextMenu>
-			<ContextMenuTrigger
-				render={
-					<div
-						className="flex min-h-11 items-center gap-2 border-border/60 border-b bg-card/95 px-3 py-2 backdrop-blur"
-						data-tab-view-header={tab.id}
-					>
-						<span
-							className={cn(
-								"flex size-4 shrink-0 items-center justify-center",
-								focused ? "text-foreground" : "text-muted-foreground"
-							)}
-						>
-							<TabGlyph
-								busy={tab.busy}
-								busySpeed={tab.busySpeed}
-								className="size-4"
-								icon={tab.icon}
-								logoSize="16px"
-								path={tab.path}
-								unloaded={tab.unloaded}
-							/>
-						</span>
-						<button
-							className={cn(
-								"min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-								focused ? "text-foreground" : "text-muted-foreground"
-							)}
-							onClick={onFocus}
-							type="button"
-						>
-							<OverflowTooltip
-								className="block overflow-hidden whitespace-nowrap font-medium text-xs"
-								fade
-								forceShow={tab.unloaded}
-								text={tab.title}
-							/>
-						</button>
-						<button
-							aria-label={`Close ${tab.title}`}
-							className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							onClick={(event) => {
-								event.stopPropagation();
-								onClose();
-							}}
-							type="button"
-						>
-							<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
-						</button>
-					</div>
-				}
-			/>
-			<ContextMenuContent>
-				<ContextMenuItem disabled={focused} onClick={onFocus}>
-					Focus tab
-				</ContextMenuItem>
-				<TabLayoutMenuItems onChange={setTabLayout} value={tabLayout} />
-				<ContextMenuItem onClick={onClose}>Close tab</ContextMenuItem>
-			</ContextMenuContent>
-		</ContextMenu>
-	);
-}
-
-function TabCanvasNodeView({
-	data,
-	dragging,
-	selected,
-}: NodeProps<TabCanvasNode>) {
-	return (
-		<>
-			<NodeResizer
-				handleClassName="!size-2 !rounded-glyph-compact !border-background !bg-primary"
-				isVisible={selected}
-				lineClassName="!border-primary/40"
-				minHeight={TAB_CANVAS_MIN_HEIGHT}
-				minWidth={TAB_CANVAS_MIN_WIDTH}
-				onResizeEnd={data.persist}
-			/>
-			<TabViewPane
-				className={cn(
-					cn(
-						"h-full rounded-2xl border border-border/70 shadow-black/5 shadow-lg duration-200",
-						layoutStyles.authored2,
-						layoutStyles.authored3
-					),
-					dragging &&
-						data.motionEnabled &&
-						"-translate-y-px scale-[1.01] shadow-2xl ring-2 ring-primary/25"
-				)}
-				focused={data.focused}
-				onClose={data.onClose}
-				onFocus={data.onFocus}
-				tab={data.tab}
-			>
-				<CanvasTabHeader
-					focused={data.focused}
-					onClose={data.onClose}
-					onFocus={data.onFocus}
-					tab={data.tab}
-					tabLayout={data.tabLayout}
-				/>
-			</TabViewPane>
-		</>
-	);
-}
-
-const NODE_TYPES: NodeTypes = {
-	region: CanvasRegionNodeView,
-	tab: TabCanvasNodeView,
-};
 
 function CanvasInner() {
 	const { activeTabId, closeTab, focusTab, openTab, tabs, groups, splits } =
@@ -551,25 +293,21 @@ function CanvasInner() {
 					zoomable
 				/>
 				<Panel position="top-right">
-					<div className="flex items-center gap-2 rounded-xl border border-border/60 bg-popover/90 p-1.5 shadow-sm backdrop-blur">
-						<span className="px-2 font-medium text-muted-foreground text-xs">
+					<div className="flex items-center gap-1 rounded-xl border border-border bg-background p-1">
+						<span className="px-2 text-muted-foreground text-xs">
 							Infinite canvas
 						</span>
-						<button
-							className="rounded-lg px-2 py-1.5 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							onClick={fitAll}
-							type="button"
-						>
+						<Button onClick={fitAll} size="sm" variant="ghost-muted">
 							Fit all
-						</button>
-						<button
+						</Button>
+						<Button
 							aria-label="New chat tab"
-							className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={() => openTab("/chat", { forceNew: true })}
-							type="button"
+							size="icon-sm"
+							variant="ghost-muted"
 						>
 							<HugeiconsIcon className="size-4" icon={Add01Icon} />
-						</button>
+						</Button>
 					</div>
 				</Panel>
 			</ReactFlow>

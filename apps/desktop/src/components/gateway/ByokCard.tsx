@@ -2,6 +2,7 @@ import {
 	gatewayAccountErrorMessage,
 	ProviderRow,
 } from "@/src/components/gateway/GatewayProviderKeyRow.tsx";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import { ProviderKeySafetyNotice } from "@/src/components/settings/shared/provider-key-safety.tsx";
 import {
 	SettingsGroup,
@@ -306,7 +307,17 @@ export function ByokCard({
 
 	return (
 		<SettingsSection
-			caption="Add your own provider keys for chat, embeddings, speech, images, and video. Ryu installs every key in this node's Gateway configuration. The desktop also mirrors the first key into its OS credential store. Keys are masked on later reads; Ryu Cloud nodes keep their provider keys server-side."
+			caption={
+				<CaptionInfo
+					detail={
+						"Ryu installs every key in this node's Gateway configuration. The desktop also mirrors the first key into its OS credential store. Keys are masked on later reads; Ryu Cloud nodes keep their provider keys server-side."
+					}
+				>
+					{
+						"Your own provider keys for chat, embeddings, speech, images and video."
+					}
+				</CaptionInfo>
+			}
 			title="Provider keys (BYOK)"
 		>
 			{managed ? null : <ProviderKeySafetyNotice storage="gateway" />}

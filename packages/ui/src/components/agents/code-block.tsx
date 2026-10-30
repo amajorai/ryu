@@ -2,6 +2,13 @@
 
 // beui.dev/components/agents/code-block
 
+import {
+	Copy01Icon,
+	Loading03Icon,
+	SourceCodeIcon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { CSSProperties } from "react";
 import css from "./code-block.module.css";
 
@@ -16,7 +23,6 @@ import {
 } from "@ryu/ui/components/agents/agent-code.tsx";
 import { SPRING_PRESS } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Check, Copy, FileCode2, LoaderCircle } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
 	type ReactNode,
@@ -127,41 +133,43 @@ export function CodeBlock({
 		<div
 			aria-busy={streaming}
 			className={cn(
-				"w-full overflow-hidden rounded-2xl bg-muted/80 text-sm",
+				"w-full overflow-hidden rounded-xl bg-muted text-sm",
 				className
 			)}
 			data-state={status}
 		>
-			<div className="flex h-10 items-center gap-2.5 px-3">
-				<FileCode2
+			<div className="flex h-10 items-center gap-1.5 px-3">
+				<HugeiconsIcon
 					aria-hidden="true"
-					className="size-3.5 shrink-0 text-muted-foreground/70"
+					className="size-3.5 shrink-0 text-muted-foreground"
+					icon={SourceCodeIcon}
 				/>
 				{filename ? (
-					<span className="min-w-0 truncate font-mono text-foreground/80 text-xs">
+					<span className="min-w-0 truncate font-mono text-foreground text-xs">
 						{filename}
 					</span>
 				) : null}
-				<span className="type-compact font-medium text-muted-foreground/55 uppercase tracking-wide">
-					{language}
-				</span>
+				<span className="text-muted-foreground text-xs">{language}</span>
 				<span
 					className={cn(
-						"type-compact ml-auto inline-flex shrink-0 items-center gap-1 font-medium",
+						"ml-auto inline-flex shrink-0 items-center gap-1 font-medium text-xs",
 						streaming ? "text-status-info" : "text-status-success"
 					)}
 				>
 					{streaming ? (
-						<LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />
+						<HugeiconsIcon
+							className={cn("size-3.5", !reduce && "animate-spin")}
+							icon={Loading03Icon}
+						/>
 					) : (
-						<Check className="size-3" />
+						<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 					)}
 					{streaming ? "Writing" : "Ready"}
 				</span>
 				{copyable || onCopy ? (
 					<motion.button
 						aria-label={copied ? "Copied" : "Copy code"}
-						className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						className="grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={handleCopy}
 						title={copied ? "Copied" : "Copy code"}
 						transition={SPRING_PRESS}
@@ -169,9 +177,9 @@ export function CodeBlock({
 						whileTap={reduce ? undefined : { scale: 0.9 }}
 					>
 						{copied ? (
-							<Check className="size-3.5" />
+							<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 						) : (
-							<Copy className="size-3.5" />
+							<HugeiconsIcon className="size-3.5" icon={Copy01Icon} />
 						)}
 					</motion.button>
 				) : null}
@@ -181,13 +189,13 @@ export function CodeBlock({
 				aria-live={streaming ? "polite" : undefined}
 				className={[
 					css.inline1,
-					"scrollbar-hide overflow-auto border-foreground/[0.06] border-t py-2",
+					"scrollbar-hide overflow-auto border-border border-t py-2",
 				].join(" ")}
 				ref={viewportRef}
 				role={streaming ? "log" : undefined}
 				style={inline1Style}
 			>
-				<pre className="m-0 min-w-max font-mono text-foreground/85 text-xs leading-5">
+				<pre className="m-0 min-w-max font-mono text-foreground text-xs leading-5">
 					<code>
 						{lines.map((line, index) => {
 							const lineNumber = index + 1;
@@ -203,7 +211,7 @@ export function CodeBlock({
 									key={line.offset}
 								>
 									{showLineNumbers ? (
-										<span className="select-none pr-3 text-right text-muted-foreground/35 tabular-nums">
+										<span className="select-none pr-3 text-right text-muted-foreground/70 tabular-nums">
 											{lineNumber}
 										</span>
 									) : null}

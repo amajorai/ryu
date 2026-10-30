@@ -16,17 +16,12 @@
 // panel renders only when that read succeeds: non-ACP agents answer 404 and
 // callers without edit access 403.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@ryu/ui/components/native-select.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import {
 	SettingsGroup,
@@ -34,198 +29,24 @@ import {
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import type {
-	AcpConfig,
-	AcpConfigOption,
-	AcpConfigSelectOption,
-} from "@/src/lib/api/acp.ts";
 import {
-	type AcpAgentSettings,
 	fetchUnfilteredAcpConfig,
-	formatEnvText,
 	getAcpAgentSettings,
-	parseArgsText,
-	parseEnvText,
 	setAcpAgentSettings,
 } from "@/src/lib/api/acp-agent-settings.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
-
-interface Choice {
-	id: string;
-	name: string;
-}
-
-interface Draft {
-	allowedModels: string[];
-	argsText: string;
-	autoCompact: boolean | null;
-	autoCompactTokens: string;
-	cliPath: string;
-	command: string;
-	configDir: string;
-	defaultConfigOptions: Record<string, string>;
-	defaultMode: string;
-	defaultModel: string;
-	envText: string;
-}
-
-function toDraft(settings: AcpAgentSettings): Draft {
-	return {
-		allowedModels: settings.allowedModels ?? [],
-		argsText: (settings.args ?? []).join("\n"),
-		autoCompact: settings.autoCompact ?? null,
-		autoCompactTokens: settings.autoCompactTokens
-			? String(settings.autoCompactTokens)
-			: "",
-		cliPath: settings.cliPath ?? "",
-		command: settings.command ?? "",
-		configDir: settings.configDir ?? "",
-		defaultConfigOptions: settings.defaultConfigOptions ?? {},
-		defaultMode: settings.defaultMode ?? "",
-		defaultModel: settings.defaultModel ?? "",
-		envText: formatEnvText(settings.env),
-	};
-}
-
-function fromDraft(draft: Draft): AcpAgentSettings {
-	const tokens = Number(draft.autoCompactTokens);
-	return {
-		allowedModels: draft.allowedModels,
-		args: parseArgsText(draft.argsText),
-		autoCompact: draft.autoCompact,
-		autoCompactTokens: Number.isInteger(tokens) && tokens > 0 ? tokens : null,
-		cliPath: draft.cliPath,
-		command: draft.command,
-		configDir: draft.configDir,
-		defaultConfigOptions: draft.defaultConfigOptions,
-		defaultMode: draft.defaultMode,
-		defaultModel: draft.defaultModel,
-		env: parseEnvText(draft.envText),
-	};
-}
-
-/** Absolute on POSIX (`/…`) or Windows (`C:\…`, `C:/…`, `\\server\…`). */
-function isAbsolutePath(path: string): boolean {
-	return /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(path);
-}
-
-function flatOptions(option: AcpConfigOption): AcpConfigSelectOption[] {
-	return (option.options ?? []).flatMap((entry) =>
-		"options" in entry ? entry.options : [entry]
-	);
-}
-
-/** The model option an agent exposes as a session config option, if any. */
-function modelConfigOption(config: AcpConfig | null): AcpConfigOption | null {
-	return (
-		config?.configOptions?.find(
-			(option) => option.category === "model" && option.type === "select"
-		) ?? null
-	);
-}
-
-function modelChoices(config: AcpConfig | null): Choice[] {
-	const listed = config?.models?.availableModels ?? [];
-	if (listed.length > 0) {
-		return listed.map((model) => ({ id: model.modelId, name: model.name }));
-	}
-	const option = modelConfigOption(config);
-	return option
-		? flatOptions(option).map((value) => ({
-				id: value.value,
-				name: value.name,
-			}))
-		: [];
-}
-
-/** Non-model, non-mode select options the user can default (e.g. effort). */
-function defaultableOptions(config: AcpConfig | null): AcpConfigOption[] {
-	return (config?.configOptions ?? []).filter(
-		(option) =>
-			option.type === "select" &&
-			option.category !== "model" &&
-			option.category !== "mode"
-	);
-}
-
-function TextRow({
-	description,
-	label,
-	multiline,
-	onChange,
-	placeholder,
-	value,
-	disabled,
-}: {
-	description: string;
-	disabled: boolean;
-	label: string;
-	multiline?: boolean;
-	onChange: (value: string) => void;
-	placeholder?: string;
-	value: string;
-}) {
-	const id = useId();
-	return (
-		<SettingsItem
-			description={description}
-			title={<label htmlFor={id}>{label}</label>}
-		>
-			{multiline ? (
-				<Textarea
-					disabled={disabled}
-					id={id}
-					onChange={(event) => onChange(event.target.value)}
-					placeholder={placeholder}
-					rows={3}
-					spellCheck={false}
-					value={value}
-					variant="code-caption"
-				/>
-			) : (
-				<Input
-					disabled={disabled}
-					id={id}
-					onChange={(event) => onChange(event.target.value)}
-					placeholder={placeholder}
-					spellCheck={false}
-					value={value}
-					variant="code-caption"
-				/>
-			)}
-		</SettingsItem>
-	);
-}
-
-function ChoiceSelect({
-	ariaLabel,
-	choices,
-	disabled,
-	onChange,
-	value,
-}: {
-	ariaLabel: string;
-	choices: Choice[];
-	disabled: boolean;
-	onChange: (value: string) => void;
-	value: string;
-}) {
-	return (
-		<NativeSelect
-			aria-label={ariaLabel}
-			disabled={disabled}
-			onChange={(event) => onChange(event.target.value)}
-			value={value}
-		>
-			<NativeSelectOption value="">Agent default</NativeSelectOption>
-			{choices.map((choice) => (
-				<NativeSelectOption key={choice.id} value={choice.id}>
-					{choice.name}
-				</NativeSelectOption>
-			))}
-		</NativeSelect>
-	);
-}
+import {
+	type Choice,
+	type Draft,
+	defaultableOptions,
+	flatOptions,
+	fromDraft,
+	isAbsolutePath,
+	modelChoices,
+	modelConfigOption,
+	toDraft,
+} from "./AcpAgentSettingsPanel-draft.ts";
+import { ChoiceSelect, TextRow } from "./AcpAgentSettingsPanel-fields.tsx";
 
 export function AcpAgentSettingsPanel({
 	agentId,
@@ -238,6 +59,7 @@ export function AcpAgentSettingsPanel({
 	 * so Core serves it no launch settings (the read answers 404). */
 	limitedOnManagedPi?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
 	// One reactive target for reads and writes: the same (per-tab aware) node
 	// the surrounding page and its `acp-config` reads use.
@@ -380,7 +202,9 @@ export function AcpAgentSettingsPanel({
 		if (relative) {
 			sileo.error({
 				title: "Use an absolute path",
-				description: `"${relative.trim()}" is relative; agent paths must be absolute.`,
+				description: tl('"{path}" is relative; agent paths must be absolute.', {
+					path: relative.trim(),
+				}),
 			});
 			return;
 		}
@@ -406,7 +230,7 @@ export function AcpAgentSettingsPanel({
 
 	return (
 		<SettingsSection
-			caption="How Ryu launches this ACP agent and how its sessions start. Ryu's own Gateway routing and managed folders always take precedence over values set here."
+			caption="How Ryu launches this ACP agent. Gateway routing and managed folders take precedence."
 			headerAction={
 				<div className="flex gap-2">
 					<Button
@@ -426,20 +250,23 @@ export function AcpAgentSettingsPanel({
 		>
 			{error ? (
 				<p className="text-status-warning text-xs dark:text-status-warning">
-					The agent did not start ({error}). Launch settings are still editable;
-					model and mode choices appear once it starts.
+					{tl(
+						"The agent did not start ({error}). Launch settings are still editable; model and mode choices appear once it starts.",
+						{ error }
+					)}
 				</p>
 			) : null}
 			{view.inheritedFrom ? (
 				<p className="text-muted-foreground text-xs">
-					These settings are inherited from {view.inheritedFrom}. Saving stores
-					them for this agent, and later changes to {view.inheritedFrom} no
-					longer apply here.
+					{tl(
+						"These settings are inherited from {inheritedFrom}. Saving stores them for this agent, and later changes to {inheritedFrom} no longer apply here.",
+						{ inheritedFrom: view.inheritedFrom }
+					)}
 				</p>
 			) : null}
 			<SettingsGroup>
 				<TextRow
-					description="Program to run instead of the default launcher, such as a locally installed adapter. When set, the arguments below replace the default ones."
+					description="A program to run instead of the default launcher. Replaces the default arguments."
 					disabled={busy}
 					label="Command"
 					onChange={(command) => patch({ command })}
@@ -591,7 +418,7 @@ export function AcpAgentSettingsPanel({
 						<SettingsItem
 							actions={
 								<ChoiceSelect
-									ariaLabel={`Default ${option.name}`}
+									ariaLabel={tl("Default {name}", { name: option.name })}
 									choices={flatOptions(option).map((value) => ({
 										id: value.value,
 										name: value.name,
@@ -610,7 +437,7 @@ export function AcpAgentSettingsPanel({
 								/>
 							}
 							key={option.id}
-							title={`Default ${option.name.toLowerCase()}`}
+							title={tl("Default {name}", { name: option.name.toLowerCase() })}
 						/>
 					))}
 				</SettingsGroup>

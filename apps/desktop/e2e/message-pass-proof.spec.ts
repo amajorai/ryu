@@ -34,6 +34,9 @@ test("proves grouped bubbles, compact actions, and pass access copy", async ({
 		);
 	expect(assistantPositions).toEqual(["first", "middle", "last"]);
 
+	// The quiet transcript (3cf89b6e6): a run reads as one by its
+	// spacing, not by tail corners. Every user bubble is the same muted
+	// rounded-3xl pill, and the assistant reply is plain prose with no bubble.
 	const userBubbles = page.locator(
 		'.group\\/user-message [data-testid="user-message-bubble"]'
 	);
@@ -41,51 +44,65 @@ test("proves grouped bubbles, compact actions, and pass access copy", async ({
 	const userClasses = await userBubbles.evaluateAll((nodes) =>
 		nodes.map((node) => node.getAttribute("class") ?? "")
 	);
-	expect(userClasses[0]).toContain("rounded-br-md");
-	expect(userClasses[1]).toContain("rounded-r-md");
-	expect(userClasses[2]).toContain("rounded-tr-md");
+	for (const classes of userClasses) {
+		expect(classes).toContain("rounded-3xl");
+		expect(classes).not.toMatch(/rounded-(?:br|r|tr)-md/);
+	}
 
-	const assistantBubbles = page.locator(
-		'[data-assistant-group-position] [data-slot="bubble-content"]'
+	const assistantProse = await page
+		.locator("[data-assistant-group-position]")
+		.evaluateAll((nodes) =>
+			nodes.map((node) => {
+				const bubble = node.querySelector('[data-slot="bubble"]');
+				const content = node.querySelector('[data-slot="bubble-content"]');
+				const style = content ? getComputedStyle(content) : null;
+				return {
+					background: style?.backgroundColor ?? null,
+					radius: style?.borderTopLeftRadius ?? null,
+					variant: bubble?.getAttribute("data-variant") ?? null,
+				};
+			})
+		);
+	expect(assistantProse).toEqual(
+		Array.from({ length: 3 }, () => ({
+			background: "rgba(0, 0, 0, 0)",
+			radius: "0px",
+			variant: "ghost",
+		}))
 	);
-	const assistantClasses = await assistantBubbles.evaluateAll((nodes) =>
-		nodes.map((node) => node.getAttribute("class") ?? "")
-	);
-	expect(assistantClasses[0]).toContain("rounded-bl-md");
-	expect(assistantClasses[1]).toContain("rounded-l-md");
-	expect(assistantClasses[2]).toContain("rounded-tl-md");
 
 	const assistantRows = page.locator("[data-assistant-group-position]");
 	await expect(assistantRows).toHaveCount(3);
 	await expect(page.locator('[data-slot="message-toolbar"]')).toHaveCount(6);
 	for (let index = 0; index < 3; index += 1) {
-		const row = assistantRows.nth(index).locator("..");
-		const toolbar = row.locator('[data-slot="message-toolbar"]');
+		// The reply's action row sits under its prose, starting at its left edge.
+		const turn = assistantRows.nth(index).locator("../..");
+		const toolbar = turn.locator('[data-slot="message-toolbar"]');
 		await assistantRows.nth(index).hover();
 		await expect(toolbar).toBeVisible();
-		const geometry = await row.evaluate((node) => {
-			const bubble = node.querySelector('[data-slot="bubble-content"]');
+		const geometry = await turn.evaluate((node) => {
+			const prose = node.querySelector('[data-slot="bubble-content"]');
 			const actions = node.querySelector('[data-slot="message-toolbar"]');
-			if (!(bubble && actions)) {
+			if (!(prose && actions)) {
 				return null;
 			}
-			const bubbleRect = bubble.getBoundingClientRect();
+			const proseRect = prose.getBoundingClientRect();
 			const actionRect = actions.getBoundingClientRect();
 			return {
-				actionCenterY: actionRect.top + actionRect.height / 2,
 				actionLeft: actionRect.left,
-				bubbleCenterY: bubbleRect.top + bubbleRect.height / 2,
-				bubbleRight: bubbleRect.right,
+				actionTop: actionRect.top,
+				proseBottom: proseRect.bottom,
+				proseLeft: proseRect.left,
 			};
 		});
 		expect(geometry).not.toBeNull();
 		if (geometry) {
-			expect(geometry.actionLeft).toBeGreaterThanOrEqual(
-				geometry.bubbleRight - 1
+			expect(geometry.actionTop).toBeGreaterThanOrEqual(
+				geometry.proseBottom - 1
 			);
 			expect(
-				Math.abs(geometry.actionCenterY - geometry.bubbleCenterY)
-			).toBeLessThanOrEqual(2);
+				Math.abs(geometry.actionLeft - geometry.proseLeft)
+			).toBeLessThanOrEqual(1);
 		}
 	}
 

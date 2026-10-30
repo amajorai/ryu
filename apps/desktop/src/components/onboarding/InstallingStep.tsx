@@ -6,7 +6,7 @@ import {
 	Loading01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { MorphIconSwap } from "@ryu/ui/components/morph-icon.tsx";
 import { NumberPopIn } from "@ryu/ui/components/number-pop-in.tsx";
 import { SuccessCheck } from "@ryu/ui/components/success-check.tsx";
@@ -50,6 +50,7 @@ export function InstallingStep({
 	onComplete,
 }: InstallingStepProps) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [items, setItems] = useState<InstallItem[]>([]);
 	const [doneCount, setDoneCount] = useState(0);
 	const started = useRef(false);
@@ -173,15 +174,17 @@ export function InstallingStep({
 					</span>
 				) : null}
 				<div>
-					<h2 className="mb-1 font-medium text-xl">Setting up Ryu</h2>
+					<h2 className="mb-1 font-semibold text-lg tracking-tight">
+						Setting up Ryu
+					</h2>
 					<p className="text-muted-foreground text-sm">
-						{doneCount < total ? (
-							<>
-								<NumberPopIn value={doneCount} /> of {total} ready
-							</>
-						) : (
-							"Everything is ready"
-						)}
+						{doneCount < total
+							? tlRich(
+									"<count></count> of {total} ready",
+									{ total },
+									{ count: () => <NumberPopIn value={doneCount} /> }
+								)
+							: "Everything is ready"}
 					</p>
 				</div>
 			</div>
@@ -194,7 +197,7 @@ export function InstallingStep({
 					>
 						<div className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
 							{item.status === "waiting" && (
-								<div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
+								<div className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
 							)}
 							{(item.status === "installing" || item.status === "done") && (
 								<span
@@ -223,7 +226,7 @@ export function InstallingStep({
 						<span
 							className={
 								item.status === "waiting"
-									? "text-muted-foreground/50 text-sm"
+									? "text-muted-foreground/70 text-sm"
 									: item.status === "installing"
 										? "font-medium text-sm"
 										: item.status === "done"

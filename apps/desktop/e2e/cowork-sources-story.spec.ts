@@ -64,7 +64,7 @@ test("summary headers keep counts beside the title and actions on the right", as
 	await expect(action).toBeVisible();
 	await expect(
 		page.locator(
-			'[data-testid="pinned-summary"] [data-slot="bouncy-accordion-item-icon"]'
+			'[data-testid="pinned-summary"] [data-slot="context-section-icon"]'
 		)
 	).toHaveCount(0);
 	await expect(

@@ -10,8 +10,8 @@ import {
 	until,
 } from "./unswept-b.test-support.ts";
 
-// Coverage for `TrainingDataNotice`, the "Train on my data" card that General
-// and Privacy settings both render. Its three controls hand a URL to the
+// Coverage for `TrainingDataNotice`, the training-commitment row that General
+// and Privacy settings both render. Its "Learn more" button hands a URL to the
 // native shell (`open_external`), so the effect asserted here is the exact
 // command and URL that reach the recorded Tauri IPC boundary, on the frontend
 // origin this build was configured with, and that a native refusal or a
@@ -105,30 +105,24 @@ function opens(): number {
 	return bridge ? openExternalUrls(bridge.calls).length : 0;
 }
 
-test("GitHub, Privacy and Terms each ask the native shell to open their exact page, once per click, in order", async () => {
+const DETAILS = `${FRONTEND}/docs/surfaces/desktop/transparency#training-commitment`;
+
+test("Learn more asks the native shell to open the public commitment, once per click", async () => {
 	bridge = installNativeBridge();
 	await mount();
 
 	const card = document.body;
-	expect(normalized(card)).toContain("Train on my data");
 	expect(normalized(card)).toContain("We never train on your data.");
 	expect(normalized(card)).toContain(
-		"Core and Gateway are open source, so you can inspect and verify that promise."
+		"Your chats, files and activity never train Ryu models."
 	);
 
-	await click(button("GitHub"));
-	await click(button("Privacy"));
-	await click(button("Terms"));
-	await click(button("Privacy"));
-	await until(() => opens() === 4, "four native opens");
+	await click(button("Learn more"));
+	await click(button("Learn more"));
+	await until(() => opens() === 2, "two native opens");
 
-	expect(openExternalUrls(bridge.calls)).toEqual([
-		"https://github.com/amajorai/ryu",
-		`${FRONTEND}/privacy`,
-		`${FRONTEND}/terms`,
-		`${FRONTEND}/privacy`,
-	]);
-	// The legal links follow the configured frontend, never a hard-coded host.
+	expect(openExternalUrls(bridge.calls)).toEqual([DETAILS, DETAILS]);
+	// The link follows the configured frontend, never a hard-coded host.
 	expect(
 		openExternalUrls(bridge.calls).filter((url) =>
 			String(url).startsWith("http://localhost")
@@ -136,37 +130,32 @@ test("GitHub, Privacy and Terms each ask the native shell to open their exact pa
 	).toEqual([]);
 });
 
-test("a native refusal is contained: the card stays usable and the next click reaches the shell again", async () => {
+test("a native refusal is contained: the row stays usable and the next click reaches the shell again", async () => {
 	bridge = installNativeBridge();
 	await mount();
 	bridge.failWith("open_external: no default browser");
 
-	await click(button("Terms"));
-	await click(button("GitHub"));
-	await until(() => opens() === 2, "two refused opens");
+	await click(button("Learn more"));
+	await until(() => opens() === 1, "one refused open");
 	await flush(4);
-	expect(openExternalUrls(bridge.calls)).toEqual([
-		`${FRONTEND}/terms`,
-		"https://github.com/amajorai/ryu",
-	]);
-	expect(button("Terms").disabled).toBe(false);
+	expect(button("Learn more").disabled).toBe(false);
 	expect(normalized(document.body)).toContain("We never train on your data.");
 
 	bridge.failWith(null);
-	await click(button("Privacy"));
-	await until(() => opens() === 3, "open after recovery");
-	expect(openExternalUrls(bridge.calls).at(-1)).toBe(`${FRONTEND}/privacy`);
+	await click(button("Learn more"));
+	await until(() => opens() === 2, "open after recovery");
+	expect(openExternalUrls(bridge.calls).at(-1)).toBe(DETAILS);
 });
 
 test("outside the native shell (no Tauri bridge) a click waits out the bridge deadline and fails quietly", async () => {
 	await mount();
-	await click(button("Privacy"));
+	await click(button("Learn more"));
 	// The shared ready-gate polls for up to two seconds before rejecting with a
-	// typed TauriUnavailableError, which the card swallows.
+	// typed TauriUnavailableError, which the row swallows.
 	await act(async () => {
 		await Bun.sleep(2300);
 	});
 	await flush(4);
-	expect(button("Privacy").disabled).toBe(false);
-	expect(normalized(document.body)).toContain("Train on my data");
+	expect(button("Learn more").disabled).toBe(false);
+	expect(normalized(document.body)).toContain("We never train on your data.");
 });

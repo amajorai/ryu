@@ -69,7 +69,7 @@ export function AvailabilitySettings() {
 
 	return (
 		<SettingsSection
-			caption="Choose when Ryu can ask for a decision. Streaming hides connected-app suggestion details; Do not disturb, Streaming, and Gaming keep agent questions from interrupting you."
+			caption="Away, Do not disturb, Gaming and Streaming keep agents working; their questions wait."
 			title="Availability & prompts"
 		>
 			<SettingsGroup>
@@ -100,7 +100,13 @@ export function AvailabilitySettings() {
 							</SelectContent>
 						</Select>
 					}
-					description={`${currentStatusSentence(tl, tl(agentAvailabilityLabel(status)), source, detectedGame, detectedStreamingApp)} ${tl("Away, Do not disturb, Gaming, and Streaming keep agents working: their questions wait instead of pausing the chat.")}`}
+					description={currentStatusSentence(
+						tl,
+						tl(agentAvailabilityLabel(status)),
+						source,
+						detectedGame,
+						detectedStreamingApp
+					)}
 					settingsId="general.chats.manual-status"
 					title="Manual status"
 				/>
@@ -112,7 +118,7 @@ export function AvailabilitySettings() {
 							onCheckedChange={setAfkDetection}
 						/>
 					}
-					description="When enabled, an unfocused or idle Ryu window becomes Away automatically. Returning to the window marks it Online again when your manual status is Online."
+					description="An idle or unfocused window goes Away, and Online again when you return."
 					settingsId="general.chats.afk-detection"
 					title="Auto-away when inactive"
 				/>
@@ -151,7 +157,6 @@ export function AvailabilitySettings() {
 							</SelectContent>
 						</Select>
 					}
-					description="Choose how long an Online window can be idle before prompts stop taking over the composer."
 					settingsId="general.chats.afk-timeout"
 					title="Auto-away after"
 				/>
@@ -316,11 +321,9 @@ function GamingModeSettings({ detectedGame }: { detectedGame: string | null }) {
 						: detectedGame
 							? tl(
 									"Detected {gameName}. Ryu is in Gaming mode until it closes.",
-									{
-										gameName: detectedGame,
-									}
+									{ gameName: detectedGame }
 								)
-							: "Switch to Gaming automatically while a game runs, like Discord's game activity. Ryu only reads process names on this node, and nothing leaves your machine."
+							: "Switch to Gaming while a game runs. Process names never leave this node."
 				}
 				settingsId="general.chats.gaming-detection"
 				title="Detect games"
@@ -334,7 +337,7 @@ function GamingModeSettings({ detectedGame }: { detectedGame: string | null }) {
 						onCheckedChange={(checked) => save({ freeLocalModels: checked })}
 					/>
 				}
-				description="While Gaming is on, unload local models (chat engines, embeddings, speech, and image models) to free RAM and VRAM. They load again after the game closes."
+				description="Unload local models while Gaming is on; they reload when the game closes."
 				settingsId="general.chats.gaming-free-models"
 				title="Free memory for games"
 			/>
@@ -349,7 +352,7 @@ function GamingModeSettings({ detectedGame }: { detectedGame: string | null }) {
 						value={gaming?.extraProcesses ?? []}
 					/>
 				}
-				description="Games Ryu does not recognise. Enter executable names separated by commas, without .exe."
+				description="Executables Ryu misses, without .exe."
 				settingsId="general.chats.gaming-processes"
 				title="Extra games"
 			/>
@@ -364,7 +367,7 @@ function GamingModeSettings({ detectedGame }: { detectedGame: string | null }) {
 						value={gaming?.ignoredProcesses ?? []}
 					/>
 				}
-				description="Apps Ryu mistakes for games, such as tools installed through Steam. They never switch on Gaming mode."
+				description="Apps that never switch on Gaming."
 				settingsId="general.chats.gaming-ignored"
 				title="Not games"
 			/>
@@ -450,10 +453,10 @@ function StreamingModeSettings({
 						? "This node's Core does not support Streaming mode yet. Update Ryu to use it."
 						: detectedApp
 							? tl(
-									"{appName} is running. Island shows a generic alert and Core does not send Connect event contents to a model.",
+									"{appName} is running. Connect event contents are withheld from models.",
 									{ appName: detectedApp }
 								)
-							: "Switch to Streaming while a listed app is open. Detection reads local process names; it cannot tell whether you are live. Connect suggestions stay generic and their event contents are withheld from model analysis."
+							: "Switch to Streaming while a listed app runs. Connect event contents stay out of models."
 				}
 				settingsId="general.chats.streaming-detection"
 				title="Detect streaming apps"
@@ -469,7 +472,7 @@ function StreamingModeSettings({
 						value={streaming?.apps ?? []}
 					/>
 				}
-				description="Exact executable names that turn on Streaming, separated by commas. Use the process name shown in Task Manager; .exe is optional."
+				description="Process names from Task Manager; .exe is optional."
 				settingsId="general.chats.streaming-apps"
 				title="Streaming apps"
 			/>

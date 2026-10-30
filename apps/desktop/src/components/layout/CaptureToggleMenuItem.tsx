@@ -4,8 +4,9 @@
 // Reusing useShadowCapture preserves the same persisted pause state and Shadow
 // request path used by the Companion and Shadow settings surfaces.
 
+import { PauseIcon, PlayIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
-import { Pause, Play } from "lucide-react";
 import { useState } from "react";
 import { useShadowCapture } from "@/src/hooks/useShadowCapture.ts";
 
@@ -32,9 +33,9 @@ export function CaptureToggleMenuItem() {
 			onClick={() => toggle().catch(() => undefined)}
 		>
 			{paused ? (
-				<Play className="mr-2 size-4" />
+				<HugeiconsIcon className="size-4" icon={PlayIcon} />
 			) : (
-				<Pause className="mr-2 size-4" />
+				<HugeiconsIcon className="size-4" icon={PauseIcon} />
 			)}
 			{paused ? "Resume Capture" : "Pause Capture"}
 		</DropdownMenuItem>

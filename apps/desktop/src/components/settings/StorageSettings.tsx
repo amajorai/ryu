@@ -1,6 +1,3 @@
-import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
-import previewStyles from "./settings-preview.module.css";
-import type { PreviewStyle } from "./settings-preview-style.ts";
 // Storage settings tab: view + relocate the Ryu data folder, and back it up /
 // restore it. All path logic lives in Core (`crate::data_path`); this tab reads
 // the state, validates a target, and triggers either a point-only switch (Core
@@ -8,48 +5,26 @@ import type { PreviewStyle } from "./settings-preview-style.ts";
 // orchestrated by the `migrate_data_folder` / `import_data_folder` Tauri
 // commands, which restart the app to apply).
 
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog.tsx";
-import { Button } from "@ryu/ui/components/button.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import { Label } from "@ryu/ui/components/label.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
-import {
-	type ReactNode,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { sileo } from "sileo";
 import { getRyuStatus, startRyuCore } from "@/lib/tauri-bridge.ts";
 import {
-	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
-import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
 	type DataPathInfo,
 	exportDataPath,
 	getDataPath,
 	resetDataPath,
 	switchDataPath,
-	type ValidateResult,
 	validateDataPath,
 } from "@/src/lib/api/data-path.ts";
 import {
@@ -59,47 +34,23 @@ import {
 import { formatBytes, NODE_UPLOAD_MAX_BYTES } from "@/src/lib/api/spaces.ts";
 import { listenWhenReady } from "@/src/lib/tauri-ready.ts";
 import { NodeBackupSettings } from "./BackupSettings.tsx";
-
-/** Core refuses an export passphrase shorter than this (`data_path.rs`). */
-const MIN_BACKUP_PASSPHRASE_CHARS = 12;
-
-/** Profiles a copy can target.
- *
- *  Mirrors the non-release rows of `PROFILE_PORT_OFFSETS`
- *  (apps/core/src/profile.rs) — the profiles that have their own port offset, data
- *  dir and keychain slot. `release` is deliberately absent: copying INTO your
- *  primary profile is a restore, which belongs to Backup & restore where it is
- *  guarded accordingly. */
-const PROFILE_COPY_TARGETS = ["dev", "canary", "nightly", "beta"] as const;
-
-function humanBytes(n: number): string {
-	const units = ["B", "KB", "MB", "GB", "TB"];
-	let v = n;
-	let i = 0;
-	while (v >= 1024 && i < units.length - 1) {
-		v /= 1024;
-		i += 1;
-	}
-	return `${v.toFixed(1)} ${units[i]}`;
-}
-
-interface PickedTarget {
-	path: string;
-	validation: ValidateResult;
-}
-
-/**
- * The selected node's authority. Every read and write on this tab is bound to
- * the node that is selected NOW, so a node switch rereads and a reply from the
- * previous node is discarded instead of being shown as this node's state.
- */
-function useSelectedNodeTarget(): ApiTarget {
-	const node = useActiveNode();
-	return useMemo(
-		() => toTarget({ url: node.url, token: node.token, userJwt: node.userJwt }),
-		[node.url, node.token, node.userJwt]
-	);
-}
+import { DataFolderSection } from "./StorageSettings-data-folder-section.tsx";
+import {
+	ExportBackupDialog,
+	ProfileCopyDialog,
+	RestoreBackupDialog,
+} from "./StorageSettings-dialogs.tsx";
+import {
+	humanBytes,
+	MIN_BACKUP_PASSPHRASE_CHARS,
+	type PickedTarget,
+	type ProgressState,
+	useSelectedNodeTarget,
+} from "./StorageSettings-model.ts";
+import {
+	NativeStorageSections,
+	renderChangeLocationBody,
+} from "./StorageSettings-native-sections.tsx";
 
 /**
  * The node's upload ceiling. Read-only, and read FROM THE NODE.
@@ -183,14 +134,9 @@ function UploadCeilingSection() {
 	);
 }
 
-interface ProgressState {
-	copied: number;
-	phase: string;
-	total: number;
-}
-
 export function StorageSettings() {
 	const { canUseNativeShell } = useAppSurface();
+	const tl = useLiteralMessages();
 	const target = useSelectedNodeTarget();
 	// The node this tab currently speaks for. Async results captured for an
 	// earlier node compare against it and are dropped once it has moved on.
@@ -324,38 +270,41 @@ export function StorageSettings() {
 		}
 	}, [target]);
 
-	const doProfileCopy = useCallback(async (toProfile: string) => {
-		setBusy(true);
-		// The Tauri command stops this profile's local Core (whichever node is
-		// active) and deliberately does not restart it, so restart it here when it
-		// was running, whether or not the copy succeeds.
-		const coreWasRunning =
-			(await getRyuStatus().catch(() => "stopped")) === "running";
-		try {
-			// Core is stopped by the Tauri command before anything is copied (every
-			// store runs in WAL mode, so a live copy captures a torn snapshot), and the
-			// master key is moved BEFORE any file is written — a failure there aborts
-			// with nothing copied rather than leaving unreadable ciphertext behind.
-			await invoke("copy_data_folder_to_profile", { toProfile });
-			sileo.success({
-				title: `Copied to the ${toProfile} profile`,
-				description: coreWasRunning
-					? "Start Ryu on that profile to use it. This profile is unchanged; restarting local Core…"
-					: "Start Ryu on that profile to use it. This profile is unchanged.",
-			});
-		} catch (e) {
-			sileo.error({
-				title: "Could not copy to that profile",
-				description: String(e),
-			});
-		} finally {
-			if (coreWasRunning) {
-				await startRyuCore().catch(() => undefined);
+	const doProfileCopy = useCallback(
+		async (toProfile: string) => {
+			setBusy(true);
+			// The Tauri command stops this profile's local Core (whichever node is
+			// active) and deliberately does not restart it, so restart it here when it
+			// was running, whether or not the copy succeeds.
+			const coreWasRunning =
+				(await getRyuStatus().catch(() => "stopped")) === "running";
+			try {
+				// Core is stopped by the Tauri command before anything is copied (every
+				// store runs in WAL mode, so a live copy captures a torn snapshot), and the
+				// master key is moved BEFORE any file is written — a failure there aborts
+				// with nothing copied rather than leaving unreadable ciphertext behind.
+				await invoke("copy_data_folder_to_profile", { toProfile });
+				sileo.success({
+					title: tl("Copied to the {toProfile} profile", { toProfile }),
+					description: coreWasRunning
+						? "Start Ryu on that profile to use it. This profile is unchanged; restarting local Core…"
+						: "Start Ryu on that profile to use it. This profile is unchanged.",
+				});
+			} catch (e) {
+				sileo.error({
+					title: "Could not copy to that profile",
+					description: String(e),
+				});
+			} finally {
+				if (coreWasRunning) {
+					await startRyuCore().catch(() => undefined);
+				}
+				setBusy(false);
+				setPendingProfileCopy(null);
 			}
-			setBusy(false);
-			setPendingProfileCopy(null);
-		}
-	}, []);
+		},
+		[tl]
+	);
 
 	const exportPassphraseError = (() => {
 		if ([...exportPassphrase].length < MIN_BACKUP_PASSPHRASE_CHARS) {
@@ -395,14 +344,17 @@ export function StorageSettings() {
 			}
 			sileo.success({
 				title: "Backup created",
-				description: `${humanBytes(res.bytes ?? 0)} written to ${dest}`,
+				description: tl("{size} written to {dest}", {
+					size: humanBytes(res.bytes ?? 0),
+					dest,
+				}),
 			});
 		} catch (e) {
 			sileo.error({ title: "Backup failed", description: String(e) });
 		} finally {
 			setBusy(false);
 		}
-	}, [closeExportDialog, exportPassphrase, target]);
+	}, [closeExportDialog, exportPassphrase, target, tl]);
 
 	const doImport = useCallback(async () => {
 		const archive = await open({
@@ -440,424 +392,66 @@ export function StorageSettings() {
 		}
 	}, [pendingRestore, restorePassphrase]);
 
-	const progressPct =
-		progress && progress.total > 0
-			? Math.min(100, Math.round((progress.copied / progress.total) * 100))
-			: null;
-
-	const progressStyle: PreviewStyle = {
-		"--settings-preview-progress": `${progressPct ?? 10}%`,
-	};
-	let changeLocationBody: ReactNode;
-	if (progress) {
-		changeLocationBody = (
-			<div className="flex flex-col gap-1.5">
-				<div className="text-muted-foreground text-xs tabular-nums">
-					{progress.phase === "extract" ? "Restoring" : "Copying"}…
-					{progressPct === null ? "" : ` ${progressPct}%`}
-				</div>
-				<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-					<div
-						className={`h-full bg-primary transition-[width] motion-reduce:transition-none ${previewStyles.progress}`}
-						style={progressStyle}
-					/>
-				</div>
-				<div className="text-muted-foreground text-xs">
-					The app will restart automatically when finished.
-				</div>
-			</div>
-		);
-	} else if (picked) {
-		changeLocationBody = (
-			<div className="flex flex-col gap-3">
-				<div className="break-all text-sm">{picked.path}</div>
-				{picked.validation.ok ? (
-					<div className="text-muted-foreground text-xs">
-						{humanBytes(picked.validation.source_size_bytes)} to copy ·{" "}
-						{humanBytes(picked.validation.target_free_bytes)} free at target
-					</div>
-				) : (
-					<div className="text-status-destructive text-xs">
-						{picked.validation.error}
-					</div>
-				)}
-				<div className="flex flex-wrap gap-2">
-					<Button
-						disabled={busy || !picked.validation.ok}
-						onClick={() => {
-							doMigrate().catch(() => undefined);
-						}}
-						size="sm"
-					>
-						Copy data &amp; restart
-					</Button>
-					<Button
-						disabled={busy || !picked.validation.ok}
-						onClick={() => {
-							doSwitch().catch(() => undefined);
-						}}
-						size="sm"
-						variant="ghost"
-					>
-						Start fresh here
-					</Button>
-					<Button
-						disabled={busy}
-						onClick={() => setPicked(null)}
-						size="sm"
-						variant="ghost"
-					>
-						Cancel
-					</Button>
-				</div>
-			</div>
-		);
-	} else {
-		changeLocationBody = null;
-	}
+	const changeLocationBody = renderChangeLocationBody({
+		busy,
+		doMigrate,
+		doSwitch,
+		picked,
+		progress,
+		setPicked,
+		tl,
+	});
 
 	return (
 		<div className="flex flex-col gap-6">
-			<SettingsSection
-				caption="Where Ryu stores everything on this device: chats, spaces, memory, models and downloaded engines. Relocate it to put large model files on another disk."
-				title="Data folder"
-			>
-				{loadFailed ? (
-					<SettingsCard className="flex items-center justify-between gap-3">
-						<p className="text-muted-foreground text-sm">
-							We couldn't load your data folder details. Please check your
-							connection and try again.
-						</p>
-						<Button onClick={() => refresh()} size="sm" variant="outline">
-							Retry
-						</Button>
-					</SettingsCard>
-				) : (
-					<SettingsGroup>
-						<SettingsItem title="Current location">
-							<p className="break-all pb-1 font-mono text-muted-foreground text-xs">
-								{info?.current ?? "Loading…"}
-							</p>
-						</SettingsItem>
-						<SettingsItem
-							actions={
-								<span className="text-muted-foreground text-sm">
-									{info
-										? `${humanBytes(info.size_bytes)} used · ${humanBytes(info.free_space_bytes)} free on this drive`
-										: "—"}
-								</span>
-							}
-							title="Size"
-						/>
-						{canUseNativeShell && info?.is_custom ? (
-							<SettingsItem
-								actions={
-									<Button
-										disabled={busy}
-										onClick={() => {
-											doReset().catch(() => undefined);
-										}}
-										size="sm"
-										variant="ghost"
-									>
-										Reset to default
-									</Button>
-								}
-								title="Default location"
-							>
-								<p className="break-all pb-1 font-mono text-muted-foreground text-xs">
-									{info.default}
-								</p>
-							</SettingsItem>
-						) : null}
-					</SettingsGroup>
-				)}
-			</SettingsSection>
+			<DataFolderSection
+				busy={busy}
+				canUseNativeShell={canUseNativeShell}
+				doReset={doReset}
+				info={info}
+				loadFailed={loadFailed}
+				refresh={refresh}
+			/>
 
 			{canUseNativeShell ? (
-				<>
-					<SettingsSection
-						caption="Pick a new folder, then choose to copy your existing data over or start fresh. The app restarts to apply."
-						title="Change location"
-					>
-						{changeLocationBody ? (
-							<SettingsCard className="flex flex-col gap-3">
-								{changeLocationBody}
-							</SettingsCard>
-						) : (
-							<SettingsGroup>
-								<SettingsItem
-									actions={
-										<Button
-											disabled={busy}
-											onClick={() => {
-												pickFolder().catch(() => undefined);
-											}}
-											size="sm"
-											variant="ghost"
-										>
-											Choose folder…
-										</Button>
-									}
-									title="New location"
-								/>
-							</SettingsGroup>
-						)}
-					</SettingsSection>
-
-					<SettingsSection
-						caption="Give another profile a copy of this one's data. For example, hand canary your stable chats, spaces and agents so you can test against real state instead of rebuilding it by hand. Both profiles stay usable; nothing here changes where THIS profile reads from. A copy is refused if that profile already has data."
-						title="Copy to another profile"
-					>
-						<SettingsGroup>
-							{PROFILE_COPY_TARGETS.map((target) => (
-								<SettingsItem
-									actions={
-										<span className="flex items-center gap-2">
-											<span className="font-mono text-muted-foreground text-xs">
-												~/.ryu-{target}
-											</span>
-											<Button
-												disabled={busy}
-												onClick={() => setPendingProfileCopy(target)}
-												size="sm"
-												variant="ghost"
-											>
-												Copy
-											</Button>
-										</span>
-									}
-									key={target}
-									title={`Copy to ${target}`}
-								/>
-							))}
-						</SettingsGroup>
-					</SettingsSection>
-
-					<SettingsSection
-						caption="Export an encrypted backup of the whole data folder, or restore from one. The backup is locked with a passphrase you choose; without it the backup cannot be restored. Restoring overwrites the current data and restarts the app."
-						title="Backup &amp; restore"
-					>
-						<SettingsGroup>
-							<SettingsItem
-								actions={
-									<Button
-										disabled={busy}
-										onClick={() => setExportDialogOpen(true)}
-										size="sm"
-										variant="ghost"
-									>
-										Export…
-									</Button>
-								}
-								title="Export backup"
-							>
-								<p className="pb-1 text-muted-foreground text-xs">
-									Save a passphrase-encrypted zip of all your Ryu data.
-								</p>
-							</SettingsItem>
-							<SettingsItem
-								actions={
-									<Button
-										disabled={busy}
-										onClick={() => {
-											doImport().catch(() => undefined);
-										}}
-										size="sm"
-										variant="ghost"
-									>
-										Restore…
-									</Button>
-								}
-								title="Restore backup"
-							>
-								<p className="pb-1 text-muted-foreground text-xs">
-									Replace current data with a backup zip.
-								</p>
-							</SettingsItem>
-						</SettingsGroup>
-					</SettingsSection>
-				</>
+				<NativeStorageSections
+					busy={busy}
+					changeLocationBody={changeLocationBody}
+					doImport={doImport}
+					pickFolder={pickFolder}
+					setExportDialogOpen={setExportDialogOpen}
+					setPendingProfileCopy={setPendingProfileCopy}
+				/>
 			) : null}
 
 			<NodeBackupSettings />
 			<UploadCeilingSection />
 
-			<AlertDialog
-				onOpenChange={(nextOpen) => {
-					if (!nextOpen) {
-						setPendingProfileCopy(null);
-					}
-				}}
-				open={pendingProfileCopy !== null}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>
-							Copy this profile&apos;s data to {pendingProfileCopy}?
-						</AlertDialogTitle>
-						<AlertDialogDescription>
-							Ryu will stop, copy your chats, spaces, agents, memory and models
-							into the {pendingProfileCopy} profile, and carry your encryption
-							key across so the copy stays readable. This profile is left
-							exactly as it is.
-						</AlertDialogDescription>
-						{/* The three things a user would otherwise discover the hard way,
-						    stated before the irreversible step. Each corresponds to an
-						    explicit exclusion or refusal in `data_path::copy_profile`. */}
-						<AlertDialogDescription>
-							Not copied: this node&apos;s identity and sign-in, its saved node
-							list, and the downloaded binaries, so {pendingProfileCopy} runs
-							its own build rather than adopting this one&apos;s. If that
-							profile already has data, the copy is refused rather than merged.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-						<AlertDialogAction
-							disabled={busy}
-							onClick={() => {
-								if (pendingProfileCopy) {
-									void doProfileCopy(pendingProfileCopy);
-								}
-							}}
-						>
-							{busy ? "Copying…" : "Copy"}
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+			<ProfileCopyDialog
+				busy={busy}
+				doProfileCopy={doProfileCopy}
+				pendingProfileCopy={pendingProfileCopy}
+				setPendingProfileCopy={setPendingProfileCopy}
+			/>
 
-			<AlertDialog
-				onOpenChange={(nextOpen) => {
-					if (!nextOpen) {
-						closeExportDialog();
-					}
-				}}
-				open={exportDialogOpen}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Encrypt this backup</AlertDialogTitle>
-						<AlertDialogDescription>
-							The backup holds all of your data, including saved credentials, so
-							Ryu encrypts it with a passphrase. You need the same passphrase to
-							restore it, and it cannot be recovered if you lose it.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<div className="grid gap-3">
-						<div className="grid gap-2">
-							<Label htmlFor="storage-export-passphrase">
-								Backup passphrase
-							</Label>
-							<Input
-								autoComplete="new-password"
-								id="storage-export-passphrase"
-								onChange={(event) => setExportPassphrase(event.target.value)}
-								type="password"
-								value={exportPassphrase}
-							/>
-						</div>
-						<div className="grid gap-2">
-							<Label htmlFor="storage-export-passphrase-confirm">
-								Confirm passphrase
-							</Label>
-							<Input
-								autoComplete="new-password"
-								id="storage-export-passphrase-confirm"
-								onChange={(event) => setExportConfirm(event.target.value)}
-								type="password"
-								value={exportConfirm}
-							/>
-						</div>
-						{exportPassphrase && exportPassphraseError ? (
-							<p className="text-muted-foreground text-xs" role="status">
-								{exportPassphraseError}
-							</p>
-						) : null}
-					</div>
-					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
-						<AlertDialogAction
-							disabled={exportPassphraseError !== null}
-							onClick={(e) => {
-								e.preventDefault();
-								doExport().catch(() => undefined);
-							}}
-						>
-							Choose location…
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+			<ExportBackupDialog
+				closeExportDialog={closeExportDialog}
+				doExport={doExport}
+				exportConfirm={exportConfirm}
+				exportDialogOpen={exportDialogOpen}
+				exportPassphrase={exportPassphrase}
+				exportPassphraseError={exportPassphraseError}
+				setExportConfirm={setExportConfirm}
+				setExportPassphrase={setExportPassphrase}
+			/>
 
-			<AlertDialog
-				onOpenChange={(nextOpen) => {
-					if (!nextOpen) {
-						setPendingRestore(null);
-						setRestorePassphrase("");
-					}
-				}}
-				open={pendingRestore !== null}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Restore from this backup?</AlertDialogTitle>
-						<AlertDialogDescription>
-							This replaces all of your current data (chats, spaces, memory,
-							models and downloaded engines) with the contents of the backup,
-							then restarts the app. This cannot be undone.
-						</AlertDialogDescription>
-						{/* The encryption key lives in the OS keychain, never in the zip.
-						    Restoring on a different machine or OS user therefore produces
-						    a node that boots and looks healthy while every message body,
-						    memory entry and plugin secret is unreadable — and there is no
-						    rekey path to recover it. Saying so here is the only place a
-						    user can still act on it. */}
-						<AlertDialogDescription>
-							<span className="text-status-warning">
-								Your encryption key is stored in this machine&apos;s keychain,
-								not in the backup. If this zip came from another machine or
-								another user account, chats, memory and plugin secrets will
-								restore but stay permanently unreadable.
-							</span>
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					{pendingRestore ? (
-						<div className="break-all rounded-md bg-muted p-3 text-sm">
-							{pendingRestore}
-						</div>
-					) : null}
-					<div className="grid gap-2">
-						<Label htmlFor="storage-restore-passphrase">
-							Backup passphrase
-						</Label>
-						<Input
-							autoComplete="off"
-							id="storage-restore-passphrase"
-							onChange={(event) => setRestorePassphrase(event.target.value)}
-							type="password"
-							value={restorePassphrase}
-						/>
-						<p className="text-muted-foreground text-xs">
-							Leave empty only for a backup made before backups were encrypted.
-						</p>
-					</div>
-					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
-						<AlertDialogAction
-							onClick={(e) => {
-								// Keep the dialog controlled by state; runImport closes it.
-								e.preventDefault();
-								runImport().catch(() => undefined);
-							}}
-							variant="destructive"
-						>
-							Restore &amp; restart
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+			<RestoreBackupDialog
+				pendingRestore={pendingRestore}
+				restorePassphrase={restorePassphrase}
+				runImport={runImport}
+				setPendingRestore={setPendingRestore}
+				setRestorePassphrase={setRestorePassphrase}
+			/>
 		</div>
 	);
 }

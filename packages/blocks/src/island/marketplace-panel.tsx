@@ -175,18 +175,18 @@ export function MarketplacePanelView({
 											{item.name}
 										</p>
 										{item.description ? (
-											<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground">
+											<p className="mt-0.5 line-clamp-2 text-detail text-muted-foreground">
 												{item.description}
 											</p>
 										) : null}
 										{item.subtitle ? (
-											<p className="type-compact mt-0.5 truncate text-muted-foreground">
+											<p className="mt-0.5 truncate text-muted-foreground text-xs">
 												{item.subtitle}
 											</p>
 										) : null}
 									</div>
 									{item.installed ? (
-										<span className="type-compact shrink-0 rounded-md bg-success/20 px-2 py-1 font-medium text-status-success">
+										<span className="shrink-0 rounded-lg bg-success/10 px-2 py-1 font-medium text-status-success text-xs">
 											Installed
 										</span>
 									) : (

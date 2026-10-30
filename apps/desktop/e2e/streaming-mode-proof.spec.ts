@@ -112,7 +112,7 @@ test("renders Streaming detection settings and persists user app names", async (
 
 	await expect(
 		page.getByText(
-			"Switch to Streaming while a listed app is open. Detection reads local process names; it cannot tell whether you are live. Connect suggestions stay generic and their event contents are withheld from model analysis.",
+			"Switch to Streaming while a listed app runs. Connect event contents stay out of models.",
 			{ exact: true }
 		)
 	).toBeVisible();

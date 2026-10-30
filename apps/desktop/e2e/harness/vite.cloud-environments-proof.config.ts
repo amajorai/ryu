@@ -47,6 +47,10 @@ const sources = [
 	),
 	path.resolve(
 		repositoryRoot,
+		"apps/desktop/src/components/gateway/cloud-environments"
+	),
+	path.resolve(
+		repositoryRoot,
 		"apps/desktop/src/components/chat/CloudEnvironmentPicker.tsx"
 	),
 	path.resolve(

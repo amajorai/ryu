@@ -1,9 +1,16 @@
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import {
+	Delete02Icon,
+	Key01Icon,
+	RefreshIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { formatDistanceToNow } from "date-fns";
-import { KeyRound, RefreshCw, Trash2 } from "lucide-react";
 import type { OwnedOAuthApp } from "../../utils/api-client.ts";
-import { SettingsItem } from "../shared/settings-rows.tsx";
+import {
+	SETTINGS_ROW_REVEAL_CLASS,
+	SettingsItem,
+} from "../shared/settings-rows.tsx";
 import { type PendingAction, scopeLabel } from "./shared.ts";
 
 export function OAuthAppRow({
@@ -23,10 +30,17 @@ export function OAuthAppRow({
 		pendingAction?.kind === "rotate" && pendingAction.clientId === app.clientId;
 	const isPending = isDeleting || isRotating;
 
+	const created = app.createdAt
+		? formatDistanceToNow(new Date(app.createdAt), { addSuffix: true })
+		: "recently";
+
 	return (
 		<SettingsItem
 			actions={
-				<>
+				// Two revealed icon buttons rather than a menu: both stay plain
+				// buttons so their accessible names keep working for keyboard and
+				// assistive tech, and the slot reserves its width while hidden.
+				<div className={SETTINGS_ROW_REVEAL_CLASS}>
 					{app.clientType === "confidential" ? (
 						<Button
 							aria-label={`Rotate secret for ${app.clientName}`}
@@ -34,63 +48,65 @@ export function OAuthAppRow({
 							onClick={() =>
 								onAction({ clientId: app.clientId, kind: "rotate" })
 							}
-							size="icon"
-							variant="ghost"
+							size="icon-sm"
+							variant="ghost-muted"
 						>
-							<RefreshCw className="size-4" />
+							<HugeiconsIcon icon={RefreshIcon} size={16} />
 						</Button>
 					) : null}
 					<Button
 						aria-label={`Delete ${app.clientName}`}
 						disabled={isPending}
 						onClick={() => onAction({ clientId: app.clientId, kind: "delete" })}
-						size="icon"
-						variant="ghost"
+						size="icon-sm"
+						variant="ghost-muted"
 					>
-						<Trash2 className="size-4 text-status-destructive" />
+						<HugeiconsIcon icon={Delete02Icon} size={16} />
 					</Button>
+				</div>
+			}
+			description={
+				<>
+					{app.clientType === "public" ? "Public" : "Confidential"} ·{" "}
+					{app.applicationType} · Created {created}
 				</>
 			}
 			title={
 				<span className="flex min-w-0 items-center gap-2">
-					<KeyRound className="size-4 shrink-0 text-muted-foreground" />
+					<HugeiconsIcon
+						className="shrink-0 text-muted-foreground"
+						icon={Key01Icon}
+						size={16}
+					/>
 					<span className="truncate">{app.clientName}</span>
-					<Badge className="shrink-0" variant="secondary">
-						{app.clientType === "public" ? "Public" : "Confidential"}
-					</Badge>
-					<Badge className="shrink-0" variant="outline">
-						{app.applicationType}
-					</Badge>
 				</span>
 			}
 		>
-			<div className="space-y-1 text-muted-foreground text-xs">
-				<p className="break-all font-mono">{app.clientId}</p>
-				<p>
-					Created{" "}
-					{app.createdAt
-						? formatDistanceToNow(new Date(app.createdAt), {
-								addSuffix: true,
-							})
-						: "recently"}
-				</p>
-				<p>
-					<strong className="font-medium text-foreground">
-						Redirect URIs:
-					</strong>{" "}
-					{app.redirectUris.join(", ")}
-				</p>
-				<p>
-					<strong className="font-medium text-foreground">
-						Allowed scopes:
-					</strong>{" "}
-					{app.scopes.map(scopeLabel).join(", ") || "None"}
-				</p>
-			</div>
+			<details className="group/details text-detail text-muted-foreground">
+				<summary className="w-fit cursor-pointer select-none rounded-lg hover:text-foreground">
+					Details
+				</summary>
+				<dl className="mt-2 flex flex-col gap-1">
+					<div>
+						<dt className="sr-only">Client ID</dt>
+						<dd className="break-all font-mono">{app.clientId}</dd>
+					</div>
+					<div className="flex gap-1">
+						<dt className="text-foreground">Redirect URIs:</dt>
+						<dd className="min-w-0 break-all">{app.redirectUris.join(", ")}</dd>
+					</div>
+					<div className="flex gap-1">
+						<dt className="text-foreground">Allowed scopes:</dt>
+						<dd className="min-w-0">
+							{app.scopes.map(scopeLabel).join(", ") || "None"}
+						</dd>
+					</div>
+				</dl>
+			</details>
 
 			{isPending ? (
 				<div className="flex flex-wrap items-center gap-2 pt-1">
-					<span className="text-muted-foreground text-xs">
+					<span className="text-detail text-muted-foreground">
 						{isDeleting
 							? "Delete this OAuth app and revoke its tokens?"
 							: "Rotate the secret now? The old secret stops working immediately."}
@@ -98,7 +114,7 @@ export function OAuthAppRow({
 					<Button
 						onClick={() => onAction(pendingAction)}
 						size="sm"
-						variant={isDeleting ? "destructive" : "default"}
+						variant={isDeleting ? "destructive" : "outline"}
 					>
 						{isDeleting ? "Delete" : "Rotate"}
 					</Button>

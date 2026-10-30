@@ -1,12 +1,10 @@
-import { Key01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
-import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
-	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
@@ -17,148 +15,20 @@ import {
 	updateGatewayConfig,
 } from "@/src/lib/api/gateway.ts";
 import { restartGateway } from "@/src/lib/api/system.ts";
+import { EgressPoolEndpoints } from "./egress-pools/pool-endpoints.tsx";
 import {
-	ProviderBrandLogo,
-	svglForProvider,
-} from "@/src/lib/provider-brand.tsx";
-
-type Pool = GatewayEgressConfig["pools"][string];
-type Endpoint = Pool["endpoints"][number];
-type DraftEndpoint = Endpoint & { draftId: string };
-type DraftPool = Omit<Pool, "endpoints"> & { endpoints: DraftEndpoint[] };
-
-const SUPPORTED = new Set([
-	"openai",
-	"edge-tts",
-	"google-tts",
-	"google-translate-tts",
-	"polly",
-	"anthropic",
-	"openrouter",
-	"cohere",
-	"deepgram",
-	"assemblyai",
-	"elevenlabs",
-	"inworld",
-	"modal",
-	"replicate",
-	"fal",
-	"recraft",
-	"stability",
-	"bfl",
-	"minimax",
-	"runway",
-	"topaz",
-	"genai",
-	"cloudflare",
-	"bedrock",
-	"vertex",
-	"openai-credits",
-	"anthropic-credits",
-	"voyage",
-	"jina",
-	"mistral",
-	"huggingface",
-	"nvidia",
-	"together",
-	"fireworks",
-	"qwen",
-	"chutes",
-	"hyperbolic",
-	"siliconflow",
-	"venice",
-	"featherless",
-]);
-const EMPTY_EGRESS: GatewayEgressConfig = { assignments: {}, pools: {} };
-/** The Gateway accepts new credential variable names only with this prefix. */
-const WRITABLE_CREDENTIAL_ENV_PREFIX = "RYU_PROXY_";
-const WELL_FORMED_ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
-
-/** Every credential variable name the saved config already uses. */
-function savedCredentialEnvNames(
-	egress: GatewayEgressConfig | null
-): ReadonlySet<string> {
-	const names = new Set<string>();
-	for (const saved of Object.values(egress?.pools ?? {})) {
-		for (const endpoint of saved.endpoints) {
-			for (const env of [endpoint.username_env, endpoint.password_env]) {
-				if (env) {
-					names.add(env);
-				}
-			}
-		}
-	}
-	return names;
-}
-
-function validatePool(
-	name: string,
-	pool: Pool,
-	savedEnvNames: ReadonlySet<string> = new Set()
-): string | null {
-	if (pool.direct_fallback_only && !pool.include_direct) {
-		return "Include a direct connection before enabling direct fallback.";
-	}
-	if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) {
-		return "Use 1–64 letters, numbers, hyphens, or underscores for the pool name.";
-	}
-	if (
-		!(
-			pool.include_direct || pool.endpoints.some((endpoint) => endpoint.enabled)
-		)
-	) {
-		return "Enable a proxy endpoint or include a direct connection.";
-	}
-	if (pool.endpoints.length + Number(pool.include_direct) > 32) {
-		return "A pool supports at most 32 connections.";
-	}
-	const ids = new Set<string>();
-	for (const endpoint of pool.endpoints) {
-		if (
-			!Number.isInteger(endpoint.priority ?? 0) ||
-			(endpoint.priority ?? 0) < 0 ||
-			(endpoint.priority ?? 0) > 65_535
-		) {
-			return "Priority must be an integer from 0 to 65535.";
-		}
-		if (!/^[A-Za-z0-9_-]{1,64}$/.test(endpoint.id) || ids.has(endpoint.id)) {
-			return "Proxy endpoint IDs must be unique and use letters, numbers, hyphens, or underscores.";
-		}
-		ids.add(endpoint.id);
-		if (endpoint.enabled) {
-			let url: URL;
-			try {
-				url = new URL(endpoint.url);
-			} catch {
-				return `Enter a valid URL for ${endpoint.id}.`;
-			}
-			if (
-				!(url.protocol === "http:" || url.protocol === "https:") ||
-				url.username ||
-				url.password ||
-				url.pathname !== "/" ||
-				url.search ||
-				url.hash
-			) {
-				return `Use an HTTP or HTTPS proxy origin without credentials or a path for ${endpoint.id}.`;
-			}
-		}
-		if (Boolean(endpoint.username_env) !== Boolean(endpoint.password_env)) {
-			return `Set both credential environment variable names for ${endpoint.id}.`;
-		}
-		for (const env of [endpoint.username_env, endpoint.password_env]) {
-			if (
-				env &&
-				WELL_FORMED_ENV_NAME.test(env) &&
-				!env.startsWith(WRITABLE_CREDENTIAL_ENV_PREFIX) &&
-				!savedEnvNames.has(env)
-			) {
-				return `Credential variable names for ${endpoint.id} must start with ${WRITABLE_CREDENTIAL_ENV_PREFIX}.`;
-			}
-		}
-	}
-	return null;
-}
+	EgressPoolList,
+	EgressPoolSettings,
+} from "./egress-pools/pool-list.tsx";
+import { EgressProviderAssignments } from "./egress-pools/provider-assignments.tsx";
+import {
+	type DraftPool,
+	EMPTY_EGRESS,
+	type Endpoint,
+	SUPPORTED,
+	savedCredentialEnvNames,
+	validatePool,
+} from "./egress-pools/shared.ts";
 
 export function EgressPoolsEditor({
 	target,
@@ -171,6 +41,7 @@ export function EgressPoolsEditor({
 	canConfigure: boolean;
 	providers: string[];
 }) {
+	const tl = useLiteralMessages();
 	const [egress, setEgress] = useState<GatewayEgressConfig | null>(null);
 	const [unsupported, setUnsupported] = useState(false);
 	const [editing, setEditing] = useState<string | null>(null);
@@ -348,12 +219,20 @@ export function EgressPoolsEditor({
 	);
 
 	const selectClass =
-		"rounded-md border border-input bg-background px-2 py-1 text-sm";
+		"h-8 rounded-lg border-0 bg-muted/50 px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 	return (
-		<div className="flex flex-col gap-6">
+		<div className="flex flex-col gap-8 [&>*]:mt-0">
 			<SettingsSection
-				caption="Choose how direct provider requests leave this node. Assigned chat sessions stay on one proxy; other calls rotate per request. Failed proxy connections can use another endpoint; uncertain delivery returns an error. Proxy credentials come from Gateway environment variables."
+				caption={
+					<CaptionInfo
+						detail={
+							"Assigned chat sessions stay on one proxy; other calls rotate per request. Failed proxy connections can use another endpoint; uncertain delivery returns an error. Proxy credentials come from Gateway environment variables."
+						}
+					>
+						{"Choose how direct provider requests leave this node."}
+					</CaptionInfo>
+				}
 				headerAction={
 					egress && !unsupported ? (
 						<Button
@@ -375,69 +254,13 @@ export function EgressPoolsEditor({
 						</p>
 					</SettingsCard>
 				) : null}
-				{egress && !unsupported ? (
-					Object.keys(egress.pools).length === 0 ? (
-						<SettingsCard>
-							<p className="text-center text-muted-foreground text-sm">
-								No proxy pools yet.
-							</p>
-						</SettingsCard>
-					) : (
-						<SettingsGroup>
-							{Object.entries(egress.pools).map(([poolName, current]) => (
-								<SettingsItem
-									actions={
-										<div className="flex items-center gap-2">
-											<span className="text-muted-foreground text-sm">
-												{
-													current.endpoints.filter(
-														(endpoint) => endpoint.enabled
-													).length
-												}{" "}
-												proxies{current.include_direct ? " + direct" : ""}
-											</span>
-											<Button
-												aria-label={`Edit proxy pool ${poolName}`}
-												disabled={disabled}
-												onClick={() => begin(poolName)}
-												size="sm"
-												variant="ghost"
-											>
-												Edit
-											</Button>
-											<Button
-												aria-label={`Remove proxy pool ${poolName}`}
-												disabled={disabled}
-												onClick={() => {
-													void persist((value) => {
-														if (
-															Object.values(value.assignments).includes(
-																poolName
-															)
-														) {
-															throw new Error(
-																"Remove provider assignments before deleting this pool."
-															);
-														}
-														const pools = { ...value.pools };
-														delete pools[poolName];
-														return { ...value, pools };
-													});
-												}}
-												size="sm"
-												variant="ghost"
-											>
-												Remove
-											</Button>
-										</div>
-									}
-									key={poolName}
-									title={poolName}
-								/>
-							))}
-						</SettingsGroup>
-					)
-				) : null}
+				<EgressPoolList
+					begin={begin}
+					disabled={disabled}
+					egress={egress}
+					persist={persist}
+					unsupported={unsupported}
+				/>
 			</SettingsSection>
 
 			{egress && !unsupported && editing !== null ? (
@@ -484,267 +307,46 @@ export function EgressPoolsEditor({
 									void savePool();
 								}}
 								size="sm"
+								variant="outline"
 							>
 								Save pool
 							</Button>
 						</div>
 					}
-					title={editing ? `Edit ${editing}` : "New pool"}
+					title={editing ? tl("Edit {editing}", { editing }) : "New pool"}
 				>
-					<SettingsGroup>
-						<SettingsItem
-							actions={
-								<div>
-									<Input
-										className="h-8 w-56"
-										disabled={disabled}
-										id="egress-pool-name"
-										onChange={(event) => setName(event.target.value)}
-										value={name}
-									/>
-								</div>
-							}
-							title={<label htmlFor="egress-pool-name">Pool name</label>}
-						/>
-						<SettingsItem
-							actions={
-								<Switch
-									checked={pool.include_direct}
-									disabled={disabled}
-									id="egress-direct"
-									onCheckedChange={(checked) =>
-										setPool((current) => ({
-											...current,
-											include_direct: checked,
-											direct_fallback_only: checked
-												? current.direct_fallback_only
-												: false,
-										}))
-									}
-								/>
-							}
-							title={
-								<label htmlFor="egress-direct">Include direct connection</label>
-							}
-						/>
-						<SettingsItem
-							actions={
-								<Switch
-									checked={pool.direct_fallback_only ?? false}
-									disabled={disabled || !pool.include_direct}
-									id="egress-direct-fallback"
-									onCheckedChange={(checked) =>
-										setPool((current) => ({
-											...current,
-											direct_fallback_only: checked,
-										}))
-									}
-								/>
-							}
-							title={
-								<label htmlFor="egress-direct-fallback">
-									Use direct only as fallback
-								</label>
-							}
-						/>
-					</SettingsGroup>
-					{pool.endpoints.map((endpoint, index) => (
-						<SettingsGroup key={endpoint.draftId}>
-							<SettingsItem
-								actions={
-									<div className="flex items-center gap-2">
-										<Switch
-											checked={endpoint.enabled}
-											disabled={disabled}
-											id={`egress-enabled-${index}`}
-											onCheckedChange={(checked) =>
-												updateEndpoint(index, { enabled: checked })
-											}
-										/>
-										<Button
-											disabled={disabled}
-											onClick={() =>
-												setPool((current) => ({
-													...current,
-													endpoints: current.endpoints.filter(
-														(_, at) => at !== index
-													),
-												}))
-											}
-											size="sm"
-											variant="ghost"
-										>
-											Remove endpoint
-										</Button>
-									</div>
-								}
-								title={
-									<label htmlFor={`egress-enabled-${index}`}>Enabled</label>
-								}
-							/>
-							<SettingsItem
-								actions={
-									<div>
-										<Input
-											className="h-8 w-28"
-											disabled={disabled}
-											id={`egress-priority-${index}`}
-											max={65_535}
-											min={0}
-											onChange={(event) =>
-												updateEndpoint(index, {
-													priority: Number(event.target.value),
-												})
-											}
-											step={1}
-											type="number"
-											value={endpoint.priority ?? 0}
-										/>
-									</div>
-								}
-								title={
-									<label htmlFor={`egress-priority-${index}`}>
-										Priority (lower first)
-									</label>
-								}
-							/>
-							{endpointField({
-								id: `egress-id-${index}`,
-								index,
-								label: "Endpoint ID",
-								patch: (id) => ({ id }),
-								value: endpoint.id,
-							})}
-							{endpointField({
-								id: `egress-url-${index}`,
-								index,
-								label: "Proxy URL",
-								patch: (url) => ({ url }),
-								placeholder: "http://127.0.0.1:8080",
-								value: endpoint.url,
-							})}
-							{endpointField({
-								id: `egress-user-${index}`,
-								index,
-								label: "Username environment variable",
-								patch: (env) => ({ username_env: env || null }),
-								placeholder: "RYU_PROXY_USER",
-								value: endpoint.username_env ?? "",
-							})}
-							{endpointField({
-								id: `egress-password-${index}`,
-								index,
-								label: "Password environment variable",
-								patch: (env) => ({ password_env: env || null }),
-								placeholder: "RYU_PROXY_PASSWORD",
-								value: endpoint.password_env ?? "",
-							})}
-						</SettingsGroup>
-					))}
+					<EgressPoolSettings
+						disabled={disabled}
+						name={name}
+						pool={pool}
+						setName={setName}
+						setPool={setPool}
+					/>
+					<EgressPoolEndpoints
+						disabled={disabled}
+						endpointField={endpointField}
+						pool={pool}
+						setPool={setPool}
+						updateEndpoint={updateEndpoint}
+					/>
 				</SettingsSection>
 			) : null}
 
-			{egress && !unsupported ? (
-				<SettingsSection title="Provider assignments">
-					<SettingsGroup>
-						{Object.entries(egress.assignments).map(([id, poolName]) => (
-							<SettingsItem
-								actions={
-									<Button
-										aria-label={`Remove proxy assignment for ${id}`}
-										disabled={disabled}
-										onClick={() => {
-											void persist((current) => {
-												const assignments = { ...current.assignments };
-												delete assignments[id];
-												return { ...current, assignments };
-											});
-										}}
-										size="sm"
-										variant="ghost"
-									>
-										Remove
-									</Button>
-								}
-								key={id}
-								title={
-									<>
-										{svglForProvider(id) ? (
-											<ProviderBrandLogo providerKey={id} size={16} />
-										) : (
-											<HugeiconsIcon
-												className="size-4 text-muted-foreground"
-												icon={Key01Icon}
-											/>
-										)}
-										<span>
-											{id} → {poolName}
-										</span>
-									</>
-								}
-							/>
-						))}
-						<SettingsItem
-							actions={
-								<div className="flex flex-wrap items-center gap-2">
-									<label className="flex items-center gap-1.5 text-muted-foreground text-xs">
-										Provider
-										<select
-											className={selectClass}
-											disabled={disabled}
-											onChange={(event) => setProvider(event.target.value)}
-											value={provider}
-										>
-											<option value="">Select provider</option>
-											{connected.map((id) => (
-												<option key={id} value={id}>
-													{id}
-												</option>
-											))}
-										</select>
-									</label>
-									<label className="flex items-center gap-1.5 text-muted-foreground text-xs">
-										Pool
-										<select
-											className={selectClass}
-											disabled={disabled}
-											onChange={(event) => setAssignment(event.target.value)}
-											value={assignment}
-										>
-											<option value="">Select pool</option>
-											{Object.keys(egress.pools).map((id) => (
-												<option key={id} value={id}>
-													{id}
-												</option>
-											))}
-										</select>
-									</label>
-									<Button
-										disabled={disabled || !provider || !assignment}
-										onClick={() => {
-											void persist((current) => ({
-												...current,
-												assignments: {
-													...current.assignments,
-													[provider]: assignment,
-												},
-											}));
-										}}
-										size="sm"
-										variant="secondary"
-									>
-										Assign
-									</Button>
-								</div>
-							}
-							title="New assignment"
-						/>
-					</SettingsGroup>
-				</SettingsSection>
-			) : null}
+			<EgressProviderAssignments
+				assignment={assignment}
+				connected={connected}
+				disabled={disabled}
+				egress={egress}
+				persist={persist}
+				provider={provider}
+				selectClass={selectClass}
+				setAssignment={setAssignment}
+				setProvider={setProvider}
+				unsupported={unsupported}
+			/>
 
 			{error || notice ? (
-				<div className="space-y-1 px-3.5">
+				<div className="space-y-1 px-3">
 					{error ? (
 						<p className="text-sm text-status-destructive" role="alert">
 							{error}

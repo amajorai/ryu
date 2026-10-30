@@ -1,5 +1,4 @@
 import { ditherAvatarSeed } from "@ryu/ui/components/dither-kit/avatar.tsx";
-import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { DEFAULT_THEME_MODE } from "@ryu/ui/theme/prefs.ts";
 import { ThemeProvider } from "next-themes";
 import { type ReactNode, Suspense, useEffect, useState } from "react";
@@ -15,7 +14,7 @@ import {
 	type HostBackButton,
 	useAppSurface,
 } from "@/src/contexts/app-surface-context.tsx";
-import { BootSpinner } from "./boot/boot-spinner.tsx";
+import { BootSplash } from "./boot/boot-splash.tsx";
 import {
 	CompanionOverlay,
 	DesktopNativeSync,
@@ -25,6 +24,7 @@ import {
 	SignedInShell,
 	WaitlistPage,
 } from "./boot/screens.ts";
+import { ThemedToaster } from "./boot/themed-toaster.tsx";
 import { useBootServices } from "./boot/use-boot-services.ts";
 import { useCoreStatusPoll } from "./boot/use-core-status-poll.ts";
 import { useNativeEventToasts } from "./boot/use-native-event-toasts.ts";
@@ -262,28 +262,28 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 						<DesktopNativeSync />
 					</Suspense>
 				) : null}
-				<Toaster position="bottom-right" theme="system" />
+				<ThemedToaster />
 				{updateStartupStatus === "ready" && <AgentationToolbar />}
 				<HostContextMenu>
 					{updateStartupStatus === "ready" ? (
 						startupSelectionLoading ? (
 							<PageWrapper>
-								<BootSpinner />
+								<BootSplash />
 							</PageWrapper>
 						) : startupChooserVisible ? (
 							<PageWrapper>
-								<Suspense fallback={<BootSpinner />}>
+								<Suspense fallback={<BootSplash />}>
 									<DesktopStartupChooser />
 								</Suspense>
 							</PageWrapper>
 						) : (!standaloneApp && isPending && !sessionSettledOnce) ||
 							waitlistResolving ? (
 							<PageWrapper>
-								<BootSpinner />
+								<BootSplash />
 							</PageWrapper>
 						) : waitlisted ? (
 							<PageWrapper>
-								<Suspense fallback={<BootSpinner />}>
+								<Suspense fallback={<BootSplash />}>
 									<WaitlistPage
 										avatarSeed={ditherAvatarSeed({
 											id: session?.user?.id,
@@ -300,7 +300,7 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 							<Suspense
 								fallback={
 									<PageWrapper>
-										<BootSpinner />
+										<BootSplash />
 									</PageWrapper>
 								}
 							>

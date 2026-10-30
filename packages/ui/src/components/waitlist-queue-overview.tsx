@@ -2,6 +2,7 @@
 
 import { CheckmarkBadge02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { DoorClosed, DoorOpen } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { isNativeNumber } from "../lib/native-primitive-observation.ts";
@@ -86,6 +87,7 @@ export function WaitlistOverviewStep({
 	title: string;
 	totalWaiting?: number | null;
 }) {
+	const tl = useLiteralMessages();
 	const [refreshing, setRefreshing] = useState(false);
 	const [cooldownUntil, setCooldownUntil] = useState<number>(readCooldownUntil);
 	const [now, setNow] = useState(() => Date.now());
@@ -182,8 +184,10 @@ export function WaitlistOverviewStep({
 								<Spinner className="size-4" />
 								Refreshing…
 							</span>
+						) : cooldownLeftMs > 0 ? (
+							tl("Refresh status {cooldownSeconds}s", { cooldownSeconds })
 						) : (
-							`Refresh status${cooldownLeftMs > 0 ? ` ${cooldownSeconds}s` : ""}`
+							tl("Refresh status")
 						)}
 					</Button>
 				) : null}

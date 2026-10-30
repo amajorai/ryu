@@ -19,8 +19,16 @@ export function ConnectionStatusToastView(
 	return <ConnectionStatusToastPrimitive {...props} />;
 }
 
-/** Connect the presentational toast to the app-wide node/network status spine. */
-export function ConnectionStatusToast() {
+/**
+ * Connect the presentational status to the app-wide node/network status spine.
+ * The shell mounts it as the inline `strip` under the header; the OS desktop,
+ * which has no header, keeps the floating toast.
+ */
+export function ConnectionStatusToast({
+	layout = "strip",
+}: {
+	layout?: ConnectionStatusToastProps["layout"];
+} = {}) {
 	const { connectionPhase, coreReachable, refresh } = useSystemStatusContext();
 	const nodeName = useNodeStore((state) => state.getActiveNode().name);
 	const [retrying, setRetrying] = useState(false);
@@ -59,6 +67,7 @@ export function ConnectionStatusToast() {
 
 	return (
 		<ConnectionStatusToastView
+			layout={layout}
 			nodeName={nodeName}
 			onRetry={() => void handleRetry()}
 			phase={connectionPhase}

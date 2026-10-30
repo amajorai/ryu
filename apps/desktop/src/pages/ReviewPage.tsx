@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import styles from "./ReviewPage.module.css";
+
 // apps/desktop/src/pages/ReviewPage.tsx
 //
 // Weekly Review: a Dayflow-inspired retrospective over Shadow's on-device
@@ -13,6 +14,12 @@ import styles from "./ReviewPage.module.css";
 // assistant a surface (starter prompts + `shadow.*` tools) while it is focused.
 
 import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	Empty,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyTitle,
+} from "@ryu/ui/components/empty.tsx";
 import {
 	Select,
 	SelectContent,
@@ -30,6 +37,7 @@ import {
 	WEEKLY_REVIEW_TOOLS,
 	weeklyReviewSnapshot,
 } from "@/src/components/review/weekly-review-context.ts";
+import { PageBody, PageTop } from "@/src/components/views/page-layout.tsx";
 import { useAssistantSurface } from "@/src/hooks/useAssistantBuilder.ts";
 import { useAssistantPageContext } from "@/src/hooks/useAssistantPageContext.ts";
 import type {
@@ -101,55 +109,52 @@ export default function ReviewPage() {
 	});
 
 	return (
-		<div className="flex h-full min-h-0 flex-col">
-			<header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
-				<div>
-					<h1 className="font-medium text-base">Weekly review</h1>
-					<p className="text-muted-foreground text-xs">
-						Your focus, time, and highlights — derived on-device.
-					</p>
-				</div>
-				<Select
-					items={RANGE_OPTIONS}
-					onValueChange={(value) => {
-						if (value !== null) {
-							setDays(Number(value));
-						}
-					}}
-					value={String(days)}
-				>
-					<SelectTrigger className="w-[150px]" size="sm">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{RANGE_OPTIONS.map((option) => (
-							<SelectItem key={option.value} value={option.value}>
-								{option.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</header>
-
-			<div className="scroll-fade min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
-				{query.isLoading && (
-					<SkeletonRows label="Loading your week…" spacing="comfortable" />
-				)}
-				{!(query.isLoading || review) && <ReviewEmptyState />}
-				{review && <ReviewBody review={review} />}
-			</div>
-		</div>
+		<PageBody width="wide">
+			<PageTop
+				actions={
+					<Select
+						items={RANGE_OPTIONS}
+						onValueChange={(value) => {
+							if (value !== null) {
+								setDays(Number(value));
+							}
+						}}
+						value={String(days)}
+					>
+						<SelectTrigger size="sm">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{RANGE_OPTIONS.map((option) => (
+								<SelectItem key={option.value} value={option.value}>
+									{option.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				}
+				subtitle="Your focus, time, and highlights, derived on-device."
+				title="Weekly review"
+			/>
+			{query.isLoading && (
+				<SkeletonRows label="Loading your week…" spacing="comfortable" />
+			)}
+			{!(query.isLoading || review) && <ReviewEmptyState />}
+			{review && <ReviewBody review={review} />}
+		</PageBody>
 	);
 }
 
 function ReviewEmptyState() {
 	return (
-		<div className="rounded-lg border border-dashed p-6 text-center">
-			<p className="font-medium text-sm">No activity yet</p>
-			<p className="mt-1 text-muted-foreground text-xs">
-				Shadow needs to be running and capturing to build your weekly review.
-			</p>
-		</div>
+		<Empty>
+			<EmptyHeader>
+				<EmptyTitle>No activity yet</EmptyTitle>
+				<EmptyDescription>
+					Turn on Shadow capture to build your weekly review.
+				</EmptyDescription>
+			</EmptyHeader>
+		</Empty>
 	);
 }
 
@@ -162,10 +167,10 @@ function ReviewBody(props: { review: WeeklyReview }) {
 	}
 
 	return (
-		<div className="space-y-4">
+		<div className="flex flex-col gap-8">
 			<FocusSummary focus={review.focus} title="Focus this period" />
 			<DailyBars days={review.days} />
-			<div className="grid gap-3 sm:grid-cols-2">
+			<div className="grid gap-8 sm:grid-cols-2">
 				<AllocationList stats={review.categories} title="Time by category" />
 				<AllocationList stats={review.apps} title="Time by app" />
 			</div>
@@ -187,8 +192,8 @@ function DailyBars(props: { days: DailyRollup[] }) {
 	);
 
 	return (
-		<div className="rounded-lg bg-muted/30 p-3">
-			<div className="mb-3 font-medium text-xs">Daily focus</div>
+		<section>
+			<h2 className="mb-3 font-semibold text-sm">Daily focus</h2>
 			<div className="flex items-end justify-between gap-2">
 				{days.map((day) => {
 					const totalMin = day.focus_minutes + day.distraction_minutes;
@@ -235,7 +240,7 @@ function DailyBars(props: { days: DailyRollup[] }) {
 								</div>
 							</div>
 							<span
-								className="type-caption truncate text-muted-foreground"
+								className="truncate text-muted-foreground/70 text-xs"
 								title={weekdayLabel(day.day)}
 							>
 								{weekdayLabel(day.day)}
@@ -244,7 +249,7 @@ function DailyBars(props: { days: DailyRollup[] }) {
 					);
 				})}
 			</div>
-		</div>
+		</section>
 	);
 }
 
@@ -255,10 +260,12 @@ function AllocationList(props: { stats: JournalStat[]; title: string }) {
 	const max = Math.max(1, ...top.map((s) => s.minutes));
 
 	return (
-		<div className="min-w-0 rounded-lg bg-muted/30 p-3">
-			<div className="mb-2 font-medium text-xs">{title}</div>
+		<section className="min-w-0">
+			<h2 className="mb-2 font-semibold text-sm">{title}</h2>
 			{top.length === 0 ? (
-				<p className="text-muted-foreground text-xs">Nothing tracked yet.</p>
+				<p className="text-detail text-muted-foreground">
+					Nothing tracked yet.
+				</p>
 			) : (
 				<div className="space-y-1.5">
 					{top.map((stat) => {
@@ -269,11 +276,11 @@ function AllocationList(props: { stats: JournalStat[]; title: string }) {
 						};
 						return (
 							<div className="min-w-0" key={stat.name}>
-								<div className="mb-0.5 flex items-center justify-between gap-2 text-xs">
+								<div className="mb-1 flex items-center justify-between gap-2 text-sm">
 									<span className="truncate" title={stat.name}>
 										{stat.name}
 									</span>
-									<span className="shrink-0 font-mono text-muted-foreground tabular-nums">
+									<span className="shrink-0 text-detail text-muted-foreground tabular-nums">
 										{stat.minutes}m
 									</span>
 								</div>
@@ -288,23 +295,20 @@ function AllocationList(props: { stats: JournalStat[]; title: string }) {
 					})}
 				</div>
 			)}
-		</div>
+		</section>
 	);
 }
 
 function Highlights(props: { items: string[] }) {
 	const { items } = props;
 	return (
-		<div className="rounded-lg bg-muted/30 p-3">
-			<div className="mb-2 font-medium text-xs">Highlights</div>
-			<ul className="space-y-1.5">
+		<section>
+			<h2 className="mb-2 font-semibold text-sm">Highlights</h2>
+			<ul className="list-disc space-y-1 pl-4 text-muted-foreground text-sm">
 				{items.map((item) => (
-					<li className="flex gap-2 text-muted-foreground text-xs" key={item}>
-						<span className="mt-1 inline-block size-1.5 shrink-0 rounded-full bg-primary" />
-						<span className="min-w-0">{item}</span>
-					</li>
+					<li key={item}>{item}</li>
 				))}
 			</ul>
-		</div>
+		</section>
 	);
 }

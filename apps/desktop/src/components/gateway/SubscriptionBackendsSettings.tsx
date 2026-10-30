@@ -12,7 +12,6 @@
 
 import { CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG } from "@ryu/auth/lib/feature-flags";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -23,6 +22,7 @@ import {
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback, useEffect, useState } from "react";
 import { PlanAccountsSettings } from "@/src/components/gateway/PlanAccountsSettings.tsx";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -210,7 +210,17 @@ export function SubscriptionBackendsSettings({
 
 	return (
 		<SettingsSection
-			caption="Cloud tasks for the Claude Code and Codex agents can run on your own Claude or ChatGPT plan, through the official CLI you signed in on this node: in the provider's cloud, or (Claude) on this computer in a separate worktree of your checkout. They count toward that plan's usage limits and use no Ryu credits. When the plan is unavailable or reaches its limit, the task runs on a Ryu Box instead, and Ryu tells you. Ryu never stores your plan's sign-in."
+			caption={
+				<CaptionInfo
+					detail={
+						"Cloud tasks for the Claude Code and Codex agents can run on your own Claude or ChatGPT plan, through the official CLI you signed in on this node: in the provider's cloud, or (Claude) on this computer in a separate worktree of your checkout. They count toward that plan's usage limits and use no Ryu credits. When the plan is unavailable or reaches its limit, the task runs on a Ryu Box instead, and Ryu tells you. Ryu never stores your plan's sign-in."
+					}
+				>
+					{
+						"Run Claude Code and Codex cloud tasks on your own Claude or ChatGPT plan."
+					}
+				</CaptionInfo>
+			}
 			title="Run on your own plan"
 		>
 			<div className="space-y-4 px-3">
@@ -364,16 +374,11 @@ export function SubscriptionBackendsSettings({
 					environment: a Ryu Box run then spends those credits on the model, and
 					its Box time still uses Ryu credits.
 				</p>
-				<div className="flex flex-wrap gap-2 text-muted-foreground text-xs">
-					<Badge variant="outline">No live screen</Badge>
-					<Badge variant="outline">
-						Provider's cloud: review and stop on the provider's site
-					</Badge>
-					<Badge variant="outline">
-						This computer: run log, diff and Stop in Ryu; edits only, no shell
-						commands
-					</Badge>
-				</div>
+				<p className="text-muted-foreground text-xs">
+					No live screen. Provider's cloud: review and stop on the provider's
+					site. This computer: run log, diff and Stop in Ryu; edits only, no
+					shell commands.
+				</p>
 				{notice ? (
 					<p className="text-muted-foreground text-xs" role="status">
 						{notice}

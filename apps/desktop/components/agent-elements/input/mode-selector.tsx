@@ -132,7 +132,7 @@ export function ModeMenuContent({
 		body = groups.map((group) => (
 			<div key={group.label ?? "__ungrouped__"}>
 				{group.label && (
-					<div className="type-caption px-3 pt-2 pb-1 font-medium text-muted-foreground">
+					<div className="px-3 pt-2 pb-1 font-medium text-muted-foreground text-xs">
 						{group.label}
 					</div>
 				)}

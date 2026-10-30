@@ -60,7 +60,6 @@ import {
 } from "@/src/lib/settings-sync/keys.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
 import {
-	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -184,13 +183,12 @@ export function SettingsSyncTab() {
 	};
 
 	return (
-		<div className="space-y-6">
+		<div>
 			<SettingsSection
 				caption={tl(
-					"Your desktop app settings follow you to every machine you sign in on. Changes upload {seconds} seconds after you stop making them, so a run of adjustments becomes one upload rather than dozens.",
+					"Your settings follow you to every machine you sign in on. Changes upload {seconds} seconds after you stop.",
 					{ seconds: Math.round(DEBOUNCE_MS / 1000) }
 				)}
-				title="Settings Sync"
 			>
 				<SettingsGroup>
 					<SettingsItem
@@ -201,7 +199,7 @@ export function SettingsSyncTab() {
 								onCheckedChange={setSyncEnabled}
 							/>
 						}
-						description="Node and gateway configuration, API keys, workspace folders and device-specific picks are never included. See the list below for exactly what travels."
+						description="Never includes node config, API keys, folders or device picks."
 						title="Sync My Settings Across Machines"
 					/>
 					<SettingsItem
@@ -218,7 +216,7 @@ export function SettingsSyncTab() {
 								disabled={!enabled || status === "syncing"}
 								onClick={handleSyncNow}
 								size="sm"
-								variant="ghost"
+								variant="outline"
 							>
 								Sync now
 							</Button>
@@ -239,7 +237,7 @@ export function SettingsSyncTab() {
 			</SettingsSection>
 
 			<SettingsSection
-				caption="Asking is the default because silently dropping one side is how people lose a change they cannot see they lost. Pick a side only once you know which machine you want to be authoritative."
+				caption="Pick a side only once you know which machine should win."
 				title="When The Same Setting Changed In Two Places"
 			>
 				<SettingsGroup>
@@ -296,51 +294,41 @@ export function SettingsSyncTab() {
 					)}
 				>
 					{conflicts.map((conflict) => (
-						<SettingsCard key={conflict.key}>
-							<div className="flex flex-col gap-2">
-								<span className="font-medium text-sm">
-									{labelForKey(conflict.key)}
-								</span>
-								<div className="grid gap-2 sm:grid-cols-2">
-									<div className="flex flex-col gap-1 rounded-md bg-background/60 p-2.5">
-										<span className="type-caption text-muted-foreground">
-											{tl("This machine · {when}", {
-												when: relativeTime(conflict.localAt),
-											})}
+						<div
+							className="flex flex-col gap-2 border-border border-b py-3 last:border-b-0"
+							key={conflict.key}
+						>
+							<span className="text-sm">{labelForKey(conflict.key)}</span>
+							<div className="grid gap-4 sm:grid-cols-2">
+								{(
+									[
+										["local", conflict.localAt, conflict.local, "Keep this"],
+										["remote", conflict.remoteAt, conflict.remote, "Use cloud"],
+									] as const
+								).map(([side, at, value, action]) => (
+									<div className="flex min-w-0 flex-col gap-1" key={side}>
+										<span className="text-muted-foreground text-xs">
+											{side === "local"
+												? tl("This machine · {when}", {
+														when: relativeTime(at),
+													})
+												: tl("Cloud · {when}", { when: relativeTime(at) })}
 										</span>
 										<span className="break-all font-mono text-xs">
-											{preview(conflict.local)}
+											{preview(value)}
 										</span>
 										<Button
 											className="mt-1 self-start"
-											onClick={() => resolveConflict(conflict.key, "local")}
+											onClick={() => resolveConflict(conflict.key, side)}
 											size="sm"
-											variant="ghost"
+											variant="outline"
 										>
-											Keep this
+											{action}
 										</Button>
 									</div>
-									<div className="flex flex-col gap-1 rounded-md bg-background/60 p-2.5">
-										<span className="type-caption text-muted-foreground">
-											{tl("Cloud · {when}", {
-												when: relativeTime(conflict.remoteAt),
-											})}
-										</span>
-										<span className="break-all font-mono text-xs">
-											{preview(conflict.remote)}
-										</span>
-										<Button
-											className="mt-1 self-start"
-											onClick={() => resolveConflict(conflict.key, "remote")}
-											size="sm"
-											variant="ghost"
-										>
-											Use cloud
-										</Button>
-									</div>
-								</div>
+								))}
 							</div>
-						</SettingsCard>
+						</div>
 					))}
 				</SettingsSection>
 			) : null}
@@ -349,32 +337,32 @@ export function SettingsSyncTab() {
 				caption="Everything else stays on this machine."
 				title="What Gets Synced"
 			>
-				{[...grouped.entries()].map(([group, labels]) => (
-					<SettingsCard key={group}>
-						<p className="mb-1.5 font-medium text-foreground/70 text-xs">
-							{SYNC_GROUP_LABELS[group]}
-						</p>
-						<p className="text-muted-foreground text-xs leading-relaxed">
-							{labels.join(" · ")}
-						</p>
-					</SettingsCard>
-				))}
+				<SettingsGroup>
+					{[...grouped.entries()].map(([group, labels]) => (
+						<SettingsItem
+							description={labels.join(" · ")}
+							key={group}
+							title={SYNC_GROUP_LABELS[group]}
+						/>
+					))}
+				</SettingsGroup>
 			</SettingsSection>
 
 			<SettingsSection
-				caption="Removes the copy held for your account. The settings on this machine are left exactly as they are."
+				caption="Removes the copy held for your account. This machine is left as it is."
 				title="Cloud Copy"
 			>
 				<SettingsGroup>
 					<SettingsItem
 						actions={
 							<Button
+								className="text-status-destructive"
 								onClick={() => {
 									setForgetIdentity(getActiveSyncIdentity());
 									setForgetOpen(true);
 								}}
 								size="sm"
-								variant="ghost"
+								variant="outline"
 							>
 								Delete cloud copy
 							</Button>

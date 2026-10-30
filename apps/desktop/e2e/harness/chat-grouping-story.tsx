@@ -19,6 +19,10 @@
 // scroll-new-turn-to-top — so "these rows are one group" is a claim about
 // attributes and geometry, not about nesting.
 //
+// The runs are a TEAMMATE's (a remote sender in a shared room): your own turn is
+// the right-aligned bubble and draws no avatar at all, so only a remote sender's
+// run has an avatar and a gutter to keep.
+//
 // The fixture, in order:
 //   • a run of THREE consecutive user messages, then THREE assistant replies;
 //   • a lone user message with a reply (a run of one);
@@ -58,11 +62,16 @@ function stampFor(daysAgo: number, minute: number): Date {
 	);
 }
 
+/** The teammate who sends every user message here. */
+const TEAMMATE = { id: "teammate-mei", name: "Mei Lin" };
+
 function user(id: string, text: string, at: Date): DatedFixtureMessage {
 	return {
 		id,
 		role: "user",
 		parts: [{ type: "text", text }],
+		// Core's verified author, as hydration projects it into SDK metadata.
+		metadata: { author: TEAMMATE },
 		createdAt: at,
 	};
 }
@@ -154,8 +163,8 @@ function Story() {
 				<ChatDisplayPrefs>
 					<AgentChat
 						conversationKey="conv-grouping"
-						// Without a current user there is no avatar at all, and every
-						// gutter assertion below would pass vacuously.
+						// Someone other than the teammate, so the runs are remote ones
+						// and carry the avatar whose gutter the spec measures.
 						currentUser={{ id: "me", name: "You" }}
 						emptyStatePosition="center"
 						messages={messages}

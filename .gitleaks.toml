@@ -1,8 +1,15 @@
 # gitleaks config for the Ryu open-core repo.
+#
+# CI scans the FULL public history, so path and value allowlists (not inline
+# `gitleaks:allow` comments) are what keep values in older mirror commits quiet.
+# Uses `[[allowlists]]` (gitleaks >= 8.25): the legacy single `[allowlist]` table
+# cannot be combined with it. Blocks with `targetRules` only silence the listed
+# default rules, so provider-specific rules (github-pat, openai, aws, stripe,
+# private-key, ...) still fire on a real credential pasted into a test file.
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Known-safe test fixtures (no real secrets)"
 # Dummy API key used in the gateway audit unit tests to verify redaction.
 regexes = [
@@ -48,4 +55,76 @@ paths = [
   # Quest keys are stable identifiers, not credentials. The generic-api-key rule
   # treats the `refer-3-monthly` / `refer-5-monthly` names as secrets.
   '''packages/auth/src/lib/quests\.ts''',
+]
+
+[[allowlists]]
+description = "Test-only files: dummy passwords, tokens, JWTs and key vectors"
+# Only the two heuristic rules. A real provider key or PEM private key in one of
+# these files is still reported by its specific rule.
+targetRules = ["generic-api-key", "jwt"]
+paths = [
+  # TypeScript unit/coverage tests and Playwright e2e specs (`*.test.ts(x)`,
+  # `*.spec.ts(x)`, including `__tests__/`): sample passwords, bearer tokens,
+  # idempotency UUIDs and JWT-shaped strings exercising redaction/sealing.
+  '''\.(test|spec)\.tsx?$''',
+  # Rust test-only modules split out of their parent (`tests.rs`, `*_test.rs`,
+  # `*_tests.rs`).
+  '''(^|/)tests\.rs$''',
+  '''_tests?\.rs$''',
+  # Deterministic crypto/protocol test vectors (fixed-seed keys, nonces, sealed
+  # blobs) consumed only by the crates' vector tests.
+  '''(^|/)crates/core/(crypto|hardware)/tests/vectors/[^/]+\.json$''',
+  # Vendored upstream rust-genai recorded HTTP responses (yakbak). The flagged
+  # `prompt_cache_key` values are request UUIDs, not credentials.
+  '''(^|/)vendor/genai/tests/data/yakbak/''',
+]
+
+[[allowlists]]
+description = "Throwaway private keys generated for unit tests"
+targetRules = ["private-key"]
+# RSA signing key for the ChatGPT Plan identity tests; only included from the
+# `#[cfg(test)] mod tests` in apps/core/src/pi_config/chatgpt_plan.rs, and its
+# JWKS twin is likewise only trusted by those tests.
+paths = ['''(^|/)apps/core/src/pi_config/fixtures/chatgpt-plan-test-private\.pem$''']
+# Legacy P-256 / P-384 PKCS#8 keys in the `#[cfg(test)]` module of
+# apps/core/src/vault/transit.rs that pin elliptic-curve migration compatibility.
+# Matched by a key-specific fragment of each body, not the shared PKCS#8 header.
+regexes = [
+  '''Jclc3u5TK30CSE8SNyo0nx03''',
+  '''daUBCcGk5CSNVUIqQBQR6vfC''',
+]
+
+[[allowlists]]
+description = "Dummy values inside #[cfg(test)] modules of production sources, and i18n text"
+targetRules = ["generic-api-key"]
+# Exact placeholder values; production files are not path-allowlisted.
+regexes = [
+  # apps/core/src/composio_host.rs (connect_suggestion_tests)
+  '''^ghp_0123456789abcdefghijkl$''',
+  # apps/core/src/hardware/node_key.rs (base64 of a literal label)
+  '''^c2VjcmV0LW5vZGUta2V5$''',
+  # apps/core/src/log_rotation.rs
+  '''^ryu_0123456789abcdef0123456789abcdef$''',
+  # apps/core/src/pi_config/secret_env.rs (env var name, hex of a provider id)
+  '''^RYU_PI_KEY_616E7468726F706963$''',
+  # apps/core/src/server/app_webhooks.rs
+  '''^replacement-secret-0123456789$''',
+  # apps/core/src/server/conversations.rs (a conversation id, not a key)
+  '''^conversation-1$''',
+  # apps/core/src/server/preferences.rs
+  '''^prm-legacy-bearer-3f9a1c$''',
+  # apps/core/src/sidecar/mcp/mod.rs
+  '''^ghp-legacy-2b8e$''',
+  # apps/core/src/vault/totp/mod.rs (base32 of "1234567890", RFC 6238 style)
+  '''^GEZDGNBVGY3TQOJQ$''',
+  # apps/gateway/src/api/mod.rs (route_tests)
+  '''^gwrelay_conventions_0123456789abcdef$''',
+  # crates/core/crypto/src/sealed.rs
+  '''^sk-live-abc123$''',
+  # crates/core/sidecar-runtime/src/peer_proof.rs (malformed-proof case)
+  '''^0123456789abcdef0123456789abcde/?$''',
+  # crates/core/webhook-ingress/src/ryu_relay.rs
+  '''^tok-legacy-9c2e$''',
+  # packages/i18n/locales/de.json: German UI text after "...arrow keys to rotate."
+  '''^Ryu-3D-Geist\.?$''',
 ]

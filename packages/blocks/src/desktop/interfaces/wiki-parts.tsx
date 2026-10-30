@@ -1,8 +1,8 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	DitherAvatar,
 	ditherAvatarSeed,
 } from "@ryu/ui/components/dither-kit/avatar.tsx";
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { AnimatePresence, motion } from "motion/react";
@@ -16,6 +16,13 @@ import {
 import { useReducedMotion } from "./reduced-motion.ts";
 import type { WikiRoute, WikiSection, WikiSegment } from "./wiki-model.ts";
 import { markMatches, sameRoute } from "./wiki-model.ts";
+
+export {
+	Infobox,
+	InfoboxHeader,
+	InfoboxRow,
+} from "./wiki-parts-infobox.tsx";
+export { WikiSkeleton } from "./wiki-parts-skeleton.tsx";
 
 // ---------------------------------------------------------------------------
 // Navigation context: every wiki link reaches the shell through this
@@ -232,93 +239,6 @@ export function WikiPortrait({
 }
 
 // ---------------------------------------------------------------------------
-// Infobox
-// ---------------------------------------------------------------------------
-
-export function Infobox({
-	caption,
-	children,
-	image,
-	imageCaption,
-	kind,
-}: {
-	caption: string;
-	children: ReactNode;
-	image?: ReactNode;
-	imageCaption?: string;
-	/** The band under the title ("Agent", "Team", "Thread"). */
-	kind: string;
-}) {
-	return (
-		<aside
-			aria-label={`${caption} summary`}
-			className="@2xl/article:float-right mb-4 @2xl/article:ml-6 @2xl/article:w-72 w-full border border-border bg-muted/40 p-1 text-[13px] leading-5"
-		>
-			<table className="w-full border-collapse">
-				<caption className="px-2 pt-1 pb-1 text-center font-semibold text-base leading-6">
-					{caption}
-				</caption>
-				<tbody>
-					<tr>
-						<th
-							className="bg-muted px-2 py-0.5 text-center font-semibold"
-							colSpan={2}
-							scope="colgroup"
-						>
-							{kind}
-						</th>
-					</tr>
-					{image ? (
-						<tr>
-							<td className="px-2 pt-2 pb-1 text-center" colSpan={2}>
-								<span className="inline-flex">{image}</span>
-								{imageCaption ? (
-									<span className="mt-1 block text-pretty text-muted-foreground">
-										{imageCaption}
-									</span>
-								) : null}
-							</td>
-						</tr>
-					) : null}
-					{children}
-				</tbody>
-			</table>
-		</aside>
-	);
-}
-
-export function InfoboxHeader({ children }: { children: ReactNode }) {
-	return (
-		<tr>
-			<th
-				className="bg-muted px-2 py-0.5 text-center font-semibold"
-				colSpan={2}
-				scope="colgroup"
-			>
-				{children}
-			</th>
-		</tr>
-	);
-}
-
-export function InfoboxRow({
-	children,
-	label,
-}: {
-	children: ReactNode;
-	label: string;
-}) {
-	return (
-		<tr className="align-top">
-			<th className="w-[38%] px-2 py-1 text-left font-semibold" scope="row">
-				{label}
-			</th>
-			<td className="px-2 py-1">{children}</td>
-		</tr>
-	);
-}
-
-// ---------------------------------------------------------------------------
 // Sections and table of contents
 // ---------------------------------------------------------------------------
 
@@ -443,12 +363,15 @@ export function CatLinks({ segments }: { segments: WikiSegment[] }) {
 
 /** "This page was last edited on ..." */
 export function WikiFooter({ edited }: { edited: string | null }) {
+	const tl = useLiteralMessages();
 	return (
 		<footer className="clear-both mt-6 border-border border-t pt-3 pb-8 text-muted-foreground text-xs leading-5">
 			{edited ? (
 				<p>
-					This page was last edited on {edited}. Text is generated from the
-					workspace&rsquo;s live agents and threads.
+					{tl(
+						"This page was last edited on {edited}. Text is generated from the workspace’s live agents and threads.",
+						{ edited }
+					)}
 				</p>
 			) : (
 				<p>
@@ -456,47 +379,6 @@ export function WikiFooter({ edited }: { edited: string | null }) {
 				</p>
 			)}
 		</footer>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// Loading
-// ---------------------------------------------------------------------------
-
-const LINE_WIDTHS = ["w-full", "w-11/12", "w-full", "w-4/5", "w-full", "w-2/3"];
-
-export function WikiSkeleton() {
-	return (
-		<div aria-busy="true" className="pt-6" role="status">
-			<span className="sr-only">Loading the wiki</span>
-			<Skeleton className="h-8 w-72" radius="block" />
-			<div className="mt-2 h-px bg-border" />
-			<div className="mt-3 flex justify-between">
-				<div className="flex gap-4">
-					<Skeleton className="h-4 w-14" radius="block" />
-					<Skeleton className="h-4 w-10" radius="block" />
-				</div>
-				<div className="flex gap-4">
-					<Skeleton className="h-4 w-10" radius="block" />
-					<Skeleton className="h-4 w-24" radius="block" />
-				</div>
-			</div>
-			<div className="mt-6 flex gap-6">
-				<div className="flex flex-1 flex-col gap-3">
-					{LINE_WIDTHS.map((width, index) => (
-						<Skeleton
-							className={cn("h-3.5", width)}
-							key={`line-${width}-${String(index)}`}
-							radius="block"
-						/>
-					))}
-				</div>
-				<Skeleton
-					className="@2xl/article:block hidden h-72 w-72 shrink-0"
-					radius="block"
-				/>
-			</div>
-		</div>
 	);
 }
 

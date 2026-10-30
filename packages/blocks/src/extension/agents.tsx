@@ -1,11 +1,12 @@
 "use client";
 
+import { AiChat02Icon, SquareLock02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Card, CardHeader, CardTitle } from "@ryu/ui/components/card";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Bot, Lock } from "lucide-react";
 import type { ReactNode } from "react";
 import styles from "./agents.module.css";
 
@@ -31,7 +32,7 @@ export function AgentCard({ agent }: { agent: AgentCardData }) {
 		<Card>
 			<CardHeader spacing="compact">
 				<CardTitle layout="badge-row">
-					<Bot className="size-4 opacity-70" />
+					<HugeiconsIcon className="opacity-70" icon={AiChat02Icon} size={16} />
 					{agent.name}
 				</CardTitle>
 				<div
@@ -52,13 +53,13 @@ export function AgentCard({ agent }: { agent: AgentCardData }) {
 					) : null}
 					{agent.hasPolicy ? (
 						<Badge variant="outline">
-							<Lock className="size-3" />
+							<HugeiconsIcon icon={SquareLock02Icon} size={14} />
 							Policy
 						</Badge>
 					) : null}
 					{agent.builtIn ? (
 						<Badge variant="outline">
-							<Lock className="size-3" />
+							<HugeiconsIcon icon={SquareLock02Icon} size={14} />
 							Built-in
 						</Badge>
 					) : null}
@@ -121,10 +122,10 @@ export function AgentsGrid({
 				{state === "empty" ? (
 					<div className="flex h-full flex-col items-center justify-center gap-3 text-center">
 						<span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-							<Bot className="size-6" />
+							<HugeiconsIcon icon={AiChat02Icon} size={20} />
 						</span>
 						<div className="space-y-1">
-							<h2 className="font-medium text-base">No agents yet</h2>
+							<h2 className="font-medium text-sm">No agents yet</h2>
 							<p className="max-w-xs text-muted-foreground text-sm">
 								Only the built-in Ryu agent ships by default. Install more from
 								the catalog.
@@ -140,7 +141,7 @@ export function AgentsGrid({
 							!
 						</span>
 						<div className="space-y-1">
-							<h2 className="font-medium text-base">Could not load agents</h2>
+							<h2 className="font-medium text-sm">Could not load agents</h2>
 							<p className="max-w-xs text-muted-foreground text-sm">
 								{errorMessage}
 							</p>

@@ -32,9 +32,6 @@ function LiveActivityRow({
 }) {
 	const tone = STATUS_TONE[activity.status] ?? "var(--primary)";
 	const clickable = Boolean(activity.action);
-	const activityTintVariables1: CSSProperties & {
-		"--live-activity-tint": string;
-	} = { "--live-activity-tint": tone };
 	const activityTintVariables2: CSSProperties & {
 		"--live-activity-tint": string;
 	} = { "--live-activity-tint": tone };
@@ -49,12 +46,9 @@ function LiveActivityRow({
 		<div className="flex min-w-0 flex-1 items-start gap-2">
 			<span
 				aria-hidden
-				className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md"
-				data-live-activity-tile=""
-				data-live-activity-tint=""
-				style={activityTintVariables1}
+				className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
 			>
-				<Icon className="size-3.5" icon={activity.icon ?? "activity-03"} />
+				<Icon className="size-4" icon={activity.icon ?? "activity-03"} />
 			</span>
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-1.5">
@@ -66,13 +60,13 @@ function LiveActivityRow({
 					</span>
 					<span
 						aria-hidden
-						className={`size-1.5 shrink-0 rounded-full ${activity.status === "running" ? "motion-safe:animate-pulse" : ""}`}
+						className="size-1.5 shrink-0 rounded-full"
 						data-live-activity-tint=""
 						style={activityTintVariables2}
 					/>
 				</div>
 				{activity.detail && (
-					<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground leading-snug">
+					<p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs leading-snug">
 						{activity.detail}
 					</p>
 				)}
@@ -94,7 +88,7 @@ function LiveActivityRow({
 	);
 	if (!clickable) {
 		return (
-			<div className="group/act relative flex gap-2.5 rounded-lg border border-border/60 border-l-2 bg-muted/40 p-2.5">
+			<div className="group/act relative flex gap-2.5 rounded-lg border border-border border-l-2 bg-muted/40 p-2.5">
 				{row}
 			</div>
 		);
@@ -104,7 +98,7 @@ function LiveActivityRow({
 	} = { "--live-activity-tint": tone };
 	return (
 		<button
-			className="group/act relative flex w-full gap-2.5 rounded-lg border border-border/60 border-l-2 bg-muted/40 p-2.5 text-left transition-colors hover:bg-muted/70"
+			className="group/act relative flex w-full gap-2.5 rounded-lg border border-border border-l-2 bg-muted/40 p-2.5 text-left transition-colors hover:bg-muted/70"
 			data-live-activity-border=""
 			onClick={() => onOpen(activity)}
 			style={activityTintVariables4}
@@ -138,14 +132,9 @@ export function LiveActivitiesSection() {
 	return (
 		<div className="flex flex-col gap-1.5 px-2 pb-1">
 			<div className="flex items-center gap-2 px-1">
-				<span className="type-compact font-medium text-muted-foreground uppercase tracking-wide">
-					Live
-				</span>
+				<span className="text-detail text-muted-foreground">Live</span>
 				<div className="flex-1" />
-				<span
-					aria-hidden
-					className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse"
-				/>
+				<span aria-hidden className="size-1.5 rounded-full bg-primary" />
 			</div>
 			<div className="scroll-fade flex max-h-[38vh] flex-col gap-1.5 overflow-y-auto">
 				{activities.map((activity) => (

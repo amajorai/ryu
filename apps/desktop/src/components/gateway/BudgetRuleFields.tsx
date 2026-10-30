@@ -58,9 +58,9 @@ export function BudgetChargeInclusionFields({
 			<Label>Count toward this cap</Label>
 			{/* Plain checkbox rows, no tiles: this sits inside a settings card or a
 			    dialog form, where a bordered box per option nests a box in a box. */}
-			<div className="flex flex-col gap-2.5 py-1">
+			<div className="flex flex-col gap-2 py-1">
 				{options.map((option) => (
-					<label className="flex items-start gap-2.5 text-sm" key={option.key}>
+					<label className="flex items-start gap-2 text-sm" key={option.key}>
 						<Checkbox
 							checked={value[option.key]}
 							disabled={disabled}

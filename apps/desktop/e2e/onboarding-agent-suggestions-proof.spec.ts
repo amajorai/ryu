@@ -17,6 +17,13 @@ test.describe("onboarding agent suggestions proof", () => {
 				"Keeps release checks together and turns them into a short brief."
 			)
 		).toBeVisible();
+		// Each draft's review details sit behind one "Details" disclosure.
+		await expect(page.getByText("Why this showed up")).toHaveCount(0);
+		for (const details of await page
+			.getByRole("button", { name: "Details" })
+			.all()) {
+			await details.click();
+		}
 		await expect(page.getByText("Connected apps", { exact: true })).toHaveCount(
 			2
 		);
@@ -131,6 +138,11 @@ test.describe("onboarding agent suggestions proof", () => {
 				.getByTestId("agent-suggestion-identity-agent-suggestion-release-desk")
 				.getByText("Its own identity", { exact: true })
 		).toBeVisible();
+		// The unselected draft keeps its own identity behind its Details toggle.
+		await page
+			.getByTestId("agent-suggestion-agent-suggestion-inbox-triage")
+			.getByRole("button", { name: "Details" })
+			.click();
 		await expect(
 			page
 				.getByTestId("agent-suggestion-identity-agent-suggestion-inbox-triage")

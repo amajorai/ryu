@@ -126,7 +126,7 @@ describe("StoreCatalogCard", () => {
 		expect(html).toContain('aria-label="Harbor"');
 	});
 
-	test("shows external and declared layer badges", () => {
+	test("keeps layer badges off the row (they live in the detail pane)", () => {
 		const html = render(
 			<StoreCatalogCard
 				external
@@ -137,8 +137,8 @@ describe("StoreCatalogCard", () => {
 				onClick={() => undefined}
 			/>
 		);
-		expect(html).toContain("External");
-		expect(html).toContain("Browser toolkit");
+		expect(html).not.toContain("External");
+		expect(html).not.toContain("Browser toolkit");
 	});
 
 	test("distinguishes community apps from apps reviewed by Ryu", () => {

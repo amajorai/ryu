@@ -1,5 +1,5 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "motion/react";
 import layoutStyles from "./MorphingTabSurface.module.css";
 
 const MORPHING_TAB_LAYOUT_ID = "desktop-titlebar-morphing-tab-surface";

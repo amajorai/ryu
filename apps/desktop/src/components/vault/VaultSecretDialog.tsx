@@ -357,6 +357,7 @@ function SecretDetail({
 							disabled={saveMutation.isPending || isDeleted}
 							loading={saveMutation.isPending}
 							onClick={() => saveMutation.mutate()}
+							variant="mono"
 						>
 							Save details
 						</Button>
@@ -368,7 +369,7 @@ function SecretDetail({
 			</section>
 
 			<section aria-labelledby="vault-detail-versions" className="space-y-2">
-				<h3 className="font-medium text-sm" id="vault-detail-versions">
+				<h3 className="font-semibold text-sm" id="vault-detail-versions">
 					Versions
 				</h3>
 				{versionsQuery.error ? (
@@ -378,17 +379,19 @@ function SecretDetail({
 				) : versionsQuery.isLoading ? (
 					<p className="text-muted-foreground text-xs">Loading versions…</p>
 				) : (
-					<ul className="divide-y rounded-xl border border-border/70">
+					<ul className="divide-y divide-border">
 						{(versionsQuery.data ?? []).map((version) => (
 							<li
-								className="flex items-center justify-between gap-3 px-3 py-2"
+								className="flex items-center justify-between gap-3 py-2"
 								key={version.version}
 							>
 								<div className="min-w-0 text-xs">
 									<p className="flex items-center gap-1.5 font-medium text-sm">
 										v{version.version}
 										{version.current ? (
-											<Badge variant="secondary">Current</Badge>
+											<span className="font-normal text-detail text-muted-foreground">
+												Current
+											</span>
 										) : null}
 										{version.destroyed ? (
 											<Badge variant="outline">Destroyed</Badge>
@@ -422,7 +425,7 @@ function SecretDetail({
 			</section>
 
 			{isDeleted && canWrite ? (
-				<div className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 p-3">
+				<div className="flex items-center justify-between gap-6 border-border border-t pt-4">
 					<p className="text-muted-foreground text-xs">
 						{tl("Deleted {when}. Restore it to use it again.", {
 							when: formatWhen(secret.deletedAt),

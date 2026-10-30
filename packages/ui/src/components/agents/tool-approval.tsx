@@ -3,20 +3,21 @@
 // beui.dev/components/agents/tool-approval
 
 import {
+	AlertCircleIcon,
+	ArrowDown01Icon,
+	Cancel01Icon,
+	Loading03Icon,
+	SecurityCheckIcon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
 	AgentCode,
 	type AgentCodeLanguage,
 } from "@ryu/ui/components/agents/agent-code.tsx";
 import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
 import { EASE_OUT, SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	Check,
-	ChevronDown,
-	CircleAlert,
-	LoaderCircle,
-	ShieldCheck,
-	X,
-} from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
 	type ReactNode,
@@ -85,30 +86,24 @@ const STATUS_COPY = {
 	error: "Failed",
 } satisfies Record<ToolApprovalStatus, string>;
 
-const PENDING_BADGE = "border-warning/30 bg-warning/10 text-status-warning";
-const BUSY_BADGE = "border-info/30 bg-info/10 text-status-info";
-const OK_BADGE = "border-success/30 bg-success/10 text-status-success";
-const BAD_BADGE =
-	"border-destructive/30 bg-destructive/10 text-status-destructive";
-
-function getStatusBadgeClass(status: ToolApprovalStatus) {
+function getStatusTextClass(status: ToolApprovalStatus) {
 	if (status === "pending") {
-		return PENDING_BADGE;
+		return "text-status-warning";
 	}
 	if (status === "approving" || status === "running") {
-		return BUSY_BADGE;
+		return "text-muted-foreground";
 	}
 	if (status === "approved" || status === "complete") {
-		return OK_BADGE;
+		return "text-status-success";
 	}
-	return BAD_BADGE;
+	return "text-status-destructive";
 }
 
 const CHOICE_TONE_CLASS = {
 	primary:
 		"bg-foreground text-background focus-visible:ring-offset-2 hover:bg-foreground/90",
 	secondary:
-		"border border-border/60 bg-background text-foreground hover:bg-muted",
+		"border border-border bg-background text-foreground hover:bg-muted",
 	ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
 } satisfies Record<NonNullable<ToolApprovalChoice["tone"]>, string>;
 
@@ -120,18 +115,23 @@ function StatusIcon({
 	status: ToolApprovalStatus;
 }) {
 	if (status === "approving" || status === "running") {
-		return <LoaderCircle className={cn("size-4", !reduce && "animate-spin")} />;
+		return (
+			<HugeiconsIcon
+				className={cn("size-4", !reduce && "animate-spin")}
+				icon={Loading03Icon}
+			/>
+		);
 	}
 	if (status === "error") {
-		return <CircleAlert className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={AlertCircleIcon} />;
 	}
 	if (status === "denied") {
-		return <X className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={Cancel01Icon} />;
 	}
 	if (status === "approved" || status === "complete") {
-		return <Check className="size-4" />;
+		return <HugeiconsIcon className="size-4" icon={Tick02Icon} />;
 	}
-	return <ShieldCheck className="size-4" />;
+	return <HugeiconsIcon className="size-4" icon={SecurityCheckIcon} />;
 }
 
 export interface ToolApprovalActionsProps {
@@ -191,10 +191,7 @@ export function ToolApprovalCode({
 }: ToolApprovalCodeProps) {
 	return (
 		<AgentCode
-			className={cn(
-				"rounded-lg border border-border/50 bg-muted/30 px-2.5 py-2",
-				className
-			)}
+			className={cn("rounded-lg bg-muted px-3 py-2", className)}
 			code={code}
 			language={language}
 		/>
@@ -248,7 +245,7 @@ export function ToolApproval({
 		<div
 			aria-busy={busy}
 			className={cn(
-				"w-full overflow-hidden rounded-2xl border border-border/60 bg-muted/20 text-sm",
+				"w-full overflow-hidden rounded-xl border border-border text-sm",
 				className
 			)}
 			data-state={status}
@@ -257,7 +254,7 @@ export function ToolApproval({
 				<span
 					aria-hidden="true"
 					className={cn(
-						"mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl border border-border/60 bg-background text-muted-foreground",
+						"mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground",
 						status === "error" && "text-status-destructive"
 					)}
 				>
@@ -274,8 +271,8 @@ export function ToolApproval({
 						</div>
 						<span
 							className={cn(
-								"type-caption shrink-0 rounded-full border px-2 py-0.5 font-medium transition-colors",
-								getStatusBadgeClass(status)
+								"shrink-0 text-xs leading-5 transition-colors",
+								getStatusTextClass(status)
 							)}
 						>
 							{STATUS_COPY[status]}
@@ -296,7 +293,7 @@ export function ToolApproval({
 						<button
 							aria-controls={detailsId}
 							aria-expanded={currentOpen}
-							className="mt-2 inline-flex items-center gap-1 rounded-md font-medium text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+							className="mt-2 inline-flex items-center gap-1 rounded-lg font-medium text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={() => setOpen(!currentOpen)}
 							type="button"
 						>
@@ -306,7 +303,7 @@ export function ToolApproval({
 								aria-hidden="true"
 								transition={reduce ? { duration: 0 } : SPRING_SWAP}
 							>
-								<ChevronDown className="size-3.5" />
+								<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
 							</motion.span>
 						</button>
 					) : null}
@@ -317,14 +314,14 @@ export function ToolApproval({
 
 			{rows.length ? (
 				<AgentDisclosure id={detailsId} open={currentOpen}>
-					<dl className="mx-4 mb-4 grid gap-2 rounded-xl border border-border/50 bg-background/70 p-3">
+					<dl className="mx-4 mb-4 grid gap-2 rounded-lg bg-muted p-3">
 						{rows.map((parameter) => (
 							<div
 								className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] items-center gap-3 text-xs"
 								key={parameter.id}
 							>
 								<dt className="text-muted-foreground">{parameter.label}</dt>
-								<dd className="min-w-0 break-words font-mono text-foreground/85">
+								<dd className="min-w-0 break-words font-mono text-foreground">
 									{parameter.value}
 								</dd>
 							</div>
@@ -337,7 +334,7 @@ export function ToolApproval({
 				{pending && decisions.length ? (
 					<motion.div
 						animate={{ opacity: 1, y: 0 }}
-						className="flex flex-wrap items-center gap-2 border-border/60 border-t px-4 py-3"
+						className="flex flex-wrap items-center gap-2 border-border border-t px-4 py-3"
 						exit={{ opacity: 0 }}
 						initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4 }}
 						transition={{ duration: reduce ? 0.12 : 0.22, ease: EASE_OUT }}
@@ -345,7 +342,7 @@ export function ToolApproval({
 						{decisions.map((choice) => (
 							<motion.button
 								className={cn(
-									"rounded-xl px-3 py-1.5 font-medium text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+									"rounded-lg px-3 py-1.5 font-medium text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
 									CHOICE_TONE_CLASS[choice.tone ?? "secondary"]
 								)}
 								key={choice.id}

@@ -8,6 +8,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { Empty, EmptyDescription } from "@ryu/ui/components/empty.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useState } from "react";
@@ -178,20 +179,22 @@ export function GitHistoryDialog({
 							<Spinner /> Reading Git checkpoints…
 						</p>
 					) : entries.length === 0 ? (
-						<div className="rounded-xl border border-dashed p-5 text-center text-muted-foreground text-sm">
-							No saved conversations in this repository. Fetch from origin if
-							someone shared its history refs.
-						</div>
+						<Empty spacing="compact">
+							<EmptyDescription>
+								No saved conversations in this repository. Fetch from origin if
+								someone shared its history refs.
+							</EmptyDescription>
+						</Empty>
 					) : (
 						<div className="grid gap-4 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-							<div className="max-h-80 space-y-2 overflow-y-auto">
+							<div className="max-h-80 space-y-0.5 overflow-y-auto">
 								{entries.map((entry) => (
 									<button
 										aria-pressed={selectedId === entry.checkpointId}
-										className={`w-full rounded-xl border p-3 text-left transition-colors hover:bg-muted/50 ${
+										className={`w-full rounded-lg px-3 py-2 text-left transition-colors duration-150 hover:duration-0 ${
 											selectedId === entry.checkpointId
-												? "border-primary bg-primary/5"
-												: "border-border"
+												? "bg-accent"
+												: "hover:bg-muted"
 										}`}
 										key={entry.checkpointId}
 										onClick={() => void select(entry.checkpointId)}
@@ -212,7 +215,7 @@ export function GitHistoryDialog({
 									</button>
 								))}
 							</div>
-							<div className="min-h-40 rounded-xl border bg-muted/20 p-3">
+							<div className="min-h-40 rounded-xl bg-muted p-3">
 								{reading ? (
 									<p className="flex items-center gap-2 text-muted-foreground text-sm">
 										<Spinner /> Loading transcript…

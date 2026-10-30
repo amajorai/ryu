@@ -1,13 +1,12 @@
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
-	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -27,172 +26,15 @@ import {
 	GovernanceScopeSwitcher,
 	type GovernanceView,
 } from "./GovernanceScopeSwitcher.tsx";
+import {
+	ChoiceButtons,
+	GitRow,
+	GitTextArea,
+	queryKey,
+	visibleAtScope,
+	writeScopeFor,
+} from "./git-settings/fields.tsx";
 import { SettingsNotice } from "./SettingsNotice.tsx";
-
-const queryKey = (target: ApiTarget) => [
-	"gateway-governance",
-	target.url,
-	target.token,
-];
-
-const writeScopeFor = (
-	view: GovernanceView
-): Extract<GovernanceScope, "node" | "user"> | null => {
-	if (view === "node") {
-		return "node";
-	}
-	if (view === "effective" || view === "user") {
-		return "user";
-	}
-	return null;
-};
-
-const scopePriority = {
-	node: 0,
-	organization: 1,
-	team: 2,
-	user: 3,
-} satisfies Record<GovernanceScope, number>;
-
-const visibleAtScope = (view: GovernanceView, scope: GovernanceScope) =>
-	view === "effective" || scopePriority[scope] <= scopePriority[view];
-
-function ChoiceButtons<Value extends string>({
-	disabled,
-	onChange,
-	options,
-	value,
-}: {
-	disabled: boolean;
-	onChange: (value: Value) => void;
-	options: ReadonlyArray<{ label: string; value: Value }>;
-	value: Value;
-}) {
-	return (
-		<div className="flex items-center gap-1 rounded-full bg-muted p-1">
-			{options.map((option) => (
-				<button
-					aria-pressed={value === option.value}
-					className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-						value === option.value
-							? "bg-background font-medium text-foreground shadow-sm"
-							: "text-muted-foreground hover:text-foreground"
-					}`}
-					disabled={disabled}
-					key={option.value}
-					onClick={() => onChange(option.value)}
-					type="button"
-				>
-					{option.label}
-				</button>
-			))}
-		</div>
-	);
-}
-
-// A Git setting row. The description becomes the iOS footer caption under the
-// row's card; the lock note and validation error stay inside the card, under the
-// control they explain.
-function GitRow({
-	actions,
-	description,
-	error,
-	locked = false,
-	title,
-}: {
-	actions: ReactNode;
-	description: string;
-	error?: { id: string; message: string };
-	locked?: boolean;
-	title: string;
-}) {
-	return (
-		<SettingsItem actions={actions} description={description} title={title}>
-			{locked ? (
-				<p className="text-muted-foreground text-xs">
-					Locked by your organization’s administrator.
-				</p>
-			) : null}
-			{error ? (
-				<p
-					className="text-status-destructive text-xs"
-					id={error.id}
-					role="alert"
-				>
-					{error.message}
-				</p>
-			) : null}
-		</SettingsItem>
-	);
-}
-
-function GitTextArea({
-	disabled,
-	onCommit,
-	onPullRequest,
-	onWatch,
-	settings,
-}: {
-	disabled: boolean;
-	onCommit: (value: string) => void;
-	onPullRequest: (value: string) => void;
-	onWatch: (value: string) => void;
-	settings: GitGovernanceSettings;
-}) {
-	// Tall text areas are `bare` rows: the textarea's own border is the only
-	// edge, so it never reads as a box inside a card.
-	return (
-		<SettingsGroup>
-			<SettingsItem
-				bare
-				description="Guidance added when Ryu watches a pull request."
-				title={
-					<label htmlFor="git-watch-instructions">
-						Watch and fix pull requests
-					</label>
-				}
-			>
-				<Textarea
-					defaultValue={settings.watchInstructions ?? ""}
-					disabled={disabled}
-					id="git-watch-instructions"
-					onBlur={(event) => onWatch(event.target.value)}
-					placeholder="For example: Comment /merge after checks pass and approve unrelated changes…"
-				/>
-			</SettingsItem>
-			<SettingsItem
-				bare
-				description="Guidance added to commit message generation prompts."
-				title={
-					<label htmlFor="git-commit-instructions">Commit instructions</label>
-				}
-			>
-				<Textarea
-					defaultValue={settings.commitInstructions ?? ""}
-					disabled={disabled}
-					id="git-commit-instructions"
-					onBlur={(event) => onCommit(event.target.value)}
-					placeholder="Add commit message guidance…"
-				/>
-			</SettingsItem>
-			<SettingsItem
-				bare
-				description="Guidance added to pull request title and description prompts."
-				title={
-					<label htmlFor="git-pr-instructions">Pull request instructions</label>
-				}
-			>
-				<Textarea
-					defaultValue={settings.pullRequestInstructions ?? ""}
-					disabled={disabled}
-					id="git-pr-instructions"
-					onBlur={(event) => onPullRequest(event.target.value)}
-					placeholder="Add pull request guidance…"
-				/>
-			</SettingsItem>
-		</SettingsGroup>
-	);
-}
 
 export function GitSettingsSection({
 	canConfigure,
@@ -285,9 +127,17 @@ export function GitSettingsSection({
 	};
 
 	return (
-		<div className="space-y-6">
+		<div className="flex flex-col gap-8 [&>*]:mt-0">
 			<SettingsSection
-				caption="Defaults for the Git actions Ryu can perform from a project. Prompt guidance is treated as text and never executed as a command."
+				caption={
+					<CaptionInfo
+						detail={
+							"Prompt guidance is treated as text and never executed as a command."
+						}
+					>
+						{"Defaults for the Git actions Ryu can perform from a project."}
+					</CaptionInfo>
+				}
 				title="Git"
 			>
 				{query.isPending ? (
@@ -374,6 +224,7 @@ export function GitSettingsSection({
 						actions={
 							<ChoiceButtons
 								disabled={disabled || isLocked("mergeMethod")}
+								label="Pull request merge method"
 								onChange={(mergeMethod) => update({ mergeMethod })}
 								options={[
 									{ label: "Merge", value: "merge" },
@@ -422,6 +273,7 @@ export function GitSettingsSection({
 						actions={
 							<ChoiceButtons
 								disabled={disabled || isLocked("reviewDelivery")}
+								label="Review delivery"
 								onChange={(reviewDelivery) => update({ reviewDelivery })}
 								options={[
 									{ label: "Inline", value: "inline" },
@@ -442,7 +294,15 @@ export function GitSettingsSection({
 			</SettingsSection>
 
 			<SettingsSection
-				caption="These controls keep pull-request automation explicit. Ryu will not merge unrelated changes without the instructions you provide."
+				caption={
+					<CaptionInfo
+						detail={
+							"Ryu will not merge unrelated changes without the instructions you provide."
+						}
+					>
+						{"Keeps pull-request automation explicit."}
+					</CaptionInfo>
+				}
 				title="Watch and fix pull requests"
 			>
 				<SettingsGroup>
@@ -516,7 +376,7 @@ export function GitSettingsSection({
 					/>
 				) : (
 					<SettingsCard>
-						<p className="text-center text-muted-foreground text-sm">
+						<p className="py-3 text-muted-foreground text-sm">
 							Select User or Node to edit local instructions.
 						</p>
 					</SettingsCard>

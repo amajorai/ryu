@@ -80,7 +80,7 @@ export function TabDropdown({
 							<AnimatedTitle text={activeTitle} />
 						</span>
 						<HugeiconsIcon
-							className="size-3.5 shrink-0 text-muted-foreground/60"
+							className="size-3.5 shrink-0 text-muted-foreground/70"
 							icon={ArrowDown01Icon}
 						/>
 					</button>

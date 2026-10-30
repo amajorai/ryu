@@ -2,7 +2,7 @@
 /* Sources: apps/desktop/package.json and apps/desktop/src-tauri/Cargo.toml + Cargo.lock. */
 /* Regenerate with: bun run licenses:desktop */
 
-export const DESKTOP_LICENSE_PACKAGE_COUNT = 2369;
-export const DESKTOP_LICENSE_NOTICE_COUNT = 930;
+export const DESKTOP_LICENSE_PACKAGE_COUNT = 2363;
+export const DESKTOP_LICENSE_NOTICE_COUNT = 928;
 export const DESKTOP_LICENSE_UNDECLARED_COUNT = 15;
 export const DESKTOP_LICENSE_MISSING_TEXT_COUNT = 222;

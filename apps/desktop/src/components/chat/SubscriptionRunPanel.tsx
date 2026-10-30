@@ -103,7 +103,7 @@ export function SubscriptionRunPanel({
 	return (
 		<section
 			aria-label="Cloud task on your plan"
-			className="flex w-full flex-col gap-1 rounded-md border px-2 py-1.5 text-xs"
+			className="flex w-full flex-col gap-1 rounded-lg border px-2 py-1.5 text-xs"
 		>
 			<div className="flex flex-wrap items-center gap-2">
 				<Badge variant="secondary">
@@ -147,7 +147,7 @@ export function SubscriptionRunPanel({
 			{run.outputTail ? (
 				<pre
 					aria-label="Run log"
-					className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-1.5 font-mono text-[11px]"
+					className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-1.5 font-mono text-xs"
 				>
 					{run.outputTail}
 				</pre>
@@ -177,7 +177,7 @@ export function SubscriptionRunPanel({
 					) : (
 						<pre
 							aria-label="Changes"
-							className="max-h-72 overflow-auto rounded bg-muted p-1.5 font-mono text-[11px]"
+							className="max-h-72 overflow-auto rounded-lg bg-muted p-1.5 font-mono text-xs"
 						>
 							{diff.patch}
 						</pre>

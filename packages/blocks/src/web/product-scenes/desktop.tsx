@@ -1,268 +1,138 @@
-import { Stage } from "../iso/kit/react/live.tsx";
 import styles from "./desktop.module.css";
-import { Scene } from "./scene.tsx";
-
-/** Sidebar slot tops: thread rows sit 18 units apart under the title bar. */
-const SLOT_Y = [34, 52, 70] as const;
-/** The threads already in the sidebar: slot top and placeholder title width. */
-const THREADS = [
-	{ width: 38, y: SLOT_Y[0] },
-	{ width: 30, y: SLOT_Y[1] },
-	{ last: true, width: 34, y: SLOT_Y[2] },
-] as const;
-
-/** One model the composer's chip can hold, with the reply badge initial. */
-const MODELS = [
-	{ className: styles.local, initial: "L", label: "local" },
-	{ className: styles.key, initial: "K", label: "your key" },
-	{ className: styles.plan, initial: "P", label: "plan" },
-] as const;
-
-/** A thread row: a pill with a 3px left rule and a placeholder title. */
-function ThreadRow({ width, y }: { width: number; y: number }) {
-	return (
-		<>
-			<rect className={styles.row} height={14} rx={7} width={60} x={26} y={y} />
-			<rect
-				className={styles.ink}
-				height={6}
-				rx={1.5}
-				width={3}
-				x={31}
-				y={y + 4}
-			/>
-			<rect
-				className={styles.ink}
-				height={3}
-				rx={1.5}
-				width={width}
-				x={38}
-				y={y + 5.5}
-			/>
-		</>
-	);
-}
-
-/** An imported thread: it arrives from beyond the left edge with its source. */
-function ImportedRow({
-	className,
-	label,
-	y,
-}: {
-	className: string;
-	label: string;
-	y: number;
-}) {
-	return (
-		<g className={className}>
-			<rect
-				className={styles.chipRow}
-				height={14}
-				rx={7}
-				width={60}
-				x={26}
-				y={y}
-			/>
-			<rect
-				className={styles.lit}
-				height={6}
-				rx={1.5}
-				width={3}
-				x={31}
-				y={y + 4}
-			/>
-			<text className={styles.label} x={37} y={y + 9.4}>
-				{label}
-			</text>
-			<rect
-				className={styles.ink}
-				height={3}
-				rx={1.5}
-				width={24}
-				x={54}
-				y={y + 5.5}
-			/>
-		</g>
-	);
-}
+import { Label, type MotionStyle, SceneCanvas } from "./scene.tsx";
 
 /**
- * Ryu Desktop: everything lands in one window. Claude Code and Codex threads
- * import into the sidebar, the composer's model slot switches between a local
- * model, your own key and a plan, and an app runs inside a sandbox in the
- * thread. The card's label and link carry the meaning; the drawing is
- * decorative (the `Scene` wrapper is `aria-hidden`).
+ * Homepage card scene for Ryu Desktop: one app for every agent and model. The
+ * window's sidebar lists the agents by name (Ryu, Claude Code, Codex); the
+ * composer names the model source it will use (a local model, your own key,
+ * or a Ryu plan). In the loop the selection moves agent to agent, the model
+ * source changes with it, and each one answers in the same thread.
+ *
+ * The markup is the still (Claude Code selected on your own key, its reply
+ * written); the 9s loop in `desktop.module.css` starts and ends on it.
  */
+
+const WINDOW = { height: 156, width: 280, x: 8, y: 8 } as const;
+const SIDEBAR_RIGHT = 100;
+const ROWS = [
+	{ label: "ryu", y: 62 },
+	{ label: "claude code", y: 84 },
+	{ label: "codex", y: 106 },
+] as const;
+const SELECTED_Y = ROWS[1].y;
+const PILL_X = 244;
+
+/** The model source each beat uses, in loop order from the still. */
+const SOURCES = [
+	{ className: styles.sourceA, label: "your key" },
+	{ className: styles.sourceB, label: "plan" },
+	{ className: styles.sourceC, label: "local" },
+] as const;
+
+const REPLY = [
+	{ delay: 0, width: 120, y: 74 },
+	{ delay: 0.15, width: 96, y: 84 },
+	{ delay: 0.3, width: 108, y: 94 },
+] as const;
+
 export function DesktopProductScene() {
 	return (
-		<Scene id="desktop">
-			<Stage className={styles.root}>
-				<svg
-					aria-hidden="true"
-					className={styles.svg}
-					focusable="false"
-					preserveAspectRatio="xMidYMid meet"
-					viewBox="0 0 320 172"
+		<SceneCanvas className={styles.root} id="desktop">
+			<rect
+				className={styles.window}
+				height={WINDOW.height}
+				rx={10}
+				width={WINDOW.width}
+				x={WINDOW.x}
+				y={WINDOW.y}
+			/>
+			{[20, 29, 38].map((cx) => (
+				<circle className={styles.light} cx={cx} cy={20} key={cx} r={2.5} />
+			))}
+			<line className={styles.rule} x1={8} x2={288} y1={32} y2={32} />
+			<line
+				className={styles.rule}
+				x1={SIDEBAR_RIGHT}
+				x2={SIDEBAR_RIGHT}
+				y1={32}
+				y2={164}
+			/>
+
+			<Label anchor="start" muted x={18} y={44}>
+				agents
+			</Label>
+			<rect
+				className={styles.selection}
+				height={18}
+				rx={9}
+				width={84}
+				x={12}
+				y={SELECTED_Y - 9}
+			/>
+			{ROWS.map((row) => (
+				<Label anchor="start" key={row.label} x={20} y={row.y}>
+					{row.label}
+				</Label>
+			))}
+
+			<rect
+				className={styles.bubble}
+				height={16}
+				rx={8}
+				width={68}
+				x={208}
+				y={42}
+			/>
+			<rect
+				className={styles.ask}
+				height={3}
+				rx={1.5}
+				width={44}
+				x={220}
+				y={48.5}
+			/>
+			{REPLY.map((line) => (
+				<rect
+					className={styles.reply}
+					height={3}
+					key={line.y}
+					rx={1.5}
+					style={{ "--delay": `${line.delay}s` } as MotionStyle}
+					width={line.width}
+					x={112}
+					y={line.y}
+				/>
+			))}
+
+			<rect
+				className={styles.composer}
+				height={24}
+				rx={12}
+				width={176}
+				x={106}
+				y={128}
+			/>
+			<Label anchor="end" muted x={PILL_X - 37} y={140}>
+				model
+			</Label>
+			<rect
+				className={styles.pill}
+				height={16}
+				rx={8}
+				width={66}
+				x={PILL_X - 33}
+				y={132}
+			/>
+			{SOURCES.map((source) => (
+				<Label
+					className={source.className}
+					key={source.label}
+					x={PILL_X}
+					y={140}
 				>
-					<rect
-						className={styles.frame}
-						height={156}
-						rx={8}
-						width={280}
-						x={20}
-						y={8}
-					/>
-					<circle className={styles.dot} cx={31} cy={17} r={2.5} />
-					<circle className={styles.dot} cx={39} cy={17} r={2.5} />
-					<circle className={styles.dot} cx={47} cy={17} r={2.5} />
-					<line className={styles.rule} x1={20} x2={300} y1={26} y2={26} />
-					<line className={styles.rule} x1={92} x2={92} y1={26} y2={164} />
-
-					<g className={styles.rowsShift}>
-						{THREADS.map((thread) => (
-							<g
-								className={"last" in thread ? styles.rowLast : undefined}
-								key={thread.y}
-							>
-								<ThreadRow width={thread.width} y={thread.y} />
-							</g>
-						))}
-					</g>
-					<ImportedRow className={styles.chipA} label="CC" y={SLOT_Y[0]} />
-					<ImportedRow className={styles.chipB} label="Cx" y={SLOT_Y[1]} />
-
-					<rect
-						className={styles.ink}
-						height={10}
-						rx={5}
-						width={90}
-						x={200}
-						y={36}
-					/>
-					<circle className={styles.badge} cx={108} cy={62} r={6} />
-					{MODELS.map((model) => (
-						<text
-							className={`${styles.label} ${model.className}`}
-							key={model.initial}
-							textAnchor="middle"
-							x={108}
-							y={64.3}
-						>
-							{model.initial}
-						</text>
-					))}
-					<rect
-						className={styles.replyBar}
-						height={10}
-						rx={5}
-						width={120}
-						x={120}
-						y={57}
-					/>
-					<rect
-						className={styles.ink}
-						height={6}
-						rx={3}
-						width={76}
-						x={120}
-						y={71}
-					/>
-
-					<rect
-						className={styles.sandbox}
-						height={40}
-						rx={6}
-						width={100}
-						x={120}
-						y={82}
-					/>
-					<rect
-						className={styles.tile}
-						height={22}
-						rx={5}
-						width={22}
-						x={128}
-						y={91}
-					/>
-					<rect
-						className={styles.ink}
-						height={5}
-						rx={1}
-						width={5}
-						x={133}
-						y={96}
-					/>
-					<rect
-						className={styles.ink}
-						height={5}
-						rx={1}
-						width={5}
-						x={140}
-						y={96}
-					/>
-					<rect
-						className={styles.ink}
-						height={5}
-						rx={1}
-						width={5}
-						x={133}
-						y={103}
-					/>
-					<rect
-						className={styles.lit}
-						height={5}
-						rx={1}
-						width={5}
-						x={140}
-						y={103}
-					/>
-					<line className={styles.track} x1={160} x2={208} y1={102} y2={102} />
-					<rect
-						className={styles.tick}
-						height={8}
-						rx={1}
-						width={4}
-						x={182}
-						y={98}
-					/>
-
-					<rect
-						className={styles.frame}
-						height={18}
-						rx={9}
-						width={192}
-						x={100}
-						y={128}
-					/>
-					<rect
-						className={styles.ink}
-						height={4}
-						rx={2}
-						width={64}
-						x={110}
-						y={135}
-					/>
-					<rect
-						className={styles.chipRow}
-						height={12}
-						rx={6}
-						width={52}
-						x={234}
-						y={131}
-					/>
-					{MODELS.map((model) => (
-						<text
-							className={`${styles.label} ${model.className}`}
-							key={model.label}
-							textAnchor="middle"
-							x={260}
-							y={139.3}
-						>
-							{model.label}
-						</text>
-					))}
-				</svg>
-			</Stage>
-		</Scene>
+					{source.label}
+				</Label>
+			))}
+		</SceneCanvas>
 	);
 }

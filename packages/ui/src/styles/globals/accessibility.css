@@ -1,0 +1,188 @@
+/* ==========================================================================
+   Accessibility preferences & material weight
+   --------------------------------------------------------------------------
+   Three INDEPENDENT signals, not one "accessibility mode". A reader can ask for
+   less motion while keeping translucency, or the reverse, so each gets its own
+   block. Everything above this line handles the first signal per named class;
+   these blocks are the defaults that catch whatever the named lists miss.
+   ========================================================================== */
+
+/* --- Reduced motion: the catch-all ---------------------------------------
+   The named blocks above are hand-maintained lists, so any animation added
+   later is uncovered until someone remembers to extend them. This is the
+   backstop for everything else.
+
+   0.01ms, NEVER `animation: none`. `none` means `transitionend`/`animationend`
+   never fire, and this codebase waits on completion — `springs.ts` ships
+   `exitFallbackMs` precisely because deferred-unmount timers guard exit
+   animations. Collapsing the duration keeps the events firing, so portals still
+   unmount; killing the animation outright can strand them mounted.
+
+   A universal selector is specificity 0,0,0, so every `.t-*` rule above still
+   wins on its own elements regardless of source order. That is deliberate:
+   those blocks encode a RESTING STATE (a drawn checkmark, a visible stagger
+   line), which is a gentler substitute than a collapse, and must not be
+   overridden by this. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+
+	/* The motion tokens cap at 90ms so anything that reads them in script
+	   (exit timers, measured fades) waits no longer than the opacity-only
+	   fallback this block allows. */
+	:root {
+		--duration-fast: 90ms;
+		--duration-base: 90ms;
+		--duration-slow: 90ms;
+	}
+
+	/* Parallax and view transitions are vestibular triggers even at zero
+	   duration, because the element still traverses the viewport. */
+	::view-transition-old(*),
+	::view-transition-new(*),
+	::view-transition-group(*) {
+		animation-duration: 0.01ms !important;
+		animation-delay: 0s !important;
+	}
+}
+
+/* --- Reduced transparency -------------------------------------------------
+   55 source files reach for `backdrop-blur`, and until now none of them asked
+   whether the reader wants it. Blur is the costly, legibility-reducing half of
+   a translucent material, so it goes first; the surfaces we own by name then
+   go fully opaque.
+
+   `[class*="backdrop-blur"]` is an attribute match on the Tailwind class rather
+   than a list of the 55 sites — a new blurred surface is covered the day it is
+   written, which is the failure mode the reduced-motion lists have. */
+@media (prefers-reduced-transparency: reduce) {
+	[class*="backdrop-blur"],
+	[class*="backdrop-saturate"] {
+		-webkit-backdrop-filter: none !important;
+		backdrop-filter: none !important;
+	}
+
+	/* Named chrome goes solid. Same slots the `data-dialog-overlay-blur` toggle
+	   near the top of this file drives, so the two mechanisms stay in step. */
+	[data-slot="dialog-content"],
+	[data-slot="alert-dialog-content"],
+	[data-slot="sheet-content"],
+	[data-slot="drawer-content"],
+	[data-slot="popover-content"],
+	[data-slot="dropdown-menu-content"],
+	[data-slot="dropdown-menu-sub-content"],
+	[data-slot="select-content"],
+	[data-slot="context-menu-content"],
+	[data-slot="context-menu-sub-content"],
+	[data-slot="combobox-content"],
+	[data-slot="navigation-menu-popup"],
+	[data-slot="tooltip-content"] {
+		background-color: var(--popover) !important;
+	}
+
+	.ryu-dialog-overlay,
+	.ryu-popup-overlay {
+		-webkit-backdrop-filter: none !important;
+		backdrop-filter: none !important;
+	}
+}
+
+/* --- Increased contrast ---------------------------------------------------
+   Near-solid surfaces with a defined edge. Translucent chrome relies on blur to
+   separate itself from what scrolls underneath; with contrast raised, the edge
+   has to do that job instead. */
+@media (prefers-contrast: more) {
+	[class*="backdrop-blur"],
+	[class*="backdrop-saturate"] {
+		-webkit-backdrop-filter: none !important;
+		backdrop-filter: none !important;
+	}
+
+	[data-slot="dialog-content"],
+	[data-slot="alert-dialog-content"],
+	[data-slot="sheet-content"],
+	[data-slot="drawer-content"],
+	[data-slot="popover-content"],
+	[data-slot="dropdown-menu-content"],
+	[data-slot="dropdown-menu-sub-content"],
+	[data-slot="select-content"],
+	[data-slot="context-menu-content"],
+	[data-slot="context-menu-sub-content"],
+	[data-slot="combobox-content"],
+	[data-slot="navigation-menu-popup"],
+	[data-slot="tooltip-content"] {
+		background-color: var(--popover) !important;
+		border: 1px solid var(--foreground) !important;
+	}
+
+	.ryu-popup-overlay {
+		-webkit-backdrop-filter: none !important;
+		backdrop-filter: none !important;
+	}
+
+	:root {
+		--border: color-mix(in oklch, var(--foreground) 55%, transparent);
+	}
+}
+
+/* --- Scroll edge effect ---------------------------------------------------
+   Apple's alternative to a 1px divider under floating chrome: fade the content
+   out where it passes beneath, rather than drawing a hard line across it. Put
+   this on the SCROLL CONTAINER, not the header.
+
+     <div class="ryu-scroll-edge overflow-y-auto">…</div>
+
+   `--ryu-scroll-edge-size` is how tall the fade is; set it per surface to match
+   the chrome that overlaps. Only worth using where floating UI actually
+   overlaps content — a solid opaque header needs no fade.
+
+   RELATIVES, so this does not become a fourth hand-rolled fade:
+     - `components/edge-scroller.tsx` is the HORIZONTAL strip equivalent, with
+       chevron affordances. Different axis, different job.
+     - `TrayPopover` measures scroll position and fades only the edges that
+       actually have more content. That is strictly better and is what to reach
+       for when a list can be shorter than its box; these classes are the static
+       version for a container that always overflows.
+   Living in this file rather than an app stylesheet is load-bearing: both
+   `apps/web/src/index.css` and `apps/desktop/src/index.css` import it, and a
+   class defined in only one of them silently no-ops in the other (the exact trap
+   documented on `edge-scroller.tsx`). */
+.ryu-scroll-edge {
+	--ryu-scroll-edge-size: 1.5rem;
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 var(--ryu-scroll-edge-size),
+		#000 calc(100% - var(--ryu-scroll-edge-size)),
+		transparent 100%
+	);
+	mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 var(--ryu-scroll-edge-size),
+		#000 calc(100% - var(--ryu-scroll-edge-size)),
+		transparent 100%
+	);
+}
+
+/* Top-only variant, for a list that sits under a header but ends on a solid
+   footer (or nothing) — a bottom fade there just clips the last row. */
+.ryu-scroll-edge-top {
+	--ryu-scroll-edge-size: 1.5rem;
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 var(--ryu-scroll-edge-size)
+	);
+	mask-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		#000 var(--ryu-scroll-edge-size)
+	);
+}

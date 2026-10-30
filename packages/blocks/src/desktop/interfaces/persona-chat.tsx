@@ -66,7 +66,9 @@ function SideChatStrip({
 					{main ? (
 						<button
 							aria-current={activeThreadId === main.id ? "true" : undefined}
-							aria-label={`Main chat: ${main.title || "Untitled"}`}
+							aria-label={tl("Main chat: {title}", {
+								title: main.title || "Untitled",
+							})}
 							className={cn(
 								CHIP,
 								"pl-1.5",
@@ -146,10 +148,8 @@ function SideChatStrip({
 	);
 }
 
-/**
- * The messaging frame the preview, a new side chat and the host's chat sit
- * in: the shared Persona column on the page background.
- */
+/** The messaging frame the preview, a new side chat and the host's chat sit
+ * in: the shared Persona column on the page background. */
 const FRAME = "flex min-h-0 flex-1 flex-col";
 const FRAME_COLUMN = cn(PERSONA_COLUMN, "flex min-h-0 flex-1 flex-col");
 
@@ -338,10 +338,8 @@ function useEscapeToClose(onClose: (() => void) | null) {
 	return ref;
 }
 
-/**
- * Starting a conversation: the first one with this persona, or a side chat.
- * Only text the user typed and sent here reaches `startThread`.
- */
+/** Starting a conversation: the first one with this persona, or a side chat.
+ * Only text the user typed and sent here reaches `startThread`. */
 function StartChat({
 	agent,
 	draft,
@@ -379,7 +377,10 @@ function StartChat({
 						<p className="max-w-sm text-balance text-muted-foreground text-sm">
 							{first
 								? "Your first message becomes the main chat."
-								: `A separate chat with ${agent.name} for one topic. Main chat stays as it is.`}
+								: tl(
+										"A separate chat with {name} for one topic. Main chat stays as it is.",
+										{ name: agent.name }
+									)}
 						</p>
 					</div>
 					{onCancel ? (
@@ -410,10 +411,8 @@ function StartChat({
 	);
 }
 
-/**
- * Chat: the persona's main conversation is the host's own chat surface
- * (`threadView`) in a messaging frame, with side chats above it.
- */
+/** Chat: the persona's main conversation is the host's own chat surface
+ * (`threadView`) in a messaging frame, with side chats above it. */
 export function PersonaChat({
 	activeThreadId,
 	agent,

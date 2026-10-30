@@ -60,14 +60,14 @@ export function WorktreeHandoffControl({
 	return (
 		<>
 			<Button
-				appearance="worktree-handoff"
-				className="flex w-full items-center justify-center"
+				className="w-full"
 				data-testid="open-worktree-handoff"
 				onClick={() => setOpen(true)}
+				size="sm"
 				type="button"
 				variant="outline"
 			>
-				<HugeiconsIcon aria-hidden className="size-3.5" icon={FolderTreeIcon} />
+				<HugeiconsIcon aria-hidden className="size-4" icon={FolderTreeIcon} />
 				Hand off to worktree
 			</Button>
 
@@ -82,7 +82,6 @@ export function WorktreeHandoffControl({
 								aria-hidden
 								className="size-5 shrink-0 text-muted-foreground"
 								icon={FolderTreeIcon}
-								strokeWidth={1.7}
 							/>
 							<DialogTitle typography="explanation">
 								Hand off chat to worktree
@@ -124,7 +123,6 @@ export function WorktreeHandoffControl({
 								aria-hidden
 								className="mt-1 size-4 shrink-0 text-status-warning"
 								icon={AlertCircleIcon}
-								strokeWidth={1.8}
 							/>
 							<span>
 								This chat is running, so handing it off will interrupt the
@@ -134,7 +132,7 @@ export function WorktreeHandoffControl({
 					)}
 
 					<Button
-						className="h-13 w-full"
+						className="h-10 w-full"
 						disabled={!trimmedBranchName}
 						onClick={handleHandOff}
 						type="button"

@@ -1,228 +1,41 @@
-import annotationStyles from "./browser-annotation.module.css";
-
-interface AnnotationRectStyle extends CSSProperties {
-	"--annotation-height": string;
-	"--annotation-left": string;
-	"--annotation-top": string;
-	"--annotation-width": string;
-}
-
-import {
-	Comment01Icon,
-	Mic01Icon,
-	RefreshIcon,
-} from "@hugeicons/core-free-icons";
+import { Mic01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
+import {
+	type AnnotationRectStyle,
+	type BrowserAnnotationKind,
+	type BrowserAnnotationSurfaceProps,
+	type BrowserContextResult,
+	type BrowserRect,
+	type BrowserStyleAdjust,
+	clamp,
+	createRecognition,
+	describeTarget,
+	extractTranscript,
+	MIN_AREA_SIZE,
+	rectFromPoints,
+	type SpeechRecognitionLike,
+	unionRects,
+} from "./browser-annotation/annotation-model.ts";
+import { AnnotationNotesList } from "./browser-annotation/annotation-notes-list.tsx";
+import { AnnotationToolbar } from "./browser-annotation/annotation-toolbar.tsx";
+import annotationStyles from "./browser-annotation.module.css";
 
-export interface BrowserRect {
-	height: number;
-	width: number;
-	x: number;
-	y: number;
-}
-
-export interface BrowserStyleAdjust {
-	background_color?: string;
-	color?: string;
-	font_family?: string;
-	font_size?: string;
-	font_weight?: string;
-	letter_spacing?: string;
-	line_height?: string;
-	margin?: string;
-	padding?: string;
-}
-
-export interface BrowserElementContext {
-	attributes: Record<string, string>;
-	component?: string;
-	computed_styles: Record<string, string>;
-	content_preview?: string;
-	name?: string;
-	rect: BrowserRect;
-	ref?: string;
-	role?: string;
-	selector: string;
-	tag: string;
-	text?: string;
-	xpath: string;
-}
-
-export interface BrowserWebMCPTool {
-	annotations: {
-		consequentialHint: boolean;
-		debugging: boolean;
-		readOnlyHint: boolean;
-		untrustedContentHint: boolean;
-	};
-	description: string;
-	input_schema: string;
-	name: string;
-	origin: string;
-	title: string;
-	tool_id: string;
-}
-
-export type BrowserAnnotationKind = "area" | "element" | "elements";
-
-export interface BrowserAnnotation {
-	comment: string;
-	created_at: string;
-	id: string;
-	kind: BrowserAnnotationKind;
-	rect: BrowserRect;
-	style?: BrowserStyleAdjust;
-	targets: BrowserElementContext[];
-}
-
-export interface BrowserContextResult {
-	annotations: BrowserAnnotation[];
-	page: { id: string; title: string; url: string };
-	screenshot?: { encoding: "base64"; image: string; mime: "image/png" };
-	selection?: {
-		rect: BrowserRect;
-		targets: BrowserElementContext[];
-	};
-	snapshot: {
-		elements: Array<{
-			depth: number;
-			name?: string;
-			props?: Record<string, boolean | number | string>;
-			ref: string;
-			role: string;
-			value?: string;
-		}>;
-		snapshot_id: string;
-		tab: { id: string; title: string; url: string };
-		truncated: boolean;
-	};
-	viewport: {
-		height: number;
-		scroll_x: number;
-		scroll_y: number;
-		width: number;
-	};
-	webmcp_tools?: BrowserWebMCPTool[];
-}
-
-export interface BrowserAnnotationInput {
-	comment: string;
-	kind: BrowserAnnotationKind;
-	rect: BrowserRect;
-	selections?: BrowserRect[];
-	style?: BrowserStyleAdjust;
-}
-
-interface BrowserAnnotationSurfaceProps {
-	askRyuPending?: boolean;
-	context: BrowserContextResult | null;
-	imageUrl: string | null;
-	isAnnotating: boolean;
-	onAnnotate: (
-		input: BrowserAnnotationInput
-	) => Promise<BrowserAnnotation | null>;
-	onAskRyu: () => void;
-	onClearAnnotations: () => Promise<void>;
-	onContext: (
-		selections: BrowserRect[]
-	) => Promise<BrowserContextResult | null>;
-	onDeleteAnnotation: (id: string) => Promise<void>;
-	onToggleAnnotating: () => void;
-}
-
-interface SpeechRecognitionResultLike {
-	0?: { transcript?: string };
-}
-
-interface SpeechRecognitionEventLike {
-	results: ArrayLike<SpeechRecognitionResultLike>;
-}
-
-interface SpeechRecognitionLike {
-	continuous: boolean;
-	interimResults: boolean;
-	lang: string;
-	onend?: (() => void) | null;
-	onerror?: (() => void) | null;
-	onresult?: ((event: SpeechRecognitionEventLike) => void) | null;
-	start: () => void;
-	stop: () => void;
-}
-
-/** Complete private speech port consumed by the annotation recorder. */
-export type BrowserAnnotationSpeechRecognition = SpeechRecognitionLike;
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
-
-/**
- * The Web Speech constructors this recorder reads. A local view rather than a
- * global `Window` augmentation: dependencies such as @assistant-ui/core already
- * augment `Window` with their own constructor types, and a second declaration
- * fails TS2717 in every program that loads both.
- */
-interface SpeechRecognitionWindow {
-	SpeechRecognition?: SpeechRecognitionConstructor;
-	webkitSpeechRecognition?: SpeechRecognitionConstructor;
-}
-
-const MIN_AREA_SIZE = 8;
-
-function clamp(value: number, min: number, max: number): number {
-	return Math.min(Math.max(value, min), max);
-}
-
-function rectFromPoints(
-	start: { x: number; y: number },
-	end: { x: number; y: number }
-): BrowserRect {
-	return {
-		height: Math.abs(end.y - start.y),
-		width: Math.abs(end.x - start.x),
-		x: Math.min(start.x, end.x),
-		y: Math.min(start.y, end.y),
-	};
-}
-
-function unionRects(rects: BrowserRect[]): BrowserRect | null {
-	if (rects.length === 0) {
-		return null;
-	}
-	const left = Math.min(...rects.map((rect) => rect.x));
-	const top = Math.min(...rects.map((rect) => rect.y));
-	const right = Math.max(...rects.map((rect) => rect.x + rect.width));
-	const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
-	return { height: bottom - top, width: right - left, x: left, y: top };
-}
-
-function describeTarget(target: BrowserElementContext): string {
-	const label = target.name || target.text || target.content_preview;
-	return label ? `${target.tag} · ${label}` : target.selector;
-}
-
-function createRecognition(): SpeechRecognitionLike | null {
-	if (!globalThis.window) {
-		return null;
-	}
-	const speechWindow: SpeechRecognitionWindow & Window = window;
-	const Constructor =
-		speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-	return Constructor ? new Constructor() : null;
-}
-
-function extractTranscript(event: SpeechRecognitionEventLike): string {
-	const transcript: string[] = [];
-	for (const result of Array.from(event.results)) {
-		const text = result[0]?.transcript?.trim();
-		if (text) {
-			transcript.push(text);
-		}
-	}
-	return transcript.join(" ");
-}
+export type {
+	BrowserAnnotation,
+	BrowserAnnotationInput,
+	BrowserAnnotationKind,
+	BrowserAnnotationSpeechRecognition,
+	BrowserContextResult,
+	BrowserElementContext,
+	BrowserRect,
+	BrowserStyleAdjust,
+	BrowserWebMCPTool,
+} from "./browser-annotation/annotation-model.ts";
 
 export function BrowserAnnotationSurface({
 	askRyuPending = false,
@@ -236,6 +49,7 @@ export function BrowserAnnotationSurface({
 	onDeleteAnnotation,
 	onToggleAnnotating,
 }: BrowserAnnotationSurfaceProps) {
+	const tl = useLiteralMessages();
 	const frameRef = useRef<HTMLDivElement>(null);
 	const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 	const [draftComment, setDraftComment] = useState("");
@@ -437,56 +251,21 @@ export function BrowserAnnotationSurface({
 			className="flex min-h-0 min-w-0 flex-1 flex-col bg-muted/20"
 			data-testid="browser-annotation-surface"
 		>
-			<div className="flex shrink-0 flex-wrap items-center gap-1.5 border-border/60 border-b bg-background/90 px-2 py-1.5 text-xs">
-				<button
-					aria-pressed={isAnnotating}
-					className={cn(
-						"rounded-md border px-2 py-1 transition-colors",
-						isAnnotating
-							? "border-primary/50 bg-primary/10 text-primary"
-							: "border-border/60 text-muted-foreground hover:bg-accent hover:text-foreground"
-					)}
-					onClick={onToggleAnnotating}
-					type="button"
-				>
-					<HugeiconsIcon
-						className="mr-1 inline-block size-3.5"
-						icon={Comment01Icon}
-					/>
-					{isAnnotating ? "Annotation mode on" : "Annotate"}
-				</button>
-				<span className="text-muted-foreground">
-					{isAnnotating
-						? "Click an element or drag an area · Shift-click adds targets"
-						: "Add visual feedback to the live browser frame"}
-				</span>
-				<div className="ml-auto flex items-center gap-1">
-					{annotations.length > 0 && (
-						<button
-							className="rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-							onClick={() => onClearAnnotations().catch(() => undefined)}
-							type="button"
-						>
-							Clear notes
-						</button>
-					)}
-					<button
-						className="rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-						disabled={askRyuPending || annotations.length === 0}
-						onClick={onAskRyu}
-						type="button"
-					>
-						{askRyuPending ? "Preparing notes…" : "Ask Ryu to address notes"}
-					</button>
-				</div>
-			</div>
+			<AnnotationToolbar
+				annotationCount={annotations.length}
+				askRyuPending={askRyuPending}
+				isAnnotating={isAnnotating}
+				onAskRyu={onAskRyu}
+				onClearAnnotations={onClearAnnotations}
+				onToggleAnnotating={onToggleAnnotating}
+			/>
 
 			<div className="min-h-0 flex-1 overflow-auto p-3">
 				{safeImageUrl ? (
 					<div className="flex min-h-full min-w-full items-center justify-center">
 						<div
 							className={cn(
-								"relative inline-block max-h-full max-w-full overflow-hidden rounded-lg border border-border/70 bg-white shadow-sm",
+								"relative inline-block max-h-full max-w-full overflow-hidden rounded-lg border border-border bg-white",
 								isAnnotating && "cursor-crosshair"
 							)}
 							data-testid="browser-annotation-frame"
@@ -522,7 +301,7 @@ export function BrowserAnnotationSurface({
 											key={annotation.id}
 											style={geometry}
 										>
-											<span className="type-compact absolute -top-5 left-0 rounded bg-highlight px-1.5 py-0.5 font-medium text-black shadow-sm">
+											<span className="absolute -top-5 left-0 rounded bg-highlight px-1.5 py-0.5 font-medium text-black text-xs shadow-sm">
 												{index + 1}
 											</span>
 										</div>
@@ -572,12 +351,15 @@ export function BrowserAnnotationSurface({
 			</div>
 
 			{isAnnotating && selectedRect && (
-				<div className="shrink-0 border-border/60 border-t bg-background p-3">
+				<div className="shrink-0 border-border border-t bg-background p-3">
 					<div className="mb-2 flex items-center gap-2 text-muted-foreground text-xs">
 						<span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary">
 							{draftKind === "area"
 								? "Area selected"
-								: `${selectedTargets.length || draftSelections.length || 1} target${(selectedTargets.length || draftSelections.length || 1) === 1 ? "" : "s"}`}
+								: tl("{count, plural, one {# target} other {# targets}}", {
+										count:
+											selectedTargets.length || draftSelections.length || 1,
+									})}
 						</span>
 						{selectedTargets.slice(0, 3).map((target) => (
 							<span
@@ -592,7 +374,7 @@ export function BrowserAnnotationSurface({
 					<div className="flex items-end gap-2">
 						<textarea
 							aria-label="Annotation comment"
-							className="min-h-16 min-w-0 flex-1 resize-y rounded-md border border-border/70 bg-background px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
+							className="min-h-16 min-w-0 flex-1 resize-y rounded-lg border border-border bg-background px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/60"
 							onChange={(event) => setDraftComment(event.target.value)}
 							placeholder="Describe the change you want Ryu to make…"
 							value={draftComment}
@@ -603,7 +385,7 @@ export function BrowserAnnotationSurface({
 									isListening ? "Stop voice annotation" : "Dictate annotation"
 								}
 								className={cn(
-									"rounded-md border p-2 text-muted-foreground hover:bg-accent hover:text-foreground",
+									"rounded-lg border p-2 text-muted-foreground hover:bg-accent hover:text-foreground",
 									isListening && "border-primary/60 bg-primary/10 text-primary"
 								)}
 								onClick={toggleVoice}
@@ -612,7 +394,7 @@ export function BrowserAnnotationSurface({
 								<HugeiconsIcon className="size-4" icon={Mic01Icon} />
 							</button>
 							<button
-								className="rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-xs disabled:cursor-not-allowed disabled:opacity-50"
+								className="rounded-lg bg-primary px-3 py-2 font-medium text-primary-foreground text-xs disabled:cursor-not-allowed disabled:opacity-50"
 								disabled={!draftComment.trim() || isSaving}
 								onClick={() => saveAnnotation().catch(() => undefined)}
 								type="button"
@@ -646,12 +428,12 @@ export function BrowserAnnotationSurface({
 						>
 							Cancel draft
 						</button>
-						<span className="type-caption text-muted-foreground">
+						<span className="text-muted-foreground text-xs">
 							⌘⇧D toggles mode
 						</span>
 					</div>
 					{adjustOpen && (
-						<div className="mt-2 grid grid-cols-2 gap-2 border-border/50 border-t pt-2 sm:grid-cols-4">
+						<div className="mt-2 grid grid-cols-2 gap-2 border-border border-t pt-2 sm:grid-cols-4">
 							{(
 								[
 									["font_size", "Font size"],
@@ -665,12 +447,12 @@ export function BrowserAnnotationSurface({
 								] satisfies [keyof BrowserStyleAdjust, string][]
 							).map(([key, label]) => (
 								<label
-									className="type-caption flex flex-col gap-1 text-muted-foreground"
+									className="flex flex-col gap-1 text-muted-foreground text-xs"
 									key={key}
 								>
 									{label}
 									<input
-										className="rounded border border-border/70 bg-background px-1.5 py-1 text-foreground text-xs outline-none focus:border-primary/60"
+										className="rounded-lg border border-border bg-background px-1.5 py-1 text-foreground text-xs outline-none focus:border-primary/60"
 										onChange={(event) => updateStyle(key, event.target.value)}
 										placeholder={
 											key === "color" || key === "background_color"
@@ -687,31 +469,10 @@ export function BrowserAnnotationSurface({
 			)}
 
 			{annotations.length > 0 && !isAnnotating && (
-				<div className="max-h-32 shrink-0 space-y-1 overflow-y-auto border-border/60 border-t bg-background p-2">
-					{annotations.map((annotation, index) => (
-						<div
-							className="flex items-start gap-2 rounded-md bg-highlight/10 px-2 py-1.5 text-xs dark:bg-highlight/10"
-							key={annotation.id}
-						>
-							<span className="type-compact mt-0.5 rounded-full bg-highlight px-1.5 py-0.5 font-medium text-black">
-								{index + 1}
-							</span>
-							<p className="min-w-0 flex-1 text-foreground">
-								{annotation.comment}
-							</p>
-							<button
-								aria-label={`Remove annotation ${index + 1}`}
-								className="text-muted-foreground hover:text-foreground"
-								onClick={() =>
-									onDeleteAnnotation(annotation.id).catch(() => undefined)
-								}
-								type="button"
-							>
-								×
-							</button>
-						</div>
-					))}
-				</div>
+				<AnnotationNotesList
+					annotations={annotations}
+					onDeleteAnnotation={onDeleteAnnotation}
+				/>
 			)}
 		</div>
 	);

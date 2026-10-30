@@ -18,295 +18,64 @@
 // did, and the closing prose is what it thinks happened. Summarising those with
 // a second model would launder the one honest signal in the transcript.
 
-import { nativeSdkSchemaAdmits } from "@ryu/blocks/desktop/agent-elements/utils/native-sdk-admission.ts";
-import type { DynamicToolUIPart } from "ai";
-import { z } from "zod";
+import {
+	baseName,
+	clamp,
+	DELEGATE_TOOLS,
+	firstString,
+	isFailure,
+	isPending,
+	isToolPart,
+	MAX_HEADLINE_PATHS,
+	MAX_OUTCOME_CHARS,
+	MAX_RATIONALE_CHARS,
+	MAX_REQUEST_CHARS,
+	MAX_THINKING_CHARS,
+	PATH_KEYS,
+	PLAN_TOOL,
+	partText,
+	readString,
+	readTodos,
+	SEARCH_TOOLS,
+	SHELL_TOOLS,
+	toolNameOf,
+	touchKindFor,
+	WEB_TOOLS,
+} from "./turn-groups-parts.ts";
+import type {
+	MissionCommand,
+	MissionDigest,
+	MissionFileTouch,
+	MissionStreamMessage,
+	MissionStreamPart,
+	MissionTodo,
+	MissionToolStat,
+	MissionTotals,
+	MissionTouchKind,
+	MissionTurn,
+	MissionTurnStatus,
+} from "./turn-groups-types.ts";
 
-/** A message part, typed loosely — we read the AI SDK fields we care about and
- *  ignore the rest, exactly as `CoworkContextPanel` does. */
-export interface MissionStreamPart {
-	input?: unknown;
-	output?: unknown;
-	/** Tool parts only: `input-available` until the result frame patches it. */
-	state?: string;
-	text?: unknown;
-	toolCallId?: string;
-	/** Present on `dynamic-tool` parts, where the name isn't in `type`. */
-	toolName?: string;
-	type?: string;
-}
-
-export interface MissionStreamMessage {
-	id?: string;
-	parts?: MissionStreamPart[];
-	role?: string;
-}
-
-/** How a turn touched one path. `create` and `edit` are writes; `read` is not. */
-export type MissionTouchKind = "create" | "edit" | "read";
-
-export interface MissionFileTouch {
-	/** Number of tool calls in scope that touched this path. */
-	count: number;
-	kind: MissionTouchKind;
-	path: string;
-}
-
-export interface MissionCommand {
-	command: string;
-	description?: string;
-	failed: boolean;
-}
-
-export interface MissionToolStat {
-	calls: number;
-	failures: number;
-	name: string;
-}
-
-export interface MissionTodo {
-	content: string;
-	status: "completed" | "in_progress" | "pending";
-}
-
-/** A turn that is still streaming has tool calls with no result frame yet. */
-export type MissionTurnStatus = "failed" | "ok" | "running";
-
-export interface MissionTurn {
-	/** Sub-agents this turn spawned, by their task description. */
-	delegates: string[];
-	files: MissionFileTouch[];
-	/** Deterministic one-liner naming the work, e.g. "Edited 3 files, ran 2 commands". */
-	headline: string;
-	/** Stable id: the first message in the turn. */
-	id: string;
-	/** 1-based position in the conversation. */
-	index: number;
-	messageIds: string[];
-	/** The assistant's closing prose — what it says it accomplished. */
-	outcome: string;
-	/** The assistant's prose before it touched anything — why it did this. */
-	rationale: string;
-	/** The user's ask, trimmed to a readable length. */
-	request: string;
-	searches: string[];
-	shellCommands: MissionCommand[];
-	status: MissionTurnStatus;
-	/** Extended-thinking text, when the agent emitted reasoning parts. */
-	thinking: string;
-	/** The plan snapshot this turn wrote, if it wrote one. */
-	todos: MissionTodo[];
-	tools: MissionToolStat[];
-	web: string[];
-}
-
-export interface MissionTotals {
-	commands: number;
-	failures: number;
-	filesTouched: number;
-	toolCalls: number;
-	turns: number;
-	writes: number;
-}
-
-export interface MissionDigest {
-	/** Latest plan snapshot, split by whether the work is still outstanding. */
-	doneTodos: MissionTodo[];
-	/** Every path the conversation wrote or read, rolled up across turns. */
-	files: MissionFileTouch[];
-	openTodos: MissionTodo[];
-	totals: MissionTotals;
-	turns: MissionTurn[];
-}
-
-// ── Text limits ───────────────────────────────────────────────────────────────
-// Card copy, not storage: the panel shows a readable excerpt and the full text
-// stays one click away in the transcript itself.
-const MAX_REQUEST_CHARS = 240;
-const MAX_RATIONALE_CHARS = 600;
-const MAX_OUTCOME_CHARS = 600;
-const MAX_THINKING_CHARS = 600;
-const MAX_HEADLINE_PATHS = 2;
-
-const TOOL_PART_PREFIX = "tool-";
-const DYNAMIC_TOOL_PART = "dynamic-tool";
-const PLAN_TOOL = "TodoWrite";
-
-/** Tools whose call means a file came into existence. */
-const CREATE_TOOLS = new Set(["Write", "create_file"]);
-/** Tools whose call means an existing file changed. */
-const EDIT_TOOLS = new Set([
-	"Edit",
-	"MultiEdit",
-	"NotebookEdit",
-	"apply_patch",
-	"str_replace_editor",
-]);
-/** Tools that only look at a file. */
-const READ_TOOLS = new Set(["Read", "NotebookRead", "view_file"]);
-const SHELL_TOOLS = new Set([
-	"Bash",
-	"BashOutput",
-	"run_terminal_cmd",
-	"shell",
-]);
-const SEARCH_TOOLS = new Set([
-	"Grep",
-	"Glob",
-	"codebase_search",
-	"file_search",
-]);
-const WEB_TOOLS = new Set(["WebFetch", "WebSearch", "web_search"]);
-const DELEGATE_TOOLS = new Set(["Task", "Agent", "Workflow"]);
-
-/** Input keys that name a file, in the order tools tend to use them. Exported
- *  so the Cowork rail's Sources list reads paths out of the same field names
- *  rather than growing a second, drifting guess at the tool schemas. */
-export const PATH_KEYS = [
-	"file_path",
-	"filePath",
-	"notebook_path",
-	"path",
-	"target",
-];
-
-// ── Small readers over untyped tool input ─────────────────────────────────────
-
-/** These are native live SDK input observations, not decoded persistence DTOs.
- * Only object representation and each consumed string slot are admitted at the
- * original read stage; unrelated opaque metadata remains untouched. */
-export type MissionRawInput = DynamicToolUIPart["input"];
-const missionTextSchema = z.string();
-const missionCallableSchema = z.function();
-interface NativeMissionToolLookup {
-	readonly [key: string]: DynamicToolUIPart["input"];
-}
-function nativeMissionRecord(
-	value: MissionRawInput
-): NativeMissionToolLookup | undefined {
-	const receiver = new Object(value);
-	if (
-		receiver !== value ||
-		value === null ||
-		nativeSdkSchemaAdmits(missionCallableSchema, value) ||
-		Array.isArray(value)
-	) {
-		return;
-	}
-	// SAFETY: This is an erased native lookup view after the original object-only
-	// representation guard. Slots remain the opaque AI SDK input domain; it claims
-	// no full tool DTO or JSON values and performs no field enumeration/validation.
-	return value as NativeMissionToolLookup;
-}
-function readString(source: MissionRawInput, key: string): string | undefined {
-	const record = nativeMissionRecord(source);
-	const value = record?.[key];
-	if (!nativeSdkSchemaAdmits(missionTextSchema, value)) {
-		return;
-	}
-	// SAFETY: Cached scalar admission establishes this exact observed primitive
-	// string without user callbacks or formatting; original trim operation remains.
-	const trimmed = value.trim();
-	return trimmed.length > 0 ? trimmed : undefined;
-}
-export function firstString(
-	source: MissionRawInput,
-	keys: string[]
-): string | undefined {
-	for (const key of keys) {
-		const found = readString(source, key);
-		if (found !== undefined) {
-			return found;
-		}
-	}
-	return;
-}
-
-function partText(part: MissionStreamPart): string {
-	const parsed = z.string().safeParse(part.text);
-	return parsed.success ? parsed.data.trim() : "";
-}
-
-function clamp(text: string, max: number): string {
-	const collapsed = text.trim();
-	if (collapsed.length <= max) {
-		return collapsed;
-	}
-	return `${collapsed.slice(0, max - 1).trimEnd()}…`;
-}
-
-/** The last path segment, for headlines that shouldn't show a whole repo path. */
-function baseName(path: string): string {
-	const parts = path.split("/").filter((segment) => segment.length > 0);
-	return parts.at(-1) ?? path;
-}
-
-// ── Part classification ───────────────────────────────────────────────────────
-
-export function isToolPart(part: MissionStreamPart): boolean {
-	const type = z.string().safeParse(part.type);
-	return (
-		part.type === DYNAMIC_TOOL_PART ||
-		(type.success && type.data.startsWith(TOOL_PART_PREFIX))
-	);
-}
-
-/** The tool's name, whether it arrived as `tool-<Name>` or a dynamic part. */
-export function toolNameOf(part: MissionStreamPart): string {
-	if (part.type === DYNAMIC_TOOL_PART) {
-		const name = z.string().min(1).safeParse(part.toolName);
-		return name.success ? name.data : "tool";
-	}
-	const type = z.string().safeParse(part.type);
-	if (type.success && type.data.startsWith(TOOL_PART_PREFIX)) {
-		return type.data.slice(TOOL_PART_PREFIX.length) || "tool";
-	}
-	return "tool";
-}
-
-function isFailure(part: MissionStreamPart): boolean {
-	return part.state === "output-error";
-}
-
-/** A tool call with no terminal frame yet — the turn is still working. */
-function isPending(part: MissionStreamPart): boolean {
-	return part.state !== "output-error" && part.state !== "output-available";
-}
-
-function touchKindFor(tool: string): MissionTouchKind | undefined {
-	if (CREATE_TOOLS.has(tool)) {
-		return "create";
-	}
-	if (EDIT_TOOLS.has(tool)) {
-		return "edit";
-	}
-	if (READ_TOOLS.has(tool)) {
-		return "read";
-	}
-	return;
-}
-
-function readTodos(input: MissionRawInput): MissionTodo[] {
-	const record = nativeMissionRecord(input);
-	const raw = record?.todos;
-	if (!Array.isArray(raw)) {
-		return [];
-	}
-	const out: MissionTodo[] = [];
-	for (const entry of raw) {
-		const content = readString(entry, "content");
-		if (content === undefined) {
-			continue;
-		}
-		const status = readString(entry, "status");
-		out.push({
-			content,
-			status:
-				status === "completed" || status === "in_progress" ? status : "pending",
-		});
-	}
-	return out;
-}
+export {
+	firstString,
+	isToolPart,
+	type MissionRawInput,
+	PATH_KEYS,
+	toolNameOf,
+} from "./turn-groups-parts.ts";
+export type {
+	MissionCommand,
+	MissionDigest,
+	MissionFileTouch,
+	MissionStreamMessage,
+	MissionStreamPart,
+	MissionTodo,
+	MissionToolStat,
+	MissionTotals,
+	MissionTouchKind,
+	MissionTurn,
+	MissionTurnStatus,
+} from "./turn-groups-types.ts";
 
 // ── Accumulating one turn's tool activity ─────────────────────────────────────
 

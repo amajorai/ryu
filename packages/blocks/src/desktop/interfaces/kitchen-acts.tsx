@@ -1,26 +1,13 @@
 /* eslint-disable react/no-unknown-property */
-import { useFrame } from "@react-three/fiber";
-import {
-	type ClockOptions,
-	clockLabel,
-	type InterfaceActivityKind,
-	type InterfaceAgentAct,
-	type InterfaceBlocker,
-	type InterfaceSnapshot,
+import type {
+	InterfaceActivityKind,
+	InterfaceAgentAct,
 } from "@ryuhq/protocol/interfaces";
-import { useEffect, useRef } from "react";
-import type { Group } from "three";
-import {
-	ActStation,
-	type StationLayout,
-	type YouSpotLayout,
-	YouSpots,
-} from "./game3d-act-stage.tsx";
+import { type YouSpotLayout, YouSpots } from "./game3d-act-stage.tsx";
 import {
 	type ActSkin,
 	actLife,
 	bubbleOverlayId,
-	isRedBlocker,
 	type OffStage,
 	slotOf,
 	toolForActivity,
@@ -30,7 +17,6 @@ import {
 } from "./game3d-acts.ts";
 import { apprenticeSpecs } from "./game3d-apprentice.tsx";
 import { LIFE_FACE_CAMERA, type LifePaths } from "./game3d-life.ts";
-import { ToonMesh } from "./game3d-materials.tsx";
 import { queuePlateText } from "./game3d-meters.tsx";
 import type { Vec3 } from "./game3d-palette.ts";
 import type {
@@ -38,13 +24,23 @@ import type {
 	VillagerSpec,
 	VillagerTool,
 } from "./game3d-villager.tsx";
+import { PassBell } from "./kitchen-acts-pass-bell.tsx";
+import type { KitchenActHandlers } from "./kitchen-acts-station.tsx";
 import {
 	type KitchenService,
 	type KitchenStation,
 	PASS_SLOTS,
 } from "./kitchen-model.ts";
 import type { KitchenPalette } from "./kitchen-palette.ts";
-import { COUNTER_HEIGHT, PROP_INK } from "./kitchen-props.tsx";
+
+export {
+	eightySixed,
+	KITCHEN_STATION_LAYOUT,
+	type KitchenActHandlers,
+	KitchenStationActs,
+	kitchenStationAct,
+	stationBurnt,
+} from "./kitchen-acts-station.tsx";
 
 /**
  * The kitchen's act layer (spec §5 kitchen row): each chef acts out its
@@ -75,10 +71,6 @@ export const KITCHEN_TOOLS: Partial<
 /** A plated dish is the kitchen's deliverable. */
 export const KITCHEN_SKIN: ActSkin = { deliverable: { shape: "plate" } };
 
-/** The station counters stand at villager scale (kitchen-diorama.tsx). */
-const STATION_SCALE = 0.68;
-const COUNTER_Z = 0.72;
-const COUNTER_TOP = (COUNTER_HEIGHT + 0.08) * STATION_SCALE;
 /** Chefs walk round their counter on this side, then along a lane. */
 const SIDE_X = 1.0;
 const LANE_Z = 1.65;
@@ -103,26 +95,6 @@ const PASS_EDGE = 0.28;
 const NOTICE_LEFT = 0.6;
 const NOTICE_BACK = 0.5;
 const NOTICE_FRONT = 0.6;
-
-/**
- * Where a chef's station pieces sit (with the act layer stations stand
- * `ACT_SPREAD` farther apart): pips on the counter's front, the words on
- * a board at its chef's left, under its own plate (speech bubbles hang up
- * and right of a plate, so the right side belongs to the chef's bubble),
- * alarms beside the chef on its lower left (the kit hangs their plates on
- * that side, so the stack never hides its kneel), the meshes at its left end, unread and
- * suggestion openers by its front corners (below the plate line).
- */
-export const KITCHEN_STATION_LAYOUT: Partial<StationLayout> = {
-	alarms: [-1.6, 0, 1.6],
-	board: [-1.0, 1.1, 0.2],
-	cue: [0, 0.02, 0],
-	limit: [-1.1, 0, 0.35],
-	next: [-1.1, 0, -0.2],
-	pips: [0, COUNTER_TOP * 0.55, COUNTER_Z + 0.36],
-	suggestion: [-0.85, 0, 0.6],
-	unread: [0.85, 0, 0.6],
-};
 
 /**
  * The pass's queue slots (in front of it, staggered), the spot where a
@@ -321,98 +293,6 @@ export function kitchenActVillagers({
 	return cast;
 }
 
-/** The station's smoke and burnt ring: a red alarm, not just any attention. */
-export function stationBurnt(blockers: readonly InterfaceBlocker[]): boolean {
-	return blockers.some((blocker) => isRedBlocker(blocker));
-}
-
-/**
- * The kitchen's words for a limit: "86'd till 15:10" (when it resets, from
- * the focus rate-limit blocker or the agent's limit), "Likely 86'd till …"
- * for an inferred one, plain "86'd" with no reset time.
- */
-export function eightySixed(
-	act: InterfaceAgentAct,
-	nowMs: number,
-	clock?: ClockOptions
-): string {
-	const blocker = act.blockers.find((item) => item.kind === "rate-limited");
-	const clears = blocker?.clearsAt ?? act.timer?.until ?? null;
-	const words = clears
-		? `86'd till ${clockLabel(clears, nowMs, clock)}`
-		: "86'd";
-	return blocker?.source === "estimate" ? `Likely ${words}` : words;
-}
-
-/** The act as a station shows it: a limited chef's bubble in kitchen words. */
-export function kitchenStationAct(
-	act: InterfaceAgentAct,
-	nowMs: number,
-	clock?: ClockOptions
-): InterfaceAgentAct {
-	if (act.act !== "limited" || !act.bubble) {
-		return act;
-	}
-	return {
-		...act,
-		bubble: { ...act.bubble, text: eightySixed(act, nowMs, clock) },
-	};
-}
-
-/** What the act props need to answer and open cards. */
-export interface KitchenActHandlers {
-	clock?: ClockOptions;
-	iconOnly: boolean;
-	nowMs: number;
-	onAsk: (askId: string) => void;
-	onBlocker: (threadId: string, agentName: string) => void;
-	onQueue: () => void;
-	privacy: "full" | "redacted";
-	reduced: boolean;
-	shown: ReadonlySet<string>;
-	snapshot: InterfaceSnapshot;
-}
-
-/**
- * A station's layout: its alarm stack stands beside the chef, away from
- * the room's middle (a station right of the middle stacks on its right,
- * a little behind; the rest on their left, a little in front), so the kit
- * hangs its plates on that side and the kneel shows, clear of the next chef.
- */
-function stationLayout(station: KitchenStation): Partial<StationLayout> {
-	return station.x > 0
-		? { ...KITCHEN_STATION_LAYOUT, alarms: [1.9, 0, -0.9] }
-		: KITCHEN_STATION_LAYOUT;
-}
-
-/** One chef's station: the kit's ActStation, in the room's frame. */
-export function KitchenStationActs({
-	act,
-	handlers,
-	station,
-}: {
-	act: InterfaceAgentAct;
-	handlers: KitchenActHandlers;
-	station: KitchenStation;
-}) {
-	return (
-		<ActStation
-			act={kitchenStationAct(act, handlers.nowMs, handlers.clock)}
-			at={[station.x, 0, station.z]}
-			clock={handlers.clock}
-			iconOnly={handlers.iconOnly}
-			layout={stationLayout(station)}
-			nowMs={handlers.nowMs}
-			onAsk={handlers.onAsk}
-			onBlocker={handlers.onBlocker}
-			privacy={handlers.privacy}
-			reduced={handlers.reduced}
-			shown={handlers.shown}
-			snapshot={handlers.snapshot}
-		/>
-	);
-}
-
 /** The pass's you-spot layout, in the room's frame. */
 export function passLayout(
 	service: KitchenService,
@@ -440,90 +320,6 @@ export function passLayout(
 		trayRowStep: [0, 0.14, 0],
 		trayStep: [-0.75, 0, 0],
 	};
-}
-
-const RING_SECONDS = 1.2;
-
-/**
- * The pass bell: rings once (a short wobble) when a chef arrives to ask,
- * keyed on the asks carried into the queue (a chef already there with a
- * new ask rings it again); still under reduced motion.
- */
-function PassBell({
-	at,
-	palette,
-	reduced,
-	ringKey,
-}: {
-	at: Vec3;
-	palette: KitchenPalette;
-	reduced: boolean;
-	ringKey: string;
-}) {
-	const bell = useRef<Group>(null);
-	const ringing = useRef<number | null>(null);
-	const heard = useRef<Set<string> | null>(null);
-	useEffect(() => {
-		const askers = new Set(ringKey.split("|").filter(Boolean));
-		const before = heard.current;
-		heard.current = askers;
-		if (reduced || before === null) {
-			return;
-		}
-		if ([...askers].some((id) => !before.has(id))) {
-			// A chef walks round the pass first: ring as it settles.
-			ringing.current = -1;
-		}
-	}, [reduced, ringKey]);
-	useFrame(({ clock, invalidate }) => {
-		const group = bell.current;
-		const start = ringing.current;
-		if (!group || start === null) {
-			return;
-		}
-		if (start < 0) {
-			ringing.current = clock.elapsedTime + 2.5;
-			invalidate();
-			return;
-		}
-		const t = clock.elapsedTime - start;
-		if (t < 0) {
-			invalidate();
-			return;
-		}
-		if (t > RING_SECONDS) {
-			group.rotation.z = 0;
-			ringing.current = null;
-			return;
-		}
-		group.rotation.z = Math.sin(t * 28) * 0.35 * (1 - t / RING_SECONDS);
-		invalidate();
-	});
-	return (
-		<group position={at}>
-			<ToonMesh
-				color={palette.steel}
-				ink={PROP_INK}
-				position={[0, 0.015, 0]}
-				scale={[0.16, 0.03, 0.16]}
-			>
-				<cylinderGeometry args={[1, 1, 1, 18]} />
-			</ToonMesh>
-			<group ref={bell}>
-				<ToonMesh
-					color={palette.lamp}
-					ink={PROP_INK}
-					position={[0, 0.09, 0]}
-					scale={0.1}
-				>
-					<sphereGeometry args={[1, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
-				</ToonMesh>
-				<ToonMesh color={palette.lamp} position={[0, 0.2, 0]} scale={0.025}>
-					<sphereGeometry args={[1, 8, 6]} />
-				</ToonMesh>
-			</group>
-		</group>
-	);
 }
 
 /**

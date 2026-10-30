@@ -2,34 +2,36 @@
 
 // beui.dev/components/agents/approval-card
 
+import {
+	ArrowLeft02Icon,
+	ArrowRight02Icon,
+	BubbleChatIcon,
+	Cancel01Icon,
+	HelpCircleIcon,
+	Loading03Icon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
 import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll.tsx";
 import { Button } from "@ryu/ui/components/motion/button/index.tsx";
-import { Checkbox } from "@ryu/ui/components/motion/checkbox.tsx";
-import { Input } from "@ryu/ui/components/motion/input.tsx";
-import {
-	RadioGroup,
-	RadioGroupItem,
-} from "@ryu/ui/components/motion/radio.tsx";
-import { EASE_OUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
+import { EASE_OUT } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	ArrowLeft,
-	ArrowRight,
-	Check,
-	CircleHelp,
-	LoaderCircle,
-	MessageSquareText,
-	X,
-} from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	EMPTY_ANSWER,
+	getStatusClass,
+	getStatusLabel,
+	getStatusLabelClass,
+	isAnswered,
+	ProgressDots,
+	QuestionOptions,
+} from "./parts.tsx";
 import type {
 	ApprovalCardAnswer,
 	ApprovalCardAnswers,
 	ApprovalCardProps,
-	ApprovalCardQuestion,
-	ApprovalCardStatus,
 } from "./types.ts";
 
 export type {
@@ -40,168 +42,6 @@ export type {
 	ApprovalCardQuestion,
 	ApprovalCardStatus,
 } from "./types.ts";
-
-const EMPTY_ANSWER: ApprovalCardAnswer = { selected: [], custom: "" };
-
-function getStatusLabel(status: ApprovalCardStatus) {
-	if (status === "submitting") {
-		return "Submitting";
-	}
-	if (status === "approved") {
-		return "Approved";
-	}
-	if (status === "rejected") {
-		return "Rejected";
-	}
-	if (status === "changes-requested") {
-		return "Changes requested";
-	}
-	if (status === "answered") {
-		return "Response submitted";
-	}
-	return "Input required";
-}
-
-function getStatusClass(status: ApprovalCardStatus) {
-	if (status === "approved" || status === "answered") {
-		return "text-status-success";
-	}
-	if (status === "rejected") {
-		return "text-status-destructive";
-	}
-	if (status === "changes-requested") {
-		return "text-status-warning";
-	}
-	return "text-muted-foreground";
-}
-
-function getStatusBadgeClass(status: ApprovalCardStatus) {
-	if (status === "pending" || status === "changes-requested") {
-		return "border-warning/30 bg-warning/10 text-status-warning";
-	}
-	if (status === "submitting") {
-		return "border-info/30 bg-info/10 text-status-info";
-	}
-	if (status === "approved" || status === "answered") {
-		return "border-success/30 bg-success/10 text-status-success";
-	}
-	return "border-destructive/30 bg-destructive/10 text-status-destructive";
-}
-
-function isAnswered(answer: ApprovalCardAnswer) {
-	return answer.selected.length > 0 || Boolean(answer.custom?.trim());
-}
-
-function QuestionOptions({
-	question,
-	answer,
-	disabled,
-	onChange,
-	onSingleSelect,
-}: {
-	question: ApprovalCardQuestion;
-	answer: ApprovalCardAnswer;
-	disabled: boolean;
-	onChange: (answer: ApprovalCardAnswer) => void;
-	onSingleSelect?: () => void;
-}) {
-	const custom = answer.custom ?? "";
-
-	return (
-		<div className="mt-3">
-			{question.options?.length ? (
-				question.multiple ? (
-					<div className="grid gap-0.5">
-						{question.options.map((option) => (
-							<Checkbox
-								checked={answer.selected.includes(option.value)}
-								className="min-h-9 rounded-lg px-1.5 py-1"
-								disabled={disabled || option.disabled}
-								key={option.value}
-								label={option.label}
-								onCheckedChange={(checked) =>
-									onChange({
-										...answer,
-										selected: checked
-											? [...answer.selected, option.value]
-											: answer.selected.filter(
-													(value) => value !== option.value
-												),
-									})
-								}
-							/>
-						))}
-					</div>
-				) : (
-					<RadioGroup
-						className="gap-0.5"
-						onValueChange={(value) => {
-							onChange({ selected: [value], custom: "" });
-							onSingleSelect?.();
-						}}
-						value={answer.selected[0] ?? ""}
-					>
-						{question.options.map((option) => (
-							<RadioGroupItem
-								className="min-h-9 rounded-lg px-1.5 py-1"
-								disabled={disabled || option.disabled}
-								key={option.value}
-								label={option.label}
-								value={option.value}
-							/>
-						))}
-					</RadioGroup>
-				)
-			) : null}
-
-			{question.allowCustom ? (
-				<Input
-					className={cn("p-0.5", question.options?.length && "mt-1.5")}
-					classNames={{
-						field:
-							"h-10 rounded-xl border-0 bg-background/70 focus-within:bg-background",
-						input: "px-3 text-sm",
-					}}
-					disabled={disabled}
-					onChange={(value) =>
-						onChange({
-							selected: question.multiple ? answer.selected : [],
-							custom: value,
-						})
-					}
-					placeholder={question.customPlaceholder ?? "Add another response…"}
-					value={custom}
-				/>
-			) : null}
-		</div>
-	);
-}
-
-function ProgressDots({ current, ids }: { current: number; ids: string[] }) {
-	return (
-		<span className="flex gap-1.5">
-			<span className="sr-only">
-				Question {current + 1} of {ids.length}
-			</span>
-			{ids.map((id, index) => (
-				<motion.span
-					animate={{
-						scale: index === current ? 1 : 0.75,
-						opacity: index <= current ? 1 : 0.35,
-					}}
-					aria-hidden="true"
-					className="size-1.5 rounded-full bg-foreground"
-					initial={{
-						scale: index === current ? 1 : 0.75,
-						opacity: index <= current ? 1 : 0.35,
-					}}
-					key={id}
-					transition={SPRING_SWAP}
-				/>
-			))}
-		</span>
-	);
-}
 
 export function ApprovalCard({
 	title = "Approval required",
@@ -312,7 +152,7 @@ export function ApprovalCard({
 		<div
 			aria-busy={busy}
 			className={cn(
-				"w-full overflow-hidden rounded-2xl bg-muted p-4 text-sm",
+				"w-full overflow-hidden rounded-xl bg-muted p-4 text-sm",
 				appearance === "docs" && "bg-docs-preview-background",
 				className
 			)}
@@ -327,36 +167,39 @@ export function ApprovalCard({
 					)}
 				>
 					{busy ? (
-						<LoaderCircle className={cn("size-4", !reduce && "animate-spin")} />
+						<HugeiconsIcon
+							className={cn("size-4", !reduce && "animate-spin")}
+							icon={Loading03Icon}
+						/>
 					) : interactive ? (
 						questionMode ? (
-							<CircleHelp className="size-4" />
+							<HugeiconsIcon className="size-4" icon={HelpCircleIcon} />
 						) : (
-							<MessageSquareText className="size-4" />
+							<HugeiconsIcon className="size-4" icon={BubbleChatIcon} />
 						)
 					) : status === "rejected" ? (
-						<X className="size-4" />
+						<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 					) : (
-						<Check className="size-4" />
+						<HugeiconsIcon className="size-4" icon={Tick02Icon} />
 					)}
 				</span>
 
 				<div className="min-w-0 flex-1">
 					<div className="flex min-w-0 items-start gap-3">
-						<h3 className="min-w-0 flex-1 font-medium text-base text-foreground leading-5">
+						<h3 className="min-w-0 flex-1 font-medium text-foreground text-sm leading-5">
 							<ActionSwapRollText value={titleKey}>
 								{displayTitle}
 							</ActionSwapRollText>
 						</h3>
 						{questionMode && interactive ? (
-							<span className="shrink-0 text-muted-foreground/65 text-xs tabular-nums">
+							<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 								{currentStep + 1}/{questions.length}
 							</span>
 						) : (
 							<span
 								className={cn(
-									"type-caption shrink-0 rounded-full border px-2 py-0.5 font-medium transition-colors",
-									getStatusBadgeClass(status)
+									"shrink-0 text-xs leading-5 transition-colors",
+									getStatusLabelClass(status)
 								)}
 							>
 								{statusLabel}
@@ -369,7 +212,7 @@ export function ApprovalCard({
 								onClick={onDismiss}
 								type="button"
 							>
-								<X className="size-4" />
+								<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 							</button>
 						) : null}
 					</div>
@@ -413,13 +256,12 @@ export function ApprovalCard({
 							<div className="mt-4 flex items-center gap-3">
 								<Button
 									aria-label="Previous question"
-									className="rounded-full"
 									disabled={busy || currentStep === 0}
 									onClick={() => setStep(currentStep - 1)}
 									size="icon"
 									variant="ghost"
 								>
-									<ArrowLeft className="size-4" />
+									<HugeiconsIcon className="size-4" icon={ArrowLeft02Icon} />
 								</Button>
 								<ProgressDots
 									current={currentStep}
@@ -431,38 +273,36 @@ export function ApprovalCard({
 											? "Submit response"
 											: "Next question"
 									}
-									className="ml-auto rounded-full"
+									className="ml-auto"
 									disabled={busy || !isAnswered(currentAnswer)}
 									onClick={continueQuestion}
 									size={currentStep === questions.length - 1 ? "sm" : "icon"}
 								>
 									{busy ? (
-										<LoaderCircle
+										<HugeiconsIcon
 											className={cn("size-4", !reduce && "animate-spin")}
+											icon={Loading03Icon}
 										/>
 									) : currentStep === questions.length - 1 ? (
 										<>
 											{submitLabel}
-											<ArrowRight className="size-3.5" />
+											<HugeiconsIcon
+												className="size-3.5"
+												icon={ArrowRight02Icon}
+											/>
 										</>
 									) : (
-										<ArrowRight className="size-4" />
+										<HugeiconsIcon className="size-4" icon={ArrowRight02Icon} />
 									)}
 								</Button>
 							</div>
 						) : (
 							<div className="mt-4 flex flex-wrap items-center gap-2">
-								<Button
-									className="rounded-full"
-									disabled={busy}
-									onClick={onApprove}
-									size="sm"
-								>
+								<Button disabled={busy} onClick={onApprove} size="sm">
 									{approveLabel}
 								</Button>
 								{onRequestChanges ? (
 									<Button
-										className="rounded-full"
 										disabled={busy}
 										onClick={onRequestChanges}
 										size="sm"
@@ -473,7 +313,7 @@ export function ApprovalCard({
 								) : null}
 								{onReject ? (
 									<Button
-										className="rounded-full text-muted-foreground hover:text-status-destructive dark:hover:text-status-destructive"
+										className="text-muted-foreground hover:text-status-destructive dark:hover:text-status-destructive"
 										disabled={busy}
 										onClick={onReject}
 										size="sm"

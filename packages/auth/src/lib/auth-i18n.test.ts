@@ -7,8 +7,67 @@ import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { admin } from "better-auth/plugins";
-import { createRyuAuthI18nPlugin, RYU_AUTH_I18N_LOCALES } from "./auth-i18n.ts";
+import {
+	authErrorLocale,
+	createRyuAuthI18nPlugin,
+	RYU_AUTH_I18N_LOCALES,
+} from "./auth-i18n.ts";
 import type { AuthFixtureDatabase } from "./auth-test-fixtures.ts";
+
+// `OFFICIAL_CATALOG_LOCALES` in @ryu/i18n (not a dependency of this package).
+const OFFICIAL_APP_LOCALES = [
+	"ar",
+	"de",
+	"es",
+	"fr",
+	"hi",
+	"it",
+	"ja",
+	"ko",
+	"pt-BR",
+	"ru",
+	"zh-CN",
+];
+
+async function translatedAuthError(headers: Headers): Promise<APIError> {
+	const original = new APIError("BAD_REQUEST", {
+		code: "INVALID_PASSWORD",
+		message: "Invalid password",
+	});
+	const database: Pick<
+		AuthFixtureDatabase,
+		"user" | "session" | "account" | "verification"
+	> = { user: [], session: [], account: [], verification: [] };
+	const auth = betterAuth({
+		baseURL: "http://localhost:3000",
+		secret: "auth-i18n-fixture-at-least-32-characters",
+		database: memoryAdapter(database),
+		plugins: [
+			createRyuAuthI18nPlugin(),
+			{
+				id: "i18n-error-fixture",
+				endpoints: {
+					i18nErrorFixture: createAuthEndpoint(
+						"/i18n-error-fixture",
+						{ method: "GET" },
+						() => {
+							throw original;
+						}
+					),
+				},
+			},
+		],
+	});
+	try {
+		await auth.api.i18nErrorFixture({ headers });
+	} catch (error) {
+		if (error instanceof APIError) {
+			return error;
+		}
+		throw error;
+	}
+	throw new Error("Expected translated API error");
+}
 
 describe("Ryu Better Auth i18n configuration", () => {
 	it("uses the reviewed built-in locale dictionaries", () => {
@@ -19,61 +78,69 @@ describe("Ryu Better Auth i18n configuration", () => {
 		expect(RYU_AUTH_I18N_LOCALES).toContain("fr");
 		expect(RYU_AUTH_I18N_LOCALES.length).toBe(22);
 		expect(plugin.options.defaultLocale).toBe("en");
-		expect(plugin.options.detection).toEqual(["cookie", "header"]);
+		expect(plugin.options.detection).toEqual(["callback"]);
 		expect(plugin.options.localeCookie).toBe("locale");
 	});
 
-	it("translates auth errors and preserves the original message", async () => {
-		const plugin = createRyuAuthI18nPlugin();
-		const original = new APIError("BAD_REQUEST", {
-			code: "INVALID_PASSWORD",
-			message: "Invalid password",
-		});
+	it("covers every official app locale with a dictionary", () => {
+		for (const locale of [...OFFICIAL_APP_LOCALES, "en"]) {
+			expect(
+				authErrorLocale(new Headers({ cookie: `locale=${locale}` }))
+			).not.toBeNull();
+		}
+	});
 
-		const database: Pick<
-			AuthFixtureDatabase,
-			"user" | "session" | "account" | "verification"
-		> = { user: [], session: [], account: [], verification: [] };
-		const auth = betterAuth({
-			baseURL: "http://localhost:3000",
-			secret: "auth-i18n-fixture-at-least-32-characters",
-			database: memoryAdapter(database),
-			plugins: [
-				plugin,
-				{
-					id: "i18n-error-fixture",
-					endpoints: {
-						i18nErrorFixture: createAuthEndpoint(
-							"/i18n-error-fixture",
-							{ method: "GET" },
-							() => {
-								throw original;
-							}
-						),
-					},
-				},
-			],
-		});
-		let responseError: APIError | null = null;
-		try {
-			await auth.api.i18nErrorFixture({
-				headers: new Headers({ Cookie: "locale=fr" }),
-			});
-		} catch (error) {
-			if (!(error instanceof APIError)) {
-				throw error;
-			}
-			responseError = error;
-		}
-		if (!responseError) {
-			throw new Error("Expected translated API error");
-		}
-		expect(responseError).toBeInstanceOf(APIError);
+	it("maps regional cookies and headers onto the dictionary keys", () => {
+		const detect = (init: Record<string, string>) =>
+			authErrorLocale(new Headers(init));
+		expect(detect({ cookie: "locale=pt-BR", "accept-language": "de" })).toBe(
+			"pt"
+		);
+		expect(detect({ cookie: "locale=zh-CN", "accept-language": "de" })).toBe(
+			"zh"
+		);
+		expect(detect({ cookie: "locale=nl" })).toBe("nl");
+		expect(detect({ "accept-language": "pt-BR,pt;q=0.9" })).toBe("pt");
+		expect(detect({ "accept-language": "zh-TW" })).toBeNull();
+	});
+
+	it("uses a signed-in account's stored locale when no cookie picks one", () => {
+		const headers = new Headers({ "accept-language": "de" });
+		expect(authErrorLocale(headers, "pt-BR")).toBe("pt");
+		expect(authErrorLocale(headers, "zh-CN")).toBe("zh");
+		expect(authErrorLocale(headers, null)).toBe("de");
+		expect(authErrorLocale(new Headers({ cookie: "locale=ja" }), "pt-BR")).toBe(
+			"ja"
+		);
+	});
+
+	it("translates auth errors and preserves the original message", async () => {
+		const responseError = await translatedAuthError(
+			new Headers({ Cookie: "locale=fr" })
+		);
 		expect(responseError.message).toBe("Mot de passe invalide");
 		expect(responseError.body).toMatchObject({
 			code: "INVALID_PASSWORD",
 			originalMessage: "Invalid password",
 		});
+	});
+
+	it("translates for the app's regional pt-BR and zh-CN cookies", async () => {
+		const portuguese = await translatedAuthError(
+			new Headers({ Cookie: "locale=pt-BR", "Accept-Language": "en" })
+		);
+		expect(portuguese.message).toBe("Senha inválida");
+		const chinese = await translatedAuthError(
+			new Headers({ Cookie: "locale=zh-CN", "Accept-Language": "en" })
+		);
+		expect(chinese.message).toBe("密码无效");
+	});
+
+	it("keeps English when nothing the request asks for is covered", async () => {
+		const error = await translatedAuthError(
+			new Headers({ "Accept-Language": "zh-TW" })
+		);
+		expect(error.message).toBe("Invalid password");
 	});
 });
 

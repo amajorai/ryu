@@ -9,7 +9,10 @@ import { ContextPill } from "./ContextPill.tsx";
 import { IslandCommand } from "./command/IslandCommand.tsx";
 import { ExpandedPanel } from "./ExpandedPanel.tsx";
 import { IslandMorphingPage } from "./IslandMorphingPage.tsx";
-import { IslandSuggestionChip } from "./IslandSuggestionChip.tsx";
+import {
+	type IslandSuggestionActions,
+	IslandSuggestionChip,
+} from "./IslandSuggestionChip.tsx";
 import { RecordingPill } from "./RecordingPill.tsx";
 import { VoiceModePanel } from "./VoiceModePanel.tsx";
 
@@ -41,6 +44,8 @@ export interface IslandContentProps {
 	onVoiceClose: () => void;
 	state: IslandState;
 	suggestion: IslandSuggestion | null;
+	/** Accept / Dismiss / Snooze for the suggestion chip, drawn inside it. */
+	suggestionActions?: IslandSuggestionActions;
 	/** Continuous voice-mode session (its own expanded view). */
 	voice: VoiceMode;
 	/** Name of the agent that will take the dictated task (recording pill). */
@@ -64,6 +69,7 @@ export function IslandContent({
 	state,
 	context,
 	suggestion,
+	suggestionActions,
 	voice,
 	composerControls,
 	onVoiceClose,
@@ -110,7 +116,13 @@ export function IslandContent({
 		suggestion ??
 		(IS_DEV && state === "suggestion" ? DEV_DEMO_SUGGESTION : null);
 	if (state === "suggestion" && shownSuggestion) {
-		return <IslandSuggestionChip suggestion={shownSuggestion} wrap={wrap} />;
+		return (
+			<IslandSuggestionChip
+				actions={suggestionActions}
+				suggestion={shownSuggestion}
+				wrap={wrap}
+			/>
+		);
 	}
 	// `idle` and `context` share the morphing pill: it widens to show the active
 	// app when live context is available, else falls back to the plain pill.

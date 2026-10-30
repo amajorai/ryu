@@ -83,7 +83,7 @@ export const DocxEditor = forwardRef<FileEditorHandle, DocxEditorProps>(
 						}
 					}}
 				>
-					<div className="border-border/60 border-b px-2 py-1">
+					<div className="border-border border-b px-2 py-1">
 						<FixedToolbar>
 							<FixedToolbarButtons placement="inline" />
 						</FixedToolbar>

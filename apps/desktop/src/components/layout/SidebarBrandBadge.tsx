@@ -70,7 +70,7 @@ function InterfaceLabel({ label }: { label: string }) {
 		// Marketplace labels may be 64 characters; truncate rather than push the
 		// topbar's actions out of a narrow window.
 		<span
-			className="min-w-0 truncate font-medium text-foreground text-lg leading-none"
+			className="min-w-0 truncate font-medium text-foreground text-sm"
 			data-ryu-bot-terminology="ignore"
 			title={label}
 		>
@@ -187,9 +187,11 @@ export function SidebarBrandBadge({
 			data-ryu-bot-terminology="ignore"
 			data-testid="product-mode-lockup"
 		>
-			<span className={"shrink-0 text-foreground"}>
-				<Logo size="20px" variant="outline" />
-			</span>
+			<HugeiconsIcon
+				aria-hidden="true"
+				className="size-4 shrink-0 text-muted-foreground"
+				icon={interfaceIcon(active.renderer)}
+			/>
 			<InterfaceLabel label={active.label} />
 		</div>
 	);
@@ -197,7 +199,7 @@ export function SidebarBrandBadge({
 	if (!showSwitcher) {
 		return (
 			<div
-				className={`${compact ? "w-auto min-w-0 max-w-64 px-0 py-0" : "w-full px-3 py-2"} ${className ?? ""}`}
+				className={`${compact ? "w-auto min-w-0 max-w-64 px-0 py-0" : "flex h-9 w-full items-center px-3"} ${className ?? ""}`}
 			>
 				{lockup}
 			</div>
@@ -206,7 +208,7 @@ export function SidebarBrandBadge({
 
 	return (
 		<div
-			className={`${compact ? "w-auto min-w-0 max-w-64 px-0 py-0" : "w-full px-2 py-1.5"} ${className ?? ""}`}
+			className={`${compact ? "w-auto min-w-0 max-w-64 px-0 py-0" : "w-full px-1"} ${className ?? ""}`}
 		>
 			<DropdownMenu onOpenChange={onMenuOpenChange} open={menuOpen}>
 				{labelledTrigger ? (
@@ -215,9 +217,7 @@ export function SidebarBrandBadge({
 							<span className="shrink-0 text-foreground">
 								<Logo size="20px" variant="outline" />
 							</span>
-							<span className="font-medium text-foreground text-lg leading-none">
-								Ryu
-							</span>
+							<span className="font-medium text-foreground text-sm">Ryu</span>
 						</div>
 						<DropdownMenuTrigger
 							aria-label={tl("Switch interface, currently {label}", {
@@ -225,7 +225,7 @@ export function SidebarBrandBadge({
 							})}
 							render={
 								<button
-									className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border px-2 py-1 font-medium text-sm transition-colors hover:bg-muted/70"
+									className="flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 font-medium text-sm transition-colors duration-150 hover:bg-muted hover:duration-0"
 									data-ryu-bot-terminology="ignore"
 									data-testid="interface-switcher-button"
 									ref={triggerRef}
@@ -256,7 +256,7 @@ export function SidebarBrandBadge({
 						})}
 						render={
 							<button
-								className="flex w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-muted/70"
+								className="group/mode flex h-9 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 aria-expanded:bg-sidebar-accent/60"
 								data-ryu-bot-terminology="ignore"
 								data-testid="product-mode-trigger"
 								ref={triggerRef}
@@ -267,9 +267,8 @@ export function SidebarBrandBadge({
 					>
 						{lockup}
 						<HugeiconsIcon
-							className="ml-auto shrink-0 text-muted-foreground"
+							className="ml-auto size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/mode:opacity-100 group-hover/mode:duration-0 group-aria-expanded/mode:opacity-100"
 							icon={ArrowDown01Icon}
-							size={16}
 						/>
 					</DropdownMenuTrigger>
 				)}

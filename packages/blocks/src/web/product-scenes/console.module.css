@@ -1,289 +1,303 @@
 /*
- * Console card motion. The base rules are the still frame, shown under
- * reduced motion and before any keyframe runs: run 1 done and filed, run 2
- * waiting at its approval, run 3 idle. One 8s loop drives every element; only
- * opacity and transform change. `Stage` sets `data-inview` while the card is
- * near the viewport; without it the loop is paused.
+ * Agent (Console) card motion, one 9s loop that starts and ends on the still
+ * (support just filed, research waiting on approval, triage queued).
+ *   support   its steps reset and run again left to right (staggered by
+ *             --delay); at 62-70% it files a new entry into the history
+ *   research  approved at 16-20%, finishes its last two steps, then runs
+ *             again and is back waiting at the gate by 84%
+ *   triage    advances two steps and returns to the queue
+ * Base rules are the still; keyframes animate transform and opacity only.
  */
 
-.root {
-	--console-cycle: 8s;
+.track {
+	stroke: currentColor;
+	stroke-opacity: 0.22;
+	stroke-width: 1;
 }
 
-.fastTick,
-.slowTick,
-.litTick {
-	opacity: 1;
+.supportStep,
+.early,
+.lit,
+.supportDone,
+.researchDone {
+	fill: var(--scene-accent);
 }
 
-.idleTick,
-.resumeTick {
-	opacity: 0.2;
+.late,
+.triageA,
+.triageB,
+.pending {
+	opacity: 0.25;
+	fill: currentColor;
 }
 
-.runPending {
+.ring {
+	fill: var(--background);
+	stroke: currentColor;
+	stroke-width: 1.2;
+}
+
+.researchDone {
 	opacity: 0;
 }
 
-.runDone {
-	opacity: 1;
+.queued {
+	opacity: 0.4;
+	fill: currentColor;
 }
 
-.approval {
-	opacity: 1;
+.gate {
+	fill: var(--background);
+	stroke: var(--scene-accent);
+	stroke-width: 1.2;
 }
 
 .approved {
 	opacity: 0;
 }
 
-.recordMark {
-	opacity: 1;
+.tag {
+	fill: var(--background);
+	stroke: var(--scene-accent);
+	stroke-width: 1;
 }
 
-.record {
-	opacity: 0.8;
-	transform-origin: left center;
-	transform-box: fill-box;
+.panel {
+	fill: var(--background);
+	stroke: currentColor;
+	stroke-opacity: 0.42;
+	stroke-width: 1;
+}
+
+.entry {
+	opacity: 0.45;
+	fill: currentColor;
+}
+
+.incoming {
+	opacity: 0;
+}
+
+@keyframes support-step {
+	0%,
+	8%,
+	38%,
+	100% {
+		opacity: 1;
+	}
+	12%,
+	34% {
+		opacity: 0.25;
+	}
+}
+
+@keyframes support-done {
+	0%,
+	8%,
+	62%,
+	100% {
+		opacity: 1;
+	}
+	12%,
+	58% {
+		opacity: 0;
+	}
+}
+
+@keyframes list {
+	0%,
+	62% {
+		transform: translateY(0);
+	}
+	70%,
+	100% {
+		transform: translateY(16px);
+	}
+}
+
+@keyframes incoming {
+	0%,
+	62% {
+		opacity: 0;
+	}
+	70%,
+	100% {
+		opacity: 1;
+	}
+}
+
+@keyframes outgoing {
+	0%,
+	62% {
+		opacity: 1;
+	}
+	68%,
+	100% {
+		opacity: 0;
+	}
+}
+
+@keyframes early {
+	0%,
+	56%,
+	74%,
+	100% {
+		opacity: 1;
+	}
+	60%,
+	70% {
+		opacity: 0.25;
+	}
+}
+
+@keyframes late {
+	0%,
+	22%,
+	60%,
+	100% {
+		opacity: 0.25;
+	}
+	26%,
+	56% {
+		opacity: 1;
+	}
+}
+
+@keyframes gate {
+	0%,
+	16%,
+	84%,
+	100% {
+		opacity: 1;
+	}
+	20%,
+	80% {
+		opacity: 0;
+	}
+}
+
+@keyframes approved {
+	0%,
+	16%,
+	60%,
+	100% {
+		opacity: 0;
+	}
+	20%,
+	56% {
+		opacity: 1;
+	}
+}
+
+@keyframes ask {
+	0%,
+	14%,
+	86%,
+	100% {
+		opacity: 1;
+	}
+	18%,
+	82% {
+		opacity: 0;
+	}
+}
+
+@keyframes research-done {
+	0%,
+	30%,
+	60%,
+	100% {
+		opacity: 0;
+	}
+	34%,
+	56% {
+		opacity: 1;
+	}
+}
+
+@keyframes triage-a {
+	0%,
+	40%,
+	84%,
+	100% {
+		opacity: 0.25;
+	}
+	44%,
+	80% {
+		opacity: 1;
+	}
+}
+
+@keyframes triage-b {
+	0%,
+	52%,
+	84%,
+	100% {
+		opacity: 0.25;
+	}
+	56%,
+	80% {
+		opacity: 1;
+	}
 }
 
 @media (prefers-reduced-motion: no-preference) {
-	.fastTick,
-	.slowTick,
-	.resumeTick,
-	.runPending,
-	.runDone,
-	.approval,
-	.approved,
-	.recordMark,
-	.record,
-	.ledgerShift {
-		animation-duration: var(--console-cycle);
+	.root[data-inview] * {
+		animation-duration: 9s;
 		animation-timing-function: ease-in-out;
+		animation-delay: var(--delay, 0s);
 		animation-iteration-count: infinite;
-		animation-fill-mode: both;
 	}
 
-	/* Run 1 lights left to right; the last tick lands at about 45%. */
-	.fastTick {
-		animation-name: console-fast-tick;
-		animation-delay: calc(var(--i) * 0.36s);
+	.root[data-inview] .supportStep {
+		animation-name: support-step;
 	}
 
-	/* Run 2 lights at half speed and reaches the approval at about 48%. */
-	.slowTick {
-		animation-name: console-slow-tick;
-		animation-delay: calc(var(--i) * 0.72s);
+	.root[data-inview] .supportDone {
+		animation-name: support-done;
 	}
 
-	.resumeTick {
-		animation-name: console-resume-tick;
+	.root[data-inview] .list {
+		animation-name: list;
 	}
 
-	.runPending {
-		animation-name: console-run-pending;
+	.root[data-inview] .incoming {
+		animation-name: incoming;
 	}
 
-	.runDone {
-		animation-name: console-run-done;
+	.root[data-inview] .outgoing {
+		animation-name: outgoing;
 	}
 
-	.approval {
-		animation-name: console-approval;
+	.root[data-inview] .early {
+		animation-name: early;
 	}
 
-	.approved {
-		animation-name: console-approved;
+	.root[data-inview] .late {
+		animation-name: late;
 	}
 
-	.record {
-		animation-name: console-record;
+	.root[data-inview] .gate {
+		animation-name: gate;
 	}
 
-	.recordMark {
-		animation-name: console-record-mark;
+	.root[data-inview] .approved {
+		animation-name: approved;
 	}
 
-	.ledgerShift {
-		animation-name: console-ledger-shift;
+	.root[data-inview] .ask {
+		animation-name: ask;
 	}
 
-	.root:not([data-inview]) * {
-		animation-play-state: paused;
+	.root[data-inview] .researchDone {
+		animation-name: research-done;
 	}
-}
 
-@keyframes console-fast-tick {
-	0%,
-	20% {
-		opacity: 0.2;
+	.root[data-inview] .triageA {
+		animation-name: triage-a;
 	}
-	24%,
-	74% {
-		opacity: 1;
-	}
-	78%,
-	100% {
-		opacity: 0.2;
-	}
-}
 
-@keyframes console-slow-tick {
-	0%,
-	20% {
-		opacity: 0.2;
-	}
-	24%,
-	78% {
-		opacity: 1;
-	}
-	82%,
-	100% {
-		opacity: 0.2;
-	}
-}
-
-@keyframes console-resume-tick {
-	0%,
-	70% {
-		opacity: 0.2;
-	}
-	74%,
-	80% {
-		opacity: 1;
-	}
-	85%,
-	100% {
-		opacity: 0.2;
-	}
-}
-
-@keyframes console-run-pending {
-	0%,
-	44% {
-		opacity: 1;
-	}
-	48%,
-	80% {
-		opacity: 0;
-	}
-	86%,
-	100% {
-		opacity: 1;
-	}
-}
-
-@keyframes console-run-done {
-	0%,
-	44% {
-		opacity: 0;
-	}
-	48%,
-	80% {
-		opacity: 1;
-	}
-	86%,
-	100% {
-		opacity: 0;
-	}
-}
-
-/* Faint until run 2 arrives, then waits (pulses) about 1.5s for approval. */
-@keyframes console-approval {
-	0%,
-	45% {
-		opacity: 0.3;
-	}
-	48% {
-		opacity: 1;
-	}
-	53% {
-		opacity: 0.5;
-	}
-	58% {
-		opacity: 1;
-	}
-	63% {
-		opacity: 0.5;
-	}
-	66% {
-		opacity: 1;
-	}
-	70%,
-	84% {
-		opacity: 0;
-	}
-	90%,
-	100% {
-		opacity: 0.3;
-	}
-}
-
-@keyframes console-approved {
-	0%,
-	66% {
-		opacity: 0;
-	}
-	70%,
-	82% {
-		opacity: 1;
-	}
-	86%,
-	100% {
-		opacity: 0;
-	}
-}
-
-/* The finished run's record leaves run 1 and files into the ledger's top slot. */
-@keyframes console-record {
-	0%,
-	46% {
-		opacity: 0;
-		transform: translate(-34px, -13px) scaleX(0.4);
-	}
-	49% {
-		opacity: 0.8;
-		transform: translate(-34px, -13px) scaleX(0.4);
-	}
-	56%,
-	82% {
-		opacity: 0.8;
-		transform: translate(0, 0) scaleX(1);
-	}
-	89%,
-	100% {
-		opacity: 0;
-		transform: translate(0, 0) scaleX(1);
-	}
-}
-
-@keyframes console-record-mark {
-	0%,
-	55% {
-		opacity: 0;
-	}
-	59%,
-	82% {
-		opacity: 1;
-	}
-	88%,
-	100% {
-		opacity: 0;
-	}
-}
-
-/* Older records step down 8 units to make room; the oldest leaves the clip. */
-@keyframes console-ledger-shift {
-	0%,
-	50% {
-		transform: translateY(-8px);
-	}
-	56%,
-	83% {
-		transform: translateY(0);
-	}
-	91%,
-	100% {
-		transform: translateY(-8px);
+	.root[data-inview] .triageB {
+		animation-name: triage-b;
 	}
 }

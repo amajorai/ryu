@@ -79,6 +79,7 @@ describe("catalog-free entries", () => {
 		"react-context.tsx",
 		"react-provider-base.tsx",
 		"react-text.tsx",
+		"react-rich-text.tsx",
 		"official-catalog.ts",
 		"account-locale.ts",
 	]) {

@@ -88,7 +88,7 @@ export const PlanTool = memo(function PlanTool({
 					{isAlreadyApproved ? (
 						<p className="text-status-success text-xs">{approveText}</p>
 					) : (
-						<div className="flex items-center gap-2 border-border/60 border-t pt-2">
+						<div className="flex items-center gap-2 border-border border-t pt-2">
 							<Button
 								appearance="plan-approve"
 								disabled={isPending}

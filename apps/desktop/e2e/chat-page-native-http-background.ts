@@ -12,11 +12,34 @@ export function canonicalPath(url: URL): string {
 	query.sort();
 	return url.pathname + (query.size ? `?${query}` : "");
 }
+// Core's `get_session_box` (`server/session_box/api.rs`) answers for ANY
+// conversation id, including the ids a browser mints for a new chat: no fixture
+// conversation ever started a session Box, so it is always Core's 404, which
+// `fetchSessionBox` reads as "this conversation has no Box".
+const SESSION_BOX_STATUS_ROUTE = /^GET \/api\/session-boxes\/[^/?]+$/;
+const NO_SESSION_BOX: BackgroundContract = {
+	body: {
+		error: {
+			code: "session_box_not_found",
+			message: "This conversation has no session Box.",
+		},
+	},
+	status: 404,
+};
+/** Core's idle contracts by `METHOD path`, answering any session-Box read. */
+export class CoreContracts extends Map<string, BackgroundContract> {
+	override get(route: string): BackgroundContract | undefined {
+		return (
+			super.get(route) ??
+			(SESSION_BOX_STATUS_ROUTE.test(route) ? NO_SESSION_BOX : undefined)
+		);
+	}
+}
 export function createBackgroundContracts(
 	conversationId: string,
 	ownerId: string
 ) {
-	const core = new Map<string, BackgroundContract>();
+	const core: Map<string, BackgroundContract> = new CoreContracts();
 	const backend = new Map<string, BackgroundContract>();
 	const get = (path: string, body: unknown) =>
 		core.set(`GET ${canonicalPath(new URL(path, "http://owned.test"))}`, {

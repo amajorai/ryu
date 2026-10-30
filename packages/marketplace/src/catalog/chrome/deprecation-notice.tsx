@@ -52,7 +52,7 @@ export default function DeprecationNotice({
 					<>
 						{" "}
 						Use{" "}
-						<code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+						<code className="rounded-lg bg-muted px-1 py-0.5 font-mono text-xs">
 							{replacement}
 						</code>{" "}
 						instead.

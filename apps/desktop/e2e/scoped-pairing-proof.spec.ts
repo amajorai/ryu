@@ -510,7 +510,7 @@ test("environment owner token cannot be rotated in Desktop", async ({
 		0
 	);
 	await expect(
-		page.getByText(/comes from the RYU_TOKEN environment variable/i)
+		page.getByText(/Set by RYU_TOKEN, so rotating here has no effect/i)
 	).toBeVisible();
 	const state = await readProofState(page);
 	expect(

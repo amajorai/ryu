@@ -62,7 +62,7 @@ import {
 } from "../friendly.ts";
 
 const BASE_CHIP =
-	"inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-3xl px-2 py-0.5 font-medium type-caption whitespace-nowrap transition-colors";
+	"inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-3xl px-2 py-0.5 font-medium text-xs whitespace-nowrap transition-colors";
 
 /** Subtle, theme-aware background per badge tone (no border — fill only). */
 const TONE_CLASS = {

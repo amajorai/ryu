@@ -18,6 +18,12 @@ test("shows inline bot threads, fallback group chats, and agent-to-agent transcr
 	await expect(page.getByText("Workspace transcript")).toBeVisible();
 	await expect(page.getByTestId("agent-message-reply")).toBeVisible();
 
+	// Agent rows are one line; the thread toggle shows on row hover (306ce31b7).
+	await page
+		.getByTestId("agent-sidebar-proof")
+		.getByText("Builder", { exact: true })
+		.first()
+		.hover();
 	await page
 		.getByRole("button", { name: "Show 2 threads for Builder" })
 		.click();

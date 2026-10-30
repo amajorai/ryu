@@ -39,6 +39,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatMessage } from "@ryu/i18n/lite";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Tooltip,
 	TooltipContent,
@@ -190,6 +192,10 @@ function relativeUntil(target: number, now: number): string {
 	return `in ${Math.round(ms / UNIT_MS.d)}d`;
 }
 
+/** English formatting for callers outside a React tree (tests, plain code). */
+const englishLiteral: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
+
 /**
  * A one-line tooltip describing when a trigger fires. For `every` schedules we
  * estimate the next run from the job's `lastRunAt` (or now) plus the interval;
@@ -198,7 +204,8 @@ function relativeUntil(target: number, now: number): string {
  */
 export function triggerTooltip(
 	trigger: WorkflowTrigger,
-	job: ScheduledJob | null
+	job: ScheduledJob | null,
+	tl: LiteralMessage = englishLiteral
 ): string | null {
 	switch (trigger.type) {
 		case "schedule": {
@@ -213,9 +220,12 @@ export function triggerTooltip(
 					const elapsed = now - anchor;
 					const bumps = elapsed >= 0 ? Math.floor(elapsed / step) + 1 : 0;
 					const next = anchor + bumps * step;
-					return `Runs every ${trigger.every} · next ${relativeUntil(next, now)}`;
+					return tl("Runs every {every} · next {nextRun}", {
+						every: trigger.every,
+						nextRun: relativeUntil(next, now),
+					});
 				}
-				return `Runs every ${trigger.every}`;
+				return tl("Runs every {every}", { every: trigger.every });
 			}
 			if (trigger.cron) {
 				return `Cron: ${trigger.cron}`;
@@ -228,7 +238,7 @@ export function triggerTooltip(
 			return `${trigger.toolkit || "Composio"} · ${trigger.trigger_slug || "event"}`;
 		case "event":
 			return trigger.event
-				? `Runs on ${trigger.event}`
+				? tl("Runs on {event}", { event: trigger.event })
 				: "Runs on an app event (none selected)";
 		default:
 			return "Runs manually";
@@ -251,6 +261,7 @@ export function WorkflowTriggerIcons({
 	job?: ScheduledJob | null;
 	className?: string;
 }) {
+	const tl = useLiteralMessages();
 	const shown = triggers.filter((t) => t.type !== "manual");
 	if (shown.length === 0) {
 		return null;
@@ -259,7 +270,7 @@ export function WorkflowTriggerIcons({
 		<span className={className}>
 			{shown.map((trigger, i) => {
 				const { icon, label } = triggerMeta(trigger);
-				const tip = triggerTooltip(trigger, job) ?? label;
+				const tip = triggerTooltip(trigger, job, tl) ?? label;
 				return (
 					<Tooltip key={`${trigger.type}-${i}`}>
 						<TooltipTrigger

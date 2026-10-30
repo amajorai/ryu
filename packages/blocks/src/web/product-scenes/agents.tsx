@@ -1,248 +1,177 @@
-import type { CSSProperties, ReactNode } from "react";
-import { Stage } from "../iso/kit/react/live.tsx";
+import type { ReactNode } from "react";
 import styles from "./agents.module.css";
-import { Scene } from "./scene.tsx";
+import { Label, Packet, type Point, SceneCanvas, Wire } from "./scene.tsx";
 
 /**
- * The Agents card: an agent core with its parts plugged in. Chat, voice and
- * image models sit on the left; tools, memory and versioned instructions on the
- * right. Signal marches along every wire toward the core, the chat model is
- * swapped while the agent keeps running, and the instructions gain a new
- * version on top of the ones they keep. The server renders the still frame;
- * CSS animates it only while the card is in view (`Stage` marks that).
+ * The Agents card: what an agent is. A core with its parts plugged in: the
+ * models it thinks and hears and sees with on the left, the tools, memory and
+ * prompt it acts with on the right. Signal flows in from the models and out to
+ * the tools, the core pulses as it works, and twice a loop the model is
+ * unplugged and another plugs in while the agent keeps running: nothing is
+ * locked in.
+ *
+ * The markup is the still (every part connected, signal mid-wire); the 9.6s
+ * loop in `agents.module.css` starts and ends on it.
  */
 
-type MotionStyle = CSSProperties & Record<`--${string}`, string>;
-
 interface Part {
-	/** Chip centre on the ellipse around the core. */
-	cx: number;
-	cy: number;
-	glyph: ReactNode;
-	label: string;
-	/** Where the wire meets the core's nearest face. */
-	toX: number;
-	toY: number;
+	/** Where the wire meets the core's face. */
+	readonly face: number;
+	readonly glyph: ReactNode;
+	readonly label: string;
+	readonly y: number;
 }
 
-const CORE_X = 160;
-const CORE_Y = 82;
-const CHIP_WIDTH = 64;
-const CHIP_HEIGHT = 18;
-const HALF_CHIP = CHIP_WIDTH / 2;
+const CORE: Point = { x: 148, y: 84 };
+const CORE_HALF = 20;
+const CHIP_WIDTH = 66;
+const LEFT_X = 43;
+const RIGHT_X = 253;
+const ROWS = [36, 84, 132] as const;
+const FACES = [74, 84, 94] as const;
 
-const CIRCLE = <circle r={2} />;
-const SQUARE = <rect height={3.6} width={3.6} x={-1.8} y={-1.8} />;
-const TRIANGLE = <path d="M0 -2.2 L2 1.6 H-2 Z" />;
-const DIAMOND = <path d="M0 -2.4 L2.4 0 L0 2.4 L-2.4 0 Z" />;
+const CIRCLE = <circle r={2.6} />;
+const DIAMOND = <path d="M0 -3 L3 0 L0 3 L-3 0 Z" />;
+const SQUARE = <rect height={5} width={5} x={-2.5} y={-2.5} />;
+const TRIANGLE = <path d="M0 -3 L2.8 2.2 H-2.8 Z" />;
 const WRENCH = (
 	<g className={styles.outline}>
-		<path d="M-1.9 1.9 L0.5 -0.5" />
-		<circle cx={1.2} cy={-1.2} r={1.1} />
+		<path d="M-2.6 2.6 L0.6 -0.6" />
+		<circle cx={1.6} cy={-1.6} r={1.5} />
 	</g>
 );
 const MEMORY = (
 	<g className={styles.outline}>
-		<ellipse cy={-1.5} rx={2.2} ry={0.8} />
-		<ellipse rx={2.2} ry={0.8} />
-		<ellipse cy={1.5} rx={2.2} ry={0.8} />
+		<ellipse cy={-2} rx={3} ry={1.1} />
+		<ellipse rx={3} ry={1.1} />
+		<ellipse cy={2} rx={3} ry={1.1} />
 	</g>
 );
-const DOC_PATH = "M-1.75 -2.25 H0.75 L1.75 -1.25 V2.25 H-1.75 Z";
+const DOC = (
+	<path className={styles.outline} d="M-2.4 -3.2 H1 L2.4 -1.8 V3.2 H-2.4 Z" />
+);
 
-const CHAT: Part = {
-	cx: 63,
-	cy: 53,
-	glyph: CIRCLE,
-	label: "chat",
-	toX: 142,
-	toY: 74,
-};
-const LEFT_PARTS: readonly Part[] = [
-	{ cx: 48, cy: 82, glyph: SQUARE, label: "voice", toX: 142, toY: 82 },
-	{ cx: 63, cy: 111, glyph: TRIANGLE, label: "image", toX: 142, toY: 90 },
+const MODELS: readonly Part[] = [
+	{ face: FACES[0], glyph: CIRCLE, label: "model", y: ROWS[0] },
+	{ face: FACES[1], glyph: SQUARE, label: "voice", y: ROWS[1] },
+	{ face: FACES[2], glyph: TRIANGLE, label: "image", y: ROWS[2] },
 ];
-const RIGHT_PARTS: readonly Part[] = [
-	{ cx: 257, cy: 53, glyph: WRENCH, label: "tools", toX: 178, toY: 74 },
-	{ cx: 272, cy: 82, glyph: MEMORY, label: "memory", toX: 178, toY: 82 },
+const ABILITIES: readonly Part[] = [
+	{ face: FACES[0], glyph: WRENCH, label: "tools", y: ROWS[0] },
+	{ face: FACES[1], glyph: MEMORY, label: "memory", y: ROWS[1] },
+	{ face: FACES[2], glyph: DOC, label: "prompt", y: ROWS[2] },
 ];
-const INSTRUCTIONS: Part = {
-	cx: 257,
-	cy: 111,
-	glyph: null,
-	label: "instructions",
-	toX: 178,
-	toY: 90,
-};
-
-/** The chip edge a wire leaves from: its inner face, toward the core. */
-const wireStart = (part: Part) =>
-	part.cx < CORE_X ? part.cx + HALF_CHIP : part.cx - HALF_CHIP;
-
-/** The outward unit step along the chat chip's radial, 10px long. */
-const CHAT_LENGTH = Math.hypot(CHAT.cx - CORE_X, CHAT.cy - CORE_Y);
-const CHAT_DX = (((CHAT.cx - CORE_X) / CHAT_LENGTH) * 10).toFixed(2);
-const CHAT_DY = (((CHAT.cy - CORE_Y) / CHAT_LENGTH) * 10).toFixed(2);
-const SWAP_STYLE: MotionStyle = {
-	"--dx": `${CHAT_DX}px`,
-	"--dy": `${CHAT_DY}px`,
-};
-
-function Wire({ index, part }: { index: number; part: Part }) {
-	const d = `M${wireStart(part)} ${part.cy} L${part.toX} ${part.toY}`;
-	const phase: MotionStyle = { "--i": String(index) };
-	return (
-		<g>
-			<path className={styles.wire} d={d} />
-			<path className={styles.flow} d={d} style={phase} />
-			<circle className={styles.end} cx={part.toX} cy={part.toY} r={1.4} />
-		</g>
-	);
-}
 
 function Chip({
-	children,
+	className,
 	glyph,
 	label,
-	labelX = -13,
+	x,
+	y,
 }: {
-	children?: ReactNode;
+	className?: string;
 	glyph: ReactNode;
 	label: string;
-	labelX?: number;
+	x: number;
+	y: number;
 }) {
 	return (
-		<g>
-			<rect
-				className={styles.chip}
-				height={CHIP_HEIGHT}
-				rx={9}
-				width={CHIP_WIDTH}
-				x={-HALF_CHIP}
-				y={-CHIP_HEIGHT / 2}
-			/>
-			{glyph ? (
+		<g className={className}>
+			<g transform={`translate(${x} ${y})`}>
+				<rect
+					className={styles.chip}
+					height={20}
+					rx={10}
+					width={CHIP_WIDTH}
+					x={-CHIP_WIDTH / 2}
+					y={-10}
+				/>
 				<g className={styles.glyph} transform="translate(-21 0)">
 					{glyph}
 				</g>
-			) : null}
-			{children}
-			<text className={styles.label} dominantBaseline="central" x={labelX}>
+			</g>
+			<Label anchor="start" x={x - 13} y={y}>
 				{label}
-			</text>
-		</g>
-	);
-}
-
-/** Three kept versions behind the live one, plus the version about to land. */
-function DocStack() {
-	const layers = [
-		[styles.docBack, "6 -6"],
-		[styles.docMid, "3 -3"],
-		[styles.docFront, "0 0"],
-		[styles.docNew, "0 0"],
-	] as const;
-	return (
-		<g transform="translate(-22 0)">
-			{layers.map(([className, at]) => (
-				<g key={className} transform={`translate(${at})`}>
-					<path className={`${styles.doc} ${className}`} d={DOC_PATH} />
-				</g>
-			))}
-		</g>
-	);
-}
-
-function ChatSwap() {
-	const d = `M${wireStart(CHAT)} ${CHAT.cy} L${CHAT.toX} ${CHAT.toY}`;
-	return (
-		<g style={SWAP_STYLE}>
-			<g className={styles.chatOld}>
-				<Wire index={0} part={CHAT} />
-				<g transform={`translate(${CHAT.cx} ${CHAT.cy})`}>
-					<g className={styles.chipOut}>
-						<Chip glyph={CIRCLE} label={CHAT.label} />
-					</g>
-				</g>
-			</g>
-			<g className={styles.chatNew}>
-				<path className={styles.trace} d={d} pathLength={1} />
-				<path
-					className={`${styles.flow} ${styles.newFlow}`}
-					d={d}
-					style={{ "--i": "0" } as MotionStyle}
-				/>
-				<circle
-					className={`${styles.end} ${styles.blink}`}
-					cx={CHAT.toX}
-					cy={CHAT.toY}
-					r={1.4}
-				/>
-				<g transform={`translate(${CHAT.cx} ${CHAT.cy})`}>
-					<g className={styles.chipIn}>
-						<Chip glyph={DIAMOND} label={CHAT.label} />
-					</g>
-				</g>
-			</g>
-		</g>
-	);
-}
-
-function AgentCore() {
-	return (
-		<g transform={`translate(${CORE_X} ${CORE_Y})`}>
-			<circle className={styles.halo} r={27} />
-			<rect
-				className={styles.core}
-				height={36}
-				rx={10}
-				width={36}
-				x={-18}
-				y={-18}
-			/>
-			<circle className={styles.dot} r={6} />
-			<text
-				className={styles.coreLabel}
-				dominantBaseline="central"
-				textAnchor="middle"
-				y={34}
-			>
-				agent
-			</text>
+			</Label>
 		</g>
 	);
 }
 
 export function AgentsScene() {
-	const parts = [...LEFT_PARTS, ...RIGHT_PARTS];
+	const left = LEFT_X + CHIP_WIDTH / 2;
+	const right = RIGHT_X - CHIP_WIDTH / 2;
 	return (
-		<Scene id="agents">
-			<Stage
-				className={`${styles.stage} absolute inset-x-0 top-0 bottom-24 px-3 pt-3`}
-			>
-				<svg
-					className="block h-full w-full overflow-visible"
-					focusable="false"
-					viewBox="4 32 312 96"
-				>
-					{parts.map((part, index) => (
-						<Wire index={index + 1} key={part.label} part={part} />
-					))}
-					<Wire index={5} part={INSTRUCTIONS} />
-					<ChatSwap />
-					{parts.map((part) => (
-						<g key={part.label} transform={`translate(${part.cx} ${part.cy})`}>
-							<Chip glyph={part.glyph} label={part.label} />
-						</g>
-					))}
-					<g transform={`translate(${INSTRUCTIONS.cx} ${INSTRUCTIONS.cy})`}>
-						<Chip glyph={null} label={INSTRUCTIONS.label} labelX={-11}>
-							<DocStack />
-						</Chip>
+		<SceneCanvas className={styles.root} id="agents">
+			{MODELS.map((part, index) => {
+				const from = { x: left, y: part.y };
+				const to = { x: CORE.x - CORE_HALF, y: part.face };
+				return (
+					<g key={part.label}>
+						<Wire from={from} to={to} />
+						<Packet delay={index * 0.4} from={from} loop to={to} />
 					</g>
-					<AgentCore />
-				</svg>
-			</Stage>
-		</Scene>
+				);
+			})}
+			{ABILITIES.map((part, index) => {
+				const from = { x: CORE.x + CORE_HALF, y: part.face };
+				const to = { x: right, y: part.y };
+				return (
+					<g key={part.label}>
+						<Wire from={from} to={to} />
+						<Packet delay={1.2 + index * 0.4} from={from} loop to={to} />
+					</g>
+				);
+			})}
+
+			{/* The model slot: one chip unplugs outward as the other plugs in. */}
+			<Chip
+				className={styles.modelA}
+				glyph={CIRCLE}
+				label="model"
+				x={LEFT_X}
+				y={ROWS[0]}
+			/>
+			<Chip
+				className={styles.modelB}
+				glyph={DIAMOND}
+				label="model"
+				x={LEFT_X}
+				y={ROWS[0]}
+			/>
+			{MODELS.slice(1).map((part) => (
+				<Chip
+					glyph={part.glyph}
+					key={part.label}
+					label={part.label}
+					x={LEFT_X}
+					y={part.y}
+				/>
+			))}
+			{ABILITIES.map((part) => (
+				<Chip
+					glyph={part.glyph}
+					key={part.label}
+					label={part.label}
+					x={RIGHT_X}
+					y={part.y}
+				/>
+			))}
+
+			<g transform={`translate(${CORE.x} ${CORE.y})`}>
+				<circle className={styles.halo} r={31} />
+				<rect
+					className={styles.core}
+					height={CORE_HALF * 2}
+					rx={11}
+					width={CORE_HALF * 2}
+					x={-CORE_HALF}
+					y={-CORE_HALF}
+				/>
+				<circle className={styles.dot} r={6} />
+			</g>
+			<Label x={CORE.x} y={CORE.y + 44}>
+				agent
+			</Label>
+		</SceneCanvas>
 	);
 }

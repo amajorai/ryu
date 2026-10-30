@@ -10,6 +10,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages, useLocalizedString } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -81,6 +82,15 @@ export interface SectionMenu {
 	onSetSort: (key: SectionKey, sort: SortKey) => void;
 }
 
+/** A section action folded into the header's ⋯ menu instead of its own
+ *  hover button, so a header shows at most "+" and "⋯". */
+export interface SectionMenuAction {
+	icon: IconSvgElement;
+	id: string;
+	label: string;
+	onSelect: () => void;
+}
+
 export interface SectionProps {
 	/** Group-by + filters, on the chat sections (Pinned, Chats, Projects, Archived). */
 	chatView?: ChatSectionView;
@@ -113,17 +123,19 @@ export function SectionActionButton({
 		<Tooltip>
 			<TooltipTrigger
 				render={
-					<button
+					<Button
 						aria-label={localizedTitle}
-						className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100"
+						className="size-6 rounded-lg opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/section:opacity-100 group-hover/section:duration-0"
 						onClick={(e) => {
 							e.stopPropagation();
 							onClick();
 						}}
+						size="icon-xs"
 						type="button"
+						variant="ghost-muted"
 					>
-						<HugeiconsIcon icon={icon} size={14} />
-					</button>
+						<HugeiconsIcon className="size-3.5" icon={icon} />
+					</Button>
 				}
 			/>
 			<TooltipContent>{localizedTitle}</TooltipContent>
@@ -163,17 +175,19 @@ export function SubSectionActionButton({
 		<Tooltip>
 			<TooltipTrigger
 				render={
-					<button
+					<Button
 						aria-label={localizedTitle}
-						className="flex size-5 shrink-0 items-center justify-center rounded bg-transparent text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/subsection:opacity-100"
+						className="size-6 rounded-lg opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/subsection:opacity-100 group-hover/subsection:duration-0"
 						onClick={(e) => {
 							e.stopPropagation();
 							onClick();
 						}}
+						size="icon-xs"
 						type="button"
+						variant="ghost-muted"
 					>
-						<HugeiconsIcon icon={icon} size={14} />
-					</button>
+						<HugeiconsIcon className="size-3.5" icon={icon} />
+					</Button>
 				}
 			/>
 			<TooltipContent>{localizedTitle}</TooltipContent>
@@ -182,6 +196,7 @@ export function SubSectionActionButton({
 }
 
 function SectionOverflowMenu({
+	actions,
 	chatGroupByOptions,
 	chatView,
 	label,
@@ -190,6 +205,7 @@ function SectionOverflowMenu({
 	sectionKey,
 	sort,
 }: {
+	actions?: readonly SectionMenuAction[];
 	chatGroupByOptions?: readonly ChatGroupBy[];
 	chatView?: ChatSectionView;
 	label: string;
@@ -206,31 +222,42 @@ function SectionOverflowMenu({
 			    data-popup-open, not data-state, on the trigger. */}
 			<DropdownMenuTrigger
 				aria-label={tl("{label} options", { label })}
-				className="flex size-5 shrink-0 items-center justify-center"
+				className="flex size-6 shrink-0 items-center justify-center rounded-lg"
 				motion="opacity"
 				onClick={(e) => e.stopPropagation()}
 				reveal="section"
 				variant="muted"
 			>
-				<HugeiconsIcon icon={MoreHorizontalIcon} size={14} />
+				<HugeiconsIcon className="size-3.5" icon={MoreHorizontalIcon} />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
+				{actions && actions.length > 0 ? (
+					<>
+						{actions.map((action) => (
+							<DropdownMenuItem key={action.id} onClick={action.onSelect}>
+								<HugeiconsIcon className="size-4" icon={action.icon} />
+								{action.label}
+							</DropdownMenuItem>
+						))}
+						<DropdownMenuSeparator />
+					</>
+				) : null}
 				<DropdownMenuItem
 					disabled={!menu.canMove(sectionKey, "up")}
 					onClick={() => menu.onMove(sectionKey, "up")}
 				>
-					<HugeiconsIcon className="mr-2" icon={ArrowUp01Icon} size={14} />
+					<HugeiconsIcon className="size-4" icon={ArrowUp01Icon} />
 					Move up
 				</DropdownMenuItem>
 				<DropdownMenuItem
 					disabled={!menu.canMove(sectionKey, "down")}
 					onClick={() => menu.onMove(sectionKey, "down")}
 				>
-					<HugeiconsIcon className="mr-2" icon={ArrowDown01Icon} size={14} />
+					<HugeiconsIcon className="size-4" icon={ArrowDown01Icon} />
 					Move down
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => menu.onHide(sectionKey)}>
-					<HugeiconsIcon className="mr-2" icon={ViewOffSlashIcon} size={14} />
+					<HugeiconsIcon className="size-4" icon={ViewOffSlashIcon} />
 					Hide section
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
@@ -284,11 +311,7 @@ function SectionOverflowMenu({
 				</DropdownMenuSub>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={menu.onOpenCustomize}>
-					<HugeiconsIcon
-						className="mr-2"
-						icon={SlidersHorizontalIcon}
-						size={14}
-					/>
+					<HugeiconsIcon className="size-4" icon={SlidersHorizontalIcon} />
 					Customize sidebar
 				</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -302,6 +325,7 @@ function SectionOverflowMenu({
 export function SidebarSection({
 	action,
 	chatDrop,
+	menuActions,
 	chatGroupByOptions,
 	chatView,
 	children,
@@ -321,6 +345,8 @@ export function SidebarSection({
 	action?: ReactNode;
 	/** Accept chat rows dragged in from other sections (pin, archive, …). */
 	chatDrop?: ChatMoveDrop;
+	/** Secondary actions listed at the top of the header's ⋯ menu. */
+	menuActions?: readonly SectionMenuAction[];
 	/** Group-by choices offered for this chat section (empty hides Group by). */
 	chatGroupByOptions?: readonly ChatGroupBy[];
 	children: ReactNode;
@@ -354,7 +380,7 @@ export function SidebarSection({
 		dnd.order.indexOf(dnd.draggingKey) < dnd.order.indexOf(sectionKey);
 	const headerButton = (
 		<button
-			className="group/hdr flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground text-xs transition-colors active:cursor-grabbing"
+			className="group/hdr flex h-7 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg px-2 text-detail text-muted-foreground transition-colors duration-150 hover:text-foreground hover:duration-0 active:cursor-grabbing"
 			draggable
 			onClick={() => onToggleCollapsed(sectionKey)}
 			onDragEnd={() => dnd.onDragEnd()}
@@ -374,19 +400,19 @@ export function SidebarSection({
 						"{filterCount, plural, one {# filter} other {# filters}} active",
 						{ filterCount }
 					)}
-					className="size-3 shrink-0 text-primary"
+					className="size-3.5 shrink-0 text-foreground"
 					icon={FilterHorizontalIcon}
 				/>
 			) : null}
 			<HugeiconsIcon
-				className={`-ml-1 size-3 shrink-0 opacity-0 transition group-hover/hdr:opacity-100 ${collapsed ? "-rotate-90" : ""}`}
+				className={`-ml-1 size-3.5 shrink-0 opacity-0 transition duration-150 group-hover/hdr:opacity-100 group-hover/hdr:duration-0 ${collapsed ? "-rotate-90" : ""}`}
 				icon={ArrowDown01Icon}
 			/>
 		</button>
 	);
 	return (
 		<SidebarGroup
-			className={`group/section scroll-mt-2 ${chatMove.isOver ? "rounded-md bg-primary/5 ring-1 ring-primary/60 ring-inset" : ""}`}
+			className={`group/section scroll-mt-2 ${chatMove.isOver ? "rounded-lg bg-accent" : ""}`}
 			data-testid={`sidebar-section-${sectionKey}`}
 			dragging={isDragging}
 			id={`sidebar-sec-${sectionKey}`}
@@ -433,6 +459,7 @@ export function SidebarSection({
 						<div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
 							{action}
 							<SectionOverflowMenu
+								actions={menuActions}
 								chatGroupByOptions={chatGroupByOptions}
 								chatView={chatView}
 								label={label}

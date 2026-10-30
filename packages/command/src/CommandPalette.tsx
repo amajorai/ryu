@@ -19,7 +19,7 @@ import {
 	CommandSeparator,
 	CommandShortcut,
 } from "@ryu/ui/components/command.tsx";
-import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Fragment,
 	type KeyboardEvent,
@@ -28,6 +28,8 @@ import {
 	useId,
 	useState,
 } from "react";
+import { PaletteFilters } from "./palette-filters.tsx";
+import { PaletteModeSwitch } from "./palette-mode-switch.tsx";
 import { actionSearchValue, groupActions } from "./registry.ts";
 import type {
 	CommandAction,
@@ -69,6 +71,11 @@ export interface CommandPaletteProps {
 	open?: boolean;
 	/** Search input placeholder. */
 	placeholder?: string;
+	/**
+	 * Result-type lanes shown as chips; the rest sit behind "More". Defaults to
+	 * All, Chats, Apps and Settings, topped up to four in host order.
+	 */
+	primaryTabIds?: string[];
 	/** Forwarded to cmdk: controlled search value. */
 	search?: string;
 	/** Forwarded to cmdk: when false, cmdk's built-in fuzzy filter is bypassed. */
@@ -91,11 +98,11 @@ function ActionRow({ action }: { action: CommandAction }) {
 			{action.icon ? (
 				<HugeiconsIcon className="size-4 shrink-0" icon={action.icon} />
 			) : null}
-			<span className="truncate" title={localizedTitle}>
+			<span className="min-w-0 flex-1 truncate" title={localizedTitle}>
 				{localizedTitle}
 			</span>
 			{action.trailing ? (
-				<span className="ml-auto truncate text-muted-foreground text-xs">
+				<span className="max-w-[40%] shrink-0 truncate text-muted-foreground text-xs">
 					{localizedTrailing}
 				</span>
 			) : null}
@@ -103,72 +110,6 @@ function ActionRow({ action }: { action: CommandAction }) {
 				<CommandShortcut>{action.shortcut}</CommandShortcut>
 			) : null}
 		</CommandItem>
-	);
-}
-
-function PaletteModeSwitch({
-	active,
-	onChange,
-	searchTabId,
-	composeTabId,
-}: {
-	active: CommandPaletteMode;
-	onChange: (mode: CommandPaletteMode) => void;
-	searchTabId: string;
-	composeTabId: string;
-}) {
-	const searchLabel = useLocalizedString("Search");
-	const composeLabel = useLocalizedString("Compose");
-
-	return (
-		<div
-			aria-label="Search and compose"
-			className="inline-flex items-center gap-1 rounded-xl border border-border/80 bg-popover/95 p-1 shadow-lg backdrop-blur-xl"
-			role="tablist"
-		>
-			<button
-				aria-label={searchLabel}
-				aria-selected={active === "search"}
-				className={
-					active === "search"
-						? "flex h-8 items-center gap-2 rounded-lg bg-accent px-3 text-foreground text-sm shadow-sm"
-						: "flex h-8 items-center gap-2 rounded-lg px-3 text-muted-foreground text-sm transition-colors hover:text-foreground"
-				}
-				id={searchTabId}
-				onClick={() => onChange("search")}
-				role="tab"
-				tabIndex={active === "search" ? 0 : -1}
-				type="button"
-			>
-				{searchLabel}
-				{active === "compose" ? <TabKeyHint /> : null}
-			</button>
-			<button
-				aria-label={composeLabel}
-				aria-selected={active === "compose"}
-				className={
-					active === "compose"
-						? "flex h-8 items-center gap-2 rounded-lg bg-accent px-3 text-foreground text-sm shadow-sm"
-						: "flex h-8 items-center gap-2 rounded-lg px-3 text-muted-foreground text-sm transition-colors hover:text-foreground"
-				}
-				id={composeTabId}
-				onClick={() => onChange("compose")}
-				role="tab"
-				tabIndex={active === "compose" ? 0 : -1}
-				type="button"
-			>
-				{composeLabel}
-				{active === "search" ? <TabKeyHint /> : null}
-			</button>
-		</div>
-	);
-}
-
-function TabKeyHint() {
-	return (
-		<kbd className="type-compact rounded border border-border/80 bg-background/50 px-1.5 py-0.5 font-mono text-muted-foreground leading-none">
-			Tab
-		</kbd>
 	);
 }
 
@@ -187,6 +128,7 @@ function PaletteBody({
 	activeTab,
 	onTabChange,
 	onHighlight,
+	primaryTabIds,
 }: Omit<
 	CommandPaletteProps,
 	"chrome" | "composeContent" | "dialogLayout" | "open" | "onOpenChange"
@@ -218,7 +160,7 @@ function PaletteBody({
 	};
 	return (
 		<Command
-			className={className}
+			className={cn("min-w-0 overflow-hidden", className)}
 			onValueChange={onHighlight ? handleHighlight : undefined}
 			shouldFilter={shouldFilter}
 			value={onHighlight ? highlighted : undefined}
@@ -231,27 +173,12 @@ function PaletteBody({
 				value={search}
 			/>
 			{tabs && tabs.length > 0 ? (
-				<div className="px-3 pb-2">
-					<Tabs
-						className="min-w-0"
-						onValueChange={(value) => onTabChange?.(String(value))}
-						value={selectedTab}
-					>
-						<TabsList
-							aria-label="Search result types"
-							className="w-full flex-nowrap"
-							persistLayout={false}
-							variant="muted-pills"
-						>
-							{tabs.map((tab) => (
-								<TabsTrigger className="shrink-0" key={tab.id} value={tab.id}>
-									{tab.icon ? <HugeiconsIcon icon={tab.icon} /> : null}
-									{tab.label}
-								</TabsTrigger>
-							))}
-						</TabsList>
-					</Tabs>
-				</div>
+				<PaletteFilters
+					onTabChange={onTabChange}
+					primaryTabIds={primaryTabIds}
+					selectedTab={selectedTab}
+					tabs={tabs}
+				/>
 			) : null}
 			<CommandList>
 				<CommandEmpty>{localizedEmptyLabel}</CommandEmpty>
@@ -312,15 +239,13 @@ export function CommandPalette({
 		composeContent === undefined ? (
 			<PaletteBody autoFocus={autoFocus} {...paletteProps} />
 		) : (
-			<div className="relative w-full" onKeyDown={handleModeKeyDown}>
-				<div className="absolute -top-14 left-1/2 z-50 -translate-x-1/2 max-sm:static max-sm:mb-3 max-sm:flex max-sm:w-full max-sm:translate-x-0 max-sm:justify-center">
-					<PaletteModeSwitch
-						active={activeMode}
-						composeTabId={`${modeId}-compose`}
-						onChange={setActiveMode}
-						searchTabId={`${modeId}-search`}
-					/>
-				</div>
+			<div className="w-full min-w-0" onKeyDown={handleModeKeyDown}>
+				<PaletteModeSwitch
+					active={activeMode}
+					composeTabId={`${modeId}-compose`}
+					onChange={setActiveMode}
+					searchTabId={`${modeId}-search`}
+				/>
 				<div
 					aria-labelledby={`${modeId}-${activeMode}`}
 					className="w-full"
@@ -341,6 +266,9 @@ export function CommandPalette({
 	}
 	return (
 		<CommandDialog
+			// The palette's own frame: 640px wide (never wider than the window
+			// less 16px a side), a 14px menu radius, and rows clipped to it.
+			className="overflow-hidden! w-[min(640px,100vw-32px)] max-w-none! rounded-xl! sm:max-w-none!"
 			layout={dialogLayout}
 			onOpenChange={onOpenChange}
 			open={open}

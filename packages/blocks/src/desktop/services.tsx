@@ -8,72 +8,27 @@
 // the real desktop too.
 
 import {
-	Alert01Icon,
-	AlertCircleIcon,
 	CancelCircleIcon,
 	CheckmarkCircle01Icon,
-	CircleArrowUp01Icon,
-	CircleIcon,
-	Download01Icon,
 	Loading01Icon,
-	MinusSignIcon,
 	PlayIcon,
-	RotateClockwiseIcon,
-	Shield01Icon,
 	Square01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
-import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
+import { DockerRow, GatewayRow, SandboxRow } from "./services-runtime-rows.tsx";
+import { SidecarRowView } from "./services-sidecar-row.tsx";
+import type { ServicesViewProps } from "./services-types.ts";
 
-/** A sidecar row as the view needs it — the container resolves install state. */
-export interface ServiceRow {
-	deprecated?: boolean;
-	description?: string | null;
-	displayName: string;
-	installedVersion?: string | null;
-	installState: "installed" | "installing" | "failed" | "available" | string;
-	latestVersion?: string | null;
-	name: string;
-	/** Action label currently in flight for this row (install/start/stop/restart). */
-	pending?: string | null;
-	running: boolean;
-}
-
-export interface DependencyRow {
-	installed: boolean;
-	name: string;
-}
-
-export interface SandboxView {
-	available: boolean;
-	docker?: { available: boolean; reason?: string | null } | null;
-	enabled: boolean;
-}
-
-export interface ServicesViewProps {
-	agents?: ServiceRow[];
-	bulkPending?: "start" | "stop" | "deps" | null;
-	dependencies?: DependencyRow[];
-	error?: string | null;
-	gatewayPending?: "start" | "stop" | null;
-	gatewayRunning?: boolean | null;
-	loading?: boolean;
-	onGatewayStart?: () => void;
-	onGatewayStop?: () => void;
-	onInstall?: (name: string) => void;
-	onInstallMissing?: () => void;
-	onRestart?: (name: string) => void;
-	onStart?: (name: string) => void;
-	onStartAll?: () => void;
-	onStop?: (name: string) => void;
-	onStopAll?: () => void;
-	onToggleSandbox?: () => void;
-	sandbox?: SandboxView | null;
-	sandboxPending?: boolean;
-	tools?: ServiceRow[];
-}
+export { SidecarRowView } from "./services-sidecar-row.tsx";
+export type {
+	DependencyRow,
+	SandboxView,
+	ServiceRow,
+	ServicesViewProps,
+} from "./services-types.ts";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
 	return (
@@ -84,418 +39,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 				</span>
 			</div>
 			<div className="mx-2 overflow-hidden rounded-lg border">{children}</div>
-		</div>
-	);
-}
-
-function StatusDot({
-	installing,
-	installed,
-	running,
-}: {
-	installing: boolean;
-	installed: boolean;
-	running: boolean;
-}) {
-	if (installing) {
-		return (
-			<HugeiconsIcon
-				className="h-3.5 w-3.5 animate-spin text-muted-foreground"
-				icon={Loading01Icon}
-			/>
-		);
-	}
-	if (!installed) {
-		return (
-			<HugeiconsIcon
-				className="h-3.5 w-3.5 text-muted-foreground/50"
-				icon={MinusSignIcon}
-			/>
-		);
-	}
-	if (running) {
-		return (
-			<HugeiconsIcon
-				className="h-3 w-3 fill-success text-status-success"
-				icon={CircleIcon}
-			/>
-		);
-	}
-	return (
-		<HugeiconsIcon
-			className="h-3 w-3 text-muted-foreground"
-			icon={CircleIcon}
-		/>
-	);
-}
-
-/** A single sidecar row (mirrors the live `SidecarRow` component). */
-export function SidecarRowView({
-	entry,
-	onInstall,
-	onStart,
-	onStop,
-	onRestart,
-}: {
-	entry: ServiceRow;
-	onInstall?: (name: string) => void;
-	onStart?: (name: string) => void;
-	onStop?: (name: string) => void;
-	onRestart?: (name: string) => void;
-}) {
-	const pending = entry.pending ?? null;
-	const isInstalled = entry.installState === "installed";
-	const isInstalling =
-		entry.installState === "installing" || pending === "install";
-	const isFailed = entry.installState === "failed";
-	const hasUpdate =
-		isInstalled &&
-		entry.latestVersion != null &&
-		entry.installedVersion != null &&
-		entry.latestVersion !== entry.installedVersion &&
-		!entry.deprecated;
-
-	return (
-		<div className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40">
-			<div className="flex w-4 flex-shrink-0 items-center justify-center">
-				<StatusDot
-					installed={isInstalled}
-					installing={isInstalling}
-					running={entry.running}
-				/>
-			</div>
-
-			<div className="min-w-0 flex-1">
-				<div className="flex items-center gap-2">
-					<span
-						className={cn(
-							"truncate font-medium text-sm",
-							!isInstalled && "text-muted-foreground"
-						)}
-						title={entry.displayName}
-					>
-						{entry.displayName}
-					</span>
-					{entry.deprecated ? (
-						<span className="flex items-center gap-1 font-medium text-status-warning text-xs">
-							<HugeiconsIcon className="h-3 w-3" icon={Alert01Icon} />
-							Deprecated
-						</span>
-					) : null}
-				</div>
-				{entry.description ? (
-					<p
-						className="truncate text-muted-foreground text-xs"
-						title={entry.description}
-					>
-						{entry.description}
-					</p>
-				) : null}
-			</div>
-
-			<div className="flex flex-shrink-0 items-center gap-1.5">
-				{isInstalling ? (
-					<span className="text-muted-foreground text-xs">Installing…</span>
-				) : isFailed ? (
-					<Button
-						appearance="service-retry"
-						disabled={pending !== null}
-						onClick={() => onInstall?.(entry.name)}
-						size="sm"
-						variant="ghost"
-					>
-						<HugeiconsIcon
-							className="mr-1 h-3.5 w-3.5"
-							icon={AlertCircleIcon}
-						/>
-						Retry
-					</Button>
-				) : isInstalled || entry.deprecated ? (
-					isInstalled ? (
-						<>
-							{hasUpdate ? (
-								<Button
-									appearance="service-update"
-									disabled={pending !== null}
-									onClick={() => onInstall?.(entry.name)}
-									size="sm"
-									variant="ghost"
-								>
-									<HugeiconsIcon
-										className="mr-1 h-3.5 w-3.5"
-										icon={CircleArrowUp01Icon}
-									/>
-									Update
-								</Button>
-							) : null}
-							{entry.running ? (
-								<>
-									<Button
-										appearance="service-action"
-										disabled={pending !== null}
-										onClick={() => onStop?.(entry.name)}
-										size="sm"
-										variant="ghost"
-									>
-										<HugeiconsIcon
-											className="mr-1 h-3.5 w-3.5"
-											icon={Square01Icon}
-										/>
-										Stop
-									</Button>
-									<Button
-										appearance="service-action"
-										disabled={pending !== null}
-										onClick={() => onRestart?.(entry.name)}
-										size="sm"
-										variant="ghost"
-									>
-										<HugeiconsIcon
-											className="mr-1 h-3.5 w-3.5"
-											icon={RotateClockwiseIcon}
-										/>
-										Restart
-									</Button>
-								</>
-							) : (
-								<Button
-									appearance="service-action"
-									disabled={pending !== null}
-									onClick={() => onStart?.(entry.name)}
-									size="sm"
-									variant="ghost"
-								>
-									<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={PlayIcon} />
-									Start
-								</Button>
-							)}
-						</>
-					) : null
-				) : (
-					<Button
-						appearance="service-action"
-						disabled={pending !== null}
-						onClick={() => onInstall?.(entry.name)}
-						size="sm"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={Download01Icon} />
-						Install
-					</Button>
-				)}
-			</div>
-		</div>
-	);
-}
-
-function GatewayRow({
-	running,
-	pending,
-	onStart,
-	onStop,
-}: {
-	running: boolean | null | undefined;
-	pending: "start" | "stop" | null | undefined;
-	onStart?: () => void;
-	onStop?: () => void;
-}) {
-	return (
-		<div className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40">
-			<div className="flex w-4 flex-shrink-0 items-center justify-center">
-				{pending == null ? (
-					running ? (
-						<HugeiconsIcon
-							className="h-3 w-3 fill-success text-status-success"
-							icon={CircleIcon}
-						/>
-					) : (
-						<HugeiconsIcon
-							className="h-3 w-3 text-muted-foreground"
-							icon={CircleIcon}
-						/>
-					)
-				) : (
-					<HugeiconsIcon
-						className="h-3.5 w-3.5 animate-spin text-muted-foreground"
-						icon={Loading01Icon}
-					/>
-				)}
-			</div>
-			<div className="min-w-0 flex-1">
-				<div className="flex items-center gap-2">
-					<HugeiconsIcon
-						className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-						icon={Shield01Icon}
-					/>
-					<span className="truncate font-medium text-sm">Gateway</span>
-				</div>
-				<p className="truncate text-muted-foreground text-xs">
-					{running
-						? "Running — routing, firewall, and budget controls active"
-						: "Not running — start to enable model routing and guardrails"}
-				</p>
-			</div>
-			<div className="flex flex-shrink-0 items-center gap-1.5">
-				{running ? (
-					<>
-						<Button
-							appearance="service-action"
-							disabled={pending != null}
-							onClick={onStop}
-							size="sm"
-							variant="ghost"
-						>
-							<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={Square01Icon} />
-							Stop
-						</Button>
-						<Button
-							appearance="service-action"
-							disabled={pending != null}
-							onClick={onStart}
-							size="sm"
-							variant="ghost"
-						>
-							<HugeiconsIcon
-								className="mr-1 h-3.5 w-3.5"
-								icon={RotateClockwiseIcon}
-							/>
-							Restart
-						</Button>
-					</>
-				) : (
-					<Button
-						appearance="service-action"
-						disabled={pending != null}
-						onClick={onStart}
-						size="sm"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={PlayIcon} />
-						Start
-					</Button>
-				)}
-			</div>
-		</div>
-	);
-}
-
-function SandboxRow({
-	sandbox,
-	pending,
-	onToggle,
-}: {
-	sandbox: SandboxView | null | undefined;
-	pending?: boolean;
-	onToggle?: () => void;
-}) {
-	const available = sandbox?.available ?? false;
-	const enabled = sandbox?.enabled ?? false;
-
-	return (
-		<div className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40">
-			<div className="flex w-4 flex-shrink-0 items-center justify-center">
-				{pending ? (
-					<HugeiconsIcon
-						className="h-3.5 w-3.5 animate-spin text-muted-foreground"
-						icon={Loading01Icon}
-					/>
-				) : enabled ? (
-					<HugeiconsIcon
-						className="h-3 w-3 fill-success text-status-success"
-						icon={CircleIcon}
-					/>
-				) : (
-					<HugeiconsIcon
-						className="h-3 w-3 text-muted-foreground"
-						icon={CircleIcon}
-					/>
-				)}
-			</div>
-			<div className="min-w-0 flex-1">
-				<span className="truncate font-medium text-sm">Wasmtime sandbox</span>
-				<p className="truncate text-muted-foreground text-xs">
-					{available
-						? "Built-in wasmtime — run WASM/WASI modules with default-deny capabilities"
-						: "Not compiled in — rebuild ryu-core with sandbox-wasmtime feature to enable"}
-				</p>
-			</div>
-			<div className="flex flex-shrink-0 items-center gap-1.5">
-				{available ? (
-					<Button
-						appearance="service-action"
-						disabled={pending}
-						onClick={onToggle}
-						size="sm"
-						variant="ghost"
-					>
-						{enabled ? (
-							<>
-								<HugeiconsIcon
-									className="mr-1 h-3.5 w-3.5"
-									icon={Square01Icon}
-								/>
-								Disable
-							</>
-						) : (
-							<>
-								<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={PlayIcon} />
-								Enable
-							</>
-						)}
-					</Button>
-				) : (
-					<span className="text-muted-foreground text-xs">Unavailable</span>
-				)}
-			</div>
-		</div>
-	);
-}
-
-function DockerRow({ sandbox }: { sandbox: SandboxView | null | undefined }) {
-	const docker = sandbox?.docker;
-	const available = docker?.available ?? false;
-	const reason = docker?.reason ?? null;
-
-	let description: string;
-	if (available) {
-		description =
-			"Docker daemon detected - opt-in backend for long-lived workspaces and native binaries";
-	} else if (reason) {
-		description = `Unavailable: ${reason}`;
-	} else {
-		description =
-			"Docker daemon not detected - install Docker Desktop to enable this backend";
-	}
-
-	return (
-		<div className="flex items-center gap-3 border-t px-4 py-2.5 transition-colors hover:bg-muted/40">
-			<div className="flex w-4 flex-shrink-0 items-center justify-center">
-				{available ? (
-					<HugeiconsIcon
-						className="h-3 w-3 fill-success text-status-success"
-						icon={CircleIcon}
-					/>
-				) : (
-					<HugeiconsIcon
-						className="h-3 w-3 text-muted-foreground"
-						icon={CircleIcon}
-					/>
-				)}
-			</div>
-			<div className="min-w-0 flex-1">
-				<span className="truncate font-medium text-sm">Docker backend</span>
-				<p
-					className="truncate text-muted-foreground text-xs"
-					title={description}
-				>
-					{description}
-				</p>
-			</div>
-			<div className="flex flex-shrink-0 items-center gap-1.5">
-				<span className="text-muted-foreground text-xs">
-					{available ? "Detected" : "Not detected"}
-				</span>
-			</div>
 		</div>
 	);
 }
@@ -522,6 +65,7 @@ export function ServicesView({
 	onStop,
 	onRestart,
 }: ServicesViewProps) {
+	const tl = useLiteralMessages();
 	const hasMissingDeps = dependencies.some((d) => !d.installed);
 
 	return (
@@ -538,7 +82,7 @@ export function ServicesView({
 						{bulkPending !== "start" && (
 							<HugeiconsIcon className="mr-1.5 h-3.5 w-3.5" icon={PlayIcon} />
 						)}
-						Start all
+						{tl("Start all")}
 					</Button>
 					<Button
 						disabled={bulkPending != null && bulkPending !== "stop"}
@@ -553,7 +97,7 @@ export function ServicesView({
 								icon={Square01Icon}
 							/>
 						)}
-						Stop all
+						{tl("Stop all")}
 					</Button>
 				</div>
 			</div>

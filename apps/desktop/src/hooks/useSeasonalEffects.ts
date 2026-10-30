@@ -1,7 +1,8 @@
 // User settings + resolution for the seasonal titlebar effects.
 //
 // Three inputs decide what falls:
-//   1. "Seasonal effects" — the on/off switch (persisted, default ON).
+//   1. "Seasonal effects" — the on/off switch (persisted, default OFF: the
+//      chrome stays quiet unless the user opts in from Appearance).
 //   2. "Season" — "auto" (whatever the calendar says today, the default) or a
 //      pinned season, for anyone who wants confetti in July (persisted).
 //   3. Preview — a transient override the Appearance tab sets for a few
@@ -19,7 +20,7 @@ import {
 	SEASONS,
 	type SeasonalTheme,
 	type SeasonConfig,
-} from "@/src/components/layout/SeasonalEffects.tsx";
+} from "@/src/components/shell/seasonal-config.ts";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import { usePrefersReducedMotion } from "@/src/hooks/usePrefersReducedMotion.ts";
 
@@ -29,7 +30,7 @@ export const SEASONAL_THEME_KEY = "ryu:seasonal-theme";
 /** Which season to show — "auto" follows the calendar. */
 export type SeasonalThemeSetting = "auto" | SeasonalTheme;
 
-export const DEFAULT_SEASONAL_EFFECTS = true;
+export const DEFAULT_SEASONAL_EFFECTS = false;
 export const DEFAULT_SEASONAL_THEME: SeasonalThemeSetting = "auto";
 
 /** How long a preview runs before it releases back to the real setting. */

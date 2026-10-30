@@ -10,7 +10,7 @@ import {
 } from "@ryu/ui/components/dialog.tsx";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
 	useEffect,
 	useLayoutEffect,
@@ -213,7 +213,7 @@ export function MediaPipDock() {
 				<motion.section
 					animate={{ opacity: 1, y: 0 }}
 					aria-label="Live media"
-					className="fixed right-4 bottom-4 z-[70] w-64 overflow-hidden rounded-2xl border border-border/70 bg-background/95 shadow-2xl backdrop-blur-xl"
+					className="fixed right-4 bottom-4 z-[70] w-64 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
 					data-media-pip-dock="true"
 					exit={{ opacity: 0, y: 18 }}
 					initial={{ opacity: 0, y: 18 }}
@@ -251,12 +251,12 @@ export function MediaPipDock() {
 						)}
 						<div className="scrim-t pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between px-3 pt-4 pb-2 text-white">
 							<span
-								className="type-caption truncate"
+								className="truncate text-xs"
 								title={sourceKindLabel(source)}
 							>
 								{sourceKindLabel(source)}
 							</span>
-							<span className="size-1.5 shrink-0 rounded-full bg-success motion-safe:animate-pulse" />
+							<span className="size-1.5 shrink-0 rounded-full bg-status-success" />
 						</div>
 					</button>
 					<div className="flex items-center gap-2 px-3 py-2.5">
@@ -267,7 +267,7 @@ export function MediaPipDock() {
 							>
 								{source.title}
 							</p>
-							<p className="type-caption truncate text-muted-foreground">
+							<p className="truncate text-muted-foreground text-xs">
 								{isVideo
 									? "Recording is ready"
 									: source.kind === "recording"
@@ -288,7 +288,7 @@ export function MediaPipDock() {
 						) : null}
 					</div>
 					{pipError && (
-						<p className="type-compact px-3 pb-2 text-status-destructive">
+						<p className="px-3 pb-2 text-status-destructive text-xs">
 							{pipError}
 						</p>
 					)}
@@ -420,20 +420,20 @@ export function MediaPipWindow() {
 
 	return (
 		<div
-			className="flex h-screen min-h-0 flex-col overflow-hidden rounded-2xl border border-border/70 bg-background text-foreground shadow-2xl"
+			className="flex h-screen min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
 			data-media-pip-window="true"
 		>
 			<header
-				className="flex h-9 shrink-0 items-center gap-2 border-border/60 border-b bg-sidebar/90 px-3"
+				className="flex h-9 shrink-0 items-center gap-2 border-border border-b bg-sidebar/90 px-3"
 				data-tauri-drag-region
 			>
-				<span className="size-1.5 rounded-full bg-success motion-safe:animate-pulse" />
+				<span className="size-1.5 rounded-full bg-status-success" />
 				<span className="min-w-0 flex-1 truncate font-medium text-xs">
 					{source?.title ?? "Live media"}
 				</span>
 				<button
 					aria-label="Close picture in picture"
-					className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+					className="grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
 					onClick={close}
 					type="button"
 				>

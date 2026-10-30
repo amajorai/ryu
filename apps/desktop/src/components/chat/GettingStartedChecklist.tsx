@@ -17,8 +17,8 @@ import type { ResolvedQuest } from "@/src/hooks/useGettingStarted.ts";
 function StatusIcon({ quest }: { quest: ResolvedQuest }) {
 	if (quest.status === "completed") {
 		return (
-			<div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-success-foreground shadow-sm">
-				<CheckIcon className="size-2.5 drop-shadow-sm" />
+			<div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-success-foreground">
+				<CheckIcon className="size-3" />
 			</div>
 		);
 	}
@@ -28,7 +28,7 @@ function StatusIcon({ quest }: { quest: ResolvedQuest }) {
 			className={cn(
 				"flex size-5 shrink-0 items-center justify-center rounded-full",
 				isCurrent
-					? "bg-primary/15 text-primary"
+					? "bg-accent text-foreground"
 					: "bg-muted text-muted-foreground"
 			)}
 		>
@@ -61,9 +61,9 @@ export const GettingStartedChecklist = memo(function GettingStartedChecklist({
 					title: (
 						<span
 							className={cn(
-								done && "text-foreground/50 line-through",
+								done && "text-muted-foreground line-through",
 								quest.status === "in_progress" && "text-foreground",
-								quest.status === "pending" && "text-foreground/80"
+								quest.status === "pending" && "text-foreground"
 							)}
 						>
 							{quest.content}
@@ -95,7 +95,7 @@ export const GettingStartedChecklist = memo(function GettingStartedChecklist({
 
 	return (
 		<BouncyAccordion
-			classNames={{ item: "border border-border/60", title: "truncate" }}
+			classNames={{ item: "border border-border", title: "truncate" }}
 			defaultValue={nextId}
 			items={items}
 		/>

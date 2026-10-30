@@ -1,23 +1,9 @@
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
-import {
-	type KeyboardEvent,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import { GamePlate, gameTitleHeight } from "./game-hud.tsx";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { gameTitleHeight } from "./game-hud.tsx";
 import { GameShell, gameSheetCover } from "./game-shell.tsx";
-import {
-	actOverlays,
-	actSummaryLine,
-	actTotals,
-	overlayBudget,
-	stageAgents,
-	youSpotSlots,
-} from "./game3d-acts.ts";
+import { actSummaryLine } from "./game3d-acts.ts";
 import { islandFor } from "./game3d-ground.tsx";
 import {
 	IsoStage,
@@ -29,27 +15,25 @@ import { useVillagerLooks } from "./game3d-villager.tsx";
 import {
 	ActAnnouncer,
 	AskQueueList,
-	askOwners,
 	BlindSpotCaption,
 	NeedYouButton,
-	openQueue,
 	QueueButton,
 	useActCards,
 } from "./interface-ask-card.tsx";
-import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useActAnnouncement, useActClockOptions, useActs } from "./use-acts.ts";
-import type { WorkersActScene } from "./workers-diorama.tsx";
 import { OFFICE_RIM, WorkersDioramaScene } from "./workers-diorama.tsx";
 import { useElementSize } from "./workers-hooks.ts";
 import { WorkersHud } from "./workers-hud.tsx";
+import { useWorkersActScene } from "./workers-interface-acts.ts";
+import { useWorkersEscape } from "./workers-interface-escape.ts";
+import { EmptyOffice, LoadingOffice } from "./workers-interface-loading.tsx";
 import { WorkersList } from "./workers-list.tsx";
 import {
 	ACT_SPREAD,
 	actWorkers,
 	buildWorkers,
 	layoutOffice,
-	plural,
 	workerIndexForThread,
 	workerTotals,
 	workspaceName,
@@ -60,31 +44,6 @@ import { WorkersPanel, type WorkersSheetView } from "./workers-panel.tsx";
 type Sheet = { kind: "new" } | { kind: "worker"; workerId: string };
 
 const STAGE_FALLBACK = { height: 808, width: 1280 };
-
-function LoadingOffice() {
-	return (
-		<div className="flex w-full flex-wrap content-center items-start justify-center gap-6 p-8">
-			{["a", "b", "c", "d", "e", "f"].map((key) => (
-				<div className="flex w-60 flex-col gap-3" key={key}>
-					<Skeleton className="h-32 w-full rounded-lg" />
-					<Skeleton className="h-4 w-24" />
-				</div>
-			))}
-			<span className="sr-only">Loading the office</span>
-		</div>
-	);
-}
-
-/** Escape inside a text field belongs to the field. */
-function escapeIsFree(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return true;
-	}
-	return (
-		!target.isContentEditable &&
-		target.closest("input, textarea, select, [contenteditable='true']") === null
-	);
-}
 
 /**
  * Workers: the workspace as a cosy open-plan office diorama on an island,
@@ -104,6 +63,7 @@ export function WorkersInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["workers"]>) {
+	const tl = useLiteralMessages();
 	const baseWorkers = useMemo(
 		() => (loading ? [] : buildWorkers(snapshot)),
 		[loading, snapshot]
@@ -157,59 +117,22 @@ export function WorkersInterface({
 		snapshot,
 	});
 	const { openAsk, openBlocker } = cards;
-	const queueOpener = useRef<(() => void) | null>(null);
-	const slots = useMemo(() => youSpotSlots(acts, unowned), [acts, unowned]);
-	const tally = actTotals(snapshot, acts);
-	const owners = useMemo(() => askOwners(acts), [acts]);
-	const budget = overlayBudget(size.width, { domTargets: true });
-	const staged = useMemo(
-		() => stageAgents(acts, Number.POSITIVE_INFINITY),
-		[acts]
+	const { actScene, onAsk, onBlocker, queueOpener, tally } = useWorkersActScene(
+		{
+			acts,
+			actsOn,
+			clock,
+			nowMs,
+			openAsk,
+			openBlocker,
+			params,
+			privacy,
+			reduced,
+			snapshot,
+			unowned,
+			width: size.width,
+		}
 	);
-	const cast = staged.onStage;
-	const shownKey = [
-		...budget.fill(
-			actOverlays(
-				cast,
-				slots,
-				staged.offStage,
-				cast.find((act) => act.act === "working")?.agentId ?? null,
-				{ reduced }
-			)
-		),
-	]
-		.sort()
-		.join("|");
-	const shown = useMemo(() => new Set(shownKey.split("|")), [shownKey]);
-	const onAsk = (askId: string, opener?: HTMLElement) => openAsk(askId, opener);
-	const onBlocker = (
-		threadId: string,
-		agentName: string,
-		opener?: HTMLElement
-	) => openBlocker(threadId, agentName, opener);
-	const actScene: WorkersActScene | null = actsOn
-		? {
-				acts,
-				handlers: {
-					clock,
-					iconOnly: budget.iconOnly,
-					nowMs,
-					onAsk: (askId) => openAsk(askId),
-					onBlocker: (threadId, agentName) => openBlocker(threadId, agentName),
-					onQueue: () => openQueue(queueOpener),
-					privacy,
-					reduced,
-					shown,
-					snapshot,
-				},
-				offStage: staged.offStage,
-				onAsk: (askId) => openAsk(askId),
-				onStage: cast,
-				owners,
-				screenWords: params?.screenWords ?? "step",
-				slots,
-			}
-		: null;
 
 	const threadOpen = threadView !== null && threadView !== undefined;
 	const sheetWorker =
@@ -278,9 +201,14 @@ export function WorkersInterface({
 		const previous = lastWaiting.current;
 		lastWaiting.current = waiting;
 		if (previous !== null && waiting !== null && waiting > previous) {
-			setAnnouncement(`${plural(waiting, "worker")} waiting on you`);
+			setAnnouncement(
+				tl(
+					"{waiting, plural, one {{count} worker} other {{count} workers}} waiting on you",
+					{ count: String(waiting), waiting }
+				)
+			);
 		}
-	}, [waiting]);
+	}, [tl, waiting]);
 
 	/** A worker's name plate: their desk, with their tasks and a composer. */
 	const openWorker = (workerId: string) => {
@@ -333,7 +261,9 @@ export function WorkersInterface({
 		const worker = workers.find((item) => item.id === input.agentId);
 		if (worker) {
 			setSheet({ kind: "worker", workerId: worker.id });
-			setAnnouncement(`Started a task on ${worker.name}'s computer`);
+			setAnnouncement(
+				tl("Started a task on {name}'s computer", { name: worker.name })
+			);
 		}
 		focusTarget.current = "sheet";
 		port.startThread(
@@ -355,46 +285,20 @@ export function WorkersInterface({
 		}
 		return false;
 	};
-	const stepBackRef = useRef(stepBack);
-	stepBackRef.current = stepBack;
-
-	const onRootKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (
-			event.key !== "Escape" ||
-			event.defaultPrevented ||
-			!escapeIsFree(event.target)
-		) {
-			return;
-		}
-		if (stepBackRef.current()) {
-			event.preventDefault();
-		}
-	};
-	useEffect(() => {
-		const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
-			if (
-				event.key !== "Escape" ||
-				event.defaultPrevented ||
-				event.target !== document.body
-			) {
-				return;
-			}
-			// A host page shown over the workers keeps its own Escape.
-			if (isInterfaceCovered(stageRef.current)) {
-				return;
-			}
-			if (stepBackRef.current()) {
-				event.preventDefault();
-			}
-		};
-		document.addEventListener("keydown", onDocumentKeyDown);
-		return () => document.removeEventListener("keydown", onDocumentKeyDown);
-	}, []);
+	const onRootKeyDown = useWorkersEscape(stepBack, stageRef);
 
 	const empty = !loading && workers.length === 0;
 	const summary = actsOn
 		? `Office: ${actSummaryLine(tally)}.`
-		: `Office: ${plural(totals.workers, "worker")}, ${totals.working} working, ${totals.waitingOnYou} waiting on you.`;
+		: tl(
+				"Office: {workers, plural, one {{workerCount} worker} other {{workerCount} workers}}, {working} working, {waitingOnYou} waiting on you.",
+				{
+					waitingOnYou: String(totals.waitingOnYou),
+					workerCount: String(totals.workers),
+					workers: totals.workers,
+					working: String(totals.working),
+				}
+			);
 	const hud = (
 		<WorkersHud
 			acts={
@@ -557,19 +461,7 @@ export function WorkersInterface({
 						</IsoStage>
 					</>
 				)}
-				{empty ? (
-					<div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
-						<GamePlate className="pointer-events-auto flex max-w-sm flex-col gap-1.5 px-5 py-4 text-center">
-							<h2 className="gk-display text-[22px] leading-7">
-								No workers yet
-							</h2>
-							<p className="text-pretty font-medium text-(--gk-ink-muted) text-[15px] leading-6">
-								Each agent gets a desk here. Start a task and its computer
-								lights up.
-							</p>
-						</GamePlate>
-					</div>
-				) : null}
+				{empty ? <EmptyOffice /> : null}
 			</div>
 			<p aria-live="polite" className="sr-only">
 				{announcement}

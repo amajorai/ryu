@@ -2,17 +2,18 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch,
 	NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
 const { QueryClient, QueryClientProvider } = await import(
 	"@tanstack/react-query"
 );
-const { PinnedSummaryPanel } = await import(
-	"./PinnedSummaryPanel.tsx"
-);
+const { PinnedSummaryPanel } = await import("./PinnedSummaryPanel.tsx");
 let root: Root,
 	container: HTMLDivElement,
 	server: ReturnType<typeof Bun.serve>,
@@ -114,10 +115,11 @@ beforeEach(() => {
 				url.pathname === "/api/background/processes" &&
 				url.search === "?running_only=true"
 			) {
-				if (identity === "b" && holdB)
+				if (identity === "b" && holdB) {
 					await new Promise<void>((resolve) => {
 						releaseB = resolve;
 					});
+				}
 				return NativeResponse.json({
 					processes: removed.has(identity)
 						? []
@@ -129,10 +131,11 @@ beforeEach(() => {
 				url.pathname === "/api/background/processes/same%2Fprocess/stop" &&
 				JSON.stringify(body) === "{}"
 			) {
-				if (identity === "a" && holdAStop)
+				if (identity === "a" && holdAStop) {
 					await new Promise<void>((resolve) => {
 						releaseAStop = resolve;
 					});
+				}
 				if (refuse) {
 					refuse = false;
 					return NativeResponse.json({ error: "Denied Stop" }, { status: 503 });
@@ -176,9 +179,9 @@ async function render() {
 			<QueryClientProvider client={client}>
 				<PinnedSummaryPanel
 					conversationId={null}
+					cowork={{ chatStatus: "ready", messages: [], runId: null, target }}
 					folder={null}
 					target={target}
-					cowork={{ chatStatus: "ready", messages: [], runId: null, target }}
 				/>
 			</QueryClientProvider>
 		)
@@ -187,11 +190,12 @@ async function render() {
 async function until(check: () => boolean) {
 	const end = Date.now() + 3000;
 	while (!check()) {
-		if (Date.now() > end)
+		if (Date.now() > end) {
 			throw Error(
 				"Actual process UI did not settle " +
 					JSON.stringify({ calls, unexpected, text: container.textContent })
 			);
+		}
 		await act(async () => {
 			await Bun.sleep(10);
 		});
@@ -204,7 +208,9 @@ function button(name: string) {
 		(b) =>
 			b.getAttribute("aria-label") === name || b.textContent?.trim() === name
 	);
-	if (!result) throw Error("Missing real button " + name);
+	if (!result) {
+		throw Error("Missing real button " + name);
+	}
 	return result;
 }
 async function open() {
@@ -216,7 +222,9 @@ async function open() {
 	const section = [
 		...container.querySelectorAll<HTMLButtonElement>("button"),
 	].find((b) => b.textContent?.startsWith("Background processes"));
-	if (!section) throw Error("No real process section");
+	if (!section) {
+		throw Error("No real process section");
+	}
 	await act(async () => section.click());
 	await until(
 		() => container.textContent?.includes("Private worker A") === true
@@ -256,7 +264,7 @@ test("actual Stop refuses without removing work, retries exact authenticated req
 	expect(container.textContent).not.toContain("Private worker A");
 	expect(unexpected).toEqual([]);
 });
-for (const field of ["token", "userJwt"] as const)
+for (const field of ["token", "userJwt"] as const) {
 	test(`same-URL ${field} rotation never exposes actionable cached A processes during B read`, async () => {
 		await render();
 		await open();
@@ -282,8 +290,9 @@ for (const field of ["token", "userJwt"] as const)
 		await until(() => container.textContent?.includes("Worker B") === true);
 		expect(unexpected).toEqual([]);
 	});
+}
 
-for (const status of [200, 503])
+for (const status of [200, 503]) {
 	test(`held A Stop ${status} acknowledgement cannot alter B process list or errors`, async () => {
 		await render();
 		await open();
@@ -322,6 +331,7 @@ for (const status of [200, 503])
 		expect(removed.has("b")).toBe(false);
 		expect(unexpected).toEqual([]);
 	});
+}
 test("same-turn repeated Stop click sends one held request and reads its acknowledged removal", async () => {
 	await render();
 	await open();
@@ -341,7 +351,7 @@ test("same-turn repeated Stop click sends one held request and reads its acknowl
 	expect(unexpected).toEqual([]);
 });
 
-for (const status of [200, 503])
+for (const status of [200, 503]) {
 	test(`returning A cannot duplicate held Stop and reconciles its ${status} acknowledgement before a fresh action`, async () => {
 		await render();
 		await open();
@@ -386,3 +396,4 @@ for (const status of [200, 503])
 		expect(removed.has("b")).toBe(false);
 		expect(unexpected).toEqual([]);
 	});
+}

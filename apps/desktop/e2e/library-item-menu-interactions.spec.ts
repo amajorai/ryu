@@ -436,7 +436,8 @@ test("delete cancel and failed confirmation preserve the chat; retry deletes it 
 	expect(deleteRequests).toHaveLength(2);
 	expect(deleteRequests.map((request) => request.body)).toEqual([null, null]);
 	await page.reload();
-	await expect(page.getByText("No chats yet", { exact: true })).toBeVisible();
+	// An empty Chats group collapses to its label: no placeholder row.
+	await expect(page.getByTestId(`sidebar-chat-row-${CHAT_ID}`)).toHaveCount(0);
 });
 
 test("system Space deletion stays disabled with its reason available in the Library card menu", async ({

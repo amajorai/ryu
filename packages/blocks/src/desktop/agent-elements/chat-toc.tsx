@@ -155,7 +155,7 @@ export const ChatToc = memo(function ChatToc({
 										) : null}
 										<div className="min-w-0 flex-1">
 											{item.agentName ? (
-												<p className="type-caption mb-0.5 text-muted-foreground">
+												<p className="mb-0.5 text-muted-foreground text-xs">
 													{item.agentName}
 												</p>
 											) : null}
@@ -168,8 +168,8 @@ export const ChatToc = memo(function ChatToc({
 									</div>
 								)}
 								{item.files && item.files.length > 0 ? (
-									<div className="border-border/60 border-t pt-2">
-										<p className="type-caption mb-1.5 text-muted-foreground">
+									<div className="border-border border-t pt-2">
+										<p className="mb-1.5 text-muted-foreground text-xs">
 											Files changed
 										</p>
 										<ul className="flex flex-col gap-1">
@@ -178,7 +178,7 @@ export const ChatToc = memo(function ChatToc({
 													className="flex min-w-0 items-baseline justify-between gap-2 text-xs"
 													key={file.name}
 												>
-													<span className="type-caption flex min-w-0 items-center gap-1.5 truncate font-mono">
+													<span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-xs">
 														<FileTypeIcon
 															className="size-3.5"
 															path={file.name}
@@ -186,7 +186,7 @@ export const ChatToc = memo(function ChatToc({
 														{file.name}
 													</span>
 													{file.stats ? (
-														<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
+														<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 															{file.stats}
 														</span>
 													) : null}
@@ -194,7 +194,7 @@ export const ChatToc = memo(function ChatToc({
 											))}
 										</ul>
 										{extraFiles > 0 ? (
-											<p className="type-compact mt-1 text-muted-foreground">
+											<p className="mt-1 text-muted-foreground text-xs">
 												{tl("+{extraFiles} more", {
 													extraFiles: String(extraFiles),
 												})}

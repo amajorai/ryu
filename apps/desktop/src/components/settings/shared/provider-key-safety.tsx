@@ -32,14 +32,15 @@ function openLink(url: string) {
 	Promise.resolve(openExternal(url)).catch(() => undefined);
 }
 
-function DocsLink() {
+function DocsLink({ detail }: { detail: string }) {
 	return (
 		<button
 			className="underline underline-offset-4"
 			onClick={() => openLink(`${FRONTEND_URL}${PROVIDER_KEY_DOCS_PATH}`)}
+			title={detail}
 			type="button"
 		>
-			How Ryu stores your keys
+			Learn more
 		</button>
 	);
 }
@@ -68,18 +69,9 @@ export function ProviderKeySafetyNotice({
 		<Alert variant="warning">
 			<HugeiconsIcon icon={Alert02Icon} />
 			<AlertTitle>Set a spending limit on every provider key</AlertTitle>
-			<AlertDescription className="space-y-1.5">
-				<p>
-					A leaked key can run up charges until you revoke it, whether it leaks
-					from this device or from any other app or service that holds it.
-					Before you paste a key, set a hard monthly limit in the provider's
-					billing settings, and create a key just for Ryu so you can revoke it
-					on its own.
-				</p>
-				<p>{STORAGE_COPY[storage]}</p>
-				<p>
-					<DocsLink />
-				</p>
+			<AlertDescription>
+				A leaked key can run up charges until you revoke it.{" "}
+				<DocsLink detail={STORAGE_COPY[storage]} />
 			</AlertDescription>
 		</Alert>
 	);

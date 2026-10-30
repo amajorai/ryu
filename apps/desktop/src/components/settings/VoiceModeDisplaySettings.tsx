@@ -20,7 +20,7 @@ export function VoiceModeDisplaySettings() {
 
 	return (
 		<SettingsSection
-			caption="When on, live voice mode adds what you and the agent say to the chat as you talk and renders any UI cards the assistant sends. When off, the call stays a single row in the composer."
+			caption="When off, a live call stays a single row in the composer."
 			title="Voice mode display"
 		>
 			<SettingsGroup>

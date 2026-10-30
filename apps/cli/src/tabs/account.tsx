@@ -1,25 +1,3 @@
-import { z } from "zod";
-import {
-	type Account,
-	accountMutationResponseSchema,
-	accountsResponseSchema,
-	type LoginStart,
-	loginStartResponseSchema,
-	sessionsResponseSchema,
-} from "../core/account-response.ts";
-import {
-	type CoreAuthStatusWire as CoreAuthStatus,
-	coreAuthStatusWireSchema,
-} from "../core/auth-status-wire.ts";
-import {
-	nativeErrorMessage as errText,
-	humanizeError,
-} from "../core/native-errors.ts";
-import {
-	type SecuritySessionResponse as SessionWire,
-	securityPasswordStatusResponseSchema,
-	securitySessionResponseSchema,
-} from "../overlays/settings/account-security-response-contracts.ts";
 /* @jsxImportSource @opentui/react */
 // Account tab - parity with apps/cli's SidebarTab::Account
 // (apps/cli/src/{auth.rs,ui.rs::render_account_content,main.rs}).
@@ -51,262 +29,49 @@ import {
 
 import { useKeyboard } from "@opentui/react";
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
-import { type ApiTarget, request } from "@ryuhq/core-client/client";
+import { request } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge.tsx";
-import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { startAccountPolling } from "../core/account-polling.ts";
 import {
-	type AccountProbeResult,
-	startAccountPolling,
-} from "../core/account-polling.ts";
+	type Account,
+	accountMutationResponseSchema,
+	type LoginStart,
+	loginStartResponseSchema,
+} from "../core/account-response.ts";
 import { AUTH_BACKEND_URL, accountBackendTarget } from "../core/authBackend.ts";
 import { useCore } from "../core/CoreContext.tsx";
 import { refreshCliIdentityAfterAccountChange } from "../core/identity.ts";
+import {
+	nativeErrorMessage as errText,
+	humanizeError,
+} from "../core/native-errors.ts";
 // Best-effort open of the device-login URL; the panel always shows it too.
 import { openBrowser } from "../core/openBrowser.ts";
+import { tf } from "../i18n/translate.ts";
 import { AccountSecurity } from "../overlays/settings/account-security.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
 import { useToast } from "../ui/toast.tsx";
+import {
+	type AuthInfo,
+	describeFlowFailure,
+	fetchAccounts,
+	fetchAuth,
+	type LoginPrompt,
+	pollOnce,
+} from "./account-data.ts";
+import { AccountBody } from "./account-views.tsx";
 import type { TabProps } from "./types.ts";
+
+export { pollOnce } from "./account-data.ts";
 
 // The control-plane (Better-Auth) backend that owns profile/billing/sessions.
 // apps/cli reads this from RYU_AUTH_URL with the same default.
 const POLL_INTERVAL_MS = 1500;
 const LOGIN_TIMEOUT_MS = 300_000;
 
-interface AuthInfo {
-	authMethod: string;
-	email: string;
-	hasPassword: boolean;
-	name: string;
-	plan: string;
-	sessionCount: number;
-	token: string;
-	twoFactor: boolean;
-	verified: boolean;
-}
-
-interface LoginPrompt {
-	url: string | null;
-	userCode: string | null;
-}
-
-// One signed-in account in the local device vault Core maintains. Tokens NEVER
-// cross the wire - Core returns only these safe fields (parity with the shared
-// multi-account contract used by every bearer surface).
-
 type Phase = "loading" | "ready";
-
-const WHITESPACE_RE = /\s+/;
-
-// Two-letter monogram for the terminal "avatar" (no images in a TUI): first
-// letters of the first two name words, else the first two chars of name/email.
-function initials(account: Account): string {
-	const source = account.name?.trim() || account.email?.trim() || "?";
-	const parts = source.split(WHITESPACE_RE).filter(Boolean);
-	if (parts.length >= 2) {
-		const first = parts[0]?.charAt(0) ?? "";
-		const second = parts[1]?.charAt(0) ?? "";
-		return `${first}${second}`.toUpperCase();
-	}
-	return source.slice(0, 2).toUpperCase();
-}
-
-// Mirror apps/cli main.rs::format_plan: collapse the subscription payload into a
-// short human label.
-function formatPlan(sub: SubscriptionStatus): string {
-	const lifetime = sub.lifetime;
-	if (lifetime) {
-		const lt = lifetime;
-		if (lt.expired === true) {
-			return "Lifetime (updates expired)";
-		}
-		const until = lt.updatesExpiresAt?.split("T")[0] ?? "—";
-		return `Lifetime (updates until ${until})`;
-	}
-
-	const subscription = sub.subscription;
-	if (subscription) {
-		const s = subscription;
-		const status = s.status;
-		const interval = s.interval;
-		if (status === "trialing") {
-			return `Trial (${interval}ly after trial)`;
-		}
-		let label = interval;
-		if (interval === "month") {
-			label = "monthly";
-		} else if (interval === "year") {
-			label = "annual";
-		}
-		return `Pro (${label})`;
-	}
-
-	return "Free";
-}
-
-type LoadResult =
-	| { kind: "coreDown"; message: string }
-	| { kind: "loggedIn"; info: AuthInfo }
-	| { kind: "loggedOut" };
-
-// One device-status probe of the flow `/api/auth/login` started under
-// `userCode`. Core stays `authenticated` with the previous account when an "add
-// account" flow is denied or expires, so success is read from the outcome Core
-// records for THIS code (`lastFlow`), never from `authenticated` alone.
-export async function pollOnce(
-	target: ApiTarget,
-	userCode: string | null,
-	signal?: AbortSignal
-): Promise<AccountProbeResult> {
-	const status = await request(
-		target,
-		"/api/auth/status",
-		{
-			signal,
-		},
-		coreAuthStatusWireSchema
-	);
-	const flow = status.lastFlow;
-	if (userCode !== null && flow?.userCode === userCode) {
-		return flow.result === "succeeded"
-			? true
-			: { failed: flow.error ?? "failed" };
-	}
-	if (status.pending) {
-		return false;
-	}
-	if (userCode === null || flow === undefined) {
-		// A Core that predates `lastFlow` (or a flow without a code) only
-		// publishes the settled state.
-		return Boolean(status.authenticated && status.token);
-	}
-	// Core is no longer waiting and recorded no outcome for this code: the flow
-	// was cancelled (sign-out) or replaced by another one.
-	return { failed: "cancelled" };
-}
-
-// Human copy for a device flow that ended without signing in.
-function describeFlowFailure(reason: string): string {
-	if (reason === "access_denied") {
-		return "Sign-in was denied";
-	}
-	if (reason === "device_code_expired" || reason === "timeout") {
-		return "Sign-in code expired";
-	}
-	if (reason === "cancelled") {
-		return "Sign-in was cancelled";
-	}
-	return `Sign-in failed: ${reason}`;
-}
-
-// Resolve the full account state in one pass (no setState - the caller applies it
-// once, guarded by mountedRef). get-session gates logged-in (parity with
-// auth.rs::fetch_auth_info); password/billing/sessions degrade independently.
-async function fetchAuth(
-	target: ApiTarget,
-	signal?: AbortSignal
-): Promise<LoadResult> {
-	let status: CoreAuthStatus;
-	try {
-		status = await request(
-			target,
-			"/api/auth/status",
-			{
-				signal,
-			},
-			coreAuthStatusWireSchema
-		);
-	} catch (err) {
-		return { kind: "coreDown", message: errText(err) };
-	}
-	const token = status.token ?? null;
-	if (!token) {
-		return { kind: "loggedOut" };
-	}
-
-	const authTarget = accountBackendTarget(token);
-	let session: SessionWire;
-	try {
-		session = await request(
-			authTarget,
-			"/api/auth/get-session",
-			{
-				signal,
-			},
-			securitySessionResponseSchema
-		);
-	} catch {
-		return { kind: "loggedOut" };
-	}
-	const user = session?.user;
-	if (!user) {
-		return { kind: "loggedOut" };
-	}
-
-	const [pw, sub, sessions] = await Promise.all([
-		request(
-			authTarget,
-			"/api/user/password-status",
-			{
-				signal,
-			},
-			securityPasswordStatusResponseSchema
-		).catch(() => null),
-		request(
-			authTarget,
-			"/api/billing/subscription-status",
-			{ signal },
-			appResponseValueSchema
-		)
-			.then((value) => subscriptionStatusSchema.parse(value))
-			.catch(() => null),
-		request(
-			authTarget,
-			"/api/sessions",
-			{ signal },
-			sessionsResponseSchema
-		).catch(() => null),
-	]);
-
-	return {
-		kind: "loggedIn",
-		info: {
-			token,
-			name: user.name ?? "Unknown",
-			email: user.email ?? "—",
-			verified: user.emailVerified ?? false,
-			twoFactor: user.twoFactorEnabled ?? false,
-			hasPassword: pw?.hasPassword ?? false,
-			authMethod: pw?.authMethod ?? "unknown",
-			plan: sub ? formatPlan(sub) : "—",
-			sessionCount: sessions?.sessions?.length ?? 0,
-		},
-	};
-}
-
-// List the signed-in accounts from Core's local vault. Degrades to an empty
-// list so a vault/read failure never blocks the profile view.
-async function fetchAccounts(
-	target: ApiTarget,
-	signal?: AbortSignal
-): Promise<Account[]> {
-	try {
-		const wire = await request(
-			target,
-			"/api/auth/accounts",
-			{
-				signal,
-			},
-			accountsResponseSchema
-		);
-		return Array.isArray(wire.accounts) ? wire.accounts : [];
-	} catch {
-		return [];
-	}
-}
 
 export function AccountTab({
 	active,
@@ -466,7 +231,7 @@ export function AccountTab({
 				scopeRef.current.target === target
 			) {
 				setLoginPending(false);
-				notify(`Sign-in failed: ${errText(err)}`, "error");
+				notify(tf("Sign-in failed: {0}", { 0: errText(err) }), "error");
 			}
 			return;
 		}
@@ -484,7 +249,7 @@ export function AccountTab({
 				scopeRef.current.target === target
 			) {
 				setLoginPending(false);
-				notify(`Sign-in failed: ${start.error}`, "error");
+				notify(tf("Sign-in failed: {error}", { error: start.error }), "error");
 			}
 			return;
 		}
@@ -517,7 +282,7 @@ export function AccountTab({
 			);
 		} catch (err) {
 			if (mountedRef.current) {
-				notify(`Sign-out failed: ${errText(err)}`, "error");
+				notify(tf("Sign-out failed: {0}", { 0: errText(err) }), "error");
 			}
 			return;
 		}
@@ -542,13 +307,13 @@ export function AccountTab({
 				);
 				if (res.error) {
 					if (mountedRef.current) {
-						notify(`Switch failed: ${res.error}`, "error");
+						notify(tf("Switch failed: {error}", { error: res.error }), "error");
 					}
 					return;
 				}
 			} catch (err) {
 				if (mountedRef.current) {
-					notify(`Switch failed: ${errText(err)}`, "error");
+					notify(tf("Switch failed: {0}", { 0: errText(err) }), "error");
 				}
 				return;
 			}
@@ -577,13 +342,16 @@ export function AccountTab({
 				);
 				if (res.error) {
 					if (mountedRef.current) {
-						notify(`Sign-out failed: ${res.error}`, "error");
+						notify(
+							tf("Sign-out failed: {error}", { error: res.error }),
+							"error"
+						);
 					}
 					return;
 				}
 			} catch (err) {
 				if (mountedRef.current) {
-					notify(`Sign-out failed: ${errText(err)}`, "error");
+					notify(tf("Sign-out failed: {0}", { 0: errText(err) }), "error");
 				}
 				return;
 			}
@@ -707,224 +475,3 @@ export function AccountTab({
 		</box>
 	);
 }
-
-function InfoRow({
-	label,
-	value,
-	valueColor,
-	suffix,
-	suffixColor,
-}: {
-	label: string;
-	suffix?: string;
-	suffixColor?: string;
-	value: string;
-	valueColor: string;
-}) {
-	const theme = useTheme();
-	return (
-		<box flexDirection="row" gap={1}>
-			<text fg={theme.colors.mutedForeground}>{label.padEnd(10, " ")}</text>
-			<text fg={valueColor}>{value}</text>
-			{suffix ? (
-				<text fg={suffixColor ?? theme.colors.mutedForeground}>{suffix}</text>
-			) : null}
-		</box>
-	);
-}
-
-function AccountBody({
-	accounts,
-	info,
-	loginPending,
-	loginPrompt,
-	selectedIdx,
-}: {
-	accounts: Account[];
-	info: AuthInfo | null;
-	loginPending: boolean;
-	loginPrompt: LoginPrompt | null;
-	selectedIdx: number;
-}) {
-	// A device flow in flight (first sign-in OR add-account) owns the view so the
-	// user_code / verification_uri is always visible.
-	if (loginPending) {
-		return <SigningInCard loginPrompt={loginPrompt} />;
-	}
-
-	if (accounts.length === 0 && !info) {
-		return <NotSignedInCard />;
-	}
-
-	return (
-		<box flexDirection="column" gap={1}>
-			{accounts.length > 0 ? (
-				<AccountsList accounts={accounts} selectedIdx={selectedIdx} />
-			) : null}
-			{info ? <ProfileCard info={info} /> : null}
-		</box>
-	);
-}
-
-// Notion-style account switcher: one row per signed-in account with a monogram
-// "avatar", name/email, the active marker, and a cursor on the highlighted row.
-function AccountsList({
-	accounts,
-	selectedIdx,
-}: {
-	accounts: Account[];
-	selectedIdx: number;
-}) {
-	const theme = useTheme();
-	return (
-		<Card
-			subtitle="↑↓ select · s switch · a add account · x sign out · r refresh"
-			title="Accounts"
-		>
-			{accounts.map((account, idx) => {
-				const isSelected = idx === selectedIdx;
-				const displayName = account.name?.trim() || account.email;
-				const showEmail =
-					Boolean(account.name?.trim()) && account.email !== displayName;
-				return (
-					<box flexDirection="row" gap={1} key={account.userId}>
-						<text
-							fg={
-								isSelected ? theme.colors.primary : theme.colors.mutedForeground
-							}
-						>
-							{isSelected ? "›" : " "}
-						</text>
-						<text fg={theme.colors.accent}>{`[${initials(account)}]`}</text>
-						{isSelected ? (
-							<text fg={theme.colors.primary}>
-								<b>{displayName}</b>
-							</text>
-						) : (
-							<text fg={theme.colors.foreground}>{displayName}</text>
-						)}
-						{showEmail ? (
-							<text fg={theme.colors.mutedForeground}>{account.email}</text>
-						) : null}
-						{account.active ? (
-							<text fg={theme.colors.success}>✓ active</text>
-						) : null}
-					</box>
-				);
-			})}
-		</Card>
-	);
-}
-
-function ProfileCard({ info }: { info: AuthInfo }) {
-	const theme = useTheme();
-	return (
-		<Card title="Active account">
-			<InfoRow
-				label="Name"
-				value={info.name}
-				valueColor={theme.colors.foreground}
-			/>
-			<InfoRow
-				label="Email"
-				suffix={info.verified ? "(verified)" : "(unverified)"}
-				suffixColor={
-					info.verified ? theme.colors.success : theme.colors.warning
-				}
-				value={info.email}
-				valueColor={theme.colors.foreground}
-			/>
-			<box height={1} />
-			<InfoRow
-				label="Password"
-				value={info.hasPassword ? "Set" : `Not set (via ${info.authMethod})`}
-				valueColor={
-					info.hasPassword ? theme.colors.success : theme.colors.mutedForeground
-				}
-			/>
-			<InfoRow
-				label="2FA"
-				value={info.twoFactor ? "Enabled" : "Disabled"}
-				valueColor={
-					info.twoFactor ? theme.colors.success : theme.colors.mutedForeground
-				}
-			/>
-			<box height={1} />
-			<InfoRow
-				label="Plan"
-				value={info.plan}
-				valueColor={theme.colors.accent}
-			/>
-			<box flexDirection="row" gap={1}>
-				<text fg={theme.colors.mutedForeground}>
-					{"Sessions".padEnd(10, " ")}
-				</text>
-				<Badge bordered={false} variant="secondary">
-					{`${info.sessionCount} active`}
-				</Badge>
-			</box>
-		</Card>
-	);
-}
-
-function SigningInCard({ loginPrompt }: { loginPrompt: LoginPrompt | null }) {
-	const theme = useTheme();
-	return (
-		<Card borderColor={theme.colors.warning} title="Signing in">
-			<text fg={theme.colors.warning}>Waiting for browser authentication…</text>
-			<box height={1} />
-			{loginPrompt?.url ? (
-				<box flexDirection="column" gap={0}>
-					<text fg={theme.colors.mutedForeground}>
-						Open this URL to continue:
-					</text>
-					<text fg={theme.colors.info}>{loginPrompt.url}</text>
-				</box>
-			) : (
-				<text fg={theme.colors.mutedForeground}>
-					Complete sign-in in the browser window that just opened.
-				</text>
-			)}
-			{loginPrompt?.userCode ? (
-				<box flexDirection="row" gap={1} marginTop={1}>
-					<text fg={theme.colors.mutedForeground}>Device code:</text>
-					<text fg={theme.colors.foreground}>
-						<b>{loginPrompt.userCode}</b>
-					</text>
-				</box>
-			) : null}
-		</Card>
-	);
-}
-
-function NotSignedInCard() {
-	const theme = useTheme();
-	return (
-		<Card title="Not signed in">
-			<text fg={theme.colors.warning}>Not logged in</text>
-			<box height={1} />
-			<box flexDirection="row" gap={1}>
-				<Badge variant="default">Sign in</Badge>
-				<text fg={theme.colors.mutedForeground}>press l or a</text>
-			</box>
-		</Card>
-	);
-}
-
-const subscriptionStatusSchema = z.object({
-	lifetime: z
-		.object({
-			expired: z.boolean().catch(false),
-			updatesExpiresAt: z.string().nullable().catch(null),
-		})
-		.nullable()
-		.catch(null),
-	subscription: z
-		.object({
-			status: z.string().catch("unknown"),
-			interval: z.string().catch(""),
-		})
-		.nullable()
-		.catch(null),
-});
-type SubscriptionStatus = z.infer<typeof subscriptionStatusSchema>;

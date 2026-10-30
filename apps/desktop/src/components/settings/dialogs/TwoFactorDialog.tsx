@@ -1,7 +1,6 @@
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-	type TwoFactorActions,
 	type TwoFactorStep,
 	totpSetupKey,
 	useTwoFactorDialog,
@@ -29,11 +28,10 @@ import { ExpandableQRCode } from "@ryu/ui/components/qr-code.tsx";
 import { Separator } from "@ryu/ui/components/separator.tsx";
 import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
 import { SPRING_PANEL } from "@ryu/ui/lib/ease.ts";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { sileo } from "sileo";
-import { z } from "zod";
-import { authClient, storeSessionToken } from "@/lib/auth-client.ts";
+import { twoFactorActions } from "./two-factor-actions.ts";
 
 const STEP_DIALOG_LABEL = {
 	password: "Enable Two-Factor Authentication",
@@ -50,69 +48,6 @@ const STEP_DIALOG_LABEL = {
 // — a shadowing copy that could not track fixes to the real one. It now IS the
 // shared token, which is also critically damped rather than overshoot-free by
 // accident.
-
-// Better Auth replaces the session when two-factor is turned on or off and
-// returns the replacement bearer in `set-auth-token`. The desktop signs every
-// request with its stored bearer, so it adopts the replacement before the
-// session is re-read; otherwise the revoked token signs the account out.
-const adoptRotatedSession = {
-	onSuccess: async (context: { response: Response }) => {
-		const rotated = context.response.headers.get("set-auth-token");
-		if (rotated) {
-			await storeSessionToken(rotated);
-		}
-	},
-};
-
-// The dialog's Better Auth calls; the shared flow toasts what they throw.
-const twoFactorActions: TwoFactorActions = {
-	enable: async (password) => {
-		const result = await authClient.twoFactor.enable({ password });
-		if (result.error) {
-			throw new Error(result.error.message);
-		}
-		if (result.data?.method !== "totp") {
-			throw new Error("Two-factor setup did not return a TOTP secret.");
-		}
-		// Enrollment mints the backup codes; verification only confirms the
-		// authenticator, so these are the codes shown after a valid code.
-		return {
-			backupCodes: result.data.backupCodes ?? [],
-			totpUri: result.data.totpURI,
-		};
-	},
-	verify: async (code) => {
-		const result = await authClient.twoFactor.verifyTotp({
-			code,
-			fetchOptions: adoptRotatedSession,
-		});
-		if (result.error) {
-			throw new Error(result.error.message);
-		}
-		return z
-			.object({ backupCodes: z.array(z.string()).optional() })
-			.nullish()
-			.parse(result.data)?.backupCodes;
-	},
-	disable: async (password) => {
-		const result = await authClient.twoFactor.disable({
-			password,
-			fetchOptions: adoptRotatedSession,
-		});
-		if (result.error) {
-			throw new Error(result.error.message);
-		}
-	},
-	regenerateBackupCodes: async (password) => {
-		const result = await authClient.twoFactor.generateBackupCodes({
-			password,
-		});
-		if (result.error) {
-			throw new Error(result.error.message);
-		}
-		return result.data?.backupCodes ?? [];
-	},
-};
 
 interface TwoFactorDialogProps {
 	isEnabled: boolean;
@@ -264,7 +199,7 @@ export function TwoFactorDialog({
 													: "Can’t scan? Enter setup key manually"}
 											</Button>
 											{flow.showManualSetup && (
-												<div className="space-y-3 rounded-md border bg-muted/40 p-3">
+												<div className="space-y-3 rounded-lg border border-border p-3">
 													<p className="text-muted-foreground text-xs">
 														In your authenticator app, choose{" "}
 														<strong>Enter setup key</strong> and paste this key.
@@ -293,7 +228,7 @@ export function TwoFactorDialog({
 														<summary className="cursor-pointer text-muted-foreground">
 															Show setup URL
 														</summary>
-														<code className="mt-2 block break-all rounded bg-background p-2">
+														<code className="mt-2 block break-all rounded-lg bg-muted p-2">
 															{flow.totpUri}
 														</code>
 													</details>

@@ -330,3 +330,34 @@ test("the sealed auth-vault and license-key slots answer null when empty, surviv
 		native.invoke("desktop_secret_get", { name: "auth-vault", extra: true })
 	).toThrow("Invalid secret slot request");
 });
+
+test("the safe-mode sentinel reads unarmed and the webview content key is a stable 32-byte key per allowlisted store", () => {
+	const native = createChatPageNativeDependencies(persisted());
+	expect(native.invoke("get_safe_mode_sentinel")).toEqual({
+		handled: true,
+		value: false,
+	});
+	const local = native.invoke("desktop_content_key", {
+		store: "local-storage",
+	}).value as { key: number[]; retired: number[][] };
+	const collaboration = native.invoke("desktop_content_key", {
+		store: "collaboration",
+	}).value as { key: number[]; retired: number[][] };
+	expect(local.key).toHaveLength(32);
+	expect(local.retired).toEqual([]);
+	expect(local.key.every((byte) => byte >= 0 && byte < 256)).toBe(true);
+	expect(collaboration.key).not.toEqual(local.key);
+	expect(
+		createChatPageNativeDependencies(persisted()).invoke(
+			"desktop_content_key",
+			{ store: "local-storage" }
+		).value
+	).toEqual(local);
+	expect(() =>
+		native.invoke("desktop_content_key", { store: "other" })
+	).toThrow();
+	expect(() => native.invoke("desktop_content_key")).toThrow();
+	expect(() =>
+		native.invoke("get_safe_mode_sentinel", { enabled: true })
+	).toThrow();
+});

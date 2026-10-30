@@ -1,5 +1,6 @@
 import { StarIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { usePrimaryBot } from "@/src/hooks/usePrimaryBot.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -14,6 +15,7 @@ export function PrimaryBotControl({
 	agentName: string;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const primary = usePrimaryBot(target);
 	const selected = primary.data?.agentId === agentId;
 	const effective = primary.data?.effectiveAgentId === agentId;
@@ -22,8 +24,8 @@ export function PrimaryBotControl({
 			<Button
 				aria-label={
 					selected
-						? `Clear ${agentName} as primary bot`
-						: `Make ${agentName} primary bot`
+						? tl("Clear {agentName} as primary bot", { agentName })
+						: tl("Make {agentName} primary bot", { agentName })
 				}
 				aria-pressed={selected}
 				disabled={!primary.data || primary.mutation.isPending}

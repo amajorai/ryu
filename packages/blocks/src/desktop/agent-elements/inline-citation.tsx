@@ -1,10 +1,11 @@
+import { ArrowUpRight01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
 } from "@ryu/ui/components/hover-card";
 import { cn } from "@ryu/ui/lib/utils";
-import { ArrowUpRight } from "lucide-react";
 import type React from "react";
 
 /**
@@ -47,7 +48,7 @@ export function CitationMark({
 	return (
 		<span
 			className={cn(
-				"type-micro inline-flex h-3 min-w-3 flex-none items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-medium text-muted-foreground leading-none",
+				"inline-flex h-3 min-w-3 flex-none items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-medium text-muted-foreground text-xs leading-none",
 				className
 			)}
 			{...props}
@@ -267,7 +268,7 @@ export function CitationSources({ citations }: { citations: Citation[] }) {
 							aria-hidden
 							className="ml-[-2px] inline-flex flex-none text-muted-foreground/70 opacity-0 transition-opacity group-hover/cite-ref:opacity-100 group-focus-visible/cite-ref:opacity-100"
 						>
-							<ArrowUpRight className="size-2.5" />
+							<HugeiconsIcon className="size-2.5" icon={ArrowUpRight01Icon} />
 						</span>
 					</a>
 				);

@@ -1,12 +1,8 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
-import { Button } from "@ryu/ui/components/button.tsx";
 import {
-	Card,
-	CardContent,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card.tsx";
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useState } from "react";
 import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
 import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
@@ -41,59 +37,44 @@ export function ActivationTaskStep({
 		<ActivationStepShell
 			subtitle="Task preview. Nothing has run, and no credits have been used."
 			title="See what Ryu will work on"
+			width="wide"
 		>
-			<Card
-				appearance="onboarding"
-				borderTone="subtle"
-				className="w-full max-w-2xl"
-			>
-				<CardHeader>
-					<CardTitle>{draft.title}</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<div className="rounded-3xl bg-muted/60 p-5">
-						<p className="whitespace-pre-wrap text-muted-foreground text-sm leading-6">
-							{draft.prompt}
-						</p>
-					</div>
-					<p className="mt-4 text-muted-foreground text-sm">
-						{draft.appName
-							? connected
-								? tl("Uses {appName} for this task.", {
-										appName: draft.appName,
-									})
-								: tl("Requires a connection to {appName} for this task.", {
-										appName: draft.appName,
-									})
-							: "Uses the context you provide."}
+			<section className="flex flex-col gap-3">
+				<h2 className="font-semibold text-sm">{draft.title}</h2>
+				<p className="whitespace-pre-wrap text-pretty rounded-xl bg-muted px-4 py-3 text-muted-foreground text-sm">
+					{draft.prompt}
+				</p>
+				<p className="text-detail text-muted-foreground">
+					{draft.appName
+						? connected
+							? tl("Uses {appName} for this task.", {
+									appName: draft.appName,
+								})
+							: tl("Requires a connection to {appName} for this task.", {
+									appName: draft.appName,
+								})
+						: "Uses the context you provide."}{" "}
+					Ryu-managed execution needs an active subscription before work starts.
+				</p>
+				{error ? (
+					<p className="text-sm text-status-destructive" role="alert">
+						{error}
 					</p>
-					<p className="mt-2 text-muted-foreground text-sm">
-						Ryu-managed execution requires an active subscription before work
-						starts. You can also open chat and choose your own model and
-						context.
-					</p>
-					{error ? (
-						<p className="mt-3 text-sm text-status-destructive" role="alert">
-							{error}
-						</p>
-					) : null}
-				</CardContent>
-				<CardFooter
-					appearance="onboarding-step"
-					className="flex-wrap justify-between"
-					spacing="choices"
-				>
-					<Button disabled={pending} onClick={onBack} variant="ghost">
-						Choose another task
-					</Button>
-					<Button
+				) : null}
+			</section>
+			<OnboardingActions className="justify-between">
+				<OnboardingCta disabled={pending} onClick={onBack} tone="secondary">
+					Choose another task
+				</OnboardingCta>
+				<div className="flex flex-wrap items-center gap-2">
+					<OnboardingCta
 						disabled={pending}
 						onClick={onUseOwnModel}
-						variant="secondary"
+						tone="secondary"
 					>
 						Choose my own model
-					</Button>
-					<Button
+					</OnboardingCta>
+					<OnboardingCta
 						disabled={pending}
 						loading={pending}
 						onClick={needsConnection ? () => setPermissionOpen(true) : onStart}
@@ -105,9 +86,9 @@ export function ActivationTaskStep({
 							: subscribed
 								? "Start managed task"
 								: "See managed pricing"}
-					</Button>
-				</CardFooter>
-			</Card>
+					</OnboardingCta>
+				</div>
+			</OnboardingActions>
 			<ConnectionPermissionDialog
 				connectionName={draft.appName ?? "this integration"}
 				connectionType="Composio"

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -31,15 +32,28 @@ export function userInitials(name: string): string {
 	);
 }
 
-/** The compact avatar shared by the @ menu, composer token, and transcript. */
-export function userMentionVisual(
-	user: Pick<MentionTargetUser, "image" | "name">
-): ReactNode {
+function UserMentionAvatar({
+	user,
+}: {
+	user: Pick<MentionTargetUser, "image" | "name">;
+}) {
+	const tl = useLiteralMessages();
 	const image = safeAvatarUrl(user.image);
 	return (
-		<Avatar aria-label={`${user.name} avatar`} className="shrink-0" size="xs">
+		<Avatar
+			aria-label={tl("{userName} avatar", { userName: user.name })}
+			className="shrink-0"
+			size="xs"
+		>
 			{image ? <AvatarImage alt="" src={image} /> : null}
 			<AvatarFallback>{userInitials(user.name)}</AvatarFallback>
 		</Avatar>
 	);
+}
+
+/** The compact avatar shared by the @ menu, composer token, and transcript. */
+export function userMentionVisual(
+	user: Pick<MentionTargetUser, "image" | "name">
+): ReactNode {
+	return <UserMentionAvatar user={user} />;
 }

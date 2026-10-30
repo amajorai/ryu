@@ -10,6 +10,7 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
+import { SidebarMenuButton } from "@ryu/ui/components/sidebar.tsx";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import { SIDEBAR_OVERFLOW_POPOVER_KEY } from "./appearance-context-menu.tsx";
@@ -111,7 +112,7 @@ export function SectionOverflowPopover<T>({
 				sideOffset={8}
 				spacing="compact"
 			>
-				<div className="flex items-center gap-2 rounded-md border border-border/50 bg-background/50 px-2 focus-within:border-ring">
+				<div className="flex h-8 items-center gap-2 rounded-lg bg-muted/50 px-2">
 					<HugeiconsIcon
 						className="shrink-0 text-muted-foreground"
 						icon={Search01Icon}
@@ -141,7 +142,7 @@ export function SectionOverflowPopover<T>({
 					ref={scrollRef}
 				>
 					{windowed.length === 0 ? (
-						<p className="px-2 py-2 text-muted-foreground text-xs">
+						<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 							No matches
 						</p>
 					) : (
@@ -203,13 +204,14 @@ function ShowMoreButton({
 }) {
 	const tl = useLiteralMessages();
 	return (
-		<button
-			className="rounded px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
+		<SidebarMenuButton
+			className="px-2 text-muted-foreground hover:text-foreground"
 			onClick={onClick}
+			size="sm"
 			type="button"
 		>
 			{tl("Show {remaining} more", { remaining: String(remaining) })}
-		</button>
+		</SidebarMenuButton>
 	);
 }
 
@@ -223,12 +225,13 @@ function ShowLessButton({
 }) {
 	const tl = useLiteralMessages();
 	return (
-		<button
-			className="rounded px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
+		<SidebarMenuButton
+			className="px-2 text-muted-foreground hover:text-foreground"
 			onClick={onClick}
+			size="sm"
 			type="button"
 		>
 			{tl("Show {count} less", { count: String(count) })}
-		</button>
+		</SidebarMenuButton>
 	);
 }

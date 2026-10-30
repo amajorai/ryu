@@ -57,6 +57,7 @@ import { CreateProjectDialog } from "./CreateProjectDialog.tsx";
 import {
 	clearSidebarChatSelection,
 	draggedSidebarChatIds,
+	useSidebarChatSelection,
 } from "./sidebar-chat-selection.tsx";
 import { ChatRowList } from "./sidebar-conversation-list.tsx";
 import type { ChatRowHandlers } from "./sidebar-conversation-rows.tsx";
@@ -64,7 +65,7 @@ import {
 	type SubSectionNesting,
 	useNestedSections,
 } from "./sidebar-nested-sections.ts";
-import { SectionActionButton } from "./sidebar-section.tsx";
+import { SubSectionActionButton } from "./sidebar-section.tsx";
 import { SubSection } from "./sidebar-subsection.tsx";
 
 /** A right-click "Delete all chats" affordance for a section or sub-section
@@ -107,7 +108,7 @@ export function DeleteAllChatsMenu({
 						onClick={() => setConfirmOpen(true)}
 						variant="destructive"
 					>
-						<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 						{itemLabel}
 						{count > 0 && (
 							<span className="ml-auto pl-2 text-muted-foreground/70">
@@ -226,13 +227,13 @@ export function BotChatSectionMenu({
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
 				<DropdownMenuItem onClick={onRename}>
-					<HugeiconsIcon className="mr-2" icon={PencilEdit01Icon} size={14} />
+					<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
 					Rename section
 				</DropdownMenuItem>
 				{moveTargets.length > 0 && (
 					<DropdownMenuSub>
 						<DropdownMenuSubTrigger>
-							<HugeiconsIcon className="mr-2" icon={FolderOpenIcon} size={14} />
+							<HugeiconsIcon className="size-4" icon={FolderOpenIcon} />
 							Move section to
 						</DropdownMenuSubTrigger>
 						<DropdownMenuSubContent>
@@ -248,7 +249,7 @@ export function BotChatSectionMenu({
 					</DropdownMenuSub>
 				)}
 				<DropdownMenuItem onClick={onDelete} variant="destructive">
-					<HugeiconsIcon className="mr-2" icon={Delete01Icon} size={14} />
+					<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 					Delete section
 				</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -342,6 +343,8 @@ export function BotModeChatSectionsBody({
 		false,
 		nesting
 	);
+	const chatDragging = useSidebarChatSelection((state) => state.dragging);
+	const anyDragging = chatDragging || nested.dnd.draggingKey !== null;
 	const conversationIds = useMemo(
 		() => new Set(loose.map((conversation) => conversation.id)),
 		[loose]
@@ -396,7 +399,7 @@ export function BotModeChatSectionsBody({
 							onRename={() => onOpenRename(customSection)}
 						/>
 					) : isProjects ? (
-						<SectionActionButton
+						<SubSectionActionButton
 							icon={Add01Icon}
 							onClick={() => setCreateProjectOpen(true)}
 							title="New project"
@@ -437,7 +440,7 @@ export function BotModeChatSectionsBody({
 			>
 				{childKeys.length > 0 && (
 					<div
-						className="ml-3 space-y-0.5 border-border/60 border-l pl-1"
+						className="ml-3 space-y-0.5 border-border border-l pl-1"
 						data-testid={`bot-chat-section-children-${sectionId}`}
 					>
 						{childKeys.map(renderSection)}
@@ -449,14 +452,14 @@ export function BotModeChatSectionsBody({
 						handlers={handlers}
 						sessionsFor={sessionsFor}
 					/>
-				) : childKeys.length > 0 ? null : (
-					<p className="px-2 py-2 text-muted-foreground text-xs">
-						{isProjects
-							? "No projects yet"
-							: isUnorganized
-								? "No chats yet"
-								: "Drop a project, chat, or section here"}
-					</p>
+				) : childKeys.length > 0 || isProjects || isUnorganized ? null : (
+					// An empty group collapses to its label; the drop hint shows only
+					// while something is being dragged.
+					anyDragging && (
+						<p className="flex h-8 items-center px-2 text-detail text-muted-foreground">
+							Drop a project, chat, or section here
+						</p>
+					)
 				)}
 			</SubSection>
 		);

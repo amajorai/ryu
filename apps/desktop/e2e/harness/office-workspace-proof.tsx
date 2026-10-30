@@ -1,4 +1,12 @@
 import {
+	File01Icon,
+	FloppyDiskIcon,
+	Message01Icon,
+	PresentationBarChart01Icon,
+	Xls01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import {
 	addContentSlide,
 	addTitleSlide,
 	createPresentation,
@@ -9,13 +17,6 @@ import { addWorksheet, createWorkbook } from "@office-kit/xlsx/workbook";
 import { setCell } from "@office-kit/xlsx/worksheet";
 import { ChannelsView } from "@ryu/blocks/desktop/channels.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	FileSpreadsheet,
-	FileText,
-	MessageCircle,
-	Presentation,
-	Save,
-} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { FileEditorHandle } from "../../src/components/files/DocxEditor.tsx";
@@ -28,13 +29,17 @@ type ProofTab = "docx" | "pdf" | "pptx" | "whatsapp" | "xlsx";
 const TABS: ReadonlyArray<{
 	id: ProofTab;
 	label: string;
-	icon: typeof FileText;
+	icon: IconSvgElement;
 }> = [
-	{ id: "pdf", label: "Policy.pdf", icon: FileText },
-	{ id: "pptx", label: "Quarterly review.pptx", icon: Presentation },
-	{ id: "xlsx", label: "Budget.xlsx", icon: FileSpreadsheet },
-	{ id: "docx", label: "Proposal.docx", icon: FileText },
-	{ id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
+	{ id: "pdf", label: "Policy.pdf", icon: File01Icon },
+	{
+		id: "pptx",
+		label: "Quarterly review.pptx",
+		icon: PresentationBarChart01Icon,
+	},
+	{ id: "xlsx", label: "Budget.xlsx", icon: Xls01Icon },
+	{ id: "docx", label: "Proposal.docx", icon: File01Icon },
+	{ id: "whatsapp", label: "WhatsApp", icon: Message01Icon },
 ];
 
 async function makeSlides(): Promise<ArrayBuffer> {
@@ -152,7 +157,6 @@ function OfficeWorkspaceProof() {
 					className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto"
 				>
 					{TABS.map((tab) => {
-						const Icon = tab.icon;
 						return (
 							<button
 								aria-current={active === tab.id ? "page" : undefined}
@@ -170,7 +174,11 @@ function OfficeWorkspaceProof() {
 								}}
 								type="button"
 							>
-								<Icon aria-hidden className="size-3.5 shrink-0" />
+								<HugeiconsIcon
+									aria-hidden
+									className="size-3.5 shrink-0"
+									icon={tab.icon}
+								/>
 								<span className="truncate">{tab.label}</span>
 							</button>
 						);
@@ -201,7 +209,7 @@ function OfficeWorkspaceProof() {
 							</div>
 							{active === "pptx" || active === "xlsx" ? (
 								<Button disabled={!dirty} onClick={save} size="sm">
-									<Save /> Save
+									<HugeiconsIcon icon={FloppyDiskIcon} /> Save
 								</Button>
 							) : null}
 						</div>

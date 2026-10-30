@@ -28,7 +28,7 @@ export default function StoreListHeader({
 	const chrome = useStoreChromeOptional();
 
 	return (
-		<div className="flex shrink-0 flex-col gap-2.5 border-border/60 border-b p-3">
+		<div className="flex shrink-0 flex-col gap-2.5 border-border border-b p-3">
 			{chrome ? (
 				<Tabs onValueChange={chrome.onSelect} value={chrome.active}>
 					<TabsList layout="catalog-sections" variant="pills">

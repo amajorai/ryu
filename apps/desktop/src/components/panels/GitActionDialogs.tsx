@@ -1,17 +1,12 @@
 import {
-	Add01Icon,
 	ArrowDown01Icon,
-	ArrowUpRight01Icon,
 	CloudUploadIcon,
-	GitBranchIcon,
 	GitCommitIcon,
 	Globe02Icon,
 	Loading01Icon,
 	RefreshIcon,
-	Share08Icon,
 	SquareLock01Icon,
 	StopIcon,
-	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button, ButtonLabel } from "@ryu/ui/components/button.tsx";
@@ -23,23 +18,15 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group.tsx";
-import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
-import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { useState } from "react";
 import type { GitCommitAction } from "@/src/lib/api/git.ts";
 import type { GitHubRepositoryVisibility } from "@/src/lib/api/pull-requests.ts";
+import {
+	BranchTargetPicker,
+	DialogDiffStats,
+} from "./git-action/branch-target-picker.tsx";
 
 export type GitProgressPhase =
 	| "generating"
@@ -83,7 +70,7 @@ export function GitProgressStatus({ onStop, phase }: GitProgressStatusProps) {
 	return (
 		<div
 			aria-live="polite"
-			className="flex w-full items-center gap-2 rounded-md bg-muted/70 px-2 py-1.5 text-xs"
+			className="flex min-h-8 w-full items-center gap-2 rounded-lg bg-muted px-2 text-xs"
 			role="status"
 		>
 			<span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
@@ -129,7 +116,7 @@ export function GitRemoteActions({
 			>
 				<HugeiconsIcon
 					aria-hidden
-					className="size-3.5 shrink-0"
+					className="size-4 shrink-0"
 					icon={ArrowDown01Icon}
 				/>
 				<span>Pull</span>
@@ -144,7 +131,7 @@ export function GitRemoteActions({
 			>
 				<HugeiconsIcon
 					aria-hidden
-					className="size-3.5 shrink-0"
+					className="size-4 shrink-0"
 					icon={RefreshIcon}
 				/>
 				<span>Sync</span>
@@ -220,7 +207,7 @@ export function CreateGitHubRepositoryDialog({
 						value={visibility}
 					>
 						<label
-							className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border/70 px-3 py-3 transition-colors hover:bg-muted/60"
+							className="flex cursor-pointer items-start gap-3 rounded-xl border border-border px-3 py-3 transition-colors duration-150 hover:bg-muted hover:duration-0"
 							htmlFor="github-repository-private"
 						>
 							<RadioGroupItem
@@ -242,7 +229,7 @@ export function CreateGitHubRepositoryDialog({
 							</span>
 						</label>
 						<label
-							className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border/70 px-3 py-3 transition-colors hover:bg-muted/60"
+							className="flex cursor-pointer items-start gap-3 rounded-xl border border-border px-3 py-3 transition-colors duration-150 hover:bg-muted hover:duration-0"
 							htmlFor="github-repository-public"
 						>
 							<RadioGroupItem
@@ -296,212 +283,6 @@ export function CreateGitHubRepositoryDialog({
 				</div>
 			</DialogContent>
 		</Dialog>
-	);
-}
-
-function DialogDiffStats({
-	deletions,
-	insertions,
-}: {
-	deletions: number;
-	insertions: number;
-}) {
-	if (insertions === 0 && deletions === 0) {
-		return null;
-	}
-	return (
-		<span className="col-start-2 flex shrink-0 items-center gap-2 font-mono text-xs tabular-nums sm:col-start-auto">
-			{insertions > 0 && (
-				<span className="text-status-success">+{formatCount(insertions)}</span>
-			)}
-			{deletions > 0 && (
-				<span className="text-status-destructive">
-					−{formatCount(deletions)}
-				</span>
-			)}
-		</span>
-	);
-}
-
-interface BranchTargetPickerProps {
-	branch: string;
-	branches: string[];
-	disabled: boolean;
-	loading: boolean;
-	onBranchMenuOpenChange: (open: boolean) => void;
-	onCreateBranch?: (name: string) => Promise<string | null>;
-	onSelectBranch: (branch: string) => void;
-}
-
-function BranchTargetPicker({
-	branch,
-	branches,
-	disabled,
-	loading,
-	onBranchMenuOpenChange,
-	onCreateBranch,
-	onSelectBranch,
-}: BranchTargetPickerProps) {
-	const [newBranchOpen, setNewBranchOpen] = useState(false);
-	const [newBranchName, setNewBranchName] = useState("");
-	const [newBranchError, setNewBranchError] = useState<string | null>(null);
-	const branchOptions = [
-		branch,
-		...branches.filter((candidate) => candidate !== branch),
-	].filter(Boolean);
-
-	const handleCreateBranch = async () => {
-		const name = newBranchName.trim();
-		if (!(name && onCreateBranch)) {
-			return;
-		}
-		setNewBranchError(null);
-		const error = await onCreateBranch(name);
-		if (error) {
-			setNewBranchError(error);
-			return;
-		}
-		setNewBranchName("");
-		setNewBranchOpen(false);
-	};
-
-	return (
-		<>
-			<DropdownMenu onOpenChange={onBranchMenuOpenChange}>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							aria-label={`Commit to ${branch}`}
-							className="w-full justify-start"
-							disabled={disabled}
-							type="button"
-							variant="secondary"
-						/>
-					}
-				>
-					<HugeiconsIcon
-						aria-hidden
-						className="size-4 shrink-0"
-						icon={GitBranchIcon}
-					/>
-					<ButtonLabel className="min-w-0 flex-1 text-left">
-						{branch}
-					</ButtonLabel>
-					<HugeiconsIcon
-						aria-hidden
-						className="size-4 shrink-0"
-						icon={ArrowDown01Icon}
-					/>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent
-					align="start"
-					className="w-72 max-w-[calc(100vw-2rem)]"
-					sideOffset={8}
-				>
-					<DropdownMenuGroup>
-						<DropdownMenuLabel>Commit to</DropdownMenuLabel>
-						{loading ? (
-							<SkeletonRows
-								inset="panel-horizontal"
-								label="Loading branches…"
-								size="sm"
-								spacing="compact-stack"
-							/>
-						) : (
-							branchOptions.map((candidate) => (
-								<DropdownMenuItem
-									disabled={disabled}
-									key={candidate}
-									onClick={() => onSelectBranch(candidate)}
-								>
-									<HugeiconsIcon
-										aria-hidden
-										className="size-4 shrink-0 text-muted-foreground"
-										icon={GitBranchIcon}
-									/>
-									<span className="min-w-0 flex-1 truncate" title={candidate}>
-										{candidate}
-									</span>
-									{candidate === branch && (
-										<HugeiconsIcon
-											aria-hidden
-											className="size-4 shrink-0"
-											icon={Tick02Icon}
-										/>
-									)}
-								</DropdownMenuItem>
-							))
-						)}
-					</DropdownMenuGroup>
-					<DropdownMenuSeparator />
-					<DropdownMenuItem
-						disabled={disabled || !onCreateBranch}
-						onClick={() => setNewBranchOpen(true)}
-					>
-						<HugeiconsIcon
-							aria-hidden
-							className="size-4 shrink-0 text-muted-foreground"
-							icon={Add01Icon}
-						/>
-						New branch
-					</DropdownMenuItem>
-				</DropdownMenuContent>
-			</DropdownMenu>
-
-			<Dialog
-				onOpenChange={(open) => {
-					setNewBranchOpen(open);
-					if (!open) {
-						setNewBranchError(null);
-					}
-				}}
-				open={newBranchOpen}
-			>
-				<DialogContent className="sm:max-w-sm">
-					<DialogHeader>
-						<DialogTitle>New branch</DialogTitle>
-						<DialogDescription>
-							Create a branch from the current commit and switch to it.
-						</DialogDescription>
-					</DialogHeader>
-					<Input
-						aria-label="New branch name"
-						onChange={(event) => {
-							setNewBranchName(event.target.value);
-							setNewBranchError(null);
-						}}
-						onKeyDown={(event) => {
-							if (event.key === "Enter") {
-								event.preventDefault();
-								void handleCreateBranch();
-							}
-						}}
-						placeholder="feature/my-branch"
-						spellCheck={false}
-						value={newBranchName}
-					/>
-					{newBranchError && (
-						<p className="text-status-destructive text-xs">{newBranchError}</p>
-					)}
-					<div className="flex justify-end gap-2">
-						<Button
-							onClick={() => setNewBranchOpen(false)}
-							type="button"
-							variant="ghost"
-						>
-							Cancel
-						</Button>
-						<Button
-							disabled={!newBranchName.trim()}
-							onClick={() => void handleCreateBranch()}
-							type="button"
-						>
-							Create branch
-						</Button>
-					</div>
-				</DialogContent>
-			</Dialog>
-		</>
 	);
 }
 
@@ -624,115 +405,7 @@ export function GitActionDialog({
 	);
 }
 
-const PULL_REQUEST_ACTIONS: ReadonlyArray<{
-	action: PullRequestAction;
-	icon: typeof Share08Icon;
-	label: string;
-}> = [
-	{ action: "draft", icon: Share08Icon, label: "Create draft PR" },
-	{ action: "create", icon: Share08Icon, label: "Create PR" },
-	{ action: "open", icon: ArrowUpRight01Icon, label: "Open PR in browser" },
-];
-
-export interface PullRequestDialogProps {
-	baseBranch: string;
-	branch: string;
-	deletions: number;
-	description: string;
-	error?: string | null;
-	includeUnstaged: boolean;
-	insertions: number;
-	onDescriptionChange: (description: string) => void;
-	onIncludeUnstagedChange: (include: boolean) => void;
-	onOpenChange: (open: boolean) => void;
-	onSubmit: (action: PullRequestAction) => void;
-	onTitleChange: (title: string) => void;
-	open: boolean;
-	progress?: GitProgressPhase;
-	title: string;
-}
-
-export function PullRequestDialog({
-	baseBranch,
-	branch,
-	deletions,
-	description,
-	error,
-	includeUnstaged,
-	insertions,
-	onDescriptionChange,
-	onIncludeUnstagedChange,
-	onOpenChange,
-	onSubmit,
-	onTitleChange,
-	open,
-	progress,
-	title,
-}: PullRequestDialogProps) {
-	const busy = progress !== undefined;
-
-	return (
-		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
-				<DialogHeader>
-					<DialogTitle>Create pull request</DialogTitle>
-					<DialogDescription className="break-all">
-						{branch} → {baseBranch}
-					</DialogDescription>
-				</DialogHeader>
-				<Input
-					aria-label="Pull request title"
-					disabled={busy}
-					onChange={(event) => onTitleChange(event.target.value)}
-					placeholder="Title"
-					value={title}
-				/>
-				<Textarea
-					aria-label="Pull request description"
-					className="max-h-60 min-h-28"
-					disabled={busy}
-					onChange={(event) => onDescriptionChange(event.target.value)}
-					placeholder="Description (leave empty to generate)"
-					value={description}
-				/>
-				<label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-3 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-					<Checkbox
-						checked={includeUnstaged}
-						disabled={busy}
-						onCheckedChange={(checked) =>
-							onIncludeUnstagedChange(checked === true)
-						}
-					/>
-					<span className="min-w-0 flex-1">Commit and push local changes</span>
-					<DialogDiffStats deletions={deletions} insertions={insertions} />
-				</label>
-				{error && (
-					<p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
-						{error}
-					</p>
-				)}
-				<div className="grid gap-2 border-border border-t pt-4">
-					{PULL_REQUEST_ACTIONS.map((item, index) => (
-						<Button
-							className="w-full justify-start"
-							disabled={busy}
-							key={item.action}
-							onClick={() => onSubmit(item.action)}
-							type="button"
-							variant={index === 1 ? "secondary" : "ghost"}
-						>
-							<HugeiconsIcon
-								aria-hidden
-								className="size-4 shrink-0 text-muted-foreground"
-								icon={item.icon}
-							/>
-							<ButtonLabel className="min-w-0 flex-1 text-left">
-								{item.label}
-							</ButtonLabel>
-						</Button>
-					))}
-				</div>
-			</DialogContent>
-		</Dialog>
-	);
-}
+export {
+	PullRequestDialog,
+	type PullRequestDialogProps,
+} from "./git-action/pull-request-dialog.tsx";

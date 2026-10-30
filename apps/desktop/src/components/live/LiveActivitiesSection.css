@@ -7,11 +7,3 @@
 [data-live-activity-border] {
 	border-left-color: var(--live-activity-tint);
 }
-
-[data-live-activity-tile] {
-	background-color: color-mix(
-		in srgb,
-		var(--live-activity-tint) 15%,
-		transparent
-	);
-}

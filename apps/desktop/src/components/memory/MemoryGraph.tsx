@@ -99,7 +99,7 @@ export function MemoryGraph({ graph }: { graph: MemoryGraphSnapshot }) {
 
 	return (
 		<div className="relative h-full w-full">
-			<div className="pointer-events-none absolute top-3 left-3 z-10 flex flex-wrap gap-1.5 rounded-lg border bg-background/90 p-2 shadow-sm backdrop-blur">
+			<div className="pointer-events-none absolute top-3 left-3 z-10 flex flex-wrap gap-1.5 rounded-lg border border-border bg-background p-2">
 				<Badge variant="secondary">
 					{tl("{memoryCount} memories", {
 						memoryCount: String(graph.memoryCount),

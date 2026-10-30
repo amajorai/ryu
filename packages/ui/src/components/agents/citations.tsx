@@ -1,11 +1,17 @@
 "use client";
 
+import {
+	ArrowDown01Icon,
+	BookOpen01Icon,
+	Globe02Icon,
+	LinkSquare02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
 import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import { getFaviconUrl } from "@ryu/ui/lib/favicon.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { BookOpenText, ChevronDown, ExternalLink, Globe2 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useCallback, useId, useState } from "react";
 
@@ -76,7 +82,7 @@ export function Citation({
 		<a
 			aria-label={tl("View citation {index}", { index })}
 			className={cn(
-				"type-compact mx-0.5 inline-flex min-w-4 -translate-y-0.5 items-center justify-center rounded-md bg-muted/60 px-1 py-0.5 font-medium text-muted-foreground leading-none no-underline outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+				"mx-0.5 inline-flex min-w-4 -translate-y-0.5 items-center justify-center rounded-lg bg-muted px-1 py-0.5 font-medium text-muted-foreground text-xs leading-none no-underline outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
 				className
 			)}
 			href={`#${citationTargetId(idPrefix, citationId)}`}
@@ -116,7 +122,7 @@ export function CitationFavicon({
 					width={16}
 				/>
 			) : (
-				<Globe2 className="size-3.5" />
+				<HugeiconsIcon className="size-3.5" icon={Globe02Icon} />
 			)}
 		</span>
 	);
@@ -151,37 +157,47 @@ function CitationRow({
 	citation,
 	index,
 	idPrefix,
+	surface,
 }: {
 	citation: CitationItem;
 	index: number;
 	idPrefix: string;
+	surface: CitationListProps["surface"];
 }) {
 	const safeUrl = safeCitationUrl(citation.url);
 	const content = (
 		<>
 			<CitationFavicon url={safeUrl ?? undefined} />
 			<span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-				<span className="truncate font-medium text-foreground/80 text-sm transition-colors group-hover/citation:text-foreground">
+				<span className="truncate font-medium text-foreground text-sm">
 					{citation.title}
 				</span>
 				{citation.domain ? (
-					<span className="min-w-0 truncate text-muted-foreground/60 text-xs">
+					<span className="min-w-0 truncate text-muted-foreground text-xs">
 						{citation.domain}
 					</span>
 				) : null}
 			</span>
 			<span className="flex shrink-0 items-center gap-1.5">
-				<span className="type-compact grid size-5 place-items-center rounded-md bg-foreground/[0.05] font-medium text-muted-foreground tabular-nums">
+				<span
+					className={cn(
+						"grid size-5 place-items-center rounded-lg font-medium text-muted-foreground text-xs tabular-nums",
+						surface === "transcript" ? "bg-background" : "bg-muted"
+					)}
+				>
 					{index}
 				</span>
 				{safeUrl ? (
-					<ExternalLink className="size-3.5 text-muted-foreground/40 transition-colors group-hover/citation:text-muted-foreground" />
+					<HugeiconsIcon
+						className="size-3.5 text-muted-foreground/70 transition-colors group-hover/citation:text-muted-foreground"
+						icon={LinkSquare02Icon}
+					/>
 				) : null}
 			</span>
 		</>
 	);
 	const className =
-		"group/citation flex items-center gap-2 rounded-md px-1.5 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring";
+		"group/citation flex items-center gap-2 rounded-lg px-1.5 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring";
 	const id = citationTargetId(idPrefix, citation.id);
 
 	return safeUrl ? (
@@ -216,7 +232,7 @@ export function CitationList({
 		<div
 			className={cn(
 				"grid gap-0.5",
-				surface === "transcript" && "rounded-xl bg-muted/60 p-2",
+				surface === "transcript" && "rounded-xl bg-muted p-2",
 				className
 			)}
 		>
@@ -242,6 +258,7 @@ export function CitationList({
 							citation={citation}
 							idPrefix={resolvedPrefix}
 							index={index + 1}
+							surface={surface}
 						/>
 					</motion.div>
 				))}
@@ -284,18 +301,18 @@ export function Citations({
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
 			>
-				<BookOpenText className="size-4" />
+				<HugeiconsIcon className="size-4" icon={BookOpen01Icon} />
 				<span className="font-medium">{title}</span>
-				<span className="type-compact rounded-full bg-muted px-1.5 py-0.5 font-medium tabular-nums">
+				<span className="text-muted-foreground/70 text-xs tabular-nums">
 					{citations.length}
 				</span>
 				<motion.span
 					animate={{ rotate: currentOpen ? 180 : 0 }}
 					aria-hidden="true"
-					className="text-muted-foreground/60"
+					className="text-muted-foreground"
 					transition={reduce ? { duration: 0 } : SPRING_SWAP}
 				>
-					<ChevronDown className="size-3.5" />
+					<HugeiconsIcon className="size-3.5" icon={ArrowDown01Icon} />
 				</motion.span>
 			</button>
 

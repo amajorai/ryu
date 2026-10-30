@@ -3,10 +3,12 @@
 import {
 	Add01Icon,
 	AiImageIcon,
+	Bookmark01Icon,
 	Cancel01Icon,
 	GhostIcon,
 	Image01Icon,
 	InformationCircleIcon,
+	Note01Icon,
 	PencilEdit01Icon,
 	Target01Icon,
 	Tick02Icon,
@@ -96,6 +98,20 @@ export interface MediaGenControls {
 	onGenerate: () => void;
 }
 
+/** Saved drafts for this project, offered in the "+" dropdown. */
+export interface ComposerDraftMenu {
+	/** Whether the current text can be saved (non-empty, idle, not saving). */
+	canSave: boolean;
+	items: { id: string; preview: string; text: string }[];
+	onDelete: (id: string) => void;
+	onInsert: (text: string) => void;
+	onSave: () => void;
+	saving: boolean;
+}
+
+/** At most this many drafts show in the menu; typing narrows the rest. */
+const MENU_DRAFT_LIMIT = 5;
+
 export interface GoalPlusButtonProps {
 	/** Apps, plugins, and context references shown in the shared searchable list. */
 	directoryGroups?: ComposerMenuGroup[];
@@ -108,6 +124,8 @@ export interface GoalPlusButtonProps {
 	 * next to the "+" once a review has run.
 	 */
 	doubleCheck?: DoubleCheckControls;
+	/** "Save draft" plus the project's saved drafts. Omitted when not wired. */
+	drafts?: ComposerDraftMenu;
 	/**
 	 * Temporary-chat affordance. When provided, the dropdown gains a "Temporary
 	 * chat" toggle row. Omit to hide it (e.g. once a thread has messages, which
@@ -152,6 +170,7 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 	videoGen,
 	pluginControls,
 	disabled,
+	drafts,
 	directoryGroups = [],
 	directoryQuery = "",
 	onDirectorySelect,
@@ -298,6 +317,29 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 	if (assistItems.length > 0) {
 		menuGroups.push({ id: "assist", label: "Assist", items: assistItems });
 	}
+	if (drafts) {
+		const draftItems: ComposerMenuItem[] = [
+			{
+				id: "action:save-draft",
+				label: drafts.saving ? "Saving draft" : "Save draft",
+				icon: <HugeiconsIcon className="size-4" icon={Bookmark01Icon} />,
+				disabled: !drafts.canSave,
+			},
+		];
+		for (const draft of drafts.items.slice(
+			0,
+			directoryQuery.trim() ? undefined : MENU_DRAFT_LIMIT
+		)) {
+			draftItems.push({
+				id: `draft:${draft.id}`,
+				label: draft.preview,
+				icon: <HugeiconsIcon className="size-4" icon={Note01Icon} />,
+				keywords: [draft.text],
+				onRemove: () => drafts.onDelete(draft.id),
+			});
+		}
+		menuGroups.push({ id: "drafts", label: "Drafts", items: draftItems });
+	}
 	menuGroups.push(...directoryGroups);
 
 	const handleMenuSelect = (item: ComposerMenuItem) => {
@@ -315,6 +357,15 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 			doubleCheck?.onToggle(!doubleCheck.enabled);
 		} else if (item.id === "action:ghost") {
 			ghost?.onToggle();
+		} else if (item.id === "action:save-draft") {
+			drafts?.onSave();
+		} else if (item.id.startsWith("draft:")) {
+			const draft = drafts?.items.find(
+				(candidate) => `draft:${candidate.id}` === item.id
+			);
+			if (draft) {
+				drafts?.onInsert(draft.text);
+			}
 		} else if (item.id.startsWith("control:")) {
 			const control = pluginControls?.find(
 				(candidate) => `control:${candidate.id}` === item.id
@@ -335,21 +386,20 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 					render={
 						<Button
 							aria-label="Add"
-							className="size-7"
 							disabled={disabled}
 							radius="pill"
-							size="icon"
+							size="icon-sm"
 							type="button"
 							variant="ghost-muted"
 						/>
 					}
 				>
-					<HugeiconsIcon className="size-4" icon={Add01Icon} strokeWidth={2} />
+					<HugeiconsIcon className="size-4" icon={Add01Icon} />
 				</PopoverTrigger>
 				<PopoverContent
 					align="start"
 					appearance="composer-menu"
-					className="w-[min(calc(100vw_-_32px),704px)]"
+					className="w-[min(calc(100vw_-_32px),320px)]"
 					corners="rounded"
 					side="top"
 					sideOffset={8}
@@ -371,8 +421,8 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 				<button
 					aria-label="Remove goal"
 					className={cn(
-						"group relative flex size-7 shrink-0 items-center justify-center rounded-full",
-						"bg-primary/10 text-primary transition-colors hover:bg-destructive/15 hover:text-status-destructive focus-visible:bg-destructive/15 focus-visible:text-status-destructive"
+						"group relative flex size-8 shrink-0 items-center justify-center rounded-full",
+						"bg-muted text-foreground transition-colors hover:bg-destructive/15 hover:text-status-destructive focus-visible:bg-destructive/15 focus-visible:text-status-destructive"
 					)}
 					onClick={goal.onRemove}
 					title="Goal active — click to remove"

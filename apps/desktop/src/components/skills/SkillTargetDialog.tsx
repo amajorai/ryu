@@ -96,7 +96,7 @@ export function SkillTargetList({
 				const checkboxId = `${listId}-skill-target-${target.id}`;
 				return (
 					<label
-						className="flex min-h-12 items-center gap-3 rounded-2xl px-3 py-2 hover:bg-muted/60 has-disabled:cursor-not-allowed has-disabled:opacity-60"
+						className="flex min-h-12 items-center gap-3 rounded-lg px-3 py-2 hover:bg-muted has-disabled:cursor-not-allowed has-disabled:opacity-60"
 						htmlFor={checkboxId}
 						key={target.id}
 					>

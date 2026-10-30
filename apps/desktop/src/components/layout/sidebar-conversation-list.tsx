@@ -23,6 +23,11 @@ import { projectFolderLeaf } from "./sidebar-panel-state.tsx";
 import { DEFAULT_PAGE_SIZE } from "./sidebar-scope-picker.tsx";
 import { SectionPagingControls } from "./sidebar-section-overflow.tsx";
 import { chatSearchText, usePaged } from "./sidebar-sort-paging.ts";
+import {
+	CHAT_ROW_VIRTUALIZE_THRESHOLD,
+	type VirtualChatRowEntry,
+	VirtualChatRowList,
+} from "./sidebar-virtual-chat-rows.tsx";
 
 /** Shared callbacks/state threaded into every chat row, regardless of group. */
 
@@ -103,7 +108,7 @@ function GroupChatRow({
 		<SidebarMenuItem>
 			{/* group header owns a disclosure button and a row-level open action */}
 			<div
-				className="group/group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted"
+				className="group/group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 				onClick={openLatest}
 				onKeyDown={(event) => {
 					if (event.key === "Enter") {
@@ -120,7 +125,7 @@ function GroupChatRow({
 							? tl("Collapse group chat threads")
 							: tl("Expand group chat threads")
 					}
-					className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+					className="flex size-5 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground"
 					onClick={(event) => {
 						event.stopPropagation();
 						setExpanded((value) => !value);
@@ -140,7 +145,7 @@ function GroupChatRow({
 				<span className="min-w-0 flex-1">
 					<span className="flex min-w-0 items-center gap-2">
 						<span className="truncate font-medium text-sm">Group chat</span>
-						<span className="type-compact shrink-0 text-muted-foreground/70 tabular-nums">
+						<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
 							{compactAge(latest.updatedAt)}
 						</span>
 					</span>
@@ -153,12 +158,14 @@ function GroupChatRow({
 						) : null}
 					</span>
 				</span>
-				<span className="type-compact shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground tabular-nums">
-					{formatCount(threads.length) ?? "—"}
-				</span>
+				{threads.length > 0 ? (
+					<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
+						{formatCount(threads.length)}
+					</span>
+				) : null}
 			</div>
 			{expanded ? (
-				<div className="relative ml-7 border-sidebar-border/70 border-l pl-2">
+				<div className="relative ml-7 border-border border-l pl-2">
 					<SidebarMenu>
 						{paged.visible.map((conversation) => (
 							<ChatRow
@@ -216,14 +223,14 @@ function SessionDisclosure({
 		<li className="list-none">
 			<button
 				aria-expanded={open}
-				className="flex w-full items-center gap-1 rounded-md py-0.5 pr-2 pl-8 text-left text-muted-foreground text-xs hover:text-foreground"
+				className="flex w-full items-center gap-1 rounded-lg py-0.5 pr-2 pl-8 text-left text-muted-foreground text-xs hover:text-foreground"
 				onClick={() => setOpen((current) => !current)}
 				type="button"
 			>
 				<HugeiconsIcon
 					className={open ? "rotate-0" : "-rotate-90"}
 					icon={ArrowDown01Icon}
-					size={12}
+					size={14}
 				/>
 				{tl("{count, plural, one {# session} other {# sessions}}", {
 					count: sessions.length,
@@ -259,34 +266,57 @@ export function ChatRowList({
 	const entries: ConversationListEntry[] = groupMultiParticipant
 		? groupConversationEntries(conversations)
 		: conversations.map((conversation) => ({ conversation }));
-	return (
-		<SidebarMenu className={className}>
-			{entries.map((entry) =>
-				entry.threads ? (
-					<GroupChatRow
+	const renderEntry = (entry: ConversationListEntry) =>
+		entry.threads ? (
+			<GroupChatRow
+				handlers={handlers}
+				key={entry.groupKey}
+				pageSize={pageSize}
+				threads={entry.threads}
+			/>
+		) : entry.conversation ? (
+			<Fragment key={entry.conversation.id}>
+				<ChatRow conv={entry.conversation} handlers={handlers} />
+				{sessionsFor ? (
+					<SessionDisclosure
 						handlers={handlers}
-						key={entry.groupKey}
-						pageSize={pageSize}
-						threads={entry.threads}
+						sessions={sessionsFor(entry.conversation.id)}
 					/>
-				) : entry.conversation ? (
-					<Fragment key={entry.conversation.id}>
-						<ChatRow conv={entry.conversation} handlers={handlers} />
-						{sessionsFor ? (
-							<SessionDisclosure
-								handlers={handlers}
-								sessions={sessionsFor(entry.conversation.id)}
-							/>
-						) : null}
-					</Fragment>
-				) : null
-			)}
-		</SidebarMenu>
+				) : null}
+			</Fragment>
+		) : null;
+	if (entries.length > CHAT_ROW_VIRTUALIZE_THRESHOLD) {
+		return (
+			<VirtualChatRowList
+				activeId={handlers.activeConversationId}
+				className={className}
+				entries={entries.map((entry) => virtualEntryOf(entry, handlers))}
+				renderEntry={(index) => {
+					const entry = entries[index];
+					return entry ? renderEntry(entry) : null;
+				}}
+			/>
+		);
+	}
+	return (
+		<SidebarMenu className={className}>{entries.map(renderEntry)}</SidebarMenu>
 	);
 }
 
-/** The production conversation-list seam, exported for browser stories that
- *  need to exercise grouping without mounting the whole desktop shell. */
+/** What the windowed list needs to know about an entry it may not mount. */
+function virtualEntryOf(
+	entry: ConversationListEntry,
+	handlers: ChatRowHandlers
+): VirtualChatRowEntry {
+	const id = entry.conversation?.id;
+	return {
+		// A collapsed group header shows no chat rows of its own.
+		ids: id ? [id] : [],
+		key: entry.groupKey ?? id ?? "",
+		unread: id ? handlers.unreadIds.has(id) : false,
+	};
+}
+
 export function SidebarConversationList({
 	conversations,
 	groupMultiParticipant = true,

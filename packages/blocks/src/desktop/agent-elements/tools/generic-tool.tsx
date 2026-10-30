@@ -1,6 +1,7 @@
+import { Wrench01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { ToolResult } from "@ryu/ui/components/agents/tool-result";
 import { cn } from "@ryu/ui/lib/utils";
-import { Wrench } from "lucide-react";
 import type React from "react";
 import { memo } from "react";
 import { useToolComplete } from "../hooks/use-tool-complete.ts";
@@ -23,7 +24,7 @@ export function GenericToolRow({
 	return (
 		<ToolResult
 			defaultOpen={!isPending}
-			icon={<Wrench className="size-4" />}
+			icon={<HugeiconsIcon className="size-4" icon={Wrench01Icon} />}
 			kind="custom"
 			status={isPending ? "running" : "success"}
 			title={step.toolName}
@@ -62,7 +63,7 @@ export const GenericTool = memo(function GenericTool({
 						<Icon className="size-full" />
 					</span>
 				) : (
-					<Wrench className="size-4" />
+					<HugeiconsIcon className="size-4" icon={Wrench01Icon} />
 				)
 			}
 			kind="custom"

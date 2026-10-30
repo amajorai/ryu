@@ -129,7 +129,7 @@ export function SettingsSearchResults({
 										</span>
 										{entry.group ? (
 											<span
-												className="type-caption truncate text-muted-foreground"
+												className="truncate text-muted-foreground text-xs"
 												title={entry.group}
 											>
 												{entry.group}

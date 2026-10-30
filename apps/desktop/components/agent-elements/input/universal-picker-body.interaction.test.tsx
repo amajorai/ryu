@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { UniversalPickerData } from "@/components/agent-elements/input/universal-picker-body.tsx";
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { act, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -76,10 +79,8 @@ function Harness({ withModel = true }: { withModel?: boolean }) {
 	const [model, setModel] = useState("model-a");
 	return (
 		<ProviderCommandDialog
-			trigger={<button type="button">Choose model</button>}
 			renderBody={(close) => (
 				<UniversalPickerBody
-					mode="models"
 					close={close}
 					data={{
 						...base,
@@ -100,8 +101,10 @@ function Harness({ withModel = true }: { withModel?: boolean }) {
 								}
 							: null,
 					}}
+					mode="models"
 				/>
 			)}
+			trigger={<button type="button">Choose model</button>}
 		/>
 	);
 }
@@ -111,10 +114,11 @@ async function click(label: string, role: string) {
 			role === "button" ? "button" : '[role="option"]'
 		),
 	].find((node) => node.textContent?.trim() === label);
-	if (!button)
+	if (!button) {
 		throw new Error(
 			`Missing real ${role} ${label}; rendered ${document.body.textContent}`
 		);
+	}
 	await act(async () => button.click());
 }
 test("the real model dialog exposes the current engine catalog without any configured providers and selects exactly that model", async () => {
@@ -138,7 +142,9 @@ test("canceling a drilled model page does not choose a model and reopening start
 	await click("Choose model", "button");
 	await click("ModelProof Model A", "option");
 	const input = document.querySelector<HTMLInputElement>('[role="combobox"]');
-	if (!input) throw new Error("Real command search input is missing");
+	if (!input) {
+		throw new Error("Real command search input is missing");
+	}
 	await act(async () =>
 		input.dispatchEvent(
 			new KeyboardEvent("keydown", {

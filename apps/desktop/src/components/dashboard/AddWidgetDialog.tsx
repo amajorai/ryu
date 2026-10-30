@@ -5,8 +5,6 @@ import { type JsonValue, jsonValueSchema } from "./widgets/data.ts";
 // the app. The Base UI Select needs an `items` prop for SelectValue to render the
 // selected label, and onValueChange is typed `(value: string | null)`.
 
-import { Cancel01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -169,21 +167,9 @@ export function AddWidgetDialog({
 
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent
-				className="max-h-[85vh] overflow-auto sm:max-w-lg"
-				showCloseButton={false}
-			>
+			<DialogContent className="max-h-[85vh] overflow-auto sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>Add widget</DialogTitle>
-					<Button
-						aria-label="Close"
-						className="absolute end-4 top-4"
-						onClick={() => onOpenChange(false)}
-						size="icon-sm"
-						variant="secondary"
-					>
-						<HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-					</Button>
 				</DialogHeader>
 
 				<div className="space-y-4">

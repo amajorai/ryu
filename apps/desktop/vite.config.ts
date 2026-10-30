@@ -43,7 +43,6 @@ export default defineConfig({
 	// The Lanyard component (@ryu/ui) imports a binary .glb model as a URL asset.
 	assetsInclude: ["**/*.glb"],
 	optimizeDeps: {
-		include: ["lucide-react"],
 		// The desktop root also contains standalone e2e HTML stories. Let their
 		// dedicated Vite configs own those graphs; the app dev server should only
 		// pre-bundle the actual desktop entry point.
@@ -110,6 +109,11 @@ export default defineConfig({
 		sourcemap: false,
 	},
 	resolve: {
+		// Workspace packages declare motion ^12 while the desktop app (and
+		// sileo's own dependency) resolve other copies; without this the renderer
+		// ships three motion/framer-motion/motion-dom trees. One copy also keeps
+		// MotionConfig and LayoutGroup contexts shared across package boundaries.
+		dedupe: ["motion"],
 		alias: [
 			{ find: "@", replacement: path.resolve(import.meta.dirname, ".") },
 			{ find: /^@hugeicons\/core-free-icons$/, replacement: modularIcons },

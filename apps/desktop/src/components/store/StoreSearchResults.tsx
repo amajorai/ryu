@@ -1,6 +1,7 @@
 import { ArrowRight01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
+import { StoreCardGrid } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -14,7 +15,6 @@ import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import type {
 	StoreSearchGroup,
-	StoreSearchItem,
 	StoreSearchRealm,
 } from "@/src/hooks/useStoreSearch.ts";
 
@@ -36,8 +36,9 @@ export default function StoreSearchResults({
 	loading: boolean;
 	isEmpty: boolean;
 	onClearSearch: () => void;
-	/** Open a realm's tab, carrying the current query across as its initial search. */
-	onOpenRealm: (realm: StoreSearchRealm) => void;
+	/** Open a realm's tab, carrying the current query across as its initial
+	 *  search; with an item id the realm opens on that item. */
+	onOpenRealm: (realm: StoreSearchRealm, itemId?: string) => void;
 }) {
 	if (loading && isEmpty) {
 		return <SkeletonRows rows={6} spacing="library" />;
@@ -51,12 +52,11 @@ export default function StoreSearchResults({
 					</EmptyMedia>
 					<EmptyTitle>Nothing found</EmptyTitle>
 					<EmptyDescription>
-						No matches across Models, Skills, MCP, Plugins, or Agents. Try a
-						different search.
+						Nothing across the Store matches. Try a different search.
 					</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
-					<Button onClick={onClearSearch} size="sm" variant="ghost">
+					<Button onClick={onClearSearch} size="sm" variant="outline">
 						Clear search
 					</Button>
 				</EmptyContent>
@@ -64,10 +64,12 @@ export default function StoreSearchResults({
 		);
 	}
 	return (
-		<div className="scroll-fade flex h-full flex-col gap-8 overflow-auto p-4">
-			{groups.map((group) => (
-				<ResultSection group={group} key={group.realm} onOpen={onOpenRealm} />
-			))}
+		<div className="scroll-fade h-full overflow-auto">
+			<div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-4 pt-2 pb-12">
+				{groups.map((group) => (
+					<ResultSection group={group} key={group.realm} onOpen={onOpenRealm} />
+				))}
+			</div>
 		</div>
 	);
 }
@@ -77,64 +79,35 @@ function ResultSection({
 	onOpen,
 }: {
 	group: StoreSearchGroup;
-	onOpen: (realm: StoreSearchRealm) => void;
+	onOpen: (realm: StoreSearchRealm, itemId?: string) => void;
 }) {
 	return (
 		<section>
 			<button
-				className="mb-3 flex w-full items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
+				className="group mb-2 flex items-center gap-2 text-left"
 				onClick={() => onOpen(group.realm)}
 				type="button"
 			>
-				<span className="font-medium text-xs uppercase tracking-widest">
-					{group.label}
-				</span>
-				<span className="type-compact rounded-full bg-muted px-1.5 py-0.5 tabular-nums">
+				<span className="font-semibold text-sm">{group.label}</span>
+				<span className="text-muted-foreground/70 text-xs tabular-nums">
 					{formatCount(group.items.length) ?? "—"}
 				</span>
-				<HugeiconsIcon className="size-3.5" icon={ArrowRight01Icon} />
+				<HugeiconsIcon
+					className="size-4 text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5"
+					icon={ArrowRight01Icon}
+				/>
 			</button>
-			<div className="grid grid-cols-2 gap-3">
+			<StoreCardGrid>
 				{group.items.map((item) => (
-					<ResultCard
-						item={item}
+					<StoreCatalogCard
+						description={item.description ?? item.tag ?? undefined}
 						key={item.id}
-						onOpen={() => onOpen(group.realm)}
+						name={item.name}
+						onClick={() => onOpen(group.realm, item.id)}
+						seedId={item.id}
 					/>
 				))}
-			</div>
+			</StoreCardGrid>
 		</section>
-	);
-}
-
-function ResultCard({
-	item,
-	onOpen,
-}: {
-	item: StoreSearchItem;
-	onOpen: () => void;
-}) {
-	return (
-		<button
-			className="flex flex-col gap-2 rounded-xl bg-card p-4 text-left transition-colors hover:border-foreground/30"
-			onClick={onOpen}
-			type="button"
-		>
-			<div className="flex items-center justify-between gap-2">
-				<span className="truncate font-medium text-sm" title={item.name}>
-					{item.name}
-				</span>
-				{item.tag ? (
-					<Badge className="shrink-0" variant="outline">
-						{item.tag}
-					</Badge>
-				) : null}
-			</div>
-			{item.description ? (
-				<p className="line-clamp-2 text-muted-foreground text-xs">
-					{item.description}
-				</p>
-			) : null}
-		</button>
 	);
 }

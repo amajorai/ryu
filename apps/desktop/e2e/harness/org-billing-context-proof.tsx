@@ -1,5 +1,11 @@
+import {
+	AiNetworkIcon,
+	Building03Icon,
+	Key01Icon,
+	Wallet01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { PlanBadge } from "@ryu/ui/components/plan-badge.tsx";
-import { Building2, KeyRound, Network, WalletCards } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import {
 	OrgBillingContextView,
@@ -62,7 +68,10 @@ function Proof() {
 					<p className="font-medium text-sm">Active organization</p>
 					<div className="rounded-xl border bg-card p-3 shadow-sm">
 						<div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
-							<Building2 className="size-4 text-primary" />
+							<HugeiconsIcon
+								className="size-4 text-primary"
+								icon={Building03Icon}
+							/>
 							<span className="min-w-0 flex-1 truncate font-medium text-sm">
 								{org.organizationName}
 							</span>
@@ -88,7 +97,7 @@ function Proof() {
 					className="overflow-hidden rounded-xl border bg-card shadow-sm"
 				>
 					<ProofRow
-						icon={<WalletCards className="size-4" />}
+						icon={<HugeiconsIcon className="size-4" icon={Wallet01Icon} />}
 						title="Ryu managed inference"
 					>
 						Spends{" "}
@@ -98,14 +107,14 @@ function Proof() {
 						.
 					</ProofRow>
 					<ProofRow
-						icon={<KeyRound className="size-4" />}
+						icon={<HugeiconsIcon className="size-4" icon={Key01Icon} />}
 						title="BYOK provider balance"
 					>
 						Belongs to the provider key stored on this node; it is separate from
 						Ryu organization credits.
 					</ProofRow>
 					<ProofRow
-						icon={<Network className="size-4" />}
+						icon={<HugeiconsIcon className="size-4" icon={AiNetworkIcon} />}
 						title="Self-hosted node passthrough"
 					>
 						The saved <code>rgw_…</code> token remains bound to its issuing

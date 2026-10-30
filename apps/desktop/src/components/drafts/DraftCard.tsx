@@ -14,6 +14,7 @@ import {
 	CARD_FLIGHT,
 	useCardMove,
 } from "@ryu/blocks/desktop/interfaces/card-motion.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, type Transition } from "motion/react";
 import type { DraftWire } from "@/src/lib/api/drafts.ts";
@@ -70,7 +71,7 @@ function DraftCardFace({ draft, rank }: { draft: DraftWire; rank: number }) {
 			<span className="line-clamp-7 whitespace-pre-line break-words px-7 pt-8 text-xs leading-snug">
 				{draft.text.trim() || "Empty draft"}
 			</span>
-			<span className="mt-auto mb-3 truncate px-7 text-center text-[0.65rem] text-muted-foreground">
+			<span className="mt-auto mb-3 truncate px-7 text-center text-muted-foreground text-xs">
 				{draft.state_label}
 			</span>
 			<CardIndex draft={draft} flipped rank={rank} />
@@ -159,6 +160,7 @@ export function DraftCard({
 	reduceMotion: boolean;
 	transition: Transition;
 }) {
+	const tl = useLiteralMessages();
 	const { draft, pose, zone } = placed;
 	const frame = useCardMove<HTMLButtonElement>(pose, transition);
 	const preview = draft.preview || "Empty draft";
@@ -170,8 +172,8 @@ export function DraftCard({
 			aria-hidden={hidden || undefined}
 			aria-label={
 				zone === "pile"
-					? `Return to hand: ${preview}`
-					: `Add to send pile: ${preview}`
+					? tl("Return to hand: {preview}", { preview })
+					: tl("Add to send pile: {preview}", { preview })
 			}
 			aria-pressed={zone === "deck" ? undefined : zone !== "hand"}
 			className="absolute top-0 cursor-pointer rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-default"

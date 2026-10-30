@@ -27,7 +27,11 @@ test("creates, assigns, reorders, sorts, and deletes local chat sections", async
 	await expect(section(page, "unorganized")).toBeVisible();
 	await expect(chatRow(page, "Newer follow-up")).toBeVisible();
 
-	await page.getByRole("button", { name: "New section" }).click();
+	await page
+		.locator('[data-testid="sidebar-section-chats"] [aria-label$=" options"]')
+		.first()
+		.click();
+	await page.getByRole("menuitem", { name: "New section" }).click();
 	await page.getByRole("textbox", { name: "Section name" }).fill("Follow up");
 	await page.getByRole("button", { name: "Create section" }).click();
 	await expect(page.getByText("Follow up", { exact: true })).toBeVisible();
@@ -100,7 +104,11 @@ test("creates, assigns, reorders, sorts, and deletes local chat sections", async
 });
 
 async function createSection(page: Page, name: string) {
-	await page.getByRole("button", { name: "New section" }).click();
+	await page
+		.locator('[data-testid="sidebar-section-chats"] [aria-label$=" options"]')
+		.first()
+		.click();
+	await page.getByRole("menuitem", { name: "New section" }).click();
 	await page.getByRole("textbox", { name: "Section name" }).fill(name);
 	await page.getByRole("button", { name: "Create section" }).click();
 	const created = page

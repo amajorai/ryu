@@ -7,6 +7,14 @@
 // loop, and update over SSE. Layout (drag/resize) persists to Core per widget.
 
 import {
+	Alert02Icon,
+	DashboardSquare01Icon,
+	PlusSignIcon,
+	SparklesIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import {
 	AlertDialog,
 	AlertDialogAction,
 	AlertDialogCancel,
@@ -24,18 +32,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuSub,
-	DropdownMenuSubContent,
-	DropdownMenuSubTrigger,
-	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu.tsx";
+
 import {
 	Empty,
 	EmptyContent,
@@ -45,1000 +42,128 @@ import {
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
-import { toast } from "@ryu/ui/components/sileo.tsx";
+
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
-import {
-	ToggleGroup,
-	ToggleGroupItem,
-} from "@ryu/ui/components/toggle-group.tsx";
-import { RealtimeConnection } from "@ryuhq/core-client/realtime.ts";
-import {
-	CheckIcon,
-	ChevronDownIcon,
-	FrameIcon,
-	LayoutDashboardIcon,
-	LayoutGridIcon,
-	PencilIcon,
-	PlusIcon,
-	SparklesIcon,
-	Trash2Icon,
-	TriangleAlertIcon,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { AddWidgetDialog } from "@/src/components/dashboard/AddWidgetDialog.tsx";
-import {
-	CANVAS_CELL,
-	DashboardCanvas,
-	DEFAULT_NODE_H,
-	DEFAULT_NODE_W,
-} from "@/src/components/dashboard/DashboardCanvas.tsx";
-import {
-	DashboardGrid,
-	type WidgetLiveState,
-} from "@/src/components/dashboard/DashboardGrid.tsx";
-import { WIDGET_DEFINITIONS } from "@/src/components/dashboard/widgets/registry.tsx";
-import { useIsActiveTab } from "@/src/contexts/TabsContext.tsx";
-import { useTitleBar } from "@/src/contexts/TitleBarContext.tsx";
-import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { useAssistantSurface } from "@/src/hooks/useAssistantBuilder.ts";
-import { useAssistantPageContext } from "@/src/hooks/useAssistantPageContext.ts";
-import { type ApiTarget, realtimeJwtForTarget } from "@/src/lib/api/client.ts";
-import {
-	type CanvasLayoutRect,
-	createDashboard,
-	createWidget,
-	type Dashboard,
-	type DashboardViewMode,
-	deleteDashboard,
-	deleteWidget,
-	type GridLayoutRect,
-	getCatalog,
-	getDashboard,
-	listDashboards,
-	refreshWidget,
-	renameDashboard,
-	setDashboardViewMode,
-	streamDashboardEvents,
-	updateWidgetCanvas,
-	updateWidgetLayout,
-	type Widget,
-	type WidgetInput,
-} from "@/src/lib/api/dashboard.ts";
-import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
-
-/**
- * Quick-add presets so the grid is usable without the AI builder. Only the ones
- * whose source type the node's catalog lists are offered or seeded (see
- * `presetsFor`): the Core-metric presets reappear on a host that can read Core
- * endpoints, and stay hidden on the Dashboards sidecar, which cannot.
- */
-const PRESETS: Array<{ label: string } & WidgetInput> = [
-	{
-		label: "Connected clients",
-		kind: "stat",
-		title: "Connected clients",
-		source: {
-			type: "core_endpoint",
-			endpoint: "connections",
-			selector: "clients",
-		},
-		config: { label: "online now" },
-		refresh_interval: "10s",
-		layout: { x: 0, y: 0, w: 3, h: 3 },
-	},
-	{
-		label: "Open quests",
-		kind: "list",
-		title: "Open quests",
-		source: { type: "core_endpoint", endpoint: "quests", selector: "quests" },
-		config: { label_key: "title" },
-		refresh_interval: "30s",
-		layout: { x: 0, y: 0, w: 4, h: 4 },
-	},
-	{
-		label: "Monitors",
-		kind: "table",
-		title: "Monitors",
-		source: {
-			type: "core_endpoint",
-			endpoint: "monitors",
-			selector: "monitors",
-		},
-		config: {},
-		refresh_interval: "30s",
-		layout: { x: 0, y: 0, w: 6, h: 4 },
-	},
-	{
-		label: "Note",
-		kind: "text",
-		title: "Note",
-		source: { type: "static", data: null },
-		config: { markdown: "Welcome to your Home dashboard. Edit me." },
-		layout: { x: 0, y: 0, w: 4, h: 3 },
-	},
-];
-
-/**
- * Non-overlapping grid placements for the auto-seeded starter (keyed by preset
- * label), so the widgets tile the 12-column grid neatly on first launch. The note
- * sits top-left so a starter of just the presets the host supports still starts at
- * the origin.
- */
-const STARTER_LAYOUTS = new Map<string, GridLayoutRect>([
-	["Note", { x: 0, y: 0, w: 4, h: 4 }],
-	["Connected clients", { x: 4, y: 0, w: 3, h: 3 }],
-	["Open quests", { x: 7, y: 0, w: 5, h: 4 }],
-	["Monitors", { x: 0, y: 4, w: 8, h: 4 }],
-]);
-
-/** The presets whose source type the node's catalog says it can resolve. */
-function presetsFor(sourceTypes: readonly string[]): typeof PRESETS {
-	return PRESETS.filter((preset) =>
-		sourceTypes.includes(preset.source?.type ?? "static")
-	);
-}
-
-/**
- * The prompt the "Generate a dashboard for me" button auto-sends to the AI
- * builder (the local `ryu`/Gemma agent), which authors widgets via Core's
- * `dashboard_builder.*` tools.
- */
-const AI_STARTER_PROMPT =
-	"Build me a useful starter Home dashboard. Start with a short welcome note, then add a few widgets that use only the source types this node supports — for example a public HTTPS JSON endpoint or a Composio action I have connected — and arrange them neatly on the 12-column grid. Keep it clean and not overwhelming.";
-
-/**
- * Nodes for which we've already auto-seeded a starter Home this session. Guards
- * against a re-list (or a dev StrictMode double-mount) seeding the starter twice.
- */
-const bootstrappedNodes = new Set<string>();
-
-/**
- * Seed the curated starter widgets onto a freshly created dashboard. Only presets
- * whose source type the catalog lists are seeded, so first launch never writes a
- * widget the node would reject or could only show as broken. Best-effort: a
- * missing catalog seeds just the static note, and a failed widget yields a
- * smaller starter rather than aborting the rest, so first launch always lands on
- * a populated (not blank) Home.
- */
-async function seedStarterWidgets(
-	target: ApiTarget,
-	dashboardId: string
-): Promise<void> {
-	let sourceTypes: string[] = ["static"];
-	try {
-		const catalog = await getCatalog(target);
-		if (Array.isArray(catalog.source_types)) {
-			sourceTypes = catalog.source_types;
-		}
-	} catch {
-		// No catalog: seed only the host-independent static note.
-	}
-	for (const preset of presetsFor(sourceTypes)) {
-		const { label, ...input } = preset;
-		const layout = STARTER_LAYOUTS.get(label) ?? input.layout;
-		try {
-			await createWidget(target, dashboardId, { ...input, layout });
-		} catch {
-			// Best-effort: skip this widget and keep seeding the rest.
-		}
-	}
-}
-
-/** Compact, model-readable summary of a dashboard's widgets for the builder preamble. */
-function dashboardSnapshot(widgets: Widget[]): string {
-	if (widgets.length === 0) {
-		return "(empty — no widgets yet)";
-	}
-	return widgets
-		.map(
-			(w) =>
-				`  - ${w.id} (${w.kind}) "${w.title}" source=${w.source.type} at ${w.layout.x},${w.layout.y} ${w.layout.w}x${w.layout.h}`
-		)
-		.join("\n");
-}
-
-/** The next free row beneath all current widgets (so a quick-add stacks). */
-function nextRow(widgets: Widget[]): number {
-	return widgets.reduce((max, w) => Math.max(max, w.layout.y + w.layout.h), 0);
-}
-
-/** Place a new Canvas widget near the viewport center without covering a card. */
-function findCanvasRect(
-	widgets: Widget[],
-	center: { x: number; y: number },
-	w: number,
-	h: number
-): CanvasLayoutRect {
-	const gap = 24;
-	const stepX = w + gap;
-	const stepY = h + gap;
-	const existing = widgets.map(
-		(widget) =>
-			widget.canvas ?? {
-				h: widget.layout.h * CANVAS_CELL,
-				w: widget.layout.w * CANVAS_CELL,
-				x: widget.layout.x * CANVAS_CELL,
-				y: widget.layout.y * CANVAS_CELL,
-			}
-	);
-	const origin = { x: center.x - w / 2, y: center.y - h / 2 };
-	const overlaps = (x: number, y: number) =>
-		existing.some(
-			(rect) =>
-				x < rect.x + rect.w + gap &&
-				x + w + gap > rect.x &&
-				y < rect.y + rect.h + gap &&
-				y + h + gap > rect.y
-		);
-
-	if (!overlaps(origin.x, origin.y)) {
-		return { ...origin, w, h };
-	}
-
-	// Search outward in a deterministic diamond spiral. The canvas is infinite,
-	// so moving one widget-width/height per step always gives existing cards room.
-	for (let radius = 1; radius <= widgets.length + 2; radius += 1) {
-		for (let dx = radius; dx >= -radius; dx -= 1) {
-			const vertical = radius - Math.abs(dx);
-			const offsets = vertical === 0 ? [0] : [vertical, -vertical];
-			for (const dy of offsets) {
-				const x = origin.x + dx * stepX;
-				const y = origin.y + dy * stepY;
-				if (!overlaps(x, y)) {
-					return { h, w, x, y };
-				}
-			}
-		}
-	}
-
-	const lowestEdge = existing.reduce(
-		(max, rect) => Math.max(max, rect.y + rect.h),
-		origin.y
-	);
-	return { h, w, x: origin.x, y: lowestEdge + gap };
-}
+import { DashboardCanvas } from "@/src/components/dashboard/DashboardCanvas.tsx";
+import { DashboardGrid } from "@/src/components/dashboard/DashboardGrid.tsx";
+import { useHomeAssistantSurface } from "./HomePage.assistant.tsx";
+import { useHomeDashboardActions } from "./HomePage.dashboards.ts";
+import { useHomeDashboardData } from "./HomePage.data.ts";
+import { useHomeWidgetActions } from "./HomePage.widgets.ts";
 
 export default function HomePage() {
-	const activeNode = useActiveNode();
-	const target = useMemo(
-		() => ({
-			url: activeNode.url,
-			token: activeNode.token,
-			userJwt: activeNode.userJwt ?? null,
-		}),
-		[activeNode.url, activeNode.token]
-	);
-	const dashboardRealtimeRef = useRef<RealtimeConnection | null>(null);
-
-	const [dashboards, setDashboards] = useState<Dashboard[]>([]);
-	const [dashboardId, setDashboardId] = useState<string | null>(null);
-	const [dashboardName, setDashboardName] = useState("Home");
-	// The current dashboard's render mode: v1 grid (default) or v2 canvas.
-	const [viewMode, setViewMode] = useState<DashboardViewMode>("grid");
-	// Latest canvas viewport centre (flow coords), reported by DashboardCanvas, so a
-	// new widget added in canvas view lands where the user is looking.
-	const canvasCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-	const [widgets, setWidgets] = useState<Widget[]>([]);
-	const [live, setLive] = useState<Record<string, WidgetLiveState>>({});
-	const [loading, setLoading] = useState(true);
-	// A load failure (fetching the dashboard list / a dashboard's widgets). Kept
-	// separate from transient action failures, which surface as toasts, so the
-	// grid never renders the "empty" state on top of a failed fetch.
-	const [error, setError] = useState<string | null>(null);
-	// Bumped to re-trigger the initial load effect from the Retry affordance.
-	const [reloadKey, setReloadKey] = useState(0);
-	// "Build with AI" mode: while on, the global Ask Ryu assistant is this
-	// dashboard's builder (see `useAssistantSurface` below). There is no second
-	// chat pane on Home.
-	const [builderOpen, setBuilderOpen] = useState(false);
-	// True while an AI "generate" turn is in flight, so the empty area shows an
-	// "assembling…" state instead of the call-to-action.
-	const [generating, setGenerating] = useState(false);
-	const [addOpen, setAddOpen] = useState(false);
-	// Armed when the user picks "Delete" so we can confirm before wiping a
-	// dashboard (and all of its widgets).
-	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-	const [coreEndpoints, setCoreEndpoints] = useState<string[]>([]);
-	const [sourceTypes, setSourceTypes] = useState<string[]>(["static"]);
-	// Name dialog state, shared by "New dashboard" (create) and "Rename".
-	const [nameDialog, setNameDialog] = useState<{
-		mode: "create" | "rename";
-		value: string;
-	} | null>(null);
-
-	// Fetch the catalog once so the Add-widget picker offers the live endpoint list.
-	useEffect(() => {
-		let active = true;
-		setSourceTypes(["static"]);
-		getCatalog(target)
-			.then((c) => {
-				if (!active) {
-					return;
-				}
-				setCoreEndpoints(c.core_endpoints);
-				setSourceTypes(
-					Array.isArray(c.source_types) ? c.source_types : ["static"]
-				);
-			})
-			.catch(() => {
-				// A missing catalog leaves only the host-independent static source.
-			});
-		return () => {
-			active = false;
-		};
-	}, [target]);
-
-	// Load the dashboard list, creating a default "Home" when none exist yet.
-	// Returns the list so callers can pick a selection.
-	const refreshList = useCallback(async (): Promise<Dashboard[]> => {
-		let list = await listDashboards(target);
-		if (list.length === 0) {
-			const home = await createDashboard(target, "Home");
-			// First launch on this node: auto-seed a curated starter so Home is
-			// never blank. Guarded per-node so it happens at most once per session
-			// and never re-seeds a dashboard the user has since emptied.
-			if (!bootstrappedNodes.has(target.url)) {
-				bootstrappedNodes.add(target.url);
-				await seedStarterWidgets(target, home.id);
-			}
-			list = [home];
-		}
-		setDashboards(list);
-		return list;
-	}, [target]);
-
-	// Resolve the dashboard list + initial selection on mount (and on Retry).
-	useEffect(() => {
-		let cancelled = false;
-		setLoading(true);
-		setError(null);
-		(async () => {
-			try {
-				const list = await refreshList();
-				if (cancelled) {
-					return;
-				}
-				// Selecting an id triggers the reload effect, which sets the name + widgets.
-				setDashboardId((prev) =>
-					prev && list.some((d) => d.id === prev) ? prev : list[0].id
-				);
-			} catch {
-				if (!cancelled) {
-					setError(
-						"We couldn't load your dashboards. Check your connection and try again."
-					);
-					setLoading(false);
-				}
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-		// `reloadKey` is load-bearing: `handleRetry`'s no-dashboard-selected branch
-		// only bumps it, so dropping it leaves that retry on a permanent spinner.
-	}, [refreshList, reloadKey]);
-
-	const reload = useCallback(
-		async (id: string) => {
-			try {
-				const { dashboard, widgets: ws } = await getDashboard(target, id);
-				setDashboardName(dashboard.name);
-				setViewMode(dashboard.view_mode ?? "grid");
-				setWidgets(ws);
-				// Seed live state from cached values so a reload shows data immediately.
-				setLive((prev) => {
-					const next = { ...prev };
-					for (const w of ws) {
-						if (!(w.id in next) && w.last_value !== undefined) {
-							next[w.id] = { value: w.last_value, error: w.last_error };
-						}
-					}
-					return next;
-				});
-				setError(null);
-			} catch {
-				setError(
-					"We couldn't load this dashboard. Check your connection and try again."
-				);
-			} finally {
-				setLoading(false);
-			}
-		},
-		[target]
-	);
-
-	// Load widgets whenever the selected dashboard changes.
-	useEffect(() => {
-		if (dashboardId) {
-			reload(dashboardId);
-		}
-	}, [dashboardId, reload]);
-
-	useEffect(() => {
-		if (!dashboardId) {
-			return;
-		}
-		let cancelled = false;
-		let connection: RealtimeConnection | null = null;
-		void realtimeJwtForTarget(target).then((jwt) => {
-			if (cancelled) {
-				return;
-			}
-			connection = new RealtimeConnection(target, {
-				appId: "@ryu/dashboards",
-				handlers: {
-					onNamedEvent: ({ name }) => {
-						if (name === "resource.changed") {
-							void reload(dashboardId);
-						}
-					},
-					onResyncRequired: () => {
-						void reload(dashboardId);
-					},
-				},
-				jwt,
-				kind: "application",
-				roomId: dashboardId,
-			});
-			dashboardRealtimeRef.current = connection;
-			connection.connect();
-		});
-		return () => {
-			cancelled = true;
-			dashboardRealtimeRef.current = null;
-			connection?.close();
-		};
-	}, [dashboardId, reload, target]);
-
-	const publishDashboardChanged = useCallback(() => {
-		dashboardRealtimeRef.current?.sendEvent("resource.changed", null);
-	}, []);
-
-	// Subscribe to the live SSE event stream for this dashboard.
-	useEffect(() => {
-		if (!dashboardId) {
-			return;
-		}
-		const controller = new AbortController();
-		(async () => {
-			try {
-				await streamDashboardEvents(
-					target,
-					(event) => {
-						if ("dashboard_id" in event && event.dashboard_id !== dashboardId) {
-							return;
-						}
-						switch (event.type) {
-							case "widget_data":
-								setLive((p) => ({
-									...p,
-									[event.widget_id]: { value: event.value, error: null },
-								}));
-								break;
-							case "widget_error":
-								setLive((p) => ({
-									...p,
-									[event.widget_id]: { error: event.error },
-								}));
-								break;
-							case "widget_updated":
-								setWidgets((p) => {
-									const i = p.findIndex((w) => w.id === event.widget.id);
-									if (i === -1) {
-										return [...p, event.widget];
-									}
-									const copy = [...p];
-									copy[i] = event.widget;
-									return copy;
-								});
-								break;
-							case "widget_deleted":
-								setWidgets((p) => p.filter((w) => w.id !== event.widget_id));
-								break;
-							case "dashboard_updated":
-								reload(dashboardId);
-								break;
-							default:
-								break;
-						}
-					},
-					controller.signal
-				);
-			} catch {
-				// Stream dropped (navigation / Core restart); the next mount reconnects.
-			}
-		})();
-		return () => controller.abort();
-	}, [dashboardId, target, reload]);
-
-	const handleLayoutPersist = useCallback(
-		(widgetId: string, rect: GridLayoutRect) => {
-			if (!dashboardId) {
-				return;
-			}
-			// Optimistic local update so the grid doesn't snap back before the PUT lands.
-			setWidgets((p) =>
-				p.map((w) => (w.id === widgetId ? { ...w, layout: rect } : w))
-			);
-			updateWidgetLayout(target, dashboardId, widgetId, rect)
-				.then(publishDashboardChanged)
-				.catch(() => {
-					// A failed persist self-heals on the next reload.
-				});
-		},
-		[dashboardId, publishDashboardChanged, target]
-	);
-
-	// Persist a widget's canvas (v2) rect. Additive: never touches the grid layout,
-	// so v1 stays intact. Optimistic so the node doesn't snap before the PUT lands.
-	const handleCanvasPersist = useCallback(
-		(widgetId: string, rect: CanvasLayoutRect) => {
-			if (!dashboardId) {
-				return;
-			}
-			setWidgets((p) =>
-				p.map((w) => (w.id === widgetId ? { ...w, canvas: rect } : w))
-			);
-			updateWidgetCanvas(target, dashboardId, widgetId, rect)
-				.then(publishDashboardChanged)
-				.catch(() => {
-					// A failed persist self-heals on the next reload.
-				});
-		},
-		[dashboardId, publishDashboardChanged, target]
-	);
-
-	// Switch the current dashboard between grid (v1) and canvas (v2). Optimistic +
-	// best-effort persist; the grid layout and widgets are untouched by the toggle.
-	const handleSetViewMode = useCallback(
-		(mode: DashboardViewMode) => {
-			if (!dashboardId || mode === viewMode) {
-				return;
-			}
-			setViewMode(mode);
-			setDashboards((p) =>
-				p.map((d) => (d.id === dashboardId ? { ...d, view_mode: mode } : d))
-			);
-			setDashboardViewMode(target, dashboardId, mode)
-				.then(publishDashboardChanged)
-				.catch(() => {
-					// A failed persist self-heals on the next reload.
-				});
-		},
-		[dashboardId, publishDashboardChanged, viewMode, target]
-	);
-
-	const handleRefresh = useCallback(
-		(widgetId: string) => {
-			if (!dashboardId) {
-				return;
-			}
-			refreshWidget(target, dashboardId, widgetId)
-				.then((r) => {
-					setLive((p) => ({
-						...p,
-						[widgetId]: { value: r.value, error: r.error ?? null },
-					}));
-				})
-				.catch(() => {
-					toast.error("Couldn't refresh widget", {
-						description: "Check your connection and try again.",
-					});
-				});
-		},
-		[dashboardId, target]
-	);
-
-	const handleRemove = useCallback(
-		(widgetId: string) => {
-			if (!dashboardId) {
-				return;
-			}
-			setWidgets((p) => p.filter((w) => w.id !== widgetId));
-			deleteWidget(target, dashboardId, widgetId)
-				.then(publishDashboardChanged)
-				.catch(() => {
-					void reload(dashboardId);
-				});
-		},
-		[dashboardId, publishDashboardChanged, target, reload]
-	);
-
-	// Create any widget (from a quick preset or the full Add-widget picker),
-	// stacking it beneath the current widgets and pulling its first value at once.
-	const handleCreateWidget = useCallback(
-		async (input: WidgetInput) => {
-			if (!dashboardId) {
-				return;
-			}
-			const layout = {
-				x: 0,
-				y: nextRow(widgets),
-				w: input.layout?.w ?? 4,
-				h: input.layout?.h ?? 3,
-			};
-			// In canvas view, drop the new widget at the current viewport centre so it
-			// appears where the user is looking (the grid layout still round-trips).
-			const canvas =
-				viewMode === "canvas"
-					? findCanvasRect(
-							widgets,
-							canvasCenterRef.current,
-							input.canvas?.w ?? DEFAULT_NODE_W,
-							input.canvas?.h ?? DEFAULT_NODE_H
-						)
-					: input.canvas;
-			try {
-				const widget = await createWidget(target, dashboardId, {
-					...input,
-					layout,
-					canvas,
-				});
-				setWidgets((p) => [...p, widget]);
-				publishDashboardChanged();
-				handleRefresh(widget.id);
-			} catch {
-				toast.error("Couldn't add widget", {
-					description: "Check your connection and try again.",
-				});
-				reload(dashboardId);
-			}
-		},
-		[
-			dashboardId,
-			target,
-			widgets,
-			handleRefresh,
-			publishDashboardChanged,
-			reload,
-			viewMode,
-		]
-	);
-
-	// Open the AI builder and hand the assistant a starter prompt so the model
-	// authors the dashboard — the one-click "generate one for me" path. The
-	// prompt is queued only once the dashboard surface is the active takeover
-	// (see below); queued earlier, an already-open assistant would send it as
-	// plain chat without the builder's tools.
-	const [starterPending, setStarterPending] = useState(false);
-	const handleGenerateWithAi = useCallback(() => {
-		setGenerating(true);
-		setBuilderOpen(true);
-		setStarterPending(true);
-	}, []);
-
-	// The AI turn produced widgets: drop the "assembling…" state so the grid shows.
-	useEffect(() => {
-		if (widgets.length > 0) {
-			setGenerating(false);
-		}
-	}, [widgets.length]);
-
-	const resolveDashboardId = useCallback(async () => {
-		if (dashboardId) {
-			return dashboardId;
-		}
-		try {
-			const dash = await createDashboard(target, "Home");
-			refreshList();
-			setDashboardId(dash.id);
-			return dash.id;
-		} catch {
-			return null;
-		}
-	}, [dashboardId, target, refreshList]);
-
-	// Switch to another dashboard: changing the id re-runs the reload + SSE effects.
-	const handleSelectDashboard = useCallback(
-		(id: string) => {
-			if (id === dashboardId) {
-				return;
-			}
-			setLive({});
-			setWidgets([]);
-			setDashboardId(id);
-		},
-		[dashboardId]
-	);
-
-	// Commit the name dialog: create a new dashboard (and switch to it) or rename
-	// the current one.
-	const handleSubmitName = useCallback(async () => {
-		if (!nameDialog) {
-			return;
-		}
-		const name = nameDialog.value.trim();
-		if (!name) {
-			return;
-		}
-		try {
-			if (nameDialog.mode === "create") {
-				const dash = await createDashboard(target, name);
-				await refreshList();
-				handleSelectDashboard(dash.id);
-			} else if (dashboardId) {
-				await renameDashboard(target, dashboardId, name);
-				setDashboardName(name);
-				await refreshList();
-				publishDashboardChanged();
-			}
-		} catch {
-			toast.error("Couldn't save dashboard", {
-				description: "Check your connection and try again.",
-			});
-		} finally {
-			setNameDialog(null);
-		}
-	}, [nameDialog, target, dashboardId, refreshList, handleSelectDashboard]);
-
-	// Delete the current dashboard (blocked when it is the only one) and fall back
-	// to the first remaining.
-	const handleDeleteCurrent = useCallback(async () => {
-		if (!dashboardId || dashboards.length <= 1) {
-			return;
-		}
-		try {
-			await deleteDashboard(target, dashboardId);
-			publishDashboardChanged();
-			const list = await refreshList();
-			const fallback = list.find((d) => d.id !== dashboardId) ?? list[0];
-			handleSelectDashboard(fallback.id);
-		} catch {
-			toast.error("Couldn't delete dashboard", {
-				description: "Check your connection and try again.",
-			});
-		} finally {
-			setConfirmDeleteOpen(false);
-		}
-	}, [
+	const tl = useLiteralMessages();
+	const {
+		addOpen,
+		builderOpen,
+		canvasCenterRef,
+		confirmDeleteOpen,
+		coreEndpoints,
 		dashboardId,
-		dashboards.length,
-		target,
+		dashboardName,
+		dashboards,
+		error,
+		generating,
+		live,
+		loading,
+		nameDialog,
+		publishDashboardChanged,
 		refreshList,
+		reload,
+		setAddOpen,
+		setBuilderOpen,
+		setConfirmDeleteOpen,
+		setDashboardId,
+		setDashboardName,
+		setDashboards,
+		setError,
+		setGenerating,
+		setLive,
+		setLoading,
+		setNameDialog,
+		setReloadKey,
+		setViewMode,
+		setWidgets,
+		sourceTypes,
+		target,
+		viewMode,
+		widgets,
+	} = useHomeDashboardData();
+	const {
+		handleCanvasPersist,
+		handleLayoutPersist,
+		handleRefresh,
+		handleRemove,
+		handleSetViewMode,
+	} = useHomeWidgetActions({
+		dashboardId,
+		publishDashboardChanged,
+		reload,
+		setDashboards,
+		setLive,
+		setViewMode,
+		setWidgets,
+		target,
+		viewMode,
+	});
+	const {
+		handleCreateWidget,
+		handleDeleteCurrent,
+		handleGenerateWithAi,
+		handleRetry,
 		handleSelectDashboard,
-	]);
-
-	// Retry a failed load: re-run the widget fetch when a dashboard is selected,
-	// otherwise re-run the initial list resolution.
-	const handleRetry = useCallback(() => {
-		setError(null);
-		setLoading(true);
-		if (dashboardId) {
-			reload(dashboardId);
-		} else {
-			setReloadKey((k) => k + 1);
-		}
-	}, [dashboardId, reload]);
-
-	// Live handle on the widgets for the assistant's send-time context resolver —
-	// a dashboard refreshes itself, so the resolver must read the CURRENT board,
-	// not the one captured when the effect published.
-	const widgetsRef = useRef(widgets);
-	widgetsRef.current = widgets;
-
-	const snapshot = useMemo(() => dashboardSnapshot(widgets), [widgets]);
-
-	// ── The dashboard as an assistant surface ────────────────────────────────
-	// "Build with AI" is the global Ask Ryu assistant docked as this dashboard's
-	// builder — `dashboard_builder.*` tools, live board as page context — not a chat pane of
-	// Home's own. It registers only while `builderOpen`, because a takeover
-	// replaces the generic assistant, and merely *looking at* Home is not a
-	// request to give up general chat. Choosing "Build" is an explicit request, so
-	// the surface docks the panel open (the default for builder pages).
-	const widgetKinds = useMemo(
-		() => WIDGET_DEFINITIONS.map((d) => d.kind).join(", "),
-		[]
-	);
-	const quickAddPresets = useMemo(() => presetsFor(sourceTypes), [sourceTypes]);
-	useAssistantSurface(
-		builderOpen
-			? {
-					kind: "dashboard",
-					label: `Build ${dashboardName}`,
-					description:
-						"Say what you want to see and I'll assemble the widgets on this board.",
-					preamble: [
-						"You are Ryu's Home dashboard builder. You are helping the user assemble",
-						'the dashboard with id "{{targetId}}". A dashboard is a grid of widgets,',
-						`each with a kind (${widgetKinds}), a data source, and a grid layout.`,
-						"When the user describes what they want to see, BUILD it by calling the",
-						"dashboard_builder tools. For edits prefer",
-						'dashboard_builder.configure_dashboard with dashboard_id "{{targetId}}"',
-						"using widgets_upsert (pass each widget's layout x/y/w/h to place it on",
-						"the 12-column grid) and widgets_remove. Pick a sensible source from",
-						`the types this node supports: ${sourceTypes.join(", ")}. Never use`,
-						"any other source type. If a save is rejected, read the error and fix",
-						"it. Call",
-						"dashboard_builder.get_dashboard when you need the current widgets.",
-						"Keep replies short and confirm what you changed.",
-					].join(" "),
-					tools: [
-						"dashboard_builder.configure_dashboard",
-						"dashboard_builder.get_dashboard",
-					],
-					prompts: [
-						"Chart a public JSON API",
-						"Show my unread email",
-						"Tidy the layout",
-					],
-					// The live board travels as the removable page context below.
-					snapshot: "",
-					targetId: dashboardId,
-					targetName: dashboardName,
-					// One conversation per board, so switching dashboards never
-					// carries the previous board's turns into this one's edits.
-					thread: dashboardId ? `dashboard:${dashboardId}` : undefined,
-					resolveId: resolveDashboardId,
-					onChanged: (id) => {
-						void reload(id).then(() => setGenerating(false));
-					},
-				}
-			: null
-	);
-
-	const activeSurfaceKind = useAssistantStore((s) => s.builder?.kind);
-	useEffect(() => {
-		if (starterPending && activeSurfaceKind === "dashboard") {
-			setStarterPending(false);
-			useAssistantStore.getState().setPendingPrompt(AI_STARTER_PROMPT);
-		}
-	}, [starterPending, activeSurfaceKind]);
-
-	// Closing the assistant ends build mode, so the surface is released and the
-	// assistant goes back to general chat. Only while Home is focused: leaving
-	// the tab also tears the takeover down, and coming back should resume it.
-	const isActiveTab = useIsActiveTab();
-	const assistantMode = useAssistantStore((s) => s.mode);
-	const builderShownRef = useRef(false);
-	useEffect(() => {
-		if (!(builderOpen && isActiveTab)) {
-			builderShownRef.current = false;
-			return;
-		}
-		if (assistantMode !== "closed") {
-			builderShownRef.current = true;
-			return;
-		}
-		if (builderShownRef.current) {
-			builderShownRef.current = false;
-			setBuilderOpen(false);
-			setGenerating(false);
-		}
-	}, [builderOpen, isActiveTab, assistantMode]);
-
-	// …and the same board as plain CONTEXT, resolved at send time. A dashboard's
-	// widgets refresh on their own, so a snapshot pushed at mount would describe a
-	// board that no longer exists by the time the user asks about it.
-	useAssistantPageContext(
-		dashboardId
-			? {
-					id: `dashboard:${dashboardId}`,
-					title: dashboardName,
-					text: snapshot,
-					getText: () => dashboardSnapshot(widgetsRef.current),
-				}
-			: null
-	);
-
-	// Dashboard controls live in the window titlebar actions instead of an
-	// in-page header row. To keep the titlebar uncluttered, everything hangs off
-	// the single dashboard selector dropdown: switching dashboards, adding widgets
-	// (Build with AI + the widget presets), and managing the current dashboard.
-	const dashboardActions = useMemo(
-		() => (
-			<div className="flex items-center gap-1.5">
-				<ToggleGroup
-					appearance="segmented"
-					onValueChange={(values: string[]) => {
-						const v = values[0];
-						if (v === "grid" || v === "canvas") {
-							handleSetViewMode(v);
-						}
-					}}
-					spacing={0}
-					value={[viewMode]}
-					variant="default"
-				>
-					<ToggleGroupItem
-						aria-label="Grid view"
-						density="dashboard-tab"
-						value="grid"
-					>
-						<LayoutGridIcon className="size-3.5" /> Grid
-					</ToggleGroupItem>
-					<ToggleGroupItem
-						aria-label="Canvas view"
-						density="dashboard-tab"
-						value="canvas"
-					>
-						<FrameIcon className="size-3.5" /> Canvas
-					</ToggleGroupItem>
-				</ToggleGroup>
-				<DropdownMenu>
-					<DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
-						<span className="flex items-center gap-0.5">
-							{dashboardName}
-							<ChevronDownIcon className="size-3.5 text-muted-foreground" />
-						</span>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="min-w-52">
-						<DropdownMenuGroup>
-							<DropdownMenuLabel>Dashboards</DropdownMenuLabel>
-							{dashboards.map((d) => (
-								<DropdownMenuItem
-									key={d.id}
-									onClick={() => handleSelectDashboard(d.id)}
-								>
-									<CheckIcon
-										className={
-											d.id === dashboardId ? "size-4" : "size-4 opacity-0"
-										}
-									/>
-									<span className="truncate" title={d.name}>
-										{d.name}
-									</span>
-								</DropdownMenuItem>
-							))}
-						</DropdownMenuGroup>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem onClick={() => setBuilderOpen(true)}>
-							<SparklesIcon className="size-4" /> Build a work view
-						</DropdownMenuItem>
-						<DropdownMenuSub>
-							<DropdownMenuSubTrigger>
-								<PlusIcon className="size-4" /> Add widget
-							</DropdownMenuSubTrigger>
-							<DropdownMenuSubContent>
-								{quickAddPresets.map((preset) => (
-									<DropdownMenuItem
-										key={preset.label}
-										onClick={() => handleCreateWidget(preset)}
-									>
-										{preset.label}
-									</DropdownMenuItem>
-								))}
-								<DropdownMenuSeparator />
-								<DropdownMenuItem onClick={() => setAddOpen(true)}>
-									<PlusIcon className="size-4" /> Custom widget…
-								</DropdownMenuItem>
-							</DropdownMenuSubContent>
-						</DropdownMenuSub>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							onClick={() => setNameDialog({ mode: "create", value: "" })}
-						>
-							<PlusIcon className="size-4" /> New dashboard
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={() =>
-								setNameDialog({ mode: "rename", value: dashboardName })
-							}
-						>
-							<PencilIcon className="size-4" /> Rename
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							disabled={dashboards.length <= 1}
-							onClick={() => setConfirmDeleteOpen(true)}
-							variant="destructive"
-						>
-							<Trash2Icon className="size-4" /> Delete
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
-			</div>
-		),
-		[
-			dashboardName,
-			dashboards,
-			dashboardId,
-			handleSelectDashboard,
-			handleCreateWidget,
-			viewMode,
-			handleSetViewMode,
-		]
-	);
-	useTitleBar(null, dashboardActions);
+		handleSubmitName,
+		resolveDashboardId,
+		setStarterPending,
+		starterPending,
+	} = useHomeDashboardActions({
+		canvasCenterRef,
+		dashboardId,
+		dashboards,
+		handleRefresh,
+		nameDialog,
+		publishDashboardChanged,
+		refreshList,
+		reload,
+		setBuilderOpen,
+		setConfirmDeleteOpen,
+		setDashboardId,
+		setDashboardName,
+		setError,
+		setGenerating,
+		setLive,
+		setLoading,
+		setNameDialog,
+		setReloadKey,
+		setWidgets,
+		target,
+		viewMode,
+		widgets,
+	});
+	useHomeAssistantSurface({
+		builderOpen,
+		dashboardId,
+		dashboardName,
+		dashboards,
+		handleCreateWidget,
+		handleSelectDashboard,
+		handleSetViewMode,
+		reload,
+		resolveDashboardId,
+		setAddOpen,
+		setBuilderOpen,
+		setConfirmDeleteOpen,
+		setGenerating,
+		setNameDialog,
+		setStarterPending,
+		sourceTypes,
+		starterPending,
+		viewMode,
+		widgets,
+	});
 
 	if (loading && widgets.length === 0 && !error) {
 		return <SkeletonRows rows={6} spacing="library" />;
@@ -1048,7 +173,7 @@ export default function HomePage() {
 		<Empty className="h-full">
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
-					<TriangleAlertIcon />
+					<HugeiconsIcon icon={Alert02Icon} />
 				</EmptyMedia>
 				<EmptyTitle>Couldn't load your dashboard</EmptyTitle>
 				<EmptyDescription>{error}</EmptyDescription>
@@ -1084,7 +209,7 @@ export default function HomePage() {
 			<Empty className="h-full">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<LayoutDashboardIcon />
+						<HugeiconsIcon icon={DashboardSquare01Icon} />
 					</EmptyMedia>
 					<EmptyTitle>Your work dashboard is empty</EmptyTitle>
 					<EmptyDescription>
@@ -1094,11 +219,12 @@ export default function HomePage() {
 				</EmptyHeader>
 				<EmptyContent>
 					<div className="flex flex-wrap items-center justify-center gap-2">
-						<Button onClick={handleGenerateWithAi} size="sm">
-							<SparklesIcon className="size-4" /> Build a work view for me
+						<Button onClick={handleGenerateWithAi} size="sm" variant="outline">
+							<HugeiconsIcon icon={SparklesIcon} size={16} /> Build a work view
+							for me
 						</Button>
 						<Button onClick={() => setAddOpen(true)} size="sm" variant="ghost">
-							<PlusIcon className="size-4" /> Add a widget
+							<HugeiconsIcon icon={PlusSignIcon} size={16} /> Add a widget
 						</Button>
 					</div>
 				</EmptyContent>
@@ -1209,6 +335,7 @@ export default function HomePage() {
 						<Button
 							disabled={!nameDialog?.value.trim()}
 							onClick={() => handleSubmitName()}
+							variant="mono"
 						>
 							{nameDialog?.mode === "rename" ? "Rename" : "Create"}
 						</Button>
@@ -1218,7 +345,9 @@ export default function HomePage() {
 			<AlertDialog onOpenChange={setConfirmDeleteOpen} open={confirmDeleteOpen}>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Delete "{dashboardName}"?</AlertDialogTitle>
+						<AlertDialogTitle>
+							{tl('Delete "{dashboardName}"?', { dashboardName })}
+						</AlertDialogTitle>
 						<AlertDialogDescription>
 							This permanently deletes this dashboard and all of its widgets.
 							This cannot be undone.

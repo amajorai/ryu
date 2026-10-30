@@ -111,10 +111,35 @@ export function createChatPageNativeDependencies(
 					profile: "release",
 					deepLinkProfile: null,
 				},
+				// `~/.ryu/safe-mode` is not armed on this fixture device.
+				get_safe_mode_sentinel: false,
 			};
 			if (Object.hasOwn(idle, command)) {
 				noArgs(args);
 				return { handled: true, value: structuredClone(idle[command]) };
+			}
+			// `desktop_seal::webview_content_key`: the keychain-derived 32-byte key
+			// of one allowlisted webview store, plus the keys of earlier desktop keys
+			// (none on this fixture device). Stable per store, like the keychain key,
+			// so a reload opens what the previous page sealed.
+			if (command === "desktop_content_key") {
+				keys(args, ["store"]);
+				const index = ["collaboration", "local-storage"].indexOf(
+					String(args.store)
+				);
+				if (index < 0) {
+					throw new Error("Unknown webview content store");
+				}
+				return {
+					handled: true,
+					value: {
+						key: Array.from(
+							{ length: 32 },
+							(_, byte) => (byte * 37 + index * 101 + 13) % 256
+						),
+						retired: [],
+					},
+				};
 			}
 			if (command === "get_editor_availability") {
 				keys(args, ["editors"]);

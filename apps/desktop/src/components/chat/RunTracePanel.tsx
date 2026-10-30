@@ -13,7 +13,6 @@ import {
 	AiBrain01Icon,
 	AlertCircleIcon,
 	ArrowDown01Icon,
-	ArrowRight01Icon,
 	ComputerTerminal01Icon,
 	DatabaseIcon,
 	Loading01Icon,
@@ -25,6 +24,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -160,7 +160,7 @@ function SpanDetail({ node }: { node: TraceNode }) {
 	const attributes = Object.entries(span.attributes);
 	return (
 		<div
-			className="space-y-1 border-t bg-muted/30 px-3 py-2 text-xs"
+			className="my-1 space-y-1 rounded-lg bg-muted px-3 py-2 text-xs"
 			data-testid="trace-span-detail"
 		>
 			<dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
@@ -210,12 +210,12 @@ function SpanDetail({ node }: { node: TraceNode }) {
 				<p className="text-status-destructive">{span.error}</p>
 			) : null}
 			{span.input === undefined ? null : (
-				<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-2 font-mono">
+				<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-background p-2 font-mono">
 					{payloadText(span.input)}
 				</pre>
 			)}
 			{span.output === undefined ? null : (
-				<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-2 font-mono">
+				<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-background p-2 font-mono">
 					{payloadText(span.output)}
 				</pre>
 			)}
@@ -252,8 +252,8 @@ function WaterfallRow({
 	return (
 		<div
 			className={cn(
-				"grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-2 py-1",
-				selected && "bg-muted/50"
+				"grid h-8 grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-2 rounded-lg",
+				selected && "bg-muted"
 			)}
 			data-testid="trace-waterfall-row"
 		>
@@ -262,20 +262,24 @@ function WaterfallRow({
 				style={{ paddingLeft: `${node.depth * 12}px` }}
 			>
 				{hasChildren ? (
-					<button
+					<Button
 						aria-expanded={!collapsed}
 						aria-label={collapsed ? "Expand span" : "Collapse span"}
-						className="rounded p-0.5 text-muted-foreground hover:bg-muted"
+						className="shrink-0"
 						onClick={onToggle}
-						type="button"
+						size="icon-sm"
+						variant="ghost-muted"
 					>
 						<HugeiconsIcon
-							className="size-3"
-							icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon}
+							className={cn(
+								"size-3.5 transition-transform duration-(--duration-base) ease-move",
+								collapsed && "-rotate-90"
+							)}
+							icon={ArrowDown01Icon}
 						/>
-					</button>
+					</Button>
 				) : (
-					<span className="w-4 shrink-0" />
+					<span className="w-8 shrink-0" />
 				)}
 				<button
 					aria-pressed={selected}
@@ -285,34 +289,33 @@ function WaterfallRow({
 				>
 					<HugeiconsIcon
 						className={cn(
-							"size-3 shrink-0",
-							failed ? "text-status-destructive" : style.text
+							"size-3.5 shrink-0",
+							failed ? "text-status-destructive" : "text-muted-foreground"
 						)}
 						icon={failed ? AlertCircleIcon : style.icon}
 					/>
-					<span className="truncate font-mono text-foreground text-xs">
+					<span className="truncate text-foreground text-xs">
 						{node.span.name}
 					</span>
-					<span className="type-compact shrink-0 text-muted-foreground">
+					<span className="shrink-0 text-muted-foreground text-xs">
 						{style.label}
 					</span>
 				</button>
 			</div>
 			<div className="flex min-w-0 items-center gap-2">
-				<div className="relative h-3 min-w-0 flex-1 rounded-sm bg-muted">
+				<div className="relative h-1.5 min-w-0 flex-1 rounded-full bg-muted">
 					<div
 						className={cn(
-							"absolute top-0 h-3 rounded-sm",
-							failed ? "bg-destructive/70" : style.bar,
-							node.span.status === "running" && "animate-pulse"
+							"absolute top-0 h-1.5 rounded-full",
+							failed ? "bg-destructive/70" : style.bar
 						)}
 						style={{ left: `${left}%`, width: `${width}%` }}
 					/>
 				</div>
-				<span className="type-compact w-14 shrink-0 text-right font-mono text-muted-foreground">
+				<span className="w-14 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
 					{formatDuration(node.durationMs)}
 				</span>
-				<span className="type-compact w-12 shrink-0 text-right font-mono text-muted-foreground">
+				<span className="w-12 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
 					{tokens > 0 ? formatTokens(tokens) : ""}
 				</span>
 			</div>
@@ -384,9 +387,10 @@ export function RunTracePanel({ runId, target }: RunTracePanelProps) {
 		});
 
 	return (
-		<div className="rounded-md bg-card text-card-foreground">
+		<div className="text-foreground">
 			<button
-				className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50"
+				aria-expanded={expanded}
+				className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors duration-150 hover:bg-muted hover:duration-0"
 				onClick={() => {
 					if (!expanded) {
 						load();
@@ -396,18 +400,21 @@ export function RunTracePanel({ runId, target }: RunTracePanelProps) {
 				type="button"
 			>
 				<HugeiconsIcon
-					className="h-3 w-3 shrink-0 text-muted-foreground"
-					icon={expanded ? ArrowDown01Icon : ArrowRight01Icon}
+					className={cn(
+						"size-3.5 shrink-0 text-muted-foreground transition-transform duration-(--duration-base) ease-move",
+						!expanded && "-rotate-90"
+					)}
+					icon={ArrowDown01Icon}
 				/>
 				<span className="font-medium text-foreground">Run trace</span>
 				{loading && (
 					<HugeiconsIcon
-						className="ml-1 h-3 w-3 shrink-0 animate-spin text-muted-foreground"
+						className="ml-1 size-3.5 shrink-0 animate-spin text-muted-foreground"
 						icon={Loading01Icon}
 					/>
 				)}
 				{!loading && spanCount > 0 && (
-					<span className="ml-auto shrink-0 text-muted-foreground">
+					<span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
 						{errorCount > 0
 							? tl(
 									"{spanCount, plural, one {{spanLabel} span} other {{spanLabel} spans}} · {errorCount} failed",
@@ -426,18 +433,16 @@ export function RunTracePanel({ runId, target }: RunTracePanelProps) {
 			</button>
 
 			{expanded && (
-				<div className="border-t px-3 py-2" data-testid="run-trace-waterfall">
-					{error && (
-						<p className="type-caption text-status-destructive">{error}</p>
-					)}
+				<div className="px-2 py-1" data-testid="run-trace-waterfall">
+					{error && <p className="text-status-destructive text-xs">{error}</p>}
 					{!error && spanCount === 0 && !loading && (
-						<p className="type-caption text-muted-foreground">
+						<p className="text-muted-foreground text-xs">
 							No spans recorded for this run.
 						</p>
 					)}
 					{tree && spanCount > 0 && (
 						<>
-							<div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground text-xs">
+							<div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground text-xs tabular-nums">
 								<span>
 									{tl("Duration {duration}", {
 										duration: formatDuration(tree.durationMs),

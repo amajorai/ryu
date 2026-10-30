@@ -1,6 +1,7 @@
 /* eslint-disable react/no-unknown-property */
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { Check, Gift, Plus, Snowflake } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useMemo, useRef } from "react";
@@ -251,10 +252,11 @@ function agentPose(
 	return "idle";
 }
 
-const POSE_WORDS: Record<VillagerPose, string> = {
-	failed: "a run failed",
+/** ICU select keys for each pose (select keys stay identifier-shaped). */
+const POSE_KEYS: Record<VillagerPose, string> = {
+	failed: "failed",
 	idle: "idle",
-	"needs-you": "needs you",
+	"needs-you": "needsYou",
 	waiting: "waiting",
 	working: "working",
 };
@@ -264,7 +266,8 @@ function seasonVillagers(
 	season: Season,
 	doors: readonly SeasonDoor[],
 	places: ReadonlyMap<number, WorldDoor>,
-	looks: ReadonlyMap<string, MemberLooks>
+	looks: ReadonlyMap<string, MemberLooks>,
+	tl: LiteralMessage
 ): { first: Map<string, number>; specs: VillagerSpec[] } {
 	const specs: VillagerSpec[] = [];
 	const first = new Map<string, number>();
@@ -297,7 +300,10 @@ function seasonVillagers(
 		const pose = agentPose(doors, agent.id);
 		specs.push({
 			id: agent.id,
-			label: `${agent.name}, ${POSE_WORDS[pose]}: open their conversation`,
+			label: tl(
+				"{name}, {pose, select, failed {a run failed} idle {idle} needsYou {needs you} waiting {waiting} other {working}}: open their conversation",
+				{ name: agent.name, pose: POSE_KEYS[pose] }
+			),
 			looks: base,
 			name: agent.name,
 			pose,
@@ -380,6 +386,7 @@ export function SeasonDiorama({
 	/** The act layer (absent: today's poses and first doors). */
 	actors?: SeasonActors;
 }) {
+	const tl = useLiteralMessages();
 	const places = useMemo(
 		() => new Map(scene.world.doors.map((door) => [door.number, door])),
 		[scene.world]
@@ -388,8 +395,8 @@ export function SeasonDiorama({
 		() =>
 			actors
 				? { first: new Map(actors.doorOf), specs: [...actors.villagers] }
-				: seasonVillagers(season, scene.doors, places, looks),
-		[actors, looks, places, scene.doors, season]
+				: seasonVillagers(season, scene.doors, places, looks, tl),
+		[actors, looks, places, scene.doors, season, tl]
 	);
 	// Act villagers walk, so the seasonal items stay with the still cast.
 	const carried = useMemo(

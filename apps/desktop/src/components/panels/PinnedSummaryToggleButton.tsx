@@ -1,12 +1,13 @@
 import { LayoutListIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
+import { notePinnedSummaryToggle } from "./pinned-summary/pinned-summary-open-request.ts";
 
 export function PinnedSummaryToggleButton({
 	open,
@@ -21,18 +22,19 @@ export function PinnedSummaryToggleButton({
 		<Tooltip>
 			<TooltipTrigger
 				render={
-					<button
+					<Button
 						aria-label={label}
 						aria-pressed={open}
-						className={cn(
-							"flex size-8 shrink-0 items-center justify-center rounded-xl transition-colors hover:bg-muted hover:text-foreground",
-							open ? "text-foreground" : "text-muted-foreground"
-						)}
-						onClick={onToggle}
-						type="button"
+						className="shrink-0 aria-pressed:text-foreground"
+						onClick={() => {
+							notePinnedSummaryToggle(open);
+							onToggle();
+						}}
+						size="icon-sm"
+						variant="ghost-muted"
 					>
 						<HugeiconsIcon className="size-4" icon={LayoutListIcon} />
-					</button>
+					</Button>
 				}
 			/>
 			<TooltipContent>{label}</TooltipContent>

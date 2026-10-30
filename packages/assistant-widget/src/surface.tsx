@@ -1,8 +1,9 @@
 "use client";
 
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
-import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
 /** The placements shared by the Desktop assistant and embeddable consumers. */
@@ -60,7 +61,11 @@ export interface RyuAssistantWidgetHeaderProps {
 	title: ReactNode;
 }
 
-/** Shared quiet title row for floating, docked, and inline assistant surfaces. */
+/**
+ * Shared quiet title row for floating, docked, and inline assistant surfaces: an
+ * `h-10` pane header with `icon-sm` actions. Hosts pass at most two action icons;
+ * the close button is the third.
+ */
 export function RyuAssistantWidgetHeader({
 	actions,
 	className,
@@ -74,8 +79,8 @@ export function RyuAssistantWidgetHeader({
 	return (
 		<header
 			className={cn(
-				"flex shrink-0 items-center gap-1.5 px-3 py-2",
-				divider && "border-border/60 border-b",
+				"flex h-10 shrink-0 items-center gap-2 px-4",
+				divider && "border-border border-b",
 				className
 			)}
 			data-tauri-drag-region={false}
@@ -84,18 +89,17 @@ export function RyuAssistantWidgetHeader({
 			<span className="min-w-0 flex-1 truncate font-medium text-sm">
 				{title}
 			</span>
-			<div className="flex items-center gap-0.5">
+			<div className="-me-2 flex items-center gap-1">
 				{actions}
 				{onClose ? (
 					<Button
 						aria-label={closeLabel}
-						className="size-7"
 						onClick={onClose}
-						size="icon"
-						title={closeTitle}
-						variant="ghost"
+						size="icon-sm"
+						title={closeTitle ?? closeLabel}
+						variant="ghost-muted"
 					>
-						<X className="size-3.5" />
+						<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
 					</Button>
 				) : null}
 			</div>
@@ -124,19 +128,21 @@ export function RyuAssistantRecentChats({
 	}
 	return (
 		<section
-			className="shrink-0 px-4 pb-2"
+			className="shrink-0 px-2 pt-6 pb-2"
 			data-testid="ryu-assistant-recent-chats"
 		>
-			<p className="mb-2 text-muted-foreground text-xs">{label}</p>
+			<p className="flex h-7 items-center px-2 text-detail text-muted-foreground">
+				{label}
+			</p>
 			<div className="flex flex-col">
 				{items.slice(0, 4).map((item) => (
 					<button
-						className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-accent"
+						className="flex h-8 min-w-0 items-center gap-3 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10"
 						key={item.id}
 						onClick={() => onSelect(item.id)}
 						type="button"
 					>
-						<span className="min-w-0 flex-1 truncate text-foreground/85">
+						<span className="min-w-0 flex-1 truncate text-foreground">
 							{item.title}
 						</span>
 						{item.meta ? (

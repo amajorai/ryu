@@ -65,12 +65,11 @@ export default function CommunityTrustNotice({
 			<HugeiconsIcon className="text-status-warning" icon={Alert02Icon} />
 			<AlertTitle>Not reviewed by Ryu</AlertTitle>
 			<AlertDescription>
-				Listings are discovered automatically from the GitHub topic{" "}
-				<code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+				Third-party listings from the GitHub topic{" "}
+				<code className="rounded-lg bg-muted px-1 py-0.5 font-mono text-xs">
 					{topicLabel}
 				</code>
-				. They are published by third parties and are not reviewed by Ryu, so
-				install at your own discretion.{" "}
+				. Install at your own discretion.{" "}
 				<button
 					className="underline underline-offset-3 hover:text-foreground"
 					onClick={() => host.openExternal(COMMUNITY_TRUST_DOC_URL)}

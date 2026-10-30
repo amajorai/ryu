@@ -243,7 +243,7 @@ export function CloudSyncSection() {
 			title="Cross-device sync"
 		>
 			{loadError ? (
-				<div className="mx-3 flex flex-col items-start gap-3 rounded-md bg-muted p-4">
+				<div className="mx-3 flex flex-col items-start gap-3 rounded-lg bg-muted p-4">
 					<p className="text-muted-foreground text-sm">
 						We couldn't read this node's sync settings.
 					</p>

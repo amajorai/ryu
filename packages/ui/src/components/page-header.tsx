@@ -16,6 +16,12 @@ interface PageHeaderProps {
 	as?: "h1" | "h2" | "h3";
 	className?: string;
 	/**
+	 * `app` is the in-app page header: a `text-xl font-semibold tracking-tight`
+	 * title over a one-line `text-detail` muted subtitle, with no reveal unless
+	 * `stagger` is set explicitly. `default` keeps the marketing treatment.
+	 */
+	size?: "default" | "app";
+	/**
 	 * Set to `false` where the header is already inside a `StaggerReveal`. That
 	 * wrapper reveals the header as one line among its siblings, so leaving the
 	 * internal cascade on would compound the two — 24px of travel and a double
@@ -53,10 +59,14 @@ export function PageHeader({
 	titleTone = "default",
 	typography = "default",
 	titleClassName,
-	stagger = true,
+	size = "default",
+	stagger: staggerProp,
 	style,
 	subtitleClassName,
 }: PageHeaderProps) {
+	const app = size === "app";
+	// App chrome has no reveal by default; marketing headers keep the cascade.
+	const stagger = staggerProp ?? !app;
 	const ref = useRef<HTMLDivElement>(null);
 	const inView = useInView(ref, { once: true });
 	const shown = stagger && inView;
@@ -76,7 +86,7 @@ export function PageHeader({
 		>
 			<Heading
 				className={cn(
-					"font-medium text-xl",
+					app ? "font-semibold text-xl tracking-tight" : "font-medium text-xl",
 					stagger && "t-stagger-line t-stagger-line--1",
 					titleTone === "destructive" && "text-status-destructive",
 					typography === "exchange" && "text-2xl",
@@ -88,7 +98,9 @@ export function PageHeader({
 			{subtitle ? (
 				<p
 					className={cn(
-						"font-medium text-muted-foreground text-xl",
+						app
+							? "text-(length:--text-detail) font-normal text-muted-foreground leading-(--text-detail--line-height)"
+							: "font-medium text-muted-foreground text-xl",
 						stagger && "t-stagger-line t-stagger-line--2",
 						typography === "exchange" &&
 							"font-normal text-muted-foreground text-sm",

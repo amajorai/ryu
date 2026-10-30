@@ -27,7 +27,6 @@ import { saveAccountLocale } from "./lib/account-locale.ts";
 import { installConsoleCapture } from "./lib/console-buffer.ts";
 import { hydrateSealedLocalStorage } from "./lib/content-seal.ts";
 import { queryClient } from "./lib/query-client.ts";
-import { followCollaborationAccount } from "./lib/realtime/collaboration-account.ts";
 import { initializeTabTransfer } from "./lib/tab-transfer.ts";
 
 // Dev-only: capture console output so the crash screen can offer a one-click
@@ -62,12 +61,17 @@ void Promise.all([
 	// Studio suites) are read synchronously by the first render.
 	hydrateSealedLocalStorage(),
 	// Collaborative snapshots are stored per account; set it before any
-	// provider loads one.
-	followCollaborationAccount({
-		getActiveCollaborationAccountId,
-		onActiveTokenChange,
-		vaultHydrated,
-	}).catch(() => undefined),
+	// provider loads one. Loaded beside the entry chunk (it carries Yjs) so it
+	// is fetched and parsed in parallel with the rest of startup.
+	import("./lib/realtime/collaboration-account.ts")
+		.then(({ followCollaborationAccount }) =>
+			followCollaborationAccount({
+				getActiveCollaborationAccountId,
+				onActiveTokenChange,
+				vaultHydrated,
+			})
+		)
+		.catch(() => undefined),
 ]).then(() => {
 	reactRoot.render(
 		<StrictMode>

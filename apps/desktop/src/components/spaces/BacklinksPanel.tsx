@@ -49,8 +49,8 @@ export function BacklinksPanel({
 	}
 
 	return (
-		<section className="shrink-0 border-t bg-muted/20 px-4 py-3">
-			<h2 className="mb-2 flex items-center gap-1.5 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+		<section className="shrink-0 border-border border-t px-4 py-3">
+			<h2 className="mb-1 flex h-7 items-center gap-1.5 text-detail text-muted-foreground">
 				<HugeiconsIcon className="size-3.5" icon={Link01Icon} />
 				{tl(
 					"{referenceCount, plural, one {# linked reference} other {# linked references}}",
@@ -61,7 +61,7 @@ export function BacklinksPanel({
 				{links.map((link) => (
 					<li key={`${link.srcDocId}:${link.kind}`}>
 						<button
-							className="w-full rounded-md px-2 py-1.5 text-left hover:bg-accent"
+							className="w-full rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-muted hover:duration-0"
 							onClick={() => openTab(`/spaces/${spaceId}/doc/${link.srcDocId}`)}
 							type="button"
 						>

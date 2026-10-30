@@ -95,7 +95,7 @@ export function EffortSliderRow({
 					{items.map((item, i) => (
 						<span
 							className={cn(
-								"type-compact flex-1 truncate leading-none",
+								"flex-1 truncate text-xs leading-none",
 								i === 0 && "text-left",
 								i === items.length - 1 && "text-right",
 								i > 0 && i < items.length - 1 && "text-center",

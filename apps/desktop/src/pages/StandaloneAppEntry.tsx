@@ -2,7 +2,6 @@ import type { StandaloneBootstrapPhase } from "@ryu/app-host/standalone";
 import { Logo as OrbLogo } from "@ryu/ui/components/logo.tsx";
 import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { SidebarInset, SidebarProvider } from "@ryu/ui/components/sidebar.tsx";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bootstrapStandaloneApp } from "@/lib/tauri-bridge.ts";
@@ -150,23 +149,21 @@ function StandaloneBootstrap({
 				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
 				data-tauri-drag-region="true"
 			>
-				<StaggerReveal>
-					<div className="flex w-full max-w-md flex-col items-center gap-6">
-						<div className="shrink-0">
-							<OrbLogo
-								size="56px"
-								variant={phase === "error" ? "outline" : "shimmer"}
-							/>
-						</div>
-						<PageHeader
-							className="w-full text-center"
-							stagger={false}
-							subtitle={error ?? phaseLabel(phase)}
-							title={appName}
-							titleClassName="text-center"
+				<div className="fade-in flex w-full max-w-md animate-in flex-col items-center gap-6 duration-(--duration-base) ease-enter">
+					<div className="shrink-0">
+						<OrbLogo
+							size="56px"
+							variant={phase === "error" ? "outline" : "shimmer"}
 						/>
 					</div>
-				</StaggerReveal>
+					<PageHeader
+						className="w-full text-center"
+						size="app"
+						subtitle={error ?? phaseLabel(phase)}
+						title={appName}
+						titleClassName="text-center"
+					/>
+				</div>
 				{phase === "no_companion" ? (
 					<p className="max-w-md text-muted-foreground text-sm">
 						The app is enabled and its Core services are ready. This app does

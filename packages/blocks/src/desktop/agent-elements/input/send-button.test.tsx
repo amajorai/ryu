@@ -1,23 +1,27 @@
 import { expect, test } from "bun:test";
-import { CallIcon } from "@hugeicons/core-free-icons";
+import { ArrowUp02Icon, CallIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { IconArrowUp } from "@tabler/icons-react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SendButton } from "./send-button.tsx";
+import { SendButton, VoiceCallButton } from "./send-button.tsx";
 
 test("uses the same upward-arrow affordance when idle and typing", () => {
 	const idleMarkup = renderToStaticMarkup(<SendButton state="idle" />);
 	const typingMarkup = renderToStaticMarkup(<SendButton state="typing" />);
-	const arrow = renderToStaticMarkup(<IconArrowUp className="size-4" />);
+	const arrow = renderToStaticMarkup(
+		<HugeiconsIcon className="size-4" icon={ArrowUp02Icon} />
+	);
 
 	expect(idleMarkup).toContain(arrow);
 	expect(typingMarkup).toContain(arrow);
-	expect(idleMarkup).not.toContain("tabler-icon-player-play-filled");
+	// Empty: the send slot stays, disabled and dimmed rather than swapped out.
+	expect(idleMarkup).toContain("disabled");
+	expect(idleMarkup).toContain("disabled:opacity-30");
+	expect(typingMarkup).not.toContain("disabled:opacity-30");
 });
 
-test("uses a call affordance for the empty voice-mode composer", () => {
+test("voice call is its own quiet button, never the send slot", () => {
 	const markup = renderToStaticMarkup(
-		<SendButton state="idle" voiceMode={{ onStart: () => undefined }} />
+		<VoiceCallButton onStart={() => undefined} />
 	);
 
 	expect(markup).toContain('aria-label="Start voice call"');
@@ -25,5 +29,7 @@ test("uses a call affordance for the empty voice-mode composer", () => {
 	expect(markup).toContain(
 		renderToStaticMarkup(<HugeiconsIcon className="size-4" icon={CallIcon} />)
 	);
-	expect(markup).not.toContain("tabler-icon-phone-call");
+	expect(renderToStaticMarkup(<SendButton state="idle" />)).not.toContain(
+		"Start voice call"
+	);
 });

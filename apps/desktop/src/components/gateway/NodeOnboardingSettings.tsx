@@ -1,9 +1,9 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useEffect, useState } from "react";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -93,7 +93,13 @@ export function NodeOnboardingSettings({
 
 	return (
 		<SettingsSection
-			caption="Node onboarding controls the context shared by every desktop that connects here. It does not reset chats, memories, themes, or other data."
+			caption={
+				<CaptionInfo
+					detail={"It does not reset chats, memories, themes, or other data."}
+				>
+					{"The context shared by every desktop that connects here."}
+				</CaptionInfo>
+			}
 			title="This node"
 		>
 			{/* Every row is a direct child of the group (never a fragment), so each
@@ -127,7 +133,11 @@ export function NodeOnboardingSettings({
 				) : null}
 				{ready ? (
 					<SettingsItem
-						actions={<Badge variant="secondary">{statusLabel}</Badge>}
+						actions={
+							<span className="text-muted-foreground text-sm">
+								{statusLabel}
+							</span>
+						}
 						description={
 							state?.completed
 								? tl("{setupLabel} context is active on this node.", {

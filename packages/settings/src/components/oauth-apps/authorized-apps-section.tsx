@@ -1,11 +1,10 @@
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../../utils/api-client.ts";
 import {
-	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -42,7 +41,7 @@ export function AuthorizedAppsSection() {
 			<AuthorizedAppsListSection
 				apps={ryuApps}
 				confirmRevoke={confirmRevoke}
-				description="First-party Ryu clients that have access to this account."
+				description="First-party Ryu clients with access to this account."
 				error={authorizedQuery.error}
 				isLoading={authorizedQuery.isLoading}
 				isRevoking={revokeMutation.isPending}
@@ -55,7 +54,7 @@ export function AuthorizedAppsSection() {
 			<AuthorizedAppsListSection
 				apps={thirdPartyApps}
 				confirmRevoke={confirmRevoke}
-				description="Third-party apps that have received your consent. Revoking access also invalidates their Ryu authorization."
+				description="Third-party apps you consented to. Revoking also ends their Ryu authorization."
 				error={authorizedQuery.error}
 				isLoading={authorizedQuery.isLoading}
 				isRevoking={revokeMutation.isPending}
@@ -103,9 +102,7 @@ function AuthorizedAppsListSection({
 			titleId={titleId}
 		>
 			{isLoading ? (
-				<SettingsCard className="flex justify-center py-6">
-					<Spinner className="size-5" />
-				</SettingsCard>
+				<SkeletonRows label="Loading" rows={2} />
 			) : error ? (
 				// A plain sentence, the server's reason in view, and a retry.
 				<SettingsGroup>
@@ -120,12 +117,13 @@ function AuthorizedAppsListSection({
 								Retry
 							</Button>
 						}
+						description={
+							<span role="alert">
+								{errorMessage(error, "Failed to load authorized apps")}
+							</span>
+						}
 						title="Couldn't load authorized apps."
-					>
-						<p className="text-status-destructive text-xs" role="alert">
-							{errorMessage(error, "Failed to load authorized apps")}
-						</p>
-					</SettingsItem>
+					/>
 				</SettingsGroup>
 			) : (
 				<AuthorizedOAuthAppList

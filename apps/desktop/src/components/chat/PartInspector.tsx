@@ -162,7 +162,7 @@ function CopyJsonButton({ value }: { value: string }) {
 	};
 	return (
 		<button
-			className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
+			className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
 			onClick={handleCopy}
 			type="button"
 		>
@@ -179,7 +179,7 @@ function CopyJsonButton({ value }: { value: string }) {
 
 function MetaChip({ label, value }: { label: string; value: string }) {
 	return (
-		<span className="type-caption inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 font-mono">
+		<span className="inline-flex items-center gap-1 rounded-lg bg-muted/60 px-2 py-0.5 font-mono text-xs">
 			<span className="text-muted-foreground">{label}</span>
 			<span className="text-foreground">{value}</span>
 		</span>
@@ -188,7 +188,7 @@ function MetaChip({ label, value }: { label: string; value: string }) {
 
 function JsonBlock({ value }: { value: unknown }) {
 	return (
-		<pre className="max-h-[40vh] overflow-auto rounded-md bg-muted/40 p-2.5 font-mono text-foreground text-xs leading-relaxed">
+		<pre className="max-h-[40vh] overflow-auto rounded-lg bg-muted/40 p-2.5 font-mono text-foreground text-xs leading-relaxed">
 			{safeStringify(value)}
 		</pre>
 	);
@@ -205,9 +205,7 @@ function Section({
 }) {
 	return (
 		<section className="flex flex-col gap-1.5">
-			<h3 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-				{title}
-			</h3>
+			<h3 className="font-semibold text-foreground text-sm">{title}</h3>
 			{empty ? (
 				<p className="text-muted-foreground text-xs italic">None</p>
 			) : (
@@ -225,7 +223,7 @@ export function PartInspector({ part }: { part: unknown }) {
 
 	return (
 		<div className="flex h-full flex-col">
-			<div className="flex shrink-0 items-center gap-2 border-border/60 border-b px-3 py-2.5">
+			<div className="flex h-10 shrink-0 items-center gap-2 border-border border-b px-3">
 				<HugeiconsIcon
 					aria-hidden
 					className="size-4 shrink-0 text-muted-foreground"

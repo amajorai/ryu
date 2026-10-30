@@ -22,6 +22,19 @@ describe("requestLocales", () => {
 		).toEqual({ accepted: "de-DE", chosen: "pt-BR" });
 	});
 
+	it("skips Accept-Language entries email cannot render", () => {
+		expect(
+			requestLocales(headers({ "accept-language": "nl,zh-TW;q=0.9,fr;q=0.8" }))
+				.accepted
+		).toBe("fr");
+		expect(
+			requestLocales(headers({ "accept-language": "nl, zh-TW" })).accepted
+		).toBeNull();
+		expect(
+			signInLocaleUpdate(null, headers({ "accept-language": "nl" }))
+		).toBeNull();
+	});
+
 	it("ignores a malformed cookie and a missing header", () => {
 		expect(requestLocales(headers({ cookie: "locale=%E0%A4%A" }))).toEqual({
 			accepted: null,

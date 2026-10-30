@@ -9,8 +9,8 @@
 // into the index would make the search list worse, not better.
 
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	SETTINGS_ENTRIES,
@@ -30,12 +30,25 @@ const GATEWAY_DIALOG = join(
 	"gateway",
 	"GatewayDialog.tsx"
 );
+/**
+ * The gateway dialog's source: `GatewayDialog.tsx` plus the section modules it
+ * was split into under `gateway-dialog/`, read as one text.
+ */
+const readGatewayDialog = (): string => {
+	const dir = join(dirname(GATEWAY_DIALOG), "gateway-dialog");
+	const parts = readdirSync(dir)
+		.filter((f) => /\.tsx?$/.test(f))
+		.sort()
+		.map((f) => readFileSync(join(dir, f), "utf8"));
+	return [readWithSplits(GATEWAY_DIALOG), ...parts].join("\n");
+};
 const SETTINGS_DIALOG = join(
 	HERE,
 	"..",
 	"components",
 	"settings",
-	"SettingsDialog.tsx"
+	// The static nav groups (value + label pairs) live beside the dialog.
+	"settings-dialog-nav.tsx"
 );
 
 /**
@@ -56,9 +69,21 @@ const SECTION_SOURCES = {
 	],
 	appearance: [
 		"AppearanceTab.tsx",
+		"appearance-theme-intro.tsx",
+		"appearance-theme-panel.tsx",
+		"appearance-layout-page.tsx",
+		"appearance-interface-page.tsx",
+		"appearance-chat-page.tsx",
+		"appearance-diff-page.tsx",
+		"appearance-files-page.tsx",
+		"appearance-seasonal-effects.tsx",
+		"appearance-level-sliders.tsx",
+		"appearance-preset-fields.tsx",
 		"InterfaceSettingsPanel.tsx",
 		"WallpaperSetting.tsx",
 		"../../lib/appearance-settings.ts",
+		"../../lib/appearance-settings-theme.ts",
+		"../../lib/appearance-settings-display.ts",
 	],
 	developer: ["DeveloperTab.tsx", "DevMetricsPanel.tsx"],
 	account: ["AccountTab.tsx"],
@@ -124,14 +149,34 @@ const UNANCHORED_SECTIONS = new Set([
 	"environments",
 ]);
 
+/**
+ * A component file plus the `<Name>-*.ts(x)` siblings it was split into, so a
+ * row that moved into a sibling still counts as rendered by that component.
+ */
+const readWithSplits = (path: string): string => {
+	const directory = dirname(path);
+	const stem = basename(path).replace(/\.tsx?$/, "");
+	const siblings = readdirSync(directory)
+		.filter(
+			(name) =>
+				name.startsWith(`${stem}-`) &&
+				/\.tsx?$/.test(name) &&
+				!name.includes(".test.")
+		)
+		.sort();
+	return [path, ...siblings.map((name) => join(directory, name))]
+		.map((file) => readFileSync(file, "utf8"))
+		.join("\n");
+};
+
 const escapeRegExp = (value: string): string =>
 	value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 describe("settings index navigation integrity", () => {
 	it("uses the visible label for each destination section", () => {
 		const sources = {
-			app: readFileSync(SETTINGS_DIALOG, "utf8"),
-			gateway: readFileSync(GATEWAY_DIALOG, "utf8"),
+			app: readWithSplits(SETTINGS_DIALOG),
+			gateway: readGatewayDialog(),
 		};
 		const stale: string[] = [];
 
@@ -158,9 +203,7 @@ const readSection = (section: string): string | null => {
 	if (!files) {
 		return null;
 	}
-	return files
-		.map((f) => readFileSync(join(SETTINGS_DIR, f), "utf8"))
-		.join("\n");
+	return files.map((f) => readWithSplits(join(SETTINGS_DIR, f))).join("\n");
 };
 
 describe("settings index integrity", () => {
@@ -183,8 +226,7 @@ describe("settings index integrity", () => {
 			if (UNANCHORED_SECTIONS.has(entry.section)) {
 				continue;
 			}
-			const source =
-				readSection(entry.section) ?? readFileSync(GATEWAY_DIALOG, "utf8");
+			const source = readSection(entry.section) ?? readGatewayDialog();
 			if (!source.includes(`"${entry.label}"`)) {
 				stale.push(`${entry.id} → "${entry.label}"`);
 			}

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Tooltip,
@@ -17,6 +18,14 @@ import {
 	useState,
 } from "react";
 import { InboxDetail, InboxIdle, isEditableTarget } from "./inbox-detail.tsx";
+import {
+	cursorStep,
+	inHostChat,
+	KEY_OWNING_WIDGETS,
+	rowIdOf,
+	stepIndex,
+} from "./inbox-interface-keyboard.ts";
+import { needsYouSummary, useMinuteClock } from "./inbox-interface-summary.ts";
 import { InboxTooltipKbd } from "./inbox-kbd.tsx";
 import {
 	buildInboxModel,
@@ -29,79 +38,6 @@ import { InboxSkeleton } from "./inbox-skeleton.tsx";
 import { InboxStatusIcon } from "./inbox-status.tsx";
 import { useAutoOpenFirstThread } from "./interface-auto-open.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
-
-const MINUTE = 60_000;
-
-/** Wall clock that ticks once a minute so relative times stay honest. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-function needsYouSummary(count: number, total: number): string {
-	if (total === 0) {
-		return "No threads yet";
-	}
-	return count === 0 ? "All caught up" : `${count} need you`;
-}
-
-type CursorStep = "first" | "last" | "next" | "previous";
-
-/**
- * Keys that move the cursor. J/K work anywhere in the inbox; arrows and
- * Home/End only on a row, so they keep scrolling the conversation elsewhere.
- */
-function cursorStep(key: string, onRow: boolean): CursorStep | null {
-	switch (key) {
-		case "j":
-			return "next";
-		case "k":
-			return "previous";
-		case "ArrowDown":
-			return onRow ? "next" : null;
-		case "ArrowUp":
-			return onRow ? "previous" : null;
-		case "Home":
-			return onRow ? "first" : null;
-		case "End":
-			return onRow ? "last" : null;
-		default:
-			return null;
-	}
-}
-
-function stepIndex(step: CursorStep, index: number, length: number): number {
-	switch (step) {
-		case "first":
-			return 0;
-		case "last":
-			return length - 1;
-		case "next":
-			return Math.min(index + 1, length - 1);
-		default:
-			return Math.max(index - 1, 0);
-	}
-}
-
-/** Widgets inside the host's chat that own their own letter/arrow keys. */
-const KEY_OWNING_WIDGETS =
-	'[role="menu"],[role="menubar"],[role="listbox"],[role="combobox"],[role="dialog"],[role="tablist"],[role="radiogroup"],[role="slider"],[role="grid"],[role="tree"]';
-
-/** True when the key event started inside the host's chat surface. */
-function inHostChat(target: EventTarget): boolean {
-	return (
-		target instanceof Element && target.closest("[data-inbox-host]") !== null
-	);
-}
-
-/** The inbox row a key event started on, if any. */
-function rowIdOf(target: EventTarget): string | undefined {
-	return target instanceof HTMLElement ? target.dataset.inboxRow : undefined;
-}
 
 /**
  * Inbox interface: triage every thread by what needs you, like an email
@@ -118,6 +54,7 @@ export function InboxInterface({
 }: InterfaceRendererProps<InterfaceParamsByRenderer["inbox"]>) {
 	const model = useMemo(() => buildInboxModel(snapshot), [snapshot]);
 	const now = useMinuteClock();
+	const tl = useLiteralMessages();
 	const [cursorId, setCursorId] = useState<string | null>(null);
 	const rowElements = useRef(new Map<string, HTMLElement>());
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -331,7 +268,7 @@ export function InboxInterface({
 			section.items.find((item) => item.thread.id === cursor) ?? cursorItem;
 	}
 
-	const summary = needsYouSummary(model.needsYou.length, total);
+	const summary = needsYouSummary(model.needsYou.length, total, tl);
 
 	// Right pane: the open thread, else a calm idle state. Stay blank while the
 	// first load is in flight so we never claim "nothing needs you" too early.

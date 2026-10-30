@@ -70,7 +70,7 @@ export function AnnouncementDetailDialog({
 				/>
 				<div className="flex flex-col gap-6 p-6 sm:p-8">
 					<DialogHeader purpose="marketplace-guide">
-						<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Product update
 						</p>
 						<DialogTitle typography="marketplace-guide">

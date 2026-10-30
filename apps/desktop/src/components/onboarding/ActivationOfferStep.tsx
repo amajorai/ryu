@@ -1,15 +1,12 @@
+import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { ONBOARDING_TEAMS_OFFER } from "@ryu/auth/lib/onboarding-offer";
+import {
+	OnboardingActions,
+	OnboardingCta,
+} from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { SubscriptionAgreement } from "@ryu/blocks/web/subscription-agreement.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Card,
-	CardContent,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card.tsx";
-import { ArrowRight, Check, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
@@ -80,95 +77,82 @@ export function ActivationOfferStep({
 				subtitle="Confirm your subscription before Ryu-managed execution starts. Your task preview has not used any credits."
 				title={subscribed ? "Your subscription is ready" : "Start with Ryu"}
 			>
-				<Card
-					appearance="onboarding"
-					borderTone="subtle"
-					className="w-full max-w-xl"
-				>
-					<CardHeader>
-						<div className="flex items-center gap-2">
-							<ShieldCheck className="size-5 text-primary" />
-							<CardTitle>
-								{subscribed
-									? "Ready to start"
-									: "Run your selected task with Ryu"}
-							</CardTitle>
-						</div>
-						<p className="text-muted-foreground text-sm">
-							{subscribed
-								? "Your existing subscription covers this workspace."
-								: offerDescription}
-						</p>
-					</CardHeader>
-					<CardContent spacing="comfortable">
+				<section className="flex flex-col gap-3">
+					<h2 className="font-semibold text-sm">
+						{subscribed ? "Ready to start" : "Run your selected task with Ryu"}
+					</h2>
+					<p className="text-pretty text-muted-foreground text-sm">
+						{subscribed
+							? "Your existing subscription covers this workspace."
+							: offerDescription}
+					</p>
+					<ul className="flex flex-col gap-1 text-detail text-muted-foreground">
 						{[
 							"Ryu lives where you already work",
 							"Use the connection needed for your selected task",
 							"Work starts only after subscription confirmation",
 						].map((item) => (
-							<div className="flex items-start gap-2 text-sm" key={item}>
-								<Check className="mt-0.5 size-4 shrink-0 text-status-success" />
-								<span>{item}</span>
-							</div>
+							<li key={item}>{item}</li>
 						))}
-						{error ? (
-							<p className="text-sm text-status-destructive" role="alert">
-								{error}
-							</p>
-						) : null}
-					</CardContent>
-					<CardFooter
-						appearance="onboarding-step"
-						className="flex-wrap justify-between"
-						spacing="choices"
-					>
-						<Button onClick={onSkip} variant="ghost">
-							Choose my own model
-						</Button>
-						{subscribed ? (
-							<Button disabled={pending} loading={pending} onClick={onContinue}>
-								Continue to task <ArrowRight className="size-4" />
-							</Button>
-						) : checkoutOpened || individualCheckoutClosed ? (
-							<Button
-								disabled={pending}
-								loading={pending}
-								onClick={
-									individualCheckoutClosed
-										? onSkip
-										: checkoutOpened
-											? onConfirmCheckout
-											: onStartCheckout
-								}
-							>
-								{checkoutOpened ? "I finished checkout" : checkoutLabel}
-								<ArrowRight className="size-4" />
-							</Button>
-						) : (
-							<SubscriptionAgreement
-								blocked={pending}
-								offerKey={organizationPlan ? "teams-onboarding" : "pro-monthly"}
-								terms={
-									organizationPlan
-										? TEAMS_OFFER_TERMS
-										: "Renews automatically at US$49 every month, plus applicable taxes, until canceled."
-								}
-							>
-								{(canContinue) => (
-									<Button
-										className="w-full"
-										disabled={!canContinue}
-										loading={pending}
-										onClick={onStartCheckout}
-									>
-										{checkoutLabel}
-										<ArrowRight className="size-4" />
-									</Button>
-								)}
-							</SubscriptionAgreement>
-						)}
-					</CardFooter>
-				</Card>
+					</ul>
+					{error ? (
+						<p className="text-sm text-status-destructive" role="alert">
+							{error}
+						</p>
+					) : null}
+				</section>
+				<OnboardingActions className="justify-between">
+					<OnboardingCta onClick={onSkip} tone="secondary">
+						Choose my own model
+					</OnboardingCta>
+					{subscribed ? (
+						<OnboardingCta
+							disabled={pending}
+							loading={pending}
+							onClick={onContinue}
+						>
+							Continue to task
+							<HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+						</OnboardingCta>
+					) : checkoutOpened || individualCheckoutClosed ? (
+						<OnboardingCta
+							disabled={pending}
+							loading={pending}
+							onClick={
+								individualCheckoutClosed
+									? onSkip
+									: checkoutOpened
+										? onConfirmCheckout
+										: onStartCheckout
+							}
+						>
+							{checkoutOpened ? "I finished checkout" : checkoutLabel}
+							<HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+						</OnboardingCta>
+					) : (
+						<SubscriptionAgreement
+							blocked={pending}
+							offerKey={organizationPlan ? "teams-onboarding" : "pro-monthly"}
+							terms={
+								organizationPlan
+									? TEAMS_OFFER_TERMS
+									: "Renews automatically at US$49 every month, plus applicable taxes, until canceled."
+							}
+						>
+							{(canContinue) => (
+								<OnboardingCta
+									className="w-full"
+									disabled={!canContinue}
+									loading={pending}
+									onClick={onStartCheckout}
+								>
+									{checkoutLabel}
+									<HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+								</OnboardingCta>
+							)}
+						</SubscriptionAgreement>
+					)}
+				</OnboardingActions>
 			</ActivationStepShell>
 			{dialog}
 		</>

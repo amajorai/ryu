@@ -2,36 +2,31 @@ import {
 	Item,
 	ItemActions,
 	ItemGroup,
-	ItemSeparator,
 	ItemTitle,
 } from "@ryu/ui/components/item.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Children, Fragment, isValidElement, type ReactNode } from "react";
+import { Children, type ReactNode } from "react";
 
-// iOS-style settings primitives for @ryu/settings.
+// Quiet, flush settings primitives for @ryu/settings.
 //
 // Local equivalents of SettingsSection / SettingsGroup / SettingsItem /
 // SettingsCard from `packages/blocks/src/desktop/settings-items.tsx`, which this
 // package cannot import (@ryu/settings does not depend on @ryu/blocks). Keep the
 // classes in step with that file so the shared web tabs look like the desktop
-// Settings panes. Deliberately smaller: no i18n lookup (the @ryu/ui primitives
-// localize themselves), no `bare` rows, and no description-to-footer slicing —
-// callers put explanatory text on the section `caption`.
+// Settings panes: a section is a small semibold title, its rows are separated by
+// full-width hairlines, and nothing sits in a card. Deliberately smaller: no
+// i18n lookup (the @ryu/ui primitives localize themselves) and no `bare` rows.
 
-/** Small muted section header, for a header that must be a `legend`/`label`. */
+/** Section header class, for a header that must be a `legend`/`label`. */
 export const SETTINGS_SECTION_HEADER_CLASS =
-	"px-3.5 font-medium text-foreground/70 text-xs";
+	"font-semibold text-foreground text-sm";
 
 /** Muted caption below a section body. */
-const SETTINGS_CAPTION_CLASS =
-	"px-3.5 text-muted-foreground text-xs leading-snug";
+const SETTINGS_CAPTION_CLASS = "mt-2 text-detail text-muted-foreground";
 
-/**
- * Borderless card surface shared by groups and cards — the same
- * `rounded-xl bg-grouped-card` as the desktop `SURFACE`, so a `grouped-pane`
- * raises it to white-on-grey and a plain page keeps the muted tint.
- */
-const SETTINGS_SURFACE_CLASS = "rounded-xl bg-grouped-card";
+/** The flush row geometry: 48px, no card inset, set off by hairlines alone. */
+const FLUSH_ROW =
+	"min-h-12 px-0 py-3 not-in-data-[slot=item-group]:rounded-none not-in-data-[slot=item-group]:bg-transparent";
 
 interface SettingsSectionProps {
 	/**
@@ -55,7 +50,10 @@ interface SettingsSectionProps {
 	titleId?: string;
 }
 
-/** A small muted header, a body, and an optional caption below it. */
+/**
+ * A semibold title, a body and an optional caption. Sections are 32px apart;
+ * the first one has no top margin.
+ */
 export function SettingsSection({
 	as: Root = "div",
 	caption,
@@ -68,12 +66,12 @@ export function SettingsSection({
 	return (
 		<Root
 			aria-labelledby={title && titleId ? titleId : undefined}
-			className={cn("space-y-1.5", className)}
+			className={cn("mt-8 first:mt-0", className)}
 		>
 			{title || headerAction ? (
-				<div className="flex items-center justify-between gap-3 px-3.5">
+				<div className="mb-1 flex items-center justify-between gap-2">
 					{title ? (
-						<h3 className="font-medium text-foreground/70 text-xs" id={titleId}>
+						<h3 className={SETTINGS_SECTION_HEADER_CLASS} id={titleId}>
 							{title}
 						</h3>
 					) : (
@@ -94,25 +92,15 @@ interface SettingsGroupProps {
 }
 
 /**
- * The rounded grouped card of rows, with hairline separators between them.
- * Children are usually {@link SettingsItem}s, or `Item purpose="settings-row"`
- * when a row needs custom markup (e.g. rendered as a `label`).
+ * One flush list of rows with full-width hairlines between them and none after
+ * the last. Children are usually {@link SettingsItem}s, or
+ * `Item purpose="settings-row"` when a row needs custom markup (e.g. rendered
+ * as a `label`).
  */
 export function SettingsGroup({ children, className }: SettingsGroupProps) {
-	const rows = Children.toArray(children);
 	return (
-		<ItemGroup
-			appearance="settings-group"
-			className={cn("overflow-hidden", className)}
-			spacing="flush"
-		>
-			{rows.map((row, index) => (
-				// Children.toArray keys every element, so the row's own key is stable.
-				<Fragment key={isValidElement(row) ? row.key : String(row)}>
-					{index > 0 ? <ItemSeparator className="my-0" /> : null}
-					{row}
-				</Fragment>
-			))}
+		<ItemGroup className={className} variant="flush">
+			{Children.toArray(children)}
 		</ItemGroup>
 	);
 }
@@ -123,6 +111,8 @@ interface SettingsItemProps {
 	/** Full-width content below the title line (meta text, inline fields). */
 	children?: ReactNode;
 	className?: string;
+	/** One short muted line under the label, inside the row. */
+	description?: ReactNode;
 	title: ReactNode;
 }
 
@@ -131,15 +121,19 @@ export function SettingsItem({
 	actions,
 	children,
 	className,
+	description,
 	title,
 }: SettingsItemProps) {
 	return (
-		<Item className={className} purpose="settings-row" size="sm">
+		<Item className={cn(FLUSH_ROW, className)} purpose="settings-row" size="sm">
 			{/* Wraps the controls under the title when the row is too narrow for
 			    both, instead of squeezing the title underneath them. */}
-			<div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2">
+			<div className="flex w-full flex-wrap items-center justify-between gap-x-6 gap-y-2">
 				<div className="flex min-w-[8rem] flex-1 flex-col gap-0.5">
 					<ItemTitle typography="settings-label">{title}</ItemTitle>
+					{description ? (
+						<p className="text-detail text-muted-foreground">{description}</p>
+					) : null}
 				</div>
 				{actions ? (
 					<ItemActions className="ml-auto shrink-0">{actions}</ItemActions>
@@ -156,13 +150,22 @@ interface SettingsCardProps {
 }
 
 /**
- * The same surface as {@link SettingsGroup} with padding, for non-row content:
- * empty states, forms with several fields, charts, tables, long lists.
+ * A container for non-row content (empty states, forms with several fields,
+ * charts, tables, long lists). Flush: a plain block with no fill, padding or
+ * border, so it sits in the pane like the rows around it.
  */
 export function SettingsCard({ children, className }: SettingsCardProps) {
 	return (
-		<div className={cn(SETTINGS_SURFACE_CLASS, "p-3.5", className)}>
+		<div className={className} data-slot="settings-card">
 			{children}
 		</div>
 	);
 }
+
+/**
+ * Hover reveal for a row's trailing action: hidden until the row is hovered or
+ * holds focus, always shown where there is no hover (touch). The slot keeps
+ * its width while hidden, so nothing reflows when it appears.
+ */
+export const SETTINGS_ROW_REVEAL_CLASS =
+	"opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-focus-within/item:opacity-100 group-hover/item:opacity-100 group-hover/item:duration-0 [@media(hover:none)]:opacity-100";

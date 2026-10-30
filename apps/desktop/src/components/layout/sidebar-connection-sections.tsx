@@ -15,7 +15,7 @@ import { SidebarMenu, SidebarMenuItem } from "@ryu/ui/components/sidebar.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { useMemo } from "react";
-import { AddChannelDialog } from "@/src/components/channels/AddChannelDialog.tsx";
+import { AddChannelDialog } from "@/src/components/channels/LazyAddChannelDialog.tsx";
 import { OpenInNewWindowContextMenuItem } from "@/src/components/layout/OpenInNewWindowMenuItem.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useAgents } from "@/src/hooks/useAgents.ts";
@@ -87,7 +87,7 @@ export function ChannelsSection({
 					<ContextMenuTrigger>
 						{/* sidebar row combines nested controls with drag/middle-click */}
 						<div
-							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
+							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 							data-prefetch-path={`/channels/${channel.id}`}
 							onAuxClick={(e) => {
 								if (e.button === 1) {
@@ -135,10 +135,7 @@ export function ChannelsSection({
 						<ContextMenuItem
 							onClick={() => openChannel(channel.id, channel.name, true)}
 						>
-							<HugeiconsIcon
-								className="mr-2 size-4"
-								icon={ArrowUpRight01Icon}
-							/>
+							<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 							Open in new tab
 						</ContextMenuItem>
 						<OpenInNewWindowContextMenuItem
@@ -172,7 +169,7 @@ export function ChannelsSection({
 			sort={sort}
 		>
 			{channels.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
+				<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 					{emptyMessage}
 				</p>
 			) : (
@@ -322,7 +319,7 @@ export function IntegrationsSection({
 			<SidebarMenuItem key={row.id}>
 				{/* sidebar row combines nested controls with drag/middle-click */}
 				<div
-					className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
+					className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 					onClick={openIntegrations}
 					onKeyDown={(e) => {
 						if (e.key === "Enter") {
@@ -369,7 +366,7 @@ export function IntegrationsSection({
 			)}
 			{!(configured && connectionsQuery.isError) &&
 				connections.length === 0 && (
-					<p className="px-2 py-2 text-muted-foreground text-xs">
+					<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 						{emptyMessage}
 					</p>
 				)}

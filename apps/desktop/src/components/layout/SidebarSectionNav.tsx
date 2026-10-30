@@ -2,7 +2,7 @@
 
 import { SPRING_MORPH } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { motion, type Transition, useReducedMotion } from "framer-motion";
+import { motion, type Transition, useReducedMotion } from "motion/react";
 import type { CSSProperties as LayoutCSSProperties } from "react";
 import { useState } from "react";
 import layoutStyles from "./SidebarSectionNav.module.css";
@@ -80,7 +80,7 @@ export function SidebarSectionNav({
 				className={cn(
 					"overflow-hidden border transition-colors",
 					open
-						? "border-border/60 bg-popover/95 shadow-lg backdrop-blur"
+						? "border-border bg-popover shadow-lg"
 						: "border-transparent bg-foreground/20 hover:bg-foreground/30"
 				)}
 				initial={false}
@@ -99,7 +99,7 @@ export function SidebarSectionNav({
 				>
 					{items.map((item) => (
 						<button
-							className="truncate rounded-md px-2 py-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
+							className="truncate rounded-lg px-2 py-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
 							key={item.key}
 							onClick={() => scrollToSection(item.key)}
 							type="button"

@@ -1,3 +1,9 @@
+import {
+	Alert02Icon,
+	Folder01Icon,
+	Video01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/components/clips/AttachVideoControl.tsx
 //
@@ -27,11 +33,6 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	IconAlertTriangle,
-	IconFolder,
-	IconVideoPlus,
-} from "@tabler/icons-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useId, useState } from "react";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
@@ -157,7 +158,10 @@ export function AttachVideoControl({
 					/>
 				}
 			>
-				<IconVideoPlus className="size-4 text-muted-foreground" />
+				<HugeiconsIcon
+					className="size-4 text-muted-foreground"
+					icon={Video01Icon}
+				/>
 			</PopoverTrigger>
 			<PopoverContent
 				align="start"
@@ -199,7 +203,7 @@ export function AttachVideoControl({
 							type="button"
 							variant="ghost"
 						>
-							<IconFolder className="size-4" />
+							<HugeiconsIcon className="size-4" icon={Folder01Icon} />
 							Choose file
 						</Button>
 					</div>
@@ -235,7 +239,10 @@ export function AttachVideoControl({
 
 				{error ? (
 					<p className="flex items-start gap-1.5 text-status-destructive text-xs">
-						<IconAlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+						<HugeiconsIcon
+							className="mt-0.5 size-3.5 shrink-0"
+							icon={Alert02Icon}
+						/>
 						<span>{error}</span>
 					</p>
 				) : null}

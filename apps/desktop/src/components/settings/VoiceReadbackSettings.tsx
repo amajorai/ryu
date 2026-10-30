@@ -3,6 +3,11 @@
 // voice-mode WebSocket session (which always speaks via Core while active).
 
 import { Switch } from "@ryu/ui/components/switch.tsx";
+import {
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	DEFAULT_VOICE_MODE_READBACK_PREFS,
@@ -10,24 +15,19 @@ import {
 	setVoiceModeReadbackPrefs,
 } from "@/src/lib/api/preferences.ts";
 import {
-	useVoicePreferenceScope,
 	useVoicePreference,
-	VoicePreferenceStatus,
+	useVoicePreferenceScope,
 	type VoicePreferenceAuthority,
+	VoicePreferenceStatus,
 } from "./voice-preference-state.tsx";
-import {
-	SettingsGroup,
-	SettingsItem,
-	SettingsSection,
-} from "@/src/components/settings/shared/settings-items.tsx";
 
 export function VoiceReadbackSettings() {
 	const scope = useVoicePreferenceScope();
 	return (
 		<VoiceReadbackSettingsForTarget
 			key={scope.id}
-			target={scope.target}
 			resource={scope.resource}
+			target={scope.target}
 		/>
 	);
 }
@@ -50,16 +50,16 @@ function VoiceReadbackSettingsForTarget({
 
 	return (
 		<SettingsSection
-			caption="Applies to desktop chat. Read-back is automatically disabled while a meeting is recording, even when this toggle is on. Engine and voice come from the Audio section below."
+			caption="Desktop chat only. Paused while a meeting records."
 			title="Read back responses"
 		>
-			<VoicePreferenceStatus error={error} retry={retry} pending={pending} />
+			<VoicePreferenceStatus error={error} pending={pending} retry={retry} />
 			<SettingsGroup>
 				<SettingsItem
 					actions={
 						<Switch
-							disabled={disabled}
 							checked={prefs.enabled}
+							disabled={disabled}
 							onCheckedChange={(enabled) => persist({ ...prefs, enabled })}
 						/>
 					}

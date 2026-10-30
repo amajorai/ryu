@@ -1,156 +1,34 @@
-import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 /* @jsxImportSource @opentui/react */
 
 import { useKeyboard } from "@opentui/react";
-import { type ApiTarget, request } from "@ryuhq/core-client/client";
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
+import { request } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { z } from "zod";
 import { Card } from "@/components/ui/card.tsx";
-import { TextInput } from "@/components/ui/text-input.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
-
-const PRIVACY_KEYS = {
-	analytics: "product-analytics-enabled",
-	community: "community-stats-enabled",
-	profileActivity: "profile-activity-enabled",
-	crashReports: "crash-reports-enabled",
-	diagnosticsExport: "diagnostics-export-enabled",
-	diagnosticsEndpoint: "diagnostics-otlp-endpoint",
-	diagnosticsContentMode: "diagnostics-otlp-content-mode",
-	supportAccess: "support-access-local-enabled",
-	supportExpiry: "support-access-local-expiry",
-} as const;
-
-const PRIVACY_KEY_ORDER = [
-	PRIVACY_KEYS.analytics,
-	PRIVACY_KEYS.community,
-	PRIVACY_KEYS.profileActivity,
-	PRIVACY_KEYS.crashReports,
-	PRIVACY_KEYS.diagnosticsExport,
-	PRIVACY_KEYS.diagnosticsEndpoint,
-	PRIVACY_KEYS.diagnosticsContentMode,
-	PRIVACY_KEYS.supportAccess,
-	PRIVACY_KEYS.supportExpiry,
-] as const;
-
-const DEFAULTS: PrivacyPreferences = {
-	analytics: true,
-	community: true,
-	profileActivity: true,
-	crashReports: true,
-	diagnosticsExport: false,
-	diagnosticsEndpoint: "",
-	diagnosticsContentMode: "metadata_only",
-	supportAccess: false,
-	supportExpiry: 0,
-};
-
-const SUPPORT_DURATION_HOURS = [1, 8, 24] as const;
-const SUPPORT_DURATION_INDEX = new Map<number, number>(
-	SUPPORT_DURATION_HOURS.map((duration, index) => [duration, index])
-);
-const ONE_HOUR_MS = 60 * 60 * 1000;
-const ROWS = [
-	"analytics",
-	"community",
-	"profileActivity",
-	"crashReports",
-	"diagnosticsExport",
-	"diagnosticsEndpoint",
-	"diagnosticsContentMode",
-	"supportDuration",
-	"supportAccess",
-] as const;
-
-type DiagnosticsContentMode = "metadata_only" | "content";
-
-interface PrivacyPreferences {
-	analytics: boolean;
-	community: boolean;
-	crashReports: boolean;
-	diagnosticsContentMode: DiagnosticsContentMode;
-	diagnosticsEndpoint: string;
-	diagnosticsExport: boolean;
-	profileActivity: boolean;
-	supportAccess: boolean;
-	supportExpiry: number;
-}
-
-const privacyPreferenceSchema = z.object({ value: z.json().optional() });
-type PreferenceWire = z.infer<typeof privacyPreferenceSchema>;
-type PrivacyPreferenceValue = PreferenceWire["value"];
-const privacyStringSchema = z.string();
-const privacyErrorSchema = z.instanceof(Error);
-const testSpanResponseSchema = z.object({ endpoint: z.string() });
-function requestPrivacyPreference(target: ApiTarget, path: string) {
-	return request(target, path, {}, appResponseValueSchema).then((raw) =>
-		privacyPreferenceSchema.parse(raw)
-	);
-}
-
-interface PreferenceWrite {
-	key: string;
-	value: string;
-}
-
-interface SaveIntent {
-	closeEndpointEditor?: boolean;
-	label: string;
-	next: Partial<PrivacyPreferences>;
-	previous: Partial<PrivacyPreferences>;
-	writes: readonly PreferenceWrite[];
-}
-
-function parseBoolean(raw: PrivacyPreferenceValue, fallback: boolean): boolean {
-	const parsed = privacyStringSchema.safeParse(raw);
-	if (!parsed.success) {
-		return fallback;
-	}
-	switch (parsed.data.trim().toLowerCase()) {
-		case "true":
-		case "1":
-		case "on":
-		case "yes":
-			return true;
-		case "false":
-		case "0":
-		case "off":
-		case "no":
-			return false;
-		default:
-			return fallback;
-	}
-}
-
-/** Mirrors Core's tolerant `ContentMode::parse`: only `content` (or `full`)
- * opts in; anything else keeps the metadata-only default. */
-function parseContentMode(
-	raw: string | null | undefined
-): DiagnosticsContentMode {
-	const value = raw?.trim().toLowerCase();
-	return value === "content" || value === "full" ? "content" : "metadata_only";
-}
-
-function rawValue(wire: PreferenceWire): string | null {
-	const parsed = privacyStringSchema.safeParse(wire.value);
-	return parsed.success ? parsed.data : null;
-}
-
-function errorMessage(
-	error: Parameters<typeof privacyErrorSchema.safeParse>[0]
-): string {
-	const parsed = privacyErrorSchema.safeParse(error);
-	return parsed.success ? parsed.data.message : String(error);
-}
-
-function parseExpiry(raw: string | null): number {
-	if (raw === null) {
-		return 0;
-	}
-	const parsed = Number(raw.trim());
-	return Number.isFinite(parsed) ? parsed : 0;
-}
+import { tf } from "../../i18n/translate.ts";
+import {
+	DEFAULTS,
+	type DiagnosticsContentMode,
+	errorMessage,
+	ONE_HOUR_MS,
+	PRIVACY_KEY_ORDER,
+	PRIVACY_KEYS,
+	type PreferenceWrite,
+	type PrivacyPreferences,
+	parseBoolean,
+	parseContentMode,
+	parseExpiry,
+	ROWS,
+	rawValue,
+	requestPrivacyPreference,
+	type SaveIntent,
+	SUPPORT_DURATION_HOURS,
+	SUPPORT_DURATION_INDEX,
+	testSpanResponseSchema,
+} from "./privacy-preferences.ts";
+import { PrivacyFooter, PrivacyRows } from "./privacy-rows.tsx";
 
 /** Core-backed privacy controls for the existing canonical preference keys. */
 export function PrivacyPanel({
@@ -240,7 +118,9 @@ export function PrivacyPanel({
 			if (requestId === requestIdRef.current) {
 				setLoadState("error");
 				setError(
-					`Couldn't load privacy preferences: ${errorMessage(loadError)}. Press r to retry.`
+					tf("Couldn't load privacy preferences: {error}. Press r to retry.", {
+						error: errorMessage(loadError),
+					})
 				);
 			}
 		}
@@ -302,7 +182,10 @@ export function PrivacyPanel({
 				setPreferences((current) => ({ ...current, ...intent.previous }));
 				setRetryIntent(intent);
 				setError(
-					`Couldn't save ${intent.label}: ${errorMessage(saveError)}. Press r to retry.`
+					tf("Couldn't save {label}: {error}. Press r to retry.", {
+						label: intent.label,
+						error: errorMessage(saveError),
+					})
 				);
 			} finally {
 				setBusy(false);
@@ -405,11 +288,18 @@ export function PrivacyPanel({
 			const parsed = testSpanResponseSchema.safeParse(raw);
 			setNotice(
 				parsed.success
-					? `Test span sent to ${parsed.data.endpoint}. Look for ryu.test in your collector.`
+					? tf(
+							"Test span sent to {endpoint}. Look for ryu.test in your collector.",
+							{ endpoint: parsed.data.endpoint }
+						)
 					: "Test span sent."
 			);
 		} catch (testError) {
-			setError(`Couldn't send the test span: ${errorMessage(testError)}`);
+			setError(
+				tf("Couldn't send the test span: {error}", {
+					error: errorMessage(testError),
+				})
+			);
 		} finally {
 			setBusy(false);
 		}
@@ -579,118 +469,24 @@ export function PrivacyPanel({
 					Loading Core privacy preferences…
 				</text>
 			) : null}
-			{ROWS.map((row, index) => {
-				const isSelected = selectedIndex === index;
-				const color = isSelected ? themeColor.primary : themeColor.foreground;
-				const prefix = isSelected ? "›" : " ";
-				let label = "";
-				let value = "";
-				let description = "";
-				if (row === "analytics") {
-					label = "Anonymous usage analytics";
-					value = preferences.analytics ? "ON" : "OFF";
-					description = "Content-free product events; enabled by default.";
-				} else if (row === "community") {
-					label = "Community stats";
-					value = preferences.community ? "ON" : "OFF";
-					description = "Anonymous aggregate savings; enabled by default.";
-				} else if (row === "profileActivity") {
-					label = "Profile activity";
-					value = preferences.profileActivity ? "ON" : "OFF";
-					description =
-						"Chats and agent runs count toward your streak; daily usage totals join your profile stats. No content.";
-				} else if (row === "crashReports") {
-					label = "Crash reports";
-					value = preferences.crashReports ? "ON" : "OFF";
-					description = "Separate consent tier; enabled by default.";
-				} else if (row === "diagnosticsExport") {
-					label = "Diagnostics export";
-					value = preferences.diagnosticsExport ? "ON" : "OFF · opt-in";
-					description =
-						"Core and Gateway export local traces to your endpoint.";
-				} else if (row === "diagnosticsEndpoint") {
-					label = "OTLP endpoint";
-					value = editingEndpoint
-						? "editing"
-						: preferences.diagnosticsEndpoint || "not set";
-					description =
-						"No destination means diagnostics remain local-only. Press t to send a test span.";
-				} else if (row === "diagnosticsContentMode") {
-					label = "Content mode";
-					value =
-						preferences.diagnosticsContentMode === "content"
-							? "Full content"
-							: "Metadata only";
-					description =
-						preferences.diagnosticsContentMode === "content"
-							? "Prompts, responses, and tool data leave this device for your collector."
-							: "Spans carry models, tokens, timings, and errors; never prompts.";
-				} else if (row === "supportDuration") {
-					label = "Support-access duration";
-					value = `${supportDurationHours} ${supportDurationHours === 1 ? "hour" : "hours"}`;
-					description = preferences.supportAccess
-						? "End the active grant before changing duration."
-						: "Grant expiry is written before access is enabled.";
-				} else {
-					label = "Local support access";
-					value = supportState;
-					description =
-						"Read-only, audited Core diagnostics; requires private mesh transport.";
-				}
-				return (
-					<box flexDirection="column" flexShrink={0} key={row} marginTop={1}>
-						<box flexDirection="row" gap={1}>
-							<text fg={color}>{prefix}</text>
-							<text fg={color}>{isSelected ? <b>{label}</b> : label}</text>
-							<text fg={themeColor.mutedForeground}>{value}</text>
-						</box>
-						{isSelected ? (
-							<text fg={themeColor.mutedForeground}>{description}</text>
-						) : null}
-						{row === "diagnosticsEndpoint" && editingEndpoint ? (
-							<TextInput
-								bordered={false}
-								label="Endpoint"
-								onChange={setEndpointDraft}
-								onSubmit={commitEndpoint}
-								placeholder="New endpoint; blank clears"
-								value={endpointDraft}
-								width={48}
-							/>
-						) : null}
-					</box>
-				);
-			})}
-			{error ? (
-				<box marginTop={1}>
-					<text fg={themeColor.error}>{error}</text>
-				</box>
-			) : null}
-			{notice ? (
-				<box marginTop={1}>
-					<text fg={themeColor.success}>{notice}</text>
-				</box>
-			) : null}
-			{busy ? (
-				<box marginTop={1}>
-					<text fg={themeColor.mutedForeground}>
-						Saving to Core and confirming…
-					</text>
-				</box>
-			) : null}
-			<box marginTop={1}>
-				<text fg={themeColor.mutedForeground}>
-					{editingEndpoint
-						? "Type endpoint · Enter save · Esc close settings"
-						: "↑↓ move rows · j/k change Settings panels · Enter toggle · e edit endpoint · t test span · ←/→ duration · r retry/load"}
-				</text>
-			</box>
-			<box marginTop={1}>
-				<text fg={themeColor.mutedForeground}>
-					Disclosure details and the local event inspector are available in
-					Desktop Settings → Privacy.
-				</text>
-			</box>
+			<PrivacyRows
+				commitEndpoint={commitEndpoint}
+				editingEndpoint={editingEndpoint}
+				endpointDraft={endpointDraft}
+				preferences={preferences}
+				selectedIndex={selectedIndex}
+				setEndpointDraft={setEndpointDraft}
+				supportDurationHours={supportDurationHours}
+				supportState={supportState}
+				themeColor={themeColor}
+			/>
+			<PrivacyFooter
+				busy={busy}
+				editingEndpoint={editingEndpoint}
+				error={error}
+				notice={notice}
+				themeColor={themeColor}
+			/>
 		</Card>
 	);
 }

@@ -21,6 +21,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { Empty, EmptyDescription } from "@ryu/ui/components/empty.tsx";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import {
 	Select,
@@ -288,7 +289,7 @@ export function ImportThreadsDialog({
 				</Select>
 
 				{error && (
-					<p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
+					<p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
 						{error}
 					</p>
 				)}
@@ -342,9 +343,11 @@ export function ImportThreadsDialog({
 						<SkeletonRows spacing="spacious" />
 					) : supported ? (
 						threads.length === 0 ? (
-							<p className="rounded-xl border border-border border-dashed px-3 py-8 text-center text-muted-foreground text-sm">
-								No past threads found for this agent.
-							</p>
+							<Empty spacing="compact">
+								<EmptyDescription>
+									No past threads found for this agent.
+								</EmptyDescription>
+							</Empty>
 						) : (
 							<ul className="flex flex-col gap-0.5 pr-2">
 								{threads.map((thread) => (
@@ -391,9 +394,11 @@ export function ImportThreadsDialog({
 							</ul>
 						)
 					) : (
-						<p className="rounded-xl border border-border border-dashed px-3 py-8 text-center text-muted-foreground text-sm">
-							This agent doesn't keep an importable local history.
-						</p>
+						<Empty spacing="compact">
+							<EmptyDescription>
+								This agent doesn't keep an importable local history.
+							</EmptyDescription>
+						</Empty>
 					)}
 				</ScrollArea>
 

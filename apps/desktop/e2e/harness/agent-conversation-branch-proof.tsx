@@ -2,6 +2,7 @@ declare const window: Window;
 
 import { AgentMessageTool } from "@ryu/blocks/desktop/agent-elements/tools/agent-message-tool.tsx";
 import type { AgentMessageContext } from "@ryu/blocks/desktop/agent-elements/types.ts";
+import { SidebarProvider } from "@ryu/ui/components/sidebar.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
@@ -238,59 +239,65 @@ function Story() {
 										Direct agent threads inline · fallback group chats
 									</p>
 								</header>
-								<div className="space-y-4 p-3">
-									<div>
-										<div className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
-											Agents
+								{/* The rows render inside the sidebar, whose menu buttons read its context. */}
+								<SidebarProvider className="min-h-0 flex-col">
+									<div className="space-y-4 p-3">
+										<div>
+											<div className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
+												Agents
+											</div>
+											{/* The row container the Agents section wraps every row body
+										    in (sidebar-agents-section.tsx): its `group/row` hover is
+										    what reveals the thread and edit actions. */}
+											<div className="group/row relative flex h-8 cursor-pointer items-center gap-2 overflow-hidden rounded-lg bg-background/30 px-2 text-sm hover:bg-sidebar-accent/60">
+												<MessagingAgentRowBody
+													agent={AGENTS[0]}
+													conversation={GROUPED_DIRECT_THREADS[0]}
+													onEdit={() => undefined}
+													onToggleThreads={() =>
+														setThreadsExpanded((value) => !value)
+													}
+													threadCount={GROUPED_DIRECT_THREADS.length}
+													threadsExpanded={threadsExpanded}
+													usageBarVisible={false}
+												/>
+											</div>
+											{threadsExpanded ? (
+												<AgentThreadList
+													loadMessages={() => Promise.resolve(PREVIEW_MESSAGES)}
+													onMarkRead={(id) =>
+														setUnreadThreadIds((current) => {
+															const next = new Set(current);
+															next.delete(id);
+															return next;
+														})
+													}
+													onMarkUnread={(id) =>
+														setUnreadThreadIds((current) =>
+															new Set(current).add(id)
+														)
+													}
+													onOpen={(id) => opened(`Opened ${id}`)}
+													onOpenQuickPreview={setPreviewId}
+													onOpenQuickReply={(id) => opened(`Quick reply ${id}`)}
+													pageSize={1}
+													threads={GROUPED_DIRECT_THREADS}
+													unreadIds={unreadThreadIds}
+												/>
+											) : null}
 										</div>
-										<div className="rounded-md bg-background/30">
-											<MessagingAgentRowBody
-												agent={AGENTS[0]}
-												conversation={GROUPED_DIRECT_THREADS[0]}
-												onEdit={() => undefined}
-												onToggleThreads={() =>
-													setThreadsExpanded((value) => !value)
-												}
-												threadCount={GROUPED_DIRECT_THREADS.length}
-												threadsExpanded={threadsExpanded}
-												usageBarVisible={false}
-											/>
-										</div>
-										{threadsExpanded ? (
-											<AgentThreadList
-												loadMessages={() => Promise.resolve(PREVIEW_MESSAGES)}
-												onMarkRead={(id) =>
-													setUnreadThreadIds((current) => {
-														const next = new Set(current);
-														next.delete(id);
-														return next;
-													})
-												}
-												onMarkUnread={(id) =>
-													setUnreadThreadIds((current) =>
-														new Set(current).add(id)
-													)
-												}
-												onOpen={(id) => opened(`Opened ${id}`)}
-												onOpenQuickPreview={setPreviewId}
-												onOpenQuickReply={(id) => opened(`Quick reply ${id}`)}
+										<div>
+											<div className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
+												Other chats
+											</div>
+											<SidebarConversationList
+												conversations={GROUP_THREADS}
+												handlers={handlers}
 												pageSize={1}
-												threads={GROUPED_DIRECT_THREADS}
-												unreadIds={unreadThreadIds}
 											/>
-										) : null}
-									</div>
-									<div>
-										<div className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
-											Other chats
 										</div>
-										<SidebarConversationList
-											conversations={GROUP_THREADS}
-											handlers={handlers}
-											pageSize={1}
-										/>
 									</div>
-								</div>
+								</SidebarProvider>
 							</section>
 							<section className="rounded-2xl border border-border/70 bg-background p-6 shadow-sm">
 								<div className="mb-5 flex items-center justify-between">

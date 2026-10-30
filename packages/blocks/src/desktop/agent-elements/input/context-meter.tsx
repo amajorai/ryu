@@ -182,7 +182,7 @@ export function ContextMeter({
 						usage={usage}
 					/>
 					{onOpen ? (
-						<div className="type-caption pt-1 text-muted-foreground">
+						<div className="pt-1 text-muted-foreground text-xs">
 							Click for the full breakdown
 						</div>
 					) : null}

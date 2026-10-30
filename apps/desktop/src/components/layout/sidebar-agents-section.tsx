@@ -7,7 +7,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { AgentTitleBadge } from "@ryu/ui/components/agent-title-badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -92,7 +92,7 @@ export function AgentThreadList({
 }) {
 	const paged = usePaged(threads, pageSize);
 	const renderList = (list: Conversation[]) => (
-		<div className="relative ml-5 border-sidebar-border/70 border-l pl-2">
+		<div className="relative ml-5 border-border border-l pl-2">
 			<SidebarMenu>
 				{list.map((thread) => (
 					<AgentThreadRow
@@ -114,14 +114,11 @@ export function AgentThreadList({
 
 	return (
 		<div className="mt-0.5" data-testid="agent-thread-list">
-			<div className="type-caption flex items-center gap-1.5 px-2 py-1 pl-7 text-muted-foreground">
-				<HugeiconsIcon
-					className="size-3 text-primary/75"
-					icon={GitBranchIcon}
-				/>
-				<span className="font-medium">Threads</span>
-				<span className="tabular-nums">
-					{formatCount(threads.length) ?? "—"}
+			<div className="flex h-7 items-center gap-1.5 px-2 pl-7 text-detail text-muted-foreground">
+				<HugeiconsIcon className="size-3.5" icon={GitBranchIcon} />
+				<span>Threads</span>
+				<span className="text-muted-foreground/70 text-xs tabular-nums">
+					{formatCount(threads.length)}
 				</span>
 			</div>
 			{renderList(paged.visible)}
@@ -259,8 +256,6 @@ export function AgentsSection({
 		openTab("/chat", { conversationId });
 	};
 
-	const emptyMessage = loading ? "Loading…" : "No agents yet";
-
 	const renderAgentRows = (list: typeof agents) =>
 		list.map((agent) => {
 			const threads = directThreadsByAgent.get(agent.id) ?? [];
@@ -273,8 +268,8 @@ export function AgentsSection({
 							<div
 								className={
 									messaging
-										? "group/row relative flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-md px-2 py-1.5 transition-colors hover:bg-muted"
-										: "group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
+										? "group/row relative flex h-8 cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2 text-sm transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
+										: "group/row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-sm transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 								}
 								onAuxClick={(e) => {
 									if (e.button === 1) {
@@ -321,7 +316,6 @@ export function AgentsSection({
 												fade
 												text={agent.name}
 											/>
-											<AgentTitleBadge title={agent.title} />
 										</div>
 										{usageBarPrefs.sidebar ? (
 											<UsageBar
@@ -334,17 +328,22 @@ export function AgentsSection({
 										<Tooltip>
 											<TooltipTrigger
 												render={
-													<button
+													<Button
 														aria-label={tl("Edit {name}", { name: agent.name })}
-														className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+														className="size-6 rounded-lg opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/row:opacity-100 group-hover/row:duration-0"
 														onClick={(e) => {
 															e.stopPropagation();
 															openAgent(agent.id, agent.name);
 														}}
+														size="icon-xs"
 														type="button"
+														variant="ghost-muted"
 													>
-														<HugeiconsIcon icon={PencilEdit01Icon} size={14} />
-													</button>
+														<HugeiconsIcon
+															className="size-3.5"
+															icon={PencilEdit01Icon}
+														/>
+													</Button>
 												}
 											/>
 											<TooltipContent>Edit agent</TooltipContent>
@@ -357,10 +356,7 @@ export function AgentsSection({
 							<ContextMenuItem
 								onClick={() => openAgent(agent.id, agent.name, true)}
 							>
-								<HugeiconsIcon
-									className="mr-2 size-4"
-									icon={ArrowUpRight01Icon}
-								/>
+								<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 								Open in new tab
 							</ContextMenuItem>
 							<OpenInNewWindowContextMenuItem
@@ -370,14 +366,14 @@ export function AgentsSection({
 								onClick={() => toggleFavorite("agent", agent.id)}
 							>
 								<HugeiconsIcon
-									className="mr-2 size-4"
+									className="size-4"
 									icon={pinnedAgentIds.has(agent.id) ? PinOffIcon : PinIcon}
 								/>
 								{pinnedAgentIds.has(agent.id) ? "Unpin agent" : "Pin agent"}
 							</ContextMenuItem>
 							{agentContributedRows(agent.id).map((row) => (
 								<ContextMenuItem key={row.id} onClick={row.onSelect}>
-									<span className="mr-2 inline-flex">
+									<span className="inline-flex">
 										<EntityRowGlyph row={row} />
 									</span>
 									{row.label}
@@ -403,6 +399,12 @@ export function AgentsSection({
 			);
 		});
 
+	// An empty Agents group is hidden outright; "New agent" stays in the
+	// account menu's New submenu. While the list loads, the header shows alone.
+	if (agents.length === 0 && !loading) {
+		return null;
+	}
+
 	return (
 		<SidebarSection
 			action={
@@ -417,11 +419,7 @@ export function AgentsSection({
 			sectionKey="agents"
 			sort={sort}
 		>
-			{agents.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
-					{emptyMessage}
-				</p>
-			) : (
+			{agents.length === 0 ? null : (
 				<>
 					{messaging ? (
 						<PinnedAgentStage
@@ -432,7 +430,7 @@ export function AgentsSection({
 						/>
 					) : null}
 					{messaging && pinnedAgents.length > 0 && listedAgents.length > 0 ? (
-						<div className="type-compact px-2 py-1 text-muted-foreground/70 uppercase tracking-section-label">
+						<div className="flex h-7 items-center px-2 text-detail text-muted-foreground">
 							Other agents
 						</div>
 					) : null}
@@ -470,14 +468,10 @@ export function SectionLoadError({
 }) {
 	return (
 		<div className="flex flex-col items-start gap-1 px-2 py-2">
-			<p className="text-muted-foreground text-xs">{message}</p>
-			<button
-				className="text-primary text-xs hover:underline"
-				onClick={onRetry}
-				type="button"
-			>
+			<p className="text-detail text-muted-foreground">{message}</p>
+			<Button onClick={onRetry} size="xs" type="button" variant="outline">
 				Try again
-			</button>
+			</Button>
 		</div>
 	);
 }

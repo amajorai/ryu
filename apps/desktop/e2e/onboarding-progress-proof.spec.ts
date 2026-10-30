@@ -41,7 +41,6 @@ test("onboarding progress stays slim and contrasts in both themes", async ({
 		await expect(progress).toHaveAttribute("aria-valuemax", "100");
 		await expect(progress).toHaveAttribute("aria-valuenow", "42");
 		const reveal = progress.locator("xpath=../..");
-		await expect(reveal).toHaveClass(/opacity-100/);
 		await expect(reveal).toHaveCSS("opacity", "1");
 
 		const styles = await progress.evaluate((track) => {

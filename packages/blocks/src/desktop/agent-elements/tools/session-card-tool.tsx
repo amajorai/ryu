@@ -46,7 +46,7 @@ export const SessionCardTool = memo(function SessionCardTool({
 	const { threadId } = model;
 	return (
 		<div
-			className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/60 px-3 py-2.5"
+			className="flex items-start gap-3 rounded-xl border border-border px-3 py-2"
 			data-testid="session-card"
 		>
 			<span

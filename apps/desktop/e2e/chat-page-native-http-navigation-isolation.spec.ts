@@ -76,7 +76,13 @@ for (const layout of ["horizontal", "scroll", "canvas"] as const) {
 				.poll(() =>
 					page.evaluate(
 						() =>
-							JSON.parse(localStorage.getItem("ryu_session_tabs") ?? "{}").tabs
+							JSON.parse(
+								(
+									Reflect.get(window, "__chatPageNativeFixture") as {
+										sealedLocalItem: (key: string) => string | null;
+									}
+								).sealedLocalItem("ryu_session_tabs") ?? "{}"
+							).tabs
 					)
 				)
 				.toEqual([

@@ -56,7 +56,11 @@ test("Simple keeps approval language human-readable", async ({ page }) => {
 	await expect(
 		card.getByText("run a shell command", { exact: true })
 	).toBeVisible();
-	await expect(card.locator("pre")).toHaveCount(0);
+	// The command itself always shows (PermissionPrompt): it is what the user
+	// approves, and the title is agent-supplied text. Simple drops only the
+	// technical label, the tool kind before the title.
+	await expect(card.locator("pre")).toHaveCount(1);
+	await expect(card.getByText(/execute ·/)).toHaveCount(0);
 });
 
 test("the bash row's approval strip renders one button per option", async ({

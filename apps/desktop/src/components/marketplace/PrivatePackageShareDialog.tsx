@@ -211,7 +211,7 @@ export default function PrivatePackageShareDialog({
 
 				{result ? (
 					<div className="space-y-4">
-						<div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-center">
+						<div className="rounded-xl bg-muted p-4 text-center">
 							<div className="mb-2 flex items-center justify-center gap-2 text-primary text-sm">
 								<HugeiconsIcon
 									className="size-4"

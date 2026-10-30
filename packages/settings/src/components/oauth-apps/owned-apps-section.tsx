@@ -1,11 +1,10 @@
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { sileo } from "sileo";
 import { type OwnedOAuthApp, settingsApi } from "../../utils/api-client.ts";
 import {
-	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -79,9 +78,9 @@ export function OwnedAppsSection() {
 	return (
 		<SettingsSection
 			as="section"
-			caption="Register an app that can ask Ryu users for scoped access. Client secrets are shown once when created or rotated."
+			caption="Apps that ask Ryu users for scoped access. Secrets show once, when created or rotated."
 			headerAction={
-				<Button onClick={openCreate} size="sm">
+				<Button onClick={openCreate} size="sm" variant="outline">
 					Create OAuth app
 				</Button>
 			}
@@ -89,9 +88,7 @@ export function OwnedAppsSection() {
 			titleId={titleId}
 		>
 			{ownedQuery.isLoading ? (
-				<SettingsCard className="flex justify-center py-6">
-					<Spinner className="size-5" />
-				</SettingsCard>
+				<SkeletonRows label="Loading" rows={2} />
 			) : ownedQuery.isError ? (
 				// A plain sentence, the server's reason in view, and a retry.
 				<SettingsGroup>
@@ -106,19 +103,21 @@ export function OwnedAppsSection() {
 								Retry
 							</Button>
 						}
+						description={
+							<span role="alert">
+								{errorMessage(
+									ownedQuery.error,
+									"Failed to load your OAuth apps"
+								)}
+							</span>
+						}
 						title="Couldn't load your OAuth apps."
-					>
-						<p className="text-status-destructive text-xs" role="alert">
-							{errorMessage(ownedQuery.error, "Failed to load your OAuth apps")}
-						</p>
-					</SettingsItem>
+					/>
 				</SettingsGroup>
 			) : ownedApps.length === 0 ? (
-				<SettingsCard>
-					<p className="text-center text-muted-foreground text-sm">
-						You have not registered an OAuth app yet.
-					</p>
-				</SettingsCard>
+				<p className="py-3 text-muted-foreground text-sm">
+					You have not registered an OAuth app yet.
+				</p>
 			) : (
 				<SettingsGroup>
 					{ownedApps.map((app) => (

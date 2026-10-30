@@ -1,3 +1,4 @@
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -52,6 +53,7 @@ export function TickerHeader({
 	now: number;
 	onNewThread: () => void;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const date = new Date(now);
 	return (
 		<header className="flex h-12 shrink-0 items-center gap-4 border-border border-b px-4">
@@ -127,10 +129,17 @@ export function TickerHeader({
 								)}
 							/>
 							<span>
-								<span className="text-foreground tabular-nums">
-									{index.working}
-								</span>{" "}
-								of {agentCount} working
+								{tlRich(
+									"<count>{working}</count> of {agentCount} working",
+									{ agentCount, working: index.working },
+									{
+										count: (chunks) => (
+											<span className="text-foreground tabular-nums">
+												{chunks}
+											</span>
+										),
+									}
+								)}
 							</span>
 						</dd>
 					</div>

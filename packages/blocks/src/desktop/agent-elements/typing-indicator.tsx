@@ -1,5 +1,6 @@
 import { Loader } from "@ryu/ui/components/motion/loader";
 import { cn } from "@ryu/ui/lib/utils";
+import { memo } from "react";
 
 export interface TypingIndicatorProps {
 	className?: string;
@@ -7,8 +8,11 @@ export interface TypingIndicatorProps {
 	label?: string;
 }
 
-/** A quiet loading indicator for a live assistant response. */
-export function TypingIndicator({
+/**
+ * A quiet loading indicator for a live assistant response. Memoised: it sits
+ * in the live turn row, which renders on every streamed chunk.
+ */
+export const TypingIndicator = memo(function TypingIndicator({
 	label = "Assistant is typing",
 	className,
 }: TypingIndicatorProps) {
@@ -29,4 +33,4 @@ export function TypingIndicator({
 			</span>
 		</div>
 	);
-}
+});

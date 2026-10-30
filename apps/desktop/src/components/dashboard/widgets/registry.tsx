@@ -10,7 +10,6 @@ import { lazy, type ReactNode, Suspense } from "react";
 import type { z } from "zod";
 import type { Widget } from "@/src/lib/api/dashboard.ts";
 import { AgentFeedBody } from "./AgentFeedWidget.tsx";
-import { ChartBody } from "./ChartWidget.tsx";
 import { ListBody } from "./ListWidget.tsx";
 
 import { StatBody } from "./StatWidget.tsx";
@@ -30,6 +29,21 @@ import { TextBody } from "./TextWidget.tsx";
 const MapBody = lazy(() =>
 	import("./MapWidget.tsx").then((module) => ({ default: module.MapBody }))
 );
+// Charts pull in recharts; keep them out of the startup chunk (the voice
+// composer reads this registry on the default chat route).
+const ChartBody = lazy(() =>
+	import("./ChartWidget.tsx").then((module) => ({ default: module.ChartBody }))
+);
+
+function renderChart(
+	kind: "area_chart" | "bar_chart" | "line_chart" | "pie_chart"
+): WidgetDefinition["render"] {
+	return ({ widget, value }) => (
+		<Suspense fallback={<Skeleton className="size-full" radius="row" />}>
+			<ChartBody config={widget.config} kind={kind} value={value} />
+		</Suspense>
+	);
+}
 
 /** Everything the app needs to know about a single widget kind. */
 export interface WidgetDefinition {
@@ -61,36 +75,28 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
 		label: "Line chart",
 		defaultSize: { w: 6, h: 4 },
 		configSchema: chartConfigSchema,
-		render: ({ widget, value }) => (
-			<ChartBody config={widget.config} kind="line_chart" value={value} />
-		),
+		render: renderChart("line_chart"),
 	},
 	{
 		kind: "bar_chart",
 		label: "Bar chart",
 		defaultSize: { w: 6, h: 4 },
 		configSchema: chartConfigSchema,
-		render: ({ widget, value }) => (
-			<ChartBody config={widget.config} kind="bar_chart" value={value} />
-		),
+		render: renderChart("bar_chart"),
 	},
 	{
 		kind: "area_chart",
 		label: "Area chart",
 		defaultSize: { w: 6, h: 4 },
 		configSchema: chartConfigSchema,
-		render: ({ widget, value }) => (
-			<ChartBody config={widget.config} kind="area_chart" value={value} />
-		),
+		render: renderChart("area_chart"),
 	},
 	{
 		kind: "pie_chart",
 		label: "Pie chart",
 		defaultSize: { w: 4, h: 4 },
 		configSchema: chartConfigSchema,
-		render: ({ widget, value }) => (
-			<ChartBody config={widget.config} kind="pie_chart" value={value} />
-		),
+		render: renderChart("pie_chart"),
 	},
 	{
 		kind: "table",

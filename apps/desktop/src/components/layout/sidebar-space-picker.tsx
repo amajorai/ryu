@@ -135,11 +135,17 @@ export function SpacesPickerBody({
 	);
 
 	if (loading) {
-		return <p className="px-2 py-2 text-muted-foreground text-xs">Loading…</p>;
+		return (
+			<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
+				Loading…
+			</p>
+		);
 	}
 	if (ordered.length === 0) {
 		return (
-			<p className="px-2 py-2 text-muted-foreground text-xs">No pages yet</p>
+			<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
+				No pages yet
+			</p>
 		);
 	}
 
@@ -216,7 +222,7 @@ function SpaceDocRows({
 						<ContextMenu>
 							<ContextMenuTrigger>
 								<button
-									className="flex h-7 w-full items-center gap-2 rounded-md pr-2 pl-8 text-left transition-colors hover:bg-muted"
+									className="flex h-7 w-full items-center gap-2 rounded-lg pr-2 pl-8 text-left transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 									data-prefetch-path={spaceDocPath(doc.spaceId, doc)}
 									onAuxClick={(e) => {
 										if (e.button === 1) {
@@ -237,7 +243,7 @@ function SpaceDocRows({
 												}
 											/>
 										}
-										size={12}
+										size={14}
 										tone="muted"
 										value={doc.icon}
 									/>
@@ -250,10 +256,7 @@ function SpaceDocRows({
 							</ContextMenuTrigger>
 							<ContextMenuContent>
 								<ContextMenuItem onClick={() => onOpenDoc(doc, true)}>
-									<HugeiconsIcon
-										className="mr-2 size-4"
-										icon={ArrowUpRight01Icon}
-									/>
+									<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 									Open in new tab
 								</ContextMenuItem>
 								{onOpenInNewWindow ? (
@@ -262,10 +265,7 @@ function SpaceDocRows({
 									/>
 								) : null}
 								<ContextMenuItem onClick={() => setIconTarget(doc)}>
-									<HugeiconsIcon
-										className="mr-2 size-4"
-										icon={ImageAdd01Icon}
-									/>
+									<HugeiconsIcon className="size-4" icon={ImageAdd01Icon} />
 									Change icon…
 								</ContextMenuItem>
 							</ContextMenuContent>

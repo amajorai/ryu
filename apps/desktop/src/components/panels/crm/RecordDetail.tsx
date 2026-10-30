@@ -11,29 +11,13 @@ import type { ValueBag } from "@/src/lib/api/crm.ts";
 // the store authors them, no route accepts them — so they render differently from
 // the entries a person wrote, and carry no edit affordance.
 
-import {
-	Calendar01Icon,
-	CheckmarkCircle01Icon,
-	Delete01Icon,
-	Note01Icon,
-	TelephoneIcon,
-	UserGroupIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import { Label } from "@ryu/ui/components/label.tsx";
-import { Separator } from "@ryu/ui/components/separator.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
-import { Textarea } from "@ryu/ui/components/textarea.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	FieldEditor,
 	FieldValue,
-	formatValue,
 	recordTitle,
 } from "@/src/components/panels/crm/fields.tsx";
 import type {
@@ -45,22 +29,11 @@ import type {
 	ObjectWithFields,
 	RelatedGroup,
 } from "@/src/lib/api/crm.ts";
-import { formatDateTime } from "@/src/lib/timezone.ts";
+import { renderActivityComposer } from "./record-activity-composer.tsx";
+import { TimelineEntry } from "./record-detail-parts.tsx";
+import { renderRelatedGroups } from "./record-related-groups.tsx";
 
 const TIMELINE_LIMIT = 100;
-
-/** Which kinds a person can author. `field_change` / `stage_change` are absent on
- *  purpose — they are the store's audit trail, not something anyone writes. */
-const AUTHORABLE: {
-	icon: typeof Note01Icon;
-	kind: ActivityKind;
-	label: string;
-}[] = [
-	{ icon: Note01Icon, kind: "note", label: "Note" },
-	{ icon: TelephoneIcon, kind: "call", label: "Call" },
-	{ icon: Calendar01Icon, kind: "meeting", label: "Meeting" },
-	{ icon: CheckmarkCircle01Icon, kind: "task", label: "Task" },
-];
 
 export function RecordDetail({
 	client,
@@ -78,6 +51,7 @@ export function RecordDetail({
 	recordId: string;
 	subject: ObjectWithFields;
 }) {
+	const tl = useLiteralMessages();
 	const [record, setRecord] = useState<CrmRecord | null>(null);
 	const [related, setRelated] = useState<RelatedGroup[]>([]);
 	const [timeline, setTimeline] = useState<Activity[]>([]);
@@ -299,7 +273,7 @@ export function RecordDetail({
 					</Button>
 					<div className="min-w-0">
 						<h2
-							className="truncate font-medium text-base"
+							className="truncate font-semibold text-sm"
 							title={recordTitle(record.title, record.values, titleField)}
 						>
 							{recordTitle(record.title, record.values, titleField)}
@@ -339,7 +313,7 @@ export function RecordDetail({
 			<div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
 				{/* Fields + relations */}
 				<aside className="scroll-fade min-h-0 overflow-y-auto border-b p-4 lg:border-r lg:border-b-0">
-					<h3 className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+					<h3 className="mb-1 font-semibold text-foreground text-sm">
 						Details
 					</h3>
 					<dl className="space-y-2">
@@ -369,7 +343,7 @@ export function RecordDetail({
 											/>
 										) : (
 											<button
-												className="w-full rounded px-1 py-0.5 text-left hover:bg-muted"
+												className="w-full rounded-lg px-1 py-0.5 text-left hover:bg-muted"
 												onClick={() => setEditingField(field.id)}
 												type="button"
 											>
@@ -384,154 +358,31 @@ export function RecordDetail({
 							))}
 					</dl>
 
-					{related.length > 0 && (
-						<>
-							<Separator className="my-4" />
-							<h3 className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-								Related
-							</h3>
-							<div className="space-y-3">
-								{related.map((group) => (
-									<div key={group.field_id}>
-										<div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
-											<HugeiconsIcon icon={UserGroupIcon} size={12} />
-											{group.field_name}
-											<Badge typography="normal" variant="secondary">
-												{group.records.length}
-											</Badge>
-										</div>
-										<ul className="space-y-0.5">
-											{group.records.map((linked) => (
-												<li className="flex items-center gap-1" key={linked.id}>
-													<button
-														className="min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-sm hover:bg-muted"
-														onClick={() =>
-															onOpenRecord(linked.id, group.object_slug)
-														}
-														type="button"
-													>
-														{recordTitle(
-															linked.title,
-															linked.values,
-															objectsBySlug
-																.get(group.object_slug)
-																?.fields.find(
-																	(f) =>
-																		f.id ===
-																		objectsBySlug.get(group.object_slug)?.object
-																			.title_field_id
-																)
-														)}
-													</button>
-													<Button
-														aria-label={`Unlink ${linked.title}`}
-														disabled={linking}
-														onClick={() =>
-															void changeLink(group, linked.id, false)
-														}
-														size="icon"
-														variant="ghost"
-													>
-														<HugeiconsIcon icon={Delete01Icon} size={12} />
-													</Button>
-												</li>
-											))}
-										</ul>
-										<RelationPicker
-											client={client}
-											disabled={linking}
-											objectSlug={group.object_slug}
-											onPick={(targetId) =>
-												void changeLink(group, targetId, true)
-											}
-											titleField={objectsBySlug
-												.get(group.object_slug)
-												?.fields.find(
-													(f) =>
-														f.id ===
-														objectsBySlug.get(group.object_slug)?.object
-															.title_field_id
-												)}
-										/>
-									</div>
-								))}
-							</div>
-						</>
-					)}
+					{renderRelatedGroups({
+						changeLink,
+						client,
+						linking,
+						objectsBySlug,
+						onOpenRecord,
+						related,
+						tl,
+					})}
 				</aside>
 
 				{/* Timeline */}
 				<section className="flex min-h-0 flex-col">
-					<div className="border-b p-3">
-						<div className="mb-2 flex flex-wrap gap-1">
-							{AUTHORABLE.map((option) => (
-								<Button
-									key={option.kind}
-									onClick={() => setComposerKind(option.kind)}
-									size="sm"
-									variant={composerKind === option.kind ? "secondary" : "ghost"}
-								>
-									<HugeiconsIcon icon={option.icon} size={13} />
-									{option.label}
-								</Button>
-							))}
-						</div>
-						<div className="space-y-2">
-							<div>
-								<Label className="sr-only" htmlFor="crm-activity-title">
-									Title
-								</Label>
-								<Input
-									id="crm-activity-title"
-									onChange={(event) => setComposerTitle(event.target.value)}
-									placeholder={
-										composerKind === "task"
-											? "What needs doing?"
-											: "What happened?"
-									}
-									value={composerTitle}
-								/>
-							</div>
-							<div>
-								<Label className="sr-only" htmlFor="crm-activity-body">
-									Detail
-								</Label>
-								<Textarea
-									id="crm-activity-body"
-									onChange={(event) => setComposerBody(event.target.value)}
-									placeholder="Detail (optional)"
-									rows={2}
-									value={composerBody}
-								/>
-							</div>
-							{composerKind === "task" && (
-								<div className="flex items-center gap-2">
-									<Label htmlFor="crm-activity-due" size="compact">
-										Due
-									</Label>
-									<Input
-										className="w-56"
-										id="crm-activity-due"
-										onChange={(event) => setComposerDue(event.target.value)}
-										type="datetime-local"
-										value={composerDue}
-									/>
-									<span className="text-muted-foreground text-xs">
-										A task with no due time never announces itself.
-									</span>
-								</div>
-							)}
-							<div className="flex justify-end">
-								<Button
-									disabled={saving || composerTitle.trim() === ""}
-									onClick={() => void submitActivity()}
-									size="sm"
-								>
-									{saving ? "Saving…" : "Add"}
-								</Button>
-							</div>
-						</div>
-					</div>
+					{renderActivityComposer({
+						composerBody,
+						composerDue,
+						composerKind,
+						composerTitle,
+						saving,
+						setComposerBody,
+						setComposerDue,
+						setComposerKind,
+						setComposerTitle,
+						submitActivity,
+					})}
 
 					<ol className="scroll-fade min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
 						{timeline.map((entry) => (
@@ -565,180 +416,6 @@ export function RecordDetail({
 					</ol>
 				</section>
 			</div>
-		</div>
-	);
-}
-
-/** One timeline row. Audit entries render as a compact sentence with no controls;
- *  authored entries get their body and, for tasks, a completion checkbox. */
-function TimelineEntry({
-	activity,
-	fieldsById,
-	onDelete,
-	onToggle,
-}: {
-	activity: Activity;
-	fieldsById: Map<string, Field>;
-	onDelete: () => void;
-	onToggle: () => void;
-}) {
-	const when = new Date(activity.created_at);
-	const stamp = Number.isNaN(when.getTime())
-		? activity.created_at
-		: formatDateTime(when);
-
-	if (activity.kind === "field_change" || activity.kind === "stage_change") {
-		const field = activity.field_id
-			? fieldsById.get(activity.field_id)
-			: undefined;
-		return (
-			<li className="flex items-baseline gap-2 text-muted-foreground text-xs">
-				<span className="shrink-0 tabular-nums opacity-70">{stamp}</span>
-				<span>
-					{field?.name ?? "A field"} changed
-					{activity.from_value !== undefined && field
-						? ` from ${formatValue(field, activity.from_value)}`
-						: ""}
-					{activity.to_value !== undefined && field
-						? ` to ${formatValue(field, activity.to_value)}`
-						: ""}
-					{activity.author ? ` · ${activity.author}` : ""}
-				</span>
-			</li>
-		);
-	}
-
-	const done = Boolean(activity.completed_at);
-
-	return (
-		<li className="rounded-md border bg-card p-3">
-			<div className="flex items-start justify-between gap-2">
-				<div className="flex min-w-0 items-start gap-2">
-					{activity.kind === "task" && (
-						<Checkbox
-							aria-label={done ? "Reopen this task" : "Mark this task complete"}
-							checked={done}
-							className="mt-0.5"
-							onCheckedChange={onToggle}
-						/>
-					)}
-					<div className="min-w-0">
-						<div
-							className={cn(
-								"font-medium text-sm",
-								done && "text-muted-foreground line-through"
-							)}
-						>
-							{activity.title || "(untitled)"}
-						</div>
-						{activity.body && (
-							<p className="mt-1 whitespace-pre-wrap text-muted-foreground text-sm">
-								{activity.body}
-							</p>
-						)}
-						<div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-							<Badge typography="normal" variant="secondary">
-								{activity.kind}
-							</Badge>
-							<span className="tabular-nums">{stamp}</span>
-							{activity.assignee && <span>· {activity.assignee}</span>}
-							{activity.due_at && (
-								<span>· due {formatDateTime(activity.due_at)}</span>
-							)}
-						</div>
-					</div>
-				</div>
-				<Button
-					aria-label="Delete this entry"
-					onClick={onDelete}
-					size="icon"
-					variant="ghost"
-				>
-					<HugeiconsIcon icon={Delete01Icon} size={14} />
-				</Button>
-			</div>
-		</li>
-	);
-}
-
-/** Search the target object and link a record.
- *
- * Its own component so each relation group keeps its own query state — one shared
- * search box across every group would make typing in "People" filter "Deals" too.
- * Debounced, and it queries the SERVER rather than filtering a preloaded list,
- * because the target object can be arbitrarily large.
- */
-function RelationPicker({
-	client,
-	disabled,
-	objectSlug,
-	onPick,
-	titleField,
-}: {
-	client: CrmClient;
-	disabled: boolean;
-	objectSlug: string;
-	onPick: (recordId: string) => void;
-	titleField: Field | undefined;
-}) {
-	const [query, setQuery] = useState("");
-	const [hits, setHits] = useState<CrmRecord[]>([]);
-
-	useEffect(() => {
-		const needle = query.trim();
-		if (needle.length < 2) {
-			setHits([]);
-			return;
-		}
-		const controller = new AbortController();
-		const timer = setTimeout(() => {
-			client
-				.queryRecords(
-					objectSlug,
-					{ limit: 6, search: needle },
-					controller.signal
-				)
-				.then((page) => setHits(page.items))
-				.catch(() => {
-					// A failed lookup leaves the previous hits alone rather than
-					// surfacing an error over the whole record page.
-				});
-		}, 250);
-		return () => {
-			clearTimeout(timer);
-			controller.abort();
-		};
-	}, [client, objectSlug, query]);
-
-	return (
-		<div className="mt-1">
-			<Input
-				aria-label={`Link a ${objectSlug}`}
-				disabled={disabled}
-				onChange={(event) => setQuery(event.target.value)}
-				placeholder={`Link a ${objectSlug}…`}
-				value={query}
-			/>
-			{hits.length > 0 && (
-				<ul className="mt-1 space-y-0.5 rounded-md border bg-card p-1">
-					{hits.map((hit) => (
-						<li key={hit.id}>
-							<button
-								className="w-full truncate rounded px-1 py-0.5 text-left text-sm hover:bg-muted"
-								onClick={() => {
-									onPick(hit.id);
-									setQuery("");
-									setHits([]);
-								}}
-								title={recordTitle(hit.title, hit.values, titleField)}
-								type="button"
-							>
-								{recordTitle(hit.title, hit.values, titleField)}
-							</button>
-						</li>
-					))}
-				</ul>
-			)}
 		</div>
 	);
 }

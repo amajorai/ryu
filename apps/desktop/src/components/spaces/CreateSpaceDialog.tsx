@@ -20,6 +20,7 @@ import { Label } from "@ryu/ui/components/label.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useFriendlyMode } from "@ryu/ui/hooks/use-friendly-mode.ts";
 import { type ChangeEvent, type SubmitEvent, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 
 /**
  * What the picker shows before the user touches it. `"vector"` is Core's shipped
@@ -186,9 +187,7 @@ export function CreateSpaceDialog({
 								onModeChange={setMode}
 							/>
 						</div>
-						{error ? (
-							<p className="text-sm text-status-destructive">{error}</p>
-						) : null}
+						{error ? <ErrorLine message={error} /> : null}
 					</div>
 					<DialogFooter>
 						<Button

@@ -100,32 +100,32 @@ export function ProjectScopeMenu({
 		<>
 			<ScopeMenu label={tl("{label} options", { label })}>
 				<DropdownMenuItem onClick={() => onNewChat(path)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={Add01Icon} />
+					<HugeiconsIcon className="size-4" icon={Add01Icon} />
 					New chat in this folder
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => onOpenGraph(path)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={GitBranchIcon} />
+					<HugeiconsIcon className="size-4" icon={GitBranchIcon} />
 					Open Git graph
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => setHistoryOpen(true)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={GitBranchIcon} />
+					<HugeiconsIcon className="size-4" icon={GitBranchIcon} />
 					Conversation history
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => onSetActive(path)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={FolderOpenIcon} />
+					<HugeiconsIcon className="size-4" icon={FolderOpenIcon} />
 					Set as active project
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => setSettingsOpen(true)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={PencilEdit01Icon} />
+					<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
 					Edit project…
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => setIconDialogOpen(true)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={ImageAdd01Icon} />
+					<HugeiconsIcon className="size-4" icon={ImageAdd01Icon} />
 					Change icon…
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => onRemove(path)} variant="destructive">
-					<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+					<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 					Remove from app
 				</DropdownMenuItem>
 			</ScopeMenu>
@@ -202,25 +202,25 @@ export function SpaceScopeMenu({
 		<>
 			<ScopeMenu label={tl("{name} options", { name: space.name })}>
 				<DropdownMenuItem onClick={onAdd}>
-					<HugeiconsIcon className="mr-2 size-4" icon={Add01Icon} />
+					<HugeiconsIcon className="size-4" icon={Add01Icon} />
 					Add files to this space…
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={onOpen}>
-					<HugeiconsIcon className="mr-2 size-4" icon={DeliverySecure01Icon} />
+					<HugeiconsIcon className="size-4" icon={DeliverySecure01Icon} />
 					Open space page
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={onOpenInNewTab}>
-					<HugeiconsIcon className="mr-2 size-4" icon={ArrowUpRight01Icon} />
+					<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
 					Open in new tab
 				</DropdownMenuItem>
 				<OpenInNewWindowDropdownMenuItem onClick={onOpenInNewWindow} />
 				<DropdownMenuItem onClick={() => setIconDialogOpen(true)}>
-					<HugeiconsIcon className="mr-2 size-4" icon={ImageAdd01Icon} />
+					<HugeiconsIcon className="size-4" icon={ImageAdd01Icon} />
 					Change icon…
 				</DropdownMenuItem>
 				{space.system ? null : (
 					<DropdownMenuItem onClick={() => setRenameOpen(true)}>
-						<HugeiconsIcon className="mr-2 size-4" icon={PencilEdit01Icon} />
+						<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
 						Rename space
 					</DropdownMenuItem>
 				)}
@@ -244,7 +244,7 @@ export function SpaceScopeMenu({
 						}
 					>
 						<HugeiconsIcon
-							className="mr-2 size-4"
+							className="size-4"
 							icon={
 								resourceVisibilityGroup(space.visibility) === "team"
 									? ViewOffSlashIcon
@@ -260,7 +260,7 @@ export function SpaceScopeMenu({
 				)}
 				{contributedRows.map((row) => (
 					<DropdownMenuItem key={row.id} onClick={row.onSelect}>
-						<span className="mr-2 inline-flex">
+						<span className="inline-flex">
 							<EntityRowGlyph row={row} />
 						</span>
 						{row.label}
@@ -271,7 +271,7 @@ export function SpaceScopeMenu({
 					<Tooltip>
 						<TooltipTrigger render={<span className="block" />}>
 							<DropdownMenuItem disabled variant="destructive">
-								<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+								<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 								Delete space
 							</DropdownMenuItem>
 						</TooltipTrigger>
@@ -283,7 +283,7 @@ export function SpaceScopeMenu({
 					</Tooltip>
 				) : (
 					<DropdownMenuItem onClick={onRequestDelete} variant="destructive">
-						<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
+						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 						Delete space
 					</DropdownMenuItem>
 				)}
@@ -349,7 +349,7 @@ export function ProjectsPickerBody({
 
 	if (conversations.length === 0) {
 		return (
-			<p className="px-2 py-2 text-muted-foreground text-xs">
+			<p className="flex min-h-8 items-center px-2 text-detail text-muted-foreground">
 				{scope === ALL_SELECTION
 					? "No chats in your projects yet"
 					: "No chats in this project yet"}

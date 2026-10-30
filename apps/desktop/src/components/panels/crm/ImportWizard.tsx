@@ -148,7 +148,7 @@ export function ImportWizard({
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="border-b px-4 py-3">
-				<h2 className="font-medium text-base">
+				<h2 className="font-semibold text-sm">
 					{tl("Import {objectPlural}", {
 						objectPlural: subject.object.plural,
 					})}
@@ -172,7 +172,7 @@ export function ImportWizard({
 						<Label htmlFor="crm-import-file">CSV file</Label>
 						<input
 							accept=".csv,text/csv"
-							className="block w-full text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm"
+							className="block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm"
 							disabled={busy}
 							id="crm-import-file"
 							onChange={(event) => {
@@ -421,7 +421,7 @@ export function ImportWizard({
 
 function Stat({ label, value }: { label: string; value: number }) {
 	return (
-		<div className="rounded-md border bg-card p-3">
+		<div className="rounded-lg border bg-card p-3">
 			<div className="font-medium text-lg tabular-nums">
 				{formatNumber(value)}
 			</div>

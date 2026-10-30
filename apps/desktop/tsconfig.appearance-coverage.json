@@ -8,6 +8,12 @@
     "src/vite-env.d.ts",
     "src/components/settings/AppearanceTab.tsx",
     "src/components/settings/AppearanceTab.coverage.native-http.test.tsx",
+    "src/components/settings/AppearanceTab.layout-detail.coverage.native-http.test.tsx",
+    "src/components/settings/AppearanceTab.tree-reset.coverage.native-http.test.tsx",
+    "src/components/settings/AppearanceTab.usage-diff.coverage.native-http.test.tsx",
+    "src/components/settings/appearance-coverage.dom.tsx",
+    "src/components/settings/appearance-coverage.harness.tsx",
+    "src/components/settings/appearance-coverage.helpers.tsx",
     "e2e/appearance-coverage.playwright.config.ts",
     "e2e/harness/vite.appearance-coverage.config.ts"
   ]

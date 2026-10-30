@@ -1,5 +1,14 @@
 "use client";
 
+import {
+	ArrowUp02Icon,
+	Attachment01Icon,
+	Cancel01Icon,
+	DragDropVerticalIcon,
+	TaskAdd01Icon,
+	Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -16,14 +25,6 @@ import {
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	IconArrowUp,
-	IconCheck,
-	IconGripVertical,
-	IconPaperclip,
-	IconX,
-} from "@tabler/icons-react";
-import { ListEnd } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { CSSProperties } from "react";
 import { useRef, useState } from "react";
@@ -188,7 +189,7 @@ function QueueItem({
 					aria-label={tl("Reorder queued message {position}", {
 						position: index + 1,
 					})}
-					className="cursor-grab touch-none text-muted-foreground/60 hover:text-foreground active:cursor-grabbing"
+					className="cursor-grab touch-none text-muted-foreground/70 hover:text-foreground active:cursor-grabbing"
 					draggable
 					onDragStart={(event) => {
 						event.dataTransfer.setData("text/plain", item.id);
@@ -205,9 +206,9 @@ function QueueItem({
 					}}
 					type="button"
 				>
-					<IconGripVertical className="h-3.5 w-3.5" />
+					<HugeiconsIcon className="h-3.5 w-3.5" icon={DragDropVerticalIcon} />
 				</button>
-				<span className="type-compact flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-muted px-1 text-center font-medium text-muted-foreground tabular-nums">
+				<span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-muted px-1 text-center font-medium text-muted-foreground text-xs tabular-nums">
 					{index + 1}
 				</span>
 				{editing ? (
@@ -237,7 +238,7 @@ function QueueItem({
 							type="button"
 							variant="ghost"
 						>
-							<IconCheck className="h-3.5 w-3.5" />
+							<HugeiconsIcon className="h-3.5 w-3.5" icon={Tick02Icon} />
 						</Button>
 						<Button
 							appearance="queued-message-action"
@@ -247,7 +248,7 @@ function QueueItem({
 							type="button"
 							variant="ghost"
 						>
-							<IconX className="h-3.5 w-3.5" />
+							<HugeiconsIcon className="h-3.5 w-3.5" icon={Cancel01Icon} />
 						</Button>
 					</>
 				) : (
@@ -292,11 +293,11 @@ function QueueItem({
 									) : null;
 								})}
 								{item.attachments.length > 3 ? (
-									<span className="type-compact">
+									<span className="text-xs">
 										+{item.attachments.length - 3}
 									</span>
 								) : (
-									<IconPaperclip className="h-3 w-3" />
+									<HugeiconsIcon className="h-3 w-3" icon={Attachment01Icon} />
 								)}
 							</div>
 						)}
@@ -310,7 +311,7 @@ function QueueItem({
 								type="button"
 								variant="ghost"
 							>
-								<IconArrowUp className="h-3.5 w-3.5" />
+								<HugeiconsIcon className="h-3.5 w-3.5" icon={ArrowUp02Icon} />
 							</Button>
 							<DropdownMenu>
 								<DropdownMenuTrigger
@@ -358,6 +359,7 @@ export function QueueBar({
 }: QueueBarProps) {
 	const [expanded, setExpanded] = useState(false);
 	const reduceMotion = useReducedMotion() ?? false;
+	const tl = useLiteralMessages();
 
 	if (items.length === 0) {
 		return null;
@@ -374,7 +376,11 @@ export function QueueBar({
 		>
 			<div className="flex h-7 items-center justify-between border-border border-b px-3 text-muted-foreground text-xs">
 				<div className="inline-flex items-center gap-1.5">
-					<ListEnd aria-hidden="true" className="size-3.5 shrink-0" />
+					<HugeiconsIcon
+						aria-hidden="true"
+						className="size-3.5 shrink-0"
+						icon={TaskAdd01Icon}
+					/>
 					Queued
 					<span className="tabular-nums">· {formatNumber(count)}</span>
 				</div>
@@ -401,10 +407,12 @@ export function QueueBar({
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem onClick={() => onQueueModeChange?.("auto")}>
-								{queueMode === "auto" ? "✓ " : ""}Auto queue messages
+								{queueMode === "auto" ? "✓ " : ""}
+								{tl("Auto queue messages")}
 							</DropdownMenuItem>
 							<DropdownMenuItem onClick={() => onQueueModeChange?.("off")}>
-								{queueMode === "off" ? "✓ " : ""}Turn off queueing
+								{queueMode === "off" ? "✓ " : ""}
+								{tl("Turn off queueing")}
 							</DropdownMenuItem>
 							<DropdownMenuItem onClick={onClear}>Clear queue</DropdownMenuItem>
 						</DropdownMenuContent>

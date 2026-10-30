@@ -3,16 +3,17 @@ import {
 	AlertCircleIcon,
 	CheckmarkCircle02Icon,
 	Refresh01Icon,
-	Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
+import { QuietEmpty } from "@/src/components/agents/shared/quiet-empty.tsx";
+import { InlineErrorRow } from "@/src/components/chat/InlineErrorRow.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -60,16 +61,14 @@ function formatDate(value: string | null): string {
 		: format(parsed, "MMM d, yyyy · HH:mm:ss");
 }
 
-function statusVariant(
+/** Only an exceptional lifecycle earns a badge; "active" is the normal state. */
+function lifecycleBadgeVariant(
 	status: AgentIdentity["lifecycleStatus"]
-): "default" | "secondary" | "outline" {
+): "secondary" | "outline" | null {
 	if (status === "active") {
-		return "default";
+		return null;
 	}
-	if (status === "trial") {
-		return "secondary";
-	}
-	return "outline";
+	return status === "trial" ? "secondary" : "outline";
 }
 
 function humanizeSafetyProfile(value: AgentIdentity["safetyProfile"]): string {
@@ -89,10 +88,10 @@ function PassportField({
 	value: string;
 }) {
 	return (
-		<div className="min-w-0 rounded-lg border bg-muted/20 p-3">
-			<dt className="font-medium text-muted-foreground text-xs">{label}</dt>
+		<div className="min-w-0">
+			<dt className="text-detail text-muted-foreground">{label}</dt>
 			<dd
-				className={`mt-1 break-words text-sm ${mono ? "font-mono text-xs" : ""}`}
+				className={`mt-0.5 break-words text-sm ${mono ? "font-mono" : ""}`}
 				title={value}
 			>
 				{value}
@@ -120,8 +119,13 @@ function activityTime(timestamp: string): string {
 	return `${format(parsed, "MMM d, yyyy · HH:mm:ss")} · ${formatDistanceToNow(parsed, { addSuffix: true })}`;
 }
 
+function emphasize(chunks: ReactNode): ReactNode {
+	return <span className="font-medium text-foreground">{chunks}</span>;
+}
+
 function ActivityRow({ row }: { row: PassportActivityRow }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const success = row.outcome === "success";
 	const correlations = [
 		row.requestId ? `request ${row.requestId}` : null,
@@ -130,56 +134,45 @@ function ActivityRow({ row }: { row: PassportActivityRow }) {
 
 	return (
 		<div
-			className="flex gap-3 border-b py-4 last:border-b-0"
+			className="flex gap-3 border-border border-b py-3 last:border-b-0"
 			data-testid="agent-passport-event"
 		>
-			<div
-				className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full ${success ? "bg-success/10 text-status-success" : "bg-destructive/10 text-status-destructive"}`}
-			>
-				<HugeiconsIcon
-					className="size-4"
-					icon={success ? CheckmarkCircle02Icon : AlertCircleIcon}
-				/>
-			</div>
+			<HugeiconsIcon
+				aria-label={success ? "Completed" : "Failed"}
+				className={`mt-0.5 size-4 shrink-0 ${success ? "text-status-success" : "text-status-destructive"}`}
+				icon={success ? CheckmarkCircle02Icon : AlertCircleIcon}
+				role="img"
+			/>
 			<div className="min-w-0 flex-1">
 				<div className="flex flex-wrap items-center gap-2">
 					<span className="font-medium text-sm">{row.eventLabel}</span>
-					<Badge variant={success ? "secondary" : "destructive"}>
-						{success ? "Completed" : "Failed"}
-					</Badge>
-					<Badge variant="outline">{row.scope}</Badge>
+					{success ? null : <Badge variant="destructive">Failed</Badge>}
+					<span className="text-muted-foreground text-xs">{row.scope}</span>
 				</div>
-				<div className="type-compact mt-1 break-all font-mono text-muted-foreground">
+				<div className="mt-1 break-all font-mono text-muted-foreground text-xs">
 					{row.action}
 				</div>
-				<div className="mt-1 break-words font-medium text-sm">{row.target}</div>
+				<div className="mt-1 break-words text-sm">{row.target}</div>
 				<p className="mt-1 text-muted-foreground text-xs">
-					{row.agentAction ? (
-						<>
-							Performed by{" "}
-							<span className="font-medium text-foreground">
-								{row.actorLabel}
-							</span>
-							{row.initiatedBy ? (
-								<>
-									{" "}
-									on behalf of{" "}
-									<span className="font-medium text-foreground">
-										{row.initiatedBy}
-									</span>
-								</>
-							) : null}
-						</>
-					) : (
-						<>
-							Changed by{" "}
-							<span className="font-medium text-foreground">
-								{row.actorLabel}
-							</span>
-						</>
-					)}
+					{row.agentAction && row.initiatedBy
+						? tlRich(
+								"Performed by <b>{actorLabel}</b> on behalf of <b>{initiatedBy}</b>",
+								{ actorLabel: row.actorLabel, initiatedBy: row.initiatedBy },
+								{ b: emphasize }
+							)
+						: row.agentAction
+							? tlRich(
+									"Performed by <b>{actorLabel}</b>",
+									{ actorLabel: row.actorLabel },
+									{ b: emphasize }
+								)
+							: tlRich(
+									"Changed by <b>{actorLabel}</b>",
+									{ actorLabel: row.actorLabel },
+									{ b: emphasize }
+								)}
 				</p>
-				<div className="type-compact mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-muted-foreground">
+				<div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-muted-foreground text-xs">
 					{row.agentAction && row.actorId ? (
 						<span className="break-all">
 							{tl("agent {actorId}", { actorId: row.actorId })}
@@ -201,10 +194,14 @@ function ActivityRow({ row }: { row: PassportActivityRow }) {
 				<p className="mt-1 break-words text-muted-foreground text-xs">
 					{row.details}
 				</p>
-				<div className="type-compact mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-muted-foreground">
-					<span title={row.timestamp}>{activityTime(row.timestamp)}</span>
+				<div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground/70 text-xs">
+					<span className="tabular-nums" title={row.timestamp}>
+						{activityTime(row.timestamp)}
+					</span>
 					{correlations.map((value) => (
-						<span key={value}>{value}</span>
+						<span className="font-mono" key={value}>
+							{value}
+						</span>
 					))}
 				</div>
 			</div>
@@ -317,41 +314,31 @@ export function AgentPassportPanel({
 	);
 	const model = detail?.chatModel?.modelId ?? agent.model ?? "Not pinned";
 	const engine = detail?.chatModel?.engine ?? agent.engine ?? "Not reported";
+	const lifecycleBadge = lifecycleBadgeVariant(agent.lifecycleStatus);
 
 	return (
 		<div className="flex flex-col gap-6" data-testid="agent-passport">
 			<SettingsSection
-				caption="A read-only identity card and event ledger for this agent. Every action names the agent, the human or system that initiated it, and the request or session correlation when available. Prompt and credential payloads are never shown."
-				headerAction={
-					<Badge variant="outline">
-						<HugeiconsIcon className="size-3" icon={Shield01Icon} />
-						Traceable identity
-					</Badge>
-				}
+				caption="Read-only identity and event ledger. Prompts and credentials are never shown."
 				title="Agent passport"
 			>
 				<SettingsCard>
-					<div className="flex items-start gap-3">
-						<div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-							<HugeiconsIcon className="size-5" icon={Shield01Icon} />
+					<div className="min-w-0">
+						<div className="flex flex-wrap items-center gap-2">
+							<h3 className="font-medium text-sm">{agent.name}</h3>
+							{lifecycleBadge ? (
+								<Badge variant={lifecycleBadge}>{agent.lifecycleStatus}</Badge>
+							) : null}
+							{agent.locked ? <Badge variant="secondary">Locked</Badge> : null}
 						</div>
-						<div className="min-w-0 flex-1">
-							<div className="flex flex-wrap items-center gap-2">
-								<h3 className="font-medium text-base">{agent.name}</h3>
-								<Badge variant={statusVariant(agent.lifecycleStatus)}>
-									{agent.lifecycleStatus}
-								</Badge>
-								{agent.locked ? (
-									<Badge variant="secondary">Locked</Badge>
-								) : null}
-							</div>
-							<p className="mt-1 text-muted-foreground text-xs">
-								{agent.description ?? "No description recorded."}
+						{agent.description ? (
+							<p className="mt-0.5 text-detail text-muted-foreground">
+								{agent.description}
 							</p>
-						</div>
+						) : null}
 					</div>
 
-					<dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+					<dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
 						<PassportField label="Agent ID" mono value={agent.id} />
 						<PassportField
 							label="Safety profile"
@@ -377,7 +364,7 @@ export function AgentPassportPanel({
 						/>
 					</dl>
 
-					<div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+					<dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 border-border border-t pt-3 sm:grid-cols-2 lg:grid-cols-4">
 						<PassportField
 							label="Tools"
 							value={capabilityValue(
@@ -414,21 +401,22 @@ export function AgentPassportPanel({
 								detail?.memory.write_enabled ? "Read + write" : "Read only"
 							)}
 						/>
-					</div>
+					</dl>
 				</SettingsCard>
 			</SettingsSection>
 
 			<SettingsSection
-				caption="The latest governed actions and human control changes for this agent. Request and session IDs are shown so an operator can follow a row into its run transcript or Gateway record."
+				caption="Governed actions and control changes, with request and session IDs."
 				headerAction={
 					<Button
 						disabled={auditQuery.isFetching}
 						onClick={() => void auditQuery.refetch()}
-						size="sm"
-						variant="ghost"
+						size="icon-sm"
+						title="Refresh"
+						variant="ghost-muted"
 					>
 						<HugeiconsIcon className="size-4" icon={Refresh01Icon} />
-						Refresh
+						<span className="sr-only">Refresh</span>
 					</Button>
 				}
 				title="Trace ledger"
@@ -437,42 +425,23 @@ export function AgentPassportPanel({
 					{auditQuery.isLoading ? (
 						<SkeletonRows inset="detail" label="Loading agent activity…" />
 					) : auditQuery.isError ? (
-						<div className="flex flex-col items-center gap-3 p-8 text-center">
-							<HugeiconsIcon
-								className="size-5 text-muted-foreground"
-								icon={AlertCircleIcon}
-							/>
-							<p className="font-medium text-sm">
-								Activity could not be loaded
-							</p>
-							<p className="max-w-md text-muted-foreground text-xs">
-								{auditQuery.error instanceof Error
+						<InlineErrorRow
+							details={
+								auditQuery.error instanceof Error
 									? auditQuery.error.message
-									: "The organization or node audit source is unavailable."}
-							</p>
-							<Button
-								onClick={() => void auditQuery.refetch()}
-								size="sm"
-								variant="outline"
-							>
-								Try again
-							</Button>
-						</div>
+									: null
+							}
+							message="Activity could not be loaded."
+							onRetry={() => void auditQuery.refetch()}
+						/>
 					) : activity.length === 0 ? (
-						<div className="flex flex-col items-center gap-2 p-8 text-center">
-							<HugeiconsIcon
-								className="size-5 text-muted-foreground"
-								icon={Activity01Icon}
-							/>
-							<p className="font-medium text-sm">No trace events yet</p>
-							<p className="max-w-md text-muted-foreground text-xs">
-								When this agent runs a model or tool, or someone changes its
-								controls, that event will appear here with its actor and
-								correlation IDs.
-							</p>
-						</div>
+						<QuietEmpty
+							description="Model, tool and control events will appear here."
+							icon={Activity01Icon}
+							title="No trace events yet"
+						/>
 					) : (
-						<div className="px-4" data-testid="agent-passport-activity">
+						<div data-testid="agent-passport-activity">
 							{activity.map((row) => (
 								<ActivityRow key={row.id} row={row} />
 							))}

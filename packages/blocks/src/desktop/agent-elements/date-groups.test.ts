@@ -19,6 +19,7 @@ import {
 } from "@ryu/ui/lib/timezone.ts";
 import {
 	type DayGroupableTurn,
+	dayDividersKey,
 	dayKeyAtTurnIndex,
 	dayKeyOf,
 	dayLabel,
@@ -285,4 +286,19 @@ describe("transition-day transcript separators", () => {
 			]);
 		});
 	}
+});
+
+describe("dayDividersKey", () => {
+	it("changes when older same-day turns move a divider onto another row", () => {
+		const groups = [
+			{ dayKey: null, startIndex: 0 },
+			{ dayKey: "100", startIndex: 1 },
+			{ dayKey: "200", startIndex: 3 },
+		];
+		const before = dayDividersKey(groups, (index) => `turn-${index}`);
+		expect(before).toBe("100@turn-1|200@turn-3");
+		// Same run of days, but the first day now opens on a different row.
+		const after = dayDividersKey(groups, (index) => `older-${index}`);
+		expect(after).not.toBe(before);
+	});
 });

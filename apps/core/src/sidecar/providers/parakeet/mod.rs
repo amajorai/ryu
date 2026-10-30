@@ -38,11 +38,23 @@ use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 /// surface (sidecar list, Store row, `/api/voice/*` error body). Names the exact
 /// remedy: pick whisper, or rebuild with the feature.
 ///
-/// Only compiled on lean builds — with the feature on, nothing references it.
+/// Only compiled where inference is absent — with it built, nothing references
+/// it. That is a lean build, or Intel macOS: ONNX Runtime ships no
+/// `x86_64-apple-darwin` build, so `ryu-stt` declares transcribe-rs for every
+/// other target and the feature compiles no engine there (the release still
+/// passes the same `--features` string at every build site).
 #[cfg(not(feature = "voice-parakeet"))]
 pub const FEATURE_MISSING: &str = "this Core build was compiled without the `voice-parakeet` \
      feature, so parakeet cannot transcribe on this node. Use the `whisper` voice engine, or \
      rebuild Core with `--features voice-parakeet` (see apps/core/package.json `build`).";
+#[cfg(all(
+    feature = "voice-parakeet",
+    target_os = "macos",
+    target_arch = "x86_64"
+))]
+pub const FEATURE_MISSING: &str = "ONNX Runtime has no Intel macOS build, so `voice-parakeet` \
+     compiles no inference engine into this Core and parakeet cannot transcribe on this node. \
+     Use the `whisper` voice engine.";
 
 /// Lifecycle manager for the in-process parakeet STT engine.
 pub struct ParakeetManager {
@@ -56,7 +68,13 @@ pub struct ParakeetManager {
     /// `main.rs` wires this on every build, but only the `voice-parakeet` arm of
     /// [`Sidecar::start`] reads it — a lean build refuses before downloading
     /// anything, so the field is legitimately write-only there.
-    #[cfg_attr(not(feature = "voice-parakeet"), allow(dead_code))]
+    #[cfg_attr(
+        not(all(
+            feature = "voice-parakeet",
+            not(all(target_os = "macos", target_arch = "x86_64"))
+        )),
+        allow(dead_code)
+    )]
     downloads: Option<crate::downloads::DownloadCenter>,
 }
 
@@ -99,7 +117,10 @@ impl Sidecar for ParakeetManager {
     /// multi-hundred-MB ONNX bundle for an inference path that is not compiled
     /// in, so the refusal comes *before* the download.
     fn start(&self) -> BoxFuture<anyhow::Result<()>> {
-        #[cfg(feature = "voice-parakeet")]
+        #[cfg(all(
+            feature = "voice-parakeet",
+            not(all(target_os = "macos", target_arch = "x86_64"))
+        ))]
         {
             let loaded = Arc::clone(&self.loaded);
             let downloads = self.downloads.clone();
@@ -123,7 +144,10 @@ impl Sidecar for ParakeetManager {
                 Ok(())
             })
         }
-        #[cfg(not(feature = "voice-parakeet"))]
+        #[cfg(not(all(
+            feature = "voice-parakeet",
+            not(all(target_os = "macos", target_arch = "x86_64"))
+        )))]
         {
             Box::pin(async move { anyhow::bail!(FEATURE_MISSING) })
         }
@@ -132,7 +156,10 @@ impl Sidecar for ParakeetManager {
     fn stop(&self) -> BoxFuture<anyhow::Result<()>> {
         let loaded = Arc::clone(&self.loaded);
         Box::pin(async move {
-            #[cfg(feature = "voice-parakeet")]
+            #[cfg(all(
+                feature = "voice-parakeet",
+                not(all(target_os = "macos", target_arch = "x86_64"))
+            ))]
             ryu_stt::parakeet::unload();
             loaded.store(false, Ordering::Relaxed);
             tracing::info!("parakeet engine unloaded");
@@ -147,7 +174,10 @@ impl Sidecar for ParakeetManager {
     /// arm too means the "Running" claim cannot be resurrected by any future flag
     /// write, and the reason travels to whatever renders the status.
     fn health_check(&self) -> BoxFuture<HealthStatus> {
-        #[cfg(feature = "voice-parakeet")]
+        #[cfg(all(
+            feature = "voice-parakeet",
+            not(all(target_os = "macos", target_arch = "x86_64"))
+        ))]
         {
             let loaded = Arc::clone(&self.loaded);
             Box::pin(async move {
@@ -158,7 +188,10 @@ impl Sidecar for ParakeetManager {
                 }
             })
         }
-        #[cfg(not(feature = "voice-parakeet"))]
+        #[cfg(not(all(
+            feature = "voice-parakeet",
+            not(all(target_os = "macos", target_arch = "x86_64"))
+        )))]
         {
             Box::pin(async move { HealthStatus::Unhealthy(FEATURE_MISSING.into()) })
         }
@@ -168,7 +201,10 @@ impl Sidecar for ParakeetManager {
         // Compile-time false on a lean build (the `cfg!` short-circuits): an
         // engine that cannot transcribe must never report itself as running to
         // the sidecar list, the Store row, or `VoiceInputSettings`.
-        cfg!(feature = "voice-parakeet") && self.loaded.load(Ordering::Relaxed)
+        cfg!(all(
+            feature = "voice-parakeet",
+            not(all(target_os = "macos", target_arch = "x86_64"))
+        )) && self.loaded.load(Ordering::Relaxed)
     }
 
     fn uninstall(&self, delete_data: bool) -> BoxFuture<anyhow::Result<()>> {
@@ -201,7 +237,10 @@ mod tests {
     /// binary with no ONNX inference reported `Healthy`/running while every
     /// transcription 500'd. Only compiled where it can actually be false — with
     /// the feature on there is no lean arm to assert.
-    #[cfg(not(feature = "voice-parakeet"))]
+    #[cfg(not(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    )))]
     #[tokio::test]
     async fn lean_build_refuses_to_start_and_never_reports_running() {
         // No download center wired ON PURPOSE: the refusal must land *before* the
@@ -235,7 +274,10 @@ mod tests {
     /// The feature-on arm keeps its original contract: not loaded yet ⇒ not
     /// running and `Unhealthy("…not loaded")`. Pinned so the lean-arm fix above
     /// can never be "achieved" by making the engine unconditionally unhealthy.
-    #[cfg(feature = "voice-parakeet")]
+    #[cfg(all(
+        feature = "voice-parakeet",
+        not(all(target_os = "macos", target_arch = "x86_64"))
+    ))]
     #[tokio::test]
     async fn feature_build_is_unhealthy_until_the_model_is_loaded() {
         let manager = ParakeetManager::new();

@@ -15,8 +15,10 @@ const inputVariants = cva(
 				"agent-detail":
 					"type-detail h-8 px-3 py-1 text-base file:h-7 file:text-sm md:text-sm",
 				default: "h-9 px-3 py-1 text-base file:h-7 file:text-sm md:text-sm",
+				// A quiet search field: no border, a faint muted fill, and the ring
+				// only on keyboard focus (from the base focus-visible styles).
 				"settings-search":
-					"h-8 px-3 py-1 text-base text-sm file:h-7 file:text-sm md:text-sm",
+					"h-8 rounded-lg border-0 bg-muted/50 px-2 py-1 text-sm file:h-7 file:text-sm",
 				compact: "h-8 px-3 py-1 text-xs file:h-7 file:text-sm md:text-sm",
 				dense: "h-7 px-3 py-1 text-xs file:h-7 file:text-sm md:text-sm",
 				lg: "h-10 px-4 py-2 text-base file:h-8 file:text-sm",

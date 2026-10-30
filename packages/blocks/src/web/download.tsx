@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button, buttonVariants } from "@ryu/ui/components/button";
 import {
 	Card,
@@ -305,6 +306,7 @@ export default function DownloadBlock({
 	isMobile = false,
 	releasesLoaded = true,
 }: DownloadProps) {
+	const tl = useLiteralMessages();
 	// Nothing to say yet — not "GitHub is down". Hold the CTA back until we know,
 	// exactly as an unresolved fetch used to.
 	const pendingReleases = !releasesLoaded && releases.length === 0;
@@ -341,7 +343,10 @@ export default function DownloadBlock({
 								>
 									<Download className="mr-2 size-5" />
 									{hero.kind === "ready"
-										? `Download for ${osName(os)} (${archLabel(os, arch)})`
+										? tl("Download for {osName} ({archLabel})", {
+												archLabel: archLabel(os, arch),
+												osName: osName(os),
+											})
 										: "View releases on GitHub"}
 								</Button>
 								<a

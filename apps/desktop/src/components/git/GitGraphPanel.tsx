@@ -1,15 +1,13 @@
 import {
 	ArrowDown01Icon,
 	GitBranchIcon,
-	GitCommitIcon,
 	RefreshIcon,
 	Search01Icon,
-	SourceCodeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { invoke } from "@tauri-apps/api/core";
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import {
@@ -22,6 +20,14 @@ import {
 	parseGitGraphLog,
 } from "@/src/lib/git-graph.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import {
+	CommitDetails,
+	GraphEmptyState,
+} from "./GitGraphPanel-commit-details.tsx";
+import {
+	BranchRefRow,
+	GitGraphCommitRow,
+} from "./GitGraphPanel-commit-row.tsx";
 
 interface GitCommandResult {
 	code: number;
@@ -34,16 +40,8 @@ interface GitGraphPanelProps {
 	folder?: string | null;
 }
 
-const LANE_COLORS = [
-	"var(--primary)",
-	"#60a5fa",
-	"#f59e0b",
-	"#e879f9",
-	"#fb7185",
-	"#2dd4bf",
-] as const;
-
 export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
+	const tl = useLiteralMessages();
 	const terminalShell = useWorkspaceStore((state) => state.terminalShell);
 	const openTab = useTabSelector((state) => state.openTab);
 	const [commits, setCommits] = useState<GitGraphCommit[]>([]);
@@ -174,8 +172,10 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 							Git graph
 						</h1>
 						<p className="mt-1 truncate text-muted-foreground text-xs">
-							{folderLabel} · follow branches, merges, and the commits behind
-							your chats
+							{tl(
+								"{folderLabel} · follow branches, merges, and the commits behind your chats",
+								{ folderLabel }
+							)}
 						</p>
 					</div>
 					<button
@@ -215,14 +215,14 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 				</label>
 				<div className="type-caption ml-auto flex items-center gap-1.5 text-muted-foreground">
 					<span className="rounded-full bg-muted/35 px-2 py-1">
-						{commits.length} commits
+						{tl("{count} commits", { count: String(commits.length) })}
 					</span>
 					<span className="rounded-full bg-muted/35 px-2 py-1">
-						{branches.length} refs
+						{tl("{count} refs", { count: String(branches.length) })}
 					</span>
 					{changedFiles > 0 && (
 						<span className="rounded-full bg-muted/35 px-2 py-1">
-							{changedFiles} changed
+							{tl("{count} changed", { count: String(changedFiles) })}
 						</span>
 					)}
 				</div>
@@ -298,290 +298,6 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 	);
 }
 
-function BranchRefRow({
-	active,
-	branch,
-	label,
-	onClick,
-}: {
-	active: boolean;
-	branch?: GitGraphBranch;
-	label: string;
-	onClick: () => void;
-}) {
-	return (
-		<button
-			aria-current={active ? "page" : undefined}
-			className={cn(
-				"group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-				active
-					? "bg-muted text-foreground"
-					: "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-			)}
-			onClick={onClick}
-			type="button"
-		>
-			<span
-				className={cn(
-					"relative flex size-4 shrink-0 items-center justify-center rounded-full ring-1 ring-border/70",
-					active && "ring-2 ring-primary/30"
-				)}
-			>
-				<span
-					className={cn(
-						"size-1.5 rounded-full",
-						active ? "bg-primary" : "bg-muted-foreground/50"
-					)}
-				/>
-			</span>
-			<span className="min-w-0 flex-1 truncate">{label}</span>
-			{branch?.current && (
-				<span className="type-compact text-primary">HEAD</span>
-			)}
-		</button>
-	);
-}
-
-function GitGraphCommitRow({
-	laneCount,
-	onSelect,
-	row,
-	selected,
-}: {
-	laneCount: number;
-	onSelect: () => void;
-	row: GitGraphRow;
-	selected: boolean;
-}) {
-	return (
-		<button
-			aria-pressed={selected}
-			className={cn(
-				"group flex min-h-14 w-full items-stretch rounded-lg text-left transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
-				selected && "bg-primary/[0.07]"
-			)}
-			onClick={onSelect}
-			type="button"
-		>
-			<CommitLane laneCount={laneCount} row={row} selected={selected} />
-			<span className="min-w-0 flex-1 py-2 pr-3">
-				<span className="flex min-w-0 items-center gap-2">
-					<span
-						className={cn(
-							"min-w-0 flex-1 truncate font-medium text-xs",
-							selected && "text-foreground"
-						)}
-						title={row.commit.subject}
-					>
-						{row.commit.subject}
-					</span>
-					{row.commit.refs.slice(0, 3).map((ref) => (
-						<span
-							className="type-compact hidden shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-primary sm:inline"
-							key={ref}
-						>
-							{ref}
-						</span>
-					))}
-				</span>
-				<span className="type-caption mt-1 flex items-center gap-1.5 truncate text-muted-foreground">
-					<code className="font-mono text-foreground/70">
-						{row.commit.shortSha}
-					</code>
-					<span aria-hidden="true">·</span>
-					<span>{row.commit.author}</span>
-					<span aria-hidden="true">·</span>
-					<span>{row.commit.date}</span>
-				</span>
-			</span>
-		</button>
-	);
-}
-
-function CommitLane({
-	laneCount,
-	row,
-	selected,
-}: {
-	laneCount: number;
-	row: GitGraphRow;
-	selected: boolean;
-}) {
-	const laneWidth = 22;
-	const width = Math.max(48, laneCount * laneWidth + 18);
-	const startX = row.lane * laneWidth + 10;
-	return (
-		<svg
-			aria-hidden="true"
-			className="h-14 shrink-0 overflow-visible"
-			viewBox={`0 0 ${width} 56`}
-			width={width}
-		>
-			{Array.from({ length: laneCount }, (_, lane) => {
-				const x = lane * laneWidth + 10;
-				return (
-					<line
-						key={`guide-${lane}`}
-						opacity={lane === row.lane ? 0.35 : 0.12}
-						stroke={laneColor(lane)}
-						strokeWidth="1"
-						x1={x}
-						x2={x}
-						y1="0"
-						y2="56"
-					/>
-				);
-			})}
-			{row.parentLanes.map((parentLane, index) => {
-				const endX = parentLane * laneWidth + 10;
-				const path =
-					endX === startX
-						? `M ${startX} 28 L ${endX} 56`
-						: `M ${startX} 28 C ${startX} 40, ${endX} 44, ${endX} 56`;
-				return (
-					<path
-						className="transition-opacity"
-						d={path}
-						fill="none"
-						key={`parent-${index}-${parentLane}`}
-						opacity={0.85}
-						stroke={laneColor(parentLane)}
-						strokeLinecap="round"
-						strokeWidth="1.5"
-					/>
-				);
-			})}
-			<circle
-				cx={startX}
-				cy="28"
-				fill="var(--sidebar)"
-				r={selected ? 5 : 4}
-				stroke={laneColor(row.lane)}
-				strokeWidth={selected ? 2 : 1.5}
-			/>
-		</svg>
-	);
-}
-
-function CommitDetails({
-	commit,
-	currentBranch,
-	changedFiles,
-	folder,
-	onOpenChanges,
-}: {
-	commit: GitGraphCommit | null;
-	currentBranch?: GitGraphBranch;
-	changedFiles: number;
-	folder: string;
-	onOpenChanges: () => void;
-}) {
-	if (!commit) {
-		return <GraphEmptyState text="Select a commit to inspect its details." />;
-	}
-	return (
-		<div className="flex h-full flex-col">
-			<div className="border-border/60 border-b px-4 py-3">
-				<div className="flex items-center gap-2 text-muted-foreground text-xs">
-					<HugeiconsIcon
-						className="size-3.5 text-primary"
-						icon={GitCommitIcon}
-					/>
-					<span>Commit details</span>
-				</div>
-				<h2 className="mt-2 font-medium text-sm leading-snug">
-					{commit.subject}
-				</h2>
-			</div>
-			<div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-xs">
-				<DetailRow label="Commit">
-					<code className="font-mono text-foreground/80">{commit.sha}</code>
-				</DetailRow>
-				<DetailRow label="Author">{commit.author}</DetailRow>
-				<DetailRow label="Updated">{commit.date}</DetailRow>
-				{commit.refs.length > 0 && (
-					<div>
-						<div className="mb-1 text-muted-foreground">Refs</div>
-						<div className="flex flex-wrap gap-1">
-							{commit.refs.map((ref) => (
-								<span
-									className="type-compact rounded-full bg-primary/10 px-2 py-1 text-primary"
-									key={ref}
-								>
-									{ref}
-								</span>
-							))}
-						</div>
-					</div>
-				)}
-				{commit.parents.length > 0 && (
-					<div>
-						<div className="mb-1 text-muted-foreground">Parents</div>
-						<div className="space-y-1">
-							{commit.parents.map((parent) => (
-								<code
-									className="block truncate font-mono text-foreground/70"
-									key={parent}
-									title={parent}
-								>
-									{parent}
-								</code>
-							))}
-						</div>
-					</div>
-				)}
-				<div className="rounded-lg border border-border/60 bg-muted/25 p-3 text-muted-foreground leading-relaxed">
-					{currentBranch
-						? `HEAD is on ${currentBranch.name}. `
-						: "This repository has no checked-out branch. "}
-					{changedFiles > 0
-						? "The working tree has local changes."
-						: "The working tree is clean."}
-				</div>
-			</div>
-			<div className="border-border/60 border-t px-4 py-3">
-				<button
-					className="flex w-full items-center justify-center gap-2 rounded-md bg-muted px-3 py-2 font-medium text-xs transition-colors hover:bg-muted/80"
-					onClick={onOpenChanges}
-					type="button"
-				>
-					<HugeiconsIcon className="size-3.5" icon={SourceCodeIcon} />
-					Open project changes
-				</button>
-				<div
-					className="type-compact mt-2 truncate text-center text-muted-foreground/60"
-					title={folder}
-				>
-					{folder}
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function DetailRow({
-	children,
-	label,
-}: {
-	children: ReactNode;
-	label: string;
-}) {
-	return (
-		<div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
-			<span className="text-muted-foreground">{label}</span>
-			<span className="min-w-0 truncate text-foreground/85">{children}</span>
-		</div>
-	);
-}
-
-function GraphEmptyState({ text }: { text: string }) {
-	return (
-		<div className="flex h-full min-h-36 items-center justify-center p-4 text-center text-muted-foreground text-xs">
-			{text}
-		</div>
-	);
-}
-
 function laneCount(rows: GitGraphRow[]): number {
 	return Math.max(
 		1,
@@ -589,8 +305,4 @@ function laneCount(rows: GitGraphRow[]): number {
 			.flatMap((row) => [row.lane, ...row.parentLanes])
 			.map((lane) => lane + 1)
 	);
-}
-
-function laneColor(index: number): string {
-	return LANE_COLORS[index % LANE_COLORS.length] ?? LANE_COLORS[0];
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readSharedGlobals } from "../styles/read-shared-globals.ts";
 import {
 	PlanBadge,
 	type PlanTier,
@@ -8,18 +8,6 @@ import {
 	planTierColors,
 	planTierGradient,
 } from "./plan-badge.tsx";
-
-const GLOBALS_URL = "../styles/globals.css";
-const GLOBALS_PARTIAL_IMPORT = /@import "(\.\/globals\/[\w-]+\.css)";/g;
-
-/** globals.css with its ordered `./globals/*.css` partials inlined. */
-function readGlobalsCss(): string {
-	const url = new URL(GLOBALS_URL, import.meta.url);
-	return readFileSync(url, "utf8").replace(
-		GLOBALS_PARTIAL_IMPORT,
-		(_statement, partial: string) => readFileSync(new URL(partial, url), "utf8")
-	);
-}
 
 const BUSINESS_GRADIENT =
 	"linear-gradient(15deg,#5dffe4 0,#8dff9a 8%,#fff36a 16%,#60dfff 24%,#7b7cff 32%,#ff77d8 40%,#ffc45f 48%,#5dffe4 56%,#8dff9a 64%,#fff36a 72%,#60dfff 80%,#7b7cff 88%,#ff77d8 96%,#ffc45f 100%)";
@@ -140,7 +128,7 @@ describe("Plan badge background motion", () => {
 	});
 
 	test("uses a shared enlarged drift animation with a reduced-motion stop", () => {
-		const css = readGlobalsCss();
+		const css = readSharedGlobals();
 
 		expect(css).toContain("@keyframes t-plan-badge-gradient-drift");
 		expect(css).toContain("background-size: 300% 100%");

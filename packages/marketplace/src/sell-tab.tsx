@@ -152,34 +152,34 @@ function MembershipTotalsGrid({
 			className={cn("grid grid-cols-2 gap-3 text-sm sm:grid-cols-4", className)}
 		>
 			<div>
-				<p className="font-medium text-base tabular-nums">
+				<p className="font-medium text-xl tabular-nums">
 					{report.eligibleListingCount}
 				</p>
-				<p className="text-muted-foreground text-xs">Eligible paid apps</p>
+				<p className="text-detail text-muted-foreground">Eligible paid apps</p>
 			</div>
 			<div>
-				<p className="font-medium text-base tabular-nums">
+				<p className="font-medium text-xl tabular-nums">
 					{formatMinorCurrency(
 						totals?.pendingMinor ?? 0,
 						totals?.currency ?? "usd"
 					)}
 				</p>
-				<p className="text-muted-foreground text-xs">Pending</p>
+				<p className="text-detail text-muted-foreground">Pending</p>
 			</div>
 			<div>
-				<p className="font-medium text-base tabular-nums">
+				<p className="font-medium text-xl tabular-nums">
 					{formatMinorCurrency(
 						totals?.paidMinor ?? 0,
 						totals?.currency ?? "usd"
 					)}
 				</p>
-				<p className="text-muted-foreground text-xs">Paid out</p>
+				<p className="text-detail text-muted-foreground">Paid out</p>
 			</div>
 			<div>
-				<p className="font-medium text-base tabular-nums">
+				<p className="font-medium text-xl tabular-nums">
 					{totals?.usageCount ?? 0}
 				</p>
-				<p className="text-muted-foreground text-xs">Usage signals</p>
+				<p className="text-detail text-muted-foreground">Usage signals</p>
 			</div>
 		</div>
 	);
@@ -421,7 +421,7 @@ export function SellTab({
 				</p>
 
 				{stripeUnavailable ? (
-					<p className="mt-4 rounded-md bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
+					<p className="mt-4 rounded-lg bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
 						{STRIPE_UNAVAILABLE_COPY}
 					</p>
 				) : (

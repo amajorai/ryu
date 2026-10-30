@@ -1,4 +1,4 @@
-import { ComputerIcon, Delete01Icon } from "@hugeicons/core-free-icons";
+import { ComputerIcon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { settingsApi } from "@ryu/settings";
@@ -12,7 +12,6 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@ryu/ui/components/alert-dialog.tsx";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +24,12 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "./shared/settings-items.tsx";
+
+// Row actions stay hidden until the row is hovered or focused, matching the
+// web settings rows (@ryu/settings SETTINGS_ROW_REVEAL_CLASS). Touch screens,
+// which cannot hover, always show them.
+const ROW_REVEAL_CLASS =
+	"opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-focus-within/item:opacity-100 group-hover/item:opacity-100 group-hover/item:duration-0 [@media(hover:none)]:opacity-100";
 
 export function SessionsTab() {
 	const tl = useLiteralMessages();
@@ -140,9 +145,8 @@ export function SessionsTab() {
 									actions={
 										!isCurrent && (
 											<Button
-												appearance="cancel-request"
 												aria-label="Revoke session"
-												className="size-8 shrink-0"
+												className={ROW_REVEAL_CLASS}
 												disabled={revokeMutation.isPending}
 												onClick={() =>
 													setPendingRevoke({
@@ -152,10 +156,10 @@ export function SessionsTab() {
 															: "Unknown device",
 													})
 												}
-												size="icon"
-												variant="ghost"
+												size="icon-sm"
+												variant="ghost-muted"
 											>
-												<HugeiconsIcon className="size-4" icon={Delete01Icon} />
+												<HugeiconsIcon icon={Delete02Icon} size={16} />
 											</Button>
 										)
 									}
@@ -172,9 +176,9 @@ export function SessionsTab() {
 													: "Unknown device"}
 											</span>
 											{isCurrent && (
-												<Badge className="shrink-0" variant="secondary">
+												<span className="shrink-0 font-normal text-detail text-muted-foreground">
 													This device
-												</Badge>
+												</span>
 											)}
 										</span>
 									}

@@ -1,23 +1,11 @@
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceParamsByRenderer,
-	type InterfaceSnapshot,
 	resolveInterfaceParams,
 } from "@ryuhq/protocol/interfaces";
-import { CarFront } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import {
-	type RefObject,
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { keepsActOverlay } from "./act-settings.ts";
-import { GAME_PLATE } from "./game-hud.tsx";
-import { GameHudSlot, GameShell } from "./game-shell.tsx";
+import { GameShell } from "./game-shell.tsx";
 import {
 	actOverlays,
 	actSummaryLine,
@@ -28,22 +16,13 @@ import {
 } from "./game3d-acts.ts";
 import { islandFor } from "./game3d-ground.tsx";
 import { useGameKitSettings } from "./game3d-settings.tsx";
-import {
-	IsoStage,
-	IsoZoomControls,
-	useGameNight,
-	useIsoView,
-} from "./game3d-stage.tsx";
+import { IsoStage, useGameNight, useIsoView } from "./game3d-stage.tsx";
 import { useVillagerLooks } from "./game3d-villager.tsx";
 import {
 	ActAnnouncer,
-	ActStatus,
 	AskQueueList,
 	askOwners,
-	BlindSpotCaption,
-	NeedYouButton,
 	openQueue,
-	QueueButton,
 	useActCards,
 } from "./interface-ask-card.tsx";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
@@ -53,128 +32,35 @@ import {
 	type RidesActView,
 	ridesActTrips,
 } from "./rides-acts.tsx";
-import { RidesBooking } from "./rides-booking.tsx";
 import { RidesDioramaScene } from "./rides-diorama.tsx";
-import { SheetHandle } from "./rides-handle.tsx";
-import { RidesActCounters, RidesCounters } from "./rides-hud.tsx";
+import { useRidesActEtas, useTripFocus } from "./rides-interface-effects.ts";
+import { RidesInterfaceHud, ridesActRow } from "./rides-interface-hud.tsx";
+import {
+	CITY_RIM,
+	EMPTY_SNAPSHOT,
+	REDUCED_TICK_MS,
+	RIDES_ACT_PLATE_FIT,
+	TICK_MS,
+	useNow,
+	useWidth,
+	WIDE_FROM,
+} from "./rides-interface-parts.ts";
+import { RidesInterfaceSheet } from "./rides-interface-sheet.tsx";
 import { RidesList } from "./rides-list.tsx";
 import {
 	arrivedTrips,
 	buildRides,
 	driverOptions,
-	etaLabel,
 	finishedTrips,
 	nowTrips,
 	type SheetTab,
 	tripHistory,
 } from "./rides-model.ts";
 import { ridesArt } from "./rides-palette.ts";
-import {
-	type RidesActEta,
-	RidesActEtas,
-	RidesActed,
-	RidesActTrips,
-	TripRow,
-} from "./rides-parts.tsx";
+import { RidesActEtas, RidesActed, RidesActTrips } from "./rides-parts.tsx";
 import { buildCityPlan, ridesFrame } from "./rides-scene.ts";
-import { RidesSheetTabs, type SheetLists } from "./rides-sheet.tsx";
-import { RidesTrip, TripPreview } from "./rides-trip.tsx";
+import type { SheetLists } from "./rides-sheet.tsx";
 import { useActAnnouncement, useActClockOptions, useActs } from "./use-acts.ts";
-
-const EMPTY_SNAPSHOT: InterfaceSnapshot = {
-	agents: [],
-	groups: [],
-	threads: [],
-	version: 1,
-};
-
-/** Seconds between position updates: smooth driving, or rare jumps. */
-const TICK_MS = 1000;
-const REDUCED_TICK_MS = 30_000;
-
-/** Escape belongs to text fields; elsewhere it closes the open trip. */
-function escapeIsFree(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return true;
-	}
-	return (
-		target.closest("input, textarea, select, [contenteditable='true']") === null
-	);
-}
-
-/** At this width and up the trip panel floats over the map's left side. */
-const WIDE_FROM = 1000;
-/** Lawn round the city, for trees and the shore. */
-const CITY_RIM = 1.8;
-
-/** The element's width, kept current; 0 until it is measured. */
-function useWidth(ref: RefObject<HTMLElement | null>): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		const measure = () => {
-			if (element.clientWidth > 0) {
-				setWidth(element.clientWidth);
-			}
-		};
-		measure();
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver(measure);
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width;
-}
-
-/** World units kept round the plates when the act layer frames the map. */
-const RIDES_ACT_PLATE_FIT = { above: 1.2, below: 0.8, max: 2.2, side: 1 };
-
-/** The panel's one-line summary under "Get a ride". */
-function panelStatus(counts: { arrived: number; enRoute: number }): string {
-	if (counts.enRoute === 0 && counts.arrived === 0) {
-		return "No trips under way";
-	}
-	return `${counts.enRoute} under way · ${counts.arrived} arrived`;
-}
-
-/** A clock that ticks while the page is visible. */
-function useNow(intervalMs: number): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		let timer: ReturnType<typeof setInterval> | null = null;
-		const start = () => {
-			if (timer === null) {
-				setNow(Date.now());
-				timer = setInterval(() => setNow(Date.now()), intervalMs);
-			}
-		};
-		const stop = () => {
-			if (timer !== null) {
-				clearInterval(timer);
-				timer = null;
-			}
-		};
-		const onVisibility = () => {
-			if (document.hidden) {
-				stop();
-			} else {
-				start();
-			}
-		};
-		start();
-		document.addEventListener("visibilitychange", onVisibility);
-		return () => {
-			stop();
-			document.removeEventListener("visibilitychange", onVisibility);
-		};
-	}, [intervalMs]);
-	return now;
-}
 
 /**
  * Rides: a ride-hailing rider app over your agents. The city map fills the
@@ -199,6 +85,7 @@ export function RidesInterface({
 	const { timeOfDay } = resolveInterfaceParams("rides", params) as Required<
 		InterfaceParamsByRenderer["rides"]
 	>;
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const now = useNow(reduceMotion ? REDUCED_TICK_MS : TICK_MS);
 	const source = loading ? EMPTY_SNAPSHOT : snapshot;
@@ -283,25 +170,7 @@ export function RidesInterface({
 	const totals = actTotals(source, acts);
 	// A routine's run is the only trip with an ETA: what is left of its
 	// estimate. A chat's typical length is not one.
-	const actEtas = useMemo(() => {
-		const out = new Map<string, RidesActEta>();
-		for (const act of acts.values()) {
-			const progress = act.progress;
-			const thread = source.threads.find((item) => item.id === act.threadId);
-			if (
-				progress?.kind === "estimate" &&
-				thread?.routineRun &&
-				progress.total > 0
-			) {
-				const left = Math.max(0, progress.total - progress.done) / 60_000;
-				out.set(thread.id, {
-					label: etaLabel(Math.round(left)),
-					share: Math.min(1, progress.done / progress.total),
-				});
-			}
-		}
-		return out;
-	}, [acts, source.threads]);
+	const actEtas = useRidesActEtas(acts, source.threads);
 	const owners = useMemo(() => askOwners(acts), [acts]);
 	// The kit settings (overlay density, work bubbles) for its own pieces too.
 	const kitSettings = useGameKitSettings();
@@ -357,24 +226,7 @@ export function RidesInterface({
 				trips: actTrips ?? undefined,
 			}
 		: null;
-	const actRow = (agentId: string) => {
-		const act = acts.get(agentId);
-		return act
-			? {
-					label: act.ariaLabel,
-					status: (
-						<ActStatus
-							act={act}
-							clock={clock}
-							nowMs={nowMs}
-							onAsk={onAsk}
-							onBlocker={onBlocker}
-							snapshot={source}
-						/>
-					),
-				}
-			: null;
-	};
+	const actRow = ridesActRow({ acts, clock, nowMs, onAsk, onBlocker, source });
 	const focusHeading = useRef(false);
 	const returnFocusTo = useRef<string | null>(null);
 
@@ -461,46 +313,21 @@ export function RidesInterface({
 		setPickedDriverId(agentId);
 		const name = options.find((option) => option.agent.id === agentId)?.agent
 			.name;
-		setAnnouncement(name ? `${name} selected as your driver.` : "");
+		setAnnouncement(
+			name ? tl("{name} selected as your driver.", { name }) : ""
+		);
 		inputRef.current?.focus();
 	};
 
 	// Land keyboard users on the trip they opened, and back on its row after.
-	useLayoutEffect(() => {
-		if (threadOpen && focusHeading.current) {
-			focusHeading.current = false;
-			headingRef.current?.focus();
-			return;
-		}
-		if (!threadOpen && returnFocusTo.current) {
-			const tripId = returnFocusTo.current;
-			returnFocusTo.current = null;
-			// The same trip can be listed twice (the phone's peek row and the
-			// full list); return to the copy that is on screen.
-			const rows = rootRef.current?.querySelectorAll<HTMLButtonElement>(
-				`[data-trip-id="${CSS.escape(tripId)}"]`
-			);
-			const row = [...(rows ?? [])].find(
-				(candidate) => candidate.getClientRects().length > 0
-			);
-			(row ?? rows?.[0])?.focus({ preventScroll: false });
-		}
-	}, [threadOpen]);
-
-	useEffect(() => {
-		const root = rootRef.current;
-		if (!(root && threadOpen)) {
-			return;
-		}
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape" && escapeIsFree(event.target)) {
-				event.preventDefault();
-				closeTrip();
-			}
-		};
-		root.addEventListener("keydown", onKeyDown);
-		return () => root.removeEventListener("keydown", onKeyDown);
-	}, [closeTrip, threadOpen]);
+	useTripFocus({
+		closeTrip,
+		focusHeading,
+		headingRef,
+		returnFocusTo,
+		rootRef,
+		threadOpen,
+	});
 
 	const counts = {
 		arrived: lists.arrived.length,
@@ -520,79 +347,24 @@ export function RidesInterface({
 						busy={loading}
 						hud={
 							loading ? null : (
-								<>
-									{withActs ? (
-										<GameHudSlot
-											at={wide ? "top-right" : "top-left"}
-											className={cn(
-												"flex-col",
-												wide
-													? "right-20 items-end"
-													: "max-w-[calc(100%-4.5rem)] items-start"
-											)}
-										>
-											{/* Wide stages carry the summary in the panel's header, which
-										    an open trip hides. */}
-											{wide && !threadOpen ? null : (
-												<p
-													className={cn(
-														GAME_PLATE,
-														"pointer-events-auto w-fit max-w-full truncate rounded-xl px-3 py-1.5 font-semibold text-[13px]"
-													)}
-													data-act-summary=""
-												>
-													{actSummaryLine(totals)}
-												</p>
-											)}
-											<BlindSpotCaption snapshot={source} />
-											<div className="flex gap-2">
-												<NeedYouButton
-													onAsk={onAsk}
-													snapshot={source}
-													totals={totals}
-												/>
-												<QueueButton
-													acts={acts}
-													clock={clock}
-													narrow={!wide && stageWidth < 640}
-													nowMs={nowMs}
-													onAsk={onAsk}
-													onBlocker={onBlocker}
-													openRef={queueOpener}
-													snapshot={source}
-													totals={totals}
-													unowned={unowned}
-												/>
-											</div>
-										</GameHudSlot>
-									) : null}
-									<GameHudSlot at="top-right">
-										<IsoZoomControls view={isoView} />
-									</GameHudSlot>
-									{wide ? (
-										<GameHudSlot at="bottom-right">
-											{withActs ? (
-												<RidesActCounters
-													acts={acts}
-													answers={
-														(source.asks ?? []).filter(
-															(ask) => ask.kind === "reply"
-														).length
-													}
-													totals={totals}
-												/>
-											) : (
-												<RidesCounters
-													arrived={counts.arrived}
-													enRoute={counts.enRoute}
-													free={
-														options.filter((option) => option.available).length
-													}
-												/>
-											)}
-										</GameHudSlot>
-									) : null}
-								</>
+								<RidesInterfaceHud
+									acts={acts}
+									clock={clock}
+									counts={counts}
+									isoView={isoView}
+									nowMs={nowMs}
+									onAsk={onAsk}
+									onBlocker={onBlocker}
+									options={options}
+									queueOpener={queueOpener}
+									source={source}
+									stageWidth={stageWidth}
+									threadOpen={threadOpen}
+									totals={totals}
+									unowned={unowned}
+									wide={wide}
+									withActs={withActs}
+								/>
 							)
 						}
 						label="Rides"
@@ -644,7 +416,17 @@ export function RidesInterface({
 										right: wide ? 88 : 16,
 										top: withActs ? actTop : 16,
 									}}
-									label={`City map: ${withActs ? actSummaryLine(totals) : `${counts.enRoute} under way, ${counts.arrived} arrived`}. Tab or the arrow keys move between cars and pins; drag to pan, plus and minus to zoom.`}
+									label={tl(
+										"City map: {summary}. Tab or the arrow keys move between cars and pins; drag to pan, plus and minus to zoom.",
+										{
+											summary: withActs
+												? actSummaryLine(totals)
+												: tl("{enRoute} under way, {arrived} arrived", {
+														arrived: counts.arrived,
+														enRoute: counts.enRoute,
+													}),
+										}
+									)}
 									night={night}
 									reducedMotion={reduceMotion}
 									view={isoView}
@@ -669,143 +451,40 @@ export function RidesInterface({
 									)}
 								</IsoStage>
 							</main>
-							<aside
-								aria-label="Rides"
-								className={cn(
-									"relative z-30 order-2 @min-[1000px]:m-0 m-2 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-[22px] border-(--gk-edge) border-2 bg-(--gk-plate) text-(--gk-ink) shadow-(--gk-lip)",
-									"@min-[1000px]:absolute @min-[1000px]:inset-y-3 @min-[1000px]:left-3 @min-[1000px]:h-auto",
-									// On a phone the open trip is a half sheet, as the
-									// peeking one: the city above keeps room for its words.
-									threadOpen
-										? "h-[46%] @min-[1000px]:w-[440px]"
-										: "@min-[1000px]:w-[400px]",
-									!threadOpen &&
-										(peek ? "@min-[1000px]:max-h-none max-h-[46%]" : "h-[64%]")
-								)}
-							>
-								{threadOpen ? null : (
-									<SheetHandle
-										expanded={!peek}
-										onExpandedChange={(next) => {
-											setExpanded(next);
-											if (!next) {
-												setPrompt("");
-											}
-										}}
-									/>
-								)}
-								{threadOpen ? null : (
-									<header className="@min-[1000px]:flex hidden shrink-0 items-center gap-3 px-3 pt-3 pb-2.5">
-										<span
-											aria-hidden="true"
-											className="grid size-11 shrink-0 place-items-center rounded-xl border-(--gk-edge) border-2 bg-(--gk-accent) text-(--gk-accent-ink)"
-										>
-											<CarFront className="size-6" strokeWidth={2.25} />
-										</span>
-										<div className="flex min-w-0 flex-col">
-											{withActs ? (
-												<h2 className="gk-display text-[24px] leading-7">
-													Get a ride
-												</h2>
-											) : (
-												<h1 className="gk-display text-[24px] leading-7">
-													Get a ride
-												</h1>
-											)}
-											<p
-												className="truncate font-semibold text-(--gk-ink-muted) text-[13px] leading-5"
-												data-act-summary={withActs && !loading ? "" : undefined}
-											>
-												{loading && "Finding drivers…"}
-												{!loading && withActs ? actSummaryLine(totals) : null}
-												{loading || withActs ? null : panelStatus(counts)}
-											</p>
-										</div>
-									</header>
-								)}
-								<div className="flex min-h-0 flex-1 flex-col overflow-hidden border-(--gk-plate-sunk) border-t-2">
-									{threadOpen ? (
-										<RidesTrip
-											headingRef={headingRef}
-											onBack={closeTrip}
-											threadView={threadView}
-											trip={openTrip}
-										/>
-									) : (
-										<>
-											<div className="flex shrink-0 flex-col gap-3 p-3">
-												<RidesBooking
-													driverId={driverId}
-													inputRef={inputRef}
-													onBook={book}
-													onDriverChange={setPickedDriverId}
-													onPromptChange={setPrompt}
-													options={loading ? [] : options}
-													prompt={prompt}
-													reduceMotion={reduceMotion}
-												/>
-											</div>
-											{/* The lists fade out as the driver picker opens in their
-								    place, so the sheet never jumps on the first keystroke. */}
-											<AnimatePresence initial={false}>
-												{booking ? null : (
-													<motion.div
-														animate={{ opacity: 1 }}
-														className={cn(
-															"min-h-0 flex-1 flex-col",
-															peek ? "@min-[1000px]:flex hidden" : "flex"
-														)}
-														exit={{ opacity: 0 }}
-														initial={{ opacity: 0 }}
-														key="lists"
-														transition={{
-															duration: reduceMotion ? 0 : 0.15,
-															ease: "easeOut",
-														}}
-													>
-														<RidesSheetTabs
-															drivers={options}
-															lists={lists}
-															loading={loading}
-															now={now}
-															onFocusTrip={setPreviewTripId}
-															onOpenTrip={openTripById}
-															onPickDriver={pickDriver}
-															onTabChange={setTab}
-															pickedDriverId={pickedDriverId}
-															reduceMotion={reduceMotion}
-															selectedTripId={selectedTripId}
-															tab={tab}
-														/>
-													</motion.div>
-												)}
-											</AnimatePresence>
-											{wide && !booking && previewTrip ? (
-												<TripPreview
-													now={now}
-													onOpen={() => openTripById(previewTrip.id)}
-													trip={previewTrip}
-												/>
-											) : null}
-											{peek && peekTrip ? (
-												<ul
-													aria-label="Next trip"
-													className="@min-[1000px]:hidden border-border border-t"
-												>
-													<TripRow
-														now={now}
-														onFocusTrip={setPreviewTripId}
-														onOpen={openTripById}
-														selected={peekTrip.id === selectedTripId}
-														trip={peekTrip}
-														variant="live"
-													/>
-												</ul>
-											) : null}
-										</>
-									)}
-								</div>
-							</aside>
+							<RidesInterfaceSheet
+								book={book}
+								booking={booking}
+								closeTrip={closeTrip}
+								counts={counts}
+								driverId={driverId}
+								headingRef={headingRef}
+								inputRef={inputRef}
+								lists={lists}
+								loading={loading}
+								now={now}
+								openTrip={openTrip}
+								openTripById={openTripById}
+								options={options}
+								peek={peek}
+								peekTrip={peekTrip}
+								pickDriver={pickDriver}
+								pickedDriverId={pickedDriverId}
+								previewTrip={previewTrip}
+								prompt={prompt}
+								reduceMotion={reduceMotion}
+								selectedTripId={selectedTripId}
+								setExpanded={setExpanded}
+								setPickedDriverId={setPickedDriverId}
+								setPreviewTripId={setPreviewTripId}
+								setPrompt={setPrompt}
+								setTab={setTab}
+								tab={tab}
+								threadOpen={threadOpen}
+								threadView={threadView}
+								totals={totals}
+								wide={wide}
+								withActs={withActs}
+							/>
 						</div>
 						<p aria-live="polite" className="sr-only">
 							{announcement}

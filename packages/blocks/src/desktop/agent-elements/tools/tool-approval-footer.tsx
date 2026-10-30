@@ -1,10 +1,11 @@
+import { Loading03Icon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	ToolApprovalActions,
 	type ToolApprovalChoice,
 	type ToolApprovalStatus,
 } from "@ryu/ui/components/agents/tool-approval";
 import { cn } from "@ryu/ui/lib/utils";
-import { LoaderCircle, ShieldCheck } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 
 /** One choice the agent offered, straight off the ACP permission request. */
@@ -113,16 +114,16 @@ export const ToolApprovalFooter = memo(function ToolApprovalFooter({
 		<div className="flex items-center justify-between gap-2 bg-muted py-1 pr-2 pl-2.5">
 			<span
 				className={cn(
-					"type-caption inline-flex items-center gap-1.5 font-medium",
+					"inline-flex items-center gap-1.5 font-medium text-xs",
 					decision === "rejected"
 						? "text-status-destructive"
 						: "text-muted-foreground"
 				)}
 			>
 				{statusLabel.busy ? (
-					<LoaderCircle className="size-3 animate-spin" />
+					<HugeiconsIcon className="size-3 animate-spin" icon={Loading03Icon} />
 				) : (
-					<ShieldCheck className="size-3" />
+					<HugeiconsIcon className="size-3" icon={SecurityCheckIcon} />
 				)}
 				{statusLabel.label}
 			</span>

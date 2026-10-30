@@ -1,10 +1,9 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	WORKBENCH_DEFAULT_SIZES,
-	WORKBENCH_SIZE_BOUNDS,
-	type WorkbenchItem,
-	type WorkbenchRegion as WorkbenchRegionName,
-	type WorkbenchState,
+import type {
+	WorkbenchItem,
+	WorkbenchRegion as WorkbenchRegionName,
+	WorkbenchState,
 } from "@ryu/workbench/model";
 import {
 	type CSSProperties,
@@ -25,6 +24,13 @@ import {
 	WorkbenchChromeProvider,
 	type WorkbenchDragBridge,
 } from "./workbench-chrome.tsx";
+import {
+	clampRegionSize,
+	RESIZE_DEFAULTS,
+	type RegionSizes,
+	type ResizableRegion,
+	ResizeBoundary,
+} from "./workbench-resize.tsx";
 import { WorkbenchSlotProvider } from "./workbench-slots.tsx";
 import {
 	isNarrowWorkbench,
@@ -34,8 +40,6 @@ import {
 	WorkbenchViewportProvider,
 } from "./workbench-viewport.tsx";
 
-type ResizableRegion = Exclude<WorkbenchRegionName, "center">;
-type RegionSizes = Record<ResizableRegion, number>;
 type WorkbenchGridStyle = CSSProperties & {
 	"--workbench-bottom-size": string;
 	"--workbench-left-size": string;
@@ -46,8 +50,6 @@ type WorkbenchGridStyle = CSSProperties & {
 	"--workbench-left-row": string;
 	"--workbench-right-row": string;
 };
-
-const RESIZE_DEFAULTS: RegionSizes = WORKBENCH_DEFAULT_SIZES;
 
 const BOTTOM_GRID_COLUMNS = {
 	center: "3 / 4",
@@ -125,65 +127,6 @@ export function CompatibilityWorkbenchFrame({
 	);
 }
 
-function clampRegionSize(region: ResizableRegion, size: number): number {
-	const bounds = WORKBENCH_SIZE_BOUNDS[region];
-	return Math.min(bounds.maximum, Math.max(bounds.minimum, size));
-}
-
-function ResizeBoundary({
-	currentSize,
-	onResizeStart,
-	onRestoreDefault,
-	onStep,
-	orientation,
-	region,
-	style,
-}: {
-	currentSize: number;
-	onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
-	onRestoreDefault: () => void;
-	onStep: (direction: -1 | 1) => void;
-	orientation: "horizontal" | "vertical";
-	region: ResizableRegion;
-	style?: CSSProperties;
-}) {
-	const label = region[0]?.toUpperCase() + region.slice(1);
-	const bounds = WORKBENCH_SIZE_BOUNDS[region];
-	return (
-		<div
-			aria-label={`Resize ${label}`}
-			aria-orientation={orientation}
-			aria-valuemax={bounds.maximum}
-			aria-valuemin={bounds.minimum}
-			aria-valuenow={Math.round(currentSize)}
-			className={cn(
-				"group/resize relative z-20 touch-none bg-border/70 outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset",
-				orientation === "vertical"
-					? "cursor-col-resize after:absolute after:inset-y-0 after:-left-1 after:w-3"
-					: "cursor-row-resize after:absolute after:inset-x-0 after:-top-1 after:h-3"
-			)}
-			onDoubleClick={onRestoreDefault}
-			onKeyDown={(event) => {
-				const negativeKey =
-					orientation === "vertical" ? "ArrowLeft" : "ArrowUp";
-				const positiveKey =
-					orientation === "vertical" ? "ArrowRight" : "ArrowDown";
-				if (event.key === negativeKey) {
-					event.preventDefault();
-					onStep(-1);
-				} else if (event.key === positiveKey) {
-					event.preventDefault();
-					onStep(1);
-				}
-			}}
-			onPointerDown={onResizeStart}
-			role="separator"
-			style={style}
-			tabIndex={0}
-		/>
-	);
-}
-
 export function WorkbenchLayout({
 	centerContent,
 	centerGlobalOverlay,
@@ -192,6 +135,7 @@ export function WorkbenchLayout({
 	suppressCenterTabStrips = false,
 	suppressLeftRegion = false,
 }: WorkbenchLayoutProps) {
+	const tl = useLiteralMessages();
 	const { dispatch, state } = useDesktopWorkbench();
 	const [liveSizes, setLiveSizes] = useState<RegionSizes>(state.sizes);
 	const resizeSessionRef = useRef<{
@@ -478,8 +422,10 @@ export function WorkbenchLayout({
 				{overlayRegion ? (
 					<>
 						<button
-							aria-label={`Close ${REGION_LABELS[overlayRegion]}`}
-							className="absolute inset-0 z-40 cursor-default bg-background/50 backdrop-blur-[1px]"
+							aria-label={tl("Close {region}", {
+								region: REGION_LABELS[overlayRegion],
+							})}
+							className="absolute inset-0 z-40 cursor-default bg-black/30 dark:bg-black/50"
 							data-workbench-overlay-scrim={overlayRegion}
 							onClick={viewport.dismissOverlay}
 							tabIndex={-1}

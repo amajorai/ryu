@@ -53,7 +53,11 @@ export function MicPermissionPrompt({
 				className={`flex items-center gap-2 text-sm ${className ?? ""}`}
 				role="status"
 			>
-				<HugeiconsIcon className="text-primary" icon={Mic01Icon} size={16} />
+				<HugeiconsIcon
+					className="text-muted-foreground"
+					icon={Mic01Icon}
+					size={16}
+				/>
 				<span className="text-muted-foreground">Microphone enabled.</span>
 			</div>
 		);

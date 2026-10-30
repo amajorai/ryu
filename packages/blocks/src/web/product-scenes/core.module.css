@@ -1,499 +1,154 @@
-/* Establish the root theme order even when this private module loads first. */
-@layer properties, theme, base, components, utilities;
+/*
+ * Ryu Core card motion, one 10s loop that starts and ends on the still (two
+ * sub-agents bound to their engines, work flowing to the resources).
+ *   30-34%  a commit lands on git
+ *   40-48%  the sub-agents return into the hub's left face
+ *   52-62%  the next task drops into the hub, which pulses
+ *   62-74%  two sub-agents spawn from the hub's face and bind to engines
+ * Work rides the resource wires on the shared flow loop throughout. Base
+ * rules are the still; keyframes animate transform and opacity only.
+ */
 
-/* Ryu Core homepage card: the orchestration map. The plain rules are the
-   still frame (mid-orchestration), which reduced motion keeps. The 10s
-   timeline only runs under `prefers-reduced-motion: no-preference`:
-   task in, spawn, bind, dispatch, collect, commit, close. */
-@layer components {
-	.root {
-		/* `--foreground`/`--background` are emitted on :root and .dark; the
-		   emerald pair falls back to literal Tailwind values in case the theme
-		   tree-shakes the unused `--color-realm-*` variables. */
-		--core-ink: var(--foreground);
-		--core-paper: var(--background);
-		--core-ok: var(--color-realm-complete, oklch(0.508 0.118 165.612));
-		--core-ok-on-ink: var(
-			--color-realm-complete-dark,
-			oklch(0.765 0.177 163.223)
-		);
-		--core-ease: cubic-bezier(0.32, 0.72, 0, 1);
-		--core-travel: cubic-bezier(0.4, 0, 0.6, 1);
-	}
-	:where([class~="dark"]) .root {
-		--core-ok: var(--color-realm-complete-dark, oklch(0.765 0.177 163.223));
-		--core-ok-on-ink: var(--color-realm-complete, oklch(0.508 0.118 165.612));
-	}
-	/* `Stage` sets data-inview while the card is on screen. */
-	.root:not([data-inview]) * {
-		animation-play-state: paused;
-	}
+.hub {
+	fill: var(--background);
+	stroke: currentColor;
+	stroke-width: 1.2;
+}
 
-	.svg {
-		display: block;
-		width: 100%;
-		height: 100%;
-		overflow: visible;
-	}
-	.label {
-		font-family: var(--font-mono, ui-monospace, monospace);
-		font-size: 7.5px;
-		letter-spacing: 0.02em;
-		fill: var(--core-ink);
-	}
-	.chip {
-		fill: var(--core-paper);
-		fill-opacity: 0.75;
-		stroke: var(--core-ink);
-		stroke-opacity: 0.2;
-		stroke-width: 0.75;
-	}
-	.dot {
-		fill: var(--core-ink);
-	}
-	.idle {
-		opacity: 0.45;
-	}
-	.wire,
-	.inlet,
-	.tether,
-	.branch,
-	.lit,
-	.bridge,
-	.march,
-	.packet {
-		fill: none;
-		stroke: var(--core-ink);
-		stroke-linecap: round;
-	}
-	.wire {
-		stroke-opacity: 0.2;
-		stroke-width: 0.75;
-	}
-	.inlet {
-		stroke-opacity: 0.3;
-		stroke-width: 0.75;
-		stroke-dasharray: 1.5 2.5;
-	}
-	.tether,
-	.branch {
-		stroke-opacity: 0.3;
-		stroke-width: 0.75;
-	}
-	.lit {
-		stroke-opacity: 0.75;
-		stroke-width: 0.9;
-	}
-	.bridge {
-		stroke-opacity: 0.7;
-		stroke-width: 0.9;
-	}
-	.march {
-		opacity: 0;
-		stroke-width: 1.1;
-		stroke-dasharray: 2 6;
-	}
-	.packet {
-		opacity: 0;
-		stroke-width: 1.6;
-		stroke-dasharray: 12 120;
-		stroke-dashoffset: 12;
-	}
-	.drop {
-		opacity: 0;
-		fill: var(--core-ink);
-	}
+.ring {
+	opacity: 0.3;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1;
+	transform-origin: center;
+	transform-box: fill-box;
+}
 
-	.hub {
-		fill: var(--core-ink);
+.bound {
+	opacity: 0.14;
+	fill: currentColor;
+}
+
+.root .sub {
+	fill: var(--background);
+	stroke: var(--scene-accent);
+	stroke-width: 1.6;
+}
+
+.commit,
+.task {
+	opacity: 0;
+}
+
+@keyframes sub {
+	0%,
+	40%,
+	74%,
+	100% {
+		opacity: 1;
+		transform: translate(var(--dx), var(--dy));
 	}
-	.ring,
-	.pulse {
-		fill: none;
-		stroke: var(--core-paper);
-		stroke-width: 0.9;
-		transform-origin: center;
-		transform-box: fill-box;
+	47% {
+		opacity: 1;
 	}
-	.ring {
-		stroke-opacity: 0.55;
+	48%,
+	62% {
+		opacity: 0;
+		transform: translate(0, 0);
 	}
-	.pulse {
+	63% {
+		opacity: 1;
+	}
+}
+
+@keyframes bound {
+	0%,
+	40%,
+	74%,
+	100% {
+		opacity: 0.14;
+	}
+	48%,
+	70% {
 		opacity: 0;
 	}
-	.hubLabel {
-		fill: var(--core-paper);
-	}
-	.sub {
-		transform-origin: center;
-		transform-box: fill-box;
-	}
-	.subBody {
-		fill: var(--core-paper);
-		stroke: var(--core-ink);
-		stroke-width: 1;
-	}
-	.subA {
-		--core-dx: 48px;
-		--core-dy: 55px;
-	}
-	.subB {
-		--core-dx: -48px;
-		--core-dy: 55px;
-	}
-	.subCore {
-		fill: var(--core-ink);
-	}
-	.tick {
-		transform-origin: center;
-		transform-box: fill-box;
-	}
-	.tickBadge {
-		fill: var(--core-ok-on-ink);
-	}
-	.tickMark {
-		fill: none;
-		stroke: var(--core-ink);
-		stroke-width: 1.3;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-	}
-	.commitNew,
-	.commitSettled {
-		transform-origin: center;
-		transform-box: fill-box;
-	}
-	.commitNew {
-		fill: var(--core-ok);
-	}
-	.commitSettled {
+}
+
+@keyframes task {
+	0%,
+	52% {
 		opacity: 0;
-		fill: var(--core-ink);
+		transform: translate(0, 0);
+	}
+	53% {
+		opacity: 1;
+	}
+	61% {
+		opacity: 1;
+		transform: translate(var(--dx), var(--dy));
+	}
+	63%,
+	100% {
+		opacity: 0;
+		transform: translate(var(--dx), var(--dy));
+	}
+}
+
+@keyframes ring {
+	0%,
+	60%,
+	72%,
+	100% {
+		opacity: 0.3;
+		transform: scale(1);
+	}
+	64% {
+		opacity: 0.8;
+		transform: scale(1.12);
+	}
+}
+
+@keyframes commit {
+	0%,
+	30%,
+	52%,
+	100% {
+		opacity: 0;
+	}
+	34%,
+	48% {
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.root[data-inview] .sub,
+	.root[data-inview] .bound,
+	.root[data-inview] .task,
+	.root[data-inview] .ring,
+	.root[data-inview] .commit {
+		animation-duration: 10s;
+		animation-timing-function: ease-in-out;
+		animation-iteration-count: infinite;
 	}
 
-	/* Longhands, not the `animation` shorthand: a CSS-module compiler cannot
-	   scope a keyframe name inside a shorthand that also holds a var(), so
-	   the name would point at keyframes that do not exist. */
-	@media (prefers-reduced-motion: no-preference) {
-		.drop,
-		.pulse,
-		.sub,
-		.tether,
-		.bridge,
-		.bound,
-		.packet,
-		.resource,
-		.lit,
-		.tick,
-		.commitNew,
-		.commitSettled {
-			animation-duration: 10s;
-			animation-timing-function: var(--core-ease);
-			animation-iteration-count: infinite;
-			animation-fill-mode: both;
-		}
-		.drop {
-			animation-name: core-drop;
-			animation-timing-function: var(--core-travel);
-		}
-		.pulse {
-			animation-name: core-pulse;
-		}
-		.sub {
-			animation-name: core-spawn;
-		}
-		.tether {
-			animation-name: core-tether;
-		}
-		.bridge {
-			stroke-dasharray: 100;
-			animation-name: core-bridge;
-		}
-		.march {
-			animation-name: core-march-show, core-march;
-			animation-duration: 10s, 1.2s;
-			animation-timing-function: linear;
-			animation-iteration-count: infinite;
-			animation-fill-mode: both, none;
-		}
-		.bound {
-			animation-name: core-bind;
-		}
-		.packet {
-			animation-name: core-dispatch;
-			animation-timing-function: var(--core-travel);
-		}
-		.returning {
-			animation-name: core-collect;
-		}
-		.resource {
-			animation-name: core-chip-lit;
-		}
-		.lit {
-			animation-name: core-wire-lit;
-		}
-		.tick {
-			animation-name: core-tick;
-		}
-		.commitNew {
-			animation-name: core-commit-new;
-		}
-		.commitSettled {
-			animation-name: core-commit-settled;
-		}
-		.step1 {
-			animation-delay: 0.8s;
-		}
-		.step2 {
-			animation-delay: 1.6s;
-		}
-		.subB,
-		.later {
-			animation-delay: 0.16s;
-		}
+	.root[data-inview] .sub {
+		animation-name: sub;
 	}
 
-	@keyframes core-drop {
-		0% {
-			opacity: 0;
-			transform: translateY(0);
-		}
-		1% {
-			opacity: 1;
-		}
-		7% {
-			opacity: 1;
-			transform: translateY(52px);
-		}
-		8%,
-		100% {
-			opacity: 0;
-			transform: translateY(52px);
-		}
+	.root[data-inview] .bound {
+		animation-name: bound;
 	}
-	@keyframes core-pulse {
-		0%,
-		6% {
-			opacity: 0;
-			transform: scale(1);
-		}
-		7% {
-			opacity: 0.8;
-			transform: scale(1);
-		}
-		16%,
-		100% {
-			opacity: 0;
-			transform: scale(1.4);
-		}
+
+	.root[data-inview] .task {
+		animation-name: task;
 	}
-	@keyframes core-spawn {
-		0%,
-		11% {
-			opacity: 0;
-			transform: translate(var(--core-dx, 0), var(--core-dy, 0)) scale(0.3);
-		}
-		12% {
-			opacity: 1;
-			transform: translate(var(--core-dx, 0), var(--core-dy, 0)) scale(0.3);
-		}
-		21%,
-		86% {
-			opacity: 1;
-			transform: translate(0, 0) scale(1);
-		}
-		94% {
-			opacity: 1;
-			transform: translate(var(--core-dx, 0), var(--core-dy, 0)) scale(0.3);
-		}
-		95%,
-		100% {
-			opacity: 0;
-			transform: translate(var(--core-dx, 0), var(--core-dy, 0)) scale(0.3);
-		}
+
+	.root[data-inview] .ring {
+		animation-name: ring;
 	}
-	@keyframes core-tether {
-		0%,
-		14% {
-			opacity: 0;
-		}
-		21%,
-		86% {
-			opacity: 1;
-		}
-		92%,
-		100% {
-			opacity: 0;
-		}
-	}
-	@keyframes core-bridge {
-		0%,
-		22% {
-			opacity: 0;
-			stroke-dashoffset: 100;
-		}
-		23% {
-			opacity: 1;
-			stroke-dashoffset: 100;
-		}
-		30%,
-		84% {
-			opacity: 1;
-			stroke-dashoffset: 0;
-		}
-		90%,
-		100% {
-			opacity: 0;
-			stroke-dashoffset: 0;
-		}
-	}
-	@keyframes core-march-show {
-		0%,
-		30% {
-			opacity: 0;
-		}
-		33%,
-		84% {
-			opacity: 1;
-		}
-		88%,
-		100% {
-			opacity: 0;
-		}
-	}
-	@keyframes core-march {
-		to {
-			stroke-dashoffset: -8;
-		}
-	}
-	@keyframes core-bind {
-		0%,
-		24% {
-			opacity: 0.45;
-		}
-		29%,
-		84% {
-			opacity: 1;
-		}
-		90%,
-		100% {
-			opacity: 0.45;
-		}
-	}
-	@keyframes core-dispatch {
-		0%,
-		34% {
-			opacity: 0;
-			stroke-dashoffset: 12;
-		}
-		35% {
-			opacity: 1;
-			stroke-dashoffset: 12;
-		}
-		41% {
-			opacity: 1;
-			stroke-dashoffset: -100;
-		}
-		42%,
-		100% {
-			opacity: 0;
-			stroke-dashoffset: -100;
-		}
-	}
-	@keyframes core-collect {
-		0%,
-		59% {
-			opacity: 0;
-			stroke-dashoffset: 12;
-		}
-		60% {
-			opacity: 1;
-			stroke-dashoffset: 12;
-		}
-		66% {
-			opacity: 1;
-			stroke-dashoffset: -100;
-		}
-		67%,
-		100% {
-			opacity: 0;
-			stroke-dashoffset: -100;
-		}
-	}
-	@keyframes core-chip-lit {
-		0%,
-		40% {
-			opacity: 0.55;
-		}
-		42%,
-		84% {
-			opacity: 1;
-		}
-		90%,
-		100% {
-			opacity: 0.55;
-		}
-	}
-	@keyframes core-wire-lit {
-		0%,
-		40% {
-			opacity: 0;
-		}
-		42%,
-		84% {
-			opacity: 1;
-		}
-		90%,
-		100% {
-			opacity: 0;
-		}
-	}
-	@keyframes core-tick {
-		0%,
-		67% {
-			opacity: 0;
-			transform: scale(0.5);
-		}
-		70%,
-		86% {
-			opacity: 1;
-			transform: scale(1);
-		}
-		92%,
-		100% {
-			opacity: 0;
-			transform: scale(1);
-		}
-	}
-	@keyframes core-commit-new {
-		0%,
-		70% {
-			opacity: 0;
-			transform: scale(0);
-		}
-		73%,
-		79% {
-			opacity: 1;
-			transform: scale(1);
-		}
-		86%,
-		100% {
-			opacity: 0;
-			transform: scale(1);
-		}
-	}
-	@keyframes core-commit-settled {
-		0%,
-		79% {
-			opacity: 0;
-		}
-		82%,
-		94% {
-			opacity: 1;
-		}
-		98%,
-		100% {
-			opacity: 0;
-		}
+
+	.root[data-inview] .commit {
+		animation-name: commit;
 	}
 }

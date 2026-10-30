@@ -132,7 +132,7 @@ function chatTurnStats(scope: ParentNode): Record<string, string> {
 		throw new Error("Missing Chat turns row");
 	}
 	const stats: Record<string, string> = {};
-	for (const caption of row.querySelectorAll("span.type-caption")) {
+	for (const caption of row.querySelectorAll('[data-slot="stat-label"]')) {
 		const value = caption.previousElementSibling?.textContent ?? "";
 		stats[caption.textContent ?? ""] = value;
 	}

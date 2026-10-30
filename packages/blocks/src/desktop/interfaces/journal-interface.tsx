@@ -1,29 +1,12 @@
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Toggle } from "@ryu/ui/components/toggle.tsx";
-import {
-	ToggleGroup,
-	ToggleGroupItem,
-} from "@ryu/ui/components/toggle-group.tsx";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
-import {
-	ChevronDown,
-	ChevronLeft,
-	ChevronRight,
-	ChevronUp,
-	Plus,
-} from "lucide-react";
+import { Plus } from "lucide-react";
 import { motion } from "motion/react";
 import {
 	type ReactNode,
 	useCallback,
 	useEffect,
-	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -36,28 +19,36 @@ import {
 import { JournalDayPage } from "./journal-day.tsx";
 import { JournalEntryPage } from "./journal-entry.tsx";
 import {
+	cssString,
+	EASE,
+	isEditable,
+	isShown,
+	NARROW_BELOW,
+	pagerFor,
+	readSerif,
+	STACK_BELOW,
+	useElementWidth,
+	useMinuteClock,
+	VIEWS,
+} from "./journal-interface-support.ts";
+import { JournalToolbar } from "./journal-interface-toolbar.tsx";
+import {
 	buildJournalEntries,
 	countLabel,
 	currentStreak,
 	entriesByDay,
 	entryNeighbors,
-	entryTitle,
 	eventsOnDay,
 	filterJournalEntries,
 	type JournalEntry,
 	type JournalView,
 	journalStats,
-	mediumDateLabel,
 	onThisDay,
 	shiftDayKey,
 	shiftMonthKey,
 	timeLabel,
 } from "./journal-model.ts";
-import {
-	JournalComposer,
-	JournalIconButton,
-	titleFace,
-} from "./journal-parts.tsx";
+import { JournalComposer, titleFace } from "./journal-parts.tsx";
 import {
 	JournalSearch,
 	JournalStrip,
@@ -65,133 +56,6 @@ import {
 } from "./journal-sidebar.tsx";
 import { JournalCalendar, JournalStatsPage } from "./journal-views.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
-
-const MINUTE = 60_000;
-/** Below this width the timeline and the page take turns. */
-const STACK_BELOW = 720;
-/** Below this width the timeline narrows to give the page room. */
-const NARROW_BELOW = 1100;
-const SERIF_KEY = "ryu.interfaces.journal.serif";
-const EASE = [0.22, 1, 0.36, 1] as const;
-
-const VIEWS: { id: JournalView; label: string }[] = [
-	{ id: "day", label: "Day" },
-	{ id: "calendar", label: "Calendar" },
-	{ id: "stats", label: "Stats" },
-];
-
-function readSerif(): boolean {
-	try {
-		return window.localStorage.getItem(SERIF_KEY) !== "off";
-	} catch {
-		return true;
-	}
-}
-
-function writeSerif(serif: boolean): void {
-	try {
-		window.localStorage.setItem(SERIF_KEY, serif ? "on" : "off");
-	} catch {
-		// Storage can be blocked; the choice then lasts for this session only.
-	}
-}
-
-/** Wall clock that ticks once a minute so "today" rolls over at midnight. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-/** The element's width, kept current with a ResizeObserver. */
-function useElementWidth(ref: { current: HTMLElement | null }): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		setWidth(element.getBoundingClientRect().width);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((records) => {
-			const rect = records[0]?.contentRect;
-			if (rect) {
-				setWidth(rect.width);
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width;
-}
-
-function isEditable(target: EventTarget | null): boolean {
-	return (
-		target instanceof HTMLElement &&
-		(target.isContentEditable ||
-			target.tagName === "INPUT" ||
-			target.tagName === "TEXTAREA" ||
-			target.tagName === "SELECT")
-	);
-}
-
-/** Whether the element is rendered (not detached or inside display: none). */
-function isShown(element: HTMLElement): boolean {
-	if (!element.isConnected) {
-		return false;
-	}
-	return typeof element.checkVisibility === "function"
-		? element.checkVisibility()
-		: element.getClientRects().length > 0;
-}
-
-/** Escapes a value for a quoted CSS attribute selector. */
-function cssString(value: string): string {
-	return value.replace(/["\\]/g, "\\$&");
-}
-
-interface JournalPager {
-	atToday: boolean;
-	nextKeys?: string[];
-	nextLabel: string;
-	nextShortcut?: string;
-	onStep: (direction: -1 | 1) => void;
-	onToday: () => void;
-	previousKeys?: string[];
-	previousLabel: string;
-	previousShortcut?: string;
-}
-
-/** The toolbar's previous / Today / next group for the day and month pages. */
-function pagerFor(
-	view: JournalView,
-	actions: Pick<JournalPager, "atToday" | "onStep" | "onToday">
-): JournalPager | null {
-	if (view === "day") {
-		return {
-			...actions,
-			nextKeys: ["⌥", "→"],
-			nextLabel: "Next day",
-			nextShortcut: "Alt+ArrowRight",
-			previousKeys: ["⌥", "←"],
-			previousLabel: "Previous day",
-			previousShortcut: "Alt+ArrowLeft",
-		};
-	}
-	if (view === "calendar") {
-		return {
-			...actions,
-			nextLabel: "Next month",
-			previousLabel: "Previous month",
-		};
-	}
-	return null;
-}
 
 /**
  * Journal: conversations as Day One entries. The timeline files each thread
@@ -566,164 +430,22 @@ export function JournalInterface({
 	});
 
 	const toolbar = (
-		<div className="flex h-12 shrink-0 items-center gap-2 border-border border-b px-3">
-			{stacked ? (
-				<Button onClick={() => setPane("list")} size="sm" variant="ghost">
-					<ChevronLeft
-						aria-hidden="true"
-						className="size-4"
-						data-icon="inline-start"
-					/>
-					Entries
-				</Button>
-			) : null}
-			{entryOpen ? (
-				<>
-					{stacked ? null : (
-						<Button
-							onClick={() => selectDay(activeEntry?.day ?? todayKey)}
-							size="sm"
-							variant="ghost"
-						>
-							<ChevronLeft
-								aria-hidden="true"
-								className="size-4"
-								data-icon="inline-start"
-							/>
-							{mediumDateLabel(activeEntry?.day ?? todayKey)}
-						</Button>
-					)}
-					<div className="ms-auto flex items-center gap-1">
-						{neighbors.position > 0 ? (
-							<span className="pe-2 text-muted-foreground text-xs tabular-nums">
-								{neighbors.position} of{" "}
-								{countLabel(neighbors.total, "entry", "entries")}
-							</span>
-						) : null}
-						<JournalIconButton
-							disabled={!neighbors.previous}
-							hint={
-								neighbors.previous
-									? `Newer: ${entryTitle(neighbors.previous.thread)}`
-									: "Newer entry"
-							}
-							keys={["⌥", "↑"]}
-							label="Newer entry"
-							onClick={() => stepEntry(-1)}
-							shortcut="Alt+ArrowUp"
-						>
-							<ChevronUp aria-hidden="true" className="size-4" />
-						</JournalIconButton>
-						<JournalIconButton
-							disabled={!neighbors.next}
-							hint={
-								neighbors.next
-									? `Older: ${entryTitle(neighbors.next.thread)}`
-									: "Older entry"
-							}
-							keys={["⌥", "↓"]}
-							label="Older entry"
-							onClick={() => stepEntry(1)}
-							shortcut="Alt+ArrowDown"
-						>
-							<ChevronDown aria-hidden="true" className="size-4" />
-						</JournalIconButton>
-					</div>
-				</>
-			) : (
-				<>
-					<ToggleGroup
-						appearance="segmented"
-						aria-label="View"
-						onValueChange={(values: unknown[]) => {
-							const next = VIEWS.find((item) => item.id === values[0]);
-							if (next) {
-								chooseView(next.id);
-							}
-						}}
-						spacing={0}
-						value={[view]}
-					>
-						{VIEWS.map((item) => (
-							<ToggleGroupItem
-								density="segmented"
-								key={item.id}
-								value={item.id}
-							>
-								{item.label}
-							</ToggleGroupItem>
-						))}
-					</ToggleGroup>
-					{pager ? (
-						<div className="flex items-center max-sm:hidden">
-							<JournalIconButton
-								keys={pager.previousKeys}
-								label={pager.previousLabel}
-								onClick={() => pager.onStep(-1)}
-								shortcut={pager.previousShortcut}
-							>
-								<ChevronLeft aria-hidden="true" className="size-4" />
-							</JournalIconButton>
-							<Button
-								aria-disabled={pager.atToday || undefined}
-								className={cn(
-									pager.atToday &&
-										"cursor-default text-muted-foreground hover:bg-transparent hover:text-muted-foreground"
-								)}
-								onClick={pager.atToday ? undefined : pager.onToday}
-								size="sm"
-								variant="ghost"
-							>
-								Today
-							</Button>
-							<JournalIconButton
-								keys={pager.nextKeys}
-								label={pager.nextLabel}
-								onClick={() => pager.onStep(1)}
-								shortcut={pager.nextShortcut}
-							>
-								<ChevronRight aria-hidden="true" className="size-4" />
-							</JournalIconButton>
-						</div>
-					) : null}
-					<div className="ms-auto flex items-center gap-1">
-						<Tooltip>
-							<TooltipTrigger
-								render={
-									<Toggle
-										aria-label="Serif titles"
-										className={cn(
-											"text-muted-foreground aria-pressed:bg-transparent aria-pressed:text-foreground aria-pressed:hover:bg-muted",
-											serif ? "font-serif" : "font-sans"
-										)}
-										onPressedChange={(pressed: boolean) => {
-											setSerif(pressed);
-											writeSerif(pressed);
-										}}
-										pressed={serif}
-										size="sm"
-									/>
-								}
-							>
-								{/* An element, not bare text: bare text gets its own overflow tooltip. */}
-								<span>Aa</span>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								{serif ? "Serif titles: on" : "Serif titles: off"}
-							</TooltipContent>
-						</Tooltip>
-						<Button onClick={newEntry} size="sm" variant="default">
-							<Plus
-								aria-hidden="true"
-								className="size-4"
-								data-icon="inline-start"
-							/>
-							New entry
-						</Button>
-					</div>
-				</>
-			)}
-		</div>
+		<JournalToolbar
+			activeEntry={activeEntry}
+			chooseView={chooseView}
+			entryOpen={entryOpen}
+			neighbors={neighbors}
+			newEntry={newEntry}
+			pager={pager}
+			selectDay={selectDay}
+			serif={serif}
+			setPane={setPane}
+			setSerif={setSerif}
+			stacked={stacked}
+			stepEntry={stepEntry}
+			todayKey={todayKey}
+			view={view}
+		/>
 	);
 
 	const main = (

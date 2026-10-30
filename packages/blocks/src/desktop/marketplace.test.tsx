@@ -24,7 +24,8 @@ test("renders a bundle install affordance and its community summary", () => {
 
 	expect(html).toContain("Install bundle");
 	expect(html).toContain("3 items · one-click install");
-	expect(html).toContain("Community · 12 installs · 8 runs");
+	// One meta line: the bundle size wins; community usage is in the detail.
+	expect(html).not.toContain("Community · 12 installs · 8 runs");
 });
 
 test("public app cards use the same native artwork instead of an old remote thumbnail", () => {

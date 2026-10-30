@@ -1,4 +1,9 @@
-#![cfg(feature = "voice-parakeet")]
+// No ONNX Runtime exists for Intel macOS, so the feature compiles no engine there
+// (see Cargo.toml) and there is nothing to prove.
+#![cfg(all(
+    feature = "voice-parakeet",
+    not(all(target_os = "macos", target_arch = "x86_64"))
+))]
 
 use std::path::PathBuf;
 

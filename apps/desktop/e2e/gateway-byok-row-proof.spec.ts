@@ -55,6 +55,16 @@ test.beforeEach(async ({ page }) => {
 	expect(diagnostics).toEqual([]);
 });
 
+/** Clear lives in each row's "<label> key actions" menu. */
+async function clearKey(
+	page: import("@playwright/test").Page,
+	row: import("@playwright/test").Locator,
+	label: string
+) {
+	await row.getByRole("button", { name: `${label} key actions` }).click();
+	await page.getByRole("menuitem", { name: "Clear", exact: true }).click();
+}
+
 test("saves all provider keys from each row with trimmed values and updates badges", async ({
 	page,
 }) => {
@@ -102,7 +112,7 @@ test("clears each configured provider and updates its stored-state badge", async
 	for (const { label, placeholder, slug } of providers) {
 		const row = page.getByTestId(slug);
 		await expect(row.getByText("Key set", { exact: true })).toBeVisible();
-		await row.getByRole("button", { name: "Clear" }).click();
+		await clearKey(page, row, label);
 		await expect(row.getByText("No key", { exact: true })).toBeVisible();
 		await expect(
 			row.getByRole("textbox", { name: `${label} API key` })
@@ -133,12 +143,14 @@ test("keeps the key usable after save and clear failures and supports retry", as
 	});
 	await save.click();
 	await expect(row.getByText("Key set", { exact: true })).toBeVisible();
-	await row.getByRole("button", { name: "Clear" }).click();
+	await clearKey(page, row, "OpenAI");
 	await expect(
 		row.getByText("Credential store refused deletion")
 	).toBeVisible();
 	await expect(row.getByText("Key set", { exact: true })).toBeVisible();
-	await expect(row.getByRole("button", { name: "Clear" })).toBeEnabled();
+	await expect(
+		row.getByRole("button", { name: "OpenAI key actions" })
+	).toBeEnabled();
 	await page.screenshot({
 		path: evidence("gateway-byok-errors.png"),
 		fullPage: true,
@@ -147,7 +159,7 @@ test("keeps the key usable after save and clear failures and supports retry", as
 	await page.evaluate(() => {
 		window.__gatewayByokProof.failClear = false;
 	});
-	await row.getByRole("button", { name: "Clear" }).click();
+	await clearKey(page, row, "OpenAI");
 	await expect(row.getByText("No key", { exact: true })).toBeVisible();
 });
 
@@ -164,9 +176,9 @@ test("hides edits on managed nodes and blocks writers without gateway configure 
 	).toBeVisible();
 	await expect(managedRow.getByRole("textbox")).toHaveCount(0);
 	await expect(managedRow.getByRole("button", { name: "Save" })).toHaveCount(0);
-	await expect(managedRow.getByRole("button", { name: "Clear" })).toHaveCount(
-		0
-	);
+	await expect(
+		managedRow.getByRole("button", { name: "OpenAI key actions" })
+	).toHaveCount(0);
 
 	await page.goto("/gateway-byok-row-proof.html?canConfigure=false&isSet=true");
 	const restrictedRow = page.getByTestId("openai");
@@ -174,7 +186,7 @@ test("hides edits on managed nodes and blocks writers without gateway configure 
 		restrictedRow.getByRole("button", { name: "Save" })
 	).toBeDisabled();
 	await expect(
-		restrictedRow.getByRole("button", { name: "Clear" })
+		restrictedRow.getByRole("button", { name: "OpenAI key actions" })
 	).toHaveCount(0);
 	const calls = await page.evaluate(() => ({
 		clears: window.__gatewayByokProof.clearCalls,

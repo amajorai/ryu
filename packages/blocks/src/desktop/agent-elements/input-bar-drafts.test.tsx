@@ -47,14 +47,25 @@ test("composer waits for saving and exposes persistence failures", async () => {
 	try {
 		const editor = container.querySelector("textarea");
 		expect(editor?.value).toBe("Unsent message");
+		// Both draft actions live in the composer's "+" menu.
+		const openPlusMenu = async () => {
+			await act(async () => {
+				container
+					.querySelector<HTMLButtonElement>('[aria-label="Add"]')
+					?.click();
+			});
+		};
+		await openPlusMenu();
+		expect(document.body.textContent).toContain("Saved message");
 		await act(async () => {
-			container
+			document
 				.querySelector<HTMLButtonElement>('[aria-label="Save draft"]')
 				?.click();
 		});
 		expect(editor?.value).toBe("Unsent message");
+		await openPlusMenu();
 		expect(
-			container
+			document
 				.querySelector('[aria-label="Saving draft"]')
 				?.hasAttribute("disabled")
 		).toBe(true);

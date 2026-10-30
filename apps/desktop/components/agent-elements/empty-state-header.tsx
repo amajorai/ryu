@@ -7,7 +7,7 @@ import {
 	ComposerSettingsMenu,
 	type ComposerSettingsSection,
 } from "@/components/agent-elements/input/composer-settings-menu.tsx";
-import { ManageModelsButton } from "@/components/agent-elements/input/manage-models-button.tsx";
+import { PickerSettingsMenu } from "@/components/agent-elements/input/manage-models-button.tsx";
 import { ProjectCommandDialog } from "@/src/components/chat/ProjectPicker.tsx";
 import { AgentLogo } from "@/src/lib/agent-logos.tsx";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
@@ -25,21 +25,15 @@ export type EmptyStateLogo =
 	| { kind: "glyph"; glyph: Exclude<GlyphValue, null> }
 	| { kind: "stack"; engines: (string | null)[] };
 
-/** Render the empty-state mark for the active target. */
-function EmptyStateMark({
-	logo,
-	hovered,
-}: {
-	logo: EmptyStateLogo;
-	hovered: boolean;
-}) {
+/** Render the empty-state mark for the active target: one 32px mark. */
+function EmptyStateMark({ logo }: { logo: EmptyStateLogo }) {
 	if (logo.kind === "glyph") {
 		return (
 			<GlyphDisplay
 				alt="Agent avatar"
-				className="size-14 object-contain"
+				className="size-8 object-contain"
 				corners="circle"
-				size={56}
+				size={32}
 				value={logo.glyph}
 			/>
 		);
@@ -47,37 +41,32 @@ function EmptyStateMark({
 	if (logo.kind === "image") {
 		return (
 			// Tauri/Vite app, no next/image; avatar is an inline data URL
-			// sized via the `size-14` class
+			// sized via the `size-8` class
 			<img
 				alt="Agent avatar"
-				className="size-14 rounded-full object-cover"
+				className="size-8 rounded-full object-cover"
 				src={logo.url}
 			/>
 		);
 	}
 	if (logo.kind === "single") {
 		return (
-			<AgentLogo className="object-contain" engine={logo.engine} size="56px" />
+			<AgentLogo className="object-contain" engine={logo.engine} size="32px" />
 		);
 	}
-	return <FannedAgentLogos engines={logo.engines} hovered={hovered} />;
+	return <FannedAgentLogos engines={logo.engines} />;
 }
 
 /**
  * A team's member logos as bare marks fanned along an arc. They sit with a
- * comfortable gap at rest and spread further apart on hover — no card chrome.
+ * comfortable gap at rest and spread a little on hover of the mark (CSS only,
+ * see `.markHost:hover .fan`) — no card chrome, no React hover state.
  */
-function FannedAgentLogos({
-	engines,
-	hovered,
-}: {
-	engines: (string | null)[];
-	hovered: boolean;
-}) {
+function FannedAgentLogos({ engines }: { engines: (string | null)[] }) {
 	const shown = engines.slice(0, 5);
 	const center = (shown.length - 1) / 2;
 	return (
-		<div className={styles.fan} data-hovered={hovered}>
+		<div className={styles.fan}>
 			{shown.map((engine, i) => {
 				const offset = i - center;
 				return (
@@ -86,7 +75,7 @@ function FannedAgentLogos({
 						data-offset={offset}
 						key={`${engine ?? "ryu"}-${offset}`}
 					>
-						<AgentLogo className="object-contain" engine={engine} size="44px" />
+						<AgentLogo className="object-contain" engine={engine} size="28px" />
 					</span>
 				);
 			})}
@@ -131,8 +120,7 @@ export function EmptyStateHeader({
 	showProjectPicker = true,
 }: EmptyStateHeaderProps) {
 	const [folderOpen, setFolderOpen] = useState(false);
-	const [hovered, setHovered] = useState(false);
-	const { folder } = useWorkspaceStore();
+	const folder = useWorkspaceStore((state) => state.folder);
 	const folderName = showProjectPicker
 		? folder?.split(PATH_SEPARATOR).at(-1)
 		: null;
@@ -141,11 +129,41 @@ export function EmptyStateHeader({
 	// once a folder is appended; keep it as plain title when no folder is set.
 	const titleText = title.replace(TRAILING_QUESTION, "");
 
+	// Mark, then greeting: one 32px mark above a 24px greeting. The mark's box
+	// is reserved (`.markHost`), so a logo that loads late never moves the
+	// greeting or the composer under it.
+	const mark = interactiveLogo ? (
+		// The logo opens the composer's full Agent · Model · Thinking dropdown
+		// (the shared ComposerSettingsMenu), not just an agent list — same
+		// sections, same behaviour, behind the empty-state mark.
+		<ComposerSettingsMenu
+			align="center"
+			footer={(close) => <PickerSettingsMenu close={close} />}
+			renderBody={renderBody}
+			sections={sections}
+			side="bottom"
+			trigger={
+				<button
+					aria-label="Agent, model and mode settings"
+					className={`${styles.markHost} ${styles.logoTrigger}`}
+					type="button"
+				>
+					<EmptyStateMark logo={logo} />
+				</button>
+			}
+		/>
+	) : (
+		<div aria-hidden="true" className={styles.markHost}>
+			<EmptyStateMark logo={logo} />
+		</div>
+	);
+
 	return (
-		<div className="flex flex-col items-center">
-			<div className="mb-7 flex flex-wrap items-baseline justify-center text-center">
+		<div className="mb-6 flex flex-col items-center gap-4">
+			{mark}
+			<div className="flex flex-wrap items-baseline justify-center text-balance text-center">
 				<h1 className={styles.heading}>
-					{folderName ? `${titleText} in ` : title}
+					{folderName ? `${titleText} in ` : title}
 				</h1>
 				{folderName && (
 					<>
@@ -168,39 +186,6 @@ export function EmptyStateHeader({
 					</>
 				)}
 			</div>
-
-			{/* The logo opens the composer's full Agent · Model · Thinking dropdown
-			    (the shared ComposerSettingsMenu), not just an agent list — same
-			    sections, same behaviour, behind the big empty-state mark. */}
-			{interactiveLogo ? (
-				<ComposerSettingsMenu
-					align="center"
-					footer={(close) => <ManageModelsButton close={close} />}
-					renderBody={renderBody}
-					sections={sections}
-					side="bottom"
-					trigger={
-						<button
-							aria-label="Agent, model and mode settings"
-							className={styles.logoTrigger}
-							onMouseEnter={() => setHovered(true)}
-							onMouseLeave={() => setHovered(false)}
-							type="button"
-						>
-							<EmptyStateMark hovered={hovered} logo={logo} />
-						</button>
-					}
-				/>
-			) : (
-				<div
-					aria-hidden="true"
-					className="relative top-5 z-0 flex items-center justify-center rounded-2xl p-1"
-					onMouseEnter={() => setHovered(true)}
-					onMouseLeave={() => setHovered(false)}
-				>
-					<EmptyStateMark hovered={hovered} logo={logo} />
-				</div>
-			)}
 		</div>
 	);
 }

@@ -1,0 +1,200 @@
+/* Compatibility classes passed to host Markdown renderers. Keep the public
+   prose hooks while giving them the shared selection and typography roles. */
+@utility prose {
+	user-select: text;
+	& * {
+		user-select: text;
+	}
+}
+
+@utility prose-sm {
+	font-size: var(--text-sm);
+	line-height: var(--text-sm--line-height);
+}
+
+@utility prose-invert {
+	color: var(--foreground);
+}
+
+/* Keep interface emphasis readable without allowing browser-default bold to
+   reintroduce a heavier weight where a surface omits an explicit utility. */
+:where(h1, h2, h3, h4, h5, h6, strong, b) {
+	font-weight: 500;
+}
+
+/* Sileo's bundled title rule capitalizes every word. Toast titles are sentence
+   copy, so the shared toaster opts into this more-specific rule to preserve the
+   casing supplied by each caller across web and desktop. */
+[data-sileo-title].ryu-sileo-title {
+	text-transform: none;
+}
+
+/* The shared toaster sits above z-50 overlays so a dialog's backdrop does not
+   dim the error it just raised. While a modal or popup is open, though, a toast
+   must not take taps meant for that surface (a bottom-drawer footer, a
+   bottom-right sheet footer, a menu opening under it), so toasts go
+   click-through for as long as one is open. They stay visible and still
+   auto-dismiss. */
+body:has(
+		:is(
+				[data-slot="dialog-content"],
+				[data-slot="alert-dialog-content"],
+				[data-slot="sheet-content"],
+				[data-slot="drawer-content"],
+				[data-slot="popover-content"],
+				[data-slot="select-content"],
+				[data-slot="combobox-content"],
+				[data-slot="dropdown-menu-content"],
+				[data-slot="context-menu-content"]
+			)[data-open]
+	) [data-slot="toaster"]
+	[data-sileo-toast],
+body:has(
+		:is(
+				[data-slot="dialog-content"],
+				[data-slot="alert-dialog-content"],
+				[data-slot="sheet-content"],
+				[data-slot="drawer-content"],
+				[data-slot="popover-content"],
+				[data-slot="select-content"],
+				[data-slot="combobox-content"],
+				[data-slot="dropdown-menu-content"],
+				[data-slot="context-menu-content"]
+			)[data-open]
+	)
+	[data-slot="toaster"]
+	[data-sileo-toast]
+	* {
+	pointer-events: none;
+}
+
+/* The welcome wordmark stays foreground-coloured while a diagonal primary
+   highlight crosses it twice. The base text never fades, so the second pass is
+   a sweep over visible text rather than a second reveal from transparency. */
+@keyframes ryu-welcome-wordmark-sweep {
+	0%,
+	14%,
+	38%,
+	52%,
+	76%,
+	100% {
+		background-position: 140% 0;
+		opacity: 0;
+	}
+	24%,
+	62% {
+		background-position: -40% 0;
+		opacity: 1;
+	}
+}
+
+.ryu-welcome-wordmark {
+	position: relative;
+	display: inline-block;
+	font-weight: 500;
+}
+
+.ryu-welcome-wordmark__sweep {
+	position: absolute;
+	inset: 0;
+	color: transparent;
+	-webkit-text-fill-color: transparent;
+	background-image: linear-gradient(
+		110deg,
+		transparent 32%,
+		color-mix(in oklab, var(--primary) 25%, transparent) 44%,
+		var(--primary) 50%,
+		color-mix(in oklab, var(--primary) 25%, transparent) 56%,
+		transparent 68%
+	);
+	-webkit-background-clip: text;
+	background-clip: text;
+	background-size: 240% 100%;
+	animation: ryu-welcome-wordmark-sweep 5s ease-in-out both;
+}
+
+/* Match the Google switch in decosmicweb: the Code mode uses the same four
+   Google colours, 300% moving canvas, and three-second background loop. */
+@keyframes ryu-interface-mode-gradient {
+	0%,
+	100% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+}
+
+.ryu-interface-mode-switch[data-checked] {
+	background-image: linear-gradient(45deg, #db4437, #f4b400, #0f9d58, #4285f4);
+	background-repeat: no-repeat;
+	background-position: 0% 50%;
+	background-size: 300% 100%;
+	animation: ryu-interface-mode-gradient 3s ease infinite;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@keyframes ryu-voice-activity-beam-sweep {
+	0% {
+		transform: translateX(8%);
+		opacity: 0.18;
+	}
+	50% {
+		opacity: 0.98;
+	}
+	100% {
+		transform: translateX(255%);
+		opacity: 0.18;
+	}
+}
+
+.voice-activity-beam__glow {
+	transition:
+		transform 150ms cubic-bezier(0.23, 1, 0.32, 1),
+		opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.voice-activity-beam__sweep {
+	animation: ryu-voice-activity-beam-sweep 2.4s linear infinite;
+	will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.voice-activity-beam__glow {
+		transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
+	}
+}
+
+/* Backport of shadcn's scroll-fade utilities. The classes are documented by
+   shadcn and already used by shared components, but the currently published
+   tailwind.css does not include their definitions yet. Keep these names and
+   variables aligned with upstream so the block can disappear on upgrade. */
+@property --scroll-fade-t {
+	syntax: "<length-percentage>";
+	inherits: false;
+	initial-value: 0px;
+}
+
+@property --scroll-fade-b {
+	syntax: "<length-percentage>";
+	inherits: false;
+	initial-value: 0px;
+}
+
+@property --scroll-fade-s {
+	syntax: "<length-percentage>";
+	inherits: false;
+	initial-value: 0px;
+}
+
+@property --scroll-fade-e {
+	syntax: "<length-percentage>";
+	inherits: false;
+	initial-value: 0px;
+}
+
+@property --scroll-fade-mask {
+	syntax: "*";
+	inherits: false;
+}

@@ -1,16 +1,18 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
 import {
-	ArrowUpRight,
-	AtSign,
-	Bookmark,
-	Globe,
-	MessageSquare,
-	Search,
-	Sparkles,
-	TerminalSquare,
-} from "lucide-react";
+	ArrowUpRight01Icon,
+	AtIcon,
+	Bookmark01Icon,
+	BubbleChatIcon,
+	CommandLineIcon,
+	Globe02Icon,
+	Search01Icon,
+	SparklesIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { cn } from "@ryu/ui/lib/utils";
 import { type KeyboardEvent, useMemo, useRef, useState } from "react";
 import { route, type SmartIntent } from "./smart-bar-engine.ts";
 
@@ -21,13 +23,13 @@ import { route, type SmartIntent } from "./smart-bar-engine.ts";
 export * from "./smart-bar-engine.ts";
 
 const INTENT_ICON = {
-	navigate: Globe,
-	search: Search,
-	ai: Sparkles,
-	bang: ArrowUpRight,
-	skill: TerminalSquare,
-	mention: AtSign,
-} satisfies Record<SmartIntent["kind"], typeof Globe>;
+	navigate: Globe02Icon,
+	search: Search01Icon,
+	ai: SparklesIcon,
+	bang: ArrowUpRight01Icon,
+	skill: CommandLineIcon,
+	mention: AtIcon,
+} satisfies Record<SmartIntent["kind"], IconSvgElement>;
 
 const PLACEHOLDER = "Search, type a URL, or ask Ryu…";
 
@@ -38,16 +40,14 @@ function DestinationPill({
 	active: boolean;
 	intent: SmartIntent;
 }) {
-	const Icon = INTENT_ICON[intent.kind];
 	return (
 		<span
-			className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
-				active
-					? "border-primary/50 bg-primary/10 text-foreground"
-					: "border-transparent bg-muted/40 text-muted-foreground"
-			}`}
+			className={cn(
+				"flex h-8 items-center gap-1.5 rounded-full px-3 text-detail transition-colors duration-150",
+				active ? "bg-muted text-foreground" : "text-muted-foreground"
+			)}
 		>
-			<Icon className="size-3" />
+			<HugeiconsIcon icon={INTENT_ICON[intent.kind]} size={14} />
 			{intent.label}
 		</span>
 	);
@@ -87,11 +87,12 @@ export interface SmartBarSuggestion {
 }
 
 function SuggestionIcon({ kind }: { kind: SmartBarSuggestion["kind"] }) {
-	const SuggestionGlyph = kind === "bookmark" ? Bookmark : MessageSquare;
 	return (
-		<SuggestionGlyph
+		<HugeiconsIcon
 			aria-hidden="true"
-			className="size-4 shrink-0 text-muted-foreground"
+			className="shrink-0 text-muted-foreground"
+			icon={kind === "bookmark" ? Bookmark01Icon : BubbleChatIcon}
+			size={16}
 		/>
 	);
 }
@@ -133,8 +134,6 @@ export function SmartBar({
 		activeSuggestionIndex >= 0 ? suggestions[activeSuggestionIndex] : undefined;
 	const suggestionsId = "ryu-smart-bar-local-results";
 
-	const ActiveIcon = INTENT_ICON[active.kind];
-
 	const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
 		if (e.key === "ArrowDown" && suggestions.length > 0) {
 			e.preventDefault();
@@ -173,26 +172,41 @@ export function SmartBar({
 		}
 	};
 
+	const showSuggestions = hasInput && suggestions.length > 0;
+	const searchStatus =
+		hasInput && suggestionStatus !== "idle"
+			? suggestionStatus === "loading"
+				? "Searching…"
+				: tl(
+						"{matchCount, plural, one {# local result} other {# local results}}",
+						{ matchCount: suggestions.length }
+					)
+			: "";
+
 	return (
-		<div className="w-full">
+		<div className="relative w-full">
 			<div
 				className={
 					embedded
-						? "flex items-center gap-3 rounded-2xl bg-muted px-3 py-3 focus-within:ring-1 focus-within:ring-primary/30"
-						: "flex items-center gap-3 rounded-2xl border bg-card px-4 py-3 shadow-sm focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/30"
+						? "flex h-12 items-center gap-3 rounded-2xl bg-muted px-4"
+						: "flex h-14 items-center gap-3 rounded-4xl border border-border bg-background px-5 shadow-xs transition-colors duration-150 focus-within:border-ring/50 dark:bg-card"
 				}
 			>
-				<ActiveIcon className="size-5 shrink-0 text-muted-foreground" />
+				<HugeiconsIcon
+					className="shrink-0 text-muted-foreground"
+					icon={INTENT_ICON[active.kind]}
+					size={16}
+				/>
 				<input
 					aria-activedescendant={
 						activeSuggestionIndex >= 0
 							? `${suggestionsId}-${activeSuggestionIndex}`
 							: undefined
 					}
-					aria-controls={suggestions.length > 0 ? suggestionsId : undefined}
+					aria-controls={showSuggestions ? suggestionsId : undefined}
 					aria-label={PLACEHOLDER}
 					autoFocus={autoFocus}
-					className="flex-1 bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
+					className="min-w-0 flex-1 bg-transparent text-comfortable caret-foreground outline-none placeholder:text-muted-foreground"
 					onChange={(e) => {
 						setValue(e.target.value);
 						setCycle(0);
@@ -207,60 +221,45 @@ export function SmartBar({
 				/>
 			</div>
 
-			{hasInput && suggestionStatus !== "idle" ? (
+			<span aria-live="polite" className="sr-only">
+				{searchStatus}
+			</span>
+
+			{showSuggestions ? (
 				<div
 					aria-label="Local Ryu results"
-					className="mt-2 overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm"
+					className="mt-2 flex flex-col rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-md"
 					id={suggestionsId}
 					role="listbox"
 				>
-					<div className="type-caption flex items-center justify-between border-border/60 border-b px-3 py-2 text-muted-foreground">
-						<span className="font-medium uppercase tracking-wider">
-							Local Ryu results
-						</span>
-						<span aria-live="polite">
-							{suggestionStatus === "loading"
-								? "Searching…"
-								: suggestions.length > 0
-									? tl("{matchCount} found", {
-											matchCount: String(suggestions.length),
-										})
-									: "No matches"}
-						</span>
-					</div>
-					{suggestions.length > 0 ? (
-						<div className="p-1">
-							{suggestions.map((suggestion, index) => (
-								<button
-									aria-selected={index === activeSuggestionIndex}
-									className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-muted ${
-										index === activeSuggestionIndex ? "bg-muted" : ""
-									}`}
-									id={`${suggestionsId}-${index}`}
-									key={suggestion.id}
-									onClick={() => onSelectSuggestion?.(suggestion)}
-									onMouseEnter={() => setSuggestionIndex(index)}
-									role="option"
-									type="button"
-								>
-									<SuggestionIcon kind={suggestion.kind} />
-									<span className="min-w-0 flex-1">
-										<span className="block truncate font-medium text-foreground text-sm">
-											{suggestion.title}
-										</span>
-										<span className="block truncate text-muted-foreground text-xs">
-											{suggestion.description}
-										</span>
-									</span>
-								</button>
-							))}
-						</div>
-					) : null}
+					{suggestions.map((suggestion, index) => (
+						<button
+							aria-selected={index === activeSuggestionIndex}
+							className={cn(
+								"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm",
+								index === activeSuggestionIndex && "bg-accent"
+							)}
+							id={`${suggestionsId}-${index}`}
+							key={suggestion.id}
+							onClick={() => onSelectSuggestion?.(suggestion)}
+							onMouseEnter={() => setSuggestionIndex(index)}
+							role="option"
+							type="button"
+						>
+							<SuggestionIcon kind={suggestion.kind} />
+							<span className="min-w-0 shrink truncate text-foreground">
+								{suggestion.title}
+							</span>
+							<span className="min-w-0 flex-1 truncate text-detail text-muted-foreground">
+								{suggestion.description}
+							</span>
+						</button>
+					))}
 				</div>
 			) : null}
 
-			{hasInput ? (
-				<div className="mt-3 flex flex-wrap items-center gap-2">
+			{hasInput && destinations.length > 1 ? (
+				<div className="mt-3 flex flex-wrap items-center gap-1">
 					{destinations.map((intent, i) => (
 						<DestinationPill
 							active={i === activeIndex}
@@ -268,31 +267,11 @@ export function SmartBar({
 							key={`${intent.kind}-${intent.label}`}
 						/>
 					))}
-					<span className="ml-auto text-muted-foreground text-xs">
-						<kbd className="rounded bg-muted px-1.5 py-0.5">↵</kbd>{" "}
-						{active.label}
-						{destinations.length > 1 ? (
-							<>
-								{"  ·  "}
-								<kbd className="rounded bg-muted px-1.5 py-0.5">⇥</kbd> cycle
-							</>
-						) : null}
+					<span className="ml-auto text-muted-foreground/70 text-xs">
+						Tab to switch
 					</span>
 				</div>
-			) : (
-				<div className="mt-3 flex items-center gap-3 text-muted-foreground text-xs">
-					<span>
-						<kbd className="rounded bg-muted px-1.5 py-0.5">/</kbd> skill
-					</span>
-					<span>
-						<kbd className="rounded bg-muted px-1.5 py-0.5">@</kbd> context
-					</span>
-					<span>
-						<kbd className="rounded bg-muted px-1.5 py-0.5">!</kbd> search
-						engine
-					</span>
-				</div>
-			)}
+			) : null}
 		</div>
 	);
 }

@@ -128,7 +128,7 @@ export function SidebarChatMessages({
 							delay={0}
 							onClick={() => onJump(entry.id, entry.title)}
 							render={
-								<button className="w-full rounded-md pr-2 pl-8 hover:bg-muted" />
+								<button className="w-full rounded-lg pr-2 pl-8 hover:bg-sidebar-accent/60" />
 							}
 							type="button"
 						>
@@ -174,7 +174,7 @@ export function SidebarChatMessages({
 												/>
 											</span>
 											<div className="min-w-0 flex-1">
-												<p className="type-caption mb-0.5 text-muted-foreground">
+												<p className="mb-0.5 text-muted-foreground text-xs">
 													{agent.name}
 												</p>
 												<p className="line-clamp-4 text-muted-foreground text-xs leading-relaxed">
@@ -188,10 +188,10 @@ export function SidebarChatMessages({
 										</p>
 									) : null}
 									{entry.files.length > 0 ? (
-										<ul className="space-y-1 border-border/60 border-t pt-2">
+										<ul className="space-y-1 border-border border-t pt-2">
 											{entry.files.slice(0, 4).map((file) => (
 												<li
-													className="type-compact flex min-w-0 items-center gap-1.5 font-mono text-muted-foreground"
+													className="flex min-w-0 items-center gap-1.5 font-mono text-muted-foreground text-xs"
 													key={file}
 												>
 													<FileTypeIcon className="size-3.5" path={file} />
@@ -228,7 +228,7 @@ export function ChatRowSubAccordion({
 		<div className="pl-4">
 			<button
 				aria-expanded={expanded}
-				className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
+				className="flex h-7 w-full items-center gap-1.5 rounded-lg px-2 text-left text-muted-foreground text-xs transition-colors duration-150 hover:bg-sidebar-accent/60 hover:text-foreground hover:duration-0"
 				onClick={(e) => {
 					e.stopPropagation();
 					onToggle();

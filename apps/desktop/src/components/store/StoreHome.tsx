@@ -1,5 +1,3 @@
-import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { InstallProgressButton } from "@ryu/blocks/desktop/install-button.tsx";
 import MarketplaceHome, {
 	type MarketplaceHomeItem,
@@ -50,9 +48,11 @@ export default function StoreHome({
 
 	return (
 		<MarketplaceHome
+			hideEmptyShelves
 			loading={loading}
 			recommendations={{
 				data: forYou.data,
+				loading: forYou.loading,
 				onCadenceChange: forYou.onCadenceChange,
 				onHide: forYou.onHide,
 				onOpen: (item) => onOpenRealm(recommendationRealm(item), "", item.id),
@@ -164,11 +164,12 @@ function HomeCardAction({
 }) {
 	if (installed) {
 		return (
-			<Button className="shrink-0" disabled size="sm" variant="secondary">
-				<HugeiconsIcon
-					className="size-3.5 text-status-success"
-					icon={CheckmarkCircle02Icon}
-				/>
+			<Button
+				className="shrink-0 text-muted-foreground"
+				disabled
+				size="sm"
+				variant="ghost"
+			>
 				Added
 			</Button>
 		);
@@ -177,7 +178,7 @@ function HomeCardAction({
 	return (
 		<InstallProgressButton
 			className="shrink-0"
-			idleVariant="default"
+			idleVariant="outline"
 			installing={busy}
 			onClick={onAdd}
 		>

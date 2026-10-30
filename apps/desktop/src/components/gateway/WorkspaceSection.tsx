@@ -1,30 +1,7 @@
-import {
-	Add01Icon,
-	Delete01Icon,
-	PencilEdit01Icon,
-	Shield01Icon,
-	UserGroupIcon,
-} from "@hugeicons/core-free-icons";
+import { UserGroupIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-	DialogTrigger,
-} from "@ryu/ui/components/dialog.tsx";
-import { Input } from "@ryu/ui/components/input.tsx";
-import { Label } from "@ryu/ui/components/label.tsx";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@ryu/ui/components/popover.tsx";
 import {
 	Select,
 	SelectContent,
@@ -33,26 +10,11 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@ryu/ui/components/table.tsx";
-import {
-	skipToken,
-	useMutation,
-	useQuery,
-	useQueryClient,
-} from "@tanstack/react-query";
-import type { ReactElement } from "react";
-import { useState } from "react";
+import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import { sileo } from "sileo";
 import { FRONTEND_URL, useSession } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { CopyableId } from "@/src/components/settings/shared/CopyableId.tsx";
 import {
@@ -62,22 +24,15 @@ import {
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import {
-	createRole,
-	deleteRole,
 	fetchMyPermissions,
 	fetchOrgMembers,
 	fetchOrgs,
-	getMemberRoles,
 	hasOrgAuth,
 	listRoles,
 	type OrgRole,
-	type OrgRoleDef,
-	PERMISSIONS,
 	type Permission,
-	setMemberRoles,
-	updateRole,
 } from "@/src/lib/api/org.ts";
-// A different module from `org.ts` above: `orgs.ts` owns the SESSION's active
+// A different module from `org.ts`: `orgs.ts` owns the SESSION's active
 // org, which `org.ts` (the org list + RBAC routes) has no accessor for.
 import {
 	listMyOrganizationTeams,
@@ -86,6 +41,9 @@ import {
 	useActiveTeamId,
 } from "@/src/lib/api/orgs.ts";
 import { NodeOrganizationBindingCard } from "./NodeOrganizationBindingCard.tsx";
+import { MemberRolesControl } from "./WorkspaceSection-member-roles.tsx";
+import { LoadErrorRow, RoleBadge } from "./WorkspaceSection-role-badge.tsx";
+import { RolesMatrix } from "./WorkspaceSection-roles-matrix.tsx";
 
 /** Where members are invited / roles changed (Better Auth owns those mutations). */
 const ORGANIZATIONS_URL = `${FRONTEND_URL.replace(/\/$/, "")}/organizations`;
@@ -101,527 +59,6 @@ const ROLE_RANK = {
 	member: 2,
 	viewer: 3,
 } satisfies Record<Exclude<OrgRole, null>, number>;
-
-function roleBadgeVariant(role: OrgRole): "default" | "secondary" | "outline" {
-	if (role === "owner") {
-		return "default";
-	}
-	if (role === "admin") {
-		return "secondary";
-	}
-	return "outline";
-}
-
-function RoleBadge({ role }: { role: OrgRole }) {
-	return (
-		<Badge casing="capitalized" variant={roleBadgeVariant(role)}>
-			{role ?? "member"}
-		</Badge>
-	);
-}
-
-/** A short kebab-case key (letters, digits, single dashes) unique per org. */
-const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-interface RoleFormValues {
-	key: string;
-	name: string;
-	permissions: string[];
-}
-
-/**
- * Create / edit dialog for a custom role. In create mode the key is editable and
- * kebab-validated; in edit mode the key is fixed (it identifies the role and its
- * assignments) so only the name and permission set change. The permission grid is
- * the literal "checkbox per PERMISSIONS key" matrix for the role being authored.
- */
-function RoleFormDialog({
-	trigger,
-	mode,
-	initial,
-	onSubmit,
-}: {
-	trigger: ReactElement;
-	mode: "create" | "edit";
-	initial?: RoleFormValues;
-	onSubmit: (values: RoleFormValues) => Promise<boolean>;
-}) {
-	const empty: RoleFormValues = { key: "", name: "", permissions: [] };
-	const [open, setOpen] = useState(false);
-	const [values, setValues] = useState<RoleFormValues>(initial ?? empty);
-	const [saving, setSaving] = useState(false);
-	const [err, setErr] = useState<string | null>(null);
-
-	const handleOpenChange = (next: boolean) => {
-		if (!next && saving) {
-			return;
-		}
-		if (next) {
-			setValues(initial ?? empty);
-			setErr(null);
-		}
-		setOpen(next);
-	};
-
-	const togglePermission = (perm: string, checked: boolean) => {
-		setValues((v) => ({
-			...v,
-			permissions: checked
-				? [...v.permissions, perm]
-				: v.permissions.filter((p) => p !== perm),
-		}));
-	};
-
-	const handleSubmit = async () => {
-		const name = values.name.trim();
-		const key = values.key.trim();
-		if (!name) {
-			setErr("Name is required.");
-			return;
-		}
-		if (mode === "create" && !KEBAB_RE.test(key)) {
-			setErr("Key must be kebab-case (letters, digits, single dashes).");
-			return;
-		}
-		setSaving(true);
-		setErr(null);
-		try {
-			const saved = await onSubmit({
-				key,
-				name,
-				permissions: values.permissions,
-			});
-			if (saved === false) {
-				return;
-			}
-			setOpen(false);
-		} catch (e) {
-			setErr(e instanceof Error ? e.message : "Failed to save role.");
-		} finally {
-			setSaving(false);
-		}
-	};
-
-	return (
-		<Dialog onOpenChange={handleOpenChange} open={open}>
-			<DialogTrigger render={trigger} />
-			<DialogContent showCloseButton={!saving}>
-				<DialogHeader>
-					<DialogTitle>
-						{mode === "create" ? "New custom role" : `Edit ${values.name}`}
-					</DialogTitle>
-					<DialogDescription>
-						Grant a precise set of permissions. Members holding this role gain
-						these permissions on top of their built-in tier.
-					</DialogDescription>
-				</DialogHeader>
-				<div className="flex flex-col gap-4 py-2">
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="role-name">Name</Label>
-						<Input
-							disabled={saving}
-							id="role-name"
-							onChange={(e) =>
-								setValues((v) => ({ ...v, name: e.target.value }))
-							}
-							placeholder="e.g. Workflow editor"
-							value={values.name}
-						/>
-					</div>
-					{mode === "create" ? (
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="role-key">Key</Label>
-							<Input
-								disabled={saving}
-								id="role-key"
-								onChange={(e) =>
-									setValues((v) => ({ ...v, key: e.target.value }))
-								}
-								placeholder="e.g. workflow-editor"
-								value={values.key}
-							/>
-							<p className="text-muted-foreground text-xs">
-								Kebab-case, unique within this workspace. Cannot be changed
-								later.
-							</p>
-						</div>
-					) : null}
-					<div className="flex flex-col gap-2">
-						<Label>Permissions</Label>
-						<div className="grid max-h-64 grid-cols-1 gap-1.5 overflow-y-auto rounded-lg border border-border/60 p-2 sm:grid-cols-2">
-							{PERMISSIONS.map((perm) => (
-								<label
-									className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted/50"
-									key={perm}
-								>
-									<Checkbox
-										checked={values.permissions.includes(perm)}
-										disabled={saving}
-										onCheckedChange={(checked) =>
-											togglePermission(perm, checked === true)
-										}
-									/>
-									<span className="font-mono text-xs">{perm}</span>
-								</label>
-							))}
-						</div>
-					</div>
-					{err ? (
-						<p className="text-sm text-status-destructive">{err}</p>
-					) : null}
-				</div>
-				<DialogFooter>
-					<Button
-						disabled={saving}
-						onClick={() => setOpen(false)}
-						variant="ghost"
-					>
-						Cancel
-					</Button>
-					<Button loading={saving} onClick={() => handleSubmit()}>
-						{mode === "create" ? "Create role" : "Save"}
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
-/**
- * The read-only permission matrix: permissions down the rows, roles across the
- * columns (so it grows downward, and the table's own container scrolls
- * horizontally if the custom columns overflow). Built-in roles are always
- * read-only; custom roles get edit + delete affordances in their header when the
- * caller holds `roles.manage`.
- */
-function RolesMatrix({
-	orgId,
-	roles,
-	canManage,
-	stepUp,
-}: {
-	orgId: string;
-	roles: OrgRoleDef[];
-	canManage: boolean;
-	stepUp: ReturnType<typeof useStepUp>;
-}) {
-	const queryClient = useQueryClient();
-	const invalidate = () =>
-		queryClient.invalidateQueries({ queryKey: ["workspace-roles", orgId] });
-
-	const createMutation = useMutation({
-		mutationFn: (values: RoleFormValues) => createRole(orgId, values),
-		onSuccess: async () => {
-			await invalidate();
-			sileo.success({ title: "Role created" });
-		},
-		onError: (e) => {
-			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to create role",
-			});
-		},
-	});
-
-	const updateMutation = useMutation({
-		mutationFn: (values: RoleFormValues) =>
-			updateRole(orgId, values.key, {
-				name: values.name,
-				permissions: values.permissions,
-			}),
-		onSuccess: async () => {
-			await invalidate();
-			sileo.success({ title: "Role updated" });
-		},
-		onError: (e) => {
-			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to update role",
-			});
-		},
-	});
-
-	const deleteMutation = useMutation({
-		mutationFn: (roleKey: string) => deleteRole(orgId, roleKey),
-		onSuccess: async () => {
-			await invalidate();
-			await queryClient.invalidateQueries({
-				queryKey: ["workspace-member-roles", orgId],
-			});
-			sileo.success({ title: "Role deleted" });
-		},
-		onError: (e) => {
-			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to delete role",
-			});
-		},
-	});
-
-	return (
-		<SettingsSection
-			caption="Every role and the permissions it grants. Built-in roles are fixed; create custom roles to grant a precise subset, then assign them to members below."
-			headerAction={
-				canManage ? (
-					<RoleFormDialog
-						mode="create"
-						onSubmit={async (values) =>
-							(await stepUp.guard("org.members", () =>
-								createMutation.mutateAsync(values)
-							)) !== null
-						}
-						trigger={
-							<Button size="sm" variant="ghost">
-								<HugeiconsIcon className="size-4" icon={Add01Icon} />
-								New role
-							</Button>
-						}
-					/>
-				) : undefined
-			}
-			title="Roles"
-		>
-			<SettingsCard className="px-2 py-1">
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead className="sticky left-0" presentation="permission">
-								Permission
-							</TableHead>
-							{roles.map((role) => (
-								<TableHead className="text-center" key={role.key}>
-									<div className="flex flex-col items-center gap-1">
-										<span className="flex items-center gap-1">
-											{role.name}
-											{role.builtin ? (
-												<Badge size="compact" variant="outline">
-													built-in
-												</Badge>
-											) : null}
-										</span>
-										{canManage && !role.builtin ? (
-											<span className="flex items-center gap-0.5">
-												<RoleFormDialog
-													initial={{
-														key: role.key,
-														name: role.name,
-														permissions: role.permissions,
-													}}
-													mode="edit"
-													onSubmit={async (values) =>
-														(await stepUp.guard("org.members", () =>
-															updateMutation.mutateAsync(values)
-														)) !== null
-													}
-													trigger={
-														<Button
-															aria-label={`Edit ${role.name}`}
-															size="icon"
-															variant="ghost"
-														>
-															<HugeiconsIcon
-																className="size-3.5"
-																icon={PencilEdit01Icon}
-															/>
-														</Button>
-													}
-												/>
-												<Button
-													aria-label={`Delete ${role.name}`}
-													disabled={deleteMutation.isPending}
-													onClick={() =>
-														void stepUp
-															.guard("org.members", () =>
-																deleteMutation.mutateAsync(role.key)
-															)
-															.catch(() => undefined)
-													}
-													size="icon"
-													variant="ghost"
-												>
-													<HugeiconsIcon
-														className="size-3.5 text-status-destructive"
-														icon={Delete01Icon}
-													/>
-												</Button>
-											</span>
-										) : null}
-									</div>
-								</TableHead>
-							))}
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{PERMISSIONS.map((perm) => (
-							<TableRow key={perm}>
-								<TableCell className="sticky left-0" presentation="permission">
-									{perm}
-								</TableCell>
-								{roles.map((role) => (
-									<TableCell className="text-center" key={role.key}>
-										<div className="flex justify-center">
-											<Checkbox
-												checked={role.permissions.includes(perm)}
-												disabled
-											/>
-										</div>
-									</TableCell>
-								))}
-							</TableRow>
-						))}
-					</TableBody>
-				</Table>
-			</SettingsCard>
-		</SettingsSection>
-	);
-}
-
-/**
- * Per-member custom-role assignment. Shows the member's assigned custom roles as
- * badges; when the caller holds `roles.manage`, a popover toggles the assignment
- * set. Built-in tier is unaffected (that lives on the Better Auth membership row);
- * this only layers custom roles on top.
- */
-function MemberRolesControl({
-	orgId,
-	userId,
-	customRoles,
-	canManage,
-	stepUp,
-}: {
-	orgId: string;
-	userId: string;
-	customRoles: OrgRoleDef[];
-	canManage: boolean;
-	stepUp: ReturnType<typeof useStepUp>;
-}) {
-	const queryClient = useQueryClient();
-	const assignedQuery = useQuery({
-		enabled: customRoles.length > 0,
-		queryKey: ["workspace-member-roles", orgId, userId],
-		queryFn: () => getMemberRoles(orgId, userId),
-	});
-	const assigned = assignedQuery.data ?? [];
-
-	const setMutation = useMutation({
-		mutationFn: (roleKeys: string[]) => setMemberRoles(orgId, userId, roleKeys),
-		onSuccess: async () => {
-			await queryClient.invalidateQueries({
-				queryKey: ["workspace-member-roles", orgId, userId],
-			});
-		},
-		onError: (e) => {
-			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to update assignment",
-			});
-		},
-	});
-
-	const toggle = (roleKey: string, checked: boolean) => {
-		const next = checked
-			? [...assigned, roleKey]
-			: assigned.filter((k) => k !== roleKey);
-		void stepUp
-			.guard("org.members", () => setMutation.mutateAsync(next))
-			.catch(() => undefined);
-	};
-
-	if (customRoles.length === 0) {
-		return null;
-	}
-
-	const assignedRoles = customRoles.filter((r) => assigned.includes(r.key));
-
-	return (
-		<div className="flex items-center gap-1.5">
-			{assignedRoles.map((r) => (
-				<Badge key={r.key} variant="secondary">
-					{r.name}
-				</Badge>
-			))}
-			{canManage ? (
-				<Popover>
-					<PopoverTrigger
-						render={
-							<Button size="sm" variant="ghost">
-								<HugeiconsIcon className="size-3.5" icon={Shield01Icon} />
-								Roles
-							</Button>
-						}
-					/>
-					<PopoverContent align="end" className="w-64">
-						<div className="flex flex-col gap-1">
-							<p className="px-1 pb-1 font-medium text-sm">Custom roles</p>
-							{assignedQuery.isLoading ? (
-								<div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-sm">
-									<Spinner className="size-3.5" />
-									Loading assigned roles…
-								</div>
-							) : assignedQuery.isError ? (
-								<div className="space-y-2 px-2 py-1.5">
-									<p className="text-sm text-status-destructive" role="alert">
-										Couldn’t load this member’s custom roles.
-									</p>
-									<Button
-										onClick={() => void assignedQuery.refetch()}
-										size="sm"
-										variant="outline"
-									>
-										Retry assigned roles
-									</Button>
-								</div>
-							) : (
-								customRoles.map((r) => (
-									<label
-										className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
-										key={r.key}
-									>
-										<Checkbox
-											checked={assigned.includes(r.key)}
-											disabled={setMutation.isPending}
-											onCheckedChange={(checked) =>
-												toggle(r.key, checked === true)
-											}
-										/>
-										<span>{r.name}</span>
-									</label>
-								))
-							)}
-						</div>
-					</PopoverContent>
-				</Popover>
-			) : null}
-		</div>
-	);
-}
-
-/**
- * A failed read as one row: a plain sentence and its Retry button, inside the
- * section's card. The raw failure message stays on the `title` attribute.
- */
-function LoadErrorRow({
-	detail,
-	message,
-	onRetry,
-	retryLabel,
-}: {
-	detail?: string;
-	message: string;
-	onRetry: () => void;
-	retryLabel: string;
-}) {
-	return (
-		<SettingsItem
-			actions={
-				<Button onClick={onRetry} size="sm" variant="outline">
-					{retryLabel}
-				</Button>
-			}
-			title={
-				<span role="alert" title={detail}>
-					{message}
-				</span>
-			}
-		/>
-	);
-}
 
 /**
  * The Workspace section of the Gateway dialog: settings for the current
@@ -643,6 +80,7 @@ export function WorkspaceSection() {
 	const userId = session?.user?.id ?? null;
 	const authed = hasOrgAuth();
 	const stepUp = useStepUp();
+	const tl = useLiteralMessages();
 
 	const orgsQuery = useQuery({
 		enabled: authed,
@@ -727,7 +165,7 @@ export function WorkspaceSection() {
 	if (!authed) {
 		return (
 			<SettingsSection title="Workspace">
-				<SettingsCard className="text-center text-muted-foreground text-sm">
+				<SettingsCard className="py-3 text-muted-foreground text-sm">
 					Sign in to view this workspace and its members.
 				</SettingsCard>
 			</SettingsSection>
@@ -758,17 +196,27 @@ export function WorkspaceSection() {
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="flex flex-col gap-8 [&>*]:mt-0">
 			{stepUp.dialog}
 			<SettingsSection
-				caption="The organization that shares this node. Its members and their roles govern who can manage the workspace."
+				caption={
+					<CaptionInfo
+						detail={
+							"Its members and their roles govern who can manage the workspace."
+						}
+					>
+						{"The organization that shares this node."}
+					</CaptionInfo>
+				}
 				title="Workspace"
 			>
 				<SettingsGroup>
 					<SettingsItem
 						description={
 							activeOrg
-								? `You are ${activeOrg.role ?? "a member"} of this workspace.`
+								? tl("You are {role} of this workspace.", {
+										role: activeOrg.role ?? tl("a member"),
+									})
 								: "You are not in an organization yet. Create one to share this node with a team."
 						}
 						title={
@@ -868,7 +316,15 @@ export function WorkspaceSection() {
 
 			{activeOrg && orgId ? (
 				<SettingsSection
-					caption="Everyone in this workspace. Owners and admins manage members and billing; assign custom roles for finer-grained permissions."
+					caption={
+						<CaptionInfo
+							detail={
+								"Owners and admins manage members and billing; assign custom roles for finer-grained permissions."
+							}
+						>
+							{"Everyone in this workspace."}
+						</CaptionInfo>
+					}
 					title="Members"
 				>
 					{membersQuery.isLoading ? (
@@ -919,7 +375,9 @@ export function WorkspaceSection() {
 										<span className="flex items-center gap-2">
 											{m.userId}
 											{m.userId === userId ? (
-												<Badge variant="outline">You</Badge>
+												<span className="text-muted-foreground text-xs">
+													You
+												</span>
 											) : null}
 										</span>
 									}

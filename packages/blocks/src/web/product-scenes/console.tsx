@@ -1,252 +1,197 @@
-import type { CSSProperties } from "react";
-import { Stage } from "../iso/kit/react/live.tsx";
 import styles from "./console.module.css";
-import { Scene } from "./scene.tsx";
+import { Check, Chip, Label, type MotionStyle, SceneCanvas } from "./scene.tsx";
 
 /**
- * The Console homepage card: the operator's board. Runs proceed side by side,
- * one stops at an approval, and a finished run files itself into the audit
- * ledger. The unanimated frame (and the reduced-motion frame) is the end of
- * that story: run 1 done and filed, run 2 waiting on the approval, run 3 idle.
+ * The homepage card for Agent (the Console realm): the operator's board, not
+ * one agent. Across the top are the models, tools and approvals the team sets.
+ * Runs proceed side by side: support completes and files itself into the
+ * history, research stops at an approval gate until it is approved, and triage
+ * waits its turn. That reads apart from the Agents card, which draws a single
+ * agent and its parts.
+ *
+ * The markup is the still: support just filed, research waiting on approval,
+ * triage queued. The 9s loop in `console.module.css` starts and ends on it.
  */
 
-interface TickIndexStyle extends CSSProperties {
-	"--i": number;
-}
+const ROWS = { research: 90, support: 56, triage: 124 } as const;
+const STEPS = [92, 118, 144, 170, 196] as const;
+const GATE = 2;
+const PANEL_X = 210;
+const PANEL_WIDTH = 76;
+const ENTRY_Y = [46, 62, 78, 94, 110, 126] as const;
 
-const tickIndex = (index: number): TickIndexStyle => ({ "--i": index });
+const delay = (seconds: number): MotionStyle => ({ "--delay": `${seconds}s` });
 
-const ROW_Y = [58, 86, 114] as const;
-const TICK_X = [110, 130, 150, 170, 190, 210] as const;
-const APPROVAL_TICK = 3;
-const LEDGER_LINE_WIDTHS = [40, 46, 34, 44, 38, 42] as const;
-
-const PROGRESS = "fill-realm-progress dark:fill-realm-progress-dark";
-const COMPLETE = "fill-realm-complete dark:fill-realm-complete-dark";
-
-function Tick({
-	className,
-	index,
-	y,
-}: {
-	className: string;
-	index: number;
-	y: number;
-}) {
+function Track({ y }: { y: number }) {
 	return (
-		<rect
-			className={`fill-foreground ${className}`}
-			height={3}
-			style={tickIndex(index)}
-			width={3}
-			x={(TICK_X[index] ?? 0) - 1.5}
-			y={y - 1.5}
+		<line
+			className={styles.track}
+			x1={STEPS[0]}
+			x2={STEPS.at(-1)}
+			y1={y}
+			y2={y}
 		/>
 	);
 }
 
-function RunLabel({ label, y }: { label: string; y: number }) {
+function Step({
+	className,
+	index,
+	seconds = 0,
+	y,
+}: {
+	className: string;
+	index: number;
+	seconds?: number;
+	y: number;
+}) {
 	return (
-		<>
-			<text className="fill-foreground" fontSize={9} x={30} y={y + 3}>
-				{label}
-			</text>
-			<line
-				className="stroke-border"
-				strokeWidth={0.75}
-				x1={106}
-				x2={214}
-				y1={y}
-				y2={y}
-			/>
-		</>
+		<circle
+			className={className}
+			cx={STEPS[index]}
+			cy={y}
+			r={3}
+			style={delay(seconds)}
+		/>
 	);
 }
 
-function SupportRun() {
-	const y = ROW_Y[0];
+/** A run's state: filled when done, a ring while it runs or waits. */
+function Status({ done, y }: { done: string; y: number }) {
 	return (
 		<g>
-			<circle
-				className={`${PROGRESS} ${styles.runPending}`}
-				cx={20}
-				cy={y}
-				r={3}
-			/>
-			<circle
-				className={`${COMPLETE} ${styles.runDone}`}
-				cx={20}
-				cy={y}
-				r={3}
-			/>
-			<RunLabel label="support" y={y} />
-			{TICK_X.map((x, index) => (
-				<Tick className={styles.fastTick} index={index} key={x} y={y} />
-			))}
+			<circle className={styles.ring} cx={16} cy={y} r={3.5} />
+			<circle className={done} cx={16} cy={y} r={3.5} />
 		</g>
 	);
 }
 
-function ResearchRun() {
-	const y = ROW_Y[1];
-	const x = TICK_X[APPROVAL_TICK];
+function Entry({ className, y }: { className?: string; y: number }) {
 	return (
-		<g>
-			<circle className={PROGRESS} cx={20} cy={y} r={3} />
-			<RunLabel label="research" y={y} />
-			{TICK_X.map((tickX, index) => {
-				if (index === APPROVAL_TICK) {
-					return null;
-				}
-				let className = styles.idleTick;
-				if (index < APPROVAL_TICK) {
-					className = styles.slowTick;
-				} else if (index === APPROVAL_TICK + 1) {
-					className = styles.resumeTick;
-				}
-				return <Tick className={className} index={index} key={tickX} y={y} />;
-			})}
-			<polygon
-				className={`${PROGRESS} ${styles.approval}`}
-				points={`${x},${y - 4} ${x + 4},${y} ${x},${y + 4} ${x - 4},${y}`}
-			/>
-			<path
-				className={`fill-none stroke-realm-complete dark:stroke-realm-complete-dark ${styles.approved}`}
-				d={`M${x - 3} ${y} l2 2 l4 -4.5`}
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				strokeWidth={1.25}
+		<g className={className}>
+			<g transform={`translate(${PANEL_X + 12} ${y})`}>
+				<Check />
+			</g>
+			<rect
+				className={styles.entry}
+				height={3}
+				rx={1.5}
+				width={42}
+				x={PANEL_X + 22}
+				y={y - 1.5}
 			/>
 		</g>
 	);
 }
 
-function TriageRun() {
-	const y = ROW_Y[2];
+export function ConsoleScene() {
+	const gateX = STEPS[GATE];
 	return (
-		<g>
-			<circle
-				className="fill-muted-foreground"
-				cx={20}
-				cy={y}
-				opacity={0.55}
-				r={3}
-			/>
-			<RunLabel label="triage" y={y} />
-			{TICK_X.map((x, index) => (
-				<Tick
-					className={index === 0 ? styles.litTick : styles.idleTick}
+		<SceneCanvas className={styles.root} id="console">
+			<Chip label="models" width={52} x={40} y={18} />
+			<Chip label="tools" width={46} x={95} y={18} />
+			<Chip label="approvals" width={70} x={159} y={18} />
+
+			<Status done={styles.supportDone} y={ROWS.support} />
+			<Label anchor="start" x={26} y={ROWS.support}>
+				support
+			</Label>
+			<Track y={ROWS.support} />
+			{STEPS.map((x, index) => (
+				<Step
+					className={styles.supportStep}
 					index={index}
 					key={x}
-					y={y}
+					seconds={index * 0.5}
+					y={ROWS.support}
 				/>
 			))}
-		</g>
-	);
-}
 
-function AuditLedger() {
-	return (
-		<g>
-			<rect
-				className="fill-background/40 stroke-border"
-				height={80}
-				rx={6}
-				strokeWidth={0.75}
-				width={68}
-				x={236}
-				y={50}
+			<Status done={styles.researchDone} y={ROWS.research} />
+			<Label anchor="start" x={26} y={ROWS.research}>
+				research
+			</Label>
+			<Track y={ROWS.research} />
+			<Step className={styles.early} index={0} y={ROWS.research} />
+			<Step
+				className={styles.early}
+				index={1}
+				seconds={0.5}
+				y={ROWS.research}
 			/>
-			<rect
-				className="fill-foreground"
-				height={3}
-				opacity={0.7}
-				width={3}
-				x={243}
-				y={56.5}
+			<Step className={styles.late} index={3} y={ROWS.research} />
+			<Step className={styles.late} index={4} seconds={0.5} y={ROWS.research} />
+			<path
+				className={styles.gate}
+				d={`M${gateX} ${ROWS.research - 5} L${gateX + 5} ${ROWS.research} L${gateX} ${ROWS.research + 5} L${gateX - 5} ${ROWS.research} Z`}
 			/>
-			<text className="fill-muted-foreground" fontSize={7.5} x={250} y={60.5}>
-				audit
-			</text>
-			<line
-				className="stroke-border"
-				strokeWidth={0.75}
-				x1={236}
-				x2={304}
-				y1={66}
-				y2={66}
-			/>
-			<svg
-				height={51}
-				overflow="hidden"
-				viewBox="236 66 68 51"
-				width={68}
-				x={236}
-				y={66}
+			<g
+				className={styles.approved}
+				transform={`translate(${gateX} ${ROWS.research})`}
 			>
-				<g className={styles.ledgerShift}>
-					{LEDGER_LINE_WIDTHS.map((width, index) => (
-						<g className="fill-muted-foreground" key={width} opacity={0.55}>
-							<circle cx={244.5} cy={80 + index * 8} r={1.5} />
-							<rect
-								height={2}
-								rx={1}
-								width={width}
-								x={250}
-								y={79 + index * 8}
-							/>
-						</g>
-					))}
-				</g>
-			</svg>
-			<circle
-				className={`${COMPLETE} ${styles.recordMark}`}
-				cx={244.5}
-				cy={72}
-				r={1.5}
-			/>
-			<rect
-				className={`fill-foreground ${styles.record}`}
-				height={2}
-				opacity={0.8}
-				rx={1}
-				width={48}
-				x={250}
-				y={71}
-			/>
-		</g>
-	);
-}
+				<Check />
+			</g>
+			<g className={styles.ask}>
+				<rect
+					className={styles.tag}
+					height={16}
+					rx={4}
+					width={58}
+					x={gateX - 29}
+					y={64}
+				/>
+				<Label x={gateX} y={72}>
+					approve?
+				</Label>
+			</g>
 
-/** The Console card scene, inside the shared decorative `Scene` backdrop. */
-export function ConsoleScene() {
-	return (
-		<Scene id="console">
-			<Stage className={`absolute inset-0 ${styles.root}`}>
-				<svg
-					aria-hidden="true"
-					className="absolute inset-x-0 top-0 mx-auto block h-auto w-full max-w-[26rem] font-mono"
-					fill="none"
-					focusable="false"
-					viewBox="0 0 320 144"
-				>
-					<text className="fill-muted-foreground" fontSize={8.5} x={16} y={25}>
-						12 nodes · 04 models · 28 agents
-					</text>
-					<line
-						className="stroke-border"
-						strokeWidth={0.75}
-						x1={16}
-						x2={304}
-						y1={38}
-						y2={38}
+			<circle className={styles.queued} cx={16} cy={ROWS.triage} r={3.5} />
+			<Label anchor="start" muted x={26} y={ROWS.triage}>
+				triage
+			</Label>
+			<Track y={ROWS.triage} />
+			<Step className={styles.lit} index={0} y={ROWS.triage} />
+			<Step className={styles.triageA} index={1} y={ROWS.triage} />
+			<Step className={styles.triageB} index={2} y={ROWS.triage} />
+			{STEPS.slice(3).map((x, index) => (
+				<Step
+					className={styles.pending}
+					index={index + 3}
+					key={x}
+					y={ROWS.triage}
+				/>
+			))}
+
+			<rect
+				className={styles.panel}
+				height={142}
+				rx={8}
+				width={PANEL_WIDTH}
+				x={PANEL_X}
+				y={8}
+			/>
+			<Label muted x={PANEL_X + PANEL_WIDTH / 2} y={20}>
+				history
+			</Label>
+			<line
+				className={styles.track}
+				x1={PANEL_X}
+				x2={PANEL_X + PANEL_WIDTH}
+				y1={32}
+				y2={32}
+			/>
+			<g className={styles.list}>
+				<Entry className={styles.incoming} y={ENTRY_Y[0] - 16} />
+				{ENTRY_Y.map((y, index) => (
+					<Entry
+						className={
+							index === ENTRY_Y.length - 1 ? styles.outgoing : undefined
+						}
+						key={y}
+						y={y}
 					/>
-					<SupportRun />
-					<ResearchRun />
-					<TriageRun />
-					<AuditLedger />
-				</svg>
-			</Stage>
-		</Scene>
+				))}
+			</g>
+		</SceneCanvas>
 	);
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { ArrowExpand01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { ComposerModelSection } from "@ryu/blocks/composer/composer-acp-sections.ts";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -12,7 +14,6 @@ import {
 } from "@ryu/ui/components/dialog.tsx";
 import { ComposerEditor } from "@ryu/ui/components/editor/composer-editor.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Maximize2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useComposerAgentControls } from "@/components/agent-elements/input/composer-agent-controls.tsx";
 import { MarkdownEditor } from "@/src/components/editor/MarkdownEditor.tsx";
@@ -162,7 +163,7 @@ export function AgentSetupComposer({
 	return (
 		<div
 			className={cn(
-				"overflow-hidden rounded-2xl border border-border/70 bg-muted/60",
+				"overflow-hidden rounded-2xl border border-border bg-muted/50",
 				className
 			)}
 			data-identity-mode={identityMode}
@@ -177,7 +178,7 @@ export function AgentSetupComposer({
 					placeholder={placeholder}
 				/>
 			</div>
-			<div className="flex min-h-10 items-center justify-between gap-2 border-border/60 border-t px-2 py-1.5">
+			<div className="flex h-10 items-center justify-between gap-2 px-2">
 				{expanded ? <span /> : renderPicker()}
 				<Button
 					aria-label="Expand instructions editor"
@@ -185,14 +186,14 @@ export function AgentSetupComposer({
 					onClick={() => setExpanded(true)}
 					size="icon-sm"
 					title="Expand instructions editor"
-					variant="ghost"
+					variant="ghost-muted"
 				>
-					<Maximize2 className="size-4" />
+					<HugeiconsIcon className="size-4" icon={ArrowExpand01Icon} />
 				</Button>
 			</div>
 			{engineNote ? (
 				<p
-					className="border-border/60 border-t px-4 py-2 text-muted-foreground text-xs leading-snug"
+					className="border-border border-t px-4 py-2 text-detail text-muted-foreground"
 					data-testid="agent-setup-engine-note"
 				>
 					{engineNote}

@@ -1,0 +1,368 @@
+/* Compact labels and scaled diagrams share named typography tokens. Keep
+   their established sizes consistent across host and marketplace surfaces. */
+@theme {
+	--color-space-paper-border: #d9d1c5;
+	--color-space-paper: #fffdfa;
+	--color-space-paper-foreground: #37332d;
+	--color-space-paper-border-dark: #49443d;
+	--color-space-paper-dark: #292722;
+	--color-space-paper-foreground-dark: #f2eee5;
+	--color-space-paper-accent: #a88de8;
+	--color-space-paper-heading-placeholder: #e0d9ce;
+	--color-space-paper-heading-placeholder-dark: #4a453e;
+	--color-space-paper-line-placeholder: #e7e0d5;
+	--color-space-paper-line-placeholder-dark: #3f3b35;
+	--color-space-template-surface-dark: #292a2d;
+	--color-space-template-grid: #b9b9b9;
+	--color-space-template-board: #fbfbfb;
+	--color-space-template-board-dark: #242528;
+	--color-space-template-accent: #a78bfa;
+	--color-space-template-paper-foreground: #3d3932;
+	--color-space-template-paper-dark: #24221f;
+	--color-space-template-heading: #77716a;
+	--color-space-template-line: #b9b1a6;
+	--color-space-rail: #f7f7f7;
+	--color-space-rail-foreground: #464646;
+	--color-space-rail-dark: #222326;
+	--color-space-rail-foreground-dark: #d5d5d5;
+	--color-space-navigation-active: #e45d57;
+	--color-space-navigation-foreground: #b7443e;
+	--color-space-navigation-surface-dark: #2b2c30;
+	--color-space-navigation-foreground-dark: #ff8c84;
+	--color-space-rail-icon: #e9e9e9;
+	--color-space-rail-icon-dark: #34353a;
+	--color-space-home: #f4f4f4;
+	--color-space-home-foreground: #242424;
+	--color-space-home-dark: #1b1c1f;
+	--color-space-home-foreground-dark: #f1f1f1;
+	--color-space-search-dark: #292a2e;
+	--tracking-table-label: 0.14em;
+	--tracking-space-greeting: -0.03em;
+	--shadow-space-paper: 0 2px 6px rgba(44, 39, 30, 0.14);
+	--color-realm-workspace-background: #121126;
+	--color-realm-site-surface: var(--color-amber-100);
+	--color-realm-site-surface-dark: var(--color-amber-900);
+	--color-realm-terminal-background: var(--color-zinc-950);
+	--color-realm-terminal-foreground: var(--color-zinc-100);
+	--color-realm-terminal-muted: var(--color-zinc-400);
+	--color-realm-terminal-label: var(--color-zinc-500);
+	--color-realm-review-marker: var(--color-amber-400);
+	--color-realm-capacity-marker: var(--color-amber-500);
+	--color-realm-review-foreground: var(--color-amber-900);
+	--color-realm-review-foreground-dark: var(--color-amber-100);
+	--color-realm-complete: var(--color-emerald-700);
+	--color-realm-complete-dark: var(--color-emerald-400);
+	--color-realm-progress: var(--color-amber-700);
+	--color-realm-progress-dark: var(--color-amber-300);
+	--color-realm-brief-foreground: var(--color-amber-800);
+	--color-realm-brief-foreground-dark: var(--color-amber-200);
+	--color-realm-video-primary: var(--color-violet-200);
+	--color-realm-video-primary-dark: var(--color-violet-900);
+	--color-realm-video-secondary: var(--color-emerald-200);
+	--color-realm-video-secondary-dark: var(--color-emerald-900);
+	--radius-glass: 3rem;
+	--color-image-viewer-foreground: var(--color-white);
+	--color-image-viewer-background: var(--color-black);
+	--color-support-warning-hover: var(--color-white);
+	--spacing-image-viewer-icon: 15px;
+	--text-image-viewer-caption: 12.5px;
+	--shadow-image-viewer-focus: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+	--radius-glyph-compact: 3px;
+	--radius-artwork-compact: 5px;
+	--radius-artwork-mention: 4px;
+	--color-glass-content: var(--color-white);
+	--color-pitch-risk: var(--color-rose-300);
+	--color-pitch-risk-emphasis: var(--color-rose-200);
+	--color-pitch-risk-indicator: var(--color-rose-400);
+	--color-pitch-success: var(--color-emerald-400);
+	--tracking-eyebrow: 0.12em;
+	--tracking-label: 0.15em;
+	--tracking-section: 0.16em;
+	--tracking-section-label: 0.1em;
+	--tracking-display: 0.2em;
+	--leading-pitch-hero: 1.04;
+	--text-diagram: 6px;
+	--text-miniature: 7px;
+	--text-tiny: 8px;
+	--text-micro: 9px;
+	--text-compact: 10px;
+	--text-caption: 11px;
+	--text-detail: 13px;
+	--text-detail--line-height: 1.125rem;
+	--text-comfortable: 15px;
+	--text-comfortable--line-height: 1.5rem;
+}
+
+/* Motion tokens (design direction §10). CSS transitions read these; gesture
+   motion keeps using springs.ts. `static` emits the variables even when no
+   utility references them, so `duration-(--duration-fast)` and inline
+   `var(--duration-base)` always resolve. The --ease-* entries also generate
+   `ease-enter`, `ease-exit` and `ease-move` utilities. */
+@theme static {
+	--duration-fast: 150ms;
+	--duration-base: 200ms;
+	--duration-slow: 280ms;
+	--ease-enter: cubic-bezier(0.19, 1, 0.22, 1);
+	--ease-exit: cubic-bezier(0.4, 0, 1, 1);
+	--ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@theme inline {
+	--color-suggestion-insert-surface: var(--color-emerald-100);
+	--color-suggestion-insert-foreground: var(--color-emerald-700);
+	--color-suggestion-remove-surface: var(--color-red-100);
+	--color-suggestion-remove-foreground: var(--color-red-700);
+
+	@keyframes scroll-fade-reveal-t {
+		from {
+			--scroll-fade-t: 0px;
+		}
+		to {
+			--scroll-fade-t: var(
+				--_scroll-fade-size-t,
+				var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+			);
+		}
+	}
+
+	@keyframes scroll-fade-reveal-b {
+		from {
+			--scroll-fade-b: var(
+				--_scroll-fade-size-b,
+				var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+			);
+		}
+		to {
+			--scroll-fade-b: 0px;
+		}
+	}
+
+	@keyframes scroll-fade-reveal-s {
+		from {
+			--scroll-fade-s: 0px;
+		}
+		to {
+			--scroll-fade-s: var(
+				--_scroll-fade-size-s,
+				var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+			);
+		}
+	}
+
+	@keyframes scroll-fade-reveal-e {
+		from {
+			--scroll-fade-e: var(
+				--_scroll-fade-size-e,
+				var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+			);
+		}
+		to {
+			--scroll-fade-e: 0px;
+		}
+	}
+}
+
+/* A settings pane: Apple's grouped background, with settings cards raised to
+   the card surface inside it. See `--grouped` above. */
+@utility grouped-pane {
+	--grouped-card: var(--card);
+	background-color: var(--grouped);
+}
+
+@utility scroll-fade {
+	--_scroll-fade-size-t: var(
+		--scroll-fade-t-size,
+		var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+	);
+	--_scroll-fade-size-b: var(
+		--scroll-fade-b-size,
+		var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+	);
+	/* Eased (sine in-out) stops instead of a linear ramp: a linear fade shows a
+	   visible band where it meets the solid region. */
+	--scroll-fade-block: linear-gradient(
+		to bottom,
+		transparent 0,
+		rgb(0 0 0 / 0.146) calc(var(--scroll-fade-t, 0px) * 0.25),
+		rgb(0 0 0 / 0.5) calc(var(--scroll-fade-t, 0px) * 0.5),
+		rgb(0 0 0 / 0.854) calc(var(--scroll-fade-t, 0px) * 0.75),
+		#000 var(--scroll-fade-t, 0px),
+		#000 calc(100% - var(--scroll-fade-b, 0px)),
+		rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-b, 0px) * 0.75),
+		rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-b, 0px) * 0.5),
+		rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-b, 0px) * 0.25),
+		transparent 100%
+	);
+	-webkit-mask-image: var(--scroll-fade-mask, var(--scroll-fade-block));
+	mask-image: var(--scroll-fade-mask, var(--scroll-fade-block));
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-composite: source-in;
+	mask-composite: intersect;
+
+	@supports (animation-timeline: scroll()) {
+		animation:
+			scroll-fade-reveal-t 1ms ease-in-out,
+			scroll-fade-reveal-b 1ms ease-in-out;
+		animation-timeline: scroll(self y), scroll(self y);
+		animation-range:
+			0 var(--scroll-fade-reveal, calc(var(--spacing) * 24)),
+			calc(100% - var(--scroll-fade-reveal, calc(var(--spacing) * 24))) 100%;
+		animation-fill-mode: both;
+	}
+
+	@supports not (animation-timeline: scroll()) {
+		--scroll-fade-t: var(--_scroll-fade-size-t);
+		--scroll-fade-b: var(--_scroll-fade-size-b);
+	}
+}
+
+@utility scroll-fade-x {
+	--_scroll-fade-size-s: var(
+		--scroll-fade-s-size,
+		var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+	);
+	--_scroll-fade-size-e: var(
+		--scroll-fade-e-size,
+		var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+	);
+	--scroll-fade-inline: linear-gradient(
+		to right,
+		transparent 0,
+		rgb(0 0 0 / 0.146) calc(var(--scroll-fade-s, 0px) * 0.25),
+		rgb(0 0 0 / 0.5) calc(var(--scroll-fade-s, 0px) * 0.5),
+		rgb(0 0 0 / 0.854) calc(var(--scroll-fade-s, 0px) * 0.75),
+		#000 var(--scroll-fade-s, 0px),
+		#000 calc(100% - var(--scroll-fade-e, 0px)),
+		rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-e, 0px) * 0.75),
+		rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-e, 0px) * 0.5),
+		rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-e, 0px) * 0.25),
+		transparent 100%
+	);
+	-webkit-mask-image: var(--scroll-fade-mask, var(--scroll-fade-inline));
+	mask-image: var(--scroll-fade-mask, var(--scroll-fade-inline));
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-composite: source-in;
+	mask-composite: intersect;
+
+	&:where([dir="rtl"], [dir="rtl"] *) {
+		--scroll-fade-inline: linear-gradient(
+			to left,
+			transparent 0,
+			rgb(0 0 0 / 0.146) calc(var(--scroll-fade-s, 0px) * 0.25),
+			rgb(0 0 0 / 0.5) calc(var(--scroll-fade-s, 0px) * 0.5),
+			rgb(0 0 0 / 0.854) calc(var(--scroll-fade-s, 0px) * 0.75),
+			#000 var(--scroll-fade-s, 0px),
+			#000 calc(100% - var(--scroll-fade-e, 0px)),
+			rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-e, 0px) * 0.75),
+			rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-e, 0px) * 0.5),
+			rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-e, 0px) * 0.25),
+			transparent 100%
+		);
+	}
+
+	@supports (animation-timeline: scroll()) {
+		animation:
+			scroll-fade-reveal-s 1ms ease-in-out,
+			scroll-fade-reveal-e 1ms ease-in-out;
+		animation-timeline: scroll(self inline), scroll(self inline);
+		animation-range:
+			0 var(--scroll-fade-reveal, calc(var(--spacing) * 24)),
+			calc(100% - var(--scroll-fade-reveal, calc(var(--spacing) * 24))) 100%;
+		animation-fill-mode: both;
+	}
+
+	@supports not (animation-timeline: scroll()) {
+		--scroll-fade-s: var(--_scroll-fade-size-s);
+		--scroll-fade-e: var(--_scroll-fade-size-e);
+	}
+}
+
+@utility scroll-fade-b {
+	--_scroll-fade-size-b: var(
+		--scroll-fade-b-size,
+		var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
+	);
+	--scroll-fade-mask: linear-gradient(
+		to bottom,
+		#000 0,
+		#000 calc(100% - var(--scroll-fade-b, 0px)),
+		rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-b, 0px) * 0.75),
+		rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-b, 0px) * 0.5),
+		rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-b, 0px) * 0.25),
+		transparent 100%
+	);
+	-webkit-mask-image: var(--scroll-fade-mask);
+	mask-image: var(--scroll-fade-mask);
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-composite: source-in;
+	mask-composite: intersect;
+
+	@supports (animation-timeline: scroll()) {
+		animation: scroll-fade-reveal-b 1ms ease-in-out;
+		animation-timeline: scroll(self y);
+		animation-range: calc(
+				100% -
+				var(--scroll-fade-reveal, calc(var(--spacing) * 24))
+			)
+			100%;
+		animation-fill-mode: both;
+	}
+
+	@supports not (animation-timeline: scroll()) {
+		--scroll-fade-b: var(--_scroll-fade-size-b);
+	}
+}
+
+/* Dissolve the trailing edge of a clipped one-line label instead of cutting it
+   with an ellipsis — the same treatment the desktop sidebar's chat titles wear
+   (`OverflowTooltip fade`). Written as a utility because two apps' account-menu
+   triggers need it and neither can import the desktop's component. Pair it with
+   `overflow-hidden whitespace-nowrap` and a max width; a label that fits is
+   unaffected, since there is nothing past the mask's opaque stop to fade. */
+@utility fade-text-edge {
+	--text-fade-edge: linear-gradient(
+		to right,
+		#000 calc(100% - 2.5rem),
+		rgb(0 0 0 / 0.854) calc(100% - 1.875rem),
+		rgb(0 0 0 / 0.5) calc(100% - 1.25rem),
+		rgb(0 0 0 / 0.146) calc(100% - 0.625rem),
+		transparent
+	);
+	-webkit-mask-image: var(--text-fade-edge);
+	mask-image: var(--text-fade-edge);
+}
+
+/* Eased scrim for legible text over imagery. Sine in-out alpha stops keep the
+   image visible higher up than a linear `from-black/80 to-transparent` ramp and
+   need less height to keep the label readable. Tune with `--scrim-alpha`. */
+@utility scrim-t {
+	background-image: linear-gradient(
+		to top,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 1)) 0,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.854)) 25%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.5)) 50%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.146)) 75%,
+		rgb(0 0 0 / 0) 100%
+	);
+}
+
+@utility scrim-b {
+	background-image: linear-gradient(
+		to bottom,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 1)) 0,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.854)) 25%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.5)) 50%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.146)) 75%,
+		rgb(0 0 0 / 0) 100%
+	);
+}
+
+/* Reorder/drop markers are deliberately pills even when they are only a couple
+   of pixels thick. Keep the cap geometry shared by tabs, sidebar sections, and
+   editor drag targets instead of relying on each surface to remember it. */
+@utility reorder-drop-indicator {
+	border-radius: 9999px;
+}

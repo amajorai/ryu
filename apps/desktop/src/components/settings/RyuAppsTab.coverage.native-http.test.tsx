@@ -50,15 +50,8 @@ const { queryClient: appQueryClient } = await import(
 );
 const { useNodeStore } = await import("@/src/store/useNodeStore.ts");
 const { RyuAppsTab } = await import("./RyuAppsTab.tsx");
-const {
-	button,
-	flush,
-	installAnimationApis,
-	isDisabled,
-	maybeButton,
-	text,
-	until,
-} = await import("./unswept-a.test-support.ts");
+const { button, flush, installAnimationApis, isDisabled, text, until } =
+	await import("./unswept-a.test-support.ts");
 installAnimationApis();
 
 // ── Native Core fixture ─────────────────────────────────────────────────────
@@ -324,12 +317,9 @@ async function remount(): Promise<void> {
 	await until(() => !text().includes("Loading installed Ryu apps"), "roster");
 }
 
-/** The card block for one listed app, found by its displayed id. */
+/** The row for one listed app, found by its id. */
 function appBlock(id: string): HTMLElement {
-	const idLine = [...document.querySelectorAll("p.font-mono")].find(
-		(line) => line.textContent === id
-	);
-	const block = idLine?.parentElement?.parentElement?.parentElement;
+	const block = document.querySelector<HTMLElement>(`[data-app-id="${id}"]`);
 	if (!block) {
 		throw new Error(`App ${id} is not listed: ${text()}`);
 	}
@@ -340,15 +330,33 @@ function blockText(id: string): string {
 	return (appBlock(id).textContent ?? "").replace(/\s+/g, " ");
 }
 
+/** The app's enabled switch. */
+function appSwitch(id: string): HTMLElement {
+	const control = appBlock(id).querySelector<HTMLElement>('[role="switch"]');
+	if (!control) {
+		throw new Error(`App ${id} has no switch`);
+	}
+	return control;
+}
+
+/** The row's state the way it reads: on or off, plus "Built in" provenance. */
 function badges(id: string): string[] {
-	return [...appBlock(id).querySelectorAll('[data-slot="badge"]')].map(
-		(badge) => badge.textContent ?? ""
-	);
+	const state =
+		appSwitch(id).getAttribute("aria-checked") === "true"
+			? "Enabled"
+			: "Disabled";
+	return appBlock(id).hasAttribute("data-built-in")
+		? [state, "Built in"]
+		: [state];
+}
+
+function switchLocked(id: string): boolean {
+	return appSwitch(id).hasAttribute("data-disabled");
 }
 
 function listedIds(): string[] {
-	return [...document.querySelectorAll("p.font-mono")].map(
-		(line) => line.textContent ?? ""
+	return [...document.querySelectorAll("[data-app-id]")].map(
+		(row) => row.getAttribute("data-app-id") ?? ""
 	);
 }
 
@@ -436,19 +444,17 @@ test("lists only installed companion or built-in apps with state, provenance, pe
 	expect(blockText(MEETINGS)).toContain(
 		"Permissions: microphone.capture, notes.write"
 	);
-	expect(maybeButton("Disable", appBlock(MEETINGS)) !== null).toBe(true);
+	expect(switchLocked(MEETINGS)).toBe(false);
 
 	expect(badges(BROWSER)).toEqual(["Enabled", "Built in"]);
 	expect(blockText(BROWSER)).toContain("Permissions: None approved");
 
-	// Mandatory: Core refuses to disable it, so no control is offered.
+	// Mandatory: Core refuses to disable it, so its switch is locked on.
 	expect(badges(SHELL)).toEqual(["Enabled", "Built in"]);
-	expect(appBlock(SHELL).querySelectorAll("button")).toHaveLength(0);
+	expect(switchLocked(SHELL)).toBe(true);
 
 	expect(badges(LINEAR)).toEqual(["Disabled"]);
-	expect(blockText(LINEAR)).toContain("OAuth services declared: linear");
-	expect(maybeButton("Enable", appBlock(LINEAR)) !== null).toBe(true);
-	expect(blockText(MEETINGS)).not.toContain("OAuth services declared");
+	expect(switchLocked(LINEAR)).toBe(false);
 
 	// The embedded accounts section lists exactly the declared server.
 	await until(() => oauthCard("Linear") !== null, "OAuth card");
@@ -469,10 +475,10 @@ test("Disable and Enable send the lifecycle request, render Core's acknowledged 
 	await mount();
 	await until(() => listedIds().length === 4, "roster");
 
-	await act(async () => button("Disable", appBlock(MEETINGS)).click());
+	await act(async () => appSwitch(MEETINGS).click());
 	await until(() => badges(MEETINGS)[0] === "Disabled", "disabled badge");
 	expect(lifecyclePosts()).toEqual([`/api/plugins/${MEETINGS}/disable`]);
-	expect(maybeButton("Enable", appBlock(MEETINGS)) !== null).toBe(true);
+	expect(switchLocked(MEETINGS)).toBe(false);
 	// Core cleared the approved grants with the disable, and the tab shows it.
 	await until(
 		() => blockText(MEETINGS).includes("Permissions: None approved"),
@@ -495,7 +501,7 @@ test("Disable and Enable send the lifecycle request, render Core's acknowledged 
 	expect(isDisabled(button("Connect", oauthCard("Linear") ?? document))).toBe(
 		true
 	);
-	await act(async () => button("Enable", appBlock(LINEAR)).click());
+	await act(async () => appSwitch(LINEAR).click());
 	await until(() => badges(LINEAR)[0] === "Enabled", "Linear enabled");
 	expect(lifecyclePosts().at(-1)).toBe(`/api/plugins/${LINEAR}/enable`);
 	await until(
@@ -532,14 +538,14 @@ test("refused toggles roll back to Core's state and explain why, by display name
 			status: 409,
 		},
 	];
-	await act(async () => button("Disable", appBlock(MEETINGS)).click());
+	await act(async () => appSwitch(MEETINGS).click());
 	await until(
 		() =>
 			text().includes("Meetings is needed by Linear. Disable Linear first."),
 		"dependency refusal"
 	);
 	expect(badges(MEETINGS)).toEqual(["Enabled"]);
-	expect(maybeButton("Disable", appBlock(MEETINGS)) !== null).toBe(true);
+	expect(switchLocked(MEETINGS)).toBe(false);
 	expect(apps.get(MEETINGS)?.enabled).toBe(true);
 
 	armed = [
@@ -549,7 +555,7 @@ test("refused toggles roll back to Core's state and explain why, by display name
 			status: 503,
 		},
 	];
-	await act(async () => button("Enable", appBlock(LINEAR)).click());
+	await act(async () => appSwitch(LINEAR).click());
 	await until(
 		() => text().includes("Gateway unreachable (fail-closed): gateway offline"),
 		"gateway refusal"
@@ -559,7 +565,7 @@ test("refused toggles roll back to Core's state and explain why, by display name
 	expect(apps.get(LINEAR)?.enabled).toBe(false);
 
 	// A success clears the banner.
-	await act(async () => button("Disable", appBlock(BROWSER)).click());
+	await act(async () => appSwitch(BROWSER).click());
 	await until(() => badges(BROWSER)[0] === "Disabled", "browser disabled");
 	expect(text()).not.toContain("Gateway unreachable");
 	expect(apps.get(BROWSER)?.enabled).toBe(false);
@@ -581,7 +587,7 @@ test("a Core acknowledgement for a different app is not reported as success and 
 			status: 200,
 		},
 	];
-	await act(async () => button("Enable", appBlock(LINEAR)).click());
+	await act(async () => appSwitch(LINEAR).click());
 	await until(
 		() =>
 			text().includes(
@@ -624,5 +630,5 @@ test("a failed roster read shows Core's error, and a node with no qualifying app
 		"empty state"
 	);
 	expect(text()).not.toContain("App and plugin accounts");
-	expect(document.querySelectorAll("button")).toHaveLength(0);
+	expect(document.querySelectorAll('[role="switch"]')).toHaveLength(0);
 });

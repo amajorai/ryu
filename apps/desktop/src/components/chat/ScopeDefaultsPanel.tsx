@@ -113,7 +113,7 @@ function ScopeEditor({
 		}
 	};
 	return (
-		<fieldset className="flex flex-col gap-3 rounded-lg border border-border/60 p-2.5">
+		<fieldset className="flex flex-col gap-3 rounded-lg border border-border p-2.5">
 			<legend className="px-1 font-medium text-xs">{label}</legend>
 			<ModelDefaultsFields
 				disabled={busy}

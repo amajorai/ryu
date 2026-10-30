@@ -22,13 +22,9 @@
 import type {
 	RawViewContribution,
 	SourceItem,
-	ViewAction,
-	ViewActionContext,
 	ViewBadge,
 	ViewContribution,
-	ViewField,
 	ViewSpec,
-	ViewTone,
 } from "@ryu/app-host/views";
 import {
 	validateView,
@@ -36,92 +32,16 @@ import {
 	viewSpecSchema,
 } from "@ryu/app-host/views";
 import { useState } from "react";
+import { CompactForm } from "./declarative-view-form.tsx";
+import {
+	ActionPanel,
+	type IslandViewActionHandler,
+	type PanelEntry,
+	ToneBadges,
+	withCtx,
+} from "./declarative-view-parts.tsx";
 
-/** Fires when a user activates an action row. The renderer supplies the ctx
- *  (selected `item`, collected form `values`); the island shell forwards the
- *  action to the declarative http tier or the owning app. */
-export type IslandViewActionHandler = (
-	action: ViewAction,
-	ctx: ViewActionContext
-) => void;
-
-const TONE_DOT = {
-	neutral: "bg-white/40",
-	success: "bg-success",
-	warning: "bg-warning",
-	danger: "bg-destructive",
-	info: "bg-info",
-} satisfies Record<ViewTone, string>;
-
-function ToneBadges({ badges }: { badges?: ViewBadge[] }) {
-	if (!badges || badges.length === 0) {
-		return null;
-	}
-	return (
-		<span className="flex items-center gap-1">
-			{badges.map((b, i) => (
-				<span
-					className="type-compact flex items-center gap-1 text-white/50"
-					key={`${b.label}-${i}`}
-				>
-					<span
-						className={`size-1.5 rounded-full ${TONE_DOT[b.tone ?? "neutral"]}`}
-					/>
-					{b.label}
-				</span>
-			))}
-		</span>
-	);
-}
-
-/** One entry of the foot ActionPanel: the action plus the ctx it fires with. */
-interface PanelEntry {
-	action: ViewAction;
-	ctx: ViewActionContext;
-}
-
-/** The Raycast-style ActionPanel: a compact row of pill buttons at the foot of the
- *  overlay. Primary reads brighter; danger reads red. Each entry carries its own
- *  ctx (the selected item / form values) so `{{…}}` templating resolves upstream. */
-function ActionPanel({
-	entries,
-	onAction,
-}: {
-	entries: PanelEntry[];
-	onAction?: IslandViewActionHandler;
-}) {
-	if (entries.length === 0) {
-		return null;
-	}
-	return (
-		<div className="flex flex-wrap items-center gap-1.5 border-border border-t px-2 pt-2">
-			{entries.map(({ action, ctx }) => (
-				<button
-					className={`rounded-md px-2 py-1 text-xs transition-colors ${
-						action.style === "primary"
-							? "bg-secondary text-white hover:bg-white/25"
-							: action.style === "danger"
-								? "text-status-destructive hover:bg-destructive/15"
-								: "text-white/70 hover:bg-muted"
-					}`}
-					key={action.id}
-					onClick={() => onAction?.(action, ctx)}
-					type="button"
-				>
-					{action.label}
-				</button>
-			))}
-		</div>
-	);
-}
-
-/** Actions with a shared ctx → panel entries. */
-function withCtx(
-	actions: ViewAction[] | undefined,
-	ctx: ViewActionContext
-): PanelEntry[] {
-	return (actions ?? []).map((action) => ({ action, ctx }));
-}
+export type { IslandViewActionHandler } from "./declarative-view-parts.tsx";
 
 /** A single dense list row (list-detail / data-table share this shape). Selectable:
  *  the foot ActionPanel fires on the selected row, Raycast-style. */
@@ -144,26 +64,31 @@ function Row({
 		<button
 			aria-pressed={selected}
 			className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
-				selected ? "bg-muted" : "hover:bg-card"
+				selected ? "bg-foreground/10" : "hover:bg-foreground/5"
 			}`}
 			onClick={onSelect}
 			type="button"
 		>
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
-					<span className="truncate text-sm text-white/90" title={title}>
+					<span className="truncate text-foreground text-sm" title={title}>
 						{title}
 					</span>
 					<ToneBadges badges={badges} />
 				</div>
 				{subtitle ? (
-					<div className="truncate text-white/45 text-xs" title={subtitle}>
+					<div
+						className="truncate text-detail text-muted-foreground"
+						title={subtitle}
+					>
 						{subtitle}
 					</div>
 				) : null}
 			</div>
 			{accessory ? (
-				<span className="type-compact shrink-0 text-white/40">{accessory}</span>
+				<span className="shrink-0 text-muted-foreground text-xs">
+					{accessory}
+				</span>
 			) : null}
 		</button>
 	);
@@ -171,7 +96,9 @@ function Row({
 
 function EmptyRow({ text }: { text: string }) {
 	return (
-		<div className="px-2 py-4 text-center text-white/40 text-xs">{text}</div>
+		<div className="px-2 py-4 text-center text-muted-foreground text-xs">
+			{text}
+		</div>
 	);
 }
 
@@ -275,116 +202,6 @@ function DataTable({
 	);
 }
 
-/** One compact, controlled form field in the island idiom. */
-function CompactField({
-	field,
-	value,
-	onChange,
-}: {
-	field: ViewField;
-	value: ViewField["value"];
-	onChange: (next: NonNullable<ViewField["value"]>) => void;
-}) {
-	if (field.type === "switch") {
-		const on = value === true;
-		return (
-			<button
-				aria-label={field.label}
-				aria-pressed={on}
-				className={`rounded-md px-2 py-0.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${
-					on ? "bg-secondary text-white" : "text-white/50 hover:bg-muted"
-				}`}
-				onClick={() => onChange(!on)}
-				type="button"
-			>
-				{on ? "On" : "Off"}
-			</button>
-		);
-	}
-	if (field.type === "select") {
-		return (
-			<select
-				aria-label={field.label}
-				className="max-w-[10rem] rounded-md bg-muted px-1.5 py-0.5 text-white/80 text-xs outline-none focus-visible:ring-1 focus-visible:ring-white/50"
-				onChange={(e) => onChange(e.target.value)}
-				value={String(value ?? "")}
-			>
-				{(field.options ?? []).map((opt) => (
-					<option key={opt.value} value={opt.value}>
-						{opt.label}
-					</option>
-				))}
-			</select>
-		);
-	}
-	return (
-		<input
-			aria-label={field.label}
-			className="max-w-[10rem] rounded-md bg-muted px-1.5 py-0.5 text-white/80 text-xs outline-none placeholder:text-white/30 focus-visible:ring-1 focus-visible:ring-white/50"
-			onChange={(e) =>
-				onChange(
-					field.type === "number" && e.target.value !== ""
-						? Number(e.target.value)
-						: e.target.value
-				)
-			}
-			placeholder={field.placeholder}
-			type={field.type === "number" ? "number" : "text"}
-			value={String(value ?? "")}
-		/>
-	);
-}
-
-type CompactFormValues = Record<string, ViewField["value"]>;
-
-function initialFormValues(fields: ViewField[]) {
-	const values: CompactFormValues = {};
-	for (const field of fields) {
-		values[field.id] = field.value ?? (field.type === "switch" ? false : "");
-	}
-	return values;
-}
-
-function CompactForm({
-	spec,
-	onAction,
-}: {
-	spec: Extract<ViewSpec, { view: "form" }>;
-	onAction?: IslandViewActionHandler;
-}) {
-	// Controlled inputs: the collected values ARE the form-submit contract — the
-	// typed field values handed to every action fired from this form.
-	const [values, setValues] = useState<CompactFormValues>(() =>
-		initialFormValues(spec.fields)
-	);
-	const setField = (id: string, next: NonNullable<ViewField["value"]>) =>
-		setValues((prev) => ({ ...prev, [id]: next }));
-	const entries: PanelEntry[] = [
-		...withCtx(spec.submit ? [spec.submit] : undefined, { values }),
-		...withCtx(spec.actions, { values }),
-	];
-	return (
-		<div className="flex flex-col">
-			<div className="flex flex-col gap-1 p-2">
-				{spec.fields.map((field) => (
-					<div
-						className="flex items-center justify-between gap-2 text-xs"
-						key={field.id}
-					>
-						<span className="text-white/50">{field.label}</span>
-						<CompactField
-							field={field}
-							onChange={(next) => setField(field.id, next)}
-							value={values[field.id]}
-						/>
-					</div>
-				))}
-			</div>
-			<ActionPanel entries={entries} onAction={onAction} />
-		</div>
-	);
-}
-
 /**
  * Render a {@link ViewSpec} in the island's compact idiom. `sourceItems` carries the
  * shell-fetched rows of a `source`-declaring `list-detail` spec (the island shell owns
@@ -441,7 +258,9 @@ export function IslandDeclarativeView({
 			return (
 				<div className="flex flex-col">
 					{spec.title ? (
-						<div className="px-2 pt-2 text-white/50 text-xs">{spec.title}</div>
+						<div className="px-2 pt-2 font-medium text-foreground text-sm">
+							{spec.title}
+						</div>
 					) : null}
 					<ActionPanel
 						entries={withCtx(spec.actions, {})}
@@ -456,10 +275,10 @@ export function IslandDeclarativeView({
 					{spec.filters.flatMap((filter) =>
 						filter.options.map((opt) => (
 							<span
-								className={`rounded-md px-2 py-0.5 text-xs ${
+								className={`rounded-lg px-2 py-0.5 text-xs ${
 									filter.value === opt.value
-										? "bg-secondary text-white"
-										: "text-white/50"
+										? "bg-foreground/10 text-foreground"
+										: "text-muted-foreground"
 								}`}
 								key={`${filter.id}-${opt.value}`}
 							>
@@ -473,9 +292,13 @@ export function IslandDeclarativeView({
 		case "empty-state":
 			return (
 				<div className="flex flex-col items-center gap-1 p-4 text-center">
-					<div className="text-sm text-white/80">{spec.title}</div>
+					<div className="font-medium text-foreground text-sm">
+						{spec.title}
+					</div>
 					{spec.description ? (
-						<div className="text-white/45 text-xs">{spec.description}</div>
+						<div className="text-detail text-muted-foreground">
+							{spec.description}
+						</div>
 					) : null}
 					{spec.action ? (
 						<ActionPanel
@@ -490,13 +313,18 @@ export function IslandDeclarativeView({
 			return (
 				<div className="grid grid-cols-2 gap-1.5 p-2">
 					{spec.stats.map((stat) => (
-						<div className="rounded-lg bg-card px-2 py-1.5" key={stat.id}>
-							<div className="type-compact text-white/45">{stat.label}</div>
-							<div className="font-medium text-sm text-white/90">
+						<div
+							className="rounded-lg bg-foreground/5 px-2 py-1.5"
+							key={stat.id}
+						>
+							<div className="text-muted-foreground text-xs">{stat.label}</div>
+							<div className="font-medium text-foreground text-sm">
 								{stat.value}
 							</div>
 							{stat.delta ? (
-								<div className="type-compact text-white/40">{stat.delta}</div>
+								<div className="text-muted-foreground text-xs">
+									{stat.delta}
+								</div>
 							) : null}
 						</div>
 					))}
@@ -536,7 +364,7 @@ export function IslandViewPanel({
 	return (
 		<div className="flex flex-col">
 			{view.title ? (
-				<div className="px-2 pt-2 pb-1 font-medium text-white/70 text-xs">
+				<div className="px-2 pt-2 pb-1 font-medium text-foreground text-sm">
 					{view.title}
 				</div>
 			) : null}

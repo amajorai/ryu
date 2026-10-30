@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-	ACTION_PILL_WIDTH,
 	DETAIL_CONTENT_VPAD,
 	DETAIL_MAX_H,
 	DETAIL_SIZES,
@@ -9,7 +8,6 @@ import {
 	pillHeight,
 	pillOverflows,
 	SPLIT_GAP,
-	SUGGESTION_STACK_GAP,
 } from "./island-config.ts";
 
 test("native material follows the logo and detail without filling their gap", () => {
@@ -25,20 +23,13 @@ test("native material follows the logo and detail without filling their gap", ()
 	).toEqual([{ x: 0, y: 0, ...DETAIL_SIZES.expanded }]);
 });
 
-test("suggestion actions remain separate native material pills", () => {
-	const contours = islandMaterialContours(
-		true,
-		DETAIL_SIZES.suggestion,
-		"suggestion"
-	);
-	expect(contours).toHaveLength(5);
-	expect(contours[2]?.x).toBe(LOGO_CIRCLE.width + SPLIT_GAP);
-	expect(contours[2]?.y).toBe(
-		DETAIL_SIZES.suggestion.height + SUGGESTION_STACK_GAP
-	);
-	expect((contours[3]?.x ?? 0) - (contours[2]?.x ?? 0)).toBe(
-		ACTION_PILL_WIDTH + SPLIT_GAP
-	);
+test("suggestion actions sit inside the chip, so it adds no extra material shapes", () => {
+	expect(
+		islandMaterialContours(true, DETAIL_SIZES.suggestion, "suggestion")
+	).toEqual([
+		{ x: 0, y: 0, ...LOGO_CIRCLE },
+		{ x: LOGO_CIRCLE.width + SPLIT_GAP, y: 0, ...DETAIL_SIZES.suggestion },
+	]);
 });
 
 describe("pillHeight", () => {

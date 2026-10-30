@@ -4,6 +4,8 @@
 // recordings on the active node. Picking one hands its id to `onPick`, which the
 // composer controls turn into a chat attachment (context summary + key frames).
 
+import { Film01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -11,7 +13,6 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
-import { IconMovie } from "@tabler/icons-react";
 import { useMemo } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { useClipStore } from "@/src/store/useClipStore.ts";
@@ -57,7 +58,10 @@ export function ClipsList({ onPick }: ClipsListProps) {
 					/>
 				}
 			>
-				<IconMovie className="size-4 text-muted-foreground" />
+				<HugeiconsIcon
+					className="size-4 text-muted-foreground"
+					icon={Film01Icon}
+				/>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="start" className="min-w-56" sideOffset={6}>
 				{clips.length === 0 ? (
@@ -66,7 +70,10 @@ export function ClipsList({ onPick }: ClipsListProps) {
 					clips.map((clip) => (
 						<DropdownMenuItem key={clip.id} onClick={() => onPick(clip.id)}>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
-								<IconMovie className="size-4 shrink-0 text-muted-foreground" />
+								<HugeiconsIcon
+									className="size-4 shrink-0 text-muted-foreground"
+									icon={Film01Icon}
+								/>
 								<span
 									className="truncate"
 									title={clip.title || "Untitled clip"}

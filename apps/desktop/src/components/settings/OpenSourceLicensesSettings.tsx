@@ -121,7 +121,7 @@ export function OpenSourceLicensesSettings() {
 								</Button>
 							</div>
 						) : (
-							<pre className="type-caption select-text whitespace-pre-wrap break-words p-6 font-mono text-foreground/90 leading-relaxed md:text-xs">
+							<pre className="select-text whitespace-pre-wrap break-words p-6 font-mono text-foreground/90 text-xs leading-relaxed md:text-xs">
 								{noticeText}
 							</pre>
 						)}

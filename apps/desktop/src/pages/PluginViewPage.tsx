@@ -209,7 +209,11 @@ export default function PluginViewPage({
 					</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
-					<Button onClick={() => openTab("/apps", { title: "Apps" })} size="sm">
+					<Button
+						onClick={() => openTab("/apps", { title: "Apps" })}
+						size="sm"
+						variant="outline"
+					>
 						Open Apps
 					</Button>
 				</EmptyContent>

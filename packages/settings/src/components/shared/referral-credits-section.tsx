@@ -1,8 +1,7 @@
 "use client";
 
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Progress } from "@ryu/ui/components/progress.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
 import type {
 	CreditReferralDashboard,
@@ -11,7 +10,6 @@ import type {
 } from "../../utils/api-client.ts";
 import { settingsApi } from "../../utils/api-client.ts";
 import {
-	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -65,9 +63,9 @@ function formatDate(iso: string): string {
  * the friend to pay, the second waits on Ryu to mint — so neither may read like
  * `denied`, which is the only state that will never pay. The old "Not paid" for
  * denied against "Waiting on them" for pending put the two a hair apart in a
- * list where they sit next to each other; the wording (and the badge variant)
- * now match the web dashboard's, so the same referral reads the same on both
- * surfaces.
+ * list where they sit next to each other; the wording now matches the web
+ * dashboard's, so the same referral reads the same on both surfaces. Every
+ * state is plain muted text: none of them is an alarm.
  */
 const STATE_LABELS = {
 	pending: "In progress",
@@ -75,15 +73,6 @@ const STATE_LABELS = {
 	paid: "Earned",
 	denied: "Closed",
 } satisfies Record<CreditReferralState, string>;
-
-const STATE_VARIANTS = {
-	pending: "secondary",
-	activated: "secondary",
-	// `outline` and not `destructive`: a closed referral is a payout that will
-	// not happen, not a verdict on the person who used the link.
-	denied: "outline",
-	paid: "default",
-} satisfies Record<CreditReferralState, "default" | "secondary" | "outline">;
 
 /**
  * `deniedReason` is an internal code and one of its values is "fraud". A user
@@ -117,24 +106,25 @@ function RefereeRow({ referee }: { referee: CreditReferralReferee }) {
 	return (
 		<SettingsItem
 			actions={
-				<>
+				<span className="flex items-center gap-2 text-sm">
 					{referee.amountMicroUsd === null ? null : (
-						<span className="font-heading font-medium text-sm tabular-nums">
+						<span className="tabular-nums">
 							{formatCredits(referee.amountMicroUsd)}
 						</span>
 					)}
-					<Badge variant={STATE_VARIANTS[referee.state]}>
+					<span className="text-muted-foreground">
 						{STATE_LABELS[referee.state]}
-					</Badge>
+					</span>
+				</span>
+			}
+			description={
+				<>
+					{stateDetail(referee)}
+					{referee.joinedAt ? ` · Joined ${formatDate(referee.joinedAt)}` : ""}
 				</>
 			}
 			title={<span title={referee.label}>{referee.label}</span>}
-		>
-			<p className="text-muted-foreground text-xs">
-				{stateDetail(referee)}
-				{referee.joinedAt ? ` · Joined ${formatDate(referee.joinedAt)}` : ""}
-			</p>
-		</SettingsItem>
+		/>
 	);
 }
 
@@ -165,11 +155,11 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 			: Math.min(Math.round((cap.earnedMicroUsd / cap.capMicroUsd) * 100), 100);
 
 	return (
-		<SettingsCard className="space-y-3">
-			<dl className="grid gap-4 sm:grid-cols-2">
-				<div className="space-y-1">
-					<dt className="text-muted-foreground text-xs">Credits earned</dt>
-					<dd className="font-heading font-semibold text-lg tabular-nums">
+		<div className="flex flex-col gap-3 py-3">
+			<dl className="grid grid-cols-2 gap-6">
+				<div className="flex flex-col gap-1">
+					<dt className="text-detail text-muted-foreground">Credits earned</dt>
+					<dd className="font-medium text-xl tabular-nums">
 						{formatCredits(cap.earnedMicroUsd)}
 					</dd>
 					<dd className="text-muted-foreground text-xs">
@@ -178,9 +168,9 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 							: `${cap.paidCount} referrals paid out`}
 					</dd>
 				</div>
-				<div className="space-y-1">
-					<dt className="text-muted-foreground text-xs">Still available</dt>
-					<dd className="font-heading font-semibold text-lg tabular-nums">
+				<div className="flex flex-col gap-1">
+					<dt className="text-detail text-muted-foreground">Still available</dt>
+					<dd className="font-medium text-xl tabular-nums">
 						{cap.remainingMicroUsd === null
 							? "Unlimited"
 							: formatCredits(cap.remainingMicroUsd)}
@@ -199,7 +189,7 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 					value={usedPercent}
 				/>
 			)}
-		</SettingsCard>
+		</div>
 	);
 }
 
@@ -219,32 +209,24 @@ export function ReferralCreditsSection() {
 			title="Credit rewards"
 		>
 			{isLoading ? (
-				<SettingsCard>
-					<div className="flex items-center justify-center py-6">
-						<Spinner className="size-5" />
-					</div>
-				</SettingsCard>
+				<SkeletonRows label="Loading credit rewards" rows={2} />
 			) : null}
 
 			{isError || !(isLoading || data) ? (
-				<SettingsCard>
-					<p className="text-muted-foreground text-sm">
-						Couldn't load your credit rewards. Nothing is lost — try again in a
-						moment.
-					</p>
-				</SettingsCard>
+				<p className="py-3 text-muted-foreground text-sm">
+					Couldn't load your credit rewards. Nothing is lost — try again in a
+					moment.
+				</p>
 			) : null}
 
 			{data ? (
-				<div className="space-y-3">
+				<div>
 					<CapSummary cap={data.cap} />
 					{data.referrals.length === 0 ? (
-						<SettingsCard>
-							<p className="text-muted-foreground text-sm">
-								Nobody has signed up with your link yet. Share it above and
-								they'll show up here.
-							</p>
-						</SettingsCard>
+						<p className="py-3 text-muted-foreground text-sm">
+							Nobody has signed up with your link yet. Share it above and
+							they'll show up here.
+						</p>
 					) : (
 						<SettingsGroup>
 							{data.referrals.map((referee) => (

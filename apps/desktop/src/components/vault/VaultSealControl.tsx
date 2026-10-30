@@ -228,6 +228,7 @@ export function VaultSealControl({
 							disabled={pending || (shamir && share.trim() === "")}
 							loading={pending}
 							onClick={doUnseal}
+							variant="mono"
 						>
 							{shamir ? "Submit share" : "Unseal"}
 						</Button>

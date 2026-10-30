@@ -10,7 +10,7 @@ import { PageWrapper } from "../components/layout/PageWrapper.tsx";
 import { MfaEnrollmentGate } from "../components/MfaEnrollmentGate.tsx";
 import { ProductModeAccessSync } from "../components/shell/ProductModeAccessSync.tsx";
 import { STANDALONE_APP_ID } from "../lib/product.ts";
-import { BootSpinner } from "./boot-spinner.tsx";
+import { BootSplash } from "./boot-splash.tsx";
 import {
 	BotManagedEntry,
 	HostedStandaloneAppEntry,
@@ -64,7 +64,7 @@ export default function SignedInShell({
 			frame={PageWrapper}
 			loading={
 				<PageWrapper>
-					<BootSpinner />
+					<BootSplash />
 				</PageWrapper>
 			}
 			token={controlPlaneToken}
@@ -73,7 +73,7 @@ export default function SignedInShell({
 				<PageWrapper>
 					<EntitlementProvider>
 						<ProductModeAccessSync>
-							<Suspense fallback={<BootSpinner />}>
+							<Suspense fallback={<BootSplash />}>
 								{standaloneApp ? (
 									<StandaloneAppEntry appId={STANDALONE_APP_ID} />
 								) : hostedStandaloneApp ? (
@@ -81,7 +81,7 @@ export default function SignedInShell({
 								) : botProduct ? (
 									<BotManagedEntry />
 								) : nodeSetupWaiting && !renderedFromNodeSetupCache ? (
-									<BootSpinner />
+									<BootSplash />
 								) : (
 									<MemoryRouter
 										initialEntries={[

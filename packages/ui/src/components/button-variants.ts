@@ -17,13 +17,13 @@ const buttonVariantClasses = cva(
 					"bg-primary text-primary-foreground hover:bg-primary/80 active:bg-primary/70",
 				mono: "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80",
 				outline:
-					"border-border bg-background hover:bg-muted hover:text-foreground active:bg-[color-mix(in_oklch,var(--muted),var(--foreground)_6%)] aria-expanded:bg-muted aria-expanded:text-foreground dark:bg-transparent dark:active:bg-input/50 dark:hover:bg-input/30",
+					"border-border bg-background duration-(--duration-fast) hover:bg-muted hover:duration-0 hover:text-foreground active:bg-[color-mix(in_oklch,var(--muted),var(--foreground)_6%)] aria-expanded:bg-muted aria-expanded:text-foreground dark:bg-transparent dark:active:bg-input/50 dark:hover:bg-input/30",
 				secondary:
 					"bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] active:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_10%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
 				ghost:
-					"hover:bg-muted hover:text-foreground active:bg-[color-mix(in_oklch,var(--muted),var(--foreground)_6%)] aria-expanded:bg-muted aria-expanded:text-foreground dark:active:bg-muted dark:hover:bg-muted/50",
+					"duration-(--duration-fast) hover:bg-muted hover:duration-0 hover:text-foreground active:bg-[color-mix(in_oklch,var(--muted),var(--foreground)_6%)] aria-expanded:bg-muted aria-expanded:text-foreground dark:active:bg-muted dark:hover:bg-muted/50",
 				"ghost-muted":
-					"text-muted-foreground hover:bg-muted hover:text-foreground active:bg-[color-mix(in_oklch,var(--muted),var(--foreground)_6%)] aria-expanded:bg-muted aria-expanded:text-foreground dark:active:bg-muted dark:hover:bg-muted/50",
+					"text-muted-foreground duration-(--duration-fast) hover:bg-muted hover:duration-0 hover:text-foreground active:bg-[color-mix(in_oklch,var(--muted),var(--foreground)_6%)] aria-expanded:bg-muted aria-expanded:text-foreground dark:active:bg-muted dark:hover:bg-muted/50",
 				destructive:
 					"bg-destructive/10 text-status-destructive hover:bg-destructive/20 focus-visible:border-destructive focus-visible:ring-destructive active:bg-destructive/30 dark:bg-destructive/20 dark:active:bg-destructive/40 dark:hover:bg-destructive/30",
 				link: "text-primary underline-offset-4 hover:underline active:text-primary/70",
@@ -103,8 +103,6 @@ const buttonVariantClasses = cva(
 				"workbench-status": "type-caption h-5 px-1.5",
 				"workbench-tab-close":
 					"size-5 opacity-0 focus-visible:opacity-100 group-hover/workbench-tab:opacity-100",
-				"worktree-handoff":
-					"gap-1.5 border-border/70 text-muted-foreground text-xs hover:bg-muted/60 hover:text-foreground",
 				"question-option":
 					"h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left font-normal",
 				"question-navigation": "h-6 px-2",

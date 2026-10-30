@@ -1,8 +1,9 @@
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import { IconX as X } from "@tabler/icons-react";
 import { useRef, useState } from "react";
 import { FileTypeIcon } from "../file-type-icon.tsx";
 import { ImageLightbox, type LightboxImage } from "../image-lightbox.tsx";
@@ -99,7 +100,7 @@ export function FileAttachment({
 	return (
 		<div
 			className={cn(
-				"relative rounded-md bg-muted/50",
+				"relative rounded-lg bg-muted",
 				isImageOnly
 					? "flex size-24 shrink-0 items-center justify-center rounded-xl p-1"
 					: "flex min-w-[120px] max-w-[200px] items-center gap-2 py-1 pr-2 pl-1",
@@ -126,7 +127,7 @@ export function FileAttachment({
 					{isImage && safeUrl ? (
 						<PreviewTrigger
 							canPreview={canPreview}
-							className="w-8 shrink-0 self-stretch overflow-hidden rounded-sm"
+							className="w-8 shrink-0 self-stretch overflow-hidden rounded-lg"
 							filename={filename}
 							onOpen={openLightbox}
 						>
@@ -137,7 +138,7 @@ export function FileAttachment({
 							/>
 						</PreviewTrigger>
 					) : (
-						<div className="flex w-8 shrink-0 items-center justify-center self-stretch rounded-sm bg-muted">
+						<div className="flex w-8 shrink-0 items-center justify-center self-stretch rounded-lg bg-background">
 							<FileTypeIcon className="size-4" path={filename} />
 						</div>
 					)}
@@ -150,7 +151,7 @@ export function FileAttachment({
 							{filename}
 						</span>
 						{size !== undefined && (
-							<span className="type-compact text-muted-foreground">
+							<span className="text-muted-foreground text-xs">
 								{formatFileSize(size)}
 							</span>
 						)}
@@ -173,7 +174,7 @@ export function FileAttachment({
 					type="button"
 					variant="outline"
 				>
-					<X className="size-3" />
+					<HugeiconsIcon className="size-3" icon={Cancel01Icon} />
 				</Button>
 			)}
 

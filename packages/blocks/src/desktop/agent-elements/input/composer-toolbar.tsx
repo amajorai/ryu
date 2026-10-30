@@ -9,13 +9,14 @@ import type { ContextUsage } from "../context-usage.tsx";
 import type { ComposerMenuGroup, ComposerMenuItem } from "./composer-menu.tsx";
 import { ContextMeter } from "./context-meter.tsx";
 import {
+	type ComposerDraftMenu,
 	type DoubleCheckControls,
 	type GhostControls,
 	type GoalControls,
 	GoalPlusButton,
 	type PluginComposerControlRow,
 } from "./goal-plus-button.tsx";
-import { SendButton } from "./send-button.tsx";
+import { SendButton, VoiceCallButton } from "./send-button.tsx";
 import { VoiceInputButton } from "./voice-input-button.tsx";
 
 export interface ComposerToolbarProps {
@@ -47,6 +48,8 @@ export interface ComposerToolbarProps {
 	 * `goalControls`, the "+" dropdown gains a "Double-check" toggle row.
 	 */
 	doubleCheckControls?: DoubleCheckControls;
+	/** "Save draft" and the saved drafts, offered in the "+" dropdown. */
+	drafts?: ComposerDraftMenu;
 
 	/**
 	 * Temporary-chat (`ghost`) affordance. When provided, the "+" dropdown gains a
@@ -116,9 +119,9 @@ export interface ComposerToolbarProps {
 	voiceDisabled?: boolean;
 
 	/**
-	 * Live voice-mode (realtime conversation) entry. When provided, the trailing
-	 * button's empty state becomes the voice-mode waveform, and STT dictation
-	 * (`hasVoice`) relocates to its own small mic button in this row.
+	 * Live voice-mode (realtime conversation) entry. When provided, a quiet call
+	 * button sits beside the mic, STT dictation (`hasVoice`) has its own small mic
+	 * button in this row, and Send keeps the trailing slot.
 	 */
 	voiceMode?: { disabled?: boolean; onStart: () => void };
 }
@@ -173,19 +176,21 @@ export function resolvePlusMenu(
 		| "isGeneratingVideo"
 		| "showAttach"
 		| "onSketch"
+		| "drafts"
 	> & { inLiveCall?: boolean }
 ) {
-	// Disable a gen row while a run is streaming or the composer is empty —
-	// there'd be no prompt to generate from.
-	const genDisabled = Boolean(p.disabled) || p.isStreaming || !p.hasInput;
+	// A gen row generates from the composer text, so it is hidden while the
+	// composer is empty (there is no prompt yet) and disabled while a run streams.
+	const genDisabled = Boolean(p.disabled) || p.isStreaming;
+	const genAvailable = !p.inLiveCall && p.hasInput;
 	const imageGen = buildMediaGen(
-		p.inLiveCall ? false : p.hasImageGen,
+		genAvailable ? p.hasImageGen : false,
 		p.onGenerateImage,
 		p.isGeneratingImage,
 		genDisabled
 	);
 	const videoGen = buildMediaGen(
-		p.inLiveCall ? false : p.hasVideoGen,
+		genAvailable ? p.hasVideoGen : false,
 		p.onGenerateVideo,
 		p.isGeneratingVideo,
 		genDisabled
@@ -209,6 +214,7 @@ export function resolvePlusMenu(
 				p.goalControls ||
 				p.ghostControls ||
 				p.pluginControls?.length ||
+				p.drafts ||
 				imageGen ||
 				videoGen
 		),
@@ -247,6 +253,7 @@ export function ComposerToolbar({
 	onGenerateVideo,
 	directoryGroups,
 	directoryQuery,
+	drafts,
 	onDirectorySelect,
 	onExpand,
 	onMenuOpenChange,
@@ -266,7 +273,7 @@ export function ComposerToolbar({
 	// The primary action always reflects what the user can do next: a typed
 	// message sends (and the host queues it when a turn is active), while Stop
 	// appears only for an active turn with an empty composer. The idle empty state
-	// is voice mode through SendButton's `voiceMode` prop.
+	// is a dimmed Send (or STT dictation when the host has no voice mode).
 	const inLiveCall = liveCallActions !== undefined;
 	const compact = compactLayout || inLiveCall;
 	let sendState: "idle" | "typing" | "streaming" = "idle";
@@ -303,6 +310,7 @@ export function ComposerToolbar({
 		isGeneratingVideo,
 		showAttach,
 		onSketch,
+		drafts,
 	});
 
 	const leftCluster = (
@@ -321,6 +329,7 @@ export function ComposerToolbar({
 					directoryQuery={directoryQuery}
 					disabled={disabled}
 					doubleCheck={doubleCheckControls}
+					drafts={inLiveCall ? undefined : drafts}
 					ghost={ghostControls}
 					goal={goalControls}
 					imageGen={imageGen}
@@ -365,10 +374,9 @@ export function ComposerToolbar({
 			{onExpand && (
 				<Button
 					aria-label="Expand composer"
-					className="size-8"
 					disabled={disabled}
 					onClick={onExpand}
-					size="icon"
+					size="icon-sm"
 					title="Expand composer"
 					type="button"
 					variant="ghost-muted"
@@ -380,8 +388,8 @@ export function ComposerToolbar({
 			    textarea (see input-bar). Here we only surface the transcribing
 			    spinner-wave, so the two waveforms never render at once. */}
 			{hasVoice && isTranscribing && (
-				<span className="inline-flex h-4 w-7 text-primary">
-					<Wave aria-label="Transcribing" className="h-4 w-7" />
+				<span className="inline-flex h-4 w-8 text-muted-foreground">
+					<Wave aria-label="Transcribing" className="h-4 w-8" />
 				</span>
 			)}
 			{/* A right-side attach button used to live here, guarded on `!goalControls`
@@ -405,8 +413,16 @@ export function ComposerToolbar({
 						onStop={onStopVoice}
 					/>
 				)}
-			{/* Trailing action: Send whenever text is present, Stop only for an
-			    active turn with an empty composer, otherwise live voice mode (or STT). */}
+			{/* Live voice mode is its own quiet button beside the mic; it never
+			    takes the send slot, so Send is always in the same place. */}
+			{voiceMode && !isStreaming ? (
+				<VoiceCallButton
+					disabled={voiceMode.disabled}
+					onStart={voiceMode.onStart}
+				/>
+			) : null}
+			{/* Trailing action: Send (dimmed when empty), Stop for an active turn
+			    with an empty composer, or STT dictation when there is no voice mode. */}
 			<SendButton
 				onClick={() => {
 					if (hasInput) {
@@ -427,7 +443,6 @@ export function ComposerToolbar({
 							}
 						: undefined
 				}
-				voiceMode={voiceMode}
 			/>
 		</motion.div>
 	);
@@ -449,7 +464,7 @@ export function ComposerToolbar({
 		<motion.div
 			className={
 				compact
-					? "grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5"
+					? "grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2"
 					: "flex flex-col gap-0"
 			}
 			data-composer-layout={compact ? "compact" : "full"}

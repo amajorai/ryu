@@ -22,47 +22,31 @@
 // AppSidebar owns what a drop or a bulk action MEANS (pin, archive, move to a
 // project) and hands it to rows and sections as {@link SidebarChatBulkActions}.
 
-import {
-	Archive01Icon,
-	ArchiveRestoreIcon,
-	Cancel01Icon,
-	Delete01Icon,
-	Folder01Icon,
-	FolderOpenIcon,
-	LinkSquare02Icon,
-	Mail01Icon,
-	PinIcon,
-	PinOffIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog.tsx";
-import {
-	ContextMenuContent,
-	ContextMenuGroup,
-	ContextMenuItem,
-	ContextMenuLabel,
-	ContextMenuSeparator,
-	ContextMenuSub,
-	ContextMenuSubContent,
-	ContextMenuSubTrigger,
-} from "@ryu/ui/components/context-menu.tsx";
-import {
-	type DragEvent as ReactDragEvent,
-	type KeyboardEvent as ReactKeyboardEvent,
-	type MouseEvent as ReactMouseEvent,
-	useEffect,
-	useState,
+import type {
+	DragEvent as ReactDragEvent,
+	KeyboardEvent as ReactKeyboardEvent,
+	MouseEvent as ReactMouseEvent,
 } from "react";
-import { create } from "zustand";
+import { useEffect, useState } from "react";
+import {
+	clearSidebarChatSelection,
+	EMPTY_SELECTION,
+	useSidebarChatSelection,
+} from "./sidebar-chat-selection-store.ts";
+import {
+	enclosingVirtualChatRows,
+	sidebarVirtualChatRows,
+	VIRTUAL_LIST_SELECTOR,
+} from "./sidebar-chat-virtual-registry.ts";
+
+export {
+	SidebarChatBulkContextMenuContent,
+	SidebarChatBulkDeleteDialog,
+} from "./sidebar-chat-selection-bulk-menu.tsx";
+export {
+	clearSidebarChatSelection,
+	useSidebarChatSelection,
+} from "./sidebar-chat-selection-store.ts";
 
 /** Drag format carrying the ids of every chat being dragged, as JSON. Distinct
  *  from the visibility payload (one chat) and the section-reorder drag. */
@@ -112,54 +96,65 @@ export interface SidebarChatBulkActions {
 	setRead: (ids: readonly string[], read: boolean) => void;
 }
 
-interface SidebarChatSelectionState {
-	/** The fixed end of a shift-click range. */
-	anchorId: string | null;
-	/** True while a chat row drag is in flight, so empty drop targets can show. */
-	dragging: boolean;
-	/** The ids of the most recent row drag (kept after dragend for late drops). */
-	draggingIds: readonly string[];
-	/** Ids awaiting the bulk delete confirmation, or null when it is closed. */
-	pendingDeleteIds: readonly string[] | null;
-	selectedIds: ReadonlySet<string>;
-}
-
-const EMPTY_SELECTION: ReadonlySet<string> = new Set();
-
-export const useSidebarChatSelection = create<SidebarChatSelectionState>(
-	() => ({
-		anchorId: null,
-		dragging: false,
-		draggingIds: [],
-		pendingDeleteIds: null,
-		selectedIds: EMPTY_SELECTION,
-	})
-);
-
-export function clearSidebarChatSelection(): void {
-	if (useSidebarChatSelection.getState().selectedIds.size === 0) {
-		return;
-	}
-	useSidebarChatSelection.setState({ selectedIds: EMPTY_SELECTION });
-}
-
 function rowRoot(element: Element): ParentNode {
 	return element.closest(ROW_SCOPE_SELECTOR) ?? element.ownerDocument;
 }
 
-/** Every chat row id under the same scope as `element`, in visual order. */
+/** Every chat row id under the same scope as `element`, in visual order. A
+ *  virtualized list contributes all of its rows, mounted or not. */
 export function orderedSidebarChatIds(element: Element): string[] {
 	const root = rowRoot(element);
 	const ids: string[] = [];
 	const seen = new Set<string>();
-	for (const row of root.querySelectorAll(`[${ROW_ID_ATTRIBUTE}]`)) {
-		const id = row.getAttribute(ROW_ID_ATTRIBUTE);
+	const push = (id: string | null) => {
 		if (id && !seen.has(id)) {
 			seen.add(id);
 			ids.push(id);
 		}
+	};
+	for (const node of root.querySelectorAll(
+		`[${ROW_ID_ATTRIBUTE}], ${VIRTUAL_LIST_SELECTOR}`
+	)) {
+		if (enclosingVirtualChatRows(node)) {
+			continue;
+		}
+		const virtual = sidebarVirtualChatRows(node);
+		if (virtual) {
+			for (const id of virtual.orderedIds()) {
+				push(id);
+			}
+			continue;
+		}
+		push(node.getAttribute(ROW_ID_ATTRIBUTE));
 	}
 	return ids;
+}
+
+/** The mounted chat row ids inside `element`, in visual order. */
+export function sidebarChatRowIdsWithin(element: Element): string[] {
+	return Array.from(
+		element.querySelectorAll(`[${ROW_ID_ATTRIBUTE}]`),
+		(row) => row.getAttribute(ROW_ID_ATTRIBUTE) ?? ""
+	).filter(Boolean);
+}
+
+/** Focus the row for `id`, scrolling a virtualized list to it when the row is
+ *  not mounted yet. */
+function focusSidebarChatRow(root: ParentNode, id: string): void {
+	const row = root.querySelector<HTMLElement>(
+		`[${ROW_ID_ATTRIBUTE}="${CSS.escape(id)}"]`
+	);
+	if (row) {
+		row.focus();
+		return;
+	}
+	for (const list of root.querySelectorAll(VIRTUAL_LIST_SELECTOR)) {
+		const virtual = sidebarVirtualChatRows(list);
+		if (virtual?.orderedIds().includes(id)) {
+			virtual.reveal(id);
+			return;
+		}
+	}
 }
 
 /** DOM attributes a chat row carries so range selection can find it. */
@@ -256,10 +251,7 @@ export function applySidebarChatArrowKey(
 	if (index < 0 || !nextId) {
 		return true;
 	}
-	const next = rowRoot(event.currentTarget).querySelector<HTMLElement>(
-		`[${ROW_ID_ATTRIBUTE}="${CSS.escape(nextId)}"]`
-	);
-	next?.focus();
+	focusSidebarChatRow(rowRoot(event.currentTarget), nextId);
 	if (event.shiftKey) {
 		const state = useSidebarChatSelection.getState();
 		// A fresh keyboard run starts at the focused row; an existing selection
@@ -469,186 +461,4 @@ export function useSidebarChatSelectionEscape(): void {
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
 	}, [hasSelection]);
-}
-
-function chatCountLabel(count: number): string {
-	return count === 1 ? "1 chat" : `${count} chats`;
-}
-
-/** The right-click menu for a row that is part of a multi-selection. */
-export function SidebarChatBulkContextMenuContent({
-	actions,
-	archivedIds,
-	pinnedIds,
-	unreadIds,
-}: {
-	actions: SidebarChatBulkActions;
-	archivedIds: ReadonlySet<string>;
-	pinnedIds: ReadonlySet<string>;
-	unreadIds: ReadonlySet<string>;
-}) {
-	const selectedIds = useSidebarChatSelection((state) => state.selectedIds);
-	const ids = [...selectedIds];
-	const count = chatCountLabel(ids.length);
-	const allPinned = ids.every((id) => pinnedIds.has(id));
-	const allArchived = ids.every((id) => archivedIds.has(id));
-	const anyUnread = ids.some((id) => unreadIds.has(id));
-	const run = (action: () => void) => {
-		action();
-		clearSidebarChatSelection();
-	};
-
-	return (
-		<ContextMenuContent>
-			<ContextMenuGroup>
-				<ContextMenuLabel>{`${count} selected`}</ContextMenuLabel>
-			</ContextMenuGroup>
-			<ContextMenuItem onClick={() => run(() => actions.openInNewTabs(ids))}>
-				<HugeiconsIcon className="mr-2 size-4" icon={LinkSquare02Icon} />
-				Open in new tabs
-			</ContextMenuItem>
-			<ContextMenuSeparator />
-			<ContextMenuItem
-				onClick={() => run(() => actions.setPinned(ids, !allPinned))}
-			>
-				<HugeiconsIcon
-					className="mr-2 size-4"
-					icon={allPinned ? PinOffIcon : PinIcon}
-				/>
-				{allPinned ? `Unpin ${count}` : `Pin ${count}`}
-			</ContextMenuItem>
-			<ContextMenuItem
-				onClick={() => run(() => actions.setArchived(ids, !allArchived))}
-			>
-				<HugeiconsIcon
-					className="mr-2 size-4"
-					icon={allArchived ? ArchiveRestoreIcon : Archive01Icon}
-				/>
-				{allArchived ? `Unarchive ${count}` : `Archive ${count}`}
-			</ContextMenuItem>
-			<ContextMenuItem
-				onClick={() => run(() => actions.setRead(ids, anyUnread))}
-			>
-				<HugeiconsIcon className="mr-2 size-4" icon={Mail01Icon} />
-				{anyUnread ? "Mark as read" : "Mark as unread"}
-			</ContextMenuItem>
-			<ContextMenuSub>
-				<ContextMenuSubTrigger>
-					<HugeiconsIcon className="mr-2 size-4" icon={FolderOpenIcon} />
-					Move to project
-				</ContextMenuSubTrigger>
-				<ContextMenuSubContent className="max-h-[60vh] overflow-y-auto">
-					{actions.projects.length === 0 ? (
-						<ContextMenuItem disabled>No projects yet</ContextMenuItem>
-					) : (
-						actions.projects.map((project) => (
-							<ContextMenuItem
-								key={project.path}
-								onClick={() =>
-									run(() => actions.moveToProject(ids, project.path))
-								}
-							>
-								<HugeiconsIcon className="mr-2 size-4" icon={Folder01Icon} />
-								<span className="truncate">{project.label}</span>
-							</ContextMenuItem>
-						))
-					)}
-					<ContextMenuSeparator />
-					<ContextMenuItem
-						onClick={() => run(() => actions.moveToProject(ids, null))}
-					>
-						Remove from project
-					</ContextMenuItem>
-				</ContextMenuSubContent>
-			</ContextMenuSub>
-			<ContextMenuSeparator />
-			<ContextMenuItem onClick={clearSidebarChatSelection}>
-				<HugeiconsIcon className="mr-2 size-4" icon={Cancel01Icon} />
-				Clear selection
-			</ContextMenuItem>
-			<ContextMenuItem
-				onClick={() =>
-					useSidebarChatSelection.setState({ pendingDeleteIds: ids })
-				}
-				variant="destructive"
-			>
-				<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
-				{`Delete ${count}`}
-			</ContextMenuItem>
-		</ContextMenuContent>
-	);
-}
-
-/** Every mounted bulk-delete dialog, in mount order. Two sidebars can be mounted
- *  at once (the collapsed docked panel and the floating peek panel), and they
- *  share {@link useSidebarChatSelection}'s pending ids, so only the first one
- *  renders; otherwise one Delete would stack two confirmations. */
-const useBulkDeleteDialogHosts = create<{ hosts: readonly symbol[] }>(() => ({
-	hosts: [],
-}));
-
-function useIsBulkDeleteDialogHost(): boolean {
-	const [token] = useState(() => Symbol("sidebar-chat-bulk-delete-dialog"));
-	useEffect(() => {
-		useBulkDeleteDialogHosts.setState((state) => ({
-			hosts: [...state.hosts, token],
-		}));
-		return () => {
-			useBulkDeleteDialogHosts.setState((state) => ({
-				hosts: state.hosts.filter((host) => host !== token),
-			}));
-		};
-	}, [token]);
-	return useBulkDeleteDialogHosts((state) => state.hosts[0] === token);
-}
-
-/** Confirmation for the bulk Delete row. Mounted by each sidebar so it outlives
- *  the context menu that opened it; only one mounted copy renders at a time. */
-export function SidebarChatBulkDeleteDialog({
-	onDelete,
-}: {
-	onDelete: (ids: readonly string[]) => void;
-}) {
-	const isHost = useIsBulkDeleteDialogHost();
-	const pendingIds = useSidebarChatSelection((state) => state.pendingDeleteIds);
-	if (!isHost) {
-		return null;
-	}
-	const count = chatCountLabel(pendingIds?.length ?? 0);
-	const close = () =>
-		useSidebarChatSelection.setState({ pendingDeleteIds: null });
-	return (
-		<AlertDialog
-			onOpenChange={(open) => {
-				if (!open) {
-					close();
-				}
-			}}
-			open={pendingIds !== null}
-		>
-			<AlertDialogContent>
-				<AlertDialogHeader>
-					<AlertDialogTitle>{`Delete ${count}?`}</AlertDialogTitle>
-					<AlertDialogDescription>
-						{`This permanently deletes ${count}. This cannot be undone.`}
-					</AlertDialogDescription>
-				</AlertDialogHeader>
-				<AlertDialogFooter>
-					<AlertDialogCancel>Cancel</AlertDialogCancel>
-					<AlertDialogAction
-						onClick={() => {
-							if (pendingIds) {
-								onDelete(pendingIds);
-							}
-							clearSidebarChatSelection();
-							close();
-						}}
-						variant="destructive"
-					>
-						{`Delete ${count}`}
-					</AlertDialogAction>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
-	);
 }

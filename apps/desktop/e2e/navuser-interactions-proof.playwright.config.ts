@@ -6,7 +6,7 @@ const baseURL = "http://127.0.0.1:5431/";
 export default defineConfig({
 	outputDir: `${tmpdir()}/ryu-navuser-interactions-playwright-results`,
 	testDir: ".",
-	testMatch: /navuser-interactions-proof\.spec\.ts$/,
+	testMatch: /navuser-interactions-proof(-accounts)?\.spec\.ts$/,
 	fullyParallel: false,
 	retries: 0,
 	use: {

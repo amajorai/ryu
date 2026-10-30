@@ -44,10 +44,10 @@ describe("island pill wrapping", () => {
 		};
 		const fixed = renderToStaticMarkup(<ContextPill context={context} />);
 		expect(fixed).toContain("truncate");
-		expect(fixed).toContain("max-w-[150px]");
+		expect(fixed).toContain("max-w-36");
 
 		const grown = renderToStaticMarkup(<ContextPill context={context} wrap />);
 		expect(grown).not.toContain("truncate");
-		expect(grown).not.toContain("max-w-[150px]");
+		expect(grown).not.toContain("max-w-36");
 	});
 });

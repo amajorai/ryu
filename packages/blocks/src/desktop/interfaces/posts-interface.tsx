@@ -1,12 +1,11 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { AnimatePresence, motion } from "motion/react";
 import {
 	type ReactNode,
-	type RefObject,
 	useCallback,
 	useEffect,
 	useEffectEvent,
-	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -22,6 +21,14 @@ import {
 	PostsSkeleton,
 } from "./posts-feed.tsx";
 import { PostsHeader, PostsSidebarToggle } from "./posts-header.tsx";
+import {
+	DETAILS_INLINE_MIN_WIDTH,
+	ownsKeys,
+	SIDEBAR_INLINE_MIN_WIDTH,
+	STEP_KEYS,
+	useElementWidth,
+	useMinuteClock,
+} from "./posts-interface-layout.ts";
 import {
 	ALL_VIEW,
 	homeCount as countHome,
@@ -43,69 +50,6 @@ import {
 import { PostPage } from "./posts-page.tsx";
 import { PostsSidebar } from "./posts-sidebar.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
-
-const MINUTE = 60_000;
-/** At or above this width the sidebar sits inline; below, it folds away. */
-const SIDEBAR_INLINE_MIN_WIDTH = 760;
-/** At or above this width the details rail sits beside the comments. */
-const DETAILS_INLINE_MIN_WIDTH = 1180;
-/** Width assumed before the first measurement (and where layout is absent). */
-const UNMEASURED_WIDTH = 1440;
-
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-function useElementWidth(ref: RefObject<HTMLElement | null>): number {
-	const [width, setWidth] = useState(0);
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		setWidth(element.getBoundingClientRect().width);
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((entries) => {
-			const next = entries[0]?.contentRect.width;
-			if (next !== undefined) {
-				setWidth(next);
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return width || UNMEASURED_WIDTH;
-}
-
-/** True for targets whose keys belong to typing, menus, or the host's chat. */
-function ownsKeys(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return (
-		target.isContentEditable ||
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.closest("[role='menu']") !== null ||
-		target.closest("[data-testid='posts-composer']") !== null ||
-		target.closest("[data-testid='posts-thread-view']") !== null
-	);
-}
-
-const STEP_KEYS: Record<string, number> = {
-	ArrowDown: 1,
-	ArrowUp: -1,
-	j: 1,
-	k: -1,
-};
 
 /**
  * Posts: Campsite-style async team posts. Each thread is a post filed in a
@@ -130,6 +74,7 @@ export function PostsInterface({
 	const reduceMotion = useReducedMotion();
 	const width = useElementWidth(rootRef);
 	const now = useMinuteClock();
+	const tl = useLiteralMessages();
 
 	const spaces = useMemo(() => postSpaces(snapshot), [snapshot]);
 	const needsYouCount = useMemo(() => countHome(snapshot), [snapshot]);
@@ -394,7 +339,7 @@ export function PostsInterface({
 						)
 					}
 					body="Posts filed here show up in this feed."
-					title={`No posts in ${header.title} yet`}
+					title={tl("No posts in {title} yet", { title: header.title })}
 				/>
 			);
 	} else if (view.kind === "home") {

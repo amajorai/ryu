@@ -18,6 +18,7 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
 import { useCallback, useEffect, useState } from "react";
+import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -100,14 +101,14 @@ function ProjectRules({
 				</p>
 			) : null}
 			{rules.length === 0 ? (
-				<p className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs">
+				<p className="text-detail text-muted-foreground">
 					No project rules found in this workspace.
 				</p>
 			) : (
 				<div className="flex flex-col gap-2">
 					{rules.map((rule) => (
 						<div
-							className="flex items-center gap-2 rounded-md border px-3 py-2"
+							className="flex items-center gap-2 rounded-lg border px-3 py-2"
 							key={`${rule.provider}:${rule.path}`}
 						>
 							<div className="min-w-0 flex-1">
@@ -223,7 +224,7 @@ export function RulesAgentEditPanel({
 
 	return (
 		<SettingsSection
-			caption="Configure agent-level rules and automatically detected project rules. Rules are injected into context according to the selected mode."
+			caption="Agent rules and detected project rules, injected into context by the selected mode."
 			headerAction={
 				saving ? (
 					<span className="text-muted-foreground text-xs">Saving…</span>
@@ -232,11 +233,9 @@ export function RulesAgentEditPanel({
 			title={title}
 		>
 			<SettingsCard className="flex flex-col gap-4">
-				{error ? (
-					<p className="text-status-destructive text-xs">{error}</p>
-				) : null}
+				{error ? <ErrorLine message={error} /> : null}
 				<div className="grid gap-3 sm:grid-cols-2">
-					<div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+					<div className="flex items-center justify-between gap-3">
 						<div>
 							<Label htmlFor="rules-enabled">Enable rules</Label>
 							<p className="text-muted-foreground text-xs">
@@ -250,7 +249,7 @@ export function RulesAgentEditPanel({
 							onCheckedChange={(value) => update({ enabled: value === true })}
 						/>
 					</div>
-					<div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+					<div className="flex items-center justify-between gap-3">
 						<div>
 							<Label htmlFor="rules-auto-inject">Auto-injected context</Label>
 							<p className="text-muted-foreground text-xs">
@@ -337,7 +336,7 @@ export function RulesAgentEditPanel({
 					) : null}
 					{config.rules.map((rule) => (
 						<div
-							className="flex flex-col gap-2 rounded-md border p-3"
+							className="flex flex-col gap-2 rounded-lg border p-3"
 							key={rule.id}
 						>
 							<div className="flex items-center gap-2">
