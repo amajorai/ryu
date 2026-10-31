@@ -8,6 +8,7 @@
 // local node, and the node's own `POST /api/update/apply` for a remote one.
 // Gated on `enabled` so it never fires at an unreachable node.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 
 import { sileo } from "sileo";
@@ -30,6 +31,7 @@ export function useNodeVersion(
 	target: ApiTarget,
 	enabled: boolean
 ): NodeVersion {
+	const tl = useLiteralMessages();
 	const { data } = useQuery({
 		queryKey: [
 			"node-version",
@@ -66,7 +68,8 @@ export function useNodeVersion(
 				const message = await applyReleaseUpdate(
 					target,
 					{ url: target.url },
-					check
+					check,
+					tl
 				);
 				if (message) {
 					sileo.success({ title: "Update started", description: message });

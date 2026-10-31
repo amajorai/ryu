@@ -136,8 +136,8 @@ export function AppearanceInterfacePage({
 							onCheckedChange={setDialogOverlayBlur}
 						/>
 					}
-					description="Dim and blur the app behind dialogs, sheets and drawers."
-					title="Blur dialog backgrounds"
+					description="Dim the app behind dialogs, sheets and drawers."
+					title="Dim dialog backgrounds"
 				/>
 				<SettingsItem
 					actions={

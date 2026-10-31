@@ -54,6 +54,8 @@ export function McpAppPanel({
 	globalEntry?: boolean;
 }) {
 	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const hostActive = useIsActiveTab();
 	const node = useActiveNode();
 	const target = useMemo(
@@ -140,6 +142,7 @@ export function McpAppPanel({
 						? { file: { name: fileAccess.name, resourceUri: fileAccess.uri } }
 						: {},
 				},
+				tlRef.current,
 				{
 					signal: lifetime.signal,
 					onPending: (id) => {

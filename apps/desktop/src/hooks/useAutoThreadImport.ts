@@ -28,12 +28,12 @@ import {
 	listAgentThreads,
 } from "@/src/lib/api/agent-threads.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	autoImportSeenKey,
 	loadAutoImportSeen,
 	saveAutoImportSeen,
 } from "@/src/lib/auto-import-seen.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 
 /** How often to rescan for new agent threads while the setting is on. */
@@ -164,7 +164,9 @@ export function useAutoThreadImport({
 					return;
 				}
 				seenKey = await autoImportSeenKey(SEEN_KEY, capturedTarget);
-				if (!ownsAuthority()) return;
+				if (!ownsAuthority()) {
+					return;
+				}
 				seen = loadAutoImportSeen(seenKey, fallbackSeen);
 				for (const agent of candidates) {
 					if (!ownsAuthority() || budget <= 0) {
@@ -176,7 +178,9 @@ export function useAutoThreadImport({
 					} catch {
 						continue;
 					}
-					if (!ownsAuthority()) return;
+					if (!ownsAuthority()) {
+						return;
+					}
 					if (!listing.supported) {
 						continue;
 					}
@@ -194,7 +198,9 @@ export function useAutoThreadImport({
 								agent.id,
 								thread.id
 							);
-							if (!ownsAuthority()) return;
+							if (!ownsAuthority()) {
+								return;
+							}
 							seen.add(key);
 							budget -= 1;
 							// Register the workspace folder so the imported chat groups

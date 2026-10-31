@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { fetchAgent, updateAgent, type AgentInput } from "./agents.ts";
+import { type AgentInput, fetchAgent, updateAgent } from "./agents.ts";
+
 const input: AgentInput = {
 	name: "Capability proof",
 	description: null,
@@ -48,13 +49,16 @@ async function exercise(
 				unexpected.push(request.url);
 				return new Response("Unexpected authority or path", { status: 403 });
 			}
-			if (request.method === "PUT")
+			if (request.method === "PUT") {
 				return request.json().then((body) => {
 					writes.push(body as Record<string, unknown>);
 					record = { ...record, ...body };
 					return Response.json({ agent: record });
 				});
-			if (request.method === "GET") return Response.json({ agent: record });
+			}
+			if (request.method === "GET") {
+				return Response.json({ agent: record });
+			}
 			unexpected.push(request.method);
 			return new Response("Unexpected method", { status: 405 });
 		},
@@ -73,7 +77,9 @@ async function exercise(
 		if (omitted) {
 			expect(writes[0]).not.toHaveProperty("orchestrator");
 			expect(writes[0]).not.toHaveProperty("can_create_agents");
-		} else expect(writes[0]).toMatchObject(expected);
+		} else {
+			expect(writes[0]).toMatchObject(expected);
+		}
 		const saved = await fetchAgent(target, "capability-proof");
 		expect(saved.orchestrator).toBe(expected.orchestrator);
 		expect(saved.canCreateAgents).toBe(expected.can_create_agents);

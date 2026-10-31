@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
 	BANGS,
 	DEFAULT_ENGINE,
@@ -8,6 +9,9 @@ import {
 	route,
 	SEARCH_ENGINES,
 } from "./smart-bar-engine.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 describe("normalizeUrl", () => {
 	it("adds https:// when no scheme is present", () => {
@@ -87,7 +91,7 @@ describe("looksLikeQuestion", () => {
 
 describe("route - explicit prefixes have no alternatives", () => {
 	it("routes a slash command to a skill", () => {
-		const r = route("/deploy prod now");
+		const r = route("/deploy prod now", tl);
 		expect(r.primary).toEqual({
 			kind: "skill",
 			name: "deploy",
@@ -98,13 +102,13 @@ describe("route - explicit prefixes have no alternatives", () => {
 	});
 
 	it("labels a bare slash as pick-a-skill", () => {
-		const r = route("/");
+		const r = route("/", tl);
 		expect(r.primary).toMatchObject({ kind: "skill", name: "", rest: "" });
 		expect(r.primary.label).toBe("Pick a skill");
 	});
 
 	it("collects @mentions into targets", () => {
-		const r = route("@alice ping @bob");
+		const r = route("@alice ping @bob", tl);
 		expect(r.primary).toEqual({
 			kind: "mention",
 			targets: ["alice", "bob"],
@@ -115,7 +119,7 @@ describe("route - explicit prefixes have no alternatives", () => {
 	});
 
 	it("routes a known bang to its destination", () => {
-		const r = route("!g rust lang");
+		const r = route("!g rust lang", tl);
 		expect(r.primary).toMatchObject({
 			kind: "bang",
 			bang: "g",
@@ -127,7 +131,7 @@ describe("route - explicit prefixes have no alternatives", () => {
 	});
 
 	it("is case-insensitive on the bang keyword", () => {
-		const r = route("!GH ryu");
+		const r = route("!GH ryu", tl);
 		expect(r.primary).toMatchObject({ kind: "bang", bang: "GH" });
 		const github = BANGS.gh;
 		if (!github) {
@@ -140,7 +144,7 @@ describe("route - explicit prefixes have no alternatives", () => {
 	});
 
 	it("falls back to search for an unknown bang", () => {
-		const r = route("!zzz find me");
+		const r = route("!zzz find me", tl);
 		expect(r.primary).toMatchObject({
 			kind: "search",
 			query: "zzz find me",
@@ -152,11 +156,11 @@ describe("route - explicit prefixes have no alternatives", () => {
 		"!constructor",
 		"!__proto__ x",
 	])("treats the inherited object key %s as an unknown bang", (input) => {
-		expect(route(input).primary.kind).toBe("search");
+		expect(route(input, tl).primary.kind).toBe("search");
 	});
 
 	it("forces search with a leading ? but offers AI as an alternative", () => {
-		const r = route("?best editor");
+		const r = route("?best editor", tl);
 		expect(r.primary).toMatchObject({ kind: "search", query: "best editor" });
 		expect(r.alternatives).toEqual([
 			{ kind: "ai", prompt: "best editor", label: "Ask Ryu" },
@@ -166,13 +170,13 @@ describe("route - explicit prefixes have no alternatives", () => {
 
 describe("route - implicit classification with cyclable fallbacks", () => {
 	it("returns an empty AI intent for blank input", () => {
-		const r = route("");
+		const r = route("", tl);
 		expect(r.primary).toEqual({ kind: "ai", prompt: "", label: "Ask Ryu" });
 		expect(r.alternatives).toEqual([]);
 	});
 
 	it("navigates a URL, with search then AI as fallbacks", () => {
-		const r = route("example.com");
+		const r = route("example.com", tl);
 		expect(r.primary).toEqual({
 			kind: "navigate",
 			url: "https://example.com",
@@ -182,13 +186,13 @@ describe("route - implicit classification with cyclable fallbacks", () => {
 	});
 
 	it("asks the AI for a question, with search as the fallback", () => {
-		const r = route("what is a monad");
+		const r = route("what is a monad", tl);
 		expect(r.primary).toMatchObject({ kind: "ai", prompt: "what is a monad" });
 		expect(r.alternatives.map((a) => a.kind)).toEqual(["search"]);
 	});
 
 	it("searches plain keywords, with AI as the fallback", () => {
-		const r = route("rust ownership");
+		const r = route("rust ownership", tl);
 		expect(r.primary).toMatchObject({
 			kind: "search",
 			query: "rust ownership",
@@ -197,7 +201,7 @@ describe("route - implicit classification with cyclable fallbacks", () => {
 	});
 
 	it("honors a non-default engine for search intents", () => {
-		const r = route("rust ownership", "duckduckgo");
+		const r = route("rust ownership", tl, "duckduckgo");
 		expect(r.primary).toMatchObject({
 			kind: "search",
 			engine: "duckduckgo",

@@ -2,8 +2,9 @@ import { cn } from "@ryu/ui/lib/utils";
 import Link from "next/link";
 import { getProduct } from "../data/products.tsx";
 import { landingSectionClass } from "../landing-typography.ts";
+import { LinkArrow } from "../link-arrow.tsx";
 import { nextLinkHref } from "../next-link-href.ts";
-import { productHref } from "../products-overview.tsx";
+import { productHref } from "../product-href.ts";
 import { NumberedSteps, SectionHeading } from "../sections.tsx";
 import type { ProductAudience, ProductExplainer } from "./explainer-types.ts";
 
@@ -107,12 +108,7 @@ export function ProductWorksWith({ slugs }: { slugs: readonly string[] }) {
 						>
 							<span className={itemTitleClass}>{product.name}</span>
 							<span className={itemDescriptionClass}>{product.tagline}</span>
-							<span
-								aria-hidden="true"
-								className="hidden text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground sm:inline"
-							>
-								→
-							</span>
+							<LinkArrow className="hidden text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground sm:inline-block" />
 						</Link>
 					</li>
 				))}

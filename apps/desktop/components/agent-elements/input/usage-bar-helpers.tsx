@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { formatCount, formatCurrency } from "@ryu/ui/lib/number-format.ts";
 import type {
 	UsageMeter,
@@ -173,7 +174,7 @@ export function formatReset(resetsAt: string | null): string {
  * that has elapsed one day expects roughly 14%; consuming 50% is therefore 36
  * points in deficit. Unknown dates deliberately produce no pace claim.
  */
-export function paceStatus(usageWindow: UsageWindow): string | null {
+function paceDifference(usageWindow: UsageWindow): number | null {
 	if (
 		!(usageWindow.resetsAt && usageWindow.windowSeconds) ||
 		usageWindow.windowSeconds <= 0
@@ -192,20 +193,31 @@ export function paceStatus(usageWindow: UsageWindow): string | null {
 		)
 	);
 	const difference = usageWindow.usedPercent - expected;
-	if (Math.abs(difference) < 1) {
-		return "on pace";
+	return Math.abs(difference) < 1 ? 0 : difference;
+}
+
+export function paceStatus(
+	usageWindow: UsageWindow,
+	tl: LiteralMessage
+): string | null {
+	const difference = paceDifference(usageWindow);
+	if (difference === null) {
+		return null;
+	}
+	if (difference === 0) {
+		return tl("on pace");
 	}
 	return difference > 0
-		? `${Math.round(difference)}% in deficit`
-		: `${Math.round(-difference)}% in reserve`;
+		? tl("{percent}% in deficit", { percent: Math.round(difference) })
+		: tl("{percent}% in reserve", { percent: Math.round(-difference) });
 }
 
 export function paceDotClass(usageWindow: UsageWindow): string {
-	const status = paceStatus(usageWindow);
-	if (status?.includes("deficit")) {
+	const difference = paceDifference(usageWindow);
+	if (difference !== null && difference > 0) {
 		return "bg-destructive";
 	}
-	if (status?.includes("reserve")) {
+	if (difference !== null && difference < 0) {
 		return "bg-success";
 	}
 	return "bg-muted-foreground/40";

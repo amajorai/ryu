@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceAgent,
 	InterfaceGroup,
@@ -134,7 +135,8 @@ export function wikiThreadTitle(thread: InterfaceThread | undefined): string {
 export function wikiPageHeading(
 	snapshot: InterfaceSnapshot,
 	route: WikiRoute,
-	tab: WikiTab
+	tab: WikiTab,
+	tl: LiteralMessage
 ): string {
 	const title = wikiRouteTitle(snapshot, route);
 	if (!routeHasTalk(route)) {
@@ -144,7 +146,7 @@ export function wikiPageHeading(
 		return `Talk:${title}`;
 	}
 	if (tab === "history") {
-		return `${title}: Revision history`;
+		return tl("{title}: Revision history", { title });
 	}
 	return title;
 }

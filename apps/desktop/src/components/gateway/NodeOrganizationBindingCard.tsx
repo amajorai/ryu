@@ -87,6 +87,7 @@ export function NodeOrganizationBindingCard({
 					name: nodeName,
 					organizationId,
 					target,
+					tl,
 				})
 			);
 		},
@@ -184,7 +185,7 @@ export function NodeOrganizationBindingCard({
 	);
 	const permissionDenied =
 		permissionsQuery.isSuccess && !canBindNode(permissionsQuery.data);
-	const nodeNameValidationError = fleetNodeNameError(nodeName);
+	const nodeNameValidationError = fleetNodeNameError(nodeName, tl);
 
 	return (
 		<section

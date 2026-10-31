@@ -1,4 +1,5 @@
 import type { HostServices } from "@ryu/app-host/rpc";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import { generateAudio } from "../../lib/api/audio.ts";
 import type { ApiTarget } from "../../lib/api/client.ts";
@@ -19,6 +20,7 @@ export interface CompanionMediaContext {
 	/** Cloud job poll cadence in ms; the API clients default to 3000. */
 	pollIntervalMs?: number;
 	target: ApiTarget;
+	tl: LiteralMessage;
 }
 
 /** The `type` of a `data:` URI, used once a remote file has been inlined so the
@@ -45,7 +47,7 @@ export function createCompanionMediaServices(
 	| "generateVideo"
 	| "modelComplete"
 > {
-	const { appId, appPermission, inline, pluginId, pollIntervalMs, target } =
+	const { appId, appPermission, inline, pluginId, pollIntervalMs, target, tl } =
 		context;
 	return {
 		bridgeFeatures: ["media.video.inputs", "model.vision"],
@@ -54,7 +56,7 @@ export function createCompanionMediaServices(
 				z.string().parse
 			),
 		generateImage: async (input) => {
-			const urls = await generateImage(target, input.prompt, {
+			const urls = await generateImage(target, input.prompt, tl, {
 				appId,
 				appPermission,
 				count: input.count,

@@ -1,3 +1,5 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
@@ -45,18 +47,28 @@ export function formatPercent(value: number | null): string {
  */
 export function describeChange(
 	change: number,
-	changePercent: number | null
+	changePercent: number | null,
+	tl: LiteralMessage
 ): string {
 	if (change === 0) {
-		return "no threads active today";
+		return tl("no threads active today");
 	}
-	const amount = Math.abs(change);
-	const noun = amount === 1 ? "message" : "messages";
-	const percent =
-		changePercent === null
-			? "none before today"
-			: `${percentFormat.format(Math.abs(changePercent))} percent`;
-	return `${change > 0 ? "up" : "down"} ${integerFormat.format(amount)} ${noun} in threads active today, ${percent}`;
+	const count = Math.abs(change);
+	const values = {
+		amount: integerFormat.format(count),
+		count,
+		direction: change > 0 ? "up" : "down",
+	};
+	if (changePercent === null) {
+		return tl(
+			"{direction, select, up {up} other {down}} {amount} {count, plural, one {message} other {messages}} in threads active today, none before today",
+			values
+		);
+	}
+	return tl(
+		"{direction, select, up {up} other {down}} {amount} {count, plural, one {message} other {messages}} in threads active today, {percent} percent",
+		{ ...values, percent: percentFormat.format(Math.abs(changePercent)) }
+	);
 }
 
 const dayFormat = new Intl.DateTimeFormat("en-US", {

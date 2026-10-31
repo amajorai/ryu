@@ -8,6 +8,7 @@ import {
 	setSystemTime,
 	test,
 } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfaceAgentAct,
 	InterfacePort,
@@ -1188,6 +1189,7 @@ describe("Seasonal useful state", () => {
 			shown: new Set(),
 			slots: youSpotSlots(acts, unownedAsks(snapshot)).slots,
 			stations,
+			tl: (source, values) => formatMessage(source, values),
 		});
 		const ada = cast.find((spec) => spec.actAgent === FIXTURE_AGENT_IDS.ada);
 		expect(ada?.label).toBe(

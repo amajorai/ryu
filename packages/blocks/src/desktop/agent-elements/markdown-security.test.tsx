@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Markdown, MarkdownResponseImages } from "./markdown.tsx";
+import {
+	Markdown,
+	MarkdownResponseImages,
+	preloadMarkdown,
+} from "./markdown.tsx";
+
+// Static markup cannot wait for a lazy chunk: load the renderer first.
+await preloadMarkdown();
 
 test.each([
 	"constructor",

@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfaceEvent,
 	InterfacePort,
@@ -344,10 +345,26 @@ describe("dashboard view model", () => {
 
 	test("untilLabel floors so it never overstates the wait", () => {
 		const at = (ms: number) => new Date(NOW + ms).toISOString();
-		expect(untilLabel(at(30 * 1000), NOW)).toBe("now");
-		expect(untilLabel(at(59 * MINUTE + 58_000), NOW)).toBe("in 59m");
-		expect(untilLabel(at(5 * HOUR_MS), NOW)).toBe("in 5h");
-		expect(untilLabel(at(50 * HOUR_MS), NOW)).toBe("in 2d");
+		expect(
+			untilLabel(at(30 * 1000), NOW, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("now");
+		expect(
+			untilLabel(at(59 * MINUTE + 58_000), NOW, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 59m");
+		expect(
+			untilLabel(at(5 * HOUR_MS), NOW, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 5h");
+		expect(
+			untilLabel(at(50 * HOUR_MS), NOW, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 2d");
 	});
 });
 

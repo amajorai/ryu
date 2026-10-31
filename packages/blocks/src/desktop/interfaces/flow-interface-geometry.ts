@@ -215,6 +215,7 @@ export function flowMenuPlacement({
 	shown,
 	size,
 	snapshot,
+	tl,
 }: {
 	layout: FlowLayout;
 	menuFor: string | null;
@@ -222,6 +223,7 @@ export function flowMenuPlacement({
 	shown: FlowView;
 	size: { height: number; width: number };
 	snapshot: InterfaceSnapshot;
+	tl: LiteralMessage;
 }) {
 	const stubNode = menuFor
 		? layout.nodes.find(
@@ -233,7 +235,7 @@ export function flowMenuPlacement({
 		menuFor && !stubNode
 			? layout.nodes.find((node) => node.id === menuFor)
 			: undefined;
-	const sections = menuFor ? connectSections(snapshot, menuFor) : [];
+	const sections = menuFor ? connectSections(snapshot, menuFor, tl) : [];
 	const menuPosition = placeMenu({
 		anchor: stubNode
 			? { right: stubNode.x + stubNode.w, y: stubNode.y }

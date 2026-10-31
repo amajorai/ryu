@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { type WikiEntry, wikiEntries } from "./wiki-model-pages.ts";
 import { wikiThread } from "./wiki-model-routes.ts";
@@ -31,14 +32,15 @@ function entryBody(snapshot: InterfaceSnapshot, entry: WikiEntry): string {
  */
 export function wikiSearch(
 	snapshot: InterfaceSnapshot,
-	query: string
+	query: string,
+	tl: LiteralMessage
 ): WikiSearchHit[] {
 	const words = normalize(query).split(/\s+/).filter(Boolean);
 	if (words.length === 0) {
 		return [];
 	}
 	const hits: (WikiSearchHit & { prefix: boolean })[] = [];
-	for (const entry of wikiEntries(snapshot)) {
+	for (const entry of wikiEntries(snapshot, tl)) {
 		const title = normalize(entry.title);
 		const body = entryBody(snapshot, entry);
 		const haystack = `${title} ${normalize(body)} ${normalize(entry.description)}`;
@@ -69,6 +71,7 @@ export function wikiSearch(
 export function wikiSuggest(
 	snapshot: InterfaceSnapshot,
 	query: string,
+	tl: LiteralMessage,
 	limit = 6
 ): WikiEntry[] {
 	const words = normalize(query).split(/\s+/).filter(Boolean);
@@ -76,7 +79,7 @@ export function wikiSuggest(
 		return [];
 	}
 	const scored: { entry: WikiEntry; start: boolean }[] = [];
-	for (const entry of wikiEntries(snapshot)) {
+	for (const entry of wikiEntries(snapshot, tl)) {
 		const title = normalize(entry.title);
 		const titleWords = title.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 		if (

@@ -191,8 +191,6 @@ export function PostJobDialog({
 				className="gap-6 bg-card p-6 text-card-foreground backdrop-blur-none sm:max-w-lg"
 				data-testid="jobs-post-dialog"
 				initialFocus={descriptionRef}
-				// A plain scrim: the shared overlay frosts the app behind it.
-				overlayClassName="[-webkit-backdrop-filter:none]! [backdrop-filter:none]!"
 			>
 				<DialogHeader>
 					<DialogTitle className="font-sans font-semibold! text-lg leading-7">

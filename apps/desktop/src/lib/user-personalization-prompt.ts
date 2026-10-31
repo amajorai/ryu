@@ -7,6 +7,7 @@
  */
 
 import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { UserPersonalization } from "@/src/lib/api/preferences.ts";
 
 /** UI field labels, in Core's prompt order. */
@@ -44,10 +45,12 @@ function promptValue(value: unknown): string {
  */
 export function personalizationCacheWarning(
 	before: UserPersonalization,
-	after: UserPersonalization
+	after: UserPersonalization,
+	tl: LiteralMessage
 ): { description: string; title: string } | null {
 	return promptEditCacheWarning(
 		changedPersonalizationFields(before, after),
-		"all-threads"
+		"all-threads",
+		tl
 	);
 }

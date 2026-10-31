@@ -32,6 +32,7 @@ mock.module("@/src/lib/api/plugins.ts", () => ({
 	installApp: () => Promise.reject(new Error("unused")),
 	uninstallApp: () => Promise.reject(new Error("unused")),
 	describeDependencyError: () => "unused",
+	describeGatewayRefusal: () => null,
 }));
 mock.module("@/src/components/views/DeclarativeView.tsx", () => ({
 	HelloDeclarativeViewHarness: () => null,

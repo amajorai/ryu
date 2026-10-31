@@ -1,4 +1,5 @@
 import { decideUpdateEligibility } from "@ryu/auth/lib/plans";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { sileo } from "sileo";
 import { resolveAppUpdateSource } from "@/src/components/updater/app-update-policy.ts";
@@ -73,10 +74,11 @@ export function sourceForUpdate(
 
 export async function prepareUpdate(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	options?: AppUpdateOptions
 ) {
 	if (!isEligibleForAppUpdate(verdict)) {
-		notifyUpdateOutsideWindow(verdict);
+		notifyUpdateOutsideWindow(verdict, tl);
 		return null;
 	}
 	const source = sourceForUpdate(verdict, options);
@@ -91,10 +93,13 @@ export async function prepareUpdate(
 
 export function showPreparedUpdatePrompt(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	options?: AppUpdateOptions
 ): void {
 	toast.info({
-		title: `Update ready — v${verdict.latest}`,
+		title: tl("Update ready — v{latestVersion}", {
+			latestVersion: verdict.latest,
+		}),
 		description: updateToastBody({
 			notes: verdict.notes,
 			htmlUrl: verdict.html_url,
@@ -108,7 +113,7 @@ export function showPreparedUpdatePrompt(
 		button: {
 			title: "Install and restart",
 			onClick: () => {
-				installUpdate(verdict, options).catch(() => undefined);
+				installUpdate(verdict, tl, options).catch(() => undefined);
 			},
 		},
 	});
@@ -116,10 +121,13 @@ export function showPreparedUpdatePrompt(
 
 export function showDownloadUpdatePrompt(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	options?: AppUpdateOptions
 ): void {
 	toast.info({
-		title: `Update available — v${verdict.latest}`,
+		title: tl("Update available — v{latestVersion}", {
+			latestVersion: verdict.latest,
+		}),
 		description: updateToastBody({
 			notes: verdict.notes,
 			htmlUrl: verdict.html_url,
@@ -130,8 +138,8 @@ export function showDownloadUpdatePrompt(
 		button: {
 			title: "Download update",
 			onClick: () => {
-				prepareAndPrompt(verdict, options).catch((error) => {
-					showPreparationFailure(verdict, options, error);
+				prepareAndPrompt(verdict, tl, options).catch((error) => {
+					showPreparationFailure(verdict, tl, options, error);
 				});
 			},
 		},
@@ -148,16 +156,18 @@ export function showDownloadUpdatePrompt(
  */
 export async function prepareAndPrompt(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	options: AppUpdateOptions | undefined
 ): Promise<void> {
-	const prepared = await prepareUpdate(verdict, options);
+	const prepared = await prepareUpdate(verdict, tl, options);
 	if (prepared) {
-		showPreparedUpdatePrompt(verdict, options);
+		showPreparedUpdatePrompt(verdict, tl, options);
 		return;
 	}
 	if (isEligibleForAppUpdate(verdict)) {
 		offerManualDownload(
 			verdict,
+			tl,
 			verdict.html_url ?? "https://ryuhq.com/downloads?ref=ryu-app"
 		);
 	}
@@ -190,6 +200,7 @@ export function updateErrorSentence<TError>(
 
 export function showPreparationFailure<TError>(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	options: AppUpdateOptions | undefined,
 	error: TError
 ): void {
@@ -203,8 +214,8 @@ export function showPreparationFailure<TError>(
 		button: {
 			title: "Retry download",
 			onClick: () => {
-				prepareAndPrompt(verdict, options).catch((retryError) => {
-					showPreparationFailure(verdict, options, retryError);
+				prepareAndPrompt(verdict, tl, options).catch((retryError) => {
+					showPreparationFailure(verdict, tl, options, retryError);
 				});
 			},
 		},
@@ -222,10 +233,13 @@ export function openDownloads(url: string) {
  */
 export function offerManualDownload(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	downloadsUrl: string
 ): void {
 	sileo.info({
-		title: `Update v${verdict.latest} available`,
+		title: tl("Update v{latestVersion} available", {
+			latestVersion: verdict.latest,
+		}),
 		description: "Open the download page to update manually.",
 		duration: null,
 		button: {

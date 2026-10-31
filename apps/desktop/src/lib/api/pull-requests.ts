@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { ownAppRequest } from "./app-request.ts";
 import type { ApiTarget } from "./client.ts";
 import {
@@ -148,9 +149,19 @@ export function gitPullRequestStatus(
 }
 
 export function gitPullRequestStatusLabel(
-	status: GitPullRequestStatus
+	status: GitPullRequestStatus,
+	tl: LiteralMessage
 ): string {
-	return `${status[0]?.toUpperCase() ?? ""}${status.slice(1)} pull request`;
+	switch (status) {
+		case "closed":
+			return tl("Closed pull request");
+		case "draft":
+			return tl("Draft pull request");
+		case "merged":
+			return tl("Merged pull request");
+		default:
+			return tl("Open pull request");
+	}
 }
 
 const MAX_REPORT_CHARS = 12_000;

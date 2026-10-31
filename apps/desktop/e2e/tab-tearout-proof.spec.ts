@@ -4,7 +4,6 @@ import { z } from "zod";
 declare global {
 	interface Window {
 		__tabTearoutClaimCommands: string[];
-		__tabTearoutDragEvents: string[];
 		__tabTearoutDragDiagnostics: Array<{
 			type: string;
 			defaultPrevented: boolean;
@@ -13,6 +12,7 @@ declare global {
 			dropEffect: string | null;
 			transferTypes: string[];
 		}>;
+		__tabTearoutDragEvents: string[];
 		__tabTearoutSourceRemoved: boolean;
 		__tabTearoutSplitSourceState: () => {
 			connected: boolean;
@@ -239,7 +239,9 @@ test("ordinary drag reorders tabs without removing them", async ({
 				true
 			);
 			document.addEventListener(type, (event) => {
-				if (!(event instanceof DragEvent)) return;
+				if (!(event instanceof DragEvent)) {
+					return;
+				}
 				window.__tabTearoutDragDiagnostics.push({
 					type: event.type,
 					defaultPrevented: event.defaultPrevented,
@@ -253,7 +255,9 @@ test("ordinary drag reorders tabs without removing them", async ({
 	});
 	const source = await tabs.nth(0).boundingBox();
 	const target = await tabs.nth(2).boundingBox();
-	if (!source || !target) throw new Error("Missing source or target tab");
+	if (!(source && target)) {
+		throw new Error("Missing source or target tab");
+	}
 	const protocol = await page.context().newCDPSession(page);
 	const dragDataSchema = z.object({
 		items: z.array(
@@ -271,8 +275,11 @@ test("ordinary drag reorders tabs without removing them", async ({
 		(resolve, reject) => {
 			protocol.once("Input.dragIntercepted", (event) => {
 				const parsed = dragDataSchema.safeParse(event.data);
-				if (parsed.success) resolve(parsed.data);
-				else reject(parsed.error);
+				if (parsed.success) {
+					resolve(parsed.data);
+				} else {
+					reject(parsed.error);
+				}
 			});
 		}
 	);
@@ -419,7 +426,9 @@ test("a physical tab drag still creates a content split and restores its pane me
 		.first()
 		.boundingBox();
 	const pane = await center.boundingBox();
-	if (!source || !pane) throw new Error("Missing physical drag source or pane");
+	if (!(source && pane)) {
+		throw new Error("Missing physical drag source or pane");
+	}
 	await page.evaluate(() => {
 		window.__tabTearoutDragEvents = [];
 		const original = document.querySelector(
@@ -451,7 +460,9 @@ test("a physical tab drag still creates a content split and restores its pane me
 	await page.mouse.move(x + 16, y);
 	await expect(page.locator("[data-tab-drop-overlay]")).toBeVisible();
 	const overlay = await page.locator("[data-tab-drop-overlay]").boundingBox();
-	if (!overlay) throw new Error("Content drag target did not mount");
+	if (!overlay) {
+		throw new Error("Content drag target did not mount");
+	}
 	// The newly mounted target must not cover the pressed titlebar source.
 	expect(overlay.y).toBeGreaterThanOrEqual(source.y + source.height);
 	const targetX = pane.x + 8;

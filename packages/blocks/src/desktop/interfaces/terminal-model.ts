@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	channelHandle,
 	type InterfaceAgent,
@@ -214,7 +215,8 @@ export type OpenResolution =
 export function resolveOpenTarget(
 	snapshot: InterfaceSnapshot,
 	target: string,
-	lastListing: readonly string[] | null
+	lastListing: readonly string[] | null,
+	tl: LiteralMessage
 ): OpenResolution {
 	const cleaned = target.replace(/^#/, "");
 	if (/^\d+$/.test(cleaned)) {
@@ -225,14 +227,16 @@ export function resolveOpenTarget(
 		if (threadId && snapshot.threads.some((thread) => thread.id === threadId)) {
 			return { kind: "found", number, threadId };
 		}
-		let scope = `${ids.length} in the last listing`;
-		if (!lastListing) {
-			scope = ids.length === 1 ? "1 thread" : `${ids.length} threads`;
-		}
+		const count = String(ids.length);
 		return {
-			hint: `${scope} · ls to refresh`,
+			hint: lastListing
+				? tl("{count} in the last listing · ls to refresh", { count })
+				: tl(
+						"{threadCount, plural, one {{count} thread} other {{count} threads}} · ls to refresh",
+						{ count, threadCount: ids.length }
+					),
 			kind: "missing",
-			message: `open: no thread #${number}`,
+			message: tl("open: no thread #{number}", { number: String(number) }),
 		};
 	}
 	const exact = snapshot.threads.find((thread) => thread.id === cleaned);
@@ -250,13 +254,16 @@ export function resolveOpenTarget(
 		return {
 			hint: "ls, then open <n>",
 			kind: "missing",
-			message: `open: ${cleaned} matches ${prefixed.length} threads`,
+			message: tl("open: {target} matches {matchCount} threads", {
+				matchCount: String(prefixed.length),
+				target: cleaned,
+			}),
 		};
 	}
 	return {
 		hint: "usage: open <n|id> · ls for numbers",
 		kind: "missing",
-		message: `open: no thread ${cleaned}`,
+		message: tl("open: no thread {target}", { target: cleaned }),
 	};
 }
 

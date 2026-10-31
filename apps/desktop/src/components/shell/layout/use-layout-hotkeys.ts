@@ -1,4 +1,5 @@
 import { useHotkey, useOptionalHotkeyBinding } from "@ryu/hotkeys/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useEffect } from "react";
 import { useAppShellPath } from "@/src/contributions/app-shell-routes.ts";
@@ -50,6 +51,7 @@ export function useLayoutHotkeys({
 	toggleWorkbenchRegion,
 	workbenchState,
 }: LayoutHotkeysOptions) {
+	const tl = useLiteralMessages();
 	// App-level shortcuts whose handlers live here (sidebar, settings, new chat,
 	// route jumps). Everything routes through the unified hotkey registry, so all
 	// of these are rebindable in Settings → Keyboard Shortcuts.
@@ -127,6 +129,7 @@ export function useLayoutHotkeys({
 			dispatch: dispatchWorkbench,
 			movableRegions: DESKTOP_SHELL_REGIONS,
 			state: workbenchState,
+			tl,
 		}).find((candidate) => candidate.id === commandId);
 		if (command && !command.disabled) {
 			command.run();

@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceThread,
@@ -115,7 +116,8 @@ function threadIdea(thread: InterfaceThread): PersonaIdea | null {
  */
 export function personaIdeas(
 	agent: InterfaceAgent | undefined,
-	threads: InterfaceThread[]
+	threads: InterfaceThread[],
+	tl: LiteralMessage
 ): PersonaIdeaGroup[] {
 	if (!agent) {
 		return [];
@@ -151,7 +153,7 @@ export function personaIdeas(
 		groups.push({
 			ideas: skills,
 			key: "skills",
-			label: `Ask about ${agent.name}'s work`,
+			label: tl("Ask about {name}'s work", { name: agent.name }),
 		});
 	}
 	groups.push({

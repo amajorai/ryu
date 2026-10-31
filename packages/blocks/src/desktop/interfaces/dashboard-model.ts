@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -247,19 +248,23 @@ export function threadTitle(thread: InterfaceThread): string {
 }
 
 /** "in 45m", "in 3h", "in 2d" for a future time; "now" once it is due. */
-export function untilLabel(iso: string, now: number): string {
+export function untilLabel(
+	iso: string,
+	now: number,
+	tl: LiteralMessage
+): string {
 	const delta = timeOf(iso) - now;
 	if (delta < MINUTE_MS) {
-		return "now";
+		return tl("now");
 	}
 	// Floor, so a run 59m 58s away reads "in 59m", never "in 60m".
 	if (delta < HOUR_MS) {
-		return `in ${Math.floor(delta / MINUTE_MS)}m`;
+		return tl("in {minutes}m", { minutes: Math.floor(delta / MINUTE_MS) });
 	}
 	if (delta < DAY_MS) {
-		return `in ${Math.floor(delta / HOUR_MS)}h`;
+		return tl("in {hours}h", { hours: Math.floor(delta / HOUR_MS) });
 	}
-	return `in ${Math.floor(delta / DAY_MS)}d`;
+	return tl("in {days}d", { days: String(Math.floor(delta / DAY_MS)) });
 }
 
 const HOUR_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric" });

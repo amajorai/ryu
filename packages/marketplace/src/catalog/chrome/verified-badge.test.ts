@@ -12,7 +12,11 @@
 // inline in the JSX: the failure mode is silent otherwise.
 
 import { describe, expect, test } from "bun:test";
-import { verifiedLabel } from "./verified-badge.tsx";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
+import { verifiedLabel as verifiedLabelWith } from "./verified-badge.tsx";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
+const verifiedLabel = (tier?: string | null) => verifiedLabelWith(tl, tier);
 
 describe("verifiedLabel", () => {
 	test("names the organization axis and qualifies it with the tier", () => {

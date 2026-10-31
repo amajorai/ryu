@@ -108,22 +108,20 @@ export interface WarehouseDioramaProps {
 }
 
 /** What a picker's name plate says to a screen reader. */
-export function pickerLabel(picker: Picker, tl?: LiteralMessage): string {
-	const aisle = AISLE_LETTERS[picker.aisle] ?? "A";
-	const status =
-		picker.pose === "picking"
-			? `picking ${plural(picker.carrying.length, "order")}`
-			: picker.pose === "packing"
-				? "packing"
-				: "idle";
-	if (tl) {
-		return tl("{name}, {status}, aisle {aisle}. Show their orders", {
-			aisle,
-			name: picker.agent.name,
-			status,
-		});
+export function pickerLabel(picker: Picker, tl: LiteralMessage): string {
+	const values = {
+		aisle: AISLE_LETTERS[picker.aisle] ?? "A",
+		name: picker.agent.name,
+	};
+	if (picker.pose === "picking") {
+		return tl(
+			"{name}, picking {count, plural, one {# order} other {# orders}}, aisle {aisle}. Show their orders",
+			{ ...values, count: picker.carrying.length }
+		);
 	}
-	return `${picker.agent.name}, ${status}, aisle ${aisle}. Show their orders`;
+	return picker.pose === "packing"
+		? tl("{name}, packing, aisle {aisle}. Show their orders", values)
+		: tl("{name}, idle, aisle {aisle}. Show their orders", values);
 }
 
 /** The warehouse diorama: island, building, racks, conveyor, dock, pickers. */

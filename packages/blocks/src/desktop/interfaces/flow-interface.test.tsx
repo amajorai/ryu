@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import {
 	type InterfacePort,
 	type InterfaceSnapshot,
@@ -166,6 +167,7 @@ const NO_OPTIONS: FlowLayoutOptions = {
 	engaged: [],
 	expanded: [],
 	stubFor: null,
+	tl: (source, values) => formatMessage(source, values),
 };
 
 const registeredDom = globalThis.document === undefined;
@@ -583,7 +585,9 @@ describe("flow model", () => {
 			.filter((entry) => entry.threadId)
 			.map((entry) => entry.threadId);
 		expect(threads).toEqual(["thread-loose"]);
-		expect(connectSections(SNAPSHOT, "lane:unassigned")).toEqual([]);
+		expect(connectSections(SNAPSHOT, "lane:unassigned", NO_OPTIONS.tl)).toEqual(
+			[]
+		);
 	});
 
 	test("keepInView pans, and zooms only when the branch cannot fit", () => {
@@ -598,7 +602,7 @@ describe("flow model", () => {
 	});
 
 	test("start actions lead with review, then agents and a project", () => {
-		const { all, short } = flowStartActions(SNAPSHOT);
+		const { all, short } = flowStartActions(SNAPSHOT, NO_OPTIONS.tl);
 		expect(short.map((action) => action.title)).toEqual([
 			"Review what needs you",
 			"Message Ada",
@@ -616,12 +620,15 @@ describe("flow model", () => {
 		expect(
 			all.find((action) => action.id === "agent:agent-linus")?.description
 		).toBe("Start a conversation");
-		const lonely = flowStartActions({ ...EMPTY, agents: [], groups: [] });
+		const lonely = flowStartActions(
+			{ ...EMPTY, agents: [], groups: [] },
+			NO_OPTIONS.tl
+		);
 		expect(lonely.short.map((action) => action.id)).toEqual(["blank"]);
 	});
 
 	test("connect menus offer a new conversation and projects", () => {
-		const ada = connectSections(SNAPSHOT, "agent:agent-ada");
+		const ada = connectSections(SNAPSHOT, "agent:agent-ada", NO_OPTIONS.tl);
 		expect(
 			ada.map((section) => section.items.map((item) => item.title))
 		).toEqual([["New conversation"], ["Add to Website"]]);
@@ -631,13 +638,15 @@ describe("flow model", () => {
 			label: "Ada in Website",
 			projectId: "project-site",
 		});
-		const you = connectSections(SNAPSHOT, "origin");
+		const you = connectSections(SNAPSHOT, "origin", NO_OPTIONS.tl);
 		expect(you.map((section) => section.label)).toEqual([
 			"Agents",
 			"Teams",
 			"Projects",
 		]);
-		expect(connectSections(SNAPSHOT, "agent:missing")).toEqual([]);
+		expect(connectSections(SNAPSHOT, "agent:missing", NO_OPTIONS.tl)).toEqual(
+			[]
+		);
 	});
 
 	test("fitting centers small flows and pins large ones to the corner", () => {

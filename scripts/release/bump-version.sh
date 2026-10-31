@@ -152,6 +152,14 @@ log "create-ryu-app SDK range (index.ts + index.test.ts)"
 for f in packages/create-ryu-app/index.ts packages/create-ryu-app/index.test.ts; do
   [[ -f "$f" ]] && perl -0777 -pi -e 'my ($o,$n)=($ENV{OLD},$ENV{NEW}); s/\^\Q$o\E/^$n/g;' "$f"
 done
+# `ryu build`'s generated package.json depends on @ryuhq/sdk-native at this range;
+# build.test.ts pins it to the SDK version, and the SDK hub's release gate runs
+# that test (v0.5.0 failed there when this constant was left at ^0.4.0).
+f=packages/sdk/src/cli/build.ts
+if [[ -f "$f" ]]; then
+  perl -0777 -pi -e 'my ($o,$n)=($ENV{OLD},$ENV{NEW}); s/(NATIVE_VERSION_RANGE = ")\^\Q$o\E"/$1^$n"/g;' "$f"
+  log "  $f -> ^$NEW"
+fi
 
 # 6) Cargo.lock — rewrite the local-crate `version` entries in EVERY tracked lock
 #    (the root workspace lock + the standalone member locks the mirror / tauri build

@@ -5,6 +5,9 @@
 // then the Ryu Box), one of the owner's plan backends on one of their accounts, or the
 // Ryu Box. Shown only to the node owner who turned plans on in Settings, and only
 // before the chat's first message: a session stays on the account it started on.
+// Under the select it says where the agent runs for the pinned choice, and warns when
+// a Claude or ChatGPT plan could be used from a datacenter IP (see
+// src/lib/cloud-agent-mode.ts).
 
 import { CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG } from "@ryu/auth/lib/feature-flags";
 import { useLiteralMessages } from "@ryu/i18n/react";
@@ -25,9 +28,19 @@ import {
 	type PlanAccountView,
 } from "@/src/lib/api/cloud-task-backends.ts";
 import {
+	backendAgentMode,
+	CLOUD_AGENT_MODE_LABELS,
+	planFromDatacenter,
+} from "@/src/lib/cloud-agent-mode.ts";
+import {
 	AUTO_BACKEND_CHOICE,
+	type CloudTaskBackendChoice,
 	useCloudTaskBackendChoices,
 } from "@/src/lib/cloud-task-backend-choice.ts";
+import {
+	DatacenterPlanWarning,
+	useNodeManaged,
+} from "./DatacenterPlanWarning.tsx";
 
 type PlanBackendId = Exclude<CloudTaskBackendId, "ryu-box">;
 
@@ -39,6 +52,29 @@ interface Option {
 
 const optionValue = (option: Option, strict: boolean) =>
 	`${option.backend}|${option.accountId}${strict ? "|strict" : ""}`;
+
+const PLAN_CLI_EXECUTORS = new Set(["claude-code", "codex"]);
+
+/**
+ * Whether the choice may put a Claude or ChatGPT plan on a datacenter IP: the
+ * pinned backend itself, or a Ryu Box that Auto or a non-strict pin falls back to
+ * with Claude Code or Codex as the agent.
+ */
+function warnsOfDatacenterPlan(
+	choice: CloudTaskBackendChoice,
+	executor: string,
+	nodeManaged: boolean
+): boolean {
+	if (choice.kind === "pinned") {
+		if (planFromDatacenter(choice.backend, executor, nodeManaged)) {
+			return true;
+		}
+		if (choice.strict) {
+			return false;
+		}
+	}
+	return PLAN_CLI_EXECUTORS.has(executor);
+}
 
 export function CloudTaskBackendChooser({
 	executor,
@@ -57,6 +93,7 @@ export function CloudTaskBackendChooser({
 	);
 	const setChoice = useCloudTaskBackendChoices((state) => state.setChoice);
 	const { url, token, userJwt } = target;
+	const nodeManaged = useNodeManaged(url);
 
 	useEffect(() => {
 		setOptions([]);
@@ -119,58 +156,73 @@ export function CloudTaskBackendChooser({
 				? "ryu-box"
 				: `${choice.backend}|${choice.accountId ?? "default"}${choice.strict ? "|strict" : ""}`;
 	}
+	const modeLabel =
+		choice.kind === "pinned"
+			? CLOUD_AGENT_MODE_LABELS[backendAgentMode(choice.backend, executor)]
+			: null;
+	const warn = warnsOfDatacenterPlan(choice, executor, nodeManaged);
 	return (
-		<NativeSelect
-			aria-label="Run on"
-			className="h-7 text-xs"
-			onChange={(event) => {
-				const next = event.target.value;
-				if (next === "auto") {
-					setChoice(scope, AUTO_BACKEND_CHOICE);
-					return;
-				}
-				if (next === "ryu-box") {
-					setChoice(scope, {
-						kind: "pinned",
-						backend: "ryu-box",
-						strict: true,
-					});
-					return;
-				}
-				const [backend, accountId, mode] = next.split("|");
-				const picked = options.find(
-					(option) =>
-						option.backend === backend && option.accountId === accountId
-				);
-				if (picked) {
-					setChoice(scope, {
-						kind: "pinned",
-						backend: picked.backend,
-						strict: mode === "strict",
-						accountId: picked.accountId,
-					});
-				}
-			}}
-			value={value}
-		>
-			<NativeSelectOption value="auto">Run on: Auto</NativeSelectOption>
-			{options.flatMap((option) => [
-				<NativeSelectOption
-					key={optionValue(option, false)}
-					value={optionValue(option, false)}
-				>
-					{tl("Run on: {label}, Ryu Box if unavailable", {
-						label: option.label,
-					})}
-				</NativeSelectOption>,
-				<NativeSelectOption
-					key={optionValue(option, true)}
-					value={optionValue(option, true)}
-				>
-					{tl("Run on: {label} only", { label: option.label })}
-				</NativeSelectOption>,
-			])}
-			<NativeSelectOption value="ryu-box">Run on: Ryu Box</NativeSelectOption>
-		</NativeSelect>
+		<>
+			<NativeSelect
+				aria-label="Run on"
+				className="h-7 text-xs"
+				onChange={(event) => {
+					const next = event.target.value;
+					if (next === "auto") {
+						setChoice(scope, AUTO_BACKEND_CHOICE);
+						return;
+					}
+					if (next === "ryu-box") {
+						setChoice(scope, {
+							kind: "pinned",
+							backend: "ryu-box",
+							strict: true,
+						});
+						return;
+					}
+					const [backend, accountId, mode] = next.split("|");
+					const picked = options.find(
+						(option) =>
+							option.backend === backend && option.accountId === accountId
+					);
+					if (picked) {
+						setChoice(scope, {
+							kind: "pinned",
+							backend: picked.backend,
+							strict: mode === "strict",
+							accountId: picked.accountId,
+						});
+					}
+				}}
+				value={value}
+			>
+				<NativeSelectOption value="auto">Run on: Auto</NativeSelectOption>
+				{options.flatMap((option) => [
+					<NativeSelectOption
+						key={optionValue(option, false)}
+						value={optionValue(option, false)}
+					>
+						{tl("Run on: {label}, then Ryu Box (agent in the cloud)", {
+							label: option.label,
+						})}
+					</NativeSelectOption>,
+					<NativeSelectOption
+						key={optionValue(option, true)}
+						value={optionValue(option, true)}
+					>
+						{tl("Run on: {label} only", { label: option.label })}
+					</NativeSelectOption>,
+				])}
+				<NativeSelectOption value="ryu-box">
+					Run on: Ryu Box (agent in the cloud)
+				</NativeSelectOption>
+			</NativeSelect>
+			{modeLabel ? (
+				<span className="text-muted-foreground text-xs">
+					{tl("Runs as: {mode}", { mode: modeLabel })}
+				</span>
+			) : null}
+			{warn ? <DatacenterPlanWarning className="basis-full" /> : null}
+		</>
 	);
 }

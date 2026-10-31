@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
 import {
-	createChatPageNativeHttpFixture,
 	CHAT_PAGE_NATIVE_HTTP_SERVER_OPTIONS,
+	createChatPageNativeHttpFixture,
 } from "./chat-page-native-http.host.ts";
+
 const origin = "http://owned-transition.test";
 const id = "conversation-toolbar-share-fixture";
 const old = {
@@ -23,7 +24,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 			path: string,
 			headers: Record<string, string> = old,
 			method = "GET",
-			body?: unknown,
+			body?: unknown
 		) =>
 			fetch(url + path, {
 				method,
@@ -45,7 +46,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 		});
 		expect(rotate.status).toBe(200);
 		expect(
-			(await request("/api/models/context-window?model=model-proof-b")).status,
+			(await request("/api/models/context-window?model=model-proof-b")).status
 		).toBe(403);
 		expect(
 			(
@@ -54,7 +55,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 					roomId: id,
 					route: "realtime",
 				})
-			).status,
+			).status
 		).toBe(403);
 		let snapshot = fixture.snapshot();
 		expect(snapshot.unexpected).toEqual([]);
@@ -69,11 +70,10 @@ test("only observed exact retired background tuples receive tagged403; model roo
 			});
 		}
 		expect(
-			(await request("/api/models/context-window?model=foreign")).status,
+			(await request("/api/models/context-window?model=foreign")).status
 		).toBe(403);
 		expect(
-			(await request("/api/models/context-window?model=auto&extra=true"))
-				.status,
+			(await request("/api/models/context-window?model=auto&extra=true")).status
 		).toBe(403);
 		expect(
 			(
@@ -81,7 +81,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 					...old,
 					authorization: "Bearer arbitrary",
 				})
-			).status,
+			).status
 		).toBe(403);
 		expect(
 			(
@@ -90,7 +90,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 					roomId: "foreign",
 					route: "realtime",
 				})
-			).status,
+			).status
 		).toBe(403);
 		const modelPath = `/api/conversations/${id}/model-selection`;
 		expect((await request(modelPath)).status).toBe(403);
@@ -101,7 +101,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 					kind: "change",
 					modelId: "model-proof-b",
 				})
-			).status,
+			).status
 		).toBe(403);
 		snapshot = fixture.snapshot();
 		expect(snapshot.unexpected).toHaveLength(6);
@@ -113,7 +113,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 		};
 		expect(
 			(await request("/api/models/context-window?model=model-proof-b", current))
-				.status,
+				.status
 		).toBe(200);
 		expect((await request(modelPath, current)).status).toBe(200);
 		expect(fixture.snapshot().calls.at(-1)?.transitionRefusal).toBeUndefined();
@@ -125,7 +125,7 @@ test("only observed exact retired background tuples receive tagged403; model roo
 					...old,
 					"x-ryu-user-jwt": "current-jwt",
 				})
-			).status,
+			).status
 		).toBe(403);
 		expect(fixture.snapshot().unexpected).toHaveLength(1);
 	} finally {

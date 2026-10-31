@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -295,7 +296,9 @@ describe("lobby model", () => {
 	});
 
 	test("dailies: failures first, then replies; live and queued are in progress", () => {
-		const quests = dailyQuests(SNAPSHOT);
+		const quests = dailyQuests(SNAPSHOT, (source, values) =>
+			formatMessage(source, values)
+		);
 		expect(quests.map((quest) => quest.id)).toEqual([
 			"daily-thread-flaky",
 			"daily-thread-notes",
@@ -344,7 +347,9 @@ describe("lobby model", () => {
 		expect(nextMilestone(0)).toEqual({ goal: 10, tier: 1 });
 		expect(nextMilestone(30)).toEqual({ goal: 50, tier: 3 });
 		expect(nextMilestone(999)).toEqual({ goal: 250, tier: 5 });
-		const quests = milestoneQuests(buildMembers(SNAPSHOT));
+		const quests = milestoneQuests(buildMembers(SNAPSHOT), (source, values) =>
+			formatMessage(source, values)
+		);
 		expect(quests[0]).toMatchObject({
 			goal: 50,
 			id: "milestone-agent-mae",

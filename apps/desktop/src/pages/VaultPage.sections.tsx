@@ -208,7 +208,11 @@ export function renderVaultSecretForm({
 				</div>
 				{saveMutation.error ? (
 					<p className="text-sm text-status-destructive sm:col-span-2">
-						{vaultErrorMessage(saveMutation.error, "Could not save secret.")}
+						{vaultErrorMessage(
+							saveMutation.error,
+							"Could not save secret.",
+							tl
+						)}
 					</p>
 				) : null}
 			</SettingsCard>
@@ -230,7 +234,7 @@ type VaultSecretListInput = Pick<
 	| "state"
 	| "vaultQuery"
 	| "visibleSecrets"
->;
+> & { tl: LiteralMessage };
 
 /** The scoped secret list with folders and deleted-secret recovery. A plain render call, so the React tree is unchanged. */
 export function renderVaultSecretList({
@@ -244,6 +248,7 @@ export function renderVaultSecretList({
 	setShowDeleted,
 	showDeleted,
 	state,
+	tl,
 	vaultQuery,
 	visibleSecrets,
 }: VaultSecretListInput) {
@@ -313,7 +318,8 @@ export function renderVaultSecretList({
 						<p className="p-4 text-sm text-status-destructive">
 							{vaultErrorMessage(
 								vaultQuery.error,
-								"Could not load vault secrets."
+								"Could not load vault secrets.",
+								tl
 							)}
 						</p>
 					) : visibleSecrets.length ? (

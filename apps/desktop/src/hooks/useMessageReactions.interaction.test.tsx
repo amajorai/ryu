@@ -3,10 +3,13 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch;
 const NativeRequest = globalThis.Request;
 const NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 mock.module("@/src/contexts/TabsContext.tsx", () => ({
@@ -78,7 +81,7 @@ async function respond(request: Request): Promise<Response> {
 	const write =
 		path === `/api/conversations/${ROOM}/messages/${MESSAGE}/reactions` &&
 		["POST", "DELETE"].includes(request.method);
-	if (!slot || !(list || write)) {
+	if (!(slot && (list || write))) {
 		unexpected.push(`${request.method} ${path}`);
 		return NativeResponse.json(
 			{ error: "Unimplemented reaction request" },
@@ -106,8 +109,9 @@ async function respond(request: Request): Promise<Response> {
 		!("emoji" in body) ||
 		Object.keys(body).length !== 1 ||
 		!["✅", "👍", "🎉"].includes(String(body.emoji))
-	)
+	) {
 		throw new Error("Invalid exact reaction body");
+	}
 	const emoji = String(body.emoji);
 	let status = 200;
 	if (
@@ -124,25 +128,27 @@ async function respond(request: Request): Promise<Response> {
 	}
 	call.status = status;
 	call.completed = true;
-	if (status !== 200)
+	if (status !== 200) {
 		return NativeResponse.json({ error: "Reaction write refused" }, { status });
+	}
 	const bucket = saved[slot].find((row) => row.emoji === emoji);
-	if (request.method === "POST" && !bucket)
+	if (request.method === "POST" && !bucket) {
 		saved[slot].push({
 			message_id: MESSAGE,
 			emoji,
 			count: 1,
 			reacted_by_me: true,
 		});
-	else if (request.method === "POST" && bucket && !bucket.reacted_by_me) {
+	} else if (request.method === "POST" && bucket && !bucket.reacted_by_me) {
 		bucket.count++;
 		bucket.reacted_by_me = true;
 	}
 	if (request.method === "DELETE" && bucket?.reacted_by_me) {
 		bucket.count--;
 		bucket.reacted_by_me = false;
-		if (bucket.count === 0)
+		if (bucket.count === 0) {
 			saved[slot] = saved[slot].filter((row) => row !== bucket);
+		}
 	}
 	return NativeResponse.json({ ok: true });
 }
@@ -156,7 +162,9 @@ globalThis.fetch = Object.assign(
 			void result.then(
 				() => {
 					const slot = identify(request);
-					if (slot) consumed.push({ slot, method: request.method });
+					if (slot) {
+						consumed.push({ slot, method: request.method });
+					}
 				},
 				() => {}
 			);
@@ -175,7 +183,6 @@ function Probe() {
 	return (
 		<div>
 			<button
-				type="button"
 				onClick={() =>
 					applyRealtimeFrame(
 						{
@@ -188,22 +195,23 @@ function Probe() {
 						"owner"
 					)
 				}
+				type="button"
 			>
 				Deliver peer frame
 			</button>
 			<output data-testid="reaction-list">
 				{JSON.stringify(byMessage.get(MESSAGE) ?? [])}
 			</output>
-			<button type="button" onClick={() => toggle(MESSAGE, "👍")}>
+			<button onClick={() => toggle(MESSAGE, "👍")} type="button">
 				Toggle thumbs
 			</button>
-			<button type="button" onClick={() => toggle(MESSAGE, "🎉")}>
+			<button onClick={() => toggle(MESSAGE, "🎉")} type="button">
 				Toggle party
 			</button>
 			<output data-testid="reaction-state">
 				{bucket ? JSON.stringify(bucket) : "loading"}
 			</output>
-			<button type="button" onClick={() => toggle(MESSAGE, "✅")}>
+			<button onClick={() => toggle(MESSAGE, "✅")} type="button">
 				Toggle reaction
 			</button>
 		</div>
@@ -230,7 +238,9 @@ async function until(predicate: () => boolean) {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 5));
 		});
-		if (predicate()) return;
+		if (predicate()) {
+			return;
+		}
 	}
 	throw new Error(
 		`Actual reaction state did not settle: ${container.textContent}; calls=${JSON.stringify(calls)}`
@@ -240,7 +250,9 @@ async function toggle() {
 	const button = [...container.querySelectorAll("button")].find(
 		(row) => row.textContent === "Toggle reaction"
 	);
-	if (!button) throw new Error("Reaction toggle missing");
+	if (!button) {
+		throw new Error("Reaction toggle missing");
+	}
 	await act(async () => button.click());
 }
 function target(slot: Slot) {
@@ -282,7 +294,9 @@ beforeEach(() => {
 	document.body.append(container);
 });
 afterEach(async () => {
-	if (held) held.release?.();
+	if (held) {
+		held.release?.();
+	}
 	held = null;
 	await Promise.all([...flights]);
 	await act(async () => root?.unmount());
@@ -353,7 +367,7 @@ test("real reaction POST refusal rolls the optimistic chip back, retry saves ide
 	expect(saved.A[0]).toMatchObject({ count: 1, reacted_by_me: false });
 	expect(calls.filter((call) => call.method === "DELETE")).toHaveLength(1);
 });
-for (const slot of ["token", "jwt"] as const)
+for (const slot of ["token", "jwt"] as const) {
 	test(`same-URL ${slot} rotation reloads that authority's own reaction membership rather than reusing A's cached buckets`, async () => {
 		await render();
 		await until(() => state() !== null);
@@ -372,7 +386,8 @@ for (const slot of ["token", "jwt"] as const)
 			[slot, "GET"],
 		]);
 	});
-for (const status of [200, 503])
+}
+for (const status of [200, 503]) {
 	test(`held A POST ${status} cannot replace current same-URL JWT B reaction state or roll A's snapshot into B's cache`, async () => {
 		await render();
 		await until(() => state() !== null);
@@ -403,6 +418,7 @@ for (const status of [200, 503])
 			calls.filter((call) => call.method !== "GET").map((call) => call.slot)
 		).toEqual(["A"]);
 	});
+}
 
 function allReactions(): Array<{
 	messageId: string;
@@ -413,7 +429,9 @@ function allReactions(): Array<{
 	const raw = container.querySelector(
 		'[data-testid="reaction-list"]'
 	)?.textContent;
-	if (!raw) throw new Error("Missing mounted hook state");
+	if (!raw) {
+		throw new Error("Missing mounted hook state");
+	}
 	return JSON.parse(raw);
 }
 async function choose(emoji: "👍" | "🎉") {
@@ -421,7 +439,9 @@ async function choose(emoji: "👍" | "🎉") {
 	const button = [...container.querySelectorAll("button")].find(
 		(row) => row.textContent === text
 	);
-	if (!button) throw new Error("Missing actual toggle");
+	if (!button) {
+		throw new Error("Missing actual toggle");
+	}
 	await act(async () => button.click());
 }
 const own = (emoji: string) => ({
@@ -440,7 +460,9 @@ async function emptyA() {
 }
 async function finishFailedThumbs() {
 	const gate = held;
-	if (!gate?.release) throw new Error("Held native thumbs request missing");
+	if (!gate?.release) {
+		throw new Error("Held native thumbs request missing");
+	}
 	gate.release();
 	held = null;
 	await until(
@@ -559,7 +581,9 @@ test("refused membership change preserves a same-emoji peer delta arriving while
 	const peer = [...container.querySelectorAll("button")].find(
 		(row) => row.textContent === "Deliver peer frame"
 	);
-	if (!peer) throw new Error("Missing frame delivery adapter");
+	if (!peer) {
+		throw new Error("Missing frame delivery adapter");
+	}
 	await act(async () => peer.click());
 	await until(() => allReactions()[0]?.count === 4);
 	expect(allReactions()).toEqual([{ ...own("👍"), count: 4 }]);

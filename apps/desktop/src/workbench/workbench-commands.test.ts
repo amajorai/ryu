@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	createDefaultWorkbench,
 	type WorkbenchState,
@@ -10,6 +12,8 @@ import {
 	visibleGroupOrder,
 	workbenchLayoutCommands,
 } from "./workbench-commands.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 function routeItem(id: string) {
 	return {
@@ -51,6 +55,7 @@ function runCommand(state: WorkbenchState, id: string): WorkbenchState {
 		dispatch,
 		movableRegions: DESKTOP_SHELL_REGIONS,
 		state,
+		tl,
 	}).find((candidate) => candidate.id === id);
 	if (!command) {
 		throw new Error(`Missing command ${id}`);
@@ -67,6 +72,7 @@ function commandById(state: WorkbenchState, id: string) {
 		dispatch: () => undefined,
 		movableRegions: DESKTOP_SHELL_REGIONS,
 		state,
+		tl,
 	}).find((candidate) => candidate.id === id);
 }
 
@@ -99,6 +105,7 @@ describe("workbenchLayoutCommands", () => {
 			dispatch: () => undefined,
 			movableRegions: DESKTOP_SHELL_REGIONS,
 			state: fixture(),
+			tl,
 		}).map((command) => command.id);
 		expect(ids).not.toContain("workbench-move-to-left");
 		expect(ids).toContain("workbench-reset-layout");

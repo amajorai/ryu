@@ -2,6 +2,7 @@
 import "./persona-test-dom.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -347,7 +348,11 @@ describe("persona model", () => {
 
 	test("ideas come from thread state and the description", () => {
 		const [delta] = SNAPSHOT.agents;
-		const groups = personaIdeas(delta, personaThreads(SNAPSHOT, "agent-delta"));
+		const groups = personaIdeas(
+			delta,
+			personaThreads(SNAPSHOT, "agent-delta"),
+			formatMessage
+		);
 		expect(groups.map((group) => group.key)).toEqual([
 			"recent",
 			"skills",
@@ -376,12 +381,13 @@ describe("persona model", () => {
 		// A role-only description still gives ideas from the description.
 		const engineer = personaIdeas(
 			delta ? { ...delta, description: "Full-stack engineer" } : undefined,
-			personaThreads(SNAPSHOT, "agent-delta")
+			personaThreads(SNAPSHOT, "agent-delta"),
+			formatMessage
 		);
 		expect(
 			engineer.find((group) => group.key === "skills")?.ideas[0]?.prompt
 		).toBe("What would you tackle next?");
-		expect(personaIdeas(undefined, [])).toEqual([]);
+		expect(personaIdeas(undefined, [], formatMessage)).toEqual([]);
 	});
 
 	test("goals count answered against open threads", () => {
@@ -445,9 +451,13 @@ describe("persona model", () => {
 			"thread:thread-audit",
 		]);
 		expect(ids).toContain("run:run-backup");
-		expect(untilLabel(new Date(BASE + 90 * MINUTE).toISOString(), BASE)).toBe(
-			"in 2h"
-		);
+		expect(
+			untilLabel(
+				new Date(BASE + 90 * MINUTE).toISOString(),
+				(source, values) => formatMessage(source, values),
+				BASE
+			)
+		).toBe("in 2h");
 	});
 });
 

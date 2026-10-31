@@ -126,6 +126,7 @@ export function WeekBlock({
 	placed: PlacedItem;
 	tabStop: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const { item } = placed;
 	const style = blockStyle(placed);
 	// Lines are laid out for the part a later, cascaded block leaves in view.
@@ -158,7 +159,7 @@ export function WeekBlock({
 		<button
 			{...{ [CALENDAR_ITEM_ATTRIBUTE]: item.key }}
 			aria-current={active ? "true" : undefined}
-			aria-label={itemAccessibleName(handlers.snapshot, item)}
+			aria-label={itemAccessibleName(handlers.snapshot, item, tl)}
 			className={blockClassName(item, active)}
 			data-thread-id={item.thread.id}
 			onClick={() => handlers.onOpenThread(item.thread.id)}

@@ -12,12 +12,17 @@
 // that has them, and still asserts something true in a zone that does not.
 
 import { describe, expect, it } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	describePendingAppUpdate,
 	localTimeZone,
 	nextQuietWindow,
 	type PendingAppUpdate,
 } from "./app-update-schedule.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 const QUIET_HOUR = 3;
 const MINUTE_MS = 60 * 1000;
@@ -106,7 +111,7 @@ describe("describePendingAppUpdate", () => {
 		// is next opened. Claiming the hour would be a promise it cannot keep —
 		// which is the exact failure the whole deferred-actions design exists to
 		// avoid.
-		const sentence = describePendingAppUpdate(pending());
+		const sentence = describePendingAppUpdate(pending(), tl);
 		expect(sentence).toContain("the next time you open Ryu after");
 		expect(sentence).not.toMatch(/will install at \d/);
 	});
@@ -114,7 +119,7 @@ describe("describePendingAppUpdate", () => {
 	it("names the version and the zone", () => {
 		// The zone is not decoration: a booked instant rendered without one is the
 		// ambiguity deferring exists to remove.
-		const sentence = describePendingAppUpdate(pending());
+		const sentence = describePendingAppUpdate(pending(), tl);
 		expect(sentence).toContain("v0.1.5");
 		expect(sentence).toContain("Europe/Berlin");
 	});

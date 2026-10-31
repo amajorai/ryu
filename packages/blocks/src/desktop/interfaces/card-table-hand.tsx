@@ -260,9 +260,12 @@ export function CardTableHand({
 							"Your hand: {cardCount, plural, one {{cardCount} card} other {{cardCount} cards}}, {heldCount} more held back",
 							{ cardCount: cards.length, heldCount: held }
 						)
-					: tl("Your hand: {cardCount, plural, one {{cardCount} card} other {{cardCount} cards}}", {
-							cardCount: cards.length,
-						})
+					: tl(
+							"Your hand: {cardCount, plural, one {{cardCount} card} other {{cardCount} cards}}",
+							{
+								cardCount: cards.length,
+							}
+						)
 			}
 			className="pointer-events-none absolute inset-0 z-20"
 			data-hand-tucked={tucked > 0 ? "" : undefined}

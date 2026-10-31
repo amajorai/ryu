@@ -1,7 +1,7 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { expect, type Page, test } from "@playwright/test";
 import { installCanvasIdleNetwork } from "./canvas-idle-network.ts";
 import type { UnexpectedChatProofRequest } from "./harness/chat-page-proof-http.ts";
-import { mkdir, writeFile } from "node:fs/promises";
-import { expect, test, type Page } from "@playwright/test";
 
 const evidence =
 	"../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-shell-flows/canvas";
@@ -51,11 +51,15 @@ const canvasKey = "ryu:tab-canvas-layout:v1";
 async function setup(page: Page, empty = false) {
 	await page.emulateMedia({ reducedMotion: "reduce" });
 	const unknown = fallbackCallsByPage.get(page);
-	if (!unknown) throw new Error("Canvas HTTP ledger missing");
+	if (!unknown) {
+		throw new Error("Canvas HTTP ledger missing");
+	}
 	backgroundByPage.set(page, await installCanvasIdleNetwork(page, unknown));
 	await page.addInitScript(
 		({ empty }) => {
-			if (sessionStorage.getItem("canvas-proof-seeded")) return;
+			if (sessionStorage.getItem("canvas-proof-seeded")) {
+				return;
+			}
 			sessionStorage.setItem("canvas-proof-seeded", "true");
 			localStorage.setItem("ryu_tab_layout", "canvas");
 			localStorage.setItem("ryu_startup_behavior", "restore");

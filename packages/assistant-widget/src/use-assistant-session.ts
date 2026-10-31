@@ -3,6 +3,7 @@ import {
 	createBrowserLocalRuntime,
 	DEFAULT_BROWSER_MODEL_ID,
 } from "@ryu/browser-local-ai";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { SyntheticEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AssistantPanelProps } from "./assistant-panel.tsx";
@@ -53,6 +54,7 @@ export function useAssistantSession({
 	docsBaseUrl,
 	initialMode,
 }: AssistantSessionOptions): AssistantSessionPanelState {
+	const tl = useLiteralMessages();
 	const [mode, setMode] = useState<AssistantMode>(initialMode);
 	// Optimistic for a guest-first embed; corrected by the site's status check.
 	const [guestAvailable, setGuestAvailable] = useState(initialMode === "guest");
@@ -164,7 +166,11 @@ export function useAssistantSession({
 				if (rememberNode) {
 					storeNode(config);
 				}
-				setNotice(`${nodeSummary(health)} · direct browser connection`);
+				setNotice(
+					tl("{nodeSummary} · direct browser connection", {
+						nodeSummary: nodeSummary(health),
+					})
+				);
 			} catch (cause) {
 				setNodeConnected(false);
 				setNodeHealth(undefined);
@@ -173,7 +179,7 @@ export function useAssistantSession({
 				setBusy(false);
 			}
 		},
-		[allowRemote, nodeToken, nodeUrl, rememberNode]
+		[allowRemote, nodeToken, nodeUrl, rememberNode, tl]
 	);
 
 	const disconnectNode = useCallback(() => {
@@ -192,14 +198,29 @@ export function useAssistantSession({
 				{
 					id: messageId("page-tool"),
 					role: "assistant",
-					text: `${tool.title ?? tool.name} result from ${tool.origin ?? "the current page"} (untrusted page content):\n${result}`,
+					text:
+						tool.origin === undefined
+							? tl(
+									"{toolTitle} result from the current page (untrusted page content):\n{result}",
+									{ result, toolTitle: tool.title ?? tool.name }
+								)
+							: tl(
+									"{toolTitle} result from {pageOrigin} (untrusted page content):\n{result}",
+									{
+										pageOrigin: tool.origin,
+										result,
+										toolTitle: tool.title ?? tool.name,
+									}
+								),
 				},
 			]);
 			setNotice(
-				`Ran page tool ${tool.name}. Review its result as page content.`
+				tl("Ran page tool {toolName}. Review its result as page content.", {
+					toolName: tool.name,
+				})
 			);
 		},
-		[]
+		[tl]
 	);
 
 	const submitQuestion = useCallback(

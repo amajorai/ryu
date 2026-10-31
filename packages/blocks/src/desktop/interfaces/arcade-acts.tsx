@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type ClockOptions,
 	clockLabel,
@@ -96,8 +97,10 @@ export function insertCoinText(
 }
 
 /** "INSERT COIN 15:10" on the station board (the kit adds "Likely"). */
-export const arcadeLimitText: LimitText = (_act, at) =>
-	at ? `INSERT COIN ${at}` : "INSERT COIN";
+export function arcadeLimitText(tl: LiteralMessage): LimitText {
+	return (_act, at) =>
+		at ? tl("INSERT COIN {at}", { at }) : tl("INSERT COIN");
+}
 
 /** The credit bar: progress pips in the cabinet's LED colours. */
 const ARCADE_PIPS: PipSkin = {
@@ -201,6 +204,7 @@ export function arcadePlayer({
 	looks,
 	paths,
 	reduced,
+	tl,
 	view,
 }: {
 	act: InterfaceAgentAct;
@@ -210,6 +214,7 @@ export function arcadePlayer({
 	looks: MemberLooks;
 	paths: LifePaths;
 	reduced: boolean;
+	tl: LiteralMessage;
 	view: ArcadeActView;
 }): VillagerSpec[] {
 	const spots: ActSpots = {
@@ -232,7 +237,7 @@ export function arcadePlayer({
 		bubbleSide: act.act === "working" && !queued ? "up" : undefined,
 		iconOnly: queued ? false : undefined,
 		label: ask
-			? `${act.ariaLabel} Answer their ask.`
+			? tl("{actLabel} Answer their ask.", { actLabel: act.ariaLabel })
 			: `${act.ariaLabel} ${label}`,
 		life: actLife(act, spots, ARCADE_ACT_SKIN, { reduced }),
 		looks: {
@@ -283,6 +288,7 @@ export function ArcadeActProps({
 	view: ArcadeActView;
 	youLayout: YouSpotLayout;
 }) {
+	const tl = useLiteralMessages();
 	const layoutOf = stationLayoutFor(stations, view.iconOnly);
 	return (
 		<group>
@@ -313,7 +319,7 @@ export function ArcadeActProps({
 						iconOnly={view.iconOnly}
 						key={act.agentId}
 						layout={layoutOf(station)}
-						limitText={arcadeLimitText}
+						limitText={arcadeLimitText(tl)}
 						nowMs={view.nowMs}
 						onAsk={view.onAsk}
 						onBlocker={view.onBlocker}

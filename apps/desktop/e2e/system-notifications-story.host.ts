@@ -3,14 +3,8 @@ import type { DesktopNotification } from "../src/lib/api/events.ts";
 export const NOTIFICATION_CORE_ORIGIN = "http://127.0.0.1:5661";
 export const NOTIFICATION_BROWSER_ORIGIN = "http://127.0.0.1:5660";
 export interface NotificationProofRequest {
-	id: number;
-	method: string;
-	path: string;
-	token: string | null;
-	userJwt: string | null;
-	status: number;
 	closed: boolean;
-	sent: DesktopNotification[];
+	id: number;
 	lifecycle: {
 		bornAt: string;
 		bornMonotonicMs: number;
@@ -25,20 +19,27 @@ export interface NotificationProofRequest {
 			| { supported: true; states: string[] }
 			| { supported: false; reason: string };
 	};
+	method: string;
+	path: string;
+	sent: DesktopNotification[];
+	status: number;
+	token: string | null;
+	userJwt: string | null;
 }
 export interface NotificationProofState {
+	pendingServerRequests?: number;
 	requests: NotificationProofRequest[];
 	unexpected: { method: string; url: string; reason: string }[];
-	pendingServerRequests?: number;
 }
 function kernelTcpSnapshot():
 	| { supported: true; rows: string[][] }
 	| { supported: false; reason: string } {
-	if (process.platform !== "linux")
+	if (process.platform !== "linux") {
 		return {
 			supported: false,
 			reason: "Linux /proc TCP diagnostics unavailable on this platform",
 		};
+	}
 	try {
 		return {
 			supported: true,
@@ -59,14 +60,17 @@ function kernelTcpSnapshot():
 function kernelPeerStates(
 	snapshot: ReturnType<typeof kernelTcpSnapshot>,
 	port: number,
-	peer: NotificationProofRequest["lifecycle"]["peer"],
+	peer: NotificationProofRequest["lifecycle"]["peer"]
 ): NonNullable<NotificationProofRequest["lifecycle"]["kernelTcp"]> {
-	if (!snapshot.supported) return snapshot;
-	if (peer?.address !== "127.0.0.1")
+	if (!snapshot.supported) {
+		return snapshot;
+	}
+	if (peer?.address !== "127.0.0.1") {
 		return {
 			supported: false,
 			reason: "Diagnostic expects the owned IPv4 loopback peer",
 		};
+	}
 	const local = `0100007F:${port.toString(16).padStart(4, "0").toUpperCase()}`;
 	const remote = `0100007F:${peer.port.toString(16).padStart(4, "0").toUpperCase()}`;
 	return {
@@ -98,7 +102,9 @@ export function startNotificationProofHost(port = 5661) {
 	};
 	function close(id: number, cause: string) {
 		const stream = streams.get(id);
-		if (!stream) return;
+		if (!stream) {
+			return;
+		}
 		stream.record.closed = true;
 		stream.record.lifecycle.closeCause = cause;
 		stream.record.lifecycle.closedAt = new Date().toISOString();
@@ -118,19 +124,21 @@ export function startNotificationProofHost(port = 5661) {
 		async fetch(request, server): Promise<Response> {
 			const url = new URL(request.url),
 				path = url.pathname;
-			if (request.method === "GET" && path === "/__ready")
+			if (request.method === "GET" && path === "/__ready") {
 				return new Response("ready", { headers });
+			}
 			if (request.method === "GET" && path === "/__proof/state") {
 				const kernel = kernelTcpSnapshot();
 				for (const record of state.requests) {
 					record.lifecycle.kernelTcp = kernelPeerStates(
 						kernel,
 						record.lifecycle.localPort,
-						record.lifecycle.peer,
+						record.lifecycle.peer
 					);
 					const retained = requestLifetimes.get(record.id);
-					if (retained)
+					if (retained) {
 						record.lifecycle.observedPeer = server.requestIP(retained);
+					}
 				}
 				state.pendingServerRequests = server.pendingRequests;
 				return Response.json(state, { headers });
@@ -139,11 +147,13 @@ export function startNotificationProofHost(port = 5661) {
 				if (
 					request.headers.get("x-notification-proof-control") !==
 					"owned-local-fixture"
-				)
+				) {
 					return refuse(request, "Unowned fixture control", 401);
+				}
 				const command: unknown = await request.json().catch(() => null);
-				if (!command || typeof command !== "object")
+				if (!command || typeof command !== "object") {
 					return refuse(request, "Malformed fixture command", 400);
+				}
 				const c = command as Record<string, unknown>;
 				if (
 					c.action === "reset" &&
@@ -151,7 +161,9 @@ export function startNotificationProofHost(port = 5661) {
 					Number(c.refused) >= 0 &&
 					Number(c.refused) <= 2
 				) {
-					for (const id of [...streams.keys()]) close(id, "fixture-reset");
+					for (const id of [...streams.keys()]) {
+						close(id, "fixture-reset");
+					}
 					state.requests.length = 0;
 					requestLifetimes.clear();
 					state.unexpected.length = 0;
@@ -173,14 +185,16 @@ export function startNotificationProofHost(port = 5661) {
 							typeof n.body === "string"
 						) ||
 						!(n.level === undefined || typeof n.level === "string")
-					)
+					) {
 						return refuse(request, "Malformed notification", 400);
+					}
 					const stream = streams.get(Number(c.requestId));
-					if (!stream)
+					if (!stream) {
 						return Response.json(
 							{ error: "Requested stream is closed" },
-							{ status: 409, headers },
+							{ status: 409, headers }
 						);
+					}
 					const value: DesktopNotification = {
 						title: n.title,
 						body: n.body as string | null | undefined,
@@ -189,17 +203,18 @@ export function startNotificationProofHost(port = 5661) {
 					stream.record.sent.push(value);
 					stream.controller.enqueue(
 						encoder.encode(
-							`event: notifications\ndata: ${JSON.stringify(value)}\n\n`,
-						),
+							`event: notifications\ndata: ${JSON.stringify(value)}\n\n`
+						)
 					);
 					return Response.json({ ok: true }, { headers });
 				}
 				if (c.action === "disconnect" && Number.isInteger(c.requestId)) {
-					if (!streams.has(Number(c.requestId)))
+					if (!streams.has(Number(c.requestId))) {
 						return Response.json(
 							{ error: "Requested stream is closed" },
-							{ status: 409, headers },
+							{ status: 409, headers }
 						);
+					}
 					close(Number(c.requestId), "fixture-disconnect");
 					return Response.json({ ok: true }, { headers });
 				}
@@ -210,15 +225,17 @@ export function startNotificationProofHost(port = 5661) {
 				path === "/api/events/all" &&
 				request.headers.get("origin") === NOTIFICATION_BROWSER_ORIGIN &&
 				request.headers.get("access-control-request-method") === "GET"
-			)
+			) {
 				return new Response(null, { status: 204, headers });
+			}
 			if (
 				request.method !== "GET" ||
 				path !== "/api/events/all" ||
 				url.search !== "" ||
 				request.headers.get("accept") !== "text/event-stream"
-			)
+			) {
 				return refuse(request, "Unsupported method/path/stream contract");
+			}
 			const token = request.headers.get("authorization"),
 				userJwt = request.headers.get("x-ryu-user-jwt");
 			if (
@@ -229,8 +246,9 @@ export function startNotificationProofHost(port = 5661) {
 					(token === "Bearer notification-node-b" &&
 						userJwt === "notification-user-a")
 				)
-			)
+			) {
 				return refuse(request, "Unknown credential pair", 401);
+			}
 			const record: NotificationProofRequest = {
 				id: ++nextId,
 				method: request.method,
@@ -280,7 +298,7 @@ export function startNotificationProofHost(port = 5661) {
 						() => close(record.id, "request-signal-abort"),
 						{
 							once: true,
-						},
+						}
 					);
 				},
 				cancel() {
@@ -300,7 +318,9 @@ export function startNotificationProofHost(port = 5661) {
 		server,
 		state,
 		stop() {
-			for (const id of [...streams.keys()]) close(id, "fixture-stop");
+			for (const id of [...streams.keys()]) {
+				close(id, "fixture-stop");
+			}
 			server.stop(true);
 		},
 	};

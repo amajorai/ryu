@@ -1,6 +1,7 @@
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+
 const baseURL = `http://127.0.0.1:${Number(process.env.RYU_BLUEPRINT_READ_PORT ?? 5526)}/`;
 export default defineConfig({
 	testDir: ".",

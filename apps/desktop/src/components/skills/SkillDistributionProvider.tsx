@@ -318,24 +318,28 @@ export function SkillDistributionProvider({
 
 	const confirmSkillSetChange = useCallback<
 		SkillDistributionFlow["confirmSkillSetChange"]
-	>((skillNames) => {
-		const warning = promptEditCacheWarning(
-			skillSetChangeLabels(skillNames),
-			"skill-threads"
-		);
-		if (!warning) {
-			return Promise.resolve(true);
-		}
-		// The dialog is modal, so a second request can only come from code; it
-		// must not replace the question the user is answering.
-		if (pendingCacheConfirmRef.current || !mountedRef.current) {
-			return Promise.resolve(false);
-		}
-		return new Promise<boolean>((resolve) => {
-			pendingCacheConfirmRef.current = resolve;
-			setCacheConfirmation(warning);
-		});
-	}, []);
+	>(
+		(skillNames) => {
+			const warning = promptEditCacheWarning(
+				skillSetChangeLabels(skillNames),
+				"skill-threads",
+				tl
+			);
+			if (!warning) {
+				return Promise.resolve(true);
+			}
+			// The dialog is modal, so a second request can only come from code; it
+			// must not replace the question the user is answering.
+			if (pendingCacheConfirmRef.current || !mountedRef.current) {
+				return Promise.resolve(false);
+			}
+			return new Promise<boolean>((resolve) => {
+				pendingCacheConfirmRef.current = resolve;
+				setCacheConfirmation(warning);
+			});
+		},
+		[tl]
+	);
 
 	const closeCacheConfirmation = useCallback((apply: boolean) => {
 		const pending = pendingCacheConfirmRef.current;

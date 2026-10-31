@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -25,6 +27,8 @@ import {
 const MINUTE = 60_000;
 const NOW = Date.now();
 const ago = (minutes: number) => new Date(NOW - minutes * MINUTE).toISOString();
+const passthrough: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 
 function thread(
 	input: Partial<InterfaceThread> & Pick<InterfaceThread, "id">
@@ -206,8 +210,12 @@ describe("focus model", () => {
 		);
 		expect(focusAge(ago(0), NOW)).toBe("just now");
 		expect(focusAge(ago(18), NOW)).toBe("18m ago");
-		expect(queue[0] ? focusReason(queue[0]) : "").toContain("failed");
-		expect(queue[2] ? focusReason(queue[2]) : "").toBe("Ada replied");
+		expect(queue[0] ? focusReason(queue[0], passthrough) : "").toContain(
+			"failed"
+		);
+		expect(queue[2] ? focusReason(queue[2], passthrough) : "").toBe(
+			"Ada replied"
+		);
 	});
 
 	test("maps plain keys to actions and ignores modified ones", () => {

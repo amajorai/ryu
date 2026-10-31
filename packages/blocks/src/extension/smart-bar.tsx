@@ -118,7 +118,10 @@ export function SmartBar({
 	const [suggestionIndex, setSuggestionIndex] = useState(-1);
 	const inputRef = useRef<HTMLInputElement>(null);
 
-	const { primary, alternatives } = useMemo(() => route(value), [value]);
+	const { primary, alternatives } = useMemo(
+		() => route(value, tl),
+		[value, tl]
+	);
 	const destinations = useMemo(
 		() => [primary, ...alternatives],
 		[primary, alternatives]

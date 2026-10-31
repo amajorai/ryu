@@ -1,4 +1,5 @@
 import { WaitlistShareDialog } from "@ryu/blocks/web/waitlist-share-dialog.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import {
 	linkedInShareUrl,
@@ -83,6 +84,7 @@ export default function WaitlistPage({
 	 *  known yet" rather than "this account has no display name". */
 	userNameLoading?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	// The metal ring ships its own light/dark tunings, and its `auto` default
 	// follows the OS — wrong here, because the app's theme toggle can disagree
 	// with it. Feed it the theme actually on screen.
@@ -304,7 +306,7 @@ export default function WaitlistPage({
 	const shareOnX = () => {
 		openExternal(
 			xShareIntentUrl(
-				waitlistShareText(shareFacts.position),
+				waitlistShareText(shareFacts.position, tl),
 				passPageUrl(shareFacts, SHARE_ORIGIN)
 			)
 		);

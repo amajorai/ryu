@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfacePort,
@@ -19,6 +21,8 @@ import {
 	uptimeShare,
 	worstState,
 } from "./status-model.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -245,7 +249,7 @@ async function click(element: Element | null | undefined) {
 
 describe("status model", () => {
 	test("teams group their members; agents outside a team follow", () => {
-		const page = buildStatusPage(SNAPSHOT, NOW);
+		const page = buildStatusPage(SNAPSHOT, NOW, tl);
 		expect(page.sections.map((section) => section.group?.name ?? null)).toEqual(
 			["Docs Crew", null]
 		);
@@ -257,7 +261,7 @@ describe("status model", () => {
 	});
 
 	test("components read degraded, working, or operational", () => {
-		const page = buildStatusPage(SNAPSHOT, NOW);
+		const page = buildStatusPage(SNAPSHOT, NOW, tl);
 		const states = Object.fromEntries(
 			page.sections
 				.flatMap((section) => section.components)
@@ -273,7 +277,7 @@ describe("status model", () => {
 	});
 
 	test("open incidents are failed threads and unretried failed runs", () => {
-		const page = buildStatusPage(SNAPSHOT, NOW);
+		const page = buildStatusPage(SNAPSHOT, NOW, tl);
 		expect(page.incidents.map((incident) => incident.id)).toEqual([
 			"thread:thread-flaky",
 			"run:audit-fail",
@@ -288,7 +292,7 @@ describe("status model", () => {
 	});
 
 	test("a later success resolves a failed run", () => {
-		const page = buildStatusPage(SNAPSHOT, NOW);
+		const page = buildStatusPage(SNAPSHOT, NOW, tl);
 		const backup = page.history
 			.flatMap((day) => day.incidents)
 			.find((incident) => incident.id === "run:backup-fail");
@@ -300,13 +304,13 @@ describe("status model", () => {
 	});
 
 	test("the banner follows how many components are affected", () => {
-		expect(buildStatusPage(CALM, NOW).overall).toBe("operational");
+		expect(buildStatusPage(CALM, NOW, tl).overall).toBe("operational");
 		const one: InterfaceSnapshot = { ...SNAPSHOT, events: [] };
-		expect(buildStatusPage(one, NOW).overall).toBe("degraded");
+		expect(buildStatusPage(one, NOW, tl).overall).toBe("degraded");
 	});
 
 	test("each component carries 30 days ending today, coloured by failures", () => {
-		const page = buildStatusPage(SNAPSHOT, NOW);
+		const page = buildStatusPage(SNAPSHOT, NOW, tl);
 		const grace = page.sections[0]?.components[1];
 		expect(grace?.days).toHaveLength(UPTIME_DAYS);
 		const failing = grace?.days.filter((day) => day.problems.length > 0);
@@ -322,7 +326,7 @@ describe("status model", () => {
 	});
 
 	test("uptime is a share of days, with partial days costing less", () => {
-		const page = buildStatusPage(SNAPSHOT, NOW);
+		const page = buildStatusPage(SNAPSHOT, NOW, tl);
 		const days = page.sections[0]?.components[0]?.days ?? [];
 		const clean = days.map((day) => ({
 			...day,
@@ -337,7 +341,7 @@ describe("status model", () => {
 	});
 
 	test("maintenance is upcoming runs, soonest first; history is a week", () => {
-		const page = buildStatusPage(SNAPSHOT, NOW);
+		const page = buildStatusPage(SNAPSHOT, NOW, tl);
 		expect(page.maintenance.map((item) => item.title)).toEqual([
 			"Usage report",
 			"Inbox sweep",

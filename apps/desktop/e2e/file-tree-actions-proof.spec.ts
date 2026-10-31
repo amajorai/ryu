@@ -1,11 +1,14 @@
 import { writeFile } from "node:fs/promises";
+
 declare global {
 	interface Window {
-		__fileTreeRuntimeErrors: string[];
 		__fileTreeCompletions: { command: string; args: unknown }[];
+		__fileTreeRuntimeErrors: string[];
 	}
 }
+
 import { expect, type Page, test } from "@playwright/test";
+
 const URL = "/file-tree-actions-proof.html";
 const HEADERS = { "x-file-tree-proof": "finite-native-boundary" };
 const INITIAL = {
@@ -14,12 +17,12 @@ const INITIAL = {
 	"archive/keep.txt": "existing destination bytes\n",
 };
 interface State {
-	secondaryProject: string;
-	secondaryFiles: Record<string, string>;
+	calls: { command: string; args: unknown; outcome: string }[];
+	files: Record<string, string>;
 	heldMove: boolean;
 	project: string;
-	files: Record<string, string>;
-	calls: { command: string; args: unknown; outcome: string }[];
+	secondaryFiles: Record<string, string>;
+	secondaryProject: string;
 	unexpected: unknown[];
 }
 async function state(page: Page): Promise<State> {
@@ -43,7 +46,9 @@ const row = (page: Page, name: string) =>
 async function expand(page: Page, folder = "src") {
 	const r = row(page, folder);
 	await expect(r).toBeVisible();
-	if ((await r.getAttribute("aria-expanded")) !== "true") await r.click();
+	if ((await r.getAttribute("aria-expanded")) !== "true") {
+		await r.click();
+	}
 }
 async function settings(page: Page) {
 	await page
@@ -126,7 +131,9 @@ test.afterEach(async ({ page }) => {
 		path: evidencePath,
 		contentType: "application/json",
 	});
-	if ((await state(page)).heldMove) await control(page, "release_move");
+	if ((await state(page)).heldMove) {
+		await control(page, "release_move");
+	}
 	await expect
 		.poll(async () =>
 			(await state(page)).calls.some(
@@ -135,9 +142,7 @@ test.afterEach(async ({ page }) => {
 			)
 		)
 		.toBe(false);
-	expect(
-		await page.evaluate(() => window.__fileTreeRuntimeErrors)
-	).toEqual([]);
+	expect(await page.evaluate(() => window.__fileTreeRuntimeErrors)).toEqual([]);
 	expect((await state(page)).unexpected).toEqual([]);
 });
 
@@ -239,8 +244,9 @@ test("actual pointer drag into another folder moves the physical file and surviv
 	await expand(page);
 	const from = await row(page, "src/alpha.ts").boundingBox();
 	const to = await row(page, "archive").boundingBox();
-	if (!from || !to)
+	if (!(from && to)) {
 		throw new Error("Real source or destination row unavailable");
+	}
 	await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
@@ -370,8 +376,9 @@ test("actual folder drag moves every descendant byte into the destination and su
 	);
 	const from = await row(page, "src").boundingBox();
 	const to = await row(page, "archive").boundingBox();
-	if (!from || !to)
+	if (!(from && to)) {
 		throw new Error("Actual folder source/destination unavailable");
+	}
 	await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
@@ -628,8 +635,9 @@ async function dragSelectedFiles(page: Page) {
 	);
 	const from = await row(page, "src/alpha.ts").boundingBox();
 	const to = await row(page, "archive").boundingBox();
-	if (!from || !to)
+	if (!(from && to)) {
 		throw new Error("Real selected source or destination unavailable");
+	}
 	await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {

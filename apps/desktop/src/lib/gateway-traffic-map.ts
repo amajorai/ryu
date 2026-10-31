@@ -14,6 +14,7 @@ import {
 	buildTopology,
 	type TopologyInput,
 } from "@ryu/blocks/desktop/gateway-canvas/topology.ts";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	ProviderCircuitState,
 	TrafficEvent,
@@ -75,37 +76,47 @@ export interface LocalTopologyInput {
 	signedIn: boolean;
 }
 
-function policyDetail(count: number | undefined, fallback: string): string {
+function policyDetail(
+	count: number | undefined,
+	fallback: string,
+	tl: LiteralMessage
+): string {
 	if (!count) {
 		return fallback;
 	}
-	return count === 1 ? "1 policy assigned" : `${count} policies assigned`;
+	return tl(
+		"{count, plural, one {# policy assigned} other {{countLabel} policies assigned}}",
+		{ count, countLabel: String(count) }
+	);
 }
 
 /** The local gateway's map: route families, the full chain, its providers. */
-export function buildLocalTopology(input: LocalTopologyInput) {
+export function buildLocalTopology(
+	input: LocalTopologyInput,
+	tl: LiteralMessage
+) {
 	const stages = new Set(input.pipelineStages ?? []);
 	const known = (input.pipelineStages?.length ?? 0) > 0;
 	const assigned = input.assignedPolicies ?? {};
 	const chain: TopologyInput["chain"] = {
 		"scope:agent": {
-			detail: policyDetail(assigned.agent, "Agent policies"),
+			detail: policyDetail(assigned.agent, "Agent policies", tl),
 			label: "Agents",
 		},
 		"scope:key": {
-			detail: policyDetail(assigned.key, "Key policies"),
+			detail: policyDetail(assigned.key, "Key policies", tl),
 			label: "Keys",
 		},
 		"scope:member": {
-			detail: policyDetail(assigned.member, "Member policies"),
+			detail: policyDetail(assigned.member, "Member policies", tl),
 			label: "Members",
 		},
 		"scope:org": {
-			detail: policyDetail(assigned.org, "Organization policies"),
+			detail: policyDetail(assigned.org, "Organization policies", tl),
 			label: "Organization",
 		},
 		"scope:team": {
-			detail: policyDetail(assigned.team, "Team policies"),
+			detail: policyDetail(assigned.team, "Team policies", tl),
 			label: "Teams",
 		},
 		"stage:budget": { detail: "Spend caps", label: "Budgets", locked: true },

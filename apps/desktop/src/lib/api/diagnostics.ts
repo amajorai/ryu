@@ -7,6 +7,7 @@
 // diagnostics export consent is off or no endpoint is active, so nothing leaves
 // the device on refusal; a failed flush is a 502.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import { ApiError, type ApiTarget, request } from "./client.ts";
 
@@ -24,7 +25,8 @@ export type DiagnosticsTestSpanResult =
  * refusals and export failures resolve to `{ ok: false }` with Core's message;
  * transport failures (Core unreachable) still throw. */
 export async function sendDiagnosticsTestSpan(
-	target: ApiTarget
+	target: ApiTarget,
+	tl: LiteralMessage
 ): Promise<DiagnosticsTestSpanResult> {
 	try {
 		// Parsed below, so an unexpected body is reported rather than thrown.
@@ -52,7 +54,7 @@ export async function sendDiagnosticsTestSpan(
 					error.serverMessage ??
 					(error.status === 404
 						? "This Core is too old to send a test span."
-						: `Core answered ${error.status}.`),
+						: tl("Core answered {status}.", { status: error.status })),
 			};
 		}
 		throw error;

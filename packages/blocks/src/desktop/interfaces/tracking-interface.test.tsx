@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfacePort,
@@ -25,6 +27,8 @@ import {
 
 const MINUTE = 60_000;
 const NOW = Date.now();
+const passthrough: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 const ago = (minutes: number) => new Date(NOW - minutes * MINUTE).toISOString();
 const ahead = (minutes: number) =>
 	new Date(NOW + minutes * MINUTE).toISOString();
@@ -295,7 +299,7 @@ describe("tracking model", () => {
 		if (!parcel) {
 			throw new Error("fixture");
 		}
-		const latest = trackingHistory(parcel, [], NOW)
+		const latest = trackingHistory(parcel, [], NOW, passthrough)
 			.flatMap((group) => group.entries)
 			.find((entry) => entry.id === "latest");
 		expect(latest?.detail).toBeNull();
@@ -305,7 +309,7 @@ describe("tracking model", () => {
 			NOW
 		);
 		const waitingLatest = waiting
-			? trackingHistory(waiting, [], NOW)
+			? trackingHistory(waiting, [], NOW, passthrough)
 					.flatMap((group) => group.entries)
 					.find((entry) => entry.id === "latest")
 			: undefined;
@@ -388,7 +392,12 @@ describe("tracking model", () => {
 		expect(expectedLine(byId("thread-question"), EVENTS, NOW)).toContain(
 			"Estimated pickup"
 		);
-		const waiting = trackingHistory(byId("thread-question"), EVENTS, NOW);
+		const waiting = trackingHistory(
+			byId("thread-question"),
+			EVENTS,
+			NOW,
+			passthrough
+		);
 		expect(waiting[0]?.id).toBe("upcoming");
 		expect(waiting[0]?.entries[0]?.title).toContain("'s next routine · ");
 		expect(rowWhen(byId("thread-question"), NOW, EVENTS)).toMatch(
@@ -397,7 +406,12 @@ describe("tracking model", () => {
 		expect(rowWhen(byId("thread-notes"), NOW, EVENTS)).toMatch(/^Delivered /);
 
 		// A delivered parcel never shows the courier's routines as scans.
-		const history = trackingHistory(byId("thread-notes"), EVENTS, NOW);
+		const history = trackingHistory(
+			byId("thread-notes"),
+			EVENTS,
+			NOW,
+			passthrough
+		);
 		expect(history.some((group) => group.id === "upcoming")).toBe(false);
 		expect(
 			history
@@ -435,7 +449,7 @@ describe("tracking schedule labels", () => {
 		if (!question) {
 			throw new Error("fixture");
 		}
-		const [upcoming] = trackingHistory(question, EVENTS, NOW);
+		const [upcoming] = trackingHistory(question, EVENTS, NOW, passthrough);
 		expect(upcoming?.entries.every((entry) => entry.estimated)).toBe(true);
 	});
 });

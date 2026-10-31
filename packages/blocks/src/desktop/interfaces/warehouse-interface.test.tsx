@@ -3,6 +3,7 @@ import "./warehouse-test-dom.ts";
 import { describe, expect, setSystemTime, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfaceAgentAct,
 	InterfacePort,
@@ -1101,6 +1102,8 @@ describe("Warehouse useful state", () => {
 			shown: new Set(),
 			slots: youSpotSlots(acts, unownedAsks(snapshot)).slots,
 			stations,
+
+			tl: (source, values) => formatMessage(source, values),
 		});
 		const ada = cast.find((spec) => spec.actAgent === FIXTURE_AGENT_IDS.ada);
 		expect(ada?.label).toBe(

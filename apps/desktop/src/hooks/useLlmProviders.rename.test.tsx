@@ -143,7 +143,9 @@ test("rename posts account identity and label, updates the shared catalog, and i
 			.map((query) => query.queryKey);
 		expect(currentConfigKeys).toHaveLength(1);
 		const configKey = currentConfigKeys[0];
-		if (!configKey) throw new Error("Missing active provider config query");
+		if (!configKey) {
+			throw new Error("Missing active provider config query");
+		}
 		expect(invalidated).toContainEqual([...configKey]);
 		expect(
 			client.getQueryState(["pi-config", "http://node-b.test"])?.isInvalidated

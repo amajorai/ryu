@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import type { ScopeDefault } from "@/src/lib/api/hierarchy.ts";
 import {
 	type AgentSelection,
@@ -9,6 +10,9 @@ import {
 	NODE_DEFAULT_SCOPE_LABEL,
 	scopeDefaultCacheWarning,
 } from "./node-default-cache-warning.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 const TITLE = "Apply now? This resets the prompt cache";
 
@@ -34,14 +38,24 @@ function lane(model: string, extra: Partial<AgentSelection> = {}) {
 describe("node-wide scope default confirmation", () => {
 	test("effort-only and unchanged saves ask nothing", () => {
 		expect(
-			scopeDefaultCacheWarning(NODE_DEFAULT_SCOPE_LABEL, scope, { ...scope })
+			scopeDefaultCacheWarning(
+				NODE_DEFAULT_SCOPE_LABEL,
+				scope,
+				{ ...scope },
+				tl
+			)
 		).toBeNull();
 		expect(
-			scopeDefaultCacheWarning(NODE_DEFAULT_SCOPE_LABEL, scope, {
-				...scope,
-				coordinatorEffort: "low",
-				effort: "high",
-			})
+			scopeDefaultCacheWarning(
+				NODE_DEFAULT_SCOPE_LABEL,
+				scope,
+				{
+					...scope,
+					coordinatorEffort: "low",
+					effort: "high",
+				},
+				tl
+			)
 		).toBeNull();
 	});
 
@@ -55,7 +69,8 @@ describe("node-wide scope default confirmation", () => {
 			const warning = scopeDefaultCacheWarning(
 				NODE_DEFAULT_SCOPE_LABEL,
 				scope,
-				after
+				after,
+				tl
 			);
 			expect(warning?.title).toBe(TITLE);
 			expect(warning?.description).toContain(
@@ -67,13 +82,14 @@ describe("node-wide scope default confirmation", () => {
 	test("resetting a stored model asks; resetting an effort-only record does not", () => {
 		const empty = { effort: "", model: "", provider: "" };
 		expect(
-			scopeDefaultCacheWarning(NODE_DEFAULT_SCOPE_LABEL, scope, empty)
+			scopeDefaultCacheWarning(NODE_DEFAULT_SCOPE_LABEL, scope, empty, tl)
 		).not.toBeNull();
 		expect(
 			scopeDefaultCacheWarning(
 				NODE_DEFAULT_SCOPE_LABEL,
 				{ ...empty, effort: "high" },
-				empty
+				empty,
+				tl
 			)
 		).toBeNull();
 	});
@@ -91,70 +107,88 @@ describe("lane default confirmation", () => {
 			EMPTY_AGENT_SELECTION,
 		]) {
 			expect(
-				laneDefaultCacheWarning({
-					after,
+				laneDefaultCacheWarning(
+					{
+						after,
+						cloudSelection: cloud,
+						lane: "cloud",
+						localSelection: local,
+						managed: false,
+					},
+					tl
+				)?.description
+			).toContain("the node-wide cloud default");
+		}
+		expect(
+			laneDefaultCacheWarning(
+				{
+					after: lane("model-a", {
+						access_mode: "acceptEdits",
+						effort: "high",
+						thinking_level: "high",
+					}),
 					cloudSelection: cloud,
 					lane: "cloud",
 					localSelection: local,
 					managed: false,
-				})?.description
-			).toContain("the node-wide cloud default");
-		}
-		expect(
-			laneDefaultCacheWarning({
-				after: lane("model-a", {
-					access_mode: "acceptEdits",
-					effort: "high",
-					thinking_level: "high",
-				}),
-				cloudSelection: cloud,
-				lane: "cloud",
-				localSelection: local,
-				managed: false,
-			})
+				},
+				tl
+			)
 		).toBeNull();
 	});
 
 	test("setting the cloud lane to the local model chats already use asks nothing", () => {
 		expect(
-			laneDefaultCacheWarning({
-				after: { ...local },
-				cloudSelection: EMPTY_AGENT_SELECTION,
-				lane: "cloud",
-				localSelection: local,
-				managed: false,
-			})
+			laneDefaultCacheWarning(
+				{
+					after: { ...local },
+					cloudSelection: EMPTY_AGENT_SELECTION,
+					lane: "cloud",
+					localSelection: local,
+					managed: false,
+				},
+				tl
+			)
 		).toBeNull();
 		expect(
-			laneDefaultCacheWarning({
-				after: EMPTY_AGENT_SELECTION,
-				cloudSelection: lane("model-a"),
-				lane: "cloud",
-				localSelection: local,
-				managed: false,
-			})
+			laneDefaultCacheWarning(
+				{
+					after: EMPTY_AGENT_SELECTION,
+					cloudSelection: lane("model-a"),
+					lane: "cloud",
+					localSelection: local,
+					managed: false,
+				},
+				tl
+			)
 		).not.toBeNull();
 	});
 
 	test("a managed node's empty cloud lane counts as Auto cloud", () => {
 		const auto = lane("openrouter/auto", { provider: "managed-openrouter" });
 		expect(
-			laneDefaultCacheWarning({
-				after: auto,
-				cloudSelection: EMPTY_AGENT_SELECTION,
-				lane: "cloud",
-				localSelection: local,
-				managed: true,
-			})
+			laneDefaultCacheWarning(
+				{
+					after: auto,
+					cloudSelection: EMPTY_AGENT_SELECTION,
+					lane: "cloud",
+					localSelection: local,
+					managed: true,
+				},
+				tl
+			)
 		).toBeNull();
 		expect(
-			laneDefaultCacheWarning({
-				after: lane("model-b"),
-				cloudSelection: EMPTY_AGENT_SELECTION,
-				lane: "cloud",
-				localSelection: local,
-				managed: true,
-			})
+			laneDefaultCacheWarning(
+				{
+					after: lane("model-b"),
+					cloudSelection: EMPTY_AGENT_SELECTION,
+					lane: "cloud",
+					localSelection: local,
+					managed: true,
+				},
+				tl
+			)
 		).not.toBeNull();
 	});
 
@@ -165,25 +199,34 @@ describe("lane default confirmation", () => {
 			localSelection: local,
 		};
 		expect(
-			laneDefaultCacheWarning({
-				...input,
-				cloudSelection: lane("cloud-a"),
-				managed: false,
-			})
+			laneDefaultCacheWarning(
+				{
+					...input,
+					cloudSelection: lane("cloud-a"),
+					managed: false,
+				},
+				tl
+			)
 		).toBeNull();
 		expect(
-			laneDefaultCacheWarning({
-				...input,
-				cloudSelection: EMPTY_AGENT_SELECTION,
-				managed: true,
-			})
+			laneDefaultCacheWarning(
+				{
+					...input,
+					cloudSelection: EMPTY_AGENT_SELECTION,
+					managed: true,
+				},
+				tl
+			)
 		).toBeNull();
 		expect(
-			laneDefaultCacheWarning({
-				...input,
-				cloudSelection: EMPTY_AGENT_SELECTION,
-				managed: false,
-			})?.description
+			laneDefaultCacheWarning(
+				{
+					...input,
+					cloudSelection: EMPTY_AGENT_SELECTION,
+					managed: false,
+				},
+				tl
+			)?.description
 		).toContain("the node-wide local default");
 	});
 });

@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { AppSurface } from "@/src/contexts/app-surface-context.tsx";
 import type {
 	NotificationPlatform,
@@ -58,7 +59,8 @@ function desktopSettingsPath(os: DeviceOs): string {
  * phone browsers), and each asks for — and blocks — notifications differently.
  */
 export function notificationOnboardingCopy(
-	context: NotificationOnboardingContext
+	context: NotificationOnboardingContext,
+	tl: LiteralMessage
 ): NotificationOnboardingCopy {
 	const { os, platform, surface } = context;
 	if (platform === "desktop") {
@@ -67,7 +69,9 @@ export function notificationOnboardingCopy(
 			enableLabel: "Turn on notifications",
 			subtitle:
 				"Get a desktop notification with the agent's avatar when it replies, needs approval or finishes a run.",
-			blockedHelp: `If no banner appears, allow Ryu in ${desktopSettingsPath(os)}.`,
+			blockedHelp: tl("If no banner appears, allow Ryu in {settingsPath}.", {
+				settingsPath: desktopSettingsPath(os),
+			}),
 		};
 	}
 	if (platform === "extension") {

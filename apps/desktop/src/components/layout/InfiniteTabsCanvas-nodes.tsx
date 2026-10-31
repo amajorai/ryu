@@ -12,6 +12,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { type NodeProps, NodeResizer, type NodeTypes } from "@xyflow/react";
 import { TabLayoutMenuItems } from "@/src/components/layout/appearance-context-menu.tsx";
 import { TabViewPane } from "@/src/components/layout/TabViewPane.tsx";
+import { GROUP_COLOR_CLASSES } from "@/src/components/shell/title-bar/tab-segments.ts";
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
 import { setTabLayout, type useTabLayout } from "@/src/hooks/useTabLayout.ts";
 import layoutStyles from "./InfiniteTabsCanvas.module.css";
@@ -21,7 +22,6 @@ import type {
 } from "./InfiniteTabsCanvas-model.ts";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 import { TabGlyph } from "./TitleBar.tsx";
-import { GROUP_COLOR_CLASSES } from "./TitleBar-tab-shared.tsx";
 import {
 	TAB_CANVAS_MIN_HEIGHT,
 	TAB_CANVAS_MIN_WIDTH,

@@ -31,7 +31,6 @@ export const CORE_TO_BOX: Product[] = [
 		tagline: "The local-first runtime every agent, session, and tool runs on.",
 		Icon: Cpu,
 		hero: {
-			eyebrow: "Ryu Core",
 			title: "Open-source runtime for developers and servers",
 			// core.md C3, C11.
 			subtitle:
@@ -81,7 +80,7 @@ export const CORE_TO_BOX: Product[] = [
 			},
 			{
 				q: "What does Core collect by default?",
-				a: "Diagnostics export is off by default. Product analytics and crash reports are on by default and can be turned off in Settings → Privacy.",
+				a: "Diagnostics export is off by default. Product analytics and crash reports are on by default and can be turned off in Privacy settings.",
 			},
 		],
 		cta: {
@@ -101,7 +100,6 @@ export const CORE_TO_BOX: Product[] = [
 		tagline: "Route, protect, and audit model and tool calls through one API.",
 		Icon: Shield,
 		hero: {
-			eyebrow: "Ryu Gateway",
 			title: "Control model and tool access",
 			subtitle:
 				"One API for model and tool calls. Route, protect, and audit each one without rewriting your agent.",
@@ -187,7 +185,6 @@ export const CORE_TO_BOX: Product[] = [
 			"An encrypted identity vault for agents and the sessions they are allowed to use.",
 		Icon: Key,
 		hero: {
-			eyebrow: "Ryu Passport · Early access",
 			title: "Safe sign‑ins for agents",
 			subtitle:
 				"Keep the sessions your agents use in an encrypted vault. Re-login is always a manual step.",
@@ -259,7 +256,6 @@ export const CORE_TO_BOX: Product[] = [
 		tagline: "Hosted tools and Skills behind one API.",
 		Icon: Cable,
 		hero: {
-			eyebrow: "Ryu Connect · Early access",
 			title: "One API for agent tools",
 			subtitle:
 				"Serve MCP servers, Skills, and hosted tools behind one API. Provider secrets stay out of your app.",
@@ -331,7 +327,6 @@ export const CORE_TO_BOX: Product[] = [
 		tagline: "Managed hosting that runs your agents.",
 		Icon: Cloud,
 		hero: {
-			eyebrow: "Ryu Cloud",
 			title: "Run your agents on Ryu Cloud",
 			// services.md: base-node.ts:74-84, 191-224; feature-flags.ts:255-264.
 			subtitle:
@@ -405,7 +400,6 @@ export const CORE_TO_BOX: Product[] = [
 		tagline: "An isolated workspace for agent runs and previews.",
 		Icon: Box,
 		hero: {
-			eyebrow: "Ryu Box · Early access",
 			title: "A workspace for each agent",
 			subtitle:
 				"Each Box is isolated and can be forked. Files last through stop, resume, and fork for up to 7 days.",

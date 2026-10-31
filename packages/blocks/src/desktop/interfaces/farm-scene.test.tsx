@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type { ReactNode } from "react";
 
 // The scene's plates are drei `Html` overlays; outside a Canvas, render them
@@ -134,6 +135,7 @@ function farmers(shown: ReadonlySet<string>, opened: string[]) {
 		reduced: true,
 		shown,
 		slots: slots.slots,
+		tl: (source, values) => formatMessage(source, values),
 	}).filter((spec) => !spec.id.includes(":helper:"));
 }
 

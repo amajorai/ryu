@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -175,17 +176,44 @@ export function compactDuration(ms: number): string {
 	return `${Math.floor(hours / 24)}d`;
 }
 
-function spokenDuration(ms: number): string {
+/** The spoken SLA sentence, one whole message per unit and direction. */
+function slaLongLabel(
+	ms: number,
+	overdue: boolean,
+	tl: LiteralMessage
+): string {
 	const minutes = Math.max(1, Math.floor(Math.abs(ms) / MINUTE));
 	if (minutes < 60) {
-		return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+		return overdue
+			? tl(
+					"Reply overdue by {minutes, plural, one {# minute} other {# minutes}}",
+					{ minutes }
+				)
+			: tl("Reply due in {minutes, plural, one {# minute} other {# minutes}}", {
+					minutes,
+				});
 	}
 	const hours = Math.floor(minutes / 60);
 	if (hours < 24) {
-		return `${hours} hour${hours === 1 ? "" : "s"}`;
+		return overdue
+			? tl("Reply overdue by {hours, plural, one {# hour} other {# hours}}", {
+					hours,
+				})
+			: tl("Reply due in {hours, plural, one {# hour} other {# hours}}", {
+					hours,
+				});
 	}
 	const days = Math.floor(hours / 24);
-	return `${days} day${days === 1 ? "" : "s"}`;
+	const values = { days, dayCount: String(days) };
+	return overdue
+		? tl(
+				"Reply overdue by {dayCount} {days, plural, one {day} other {days}}",
+				values
+			)
+		: tl(
+				"Reply due in {dayCount} {days, plural, one {day} other {days}}",
+				values
+			);
 }
 
 /**
@@ -196,7 +224,8 @@ export function ticketSla(
 	status: TicketStatus,
 	priority: TicketPriority,
 	updatedAt: number,
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): TicketSla | null {
 	if (!(status === "open" || status === "new") || updatedAt === 0) {
 		return null;
@@ -208,7 +237,7 @@ export function ticketSla(
 		return {
 			dueAt,
 			label: `-${compactDuration(remaining)}`,
-			longLabel: `Reply overdue by ${spokenDuration(remaining)}`,
+			longLabel: slaLongLabel(remaining, true, tl),
 			state: "breached",
 			targetMs,
 		};
@@ -216,7 +245,7 @@ export function ticketSla(
 	return {
 		dueAt,
 		label: compactDuration(remaining),
-		longLabel: `Reply due in ${spokenDuration(remaining)}`,
+		longLabel: slaLongLabel(remaining, false, tl),
 		state: remaining <= targetMs / 2 ? "due-soon" : "on-track",
 		targetMs,
 	};
@@ -279,7 +308,8 @@ function groupById(
 /** Every thread as a ticket, in snapshot order. */
 export function buildTickets(
 	snapshot: InterfaceSnapshot,
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): Ticket[] {
 	const numbers = ticketNumbers(snapshot.threads);
 	const agents = new Map(snapshot.agents.map((agent) => [agent.id, agent]));
@@ -314,7 +344,7 @@ export function buildTickets(
 			priority,
 			project,
 			requester: people[0] ?? null,
-			sla: ticketSla(status, priority, updatedAt, now),
+			sla: ticketSla(status, priority, updatedAt, now, tl),
 			status,
 			tags,
 			team,

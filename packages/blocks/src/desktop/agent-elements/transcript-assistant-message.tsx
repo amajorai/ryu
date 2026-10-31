@@ -1,6 +1,6 @@
 import { Marker, MarkerContent, MarkerIcon } from "@ryu/ui/components/marker";
 import type React from "react";
-import { Fragment, memo, useMemo } from "react";
+import { memo, useMemo } from "react";
 import { AssistantParts } from "./assistant-parts.tsx";
 import type { AssistantPartsProps } from "./assistant-parts-types.ts";
 import {
@@ -61,59 +61,166 @@ const TranscriptAssistantParts = memo(function TranscriptAssistantParts({
 	return <AssistantParts {...props} onRetryError={retry} />;
 });
 
+type AssistantMessage = TranscriptTurnContext["turn"]["assistantMsgs"][number];
+type ActionStates = NonNullable<MessageListScope["messageActionStates"]>;
+
+type TranscriptAssistantMessageProps = Pick<
+	MessageListScope,
+	| "CustomToolRenderer"
+	| "agentMessageContext"
+	| "markCopied"
+	| "mentionItems"
+	| "messageActions"
+	| "onAgentUiSubmit"
+	| "onAnnotateImage"
+	| "onBranch"
+	| "onContributedMessageAction"
+	| "onOpenFile"
+	| "onOpenLink"
+	| "onOpenMention"
+	| "onQuote"
+	| "onRegenerateMessage"
+	| "onReply"
+	| "onRetryError"
+	| "onRetryGeneration"
+	| "onSpeak"
+	| "onWorkflowResume"
+	| "previewResolvers"
+	| "showCopyToolbar"
+	| "suppressQuestionTool"
+	| "toolRenderers"
+	| "unreadMarkerRef"
+> & {
+	bubbleEntering: boolean;
+	/** Turns from this one to the end, handed to the host on reply. */
+	chainLength: number;
+	/** Whether this message closes its turn (and carries the send time). */
+	closesTurn: boolean;
+	copyActive: boolean;
+	/** The goal-completion footer, on the conversation's last message only. */
+	goalCompletion: React.ReactNode;
+	groupPosition: AssistantPartsProps["groupPosition"];
+	isLastMsg: boolean;
+	isTurnStreaming: boolean;
+	messageActionState: ReturnType<ActionStates["get"]>;
+	msg: AssistantMessage;
+	reactionAction: TranscriptAssistantTurnState["reactionAction"];
+	/** The reply's send time, on the message that closes the turn only. */
+	timestamp: React.ReactNode;
+	/** The unread marker's label, set only on the first unread message. */
+	unreadMarkerLabel: string | undefined;
+};
+
 /** One assistant message of a turn, with its toolbar. */
 export function renderTranscriptAssistantMessage(
 	scope: MessageListScope,
 	turnContext: TranscriptTurnContext,
 	assistantTurn: TranscriptAssistantTurnState,
-	msg: TranscriptTurnContext["turn"]["assistantMsgs"][number],
+	msg: AssistantMessage,
 	i: number
 ) {
-	const {
-		CustomToolRenderer,
-		activeCopyId,
-		agentMessageContext,
-		firstUnreadMessageId,
-		isBubbleEntering,
-		markCopied,
-		mentionItems,
-		messageActionStates,
-		messageActions,
-		onAgentUiSubmit,
-		onAnnotateImage,
-		onBranch,
-		onContributedMessageAction,
-		onOpenFile,
-		onOpenLink,
-		onOpenMention,
-		onQuote,
-		onRegenerateMessage,
-		onReply,
-		onRetryError,
-		onRetryGeneration,
-		onSpeak,
-		onWorkflowResume,
-		previewResolvers,
-		showCopyToolbar,
-		suppressQuestionTool,
-		toolRenderers,
-		turns,
-		unreadMarkerRef,
-		unreadMessageLabel,
-	} = scope;
 	const { isLastTurn, turn, turnIndex } = turnContext;
 	const { goalCompletionNode, isTurnStreaming, reactionAction, timestampNode } =
 		assistantTurn;
 	const closesTurn = i === turn.assistantMsgs.length - 1;
 	const isLastMsg = isLastTurn && closesTurn;
-	const assistantGroupPosition = messageGroupPositionFor(
-		i,
-		turn.assistantMsgs.length
+	// Every value is per message, so a reply that is not streaming keeps its
+	// props while another reply in the same live turn streams.
+	return (
+		<TranscriptAssistantMessage
+			agentMessageContext={scope.agentMessageContext}
+			bubbleEntering={scope.isBubbleEntering(msg.id)}
+			CustomToolRenderer={scope.CustomToolRenderer}
+			chainLength={scope.turns.length - turnIndex}
+			closesTurn={closesTurn}
+			copyActive={scope.activeCopyId === `assistant-${msg.id}`}
+			goalCompletion={isLastMsg ? goalCompletionNode : null}
+			groupPosition={messageGroupPositionFor(i, turn.assistantMsgs.length)}
+			isLastMsg={isLastMsg}
+			isTurnStreaming={isTurnStreaming}
+			key={msg.id}
+			markCopied={scope.markCopied}
+			mentionItems={scope.mentionItems}
+			messageActionState={scope.messageActionStates?.get(msg.id)}
+			messageActions={scope.messageActions}
+			msg={msg}
+			onAgentUiSubmit={scope.onAgentUiSubmit}
+			onAnnotateImage={scope.onAnnotateImage}
+			onBranch={scope.onBranch}
+			onContributedMessageAction={scope.onContributedMessageAction}
+			onOpenFile={scope.onOpenFile}
+			onOpenLink={scope.onOpenLink}
+			onOpenMention={scope.onOpenMention}
+			onQuote={scope.onQuote}
+			onRegenerateMessage={scope.onRegenerateMessage}
+			onReply={scope.onReply}
+			onRetryError={scope.onRetryError}
+			onRetryGeneration={scope.onRetryGeneration}
+			onSpeak={scope.onSpeak}
+			onWorkflowResume={scope.onWorkflowResume}
+			previewResolvers={scope.previewResolvers}
+			reactionAction={reactionAction}
+			showCopyToolbar={scope.showCopyToolbar}
+			suppressQuestionTool={scope.suppressQuestionTool}
+			timestamp={closesTurn ? timestampNode : undefined}
+			toolRenderers={scope.toolRenderers}
+			unreadMarkerLabel={
+				msg.id === scope.firstUnreadMessageId
+					? scope.unreadMessageLabel
+					: undefined
+			}
+			unreadMarkerRef={scope.unreadMarkerRef}
+		/>
 	);
+}
+
+/**
+ * One assistant message, memoised on the values it reads. A live turn can hold
+ * several replies (multi-agent); only the streaming one changes per chunk, so
+ * the others keep their context menu, closures and parts.
+ */
+const TranscriptAssistantMessage = memo(function TranscriptAssistantMessage({
+	CustomToolRenderer,
+	agentMessageContext,
+	bubbleEntering,
+	chainLength,
+	closesTurn,
+	copyActive,
+	goalCompletion: messageGoalCompletion,
+	groupPosition: assistantGroupPosition,
+	isLastMsg,
+	isTurnStreaming,
+	markCopied,
+	mentionItems,
+	messageActionState,
+	messageActions,
+	msg,
+	onAgentUiSubmit,
+	onAnnotateImage,
+	onBranch,
+	onContributedMessageAction,
+	onOpenFile,
+	onOpenLink,
+	onOpenMention,
+	onQuote,
+	onRegenerateMessage,
+	onReply,
+	onRetryError,
+	onRetryGeneration,
+	onSpeak,
+	onWorkflowResume,
+	previewResolvers,
+	reactionAction,
+	showCopyToolbar,
+	suppressQuestionTool,
+	timestamp: timestampNode,
+	toolRenderers,
+	unreadMarkerLabel,
+	unreadMarkerRef,
+}: TranscriptAssistantMessageProps) {
 	const messageText = getTextFromParts(msg.parts ?? [], "\n\n");
 	const hasMessageText = Boolean(messageText.trim());
 	const messageCopyKey = `assistant-${msg.id}`;
-	const messageActionState = messageActionStates?.get(msg.id);
 	// Client-only rows (live voice-call turns) have
 	// no persisted id: offer only client-side actions.
 	const msgIsEphemeral = messageIsEphemeral(msg);
@@ -135,7 +242,7 @@ export function renderTranscriptAssistantMessage(
 			? () => {
 					if (onReply && !msgIsEphemeral) {
 						onReply({
-							chainLength: turns.length - turnIndex,
+							chainLength,
 							messageId: msg.id,
 							text: messageText,
 						});
@@ -156,7 +263,6 @@ export function renderTranscriptAssistantMessage(
 						value,
 					})
 			: undefined;
-	const messageGoalCompletion = isLastMsg ? goalCompletionNode : null;
 	const showMessageToolbar =
 		!isTurnStreaming &&
 		(Boolean(messageGoalCompletion) ||
@@ -168,14 +274,13 @@ export function renderTranscriptAssistantMessage(
 				Boolean(onRegenerateMessageForMessage) ||
 				Boolean(assistantActions?.length)) &&
 				hasMessageText));
-	const shouldRenderToolbar =
-		showMessageToolbar || activeCopyId === messageCopyKey;
+	const shouldRenderToolbar = showMessageToolbar || copyActive;
 	return (
-		<Fragment key={msg.id}>
-			{msg.id === firstUnreadMessageId ? (
+		<>
+			{unreadMarkerLabel === undefined ? null : (
 				<div data-slot="unread-message-marker" ref={unreadMarkerRef}>
 					<Marker
-						aria-label={unreadMessageLabel}
+						aria-label={unreadMarkerLabel}
 						className="my-1"
 						role="status"
 						tone="primary"
@@ -184,15 +289,15 @@ export function renderTranscriptAssistantMessage(
 						<MarkerIcon>
 							<span className="size-2 rounded-full bg-primary" />
 						</MarkerIcon>
-						<MarkerContent>{unreadMessageLabel}</MarkerContent>
+						<MarkerContent>{unreadMarkerLabel}</MarkerContent>
 					</Marker>
 				</div>
-			) : null}
+			)}
 			{/* Plain prose with the hover action row BELOW it, never beside: a
 			    reply has no bubble edge for a toolbar to sit against. */}
 			<div
 				className="group/assistant-message flex w-full min-w-0 flex-col items-start gap-1"
-				data-bubble-enter={isBubbleEntering(msg.id) ? "" : undefined}
+				data-bubble-enter={bubbleEntering ? "" : undefined}
 			>
 				<MessageContextMenu
 					actionState={messageActionState}
@@ -246,7 +351,7 @@ export function renderTranscriptAssistantMessage(
 						goalCompletion={messageGoalCompletion}
 						heightClass="h-6"
 						hoverClass="group-hover/assistant-message:pointer-events-auto group-hover/assistant-message:opacity-100 group-hover/assistant-message:duration-0"
-						isVisible={isLastMsg || activeCopyId === messageCopyKey}
+						isVisible={isLastMsg || copyActive}
 						menuAlign="start"
 						// Every turn's closing reply carries its send time in the hover row.
 						meta={closesTurn ? timestampNode : undefined}
@@ -262,6 +367,6 @@ export function renderTranscriptAssistantMessage(
 					/>
 				) : null}
 			</div>
-		</Fragment>
+		</>
 	);
-}
+});

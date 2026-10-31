@@ -14,8 +14,8 @@ import { useBackdropGate } from "./use-backdrop-gate.ts";
  * hues, and the stage follows the page's theme in both.
  *
  * Sources: React Bits and Spell UI components vendored under ./vendor (see
- * ./vendor/README.md); Starfield, RadiantLines and DesktopWindows are Ryu's
- * own.
+ * ./vendor/README.md); Starfield, RadiantLines, DesktopWindows and
+ * InterfaceReel are Ryu's own.
  *
  * An effect mounts (and its chunk downloads) only after the first idle period,
  * and a WebGL effect only when the browser has a hardware GPU for it (see
@@ -35,6 +35,7 @@ const ColorBends = load(() => import("./vendor/react-bits/ColorBends.tsx"));
 const DesktopWindows = load(() => import("./desktop-windows.tsx"));
 const Dither = load(() => import("./vendor/react-bits/Dither.tsx"));
 const Galaxy = load(() => import("./vendor/react-bits/Galaxy.tsx"));
+const InterfaceReel = load(() => import("./interface-reel.tsx"));
 const GradientWaves = load(
 	() => import("./vendor/react-bits/GradientWaves.tsx")
 );
@@ -55,14 +56,18 @@ const Topography = load(() => import("./vendor/react-bits/Topography.tsx"));
 
 const BRAND = "#0099ff";
 
-/** Ryu's own 2D canvas backdrops: they need no WebGL, only an idle main thread. */
+/** Ryu's own backdrops that need no WebGL (2D canvas or images), only an idle main thread. */
 const CANVAS_2D_BACKDROPS: ReadonlySet<StageKey> = new Set([
 	"bot",
 	"connect",
 	"desktop",
 	"page-partners",
 	"page-startups",
+	"page-interfaces",
 ]);
+
+/** Photographic backdrops: drawn in the page's own theme, so never inverted. */
+const PHOTO_BACKDROPS: ReadonlySet<StageKey> = new Set(["page-interfaces"]);
 
 // Stable prop objects: Spell UI rebuilds its shader program when `config` changes identity.
 const MIST = { preset: "Mist" } as const;
@@ -184,6 +189,8 @@ export const HERO_BACKGROUNDS = {
 	),
 	"page-contact": () => <Plasma color="#4fa3ff" />,
 	"page-apps": () => <PixelBlast color="#7a5cff" variant="circle" />,
+	// The real interfaces themselves, one after another.
+	"page-interfaces": () => <InterfaceReel />,
 } satisfies Record<StageKey, () => ReactNode>;
 
 export type HeroBackgroundId = StageKey;
@@ -196,7 +203,11 @@ export function HeroBackground({ id }: { id: HeroBackgroundId }) {
 			aria-hidden="true"
 			// Light theme: invert the light-on-black effect and turn its hue back,
 			// so it draws dark on white in the same colours.
-			className="absolute inset-0 z-0 overflow-hidden hue-rotate-180 invert dark:hue-rotate-0 dark:invert-0"
+			className={
+				PHOTO_BACKDROPS.has(id)
+					? "absolute inset-0 z-0 overflow-hidden"
+					: "absolute inset-0 z-0 overflow-hidden hue-rotate-180 invert dark:hue-rotate-0 dark:invert-0"
+			}
 			data-backdrop={gate}
 			data-hero-background={id}
 		>

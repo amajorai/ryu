@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -134,10 +135,12 @@ function makeBook(input: {
 	};
 }
 
-function groupDescription(group: InterfaceGroup): string {
+function groupDescription(group: InterfaceGroup, tl: LiteralMessage): string {
 	return group.kind === "project"
-		? `Every conversation filed under the ${group.name} project.`
-		: `Conversations with the ${group.name} team.`;
+		? tl("Every conversation filed under the {name} project.", {
+				name: group.name,
+			})
+		: tl("Conversations with the {name} team.", { name: group.name });
 }
 
 /** One book per agent, in snapshot order. */
@@ -162,7 +165,10 @@ export function agentBooks(snapshot: InterfaceSnapshot): LibraryBook[] {
  * Projects and teams as collections, plus an "Unassigned" collection for
  * conversations no agent, project, or team owns (so none is unreachable).
  */
-export function collectionBooks(snapshot: InterfaceSnapshot): LibraryBook[] {
+export function collectionBooks(
+	snapshot: InterfaceSnapshot,
+	tl: LiteralMessage
+): LibraryBook[] {
 	const books = snapshot.groups.map((group) => {
 		const authors = group.memberAgentIds
 			.map((id) => snapshot.agents.find((agent) => agent.id === id))
@@ -170,7 +176,7 @@ export function collectionBooks(snapshot: InterfaceSnapshot): LibraryBook[] {
 		return makeBook({
 			agentId: authors[0]?.id ?? null,
 			authors,
-			description: groupDescription(group),
+			description: groupDescription(group, tl),
 			groupId: group.id,
 			id: groupBookId(group),
 			kind: group.kind,
@@ -209,10 +215,13 @@ export interface LibraryShelves {
 	collections: LibraryBook[];
 }
 
-export function libraryShelves(snapshot: InterfaceSnapshot): LibraryShelves {
+export function libraryShelves(
+	snapshot: InterfaceSnapshot,
+	tl: LiteralMessage
+): LibraryShelves {
 	return {
 		books: agentBooks(snapshot),
-		collections: collectionBooks(snapshot),
+		collections: collectionBooks(snapshot, tl),
 	};
 }
 
@@ -378,11 +387,14 @@ export function chapterCountLabel(count: number): string {
 	return count === 1 ? "1 chapter" : `${count.toString()} chapters`;
 }
 
-export function progressLabel(book: LibraryBook): string {
+export function progressLabel(book: LibraryBook, tl: LiteralMessage): string {
 	if (book.chapters.length === 0) {
 		return "No chapters yet";
 	}
-	return `${book.finishedCount.toString()} of ${book.chapters.length.toString()} chapters finished`;
+	return tl("{finishedCount} of {chapterCount} chapters finished", {
+		chapterCount: book.chapters.length.toString(),
+		finishedCount: book.finishedCount.toString(),
+	});
 }
 
 const KIND_LABELS: Record<LibraryBookKind, string> = {

@@ -1,6 +1,7 @@
 /* eslint-disable react/no-unknown-property */
 import { Html } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -1020,6 +1021,7 @@ export function World3dInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<World3dParams>) {
+	const tl = useLiteralMessages();
 	const actsView = useActs(snapshot);
 	const { acts, enabled: withActs, nowMs, privacy, unowned } = actsView;
 	// With acts an agent works (lit windows, sparkles, plate dots, the
@@ -1231,6 +1233,7 @@ export function World3dInterface({
 				loading,
 				player: world.player,
 				threads: snapshot.threads,
+				tl,
 			});
 	const { openAsk: openAskCard, openBlocker: openBlockerCard } = cards;
 	const mapRef = world.mapRef;

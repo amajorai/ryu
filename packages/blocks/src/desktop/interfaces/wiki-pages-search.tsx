@@ -18,7 +18,10 @@ export function SearchPage({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
-	const hits = useMemo(() => wikiSearch(snapshot, query), [snapshot, query]);
+	const hits = useMemo(
+		() => wikiSearch(snapshot, query, tl),
+		[snapshot, query, tl]
+	);
 	const [draft, setDraft] = useState(query);
 	const fieldId = useId();
 	const submit = (event: FormEvent) => {

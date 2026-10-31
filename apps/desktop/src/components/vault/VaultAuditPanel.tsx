@@ -106,7 +106,7 @@ export function VaultAuditPanel({ target }: { target: ApiTarget }) {
 			) : null}
 			{verifyMutation.error ? (
 				<p className="px-3.5 text-status-destructive text-xs" role="status">
-					{vaultErrorMessage(verifyMutation.error, "Could not verify.")}
+					{vaultErrorMessage(verifyMutation.error, "Could not verify.", tl)}
 				</p>
 			) : null}
 			<SettingsCard className="divide-y p-0">
@@ -116,7 +116,8 @@ export function VaultAuditPanel({ target }: { target: ApiTarget }) {
 					<p className="p-4 text-sm text-status-destructive">
 						{vaultErrorMessage(
 							auditQuery.error,
-							"Could not load the audit log."
+							"Could not load the audit log.",
+							tl
 						)}
 					</p>
 				) : auditQuery.data?.events.length ? (

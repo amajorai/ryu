@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfacePort } from "@ryuhq/protocol/interfaces";
 import {
@@ -85,6 +86,7 @@ export function TicketsInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const headingRef = useRef<HTMLHeadingElement>(null);
@@ -115,7 +117,10 @@ export function TicketsInterface({
 		width - (showViewsPanel ? VIEWS_PANEL_WIDTH : 0)
 	);
 
-	const tickets = useMemo(() => buildTickets(snapshot, now), [snapshot, now]);
+	const tickets = useMemo(
+		() => buildTickets(snapshot, now, tl),
+		[snapshot, now, tl]
+	);
 	const byId = useMemo(
 		() => new Map(tickets.map((ticket) => [ticket.id, ticket])),
 		[tickets]

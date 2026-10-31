@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 
 // The DOM must exist before the dialog primitives load (they read it on import).
 GlobalRegistrator.register();
@@ -312,6 +313,7 @@ describe("lobby squad plates (15a)", () => {
 			looks: {} as never,
 			paths,
 			reduced: true,
+			tl: (source, values) => formatMessage(source, values),
 			view,
 		});
 		if (!spec) {
@@ -571,6 +573,7 @@ describe("lobby daily quests with acts", () => {
 		const board = buildQuestBoard(
 			fixture,
 			members,
+			(source, values) => formatMessage(source, values),
 			{ answered: 2, firstThreadId: "t-ada", waiting: 3 },
 			FIXTURE_NOW
 		);
@@ -587,6 +590,7 @@ describe("lobby daily quests with acts", () => {
 		const quiet = buildQuestBoard(
 			fixture,
 			members,
+			(source, values) => formatMessage(source, values),
 			{ answered: 0, firstThreadId: null, waiting: 0 },
 			FIXTURE_NOW
 		);

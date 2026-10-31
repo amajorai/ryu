@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfacePort,
 	type InterfaceSnapshot,
@@ -19,6 +21,8 @@ import {
 	trackerGoal,
 } from "./world-3d-model.ts";
 
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 const MINUTE = 60_000;
 const BASE = Date.parse("2026-10-12T12:00:00Z");
 const ago = (minutes: number) =>
@@ -204,6 +208,7 @@ describe("world 3d model", () => {
 			loading: false,
 			player: { x: 0, y: 0 },
 			threads: SNAPSHOT.threads,
+			tl,
 		});
 		expect(goal).toEqual({
 			agentId: "agent-grace",
@@ -217,6 +222,7 @@ describe("world 3d model", () => {
 			loading: false,
 			player: { x: 0, y: 0 },
 			threads: SNAPSHOT.threads.filter((item) => item.id !== "thread-flaky"),
+			tl,
 		});
 		expect(calm.title).toBe("Ada replied");
 		expect(calm.status).toBe("your-turn");
@@ -234,6 +240,7 @@ describe("world 3d model", () => {
 			loading: false,
 			player: { x: 0, y: 0 },
 			threads,
+			tl,
 		});
 		expect(goal.detail).toBe("Run interrupted · Flaky test");
 		expect(goal.status).toBe("attention");
@@ -254,6 +261,7 @@ describe("world 3d model", () => {
 			loading: false,
 			player: { x: first?.x ?? 0, y: (first?.y ?? 0) + 1 },
 			threads: [],
+			tl,
 		});
 		expect(quiet.title).toBe(`Talk to ${first?.name}`);
 		expect(quiet.detail).toBe("3 agents · 1 working");
@@ -264,6 +272,7 @@ describe("world 3d model", () => {
 				loading: true,
 				player: { x: 0, y: 0 },
 				threads: [],
+				tl,
 			}).title
 		).toBe("Loading agents");
 		expect(
@@ -272,6 +281,7 @@ describe("world 3d model", () => {
 				loading: false,
 				player: { x: 0, y: 0 },
 				threads: [],
+				tl,
 			}).title
 		).toBe("No agents yet");
 	});
@@ -283,16 +293,22 @@ describe("world 3d model", () => {
 			loading: false,
 			player: { x: 0, y: 0 },
 			threads: SNAPSHOT.threads,
+			tl,
 		});
-		expect(trackerLabel(goal)).toBe("Go to Grace: Run failed, Flaky test");
+		expect(trackerLabel(goal, tl)).toBe("Go to Grace: Run failed, Flaky test");
 		const loadingGoal = trackerGoal({
 			entities,
 			loading: true,
 			player: { x: 0, y: 0 },
 			threads: [],
+			tl,
 		});
 		expect(loadingGoal.agentId).toBe(null);
-		expect(trackerLabel(loadingGoal)).toBe("Loading agents");
+		expect(
+			trackerLabel(loadingGoal, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("Loading agents");
 	});
 
 	test("a hidden name plate leaves the Tab order until it shows again", () => {

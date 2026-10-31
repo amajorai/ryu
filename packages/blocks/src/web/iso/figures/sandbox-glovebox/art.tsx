@@ -1,7 +1,8 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Line, Solid } from "../../kit/react/draw.tsx";
 import { BOX_ART, HATCH_ART } from "./geometry.ts";
 import { SandboxGloveboxLive } from "./live.tsx";
-import { DESCRIPTION, LABEL } from "./model.ts";
+import { describeSandbox, LABEL } from "./model.ts";
 
 /**
  * The static parts, built on the server and handed to the live component in painter's
@@ -22,10 +23,11 @@ const TRAY = (
 );
 
 export function SandboxGloveboxArt() {
+	const tl = useLiteralMessages();
 	return (
 		<SandboxGloveboxLive
 			box={BOX}
-			description={DESCRIPTION}
+			description={describeSandbox(tl)}
 			door={<Solid crease="none" paths={HATCH_ART.door} tone="mid" />}
 			label={LABEL}
 			tray={TRAY}

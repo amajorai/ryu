@@ -1,6 +1,6 @@
 "use client";
 
-import { ComposerEditor } from "@ryu/ui/components/editor/composer-editor.tsx";
+import { LazyComposerEditor } from "@ryu/ui/components/editor/composer-editor-lazy.tsx";
 import { importMentionMarkdown } from "@ryu/ui/components/editor/composer-mention-markdown.ts";
 import { Wave } from "@ryu/ui/components/wave";
 import { cn } from "@ryu/ui/lib/utils";
@@ -128,7 +128,7 @@ export function ComposerInputContent({
 	} else if (markdownComposer) {
 		inputContent = (
 			<div onKeyDownCapture={handleKeyDown}>
-				<ComposerEditor
+				<LazyComposerEditor
 					disabled={disabled}
 					editorRef={richEditorRef}
 					markdown={input}

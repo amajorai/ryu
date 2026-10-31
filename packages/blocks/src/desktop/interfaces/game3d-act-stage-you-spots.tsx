@@ -194,7 +194,7 @@ export function YouSpots({
 					<TallyPlate
 						at={layout.tally}
 						focusable={focusable}
-						label={overflowLabel(slots.overflow)}
+						label={overflowLabel(slots.overflow, tl)}
 						onOpen={onOpenQueue}
 						scope="you"
 						text={tl("+{overflow} more", { overflow: String(slots.overflow) })}
@@ -204,7 +204,7 @@ export function YouSpots({
 					<TallyPlate
 						at={layout.offStage}
 						focusable={focusable}
-						label={offStageLabel(offStage.count)}
+						label={offStageLabel(offStage.count, tl)}
 						onOpen={onOpenQueue}
 						scope="off"
 						text={offStageText(offStage)}

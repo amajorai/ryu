@@ -34,6 +34,7 @@
 // missing) this shape degrades the right way — the input disappears exactly when
 // the option it configures does — whereas a hardcoded `true` would strand it.
 
+import type { LiteralMessage } from "@ryu/i18n";
 import { ApiError } from "@/src/lib/api/client.ts";
 import { ingressLabel, isOwnRelayKind } from "@/src/lib/api/mesh.ts";
 
@@ -105,18 +106,24 @@ export function ingressUrlDirty(typed: string, saved: string): boolean {
 export function ingressSelectedToast(
 	kind: string,
 	urlLoaded: boolean,
-	urlValue: string
+	urlValue: string,
+	tl: LiteralMessage
 ): IngressToast {
-	const title = `Ingress set to ${ingressLabel(kind)}`;
-	const restart = "Restart this node for the change to take effect.";
+	const title = tl("Ingress set to {backend}", { backend: ingressLabel(kind) });
 	if (isOwnRelayKind(kind) && urlLoaded && urlValue.trim().length === 0) {
 		return {
 			level: "success",
 			title,
-			description: `This node accepted the selection, so its public URL is configured outside this tab — most likely RYU_WEBHOOK_INGRESS_URL in its environment. ${restart}`,
+			description: tl(
+				"This node accepted the selection, so its public URL is configured outside this tab — most likely RYU_WEBHOOK_INGRESS_URL in its environment. Restart this node for the change to take effect."
+			),
 		};
 	}
-	return { level: "success", title, description: restart };
+	return {
+		level: "success",
+		title,
+		description: tl("Restart this node for the change to take effect."),
+	};
 }
 
 /**
@@ -135,27 +142,32 @@ export function ingressSelectedToast(
  */
 export function ingressUrlSavedToast(
 	urlValue: string,
-	activeBackend: string
+	activeBackend: string,
+	tl: LiteralMessage
 ): IngressToast {
 	if (urlValue.trim().length > 0) {
 		return {
 			level: "success",
-			title: "Public URL saved",
-			description: "Restart this node for the change to take effect.",
+			title: tl("Public URL saved"),
+			description: tl("Restart this node for the change to take effect."),
 		};
 	}
 	if (isOwnRelayKind(activeBackend)) {
 		return {
 			level: "warning",
-			title: "Public URL cleared",
-			description:
-				"Self-hosted relay is the active backend and now has no address of its own. Unless RYU_WEBHOOK_INGRESS_URL is set in this node's environment, inbound webhooks stop arriving after the next restart.",
+			title: tl("Public URL cleared"),
+			description: tl(
+				"Self-hosted relay is the active backend and now has no address of its own. Unless RYU_WEBHOOK_INGRESS_URL is set in this node's environment, inbound webhooks stop arriving after the next restart."
+			),
 		};
 	}
 	return {
 		level: "success",
-		title: "Public URL cleared",
-		description: `${ingressLabel(activeBackend)} is unaffected — Self-hosted relay simply cannot be selected until a URL is saved here.`,
+		title: tl("Public URL cleared"),
+		description: tl(
+			"{backend} is unaffected — Self-hosted relay simply cannot be selected until a URL is saved here.",
+			{ backend: ingressLabel(activeBackend) }
+		),
 	};
 }
 

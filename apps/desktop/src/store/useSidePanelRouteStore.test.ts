@@ -65,7 +65,8 @@ test("repeating the same page bumps the nonce so the dock refocuses, and clear r
 	const first = useSidePanelRouteStore.getState().pending;
 	store.openPage("vault");
 	const second = useSidePanelRouteStore.getState().pending;
-	expect(second?.kind).toBe(first?.kind ?? "missing");
+	expect(first?.kind).toBe("route:/vault");
+	expect(second?.kind).toBe("route:/vault");
 	expect(second).not.toBe(first);
 	expect(second?.nonce ?? 0).toBeGreaterThan(first?.nonce ?? 0);
 	store.clear();

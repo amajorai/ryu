@@ -279,14 +279,15 @@ export interface PluginCompanionWire {
 	default_csp_enforced?: boolean;
 	first_party?: boolean;
 	has_ui?: boolean;
-	icon?: string;
+	/** Null when the manifest declares none (Core's `Option<String>`). */
+	icon?: string | null;
 	id: string;
 	label: string;
 	mcpToolId?: string;
 	name: string;
 	navigationVisible?: boolean;
 	plugin_id?: string;
-	shortcut?: string;
+	shortcut?: string | null;
 }
 
 export function toPluginCompanion(w: PluginCompanionWire): PluginCompanion {
@@ -300,8 +301,8 @@ export function toPluginCompanion(w: PluginCompanionWire): PluginCompanion {
 		name: w.name,
 		firstParty: w.first_party ?? false,
 		label: w.label,
-		icon: w.icon,
-		shortcut: w.shortcut,
+		icon: w.icon ?? undefined,
+		shortcut: w.shortcut ?? undefined,
 		pluginId: w.plugin_id ?? "",
 		approvedGrants: w.approved_grants ?? [],
 		hasUi: w.has_ui ?? false,

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -39,6 +40,7 @@ export function PostRow({
 	registerRow,
 	showSpace,
 }: PostRowProps) {
+	const tl = useLiteralMessages();
 	const titleId = useId();
 	const { thread } = item;
 	const comments = commentLabel(item.comments);
@@ -111,7 +113,10 @@ export function PostRow({
 						</span>
 					)}
 					{hideMarker ? null : (
-						<PostMarkerLabel label={markerLabel(item)} marker={item.marker} />
+						<PostMarkerLabel
+							label={markerLabel(item, tl)}
+							marker={item.marker}
+						/>
 					)}
 				</div>
 			</div>

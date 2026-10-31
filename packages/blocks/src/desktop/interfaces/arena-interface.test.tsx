@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -316,10 +317,24 @@ describe("Arena header and schedule", () => {
 		expect(arenaUpcomingRuns(undefined, BASE)).toEqual([]);
 		const at = (minutes: number) =>
 			new Date(BASE + minutes * MINUTE).toISOString();
-		expect(untilLabel(at(5), BASE)).toBe("in 5m");
-		expect(untilLabel(at(59.8), BASE)).toBe("in 1h");
-		expect(untilLabel(at(60 * 20), BASE)).toBe("in 20h");
-		expect(untilLabel(at(60 * 24 * 3), BASE)).toBe("in 3d");
+		expect(
+			untilLabel(at(5), BASE, (source, values) => formatMessage(source, values))
+		).toBe("in 5m");
+		expect(
+			untilLabel(at(59.8), BASE, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 1h");
+		expect(
+			untilLabel(at(60 * 20), BASE, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 20h");
+		expect(
+			untilLabel(at(60 * 24 * 3), BASE, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 3d");
 	});
 });
 

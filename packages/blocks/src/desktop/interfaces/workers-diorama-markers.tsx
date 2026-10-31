@@ -185,7 +185,7 @@ export function WorkerMarkers({
 						label={
 							act
 								? `${actScreenLabel(worker, act, tl, actScene?.screenWords)}. ${worker.current ? "Open the task" : "Open their desk"}`
-								: screenLabel(worker)
+								: screenLabel(worker, tl)
 						}
 						onSelect={() => onOpenScreen(worker.id)}
 					>
@@ -300,6 +300,10 @@ function FigureProbe({
 }
 
 /** What a screen plate says to a screen reader. */
-export function screenLabel(worker: WorkerView): string {
-	return `${worker.name}'s screen: ${screenTitle(worker)}, ${WORKER_STATE_LABELS[worker.state]}. Open the task`;
+export function screenLabel(worker: WorkerView, tl: LiteralMessage): string {
+	return tl("{name}'s screen: {taskTitle}, {state}. Open the task", {
+		name: worker.name,
+		state: WORKER_STATE_LABELS[worker.state],
+		taskTitle: screenTitle(worker),
+	});
 }

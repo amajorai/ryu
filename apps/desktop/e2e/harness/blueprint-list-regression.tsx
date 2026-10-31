@@ -8,6 +8,7 @@ import type {
 	BlueprintListApi,
 	BlueprintListCall,
 } from "./blueprint-list-regression.types.ts";
+
 const planId = "plan-read-regression";
 const calls: BlueprintListCall[] = [];
 let root: Root | null = null;

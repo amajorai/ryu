@@ -1,6 +1,6 @@
 /* eslint-disable react/no-unknown-property */
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { type ReactNode, useMemo } from "react";
 import type { LifePaths } from "./game3d-life.ts";
 import type { Scene3dTheme, Vec3 } from "./game3d-palette.ts";
@@ -31,7 +31,6 @@ import {
 	type PassportPage,
 	type PassportSpread,
 	type PassportStamp,
-	plural,
 	UNASSIGNED_CODE,
 	UNASSIGNED_LABEL,
 } from "./passport-model.ts";
@@ -96,23 +95,43 @@ export function countryPose(stamps: readonly PassportStamp[]): VillagerPose {
 }
 
 /** What a country's row says to a screen reader (the list without WebGL). */
-export function stationLabel(station: {
-	country: PassportCountry | null;
-	stamps: readonly PassportStamp[];
-}): string {
-	const name = station.country?.agent.name ?? UNASSIGNED_LABEL;
-	return `${name} (${station.country?.code ?? UNASSIGNED_CODE}): ${plural(station.stamps.length, "stamp", "stamps")}. Open its visa pages`;
+export function stationLabel(
+	station: {
+		country: PassportCountry | null;
+		stamps: readonly PassportStamp[];
+	},
+	tl: LiteralMessage
+): string {
+	return tl(
+		"{name} ({code}): {stampCount, plural, one {{stampTotal} stamp} other {{stampTotal} stamps}}. Open its visa pages",
+		{
+			code: station.country?.code ?? UNASSIGNED_CODE,
+			name: station.country?.agent.name ?? UNASSIGNED_LABEL,
+			stampCount: station.stamps.length,
+			stampTotal: String(station.stamps.length),
+		}
+	);
 }
 
 /**
  * A country row's name with the act layer: the country, not its agent (the
  * agent's own row button is its one target, named by its act).
  */
-export function countryLabel(station: {
-	country: PassportCountry | null;
-	stamps: readonly PassportStamp[];
-}): string {
-	return `Country ${station.country?.code ?? UNASSIGNED_CODE}: ${plural(station.stamps.length, "stamp", "stamps")}. Open its visa pages`;
+export function countryLabel(
+	station: {
+		country: PassportCountry | null;
+		stamps: readonly PassportStamp[];
+	},
+	tl: LiteralMessage
+): string {
+	return tl(
+		"Country {code}: {stampCount, plural, one {{stampTotal} stamp} other {{stampTotal} stamps}}. Open its visa pages",
+		{
+			code: station.country?.code ?? UNASSIGNED_CODE,
+			stampCount: station.stamps.length,
+			stampTotal: String(station.stamps.length),
+		}
+	);
 }
 
 /** Where a shown page lies: its middle across the desk. */

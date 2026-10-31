@@ -1,5 +1,6 @@
 import { ComputerIcon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { surfaceLabel } from "../surface-labels.ts";
 import {
 	extensionSummaries,
@@ -24,6 +25,7 @@ export function SupportExtensionPanel({
 	detail: PluginCatalogDetail | null;
 	entry: CatalogEntry;
 }) {
+	const tl = useLiteralMessages();
 	const support = surfaceSupportRows(detail, entry);
 	const extensions = extensionSummaries(detail, entry);
 	const implementation = implementationSummaries(detail, entry);
@@ -55,9 +57,9 @@ export function SupportExtensionPanel({
 								<p className="truncate font-medium text-sm">
 									{surfaceLabel(row.surface)}
 								</p>
-								{inheritedSurfaceLabel(row.inheritedFrom) ? (
+								{inheritedSurfaceLabel(tl, row.inheritedFrom) ? (
 									<p className="truncate text-muted-foreground text-xs">
-										{inheritedSurfaceLabel(row.inheritedFrom)}
+										{inheritedSurfaceLabel(tl, row.inheritedFrom)}
 									</p>
 								) : null}
 							</div>

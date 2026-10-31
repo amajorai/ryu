@@ -10,6 +10,7 @@ import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
 import { triggerGlobalRefresh } from "../../src/lib/core-refresh.ts";
+
 const node = {
 	name: "voice-outcomes",
 	url: "http://127.0.0.1:5866",
@@ -75,5 +76,5 @@ createRoot(document.getElementById("root")!).render(
 				</I18nProvider>
 			</AppSurfaceProvider>
 		</QueryClientProvider>
-	</MemoryRouter>,
+	</MemoryRouter>
 );

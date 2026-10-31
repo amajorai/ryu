@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
 import { buildCalendarEvents, cronFireTimes } from "./events.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const T0 = Date.UTC(2026, 9, 16, 0, 0);
 const HOUR = 3_600_000;
@@ -50,7 +54,8 @@ describe("calendar events for interfaces", () => {
 		const events = buildCalendarEvents(
 			[job()],
 			new Date(T0 - 48 * HOUR),
-			new Date(T0 + 24 * HOUR)
+			new Date(T0 + 24 * HOUR),
+			tl
 		);
 		const past = events.filter((event) => event.kind === "past");
 		expect(past.map((event) => event.runId)).toEqual([null, "agentrun_1"]);
@@ -69,7 +74,8 @@ describe("calendar events for interfaces", () => {
 				}),
 			],
 			new Date(T0 - 48 * HOUR),
-			new Date(T0 + 24 * HOUR)
+			new Date(T0 + 24 * HOUR),
+			tl
 		);
 		expect(events.every((event) => event.conversationId === undefined)).toBe(
 			true

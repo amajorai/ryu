@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceAgent,
 	InterfaceGroup,
@@ -122,6 +123,9 @@ export interface FlowLayout {
 	nodes: FlowNode[];
 }
 
+/** An arrow-key direction across the flow. */
+export type FlowDirection = "down" | "left" | "right" | "up";
+
 export interface FlowLayoutOptions {
 	/** Open thread: always laid out, even when it would sit behind "N more". */
 	activeThreadId?: string | null;
@@ -134,4 +138,6 @@ export interface FlowLayoutOptions {
 	originStub?: boolean;
 	/** Node id (`origin` or a lead) that shows its dotted "+" stub. */
 	stubFor: string | null;
+	/** Translates the connector chips' descriptions. */
+	tl: LiteralMessage;
 }

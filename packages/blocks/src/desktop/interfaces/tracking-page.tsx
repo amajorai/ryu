@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -156,8 +157,9 @@ function TrackingHistory({
 	now: number;
 	parcel: TrackingParcel;
 }) {
+	const tl = useLiteralMessages();
 	const headingId = useId();
-	const groups = trackingHistory(parcel, events, now);
+	const groups = trackingHistory(parcel, events, now, tl);
 	const total = groups.reduce((sum, group) => sum + group.entries.length, 0);
 	const rows: ReactNode[] = [];
 	let seen = 0;

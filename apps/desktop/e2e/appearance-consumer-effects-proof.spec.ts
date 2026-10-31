@@ -1,22 +1,25 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 const STORY = "/appearance-consumer-effects-proof.html";
+const SOLID_SCRIM_BACKGROUND = /^rgba\(0, 0, 0, 0\.[35]\)$/;
 const css = (node: Locator, property: string) =>
 	node.evaluate(
 		(element, key) => getComputedStyle(element).getPropertyValue(key),
-		property,
+		property
 	);
 // Compare rendered colors, rather than equivalent browser CSS serializations.
 const rgba = (node: Locator) =>
 	node.evaluate((element) => {
 		const value = getComputedStyle(element).backgroundColor;
-		if (!CSS.supports("color", value))
+		if (!CSS.supports("color", value)) {
 			throw new Error(`Invalid computed color: ${value}`);
+		}
 		const canvas = document.createElement("canvas");
 		canvas.width = canvas.height = 1;
 		const context = canvas.getContext("2d", { colorSpace: "srgb" });
-		if (!context)
+		if (!context) {
 			throw new Error("Canvas2D is unavailable for rendered color comparison");
+		}
 		context.fillStyle = value;
 		context.fillRect(0, 0, 1, 1);
 		return Array.from(context.getImageData(0, 0, 1, 1).data);
@@ -25,7 +28,7 @@ const colorDelta = (left: number[], right: number[]) => {
 	expect(left).toHaveLength(4);
 	expect(right).toHaveLength(4);
 	return Math.max(
-		...left.map((channel, index) => Math.abs(channel - right[index])),
+		...left.map((channel, index) => Math.abs(channel - right[index]))
 	);
 };
 const pageFailures = new WeakMap<Page, string[]>();
@@ -39,7 +42,7 @@ async function open(page: Page, name: string) {
 const SWITCH_TITLES = {
 	"pointer-cursor-toggle": "Pointer cursor",
 	"chrome-shadows-toggle": "Navigation & sidebar shadows",
-	"dialog-overlay-blur-toggle": "Blur dialog backgrounds",
+	"dialog-overlay-blur-toggle": "Dim dialog backgrounds",
 	"inverted-backgrounds-toggle": "Invert overlay backgrounds",
 	"friendly-names-toggle": "Friendly names",
 	"animations-enabled-toggle": "Enable animations",
@@ -48,7 +51,7 @@ const SWITCH_TITLES = {
 async function toggle(
 	page: Page,
 	id: keyof typeof SWITCH_TITLES,
-	enabled: boolean,
+	enabled: boolean
 ) {
 	// Anchor to the real Item boundary: text wrappers may change with motion.
 	const row = page
@@ -61,8 +64,9 @@ async function toggle(
 	const control = row.getByRole("switch");
 	await expect(control).toHaveCount(1);
 	await expect(control).toBeVisible();
-	if ((await control.getAttribute("aria-checked")) !== String(enabled))
+	if ((await control.getAttribute("aria-checked")) !== String(enabled)) {
 		await control.click();
+	}
 	// Distinguish a rendering failure from a stale control locator.
 	expect(pageFailures.get(page) ?? []).toEqual([]);
 	await expect(page.getByTestId("settings")).toBeVisible();
@@ -89,7 +93,7 @@ test.afterEach(async ({ page }, testInfo) => {
 	});
 	expect(
 		failures,
-		"Real consumer rendering must not raise page errors or crash",
+		"Real consumer rendering must not raise page errors or crash"
 	).toEqual([]);
 });
 
@@ -131,7 +135,7 @@ test("selected fonts reach rendered interface, heading and code after restart", 
 						document.fonts.check('16px "Geist Variable"') &&
 						document.fonts.check('16px "Inter Variable"')
 					);
-				}),
+				})
 			)
 			.toBe(true);
 	};
@@ -168,14 +172,14 @@ test("card padding and UI scale change real geometry by the selected amounts and
 	await page.keyboard.press("ArrowRight");
 	await expect(spacing).toHaveAttribute(
 		"aria-valuenow",
-		String(Number((initialSpacing + 0.005).toFixed(3))),
+		String(Number((initialSpacing + 0.005).toFixed(3)))
 	);
 	const verifySpacing = () =>
 		expect
 			.poll(async () =>
 				Number.parseFloat(
-					await css(page.getByTestId("consumer-button"), "padding-left"),
-				),
+					await css(page.getByTestId("consumer-button"), "padding-left")
+				)
 			)
 			.toBeCloseTo((initialSpacing + 0.005) * 16 * 3, 2);
 	await verifySpacing();
@@ -200,7 +204,7 @@ test("card padding and UI scale change real geometry by the selected amounts and
 	await page.keyboard.press("ArrowRight");
 	await expect(padding).toHaveAttribute(
 		"aria-valuenow",
-		String(Number((initial + 0.02).toFixed(2))),
+		String(Number((initial + 0.02).toFixed(2)))
 	);
 	const verifyPadding = () =>
 		expect
@@ -232,8 +236,8 @@ test("pointer preference changes enabled controls and preserves disabled control
 	page,
 }) => {
 	await open(page, "Interface");
-	const enabled = page.getByTestId("consumer-button"),
-		disabled = page.getByTestId("consumer-disabled-button");
+	const enabled = page.getByTestId("consumer-button");
+	const disabled = page.getByTestId("consumer-disabled-button");
 	const disabledCursor = await css(disabled, "cursor");
 	await toggle(page, "pointer-cursor-toggle", true);
 	await expect(enabled).toHaveCSS("cursor", "pointer");
@@ -264,7 +268,13 @@ test("shadow preference removes and restores actual shared desktop chrome filter
 	await expect.poll(() => css(chrome, "filter")).toBe(original);
 });
 
-test("blur and inverted backgrounds reach actual dialog and popup portals after restart", async ({
+// The modal scrim is a plain solid dim (30% black light, 50% dark): never a blur.
+async function expectSolidScrim(overlay: Locator): Promise<void> {
+	await expect(overlay).toHaveCSS("backdrop-filter", "none");
+	await expect(overlay).toHaveCSS("background-color", SOLID_SCRIM_BACKGROUND);
+}
+
+test("dim and inverted backgrounds reach actual dialog and popup portals after restart", async ({
 	page,
 }) => {
 	await open(page, "Interface");
@@ -274,7 +284,7 @@ test("blur and inverted backgrounds reach actual dialog and popup portals after 
 		.click();
 	const overlay = page.locator('[data-slot="dialog-overlay"]');
 	await expect(overlay).toBeVisible();
-	await expect(overlay).toHaveCSS("backdrop-filter", "blur(8px)");
+	await expectSolidScrim(overlay);
 	await page.keyboard.press("Escape");
 	await expect(page.getByRole("dialog")).toHaveCount(0);
 	const popup = page.getByTestId("consumer-popup");
@@ -303,7 +313,7 @@ test("blur and inverted backgrounds reach actual dialog and popup portals after 
 	await page
 		.getByRole("button", { name: "Open consumer dialog", exact: true })
 		.click();
-	await expect(overlay).toHaveCSS("backdrop-filter", "blur(8px)");
+	await expectSolidScrim(overlay);
 	await page.keyboard.press("Escape");
 	await open(page, "Interface");
 	await toggle(page, "dialog-overlay-blur-toggle", false);
@@ -337,19 +347,19 @@ test("persisted master motion controls real conversation preview and title with 
 }) => {
 	await page.emulateMedia({ reducedMotion: "no-preference" });
 	await open(page, "Motion & effects");
-	const preview = page.getByTestId("consumer-preview"),
-		live = preview.locator('[aria-live="polite"]');
+	const preview = page.getByTestId("consumer-preview");
+	const live = preview.locator('[aria-live="polite"]');
 	await expect(live).toBeVisible();
 	await expect(live.locator(":scope > :not([aria-hidden])")).toContainText(
 		"Running tests",
-		{ timeout: 7000 },
+		{ timeout: 7000 }
 	);
 	await page
 		.getByRole("button", { name: "Change consumer title", exact: true })
 		.click();
 	await expect(page.locator("[data-animated-title]")).toHaveAttribute(
 		"data-animated-title-state",
-		"transitioning",
+		"transitioning"
 	);
 	await toggle(page, "animations-enabled-toggle", false);
 	await expect(live).toHaveCount(0);
@@ -359,7 +369,7 @@ test("persisted master motion controls real conversation preview and title with 
 		.click();
 	await expect(page.locator("[data-animated-title]")).toHaveAttribute(
 		"data-animated-title-state",
-		"settled",
+		"settled"
 	);
 	await page.waitForTimeout(2700);
 	await expect(preview).toHaveText("Reviewing files");
@@ -373,7 +383,7 @@ test("persisted master motion controls real conversation preview and title with 
 	await expect(preview).toHaveText("Reviewing files");
 	await expect
 		.poll(() =>
-			page.evaluate(() => localStorage.getItem("ryu:animations-enabled")),
+			page.evaluate(() => localStorage.getItem("ryu:animations-enabled"))
 		)
 		.toBe("true");
 });
@@ -399,10 +409,10 @@ test("selected chat width controls actual transcript content, composer and narro
 					const style = getComputedStyle(element);
 					return (
 						element.getBoundingClientRect().width -
-						parseFloat(style.paddingLeft) -
-						parseFloat(style.paddingRight)
+						Number.parseFloat(style.paddingLeft) -
+						Number.parseFloat(style.paddingRight)
 					);
-				}),
+				})
 			)
 			.toBeCloseTo(selected, 1);
 	const composer = page
@@ -433,8 +443,8 @@ test("selected chat width controls actual transcript content, composer and narro
 			column.evaluate(
 				(element) =>
 					element.getBoundingClientRect().width <=
-					element.parentElement!.getBoundingClientRect().width,
-			),
+					element.parentElement!.getBoundingClientRect().width
+			)
 		)
 		.toBe(true);
 	await expect

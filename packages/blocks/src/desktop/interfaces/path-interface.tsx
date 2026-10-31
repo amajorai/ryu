@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -268,6 +269,7 @@ export function PathInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["path"]>) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const model = useMemo(() => buildPath(snapshot), [snapshot]);
 	const stats = useMemo(() => pathStats(snapshot), [snapshot]);
@@ -377,6 +379,7 @@ export function PathInterface({
 						shown,
 						slots: slots.slots,
 						stones,
+						tl,
 					})
 				: [],
 		[
@@ -391,6 +394,7 @@ export function PathInterface({
 			shown,
 			slots.slots,
 			stones,
+			tl,
 		]
 	);
 	const onAsk = (askId: string, opener?: HTMLElement) => openAsk(askId, opener);

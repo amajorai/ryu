@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -187,6 +188,7 @@ export function actVillagers({
 	shown,
 	slots,
 	stations,
+	tl,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
 	looks: ReadonlyMap<string, MemberLooks>;
@@ -198,6 +200,7 @@ export function actVillagers({
 	shown: ReadonlySet<string>;
 	slots: readonly YouSpotSlot[];
 	stations: readonly SeasonStation[];
+	tl: LiteralMessage;
 }): VillagerSpec[] {
 	const cast: VillagerSpec[] = [];
 	const skin = seasonSkin(season);
@@ -222,7 +225,7 @@ export function actVillagers({
 			iconOnly: asking && spots.slot ? false : undefined,
 			id: act.agentId,
 			label: asking
-				? `${act.ariaLabel} Answer their ask.`
+				? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
 				: `${act.ariaLabel} ${SEASON_ACT_WORDS[season].open}`,
 			life: actLife(act, spots, skin, { reduced }),
 			looks: {

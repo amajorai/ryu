@@ -12,7 +12,6 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
-import type { StoredAccount } from "@/lib/auth-client.ts";
 import type {
 	ConversationAccess,
 	PrincipalDirectory,
@@ -20,6 +19,7 @@ import type {
 import {
 	type GeneralAccess,
 	isGeneralAccess,
+	type ShareOwner,
 } from "./ShareConversationDialog-access.ts";
 
 export function ShareConversationGeneralSection({
@@ -36,7 +36,7 @@ export function ShareConversationGeneralSection({
 	canManage: boolean;
 	directory: PrincipalDirectory | null;
 	generalAccess: GeneralAccess;
-	owner: StoredAccount | null;
+	owner: ShareOwner | null;
 	setAccess: (access: ConversationAccess) => void;
 	setError: (error: string | null) => void;
 	setGeneralAccess: (value: GeneralAccess) => void;

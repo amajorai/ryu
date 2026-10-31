@@ -11,6 +11,7 @@ import {
 } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfaceAgentAct,
 	InterfacePort,
@@ -1275,6 +1276,7 @@ describe("Passport useful state", () => {
 			onAsk: (askId) => opened.push(askId),
 			reduced: true,
 			shown: new Set(),
+			tl: formatMessage,
 		});
 		const ada = cast.find((spec) => spec.actAgent === FIXTURE_AGENT_IDS.ada);
 		expect(ada?.label).toBe(

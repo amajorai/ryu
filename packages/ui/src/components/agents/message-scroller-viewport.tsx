@@ -3,6 +3,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback } from "react";
 import { isNativeFunction } from "../../lib/native-primitive-observation.ts";
 import type { useMessageScrollerFollow } from "./message-scroller-follow.ts";
+import { startRailJump } from "./message-scroller-rail-jump.ts";
 import type { useMessageScrollerRail } from "./message-scroller-rail-sync.ts";
 import type { MessageScrollerBaseScope } from "./message-scroller-scope.ts";
 
@@ -14,8 +15,10 @@ export type UseMessageScrollerViewportInput = MessageScrollerBaseScope &
 export function useMessageScrollerViewport({
 	viewportRef,
 	railTargetsRef,
+	railJumpRef,
 	railItems,
 	setActiveRailId,
+	updateActiveRailItem,
 	setFollowing,
 	scrollToEnd,
 	reduce,
@@ -50,6 +53,8 @@ export function useMessageScrollerViewport({
 			}
 
 			const lastItem = railItems.at(-1)?.id === item.id;
+			railJumpRef.current?.cancel();
+			railJumpRef.current = null;
 			setActiveRailId(item.id);
 			if (lastItem) {
 				setFollowing(true);
@@ -81,6 +86,19 @@ export function useMessageScrollerViewport({
 					viewportRect.top -
 					(viewport.clientHeight - targetRect.height) / 2;
 			}
+			const jump = startRailJump({
+				id: item.id,
+				viewport,
+				target,
+				smooth: behavior === "smooth",
+				onSettled: () => {
+					if (railJumpRef.current === jump) {
+						railJumpRef.current = null;
+					}
+					updateActiveRailItem();
+				},
+			});
+			railJumpRef.current = jump;
 			if (scrollTimerRef.current) {
 				window.clearTimeout(scrollTimerRef.current);
 			}
@@ -91,7 +109,7 @@ export function useMessageScrollerViewport({
 				behavior === "smooth" ? 320 : 0
 			);
 		},
-		[railItems, reduce, scrollToEnd, setFollowing, smooth]
+		[railItems, reduce, scrollToEnd, setFollowing, smooth, updateActiveRailItem]
 	);
 
 	const viewport = (
@@ -108,6 +126,15 @@ export function useMessageScrollerViewport({
 			onKeyDown={(event) => {
 				if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
 					leaveLiveEdge();
+				} else if (
+					railJumpRef.current &&
+					["ArrowDown", "PageDown", "End", " "].includes(event.key)
+				) {
+					// Scrolling down does not leave the live edge, but the reader
+					// has taken over: a rail jump still landing must not pull back.
+					railJumpRef.current.cancel();
+					railJumpRef.current = null;
+					updateActiveRailItem();
 				}
 				onViewportKeyDown?.(event);
 			}}

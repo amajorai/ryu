@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	askBubble,
 	type InterfaceAgent,
@@ -430,19 +431,23 @@ export function nextDeal(
 }
 
 /** "in 45m", "in 3h", "in 2d": how long until a scheduled run. */
-export function untilLabel(iso: string, now: number): string {
+export function untilLabel(
+	iso: string,
+	now: number,
+	tl: LiteralMessage
+): string {
 	const minutes = Math.max(0, Math.round((time(iso) - now) / 60_000));
 	if (minutes < 1) {
-		return "now";
+		return tl("now");
 	}
 	if (minutes < 60) {
-		return `in ${minutes}m`;
+		return tl("in {minutes}m", { minutes });
 	}
 	const hours = Math.round(minutes / 60);
 	if (hours < 24) {
-		return `in ${hours}h`;
+		return tl("in {hours}h", { hours });
 	}
-	return `in ${Math.round(hours / 24)}d`;
+	return tl("in {days}d", { days: String(Math.round(hours / 24)) });
 }
 
 /** The card's rank: the lead agent's initial, or a dash for nobody. */

@@ -7,6 +7,7 @@ import {
 	CheckmarkCircle02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -60,6 +61,7 @@ export function VaultChangeRequests({
 	callerSubject: string;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
 	const requestsQuery = useQuery({
 		queryKey: ["vault", "change-requests", target.url, "pending"],
@@ -75,7 +77,7 @@ export function VaultChangeRequests({
 		onError: (error) => {
 			sileo.error({
 				title: "Could not update the request",
-				description: vaultErrorMessage(error, "Try again."),
+				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},
 	});

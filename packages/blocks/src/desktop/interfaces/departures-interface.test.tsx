@@ -8,6 +8,8 @@ import {
 	test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfacePort,
@@ -151,6 +153,8 @@ function fixture(now: number): InterfaceSnapshot {
 		version: 1,
 	};
 }
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const registeredDom = globalThis.document === undefined;
 if (registeredDom) {
@@ -305,7 +309,7 @@ describe("departures model", () => {
 		expect(audit?.status).toBe("delayed");
 		expect(audit?.remark).toBe("Run failed");
 		expect(
-			audit && flightTimeline(audit, NOW).map((step) => step.label)
+			audit && flightTimeline(audit, NOW, tl).map((step) => step.label)
 		).toEqual(["Departed", "Delayed", "Rebook"]);
 		// A later success supersedes the older failure of the same routine.
 		const backups = boards.arrivals.filter(
@@ -411,7 +415,7 @@ describe("departures model", () => {
 		const live = boards.departures.find(
 			(flight) => flight.threadId === "thread-live"
 		);
-		const steps = live ? flightTimeline(live, NOW) : [];
+		const steps = live ? flightTimeline(live, NOW, tl) : [];
 		expect(steps.map((step) => step.label)).toEqual([
 			"Departed",
 			"Airborne",
@@ -422,9 +426,9 @@ describe("departures model", () => {
 		const gate = boards.arrivals.find(
 			(flight) => flight.threadId === "thread-gate"
 		);
-		expect(gate && flightTimeline(gate, NOW).map((step) => step.label)).toEqual(
-			["Landed", "At gate"]
-		);
+		expect(
+			gate && flightTimeline(gate, NOW, tl).map((step) => step.label)
+		).toEqual(["Landed", "At gate"]);
 	});
 
 	test("a conversation with no messages never shows a landing", () => {
@@ -444,7 +448,7 @@ describe("departures model", () => {
 		const flight = buildBoards({ ...SNAPSHOT, threads: [blank] }, NOW)
 			.arrivals[0];
 		expect(flight?.quiet).toBeTrue();
-		const steps = flight ? flightTimeline(flight, NOW) : [];
+		const steps = flight ? flightTimeline(flight, NOW, tl) : [];
 		expect(steps.map((step) => step.label)).toEqual(["Not started"]);
 		expect(steps.some((step) => step.detail?.includes("On the ground"))).toBe(
 			false

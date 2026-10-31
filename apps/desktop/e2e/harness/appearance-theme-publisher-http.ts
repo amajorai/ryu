@@ -1,39 +1,40 @@
 import {
+	closeSync,
+	fsyncSync,
 	mkdirSync,
-	writeFileSync,
+	openSync,
 	readFileSync,
 	renameSync,
-	openSync,
-	fsyncSync,
-	closeSync,
+	writeFileSync,
 } from "node:fs";
-import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 import type { Plugin } from "vite";
+
 interface Payload {
-	version: number;
-	mode: string;
-	lightPreset: string;
-	darkPreset: string;
 	contrast: number;
-	radius: number;
 	customThemes: Array<{
 		id: string;
 		label: string;
 		mode: string;
 		tokens: Record<string, string>;
 	}>;
+	darkPreset: string;
+	lightPreset: string;
+	mode: string;
+	radius: number;
+	version: number;
 	[key: string]: unknown;
 }
 interface Call {
+	admitted: boolean;
+	authorization: string | null;
+	completed: boolean;
 	id: number;
 	method: string;
 	path: string;
-	authorization: string | null;
-	status: number;
-	admitted: boolean;
-	completed: boolean;
 	payload?: Payload;
+	status: number;
 }
 interface State {
 	calls: Call[];
@@ -41,8 +42,9 @@ interface State {
 }
 export function themePublisherHttp(): Plugin {
 	const directory = process.env.RYU_APPEARANCE_PUBLISHER_DATA;
-	if (!directory || !path.isAbsolute(directory))
+	if (!(directory && path.isAbsolute(directory))) {
 		throw new Error("Fresh owned publisher data path required");
+	}
 	const file = path.join(directory, "ledger.json");
 	let state: State = { calls: [], preference: null };
 	let next = 1;
@@ -73,14 +75,16 @@ export function themePublisherHttp(): Plugin {
 		let text = "";
 		for await (const chunk of req) {
 			text += chunk;
-			if (Buffer.byteLength(text) > max)
+			if (Buffer.byteLength(text) > max) {
 				throw Error("Bounded publisher request exceeded");
+			}
 		}
 		return JSON.parse(text);
 	}
 	function validate(value: unknown): Payload {
-		if (typeof value !== "object" || value === null || Array.isArray(value))
+		if (typeof value !== "object" || value === null || Array.isArray(value)) {
 			throw Error("ThemePrefs object required");
+		}
 		const prefs = value as Payload;
 		if (
 			prefs.version !== 1 ||
@@ -91,8 +95,9 @@ export function themePublisherHttp(): Plugin {
 			!Number.isFinite(prefs.radius) ||
 			!Array.isArray(prefs.customThemes) ||
 			prefs.customThemes.length > 16
-		)
+		) {
 			throw Error("Invalid actual ThemePrefs shape");
+		}
 		for (const theme of prefs.customThemes) {
 			if (
 				!theme ||
@@ -102,10 +107,11 @@ export function themePublisherHttp(): Plugin {
 				typeof theme.tokens !== "object" ||
 				theme.tokens === null ||
 				Object.entries(theme.tokens).some(
-					([key, value]) => !key.startsWith("--") || typeof value !== "string",
+					([key, value]) => !key.startsWith("--") || typeof value !== "string"
 				)
-			)
+			) {
 				throw Error("Invalid inline theme variant");
+			}
 		}
 		return prefs;
 	}
@@ -139,8 +145,9 @@ export function themePublisherHttp(): Plugin {
 								!data ||
 								data.reset !== true ||
 								Object.keys(data).length !== 1
-							)
+							) {
 								throw Error("Exact reset control required");
+							}
 							if (state.calls.some((call) => !call.completed)) {
 								send(res, 409, { error: "Publisher not settled" });
 								return;
@@ -190,8 +197,9 @@ export function themePublisherHttp(): Plugin {
 						!envelope ||
 						typeof envelope.value !== "string" ||
 						Object.keys(envelope).length !== 1
-					)
+					) {
 						throw Error("Actual {value:string} preferences protocol required");
+					}
 					const payload = validate(JSON.parse(envelope.value));
 					call.payload = payload;
 					call.admitted = true;

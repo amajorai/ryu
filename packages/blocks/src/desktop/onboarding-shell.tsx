@@ -28,6 +28,14 @@ const SHELL_WIDTH = {
 } satisfies Record<OnboardingShellWidth, string>;
 
 /**
+ * `stacked` centers the header above the content. `split` is for long steps
+ * (lists, multi-field forms): on a wide window the header sits in a left
+ * column and the content scrolls on its own in the right column, so the step
+ * no longer runs the full height of the window. Narrow windows stack as usual.
+ */
+export type OnboardingShellLayout = "stacked" | "split";
+
+/**
  * The one onboarding step frame, shared by the block steps and every
  * desktop-only step. It owns the scroll, the drag region, the persona mark, the
  * centered `PageHeader` and a single 200ms fade per step.
@@ -38,6 +46,7 @@ export function OnboardingShell({
 	avatar,
 	avatarGlyph,
 	children,
+	layout = "stacked",
 	liveSubtitle = false,
 	stepKey,
 	width = "form",
@@ -46,6 +55,7 @@ export function OnboardingShell({
 	avatar?: ReactNode;
 	avatarGlyph?: GlyphValue;
 	children?: ReactNode;
+	layout?: OnboardingShellLayout;
 	/**
 	 * Morph a string subtitle in place as it changes (rotating status lines on
 	 * the auto-advancing steps). The morph cannot wrap, so a long, static
@@ -71,37 +81,63 @@ export function OnboardingShell({
 			<GhostOrb size="48px" variant="outline" />
 		);
 	}
+	const split = layout === "split";
+	const header = (
+		<PageHeader
+			className={cn("w-full text-center", split && "lg:text-left")}
+			size="app"
+			subtitle={
+				liveSubtitle && typeof subtitle === "string" ? (
+					<TextSwap>{subtitle}</TextSwap>
+				) : (
+					subtitle
+				)
+			}
+			subtitleClassName="text-balance"
+			title={typeof title === "string" ? <TextSwap>{title}</TextSwap> : title}
+			titleClassName={cn("text-balance", split && "lg:text-2xl")}
+		/>
+	);
 	return (
 		// The shell fills the window and sits on top of the page wrapper, so the
 		// drag region lives here (as it does on LoginView); interactive children
 		// override it. The outer box owns the scroll and the inner column uses
 		// `min-h-full`, so a short step stays centered and a long one scrolls.
-		<div className="scroll-fade h-full w-full overflow-y-auto">
+		// In the wide split layout the content column owns the scroll instead.
+		<div
+			className={cn(
+				"scroll-fade h-full w-full overflow-y-auto",
+				split && "lg:overflow-hidden"
+			)}
+		>
 			<div
-				className="fade-in flex min-h-full w-full animate-in flex-col items-center justify-center gap-8 px-6 py-12 duration-(--duration-base) ease-enter"
+				className={cn(
+					"fade-in flex min-h-full w-full animate-in flex-col items-center justify-center gap-8 px-6 py-12 duration-(--duration-base) ease-enter",
+					split &&
+						"lg:mx-auto lg:grid lg:h-full lg:min-h-0 lg:max-w-6xl lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16 lg:px-12 lg:py-0"
+				)}
 				data-tauri-drag-region="true"
 				key={stepKey}
 			>
-				<div className="flex w-full max-w-xl flex-col items-center gap-6">
+				<div
+					className={cn(
+						"flex w-full max-w-xl flex-col items-center gap-6",
+						split && "lg:items-start"
+					)}
+					data-tauri-drag-region="true"
+				>
 					<div className="shrink-0">{mark}</div>
-					<PageHeader
-						className="w-full text-center"
-						size="app"
-						subtitle={
-							liveSubtitle && typeof subtitle === "string" ? (
-								<TextSwap>{subtitle}</TextSwap>
-							) : (
-								subtitle
-							)
-						}
-						subtitleClassName="text-balance"
-						title={
-							typeof title === "string" ? <TextSwap>{title}</TextSwap> : title
-						}
-						titleClassName="text-balance"
-					/>
+					{header}
 				</div>
-				<div className={cn("flex w-full flex-col gap-6", SHELL_WIDTH[width])}>
+				<div
+					className={cn(
+						"flex w-full flex-col gap-6",
+						SHELL_WIDTH[width],
+						split &&
+							"scroll-fade lg:max-h-full lg:max-w-none lg:overflow-y-auto lg:px-1 lg:py-12",
+						split && styles.cardedContent
+					)}
+				>
 					{children}
 				</div>
 			</div>
@@ -140,6 +176,7 @@ export function OnboardingActions({
 	return (
 		<div
 			className={cn("flex flex-wrap items-center justify-end gap-2", className)}
+			data-slot="onboarding-actions"
 		>
 			{children}
 		</div>

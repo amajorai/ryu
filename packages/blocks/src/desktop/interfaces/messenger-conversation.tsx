@@ -85,7 +85,9 @@ export function MessengerConversation({
 	let subtitle = entry.description;
 	if (typing) {
 		subtitle =
-			entry.kind === "team" ? typingLabel(typingNames) || "typing" : "typing";
+			entry.kind === "team"
+				? typingLabel(typingNames, tl) || "typing"
+				: "typing";
 	}
 	const startable = canStartWith(entry);
 	return (

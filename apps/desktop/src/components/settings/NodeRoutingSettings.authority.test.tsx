@@ -11,32 +11,35 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import { sileo } from "sileo";
+
 const nativeFetch = globalThis.fetch;
 const NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
 interface Target {
-	url: string;
 	token: string | null;
+	url: string;
 	userJwt?: string | null;
 }
 interface Policy {
 	fallback: string[];
-	openrouter?: Record<string, unknown>;
-	openrouter_model_fallbacks?: string[];
 	firewall?: {
 		custom_patterns: Array<{ kind: string; name: string; regex: string }>;
 	};
+	openrouter?: Record<string, unknown>;
+	openrouter_model_fallbacks?: string[];
 }
 interface Call {
-	lane: string;
-	method: string;
 	authorization: string | null;
 	jwt: string | null;
-	value: string | null;
+	lane: string;
+	method: string;
 	status: number;
+	value: string | null;
 }
 let active: Target;
 let stored: Record<string, Policy>;
@@ -56,7 +59,7 @@ const server = Bun.serve({
 		const matched = /^\/(A|B)\/api\/preferences\/node-routing-prefs$/.exec(
 			path
 		);
-		if (!matched || !["GET", "PUT"].includes(request.method)) {
+		if (!(matched && ["GET", "PUT"].includes(request.method))) {
 			unexpected.push(`${request.method} ${path}`);
 			return NativeResponse.json(
 				{ error: "Unexpected request" },
@@ -90,20 +93,25 @@ const server = Bun.serve({
 		if (
 			(request.method === "GET" && heldRead && lane === "A") ||
 			(request.method === "PUT" && heldWrite && lane === "A")
-		)
+		) {
 			await new Promise<void>((resolve) => {
 				release = resolve;
 			});
+		}
 		const status = request.method === "GET" ? readStatus : writeStatus;
 		call.status = status;
-		if (status !== 200 && status !== 404)
+		if (status !== 200 && status !== 404) {
 			return NativeResponse.json(
 				{ error: "Routing policy refused" },
 				{ status }
 			);
-		if (status === 404)
+		}
+		if (status === 404) {
 			return NativeResponse.json({ error: "Unset preference" }, { status });
-		if (raw) stored[lane] = JSON.parse(raw.value);
+		}
+		if (raw) {
+			stored[lane] = JSON.parse(raw.value);
+		}
 		return NativeResponse.json({
 			key: "node-routing-prefs",
 			value: JSON.stringify(raw ? stored[lane] : snapshot),
@@ -185,7 +193,9 @@ async function until(predicate: () => boolean) {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 5));
 		});
-		if (predicate()) return;
+		if (predicate()) {
+			return;
+		}
 	}
 	throw new Error(
 		`Actual mounted routing did not settle: ${container.textContent}`
@@ -203,7 +213,9 @@ function button(name: string) {
 	const found = [
 		...container.querySelectorAll<HTMLButtonElement>("button"),
 	].find((x) => x.textContent?.trim() === name);
-	if (!found) throw new Error(`Missing ${name}`);
+	if (!found) {
+		throw new Error(`Missing ${name}`);
+	}
 	return found;
 }
 const writes = () => calls.filter((x) => x.method === "PUT");
@@ -216,7 +228,7 @@ async function edit(value: string) {
 		input().dispatchEvent(new Event("input", { bubbles: true }));
 	});
 }
-for (const status of [500, 403])
+for (const status of [500, 403]) {
 	test(`refused ${status} policy reads never enable a destructive Save; Retry loads persisted policy`, async () => {
 		readStatus = status;
 		await render();
@@ -253,6 +265,7 @@ for (const status of [500, 403])
 				.every((x) => x.authorization === "Bearer A-token" && x.jwt === "A-jwt")
 		).toBe(true);
 	});
+}
 test("404 is intentionally unset and can create a first policy", async () => {
 	delete stored.A;
 	readStatus = 404;
@@ -289,7 +302,7 @@ test("late A policy reads cannot replace the newly selected B policy", async () 
 	expect(stored.A).toEqual(policy("A"));
 	expect(stored.B).toEqual({ ...policy("B"), fallback: ["b-draft"] });
 });
-for (const scope of ["url", "token", "jwt"] as const)
+for (const scope of ["url", "token", "jwt"] as const) {
 	test(`${scope} authority rotation loads a fresh policy and isolates a held refused old save`, async () => {
 		await render();
 		await until(() => input()?.value === "provider-a");
@@ -304,7 +317,9 @@ for (const scope of ["url", "token", "jwt"] as const)
 				: scope === "token"
 					? target("A", "A-rotated", "A-jwt")
 					: target("A", "A-token", "A-rotated-jwt");
-		if (scope !== "url") stored.A = policy("B");
+		if (scope !== "url") {
+			stored.A = policy("B");
+		}
 		await render();
 		await until(() => input()?.value === "provider-b");
 		expect(button("Save routing preferences").disabled).toBe(false);
@@ -330,6 +345,7 @@ for (const scope of ["url", "token", "jwt"] as const)
 			fallback: ["new-draft"],
 		});
 	});
+}
 test("equivalent target preserves dirty edits and same-turn Save issues one exact PUT", async () => {
 	await render();
 	await until(() => input()?.value === "provider-a");

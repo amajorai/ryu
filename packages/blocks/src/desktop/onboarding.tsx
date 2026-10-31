@@ -84,6 +84,8 @@ export function OnboardingView(props: OnboardingViewProps) {
 	return (
 		<OnboardingShell
 			avatarGlyph={agentAvatarGlyph}
+			// The pickers are long lists; on a wide window they sit beside the header.
+			layout={step === "agents" || step === "skills" ? "split" : "stacked"}
 			liveSubtitle={progressStep}
 			stepKey={stepKey}
 			subtitle={headerSubtitle}

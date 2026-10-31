@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { sileo } from "sileo";
 import type { UpdateCheck } from "@/src/lib/api/update.ts";
 import { getAppVersion } from "@/src/lib/app-version.ts";
@@ -22,7 +23,8 @@ import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
  * {@link notifyUpdateOutsideWindow}.
  */
 export async function notifyUpdatesWindowLapsed(
-	verdict: UpdateCheck
+	verdict: UpdateCheck,
+	tl: LiteralMessage
 ): Promise<void> {
 	if (!verdict.restricted_by_cutoff) {
 		return;
@@ -35,8 +37,10 @@ export async function notifyUpdatesWindowLapsed(
 
 	const windowEnd = getUpdatesWindowEnd();
 	const ended = windowEnd
-		? `Your lifetime updates ended on ${formatUpdatesCutoff(windowEnd)}.`
-		: "Your lifetime updates have ended.";
+		? tl("Your lifetime updates ended on {cutoffDate}.", {
+				cutoffDate: formatUpdatesCutoff(windowEnd),
+			})
+		: tl("Your lifetime updates have ended.");
 	// Only claim a ceiling Core actually computed. `cutoff_unresolved` means it
 	// could not resolve the covered build (`latest` is a placeholder), and an
 	// UNCLAMPED verdict never had a ceiling computed at all — there `latest` is
@@ -48,15 +52,26 @@ export async function notifyUpdatesWindowLapsed(
 	const current = (await getAppVersion()) ?? verdict.current;
 	const ceiling =
 		verdict.restricted_by_cutoff && !verdict.cutoff_unresolved
-			? ` You're on v${current}, and Ryu stays on the newest build they cover.`
+			? tl(
+					"You're on v{currentVersion}, and Ryu stays on the newest build they cover.",
+					{
+						currentVersion: current,
+					}
+				)
 			: "";
 
 	sileo.info({
-		title: `Ryu v${newest} is out`,
+		title: tl("Ryu v{newestVersion} is out", { newestVersion: newest }),
 		// Name the redeem URL rather than just the offer: the button below opens
 		// Billing, and Billing has no redeem affordance, so the free-year path is
 		// only reachable if the notice itself names where it lives.
-		description: `${ended}${ceiling} Renew, or earn a free year at ryu.com/redeem.`,
+		description: [
+			ended,
+			ceiling,
+			tl("Renew, or earn a free year at ryu.com/redeem."),
+		]
+			.filter(Boolean)
+			.join(" "),
 		duration: null,
 		button: {
 			title: "Renew",
@@ -80,14 +95,23 @@ export async function notifyUpdatesWindowLapsed(
  * Answers factually and dismisses itself: an explicit action deserves an
  * explicit answer, not a persistent purchase prompt.
  */
-export function notifyUpdateOutsideWindow(verdict: UpdateCheck): void {
+export function notifyUpdateOutsideWindow(
+	verdict: UpdateCheck,
+	tl: LiteralMessage
+): void {
 	const windowEnd = getUpdatesWindowEnd();
-	const ended = windowEnd
-		? `your lifetime updates ended on ${formatUpdatesCutoff(windowEnd)}`
-		: "your lifetime updates have ended";
 	sileo.info({
-		title: `v${verdict.latest} is outside your updates window`,
-		description: `Ryu did not install it because ${ended}. Renew, or earn a free year at ryu.com/redeem.`,
+		title: tl("v{latest} is outside your updates window", {
+			latest: verdict.latest,
+		}),
+		description: windowEnd
+			? tl(
+					"Ryu did not install it because your lifetime updates ended on {cutoffDate}. Renew, or earn a free year at ryu.com/redeem.",
+					{ cutoffDate: formatUpdatesCutoff(windowEnd) }
+				)
+			: tl(
+					"Ryu did not install it because your lifetime updates have ended. Renew, or earn a free year at ryu.com/redeem."
+				),
 		duration: 8000,
 		button: {
 			title: "Renew",

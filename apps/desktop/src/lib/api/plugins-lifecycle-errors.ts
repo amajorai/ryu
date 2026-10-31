@@ -1,3 +1,5 @@
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { DependencyError } from "@ryuhq/core-client/plugins.ts";
 import { z } from "zod";
 import {
@@ -14,6 +16,8 @@ import {
  *  unreachability, or an unsatisfiable dependency graph via the UI without
  *  leaking raw status codes. */
 export interface AppLifecycleError {
+	/** The grants the Gateway denied (comma-joined), when it named them. */
+	deniedGrants: string | null;
 	/** The typed dependency failure (HTTP 409), or `null` for other failures. */
 	dependencyError: DependencyError | null;
 	/** True when the Gateway was unreachable (fail-closed). */
@@ -24,7 +28,13 @@ export interface AppLifecycleError {
 	message: string;
 	/** HTTP status from Core, used for narrow built-in-vs-bundle fallback. */
 	status: number;
+	/** Why the Gateway was unreachable, when `gatewayUnreachable`. */
+	unreachableReason: string | null;
 }
+
+/** English rendering for the thrown `Error.message`; UI re-renders with `tl`. */
+const englishMessages: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 /** Render a {@link DependencyError} as an ACTIONABLE sentence.
  *
@@ -34,34 +44,99 @@ export interface AppLifecycleError {
  *  cascading, so the message must name exactly which plugins to disable first. */
 export function describeDependencyError(
 	err: DependencyError,
+	tl: LiteralMessage,
 	displayName: (id: string) => string = (id) => id
 ): string {
 	switch (err.code) {
 		case "blocked_by_dependents": {
 			const names = err.dependents.map(displayName).join(", ");
-			return `${displayName(err.plugin)} is needed by ${names}. Disable ${names} first.`;
+			return tl("{plugin} is needed by {names}. Disable {names} first.", {
+				plugin: displayName(err.plugin),
+				names,
+			});
 		}
 		case "missing_dependency": {
-			const version = err.required ? ` (${err.required} or newer)` : "";
-			return `${displayName(err.plugin)} needs ${displayName(err.dependency)}${version}. Install it first.`;
+			const values = {
+				plugin: displayName(err.plugin),
+				dependency: displayName(err.dependency),
+			};
+			return err.required
+				? tl(
+						"{plugin} needs {dependency} ({required} or newer). Install it first.",
+						{ ...values, required: err.required }
+					)
+				: tl("{plugin} needs {dependency}. Install it first.", values);
 		}
 		case "version_mismatch":
-			return `${displayName(err.plugin)} needs ${displayName(err.dependency)} ${err.required} or newer, but ${err.installed} is installed. Update it first.`;
+			return tl(
+				"{plugin} needs {dependency} {required} or newer, but {installed} is installed. Update it first.",
+				{
+					plugin: displayName(err.plugin),
+					dependency: displayName(err.dependency),
+					required: err.required,
+					installed: err.installed,
+				}
+			);
 		case "dependent_version_mismatch":
-			return `Updating ${displayName(err.dependency)} to ${err.incoming} would break ${displayName(err.plugin)}, which needs ${err.required}. Update ${displayName(err.plugin)} first, or force the update.`;
+			return tl(
+				"Updating {dependency} to {incoming} would break {plugin}, which needs {required}. Update {plugin} first, or force the update.",
+				{
+					dependency: displayName(err.dependency),
+					incoming: err.incoming,
+					plugin: displayName(err.plugin),
+					required: err.required,
+				}
+			);
 		case "invalid_version_req":
-			return `${displayName(err.plugin)} declares an invalid version requirement for ${displayName(err.dependency)} ("${err.requirement}"): ${err.reason}.`;
+			return tl(
+				'{plugin} declares an invalid version requirement for {dependency} ("{requirement}"): {reason}.',
+				{
+					plugin: displayName(err.plugin),
+					dependency: displayName(err.dependency),
+					requirement: err.requirement,
+					reason: err.reason,
+				}
+			);
 		case "cycle":
-			return `Circular dependency: ${err.cycle.map(displayName).join(" → ")}.`;
+			return tl("Circular dependency: {cycle}.", {
+				cycle: err.cycle.map(displayName).join(" → "),
+			});
 		case "self_dependency":
-			return `${displayName(err.plugin)} declares itself as a dependency.`;
+			return tl("{plugin} declares itself as a dependency.", {
+				plugin: displayName(err.plugin),
+			});
 		case "not_installed":
-			return `${displayName(err.plugin)} is not installed.`;
+			return tl("{plugin} is not installed.", {
+				plugin: displayName(err.plugin),
+			});
 		default:
 			// A `code` this client does not know yet (Core added a variant). Never
 			// crash — fall back to a generic sentence.
-			return "This change conflicts with the current plugin dependencies.";
+			return tl("This change conflicts with the current plugin dependencies.");
 	}
+}
+
+/** Render the Gateway half of a lifecycle refusal (denied grants, or the
+ *  fail-closed unreachable case), or `null` when it is neither. Pure over the
+ *  structured fields so the UI can re-render it in the viewer's language. */
+export function describeGatewayRefusal(
+	err: Pick<
+		AppLifecycleError,
+		"deniedGrants" | "gatewayUnreachable" | "grantsDenied" | "unreachableReason"
+	>,
+	tl: LiteralMessage
+): string | null {
+	if (err.grantsDenied) {
+		return err.deniedGrants
+			? tl("Gateway denied grants: {denied}", { denied: err.deniedGrants })
+			: tl("Gateway denied one or more permission grants.");
+	}
+	if (err.gatewayUnreachable) {
+		return tl("Gateway unreachable (fail-closed): {reason}", {
+			reason: err.unreachableReason ?? tl("gateway unreachable"),
+		});
+	}
+	return null;
 }
 
 /** Complete dependency-graph refusal serialized by Core's native enum. */
@@ -140,28 +215,38 @@ export async function parseLifecycleError(
 	const dependencyError =
 		status === 409 ? toDependencyError(body.dependency_error) : null;
 
+	const parsedDenied = z.array(pluginValueSchema).safeParse(body.denied_grants);
+	const deniedGrants =
+		grantsDenied && parsedDenied.success
+			? parsedDenied.data.join(", ") || null
+			: null;
+	const unreachableReason = gatewayUnreachable
+		? (pluginStringField(body.reason) ?? null)
+		: null;
+	const gatewayRefusal = {
+		deniedGrants,
+		gatewayUnreachable,
+		grantsDenied,
+		unreachableReason,
+	};
+
+	// The thrown message is English: `useApps` re-renders the dependency and
+	// Gateway refusals in the viewer's language (with display NAMES, "Disable
+	// Meetings, Whiteboard first") from the structured fields below.
 	let message = rawMessage;
 	if (dependencyError) {
-		// Id-only sentence here; `useApps` re-renders it with display NAMES once the
-		// app list is in scope ("Disable Meetings, Whiteboard first").
-		message = describeDependencyError(dependencyError);
+		message = describeDependencyError(dependencyError, englishMessages);
 	} else if (
 		status === 409 &&
 		pluginStringField(pluginRecord(body.dependency_error)?.code) !== undefined
 	) {
-		message = "This change conflicts with the current plugin dependencies.";
-	} else if (grantsDenied) {
-		const parsedDenied = z
-			.array(pluginValueSchema)
-			.safeParse(body.denied_grants);
-		const denied = parsedDenied.success ? parsedDenied.data.join(", ") : null;
-		message = denied
-			? `Gateway denied grants: ${denied}`
-			: "Gateway denied one or more permission grants.";
-	} else if (gatewayUnreachable) {
-		const reason = pluginStringField(body.reason) ?? "gateway unreachable";
-		message = `Gateway unreachable (fail-closed): ${reason}`;
+		message = englishMessages(
+			"This change conflicts with the current plugin dependencies."
+		);
+	} else {
+		message =
+			describeGatewayRefusal(gatewayRefusal, englishMessages) ?? message;
 	}
 
-	return { message, grantsDenied, gatewayUnreachable, dependencyError, status };
+	return { message, dependencyError, status, ...gatewayRefusal };
 }

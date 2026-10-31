@@ -1,7 +1,7 @@
 import { Add01Icon, SmilePlusIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { EmojiPicker } from "@ryu/ui/components/emoji-picker";
+import { LazyEmojiPicker } from "@ryu/ui/components/emoji-picker-lazy.tsx";
 import {
 	Popover,
 	PopoverContent,
@@ -170,7 +170,9 @@ export function MessageReactionButton({
 				</div>
 				{showEmojiPicker && canReact ? (
 					<div className="mt-1 overflow-hidden rounded-lg border border-border [&_em-emoji-picker]:w-full!">
-						<EmojiPicker onEmojiSelect={(emoji) => handlePick(emoji.native)} />
+						<LazyEmojiPicker
+							onEmojiSelect={(emoji) => handlePick(emoji.native)}
+						/>
 					</div>
 				) : null}
 			</PopoverContent>
@@ -296,7 +298,9 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
 				</div>
 				{showEmojiPicker && (
 					<div className="overflow-hidden rounded-lg border border-border [&_em-emoji-picker]:w-full!">
-						<EmojiPicker onEmojiSelect={(emoji) => handlePick(emoji.native)} />
+						<LazyEmojiPicker
+							onEmojiSelect={(emoji) => handlePick(emoji.native)}
+						/>
 					</div>
 				)}
 			</PopoverContent>

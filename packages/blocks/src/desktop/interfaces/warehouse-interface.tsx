@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceParamsByRenderer,
@@ -201,6 +202,7 @@ export function WarehouseInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["warehouse"]>) {
+	const tl = useLiteralMessages();
 	const now = useClock();
 	const reduceMotion = useReducedMotion();
 	const settings = warehouseSettings(params);
@@ -565,6 +567,7 @@ export function WarehouseInterface({
 				shown,
 				slots: slots.slots,
 				stations,
+				tl,
 			}),
 		[
 			acts,
@@ -576,6 +579,7 @@ export function WarehouseInterface({
 			shown,
 			slots,
 			stations,
+			tl,
 		]
 	);
 	// A shelf label says what its picker is working on: off with work bubbles.

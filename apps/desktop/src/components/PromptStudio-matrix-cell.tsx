@@ -189,7 +189,7 @@ export function MatrixCell({
 			setReviewScore(String(savedReview.score ?? score.overall));
 			onReviewSaved(savedReview);
 		} catch (error) {
-			toastActionError("Couldn't save review", error);
+			toastActionError("Couldn't save review", error, tl);
 		} finally {
 			setReviewSaving(false);
 		}

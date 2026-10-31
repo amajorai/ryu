@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type GraphEdge,
@@ -41,7 +42,7 @@ import {
 	TEXT_BODY,
 	TEXT_META,
 } from "./graph-parts.tsx";
-import { agentSubLabel, labelScale } from "./graph-view.ts";
+import { agentSubLabel, labelScale, labelTransform } from "./graph-view.ts";
 
 export interface GraphMapContextValue {
 	emphasis: (nodeId: string) => GraphEmphasis;
@@ -166,6 +167,7 @@ const FOCUS_RING =
 	"outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 function YouNode({ data }: NodeProps<GraphFlowNode>) {
+	const tl = useLiteralMessages();
 	const { emphasis, ...button } = useNodeButton(data.node.id);
 	const scale = useStore(selectLabelScale);
 	const { node } = data;
@@ -176,7 +178,10 @@ function YouNode({ data }: NodeProps<GraphFlowNode>) {
 			<CenterHandles />
 			<button
 				{...button}
-				aria-label={`You: ${plural(node.threadCount, "thread")}. Show all threads`}
+				aria-label={tl(
+					"You: {count, plural, one {{countLabel} thread} other {{countLabel} threads}}. Show all threads",
+					{ count: node.threadCount, countLabel: String(node.threadCount) }
+				)}
 				className={cn(
 					"nodrag flex size-full cursor-pointer flex-col items-center justify-center gap-0.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90",
 					emphasis === "focus" &&
@@ -211,14 +216,6 @@ function selectShowsSubLabel(state: ReactFlowState): boolean {
 /** How much names grow against the zoom, so they stay legible zoomed out. */
 function selectLabelScale(state: ReactFlowState): number {
 	return labelScale(state.transform[2]);
-}
-
-/** A label's transform: centered under its node, grown by `scale`. */
-function labelTransform(scale: number): CSSProperties {
-	return {
-		transform: `translateX(-50%) scale(${scale})`,
-		transformOrigin: "top center",
-	};
 }
 
 /**

@@ -41,7 +41,7 @@ export function DiffStat({ stat }: { stat: LineStat }) {
 		return null;
 	}
 	return (
-		<span className="type-caption flex shrink-0 items-center gap-1 font-medium font-mono tabular-nums">
+		<span className="flex shrink-0 items-center gap-1 font-medium font-mono text-xs tabular-nums">
 			{stat.insertions > 0 && (
 				<span className="text-status-success dark:text-status-success/90">
 					+{formatCount(stat.insertions)}

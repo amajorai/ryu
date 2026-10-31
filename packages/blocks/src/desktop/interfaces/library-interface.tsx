@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { motion } from "motion/react";
 import {
 	type ReactNode,
@@ -101,6 +102,7 @@ export function LibraryInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const now = useMinuteClock();
 	const [view, setView] = useState<LibraryView>("home");
 	const [openBookId, setOpenBookId] = useState<string | null>(null);
@@ -113,7 +115,7 @@ export function LibraryInterface({
 	/** The book control to hand focus back to after leaving a book. */
 	const returnFocusId = useRef<string | null>(null);
 
-	const shelves = useMemo(() => libraryShelves(snapshot), [snapshot]);
+	const shelves = useMemo(() => libraryShelves(snapshot, tl), [snapshot, tl]);
 	const continueItems = useMemo(() => continueReading(shelves), [shelves]);
 	const openBook = findBook(shelves, openBookId);
 	const reading = threadView !== null;

@@ -32,7 +32,6 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		tagline: "Run Ryu agents from your desktop.",
 		Icon: Monitor,
 		hero: {
-			eyebrow: "Ryu Desktop",
 			title: "The Ryu app for your computer",
 			subtitle:
 				"Chat with agents, connect tools, manage models, and review runs in one app.",
@@ -89,7 +88,6 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		tagline: "A screen-aware companion that suggests the next step.",
 		Icon: Radio,
 		hero: {
-			eyebrow: "Ryu Island · Coming soon",
 			title: "Help with what's on screen",
 			subtitle:
 				"Uses on-screen context to suggest your next step, with access you choose.",
@@ -157,7 +155,6 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		tagline: "Chat with your agents from your phone.",
 		Icon: Smartphone,
 		hero: {
-			eyebrow: "Ryu Mobile · Coming soon",
 			title: "Use Ryu on your phone",
 			subtitle: "Reach your Ryu server from iPhone and Android.",
 			primaryCta: EARLY_ACCESS,
@@ -220,7 +217,6 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		tagline: "A page-aware companion in your browser.",
 		Icon: Chrome,
 		hero: {
-			eyebrow: "Ryu for Chrome · Early access",
 			title: "Ryu in your browser",
 			subtitle:
 				"Summarize the page, ask about a selection, or save it to Ryu, without leaving the tab.",
@@ -284,7 +280,6 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		tagline: "A watch, a necklace, and a desk display for your Ryu server.",
 		Icon: Gem,
 		hero: {
-			eyebrow: "Ryu Devices · Coming soon",
 			title: "Ryu beyond your computer",
 			subtitle:
 				// apps/hardware/README.md:11-13.

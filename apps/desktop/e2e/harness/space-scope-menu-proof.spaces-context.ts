@@ -1,3 +1,4 @@
+import { formatMessage } from "@ryu/i18n";
 import { uploadSpaceFile } from "@/src/lib/api/spaces.ts";
 import { getSpaceScopeMenuProofBridge } from "./space-scope-menu-proof.bridge.ts";
 
@@ -21,7 +22,10 @@ export function useSpacesContext() {
 				{ token: null, url: window.location.origin },
 				spaceId,
 				file,
-				opts
+				{
+					...opts,
+					tl: (source, values) => formatMessage(source, values ?? {}),
+				}
 			);
 			bridge.onFileStored(spaceId);
 			return stored;

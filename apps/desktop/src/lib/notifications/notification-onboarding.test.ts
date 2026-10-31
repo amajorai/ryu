@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	detectDeviceOs,
 	notificationOnboardingCopy,
 } from "./notification-onboarding.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 describe("detectDeviceOs", () => {
 	test("maps user agents to the settings screen family", () => {
@@ -24,81 +28,105 @@ describe("detectDeviceOs", () => {
 
 describe("notificationOnboardingCopy", () => {
 	test("desktop points at the OS notification settings", () => {
-		const mac = notificationOnboardingCopy({
-			os: "macos",
-			permission: "granted",
-			platform: "desktop",
-			surface: "desktop",
-		});
+		const mac = notificationOnboardingCopy(
+			{
+				os: "macos",
+				permission: "granted",
+				platform: "desktop",
+				surface: "desktop",
+			},
+			tl
+		);
 		expect(mac.supported).toBe(true);
 		expect(mac.blockedHelp).toContain("System Settings → Notifications");
-		const windows = notificationOnboardingCopy({
-			os: "windows",
-			permission: "granted",
-			platform: "desktop",
-			surface: "desktop",
-		});
+		const windows = notificationOnboardingCopy(
+			{
+				os: "windows",
+				permission: "granted",
+				platform: "desktop",
+				surface: "desktop",
+			},
+			tl
+		);
 		expect(windows.blockedHelp).toContain("Settings → System → Notifications");
 	});
 
 	test("the extension asks the browser for the extension permission", () => {
-		const copy = notificationOnboardingCopy({
-			os: "macos",
-			permission: "default",
-			platform: "extension",
-			surface: "extension",
-		});
+		const copy = notificationOnboardingCopy(
+			{
+				os: "macos",
+				permission: "default",
+				platform: "extension",
+				surface: "extension",
+			},
+			tl
+		);
 		expect(copy.subtitle).toContain("Ryu extension");
 		expect(copy.blockedHelp).toContain("extension settings");
 	});
 
 	test("web distinguishes phone browsers from desktop tabs", () => {
-		const phone = notificationOnboardingCopy({
-			os: "android",
-			permission: "default",
-			platform: "web",
-			surface: "mobile",
-		});
+		const phone = notificationOnboardingCopy(
+			{
+				os: "android",
+				permission: "default",
+				platform: "web",
+				surface: "mobile",
+			},
+			tl
+		);
 		expect(phone.subtitle).toContain("this phone");
-		const desktopTab = notificationOnboardingCopy({
-			os: "linux",
-			permission: "denied",
-			platform: "web",
-			surface: "web",
-		});
+		const desktopTab = notificationOnboardingCopy(
+			{
+				os: "linux",
+				permission: "denied",
+				platform: "web",
+				surface: "web",
+			},
+			tl
+		);
 		expect(desktopTab.subtitle).toContain("close this tab");
 		expect(desktopTab.blockedHelp).toContain("address bar");
 	});
 
 	test("iPhone Safari explains Add to Home Screen", () => {
-		const copy = notificationOnboardingCopy({
-			os: "ios",
-			permission: "unsupported",
-			platform: "unsupported",
-			surface: "mobile",
-		});
+		const copy = notificationOnboardingCopy(
+			{
+				os: "ios",
+				permission: "unsupported",
+				platform: "unsupported",
+				surface: "mobile",
+			},
+			tl
+		);
 		expect(copy.supported).toBe(false);
 		expect(copy.subtitle).toContain("Add to Home Screen");
 	});
 
 	test("Android browsers without notifications point to the mobile app", () => {
-		const copy = notificationOnboardingCopy({
-			os: "android",
-			permission: "unsupported",
-			platform: "unsupported",
-			surface: "mobile",
-		});
+		const copy = notificationOnboardingCopy(
+			{
+				os: "android",
+				permission: "unsupported",
+				platform: "unsupported",
+				surface: "mobile",
+			},
+			tl
+		);
 		expect(copy.supported).toBe(false);
 		expect(copy.subtitle).toContain("Ryu mobile app");
 	});
 
 	test("Telegram explains replies arrive as messages", () => {
-		const copy = notificationOnboardingCopy({
-			os: "android",
-			permission: "unsupported",
-			platform: "unsupported",
-			surface: "telegram",
-		});
+		const copy = notificationOnboardingCopy(
+			{
+				os: "android",
+				permission: "unsupported",
+				platform: "unsupported",
+				surface: "telegram",
+			},
+			tl
+		);
 		expect(copy.subtitle).toContain("Telegram messages");
 	});
 });

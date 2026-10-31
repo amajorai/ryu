@@ -1,5 +1,6 @@
 import { SecurityCheckIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
@@ -54,6 +55,7 @@ const SCOPE_OPTIONS: { id: string; label: string; description: string }[] = [
 
 export function SupportAccessTab() {
 	const queryClient = useQueryClient();
+	const tl = useLiteralMessages();
 	const [selectedScopes, setSelectedScopes] = useState<string[]>(["billing"]);
 	const [note, setNote] = useState("");
 
@@ -146,11 +148,12 @@ export function SupportAccessTab() {
 								</ItemActions>
 							</div>
 							<p className="text-detail text-muted-foreground">
-								Scopes: {grant.scopes.join(", ") || "none"}. Expires{" "}
-								{formatDistanceToNow(new Date(grant.expiresAt), {
-									addSuffix: true,
+								{tl("Scopes: {scopeList}. Expires {relativeTime}.", {
+									scopeList: grant.scopes.join(", ") || tl("none"),
+									relativeTime: formatDistanceToNow(new Date(grant.expiresAt), {
+										addSuffix: true,
+									}),
 								})}
-								.
 							</p>
 						</Item>
 					</SettingsGroup>
@@ -253,9 +256,12 @@ export function SupportAccessTab() {
 								<div className="space-y-0.5 text-detail text-muted-foreground">
 									<p>{entry.reason}</p>
 									<p>
-										Scopes: {entry.scopes.join(", ") || "none"} ·{" "}
-										{formatDistanceToNow(new Date(entry.startedAt), {
-											addSuffix: true,
+										{tl("Scopes: {scopeList} · {relativeTime}", {
+											scopeList: entry.scopes.join(", ") || tl("none"),
+											relativeTime: formatDistanceToNow(
+												new Date(entry.startedAt),
+												{ addSuffix: true }
+											),
 										})}
 									</p>
 								</div>

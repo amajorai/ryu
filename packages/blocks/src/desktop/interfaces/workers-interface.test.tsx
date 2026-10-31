@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -289,9 +290,9 @@ describe("workers model", () => {
 		expect(workerPose("attention")).toBe("failed");
 		expect(workerPose("idle")).toBe("idle");
 		const [ada] = buildWorkers(SNAPSHOT);
-		expect(ada && screenLabel(ada)).toBe(
-			"Ada's screen: Release notes, Waiting on you. Open the task"
-		);
+		expect(
+			ada && screenLabel(ada, (source, values) => formatMessage(source, values))
+		).toBe("Ada's screen: Release notes, Waiting on you. Open the task");
 	});
 
 	test("the workspace is named after a group only when every worker is in it", () => {

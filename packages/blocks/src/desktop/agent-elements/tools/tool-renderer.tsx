@@ -6,7 +6,7 @@ import {
 } from "@ryu/ui/lib/native-primitive-observation.ts";
 import type React from "react";
 import { memo } from "react";
-import { AgentUI } from "../agent-ui/agent-ui.tsx";
+import { LazyAgentUI } from "../agent-ui/agent-ui-lazy.tsx";
 import { agentUiSurfaceFromPart } from "../agent-ui/surface.ts";
 import {
 	AgentUiSurfaceChip,
@@ -235,7 +235,8 @@ const ToolRendererInner = memo(function ToolRendererInner({
 			return <AgentUiSurfaceChip host={surfaceHost} surface={surface} />;
 		}
 		return (
-			<AgentUI
+			<LazyAgentUI
+				fallback={<GenericTool isPending title="Rendering UI" />}
 				format={input.format}
 				onSubmit={onAgentUiSubmit}
 				persistKey={

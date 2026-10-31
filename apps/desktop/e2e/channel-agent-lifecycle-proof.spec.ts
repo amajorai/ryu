@@ -56,12 +56,13 @@ test("proves channel fallback, setup toggles, and protected deletion", async ({
 		name: "Delete Support Discord bot",
 	});
 	await expect(slider).toHaveAttribute("aria-valuenow", "0");
-	// The blade is a vertical slider: ArrowDown advances one of five steps, and
-	// ArrowRight is deliberately not bound.
+	// The slide-to-confirm handle advances one of five steps per ArrowRight;
+	// ArrowLeft steps back, so a stray press does not commit.
 	await slider.press("ArrowRight");
+	await slider.press("ArrowLeft");
 	await expect(slider).toHaveAttribute("aria-valuenow", "0");
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowDown");
+		await slider.press("ArrowRight");
 	}
 	await expect(
 		page.getByRole("alertdialog", { name: "Delete this channel?" })

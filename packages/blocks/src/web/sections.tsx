@@ -12,6 +12,7 @@ import {
 	landingSubheadlineBodyClass,
 	landingSubheadlineClass,
 } from "./landing-typography.ts";
+import { LinkArrow } from "./link-arrow.tsx";
 import { nextLinkHref } from "./next-link-href.ts";
 import { ProductHeroFrame } from "./product-landing-layouts.tsx";
 import { SectionTitle } from "./section-title.tsx";
@@ -73,15 +74,16 @@ export function Cta({
 	);
 }
 
-/** Inline "Label →" link: the only call to action a feature row may carry. */
+/** Inline "Label" + arrow link: the only call to action a feature row may carry. */
 export function TextLink({ cta }: { cta: CtaLink }) {
 	return (
 		<Link
-			className="mt-4 inline-flex min-h-10 items-center font-medium text-foreground text-sm underline-offset-4 hover:underline"
+			className="mt-4 inline-flex min-h-10 items-center gap-1 font-medium text-foreground text-sm underline-offset-4 hover:underline"
 			href={nextLinkHref(cta.href)}
 			{...externalLinkProps(cta)}
 		>
-			{cta.label}&nbsp;<span aria-hidden="true">→</span>
+			{cta.label}
+			<LinkArrow />
 		</Link>
 	);
 }
@@ -96,7 +98,6 @@ const itemDescriptionClass =
 
 export function ProductHero({
 	background,
-	eyebrow,
 	title,
 	subtitle,
 	primaryCta,
@@ -105,7 +106,6 @@ export function ProductHero({
 }: {
 	/** An animated backdrop: the hero becomes a full-viewport stage. */
 	background?: ReactNode;
-	eyebrow: string;
 	title: string;
 	subtitle: string;
 	primaryCta: CtaLink;
@@ -124,7 +124,6 @@ export function ProductHero({
 				</>
 			}
 			background={background}
-			eyebrow={eyebrow}
 			subtitle={subtitle}
 			title={title}
 			visual={visual}
@@ -242,7 +241,7 @@ export function Highlights({
 /* ------------------------------------------------------------------ */
 
 export interface BentoItem {
-	/** Optional "Label →" link under the description. */
+	/** Optional arrow link under the description. */
 	cta?: CtaLink;
 	description: string;
 	title: string;

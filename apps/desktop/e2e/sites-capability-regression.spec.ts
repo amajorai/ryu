@@ -4,17 +4,18 @@ import path from "node:path";
 import { expect, type FrameLocator, type Page, test } from "@playwright/test";
 import type { RuntimeSite } from "../../../apps-store/sites/sidecar/src/contracts.ts";
 import type { SitesProofApi } from "./harness/sites-capability-regression.types.ts";
+
 declare global {
 	interface Window {
 		__sitesProof: SitesProofApi;
 	}
 }
 interface State {
+	databaseCalls: Array<{ method: string; input: unknown }>;
 	ids: { owned: string; shared: string; hidden: string };
-	projects: RuntimeSite[];
 	installations: unknown[];
 	installedFile: string;
-	databaseCalls: Array<{ method: string; input: unknown }>;
+	projects: RuntimeSite[];
 	visitorPort: number;
 }
 async function state(page: Page): Promise<State> {

@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { MarketplaceBundleMember } from "@ryu/marketplace/catalog/bundle-types";
 import type { ApiTarget } from "./client.ts";
 
 const calls: string[] = [];
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 let installMarketplaceBundle: typeof import("./marketplace-bundles.ts").installMarketplaceBundle;
 let describeBundleManualSteps: typeof import("./marketplace-bundles.ts").describeBundleManualSteps;
 
@@ -155,9 +159,9 @@ describe("Marketplace bundle orchestration", () => {
 			"acme/pick-me",
 			"acme/escape",
 		]);
-		expect(describeBundleManualSteps(result.manual)).toContain(
+		expect(describeBundleManualSteps(result.manual, tl)).toContain(
 			"2 need manual setup"
 		);
-		expect(describeBundleManualSteps([])).toBeNull();
+		expect(describeBundleManualSteps([], tl)).toBeNull();
 	});
 });

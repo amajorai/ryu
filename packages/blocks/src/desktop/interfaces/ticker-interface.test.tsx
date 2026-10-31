@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceAgent,
 	InterfacePort,
@@ -34,6 +36,8 @@ import {
 	upcomingRuns,
 } from "./ticker-model.ts";
 
+const passthrough: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -491,13 +495,13 @@ describe("ticker model", () => {
 		expect(formatPercent(-50)).toBe("−50.0%");
 		expect(formatPercent(0)).toBe("0.0%");
 		expect(formatPercent(null)).toBe("—");
-		expect(describeChange(-1, -50)).toBe(
+		expect(describeChange(-1, -50, passthrough)).toBe(
 			"down 1 message in threads active today, 50.0 percent"
 		);
-		expect(describeChange(35, null)).toBe(
+		expect(describeChange(35, null, passthrough)).toBe(
 			"up 35 messages in threads active today, none before today"
 		);
-		expect(describeChange(0, 0)).toBe("no threads active today");
+		expect(describeChange(0, 0, passthrough)).toBe("no threads active today");
 	});
 });
 

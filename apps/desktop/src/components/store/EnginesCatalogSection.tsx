@@ -15,6 +15,7 @@
 //     a plain start/stop of the engine's sidecar process.
 
 import { EnginesErrorState } from "@ryu/blocks/desktop/store-engines.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import StoreCatalogLayout from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { useMemo, useState } from "react";
 import { useDebouncedValue } from "@/src/hooks/use-debounced-value.ts";
@@ -47,6 +48,7 @@ export default function EnginesCatalogSection({
 } = {}) {
 	// Some engines ship as installed plugins with their own settings (a voice
 	// backend, a sandbox provider); the resolver returns null for the rest.
+	const tl = useLiteralMessages();
 	const settingsOpener = usePluginSettingsOpener();
 	const [query, setQuery] = useState("");
 	const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
@@ -111,6 +113,7 @@ export default function EnginesCatalogSection({
 					? {}
 					: {
 							unavailableReason: unsupportedReason(
+								tl,
 								e.platforms,
 								e.unsupportedReason
 							),
@@ -142,6 +145,7 @@ export default function EnginesCatalogSection({
 				? {}
 				: {
 						unavailableReason: unsupportedReason(
+							tl,
 							e.platforms,
 							e.unsupportedReason
 						),
@@ -165,13 +169,13 @@ export default function EnginesCatalogSection({
 			.map((e) => runAlongside(e, "voice"));
 
 		const sandboxItems: EngineListItem[] = sandboxBackends
-			.filter((b) => matches(b.displayName, sandboxDescription(b)))
+			.filter((b) => matches(b.displayName, sandboxDescription(tl, b)))
 			.map((b) => ({
 				id: `sandbox:${b.name}`,
 				kind: "sandbox" as const,
 				name: b.name,
 				displayName: b.displayName,
-				description: sandboxDescription(b),
+				description: sandboxDescription(tl, b),
 				status: b.isDefault ? ({ kind: "default" } as const) : null,
 				// Ryu never installs a sandbox backend — its runtime is detected on the
 				// node — so the row carries no install lifecycle at all.
@@ -195,6 +199,7 @@ export default function EnginesCatalogSection({
 		sandboxBackends,
 		debouncedQuery,
 		engineUpdatesAllowed,
+		tl,
 	]);
 
 	// Card-level lifecycle, so an engine installs / starts / swaps straight from the

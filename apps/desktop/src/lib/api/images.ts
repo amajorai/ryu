@@ -11,6 +11,7 @@
 // Core client module (see lib/api/voice.ts for the sibling speech path).
 
 import type { RyuJsonValue } from "@ryu/app-host/rpc";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
 import {
 	type ImageGenerationInput,
@@ -83,6 +84,7 @@ export interface GenerateImageOptions {
 export async function generateImage(
 	target: ApiTarget,
 	prompt: string,
+	tl: LiteralMessage,
 	options: GenerateImageOptions = {}
 ): Promise<string[]> {
 	const body: ImageGenerationInput = {
@@ -122,7 +124,9 @@ export async function generateImage(
 	});
 
 	if (!resp.ok) {
-		let detail = `image generation failed: ${resp.status}`;
+		let detail = tl("image generation failed: {status}", {
+			status: resp.status,
+		});
 		try {
 			const errorBody = imageGenerationErrorSchema.parse(await resp.json());
 			if (errorBody.error) {
@@ -203,7 +207,8 @@ function imageBlobToDataUrl(image: Blob, signal: AbortSignal): Promise<string> {
  */
 export async function generateImageResize(
 	target: ApiTarget,
-	request: ImageResizeRequest
+	request: ImageResizeRequest,
+	tl: LiteralMessage
 ): Promise<string> {
 	let provider = "local";
 	let model: string | undefined;
@@ -251,6 +256,7 @@ export async function generateImageResize(
 			request.height,
 			request.instructions
 		),
+		tl,
 		options
 	);
 	const [result] = urls;

@@ -4,6 +4,7 @@ import type {
 	BrowserImageRuntimeListener,
 	BrowserImageSegment,
 } from "@ryu/browser-local-ai";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useMemo, useRef, useState } from "react";
@@ -265,6 +266,7 @@ function createFakeRuntime(): BrowserImageEngine {
 }
 
 function ImageEditorProof() {
+	const tl = useLiteralMessages();
 	const useProductionApi = new URLSearchParams(window.location.search).has(
 		"production-api"
 	);
@@ -366,7 +368,8 @@ function ImageEditorProof() {
 										url: "https://image-node.example.test",
 										token: "image-node-fixture-token",
 									},
-									request
+									request,
+									tl
 								);
 								return fetchEditableImage(url, request.signal);
 							}

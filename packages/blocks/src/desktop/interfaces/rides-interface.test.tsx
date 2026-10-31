@@ -2,6 +2,8 @@
 import "./rides-test-dom.ts";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfacePort,
@@ -52,6 +54,8 @@ import {
 } from "./rides-scene.ts";
 import { registeredDom } from "./rides-test-dom.ts";
 import { TripPreview } from "./rides-trip.tsx";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const MINUTE = 60_000;
 const NOW = Date.now();
@@ -386,7 +390,7 @@ describe("Rides model", () => {
 		expect(triage?.typical).toBe(8);
 		expect(triage?.etaMinutes).toBe(6);
 		expect(tripEta(triage ?? trips[0]!)).toBe("6 min");
-		expect(tripHeadline(triage ?? trips[0]!).status).toBe("En route");
+		expect(tripHeadline(triage ?? trips[0]!, tl).status).toBe("En route");
 	});
 
 	test("never puts a live car at the pin before the agent replies", () => {

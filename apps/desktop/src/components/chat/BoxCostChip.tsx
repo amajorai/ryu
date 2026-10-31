@@ -101,7 +101,7 @@ export function BoxCostChip({
 	return (
 		<span
 			className={cn(
-				"type-compact inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 tabular-nums",
+				"inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs tabular-nums",
 				box.warning === "none"
 					? "bg-muted text-muted-foreground"
 					: "bg-warning/10 text-status-warning",

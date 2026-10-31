@@ -1,33 +1,34 @@
+import { expect, type Page, test } from "@playwright/test";
 import {
 	assertNativeWindowLifetime,
 	persistNativeLifetimeDiagnostics,
 } from "./chat-page-native-http-lifetime.ts";
-import { expect, test, type Page } from "@playwright/test";
 import {
 	chatPageControl,
 	chatPageState,
 } from "./chat-page-native-http-support.ts";
 
 interface Diagnostics {
-	listeners: Array<{ id: number; event: string; handler: number }>;
 	callbackIds: number[];
 	heldClipsListenerIds: number[];
+	listeners: Array<{ id: number; event: string; handler: number }>;
 	unexpected: unknown[];
 }
 async function diagnostics(page: Page): Promise<Diagnostics> {
 	return page.evaluate(() =>
-		Reflect.get(window, "__chatPageNativeFixture").nativeDiagnostics(),
+		Reflect.get(window, "__chatPageNativeFixture").nativeDiagnostics()
 	);
 }
 async function selectNode(page: Page, url: string) {
 	await page.evaluate(async (url) => {
 		const store = Reflect.get(
 			window,
-			"__chatPageNativeFixture",
+			"__chatPageNativeFixture"
 		).nodeStore.getState();
 		const node = store.nodes.find((node: { url: string }) => node.url === url);
-		if (!node)
+		if (!node) {
 			throw new Error(`Actual native node profile did not load ${url}`);
+		}
 		await store.setDefault(node.name);
 	}, url);
 }
@@ -45,18 +46,18 @@ test("late native Clips subscription acknowledgment is disposed by its old Layou
 		await expect(
 			page.getByText("The organization copy is ready for review.", {
 				exact: true,
-			}),
+			})
 		).toBeVisible();
 		await expect
 			.poll(
 				async () =>
 					(await diagnostics(page)).listeners.filter(
-						(l) => l.event === "clips:quick-attach",
-					).length,
+						(l) => l.event === "clips:quick-attach"
+					).length
 			)
 			.toBeGreaterThan(0);
 		await page.evaluate(() =>
-			Reflect.get(window, "__chatPageNativeFixture").holdNextClipsListener(),
+			Reflect.get(window, "__chatPageNativeFixture").holdNextClipsListener()
 		);
 		await selectNode(page, "http://127.0.0.1:5594");
 		await expect
@@ -64,13 +65,15 @@ test("late native Clips subscription acknowledgment is disposed by its old Layou
 			.toBe(1);
 		const held = await diagnostics(page);
 		const id = held.heldClipsListenerIds[0];
-		if (id === undefined)
+		if (id === undefined) {
 			throw new Error("The actual native Clips acknowledgment was not held");
+		}
 		const listener = held.listeners.find((l) => l.id === id);
-		if (!listener)
+		if (!listener) {
 			throw new Error(
-				"Held acknowledgment did not register its actual native listener",
+				"Held acknowledgment did not register its actual native listener"
 			);
+		}
 		expect(listener.event).toBe("clips:quick-attach");
 		expect(held.callbackIds).toContain(listener.handler);
 		// The shipping active-node hook reruns Layout's effect; this is not a callback replacement.
@@ -78,24 +81,24 @@ test("late native Clips subscription acknowledgment is disposed by its old Layou
 		await expect
 			.poll(async () =>
 				(await diagnostics(page)).listeners.some(
-					(l) => l.event === "clips:quick-attach" && l.id > id,
-				),
+					(l) => l.event === "clips:quick-attach" && l.id > id
+				)
 			)
 			.toBe(true);
 		expect((await diagnostics(page)).heldClipsListenerIds).toEqual([id]);
 		await page.evaluate(
 			(id) =>
 				Reflect.get(window, "__chatPageNativeFixture").releaseClipsListener(id),
-			id,
+			id
 		);
 		await expect
 			.poll(async () =>
-				(await diagnostics(page)).listeners.some((l) => l.id === id),
+				(await diagnostics(page)).listeners.some((l) => l.id === id)
 			)
 			.toBe(false);
 		await expect
 			.poll(async () =>
-				(await diagnostics(page)).callbackIds.includes(listener.handler),
+				(await diagnostics(page)).callbackIds.includes(listener.handler)
 			)
 			.toBe(false);
 		expect((await diagnostics(page)).heldClipsListenerIds).toEqual([]);
@@ -105,16 +108,17 @@ test("late native Clips subscription acknowledgment is disposed by its old Layou
 	} finally {
 		beforeCleanup = await diagnostics(page);
 		// Release owned deferred IPC even on failure; release only resolves the real SDK promise.
-		for (const id of beforeCleanup.heldClipsListenerIds)
+		for (const id of beforeCleanup.heldClipsListenerIds) {
 			await page.evaluate(
 				(id) =>
 					Reflect.get(window, "__chatPageNativeFixture").releaseClipsListener(
-						id,
+						id
 					),
-				id,
+				id
 			);
+		}
 		await page.evaluate(() =>
-			Reflect.get(window, "__chatPageNativeFixture").unmount(),
+			Reflect.get(window, "__chatPageNativeFixture").unmount()
 		);
 		await persistNativeLifetimeDiagnostics(testInfo, {
 			beforeCleanup,
@@ -125,8 +129,8 @@ test("late native Clips subscription acknowledgment is disposed by its old Layou
 	await expect
 		.poll(async () =>
 			(await diagnostics(page)).listeners.filter(
-				(l) => l.event === "clips:quick-attach",
-			),
+				(l) => l.event === "clips:quick-attach"
+			)
 		)
 		.toEqual([]);
 	expect((await diagnostics(page)).unexpected).toEqual([]);

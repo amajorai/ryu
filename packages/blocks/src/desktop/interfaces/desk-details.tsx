@@ -128,7 +128,7 @@ export function DeskDetails({
 							{THREAD_STATUS_LABELS[row.status]}
 						</p>
 						<p className="text-pretty text-muted-foreground text-sm">
-							{deskStatusExplanation(row)}
+							{deskStatusExplanation(row, tl)}
 						</p>
 					</DetailsSection>
 				) : null}

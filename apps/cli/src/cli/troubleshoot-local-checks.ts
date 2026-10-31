@@ -159,7 +159,9 @@ export async function checkDataDir(
 						? "warn"
 						: "pass",
 			title: "Free disk space",
-			detail: tf("{free} free on the data directory's volume.", { free: gib(free) }),
+			detail: tf("{free} free on the data directory's volume.", {
+				free: gib(free),
+			}),
 			fix: "Free up space; models and engines need several GB. Move data with RYU_DIR or Settings › Storage.",
 			searchTerms: "disk space download failed",
 			unit: "apps/core",

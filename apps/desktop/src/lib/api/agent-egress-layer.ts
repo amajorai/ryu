@@ -2,6 +2,7 @@
 //
 // Split out of `agent-egress.ts`; import from there. See that module's header.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	CLAUDE_ID,
 	CODEX_ID,
@@ -46,7 +47,8 @@ export function findByPrefix(
 export function classifyEgressLayer(
 	agent: EgressAgentInput,
 	catalog: readonly AgentCatalogEntry[],
-	prefs: EgressPrefs
+	prefs: EgressPrefs,
+	tl: LiteralMessage
 ): Omit<AgentEgress, "tools"> {
 	const base = { agentId: agent.id, name: agent.name };
 
@@ -71,8 +73,14 @@ export function classifyEgressLayer(
 			credentialNote: null,
 			takesEffect: TAKES_EFFECT_AGENT,
 			detail: governed
-				? `Runs Ryu's managed Pi with the gateway on top — every model call is filtered, budgeted and logged. ${PI_POINTER}`
-				: `Ryu's managed Pi is set to a direct provider, so its model calls go straight to that provider. ${PI_POINTER}`,
+				? tl(
+						"Runs Ryu's managed Pi with the gateway on top — every model call is filtered, budgeted and logged. {piPointer}",
+						{ piPointer: tl(PI_POINTER) }
+					)
+				: tl(
+						"Ryu's managed Pi is set to a direct provider, so its model calls go straight to that provider. {piPointer}",
+						{ piPointer: tl(PI_POINTER) }
+					),
 		};
 	}
 
@@ -96,8 +104,14 @@ export function classifyEgressLayer(
 			credentialNote: null,
 			takesEffect: TAKES_EFFECT_AGENT,
 			detail: governed
-				? `Runs on the Ryu agent's managed Pi with the gateway on top — every model call is filtered, budgeted and logged under this agent's own name. ${PI_POINTER}`
-				: `Runs on the Ryu agent's managed Pi, which is set to a direct provider, so its model calls go straight to that provider. ${PI_POINTER}`,
+				? tl(
+						"Runs on the Ryu agent's managed Pi with the gateway on top — every model call is filtered, budgeted and logged under this agent's own name. {piPointer}",
+						{ piPointer: tl(PI_POINTER) }
+					)
+				: tl(
+						"Runs on the Ryu agent's managed Pi, which is set to a direct provider, so its model calls go straight to that provider. {piPointer}",
+						{ piPointer: tl(PI_POINTER) }
+					),
 		};
 	}
 
@@ -165,7 +179,10 @@ export function classifyEgressLayer(
 			bestEffort: false,
 			credentialNote: null,
 			takesEffect: null,
-			detail: `Ryu does not recognise the engine "${engine}", so it cannot say where this agent's model calls go (chats with it will fail).`,
+			detail: tl(
+				'Ryu does not recognise the engine "{engine}", so it cannot say where this agent\'s model calls go (chats with it will fail).',
+				{ engine }
+			),
 		};
 	}
 

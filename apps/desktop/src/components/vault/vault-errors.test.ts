@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { sharedValuesMissingMessage } from "@/src/lib/access-refusal.ts";
 import { ApiError } from "@/src/lib/api/client.ts";
 import {
@@ -9,6 +11,9 @@ import {
 	type VaultStepUpGuard,
 	vaultErrorMessage,
 } from "./vault-errors.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 // The Vault pages decide what to render from these two answers: whether a
 // failure is Core refusing the caller (the broker panel's "Broker admins only"
@@ -24,13 +29,15 @@ test("a Core vault error shows its sentence without the program code, capitalise
 				403,
 				"vault_denied: the `read` capability is required on `default/API_KEY`"
 			),
-			FALLBACK
+			FALLBACK,
+			tl
 		)
 	).toBe("The `read` capability is required on `default/API_KEY`");
 	expect(
 		vaultErrorMessage(
 			new ApiError("/api/vault/seal", 423, "vault_sealed:   unseal it first"),
-			FALLBACK
+			FALLBACK,
+			tl
 		)
 	).toBe("Unseal it first");
 });
@@ -39,42 +46,44 @@ test("only a leading vault_ code is stripped; other messages keep their text", (
 	expect(
 		vaultErrorMessage(
 			new ApiError("/api/x", 500, "database vault_denied: stays"),
-			FALLBACK
+			FALLBACK,
+			tl
 		)
 	).toBe("Database vault_denied: stays");
 	expect(
-		vaultErrorMessage(new ApiError("/api/x", 429, "Slow down"), FALLBACK)
+		vaultErrorMessage(new ApiError("/api/x", 429, "Slow down"), FALLBACK, tl)
 	).toBe("Slow down");
 	expect(
 		vaultErrorMessage(
 			new ApiError("/api/x", 400, "VAULT_DENIED: loud"),
-			FALLBACK
+			FALLBACK,
+			tl
 		)
 	).toBe("VAULT_DENIED: loud");
 });
 
 test("an API failure with no server message says so for 403 and uses the fallback otherwise", () => {
-	expect(vaultErrorMessage(new ApiError("/api/x", 403), FALLBACK)).toBe(
+	expect(vaultErrorMessage(new ApiError("/api/x", 403), FALLBACK, tl)).toBe(
 		"You do not have access to do that."
 	);
-	expect(vaultErrorMessage(new ApiError("/api/x", 500), FALLBACK)).toBe(
+	expect(vaultErrorMessage(new ApiError("/api/x", 500), FALLBACK, tl)).toBe(
 		FALLBACK
 	);
-	expect(vaultErrorMessage(new ApiError("/api/x", 409, ""), FALLBACK)).toBe(
+	expect(vaultErrorMessage(new ApiError("/api/x", 409, ""), FALLBACK, tl)).toBe(
 		FALLBACK
 	);
 });
 
 test("a thrown Error shows its own message, and anything else the fallback", () => {
-	expect(vaultErrorMessage(new Error("network down"), FALLBACK)).toBe(
+	expect(vaultErrorMessage(new Error("network down"), FALLBACK, tl)).toBe(
 		"network down"
 	);
 	// An Error whose message was blanked has nothing to show.
 	const blank = Object.assign(new Error("placeholder"), { message: "" });
-	expect(vaultErrorMessage(blank, FALLBACK)).toBe(FALLBACK);
-	expect(vaultErrorMessage("boom", FALLBACK)).toBe(FALLBACK);
-	expect(vaultErrorMessage(undefined, FALLBACK)).toBe(FALLBACK);
-	expect(vaultErrorMessage(null, FALLBACK)).toBe(FALLBACK);
+	expect(vaultErrorMessage(blank, FALLBACK, tl)).toBe(FALLBACK);
+	expect(vaultErrorMessage("boom", FALLBACK, tl)).toBe(FALLBACK);
+	expect(vaultErrorMessage(undefined, FALLBACK, tl)).toBe(FALLBACK);
+	expect(vaultErrorMessage(null, FALLBACK, tl)).toBe(FALLBACK);
 });
 
 test("isForbidden is true only for an API failure with status 403", () => {
@@ -189,18 +198,21 @@ describe("vault error messages", () => {
 			"Unauthorized",
 			"user_jwt_org_not_admitted"
 		);
-		expect(vaultErrorMessage(refused, "Could not export.")).toContain(
+		expect(vaultErrorMessage(refused, "Could not export.", tl)).toContain(
 			"ryu-cli secrets confirm CODE --method totp"
 		);
 		const plain = new ApiError("/api/vault/export", 401, "Unauthorized");
-		expect(vaultErrorMessage(plain, "Could not export.")).toBe("Unauthorized");
+		expect(vaultErrorMessage(plain, "Could not export.", tl)).toBe(
+			"Unauthorized"
+		);
 	});
 });
 
 describe("an export that left the shared values out", () => {
 	test("says what to do when the control plane refused you", () => {
 		const refused = sharedValuesMissingMessage(
-			"vault_shared_refused: org_ip_not_allowed"
+			"vault_shared_refused: org_ip_not_allowed",
+			tl
 		);
 		expect(refused).toContain("Shared secrets were left out");
 		expect(refused).toContain("network address");
@@ -214,7 +226,8 @@ describe("an export that left the shared values out", () => {
 			["staff_session_factor_required", "staff sign-ins"],
 		] as const) {
 			const message = sharedValuesMissingMessage(
-				`vault_shared_refused: ${code}`
+				`vault_shared_refused: ${code}`,
+				tl
 			);
 			expect(message).toContain("Shared secrets were left out");
 			expect(message).toContain(phrase);
@@ -226,7 +239,7 @@ describe("an export that left the shared values out", () => {
 			"vault_shared_unreachable: the control plane answered 503",
 			"vault_shared_refused: something_new",
 		]) {
-			expect(sharedValuesMissingMessage(sharedError)).toBe(
+			expect(sharedValuesMissingMessage(sharedError, tl)).toBe(
 				"Shared secrets could not be loaded. This export has your own and this node's secrets only."
 			);
 		}
@@ -241,7 +254,8 @@ describe("an export that left the shared values out", () => {
 					"changes go through your own personal node or the web console",
 					"personal_node_required"
 				),
-				"Could not save."
+				"Could not save.",
+				tl
 			)
 		).toContain("your own personal node");
 	});

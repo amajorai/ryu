@@ -1,15 +1,17 @@
 // packages/ui/src/hooks/use-dialog-overlay-blur.ts
 //
-// THE one shared, persisted "Blur dialog backgrounds" toggle. OFF by default:
+// THE one shared, persisted "Dim dialog backgrounds" toggle. OFF by default:
 // dialogs, alert dialogs, sheets and drawers get a flat transparent look with no
 // backdrop and no panel shadow. On — reachable only from the desktop Appearance
-// settings — dims (30% black) and blurs (8px) the app behind them, and the
-// panels themselves are translucent (`bg-popover/90 backdrop-blur-xl`) so that
-// shows through.
+// settings — lays a plain solid scrim behind them: 30% black in light mode, 50%
+// in dark. The scrim never blurs or saturates the app behind it.
+//
+// The module and storage key keep their historical `blur` names so imports and
+// every desktop user's saved preference carry over.
 //
 // `apps/web` exposes no toggle and deliberately never bootstraps this store
 // (see apps/web/src/components/providers.tsx), so the CSS base state below —
-// which IS blurred — is what the web renders. This module's default therefore
+// which IS dimmed — is what the web renders. This module's default therefore
 // only ever decides what the desktop does.
 //
 // This lives in `@ryu/ui` — the leaf package `apps/web`, `apps/desktop`, and the
@@ -22,10 +24,10 @@
 // The storage key keeps its historical `ryu_dialog_overlay_blur` name so every
 // desktop user's existing preference carries over. Do not rename it.
 //
-// The CSS side is `--ryu-dialog-overlay-background` / `--ryu-dialog-overlay-blur`
-// in `styles/globals.css` (.ryu-dialog-overlay), plus the
+// The CSS side is `--ryu-dialog-overlay-background` in `styles/overlays.css`
+// (.ryu-dialog-overlay, with a darker value under `.dark`), plus the
 // `html[data-dialog-overlay-blur="off"]` rules that hide the backdrop and strip
-// panel shadows when the toggle is off. The CSS keeps blurred as its BASE state
+// panel shadows when the toggle is off. The CSS keeps dimmed as its BASE state
 // even though the desktop default is now off, because that is what `apps/web`
 // paints with no JS at all. The desktop reaches its own default by stamping the
 // attribute at boot — `initDialogOverlayBlur()` runs in `main.tsx` module scope,
@@ -41,10 +43,10 @@ export const DIALOG_OVERLAY_BLUR_STORAGE_KEY = "ryu_dialog_overlay_blur";
 /** Default OFF — only an explicit `"true"` in storage enables the overlay. */
 export const DEFAULT_DIALOG_OVERLAY_BLUR = false;
 
-const ENABLED_BACKGROUND = "rgb(0 0 0 / 30%)";
+// Off pins the scrim colour transparent for consumers that paint it without
+// checking the mode attribute (e.g. `bg-(--ryu-dialog-overlay-background)`).
+// On removes the inline value so the stylesheet's light/dark dim applies.
 const DISABLED_BACKGROUND = "rgb(0 0 0 / 0)";
-const ENABLED_BLUR = "8px";
-const DISABLED_BLUR = "0px";
 
 const listeners = new Set<() => void>();
 
@@ -53,14 +55,14 @@ function applyOverlayVars(enabled: boolean): void {
 		return;
 	}
 	const root = document.documentElement;
-	root.style.setProperty(
-		"--ryu-dialog-overlay-background",
-		enabled ? ENABLED_BACKGROUND : DISABLED_BACKGROUND
-	);
-	root.style.setProperty(
-		"--ryu-dialog-overlay-blur",
-		enabled ? ENABLED_BLUR : DISABLED_BLUR
-	);
+	if (enabled) {
+		root.style.removeProperty("--ryu-dialog-overlay-background");
+	} else {
+		root.style.setProperty(
+			"--ryu-dialog-overlay-background",
+			DISABLED_BACKGROUND
+		);
+	}
 	// Opt-out attribute: present only to turn the overlay OFF. See the header.
 	if (enabled) {
 		root.removeAttribute("data-dialog-overlay-blur");

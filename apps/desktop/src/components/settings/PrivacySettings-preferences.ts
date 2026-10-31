@@ -322,7 +322,7 @@ export function usePrivacyPreferences({
 		}
 		setTestSpanBusy(true);
 		try {
-			const result = await sendDiagnosticsTestSpan(target);
+			const result = await sendDiagnosticsTestSpan(target, tl);
 			if (!isCurrent()) {
 				return;
 			}

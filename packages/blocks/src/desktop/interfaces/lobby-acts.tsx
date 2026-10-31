@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -197,6 +198,7 @@ export function lobbyMember({
 	looks,
 	paths,
 	reduced,
+	tl,
 	view,
 }: {
 	act: InterfaceAgentAct;
@@ -204,6 +206,7 @@ export function lobbyMember({
 	looks: MemberLooks;
 	paths: LifePaths;
 	reduced: boolean;
+	tl: LiteralMessage;
 	view: LobbyActView;
 }): VillagerSpec[] {
 	const spots: ActSpots = {
@@ -226,7 +229,9 @@ export function lobbyMember({
 		actAgent: act.agentId,
 		bubble,
 		iconOnly: queued ? false : undefined,
-		label: ask ? `${act.ariaLabel} Answer their ask.` : act.ariaLabel,
+		label: ask
+			? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+			: act.ariaLabel,
 		life: actLife(act, spots, LOBBY_ACT_SKIN, { reduced }),
 		looks: {
 			...looks,

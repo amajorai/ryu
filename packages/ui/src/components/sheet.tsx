@@ -46,7 +46,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
 	return (
 		<SheetPrimitive.Backdrop
 			className={cn(
-				"ryu-dialog-overlay fixed inset-0 z-50 rounded-[var(--ryu-window-radius,0px)] transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0",
+				"ryu-dialog-overlay fixed inset-0 z-50 rounded-[var(--ryu-window-radius,0px)] transition-opacity duration-(--duration-slow) ease-(--ease-enter) data-ending-style:opacity-0 data-starting-style:opacity-0 data-ending-style:duration-(--duration-fast) data-ending-style:ease-(--ease-exit)",
 				className
 			)}
 			data-slot="sheet-overlay"

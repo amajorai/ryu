@@ -2,14 +2,6 @@
 
 // beui.dev/components/blocks/otp-input
 
-import type { MotionStyle } from "motion/react";
-import css from "./otp-input.module.css";
-
-interface Inline1Style extends MotionStyle {
-	"--otp-input-1-transform-origin"?: MotionStyle["transformOrigin"];
-	"--otp-input-1-transform-style"?: MotionStyle["transformStyle"];
-}
-
 import { EASE_OUT } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
@@ -21,6 +13,7 @@ import {
 import {
 	type ChangeEvent,
 	type ClipboardEvent,
+	type CSSProperties,
 	Fragment,
 	type KeyboardEvent,
 	useEffect,
@@ -28,6 +21,15 @@ import {
 	useRef,
 	useState,
 } from "react";
+import {
+	ALPHANUMERIC_KEY,
+	NON_ALPHANUMERIC,
+	NUMERIC_KEY,
+	sanitize,
+	strip,
+	toSlots,
+} from "./otp-chars.ts";
+import { OTPSlot } from "./otp-slot.tsx";
 
 /**
  * Slot-per-character code entry with a caret on the active slot, digits that
@@ -81,11 +83,6 @@ export interface OTPInputProps {
 	value?: string;
 }
 
-const NUMERIC_KEY = /^[0-9]$/;
-const ALPHANUMERIC_KEY = /^[0-9a-zA-Z]$/;
-const NON_NUMERIC = /[^0-9]/g;
-const NON_ALPHANUMERIC = /[^0-9A-Z]/g;
-
 export function OTPInput({
 	length = 6,
 	value: controlledValue,
@@ -116,6 +113,18 @@ export function OTPInput({
 	const controlled = controlledValue !== undefined;
 	const effectiveGroupSize =
 		groupSize ?? (length >= 6 && length % 2 === 0 ? length / 2 : undefined);
+	const separatorCount = effectiveGroupSize
+		? Math.ceil(length / effectiveGroupSize) - 1
+		: 0;
+	// Slots scale with the viewport up to 3.5rem, but never past the width of the
+	// nearest `@container` ancestor: a long code (the eight-character device code)
+	// would otherwise run wider than the form it sits in. Without a container
+	// ancestor `cqi` resolves against the viewport, which the `8vw` term already
+	// undercuts, so existing callers render as before.
+	const slotRowStyle = {
+		"--otp-gap": "clamp(0.25rem, 2vw, 0.75rem)",
+		"--otp-slot": `clamp(2rem, min(8vw, calc((100cqi - ${length - 1 + separatorCount} * var(--otp-gap) - ${separatorCount} * 0.75rem) / ${length})), 3.5rem)`,
+	} as CSSProperties;
 
 	// Source of truth is a fixed-length array, so a cleared middle slot stays an
 	// in-place hole instead of collapsing the characters after it to the left.
@@ -345,9 +354,10 @@ export function OTPInput({
 				<div
 					className={cn(
 						"flex items-center",
-						size === "compact" ? "gap-1" : "gap-[clamp(0.25rem,2vw,0.75rem)]"
+						size === "compact" ? "gap-1" : "gap-(--otp-gap)"
 					)}
 					ref={slotsRef}
+					style={size === "compact" ? undefined : slotRowStyle}
 				>
 					{Array.from({ length }, (_, i) => {
 						const char = slots[i] ?? "";
@@ -356,104 +366,21 @@ export function OTPInput({
 							effectiveGroupSize &&
 							i < length - 1 &&
 							(i + 1) % effectiveGroupSize === 0;
-						const inline1Style: Inline1Style = {
-							"--otp-input-1-transform-origin": "center bottom",
-							"--otp-input-1-transform-style": "preserve-3d",
-						};
 						return (
 							<Fragment key={`${uid}-${i}`}>
-								<div
-									className={cn(
-										"relative grid aspect-square min-w-0 place-items-center overflow-hidden rounded-xl bg-foreground/[0.06] font-semibold tabular-nums outline-none ring-1 ring-foreground/10 transition-[background-color,color] duration-150 ease-out [container-type:inline-size] motion-reduce:transition-none",
-										size === "compact"
-											? "h-9 w-9 rounded-lg text-sm *:text-[min(0.875rem,43cqi)]"
-											: "h-[clamp(2rem,8vw,3.5rem)] w-[clamp(2rem,8vw,3.5rem)] text-2xl *:text-[min(1.5rem,43cqi)]",
-										showSuccess &&
-											"bg-status-success/10 ring-status-success/50",
-										isError && "bg-destructive/5 ring-destructive/40",
-										isActive &&
-											!(showSuccess || isError) &&
-											"z-10 bg-foreground/10",
-										disabled && "opacity-50"
-									)}
-									data-active={isActive}
-									data-filled={char !== ""}
-									data-index={i}
-									data-otp-index={i}
-								>
-									{isActive && !showSuccess ? (
-										<motion.span
-											aria-hidden
-											className={cn(
-												"pointer-events-none absolute inset-0 z-20 rounded-[inherit] ring-3",
-												isError ? "ring-destructive" : "ring-foreground/75"
-											)}
-											layoutId={reduce ? undefined : `${uid}-active-ring`}
-											transition={
-												reduce
-													? { duration: 0 }
-													: { type: "spring", duration: 0.25, bounce: 0.18 }
-											}
-										/>
-									) : null}
-									{char ? null : (
-										<span
-											aria-hidden
-											className="select-none text-foreground/20"
-										>
-											{alphanumeric ? "·" : "0"}
-										</span>
-									)}
-									<AnimatePresence initial={false}>
-										{char ? (
-											<motion.span
-												animate={
-													reduce
-														? { opacity: 1 }
-														: {
-																y: 0,
-																opacity: 1,
-																rotateX: 0,
-																filter: "blur(0px)",
-															}
-												}
-												className={[
-													css.inline1,
-													"absolute inset-0 grid place-items-center text-foreground leading-none",
-												].join(" ")}
-												exit={
-													reduce
-														? { opacity: 0 }
-														: {
-																y: -2,
-																opacity: 0,
-																rotateX: 15,
-																filter: "blur(2px)",
-															}
-												}
-												initial={
-													reduce
-														? { opacity: 0 }
-														: {
-																y: 6,
-																opacity: 0,
-																rotateX: -35,
-																filter: "blur(2px)",
-															}
-												}
-												key={`${i}-${char}`}
-												style={inline1Style}
-												transition={
-													reduce
-														? { duration: 0 }
-														: { type: "spring", duration: 0.25, bounce: 0.2 }
-												}
-											>
-												{mask ? "•" : char}
-											</motion.span>
-										) : null}
-									</AnimatePresence>
-								</div>
+								<OTPSlot
+									alphanumeric={alphanumeric}
+									char={char}
+									disabled={disabled}
+									index={i}
+									isActive={isActive}
+									isError={isError}
+									mask={mask}
+									reduce={Boolean(reduce)}
+									ringLayoutId={`${uid}-active-ring`}
+									showSuccess={showSuccess}
+									size={size}
+								/>
 								{endsGroup ? (
 									<span
 										aria-hidden
@@ -527,21 +454,6 @@ export function OTPInput({
 			) : null}
 		</div>
 	);
-}
-
-function strip(raw: string, alphanumeric: boolean) {
-	return alphanumeric
-		? raw.toUpperCase().replace(NON_ALPHANUMERIC, "")
-		: raw.replace(NON_NUMERIC, "");
-}
-
-function sanitize(raw: string, length: number, alphanumeric: boolean) {
-	return strip(raw, alphanumeric).slice(0, length);
-}
-
-function toSlots(raw: string, length: number, alphanumeric: boolean) {
-	const chars = sanitize(raw, length, alphanumeric);
-	return Array.from({ length }, (_, i) => chars[i] ?? "");
 }
 
 export interface OTPCodeDisplayProps {

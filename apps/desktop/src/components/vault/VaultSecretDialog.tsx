@@ -202,7 +202,9 @@ function SecretDetail({
 				setRevealed(value);
 			}
 		} catch (error) {
-			setRevealError(vaultErrorMessage(error, "Could not reveal this value."));
+			setRevealError(
+				vaultErrorMessage(error, "Could not reveal this value.", tl)
+			);
 		} finally {
 			setRevealing(false);
 		}
@@ -213,7 +215,7 @@ function SecretDetail({
 	const saveError = saveMutation.error
 		? isStaleVersion(saveMutation.error)
 			? "This secret changed since you opened it. Refresh and try again."
-			: vaultErrorMessage(saveMutation.error, "Could not save details.")
+			: vaultErrorMessage(saveMutation.error, "Could not save details.", tl)
 		: null;
 	const actionError = rollbackMutation.error ?? restoreMutation.error;
 
@@ -374,7 +376,11 @@ function SecretDetail({
 				</h3>
 				{versionsQuery.error ? (
 					<p className="text-status-destructive text-xs">
-						{vaultErrorMessage(versionsQuery.error, "Could not load versions.")}
+						{vaultErrorMessage(
+							versionsQuery.error,
+							"Could not load versions.",
+							tl
+						)}
 					</p>
 				) : versionsQuery.isLoading ? (
 					<p className="text-muted-foreground text-xs">Loading versions…</p>
@@ -445,7 +451,7 @@ function SecretDetail({
 			) : null}
 			{actionError ? (
 				<p className="text-sm text-status-destructive">
-					{vaultErrorMessage(actionError, "That did not work.")}
+					{vaultErrorMessage(actionError, "That did not work.", tl)}
 				</p>
 			) : null}
 		</div>

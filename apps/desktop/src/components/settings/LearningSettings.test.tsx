@@ -3,7 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import type { Node } from "@/src/store/useNodeStore.ts";
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
 const { LearningSettings } = await import("./LearningSettings.tsx");
@@ -29,11 +32,11 @@ const destinations = [
 	{ ...first, name: "new-user", userJwt: second.userJwt },
 ];
 interface Call {
-	url: string;
+	body: { value: string } | null;
 	method: string;
 	token: string | null;
+	url: string;
 	userJwt: string | null;
-	body: { value: string } | null;
 }
 let calls: Call[];
 let respond: (call: Call) => Response | Promise<Response>;
@@ -85,7 +88,9 @@ beforeEach(() => {
 });
 afterEach(async () => {
 	await act(async () => {
-		for (const root of roots.splice(0)) root.unmount();
+		for (const root of roots.splice(0)) {
+			root.unmount();
+		}
 	});
 	document.body.replaceChildren();
 	globalThis.fetch = originalFetch;
@@ -108,7 +113,9 @@ function control(name = "Learn skills from my chats") {
 	const element = document.querySelector<HTMLElement>(
 		`[role="switch"][aria-label="${name}"]`
 	);
-	if (!element) throw new Error(`Missing consent control ${name}`);
+	if (!element) {
+		throw new Error(`Missing consent control ${name}`);
+	}
 	return element;
 }
 async function click(name?: string) {
@@ -131,7 +138,7 @@ for (const destination of destinations) {
 			expected(destination, "learning.skills-enabled", "false"),
 		]);
 	});
-	for (const status of [200, 403])
+	for (const status of [200, 403]) {
 		test(`old ${status} save cannot rollback or unlock new consent ${destination.url}/${destination.token}/${destination.userJwt}`, async () => {
 			const old = pending();
 			const current = pending();
@@ -174,6 +181,7 @@ for (const destination of destinations) {
 				expected(destination, "learning.skills-enabled", "true")
 			);
 		});
+	}
 }
 test("equivalent node objects preserve the pending consent and do not reread", async () => {
 	const write = pending();
@@ -218,12 +226,14 @@ test("failed consent read blocks mutation until a real retry", async () => {
 	const retry = [...document.querySelectorAll("button")].find(
 		(button) => button.textContent === "Retry"
 	);
-	if (!retry) throw new Error("Missing read retry");
+	if (!retry) {
+		throw new Error("Missing read retry");
+	}
 	await act(async () => retry.click());
 	await settle();
 	expect(control().getAttribute("aria-checked")).toBe("true");
 });
-for (const name of ["Learn skills from my chats", "Train my local model"])
+for (const name of ["Learn skills from my chats", "Train my local model"]) {
 	test(`${name} refuses duplicate pending writes and retries with durable readback`, async () => {
 		const write = pending();
 		const stored = new Map<string, string>();
@@ -273,3 +283,4 @@ for (const name of ["Learn skills from my chats", "Train my local model"])
 			).getAttribute("aria-checked")
 		).toBe("false");
 	});
+}

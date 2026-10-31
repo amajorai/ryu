@@ -9,6 +9,7 @@ export const PRODUCT_ACTIVE_PREFIXES: readonly string[] = [
 	"/agent",
 	"/platform",
 	"/marketplace",
+	"/interfaces",
 ];
 
 export const RESOURCE_ACTIVE_PREFIXES: readonly string[] = [

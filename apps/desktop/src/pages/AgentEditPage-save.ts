@@ -1,4 +1,5 @@
 import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { composeRules } from "@ryuhq/protocol/agent-rules";
 import { buildNewAgentChatSeed } from "@/src/lib/agent-onboarding.ts";
 import { glyphToPersonaFields } from "@/src/lib/agent-persona.ts";
@@ -35,9 +36,10 @@ export function createAgentEditSave(
 		AgentEditFormState &
 		AgentEditComposio &
 		AgentEditLoaders &
-		AgentEditHydrate
+		AgentEditHydrate & { tl: LiteralMessage }
 ) {
 	const {
+		tl,
 		editorMounted,
 		activeRecordScope,
 		recordScope,
@@ -160,7 +162,8 @@ export function createAgentEditSave(
 						return value === "neutral" ? null : value;
 					})(),
 				}),
-				"bot"
+				"bot",
+				tl
 			);
 			if (warning) {
 				setPromptEditConfirmation(warning);

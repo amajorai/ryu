@@ -157,7 +157,7 @@ function WatchRow({
 	const working = quote.agent.status === "working";
 	const tick = usePriceTick(quote.price);
 	const rowValues = {
-		change: describeChange(quote.change, quote.changePercent),
+		change: describeChange(quote.change, quote.changePercent, tl),
 		name: quote.agent.name,
 		price: formatPrice(quote.price),
 		symbol: quote.symbol,

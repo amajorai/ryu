@@ -105,6 +105,7 @@ export function buildPluginHostMediaWorkflowServices({
 	companion,
 	mediaPermission,
 	node,
+	tl,
 }: PluginHostServicesContext): Partial<HostServices> {
 	return {
 		// Media services — host-direct governed fetches (same pattern as
@@ -120,6 +121,7 @@ export function buildPluginHostMediaWorkflowServices({
 			inline: inlineToDataUrl,
 			pluginId: companion.pluginId,
 			target: toTarget(node),
+			tl,
 		}),
 		ttsSpeak: async (input) => {
 			const blob = await apiSpeakText(toTarget(node), input.text, {

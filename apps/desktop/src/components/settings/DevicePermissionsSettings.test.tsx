@@ -2,7 +2,10 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
 const { DevicePermissionsSettings } = await import(
@@ -15,8 +18,8 @@ const checkCommands = [
 ];
 interface PendingCheck {
 	promise: Promise<boolean>;
-	resolve: (value: boolean) => void;
 	reject: (error: Error) => void;
+	resolve: (value: boolean) => void;
 }
 function pendingCheck(): PendingCheck {
 	let resolve!: (value: boolean) => void;
@@ -51,8 +54,9 @@ beforeEach(() => {
 			transformCallback: () => 1,
 			invoke: async (command: string) => {
 				const checkIndex = checkCommands.indexOf(command);
-				if (checkIndex === -1)
+				if (checkIndex === -1) {
 					throw new Error(`Unexpected native command: ${command}`);
+				}
 				const batch = Math.floor(calls.length / checkCommands.length);
 				calls.push(command);
 				return await batches[batch][checkIndex].promise;
@@ -62,15 +66,21 @@ beforeEach(() => {
 });
 afterEach(async () => {
 	await act(async () => {
-		for (const root of roots.splice(0)) root.unmount();
+		for (const root of roots.splice(0)) {
+			root.unmount();
+		}
 	});
 	document.body.replaceChildren();
-	if (bridgeDescriptor)
+	if (bridgeDescriptor) {
 		Object.defineProperty(window, "__TAURI_INTERNALS__", bridgeDescriptor);
-	else Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
-	if (userAgentDescriptor)
+	} else {
+		Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+	}
+	if (userAgentDescriptor) {
 		Object.defineProperty(navigator, "userAgent", userAgentDescriptor);
-	else Reflect.deleteProperty(navigator, "userAgent");
+	} else {
+		Reflect.deleteProperty(navigator, "userAgent");
+	}
 });
 async function settle() {
 	await act(async () => {
@@ -96,14 +106,18 @@ async function refresh() {
 }
 async function finish(batch: number, granted: boolean) {
 	await act(async () => {
-		for (const check of batches[batch]) check.resolve(granted);
+		for (const check of batches[batch]) {
+			check.resolve(granted);
+		}
 	});
 	await settle();
 }
 async function refuse(batch: number) {
 	await act(async () => {
 		batches[batch][0].reject(new Error("Native permission check failed"));
-		for (const check of batches[batch].slice(1)) check.resolve(false);
+		for (const check of batches[batch].slice(1)) {
+			check.resolve(false);
+		}
 	});
 	await settle();
 }
@@ -114,7 +128,9 @@ async function retry() {
 	const button = [...document.querySelectorAll("button")].find(
 		(element) => element.textContent === "Check access again"
 	);
-	if (!button) throw new Error("Missing native permission retry");
+	if (!button) {
+		throw new Error("Missing native permission retry");
+	}
 	await act(async () => button.click());
 	await settle();
 }

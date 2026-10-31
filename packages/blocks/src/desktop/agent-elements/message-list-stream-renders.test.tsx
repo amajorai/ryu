@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { UIMessage } from "ai";
 import { act, Profiler, type ProfilerOnRenderCallback } from "react";
@@ -19,6 +19,23 @@ afterAll(async () => {
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Reflect.set(Element.prototype, "getAnimations", () => []);
+
+// Every message's context menu, counted by the text it copies: the message
+// shell around the parts renders it, so it shows whether that shell re-rendered.
+const contextMenuRenders = new Map<string, number>();
+const contextMenuModule = await import("./message-context-menu.tsx");
+const RealMessageContextMenu = contextMenuModule.MessageContextMenu;
+function CountingMessageContextMenu(
+	props: React.ComponentProps<typeof RealMessageContextMenu>
+): React.ReactElement {
+	const text = props.text ?? "";
+	contextMenuRenders.set(text, (contextMenuRenders.get(text) ?? 0) + 1);
+	return <RealMessageContextMenu {...props} />;
+}
+mock.module("./message-context-menu.tsx", () => ({
+	...contextMenuModule,
+	MessageContextMenu: CountingMessageContextMenu,
+}));
 
 const { MessageList } = await import("./message-list.tsx");
 const { UserMessage } = await import("./user-message.tsx");
@@ -252,6 +269,7 @@ test("in a live turn with several replies, only the streaming one re-renders", a
 	let reply = "Second";
 	await renderWith(reply);
 	assistantRenders.clear();
+	contextMenuRenders.clear();
 	const chunks = 50;
 	for (let chunk = 0; chunk < chunks; chunk++) {
 		reply += ` token${chunk}`;
@@ -262,6 +280,65 @@ test("in a live turn with several replies, only the streaming one re-renders", a
 		chunks
 	);
 	expect(assistantRenders.get("assistant-first") ?? 0).toBe(0);
+	// The complete reply's own shell (its context menu and the closures bound
+	// to it) holds still too, not only its parts.
+	expect(contextMenuRenders.get("First agent's answer.") ?? 0).toBe(0);
+	await act(async () => root.unmount());
+	container.remove();
+}, 60_000);
+
+test("a streamed chunk commits the list once; the rail does not commit again a frame later", async () => {
+	const history = Array.from({ length: 4 }, (_, index) =>
+		priorTurn(index)
+	).flat();
+	const liveUser: UIMessage = {
+		id: "user-rail",
+		parts: [{ text: "Stream into the rail preview", type: "text" }],
+		role: "user",
+	};
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	let commits = 0;
+	const onRender: ProfilerOnRenderCallback = () => {
+		commits += 1;
+	};
+	const nextFrame = () =>
+		act(
+			() =>
+				new Promise<void>((resolve) => {
+					requestAnimationFrame(() => resolve());
+				})
+		);
+	const renderWith = async (text: string) => {
+		await act(async () => {
+			root.render(
+				<Profiler id="transcript" onRender={onRender}>
+					<MessageList
+						messages={[...history, liveUser, streamingReply(text)]}
+						slots={SLOTS}
+						status="streaming"
+					/>
+				</Profiler>
+			);
+		});
+		// The rail's own sync runs on the next frame: let it.
+		await nextFrame();
+		await nextFrame();
+	};
+	let reply = "Rail";
+	await renderWith(reply);
+	commits = 0;
+	const chunks = 30;
+	for (let chunk = 0; chunk < chunks; chunk++) {
+		reply += ` token${chunk}`;
+		await renderWith(reply);
+	}
+	expect(container.textContent).toContain(`token${chunks - 1}`);
+	// One commit for the chunk and one for Streamdown's own block transition.
+	// The rail's preview text follows the reply, and used to be copied into
+	// the scroller's state a frame later: a third commit per chunk.
+	expect(commits).toBeLessThanOrEqual(chunks * 2);
 	await act(async () => root.unmount());
 	container.remove();
 }, 60_000);

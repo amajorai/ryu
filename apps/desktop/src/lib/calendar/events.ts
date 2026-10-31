@@ -19,6 +19,7 @@
 // are collapsed into one aggregate marker per day carrying a run count instead
 // of one event per fire.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	nextDisplayDayBoundaryMs,
 	startOfDisplayDayMs,
@@ -145,7 +146,10 @@ function formatHour(h: number): string {
 }
 
 /** Human-readable phrase for a job's schedule, shared with the automations list. */
-export function describeSchedule(schedule: Schedule): string {
+export function describeSchedule(
+	schedule: Schedule,
+	tl: LiteralMessage
+): string {
 	if (schedule.kind === "every") {
 		const labels = new Map([
 			["5m", "Every 5 minutes"],
@@ -160,12 +164,15 @@ export function describeSchedule(schedule: Schedule): string {
 	const expr = schedule.expr.trim();
 	const daily = DAILY_CRON.exec(expr);
 	if (daily) {
-		return `Daily at ${formatHour(Number(daily[1]))}`;
+		return tl("Daily at {time}", { time: formatHour(Number(daily[1])) });
 	}
 	const weekly = WEEKLY_CRON.exec(expr);
 	if (weekly) {
 		const day = DAYS_OF_WEEK[Number(weekly[2])] ?? weekly[2];
-		return `Weekly on ${day} at ${formatHour(Number(weekly[1]))}`;
+		return tl("Weekly on {day} at {time}", {
+			day,
+			time: formatHour(Number(weekly[1])),
+		});
 	}
 	return `cron: ${expr}`;
 }
@@ -200,7 +207,6 @@ function parseIntervalSeconds(interval: string): number | null {
 }
 
 // ── Occurrence projection ────────────────────────────────────────────────────
-
 // Anything that would fire more than this many times within the window is
 // collapsed to a per-day count rather than rendered as individual events.
 const HIGH_FREQUENCY_SECONDS = 3600; // sub-hourly intervals aggregate
@@ -212,6 +218,7 @@ function intervalOccurrences(
 	stepSeconds: number,
 	windowStart: Date,
 	windowEnd: Date,
+	tl: LiteralMessage,
 	workflowNames?: Map<string, string>
 ): CalendarEvent[] {
 	const stepMs = stepSeconds * 1000;
@@ -219,7 +226,7 @@ function intervalOccurrences(
 	const anchorMs = new Date(anchorIso).getTime();
 	const startMs = windowStart.getTime();
 	const endMs = windowEnd.getTime();
-	const label = describeSchedule(job.schedule);
+	const label = describeSchedule(job.schedule, tl);
 	const target = targetInfo(job, workflowNames);
 
 	// First occurrence at or after the window start, aligned to the anchor.
@@ -323,9 +330,10 @@ function cronOccurrences(
 	expr: string,
 	windowStart: Date,
 	windowEnd: Date,
+	tl: LiteralMessage,
 	workflowNames?: Map<string, string>
 ): CalendarEvent[] {
-	const label = describeSchedule(job.schedule);
+	const label = describeSchedule(job.schedule, tl);
 	const target = targetInfo(job, workflowNames);
 	let fires: Date[];
 	try {
@@ -387,9 +395,10 @@ function pastOccurrences(
 	job: ScheduledJob,
 	windowStart: Date,
 	windowEnd: Date,
+	tl: LiteralMessage,
 	workflowNames?: Map<string, string>
 ): CalendarEvent[] {
-	const label = describeSchedule(job.schedule);
+	const label = describeSchedule(job.schedule, tl);
 	const target = targetInfo(job, workflowNames);
 	const startMs = windowStart.getTime();
 	const endMs = windowEnd.getTime();
@@ -434,11 +443,14 @@ export function buildCalendarEvents(
 	jobs: ScheduledJob[],
 	windowStart: Date,
 	windowEnd: Date,
+	tl: LiteralMessage,
 	workflowNames?: Map<string, string>
 ): CalendarEvent[] {
 	const events: CalendarEvent[] = [];
 	for (const job of jobs) {
-		events.push(...pastOccurrences(job, windowStart, windowEnd, workflowNames));
+		events.push(
+			...pastOccurrences(job, windowStart, windowEnd, tl, workflowNames)
+		);
 
 		// Only project future runs for enabled jobs — a disabled job won't fire.
 		if (!job.enabled) {
@@ -451,6 +463,7 @@ export function buildCalendarEvents(
 					job.schedule.expr,
 					windowStart,
 					windowEnd,
+					tl,
 					workflowNames
 				)
 			);
@@ -463,6 +476,7 @@ export function buildCalendarEvents(
 						seconds,
 						windowStart,
 						windowEnd,
+						tl,
 						workflowNames
 					)
 				);

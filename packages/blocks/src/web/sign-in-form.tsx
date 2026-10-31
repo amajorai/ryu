@@ -166,9 +166,7 @@ export default function SignInForm({
 							? "Enter your email to receive a sign in link"
 							: "Please sign in to continue"
 					}
-					subtitleClassName="font-normal text-sm"
 					title={examSignIn ? "Sign in to take the exam" : "Sign in to Ryu"}
-					titleClassName="text-2xl tracking-tight"
 				/>
 
 				<form

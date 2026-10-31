@@ -65,7 +65,9 @@ export function PassportList({
 						key={station.id}
 					>
 						<button
-							aria-label={acts ? countryLabel(station) : stationLabel(station)}
+							aria-label={
+								acts ? countryLabel(station, tl) : stationLabel(station, tl)
+							}
 							className={cn(
 								GAME_FOCUS,
 								"gk-display flex items-center gap-2 rounded-lg px-2 py-1 text-[16px] hover:bg-(--gk-plate-sunk)"

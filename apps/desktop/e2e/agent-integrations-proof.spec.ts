@@ -4,9 +4,9 @@ import type { AgentIntegrationProofState } from "./harness/agent-integrations-pr
 
 declare global {
 	interface Window {
-		__integrationBootErrors: string[];
 		__agentIntegrationProof: AgentIntegrationProofState;
 		__clipboardAttempts: { text: string; outcome: string }[];
+		__integrationBootErrors: string[];
 		__refuseClipboardOnce: boolean;
 	}
 }
@@ -106,10 +106,11 @@ test("every language copies the exact rendered call through the real Clipboard A
 		expect(snippet).toContain('"review-agent"');
 		expect(snippet).toContain(new URL(page.url()).origin);
 		expect(snippet).toContain("RYU_TOKEN");
-		if (language !== "TypeScript SDK")
+		if (language !== "TypeScript SDK") {
 			expect(snippet).toContain(
 				`${new URL(page.url()).origin}/api/chat/stream`
 			);
+		}
 		const copy = page.getByRole("button", {
 			name: /^(Copy code sample|Code sample copied)$/,
 		});

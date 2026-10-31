@@ -234,7 +234,8 @@ export function useComposerSlot(
 				files,
 				(item) => setImages((prev) => [...prev, item]),
 				(message) =>
-					toast.error({ title: "Could not attach file", description: message })
+					toast.error({ title: "Could not attach file", description: message }),
+				tl
 			);
 			if (unsupported.length > 0) {
 				toast.error({

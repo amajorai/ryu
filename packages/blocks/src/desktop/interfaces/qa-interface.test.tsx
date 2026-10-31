@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfaceSnapshot,
 	InterfaceThread,
@@ -459,16 +460,26 @@ describe("qa model", () => {
 	});
 
 	test("headings and names read the way Stack Overflow and Quora say them", () => {
-		expect(qaHeading(SNAPSHOT, EMPTY_QA_FILTER)).toBe("Top questions");
+		expect(qaHeading(SNAPSHOT, EMPTY_QA_FILTER, formatMessage)).toBe(
+			"Top questions"
+		);
 		expect(
-			qaHeading(SNAPSHOT, { ...EMPTY_QA_FILTER, topicId: "project-site" })
+			qaHeading(
+				SNAPSHOT,
+				{ ...EMPTY_QA_FILTER, topicId: "project-site" },
+				formatMessage
+			)
 		).toBe("Questions in Site");
 		expect(
-			qaHeading(SNAPSHOT, { ...EMPTY_QA_FILTER, agentId: "agent-ada" })
+			qaHeading(
+				SNAPSHOT,
+				{ ...EMPTY_QA_FILTER, agentId: "agent-ada" },
+				formatMessage
+			)
 		).toBe("Questions for Ada");
-		expect(qaHeading(SNAPSHOT, { ...EMPTY_QA_FILTER, query: "x" })).toBe(
-			"Search results"
-		);
+		expect(
+			qaHeading(SNAPSHOT, { ...EMPTY_QA_FILTER, query: "x" }, formatMessage)
+		).toBe("Search results");
 		const [ada, grace, linus] = SNAPSHOT.agents;
 		if (!(ada && grace && linus)) {
 			throw new Error("fixture missing");

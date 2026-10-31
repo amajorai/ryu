@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
-	HotkeysProvider,
 	type HotkeyStorage,
+	HotkeysProvider,
 	useHotkey,
 	useHotkeysAdmin,
 	useOptionalHotkeyBinding,
@@ -11,7 +11,9 @@ import type { HotkeyRegistry, Overrides } from "@ryu/hotkeys/registry";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-if (typeof document === "undefined") GlobalRegistrator.register();
+if (typeof document === "undefined") {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const registry: HotkeyRegistry = [
 	{
@@ -54,7 +56,9 @@ async function click(label: string) {
 	const button = Array.from(container.querySelectorAll("button")).find(
 		(node) => node.textContent === label
 	);
-	if (!button) throw new Error(`Missing actual control ${label}`);
+	if (!button) {
+		throw new Error(`Missing actual control ${label}`);
+	}
 	await act(async () => button.click());
 }
 test("optional observer remains inert without provider and for unknown actions", async () => {
@@ -109,8 +113,9 @@ test("persisted changes and provider removal update observers and release storag
 		)
 	);
 	expect(container.textContent).toBe("unbound");
-	if (!subscription.notify)
+	if (!subscription.notify) {
 		throw new Error("Expected genuine provider storage subscription");
+	}
 	const change = subscription.notify;
 	await act(async () => change({ "approval.accept": "Mod+K" }));
 	expect(container.textContent).toBe("Mod+K");

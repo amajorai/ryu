@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n";
 import type {
 	CatalogEntry,
 	CatalogExtensionSummary,
@@ -103,12 +104,13 @@ export function surfaceSupportLabel(support?: string | null): string {
 
 /** Short explanation of the host inheritance row. */
 export function inheritedSurfaceLabel(
+	tl: LiteralMessage,
 	inheritedFrom?: string | null
 ): string | null {
 	return inheritedFrom?.toLowerCase() === "desktop"
 		? "Uses the shared Desktop shell"
 		: inheritedFrom
-			? `Uses ${inheritedFrom} as its shell base`
+			? tl("Uses {inheritedFrom} as its shell base", { inheritedFrom })
 			: null;
 }
 

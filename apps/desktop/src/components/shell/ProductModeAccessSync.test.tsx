@@ -232,3 +232,29 @@ describe("product-mode gate once the flag has an answer", () => {
 		expect(shownMode()).toBe("console");
 	});
 });
+
+describe("product-mode gate and the interface level", () => {
+	beforeEach(() => {
+		account = `account-${crypto.randomUUID()}`;
+		localStorage.setItem(PRODUCT_MODE_KEY, "console");
+		localStorage.setItem("ryu:interface-level", "expert");
+		localStorage.setItem("ryu:sidebar-mode", "sections");
+		useProductModeStore.setState({
+			consoleAccess: false,
+			osAccess: false,
+			requestedMode: "console",
+		});
+		useNodeStore.setState({ hydrateCloudNodes: async () => undefined });
+	});
+
+	test("a remembered Console launch keeps the Code level and the chosen sidebar while access resolves", async () => {
+		await mountGate();
+
+		expect(shownMode()).toBe("console");
+		// Console access starts false, so the effective mode reads as Bot until
+		// the gate decides it. Applying Ryu Work's level in that window would
+		// reset the sidebar to the Agents view before Code was applied back.
+		expect(localStorage.getItem("ryu:interface-level")).toBe("expert");
+		expect(localStorage.getItem("ryu:sidebar-mode")).toBe("sections");
+	});
+});

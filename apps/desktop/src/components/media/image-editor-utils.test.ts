@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 
 import {
 	imageDimensionError,
 	isEditableImageType,
 	normalizedImagePoint,
 } from "./image-editor-utils.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 describe("image editor input bounds", () => {
 	test("allows supported raster image types and rejects SVG", () => {
@@ -15,10 +18,10 @@ describe("image editor input bounds", () => {
 	});
 
 	test("rejects invalid and excessive image dimensions", () => {
-		expect(imageDimensionError(0, 10)).toContain("positive whole numbers");
-		expect(imageDimensionError(16_001, 1)).toContain("per side");
-		expect(imageDimensionError(8000, 8000)).toContain("too large");
-		expect(imageDimensionError(4000, 3000)).toBeNull();
+		expect(imageDimensionError(tl, 0, 10)).toContain("positive whole numbers");
+		expect(imageDimensionError(tl, 16_001, 1)).toContain("per side");
+		expect(imageDimensionError(tl, 8000, 8000)).toContain("too large");
+		expect(imageDimensionError(tl, 4000, 3000)).toBeNull();
 	});
 
 	test("maps pointer coordinates to normalized image coordinates", () => {

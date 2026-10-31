@@ -26,6 +26,7 @@
 // the same authenticated raw-fetch seam as every other Core call and throws a
 // typed {@link CapabilityBindingConflictError} instead.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import {
 	type CapabilityProviderWire,
@@ -178,19 +179,26 @@ export class CapabilityBindingConflictError extends Error {
  */
 const nativeErrorSchema = z.instanceof(Error);
 
+export function describeBindingConflict(
+	error: CapabilityBindingConflictError
+): string {
+	const where = error.plugin ? ` (${error.plugin})` : "";
+	return `${error.message}${where} · ${error.bindingError}`;
+}
+
 export function describeBindingFailure(
 	error: Parameters<typeof nativeErrorSchema.parse>[0],
-	providerName: string
+	providerName: string,
+	tl: LiteralMessage
 ): string {
 	if (error instanceof CapabilityBindingConflictError) {
-		const where = error.plugin ? ` (${error.plugin})` : "";
-		return `${error.message}${where} · ${error.bindingError}`;
+		return describeBindingConflict(error);
 	}
 	const nativeError = nativeErrorSchema.safeParse(error);
 	if (nativeError.success) {
 		return nativeError.data.message;
 	}
-	return `Couldn't switch to ${providerName}`;
+	return tl("Couldn't switch to {providerName}", { providerName });
 }
 
 /**

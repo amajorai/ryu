@@ -1,7 +1,11 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { ApiError } from "./client.ts";
 
 /** Replace internal Core API paths with a useful action-level retry message. */
-export function repositoryCreationErrorMessage<TError>(error: TError): string {
+export function repositoryCreationErrorMessage<TError>(
+	error: TError,
+	tl: LiteralMessage
+): string {
 	if (error instanceof ApiError) {
 		if (error.status === 401) {
 			return "Sign in to GitHub on the active node and try again.";
@@ -12,7 +16,10 @@ export function repositoryCreationErrorMessage<TError>(error: TError): string {
 		if (error.status >= 500) {
 			return "GitHub is temporarily unavailable. Try again.";
 		}
-		return `Could not create the GitHub repository (HTTP ${error.status}). Try again.`;
+		return tl(
+			"Could not create the GitHub repository (HTTP {status}). Try again.",
+			{ status: error.status }
+		);
 	}
 	if (error instanceof Error) {
 		return error.message;

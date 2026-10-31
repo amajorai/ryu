@@ -1,6 +1,7 @@
 // The DOM first, before React loads (seasonal-test-dom.ts).
 import "./seasonal-test-dom.ts";
 import { afterAll, describe, expect, mock, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
 import type { ReactNode } from "react";
 import { seasonalDom } from "./seasonal-test-dom.ts";
 
@@ -185,6 +186,7 @@ function renderBoard(
 		shown,
 		slots: slots.slots,
 		stations,
+		tl: (source, values) => formatMessage(source, values),
 	});
 	const stopped = blockerEntries(snapshot, acts).flatMap((entry) => {
 		const number = board.doors.find(

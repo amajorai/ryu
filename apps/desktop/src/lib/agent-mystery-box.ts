@@ -14,6 +14,7 @@
 // community rating, detected on this machine). A box can never claim an agent is
 // rarer than the data says it is.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { AgentCatalogEntry } from "@/src/lib/api/agents.ts";
 import type { MarketplaceCard } from "@/src/lib/api/marketplace.ts";
 
@@ -161,7 +162,10 @@ export function templateRarity(card: MysteryTemplateSignals): MysteryRarity {
 }
 
 /** Why this card got its tier, shown under the rarity chip. */
-export function mysteryRarityReason(agent: MysteryAgent): string | null {
+export function mysteryRarityReason(
+	agent: MysteryAgent,
+	tl: LiteralMessage
+): string | null {
 	if (agent.kind === "runtime") {
 		const { entry } = agent;
 		if (entry.recommended) {
@@ -172,11 +176,12 @@ export function mysteryRarityReason(agent: MysteryAgent): string | null {
 		}
 		return entry.registryId ? "From the agent registry" : null;
 	}
-	return templateRarityReason(agent.card);
+	return templateRarityReason(agent.card, tl);
 }
 
 export function templateRarityReason(
-	card: MysteryTemplateSignals
+	card: MysteryTemplateSignals,
+	tl: LiteralMessage
 ): string | null {
 	if (card.firstParty) {
 		return "Published by Ryu";
@@ -185,7 +190,10 @@ export function templateRarityReason(
 		return "Verified publisher";
 	}
 	if (card.ratingCount >= MIN_RATINGS_FOR_TIER) {
-		return `Rated ${card.ratingAverage.toFixed(1)} by ${card.ratingCount} people`;
+		return tl("Rated {rating} by {ratingCount} people", {
+			rating: card.ratingAverage.toFixed(1),
+			ratingCount: String(card.ratingCount),
+		});
 	}
 	return card.verification === "verified" ? "Signed template" : null;
 }

@@ -1,4 +1,6 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ChannelStatus } from "./channelStatus.ts";
 import type { TrafficEvent } from "./gateway.ts";
 
@@ -37,6 +39,8 @@ const { streamActivityChat } = await import("./shadow.ts");
 const { subscribeGatewayTraffic } = await import("./gateway.ts");
 const { subscribeChannelStatus } = await import("./channelStatus.ts");
 const target = { url: "http://fixture.test", token: null };
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 const cleanups: (() => void)[] = [];
 afterEach(() => {
 	for (const cleanup of cleanups.splice(0).reverse()) {
@@ -207,7 +211,7 @@ test("Gateway traffic unsubscribe stops buffered events and releases its reader"
 	const stream = source(trafficFrame("first") + trafficFrame("late"));
 	let calls = 0;
 	let stop = () => {};
-	stop = subscribeGatewayTraffic(target, () => {
+	stop = subscribeGatewayTraffic(target, tl, () => {
 		calls += 1;
 		stop();
 	});

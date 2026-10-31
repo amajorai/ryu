@@ -9,12 +9,17 @@ import {
 	indexTopology,
 	type TrafficPulse,
 } from "@ryu/blocks/desktop/gateway-canvas/model.ts";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { parseTrafficFrame } from "./api/gateway-traffic-contracts.ts";
 import {
 	buildLocalTopology,
 	followGatewayTraffic,
 	providerLabel,
 } from "./gateway-traffic-map.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 function row(overrides: Record<string, unknown>) {
 	return {
@@ -122,15 +127,22 @@ describe("parseTrafficFrame", () => {
 
 describe("buildLocalTopology", () => {
 	test("follows the running stages and lists providers with health", () => {
-		const topology = buildLocalTopology({
-			gatewayReachable: true,
-			pipelineStages: ["rate-limit", "firewall", "route", "audit"],
-			providerHealth: {
-				anthropic: { circuit: "open", consecutiveFailures: 5, openForSecs: 3 },
+		const topology = buildLocalTopology(
+			{
+				gatewayReachable: true,
+				pipelineStages: ["rate-limit", "firewall", "route", "audit"],
+				providerHealth: {
+					anthropic: {
+						circuit: "open",
+						consecutiveFailures: 5,
+						openForSecs: 3,
+					},
+				},
+				providers: ["openai", "anthropic"],
+				signedIn: false,
 			},
-			providers: ["openai", "anthropic"],
-			signedIn: false,
-		});
+			tl
+		);
 		const ids = topology.nodes.map((node) => node.id);
 		expect(ids).not.toContain("stage:inspector");
 		expect(ids).not.toContain("infra:control_plane");
@@ -143,12 +155,15 @@ describe("buildLocalTopology", () => {
 	});
 
 	test("an older gateway without a stage list gets every screener", () => {
-		const topology = buildLocalTopology({
-			assignedPolicies: { team: 2 },
-			gatewayReachable: false,
-			providers: [],
-			signedIn: true,
-		});
+		const topology = buildLocalTopology(
+			{
+				assignedPolicies: { team: 2 },
+				gatewayReachable: false,
+				providers: [],
+				signedIn: true,
+			},
+			tl
+		);
 		const ids = topology.nodes.map((node) => node.id);
 		expect(ids).toContain("stage:inspector");
 		expect(ids).toContain("stage:evaluator");
@@ -167,11 +182,12 @@ describe("buildLocalTopology", () => {
 			providers: ["openai"],
 			signedIn: false,
 		};
-		expect(buildLocalTopology(input).version).toBe(
-			buildLocalTopology({ ...input, providers: ["openai"] }).version
+		expect(buildLocalTopology(input, tl).version).toBe(
+			buildLocalTopology({ ...input, providers: ["openai"] }, tl).version
 		);
-		expect(buildLocalTopology(input).version).not.toBe(
-			buildLocalTopology({ ...input, providers: ["openai", "ollama"] }).version
+		expect(buildLocalTopology(input, tl).version).not.toBe(
+			buildLocalTopology({ ...input, providers: ["openai", "ollama"] }, tl)
+				.version
 		);
 	});
 
@@ -182,11 +198,14 @@ describe("buildLocalTopology", () => {
 
 describe("followGatewayTraffic", () => {
 	const index = indexTopology(
-		buildLocalTopology({
-			gatewayReachable: true,
-			providers: ["openai"],
-			signedIn: false,
-		})
+		buildLocalTopology(
+			{
+				gatewayReachable: true,
+				providers: ["openai"],
+				signedIn: false,
+			},
+			tl
+		)
 	);
 
 	test("CV-1: replayed rows after a reconnect are drawn once", () => {

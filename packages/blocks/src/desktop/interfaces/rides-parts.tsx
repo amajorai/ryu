@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -98,6 +99,7 @@ export function RideAvatar({
  * do on one line, the way a rider app lists ride types.
  */
 export function DriverOptionBody({ option }: { option: DriverOption }) {
+	const tl = useLiteralMessages();
 	return (
 		<>
 			<RideAvatar agent={option.agent} size={40} />
@@ -107,7 +109,7 @@ export function DriverOptionBody({ option }: { option: DriverOption }) {
 				</span>
 				<span className="truncate text-[13px] text-muted-foreground">
 					<span className={cn(option.available ? null : "text-foreground")}>
-						{availabilityText(option)}
+						{availabilityText(option, tl)}
 					</span>
 					{option.agent.description ? ` · ${option.agent.description}` : null}
 				</span>

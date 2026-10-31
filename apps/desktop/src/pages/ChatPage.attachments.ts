@@ -60,7 +60,8 @@ export function useChatAttachments({
 				files,
 				(item) => setAttachedImages((prev) => [...prev, item]),
 				(message) =>
-					toast.error("Could not attach file", { description: message })
+					toast.error("Could not attach file", { description: message }),
+				tlRef.current
 			);
 			if (unsupported.length > 0) {
 				toast.error("Can't attach these files yet", {
@@ -96,7 +97,11 @@ export function useChatAttachments({
 	}, []);
 
 	const handleAiResize = useCallback(async (request: ImageResizeRequest) => {
-		const resultUrl = await generateImageResize(chatTargetRef.current, request);
+		const resultUrl = await generateImageResize(
+			chatTargetRef.current,
+			request,
+			tlRef.current
+		);
 		return fetchEditableImage(resultUrl, request.signal);
 	}, []);
 

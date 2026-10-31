@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -35,8 +36,9 @@ import {
 	Table2,
 	X,
 } from "lucide-react";
-import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import type { KeyboardEvent, RefObject } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { FilterChips } from "./records-filter-chips.tsx";
 import {
 	RECORDS_OBJECT_LABELS,
 	RECORDS_OBJECTS,
@@ -81,6 +83,7 @@ export function RecordsHeader({
 	onStart: () => void;
 	view: RecordsView | undefined;
 }) {
+	const tl = useLiteralMessages();
 	const Icon = RECORDS_OBJECT_ICONS[object];
 	const objectLabel = RECORDS_OBJECT_LABELS[object].plural;
 	const title = (
@@ -119,7 +122,14 @@ export function RecordsHeader({
 						<DropdownMenuTrigger
 							render={
 								<Button
-									aria-label={`${objectLabel}${view ? `, ${view.label}` : ""}. Switch records`}
+									aria-label={
+										view
+											? tl("{objectLabel}, {viewLabel}. Switch records", {
+													objectLabel,
+													viewLabel: view.label,
+												})
+											: tl("{objectLabel}. Switch records", { objectLabel })
+									}
 									className="-ms-2 min-w-0 px-2"
 									size="sm"
 									type="button"
@@ -190,74 +200,6 @@ export function RecordsHeader({
 	);
 }
 
-function Chip({
-	children,
-	clearLabel,
-	onClear,
-}: {
-	children: ReactNode;
-	clearLabel: string;
-	onClear: () => void;
-}) {
-	return (
-		<span className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background ps-2 pe-0.5 text-foreground text-xs">
-			{children}
-			<button
-				aria-label={clearLabel}
-				className="flex size-6 items-center justify-center rounded-[5px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-				onClick={onClear}
-				type="button"
-			>
-				<X aria-hidden="true" className="size-3.5" />
-			</button>
-		</span>
-	);
-}
-
-/** Active filters as removable chips, Attio-style, after the menu buttons. */
-function FilterChips({
-	filter,
-	onFilterChange,
-}: {
-	filter: RecordsFilter;
-	onFilterChange: (filter: RecordsFilter) => void;
-}) {
-	return (
-		<>
-			{filter.statuses.length > 0 ? (
-				<Chip
-					clearLabel="Remove status filter"
-					onClear={() => onFilterChange({ ...filter, statuses: [] })}
-				>
-					<span className="text-muted-foreground">Status</span>
-					<span className="max-w-48 truncate font-medium">
-						{filter.statuses
-							.map((status) => THREAD_STATUS_LABELS[status])
-							.join(", ")}
-					</span>
-				</Chip>
-			) : null}
-			{filter.needsYou ? (
-				<Chip
-					clearLabel="Remove needs you filter"
-					onClear={() => onFilterChange({ ...filter, needsYou: false })}
-				>
-					<span className="font-medium">Needs you</span>
-				</Chip>
-			) : null}
-			{filter.recentHours === null ? null : (
-				<Chip
-					clearLabel="Remove last interaction filter"
-					onClear={() => onFilterChange({ ...filter, recentHours: null })}
-				>
-					<span className="text-muted-foreground">Last interaction</span>
-					<span className="font-medium">within {filter.recentHours} hours</span>
-				</Chip>
-			)}
-		</>
-	);
-}
-
 /**
  * The view bar under the header: layout switch, sort, filter (with chips for
  * what is active), and search, in Attio's order.
@@ -287,6 +229,7 @@ export function RecordsToolbar({
 	searchRef: RefObject<HTMLInputElement | null>;
 	sort: RecordsSort;
 }) {
+	const tl = useLiteralMessages();
 	const filterCount = recordsFilterCount(filter);
 	const SortIcon =
 		sort.direction === "desc" ? ArrowDownWideNarrow : ArrowUpNarrowWide;
@@ -341,7 +284,13 @@ export function RecordsToolbar({
 				<DropdownMenuTrigger
 					render={
 						<Button
-							aria-label={`Sort: ${RECORDS_SORT_LABELS[sort.key]}, ${sort.direction === "asc" ? "ascending" : "descending"}`}
+							aria-label={tl(
+								"Sort: {sortLabel}, {direction, select, asc {ascending} other {descending}}",
+								{
+									direction: sort.direction,
+									sortLabel: RECORDS_SORT_LABELS[sort.key],
+								}
+							)}
 							className="text-foreground/80"
 							size="dense"
 							type="button"
@@ -400,7 +349,9 @@ export function RecordsToolbar({
 					render={
 						<Button
 							aria-label={
-								filterCount > 0 ? `Filter, ${filterCount} active` : "Filter"
+								filterCount > 0
+									? tl("Filter, {filterCount} active", { filterCount })
+									: "Filter"
 							}
 							className="text-foreground/80"
 							size="dense"

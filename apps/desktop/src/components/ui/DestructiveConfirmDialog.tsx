@@ -7,9 +7,14 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@ryu/ui/components/alert-dialog.tsx";
-import { CutToConfirm } from "@ryu/ui/components/cut-to-confirm.tsx";
+import { SlideCommit } from "@ryu/ui/components/slide-commit.tsx";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+/** How long the "Deleted" pill stays visible before the dialog closes. */
+const CLOSE_AFTER_DONE_MS = 600;
+
+class DeclinedConfirmation extends Error {}
 
 export function DestructiveConfirmDialog({
 	description,
@@ -34,6 +39,9 @@ export function DestructiveConfirmDialog({
 }) {
 	const [confirming, setConfirming] = useState(false);
 	const [resetKey, setResetKey] = useState(0);
+	const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+		undefined
+	);
 
 	useEffect(() => {
 		if (open) {
@@ -41,23 +49,28 @@ export function DestructiveConfirmDialog({
 		}
 	}, [open]);
 
-	const handleConfirm = () => {
-		if (confirming || busy) {
-			return;
-		}
+	useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+	// SlideCommit shows a spinner while this promise is pending, unfurls the
+	// done pill when it resolves, and springs the handle home when it rejects.
+	const handleConfirm = async () => {
 		setConfirming(true);
-		void Promise.resolve(onConfirm())
-			.then((confirmed) => {
-				if (confirmed) {
-					onOpenChange(false);
-				} else {
-					setResetKey((key) => key + 1);
-				}
-			})
-			.catch(() => {
-				setResetKey((key) => key + 1);
-			})
-			.finally(() => setConfirming(false));
+		try {
+			const confirmed = await onConfirm();
+			if (!confirmed) {
+				throw new DeclinedConfirmation();
+			}
+		} finally {
+			setConfirming(false);
+		}
+	};
+
+	const handleDone = () => {
+		clearTimeout(closeTimer.current);
+		closeTimer.current = setTimeout(
+			() => onOpenChange(false),
+			CLOSE_AFTER_DONE_MS
+		);
 	};
 
 	return (
@@ -81,25 +94,18 @@ export function DestructiveConfirmDialog({
 						{impact}
 					</div>
 				) : null}
-				<CutToConfirm
-					disabled={busy || confirming}
+				<SlideCommit
+					disabled={busy}
+					doneLabel="Deleted"
+					errorLabel="Couldn't delete — slide to retry"
+					holdMs={0}
+					key={resetKey}
+					keyboardSteps={5}
 					label={label}
 					onConfirm={handleConfirm}
-					renderHint={(progress) => {
-						if (progress >= 1) {
-							return "Deleting…";
-						}
-						if (progress > 0) {
-							return `${Math.round(progress * 5)} of 5 steps — keep sliding`;
-						}
-						return "Slide across the blade to confirm";
-					}}
-					resetKey={resetKey}
-				>
-					<div className="flex min-h-16 items-center justify-center px-4 text-center text-muted-foreground text-sm">
-						{label}
-					</div>
-				</CutToConfirm>
+					onDone={handleDone}
+					width="100%"
+				/>
 				<AlertDialogFooter>
 					<AlertDialogCancel disabled={busy || confirming}>
 						Cancel

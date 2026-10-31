@@ -1,3 +1,5 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 /**
  * The status vocabulary persisted by Core for a conversation run.
  *
@@ -13,8 +15,12 @@ export type ConversationRunStatus =
 	| "running";
 
 export interface ConversationRunStatusMeta {
-	/** Explains whether the work can make progress without the user. */
-	description: string;
+	/**
+	 * Explains whether the work can make progress without the user (English
+	 * source; show it through {@link conversationRunStatusDescription}). Null
+	 * for a status this desktop does not know yet.
+	 */
+	description: string | null;
 	/** Tailwind tone for compact desktop status indicators. */
 	dotClass: string;
 	/** Whether the row title should show active work. */
@@ -79,10 +85,20 @@ export function conversationRunStatusMeta(
 	return (
 		STATUS_BY_NAME.get(status) ?? {
 			label: status.replaceAll("_", " "),
-			description: `Run status: ${status.replaceAll("_", " ")}.`,
+			description: null,
 			dotClass: "bg-muted-foreground",
 			isRunning: false,
 			needsAttention: true,
 		}
 	);
+}
+
+/** The status's description as shown: an unknown status names itself. */
+export function conversationRunStatusDescription(
+	meta: ConversationRunStatusMeta,
+	tl: LiteralMessage
+): string {
+	return meta.description === null
+		? tl("Run status: {status}.", { status: meta.label })
+		: tl(meta.description);
 }

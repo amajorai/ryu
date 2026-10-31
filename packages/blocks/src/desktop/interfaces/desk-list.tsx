@@ -317,9 +317,9 @@ export function DeskConversationList({
 	const tl = useLiteralMessages();
 	const label = view?.label ?? "Conversations";
 	const listLabel = tl("{label} conversations", { label });
-	const startLabel = deskStartLabel(view);
+	const startLabel = deskStartLabel(view, tl);
 	const needsYou = rows.filter((row) => row.needsYou).length;
-	const empty = deskEmptyCopy(view);
+	const empty = deskEmptyCopy(view, tl);
 	const showSkeleton = loading && rows.length === 0;
 	let summary = pluralize(rows.length, "conversation");
 	if (needsYou > 0 && view?.id !== "needs-you") {

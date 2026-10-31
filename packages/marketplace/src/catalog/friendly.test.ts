@@ -4,6 +4,7 @@
 // parsing edge cases directly (no DOM, no network).
 
 import { describe, expect, test } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
 	displayTokens,
 	extractTokens,
@@ -18,6 +19,9 @@ import {
 	titleCase,
 } from "./friendly.ts";
 import type { SkillCard } from "./types.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 describe("extractTokens", () => {
 	test("matches an alias against a name segment (Instruct)", () => {
@@ -77,13 +81,13 @@ describe("displayTokens", () => {
 
 describe("parseModelSize", () => {
 	test("parses a plain size token into tier + raw", () => {
-		const size = parseModelSize("Llama-3.1-8B-Instruct");
+		const size = parseModelSize("Llama-3.1-8B-Instruct", tl);
 		expect(size?.raw).toBe("8B");
 		expect(size?.tier).toBe("Medium");
 	});
 
 	test("picks the largest token as the headline (MoE active vs total)", () => {
-		const size = parseModelSize("Qwen3-30B-A3B");
+		const size = parseModelSize("Qwen3-30B-A3B", tl);
 		expect(size?.raw).toBe("30B");
 		expect(size?.tier).toBe("Large");
 		// The tooltip still records the active-parameter token.
@@ -91,21 +95,21 @@ describe("parseModelSize", () => {
 	});
 
 	test("tier thresholds: small < 3B", () => {
-		expect(parseModelSize("tiny-1B")?.tier).toBe("Small");
+		expect(parseModelSize("tiny-1B", tl)?.tier).toBe("Small");
 	});
 
 	test("tier thresholds: extra large >= 70B", () => {
-		expect(parseModelSize("giant-120B")?.tier).toBe("Extra Large");
+		expect(parseModelSize("giant-120B", tl)?.tier).toBe("Extra Large");
 	});
 
 	test("million-scale token maps below 3B (Small)", () => {
-		const size = parseModelSize("gemma-270M");
+		const size = parseModelSize("gemma-270M", tl);
 		expect(size?.raw).toBe("270M");
 		expect(size?.tier).toBe("Small");
 	});
 
 	test("returns null when no size token is present", () => {
-		expect(parseModelSize("just-a-name")).toBeNull();
+		expect(parseModelSize("just-a-name", tl)).toBeNull();
 	});
 });
 

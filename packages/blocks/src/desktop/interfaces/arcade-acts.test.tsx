@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 
 // The DOM must exist before the dialog primitives load (they read it on import).
 GlobalRegistrator.register();
@@ -284,6 +285,7 @@ describe("arcade players (plate activation, 15a)", () => {
 			looks: {} as never,
 			paths,
 			reduced: true,
+			tl: (source, values) => formatMessage(source, values),
 			view,
 		});
 		if (!spec) {

@@ -15,6 +15,11 @@ const CHUNK_INTERVAL_MS = 70;
 // the nodes it adds; a document-level `:has()` rule over a descendant (see
 // styles/window-chrome.css) restyled the whole page per chunk: about 35 s.
 const STYLE_RECALC_BUDGET_S = 5;
+// Commits across the stream: one per chunk for the transcript and one for
+// Streamdown's own block transition. The scroller used to copy the rail's
+// preview (a live turn's text, up to 160 characters) into its state a frame
+// after each chunk, a third commit: about 430 in all, 407 without it.
+const COMMIT_BUDGET = CHUNKS * 2 + 15;
 const WATCHED = [
 	"ChatPage",
 	"AgentChat",
@@ -26,6 +31,7 @@ const WATCHED = [
 	"LiveMessageList",
 	"UserMessage",
 	"TypingIndicator",
+	"MessageScroller",
 	...(process.env.RYU_STREAM_RENDER_ALL ? ["*"] : []),
 ];
 
@@ -125,6 +131,13 @@ test("streaming 200 chunks re-renders the transcript, not the page shell or comp
 	// message and the typing indicator above it keep still.
 	expect(counts.UserMessage ?? 0).toBeLessThanOrEqual(budget);
 	expect(counts.TypingIndicator ?? 0).toBeLessThanOrEqual(budget);
+	// The scroller renders with the transcript, not again for its rail (a few
+	// renders remain for the rail's overflow and active item; about 20 more
+	// when the rail's preview text was copied into state).
+	expect(counts.MessageScroller ?? 0).toBeLessThanOrEqual(
+		(counts.MessageList ?? 0) + 5
+	);
+	expect(commits).toBeLessThanOrEqual(COMMIT_BUDGET);
 	// ...and no chunk restyles the whole document.
 	expect(styleRecalcS).toBeLessThanOrEqual(STYLE_RECALC_BUDGET_S);
 });

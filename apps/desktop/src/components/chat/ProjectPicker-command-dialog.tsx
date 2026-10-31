@@ -315,7 +315,7 @@ function ProjectPickerContent({
 										</div>
 										{project.folders.map((source) => (
 											<div
-												className="type-compact truncate font-mono font-normal text-muted-foreground"
+												className="truncate font-mono font-normal text-muted-foreground text-xs"
 												key={source}
 												title={source}
 											>

@@ -6,6 +6,7 @@ import {
 	CATALOG_AGENTS_AS_A_SERVICE_FLAG,
 	CATALOG_RED_TEAM_FLAG,
 	CATALOG_WORKFLOWS_FLAG,
+	CHALLENGES_FLAG,
 	CLOUD_TASKS_BOX_BACKEND_FLAG,
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG,
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG,
@@ -178,6 +179,17 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
 			"Show /startups and accept startup applications for a free 3–6 month desktop licence (BYOK, no Ryu Cloud).",
 		defaultValue: false,
 		exposure: "public",
+		failMode: "closed",
+	},
+	{
+		key: CHALLENGES_FLAG,
+		description:
+			"Show community Challenges: the /challenges pages, their nav and menu links, the sitemap entries, and registering or submitting entries. Admin tooling stays available.",
+		defaultValue: false,
+		exposure: "public",
+		// Not live yet: a visitor whose client never read the map sees no
+		// Challenges surface. The challenges router re-checks it on every
+		// participant write; hiding the page is not the gate.
 		failMode: "closed",
 	},
 	{

@@ -135,7 +135,7 @@ function JobStatusRow({
 						<StatusPill status={status} />
 					</div>
 					<p className="truncate text-muted-foreground text-xs">
-						{describeSchedule(job.schedule)}
+						{describeSchedule(job.schedule, tl)}
 						{job.enabled ? "" : " · Paused"}
 					</p>
 				</div>
@@ -149,7 +149,7 @@ function JobStatusRow({
 					name: job.name,
 				})}
 				endAt={dayEnd.getTime()}
-				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events)}
+				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events, tl)}
 				nowAt={isDisplayToday(day) ? Date.now() : undefined}
 				showScale={showScale}
 				startAt={dayStart.getTime()}
@@ -201,7 +201,7 @@ function StatusPageOverview({
 					date: formatCalendarDate(day, "longDate", locale),
 				})}
 				endAt={dayEnd.getTime()}
-				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events)}
+				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events, tl)}
 				nowAt={isDisplayToday(day) ? Date.now() : undefined}
 				showScale
 				startAt={dayStart.getTime()}
@@ -259,7 +259,7 @@ function DayRunTimeline({
 					date: formatCalendarDate(day, "longDate", locale),
 				})}
 				endAt={dayEnd.getTime()}
-				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events)}
+				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events, tl)}
 				nowAt={isDisplayToday(day) ? Date.now() : undefined}
 				showScale={showScale}
 				startAt={dayStart.getTime()}

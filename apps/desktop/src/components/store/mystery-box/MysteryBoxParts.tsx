@@ -152,7 +152,7 @@ export function TemplateDisclosure({ card }: { card: MarketplaceCard }) {
 				</p>
 			) : null}
 			<p className="text-muted-foreground text-xs">
-				{communityAgentNotice(identityMode)}
+				{communityAgentNotice(tl, identityMode)}
 			</p>
 		</div>
 	);

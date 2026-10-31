@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { ApiError } from "./client.ts";
 import {
 	beginManagedBotPairing,
@@ -11,29 +13,32 @@ import {
 	managedBotStatusSchema,
 } from "./managed-bots.ts";
 
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
+
 test("classifies genuine native errors and arbitrary thrown values without treating an expired nonce as an unsupported feature", () => {
 	const unavailable = new ApiError("/pair", 501);
-	expect(classifyPairError(unavailable).kind).toBe("unsupported");
-	expect(classifyStatusError(unavailable).kind).toBe("unsupported");
+	expect(classifyPairError(unavailable, tl).kind).toBe("unsupported");
+	expect(classifyStatusError(unavailable, tl).kind).toBe("unsupported");
 	const missing = new ApiError("/pair", 404);
-	expect(classifyPairError(missing).kind).toBe("unsupported");
-	expect(classifyStatusError(missing)).toEqual({
+	expect(classifyPairError(missing, tl).kind).toBe("unsupported");
+	expect(classifyStatusError(missing, tl)).toEqual({
 		kind: "expired",
 		message: "That pairing link is no longer valid.",
 	});
 	const unsupported = new ApiError("/pair", 503, "managed_bots_unavailable");
-	expect(classifyPairError(unsupported).kind).toBe("unsupported");
-	expect(classifyStatusError(unsupported).kind).toBe("unsupported");
+	expect(classifyPairError(unsupported, tl).kind).toBe("unsupported");
+	expect(classifyStatusError(unsupported, tl).kind).toBe("unsupported");
 	for (const classify of [classifyPairError, classifyStatusError]) {
-		expect(classify(new Error("offline"))).toEqual({
+		expect(classify(new Error("offline"), tl)).toEqual({
 			kind: "unreachable",
 			message: "offline",
 		});
-		expect(classify(new ApiError("/pair", 503, "manager down"))).toEqual({
+		expect(classify(new ApiError("/pair", 503, "manager down"), tl)).toEqual({
 			kind: "unreachable",
 			message: "manager down",
 		});
-		expect(classify(new ApiError("/pair", 503))).toEqual({
+		expect(classify(new ApiError("/pair", 503), tl)).toEqual({
 			kind: "unreachable",
 			message: "The pairing service answered 503. Try again in a moment.",
 		});
@@ -45,7 +50,7 @@ test("classifies genuine native errors and arbitrary thrown values without treat
 			{ status: 501 },
 			{ message: "spoof" },
 		]) {
-			expect(classify(thrown)).toEqual({
+			expect(classify(thrown, tl)).toEqual({
 				kind: "unreachable",
 				message: "Could not reach the pairing service.",
 			});

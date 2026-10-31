@@ -164,6 +164,7 @@ export function RunAlongsideEngineDetail({
 								<StatusBadge
 									kind="unavailable"
 									label={unsupportedReason(
+										tl,
 										engine.platforms,
 										engine.unsupportedReason
 									)}
@@ -276,7 +277,7 @@ export function RunAlongsideEngineDetail({
 			) : null}
 			{unsupported && (
 				<EngineFootnote>
-					{unsupportedReason(engine.platforms, engine.unsupportedReason)}
+					{unsupportedReason(tl, engine.platforms, engine.unsupportedReason)}
 				</EngineFootnote>
 			)}
 			{state.error && (

@@ -40,7 +40,7 @@ import {
 	type CapabilityLayer,
 	type CapabilityProvider,
 	clearCapabilityBinding,
-	describeBindingFailure,
+	describeBindingConflict,
 	fetchCapabilityLayers,
 	setCapabilityBinding,
 } from "./capability-layers.ts";
@@ -388,7 +388,7 @@ export async function setParseBackend(
  *
  * - `CapabilityBindingConflictError` — Core's 409 on a refused binding change,
  *   carrying the enabled `plugin` the change would leave unbound and the stable
- *   `binding_error` code. Delegated to `describeBindingFailure` so a refusal is
+ *   `binding_error` code. Delegated to `describeBindingConflict` so a refusal is
  *   worded identically here and in the node layer menu; `error.message` alone
  *   would drop both fields.
  * - `ApiError` — a generic Core refusal whose body has `{error}`. Its own
@@ -405,7 +405,7 @@ export function describeApiRefusal(
 	error: Parameters<typeof nativeErrorSchema.parse>[0]
 ): string | undefined {
 	if (error instanceof CapabilityBindingConflictError) {
-		return describeBindingFailure(error, "this parser");
+		return describeBindingConflict(error);
 	}
 	if (error instanceof ApiError) {
 		return error.serverMessage ?? error.message;

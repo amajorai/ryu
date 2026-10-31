@@ -72,10 +72,14 @@ test("sheets mirror the desktop menus: the same groups, items, and summaries", a
 	const { PRODUCT_NAV_GROUPS } = await import("./data/product-realms.ts");
 	const { resourceCategories } = await import("./data/resources.tsx");
 
-	// Available products only: early-access ones stay on /products.
-	expect(PRODUCT_SHEET.map((group) => group.title)).toEqual(
-		PRODUCT_NAV_GROUPS.map((group) => group.title)
-	);
+	// Available products only (early-access ones stay on /products), then Features.
+	expect(PRODUCT_SHEET.map((group) => group.title)).toEqual([
+		...PRODUCT_NAV_GROUPS.map((group) => group.title),
+		"Features",
+	]);
+	expect(PRODUCT_SHEET.at(-1)?.links.map((link) => link.href)).toEqual([
+		"/interfaces",
+	]);
 	expect(PRODUCT_SHEET[0]?.links.map((link) => link.label)).toEqual([
 		"Bot",
 		"Agent",

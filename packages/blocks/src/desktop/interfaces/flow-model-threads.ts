@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
@@ -82,4 +83,9 @@ export function firstNeedingYou(
 			return status === "attention" || status === "your-turn";
 		})
 		.sort(byUrgency)[0];
+}
+
+/** A connector chip's description: how many conversations wait on the user. */
+export function waitingOnYouLabel(count: number, tl: LiteralMessage): string {
+	return tl("{count} waiting on you", { count: String(count) });
 }

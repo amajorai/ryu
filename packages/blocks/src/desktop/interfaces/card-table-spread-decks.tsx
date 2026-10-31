@@ -77,7 +77,7 @@ function RestingDeck({
 				aria-expanded={empty ? undefined : false}
 				aria-label={
 					empty && !act
-						? dealLabel(deck)
+						? dealLabel(deck, tl)
 						: deckLabel(deck, act, empty ? "Deal a thread" : "Fan out the deck")
 				}
 				className="group/deck relative block w-full cursor-pointer rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -145,12 +145,12 @@ function RestingDeck({
 				</div>
 				{empty || card.width < LABEL_DEAL_MIN ? null : (
 					<Button
-						aria-label={dealLabel(deck)}
+						aria-label={dealLabel(deck, tl)}
 						className="-me-1 text-(--gk-ink-muted) hover:bg-(--gk-plate-sunk) hover:text-(--gk-ink)"
 						onClick={() => onDeal(deck.agent?.id)}
 						size="icon-sm"
 						tabIndex={-1}
-						title={dealLabel(deck)}
+						title={dealLabel(deck, tl)}
 						type="button"
 						variant="ghost"
 					>

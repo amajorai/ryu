@@ -12,6 +12,7 @@
 // Nothing here hits the network or React; it is unit-tested in
 // `friendly.test.ts`.
 
+import type { LiteralMessage } from "@ryu/i18n";
 import {
 	extractTokens,
 	friendlyModelName,
@@ -128,9 +129,9 @@ export function friendlyModelDisplay(raw: string): FriendlyModelDisplay {
 // ── Search ──────────────────────────────────────────────────────────────────
 
 /** Lowercased haystack for a model card: name, author, id, tags, token labels, size. */
-export function modelHaystack(card: ModelCard): string {
+export function modelHaystack(card: ModelCard, tl: LiteralMessage): string {
 	const tokens = extractTokens(card.name, card.tags).map((t) => t.label);
-	const size = parseModelSize(card.name);
+	const size = parseModelSize(card.name, tl);
 	return [
 		card.name,
 		friendlyModelName(card.name, card.tags),

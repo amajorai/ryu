@@ -10,6 +10,7 @@
  */
 
 import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	NativeSelect,
@@ -62,6 +63,7 @@ export function AgentGoalPanel({
 	disabled?: boolean;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const [stored, setStored] = useState<ScopeGuidance | null>(null);
 	const [goal, setGoal] = useState("");
 	const [brief, setBrief] = useState<BriefChoice>("inherit");
@@ -117,7 +119,7 @@ export function AgentGoalPanel({
 	}
 
 	function save() {
-		const warning = promptEditCacheWarning(changed, "bot");
+		const warning = promptEditCacheWarning(changed, "bot", tl);
 		if (warning) {
 			setConfirmation(warning);
 		}

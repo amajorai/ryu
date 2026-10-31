@@ -77,13 +77,14 @@ export function BookTile({
 	book: LibraryBook;
 	onOpen: (bookId: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	const percent = progressPercent(book);
 	const empty = book.chapters.length === 0;
 	return (
 		<li className="min-w-0">
 			<button
 				{...{ [LIBRARY_BOOK_ATTRIBUTE]: book.id }}
-				aria-label={`${book.title}. ${progressLabel(book)}`}
+				aria-label={`${book.title}. ${progressLabel(book, tl)}`}
 				className={cn("group block w-full rounded-[3px] text-left", FOCUS_RING)}
 				onClick={() => onOpen(book.id)}
 				type="button"

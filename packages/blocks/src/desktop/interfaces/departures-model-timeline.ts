@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
 import {
 	boardDate,
@@ -81,7 +82,11 @@ function routineRunTimeline(flight: Flight, now: number): TimelineStep[] {
  * a thread carries one timestamp (its last update), so earlier steps are
  * named without a time rather than given an invented one.
  */
-export function flightTimeline(flight: Flight, now: number): TimelineStep[] {
+export function flightTimeline(
+	flight: Flight,
+	now: number,
+	tl: LiteralMessage
+): TimelineStep[] {
 	if (flight.eventId !== null && flight.status !== "scheduled") {
 		return routineRunTimeline(flight, now);
 	}
@@ -120,7 +125,7 @@ export function flightTimeline(flight: Flight, now: number): TimelineStep[] {
 				},
 				{
 					detail: gate
-						? `Waiting for ${gate} · ${elapsed}`
+						? tl("Waiting for {gate} · {elapsed}", { elapsed, gate })
 						: "No gate assigned",
 					key: "departure",
 					label: "Departure",
@@ -132,7 +137,9 @@ export function flightTimeline(flight: Flight, now: number): TimelineStep[] {
 		case "in-flight":
 			return [
 				{
-					detail: gate ? `${gate} started the run` : "The run started",
+					detail: gate
+						? tl("{gate} started the run", { gate })
+						: "The run started",
 					key: "departed",
 					label: "Departed",
 					state: "done",
@@ -192,7 +199,7 @@ export function flightTimeline(flight: Flight, now: number): TimelineStep[] {
 					tone: "off",
 				},
 				{
-					detail: `Waiting on you · ${elapsed}`,
+					detail: tl("Waiting on you · {elapsed}", { elapsed }),
 					key: "gate",
 					label: "At gate",
 					state: "current",
@@ -224,7 +231,7 @@ export function flightTimeline(flight: Flight, now: number): TimelineStep[] {
 					tone: "off",
 				},
 				{
-					detail: `On the ground ${elapsed}`,
+					detail: tl("On the ground {elapsed}", { elapsed }),
 					key: "arrived",
 					label: "Arrived",
 					state: "done",

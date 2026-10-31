@@ -135,14 +135,14 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 			persist(
 				setContextBudget(target, next),
 				isCurrent,
-				"the context budget",
+				tl("Couldn't save the context budget"),
 				() => {
 					setBudget(previous);
 					setCustomOpen(previousCustomOpen);
 				}
 			);
 		},
-		[budget, customOpen, target, captureOwner]
+		[budget, customOpen, target, captureOwner, tl]
 	);
 
 	// Base UI's Select can emit `null` (a cleared selection); there is no "no
@@ -230,13 +230,13 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 		persist(
 			setContextOutputReserve(target, clamped),
 			isCurrent,
-			"the reply reserve",
+			tl("Couldn't save the reply reserve"),
 			() => {
 				setReserve(reserve);
 				setReserveText(String(reserve));
 			}
 		);
-	}, [reserve, reserveText, target, captureOwner]);
+	}, [reserve, reserveText, target, captureOwner, tl]);
 
 	const handleAutoCompact = useCallback(
 		(next: boolean) => {
@@ -249,11 +249,11 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 			persist(
 				setContextAutoCompact(target, next),
 				isCurrent,
-				"auto-compact",
+				tl("Couldn't save auto-compact"),
 				() => setAutoCompact(previous)
 			);
 		},
-		[autoCompact, target, captureOwner]
+		[autoCompact, target, captureOwner, tl]
 	);
 
 	const handleCompactOnCacheExpire = useCallback(
@@ -267,11 +267,11 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 			persist(
 				setContextCompactOnCacheExpire(target, next),
 				isCurrent,
-				"compact-on-cache-expire",
+				tl("Couldn't save compact-on-cache-expire"),
 				() => setCompactOnCacheExpire(previous)
 			);
 		},
-		[compactOnCacheExpire, target, captureOwner]
+		[compactOnCacheExpire, target, captureOwner, tl]
 	);
 
 	const handleCompactModel = useCallback(
@@ -285,11 +285,11 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 			persist(
 				setContextCompactConfig(target, next),
 				isCurrent,
-				"the summarizer model",
+				tl("Couldn't save the summarizer model"),
 				() => setCompactModel(previous)
 			);
 		},
-		[compactModel, target, captureOwner]
+		[compactModel, target, captureOwner, tl]
 	);
 
 	const off = budget.kind === "off";

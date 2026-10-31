@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -272,10 +274,12 @@ describe("moments model", () => {
 	});
 
 	test("words days, updates, names, and summaries the MercuryOS way", () => {
-		expect(momentsUpdatedLabel(new Date(NOW).toISOString(), NOW)).toBe(
+		const tl: LiteralMessage = (source, values) =>
+			formatMessage(source, values);
+		expect(momentsUpdatedLabel(new Date(NOW).toISOString(), NOW, tl)).toBe(
 			"Updated just now"
 		);
-		expect(momentsUpdatedLabel(ago(18), NOW)).toBe("Updated 18 min ago");
+		expect(momentsUpdatedLabel(ago(18), NOW, tl)).toBe("Updated 18 min ago");
 		expect(momentsNameList(["Ada", "Grace", "Linus"])).toBe(
 			"Ada, Grace, and Linus"
 		);
@@ -285,7 +289,9 @@ describe("moments model", () => {
 		const team = buildMomentsFlows(SNAPSHOT).find(
 			(flow) => flow.kind === "team"
 		);
-		expect(team && momentsFlowSummary(team)).toBe("1 item with Ada and Linus");
+		expect(team && momentsFlowSummary(team, tl)).toBe(
+			"1 item with Ada and Linus"
+		);
 	});
 
 	test("an opened thread lands in needs-you while it waits, else its home flow", () => {

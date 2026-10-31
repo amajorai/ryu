@@ -303,7 +303,7 @@ export function TicketsSidebar({
 				</SidebarSection>
 			) : null}
 			<SidebarSection className="border-b-0" title="Activity">
-				<ActivityList items={ticketActivity(ticket, now)} now={now} />
+				<ActivityList items={ticketActivity(ticket, now, tl)} now={now} />
 			</SidebarSection>
 		</aside>
 	);

@@ -278,7 +278,7 @@ function ThreadBar({
 	const tl = useLiteralMessages();
 	const stoppedLabel = stopped === "failed" ? "Run failed" : "Run interrupted";
 	const repliesLabel = replies === 1 ? "1 reply" : `${replies} replies`;
-	const last = lastReplyPhrase(updatedAt, now);
+	const last = lastReplyPhrase(updatedAt, tl, now);
 	const workingLabel = workerName
 		? tl("{workerName} is working…", { workerName })
 		: "Working…";

@@ -4,8 +4,8 @@ import {
 } from "@ryu/app-host/ExtensionHost";
 import {
 	capabilitiesFromGrants,
-	validatePluginRoute,
 	type HostServices,
+	validatePluginRoute,
 } from "@ryu/app-host/rpc";
 import { htmlCompanionSrcdoc } from "@ryu/app-host/third-party-plugin";
 import { createElement } from "react";

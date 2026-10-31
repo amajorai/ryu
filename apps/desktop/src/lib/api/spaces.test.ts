@@ -34,6 +34,8 @@ import { z } from "zod";
 import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	describeRetrievalModeChange,
 	FILE_DOCUMENT_KIND,
@@ -52,6 +54,9 @@ import {
 	toFileIndexState,
 	toRetrievalMode,
 } from "./spaces.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 // src/lib/api → src/lib → src → apps/desktop → apps → repo root.
 const REPO_ROOT = join(import.meta.dir, "../../../../..");
@@ -876,7 +881,8 @@ function change(partial: Partial<RetrievalModeChange>): RetrievalModeChange {
 describe("describeRetrievalModeChange", () => {
 	it("reports what the graph rebuild covered", () => {
 		const text = describeRetrievalModeChange(
-			change({ chunksScanned: 12, graphNodes: 30, graphEdges: 45 })
+			change({ chunksScanned: 12, graphNodes: 30, graphEdges: 45 }),
+			tl
 		);
 		expect(text).toContain("30 entities");
 		expect(text).toContain("45 connections");
@@ -885,7 +891,8 @@ describe("describeRetrievalModeChange", () => {
 
 	it("singularizes counts of one", () => {
 		const text = describeRetrievalModeChange(
-			change({ chunksScanned: 1, graphNodes: 1, graphEdges: 1 })
+			change({ chunksScanned: 1, graphNodes: 1, graphEdges: 1 }),
+			tl
 		);
 		expect(text).toContain("1 entity");
 		expect(text).toContain("1 connection");
@@ -896,14 +903,15 @@ describe("describeRetrievalModeChange", () => {
 	it("does not read an empty space as a failed rebuild", () => {
 		// "Mapped 0 entities across 0 chunks" is a correct outcome for a space with
 		// no documents, but it reads as breakage. This case gets its own sentence.
-		const text = describeRetrievalModeChange(change({ chunksScanned: 0 }));
+		const text = describeRetrievalModeChange(change({ chunksScanned: 0 }), tl);
 		expect(text).toContain("no documents yet");
 		expect(text).not.toContain("0 entities");
 	});
 
 	it("says the graph was discarded when switching back to vector", () => {
 		const text = describeRetrievalModeChange(
-			change({ mode: "vector", previous: "graph", graphRebuilt: false })
+			change({ mode: "vector", previous: "graph", graphRebuilt: false }),
+			tl
 		);
 		expect(text).toContain("discarded");
 		expect(text).toContain("Vector retrieval is on");
@@ -917,7 +925,7 @@ describe("describeRetrievalModeChange", () => {
 			change({ chunksScanned: 0 }),
 			change({ mode: "vector", graphRebuilt: false }),
 		]) {
-			expect(describeRetrievalModeChange(outcome)).not.toMatch(
+			expect(describeRetrievalModeChange(outcome, tl)).not.toMatch(
 				/re-?embedding|will be re-?embedded/i
 			);
 		}

@@ -107,6 +107,9 @@ interface OrgPolicies {
  * through the same client and step-up prompt as Guardrail policies.
  */
 function useOrgPolicies(): OrgPolicies {
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const signedIn = hasOrgAuth();
 	const orgId = useActiveOrgId();
 	const [policies, setPolicies] = useState<PolicyView[]>([]);
@@ -118,7 +121,12 @@ function useOrgPolicies(): OrgPolicies {
 	const stepUp = useStepUp();
 
 	const baseClient = useMemo(
-		() => (orgId ? desktopPolicyWorkspaceClient(SESSION, orgId) : null),
+		() =>
+			orgId
+				? desktopPolicyWorkspaceClient(SESSION, orgId, (source, values) =>
+						tlRef.current(source, values)
+					)
+				: null,
 		[orgId]
 	);
 
@@ -159,7 +167,7 @@ function useOrgPolicies(): OrgPolicies {
 				}
 			})
 			.catch(() => undefined);
-		loadPolicyScopeOptions(SESSION, orgId)
+		loadPolicyScopeOptions(SESSION, orgId, tlRef.current)
 			.then((next) => {
 				if (!cancelled) {
 					setScopeOptions(next);
@@ -225,6 +233,8 @@ export function TrafficMapSection({
 	const assignedPolicies = orgPolicies.counts;
 	const signedIn = hasOrgAuth();
 	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 
 	useEffect(() => {
 		if (!reachable) {
@@ -242,14 +252,17 @@ export function TrafficMapSection({
 	const providerHealth = status?.metrics?.providerHealth;
 	const topology = useMemo(
 		() =>
-			buildLocalTopology({
-				assignedPolicies,
-				gatewayReachable: reachable,
-				pipelineStages,
-				providerHealth,
-				providers: health?.providers ?? [],
-				signedIn,
-			}),
+			buildLocalTopology(
+				{
+					assignedPolicies,
+					gatewayReachable: reachable,
+					pipelineStages,
+					providerHealth,
+					providers: health?.providers ?? [],
+					signedIn,
+				},
+				tl
+			),
 		[
 			assignedPolicies,
 			health?.providers,
@@ -257,6 +270,7 @@ export function TrafficMapSection({
 			providerHealth,
 			reachable,
 			signedIn,
+			tl,
 		]
 	);
 	const indexRef = useRef(indexTopology(topology));
@@ -281,7 +295,14 @@ export function TrafficMapSection({
 			}
 			return followGatewayTraffic(
 				(onEvent, onError, onEnd, onOpen) =>
-					subscribeGatewayTraffic(target, onEvent, onError, onEnd, onOpen),
+					subscribeGatewayTraffic(
+						target,
+						tlRef.current,
+						onEvent,
+						onError,
+						onEnd,
+						onOpen
+					),
 				() => indexRef.current,
 				onPulse,
 				setFeed

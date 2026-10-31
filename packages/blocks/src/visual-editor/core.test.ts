@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import { VISUAL_BLOCKS } from "./blocks.ts";
 import { canvasDocument } from "./canvas.ts";
 import { buildVisualEditPrompt, parseVisualEditResponse } from "./chat.ts";
@@ -25,6 +26,10 @@ afterAll(async () => {
 });
 
 const parser = new DOMParser();
+const tl = (
+	source: string,
+	values?: Parameters<typeof formatMessage>[1]
+): string => formatMessage(source, values);
 const parse = (html: string) => parser.parseFromString(html, "text/html");
 
 const SITE =
@@ -71,7 +76,8 @@ describe("visual editor core", () => {
 				{ kind: "duplicate", nodeId: "n5" },
 				{ kind: "move", nodeId: "n7", parentId: "n4", index: 0 },
 			],
-			parser
+			parser,
+			tl
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) {
@@ -101,7 +107,8 @@ describe("visual editor core", () => {
 				{ kind: "setText", nodeId: "n2", text: "Changed" },
 				{ kind: "setText", nodeId: "n1", text: "would flatten the header" },
 			],
-			parser
+			parser,
+			tl
 		);
 		expect(result).toEqual({
 			ok: false,
@@ -122,7 +129,8 @@ describe("visual editor core", () => {
 					html: '<div onclick="alert(1)"><a href="javascript:alert(1)">x</a><script>alert(1)</script><iframe src="https://x"></iframe></div>',
 				},
 			],
-			parser
+			parser,
+			tl
 		);
 		expect(insert.ok).toBe(true);
 		if (insert.ok) {
@@ -142,7 +150,8 @@ describe("visual editor core", () => {
 						value: "x()",
 					},
 				],
-				parser
+				parser,
+				tl
 			).ok
 		).toBe(false);
 		expect(
@@ -156,7 +165,8 @@ describe("visual editor core", () => {
 						value: "n9",
 					},
 				],
-				parser
+				parser,
+				tl
 			).ok
 		).toBe(false);
 		expect(
@@ -170,21 +180,23 @@ describe("visual editor core", () => {
 						value: "url(https://tracker.example/p.gif)",
 					},
 				],
-				parser
+				parser,
+				tl
 			).ok
 		).toBe(false);
 		expect(
-			editHtml(prepared, [{ kind: "remove", nodeId: "root" }], parser).ok
+			editHtml(prepared, [{ kind: "remove", nodeId: "root" }], parser, tl).ok
 		).toBe(false);
 		expect(
 			editHtml(
 				prepared,
 				[{ kind: "move", nodeId: "n4", parentId: "n5", index: 0 }],
-				parser
+				parser,
+				tl
 			).ok
 		).toBe(false);
 		expect(
-			editHtml(prepared, [{ kind: "remove", nodeId: "#evil" }], parser).ok
+			editHtml(prepared, [{ kind: "remove", nodeId: "#evil" }], parser, tl).ok
 		).toBe(false);
 	});
 
@@ -200,7 +212,8 @@ describe("visual editor core", () => {
 					html: '<div><a href="java&#9;script:alert(1)">a</a><a href="&#1;javascript:alert(2)">b</a><svg><a><set attributeName="href" to="javascript:alert(3)"></set><animate attributeName="href" values="javascript:alert(4)"></animate></a></svg></div>',
 				},
 			],
-			parser
+			parser,
+			tl
 		);
 		expect(insert.ok).toBe(true);
 		if (insert.ok) {
@@ -221,7 +234,8 @@ describe("visual editor core", () => {
 						value: "java\tscript:alert(1)",
 					},
 				],
-				parser
+				parser,
+				tl
 			).ok
 		).toBe(false);
 		expect(
@@ -235,7 +249,8 @@ describe("visual editor core", () => {
 						value: "https://example.com/pricing",
 					},
 				],
-				parser
+				parser,
+				tl
 			).ok
 		).toBe(true);
 	});
@@ -276,7 +291,8 @@ describe("visual editor core", () => {
 			const result = editHtml(
 				prepared,
 				[{ kind: "insertHtml", parentId: "n4", index: 0, html: block.html }],
-				parser
+				parser,
+				tl
 			);
 			expect(result.ok).toBe(true);
 		}
@@ -312,7 +328,8 @@ describe("visual editor chat", () => {
 
 	test("parses fenced replies and rejects invalid ones", () => {
 		const good = parseVisualEditResponse(
-			'```json\n{"operations":[{"kind":"setStyle","nodeId":"n3","property":"font-weight","value":"700"}],"summary":"Bolded the intro."}\n```'
+			'```json\n{"operations":[{"kind":"setStyle","nodeId":"n3","property":"font-weight","value":"700"}],"summary":"Bolded the intro."}\n```',
+			tl
 		);
 		expect(good).toEqual({
 			ok: true,
@@ -326,13 +343,15 @@ describe("visual editor chat", () => {
 				},
 			],
 		});
-		expect(parseVisualEditResponse("Sure! I made it bold.").ok).toBe(false);
+		expect(parseVisualEditResponse("Sure! I made it bold.", tl).ok).toBe(false);
 		expect(
-			parseVisualEditResponse('{"operations":[{"kind":"eval","code":"x"}]}').ok
+			parseVisualEditResponse('{"operations":[{"kind":"eval","code":"x"}]}', tl)
+				.ok
 		).toBe(false);
 		expect(
 			parseVisualEditResponse(
-				'{"operations":[],"summary":"That needs a server."}'
+				'{"operations":[],"summary":"That needs a server."}',
+				tl
 			)
 		).toEqual({
 			ok: false,

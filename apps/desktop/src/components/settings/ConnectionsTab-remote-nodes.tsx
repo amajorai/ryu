@@ -228,7 +228,7 @@ export function RemoteNodesSection() {
 										</div>
 									}
 									description={
-										<span className="type-caption font-mono">{node.url}</span>
+										<span className="font-mono text-xs">{node.url}</span>
 									}
 									key={node.name}
 									title={

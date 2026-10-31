@@ -4,6 +4,7 @@ import {
 	OnboardingActions,
 	OnboardingCta,
 } from "@ryu/blocks/desktop/onboarding-shell.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
@@ -57,6 +58,7 @@ export function NodePersonalizationStep({
 	initialSetupKind = null,
 	onContinue,
 }: NodePersonalizationStepProps) {
+	const tl = useLiteralMessages();
 	const [setupKind, setSetupKind] = useState<NodeSetupKind | null>(
 		initialSetupKind
 	);
@@ -90,7 +92,11 @@ export function NodePersonalizationStep({
 		// prompt carries is a cache miss for them: confirm first.
 		const warning =
 			setupKind === "personal"
-				? personalizationCacheWarning(initialPersonalization, personalization)
+				? personalizationCacheWarning(
+						initialPersonalization,
+						personalization,
+						tl
+					)
 				: null;
 		if (warning) {
 			setConfirmation(warning);

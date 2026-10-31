@@ -42,11 +42,10 @@ import {
 	safeMarkdownDestination,
 } from "./markdown-content.ts";
 import { MermaidBlock } from "./markdown-mermaid.tsx";
+import { MarkdownResponseImages } from "./markdown-response-images.ts";
 import { ExpandableMarkdownTable } from "./markdown-table.tsx";
 import { MentionToken } from "./mention-token.tsx";
 import type { MentionItem } from "./types.ts";
-
-export const MarkdownResponseImages = createContext(true);
 
 function MarkdownImage({
 	alt,

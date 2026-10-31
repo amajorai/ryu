@@ -31,7 +31,7 @@ export function FitInstallNotice({
 }) {
 	const tl = useLiteralMessages();
 	const blocking = blockingProp ?? isBlockedFit(fit);
-	const reason = blocking ? fitBlockReason(fit, label, device) : null;
+	const reason = blocking ? fitBlockReason(fit, label, device, tl) : null;
 	if (reason) {
 		return (
 			<p

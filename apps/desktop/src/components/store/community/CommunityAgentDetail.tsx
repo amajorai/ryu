@@ -163,7 +163,7 @@ export function CommunityAgentDetail({
 						icon={Alert01Icon}
 					/>
 					<p className="text-muted-foreground">
-						{communityAgentNotice(identityMode)}
+						{communityAgentNotice(tl, identityMode)}
 					</p>
 				</div>
 			}

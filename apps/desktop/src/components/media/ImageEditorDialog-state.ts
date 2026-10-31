@@ -6,6 +6,7 @@ import {
 	type BrowserImageSegment,
 	isValidBrowserModelId,
 } from "@ryu/browser-local-ai";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	DEFAULT_IMAGE_RESIZE_ENGINE,
@@ -45,6 +46,10 @@ export function useImageEditorState({
 	open: boolean;
 	runtime: BrowserImageEngine;
 }) {
+	const tl = useLiteralMessages();
+	// Read through a ref so a locale change does not reload the image.
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
 	const workingCanvasRef = useRef<HTMLCanvasElement | null>(null);
 	const originalBlobRef = useRef<Blob | null>(null);
@@ -135,7 +140,10 @@ export function useImageEditorState({
 		setOperation(null);
 		setModels(getImageEditorModelPreferences());
 		fetchEditableImage(image.url, controller.signal)
-			.then(async (blob) => ({ blob, canvas: await blobToCanvas(blob) }))
+			.then(async (blob) => ({
+				blob,
+				canvas: await blobToCanvas(tlRef.current, blob),
+			}))
 			.then(({ blob, canvas }) => {
 				if (cancelled) {
 					return;

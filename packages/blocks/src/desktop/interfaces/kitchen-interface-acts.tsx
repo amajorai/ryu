@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useMemo, useRef } from "react";
 import {
 	actOverlays,
@@ -51,6 +52,7 @@ export function useKitchenActLayer({
 	snapshot: InterfaceRendererProps<unknown>["snapshot"];
 	stageSize: { height: number; width: number } | null;
 }) {
+	const tl = useLiteralMessages();
 	const fallbackRef = useRef<HTMLHeadingElement>(null);
 	const { acts, nowMs, privacy, unowned } = actsView;
 	const actsOn = actsView.enabled;
@@ -115,6 +117,7 @@ export function useKitchenActLayer({
 						shown,
 						slab: SLAB,
 						slots: slots.slots,
+						tl,
 					})
 				: [],
 		[
@@ -129,6 +132,7 @@ export function useKitchenActLayer({
 			service,
 			shown,
 			slots.slots,
+			tl,
 		]
 	);
 	const actScene: KitchenActScene | null = actsOn

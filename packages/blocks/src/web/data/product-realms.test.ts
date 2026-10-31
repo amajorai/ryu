@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { productHref } from "../products-overview.tsx";
+import { productHref } from "../product-href.ts";
 import {
 	PRODUCT_NAV_GROUPS,
 	PRODUCT_REALMS,

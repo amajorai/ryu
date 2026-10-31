@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfaceSnapshot,
@@ -37,6 +39,8 @@ import {
 	wikiThreadArticle,
 } from "./wiki-model.ts";
 
+const passthrough: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 const MINUTE = 60_000;
 const BASE = Date.parse("2026-10-12T12:00:00Z");
 const ago = (minutes: number) =>
@@ -401,20 +405,20 @@ describe("wiki model", () => {
 	});
 
 	test("suggests title prefixes and searches bodies", () => {
-		expect(wikiSuggest(SNAPSHOT, "re").map((entry) => entry.title)).toEqual([
-			"Release notes",
-		]);
+		expect(
+			wikiSuggest(SNAPSHOT, "re", passthrough).map((entry) => entry.title)
+		).toEqual(["Release notes"]);
 		// "crash" starts a title word; "ash" does not.
-		expect(wikiSuggest(SNAPSHOT, "crash").map((entry) => entry.id)).toEqual([
-			"thread-triage",
-		]);
-		expect(wikiSuggest(SNAPSHOT, "ash")).toEqual([]);
-		const hits = wikiSearch(SNAPSHOT, "crash");
+		expect(
+			wikiSuggest(SNAPSHOT, "crash", passthrough).map((entry) => entry.id)
+		).toEqual(["thread-triage"]);
+		expect(wikiSuggest(SNAPSHOT, "ash", passthrough)).toEqual([]);
+		const hits = wikiSearch(SNAPSHOT, "crash", passthrough);
 		expect(hits[0]?.entry.id).toBe("thread-triage");
-		expect(wikiSearch(SNAPSHOT, "bugs").map((hit) => hit.entry.id)).toEqual([
-			"agent-grace",
-		]);
-		expect(wikiSearch(SNAPSHOT, "   ")).toEqual([]);
+		expect(
+			wikiSearch(SNAPSHOT, "bugs", passthrough).map((hit) => hit.entry.id)
+		).toEqual(["agent-grace"]);
+		expect(wikiSearch(SNAPSHOT, "   ", passthrough)).toEqual([]);
 	});
 
 	test("marks matches and excerpts around them", () => {
@@ -462,7 +466,9 @@ describe("wiki model", () => {
 	});
 
 	test("groups category pages by initial and changes by day", () => {
-		const letters = categoryLetters(indexEntries(SNAPSHOT, "agents"));
+		const letters = categoryLetters(
+			indexEntries(SNAPSHOT, "agents", passthrough)
+		);
 		expect(letters.map((group) => group.letter)).toEqual(["A", "G", "L"]);
 		const days = changesByDay(threadRevisions(SNAPSHOT.threads));
 		expect(days.at(-1)?.revisions.map((row) => row.at)).toEqual([ago(60 * 30)]);
@@ -494,16 +500,36 @@ describe("wiki model", () => {
 
 	test("names pages the way the reference does", () => {
 		expect(
-			wikiPageHeading(SNAPSHOT, { id: "agent-ada", kind: "agent" }, "talk")
+			wikiPageHeading(
+				SNAPSHOT,
+				{ id: "agent-ada", kind: "agent" },
+				"talk",
+				passthrough
+			)
 		).toBe("Talk:Ada");
 		expect(
-			wikiPageHeading(SNAPSHOT, { id: "team-docs", kind: "group" }, "history")
+			wikiPageHeading(
+				SNAPSHOT,
+				{ id: "team-docs", kind: "group" },
+				"history",
+				passthrough
+			)
 		).toBe("Docs Crew: Revision history");
 		expect(
-			wikiPageHeading(SNAPSHOT, { index: "teams", kind: "index" }, "article")
+			wikiPageHeading(
+				SNAPSHOT,
+				{ index: "teams", kind: "index" },
+				"article",
+				passthrough
+			)
 		).toBe("Category:Teams");
 		expect(
-			wikiPageHeading(SNAPSHOT, { index: "threads", kind: "index" }, "talk")
+			wikiPageHeading(
+				SNAPSHOT,
+				{ index: "threads", kind: "index" },
+				"talk",
+				passthrough
+			)
 		).toBe("List of threads");
 	});
 });

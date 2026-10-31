@@ -3,8 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-	DrawesomeSketchDialog,
 	type DrawesomeSketchAttachment,
+	DrawesomeSketchDialog,
 } from "../../src/components/chat/DrawesomeSketchDialog.tsx";
 import { SkillDistributionProvider } from "../../src/components/skills/SkillDistributionProvider.tsx";
 import { TabsContext } from "../../src/contexts/TabsContext.tsx";
@@ -128,18 +128,18 @@ function DialogHarness() {
 	const [open, setOpen] = useState(false);
 	return (
 		<main>
-			<button type="button" onClick={() => setOpen(true)}>
+			<button onClick={() => setOpen(true)} type="button">
 				Open actual sketch dialog
 			</button>
 			<output data-testid="attachment-count">{attachments.length}</output>
 			<DrawesomeSketchDialog
 				companion={companion}
-				sourceImage={sourceImage}
-				open={open}
-				onOpenChange={setOpen}
 				onAttach={(attachment) => {
 					attachments.push(structuredClone(attachment));
 				}}
+				onOpenChange={setOpen}
+				open={open}
+				sourceImage={sourceImage}
 			/>
 		</main>
 	);

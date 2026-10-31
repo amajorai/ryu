@@ -1,19 +1,13 @@
 // apps/desktop/src/lib/composer/attachments.ts
 //
-// The ONE composer attachment seam.
-//
-// Every composer in the desktop — the chat page, the Ask-Ryu dock / builder panes
-// (`useComposerSlot`), and the launchpad empty state — used to carry its own
-// `addImages` that did the same two things: filter `files` to `image/*` and drop
-// the rest. Silently. A PDF dragged into chat produced no chip, no toast, no error,
-// and no request; the same drop was filtered a second time server-side. Three
-// copies of one bug.
-//
-// This module is that logic, once. A surface wires `stageComposerFiles` into its
-// picker/paste/drop handlers and renders the resulting `AttachedImage[]`; the rules
-// for what is accepted, how a document becomes model-readable text, and what the
-// user is told when it cannot, live here and nowhere else.
+// The ONE composer attachment seam. Every composer (the chat page, the Ask-Ryu
+// dock / builder panes via `useComposerSlot`, the launchpad empty state) once
+// kept `image/*` and silently dropped the rest: three copies of one bug. Surfaces
+// wire `stageComposerFiles` into picker/paste/drop handlers and render the
+// resulting `AttachedImage[]`; what is accepted, how a document becomes
+// model-readable text, and what the user is told when it cannot, live here only.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { AttachedImage } from "@/components/agent-elements/input-bar.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -283,10 +277,15 @@ export function stageImageAndTextFiles(
 	target: ApiTarget,
 	files: File[],
 	add: (item: StagedComposerFile) => void,
-	onError: (message: string) => void
+	onError: (message: string) => void,
+	tl: LiteralMessage
 ): string[] {
 	const unsupported: string[] = [];
 	for (const file of files) {
+		const readError = (err: unknown) =>
+			err instanceof Error
+				? err.message
+				: tl("Could not read {name}", { name: file.name });
 		if (file.type.startsWith("image/")) {
 			void stageImageUpload(target, file)
 				.then(({ dataUrl, upload }) =>
@@ -298,19 +297,11 @@ export function stageImageAndTextFiles(
 						size: file.size,
 					})
 				)
-				.catch((err) =>
-					onError(
-						err instanceof Error ? err.message : `Could not read ${file.name}`
-					)
-				);
+				.catch((err) => onError(readError(err)));
 		} else if (isTextAttachmentFile(file)) {
 			void readTextAttachment(file)
 				.then(add)
-				.catch((err) =>
-					onError(
-						err instanceof Error ? err.message : `Could not read ${file.name}`
-					)
-				);
+				.catch((err) => onError(readError(err)));
 		} else {
 			unsupported.push(file.name);
 		}
@@ -347,13 +338,14 @@ function patch(
 export function stageComposerFiles(
 	target: ApiTarget,
 	files: File[],
-	update: Update
+	update: Update,
+	tl: LiteralMessage
 ): void {
 	for (const file of files) {
 		if (file.type.startsWith("image/")) {
 			stageImage(target, file, update);
 		} else {
-			stageDocument(target, file, update);
+			stageDocument(target, file, update, tl);
 		}
 	}
 }
@@ -394,7 +386,12 @@ function stageImage(target: ApiTarget, file: File, update: Update): void {
 		});
 }
 
-function stageDocument(target: ApiTarget, file: File, update: Update): void {
+function stageDocument(
+	target: ApiTarget,
+	file: File,
+	update: Update,
+	tl: LiteralMessage
+): void {
 	const id = nextId("doc");
 	if (file.size > MAX_PARSE_BYTES) {
 		// Refused before the upload, not after: the route's body limit answers an
@@ -408,7 +405,9 @@ function stageDocument(target: ApiTarget, file: File, update: Update): void {
 				mimeType: file.type || "application/octet-stream",
 				size: file.size,
 				state: "error",
-				error: `Too large to read (max ${Math.floor(MAX_PARSE_BYTES / (1024 * 1024))} MB)`,
+				error: tl("Too large to read (max {maxMegabytes} MB)", {
+					maxMegabytes: Math.floor(MAX_PARSE_BYTES / (1024 * 1024)),
+				}),
 			},
 		]);
 		return;
@@ -443,7 +442,9 @@ function stageDocument(target: ApiTarget, file: File, update: Update): void {
 				error:
 					result.error ??
 					(result.missingDependencies?.length
-						? `Parser is missing ${result.missingDependencies.join(", ")}`
+						? tl("Parser is missing {dependencies}", {
+								dependencies: result.missingDependencies.join(", "),
+							})
 						: "Could not read this file"),
 			});
 		})

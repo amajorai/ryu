@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os";
 import path from "node:path";
+
 const desktopDirectory = path.resolve(import.meta.dirname, "..");
 const hostBuildDirectory = path.join(
 	tmpdir(),

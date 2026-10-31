@@ -51,7 +51,9 @@ export function useOwnedChatMessages<T>(
 ) {
 	return useCallback(
 		(next: T) => {
-			if (isCurrent()) setter(next);
+			if (isCurrent()) {
+				setter(next);
+			}
 		},
 		[isCurrent, setter]
 	);

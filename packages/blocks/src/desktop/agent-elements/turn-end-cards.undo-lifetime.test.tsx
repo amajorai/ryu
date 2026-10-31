@@ -3,10 +3,13 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
-	FileEditUndoPlan,
 	FileEditsTurnEndCard,
+	FileEditUndoPlan,
 } from "./turn-end-cards.ts";
-if (typeof document === "undefined") GlobalRegistrator.register();
+
+if (typeof document === "undefined") {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Reflect.set(Element.prototype, "getAnimations", () => []);
 const { TurnEndCards } = await import("./turn-end-cards.tsx");
@@ -42,7 +45,9 @@ function button(label: string, scope: ParentNode = document) {
 	const node = Array.from(
 		scope.querySelectorAll<HTMLButtonElement>("button")
 	).find((b) => b.textContent?.trim() === label);
-	if (!node) throw new Error(`Actual visible Undo control missing: ${label}`);
+	if (!node) {
+		throw new Error(`Actual visible Undo control missing: ${label}`);
+	}
 	return node;
 }
 async function click(label: string) {
@@ -52,7 +57,7 @@ async function start() {
 	await click("Undo");
 	await click("Undo changes");
 }
-for (const transition of ["B", "ABA"] as const)
+for (const transition of ["B", "ABA"] as const) {
 	for (const accepted of [true, false]) {
 		test(`held old Undo ${accepted ? "accepted" : "refused"} cannot publish completion/error into ${transition} same-id turn`, async () => {
 			let settle: (() => void) | undefined;
@@ -77,7 +82,9 @@ for (const transition of ["B", "ABA"] as const)
 				// Fresh callback owner returned to A; the first A must remain retired.
 				await render(async () => {});
 			}
-			if (!settle) throw new Error("Actual old operation gate is absent");
+			if (!settle) {
+				throw new Error("Actual old operation gate is absent");
+			}
 			await act(async () => {
 				settle?.();
 				await gate.catch(() => {});
@@ -89,6 +96,7 @@ for (const transition of ["B", "ABA"] as const)
 			expect(calls).toEqual([plan]);
 		});
 	}
+}
 test("current Undo acknowledgment marks the exact current turn completed", async () => {
 	const calls: FileEditUndoPlan[] = [];
 	await render(async (p) => {
@@ -103,8 +111,9 @@ test("current refusal preserves exact error and explicit retry; pending blocks d
 	const calls: FileEditUndoPlan[] = [];
 	await render(async (p) => {
 		calls.push(p);
-		if (calls.length === 1)
+		if (calls.length === 1) {
 			throw new Error("Current edit changed; no files changed");
+		}
 	});
 	await start();
 	expect(document.querySelector('[role="alert"]')?.textContent).toBe(
@@ -145,7 +154,9 @@ test("same-owner rerender with refreshed plan objects retains pending authority 
 	expect(button("Undoing…").disabled).toBe(true);
 	await click("Undoing…");
 	expect(calls).toEqual([plan]);
-	if (!release) throw new Error("Actual pending current Undo is absent");
+	if (!release) {
+		throw new Error("Actual pending current Undo is absent");
+	}
 	await act(async () => {
 		release?.();
 		await gate;
@@ -163,7 +174,9 @@ test("physically unmounted turn cannot publish a late refused Undo error into a 
 	await start();
 	await act(async () => root.render(null));
 	await render(async () => {});
-	if (!reject) throw new Error("Actual pending detached Undo is absent");
+	if (!reject) {
+		throw new Error("Actual pending detached Undo is absent");
+	}
 	await act(async () => {
 		reject?.();
 		await gate.catch(() => {});

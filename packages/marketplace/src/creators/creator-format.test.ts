@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
 	creatorHandle,
 	creatorKindSummary,
@@ -8,6 +9,8 @@ import {
 	filterListingsByKind,
 	pluralCount,
 } from "./creator-format.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 describe("creator handles", () => {
 	it("prefers the slug and falls back to the id", () => {
@@ -32,11 +35,11 @@ describe("creatorKindSummary", () => {
 
 describe("creatorSinceLabel", () => {
 	it("formats a month and year, and rejects bad input", () => {
-		expect(creatorSinceLabel("2026-03-15T00:00:00Z", "en-US")).toBe(
+		expect(creatorSinceLabel(tl, "2026-03-15T00:00:00Z", "en-US")).toBe(
 			"Publishing since Mar 2026"
 		);
-		expect(creatorSinceLabel(null)).toBeNull();
-		expect(creatorSinceLabel("not a date")).toBeNull();
+		expect(creatorSinceLabel(tl, null)).toBeNull();
+		expect(creatorSinceLabel(tl, "not a date")).toBeNull();
 	});
 });
 

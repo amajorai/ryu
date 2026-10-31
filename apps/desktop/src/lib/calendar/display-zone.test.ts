@@ -1,4 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 
 // The machine clock is New York. Every case below picks a display zone whose
 // civil days differ from New York's, so a day filed, windowed or labelled with
@@ -38,6 +40,8 @@ const { buildCalendarEvents, eventDayKey, groupEventsByDay } = await import(
 );
 const { viewDays, viewRange } = await import("@/src/lib/calendar/views.ts");
 type ScheduledJob = import("@/src/lib/api/schedules.ts").ScheduledJob;
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 afterEach(() => {
 	resetTimezone();
@@ -185,7 +189,8 @@ test("recorded runs are bucketed by the display zone's day, not the machine's", 
 			}),
 		],
 		new Date("2026-06-09T00:00:00.000Z"),
-		new Date("2026-06-13T00:00:00.000Z")
+		new Date("2026-06-13T00:00:00.000Z"),
+		tl
 	);
 	const byDay = groupEventsByDay(events);
 	// 10:00Z is Tokyo 19:00 on June 10; 22:30Z is Tokyo 07:30 on June 11.
@@ -237,7 +242,7 @@ test("a sub-hourly interval collapses to one count per display-zone day, with th
 	// Tokyo's June 11 and 12 begin at 15:00Z.
 	const start = new Date("2026-06-10T15:00:00.000Z");
 	const end = new Date("2026-06-12T15:00:00.000Z");
-	const events = buildCalendarEvents([every30], start, end);
+	const events = buildCalendarEvents([every30], start, end, tl);
 	expect(events.map((e) => e.aggregateCount)).toEqual([48, 48]);
 	expect(events.map((e) => iso(e.start.getTime()))).toEqual([
 		"2026-06-11T03:00:00.000Z",
@@ -258,7 +263,8 @@ test("a sub-hourly interval collapses to one count per display-zone day, with th
 			}),
 		],
 		new Date("2026-03-28T23:00:00.000Z"),
-		new Date("2026-03-29T22:00:00.000Z")
+		new Date("2026-03-29T22:00:00.000Z"),
+		tl
 	);
 	expect(spring.map((e) => e.aggregateCount)).toEqual([46]);
 	expect(displayDayKey(spring[0]?.start as Date)).toBe("2026-2-29");
@@ -271,7 +277,8 @@ test("a busy cron collapses to one count per display-zone day too", () => {
 	const events = buildCalendarEvents(
 		[busy],
 		new Date("2026-06-10T15:00:00.000Z"),
-		new Date("2026-06-12T15:00:00.000Z")
+		new Date("2026-06-12T15:00:00.000Z"),
+		tl
 	);
 	expect(events.map((e) => e.aggregateCount)).toEqual([12, 12]);
 	expect([...groupEventsByDay(events).keys()]).toEqual([

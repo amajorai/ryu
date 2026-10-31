@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 import { type ApiTarget, request } from "@/src/lib/api/client.ts";
@@ -47,13 +48,19 @@ async function withFleetRequestTimeout<T>(
 	}
 }
 
-export function fleetNodeNameError(value: string): string | null {
+export function fleetNodeNameError(
+	value: string,
+	tl: LiteralMessage
+): string | null {
 	const trimmed = value.trim();
 	if (!trimmed) {
 		return "Enter a name for this node.";
 	}
 	if (trimmed.length > FLEET_NODE_NAME_MAX_LENGTH) {
-		return `Node name must be ${FLEET_NODE_NAME_MAX_LENGTH} characters or fewer.`;
+		return tl(
+			"Node name must be {fleetNodeNameMaxLength} characters or fewer.",
+			{ fleetNodeNameMaxLength: FLEET_NODE_NAME_MAX_LENGTH }
+		);
 	}
 	return null;
 }
@@ -202,9 +209,10 @@ export async function bindSelfHostedNodeToOrganization(input: {
 	name: string;
 	organizationId: string;
 	target: ApiTarget;
+	tl: LiteralMessage;
 }): Promise<Extract<FleetBindingStatus, { enrolled: true }>> {
 	const name = input.name.trim();
-	const nameError = fleetNodeNameError(input.name);
+	const nameError = fleetNodeNameError(input.name, input.tl);
 	if (nameError) {
 		throw new Error(nameError);
 	}

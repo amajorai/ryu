@@ -164,7 +164,7 @@ export default function MarketplaceStrip({
 				const requiredFailures = result.failures.filter(
 					({ member }) => member.required
 				);
-				const manualNote = describeBundleManualSteps(result.manual);
+				const manualNote = describeBundleManualSteps(result.manual, tl);
 				if (requiredFailures.length > 0) {
 					toast.error("Bundle installed with required items missing", {
 						description: tl(

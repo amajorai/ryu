@@ -7,7 +7,9 @@ export async function autoImportSeenKey(
 	target: ApiTarget
 ): Promise<string | null> {
 	try {
-		if (!globalThis.crypto?.subtle) return null;
+		if (!globalThis.crypto?.subtle) {
+			return null;
+		}
 		const identity = JSON.stringify([
 			target.url.replace(/\/$/, ""),
 			target.token ?? null,
@@ -29,7 +31,9 @@ export function loadAutoImportSeen(
 	key: string | null,
 	fallback: Set<string>
 ): Set<string> {
-	if (!key) return new Set(fallback);
+	if (!key) {
+		return new Set(fallback);
+	}
 	try {
 		const raw: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
 		return Array.isArray(raw)
@@ -47,8 +51,12 @@ export function saveAutoImportSeen(
 	seen: Set<string>,
 	fallback: Set<string>
 ): void {
-	for (const id of seen) fallback.add(id);
-	if (!key) return;
+	for (const id of seen) {
+		fallback.add(id);
+	}
+	if (!key) {
+		return;
+	}
 	try {
 		localStorage.setItem(key, JSON.stringify([...seen]));
 	} catch {

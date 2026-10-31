@@ -411,7 +411,7 @@ export function QaInterface({
 														})
 												: null
 										}
-										title={qaHeading(snapshot, filter)}
+										title={qaHeading(snapshot, filter, tl)}
 									/>
 									<div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 pb-4">
 										<p

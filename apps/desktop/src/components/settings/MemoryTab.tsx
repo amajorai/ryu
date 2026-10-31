@@ -159,11 +159,11 @@ export function MemoryTab() {
 			persist(
 				setAutoRecallEnabled(target, next),
 				isCurrent,
-				"auto-recall",
+				tl("Couldn't save auto-recall"),
 				() => setAutoRecall(previous)
 			);
 		},
-		[autoRecall, target, captureOwner]
+		[autoRecall, target, captureOwner, tl]
 	);
 
 	// How many recalled snippets are injected per turn (`auto-recall-top-k`).
@@ -223,13 +223,13 @@ export function MemoryTab() {
 		persist(
 			setAutoRecallTopK(target, clamped),
 			isCurrent,
-			"the recall limit",
+			tl("Couldn't save the recall limit"),
 			() => {
 				setTopKSaved(previous);
 				setTopKText(previous === null ? "" : String(previous));
 			}
 		);
-	}, [target, topKSaved, topKText, captureOwner]);
+	}, [target, topKSaved, topKText, captureOwner, tl]);
 
 	// Skills disclosure: progressive (default) injects only an L1 skill index and
 	// loads full bodies on demand via the `skills.load` tool, saving context on
@@ -268,11 +268,11 @@ export function MemoryTab() {
 			persist(
 				setSkillsProgressive(target, next),
 				isCurrent,
-				"skill loading",
+				tl("Couldn't save skill loading"),
 				() => setSkillsProgressiveState(previous)
 			);
 		},
-		[skillsProgressive, target, captureOwner]
+		[skillsProgressive, target, captureOwner, tl]
 	);
 
 	const [indexContent, setIndexContent] = useState("");

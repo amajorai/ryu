@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -26,6 +28,7 @@ import {
 	liveUptime,
 } from "./live-model.ts";
 
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 const MINUTE = 60_000;
 const BASE = Date.parse("2026-10-12T12:00:00Z");
 const ago = (minutes: number) =>
@@ -375,20 +378,20 @@ describe("live model", () => {
 	test("art follows the job and stays stable per seed", () => {
 		const [ada, grace] = SNAPSHOT.agents;
 		const deploy = SNAPSHOT.threads[2] ?? null;
-		expect(liveArt(deploy, grace).kind).toBe("chart");
+		expect(liveArt(deploy, grace, tl).kind).toBe("chart");
 		expect(
-			liveArt(thread({ id: "x", title: "Pick a palette" }), ada).kind
+			liveArt(thread({ id: "x", title: "Pick a palette" }), ada, tl).kind
 		).toBe("canvas");
 		expect(
-			liveArt(thread({ id: "y", title: "Audit lockfile" }), ada).kind
+			liveArt(thread({ id: "y", title: "Audit lockfile" }), ada, tl).kind
 		).toBe("terminal");
-		expect(liveArt(null, ada).kind).toBe("doc");
-		expect(liveArt(deploy, grace)).toEqual(liveArt(deploy, grace));
+		expect(liveArt(null, ada, tl).kind).toBe("doc");
+		expect(liveArt(deploy, grace, tl)).toEqual(liveArt(deploy, grace, tl));
 		const kinds = new Set(
 			Array.from(
 				{ length: 60 },
 				(_, index) =>
-					liveArt(thread({ id: `t-${index}`, title: "" }), null).kind
+					liveArt(thread({ id: `t-${index}`, title: "" }), null, tl).kind
 			)
 		);
 		expect(kinds.size).toBe(LIVE_ART_KINDS.length);

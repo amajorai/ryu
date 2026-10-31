@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 
 export const MAX_EDITABLE_IMAGE_BYTES = 32 * 1024 * 1024;
@@ -22,6 +23,7 @@ export function isEditableImageType(mimeType: string): boolean {
 }
 
 export function imageDimensionError(
+	tl: LiteralMessage,
 	width: number,
 	height: number
 ): string | null {
@@ -33,7 +35,9 @@ export function imageDimensionError(
 		return "Image width and height must be positive whole numbers.";
 	}
 	if (width > MAX_EDITABLE_IMAGE_SIDE || height > MAX_EDITABLE_IMAGE_SIDE) {
-		return `Image dimensions must stay below ${MAX_EDITABLE_IMAGE_SIDE.toLocaleString()} px per side.`;
+		return tl("Image dimensions must stay below {maxSide} px per side.", {
+			maxSide: MAX_EDITABLE_IMAGE_SIDE.toLocaleString(),
+		});
 	}
 	if (width * height > MAX_EDITABLE_IMAGE_PIXELS) {
 		return "This image is too large to edit safely in the browser.";

@@ -92,7 +92,8 @@ export function modelBody(
 	const blockedReason = fitBlockReason(
 		quant.fit,
 		quant.fitLabel,
-		q.data.device
+		q.data.device,
+		tl
 	);
 	return {
 		title: `Install ${card.name}?`,

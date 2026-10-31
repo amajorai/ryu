@@ -61,7 +61,7 @@ export function RoutineRow({
 							<StatusPill status={status} />
 						</div>
 						<p className="mt-0.5 truncate text-detail text-muted-foreground">
-							{describeSchedule(job.schedule)} ·{" "}
+							{describeSchedule(job.schedule, tl)} ·{" "}
 							{job.target.type === "agent" && job.target.conversationId
 								? "Persistent chat"
 								: "New chat each run"}{" "}
@@ -114,7 +114,8 @@ export function RoutineRow({
 					entries={buildRunStatusTimelineEntries(
 						windowStart,
 						windowEnd,
-						jobEvents
+						jobEvents,
+						tl
 					)}
 					startAt={windowStart.getTime()}
 				/>

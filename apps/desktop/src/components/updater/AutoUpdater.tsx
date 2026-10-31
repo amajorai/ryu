@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { useEffect, useRef } from "react";
 import {
 	installUpdate,
@@ -57,6 +58,7 @@ export { notifyUpdatesWindowLapsed } from "@/src/components/updater/AutoUpdater-
 // launch-time branch installs or relaunches the app.
 export function AutoUpdater() {
 	const getNode = useActiveNodeGetter();
+	const tl = useLiteralMessages();
 	const ranRef = useRef(false);
 
 	useEffect(() => {
@@ -75,7 +77,7 @@ export function AutoUpdater() {
 			// launch after the window" is when the promise is actually kept. See
 			// `lib/app-update-schedule.ts` for why that is the only promise this
 			// surface may make.
-			if (await installDeferredUpdate(node)) {
+			if (await installDeferredUpdate(node, tl)) {
 				return;
 			}
 			// ALWAYS clamped, regardless of which node answers. This verdict has
@@ -95,7 +97,7 @@ export function AutoUpdater() {
 			const verdict = await checkForUpdate(target, { clamp: true });
 			if (!verdict.update_available) {
 				// Already at the ceiling their window covers, but a newer Ryu exists.
-				await notifyUpdatesWindowLapsed(verdict);
+				await notifyUpdatesWindowLapsed(verdict, tl);
 				return;
 			}
 			// Core answered about ITSELF — `verdict.current` is the answering Core
@@ -119,7 +121,7 @@ export function AutoUpdater() {
 					// "Install later" already pins and authorizes this release. Prepare
 					// it now so the quiet-window handoff does not spend that window
 					// downloading, but do not install before the booked instant.
-					await prepareUpdate(verdict, { node, pinned: true }).catch(
+					await prepareUpdate(verdict, tl, { node, pinned: true }).catch(
 						() => undefined
 					);
 					return;
@@ -142,14 +144,14 @@ export function AutoUpdater() {
 			});
 			switch (action.kind) {
 				case "prompt_install":
-					showPreparedUpdatePrompt(verdict, { node });
+					showPreparedUpdatePrompt(verdict, tl, { node });
 					return;
 				case "clear_and_notify":
 					await clearPreparedAppUpdate();
-					showDownloadUpdatePrompt(verdict, { node });
+					showDownloadUpdatePrompt(verdict, tl, { node });
 					return;
 				case "notify_download":
-					showDownloadUpdatePrompt(verdict, { node });
+					showDownloadUpdatePrompt(verdict, tl, { node });
 					return;
 				case "replace":
 					await clearPreparedAppUpdate();
@@ -162,22 +164,23 @@ export function AutoUpdater() {
 				}
 			}
 			try {
-				const ready = await prepareUpdate(verdict, { node });
+				const ready = await prepareUpdate(verdict, tl, { node });
 				if (ready) {
-					showPreparedUpdatePrompt(verdict, { node });
+					showPreparedUpdatePrompt(verdict, tl, { node });
 				} else {
 					offerManualDownload(
 						verdict,
+						tl,
 						verdict.html_url ?? "https://ryuhq.com/downloads?ref=ryu-app"
 					);
 				}
 			} catch (error) {
-				showPreparationFailure(verdict, { node }, error);
+				showPreparationFailure(verdict, tl, { node }, error);
 			}
 		};
 
 		run().catch(() => undefined);
-	}, [getNode]);
+	}, [getNode, tl]);
 
 	// OPPORTUNISTIC, not the mechanism. If the app happens to be open and the
 	// machine awake when the window arrives, install then — that is the one case
@@ -188,12 +191,12 @@ export function AutoUpdater() {
 	useEffect(() => {
 		const timer = setInterval(
 			() => {
-				installDeferredUpdate(getNode()).catch(() => undefined);
+				installDeferredUpdate(getNode(), tl).catch(() => undefined);
 			},
 			10 * 60 * 1000
 		);
 		return () => clearInterval(timer);
-	}, [getNode]);
+	}, [getNode, tl]);
 
 	return null;
 }
@@ -214,7 +217,10 @@ export function AutoUpdater() {
  * is newest at THIS moment — a different build, with different release notes,
  * on a machine they deliberately chose not to touch during the day.
  */
-async function installDeferredUpdate(node: { url: string }): Promise<boolean> {
+async function installDeferredUpdate(
+	node: { url: string },
+	tl: LiteralMessage
+): Promise<boolean> {
 	const due = await dueAppUpdate();
 	if (!due) {
 		return false;
@@ -238,6 +244,6 @@ async function installDeferredUpdate(node: { url: string }): Promise<boolean> {
 	if (!(await clearPendingAppUpdate())) {
 		return false;
 	}
-	await installUpdate(due.verdict, { node, pinned: true });
+	await installUpdate(due.verdict, tl, { node, pinned: true });
 	return true;
 }

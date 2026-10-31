@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type { ReactNode } from "react";
 
 // The town's targets are DOM overlay buttons (town-overlay.tsx), so their
@@ -85,6 +86,7 @@ function overlay(width: number, opened: string[], selectedId: string | null) {
 		shown,
 		slots: slots.slots,
 		snapshot: fixture,
+		tl: (source, values) => formatMessage(source, values),
 		town,
 	});
 	return render(

@@ -1,7 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { type PluginValue, pluginValueSchema } from "./plugin-wire-values.ts";
 import { scheduledJobWireSchema } from "./schedule-wire-contracts.ts";
 import { createJob, fetchJobs, runJobNow, updateJob } from "./schedules.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 const originalFetch = globalThis.fetch;
 const target = { token: null, url: "https://schedules.test" };
@@ -182,30 +187,38 @@ test("creation preserves exact omission and ordering of scheduling fields", asyn
 		},
 		{ preconnect: originalFetch.preconnect }
 	);
-	await createJob(target, {
-		name: "Routine",
-		schedule: { kind: "cron", expr: "0 5 * * *", tz: "" },
-		target: {
-			type: "agent",
-			agentId: "agent",
-			conversationId: null,
-			prompt: "hello",
-			model: "",
+	await createJob(
+		target,
+		{
+			name: "Routine",
+			schedule: { kind: "cron", expr: "0 5 * * *", tz: "" },
+			target: {
+				type: "agent",
+				agentId: "agent",
+				conversationId: null,
+				prompt: "hello",
+				model: "",
+			},
+			enabled: false,
+			quickRoutine: false,
+			ownerApp: "",
 		},
-		enabled: false,
-		quickRoutine: false,
-		ownerApp: "",
-	});
+		tl
+	);
 	expect(bodies[0]).toBe(
 		'{"name":"Routine","schedule":{"kind":"cron","expr":"0 5 * * *"},"target":{"type":"agent","agent_id":"agent","conversation_id":null,"prompt":"hello"},"enabled":false,"require_approval":false,"quick_routine":false}'
 	);
-	await createJob(target, {
-		name: "Routine",
-		schedule: { kind: "every", interval: "1h" },
-		target: { type: "workflow", workflowId: "workflow" },
-		enabled: true,
-		ownerApp: "app",
-	});
+	await createJob(
+		target,
+		{
+			name: "Routine",
+			schedule: { kind: "every", interval: "1h" },
+			target: { type: "workflow", workflowId: "workflow" },
+			enabled: true,
+			ownerApp: "app",
+		},
+		tl
+	);
 	expect(bodies[1]).toBe(
 		'{"name":"Routine","schedule":{"kind":"every","interval":"1h"},"target":{"type":"workflow","workflow_id":"workflow","input":{}},"enabled":true,"require_approval":false,"owner_app":"app"}'
 	);
@@ -220,20 +233,25 @@ test("updates preserve false values, conversation omission, and model order", as
 		},
 		{ preconnect: originalFetch.preconnect }
 	);
-	await updateJob(target, "job", {
-		target: {
-			type: "agent",
-			agentId: "agent",
-			prompt: "hello",
-			model: "model",
+	await updateJob(
+		target,
+		"job",
+		{
+			target: {
+				type: "agent",
+				agentId: "agent",
+				prompt: "hello",
+				model: "model",
+			},
+			enabled: false,
+			requireApproval: false,
 		},
-		enabled: false,
-		requireApproval: false,
-	});
+		tl
+	);
 	expect(bodies[0]).toBe(
 		'{"target":{"type":"agent","agent_id":"agent","prompt":"hello","model":"model"},"enabled":false,"require_approval":false}'
 	);
-	await updateJob(target, "job", {});
+	await updateJob(target, "job", {}, tl);
 	expect(bodies[1]).toBe("{}");
 });
 
@@ -245,9 +263,11 @@ test("Core errors keep empty messages, status fallbacks, and run outcomes", asyn
 		enabled: true,
 	} satisfies Parameters<typeof createJob>[1];
 	respond({ error: "" }, 400);
-	await expect(createJob(target, input)).rejects.toMatchObject({ message: "" });
+	await expect(createJob(target, input, tl)).rejects.toMatchObject({
+		message: "",
+	});
 	respond({ error: 12 }, 403);
-	await expect(updateJob(target, "job", {})).rejects.toThrow(
+	await expect(updateJob(target, "job", {}, tl)).rejects.toThrow(
 		"Failed to update job (403)"
 	);
 	respond({ success: false, error: "failure" });

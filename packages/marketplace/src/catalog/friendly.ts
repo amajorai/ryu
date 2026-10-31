@@ -7,6 +7,7 @@
 // desktop-only surfaces (Download Center labels, model pickers, search
 // haystacks). Nothing here hits the network or React.
 
+import type { LiteralMessage } from "@ryu/i18n";
 import { type BadgeTone, CATALOG_TOKENS } from "./friendly-tokens.ts";
 import type { SkillCard } from "./types.ts";
 
@@ -159,14 +160,25 @@ export function displayTokens(
 }
 
 /** Human description of one size token for the hover. */
-function describeSizeToken(prefix: string, num: string, unit: string): string {
+function describeSizeToken(
+	prefix: string,
+	num: string,
+	unit: string,
+	tl: LiteralMessage
+): string {
 	const count =
 		unit.toLowerCase() === "m" ? `${num} million` : `${num} billion`;
 	if (prefix.toLowerCase() === "a") {
-		return `${num}${unit.toUpperCase()} active parameters (Mixture-of-Experts)`;
+		return tl("{num}{unit} active parameters (Mixture-of-Experts)", {
+			num,
+			unit: unit.toUpperCase(),
+		});
 	}
 	if (prefix.toLowerCase() === "e") {
-		return `${num}${unit.toUpperCase()} effective parameters`;
+		return tl("{num}{unit} effective parameters", {
+			num,
+			unit: unit.toUpperCase(),
+		});
 	}
 	return `${count} parameters`;
 }
@@ -196,7 +208,10 @@ function tierFor(b: number): string {
  * the headline tier while the tooltip lists every size token found. Returns `null`
  * when no size is present.
  */
-export function parseModelSize(name: string): SizeBadgeInfo | null {
+export function parseModelSize(
+	name: string,
+	tl: LiteralMessage
+): SizeBadgeInfo | null {
 	const matches = [...name.matchAll(SIZE_TOKEN_RE)];
 	if (matches.length === 0) {
 		return null;
@@ -218,7 +233,7 @@ export function parseModelSize(name: string): SizeBadgeInfo | null {
 		}
 		const prefix = prefixRaw ?? "";
 		const b = billions(num, unit);
-		descriptions.push(describeSizeToken(prefix, num, unit));
+		descriptions.push(describeSizeToken(prefix, num, unit, tl));
 		if (
 			!headline ||
 			b > headline.b ||

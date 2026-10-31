@@ -48,7 +48,7 @@ beforeEach(() => {
 
 function panel(
 	plugin: string,
-	linkHandler: Record<string, unknown>,
+	linkHandler: { [key: string]: string | string[] },
 	id = "viewer"
 ): PluginDockPanel {
 	return {

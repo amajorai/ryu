@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
 	bundleSkillChanges,
 	enabledSkillUpdates,
@@ -9,6 +10,9 @@ import {
 	skillToggleChangesSet,
 	skillUpdateChanges,
 } from "./skill-set-change.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 describe("skillDisplayName", () => {
 	it("prefers the catalog name", () => {
@@ -26,7 +30,7 @@ describe("skillSetChangeLabels", () => {
 		expect(skillSetChangeLabels([])).toEqual([]);
 		expect(skillSetChangeLabels([" ", ""])).toEqual([]);
 		expect(
-			promptEditCacheWarning(skillSetChangeLabels([]), "skill-threads")
+			promptEditCacheWarning(skillSetChangeLabels([]), "skill-threads", tl)
 		).toBeNull();
 	});
 
@@ -34,7 +38,7 @@ describe("skillSetChangeLabels", () => {
 		const labels = skillSetChangeLabels(["Alpha"]);
 		expect(labels).toEqual(["The Alpha skill"]);
 		expect(
-			promptEditCacheWarning(labels, "skill-threads")?.description
+			promptEditCacheWarning(labels, "skill-threads", tl)?.description
 		).toStartWith(
 			"The Alpha skill is part of the system prompt for every thread that loads skills."
 		);

@@ -17,9 +17,9 @@ interface AgentTargetWire {
 }
 
 interface CreateJobBody {
-	quick_routine?: boolean;
 	enabled: boolean;
 	name: string;
+	quick_routine?: boolean;
 	require_approval: boolean;
 	schedule: ScheduleWire;
 	target: AgentTargetWire;
@@ -61,14 +61,14 @@ interface CoreFixture {
 }
 
 interface CoreFixtureState {
+	jobReads: StoredJob[][];
+	jobs: StoredJob[];
 	protocol: Array<{
 		event: "accepted-write" | "read-request";
 		method: string;
 		path: string;
 		status?: number;
 	}>;
-	jobReads: StoredJob[][];
-	jobs: StoredJob[];
 	writes: CapturedWrite[];
 }
 
@@ -102,7 +102,9 @@ function makeStoredJob(body: CreateJobBody, id: string): StoredJob {
 	// The request-only quick slot flag is not part of Core's saved job DTO.
 	const { quick_routine: _quickRoutine, ...stored } = body;
 	const target = { ...stored.target };
-	if (target.conversation_id === null) delete target.conversation_id;
+	if (target.conversation_id === null) {
+		delete target.conversation_id;
+	}
 	return {
 		...stored,
 		target,
@@ -191,7 +193,9 @@ async function installCoreFixture(
 				job.created_at = previous.created_at;
 				job.history = previous.history;
 				state.jobs[existing] = job;
-			} else state.jobs.push(job);
+			} else {
+				state.jobs.push(job);
+			}
 			await route.fulfill(jsonResponse({ success: true, job }));
 			return;
 		}

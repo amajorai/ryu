@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	keepPreviousData,
 	useMutation,
@@ -33,6 +34,7 @@ import { NAME_PATTERN, type VaultTab } from "./VaultPage.model.ts";
 
 /** Vault queries, mutations, scope and environment selection, and the secret list model. */
 export function useVaultPageState() {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const target: ApiTarget = {
 		url: node.url,
@@ -137,7 +139,7 @@ export function useVaultPageState() {
 		onError: (error) => {
 			sileo.error({
 				title: "Could not restore",
-				description: vaultErrorMessage(error, "Try again."),
+				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},
 	});

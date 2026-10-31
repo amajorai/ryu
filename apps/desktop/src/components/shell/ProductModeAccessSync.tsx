@@ -53,6 +53,10 @@ export function ProductModeAccessSync({ children }: { children: ReactNode }) {
 			.setWorkspaceInterfaces(workspaceInterfacesRolledOut);
 	}, [osRolledOut, workspaceInterfacesRolledOut]);
 	const [cloudNodesSettled, setCloudNodesSettled] = useState(false);
+	// Whether the access effect below has decided Console access for this
+	// launch. Until then the effective product mode is the gated fallback (a
+	// remembered Console or OS choice reads as Bot), not the user's surface.
+	const [accessResolved, setAccessResolved] = useState(false);
 
 	useEffect(() => {
 		hydrateCloudNodes()
@@ -66,6 +70,7 @@ export function ProductModeAccessSync({ children }: { children: ReactNode }) {
 		}
 		if (isRyuBot()) {
 			setConsoleAccess(false);
+			setAccessResolved(true);
 			return;
 		}
 		const managedProductAvailable =
@@ -87,9 +92,11 @@ export function ProductModeAccessSync({ children }: { children: ReactNode }) {
 			if (productMode !== "console") {
 				setProductMode("console");
 			}
+			setAccessResolved(true);
 			return;
 		}
 		setConsoleAccess(canSwitchToConsole);
+		setAccessResolved(true);
 	}, [
 		activeNode.managed,
 		canSwitchToConsole,
@@ -105,11 +112,31 @@ export function ProductModeAccessSync({ children }: { children: ReactNode }) {
 		setConsoleAccess,
 	]);
 
+	// Apply the level only once access is decided. Before that a Console user's
+	// mode transiently reads as Bot, and applying Ryu Work's level then would
+	// reset their sidebar to the Agents view (and Bot terminology) on every
+	// launch, before the Code level is applied back over it.
 	useEffect(() => {
+		if (!accessResolved) {
+			return;
+		}
 		setInterfaceLevel(productMode === "bot" ? "simple" : "expert");
-	}, [productMode]);
+	}, [accessResolved, productMode]);
 
-	if (entitlementLoading || !cloudNodesSettled) {
+	// The splash holds only the first resolution. The wallet reloads on every
+	// window focus and org switch (`useCreditsWallet`), and replacing the shell
+	// on each of those would unmount every open tab: an app's unsaved draft, a
+	// chat composer, a terminal. Once access has settled, a reload keeps the
+	// shell and the effect above re-decides access when the new answer lands.
+	const accessLoading = entitlementLoading || !cloudNodesSettled;
+	const [startupSettled, setStartupSettled] = useState(false);
+	useEffect(() => {
+		if (!accessLoading) {
+			setStartupSettled(true);
+		}
+	}, [accessLoading]);
+
+	if (accessLoading && !startupSettled) {
 		return (
 			<div
 				className="flex size-full items-center justify-center"

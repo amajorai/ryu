@@ -7,6 +7,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { renderTemplate } from "@ryu/app-host/views";
 import type { CommandAction, CommandPaletteTab } from "@ryu/command/types";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { marketplaceBrowseKindLabel } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
 import { parseContributedTarget } from "@/src/contributions/contributed-target.ts";
 import { contributionRegistry } from "@/src/contributions/registry.ts";
@@ -74,6 +75,7 @@ export interface CommandPaletteActionContext {
 	shadowResults: ShadowSearchResult[];
 	spaceResults: SpaceLexicalHit[];
 	theme: string | undefined;
+	tl: LiteralMessage;
 	workbench: DesktopWorkbenchValue | null;
 	workbenchTools: WorkbenchTools | null;
 }
@@ -115,6 +117,7 @@ export function buildCommandPaletteActions(
 		searchTabs,
 		shadowResults,
 		spaceResults,
+		tl,
 		workbench,
 		workbenchTools,
 	} = ctx;
@@ -275,6 +278,7 @@ export function buildCommandPaletteActions(
 			dispatch: workbench.dispatch,
 			movableRegions: DESKTOP_SHELL_REGIONS,
 			state: workbench.state,
+			tl,
 		})) {
 			items.push({
 				checked: command.checked,

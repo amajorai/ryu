@@ -117,6 +117,7 @@ export function HeatmapClipDialog({
 			{
 				cells: buildHeatmapCells(current.days, current.endDay),
 				fontFamily: readFontFamily(target),
+				tl,
 			}
 		);
 	};

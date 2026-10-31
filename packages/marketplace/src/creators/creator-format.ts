@@ -3,6 +3,7 @@
 // Pure display rules for the Creators tab, kept out of the components so they
 // are unit-testable without rendering.
 
+import type { LiteralMessage } from "@ryu/i18n";
 import { marketplaceBrowseKindLabel } from "../catalog/chrome/marketplace-sections.ts";
 import type { MarketplaceCreator } from "./creator-types.ts";
 
@@ -32,6 +33,7 @@ export function creatorKindSummary(kinds: string[], max = 2): string {
 
 /** "Publishing since Mar 2026", or null when the date is missing or invalid. */
 export function creatorSinceLabel(
+	tl: LiteralMessage,
 	iso: string | null,
 	locale?: string
 ): string | null {
@@ -47,7 +49,7 @@ export function creatorSinceLabel(
 		timeZone: "UTC",
 		year: "numeric",
 	}).format(date);
-	return `Publishing since ${month}`;
+	return tl("Publishing since {month}", { month });
 }
 
 /** "1 listing" / "3 listings", and the same for followers. */

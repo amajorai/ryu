@@ -135,7 +135,7 @@ ryu-gw-channels = { path = "../../crates/gateway/channels" }
 # fresh (Core's spike has none of the fuel/epoch/limit hardening) — the shared
 # `ryu-wasm-host` crate that would dedupe this AND retrofit Core is a documented
 # follow-up (see src/wasm_policy/mod.rs).
-wasmtime = "48.0.7"
+wasmtime = "48.0.8"
 
 # OpenTelemetry seam (#540, P1): mirrors Core's seam (apps/core/Cargo.toml). The
 # vendor-neutral instrumentation export path. `tracing-opentelemetry` 0.33 bridges

@@ -8,6 +8,7 @@ test.describe.configure({ timeout: 90_000 });
 const STORY_URL = "/chat-preview-rail-story.html";
 const EXPECTED_MESSAGE_COUNT = "56";
 const EXPECTED_NAVIGATION_COUNT = 28;
+const CENTERED_TOLERANCE_PX = 4;
 
 async function openStory(page: Page) {
 	await page.goto(STORY_URL);
@@ -122,6 +123,26 @@ test("selecting a popover message closes it and updates the active jump target",
 
 	await expect(navigationPopover(page)).toHaveCount(0);
 	if (targetId) {
+		await expect(trigger).toHaveAttribute("data-active-message-id", targetId);
+		// Rows above the target only take their real height as the jump reveals
+		// them. The jump has landed once its message holds the viewport centre,
+		// and the active jump target must still be that message afterwards.
+		const viewport = page.locator('[data-slot="message-scroller-viewport"]');
+		const message = viewport.locator(`[data-message-id="${targetId}"]`).first();
+		await expect
+			.poll(async () => {
+				const viewportBox = await viewport.boundingBox();
+				const messageBox = await message.boundingBox();
+				if (!(viewportBox && messageBox)) {
+					return Number.POSITIVE_INFINITY;
+				}
+				return Math.abs(
+					messageBox.y +
+						messageBox.height / 2 -
+						(viewportBox.y + viewportBox.height / 2)
+				);
+			})
+			.toBeLessThanOrEqual(CENTERED_TOLERANCE_PX);
 		await expect(trigger).toHaveAttribute("data-active-message-id", targetId);
 	}
 });

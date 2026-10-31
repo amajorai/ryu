@@ -3,7 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
 const { CustomAppSecuritySettings } = await import(
@@ -22,11 +25,11 @@ const second: ApiTarget = {
 	userJwt: "second-user",
 };
 interface RequestRecord {
-	url: string;
-	method: string;
 	authorization: string | null;
-	userJwt: string | null;
 	body: { value: string } | null;
+	method: string;
+	url: string;
+	userJwt: string | null;
 }
 let requests: RequestRecord[];
 let respond: (request: RequestRecord) => Response | Promise<Response>;
@@ -61,7 +64,9 @@ beforeEach(() => {
 });
 afterEach(async () => {
 	await act(async () => {
-		for (const root of roots.splice(0)) root.unmount();
+		for (const root of roots.splice(0)) {
+			root.unmount();
+		}
 	});
 	document.body.replaceChildren();
 	globalThis.fetch = originalFetch;
@@ -73,9 +78,13 @@ async function settle() {
 }
 async function render(target: ApiTarget, existing?: Root) {
 	const host = document.createElement("div");
-	if (!existing) document.body.append(host);
+	if (!existing) {
+		document.body.append(host);
+	}
 	const root = existing ?? createRoot(host);
-	if (!existing) roots.push(root);
+	if (!existing) {
+		roots.push(root);
+	}
 	await act(async () =>
 		root.render(<CustomAppSecuritySettings target={target} />)
 	);
@@ -84,13 +93,16 @@ async function render(target: ApiTarget, existing?: Root) {
 }
 function input() {
 	const control = document.getElementById("enforce-custom-app-csp");
-	if (!(control instanceof HTMLInputElement))
+	if (!(control instanceof HTMLInputElement)) {
 		throw new Error("Missing CSP setting input");
+	}
 	return control;
 }
 async function click() {
 	const control = document.querySelector<HTMLElement>('[role="switch"]');
-	if (!control) throw new Error("Missing visible CSP setting switch");
+	if (!control) {
+		throw new Error("Missing visible CSP setting switch");
+	}
 	await act(async () => control.click());
 	await settle();
 }
@@ -199,7 +211,9 @@ test("a current-node failure rolls back, then retries the exact authenticated va
 	let saved = false;
 	let refused = false;
 	respond = (request) => {
-		if (request.method === "GET") return preference(saved);
+		if (request.method === "GET") {
+			return preference(saved);
+		}
 		if (!refused) {
 			refused = true;
 			return Response.json({ error: "write refused" }, { status: 503 });
@@ -228,16 +242,24 @@ test("a current-node failure rolls back, then retries the exact authenticated va
 });
 
 test("rapid repeated activation sends one pending write instead of duplicate changes", async () => {
- const write = pendingResponse();
- respond = (request) => request.method === "PUT" ? write.promise : preference(false);
- await render(first);
- const control = document.querySelector<HTMLElement>('[role="switch"]');
- if (!control) throw new Error("Missing visible CSP setting switch");
- await act(async () => { control.click(); control.click(); });
- await settle();
- expect(requests.filter((request) => request.method === "PUT")).toEqual([call(first, "PUT", "true")]);
- expect(input().disabled).toBe(true);
- await act(async () => write.resolve(Response.json({ ok: true })));
- await settle();
- expect(input().disabled).toBe(false);
+	const write = pendingResponse();
+	respond = (request) =>
+		request.method === "PUT" ? write.promise : preference(false);
+	await render(first);
+	const control = document.querySelector<HTMLElement>('[role="switch"]');
+	if (!control) {
+		throw new Error("Missing visible CSP setting switch");
+	}
+	await act(async () => {
+		control.click();
+		control.click();
+	});
+	await settle();
+	expect(requests.filter((request) => request.method === "PUT")).toEqual([
+		call(first, "PUT", "true"),
+	]);
+	expect(input().disabled).toBe(true);
+	await act(async () => write.resolve(Response.json({ ok: true })));
+	await settle();
+	expect(input().disabled).toBe(false);
 });

@@ -1,5 +1,5 @@
-import { requireTestValue } from "../../test-required.ts";
 import { describe, expect, it } from "bun:test";
+import { requireTestValue } from "../../test-required.ts";
 import { extractCitations, linkifyCitationMarkers } from "./citations.ts";
 
 function webFetch<Input, Output>(input: Input, output: Output) {
@@ -31,7 +31,9 @@ describe("extractCitations - WebFetch", () => {
 	it("falls back to the hostname title when output has none", () => {
 		const parts = [webFetch({ url: "https://www.example.com/x" }, {})];
 		const [c] = extractCitations(parts);
-		if (!c) throw new Error("Expected extracted citation");
+		if (!c) {
+			throw new Error("Expected extracted citation");
+		}
 		expect(c.title).toBe("example.com");
 		expect(c.description).toBeUndefined();
 	});
@@ -55,7 +57,9 @@ describe("extractCitations - WebFetch", () => {
 		const [c] = extractCitations([
 			webFetch({ url: "https://x.io" }, "plain body text"),
 		]);
-		if (!c) throw new Error("Expected extracted citation");
+		if (!c) {
+			throw new Error("Expected extracted citation");
+		}
 		expect(c.description).toBe("plain body text");
 	});
 
@@ -66,7 +70,9 @@ describe("extractCitations - WebFetch", () => {
 				JSON.stringify({ title: "T", text: "B" })
 			),
 		]);
-		if (!c) throw new Error("Expected extracted citation");
+		if (!c) {
+			throw new Error("Expected extracted citation");
+		}
 		expect(c.title).toBe("T");
 		expect(c.description).toBe("B");
 	});
@@ -76,7 +82,9 @@ describe("extractCitations - WebFetch", () => {
 		const [c] = extractCitations([
 			webFetch({ url: "https://x.io" }, { summary: long }),
 		]);
-		if (!c) throw new Error("Expected extracted citation");
+		if (!c) {
+			throw new Error("Expected extracted citation");
+		}
 		expect(c.description).toHaveLength(240);
 	});
 

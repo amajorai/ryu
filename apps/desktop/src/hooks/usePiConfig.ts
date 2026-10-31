@@ -8,7 +8,6 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { useProviderQueryScope } from "./provider-query-scope.ts";
 import {
 	fetchPiCatalog,
 	fetchPiConfig,
@@ -17,6 +16,7 @@ import {
 	type PiConfigInput,
 	updatePiConfig,
 } from "@/src/lib/api/pi-config.ts";
+import { useProviderQueryScope } from "./provider-query-scope.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 export interface UsePiConfigResult {
@@ -83,10 +83,12 @@ export function usePiConfig(): UsePiConfigResult {
 	const waitingForRefresh =
 		(scope.pending && scope.resource.owner !== scope.generation) ||
 		(scope.waitForRefresh &&
-			(!configQuery.isFetchedAfterMount ||
-				!catalogQuery.isFetchedAfterMount ||
-				!configQuery.isSuccess ||
-				!catalogQuery.isSuccess));
+			!(
+				configQuery.isFetchedAfterMount &&
+				catalogQuery.isFetchedAfterMount &&
+				configQuery.isSuccess &&
+				catalogQuery.isSuccess
+			));
 	return {
 		config: waitingForRefresh ? null : (configQuery.data ?? null),
 		catalog: waitingForRefresh ? null : (catalogQuery.data ?? null),

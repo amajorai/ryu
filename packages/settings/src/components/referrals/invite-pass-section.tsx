@@ -2,6 +2,7 @@
 
 import { Copy01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { ReferralPass } from "@ryu/ui/components/referral-pass.tsx";
 import { SensitiveValue } from "@ryu/ui/components/sensitive-value.tsx";
@@ -27,6 +28,7 @@ export function InvitePassSection({
 	metalTheme: "auto" | "dark" | "light";
 	onCopy: () => void;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		/* THE INVITE IS AN OBJECT, NOT A FORM FIELD. This was a read-only input
 		    with a Copy button — the same control the app uses for an API key,
@@ -39,13 +41,16 @@ export function InvitePassSection({
 		<SettingsSection
 			caption={
 				<>
-					Earn Ryu credits when a friend you invite starts paying
-					{data.enabled ? ", plus a cash commission." : "."}
+					{data.enabled
+						? tl(
+								"Earn Ryu credits when a friend you invite starts paying, plus a cash commission."
+							)
+						: tl("Earn Ryu credits when a friend you invite starts paying.")}
 					{/* Credit rewards land in the earner's PERSONAL org, always — never
 					    in whichever org is active when the payout fires, which may be a
 					    client's. Said here because it is surprising the first time and
 					    because the Credits tab is where the money can then be moved. */}{" "}
-					Credits go to your personal workspace; move them from Credits.
+					{tl("Credits go to your personal workspace; move them from Credits.")}
 				</>
 			}
 			title="Your invite pass"

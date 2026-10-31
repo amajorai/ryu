@@ -237,7 +237,7 @@ export function useStoreHome(): UseStoreHomeResult {
 				runAdd(
 					card.id,
 					() =>
-						addModelFromHome({ url, token, userJwt }, card).catch(
+						addModelFromHome({ url, token, userJwt }, card, tl).catch(
 							(err: unknown) => {
 								// Home has no detail panel to explain a refusal, so the model
 								// realm surfaces it (including Core's 422 "won't fit").

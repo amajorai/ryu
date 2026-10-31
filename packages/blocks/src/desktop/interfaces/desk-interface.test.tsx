@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfacePort,
 	type InterfaceSnapshot,
@@ -20,6 +22,7 @@ import {
 	findDeskView,
 } from "./desk-model.ts";
 
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 const MINUTE = 60_000;
 const BASE = Date.parse("2026-10-12T12:00:00Z");
 const ago = (minutes: number) =>
@@ -232,11 +235,11 @@ describe("desk model", () => {
 		if (!question) {
 			throw new Error("fixture");
 		}
-		expect(deskStatusExplanation(deskRow(SNAPSHOT, question))).toBe(
+		expect(deskStatusExplanation(deskRow(SNAPSHOT, question), tl)).toBe(
 			"You wrote last. Ada has not started a run yet."
 		);
 		const unassigned = deskRow(SNAPSHOT, { ...question, agentIds: [] });
-		expect(deskStatusExplanation(unassigned)).toContain(
+		expect(deskStatusExplanation(unassigned, tl)).toContain(
 			"no agent is on this conversation"
 		);
 	});

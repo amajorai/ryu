@@ -289,7 +289,8 @@ export function TerminalInterface({
 				const resolved = resolveOpenTarget(
 					snapshot,
 					command.target,
-					lastListing.current
+					lastListing.current,
+					tlRef.current
 				);
 				if (resolved.kind === "found") {
 					openThread(resolved.threadId, resolved.number, true);

@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceAgent,
 	InterfaceSnapshot,
@@ -17,7 +18,6 @@ import type { FlowNode, FlowTarget } from "./flow-model-types.ts";
 export { edgePath } from "./flow-model-edges.ts";
 export {
 	buildFlowLayout,
-	type FlowDirection,
 	flowNeighbor,
 	flowPath,
 } from "./flow-model-layout.ts";
@@ -44,6 +44,7 @@ export {
 	FLOW_GEOMETRY,
 	FLOW_VISIBLE_PER_LEAD,
 	type FlowChip,
+	type FlowDirection,
 	type FlowDotTone,
 	type FlowEdge,
 	type FlowJoint,
@@ -109,7 +110,10 @@ function teamActions(snapshot: InterfaceSnapshot): FlowAction[] {
 		}));
 }
 
-function projectActions(snapshot: InterfaceSnapshot): FlowAction[] {
+function projectActions(
+	snapshot: InterfaceSnapshot,
+	tl: LiteralMessage
+): FlowAction[] {
 	return snapshot.groups
 		.filter((group) => group.kind === "project")
 		.map((group) => ({
@@ -118,15 +122,18 @@ function projectActions(snapshot: InterfaceSnapshot): FlowAction[] {
 			id: `project:${group.id}`,
 			target: {
 				groupKey: "root",
-				label: `New conversation in ${group.name}`,
+				label: tl("New conversation in {name}", { name: group.name }),
 				projectId: group.id,
 			},
-			title: `Start in ${group.name}`,
+			title: tl("Start in {name}", { name: group.name }),
 		}));
 }
 
 /** Every way to start, and the short list the first card shows. */
-export function flowStartActions(snapshot: InterfaceSnapshot): {
+export function flowStartActions(
+	snapshot: InterfaceSnapshot,
+	tl: LiteralMessage
+): {
 	all: FlowAction[];
 	short: FlowAction[];
 } {
@@ -135,7 +142,10 @@ export function flowStartActions(snapshot: InterfaceSnapshot): {
 		waiting > 0
 			? [
 					{
-						description: `${plural(waiting, "conversation is", "conversations are")} waiting on you`,
+						description: tl(
+							"{count, plural, one {{countLabel} conversation is} other {{countLabel} conversations are}} waiting on you",
+							{ count: waiting, countLabel: String(waiting) }
+						),
 						icon: "review",
 						id: "review",
 						target: null,
@@ -157,7 +167,7 @@ export function flowStartActions(snapshot: InterfaceSnapshot): {
 			: [];
 	const agents = agentActions(snapshot);
 	const teams = teamActions(snapshot);
-	const projects = projectActions(snapshot);
+	const projects = projectActions(snapshot, tl);
 	const all = [...review, ...blank, ...agents, ...teams, ...projects];
 	const roomForAgents = Math.max(
 		1,
@@ -181,7 +191,8 @@ export interface FlowMenuSection {
 /** Choices in a node's "Connect to" menu, in sections. */
 export function connectSections(
 	snapshot: InterfaceSnapshot,
-	ownerId: string
+	ownerId: string,
+	tl: LiteralMessage
 ): FlowMenuSection[] {
 	const scope = scopeFromNodeId(ownerId);
 	const projects = snapshot.groups.filter((group) => group.kind === "project");
@@ -192,7 +203,11 @@ export function connectSections(
 		return [
 			{ id: "agents", items: agentActions(snapshot), label: "Agents" },
 			{ id: "teams", items: teamActions(snapshot), label: "Teams" },
-			{ id: "projects", items: projectActions(snapshot), label: "Projects" },
+			{
+				id: "projects",
+				items: projectActions(snapshot, tl),
+				label: "Projects",
+			},
 		].filter((section) => section.items.length > 0);
 	}
 	let base: FlowTarget | null = null;
@@ -225,8 +240,8 @@ export function connectSections(
 				{
 					description:
 						scope.kind === "agent"
-							? `Message ${name} directly`
-							: `Message everyone in ${name}`,
+							? tl("Message {name} directly", { name })
+							: tl("Message everyone in {name}", { name }),
 					icon: "blank" as const,
 					id: "new",
 					target: start,
@@ -238,7 +253,7 @@ export function connectSections(
 		{
 			id: "projects",
 			items: projects.map((project) => ({
-				description: `File it under ${project.name}`,
+				description: tl("File it under {name}", { name: project.name }),
 				icon: "project" as const,
 				id: `project:${project.id}`,
 				target: {
@@ -246,7 +261,7 @@ export function connectSections(
 					label: `${name} in ${project.name}`,
 					projectId: project.id,
 				},
-				title: `Add to ${project.name}`,
+				title: tl("Add to {name}", { name: project.name }),
 			})),
 			label: "Add to project",
 		},
@@ -257,7 +272,8 @@ export function connectSections(
 /** A spoken name for a node, used as its accessible label. */
 export function nodeLabel(
 	node: FlowNode,
-	statusLabel: (status: ThreadStatus) => string
+	statusLabel: (status: ThreadStatus) => string,
+	tl: LiteralMessage
 ): string {
 	switch (node.kind) {
 		case "origin":
@@ -271,7 +287,7 @@ export function nodeLabel(
 		case "thread":
 			return `${node.thread.title.trim() || "Untitled conversation"}, ${statusLabel(node.status)}`;
 		case "more":
-			return `Show ${node.count} more`;
+			return tl("Show {count} more", { count: String(node.count) });
 		case "stub":
 			return "Connect";
 		default:

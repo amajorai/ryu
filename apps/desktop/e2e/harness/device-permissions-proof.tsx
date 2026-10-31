@@ -70,13 +70,15 @@ if (new URLSearchParams(location.search).get("native") !== "1") {
 				if (
 					(!args || Object.keys(args).length === 0) &&
 					requests.includes(command)
-				)
+				) {
 					return false;
+				}
 				if (
 					(!args || Object.keys(args).length === 0) &&
 					checks.includes(command)
-				)
+				) {
 					return granted;
+				}
 				unexpected.push(command);
 				throw new Error(`Unexpected command: ${command}`);
 			},

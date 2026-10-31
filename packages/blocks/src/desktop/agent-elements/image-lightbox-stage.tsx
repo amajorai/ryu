@@ -257,7 +257,7 @@ export function Stage({
 			<motion.div
 				animate={{ opacity: 1 }}
 				aria-hidden
-				className="absolute inset-0 bg-black/90 backdrop-blur-sm"
+				className="absolute inset-0 bg-black/90"
 				exit={{
 					opacity: 0,
 					transition: reduced ? { duration: 0 } : { duration: 0.3, ease: EASE },

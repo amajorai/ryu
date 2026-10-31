@@ -113,6 +113,19 @@ export function ProductFigure({ figure }: { figure: ProductFigureId }) {
 	);
 }
 
+/**
+ * Just the drawing, with no page stylesheet: for a host that sizes the figure
+ * itself, like the landing page's product cards.
+ */
+export function ProductFigureDrawing({ figure }: { figure: ProductFigureId }) {
+	const Figure = FIGURES[figure];
+	return (
+		<div className="w-full" data-product-figure={figure}>
+			<Figure />
+		</div>
+	);
+}
+
 /** Figures whose drawing is a long diagonal: shown narrower so the band stays tight. */
 const COMPACT_BY_DEFAULT: ReadonlySet<ProductFigureId> = new Set([
 	"workflow-run",

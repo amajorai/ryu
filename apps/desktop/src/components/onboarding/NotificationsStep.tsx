@@ -101,12 +101,15 @@ export function NotificationsStep({
 		};
 	}, [platform]);
 
-	const copy = notificationOnboardingCopy({
-		os,
-		permission,
-		platform,
-		surface,
-	});
+	const copy = notificationOnboardingCopy(
+		{
+			os,
+			permission,
+			platform,
+			surface,
+		},
+		tl
+	);
 	const blocked = status === "blocked" || permission === "denied";
 	const showSettingsLink =
 		platform === "desktop" && canOpenNotificationSettings();

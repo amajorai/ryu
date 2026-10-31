@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	askKindWords,
 	compareAsks,
@@ -36,7 +37,8 @@ export interface RidesActTrip {
  */
 export function ridesActTrips(
 	snapshot: Pick<InterfaceSnapshot, "agents" | "asks" | "privacy" | "threads">,
-	acts: ReadonlyMap<string, InterfaceAgentAct>
+	acts: ReadonlyMap<string, InterfaceAgentAct>,
+	tl: LiteralMessage
 ): Map<string, RidesActTrip> {
 	const counted = countedBlockerThreads(snapshot, acts);
 	const asks = snapshot.asks ?? [];
@@ -69,24 +71,28 @@ export function ridesActTrips(
 			own.filter((ask) => ask.blocking).sort(compareAsks)[0];
 		out.set(
 			thread.id,
-			actTrip(thread, {
-				asked: blocking
-					? redacted
-						? askKindWords(blocking)
-						: plainText(blocking.text) || askKindWords(blocking)
-					: null,
-				counted: counted.get(thread.id)?.blocker,
-				// Who the sentence is about: the asker, else whose act is on
-				// this thread, else its first member.
-				driver:
-					(blocking ? nameOf(blocking.agentId) : undefined) ??
-					actOn.get(thread.id) ??
-					nameOf(thread.agentIds[0]) ??
-					"Your driver",
-				redacted,
-				limited: limited.has(thread.id),
-				replied: own.some((ask) => ask.kind === "reply"),
-			})
+			actTrip(
+				thread,
+				{
+					asked: blocking
+						? redacted
+							? askKindWords(blocking)
+							: plainText(blocking.text) || askKindWords(blocking)
+						: null,
+					counted: counted.get(thread.id)?.blocker,
+					// Who the sentence is about: the asker, else whose act is on
+					// this thread, else its first member.
+					driver:
+						(blocking ? nameOf(blocking.agentId) : undefined) ??
+						actOn.get(thread.id) ??
+						nameOf(thread.agentIds[0]) ??
+						"Your driver",
+					redacted,
+					limited: limited.has(thread.id),
+					replied: own.some((ask) => ask.kind === "reply"),
+				},
+				tl
+			)
 		);
 	}
 	return out;
@@ -102,12 +108,13 @@ function actTrip(
 		limited: boolean;
 		redacted: boolean;
 		replied: boolean;
-	}
+	},
+	tl: LiteralMessage
 ): RidesActTrip {
 	const { asked, counted, driver } = state;
 	if (asked !== null) {
 		return {
-			detail: `${driver} is asking you: ${asked}`,
+			detail: tl("{driver} is asking you: {asked}", { asked, driver }),
 			done: false,
 			stage: "requested",
 			tone: "you",
@@ -124,7 +131,7 @@ function actTrip(
 				(state.redacted || !counted.detail
 					? null
 					: plainText(counted.detail)) ??
-				`${counted.title}. Send a message to try again.`,
+				tl("{title}. Send a message to try again.", { title: counted.title }),
 			done: false,
 			stage: "cancelled",
 			tone: "alert",
@@ -133,7 +140,7 @@ function actTrip(
 	}
 	if (thread.running) {
 		return {
-			detail: `${driver} is on it.`,
+			detail: tl("{driver} is on it.", { driver }),
 			done: false,
 			stage: "enroute",
 			tone: "plain",
@@ -142,7 +149,7 @@ function actTrip(
 	}
 	if (state.replied) {
 		return {
-			detail: `${driver} brought an answer.`,
+			detail: tl("{driver} brought an answer.", { driver }),
 			done: true,
 			stage: "arrived",
 			tone: "you",
@@ -153,7 +160,9 @@ function actTrip(
 	// (A reply already waiting outranks it: the answer can be read now.)
 	if (state.limited || counted?.kind === "rate-limited") {
 		return {
-			detail: `${driver} is waiting at a red light (a usage limit).`,
+			detail: tl("{driver} is waiting at a red light (a usage limit).", {
+				driver,
+			}),
 			done: false,
 			stage: "completed",
 			tone: "plain",
@@ -171,7 +180,7 @@ function actTrip(
 	}
 	if (thread.blocker) {
 		return {
-			detail: `An older run: ${thread.blocker.title}.`,
+			detail: tl("An older run: {title}.", { title: thread.blocker.title }),
 			done: false,
 			stage: "completed",
 			tone: "dim",

@@ -163,3 +163,48 @@ test("prepending older history keeps every turn's content", async () => {
 		);
 	}
 });
+
+test("each reply of a multi-reply turn settles and calls the newest host handler", async () => {
+	const council: UIMessage[] = [
+		{
+			id: "user-council",
+			parts: [{ text: "Ask the council", type: "text" }],
+			role: "user",
+		},
+		{
+			id: "assistant-first",
+			parts: [{ text: "First agent's answer.", type: "text" }],
+			role: "assistant",
+		},
+		{
+			id: "assistant-second",
+			parts: [{ text: "Second agent's answer.", type: "text" }],
+			role: "assistant",
+		},
+	] as UIMessage[];
+	const replyButtons = () =>
+		turnElement("user-council").querySelectorAll<HTMLButtonElement>(
+			'.group\\/assistant-message [aria-label="Reply to message"]'
+		);
+	await renderList({ messages: council, status: "streaming" });
+	expect(replyButtons()).toHaveLength(0);
+	const replies: Parameters<NonNullable<ListProps["onReply"]>>[0][] = [];
+	await renderList({
+		messages: council,
+		onReply: (reply) => {
+			replies.push(reply);
+		},
+		status: "ready",
+	});
+	expect(replyButtons()).toHaveLength(2);
+	await act(async () => {
+		replyButtons()[0]?.click();
+	});
+	expect(replies).toEqual([
+		{
+			chainLength: 1,
+			messageId: "assistant-first",
+			text: "First agent's answer.",
+		},
+	]);
+});

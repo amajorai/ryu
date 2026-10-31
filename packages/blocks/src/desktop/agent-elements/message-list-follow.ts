@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -35,6 +36,7 @@ export function useMessageListFollow({
 	status,
 	conversationKey,
 }: UseMessageListFollowInput) {
+	const tl = useLiteralMessages();
 	// This shared composite exposes its actual native root ref, but no render
 	// slot. Its open classNames producer contract belongs to this root, not an
 	// outer wrapper or a viewport. Apply the inspected canonical root recipe at
@@ -246,7 +248,7 @@ export function useMessageListFollow({
 		[normalizedMessages, unreadMessageIdSet]
 	);
 	const unreadMessageCount = unreadMessageIds.length;
-	const unreadMessageLabel = getUnreadMessageLabel(unreadMessageCount);
+	const unreadMessageLabel = getUnreadMessageLabel(unreadMessageCount, tl);
 
 	useEffect(() => {
 		if (!(unreadMessageCount > 0 && firstUnreadMessageId)) {

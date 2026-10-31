@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -114,7 +115,11 @@ export function StatusInterface({
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
 	const now = useNow(CLOCK_TICK_MS);
-	const page = useMemo(() => buildStatusPage(snapshot, now), [snapshot, now]);
+	const tl = useLiteralMessages();
+	const page = useMemo(
+		() => buildStatusPage(snapshot, now, tl),
+		[snapshot, now, tl]
+	);
 	const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
 		() => new Set()
 	);

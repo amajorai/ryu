@@ -1,4 +1,4 @@
-import { ComposerEditor } from "@ryu/ui/components/editor/composer-editor.tsx";
+import { LazyComposerEditor } from "@ryu/ui/components/editor/composer-editor-lazy.tsx";
 import { Wave } from "@ryu/ui/components/wave";
 import { cn } from "@ryu/ui/lib/utils";
 import styles from "./input-bar.module.css";
@@ -96,7 +96,7 @@ export function getInputBarEditor({
 	} else if (markdownComposer) {
 		inputContent = (
 			<div onKeyDownCapture={handleKeyDown}>
-				<ComposerEditor
+				<LazyComposerEditor
 					disabled={disabled}
 					editorRef={richEditorRef}
 					markdown={input}

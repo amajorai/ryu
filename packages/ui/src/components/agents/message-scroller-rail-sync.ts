@@ -1,7 +1,7 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { PreviewRailItem } from "@ryu/ui/components/motion/preview-rail.tsx";
 import { useReducedMotion } from "motion/react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	isNativeFunction,
 	isNativeText,
@@ -10,6 +10,7 @@ import {
 	getMessagePreview,
 	RAIL_COLLAPSE_ITEM_COUNT,
 } from "./message-scroller-rail.tsx";
+import type { RailJump } from "./message-scroller-rail-jump.ts";
 import type { MessageScrollerBaseScope } from "./message-scroller-scope.ts";
 
 export type UseMessageScrollerRailInput = MessageScrollerBaseScope;
@@ -43,7 +44,18 @@ export function useMessageScrollerRail({
 	const railIdRef = useRef(new WeakMap<HTMLElement, string>());
 	const railIdCounterRef = useRef(0);
 	const railTargetsRef = useRef(new Map<string, HTMLElement>());
-	const [railItems, setRailItems] = useState<PreviewRailItem[]>([]);
+	// A rail jump in flight owns the active item until it lands on its target
+	// (see message-scroller-rail-jump.ts).
+	const railJumpRef = useRef<RailJump | null>(null);
+	// Consumer-supplied rail items render straight from props. Copying them into
+	// state after the next frame cost a second commit per streamed chunk (a live
+	// turn's preview text changes with every chunk). The frame sync only
+	// resolves their scroll targets, which renders nothing, so it reads the
+	// items through a ref and keeps its identity.
+	const externalRailItemsRef = useRef(externalRailItems);
+	externalRailItemsRef.current = externalRailItems;
+	const [measuredRailItems, setRailItems] = useState<PreviewRailItem[]>([]);
+	const railItems = externalRailItems ?? measuredRailItems;
 	const [activeRailId, setActiveRailId] = useState("");
 	const [railOverflowing, setRailOverflowing] = useState(false);
 	const [following, setFollowingState] = useState(followOutput);
@@ -141,6 +153,11 @@ export function useMessageScrollerRail({
 		if (!viewport || targets.length === 0) {
 			return;
 		}
+		const jumpId = railJumpRef.current?.id;
+		if (jumpId) {
+			setActiveRailId((current) => (current === jumpId ? current : jumpId));
+			return;
+		}
 
 		const viewportRect = viewport.getBoundingClientRect();
 		if (viewport.scrollTop <= followThreshold) {
@@ -184,12 +201,13 @@ export function useMessageScrollerRail({
 			return;
 		}
 
-		// Consumer-supplied rail: use the items verbatim and resolve each row's
-		// scroll target by its `data-message-id`. The rich preview (files, agent,
-		// description) is the caller's business; this only needs the DOM anchor.
-		if (externalRailItems) {
+		// Consumer-supplied rail: the items render verbatim from props; only
+		// each row's scroll target is resolved here, by its `data-message-id`.
+		// The rich preview (files, agent, description) is the caller's business.
+		const consumerRailItems = externalRailItemsRef.current;
+		if (consumerRailItems) {
 			const targets = new Map<string, HTMLElement>();
-			for (const item of externalRailItems) {
+			for (const item of consumerRailItems) {
 				const el = content.querySelector<HTMLElement>(
 					`[data-message-id="${CSS.escape(item.id)}"]`
 				);
@@ -198,20 +216,9 @@ export function useMessageScrollerRail({
 				}
 			}
 			railTargetsRef.current = targets;
-			setRailItems((current) => {
-				const unchanged =
-					current.length === externalRailItems.length &&
-					current.every(
-						(item, index) =>
-							item.id === externalRailItems[index]?.id &&
-							item.label === externalRailItems[index]?.label &&
-							item.description === externalRailItems[index]?.description
-					);
-				return unchanged ? current : externalRailItems;
-			});
 			setRailOverflowing(
 				viewport.scrollHeight > viewport.clientHeight + 1 &&
-					externalRailItems.length > 1
+					consumerRailItems.length > 1
 			);
 			return;
 		}
@@ -268,7 +275,7 @@ export function useMessageScrollerRail({
 		setRailOverflowing(
 			viewport.scrollHeight > viewport.clientHeight + 1 && messages.length > 1
 		);
-	}, [externalRailItems, navigation]);
+	}, [navigation]);
 
 	const scheduleRailSync = useCallback(() => {
 		if (navigation !== "rail") {
@@ -282,6 +289,15 @@ export function useMessageScrollerRail({
 			updateActiveRailItem();
 		});
 	}, [navigation, syncRailItems, updateActiveRailItem]);
+
+	// New consumer items may name rows the targets map has not resolved yet.
+	// The sync runs on the next frame and renders only if the rail's overflow
+	// or active item changes.
+	useEffect(() => {
+		if (externalRailItems !== undefined || railTargetsRef.current.size > 0) {
+			scheduleRailSync();
+		}
+	}, [externalRailItems, scheduleRailSync]);
 	return {
 		reduce,
 		viewportRef,
@@ -293,6 +309,7 @@ export function useMessageScrollerRail({
 		frameRef,
 		railFrameRef,
 		railTargetsRef,
+		railJumpRef,
 		railItems,
 		setRailItems,
 		activeRailId,

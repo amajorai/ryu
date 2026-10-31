@@ -26,6 +26,7 @@ import type {
 	PolicyView,
 } from "@ryu/blocks/desktop/guardrails/policy-model.ts";
 import type { PolicyWorkspaceClient } from "@ryu/blocks/desktop/guardrails/policy-workspace.tsx";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { STEP_UP_REQUIRED } from "@ryu/step-up";
 import { z } from "zod";
 
@@ -65,7 +66,8 @@ const refusalSchema = z.looseObject({
 
 function refusalFrom(
 	status: number,
-	body: unknown
+	body: unknown,
+	tl: LiteralMessage
 ): GuardrailPolicyRequestError {
 	const parsed = refusalSchema.safeParse(body);
 	const data = parsed.success ? parsed.data : {};
@@ -74,7 +76,7 @@ function refusalFrom(
 	const message =
 		data.message ??
 		(typeof data.error === "string" ? data.error : null) ??
-		`Request failed (${status})`;
+		tl("Request failed ({status})", { status });
 	return new GuardrailPolicyRequestError(status, code, message);
 }
 
@@ -82,6 +84,7 @@ async function request<T>(
 	session: ControlPlaneSession,
 	url: string,
 	decode: (value: unknown) => T,
+	tl: LiteralMessage,
 	init?: { body?: unknown; method?: "DELETE" | "POST" | "PUT" }
 ): Promise<T> {
 	const headers = new Headers();
@@ -99,7 +102,7 @@ async function request<T>(
 	});
 	const body: unknown = await response.json().catch(() => null);
 	if (!response.ok) {
-		throw refusalFrom(response.status, body);
+		throw refusalFrom(response.status, body, tl);
 	}
 	return decode(body);
 }
@@ -256,14 +259,15 @@ export function decodePolicyPreview(value: unknown): PolicyPreviewView {
 /** The workspace client for one organization. */
 export function desktopPolicyWorkspaceClient(
 	session: ControlPlaneSession,
-	orgId: string
+	orgId: string,
+	tl: LiteralMessage
 ): PolicyWorkspaceClient {
 	const base = orgBase(session, orgId);
 	const call = <T>(
 		url: string,
 		decode: (value: unknown) => T,
-		init?: Parameters<typeof request>[3]
-	) => request(session, url, decode, init);
+		init?: Parameters<typeof request>[4]
+	) => request(session, url, decode, tl, init);
 	const policyUrl = (policyId: string) =>
 		`${base}/guardrail-policies/${encodeURIComponent(policyId)}`;
 	return {
@@ -365,11 +369,12 @@ const keysSchema = z.looseObject({
  */
 export async function loadPolicyScopeOptions(
 	session: ControlPlaneSession,
-	orgId: string
+	orgId: string,
+	tl: LiteralMessage
 ): Promise<PolicyScopeOptions> {
 	const base = orgBase(session, orgId);
 	const call = <T>(url: string, decode: (value: unknown) => T) =>
-		request(session, url, decode);
+		request(session, url, decode, tl);
 	const [detail, members, keys] = await Promise.allSettled([
 		call(base, orgDetailSchema.parse),
 		call(`${base}/members`, membersSchema.parse),

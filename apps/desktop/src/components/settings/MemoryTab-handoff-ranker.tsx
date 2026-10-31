@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
@@ -37,6 +38,7 @@ const HANDOFF_ITEMS: { value: ContextHandoffPolicy; label: string }[] = [
 
 export function ContextHandoffSection({ target }: { target: ApiTarget }) {
 	const captureOwner = useMemoryOwner(target);
+	const tl = useLiteralMessages();
 	const [policy, setPolicy] = useState<ContextHandoffPolicy>("smaller-context");
 
 	useEffect(() => {
@@ -72,11 +74,11 @@ export function ContextHandoffSection({ target }: { target: ApiTarget }) {
 			persist(
 				setContextHandoffPolicy(target, next),
 				isCurrent,
-				"the handoff setting",
+				tl("Couldn't save the handoff setting"),
 				() => setPolicy(previous)
 			);
 		},
-		[policy, target, captureOwner]
+		[policy, target, captureOwner, tl]
 	);
 
 	return (
@@ -123,6 +125,7 @@ const RANKER_ITEMS: { value: ToolRankerId; label: string }[] = [
 
 export function ToolRankerSection({ target }: { target: ApiTarget }) {
 	const captureOwner = useMemoryOwner(target);
+	const tl = useLiteralMessages();
 	const [ranker, setRanker] = useState<ToolRankerId>("needle2");
 
 	useEffect(() => {
@@ -165,11 +168,11 @@ export function ToolRankerSection({ target }: { target: ApiTarget }) {
 			persist(
 				setToolRanker(target, next),
 				isCurrent,
-				"the search ranking",
+				tl("Couldn't save the search ranking"),
 				() => setRanker(previous)
 			);
 		},
-		[ranker, target, captureOwner]
+		[ranker, target, captureOwner, tl]
 	);
 
 	return (

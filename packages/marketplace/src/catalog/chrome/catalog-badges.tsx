@@ -331,7 +331,8 @@ export function CardBadges({
 	friendly: boolean;
 	showTags?: boolean;
 }) {
-	const size = parseModelSize(name);
+	const tl = useLiteralMessages();
+	const size = parseModelSize(name, tl);
 	const tokens = displayTokens(extractTokens(name, tags), friendly);
 	const hasTopRow = Boolean(size) || tokens.length > 0;
 	const tagsRow = showTags && tags.length > 0;

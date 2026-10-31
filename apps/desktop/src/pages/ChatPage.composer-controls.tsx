@@ -14,7 +14,7 @@ import {
 	composerSelectValue,
 	partitionComposerControls,
 } from "@/src/components/composer/plugin-composer-controls.ts";
-import { patchForFile } from "@/src/components/diffs/RichPatchDiff.tsx";
+import { patchForFile } from "@/src/components/diffs/patch-split.ts";
 import { useWorktreeDiff } from "@/src/hooks/useGitStatus.ts";
 import { engineForAgent } from "@/src/lib/agent-logos.tsx";
 import { rememberLastUsedAgent } from "@/src/lib/composer-target.ts";

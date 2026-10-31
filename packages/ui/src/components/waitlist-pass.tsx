@@ -1,5 +1,6 @@
 "use client";
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { CSSProperties } from "react";
 
 import { useLayoutEffect, useRef, useState } from "react";
@@ -187,13 +188,18 @@ export const xShareIntentUrl = (
  * the post have never heard the name, and "I got spot #42" tells them nothing
  * they could act on.
  */
-const RYU_PITCH = "Ryu is end-to-end infrastructure for AI agents.";
 export const waitlistShareText = (
-	position: number | null | undefined
+	position: number | null | undefined,
+	tl: LiteralMessage
 ): string =>
 	isNativeNumber(position)
-		? `I just claimed spot #${position} on the Ryu waitlist. ${RYU_PITCH}`
-		: `I just claimed my spot on the Ryu waitlist. ${RYU_PITCH}`;
+		? tl(
+				"I just claimed spot #{position} on the Ryu waitlist. Ryu is end-to-end infrastructure for AI agents.",
+				{ position: String(position) }
+			)
+		: tl(
+				"I just claimed my spot on the Ryu waitlist. Ryu is end-to-end infrastructure for AI agents."
+			);
 
 /**
  * The name line, scaled to the card. It starts at the `text-5xl` the hero was

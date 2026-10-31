@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
@@ -102,12 +103,15 @@ function needsYou(
 }
 
 /** "Reply in <title>", or "Retry <title>" for a failed run. */
-function replyIn(thread: InterfaceThread): PanelsHeaderAction {
+function replyIn(
+	thread: InterfaceThread,
+	tl: LiteralMessage
+): PanelsHeaderAction {
 	const title = trimSentence(thread.title);
 	const text =
 		threadStatus(thread) === "attention"
-			? `Retry ${title}`
-			: `Reply in ${title}`;
+			? tl("Retry {title}", { title })
+			: tl("Reply in {title}", { title });
 	return { label: text, target: { kind: "open", threadId: thread.id }, text };
 }
 
@@ -119,7 +123,8 @@ function replyIn(thread: InterfaceThread): PanelsHeaderAction {
  */
 export function panelHeaderActions(
 	snapshot: InterfaceSnapshot,
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): PanelsHeaderActions {
 	const used = new Set<string>();
 	const claim = (
@@ -129,7 +134,7 @@ export function panelHeaderActions(
 			return null;
 		}
 		used.add(thread.id);
-		return replyIn(thread);
+		return replyIn(thread, tl);
 	};
 	const firstClaim = (
 		threads: Iterable<InterfaceThread | undefined>
@@ -145,9 +150,9 @@ export function panelHeaderActions(
 	const live = workingThreads(snapshot)[0];
 	const working: PanelsHeaderAction | null = live
 		? {
-				label: `Watch ${trimSentence(live.title)}`,
+				label: tl("Watch {title}", { title: trimSentence(live.title) }),
 				target: { kind: "open", threadId: live.id },
-				text: "Watch",
+				text: tl("Watch"),
 			}
 		: null;
 	const agents = firstClaim(buildAgentRows(snapshot).map((row) => row.thread));

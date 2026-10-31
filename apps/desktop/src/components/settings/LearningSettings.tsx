@@ -12,10 +12,11 @@
 // the app record — only the HTTP surface is gated — so the consent control has to
 // exist wherever that capture does.
 
-import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
 	getLearningEnabled,
@@ -23,7 +24,6 @@ import {
 	setLearningEnabled,
 	setLearningSkillsEnabled,
 } from "@/src/lib/api/preferences.ts";
-import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -64,13 +64,17 @@ function NodeLearningSettings({ target }: { target: ApiTarget }) {
 		setReadError(false);
 		Promise.all([getLearningEnabled(target), getLearningSkillsEnabled(target)])
 			.then(([learning, skills]) => {
-				if (cancelled) return;
+				if (cancelled) {
+					return;
+				}
 				setLearningEnabledState(learning);
 				setSkillsEnabledState(skills);
 				setLoaded(true);
 			})
 			.catch(() => {
-				if (!cancelled) setReadError(true);
+				if (!cancelled) {
+					setReadError(true);
+				}
 			});
 		return () => {
 			cancelled = true;
@@ -78,7 +82,9 @@ function NodeLearningSettings({ target }: { target: ApiTarget }) {
 	}, [target, readAttempt]);
 
 	async function handleChange(kind: "skills" | "learning", next: boolean) {
-		if (!loaded || pendingWrites.current.has(kind)) return;
+		if (!loaded || pendingWrites.current.has(kind)) {
+			return;
+		}
 		pendingWrites.current.add(kind);
 		setPending((previous) => ({ ...previous, [kind]: true }));
 		const setValue =
@@ -88,9 +94,13 @@ function NodeLearningSettings({ target }: { target: ApiTarget }) {
 		try {
 			const save =
 				kind === "skills" ? setLearningSkillsEnabled : setLearningEnabled;
-			if (!(await save(target, next))) throw new Error("Consent write refused");
+			if (!(await save(target, next))) {
+				throw new Error("Consent write refused");
+			}
 		} catch {
-			if (!mounted.current) return;
+			if (!mounted.current) {
+				return;
+			}
 			setValue(previous);
 			toast.error(
 				kind === "skills"
@@ -128,8 +138,8 @@ function NodeLearningSettings({ target }: { target: ApiTarget }) {
 							<Switch
 								aria-label="Learn skills from my chats"
 								checked={skillsEnabled}
-								id="learning-skills-enabled"
 								disabled={!loaded || pending.skills}
+								id="learning-skills-enabled"
 								onCheckedChange={(next) => handleChange("skills", next)}
 							/>
 						}
@@ -141,8 +151,8 @@ function NodeLearningSettings({ target }: { target: ApiTarget }) {
 							<Switch
 								aria-label="Train my local model"
 								checked={learningEnabled}
-								id="learning-enabled"
 								disabled={!loaded || pending.learning}
+								id="learning-enabled"
 								onCheckedChange={(next) => handleChange("learning", next)}
 							/>
 						}

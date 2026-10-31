@@ -37,11 +37,13 @@ mock.module("@/src/lib/api/plugins.ts", () => ({
 	installApp: () => Promise.reject(new Error("unused")),
 	uninstallApp: () => Promise.reject(new Error("unused")),
 	describeDependencyError: () => "unused",
+	describeGatewayRefusal: () => null,
 }));
 // The dependency-refusal reader validates against the real plugin schema that
 // the roster-only stub above leaves out; no refusal reaches these readers.
 mock.module("@/src/lib/plugin-dependency-errors.ts", () => ({
 	dependencyErrorOf: () => null,
+	gatewayRefusalOf: () => null,
 }));
 mock.module("@/src/lib/core-refresh.ts", () => ({
 	triggerGlobalRefresh: () => undefined,

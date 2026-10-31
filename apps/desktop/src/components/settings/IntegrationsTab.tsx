@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import {
@@ -64,6 +65,7 @@ function raiseIngressToast(toast: IngressToast): void {
 }
 
 export function IntegrationsTab() {
+	const tl = useLiteralMessages();
 	const getTarget = useActiveTargetGetter();
 	const [hfToken, setHfTokenValue] = useState("");
 	const [aaKey, setAaKeyValue] = useState("");
@@ -175,7 +177,7 @@ export function IntegrationsTab() {
 			// primary case — see `ingressSelectedToast` for what replaced it and why
 			// the saved value (not the typed one) is what the branch reads.
 			raiseIngressToast(
-				ingressSelectedToast(kind, ingressUrlLoaded, savedIngressUrl)
+				ingressSelectedToast(kind, ingressUrlLoaded, savedIngressUrl, tl)
 			);
 		} catch (e) {
 			setIngressBackendValue(previous);
@@ -217,7 +219,7 @@ export function IntegrationsTab() {
 			// a write (the gate runs only on the backend POST), so a bad value saved here
 			// surfaces at the next Core start. Closing that belongs in Core, on the pref
 			// write — not in a second copy of the rule.
-			raiseIngressToast(ingressUrlSavedToast(trimmed, ingressBackend));
+			raiseIngressToast(ingressUrlSavedToast(trimmed, ingressBackend, tl));
 		} catch {
 			// Keep the previous saved value so the dirty marker leaves Save enabled.
 			sileo.error({ title: "Failed to save the public URL" });

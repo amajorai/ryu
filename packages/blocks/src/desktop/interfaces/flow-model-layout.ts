@@ -13,11 +13,13 @@ import {
 	needsYou,
 	needsYouCount,
 	threadGroupKey,
+	waitingOnYouLabel,
 } from "./flow-model-threads.ts";
 import {
 	FLOW_GEOMETRY,
 	FLOW_VISIBLE_PER_LEAD,
 	type FlowChip,
+	type FlowDirection,
 	type FlowEdge,
 	type FlowJoint,
 	type FlowLayout,
@@ -280,7 +282,7 @@ function placeLead(
 	const jointX = (leadRight + g.convBusX) / 2;
 	if (visible.length > 0 && waiting.length > 0) {
 		cursor.chips.push({
-			description: `${waiting.length} waiting on you`,
+			description: waitingOnYouLabel(waiting.length, options.tl),
 			id: `chip:${group.key}`,
 			label: String(waiting.length),
 			threadId: waiting[0]?.id ?? null,
@@ -424,7 +426,7 @@ export function buildFlowLayout(
 		const waiting = needsYouCount(snapshot);
 		if (waiting > 0) {
 			cursor.chips.unshift({
-				description: `${waiting} waiting on you`,
+				description: waitingOnYouLabel(waiting, options.tl),
 				id: "chip:origin",
 				label: String(waiting),
 				threadId: firstNeedingYou(snapshot)?.id ?? null,
@@ -456,8 +458,6 @@ export function buildFlowLayout(
 		nodes: cursor.nodes,
 	};
 }
-
-export type FlowDirection = "down" | "left" | "right" | "up";
 
 /** The node an arrow key moves to from `id`, along the flow's connections. */
 export function flowNeighbor(

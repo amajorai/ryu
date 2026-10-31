@@ -11,6 +11,7 @@ import type {
 	PreviewCall,
 	VideoPreviewApi,
 } from "./video-preview-regression.types.ts";
+
 const assets = {
 	A: assetSchema.parse({
 		id: crypto.randomUUID(),

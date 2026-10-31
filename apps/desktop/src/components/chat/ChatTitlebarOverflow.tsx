@@ -7,6 +7,7 @@ import {
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -51,6 +52,7 @@ export function ChatTitlebarOverflow({
 	onTogglePinnedSummary,
 	pinnedSummaryOpen,
 }: ChatTitlebarOverflowProps) {
+	const tl = useLiteralMessages();
 	const hasViewItems = Boolean(onToggleBottomPanel || onTogglePinnedSummary);
 	const hasThreadItems = Boolean(
 		onCopyTranscript || onOpenAgentActivity || agentTools.length > 0
@@ -93,7 +95,10 @@ export function ChatTitlebarOverflow({
 							<DropdownMenuSub>
 								<DropdownMenuSubTrigger>
 									<HugeiconsIcon className="size-4" icon={Wrench01Icon} />
-									{`${toolCount} ${agentTools.length === 1 ? "tool" : "tools"}`}
+									{tl("{count} {toolCount, plural, one {tool} other {tools}}", {
+										count: toolCount,
+										toolCount: agentTools.length,
+									})}
 								</DropdownMenuSubTrigger>
 								<DropdownMenuSubContent className="max-h-80 w-56 overflow-y-auto">
 									{agentTools.map((tool) => (

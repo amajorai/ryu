@@ -1,16 +1,17 @@
-import {
-	assertNativeWindowLifetime,
-	persistNativeLifetimeDiagnostics,
-} from "./chat-page-native-http-lifetime.ts";
 // Shipping ChatPage and turn-end undo card invoke the real authenticated SDK
 // over native HTTP. The fixture accepts/rejects plans; this does not prove
 // a filesystem reversal, which belongs to real Core Git tests.
 import { expect, type Page, test } from "@playwright/test";
 import {
+	assertNativeWindowLifetime,
+	persistNativeLifetimeDiagnostics,
+} from "./chat-page-native-http-lifetime.ts";
+import {
+	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
 	chatPageControl,
 	chatPageState,
-	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
 } from "./chat-page-native-http-support.ts";
+
 const CONVERSATION = "conversation-toolbar-share-fixture";
 const PLAN = {
 	kind: "text-replacements",
@@ -43,13 +44,13 @@ async function open(page: Page) {
 	page.on("pageerror", (error) => pageErrors.push(error.message));
 	await page.goto("/chat-page-native-http.html?scenario=undo-file-edits");
 	await expect(
-		page.getByText("Updated status file.", { exact: true }),
+		page.getByText("Updated status file.", { exact: true })
 	).toBeVisible();
 	await expect(
 		page.getByRole("button", {
 			name: "Undo this turn's text edits",
 			exact: true,
-		}),
+		})
 	).toBeEnabled();
 }
 async function confirmation(page: Page) {
@@ -77,13 +78,13 @@ test.beforeEach(async ({ request }) => {
 				id: "undo-caller-user",
 				role: "user",
 				content: "Please update status file.",
-				created_at: 1724000000000,
+				created_at: 1_724_000_000_000,
 			},
 			{
 				id: "undo-caller-assistant",
 				role: "assistant",
 				content: "Updated status file.",
-				created_at: 1724000010000,
+				created_at: 1_724_000_010_000,
 				parts: [
 					{ type: "text", text: "Updated status file." },
 					{
@@ -125,11 +126,15 @@ test.afterEach(async ({ page, request }, testInfo) => {
 		expect(errors.get(page) ?? []).toEqual([]);
 		const mounted = await page.evaluate(() => {
 			const fixture = Reflect.get(window, "__chatPageNativeFixture");
-			if (!fixture) return false;
+			if (!fixture) {
+				return false;
+			}
 			fixture.unmount();
 			return true;
 		});
-		if (mounted) await assertNativeWindowLifetime(page);
+		if (mounted) {
+			await assertNativeWindowLifetime(page);
+		}
 	} finally {
 		await persistNativeLifetimeDiagnostics(testInfo, {
 			beforeCleanup,
@@ -149,12 +154,12 @@ test("canceling the actual turn-end confirmation sends no reverse-edits request 
 		page.getByRole("button", {
 			name: "Undo this turn's text edits",
 			exact: true,
-		}),
+		})
 	).toBeEnabled();
 	expect(
 		(await chatPageState(request)).calls.filter(
-			(c) => c.path === "/api/git/reverse-edits",
-		),
+			(c) => c.path === "/api/git/reverse-edits"
+		)
 	).toEqual([]);
 	expect((await chatPageState(request)).reversedEdits).toEqual([]);
 });
@@ -180,16 +185,16 @@ test("a real 409 remains recoverable; held identical retry cannot dismiss or dou
 		.getByRole("button", { name: "Undo changes", exact: true })
 		.click();
 	await expect(dialog.getByRole("alert")).toHaveText(
-		"The edited text changed after this turn. No files were changed.",
+		"The edited text changed after this turn. No files were changed."
 	);
 	await expect(
-		dialog.getByRole("button", { name: "Undo changes", exact: true }),
+		dialog.getByRole("button", { name: "Undo changes", exact: true })
 	).toBeEnabled();
 	expect((await chatPageState(request)).reversedEdits).toEqual([]);
 	await expect(
 		page
 			.getByRole("button", { name: "Undo this turn's text edits", exact: true })
-			.filter({ hasText: /^Undone$/ }),
+			.filter({ hasText: /^Undone$/ })
 	).toHaveCount(0);
 	await chatPageControl(request, {
 		action: "hold_next",
@@ -204,21 +209,21 @@ test("a real 409 remains recoverable; held identical retry cannot dismiss or dou
 		.poll(async () => (await chatPageState(request)).heldRequestIds.length)
 		.toBe(1);
 	await expect(
-		dialog.getByRole("button", { name: "Undoing…", exact: true }),
+		dialog.getByRole("button", { name: "Undoing…", exact: true })
 	).toBeDisabled();
 	await expect(
-		dialog.getByRole("button", { name: "Cancel", exact: true }),
+		dialog.getByRole("button", { name: "Cancel", exact: true })
 	).toBeDisabled();
 	await page.keyboard.press("Escape");
 	await expect(dialog).toBeVisible();
 	await page.keyboard.press("Enter");
 	const pending = await chatPageState(request);
 	expect(
-		pending.calls.filter((c) => c.path === "/api/git/reverse-edits"),
+		pending.calls.filter((c) => c.path === "/api/git/reverse-edits")
 	).toHaveLength(2);
 	expect(pending.reversedEdits).toEqual([]);
 	const beforeReads = pending.calls.filter((c) =>
-		c.path.startsWith("/api/git/status?"),
+		c.path.startsWith("/api/git/status?")
 	).length;
 	await chatPageControl(request, {
 		action: "release",
@@ -229,23 +234,23 @@ test("a real 409 remains recoverable; held identical retry cannot dismiss or dou
 	await expect(
 		page
 			.getByRole("button", { name: "Undo this turn's text edits", exact: true })
-			.filter({ hasText: /^Undone$/ }),
+			.filter({ hasText: /^Undone$/ })
 	).toBeDisabled();
 	await expect(
 		page.getByRole("button", {
 			name: "Undo this turn's text edits",
 			exact: true,
-		}),
+		})
 	).toHaveText("Undone");
 	await expect(
-		page.getByText("Turn edit undone", { exact: true }),
+		page.getByText("Turn edit undone", { exact: true })
 	).toBeVisible();
 	await expect
 		.poll(
 			async () =>
 				(await chatPageState(request)).calls.filter((c) =>
-					c.path.startsWith("/api/git/status?"),
-				).length,
+					c.path.startsWith("/api/git/status?")
+				).length
 		)
 		.toBeGreaterThan(beforeReads);
 	const accepted = await chatPageState(request),
@@ -262,7 +267,7 @@ test("a real 409 remains recoverable; held identical retry cannot dismiss or dou
 			auth: c.authorization,
 			jwt: c.userJwt,
 			status: c.responseStatus,
-		})),
+		}))
 	).toEqual([
 		{
 			node: "a",
@@ -283,6 +288,6 @@ test("a real 409 remains recoverable; held identical retry cannot dismiss or dou
 		{ cwd: "/tmp/ryu-chat-controls-project", plan: PLAN },
 	]);
 	expect(
-		accepted.calls.filter((c) => c.node === "b" && isChatOrGitMutation(c)),
+		accepted.calls.filter((c) => c.node === "b" && isChatOrGitMutation(c))
 	).toEqual([]);
 });

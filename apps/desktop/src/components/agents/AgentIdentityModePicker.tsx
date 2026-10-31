@@ -2,6 +2,7 @@ import {
 	modeHasOwnAccounts,
 	modeUsesYourAccounts,
 } from "@ryu/blocks/desktop/agent-identity-mode.tsx";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { isAgentOwnedKey } from "@/src/components/agents/agent-account-keys.ts";
 import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
 
@@ -34,19 +35,21 @@ export {
  * stop; they are named whatever the mode.
  */
 export function identityModeAccountWarning(
+	tl: LiteralMessage,
 	mode: AgentIdentityMode,
 	accountAccess: readonly string[] | null,
 	identityProfileCount: number,
 	stoppedTriggerCount = 0
 ): string | null {
 	const parts = [
-		accountsSwitchedOff(mode, accountAccess ?? [], identityProfileCount),
-		stoppedTriggersMessage(stoppedTriggerCount),
+		accountsSwitchedOff(tl, mode, accountAccess ?? [], identityProfileCount),
+		stoppedTriggersMessage(tl, stoppedTriggerCount),
 	].filter((part): part is string => part !== null);
 	return parts.length > 0 ? parts.join(" ") : null;
 }
 
 function accountsSwitchedOff(
+	tl: LiteralMessage,
 	mode: AgentIdentityMode,
 	keys: readonly string[],
 	identityProfileCount: number
@@ -65,24 +68,34 @@ function accountsSwitchedOff(
 					)
 			).length + identityProfileCount;
 		if (yours > 0) {
-			return `${yours} of your accounts selected here won't be used while this agent has its own identity.`;
+			return tl(
+				"{yourAccountCount} of your accounts selected here won't be used while this agent has its own identity.",
+				{ yourAccountCount: yours }
+			);
 		}
 		return null;
 	}
 	if (!modeHasOwnAccounts(mode)) {
 		const own = keys.filter(isAgentOwnedKey).length;
 		if (own > 0) {
-			return `${own} of the agent's own accounts selected here won't be used while it acts as you.`;
+			return tl(
+				"{ownAccountCount} of the agent's own accounts selected here won't be used while it acts as you.",
+				{ ownAccountCount: own }
+			);
 		}
 	}
 	return null;
 }
 
-function stoppedTriggersMessage(count: number): string | null {
+function stoppedTriggersMessage(
+	tl: LiteralMessage,
+	count: number
+): string | null {
 	if (count <= 0) {
 		return null;
 	}
-	return count === 1
-		? "1 event trigger watches an account this agent may no longer use, so it will stop firing."
-		: `${count} event triggers watch accounts this agent may no longer use, so they will stop firing.`;
+	return tl(
+		"{count, plural, one {# event trigger watches an account this agent may no longer use, so it will stop firing.} other {# event triggers watch accounts this agent may no longer use, so they will stop firing.}}",
+		{ count }
+	);
 }

@@ -113,8 +113,8 @@ test("Windows and Linux expose their distinct setup states", async ({
 
 interface DeviceNativeFixture {
 	calls: string[];
-	unexpected: string[];
 	failNextSettings(): void;
+	unexpected: string[];
 }
 async function deviceNative(page: import("@playwright/test").Page) {
 	return page.evaluate(

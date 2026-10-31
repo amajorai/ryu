@@ -91,9 +91,7 @@ export function RunModeContent({
 			</CommandGroup>
 			{worktreeMode && (
 				<div className="flex flex-col gap-1.5 px-2.5 pb-2">
-					<span className="type-caption text-muted-foreground">
-						Branch name
-					</span>
+					<span className="text-muted-foreground text-xs">Branch name</span>
 					<div className="flex items-center gap-1.5">
 						<Input
 							aria-label="Branch name"

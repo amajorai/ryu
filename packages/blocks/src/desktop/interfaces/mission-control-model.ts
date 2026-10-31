@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -191,16 +192,17 @@ function stationFor(
 	};
 }
 
-function runFailedDetail(event: InterfaceEvent): string {
+function runFailedDetail(event: InterfaceEvent, tl: LiteralMessage): string {
 	return event.label
-		? `Scheduled run failed · ${event.label}`
-		: "Scheduled run failed";
+		? tl("Scheduled run failed · {label}", { label: event.label })
+		: tl("Scheduled run failed");
 }
 
 function buildAlerts(
 	threads: readonly InterfaceThread[],
 	events: readonly InterfaceEvent[],
-	statusOf: ReadonlyMap<string, ThreadStatus>
+	statusOf: ReadonlyMap<string, ThreadStatus>,
+	tl: LiteralMessage
 ): MissionAlert[] {
 	const warnings: MissionAlert[] = [];
 	const advisories: MissionAlert[] = [];
@@ -237,7 +239,7 @@ function buildAlerts(
 			warnings.push({
 				agentId: event.agentId,
 				at: event.end ?? event.start,
-				detail: runFailedDetail(event),
+				detail: runFailedDetail(event, tl),
 				id: `run:${event.id}`,
 				severity: "warning",
 				source: "run",
@@ -326,7 +328,8 @@ function buildRecentRuns(events: readonly InterfaceEvent[]): InterfaceEvent[] {
 /** Everything Mission Control shows, for one snapshot at one moment. */
 export function buildMissionControl(
 	snapshot: InterfaceSnapshot,
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): MissionView {
 	const { threads } = snapshot;
 	const events = snapshot.events ?? [];
@@ -343,7 +346,7 @@ export function buildMissionControl(
 	const stations = snapshot.agents.map((agent) =>
 		stationFor(agent, threads, statusOf, starts)
 	);
-	const alerts = buildAlerts(threads, events, statusOf);
+	const alerts = buildAlerts(threads, events, statusOf, tl);
 	const newest = [...threads].sort(byNewest)[0];
 	return {
 		activity,
@@ -359,6 +362,7 @@ export function buildMissionControl(
 			stations,
 			statusOf,
 			threads,
+			tl,
 		}),
 		lastUpdate: newest?.updatedAt ?? null,
 		recentRuns: buildRecentRuns(events),

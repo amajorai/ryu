@@ -96,7 +96,7 @@ export function WarehouseList({
 												? tl("{name}. Show their orders", {
 														name: picker.agent.name,
 													})
-												: pickerLabel(picker)
+												: pickerLabel(picker, tl)
 										}
 										aria-pressed={selectedAgentId === picker.agent.id}
 										className={cn(

@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { CarFront, Flag } from "lucide-react";
 import { type ReactNode, useContext, useId } from "react";
@@ -22,18 +22,19 @@ function carName(
 	car: RideCar,
 	trip: RideTrip | undefined,
 	acted: boolean,
+	tl: LiteralMessage,
 	/** The trip's act word ("Waiting on you"). */
 	word?: string
 ): string {
 	if (!acted) {
-		return carLabel(car, trip);
+		return carLabel(car, trip, tl);
 	}
 	if (!trip) {
 		return `${car.agent.name}. Book a trip`;
 	}
 	return word
 		? `${car.agent.name}, ${word} for ${trip.thread.title}. Show the trip`
-		: `${carLabel(car, trip)}. Show the trip`;
+		: `${carLabel(car, trip, tl)}. Show the trip`;
 }
 
 /**
@@ -98,6 +99,7 @@ export function RidesList({
 											car,
 											trip,
 											row !== null,
+											tl,
 											trip && actTrips
 												? tripWord(trip, actTrips.get(trip.id))
 												: undefined

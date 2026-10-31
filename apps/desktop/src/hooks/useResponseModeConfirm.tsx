@@ -8,6 +8,7 @@
  * when the user cancels.
  */
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { type ReactNode, useCallback, useState } from "react";
 import {
 	type PromptCacheConfirmation,
@@ -29,6 +30,7 @@ export function useResponseModeConfirm(): {
 	confirmLevelChange: (next: InterfaceLevel, apply: () => void) => void;
 	dialog: ReactNode;
 } {
+	const tl = useLiteralMessages();
 	const [pending, setPending] = useState<PendingLevelChange | null>(null);
 
 	const confirmLevelChange = useCallback(
@@ -36,7 +38,8 @@ export function useResponseModeConfirm(): {
 			// Ryu Bot pins the level to Ryu Work, so nothing it does moves the mode.
 			const warning = responseModeCacheWarning(
 				readInterfaceLevel(),
-				isRyuBot() ? "simple" : next
+				isRyuBot() ? "simple" : next,
+				tl
 			);
 			if (!warning) {
 				apply();
@@ -44,7 +47,7 @@ export function useResponseModeConfirm(): {
 			}
 			setPending({ apply, confirmation: warning });
 		},
-		[]
+		[tl]
 	);
 
 	const onApply = () => {

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { createChatPageNativeHttpFixture } from "./chat-page-native-http.host.ts";
 import { REACTION_MESSAGE_ID } from "./chat-page-native-http-reactions.ts";
+
 const origin = "http://127.0.0.1:5590";
 const conversation = "conversation-toolbar-share-fixture";
 const list = `/api/conversations/${conversation}/reactions`;
@@ -52,12 +53,13 @@ test("native reaction fixture persists exact body, idempotent add, remove and in
 		expect(await (await fetch(url + list, { headers })).json()).toEqual({
 			reactions: [],
 		});
-		for (let i = 0; i < 2; i++)
+		for (let i = 0; i < 2; i++) {
 			expect(await (await write(url, "POST", { emoji: "🎉" })).json()).toEqual({
 				ok: true,
 				message_id: REACTION_MESSAGE_ID,
 				emoji: "🎉",
 			});
+		}
 		expect(await (await fetch(url + list, { headers })).json()).toEqual({
 			reactions: [
 				{
@@ -87,15 +89,21 @@ test("real held refused HTTP save cannot mutate reaction storage, and identical 
 		await new Promise<void>((resolve, reject) => {
 			let remaining = 100;
 			const tick = () => {
-				if (fixture.snapshot().heldRequestIds.length) resolve();
-				else if (remaining-- > 0) setTimeout(tick, 1);
-				else reject(new Error("HTTP hold not reached"));
+				if (fixture.snapshot().heldRequestIds.length) {
+					resolve();
+				} else if (remaining-- > 0) {
+					setTimeout(tick, 1);
+				} else {
+					reject(new Error("HTTP hold not reached"));
+				}
 			};
 			tick();
 		});
 		expect(fixture.snapshot().reactions).toEqual({});
 		const id = fixture.snapshot().heldRequestIds[0];
-		if (id === undefined) throw new Error("missing held ID");
+		if (id === undefined) {
+			throw new Error("missing held ID");
+		}
 		await control(url, { action: "release", requestId: id, accept: false });
 		expect((await pending).status).toBe(503);
 		expect(await (await fetch(url + list, { headers })).json()).toEqual({

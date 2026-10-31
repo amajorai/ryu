@@ -5,6 +5,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import type { CSSProperties } from "react";
 import { GRAPH_NODE_SIZE } from "./graph-model.ts";
 
 /*
@@ -392,4 +393,12 @@ export function frameViewport(
 			minZoom: limits.minZoom,
 		}) ?? fitAll
 	);
+}
+
+/** A label's transform: centered under its node, grown by `scale`. */
+export function labelTransform(scale: number): CSSProperties {
+	return {
+		transform: `translateX(-50%) scale(${scale})`,
+		transformOrigin: "top center",
+	};
 }

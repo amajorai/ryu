@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -305,8 +306,10 @@ function ReefFeature({
 }
 
 /** The aquarium's words for a limit, by the clam: "In the clam till 15:10". */
-export const aquariumLimitText: LimitText = (_act, at) =>
-	at ? `In the clam till ${at}` : "In the clam";
+export function aquariumLimitText(tl: LiteralMessage): LimitText {
+	return (_act, at) =>
+		at ? tl("In the clam till {at}", { at }) : tl("In the clam");
+}
 
 /**
  * Where a creature's act props sit on the sand under its home: the pearl
@@ -389,6 +392,7 @@ export function AquariumActProps({
 	};
 	slots: { overflow: number; slots: readonly YouSpotSlot[] };
 }) {
+	const tl = useLiteralMessages();
 	const sand = TANK_FLOOR + 0.02;
 	return (
 		<group>
@@ -414,7 +418,7 @@ export function AquariumActProps({
 							focusable={false}
 							iconOnly={handlers.iconOnly}
 							layout={handlers.iconOnly ? PHONE_SAND_LAYOUT : SAND_LAYOUT}
-							limitText={aquariumLimitText}
+							limitText={aquariumLimitText(tl)}
 							nowMs={handlers.nowMs}
 							onAsk={handlers.onAsk}
 							onBlocker={handlers.onBlocker}

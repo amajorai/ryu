@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceGroup,
 	type InterfaceSnapshot,
@@ -80,16 +81,24 @@ function agentNames(
 	return `${names[0]} and ${names.length - 1} more`;
 }
 
-function dailyDetail(status: ThreadStatus, who: string): string {
+function dailyDetail(
+	status: ThreadStatus,
+	who: string,
+	tl: LiteralMessage
+): string {
 	switch (status) {
 		case "attention":
-			return `Check the failed run · ${who}`;
+			return tl("Check the failed run · {who}", { who });
 		case "your-turn":
-			return who === "No agent" ? "Reply to the thread" : `Reply to ${who}`;
+			return who === "No agent"
+				? tl("Reply to the thread")
+				: tl("Reply to {who}", { who });
 		case "working":
-			return `${who} is working on it`;
+			return tl("{who} is working on it", { who });
 		default:
-			return `Waiting on ${who === "No agent" ? "an agent" : who} to pick it up`;
+			return who === "No agent"
+				? tl("Waiting on an agent to pick it up")
+				: tl("Waiting on {who} to pick it up", { who });
 	}
 }
 
@@ -118,7 +127,10 @@ function dailyProgress(status: ThreadStatus): number {
  * Daily quests: open conversations. Those waiting on you (a reply, or a failed
  * run) are complete and ready to claim; live and queued ones are in progress.
  */
-export function dailyQuests(snapshot: InterfaceSnapshot): LobbyQuest[] {
+export function dailyQuests(
+	snapshot: InterfaceSnapshot,
+	tl: LiteralMessage
+): LobbyQuest[] {
 	const rank = (thread: InterfaceThread) =>
 		THREAD_STATUS_ORDER.indexOf(threadStatus(thread));
 	return snapshot.threads
@@ -131,7 +143,7 @@ export function dailyQuests(snapshot: InterfaceSnapshot): LobbyQuest[] {
 				action: { kind: "open", threadId: thread.id },
 				agentId: thread.agentIds[0] ?? null,
 				complete,
-				detail: dailyDetail(status, agentNames(snapshot, thread)),
+				detail: dailyDetail(status, agentNames(snapshot, thread), tl),
 				goal: DAILY_STEPS,
 				groupId: null,
 				id: `daily-${thread.id}`,
@@ -215,7 +227,10 @@ export function nextMilestone(messages: number): MilestoneTier {
 }
 
 /** Milestones: per agent, messages traded toward the next tier. */
-export function milestoneQuests(members: readonly LobbyMember[]): LobbyQuest[] {
+export function milestoneQuests(
+	members: readonly LobbyMember[],
+	tl: LiteralMessage
+): LobbyQuest[] {
 	return [...members]
 		.sort(
 			(a, b) =>
@@ -230,14 +245,17 @@ export function milestoneQuests(members: readonly LobbyMember[]): LobbyQuest[] {
 					: { agentId: member.agent.id, kind: "start" },
 				agentId: member.agent.id,
 				complete: member.messages >= goal,
-				detail: `Tier ${tier} of ${MILESTONE_TIERS.length}`,
+				detail: tl("Tier {tier} of {tierCount}", {
+					tier: String(tier),
+					tierCount: String(MILESTONE_TIERS.length),
+				}),
 				goal,
 				groupId: null,
 				id: `milestone-${member.agent.id}`,
 				kind: "milestone",
 				metric: `${Math.min(member.messages, goal)} / ${goal} messages`,
 				progress: Math.min(member.messages, goal),
-				title: `Talk shop with ${member.agent.name}`,
+				title: tl("Talk shop with {name}", { name: member.agent.name }),
 				updatedAt: member.lastActive,
 				xp: goal * XP_PER_MESSAGE,
 			};
@@ -317,7 +335,8 @@ function finishedAt(thread: InterfaceThread): string | null {
 export function actDailyQuests(
 	snapshot: InterfaceSnapshot,
 	asks: AskTally,
-	nowMs: number
+	nowMs: number,
+	tl: LiteralMessage
 ): LobbyQuest[] {
 	const today = localDayKey(new Date(nowMs));
 	const answers: LobbyQuest = {
@@ -363,7 +382,9 @@ export function actDailyQuests(
 				action: { kind: "open", threadId: thread.id },
 				agentId: thread.agentIds[0] ?? null,
 				complete: true,
-				detail: `${agentNames(snapshot, thread)} finished a run`,
+				detail: tl("{names} finished a run", {
+					names: agentNames(snapshot, thread),
+				}),
 				goal: 1,
 				groupId: null,
 				id: `daily-done-${thread.id}`,
@@ -381,13 +402,16 @@ export function actDailyQuests(
 export function buildQuestBoard(
 	snapshot: InterfaceSnapshot,
 	members: readonly LobbyMember[],
+	tl: LiteralMessage,
 	/** The act layer's ask tally: dailies count asks answered and runs finished today. */
 	asks?: AskTally,
 	nowMs = Date.now()
 ): QuestBoard {
 	return {
-		daily: asks ? actDailyQuests(snapshot, asks, nowMs) : dailyQuests(snapshot),
-		milestone: milestoneQuests(members),
+		daily: asks
+			? actDailyQuests(snapshot, asks, nowMs, tl)
+			: dailyQuests(snapshot, tl),
+		milestone: milestoneQuests(members, tl),
 		weekly: weeklyQuests(snapshot),
 	};
 }

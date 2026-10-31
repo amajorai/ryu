@@ -36,7 +36,9 @@ export async function installCanvasIdleNetwork(
 	await page.route("**/api/**", async (route) => {
 		const request = route.request();
 		const url = new URL(request.url());
-		if (!url.pathname.startsWith("/api/")) return route.continue();
+		if (!url.pathname.startsWith("/api/")) {
+			return route.continue();
+		}
 		const rawBody = request.postData();
 		const authorization = request.headers().authorization ?? null;
 		const record = (status: number) =>

@@ -32,6 +32,7 @@ GlobalRegistrator.register();
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const { act } = await import("react");
+const { formatMessage } = await import("@ryu/i18n");
 const { createRoot } = await import("react-dom/client");
 const { agentActs, unownedAsks } = await import("@ryuhq/protocol/interfaces");
 const { FIXTURE_CLOCK, FIXTURE_NOW, usefulStateFixture } = await import(
@@ -132,7 +133,7 @@ describe("lobby act props", () => {
 					"+6: 1 limited, 2 working, 1 delivering, 2 idle"
 				);
 				expect(tally?.getAttribute("aria-label")).toBe(
-					offStageLabel(offStage.count)
+					offStageLabel(offStage.count, formatMessage)
 				);
 				expect(tally?.tabIndex).toBe(0);
 				act(() => tally?.click());

@@ -1,5 +1,5 @@
-import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";

@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceActivityKind,
@@ -380,6 +381,7 @@ export function pathActVillagers({
 	shown,
 	slots,
 	stones,
+	tl,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
 	looks: ReadonlyMap<string, MemberLooks>;
@@ -392,6 +394,7 @@ export function pathActVillagers({
 	shown: ReadonlySet<string>;
 	slots: readonly YouSpotSlot[];
 	stones: ReadonlyMap<string, WorldStone>;
+	tl: LiteralMessage;
 }): VillagerSpec[] {
 	const cast: VillagerSpec[] = [];
 	for (const [agentId, stone] of stones) {
@@ -417,8 +420,8 @@ export function pathActVillagers({
 			iconOnly: asking && slot ? false : undefined,
 			id: `hiker:${agentId}`,
 			label: asking
-				? `${act.ariaLabel} Answer their ask.`
-				: `${act.ariaLabel} Open their stop.`,
+				? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+				: tl("{ariaLabel} Open their stop.", { ariaLabel: act.ariaLabel }),
 			life: actLife(
 				act,
 				{

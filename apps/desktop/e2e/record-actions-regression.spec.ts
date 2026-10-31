@@ -7,6 +7,7 @@ import type {
 	RecordCall,
 	RecordCompanionApi,
 } from "./harness/record-companion-regression.types.ts";
+
 declare global {
 	interface Window {
 		__recordCompanion: RecordCompanionApi;
@@ -41,9 +42,9 @@ async function writes(page: Page): Promise<RecordCall[]> {
 	);
 }
 interface SavedState {
-	schemaVersion: number;
 	invoices?: Record<string, unknown>[];
 	people?: Record<string, unknown>[];
+	schemaVersion: number;
 }
 async function stored(page: Page, app: RecordApp): Promise<SavedState> {
 	const raw = await page.evaluate(

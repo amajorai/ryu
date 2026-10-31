@@ -1,4 +1,5 @@
 import { replyThreadDescription } from "@ryu/blocks/desktop/agent-elements/reply-thread.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import type { ComposerSettingsSection } from "@/components/agent-elements/input/composer-settings-menu.tsx";
 import type {
@@ -117,6 +118,7 @@ export function useChatComposerRefs({
 	handleSaveTemporaryChat,
 	savingTemporaryChat,
 }: UseChatComposerRefsInput) {
+	const tl = useLiteralMessages();
 	// The "check my balance every time I send" half of the threshold fallback.
 	// Bound to the turn LIFECYCLE rather than the submit handler: a send can land
 	// through three paths here (direct, queued, blocked-retry), and the spend a
@@ -187,7 +189,7 @@ export function useChatComposerRefs({
 						label: creatingReplyThread ? "Creating…" : "Create thread",
 						onClick: handleCreateFocusedThread,
 					},
-					description: replyThreadDescription(replyContext.chainLength),
+					description: replyThreadDescription(replyContext.chainLength, tl),
 					onClose: clearReply,
 					title: "Long reply chain",
 				}

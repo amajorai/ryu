@@ -3,16 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, type FrameLocator, type Page, test } from "@playwright/test";
 import type { DrawesomeSketchAttachment } from "../src/components/chat/DrawesomeSketchDialog.tsx";
+
 const INLINE_REFERENCE_PNG =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=";
 
 interface DialogApi {
+	attachments(): DrawesomeSketchAttachment[];
 	mount(input: {
 		appHtml: string;
 		sourceImage?: { filename: string; url: string };
 	}): void;
 	requests(): Array<{ method: string; path: string }>;
-	attachments(): DrawesomeSketchAttachment[];
 	unknownRequests(): string[];
 }
 declare global {
@@ -230,7 +231,9 @@ test("actual Desktop Drawesome cancelling held PNG preparation destroys its fram
 		.locator('iframe[title="Plugin: Drawesome"]')
 		.elementHandle();
 	const originalFrame = await iframeHandle?.contentFrame();
-	if (!originalFrame) throw new Error("Missing original annotation frame.");
+	if (!originalFrame) {
+		throw new Error("Missing original annotation frame.");
+	}
 	// Hold completion of the real browser encoder after it has produced a PNG;
 	// the callback receives its original bytes, never a substitute attachment.
 	await originalFrame.evaluate(() => {
@@ -239,7 +242,9 @@ test("actual Desktop Drawesome cancelling held PNG preparation destroys its fram
 			encode.call(
 				this,
 				(blob) => {
-					if (!blob) throw new Error("Actual canvas encoder returned no PNG");
+					if (!blob) {
+						throw new Error("Actual canvas encoder returned no PNG");
+					}
 					void window.__holdDrawesomePng(blob.size).then(() => callback(blob));
 				},
 				type,
@@ -297,7 +302,7 @@ test("actual Desktop Drawesome annotation refusal retains drawn draft; explicit 
 	// first native export, then restore it so retry produces actual composite bytes.
 	await frame.locator("body").evaluate(() => {
 		const exportPng = HTMLCanvasElement.prototype.toDataURL;
-		HTMLCanvasElement.prototype.toDataURL = function () {
+		HTMLCanvasElement.prototype.toDataURL = () => {
 			HTMLCanvasElement.prototype.toDataURL = exportPng;
 			throw new DOMException("Canvas export refused", "SecurityError");
 		};

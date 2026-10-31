@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { PASS_FORMATS } from "../pass-studio/formats.ts";
 import {
 	buildHeatmapCells,
@@ -18,6 +20,8 @@ import {
 	heatmapLevel,
 	layoutHeatmapClip,
 } from "./heatmap-clip.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const DATA: HeatmapClipData = {
 	activeDays: 42,
@@ -167,7 +171,7 @@ describe("timeline", () => {
 });
 
 test("the stats and footer only carry the Stats tab's own figures", () => {
-	expect(heatmapClipStats(DATA, 1)).toEqual([
+	expect(heatmapClipStats(DATA, 1, tl)).toEqual([
 		{ label: "Total tokens", value: "1.2m" },
 		{ label: "Active days", value: "42" },
 		{ label: "Day streak · best 12", value: "4" },
@@ -216,7 +220,9 @@ describe("drawHeatmapFrame", () => {
 
 	test("the held frame shows the wordmark, the name, the numbers and every active day", () => {
 		const { ctx, fills, texts } = recordingContext();
-		drawHeatmapFrame(ctx, DATA, HEATMAP_CLIP_HOLD_TIME, size, palette);
+		drawHeatmapFrame(ctx, DATA, HEATMAP_CLIP_HOLD_TIME, size, palette, {
+			tl,
+		});
 		expect(texts).toContain("Ryu");
 		expect(texts).toContain("Ada Lovelace");
 		expect(texts).toContain("1.2m");
@@ -229,7 +235,7 @@ describe("drawHeatmapFrame", () => {
 
 	test("before the fill starts no day is lit", () => {
 		const { ctx, fills } = recordingContext();
-		drawHeatmapFrame(ctx, DATA, 0.1, size, palette);
+		drawHeatmapFrame(ctx, DATA, 0.1, size, palette, { tl });
 		expect(
 			fills.some((fill) => (palette.levels as readonly string[]).includes(fill))
 		).toBe(false);

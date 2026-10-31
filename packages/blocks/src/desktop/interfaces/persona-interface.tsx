@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { threadStatus } from "@ryuhq/protocol/interfaces";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isInterfaceCovered } from "./interface-keys.ts";
@@ -49,6 +50,7 @@ export function PersonaInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const [chosenId, setChosenId] = useState<string | null>(null);
 	const [tab, setTab] = useState<PersonaTab>("chat");
 	const [depth, setDepth] = useState<StatusDepth>(0);
@@ -134,8 +136,8 @@ export function PersonaInterface({
 	}, [loading, mainId, port, threadOpen]);
 
 	const suggestions = useMemo(
-		() => personaIdeas(persona, threads).flatMap((group) => group.ideas),
-		[persona, threads]
+		() => personaIdeas(persona, threads, tl).flatMap((group) => group.ideas),
+		[persona, threads, tl]
 	);
 
 	// Goals the persona is part of lead the context column's preview.
@@ -262,7 +264,7 @@ export function PersonaInterface({
 				agent={persona}
 				draft={ideaDraft}
 				fieldRef={ideaFieldRef}
-				groups={personaIdeas(persona, threads)}
+				groups={personaIdeas(persona, threads, tl)}
 				onDraftChange={setIdeaDraft}
 				onPick={pickIdea}
 				onSend={send}

@@ -5,9 +5,9 @@ import "../../src/index.css";
 
 export interface AgentIntegrationProofState {
 	calls: { command: string; args: unknown; outcome: string }[];
+	refuseDocsOnce: boolean;
 	requests: { url: string; method: string; authorization: string | null }[];
 	unexpected: unknown[];
-	refuseDocsOnce: boolean;
 }
 declare global {
 	interface Window {
@@ -39,8 +39,9 @@ mockIPC(async (command, args) => {
 	if (
 		command === "plugin:store|load" &&
 		JSON.stringify(args) === JSON.stringify({ path: "auth.bin" })
-	)
+	) {
 		return 4218;
+	}
 	if (
 		command === "plugin:store|get" &&
 		args &&
@@ -48,13 +49,15 @@ mockIPC(async (command, args) => {
 		Object.keys(args).sort().join(",") === "key,rid" &&
 		args.rid === 4218 &&
 		["accounts", "activeUserId", "token"].includes(String(args.key))
-	)
+	) {
 		return [null, false];
+	}
 	if (
 		command === "plugin:store|save" &&
 		JSON.stringify(args) === JSON.stringify({ rid: 4218 })
-	)
+	) {
 		return null;
+	}
 	call.outcome = "unexpected";
 	proof.unexpected.push({ command, args });
 	throw new Error("Unexpected integration native command");
@@ -73,7 +76,7 @@ window.fetch = async (input, init) => {
 			request.url === `${location.origin}/api/gateway/config` &&
 			request.method === "GET" &&
 			request.headers.get("authorization") === "Bearer integration-proof-token"
-		)
+		) {
 			return Response.json({
 				auth: {
 					api_keys: [
@@ -85,6 +88,7 @@ window.fetch = async (input, init) => {
 					],
 				},
 			});
+		}
 		proof.unexpected.push(call);
 		return Response.json(
 			{ error: "Unexpected integration HTTP request" },
@@ -94,7 +98,9 @@ window.fetch = async (input, init) => {
 	return actualFetch(input, init);
 };
 const root = document.getElementById("root");
-if (!root) throw new Error("Missing integration proof root");
+if (!root) {
+	throw new Error("Missing integration proof root");
+}
 createRoot(root).render(
 	<main className="mx-auto max-w-5xl p-8">
 		<IntegrationsPanel

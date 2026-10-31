@@ -5,6 +5,7 @@ import {
 	LayoutRightIcon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	BottomAlignment,
 	WorkbenchRegion,
@@ -146,10 +147,12 @@ export function workbenchLayoutCommands({
 	dispatch,
 	movableRegions,
 	state,
+	tl,
 }: {
 	dispatch: (action: WorkbenchAction) => void;
 	movableRegions: readonly WorkbenchRegion[];
 	state: WorkbenchState;
+	tl: LiteralMessage;
 }): WorkbenchCommand[] {
 	const commands: WorkbenchCommand[] = [];
 	for (const region of ["right", "bottom"] as const) {
@@ -166,7 +169,9 @@ export function workbenchLayoutCommands({
 						? { type: "region/hide", region }
 						: { type: "region/show", region }
 				),
-			title: `${open ? "Hide" : "Show"} ${name} Pane`,
+			title: open
+				? tl("Hide {name} Pane", { name })
+				: tl("Show {name} Pane", { name }),
 		});
 	}
 
@@ -197,7 +202,7 @@ export function workbenchLayoutCommands({
 					});
 				}
 			},
-			title: `Move Tab to ${name} Pane`,
+			title: tl("Move Tab to {name} Pane", { name }),
 		});
 	}
 
@@ -208,7 +213,7 @@ export function workbenchLayoutCommands({
 			id: `workbench-align-bottom-${alignment}`,
 			keywords: `align bottom pane panel width ${label.toLowerCase()} layout`,
 			run: () => dispatch({ type: "bottom/align", alignment }),
-			title: `Align Bottom Pane: ${label}`,
+			title: tl("Align Bottom Pane: {label}", { label }),
 		});
 	}
 
@@ -256,7 +261,7 @@ export function workbenchLayoutCommands({
 					focusGroupElement(target);
 				}
 			},
-			title: `Focus ${label} Pane`,
+			title: delta === 1 ? tl("Focus Next Pane") : tl("Focus Previous Pane"),
 		});
 	}
 

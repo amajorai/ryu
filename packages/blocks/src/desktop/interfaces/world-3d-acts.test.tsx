@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 
 // The DOM must exist before the dialog primitives load (they read it on import).
 GlobalRegistrator.register();
@@ -313,9 +314,11 @@ describe("world-3d words", () => {
 		expect(goal?.suffix).toBe("· ≤ 7m");
 		// Its name says it opens the ask, with the wait.
 		const { trackerLabel } = await import("./world-3d-hud.tsx");
-		expect(goal ? trackerLabel(goal) : "").toBe(
-			"Answer Bo: Bo asks: Which DB to use?, ≤ 7m"
-		);
+		expect(
+			goal
+				? trackerLabel(goal, (source, values) => formatMessage(source, values))
+				: ""
+		).toBe("Answer Bo: Bo asks: Which DB to use?, ≤ 7m");
 		expect(goal?.agentId).toBe(agentId("Bo"));
 		// It carries the ask it names, so activating it opens exactly that one.
 		expect(goal?.askId).toBe(

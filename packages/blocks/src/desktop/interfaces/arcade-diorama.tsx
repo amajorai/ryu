@@ -181,6 +181,7 @@ export function ArcadeDioramaScene({
 						looks: base,
 						paths,
 						reduced,
+						tl,
 						view: actView,
 					});
 				}

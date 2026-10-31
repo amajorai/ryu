@@ -5,6 +5,7 @@
 // above the lane default this section's other cards set, so a blank picker
 // shows the lane model it falls back to.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
@@ -43,10 +44,7 @@ import {
 	inheritedForCoordinator,
 	isScopeSet,
 } from "@/src/lib/model-defaults.ts";
-import {
-	NODE_DEFAULT_SCOPE_LABEL,
-	scopeDefaultCacheWarning,
-} from "@/src/lib/node-default-cache-warning.ts";
+import { scopeDefaultCacheWarning } from "@/src/lib/node-default-cache-warning.ts";
 
 interface ModelsDefaultsProps {
 	canConfigure: boolean;
@@ -73,6 +71,7 @@ function ScopedModelsDefaultsCard({
 	canConfigure,
 	target,
 }: ModelsDefaultsProps) {
+	const tl = useLiteralMessages();
 	const [stored, setStored] = useState<ScopeDefault>(EMPTY_SCOPE_DEFAULT);
 	const [draft, setDraft] = useState<ScopeDefault>(EMPTY_SCOPE_DEFAULT);
 	const [effective, setEffective] = useState<
@@ -171,9 +170,10 @@ function ScopedModelsDefaultsCard({
 	 * default. Cancel writes nothing. */
 	const confirmThenRun = (next: ScopeDefault, write: () => Promise<void>) => {
 		const confirmation = scopeDefaultCacheWarning(
-			NODE_DEFAULT_SCOPE_LABEL,
+			tl("the node-wide default"),
 			stored,
-			next
+			next,
+			tl
 		);
 		if (!confirmation) {
 			void run(write);

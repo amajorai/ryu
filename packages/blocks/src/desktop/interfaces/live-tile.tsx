@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	InterfaceAgent,
@@ -92,7 +93,8 @@ export const LiveTile = memo(function LiveTileImpl({
 	thread,
 	tileId,
 }: LiveTileProps) {
-	const spec = liveArt(thread, agent);
+	const tl = useLiteralMessages();
+	const spec = liveArt(thread, agent, tl);
 	const tag = thread ? liveStatusTag(thread) : null;
 	const title = thread?.title ?? "No streams yet";
 	return (

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useMemo, useRef } from "react";
 import { keepsActOverlay } from "./act-settings.ts";
 import {
@@ -56,6 +57,7 @@ export function usePassportActors({
 	snapshot: RendererProps["snapshot"];
 	unowned: ActsView["unowned"];
 }) {
+	const tl = useLiteralMessages();
 	const cards = useActCards({
 		acts,
 		clock,
@@ -113,8 +115,9 @@ export function usePassportActors({
 				onAsk: (askId) => openAsk(askId),
 				reduced: reduceMotion,
 				shown,
+				tl,
 			}),
-		[acts, budget.iconOnly, layout, looks, openAsk, reduceMotion, shown]
+		[acts, budget.iconOnly, layout, looks, openAsk, reduceMotion, shown, tl]
 	);
 	const onAsk = (askId: string, opener?: HTMLElement) =>
 		cards.openAsk(askId, opener);

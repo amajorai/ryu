@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type { ReactNode } from "react";
 
 // The picker plates are drei `Html` overlays: outside a Canvas, render them
@@ -58,6 +59,8 @@ describe("Warehouse picker plates (15a)", () => {
 		shown: new Set(),
 		slots: youSpotSlots(acts, unownedAsks(snapshot)).slots,
 		stations,
+
+		tl: (source, values) => formatMessage(source, values),
 	});
 	const specOf = (id: string): Spec => {
 		const spec = cast.find((candidate) => candidate.actAgent === id);

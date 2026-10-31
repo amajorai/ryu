@@ -23,6 +23,7 @@
 // it. So the untrusted-input path into this function is short, and it does not run
 // through a human first.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type AppRequestMethod,
 	type AppRequestValue,
@@ -89,12 +90,15 @@ export function resolveBlueprintPath(path: MountedAppPathInput): string | null {
  */
 export async function blueprintRequest(
 	target: ApiTarget,
-	input: BlueprintRequestInput
+	input: BlueprintRequestInput,
+	tl: LiteralMessage
 ): Promise<AppResponseValue> {
 	return await mountedAppRequest(target, input, {
 		allowedMethods: ALLOWED_METHODS,
 		invalidMethodMessage: (method) =>
-			`Refusing to forward a blueprint request with method "${method}".`,
+			tl('Refusing to forward a blueprint request with method "{method}".', {
+				method,
+			}),
 		invalidPathMessage: (path) =>
 			`Refusing to forward "${String(path)}" — a blueprint request path must be a sub-path of ${BLUEPRINT_MOUNT} beginning with "/" and containing no ".." segment.`,
 		mount: BLUEPRINT_MOUNT,

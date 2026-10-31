@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { MarketplaceBundleMember } from "@ryu/marketplace/catalog/bundle-types";
 import { z } from "zod";
 import { installPublishedAgent } from "./agents.ts";
@@ -63,13 +64,20 @@ function modelFileFromSource(source: string | null | undefined): string | null {
 /** Human-facing summary of manual steps, for toasts and dialogs. */
 export function describeBundleManualSteps<
 	T extends MarketplaceBundleMemberInput,
->(manual: MarketplaceBundleManualStep<T>[]): string | null {
+>(manual: MarketplaceBundleManualStep<T>[], tl: LiteralMessage): string | null {
 	const first = manual[0];
 	if (!first) {
 		return null;
 	}
-	const more = manual.length > 1 ? ` (+${manual.length - 1} more)` : "";
-	return `${manual.length} need manual setup: ${first.member.name ?? first.member.id}: ${first.reason}${more}`;
+	return tl(
+		"{count} need manual setup: {name}: {reason}{moreCount, plural, =0 {} other { (+# more)}}",
+		{
+			count: manual.length,
+			moreCount: manual.length - 1,
+			name: first.member.name ?? first.member.id,
+			reason: first.reason,
+		}
+	);
 }
 
 function errorMessage<TCause>(cause: TCause): string {

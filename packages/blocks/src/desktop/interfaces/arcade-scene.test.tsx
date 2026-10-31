@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type { ReactNode } from "react";
 
 // The act props are drei `Html` plates over three.js meshes; outside a
@@ -122,6 +123,7 @@ function renderProps(width: number) {
 			looks: {} as never,
 			paths,
 			reduced: true,
+			tl: (source, values) => formatMessage(source, values),
 			view,
 		})
 	);

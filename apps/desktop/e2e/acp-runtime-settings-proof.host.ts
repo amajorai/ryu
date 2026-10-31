@@ -1,10 +1,11 @@
 import { rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
 interface GatewayAcpSettings {
 	idle_timeout_minutes: number;
-	max_parallel_agents: number | null;
 	keep_computer_awake: boolean;
+	max_parallel_agents: number | null;
 }
 
 const desktopDirectory = path.resolve(import.meta.dirname, "..");
@@ -22,11 +23,11 @@ const initialSettings: GatewayAcpSettings = {
 	keep_computer_awake: true,
 };
 interface Call {
+	authorization: string | null;
+	body: { acp: GatewayAcpSettings } | null;
+	contentType: string | null;
 	method: "GET" | "PUT";
 	path: string;
-	authorization: string | null;
-	contentType: string | null;
-	body: { acp: GatewayAcpSettings } | null;
 	status: "pending" | "accepted" | "refused";
 }
 const calls: Call[] = [];
@@ -59,7 +60,9 @@ const json = (data: unknown, status = 200) => Response.json(data, { status });
 const saved = async () =>
 	(await Bun.file(stateFile).json()) as GatewayAcpSettings;
 function validateSettings(value: unknown): value is GatewayAcpSettings {
-	if (!value || typeof value !== "object") return false;
+	if (!value || typeof value !== "object") {
+		return false;
+	}
 	const settings = value as GatewayAcpSettings;
 	return (
 		Object.keys(settings).sort().join(",") ===
@@ -80,7 +83,9 @@ const server = Bun.serve({
 	async fetch(request) {
 		const url = new URL(request.url);
 		const route = url.pathname;
-		if (route === "/__ready") return new Response("ready");
+		if (route === "/__ready") {
+			return new Response("ready");
+		}
 		if (route === "/__acp-proof/state" || route === "/__acp-proof/control") {
 			if (request.headers.get("x-acp-proof-control") !== "finite-acp-fixture") {
 				return json({ error: "Fixture control credential required." }, 403);
@@ -236,8 +241,9 @@ const server = Bun.serve({
 		const relative =
 			route === "/" ? "acp-runtime-settings-proof.html" : route.slice(1);
 		const filePath = path.resolve(buildDirectory, relative);
-		if (!filePath.startsWith(`${buildDirectory}/`))
+		if (!filePath.startsWith(`${buildDirectory}/`)) {
 			return new Response("Forbidden", { status: 403 });
+		}
 		const file = Bun.file(filePath);
 		return (await file.exists())
 			? new Response(file)

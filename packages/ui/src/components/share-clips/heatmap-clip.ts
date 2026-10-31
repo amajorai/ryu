@@ -20,8 +20,10 @@
  * Only numbers the Stats tab already shows go on the clip.
  */
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { formatNumber } from "../../lib/number-format.ts";
 import { drawGhost, ellipsize } from "../pass-studio/paint.ts";
+import { fillRoundedRect, fontString } from "./heatmap-clip-canvas.ts";
 import type {
 	HeatmapClipCell,
 	HeatmapClipData,
@@ -286,7 +288,8 @@ export function countUp(value: number, progress: number): number {
 /** The four headline stats, every one of them a figure the Stats tab shows. */
 export function heatmapClipStats(
 	data: HeatmapClipData,
-	progress: number
+	progress: number,
+	tl: LiteralMessage
 ): HeatmapClipStat[] {
 	const longest = data.streakLongest ?? 0;
 	return [
@@ -299,7 +302,10 @@ export function heatmapClipStats(
 			value: formatNumber(countUp(data.activeDays ?? 0, progress)),
 		},
 		{
-			label: longest > 0 ? `Day streak · best ${longest}` : "Day streak",
+			label:
+				longest > 0
+					? tl("Day streak · best {longest}", { longest: String(longest) })
+					: "Day streak",
 			value: formatNumber(countUp(data.streakCurrent, progress)),
 		},
 		{ label: "Level", value: formatNumber(countUp(data.level, progress)) },
@@ -318,29 +324,6 @@ export function heatmapClipFooter(data: HeatmapClipData): string {
 		parts.push(`Favourite model ${data.favoriteModel}`);
 	}
 	return parts.join("   ·   ");
-}
-
-const fontString = (
-	family: string,
-	weight: number,
-	px: number,
-	unit: number
-): string => `${weight} ${px * unit}px ${family}`;
-
-function fillRoundedRect(
-	ctx: CanvasRenderingContext2D,
-	x: number,
-	y: number,
-	size: number,
-	radius: number
-): void {
-	if (typeof ctx.roundRect === "function") {
-		ctx.beginPath();
-		ctx.roundRect(x, y, size, size, radius);
-		ctx.fill();
-		return;
-	}
-	ctx.fillRect(x, y, size, size);
 }
 
 function drawHeader(
@@ -425,11 +408,12 @@ function drawStats(
 	size: HeatmapClipSize,
 	palette: HeatmapClipPalette,
 	family: string,
-	progress: number
+	progress: number,
+	tl: LiteralMessage
 ): void {
 	const { margin, statsTop, unit } = layout;
 	const columnWidth = (size.width - margin * 2) / 2;
-	const stats = heatmapClipStats(data, progress);
+	const stats = heatmapClipStats(data, progress, tl);
 	ctx.textAlign = "left";
 	ctx.textBaseline = "alphabetic";
 	// The block fades in over the first half of its count-up rather than sitting
@@ -476,7 +460,11 @@ export function drawHeatmapFrame(
 	time: number,
 	size: HeatmapClipSize,
 	palette: HeatmapClipPalette,
-	options: { cells?: readonly HeatmapClipCell[]; fontFamily?: string } = {}
+	options: {
+		cells?: readonly HeatmapClipCell[];
+		fontFamily?: string;
+		tl: LiteralMessage;
+	}
 ): void {
 	const family = options.fontFamily ?? "system-ui, sans-serif";
 	const cells = options.cells ?? buildHeatmapCells(data.days, data.endDay);
@@ -490,6 +478,6 @@ export function drawHeatmapFrame(
 	ctx.globalAlpha = phase.alpha;
 	drawHeader(ctx, data, layout, size, palette, family);
 	drawGrid(ctx, cells, layout.grid, palette, phase.fill);
-	drawStats(ctx, data, layout, size, palette, family, phase.stats);
+	drawStats(ctx, data, layout, size, palette, family, phase.stats, options.tl);
 	ctx.restore();
 }

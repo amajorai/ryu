@@ -66,7 +66,7 @@ function supportedZones(): string[] {
 /** `"GMT+01:00"` for a zone right now, or `"GMT+00:00"` if it can't be read. */
 export function zoneOffsetLabel(
 	timeZone: string,
-	now: Date = new Date(),
+	now: Date = new Date()
 ): string {
 	try {
 		const parts = new Intl.DateTimeFormat("en-US", {
@@ -115,7 +115,7 @@ function buildTimezoneOptions(at: number): TimezoneOption[] {
 		})
 		.sort(
 			(a, b) =>
-				a.offsetMinutes - b.offsetMinutes || a.value.localeCompare(b.value),
+				a.offsetMinutes - b.offsetMinutes || a.value.localeCompare(b.value)
 		);
 
 	return [

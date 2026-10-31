@@ -13,7 +13,10 @@ import {
 	relativeTime,
 	statusMeta,
 } from "@/src/components/agents/AgentRunHistoryView-entries.ts";
-import { conversationRunStatusMeta } from "@/src/lib/conversation-run-status.ts";
+import {
+	conversationRunStatusDescription,
+	conversationRunStatusMeta,
+} from "@/src/lib/conversation-run-status.ts";
 
 function HistoryRow({
 	entry,
@@ -24,6 +27,7 @@ function HistoryRow({
 }) {
 	const tl = useLiteralMessages();
 	const status = statusMeta(entry.runStatus);
+	const runStatus = conversationRunStatusMeta(entry.runStatus);
 	return (
 		<button
 			className={cn(
@@ -50,7 +54,11 @@ function HistoryRow({
 			</div>
 			{status ? (
 				<Badge
-					title={conversationRunStatusMeta(entry.runStatus)?.description}
+					title={
+						runStatus
+							? conversationRunStatusDescription(runStatus, tl)
+							: undefined
+					}
 					variant={status.variant}
 				>
 					<HugeiconsIcon

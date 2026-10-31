@@ -8,6 +8,7 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -170,8 +171,9 @@ export function CreatorProfileHeader({
 	follow?: ReactNode;
 	listings: MarketplaceCreatorListing[];
 }) {
+	const tl = useLiteralMessages();
 	const handle = creatorHandle(creator);
-	const since = creatorSinceLabel(creator.firstPublishedAt);
+	const since = creatorSinceLabel(tl, creator.firstPublishedAt);
 	const links = creatorLinks(creator);
 	const downloads = listings.reduce(
 		(sum, listing) => sum + (listing.communityStats?.downloads ?? 0),

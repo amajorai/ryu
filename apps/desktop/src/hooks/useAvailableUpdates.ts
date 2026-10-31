@@ -321,7 +321,8 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 					const message = await applyReleaseUpdate(
 						target,
 						node,
-						update.appVerdict
+						update.appVerdict,
+						tl
 					);
 					return { detail: message, silent: message === null };
 				}

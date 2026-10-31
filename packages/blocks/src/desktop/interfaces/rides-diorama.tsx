@@ -476,7 +476,7 @@ export function RidesDioramaScene({
 						]}
 						className="h-6 px-2 text-[12px]"
 						key={spot.car.id}
-						label={carLabel(spot.car, spot.trip)}
+						label={carLabel(spot.car, spot.trip, tl)}
 						onSelect={() =>
 							spot.trip
 								? onSelectTrip(spot.trip.id)

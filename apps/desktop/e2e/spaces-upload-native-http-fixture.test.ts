@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { startSpacesUploadHost } from "./spaces-upload-native-http.host.ts";
+
 test("finite upload host refuses bytes without exact authority/schema and persists only accepted retry bytes for independent GET", async () => {
 	const owned = startSpacesUploadHost(0, "http://owned-fixture.invalid");
 	const url = `http://127.0.0.1:${owned.server.port}`;
@@ -166,8 +167,9 @@ test("exact SDK attribution/auth CORS preflight permits a subsequent authenticat
 			"x-ryu-client-id",
 			"x-ryu-client-label",
 			"x-ryu-surface",
-		])
+		]) {
 			expect(allowed).toContain(header);
+		}
 		expect(allowed).not.toContain("*");
 		const response = await fetch(`${url}/api/spaces`, {
 			headers: {

@@ -17,6 +17,7 @@ describe("stage hero routes", () => {
 		expect(hasStageHero("/enterprise")).toBe(true);
 		expect(hasStageHero("/pro/")).toBe(true);
 		expect(hasStageHero("/products")).toBe(true);
+		expect(hasStageHero("/interfaces")).toBe(true);
 		expect(hasStageHero("/pricing")).toBe(false);
 		expect(hasStageHero("/marketplace")).toBe(false);
 	});

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLIENT_SURFACE } from "@/src/lib/client-surface.ts";
 import { sealedLocalStorage } from "../content-seal.ts";
 
 /** localStorage key for this install's stable, randomly-generated client id. */
@@ -44,8 +45,8 @@ export function currentClientId(): string {
 export function identityHeaders() {
 	const headers: RequestInit["headers"] = {
 		"X-Ryu-Client-Id": clientId(),
-		"X-Ryu-Client-Label": "Desktop",
-		"X-Ryu-Surface": "desktop",
+		"X-Ryu-Client-Label": CLIENT_SURFACE.label,
+		"X-Ryu-Surface": CLIENT_SURFACE.surface,
 	};
 	try {
 		const raw = sealedLocalStorage.getItem(OIDC_USER_KEY);

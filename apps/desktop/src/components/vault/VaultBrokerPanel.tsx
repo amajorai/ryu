@@ -126,7 +126,7 @@ function BrokerProposals({ target }: { target: ApiTarget }) {
 		onError: (error) => {
 			sileo.error({
 				title: "Could not update the proposal",
-				description: vaultErrorMessage(error, "Try again."),
+				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},
 	});
@@ -144,7 +144,8 @@ function BrokerProposals({ target }: { target: ApiTarget }) {
 					<p className="p-4 text-sm text-status-destructive">
 						{vaultErrorMessage(
 							proposalsQuery.error,
-							"Could not load proposals."
+							"Could not load proposals.",
+							tl
 						)}
 					</p>
 				) : proposals.length === 0 ? (
@@ -285,6 +286,7 @@ function cardApprovalSummary(approval: VaultCardApproval): string {
 }
 
 function CardApprovals({ target }: { target: ApiTarget }) {
+	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
 	const approvalsQuery = useQuery({
 		queryKey: ["vault", "broker", "card-approvals", target.url],
@@ -305,7 +307,7 @@ function CardApprovals({ target }: { target: ApiTarget }) {
 		onError: (error) => {
 			sileo.error({
 				title: "Could not update the card approval",
-				description: vaultErrorMessage(error, "Try again."),
+				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},
 	});
@@ -323,7 +325,8 @@ function CardApprovals({ target }: { target: ApiTarget }) {
 					<p className="p-4 text-sm text-status-destructive">
 						{vaultErrorMessage(
 							approvalsQuery.error,
-							"Could not load card approvals."
+							"Could not load card approvals.",
+							tl
 						)}
 					</p>
 				) : approvals.length === 0 ? (
@@ -399,6 +402,7 @@ function CardApprovals({ target }: { target: ApiTarget }) {
 }
 
 function BrokerServices({ target }: { target: ApiTarget }) {
+	const tl = useLiteralMessages();
 	const servicesQuery = useQuery({
 		queryKey: ["vault", "broker", "services", target.url],
 		queryFn: () => listVaultBrokerServices(target),
@@ -417,7 +421,8 @@ function BrokerServices({ target }: { target: ApiTarget }) {
 					<p className="p-4 text-sm text-status-destructive">
 						{vaultErrorMessage(
 							servicesQuery.error,
-							"Could not load broker services."
+							"Could not load broker services.",
+							tl
 						)}
 					</p>
 				) : services.length === 0 ? (

@@ -4,7 +4,7 @@
 
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type CSSProperties, Fragment, useEffect, useState } from "react";
-import { createHighlighter, type Highlighter } from "shiki";
+import type { Highlighter } from "shiki";
 
 /**
  * Languages the agent code surfaces highlight — a command, a diff, a JSON
@@ -91,10 +91,14 @@ const tokenCache = new Map<string, AgentCodeTokenLines>();
 
 function getAgentCodeHighlighter() {
 	if (!agentCodeHighlighter) {
-		agentCodeHighlighter = createHighlighter({
-			themes: [LIGHT_THEME, DARK_THEME],
-			langs: [],
-		});
+		// Shiki (and its regex engine) loads with the first block it highlights,
+		// not with the routes that merely can show one.
+		agentCodeHighlighter = import("shiki").then(({ createHighlighter }) =>
+			createHighlighter({
+				themes: [LIGHT_THEME, DARK_THEME],
+				langs: [],
+			})
+		);
 	}
 	return agentCodeHighlighter;
 }

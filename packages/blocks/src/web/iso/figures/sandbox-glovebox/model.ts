@@ -31,6 +31,8 @@
  * never a recording of a real run, and it is not timed to one.
  */
 
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 /** `DEFAULT_MEMORY_MB`, crates/core/tool-exec/src/lib.rs:223. */
 export const MEMORY_MIB = 256;
 
@@ -47,4 +49,13 @@ export const LABEL =
 	"Ryu's JavaScript sandbox drawn as one sealed box with a single hatch";
 
 /** What the drawing shows, for assistive tech only; nothing here is drawn as text. */
-export const DESCRIPTION = `A simulation of the mechanism, not a recording of a real run. Agent programs run in QuickJS compiled to WebAssembly, sealed in a box: the three blanked ports on its roof stand for the filesystem, network and environment the program never gets. The only way in or out is the hatch on the right. A tool call or timer leaves through it and the answer comes back the same way, and the final result comes out cut to ${grouped(RESULT_BYTES)} bytes. Memory is capped at ${MEMORY_MIB} MiB by default and active compute at ${DEADLINE_S} seconds, and starting another program needs both the app's manifest grant and the host's allowlist.`;
+export function describeSandbox(tl: LiteralMessage): string {
+	return tl(
+		"A simulation of the mechanism, not a recording of a real run. Agent programs run in QuickJS compiled to WebAssembly, sealed in a box: the three blanked ports on its roof stand for the filesystem, network and environment the program never gets. The only way in or out is the hatch on the right. A tool call or timer leaves through it and the answer comes back the same way, and the final result comes out cut to {resultBytes} bytes. Memory is capped at {memoryMib} MiB by default and active compute at {deadlineSeconds} seconds, and starting another program needs both the app's manifest grant and the host's allowlist.",
+		{
+			deadlineSeconds: DEADLINE_S,
+			memoryMib: MEMORY_MIB,
+			resultBytes: grouped(RESULT_BYTES),
+		}
+	);
+}

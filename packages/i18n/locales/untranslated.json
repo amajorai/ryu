@@ -8087,6 +8087,21 @@
     ],
     "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
   },
+  "Ryu Marketplace · {itemCount}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
   "Ryu Max": {
     "locales": [
       "ar",
@@ -10600,6 +10615,22 @@
     ],
     "reason": "Ryu Wrapped feature name"
   },
+  "Wrapped {year}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Wrapped feature name with year"
+  },
   "Wrapped · {year}": {
     "locales": [
       "ar",
@@ -10895,6 +10926,13 @@
     ],
     "reason": "Claude Code product name (lowercase diagram label)"
   },
+  "cloud": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "Ryu Cloud component name (lowercase diagram label beside core and gateway)"
+  },
   "core": {
     "locales": [
       "ar",
@@ -10997,12 +11035,19 @@
   },
   "gateway": {
     "locales": [
+      "ar",
+      "de",
       "es",
+      "fr",
+      "hi",
       "it",
+      "ja",
+      "ko",
       "pt-BR",
-      "ru"
+      "ru",
+      "zh-CN"
     ],
-    "reason": "Ryu Gateway product name, kept untranslated per glossary"
+    "reason": "Ryu Gateway component name (lowercase diagram label beside core and cloud)"
   },
   "gemma-4 · local": {
     "locales": [
@@ -11541,6 +11586,13 @@
     ],
     "reason": "literal CLI command syntax that users type as-is"
   },
+  "{agentName} in {topicName}": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'in' is the German and Italian preposition"
+  },
   "{agentName} · {messageCount} messages": {
     "locales": [
       "fr"
@@ -11677,6 +11729,15 @@
     ],
     "reason": "units and hardware term"
   },
+  "{durationMinutes} min": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'min' unit abbreviation is the same"
+  },
   "{environment} · version {version}": {
     "locales": [
       "fr"
@@ -11744,6 +11805,20 @@
     ],
     "reason": "German word is 'Version'"
   },
+  "{kindLabel} — Ryu Marketplace": {
+    "locales": [
+      "ar",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
   "{label} (Esc)": {
     "locales": [
       "ar",
@@ -11772,6 +11847,30 @@
       "fr"
     ],
     "reason": "'messages' is the French word"
+  },
+  "{level} · {durationMinutes} min": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'min' unit abbreviation is the same"
+  },
+  "{level} · {durationMinutes} min · {credentialTitle}": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'min' unit abbreviation is the same"
+  },
+  "{locale} · {messageCount} strings": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'strings' is the Brazilian Portuguese glossary term (e.g. 'strings traduzidas')"
   },
   "{memberCount, plural, one {# skill} other {# skills}}": {
     "locales": [
@@ -11812,6 +11911,18 @@
       "fr"
     ],
     "reason": "'participant(s)' is the French word"
+  },
+  "{nodeType}, {cores} vCPU, {memoryGb} GB RAM": {
+    "locales": [
+      "de"
+    ],
+    "reason": "vCPU, GB and RAM are hardware/unit abbreviations used as-is in German"
+  },
+  "{percent}% in deficit": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'in deficit' is the Italian phrase"
   },
   "{planName} ({billingPeriod})": {
     "locales": [
@@ -11900,6 +12011,28 @@
       "zh-CN"
     ],
     "reason": "unit"
+  },
+  "{title} | Ryu Academy": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "{title} | Ryu Challenges": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German locale uses the loanword Challenges for this feature (matches 'Ryu Challenges')"
   },
   "{tokenCount} tokens": {
     "locales": [

@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceEvent } from "@ryuhq/protocol/interfaces";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -24,18 +25,21 @@ interface NodeJobs {
  */
 export function interfaceEventsAround(
 	jobs: ScheduledJob[],
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): InterfaceEvent[] {
 	const nowDate = new Date(now);
 	const history = buildCalendarEvents(
 		jobs,
 		new Date(now - WINDOW_DAYS * DAY_MS),
-		nowDate
+		nowDate,
+		tl
 	).filter((event) => event.kind === "past");
 	const upcoming = buildCalendarEvents(
 		jobs,
 		nowDate,
-		new Date(now + WINDOW_DAYS * DAY_MS)
+		new Date(now + WINDOW_DAYS * DAY_MS),
+		tl
 	).filter((event) => event.kind === "upcoming");
 	return toInterfaceEvents([...history, ...upcoming], now);
 }
@@ -56,6 +60,7 @@ export interface InterfaceEventsState {
  * the new request is in flight.
  */
 export function useInterfaceEvents(enabled: boolean): InterfaceEventsState {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const { token, url, userJwt } = node;
 	const authority = JSON.stringify([url, token ?? null, userJwt ?? null]);
@@ -102,8 +107,8 @@ export function useInterfaceEvents(enabled: boolean): InterfaceEventsState {
 	return useMemo(
 		() =>
 			jobs
-				? { events: interfaceEventsAround(jobs, Date.now()), jobs }
+				? { events: interfaceEventsAround(jobs, Date.now(), tl), jobs }
 				: { events: undefined, jobs: undefined },
-		[jobs]
+		[jobs, tl]
 	);
 }

@@ -174,7 +174,7 @@ function ImportBody({
 			});
 			onDone();
 		} catch (caught) {
-			setError(vaultErrorMessage(caught, "Could not import."));
+			setError(vaultErrorMessage(caught, "Could not import.", tl));
 		} finally {
 			setPending(false);
 		}
@@ -329,7 +329,7 @@ function ExportBody({
 				setSharedError(result.sharedError || null);
 			}
 		} catch (caught) {
-			setError(vaultErrorMessage(caught, "Could not export."));
+			setError(vaultErrorMessage(caught, "Could not export.", tl));
 		} finally {
 			setPending(false);
 		}
@@ -416,7 +416,7 @@ function ExportBody({
 					</Label>
 					{sharedError ? (
 						<p className="text-status-destructive text-xs">
-							{sharedValuesMissingMessage(sharedError)}
+							{sharedValuesMissingMessage(sharedError, tl)}
 						</p>
 					) : null}
 					<Textarea

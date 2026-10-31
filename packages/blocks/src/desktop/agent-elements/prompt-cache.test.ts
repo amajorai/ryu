@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import type { DataUIPart, UIDataTypes, UIMessage } from "ai";
 import { deriveContextUsage } from "./context-usage.tsx";
 import {
@@ -14,6 +15,9 @@ import {
 } from "./prompt-cache.ts";
 
 const OBSERVED_AT = 1_800_000_000_000;
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 function assistantMessage(
 	type: DataUIPart<UIDataTypes>["type"],
@@ -128,7 +132,8 @@ describe("modelSwitchCacheWarning", () => {
 		const warning = modelSwitchCacheWarning(
 			usage,
 			"GPT-5.1",
-			OBSERVED_AT + 30_000
+			OBSERVED_AT + 30_000,
+			tl
 		);
 		expect(warning?.title).toBe("Switching to GPT-5.1 resets the prompt cache");
 		expect(warning?.description).toContain("48,000 tokens");
@@ -137,29 +142,30 @@ describe("modelSwitchCacheWarning", () => {
 
 	test("stays quiet once the cache has expired or with no history", () => {
 		expect(
-			modelSwitchCacheWarning(usage, "GPT-5.1", OBSERVED_AT + 6 * 60_000)
+			modelSwitchCacheWarning(usage, "GPT-5.1", OBSERVED_AT + 6 * 60_000, tl)
 		).toBeNull();
-		expect(modelSwitchCacheWarning(null, "GPT-5.1", 0)).toBeNull();
+		expect(modelSwitchCacheWarning(null, "GPT-5.1", 0, tl)).toBeNull();
 	});
 });
 
 describe("promptEditCacheWarning", () => {
 	test("nothing changed means no confirmation", () => {
-		expect(promptEditCacheWarning([], "project")).toBeNull();
-		expect(promptEditCacheWarning(["  "], "bot")).toBeNull();
+		expect(promptEditCacheWarning([], "project", tl)).toBeNull();
+		expect(promptEditCacheWarning(["  "], "bot", tl)).toBeNull();
 	});
 
 	test("names the fields and how far the miss reaches", () => {
 		const warning = promptEditCacheWarning(
 			["The project goal", "brief replies"],
-			"project"
+			"project",
+			tl
 		);
 		expect(warning?.title).toContain("prompt cache");
 		expect(warning?.description).toContain(
 			"The project goal and brief replies are part of the system prompt for every thread in this project"
 		);
 		expect(
-			promptEditCacheWarning(["The goal"], "bot-in-project")?.description
+			promptEditCacheWarning(["The goal"], "bot-in-project", tl)?.description
 		).toContain(
 			"The goal is part of the system prompt for this bot's threads in this project"
 		);
@@ -167,23 +173,25 @@ describe("promptEditCacheWarning", () => {
 
 	test("a plural label takes a plural verb", () => {
 		expect(
-			promptEditCacheWarning(["The project instructions"], "project")
+			promptEditCacheWarning(["The project instructions"], "project", tl)
 				?.description
 		).toContain("The project instructions are part of the system prompt");
 		expect(
-			promptEditCacheWarning(["The Alpha skill"], "skill-threads")?.description
+			promptEditCacheWarning(["The Alpha skill"], "skill-threads", tl)
+				?.description
 		).toContain("The Alpha skill is part of");
 	});
 
 	test("names the node-wide reaches", () => {
 		expect(
-			promptEditCacheWarning(["About you"], "all-threads")?.description
+			promptEditCacheWarning(["About you"], "all-threads", tl)?.description
 		).toContain("for every thread on this node");
 		expect(
-			promptEditCacheWarning(["The response mode"], "ryu-agent")?.description
+			promptEditCacheWarning(["The response mode"], "ryu-agent", tl)
+				?.description
 		).toContain("for every Ryu assistant thread");
 		expect(
-			promptEditCacheWarning(["The enabled skills"], "skill-threads")
+			promptEditCacheWarning(["The enabled skills"], "skill-threads", tl)
 				?.description
 		).toContain("for every thread that loads skills");
 	});
@@ -193,13 +201,19 @@ describe("modelDefaultCacheWarning", () => {
 	const before = { model: "claude-x", provider: "anthropic" };
 
 	test("effort-only edits keep the cache", () => {
-		expect(modelDefaultCacheWarning("Atlas", before, { ...before })).toBeNull();
+		expect(
+			modelDefaultCacheWarning("Atlas", before, { ...before }, tl)
+		).toBeNull();
 	});
 
 	test("a model change warns about every inheriting thread", () => {
 		expect(
-			modelDefaultCacheWarning("Atlas", before, { ...before, model: "gpt-y" })
-				?.description
+			modelDefaultCacheWarning(
+				"Atlas",
+				before,
+				{ ...before, model: "gpt-y" },
+				tl
+			)?.description
 		).toContain("Every thread that inherits Atlas switches model");
 	});
 });

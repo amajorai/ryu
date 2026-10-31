@@ -1,5 +1,6 @@
 import { AppWindowIcon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { formatDistanceToNow } from "date-fns";
 import type { OAuthApp } from "../../utils/api-client.ts";
@@ -25,6 +26,7 @@ export function AuthorizedOAuthAppList({
 	onRevoke: (clientId: string) => void;
 	onStartRevoke: (clientId: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	if (apps.length === 0) {
 		return (
 			<p className="py-3 text-muted-foreground text-sm">No authorized apps.</p>
@@ -68,7 +70,9 @@ export function AuthorizedOAuthAppList({
 								</div>
 							) : (
 								<Button
-									aria-label={`Revoke access for ${app.clientName}`}
+									aria-label={tl("Revoke access for {clientName}", {
+										clientName: app.clientName,
+									})}
 									className={SETTINGS_ROW_REVEAL_CLASS}
 									disabled={isRevoking}
 									onClick={() => onStartRevoke(app.clientId)}
@@ -79,14 +83,12 @@ export function AuthorizedOAuthAppList({
 								</Button>
 							)
 						}
-						description={
-							<>
-								{scopeList || "No scopes"} · Authorized{" "}
-								{formatDistanceToNow(new Date(app.grantedAt), {
-									addSuffix: true,
-								})}
-							</>
-						}
+						description={tl("{scopeList} · Authorized {relativeTime}", {
+							scopeList: scopeList || tl("No scopes"),
+							relativeTime: formatDistanceToNow(new Date(app.grantedAt), {
+								addSuffix: true,
+							}),
+						})}
 						key={app.clientId}
 						title={
 							<span className="flex min-w-0 items-center gap-2">

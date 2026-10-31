@@ -1,5 +1,6 @@
 /* eslint-disable react/no-unknown-property */
 import { Html } from "@react-three/drei";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	askAriaLabel,
 	type InterfaceAct,
@@ -94,13 +95,19 @@ export function offStageText(offStage: OffStage): string {
 }
 
 /** "6 more agents. Open the queue". */
-export function offStageLabel(count: number): string {
-	return `${count} more ${count === 1 ? "agent" : "agents"}. Open the queue`;
+export function offStageLabel(count: number, tl: LiteralMessage): string {
+	return tl(
+		"{count} more {count, plural, one {agent} other {agents}}. Open the queue",
+		{ count }
+	);
 }
 
 /** "+3 more" asks at the you-spot. */
-export function overflowLabel(count: number): string {
-	return `${count} more ${count === 1 ? "ask" : "asks"} waiting. Open the queue`;
+export function overflowLabel(count: number, tl: LiteralMessage): string {
+	return tl(
+		"{count} more {count, plural, one {ask} other {asks}} waiting. Open the queue",
+		{ count }
+	);
 }
 
 /**

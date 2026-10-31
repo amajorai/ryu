@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import type { Machine, Reel, WallCabinet } from "./arcade-model.ts";
 
@@ -54,10 +55,12 @@ export function scoreRows(cabinet: WallCabinet): ScoreRow[] {
 export function wallCabinetLabel(
 	cabinet: WallCabinet,
 	active: boolean,
+	tl: LiteralMessage,
 	/** With the act layer the jackpot count (legacy statuses) is left out. */
 	acted = false
 ): string {
 	const kind = cabinet.group.kind === "team" ? "team" : "project";
+	const name = cabinet.group.name;
 	const counts = [
 		plural(cabinet.machines, "machine"),
 		acted ? null : `${cabinet.jackpots} waiting on you`,
@@ -66,6 +69,13 @@ export function wallCabinetLabel(
 		.filter(Boolean)
 		.join(", ");
 	return active
-		? `Show every machine (now showing ${kind} ${cabinet.group.name}: ${counts})`
-		: `Show ${kind} ${cabinet.group.name}: ${counts}`;
+		? tl(
+				"Show every machine (now showing {kind, select, team {team} other {project}} {name}: {counts})",
+				{ counts, kind, name }
+			)
+		: tl("Show {kind, select, team {team} other {project}} {name}: {counts}", {
+				counts,
+				kind,
+				name,
+			});
 }

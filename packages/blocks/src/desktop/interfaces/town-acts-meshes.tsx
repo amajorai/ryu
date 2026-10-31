@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -55,6 +56,7 @@ export function TownActMeshes({
 	snapshot: Pick<InterfaceSnapshot, "asks">;
 	town: Town;
 }) {
+	const tl = useLiteralMessages();
 	const oldest = oldestBlockingAsk(snapshot.asks);
 	const delivering = [...acts.values()].filter(
 		(act) => act.act === "delivering" && act.ask
@@ -91,7 +93,7 @@ export function TownActMeshes({
 								showText={false}
 								text={limitWords(act, {
 									clock,
-									limitText: townLimitText,
+									limitText: townLimitText(tl),
 									nowMs,
 								})}
 							/>

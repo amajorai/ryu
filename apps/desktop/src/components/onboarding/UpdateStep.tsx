@@ -184,6 +184,7 @@ interface UpdateStepProps {
 
 /** Desktop-only container for the first-run update check. */
 export function UpdateStep({ onContinue }: UpdateStepProps) {
+	const tl = useLiteralMessages();
 	const getNode = useActiveNodeGetter();
 	const [automaticDownload, setAutomaticDownload] = useState(true);
 	const [checking, setChecking] = useState(true);
@@ -222,7 +223,9 @@ export function UpdateStep({ onContinue }: UpdateStepProps) {
 				if (downloadAutomatically) {
 					setDownloading(true);
 					try {
-						const ready = await prepareUpdate(verdict, { node: activeNode });
+						const ready = await prepareUpdate(verdict, tl, {
+							node: activeNode,
+						});
 						setPrepared(ready !== null);
 					} finally {
 						setDownloading(false);
@@ -232,7 +235,7 @@ export function UpdateStep({ onContinue }: UpdateStepProps) {
 				setStatus("up-to-date");
 			}
 		},
-		[getNode]
+		[getNode, tl]
 	);
 
 	useEffect(() => {
@@ -294,7 +297,7 @@ export function UpdateStep({ onContinue }: UpdateStepProps) {
 					if (next && available && node) {
 						setDownloading(true);
 						try {
-							const ready = await prepareUpdate(available, { node });
+							const ready = await prepareUpdate(available, tl, { node });
 							setPrepared(ready !== null);
 						} finally {
 							setDownloading(false);
@@ -308,7 +311,7 @@ export function UpdateStep({ onContinue }: UpdateStepProps) {
 					});
 				});
 		},
-		[automaticDownload, available, node]
+		[automaticDownload, available, node, tl]
 	);
 
 	const handleInstall = useCallback(() => {
@@ -316,10 +319,10 @@ export function UpdateStep({ onContinue }: UpdateStepProps) {
 			return;
 		}
 		setDownloading(true);
-		installUpdate(available, { node })
+		installUpdate(available, tl, { node })
 			.catch(() => undefined)
 			.finally(() => setDownloading(false));
-	}, [available, downloading, node]);
+	}, [available, downloading, node, tl]);
 
 	return (
 		<UpdateStepView

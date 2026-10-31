@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 // Preserve the accepted native packet's per-case timeout without changing legacy Voice cases.
 test.setTimeout(60_000);
 const base = "http://127.0.0.1:5866";
@@ -19,7 +20,7 @@ async function modelRow(page: import("@playwright/test").Page, name: string) {
 	const title = page.getByText(name, { exact: true });
 	await expect(title).toBeVisible();
 	return title.locator(
-		'xpath=ancestor::*[.//button or .//span[text()="Installed"]][1]',
+		'xpath=ancestor::*[.//button or .//span[text()="Installed"]][1]'
 	);
 }
 const evidence = new WeakMap<
@@ -40,11 +41,12 @@ test.beforeEach(async ({ page }) => {
 	evidence.set(page, recorded);
 	page.on("pageerror", (error) => recorded.pageErrors.push(error.message));
 	page.on("console", (message) => {
-		if (message.type() === "error")
+		if (message.type() === "error") {
 			recorded.consoleErrors.push({
 				text: message.text(),
 				url: message.location().url,
 			});
+		}
 	});
 	await page.route("**/*", async (route) => {
 		const url = new URL(route.request().url());
@@ -72,13 +74,15 @@ test.afterEach(async ({ page }, testInfo) => {
 	const receipt = await control();
 	const recorded = evidence.get(page)!;
 	const unexpectedConsole = recorded.consoleErrors.filter((error) => {
-		if (!/Failed to load resource:.*503/.test(error.text)) return true;
+		if (!/Failed to load resource:.*503/.test(error.text)) {
+			return true;
+		}
 		try {
 			const url = new URL(error.url);
 			return (
 				url.origin !== base ||
 				!receipt.calls.some(
-					(c: any) => c.path === url.pathname && c.status === 503,
+					(c: any) => c.path === url.pathname && c.status === 503
 				)
 			);
 		} catch {
@@ -92,7 +96,7 @@ test.afterEach(async ({ page }, testInfo) => {
 		unexpected: [
 			...recorded.unexpectedOrigins,
 			...receipt.calls.filter(
-				(c: any) => c.authorizationAccepted !== true || c.status === 404,
+				(c: any) => c.authorizationAccepted !== true || c.status === 404
 			),
 		],
 		browserErrors: [...recorded.pageErrors, ...unexpectedConsole],
@@ -125,12 +129,12 @@ test("refused model download is visible and retry confirms the exact same model 
 		.poll(
 			async () =>
 				(await control()).calls.filter(
-					(c: any) => c.path === "/api/voice/tts-models/install",
-				).length,
+					(c: any) => c.path === "/api/voice/tts-models/install"
+				).length
 		)
 		.toBe(1);
 	await expect(
-		page.getByText(/Finite model download refused|Couldn.t install.*model/),
+		page.getByText(/Finite model download refused|Couldn.t install.*model/)
 	).toBeVisible();
 	await expect(row.getByText("Installed", { exact: true })).toHaveCount(0);
 	expect((await control()).disk.models[0].installed).toBe(false);
@@ -143,7 +147,7 @@ test("refused model download is visible and retry confirms the exact same model 
 			.map((c: any) => ({
 				body: c.body,
 				authorizationAccepted: c.authorizationAccepted,
-			})),
+			}))
 	).toEqual([
 		{
 			body: { engine: "kokoro", model_name: "kokoro-finite-model" },
@@ -159,12 +163,12 @@ test("refused model download is visible and retry confirms the exact same model 
 	await expect(
 		(await modelRow(page, "Kokoro finite model")).getByText("Installed", {
 			exact: true,
-		}),
+		})
 	).toBeVisible();
 	expect(
 		(await control()).calls.filter(
-			(c: any) => c.path === "/api/voice/tts-models/install",
-		),
+			(c: any) => c.path === "/api/voice/tts-models/install"
+		)
 	).toHaveLength(2);
 });
 
@@ -177,10 +181,10 @@ test("held download cannot claim Installed or submit another model; acknowledged
 	const second = await modelRow(page, "Pocket finite model");
 	await first.getByRole("button", { name: "Install", exact: true }).click();
 	await expect(
-		first.getByRole("button", { name: "Installing…", exact: true }),
+		first.getByRole("button", { name: "Installing…", exact: true })
 	).toBeDisabled();
 	await expect(
-		second.getByRole("button", { name: "Waiting…", exact: true }),
+		second.getByRole("button", { name: "Waiting…", exact: true })
 	).toBeDisabled();
 	await expect.poll(async () => (await control()).held).toBe(1);
 	expect((await control()).disk.models.map((m: any) => m.installed)).toEqual([
@@ -190,13 +194,13 @@ test("held download cannot claim Installed or submit another model; acknowledged
 	await expect(first.getByText("Installed", { exact: true })).toHaveCount(0);
 	expect(
 		(await control()).calls.filter(
-			(c: any) => c.path === "/api/voice/tts-models/install",
-		),
+			(c: any) => c.path === "/api/voice/tts-models/install"
+		)
 	).toHaveLength(1);
 	await control({ release: true });
 	await expect(first.getByText("Installed", { exact: true })).toBeVisible();
 	await expect(
-		second.getByRole("button", { name: "Install", exact: true }),
+		second.getByRole("button", { name: "Install", exact: true })
 	).toBeEnabled();
 	const receipt = await control();
 	expect(receipt.disk.models.map((m: any) => m.installed)).toEqual([
@@ -204,13 +208,13 @@ test("held download cannot claim Installed or submit another model; acknowledged
 		false,
 	]);
 	expect(
-		receipt.calls.filter((c: any) => c.path === "/api/voice/tts-models").length,
+		receipt.calls.filter((c: any) => c.path === "/api/voice/tts-models").length
 	).toBeGreaterThanOrEqual(2);
 	await page.reload();
 	await expect(
 		(await modelRow(page, "Kokoro finite model")).getByText("Installed", {
 			exact: true,
-		}),
+		})
 	).toBeVisible();
 });
 
@@ -226,14 +230,14 @@ test("failed acknowledged inventory read retains confirmed models and retries GE
 	await second.getByRole("button", { name: "Install", exact: true }).click();
 	await expect(
 		page.getByText(
-			/Couldn.t load.*voice models|Finite model inventory unreadable/,
-		),
+			/Couldn.t load.*voice models|Finite model inventory unreadable/
+		)
 	).toBeVisible();
 	await expect(first.getByText("Installed", { exact: true })).toBeVisible();
 	const before = await control();
 	expect(before.disk.models.map((m: any) => m.installed)).toEqual([true, true]);
 	expect(
-		before.calls.filter((c: any) => c.path === "/api/voice/tts-models/install"),
+		before.calls.filter((c: any) => c.path === "/api/voice/tts-models/install")
 	).toHaveLength(2);
 	await page
 		.getByRole("button", { name: "Retry loading voice models", exact: true })
@@ -241,8 +245,8 @@ test("failed acknowledged inventory read retains confirmed models and retries GE
 	await expect(second.getByText("Installed", { exact: true })).toBeVisible();
 	expect(
 		(await control()).calls.filter(
-			(c: any) => c.path === "/api/voice/tts-models/install",
-		),
+			(c: any) => c.path === "/api/voice/tts-models/install"
+		)
 	).toHaveLength(2);
 });
 
@@ -259,19 +263,19 @@ test("HTTP200 refused runtime start keeps runtime stopped, exposes failure and r
 	await start.click();
 	await expect(
 		page.getByText(
-			/Finite runtime start refused|Couldn.t start.*audio|Couldn.t start.*voice/i,
-		),
+			/Finite runtime start refused|Couldn.t start.*audio|Couldn.t start.*voice/i
+		)
 	).toBeVisible();
 	await expect(start).toBeEnabled();
 	expect((await control()).disk.runtimeRunning).toBe(false);
 	await expect(
-		page.getByRole("combobox", { name: "Audio engine" }),
+		page.getByRole("combobox", { name: "Audio engine" })
 	).toContainText("not installed");
 	await control({ refuseStart: false });
 	await start.click();
 	await expect(start).toHaveCount(0);
 	await expect(
-		page.getByRole("combobox", { name: "Audio engine" }),
+		page.getByRole("combobox", { name: "Audio engine" })
 	).not.toContainText("not installed");
 	const receipt = await control();
 	expect(receipt.disk.runtimeRunning).toBe(true);
@@ -282,7 +286,7 @@ test("HTTP200 refused runtime start keeps runtime stopped, exposes failure and r
 				method: c.method,
 				body: c.body,
 				authorizationAccepted: c.authorizationAccepted,
-			})),
+			}))
 	).toEqual([
 		{ method: "POST", body: null, authorizationAccepted: true },
 		{ method: "POST", body: null, authorizationAccepted: true },
@@ -304,12 +308,12 @@ test("unreadable runtime health after start cannot manufacture stopped state or 
 	await start.click();
 	await expect(
 		page.getByText(
-			/Couldn.t confirm.*audio|Couldn.t load.*runtime status|Finite runtime status unreadable/i,
-		),
+			/Couldn.t confirm.*audio|Couldn.t load.*runtime status|Finite runtime status unreadable/i
+		)
 	).toBeVisible();
 	expect((await control()).disk.runtimeRunning).toBe(true);
 	await expect(
-		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true }),
+		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
 	).toHaveCount(0);
 	await page
 		.getByRole("button", {
@@ -318,12 +322,12 @@ test("unreadable runtime health after start cannot manufacture stopped state or 
 		})
 		.click();
 	await expect(
-		page.getByRole("combobox", { name: "Audio engine" }),
+		page.getByRole("combobox", { name: "Audio engine" })
 	).not.toContainText("not installed");
 	expect(
 		(await control()).calls.filter(
-			(c: any) => c.path === "/api/sidecar/ryutts/start",
-		),
+			(c: any) => c.path === "/api/sidecar/ryutts/start"
+		)
 	).toHaveLength(1);
 });
 
@@ -344,31 +348,31 @@ test("runtime download refusal cannot become installed; retry and fresh health r
 	await install.click();
 	await expect(
 		page.getByText(
-			/Finite runtime download refused|Couldn.t install.*audio|Couldn.t install.*voice/i,
-		),
+			/Finite runtime download refused|Couldn.t install.*audio|Couldn.t install.*voice/i
+		)
 	).toBeVisible();
 	await expect(install).toBeEnabled();
 	expect((await control()).disk.runtimeInstalled).toBe(false);
 	expect((await control()).disk.runtimeRunning).toBe(false);
 	await expect(
-		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true }),
+		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
 	).toHaveCount(0);
 	await install.click();
 	await expect(
-		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true }),
+		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
 	).toBeVisible();
 	const receipt = await control();
 	expect(receipt.disk.runtimeInstalled).toBe(true);
 	expect(receipt.disk.runtimeRunning).toBe(false);
 	expect(
-		receipt.calls.filter((c: any) => c.path === "/api/setup/ryutts/install"),
+		receipt.calls.filter((c: any) => c.path === "/api/setup/ryutts/install")
 	).toHaveLength(2);
 	expect(
-		receipt.calls.filter((c: any) => c.path === "/api/sidecar/ryutts/start"),
+		receipt.calls.filter((c: any) => c.path === "/api/sidecar/ryutts/start")
 	).toHaveLength(0);
 	await page.reload();
 	await expect(
-		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true }),
+		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
 	).toBeVisible();
 	await expect(install).toHaveCount(0);
 });
@@ -376,12 +380,12 @@ test("runtime download refusal cannot become installed; retry and fresh health r
 async function releaseAndObserve(
 	page: import("@playwright/test").Page,
 	id: number,
-	rawPath: string,
+	rawPath: string
 ) {
 	const responsePromise = page.waitForResponse(
 		(response) =>
 			new URL(response.url()).pathname === rawPath &&
-			response.request().method() === "GET",
+			response.request().method() === "GET"
 	);
 	await control({ release: true, id });
 	const response = await responsePromise;
@@ -390,8 +394,8 @@ async function releaseAndObserve(
 	await page.evaluate(
 		() =>
 			new Promise<void>((resolve) =>
-				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-			),
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+			)
 	);
 }
 
@@ -402,25 +406,25 @@ test("synchronous real node ABA retires the held original inventory before React
 		await control({ holdModelsRead: 1 });
 		await page.goto("/voice-install-native-http-outcomes.html");
 		await expect(
-			page.getByRole("combobox", { name: "Audio engine" }),
+			page.getByRole("combobox", { name: "Audio engine" })
 		).toBeVisible();
 		await expect
 			.poll(
 				async () =>
 					(await control()).heldReceipts.filter(
 						(h: any) =>
-							h.authority === "a" && h.path === "/api/voice/tts-models",
-					).length,
+							h.authority === "a" && h.path === "/api/voice/tts-models"
+					).length
 			)
 			.toBe(1);
 		const original = await control();
 		const heldRead = original.heldReceipts.find(
-			(h: any) => h.authority === "a" && h.path === "/api/voice/tts-models",
+			(h: any) => h.authority === "a" && h.path === "/api/voice/tts-models"
 		);
 		expect(
 			original.calls.find(
-				(c: any) => c.authority === "a" && c.path === "/api/voice/tts-models",
-			).admittedSnapshot.data[0].installed,
+				(c: any) => c.authority === "a" && c.path === "/api/voice/tts-models"
+			).admittedSnapshot.data[0].installed
 		).toBe(false);
 		const latest = original.disk.models.map((m: any, index: number) => ({
 			...m,
@@ -437,8 +441,8 @@ test("synchronous real node ABA retires the held original inventory before React
 				async () =>
 					(await control()).calls.filter(
 						(c: any) =>
-							c.authority === "a" && c.path === "/api/voice/tts-models",
-					).length,
+							c.authority === "a" && c.path === "/api/voice/tts-models"
+					).length
 			)
 			.toBe(2);
 		const row = await modelRow(page, "Kokoro finite model");
@@ -446,13 +450,13 @@ test("synchronous real node ABA retires the held original inventory before React
 		await releaseAndObserve(page, heldRead.id, "/api/voice/tts-models");
 		await expect(row.getByText("Installed", { exact: true })).toBeVisible();
 		await expect(
-			row.getByRole("button", { name: "Install", exact: true }),
+			row.getByRole("button", { name: "Install", exact: true })
 		).toHaveCount(0);
 		const receipt = await control();
 		expect(
 			receipt.calls.filter(
-				(c: any) => c.path === "/api/voice/tts-models/install",
-			),
+				(c: any) => c.path === "/api/voice/tts-models/install"
+			)
 		).toHaveLength(0);
 		expect(receipt.authorities.a.disk.models[0].installed).toBe(true);
 	} finally {
@@ -467,8 +471,8 @@ test("synchronous real node ABA retires the held original inventory before React
 						heldReceipts: authoritySnapshot.heldReceipts,
 					},
 					null,
-					2,
-				),
+					2
+				)
 			),
 			contentType: "application/json",
 		});
@@ -488,21 +492,21 @@ test("accepted old model acknowledgment cannot refresh or mutate the rotated bea
 				async () =>
 					(await control()).heldReceipts.filter(
 						(h: any) =>
-							h.authority === "a" && h.path === "/api/voice/tts-models/install",
-					).length,
+							h.authority === "a" && h.path === "/api/voice/tts-models/install"
+					).length
 			)
 			.toBe(1);
 		const admitted = await control();
 		expect(admitted.authorities.a.disk.models[0].installed).toBe(true);
 		const heldAck = admitted.heldReceipts.find(
 			(h: any) =>
-				h.authority === "a" && h.path === "/api/voice/tts-models/install",
+				h.authority === "a" && h.path === "/api/voice/tts-models/install"
 		);
 		const oldReads = admitted.calls.filter(
-			(c: any) => c.authority === "a" && c.path === "/api/voice/tts-models",
+			(c: any) => c.authority === "a" && c.path === "/api/voice/tts-models"
 		).length;
 		await page.evaluate(() =>
-			(window as any).__voiceOutcomeAuthority.select("rotated"),
+			(window as any).__voiceOutcomeAuthority.select("rotated")
 		);
 		await expect
 			.poll(
@@ -511,22 +515,22 @@ test("accepted old model acknowledgment cannot refresh or mutate the rotated bea
 						(c: any) =>
 							c.authority === "rotated" &&
 							c.path === "/api/voice/tts-models" &&
-							c.finished,
-					).length,
+							c.finished
+					).length
 			)
 			.toBe(1);
 		expect(
 			await page.evaluate(
-				() => (window as any).__voiceOutcomeAuthority.current().url,
-			),
+				() => (window as any).__voiceOutcomeAuthority.current().url
+			)
 		).toBe("http://127.0.0.1:5866");
 		expect(
 			await page.evaluate(
-				() => (window as any).__voiceOutcomeAuthority.current().token,
-			),
+				() => (window as any).__voiceOutcomeAuthority.current().token
+			)
 		).toBe("finite-voice-outcomes-token-rotated");
 		await page.evaluate(() =>
-			(window as any).__voiceOutcomeAuthority.select("b"),
+			(window as any).__voiceOutcomeAuthority.select("b")
 		);
 		await expect
 			.poll(
@@ -535,15 +539,15 @@ test("accepted old model acknowledgment cannot refresh or mutate the rotated bea
 						(c: any) =>
 							c.authority === "b" &&
 							c.path === "/api/voice/tts-models" &&
-							c.finished,
-					).length,
+							c.finished
+					).length
 			)
 			.toBe(1);
 		await expect(row.getByText("Installed", { exact: true })).toHaveCount(0);
 		const responsePromise = page.waitForResponse(
 			(response) =>
 				new URL(response.url()).pathname === "/api/voice/tts-models/install" &&
-				response.request().method() === "POST",
+				response.request().method() === "POST"
 		);
 		await control({ release: true, id: heldAck.id });
 		const response = await responsePromise;
@@ -551,19 +555,19 @@ test("accepted old model acknowledgment cannot refresh or mutate the rotated bea
 		await page.evaluate(
 			() =>
 				new Promise<void>((resolve) =>
-					requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-				),
+					requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+				)
 		);
 		const receipt = await control();
 		expect(
 			receipt.calls.filter(
-				(c: any) => c.authority === "a" && c.path === "/api/voice/tts-models",
-			),
+				(c: any) => c.authority === "a" && c.path === "/api/voice/tts-models"
+			)
 		).toHaveLength(oldReads);
 		expect(
 			receipt.calls
 				.filter((c: any) => c.path === "/api/voice/tts-models/install")
-				.map((c: any) => ({ authority: c.authority, body: c.body })),
+				.map((c: any) => ({ authority: c.authority, body: c.body }))
 		).toEqual([
 			{
 				authority: "a",
@@ -575,7 +579,7 @@ test("accepted old model acknowledgment cannot refresh or mutate the rotated bea
 		expect(receipt.authorities.b.disk.models[0].installed).toBe(false);
 		await expect(row.getByText("Installed", { exact: true })).toHaveCount(0);
 		await expect(
-			row.getByRole("button", { name: "Install", exact: true }),
+			row.getByRole("button", { name: "Install", exact: true })
 		).toBeEnabled();
 	} finally {
 		const authoritySnapshot = await control();
@@ -589,8 +593,8 @@ test("accepted old model acknowledgment cannot refresh or mutate the rotated bea
 						heldReceipts: authoritySnapshot.heldReceipts,
 					},
 					null,
-					2,
-				),
+					2
+				)
 			),
 			contentType: "application/json",
 		});
@@ -604,28 +608,28 @@ test("a later same-authority health read wins after actual Refresh all while the
 		await control({ holdStatusRead: 1 });
 		await page.goto("/voice-install-native-http-outcomes.html");
 		await expect(
-			page.getByRole("combobox", { name: "Audio engine" }),
+			page.getByRole("combobox", { name: "Audio engine" })
 		).toBeVisible();
 		await expect
 			.poll(
 				async () =>
 					(await control()).heldReceipts.filter(
-						(h: any) => h.authority === "a" && h.path === "/api/sidecar/status",
-					).length,
+						(h: any) => h.authority === "a" && h.path === "/api/sidecar/status"
+					).length
 			)
 			.toBe(1);
 		const original = await control();
 		const earlier = original.heldReceipts.find(
-			(h: any) => h.authority === "a" && h.path === "/api/sidecar/status",
+			(h: any) => h.authority === "a" && h.path === "/api/sidecar/status"
 		);
 		expect(
 			original.calls.find(
-				(c: any) => c.authority === "a" && c.path === "/api/sidecar/status",
-			).admittedSnapshot.sidecars[0].running,
+				(c: any) => c.authority === "a" && c.path === "/api/sidecar/status"
+			).admittedSnapshot.sidecars[0].running
 		).toBe(false);
 		await control({ setState: { runtimeRunning: true } });
 		await page.evaluate(() =>
-			(window as any).__voiceOutcomeAuthority.refreshAll(),
+			(window as any).__voiceOutcomeAuthority.refreshAll()
 		);
 		await expect
 			.poll(
@@ -634,28 +638,28 @@ test("a later same-authority health read wins after actual Refresh all while the
 						(c: any) =>
 							c.authority === "a" &&
 							c.path === "/api/sidecar/status" &&
-							c.finished,
-					).length,
+							c.finished
+					).length
 			)
 			.toBe(1);
 		await expect(
-			page.getByRole("button", { name: "Start Ryu Audio engine", exact: true }),
+			page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
 		).toHaveCount(0);
 		await releaseAndObserve(page, earlier.id, "/api/sidecar/status");
 		await expect(
-			page.getByRole("button", { name: "Start Ryu Audio engine", exact: true }),
+			page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
 		).toHaveCount(0);
 		const receipt = await control();
 		expect(receipt.authorities.a.disk.runtimeRunning).toBe(true);
 		expect(
 			receipt.calls
 				.filter(
-					(c: any) => c.authority === "a" && c.path === "/api/sidecar/status",
+					(c: any) => c.authority === "a" && c.path === "/api/sidecar/status"
 				)
-				.map((c: any) => c.responseBody.sidecars[0].running),
+				.map((c: any) => c.responseBody.sidecars[0].running)
 		).toEqual([false, true]);
 		expect(
-			receipt.calls.filter((c: any) => c.path === "/api/sidecar/ryutts/start"),
+			receipt.calls.filter((c: any) => c.path === "/api/sidecar/ryutts/start")
 		).toHaveLength(0);
 	} finally {
 		const authoritySnapshot = await control();
@@ -669,8 +673,8 @@ test("a later same-authority health read wins after actual Refresh all while the
 						heldReceipts: authoritySnapshot.heldReceipts,
 					},
 					null,
-					2,
-				),
+					2
+				)
 			),
 			contentType: "application/json",
 		});

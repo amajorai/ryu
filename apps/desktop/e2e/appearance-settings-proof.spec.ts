@@ -1060,7 +1060,7 @@ test("every enabled Interface switch changes and persists its choice", async ({
 		},
 		{
 			id: "dialog-overlay-blur-toggle",
-			label: "Blur dialog backgrounds",
+			label: "Dim dialog backgrounds",
 			key: "ryu_dialog_overlay_blur",
 			storedValue: (enabled: boolean) => String(enabled),
 		},

@@ -1,10 +1,10 @@
+import { expect, type Page, test } from "@playwright/test";
+import type { Node } from "../src/store/useNodeStore.ts";
+import type { Call } from "./chat-page-native-http.host.ts";
 import {
 	assertNativeWindowLifetime,
 	persistNativeLifetimeDiagnostics,
 } from "./chat-page-native-http-lifetime.ts";
-import { expect, test, type Page } from "@playwright/test";
-import type { Node } from "../src/store/useNodeStore.ts";
-import type { Call } from "./chat-page-native-http.host.ts";
 import {
 	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
 	CHAT_PAGE_NATIVE_NODE_B_TOKEN,
@@ -13,6 +13,17 @@ import {
 } from "./chat-page-native-http-support.ts";
 
 const pageErrors = new WeakMap<Page, string[]>();
+// A navigation re-evaluates the whole unbundled Layout graph before ChatPage
+// mounts, which takes longer under suite load; wait for the rendered thread,
+// not a fixed default, before reading what the page fetched.
+const pageReadyTimeout = 30_000;
+async function chatReady(page: Page) {
+	await expect(
+		page.getByText("The organization copy is ready for review.", {
+			exact: true,
+		})
+	).toBeVisible({ timeout: pageReadyTimeout });
+}
 
 const conversationId = "conversation-toolbar-share-fixture";
 const path = `/api/conversations/${conversationId}/model-selection`;
@@ -38,11 +49,11 @@ function assertChoice(
 	modelId: string,
 	modelLabel: string,
 	node: "a" | "b",
-	authority?: { token: string; userJwt: string | null },
+	authority?: { token: string; userJwt: string | null }
 ) {
 	expect(call.node).toBe(node);
 	expect(call.authorization).toBe(
-		`Bearer ${authority?.token ?? (node === "a" ? CHAT_PAGE_NATIVE_NODE_A_TOKEN : CHAT_PAGE_NATIVE_NODE_B_TOKEN)}`,
+		`Bearer ${authority?.token ?? (node === "a" ? CHAT_PAGE_NATIVE_NODE_A_TOKEN : CHAT_PAGE_NATIVE_NODE_B_TOKEN)}`
 	);
 	expect(call.userJwt).toBe(authority?.userJwt ?? null);
 	expect(call.body).toEqual({
@@ -68,21 +79,17 @@ test.beforeEach(async ({ request, page }) => {
 		scenario: "model-selection-caller",
 	});
 	await page.goto(
-		"/chat-page-native-http.html?scenario=model-selection-caller",
+		"/chat-page-native-http.html?scenario=model-selection-caller"
 	);
-	await expect(
-		page.getByText("The organization copy is ready for review.", {
-			exact: true,
-		}),
-	).toBeVisible();
+	await chatReady(page);
 	await expect(modelTrigger(page)).toHaveAttribute("title", "Proof Model A");
 	await expect
 		.poll(
 			async () =>
 				(await chatPageState(request)).calls.filter(
 					(call) =>
-						call.node === "a" && call.path === path && call.method === "GET",
-				).length,
+						call.node === "a" && call.path === path && call.method === "GET"
+				).length
 		)
 		.toBeGreaterThan(0);
 });
@@ -152,13 +159,15 @@ test("actual composer choice records exact model and fresh room GET restores it 
 		.poll(
 			async () =>
 				writes((await chatPageState(request)).calls).filter(
-					(call) => call.status === "accepted",
-				).length,
+					(call) => call.status === "accepted"
+				).length
 		)
 		.toBe(1);
 	const before = await chatPageState(request);
 	const call = writes(before.calls)[0];
-	if (!call) throw new Error("Real model choice PUT was not captured");
+	if (!call) {
+		throw new Error("Real model choice PUT was not captured");
+	}
 	assertChoice(call, "model-proof-b", "Proof model B", "a");
 	await expect(page.getByText("Model changed", { exact: true })).toBeVisible();
 	expect(before.modelSelections[`a:${conversationId}`]).toMatchObject({
@@ -173,18 +182,19 @@ test("actual composer choice records exact model and fresh room GET restores it 
 	});
 	// Remove the per-agent browser fallback so the room's GET is the restore source.
 	await page.evaluate(() =>
-		localStorage.removeItem("ryu_agent_model_selection"),
+		localStorage.removeItem("ryu_agent_model_selection")
 	);
 	const priorGets = before.calls.filter(
-		(call) => call.path === path && call.method === "GET",
+		(call) => call.path === path && call.method === "GET"
 	).length;
 	await page.reload();
+	await chatReady(page);
 	await expect
 		.poll(
 			async () =>
 				(await chatPageState(request)).calls.filter(
-					(call) => call.path === path && call.method === "GET",
-				).length,
+					(call) => call.path === path && call.method === "GET"
+				).length
 		)
 		.toBeGreaterThan(priorGets);
 	await expect(modelTrigger(page)).toHaveAttribute("title", "Proof Model B");
@@ -205,11 +215,13 @@ test("refused model sharing is visible, retains server history, and a real picke
 	});
 	await pickModel(page, "Proof model B");
 	await expect(
-		page.getByText(`${path} failed: 503`, { exact: true }),
+		page.getByText(`${path} failed: 503`, { exact: true })
 	).toBeVisible();
 	const refused = await chatPageState(request);
 	const refusedCall = writes(refused.calls)[0];
-	if (!refusedCall) throw new Error("Refused real model PUT was not captured");
+	if (!refusedCall) {
+		throw new Error("Refused real model PUT was not captured");
+	}
 	assertChoice(refusedCall, "model-proof-b", "Proof model B", "a");
 	expect(refusedCall.responseStatus).toBe(503);
 	expect(refused.modelSelections[`a:${conversationId}`]).toBeUndefined();
@@ -219,8 +231,8 @@ test("refused model sharing is visible, retains server history, and a real picke
 		.poll(
 			async () =>
 				writes((await chatPageState(request)).calls).filter(
-					(call) => call.status === "accepted",
-				).length,
+					(call) => call.status === "accepted"
+				).length
 		)
 		.toBe(1);
 	const accepted = await chatPageState(request);
@@ -229,7 +241,7 @@ test("refused model sharing is visible, retains server history, and a real picke
 		writes(accepted.calls)[1],
 		"model-proof-b",
 		"Proof model B",
-		"a",
+		"a"
 	);
 	expect(accepted.modelSelections[`a:${conversationId}`]).toMatchObject({
 		changes: [
@@ -237,9 +249,10 @@ test("refused model sharing is visible, retains server history, and a real picke
 		],
 	});
 	await page.evaluate(() =>
-		localStorage.removeItem("ryu_agent_model_selection"),
+		localStorage.removeItem("ryu_agent_model_selection")
 	);
 	await page.reload();
+	await chatReady(page);
 	await expect(modelTrigger(page)).toHaveAttribute("title", "Proof Model B");
 });
 
@@ -259,8 +272,9 @@ test("two queued choices remain owned by A when real node selection changes befo
 		.toBe(1);
 	const held = await chatPageState(request);
 	const requestId = held.heldRequestIds[0];
-	if (requestId === undefined)
+	if (requestId === undefined) {
 		throw new Error("First real model PUT was not held");
+	}
 	await pickModel(page, "Proof model A");
 	expect(writes((await chatPageState(request)).calls)).toHaveLength(1);
 	await page.evaluate(async () => {
@@ -276,9 +290,11 @@ test("two queued choices remain owned by A when real node selection changes befo
 		};
 		const store = host.__chatPageNativeFixture.nodeStore.getState();
 		const nodeB = store.nodes.find(
-			(node) => node.url === "http://127.0.0.1:5594",
+			(node) => node.url === "http://127.0.0.1:5594"
 		);
-		if (!nodeB) throw new Error("Real node store did not load B");
+		if (!nodeB) {
+			throw new Error("Real node store did not load B");
+		}
 		await store.setDefault(nodeB.name);
 	});
 	await expect
@@ -286,8 +302,8 @@ test("two queued choices remain owned by A when real node selection changes befo
 			async () =>
 				(await chatPageState(request)).calls.filter(
 					(call) =>
-						call.node === "b" && call.path === path && call.method === "GET",
-				).length,
+						call.node === "b" && call.path === path && call.method === "GET"
+				).length
 		)
 		.toBeGreaterThan(0);
 	await chatPageControl(request, {
@@ -299,8 +315,8 @@ test("two queued choices remain owned by A when real node selection changes befo
 		.poll(
 			async () =>
 				writes((await chatPageState(request)).calls).filter(
-					(call) => call.status !== "pending",
-				).length,
+					(call) => call.status !== "pending"
+				).length
 		)
 		.toBe(2);
 	const final = await chatPageState(request);
@@ -334,8 +350,9 @@ async function selectRealNode(page: Page, url: string) {
 		};
 		const state = host.__chatPageNativeFixture.nodeStore.getState();
 		const node = state.nodes.find((node) => node.url === url);
-		if (!node)
+		if (!node) {
 			throw new Error("Selected authority is absent from actual node store");
+		}
 		await state.setDefault(node.name);
 	}, url);
 }
@@ -360,8 +377,9 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 			.toBe(1);
 		const first = await chatPageState(request);
 		const oldId = first.heldRequestIds[0];
-		if (oldId === undefined)
+		if (oldId === undefined) {
 			throw new Error("Original model choice was not held by HTTP fixture");
+		}
 		const currentAuthority = {
 			token:
 				variant === "token"
@@ -376,15 +394,13 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 					async () =>
 						(await chatPageState(request)).calls.filter(
 							(call) =>
-								call.node === "b" &&
-								call.path === path &&
-								call.method === "GET",
-						).length,
+								call.node === "b" && call.path === path && call.method === "GET"
+						).length
 				)
 				.toBeGreaterThan(0);
 			const aReads = (await chatPageState(request)).calls.filter(
 				(call) =>
-					call.node === "a" && call.path === path && call.method === "GET",
+					call.node === "a" && call.path === path && call.method === "GET"
 			).length;
 			await selectRealNode(page, "http://127.0.0.1:5591");
 			await expect
@@ -392,10 +408,8 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 					async () =>
 						(await chatPageState(request)).calls.filter(
 							(call) =>
-								call.node === "a" &&
-								call.path === path &&
-								call.method === "GET",
-						).length,
+								call.node === "a" && call.path === path && call.method === "GET"
+						).length
 				)
 				.toBeGreaterThan(aReads);
 		} else {
@@ -415,7 +429,7 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 					__chatPageNativeFixture: {
 						nodeStore: {
 							setState: (
-								update: (state: { nodes: Node[] }) => { nodes: Node[] },
+								update: (state: { nodes: Node[] }) => { nodes: Node[] }
 							) => void;
 						};
 					};
@@ -424,7 +438,7 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 					nodes: state.nodes.map((node) =>
 						node.url === "http://127.0.0.1:5591"
 							? { ...node, ...authority }
-							: node,
+							: node
 					),
 				}));
 			}, currentAuthority);
@@ -468,8 +482,8 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 								call.path === path &&
 								call.method === "GET" &&
 								call.authorization === `Bearer ${currentAuthority.token}` &&
-								call.userJwt === currentAuthority.userJwt,
-						).length,
+								call.userJwt === currentAuthority.userJwt
+						).length
 				)
 				.toBeGreaterThan(0);
 		}
@@ -486,7 +500,7 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 				new URL(response.url()).pathname === path &&
 				response.request().method() === "PUT" &&
 				response.request().headers().authorization ===
-					`Bearer ${CHAT_PAGE_NATIVE_NODE_A_TOKEN}`,
+					`Bearer ${CHAT_PAGE_NATIVE_NODE_A_TOKEN}`
 		);
 		await chatPageControl(request, {
 			action: "release",
@@ -506,29 +520,30 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 			.toBe(1);
 		const pending = await chatPageState(request);
 		const currentId = pending.heldRequestIds[0];
-		if (currentId === undefined || currentId === oldId)
+		if (currentId === undefined || currentId === oldId) {
 			throw new Error("Current model choice was not independently held");
+		}
 		assertChoice(
 			writes(pending.calls)[0],
 			"model-proof-b",
 			"Proof model B",
-			"a",
+			"a"
 		);
 		assertChoice(
 			writes(pending.calls)[1],
 			"model-proof-a",
 			"Proof model A",
 			"a",
-			currentAuthority,
+			currentAuthority
 		);
 		await page.evaluate(
 			() =>
 				new Promise<void>((resolve) =>
-					requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-				),
+					requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+				)
 		);
 		await expect(page.getByText("Model changed", { exact: true })).toHaveCount(
-			0,
+			0
 		);
 		await expect(page.getByText(oldError, { exact: false })).toHaveCount(0);
 		await expect(modelTrigger(page)).toHaveAttribute("title", "Proof Model A");
@@ -541,12 +556,12 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 			.poll(
 				async () =>
 					writes((await chatPageState(request)).calls).filter(
-						(call) => call.status === "accepted",
-					).length,
+						(call) => call.status === "accepted"
+					).length
 			)
 			.toBe(variant === "jwt" ? 1 : 2);
 		await expect(page.getByText("Model changed", { exact: true })).toHaveCount(
-			1,
+			1
 		);
 		const accepted = await chatPageState(request);
 		expect(accepted.modelSelections[`a:${conversationId}`]).toMatchObject({
@@ -560,7 +575,7 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 		// Its background consumers legitimately still use the rotated credentials.
 		// Accepted room history must survive without the browser model fallback.
 		await page.evaluate(() =>
-			localStorage.removeItem("ryu_agent_model_selection"),
+			localStorage.removeItem("ryu_agent_model_selection")
 		);
 		const fixtureUrl = page.url();
 		await page.goto("about:blank");
@@ -571,22 +586,22 @@ for (const variant of ["token", "jwt", "aba"] as const) {
 			userJwt: null,
 		});
 		const previousReads = accepted.calls.filter(
-			(call) =>
-				call.node === "a" && call.path === path && call.method === "GET",
+			(call) => call.node === "a" && call.path === path && call.method === "GET"
 		).length;
 		await page.goto(fixtureUrl);
+		await chatReady(page);
 		await expect
 			.poll(
 				async () =>
 					(await chatPageState(request)).calls.filter(
 						(call) =>
-							call.node === "a" && call.path === path && call.method === "GET",
-					).length,
+							call.node === "a" && call.path === path && call.method === "GET"
+					).length
 			)
 			.toBeGreaterThan(previousReads);
 		await expect(modelTrigger(page)).toHaveAttribute("title", "Proof Model A");
 		await expect(page.getByText("Model changed", { exact: true })).toHaveCount(
-			variant === "jwt" ? 1 : 2,
+			variant === "jwt" ? 1 : 2
 		);
 		expect(writes((await chatPageState(request)).calls)).toHaveLength(2);
 	});

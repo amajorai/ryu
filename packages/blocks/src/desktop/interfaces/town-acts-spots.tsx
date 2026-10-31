@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { InterfaceAsk } from "@ryuhq/protocol/interfaces";
 import type { LimitText } from "./game3d-act-stage.tsx";
 import { YOU_SLOTS } from "./game3d-acts.ts";
@@ -30,8 +31,9 @@ export function doorOf(building: TownBuilding): Vec3 {
 }
 
 /** The town's words for a limit, on the door sign: "Closed till 15:10". */
-export const townLimitText: LimitText = (_act, at) =>
-	at ? `Closed till ${at}` : "Closed";
+export function townLimitText(tl: LiteralMessage): LimitText {
+	return (_act, at) => (at ? tl("Closed till {at}", { at }) : tl("Closed"));
+}
 
 /** The oldest blocking ask's wait, for the clock tower (null with none). */
 export function oldestBlockingAsk(

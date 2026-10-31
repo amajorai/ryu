@@ -8,6 +8,7 @@ import {
 } from "@ryu/ui/components/motion-navigation-menu";
 import Link from "next/link";
 import { createContext, type ReactElement, use } from "react";
+import { FEATURE_NAV_GROUP } from "./data/feature-nav.ts";
 import {
 	type ProductNavGroup,
 	productMenuGroupsFor,
@@ -23,6 +24,7 @@ import {
 	PRODUCT_ACTIVE_PREFIXES,
 	RESOURCE_ACTIVE_PREFIXES,
 } from "./header-active-routes.ts";
+import { LinkArrow } from "./link-arrow.tsx";
 import { nextLinkHref } from "./next-link-href.ts";
 
 // The marketing header's Products and Resources mega-menus (see header.tsx).
@@ -67,7 +69,11 @@ const MENU_GROUP_TITLE_CLASS =
 // top-bar links beside them.
 const MENU_PILL_CLASS = "rounded-full";
 
-function ProductLinkGroup({ group }: { group: ProductNavGroup }) {
+function ProductLinkGroup({
+	group,
+}: {
+	group: Pick<ProductNavGroup, "items"> & { title: string };
+}) {
 	const localizedTitle = useLocalizedText(group.title, { literal: true });
 	const origin = use(HeaderLinkOrigin);
 	return (
@@ -99,8 +105,9 @@ function MenuFooterLink({ href, label }: { href: string; label: string }) {
 			render={menuLink(origin, href)}
 			spacing="horizontal"
 		>
-			<span className="font-medium text-foreground text-sm">
+			<span className="inline-flex items-center gap-1 font-medium text-foreground text-sm">
 				<LocalizedHeaderCopy value={label} />
+				<LinkArrow />
 			</span>
 		</MotionNavigationMenuLink>
 	);
@@ -117,13 +124,14 @@ function PrimaryProductLinks({
 				{productMenuGroupsFor(hiddenProductIds).map((group) => (
 					<ProductLinkGroup group={group} key={group.title} />
 				))}
+				<ProductLinkGroup group={FEATURE_NAV_GROUP} />
 			</div>
 			<div
 				className="mt-6 flex items-center gap-2"
 				data-testid="product-menu-explore"
 			>
-				<MenuFooterLink href="/products" label="All products →" />
-				<MenuFooterLink href="/platform" label="How it fits together →" />
+				<MenuFooterLink href="/products" label="All products" />
+				<MenuFooterLink href="/platform" label="How it fits together" />
 			</div>
 		</div>
 	);
@@ -173,7 +181,14 @@ function ResourceLink({
 	);
 }
 
-export function ResourcesMenu({ pathname }: { pathname: string }) {
+export function ResourcesMenu({
+	hiddenHrefs,
+	pathname,
+}: {
+	/** Destinations left out of the menu (an unreleased surface). */
+	hiddenHrefs: readonly string[];
+	pathname: string;
+}) {
 	const resourcesLabel = useLocalizedText("Resources", { literal: true });
 	const active = isWithinPrefixes(pathname, RESOURCE_ACTIVE_PREFIXES);
 	return (
@@ -199,9 +214,11 @@ export function ResourcesMenu({ pathname }: { pathname: string }) {
 							<p className={MENU_GROUP_TITLE_CLASS}>
 								<LocalizedHeaderCopy value={category} />
 							</p>
-							{resourcesByCategory(category).map((resource) => (
-								<ResourceLink key={resource.href} resource={resource} />
-							))}
+							{resourcesByCategory(category)
+								.filter((resource) => !hiddenHrefs.includes(resource.href))
+								.map((resource) => (
+									<ResourceLink key={resource.href} resource={resource} />
+								))}
 						</div>
 					))}
 				</div>

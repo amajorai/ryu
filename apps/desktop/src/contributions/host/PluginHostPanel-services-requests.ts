@@ -57,6 +57,7 @@ export function buildPluginHostRequestServices({
 	openTab,
 	realtimeLifetimeRef,
 	realtimeSessionsRef,
+	tl,
 	updateTabTitle,
 	updateTabsIconWhere,
 }: PluginHostServicesContext): Partial<HostServices> {
@@ -205,7 +206,9 @@ export function buildPluginHostRequestServices({
 		// earlier are both load-bearing. No `open` verb: the review surface is the
 		// companion, so it never navigates the shell.
 		blueprintRequest: (input) =>
-			blueprintRequest(toTarget(node), input).then(rpcJsonResponseSchema.parse),
+			blueprintRequest(toTarget(node), input, tl).then(
+				rpcJsonResponseSchema.parse
+			),
 		// Generic companion → sidecar forwarder. Own sidecar by default (grant
 		// `app:http`); another app's only with the reviewed per-target grant
 		// `app:http:<app>`, checked against the APPROVED grants. Plugin ids are

@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -174,7 +175,7 @@ export function focusAge(iso: string, now: number = Date.now()): string {
  * failed"), so the card never says the same thing twice. Empty when the label
  * already says everything.
  */
-export function focusReason(item: FocusItem): string {
+export function focusReason(item: FocusItem, tl: LiteralMessage): string {
 	const lead = item.agents[0]?.name;
 	switch (item.status) {
 		case "attention":
@@ -184,9 +185,13 @@ export function focusReason(item: FocusItem): string {
 		case "your-turn":
 			return `${lead ?? "The agent"} replied`;
 		case "working":
-			return `${lead ?? "The agent"} is running`;
+			return lead
+				? tl("{agentName} is running", { agentName: lead })
+				: tl("The agent is running");
 		case "waiting":
-			return lead ? `Sent to ${lead}, not picked up yet` : "No agent assigned";
+			return lead
+				? tl("Sent to {lead}, not picked up yet", { lead })
+				: "No agent assigned";
 		default:
 			return "";
 	}

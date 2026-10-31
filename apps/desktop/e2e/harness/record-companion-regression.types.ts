@@ -5,10 +5,10 @@ export interface RecordCall {
 	status: "pending" | "accepted" | "refused";
 }
 export interface RecordCompanionApi {
-	mount(input: { app: RecordApp; appHtml: string; reset?: boolean }): void;
 	calls(): RecordCall[];
 	connected(): boolean;
-	stored(app: RecordApp): string | null;
 	holdNextWrite(): void;
+	mount(input: { app: RecordApp; appHtml: string; reset?: boolean }): void;
 	releaseWrite(accept: boolean): void;
+	stored(app: RecordApp): string | null;
 }

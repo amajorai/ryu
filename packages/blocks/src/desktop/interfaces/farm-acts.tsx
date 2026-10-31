@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceActivityKind,
@@ -98,6 +99,7 @@ export function farmActVillagers({
 	reduced,
 	shown,
 	slots,
+	tl,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
 	/** `benchOf`: where each limited farmer sits. */
@@ -110,6 +112,7 @@ export function farmActVillagers({
 	reduced: boolean;
 	shown: ReadonlySet<string>;
 	slots: readonly YouSpotSlot[];
+	tl: LiteralMessage;
 }): VillagerSpec[] {
 	const cast: VillagerSpec[] = [];
 	for (const placed of diorama.beds) {
@@ -130,8 +133,8 @@ export function farmActVillagers({
 			iconOnly: asking && slot ? false : undefined,
 			id: placed.plot.id,
 			label: asking
-				? `${act.ariaLabel} Answer their ask.`
-				: `${act.ariaLabel} Open their plot.`,
+				? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+				: tl("{ariaLabel} Open their plot.", { ariaLabel: act.ariaLabel }),
 			life: actLife(
 				act,
 				{

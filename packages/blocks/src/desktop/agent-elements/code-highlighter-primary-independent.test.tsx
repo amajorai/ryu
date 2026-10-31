@@ -23,7 +23,8 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Reflect.set(Element.prototype, "getAnimations", () => []);
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { Markdown } = await import("./markdown.tsx");
+const { Markdown, preloadMarkdown } = await import("./markdown.tsx");
+await preloadMarkdown();
 const { streamingCodeHighlighter } = await import("./code-highlighter.ts");
 afterAll(async () => {
 	mock.restore();

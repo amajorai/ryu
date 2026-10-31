@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -494,12 +495,12 @@ describe("jobs model", () => {
 
 	test("explains status and builds a timeline from recorded facts", () => {
 		const failed = jobRow(SNAPSHOT, threadAt(3));
-		expect(jobStatusDetail(failed)).toBe(
+		expect(jobStatusDetail(failed, formatMessage)).toBe(
 			"The last run failed. Reply to retry."
 		);
-		expect(jobStatusDetail(jobRow(SNAPSHOT, threadAt(4)))).toContain(
-			"Nothing has been said"
-		);
+		expect(
+			jobStatusDetail(jobRow(SNAPSHOT, threadAt(4)), formatMessage)
+		).toContain("Nothing has been said");
 		expect(jobTimeline(failed).map((entry) => entry.label)).toEqual([
 			"Posted by you",
 			"Put on hold",

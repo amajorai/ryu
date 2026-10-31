@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	ditherAvatarHue,
 	ditherAvatarSeed,
@@ -406,14 +407,18 @@ export function galleryByline(agents: readonly InterfaceAgent[]): string {
 /** Sentence for the "nothing matches" state. */
 export function galleryNoMatchText(
 	filter: GalleryFilter,
-	agentName: string | undefined
+	agentName: string | undefined,
+	tl: LiteralMessage
 ): string {
 	const query = filter.query.trim();
 	if (query) {
-		return `Nothing matches “${query}”. Try another word or clear the filters.`;
+		return tl(
+			"Nothing matches “{query}”. Try another word or clear the filters.",
+			{ query }
+		);
 	}
 	if (agentName) {
-		return `${agentName} has no conversations in this view.`;
+		return tl("{agentName} has no conversations in this view.", { agentName });
 	}
 	return "No conversations in this view.";
 }

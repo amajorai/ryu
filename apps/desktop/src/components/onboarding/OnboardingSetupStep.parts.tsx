@@ -26,7 +26,14 @@ export function Shell({
 	title: string;
 }) {
 	return (
-		<ActivationStepShell stepKey={title} subtitle={subtitle} title={title}>
+		// Setup steps are lists and multi-field forms; on a wide window they sit
+		// beside the header instead of running the full window height.
+		<ActivationStepShell
+			layout="split"
+			stepKey={title}
+			subtitle={subtitle}
+			title={title}
+		>
 			{children}
 		</ActivationStepShell>
 	);

@@ -62,6 +62,7 @@ export function PostDetails({
 	onClose,
 	onSelectSpace,
 }: PostDetailsProps) {
+	const tl = useLiteralMessages();
 	const headingId = useId();
 	const { space, thread } = item;
 	return (
@@ -92,7 +93,7 @@ export function PostDetails({
 				<DetailRow label="Status">
 					<PostMarkerLabel
 						className="text-sm leading-6"
-						label={markerLabel(item)}
+						label={markerLabel(item, tl)}
 						marker={item.marker}
 					/>
 				</DetailRow>
@@ -231,6 +232,7 @@ export function PostPage({
 	sidebarToggle,
 	threadView,
 }: PostPageProps) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const titleId = useId();
 	const commentsId = useId();
@@ -289,7 +291,7 @@ export function PostPage({
 									{detailsOpen ? null : (
 										<PostMarkerLabel
 											className="ml-auto shrink-0 pl-3 text-sm"
-											label={markerLabel(item)}
+											label={markerLabel(item, tl)}
 											marker={item.marker}
 										/>
 									)}

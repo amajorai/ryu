@@ -2,9 +2,12 @@ import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useState } from "react";
 import type { Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch;
 const NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
@@ -107,10 +110,12 @@ const server = Bun.serve({
 			request.method === "POST";
 		const history = match && match[2] && !match[3] && request.method === "GET";
 		if (
-			!node ||
-			!match ||
-			!(list || fork || history) ||
-			!["", "?preview=1"].includes(url.search)
+			!(
+				node &&
+				match &&
+				(list || fork || history) &&
+				["", "?preview=1"].includes(url.search)
+			)
 		) {
 			unexpected.push(`${request.method} ${request.url}`);
 			return NativeResponse.json(
@@ -128,7 +133,9 @@ const server = Bun.serve({
 			status: 200,
 		};
 		calls.push(call);
-		if (list) return NativeResponse.json({ conversations: records[slot] });
+		if (list) {
+			return NativeResponse.json({ conversations: records[slot] });
+		}
 		if (history) {
 			const messages = histories[slot + ":" + decodeURIComponent(match[2]!)];
 			if (!messages) {
@@ -140,21 +147,28 @@ const server = Bun.serve({
 		expect(request.headers.get("content-type")).toContain("application/json");
 		if (body === null || typeof body !== "object") {
 			unexpected.push("Invalid fork request body");
-			return NativeResponse.json({ error: "Invalid fork request body" }, { status: 400 });
+			return NativeResponse.json(
+				{ error: "Invalid fork request body" },
+				{ status: 400 }
+			);
 		}
 		expect(Object.keys(body)).toEqual(
 			Object.keys(body).length ? ["message_id"] : []
 		);
 		const status = gate?.status ?? responseStatus;
 		const held = gate;
-		if (held)
+		if (held) {
 			await new Promise<void>((resolve) => {
 				held.release = resolve;
 			});
+		}
 		call.status = status;
-		if (status !== 200)
+		if (status !== 200) {
 			return NativeResponse.json({ error: "Fork refused" }, { status });
-		if (missingConversation) return NativeResponse.json({ ok: true });
+		}
+		if (missingConversation) {
+			return NativeResponse.json({ ok: true });
+		}
 		const id = slot + "-fork";
 		const boundary = (body as { message_id?: string }).message_id;
 		if (boundary && boundary !== MESSAGE) {
@@ -245,7 +259,9 @@ async function until(predicate: () => boolean) {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 4));
 		});
-		if (predicate()) return;
+		if (predicate()) {
+			return;
+		}
 	}
 	throw new Error(
 		"Native fork result did not settle: " +
@@ -258,7 +274,9 @@ async function click(label: string) {
 	const button = [...container.querySelectorAll("button")].find(
 		(node) => node.textContent === label
 	);
-	if (!button) throw new Error("Missing actual provider probe action");
+	if (!button) {
+		throw new Error("Missing actual provider probe action");
+	}
 	await act(async () => button.click());
 }
 beforeEach(() => {
@@ -335,7 +353,7 @@ test("whole-conversation fork sends empty JSON instead of a cutoff from a previo
 	).toEqual([{}]);
 	expect(histories["A:A-fork"]).toEqual(sourceMessages);
 });
-for (const failure of ["http", "missing-conversation"] as const)
+for (const failure of ["http", "missing-conversation"] as const) {
 	test(`fork ${failure} failure publishes no draft/new ID; explicit retry sends the same cutoff and fresh list reads the accepted fork`, async () => {
 		await mount();
 		await until(() => rows().length === 1);
@@ -359,7 +377,8 @@ for (const failure of ["http", "missing-conversation"] as const)
 		await until(() => rows().length === 2);
 		expect(rows()[0]?.id).toBe("A-fork");
 	});
-for (const rotation of ["url", "token", "jwt"] as const)
+}
+for (const rotation of ["url", "token", "jwt"] as const) {
 	test(`late successful A fork after ${rotation} authority rotation cannot insert A's returned row into B or return a usable ID to the old caller`, async () => {
 		mode = rotation;
 		select("A");
@@ -382,6 +401,7 @@ for (const rotation of ["url", "token", "jwt"] as const)
 			calls.filter((call) => call.method === "POST").map((call) => call.slot)
 		).toEqual(["A"]);
 	});
+}
 
 test("returning A after A-to-B-to-A still cancels the old fork navigation intent; an explicit fresh list can recover the persisted background fork", async () => {
 	await mount();

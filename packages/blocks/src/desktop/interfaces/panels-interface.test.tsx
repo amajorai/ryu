@@ -2,6 +2,7 @@
 import "./panels-test-dom.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -371,7 +372,9 @@ describe("panels model", () => {
 	});
 
 	test("names each panel link by the thread it opens, never twice", () => {
-		const actions = panelHeaderActions(SNAPSHOT, NOW);
+		const actions = panelHeaderActions(SNAPSHOT, NOW, (source, values) =>
+			formatMessage(source, values)
+		);
 		expect(actions.working?.text).toBe("Watch");
 		const targets = [actions.agents, actions.activity, actions.upcoming]
 			.filter((action) => action !== null)

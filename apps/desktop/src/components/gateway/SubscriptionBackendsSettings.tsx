@@ -4,7 +4,8 @@
 // whether cloud tasks for the Claude Code and Codex agents may run on their own
 // Claude or ChatGPT plan instead of a Ryu Box. It covers the default order, an
 // order per agent, and each environment's local checkout (Claude cloud, and runs on
-// this computer for Claude or Codex) or Codex environment ID.
+// this node for Claude or Codex) or Codex environment ID. On a node Ryu hosts, a
+// plan run on the node leaves a datacenter IP, so the card warns about it.
 //
 // The plan's sign-in belongs to the provider CLI on the node. "Sign in" asks Core to
 // start that CLI's own sign-in, which opens the provider's page; Ryu never sees a
@@ -21,6 +22,10 @@ import {
 } from "@ryu/ui/components/native-select.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback, useEffect, useState } from "react";
+import {
+	DatacenterPlanWarning,
+	useNodeManaged,
+} from "@/src/components/chat/DatacenterPlanWarning.tsx";
 import { PlanAccountsSettings } from "@/src/components/gateway/PlanAccountsSettings.tsx";
 import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
@@ -52,7 +57,7 @@ interface EnvironmentOption {
 const ORDER_PRESETS: { label: string; order: CloudTaskBackendId[] }[] = [
 	{
 		label:
-			"Your plan in the provider's cloud first, then on this computer, then Ryu Box",
+			"Your plan in the provider's cloud first, then on this node, then Ryu Box",
 		order: [
 			"anthropic-subscription-cli",
 			"anthropic-subscription-sdk",
@@ -62,7 +67,7 @@ const ORDER_PRESETS: { label: string; order: CloudTaskBackendId[] }[] = [
 		],
 	},
 	{
-		label: "Your plan on this computer first, then Ryu Box",
+		label: "Your plan on this node first, then Ryu Box",
 		order: [
 			"anthropic-subscription-sdk",
 			"anthropic-subscription-cli",
@@ -118,6 +123,7 @@ export function SubscriptionBackendsSettings({
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const { url, token, userJwt } = target;
+	const nodeManaged = useNodeManaged(url);
 	const load = useCallback(
 		async (signal?: AbortSignal) => {
 			try {
@@ -213,7 +219,14 @@ export function SubscriptionBackendsSettings({
 			caption={
 				<CaptionInfo
 					detail={
-						"Cloud tasks for the Claude Code and Codex agents can run on your own Claude or ChatGPT plan, through the official CLI you signed in on this node: in the provider's cloud, or (Claude) on this computer in a separate worktree of your checkout. They count toward that plan's usage limits and use no Ryu credits. When the plan is unavailable or reaches its limit, the task runs on a Ryu Box instead, and Ryu tells you. Ryu never stores your plan's sign-in."
+						<>
+							{
+								"Cloud tasks for the Claude Code and Codex agents can run on your own Claude or ChatGPT plan, through the official CLI you signed in on this node: in the provider's cloud (agent in the cloud, run by the provider), or on this node in a separate worktree of your checkout. They count toward that plan's usage limits and use no Ryu credits."
+							}{" "}
+							{
+								"When the plan is unavailable or reaches its limit, the task runs on a Ryu Box instead, and Ryu tells you; there the agent runs in the cloud and needs an API key. Ryu never stores your plan's sign-in. Providers can restrict plan accounts used from datacenter IPs, so do not sign in to your plan inside a Ryu Box or on a node Ryu hosts."
+							}
+						</>
 					}
 				>
 					{
@@ -224,6 +237,7 @@ export function SubscriptionBackendsSettings({
 			title="Run on your own plan"
 		>
 			<div className="space-y-4 px-3">
+				{nodeManaged ? <DatacenterPlanWarning /> : null}
 				<div className="flex items-center gap-2">
 					<Switch
 						checked={draft.enabled}
@@ -309,9 +323,9 @@ export function SubscriptionBackendsSettings({
 						<p className="text-muted-foreground text-xs">
 							Claude runs <code>claude --cloud</code> in a local checkout, and
 							its cloud session clones that checkout's GitHub remote at its
-							current branch. Runs on this computer, for Claude or Codex, work
-							in their own branch of the same checkout. Codex cloud submits to
-							the Codex environment you name.
+							current branch. Runs on this node, for Claude or Codex, work in
+							their own branch of the same checkout. Codex cloud submits to the
+							Codex environment you name.
 						</p>
 						{environments.map((environment) => (
 							<div className="grid gap-2 sm:grid-cols-2" key={environment.id}>
@@ -376,8 +390,8 @@ export function SubscriptionBackendsSettings({
 				</p>
 				<p className="text-muted-foreground text-xs">
 					No live screen. Provider's cloud: review and stop on the provider's
-					site. This computer: run log, diff and Stop in Ryu; edits only, no
-					shell commands.
+					site. This node: run log, diff and Stop in Ryu; edits only, no shell
+					commands.
 				</p>
 				{notice ? (
 					<p className="text-muted-foreground text-xs" role="status">

@@ -102,7 +102,7 @@ export function LayersSection({
 		} catch (e) {
 			// Core's 409 names the plugin that would break and the binding_error
 			// code; surface both rather than a bare "request failed".
-			sileo.error({ title: describeBindingFailure(e, provider.name) });
+			sileo.error({ title: describeBindingFailure(e, provider.name, tl) });
 		}
 	};
 
@@ -250,7 +250,7 @@ export function DecisionModelsSection({
 			await select(entry.capability, provider.id);
 			sileo.success({ title: `${label} → ${provider.name}` });
 		} catch (error) {
-			sileo.error({ title: describeBindingFailure(error, provider.name) });
+			sileo.error({ title: describeBindingFailure(error, provider.name, tl) });
 		}
 	};
 

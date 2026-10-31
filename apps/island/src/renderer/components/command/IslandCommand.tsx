@@ -198,7 +198,7 @@ export function IslandCommand() {
 		const items: CommandAction[] = [];
 
 		if (trimmed.length > 0) {
-			const { primary, alternatives } = route(trimmed);
+			const { primary, alternatives } = route(trimmed, tl);
 			let index = 0;
 			for (const intent of [primary, ...alternatives]) {
 				items.push({

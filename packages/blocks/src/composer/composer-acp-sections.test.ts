@@ -720,8 +720,9 @@ describe("boolean config options (unstable_boolean_config)", () => {
 		);
 		expect(visibleAcpConfigOptions).toHaveLength(1);
 		const visibleToggle = visibleAcpConfigOptions[0];
-		if (!visibleToggle)
+		if (!visibleToggle) {
 			throw new Error("Boolean control did not survive the visibility filter");
+		}
 		expect(visibleToggle.id).toBe("web_search");
 	});
 });

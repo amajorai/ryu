@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfacePort,
@@ -19,6 +21,8 @@ import {
 	hourIndex,
 	hourlyStarts,
 } from "./mission-control-model.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const MINUTE = 60_000;
 /** Local mid-day and mid-hour, so buckets and "today" hold in any time zone. */
@@ -235,7 +239,7 @@ describe("mission control model", () => {
 	});
 
 	test("counts statuses and builds the six KPIs", () => {
-		const view = buildMissionControl(SNAPSHOT, NOW);
+		const view = buildMissionControl(SNAPSHOT, NOW, tl);
 		expect(view.counts).toEqual({
 			attention: 1,
 			quiet: 0,
@@ -267,7 +271,7 @@ describe("mission control model", () => {
 	});
 
 	test("activity counts updates per hour and places finished runs", () => {
-		const { activity } = buildMissionControl(SNAPSHOT, NOW);
+		const { activity } = buildMissionControl(SNAPSHOT, NOW, tl);
 		expect(activity.total).toBe(4);
 		expect(activity.buckets.at(-1)?.threadIds).toEqual([
 			"thread-triage",
@@ -286,7 +290,7 @@ describe("mission control model", () => {
 	});
 
 	test("stations keep agent order and pick the thread each is on", () => {
-		const { stations } = buildMissionControl(SNAPSHOT, NOW);
+		const { stations } = buildMissionControl(SNAPSHOT, NOW, tl);
 		expect(stations.map((station) => station.agent.name)).toEqual([
 			"Ada",
 			"Grace",
@@ -303,7 +307,7 @@ describe("mission control model", () => {
 	});
 
 	test("alerts list failures (threads and runs) before advisories", () => {
-		const { alerts, banner } = buildMissionControl(SNAPSHOT, NOW);
+		const { alerts, banner } = buildMissionControl(SNAPSHOT, NOW, tl);
 		expect(alerts.map((alert) => `${alert.severity}:${alert.id}`)).toEqual([
 			"warning:run:run-audit",
 			"warning:thread:thread-flaky",
@@ -323,7 +327,7 @@ describe("mission control model", () => {
 			events: undefined,
 			threads: SNAPSHOT.threads.filter((item) => item.id !== "thread-flaky"),
 		};
-		const view = buildMissionControl(calm, NOW);
+		const view = buildMissionControl(calm, NOW, tl);
 		expect(view.banner.tone).toBe("nominal");
 		expect(view.banner.headline).toBe("All systems nominal");
 		expect(view.upcoming).toEqual([]);
@@ -334,7 +338,7 @@ describe("mission control model", () => {
 	});
 
 	test("upcoming runs sort soonest first; the tape mixes threads and runs", () => {
-		const view = buildMissionControl(SNAPSHOT, NOW);
+		const view = buildMissionControl(SNAPSHOT, NOW, tl);
 		expect(view.upcoming.map((event) => event.id)).toEqual([
 			"next-sweep",
 			"next-digest",
@@ -351,12 +355,16 @@ describe("mission control model", () => {
 	});
 
 	test("recent runs list finished runs newest first; stations carry hourly activity", () => {
-		const view = buildMissionControl(SNAPSHOT, NOW);
+		const view = buildMissionControl(SNAPSHOT, NOW, tl);
 		expect(view.recentRuns.map((event) => event.id)).toEqual([
 			"run-audit",
 			"run-backup",
 		]);
-		const calm = buildMissionControl({ ...SNAPSHOT, events: undefined }, NOW);
+		const calm = buildMissionControl(
+			{ ...SNAPSHOT, events: undefined },
+			NOW,
+			tl
+		);
 		expect(calm.recentRuns).toEqual([]);
 		const [ada, grace, linus] = view.stations;
 		const sum = (values: readonly number[] = []) =>

@@ -19,11 +19,17 @@ export const JOB_UPDATED_LABELS: Record<JobUpdatedWithin, string> = {
 	week: "Past week",
 };
 
+/** Whole phrases, so each reads as one sentence in every language. */
+const JOB_UPDATED_PHRASES: Record<JobUpdatedWithin, string> = {
+	any: "Updated",
+	day: "Updated in the past 24 hours",
+	month: "Updated in the past month",
+	week: "Updated in the past week",
+};
+
 /** The phrase on an applied pill and its saved search: one wording for both. */
 export function jobUpdatedPhrase(within: JobUpdatedWithin): string {
-	return within === "any"
-		? "Updated"
-		: `Updated in the ${JOB_UPDATED_LABELS[within].toLowerCase()}`;
+	return JOB_UPDATED_PHRASES[within];
 }
 
 const DAY = 86_400_000;

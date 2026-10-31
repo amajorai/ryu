@@ -11,6 +11,7 @@ import {
 	TableRow,
 } from "@ryu/ui/components/table.tsx";
 import { cn } from "@ryu/ui/lib/utils";
+import { landingContainerClass } from "./landing-typography.ts";
 import {
 	type ComparisonCell,
 	type ComparisonOptions,
@@ -18,6 +19,7 @@ import {
 	comparisonSeats,
 	comparisonSections,
 } from "./pricing-comparison.ts";
+import { SectionHeading } from "./sections.tsx";
 
 /** The sticky first column keeps row labels in view while plans scroll. */
 const STICKY_COLUMN =
@@ -72,26 +74,24 @@ export function PricingComparisonTable(props: ComparisonOptions) {
 
 	return (
 		<section
-			aria-labelledby="plan-comparison-heading"
-			className="mx-auto mb-16 max-w-6xl"
+			aria-label="Compare plans"
+			className={cn(landingContainerClass, "py-12 md:py-16")}
 			data-testid="pricing-comparison"
 			id="compare-plans"
 		>
-			<h2
-				className="font-medium text-2xl tracking-tight md:text-3xl"
-				id="plan-comparison-heading"
-			>
-				Compare plans
-			</h2>
-			<p className="mt-3 max-w-3xl text-muted-foreground text-sm leading-relaxed sm:text-base">
-				{isOrganization
-					? tl(
-							"Every limit and feature side by side. Organization prices and credits are shown for {seats} seats.",
-							{ seats: String(seats) }
-						)
-					: "Every limit and feature side by side."}
-			</p>
-			<div className="mt-6 overflow-hidden rounded-2xl border border-border/60">
+			<SectionHeading
+				className="mb-8 md:mb-10"
+				subtitle={
+					isOrganization
+						? tl(
+								"Every limit and feature side by side. Organization prices and credits are shown for {seats} seats.",
+								{ seats: String(seats) }
+							)
+						: "Every limit and feature side by side."
+				}
+				title="Compare plans"
+			/>
+			<div className="overflow-hidden rounded-2xl border border-border/60">
 				<Table className="min-w-[40rem] table-fixed">
 					<TableCaption className="sr-only">
 						{isOrganization

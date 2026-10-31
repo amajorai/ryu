@@ -29,6 +29,13 @@ const PATTERNCRAFT_CATEGORY = {
 	geometric: "Geometric",
 	gradients: "Gradients",
 } satisfies Record<PatternCraftCategory, BackdropCategory>;
+/** Whole-sentence fallbacks so each description is one translatable message. */
+const PATTERNCRAFT_DESCRIPTION = {
+	decorative: "Decorative CSS wallpaper from PatternCraft.",
+	effects: "Effects CSS wallpaper from PatternCraft.",
+	geometric: "Geometric CSS wallpaper from PatternCraft.",
+	gradients: "Gradients CSS wallpaper from PatternCraft.",
+} satisfies Record<PatternCraftCategory, string>;
 const PATTERNCRAFT_BY_ID = new Map(
 	PATTERNCRAFT_WALLPAPERS.map((wallpaper) => [wallpaper.id, wallpaper])
 );
@@ -100,8 +107,7 @@ export const BUNDLED_MARKETPLACE_BACKGROUNDS: readonly AttributedMarketplaceBack
 			attributionUrl: "https://patterncraft.fun/",
 			backdropId: PATTERNCRAFT_BACKDROP_ID,
 			description:
-				wallpaper.description ??
-				`${PATTERNCRAFT_CATEGORY[wallpaper.category]} CSS wallpaper from PatternCraft.`,
+				wallpaper.description ?? PATTERNCRAFT_DESCRIPTION[wallpaper.category],
 			id: `${PATTERNCRAFT_PLUGIN_ID}:${wallpaper.slug}`,
 			label: wallpaper.label,
 			params: { patternId: wallpaper.id },
@@ -142,8 +148,7 @@ function patternCraftDefinition(
 		animated: wallpaper.style.animation !== undefined,
 		category: PATTERNCRAFT_CATEGORY[wallpaper.category],
 		description:
-			wallpaper.description ??
-			`${PATTERNCRAFT_CATEGORY[wallpaper.category]} CSS wallpaper from PatternCraft.`,
+			wallpaper.description ?? PATTERNCRAFT_DESCRIPTION[wallpaper.category],
 		id: PATTERNCRAFT_BACKDROP_ID,
 		label: wallpaper.label,
 		params: [],

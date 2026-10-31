@@ -133,36 +133,46 @@ export function ChooseStep({
 		);
 	}
 
+	// The row is sized by the column the step renders in, not the viewport: a
+	// container query keeps the three cards side by side only when each gets
+	// about 13rem (42rem across), and stacks them in a narrower window, pane or
+	// story column instead of squeezing their copy and buttons.
 	return (
-		<div className="grid w-full grid-cols-1 gap-3 md:grid-cols-3">
-			<ChoiceCard
-				action={
-					<Button
-						className="w-full"
-						disabled={managedBusy || managedLoading}
-						onClick={onChooseManaged}
-						variant={cloudRecommended ? "mono" : "outline"}
-					>
-						{managedLabel}
-					</Button>
-				}
-				description="Ryu handles downloads, updates, and the server. Start working right away."
-				testId="onboarding-cloud-choice"
-				title="Let Ryu handle it"
-			/>
+		<div className="@container w-full">
+			<div className="grid @2xl:grid-cols-3 grid-cols-1 gap-3">
+				<ChoiceCard
+					action={
+						<Button
+							className="w-full"
+							disabled={managedBusy || managedLoading}
+							onClick={onChooseManaged}
+							variant={cloudRecommended ? "mono" : "outline"}
+						>
+							{managedLabel}
+						</Button>
+					}
+					description="Ryu handles downloads, updates, and the server. Start working right away."
+					testId="onboarding-cloud-choice"
+					title="Let Ryu handle it"
+				/>
 
-			{localCard}
+				{localCard}
 
-			<ChoiceCard
-				action={
-					<Button className="w-full" onClick={onChooseRemote} variant="outline">
-						Connect a server
-					</Button>
-				}
-				description="Connect to a server your team runs. Your team handles updates and access."
-				testId="onboarding-existing-node-choice"
-				title="Bring your own server"
-			/>
+				<ChoiceCard
+					action={
+						<Button
+							className="w-full"
+							onClick={onChooseRemote}
+							variant="outline"
+						>
+							Connect a server
+						</Button>
+					}
+					description="Connect to a server your team runs. Your team handles updates and access."
+					testId="onboarding-existing-node-choice"
+					title="Bring your own server"
+				/>
+			</div>
 		</div>
 	);
 }

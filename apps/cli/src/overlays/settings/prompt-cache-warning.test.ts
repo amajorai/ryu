@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { formatMessage } from "@ryu/i18n/core";
 import { aboutYouCacheWarning } from "./prompt-cache-warning.ts";
+
+type Translate = (
+	source: string,
+	values?: Record<string, string | number>
+) => string;
 
 type PromptEditCacheWarning = (
 	changed: readonly string[],
-	reach: string
+	reach: string,
+	tl: Translate
 ) => { description: string; title: string } | null;
+
+const tl: Translate = (source, values) => formatMessage(source, values ?? {});
 
 describe("aboutYouCacheWarning", () => {
 	test("pins the About you prompt-cache copy", () => {
@@ -27,7 +36,7 @@ describe("aboutYouCacheWarning", () => {
 			promptEditCacheWarning: PromptEditCacheWarning;
 		};
 		expect(aboutYouCacheWarning()).toEqual(
-			shared.promptEditCacheWarning(["About you"], "all-threads") ?? {
+			shared.promptEditCacheWarning(["About you"], "all-threads", tl) ?? {
 				description: "",
 				title: "",
 			}

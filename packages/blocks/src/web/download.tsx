@@ -20,11 +20,11 @@ import {
 	Moon,
 } from "lucide-react";
 import { DOCS_URL } from "./data/resources.tsx";
+import { archHintFor } from "./download-arch-hint.ts";
 import {
 	archLabel,
 	type DownloadArch,
 	type DownloadOS,
-	type DownloadState,
 	findChannelRelease,
 	GITHUB_REPO,
 	osName,
@@ -65,25 +65,6 @@ export {
 	verifyDownloadUrl,
 	WEBAPP_URL,
 } from "./download-catalog.tsx";
-
-/** The sub-label under an arch name, explaining what that row can offer. */
-function archHintFor(state: DownloadState, arch: DownloadArch): string {
-	if (state.kind === "building") {
-		return `${state.version} is still building`;
-	}
-	if (state.kind === "unavailable") {
-		return "Not available";
-	}
-	if (state.kind === "unknown") {
-		return "Browse releases on GitHub";
-	}
-	const processors = arch === "arm" ? "ARM processors" : "Intel / AMD";
-	// During a release window the newest tag has no binaries yet, so name the
-	// version this button really hands over rather than implying it is the newest.
-	return state.supersededByBuilding
-		? `${processors} · ${state.servedVersion}`
-		: processors;
-}
 
 function DownloadSettingRow({
 	ariaLabel,
@@ -165,6 +146,7 @@ function PlatformCard({
 	platform: DownloadPlatform;
 	releases: Release[];
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<Card className="h-full" elevation="flat">
 			<CardHeader>
@@ -196,7 +178,7 @@ function PlatformCard({
 							icon={<Download className="size-4" />}
 							key={arch}
 							label={archLabel(platform.id, arch)}
-							meta={archHintFor(state, arch)}
+							meta={archHintFor(state, arch, tl)}
 							openInNewTab={state.kind === "unknown"}
 							status={
 								state.kind === "ready" || state.kind === "unknown"
@@ -294,7 +276,7 @@ export interface DownloadProps {
  * useOS/useIsMobile hooks and passes the resolved values in; the storyboard
  * renders it with a static release list.
  *
- * The layout mirrors the marketing pages (centered hero with an eyebrow pill,
+ * The layout mirrors the marketing pages (centered hero,
  * a primary CTA, Reveal-staggered cards, then a Highlights strip) so the
  * download surface reads as part of the same site, not a bolted-on page.
  */

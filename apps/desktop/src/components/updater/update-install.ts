@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -76,7 +77,8 @@ export async function scheduleReleaseUpdate(
 export async function applyReleaseUpdate(
 	target: ApiTarget,
 	node: { url: string },
-	verdict: UpdateCheck
+	verdict: UpdateCheck,
+	tl: LiteralMessage
 ): Promise<string | null> {
 	if (!isLocalNode(node)) {
 		if (!verdict.asset) {
@@ -90,7 +92,7 @@ export async function applyReleaseUpdate(
 		const result = await applyNodeUpdate(target, verdict.asset);
 		return result.message;
 	}
-	await installUpdate(verdict, { node });
+	await installUpdate(verdict, tl, { node });
 	return null;
 }
 
@@ -153,10 +155,11 @@ export let installFailureToastSequence = 0;
 
 export async function installUpdate(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	options?: AppUpdateOptions
 ): Promise<void> {
 	if (!isEligibleForAppUpdate(verdict)) {
-		notifyUpdateOutsideWindow(verdict);
+		notifyUpdateOutsideWindow(verdict, tl);
 		return;
 	}
 
@@ -178,23 +181,27 @@ export async function installUpdate(
 				await clearPreparedAppUpdate();
 			}
 			progressId = sileo.info({
-				title: `Downloading update v${verdict.latest}…`,
+				title: tl("Downloading update v{latestVersion}…", {
+					latestVersion: verdict.latest,
+				}),
 				description: "Ryu will ask before installing and restarting.",
 				duration: null,
 			});
-			const downloaded = await prepareUpdate(verdict, options);
+			const downloaded = await prepareUpdate(verdict, tl, options);
 			if (progressId !== undefined) {
 				sileo.dismiss(progressId);
 				progressId = undefined;
 			}
 			if (!downloaded) {
-				offerManualDownload(verdict, downloadsUrl);
+				offerManualDownload(verdict, tl, downloadsUrl);
 				return;
 			}
 		}
 
 		progressId = sileo.info({
-			title: `Preparing to install v${verdict.latest}…`,
+			title: tl("Preparing to install v{latestVersion}…", {
+				latestVersion: verdict.latest,
+			}),
 			description: "Checking the runtime release. Ryu asks before restarting.",
 			duration: null,
 		});
@@ -205,7 +212,7 @@ export async function installUpdate(
 			return;
 		}
 		if (!installed) {
-			offerManualDownload(verdict, downloadsUrl);
+			offerManualDownload(verdict, tl, downloadsUrl);
 			return;
 		}
 		sileo.success({
@@ -243,7 +250,7 @@ export async function installUpdate(
 			button: {
 				title: "Retry",
 				onClick: () => {
-					installUpdate(verdict, options).catch(() => undefined);
+					installUpdate(verdict, tl, options).catch(() => undefined);
 				},
 			},
 		});

@@ -89,7 +89,7 @@ export function FolderRow({
 						<p
 							className={cn(
 								layout.folderNote,
-								"type-caption py-1 text-muted-foreground"
+								"py-1 text-muted-foreground text-xs"
 							)}
 							style={noteIndent}
 						>
@@ -115,7 +115,7 @@ export function FolderRow({
 						<p
 							className={cn(
 								layout.folderNote,
-								"type-caption py-1 text-muted-foreground"
+								"py-1 text-muted-foreground text-xs"
 							)}
 							style={noteIndent}
 						>

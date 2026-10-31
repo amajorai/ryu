@@ -46,10 +46,10 @@ function Fixture() {
 								<TitleBarProvider>
 									<nav aria-label="Fixture authority">
 										<button
-											type="button"
 											onClick={() =>
 												useNodeStore.setState({ defaultNode: nodes[1]!.name })
 											}
+											type="button"
 										>
 											Use scope B
 										</button>
@@ -65,5 +65,7 @@ function Fixture() {
 	);
 }
 const root = document.getElementById("root");
-if (!root) throw new Error("Missing actual agent editor proof root");
+if (!root) {
+	throw new Error("Missing actual agent editor proof root");
+}
 createRoot(root).render(<Fixture />);

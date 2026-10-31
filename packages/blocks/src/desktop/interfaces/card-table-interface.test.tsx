@@ -1,6 +1,7 @@
 import "./card-table-test-dom.ts";
 // The DOM first, before React loads (the side-effect import above stays first).
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfaceAgent,
 	InterfaceEvent,
@@ -375,9 +376,21 @@ describe("card table model", () => {
 		];
 		expect(nextDeal(events, NOW)?.id).toBe("soon");
 		expect(nextDeal(undefined, NOW)).toBeUndefined();
-		expect(untilLabel(ago(-45), NOW)).toBe("in 45m");
-		expect(untilLabel(ago(-180), NOW)).toBe("in 3h");
-		expect(untilLabel(ago(-60 * 50), NOW)).toBe("in 2d");
+		expect(
+			untilLabel(ago(-45), NOW, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 45m");
+		expect(
+			untilLabel(ago(-180), NOW, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 3h");
+		expect(
+			untilLabel(ago(-60 * 50), NOW, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("in 2d");
 	});
 
 	test("ranks a card by its agent and stacks one chip per thread", () => {

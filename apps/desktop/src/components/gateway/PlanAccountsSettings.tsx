@@ -10,16 +10,7 @@
 // Ryu never sees a plan credential: Core reads only each CLI's status.
 // See docs/subscription-cloud-sessions.md §0b.
 
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -29,6 +20,7 @@ import {
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
 import { useCallback, useEffect, useState } from "react";
+import { PlanAccountRemoveDialog } from "@/src/components/gateway/PlanAccountRemoveDialog.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -87,6 +79,7 @@ export function PlanAccountsSettings({
 	save: (next: CloudTaskRoutingSettings) => Promise<void>;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const [accounts, setAccounts] = useState<PlanAccountView[] | null>(null);
 	const [sessions, setSessions] = useState<PlanSession[]>([]);
 	const [newProvider, setNewProvider] = useState<PlanProvider>("anthropic");
@@ -175,10 +168,11 @@ export function PlanAccountsSettings({
 				const own = accounts.filter((account) => account.provider === provider);
 				const defaultId = draft.defaultAccounts[provider] ?? DEFAULT_ACCOUNT_ID;
 				const fallbacks = fallbacksFor(provider);
+				const providerName = PROVIDER_NAMES[provider];
 				return (
 					<div className="space-y-2" key={provider}>
 						<p className="font-medium text-sm">
-							{PROVIDER_NAMES[provider]} accounts
+							{tl("{providerName} accounts", { providerName })}
 						</p>
 						<SettingsGroup>
 							{own.map((account) => (
@@ -377,44 +371,13 @@ export function PlanAccountsSettings({
 					{error}
 				</p>
 			) : null}
-			<AlertDialog
-				onOpenChange={(open) => {
-					if (!open) {
-						setRemoving(null);
-					}
-				}}
-				open={removing !== null}
-			>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>
-							Remove {removing ? removing.tag : "this account"}?
-						</AlertDialogTitle>
-						<AlertDialogDescription>
-							Ryu deletes this account's sign-in folder on this node, so the CLI
-							is signed out of it here. Conversations that ran on it keep their
-							history but cannot continue.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
-						<AlertDialogAction
-							onClick={(event) => {
-								event.preventDefault();
-								const account = removing;
-								setRemoving(null);
-								if (account) {
-									act(() =>
-										removePlanAccount(target, account.provider, account.id)
-									);
-								}
-							}}
-						>
-							Remove
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+			<PlanAccountRemoveDialog
+				account={removing}
+				onClose={() => setRemoving(null)}
+				onConfirm={(account) =>
+					act(() => removePlanAccount(target, account.provider, account.id))
+				}
+			/>
 		</div>
 	);
 }

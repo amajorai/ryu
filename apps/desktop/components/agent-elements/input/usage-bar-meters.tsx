@@ -79,8 +79,9 @@ export function WindowTooltipRow({
 }) {
 	const used = Math.max(0, Math.min(100, usageWindow.usedPercent));
 	const shown = mode === "remaining" ? 100 - used : used;
+	const tl = useLiteralMessages();
 	const reset = formatReset(usageWindow.resetsAt);
-	const pace = paceStatus(usageWindow);
+	const pace = paceStatus(usageWindow, tl);
 	return (
 		<span className="font-medium">
 			{usageWindow.label}: {Math.round(shown)}%{" "}
@@ -369,7 +370,7 @@ export function UsageWindowMeter({
 	// Color always reflects danger (high usage → red), regardless of which
 	// number is displayed; the bar fill matches the displayed number.
 	const reset = formatReset(usageWindow.resetsAt);
-	const pace = paceStatus(usageWindow);
+	const pace = paceStatus(usageWindow, tl);
 	const paceClass = paceDotClass(usageWindow);
 	const linearBar = (
 		<span

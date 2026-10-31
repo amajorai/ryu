@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfaceSnapshot,
 	InterfaceThread,
@@ -162,6 +163,7 @@ function renderDesk(
 		onAsk: (askId) => asked.push(askId),
 		reduced: true,
 		shown,
+		tl: formatMessage,
 	});
 	const paths = deskPaths(layout);
 	const spreads =
@@ -532,6 +534,7 @@ describe("passport desk: the booklet", () => {
 			onAsk: () => undefined,
 			reduced: false,
 			shown,
+			tl: formatMessage,
 		})) {
 			const act = acts.get(spec.id);
 			if (act && (act.act === "working" || act.act === "waiting")) {

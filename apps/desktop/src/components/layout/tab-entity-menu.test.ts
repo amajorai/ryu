@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
+
 // The menu also mounts browser-backed workspace stores. Initialize their host
 // before importing the real menu; keep all entity routing assertions unchanged.
 if (!GlobalRegistrator.isRegistered) {

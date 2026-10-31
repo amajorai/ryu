@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useMemo, useState } from "react";
@@ -34,6 +35,7 @@ import {
  * click, and on desktop links to the OS notification settings instead.
  */
 export function NotificationSettings() {
+	const tl = useLiteralMessages();
 	const { surface } = useAppSurface();
 	const choice = useOsNotificationsChoice();
 	const platform = useNotificationPlatform();
@@ -56,12 +58,15 @@ export function NotificationSettings() {
 		};
 	}, [platform]);
 
-	const copy = notificationOnboardingCopy({
-		os,
-		permission,
-		platform,
-		surface,
-	});
+	const copy = notificationOnboardingCopy(
+		{
+			os,
+			permission,
+			platform,
+			surface,
+		},
+		tl
+	);
 	// `choice` is read so the switch re-renders when it changes; the effective
 	// state also covers users who have not chosen yet.
 	const enabled = choice ?? osNotificationsEnabled();

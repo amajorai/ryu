@@ -225,3 +225,62 @@ describe("dynamic sentences through catalog templates", () => {
 		stop();
 	});
 });
+
+describe("satellite copy in a Companion frame", () => {
+	// Sidecar and backend sentences reach the official catalog as ICU
+	// templates (tools/i18n-extract/satellite-surface.mjs); the frame has no
+	// catalog of its own, so the host matches them.
+	const SATELLITE: Record<string, string> = {
+		"Clock drift of {percent}% left uncorrected; sync the clips again.":
+			"Taktabweichung von {percent} % nicht korrigiert; synchronisiere die Clips erneut.",
+		"Media relinked to {file}.": "Medien mit {file} verknüpft.",
+	};
+
+	test("dynamic sidecar text resolves through host templates; glued text does not", async () => {
+		registerLiteralCatalogLoader((requested) =>
+			requested.startsWith("de") ? SATELLITE : null
+		);
+		const hostRuntime = new I18nRuntime([], {
+			initialLocale: "de",
+			initialPackId: null,
+		});
+		const frameRuntime = new I18nRuntime([], {
+			initialLocale: "de",
+			initialPackId: null,
+		});
+		const requests: string[] = [];
+		const host: CompanionI18nApi = {
+			get: () => Promise.resolve(hostRuntime.getSnapshot()),
+			subscribe: () => ({ dispose: () => undefined }),
+			translate: ({ defaultMessage, id }) => {
+				requests.push(defaultMessage);
+				return Promise.resolve(
+					hostRuntime.translate(id, undefined, defaultMessage)
+				);
+			},
+		};
+		const drift =
+			"Clock drift of 1.234% left uncorrected; sync the clips again.";
+		const glued = `Media relinked to take-2.mov. ${drift}`;
+		document.body.innerHTML = [
+			`<small>${drift}</small>`,
+			"<p>Media relinked to take-2.mov.</p>",
+			`<p>${glued}</p>`,
+		].join("");
+		const stop = observeDomLocalization({
+			host,
+			state: stateOf(frameRuntime),
+			translationKey: () => String(frameRuntime.getVersion()),
+		});
+		await settle();
+		await settle();
+		expect(query("small").textContent).toBe(
+			"Taktabweichung von 1.234 % nicht korrigiert; synchronisiere die Clips erneut."
+		);
+		const paragraphs = document.querySelectorAll("p");
+		expect(paragraphs[0]?.textContent).toBe("Medien mit take-2.mov verknüpft.");
+		expect(paragraphs[1]?.textContent).toBe(glued);
+		expect(requests).toContain(glued);
+		stop();
+	});
+});

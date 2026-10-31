@@ -1,10 +1,11 @@
 /* eslint-disable react/no-unknown-property */
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
 	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
+import { useMemo } from "react";
 import {
 	ActStation,
 	type LimitText,
@@ -195,8 +196,9 @@ export const RIDES_PIPS = {
 };
 
 /** "Red light till 15:10": the rides' words for a usage limit (the kit adds "Likely"). */
-export const ridesLimitText: LimitText = (_act, at) =>
-	at ? `Red light till ${at}` : "Red light";
+export function ridesLimitText(tl: LiteralMessage): LimitText {
+	return (_act, at) => (at ? tl("Red light till {at}", { at }) : "Red light");
+}
 
 /** On a phone the city is small: the board stands well behind the car, up the screen, clear of its neighbours. */
 const RIDES_STATION_LAYOUT_NARROW: Partial<StationLayout> = {
@@ -254,6 +256,8 @@ export function RidesActProps({
 	yaws?: ReadonlyMap<string, number>;
 	youLayout: YouSpotLayout;
 }) {
+	const tl = useLiteralMessages();
+	const limitText = useMemo(() => ridesLimitText(tl), [tl]);
 	return (
 		<group>
 			<YouSpots
@@ -304,7 +308,7 @@ export function RidesActProps({
 							clock={view.clock}
 							iconOnly={view.iconOnly}
 							layout={ridesStationLayout(view.iconOnly, act.act === "limited")}
-							limitText={ridesLimitText}
+							limitText={limitText}
 							nowMs={view.nowMs}
 							onAsk={view.onAsk}
 							onBlocker={view.onBlocker}

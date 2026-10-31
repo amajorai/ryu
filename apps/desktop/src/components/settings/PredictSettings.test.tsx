@@ -5,7 +5,10 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import type { PredictConfig } from "@/src/lib/api/predict.ts";
 import type { Node } from "@/src/store/useNodeStore.ts";
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
 const { EntitlementProvider } = await import(
@@ -49,11 +52,11 @@ const secondConfig: PredictConfig = {
 	appAllowlist: ["SecondApp"],
 };
 interface Call {
-	url: string;
-	method: string;
 	authorization: string | null;
-	userJwt: string | null;
 	body: PredictConfig | null;
+	method: string;
+	url: string;
+	userJwt: string | null;
 }
 let calls: Call[];
 let respond: (call: Call) => Response | Promise<Response>;
@@ -96,8 +99,9 @@ beforeEach(() => {
 		async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
 			if (!url.includes("/api/predict/config")) {
-				if (url.includes("catalog"))
+				if (url.includes("catalog")) {
 					return Response.json({ providers: [], thinkingLevels: [] });
+				}
 				return Response.json([]);
 			}
 			const headers = new Headers(init?.headers);
@@ -116,7 +120,9 @@ beforeEach(() => {
 });
 afterEach(async () => {
 	await act(async () => {
-		for (const root of roots.splice(0)) root.unmount();
+		for (const root of roots.splice(0)) {
+			root.unmount();
+		}
 	});
 	queryClient.clear();
 	useNodeStore.setState(originalState);
@@ -154,12 +160,16 @@ async function select(node: Node) {
 function allowedApps(): HTMLTextAreaElement {
 	const input =
 		document.querySelector<HTMLTextAreaElement>("#predict-allowlist");
-	if (!input) throw new Error("Missing allowed apps setting");
+	if (!input) {
+		throw new Error("Missing allowed apps setting");
+	}
 	return input;
 }
 function debounce(): HTMLInputElement {
 	const input = document.querySelector<HTMLInputElement>("#predict-debounce");
-	if (!input) throw new Error("Missing debounce setting");
+	if (!input) {
+		throw new Error("Missing debounce setting");
+	}
 	return input;
 }
 async function fill(value: string) {
@@ -181,7 +191,9 @@ async function retry() {
 	const button = [...document.querySelectorAll("button")].find(
 		(element) => element.textContent?.trim() === "Retry"
 	);
-	if (!button) throw new Error("Missing actionable Retry");
+	if (!button) {
+		throw new Error("Missing actionable Retry");
+	}
 	await act(async () => button.click());
 	await settle();
 }
@@ -280,9 +292,12 @@ test("a refused save restores durable controls, retries the exact change and sur
 	let durable = firstConfig;
 	let refuse = true;
 	respond = (request) => {
-		if (request.method === "GET") return Response.json(durable);
-		if (refuse)
+		if (request.method === "GET") {
+			return Response.json(durable);
+		}
+		if (refuse) {
 			return Response.json({ error: "permission refused" }, { status: 403 });
+		}
 		durable = request.body ?? durable;
 		return Response.json({});
 	};
@@ -336,7 +351,9 @@ for (const [draft, expected] of [
 	test(`debounce draft ${draft} persists its valid bounded value and preserves sibling settings`, async () => {
 		let durable = firstConfig;
 		respond = (request) => {
-			if (request.method === "PUT") durable = request.body ?? durable;
+			if (request.method === "PUT") {
+				durable = request.body ?? durable;
+			}
 			return Response.json(durable);
 		};
 		const root = await mount();

@@ -1,5 +1,5 @@
-import original from "./vite.voice-settings-proof.config.ts";
 import { defineConfig } from "vite";
+import original from "./vite.voice-settings-proof.config.ts";
 
 // Reuse shipping Voice aliases, providers/CSS, harness root and UI port.
 // This independent selection retains the accepted Voice16 recipe unchanged.

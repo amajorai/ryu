@@ -1,4 +1,4 @@
-import { useRichLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -53,6 +53,7 @@ export function TickerHeader({
 	now: number;
 	onNewThread: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const tlRich = useRichLiteralMessages();
 	const date = new Date(now);
 	return (
@@ -89,7 +90,7 @@ export function TickerHeader({
 								active today
 							</span>
 							<span className="sr-only">
-								{describeChange(index.change, index.changePercent)}
+								{describeChange(index.change, index.changePercent, tl)}
 							</span>
 						</dd>
 					</div>

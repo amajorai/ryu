@@ -73,6 +73,9 @@ export function TelegramManagedBotPanel({
 	onUnsupported: (message: string) => void;
 }) {
 	const tl = useLiteralMessages();
+	// Read through a ref: the polling effect must not restart on every render.
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const tlRich = useRichLiteralMessages();
 	const getActiveNode = useNodeStore((s) => s.getActiveNode);
 	const node = getActiveNode();
@@ -158,7 +161,7 @@ export function TelegramManagedBotPanel({
 			setRemainingMs(Math.max(0, Date.parse(opened.expires_at) - Date.now()));
 			setPhase("waiting");
 		} catch (error) {
-			const classified = classifyPairError(error);
+			const classified = classifyPairError(error, tlRef.current);
 			if (classified.kind === "unsupported") {
 				onUnsupportedRef.current(classified.message);
 				reset();
@@ -235,7 +238,7 @@ export function TelegramManagedBotPanel({
 					if (stopped || controller.signal.aborted) {
 						return;
 					}
-					const classified = classifyStatusError(error);
+					const classified = classifyStatusError(error, tlRef.current);
 					consecutiveFailures += 1;
 					// Keep waiting through a flaky poll, but never silently: a definitive
 					// answer stops immediately, and a run of failures is reported rather
@@ -281,7 +284,7 @@ export function TelegramManagedBotPanel({
 		} catch (error) {
 			// The token is not lost: the node keeps holding it, so the retry is another
 			// confirm and needs no second trip through Telegram.
-			setFailure(classifyStatusError(error));
+			setFailure(classifyStatusError(error, tlRef.current));
 			setPhase("confirming");
 		}
 	}, [pairing, target]);

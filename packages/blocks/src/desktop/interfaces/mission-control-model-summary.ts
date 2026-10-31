@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceThread,
 	localDayKey,
@@ -71,9 +72,19 @@ export function buildKpis(input: {
 	stations: readonly MissionStation[];
 	threads: readonly InterfaceThread[];
 	statusOf: ReadonlyMap<string, ThreadStatus>;
+	tl: LiteralMessage;
 }): MissionKpi[] {
-	const { activity, alerts, counts, now, starts, stations, threads, statusOf } =
-		input;
+	const {
+		activity,
+		alerts,
+		counts,
+		now,
+		starts,
+		stations,
+		threads,
+		statusOf,
+		tl,
+	} = input;
 	const trendFor = (status: ThreadStatus) =>
 		hourlyCounts(
 			starts,
@@ -153,7 +164,9 @@ export function buildKpis(input: {
 			value: counts.waiting,
 		},
 		{
-			caption: `of ${stations.length} · last 1h`,
+			caption: tl("of {agentCount} · last 1h", {
+				agentCount: String(stations.length),
+			}),
 			id: "online",
 			label: "Agents active",
 			tone: statusTone(online, "live"),

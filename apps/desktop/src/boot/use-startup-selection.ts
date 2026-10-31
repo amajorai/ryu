@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listAccounts } from "@/lib/auth-client.ts";
 import {
 	readStartupSelectionPreferences,
@@ -27,10 +27,19 @@ export function useStartupSelection({
 	const startupAccountIds = startupAccounts
 		.map((account) => account.userId)
 		.join("\u001f");
+	// The chooser is a startup decision. Once this signed-in session got past it,
+	// a node list that changes later (cloud nodes hydrating, a node added during
+	// onboarding) must not bring it back: that would swap out whatever is mounted
+	// (onboarding included) and restart it when the chooser resolves.
+	const resolved = useRef(false);
 
 	useEffect(() => {
 		if (!authed) {
+			resolved.current = false;
 			setStartupSelectionStatus("ready");
+			return;
+		}
+		if (resolved.current) {
 			return;
 		}
 		if (botProduct) {
@@ -48,7 +57,9 @@ export function useStartupSelection({
 			mode: startupPreferences.mode,
 			nodes: startupNodes,
 		});
-		setStartupSelectionStatus(steps.account || steps.node ? "show" : "ready");
+		const show = steps.account || steps.node;
+		resolved.current = !show;
+		setStartupSelectionStatus(show ? "show" : "ready");
 	}, [
 		authed,
 		nodesReady,

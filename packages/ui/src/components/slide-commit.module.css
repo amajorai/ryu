@@ -1,0 +1,209 @@
+/* Adapted from the React Bits SlideCommit component; colours default to theme tokens. */
+.root {
+	--sc-track: var(--muted);
+	--sc-ink: var(--foreground);
+	--sc-ok: var(--success);
+	--sc-no: var(--destructive);
+	--sc-on-ink: var(--background);
+	--sc-on-ok: var(--success-foreground);
+	--sc-on-no: #ffffff;
+	--sc-radius: 28px;
+	--sc-grip-r: 24px;
+	--sc-pad: 4px;
+	--sc-font: 14px;
+	--sc-label-inset: 56px;
+
+	position: relative;
+	display: inline-block;
+	max-width: 100%;
+	font-family: inherit;
+	vertical-align: middle;
+}
+
+.root[data-disabled] {
+	pointer-events: none;
+	opacity: 0.55;
+}
+
+.track {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	border-radius: var(--sc-radius);
+	background: var(--sc-track);
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.track:has(:focus-visible) {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
+.root[data-held] .track {
+	cursor: grabbing;
+}
+
+.root[data-phase="pending"] .track,
+.root[data-phase="done"] .track {
+	cursor: default;
+}
+
+.label {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding-inline: var(--sc-label-inset) calc(var(--sc-pad) * 4);
+	font-size: var(--sc-font);
+	font-weight: 500;
+	line-height: 1;
+	letter-spacing: -0.006em;
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.text {
+	grid-area: 1 / 1;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: color-mix(in srgb, var(--sc-ink) 55%, transparent);
+	transition:
+		opacity 200ms ease,
+		filter 200ms ease;
+}
+
+.textError {
+	color: var(--sc-no);
+	opacity: 0;
+	filter: blur(2px);
+}
+
+.root[data-phase="error"] .textPlain {
+	opacity: 0;
+	filter: blur(2px);
+}
+
+.root[data-phase="error"] .textError {
+	opacity: 1;
+	filter: none;
+}
+
+.capsule {
+	position: absolute;
+	top: var(--sc-pad);
+	left: var(--sc-pad);
+	width: calc(100% - var(--sc-pad) * 2);
+	height: calc(100% - var(--sc-pad) * 2);
+	color: var(--sc-on-ink);
+	outline: none;
+	background: var(--sc-ink);
+	transition:
+		background-color 200ms ease,
+		color 200ms ease;
+}
+
+.root[data-phase="done"] .capsule {
+	color: var(--sc-on-ok);
+	background: var(--sc-ok);
+}
+
+.root[data-phase="error"] .capsule {
+	color: var(--sc-on-no);
+	background: var(--sc-no);
+}
+
+.content {
+	position: absolute;
+	inset: 0;
+}
+
+.arrow,
+.spin,
+.done {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	justify-content: center;
+	font-size: var(--sc-font);
+	font-weight: 600;
+	line-height: 1;
+	letter-spacing: -0.006em;
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.arrow svg,
+.done svg,
+.spinner {
+	display: block;
+}
+
+.arrow,
+.spin {
+	transition: filter 200ms ease;
+}
+
+.root[data-phase="pending"] .arrow {
+	filter: blur(2px);
+}
+
+.root:not([data-phase="pending"]) .spin {
+	filter: blur(2px);
+}
+
+.spinner {
+	animation: slide-commit-spin 1s linear infinite;
+	animation-play-state: paused;
+}
+
+.root[data-phase="pending"] .spinner {
+	animation-play-state: running;
+}
+
+@keyframes slide-commit-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.sr {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	white-space: nowrap;
+	border: 0;
+	clip: rect(0 0 0 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.spinner {
+		animation: slide-commit-breathe 1.4s ease-in-out infinite;
+		animation-play-state: paused;
+	}
+
+	.root[data-phase="pending"] .spinner {
+		animation-play-state: running;
+	}
+
+	@keyframes slide-commit-breathe {
+		0%,
+		100% {
+			opacity: 1;
+		}
+
+		50% {
+			opacity: 0.4;
+		}
+	}
+}

@@ -37,7 +37,7 @@ test("enterprise page follows the shared landing template", () => {
 	const html = renderToStaticMarkup(<EnterpriseLanding />);
 	expect(html).toContain('data-product-hero-layout="stage"');
 	expect(html).toContain("Agents your company controls");
-	expect(html).toContain("Ryu Enterprise");
+	expect(html).not.toContain(">Ryu Enterprise</p>");
 	expect(html).toContain('data-testid="product-cta"');
 	expect(html).toContain("Ready to bring agents to your org?");
 	// A text-only stage hero, its figure, one controls section (self-hosting is a

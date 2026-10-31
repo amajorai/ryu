@@ -108,8 +108,9 @@ export function useMarketActCast({
 				shown,
 				slots: slots.slots,
 				stations,
+				tl,
 			}),
-		[acts, actPaths, looks, nowMs, openAsk, reduced, shown, slots, stations]
+		[acts, actPaths, looks, nowMs, openAsk, reduced, shown, slots, stations, tl]
 	);
 	const customerCast = useMemo(
 		() =>

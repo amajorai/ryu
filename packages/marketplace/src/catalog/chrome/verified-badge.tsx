@@ -40,6 +40,9 @@
 // bare "Verified" here would be the third one and the user could not tell which
 // claim it makes.
 
+"use client";
+
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type VerificationDetails,
 	VerificationPopover,
@@ -78,9 +81,14 @@ const TIER_LABEL = new Map(
  *
  * Exported so the label rules are unit-testable without rendering.
  */
-export function verifiedLabel(tier?: string | null): string {
+export function verifiedLabel(
+	tl: LiteralMessage,
+	tier?: string | null
+): string {
 	const known = tier ? TIER_LABEL.get(tier.trim().toLowerCase()) : undefined;
-	return known ? `Verified organization — ${known}` : "Verified organization";
+	return known
+		? tl("Verified organization — {known}", { known })
+		: "Verified organization";
 }
 
 export function trustLabel(level: PublisherTrustLevel): string {
@@ -126,6 +134,7 @@ export default function VerifiedBadge({
 	 *  high-contrast icon colour instead. */
 	tone?: "card" | "hero";
 }) {
+	const tl = useLiteralMessages();
 	// New catalog payloads carry the complete publisher mark. Older Core-facing
 	// payloads only carry the org flag and tier, so retain their established
 	// semantics: an explicit true renders the tier-qualified organization badge;
@@ -141,7 +150,7 @@ export default function VerifiedBadge({
 	}
 	const label = hasExplicitPublisherTrust
 		? trustLabel(level)
-		: verifiedLabel(tier);
+		: verifiedLabel(tl, tier);
 	const tooltip = hasExplicitPublisherTrust
 		? publisherTrustTooltip(level)
 		: label;

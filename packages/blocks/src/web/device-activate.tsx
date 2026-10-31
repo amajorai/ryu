@@ -65,7 +65,9 @@ export default function DeviceActivate({
 					{accountSwitcher}
 
 					<form className="space-y-6" onSubmit={onSubmit}>
-						<div className="flex justify-center">
+						{/* `@container` caps the eight code slots to the column, so the
+						    code lines up with the button instead of running past it. */}
+						<div className="@container flex justify-center">
 							<OTPInput
 								aria-label="Device activation code"
 								autoFocus

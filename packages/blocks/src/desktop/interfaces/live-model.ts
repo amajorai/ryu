@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	ditherAvatarHue,
 	ditherAvatarSeed,
@@ -391,7 +392,8 @@ function artKindFor(text: string): LiveArtKind | null {
  */
 export function liveArt(
 	thread: InterfaceThread | null,
-	agent: InterfaceAgent | null | undefined
+	agent: InterfaceAgent | null | undefined,
+	tl: LiteralMessage
 ): LiveArtSpec {
 	const seed = thread?.id ?? agent?.id ?? "live";
 	const kind =
@@ -406,7 +408,11 @@ export function liveArt(
 		neutral: !agent,
 		seed,
 		speaker: thread ? liveSpeaker(thread, agent) : (agent?.name ?? "Agent"),
-		title: thread?.title ?? `${agent?.name ?? "This channel"} is offline`,
+		title:
+			thread?.title ??
+			(agent
+				? tl("{name} is offline", { name: agent.name })
+				: tl("This channel is offline")),
 	};
 }
 

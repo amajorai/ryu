@@ -2,10 +2,13 @@ import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch;
 const NativeResponse = globalThis.Response;
 const NativeRequest = globalThis.Request;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
@@ -33,13 +36,13 @@ type InputPrefs = {
 type Prefs = InputPrefs | { enabled: boolean };
 type Authority = { name: string; url: string; token: string; userJwt: string };
 interface Call {
-	slot: string;
-	key: Kind;
-	method: string;
 	authorization: string | null;
-	jwt: string | null;
 	body: unknown;
 	completed: boolean;
+	jwt: string | null;
+	key: Kind;
+	method: string;
+	slot: string;
 	status: number;
 }
 let authorities: Record<string, Authority>;
@@ -100,9 +103,7 @@ const server: Bun.Server<undefined> = Bun.serve({
 			);
 		});
 		if (
-			!match ||
-			!slot ||
-			!["GET", "PUT"].includes(request.method) ||
+			!(match && slot && ["GET", "PUT"].includes(request.method)) ||
 			(match[2] === "sidecar/status" && request.method !== "GET")
 		) {
 			unexpected.push(request.method + " " + path);
@@ -111,8 +112,9 @@ const server: Bun.Server<undefined> = Bun.serve({
 				{ status: 503 }
 			);
 		}
-		if (match[2] === "sidecar/status")
+		if (match[2] === "sidecar/status") {
 			return NativeResponse.json({ sidecars: [] });
+		}
 		const key = match[3] as Kind;
 		const body: unknown =
 			request.method === "PUT" ? await request.json() : null;
@@ -130,17 +132,22 @@ const server: Bun.Server<undefined> = Bun.serve({
 		const snapshot = structuredClone(saved[slot]![key]);
 		const status = statuses[slot + ":" + request.method] ?? 200;
 		const pendingRequest = held;
-		if (pendingRequest?.slot === slot && pendingRequest.method === request.method)
+		if (
+			pendingRequest?.slot === slot &&
+			pendingRequest.method === request.method
+		) {
 			await new Promise<void>((resolve) => {
 				release = resolve;
 			});
+		}
 		call.status = status;
 		call.completed = true;
-		if (status !== 200)
+		if (status !== 200) {
 			return NativeResponse.json(
 				{ error: "Voice preference refused" },
 				{ status }
 			);
+		}
 		if (request.method === "PUT") {
 			const value = (body as { value?: unknown }).value;
 			if (
@@ -232,7 +239,9 @@ async function until(predicate: () => boolean) {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 5));
 		});
-		if (predicate()) return;
+		if (predicate()) {
+			return;
+		}
 	}
 	throw new Error(
 		"Production voice state did not settle: " + container.textContent
@@ -274,7 +283,9 @@ function control(): HTMLElement {
 	const found = container.querySelector<HTMLElement>(
 		kind === "voice-input" ? '[role="combobox"]' : '[role="switch"]'
 	);
-	if (!found) throw Error("Missing production control");
+	if (!found) {
+		throw Error("Missing production control");
+	}
 	return found;
 }
 function disabled(): boolean {
@@ -297,10 +308,11 @@ async function edit() {
 	const option = [
 		...document.querySelectorAll<HTMLElement>('[role="option"]'),
 	].find((el) => el.textContent?.trim() === "Cloud (via gateway)");
-	if (!option)
+	if (!option) {
 		throw Error(
 			"Missing real Gateway engine option: " + document.body.textContent
 		);
+	}
 	await act(async () => option.click());
 }
 async function switchAuthority(slot: string) {
@@ -365,8 +377,11 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 				next === "voice-input" ? input("B") : { enabled: true }
 			);
 		} finally {
-			if (descriptor) Object.defineProperty(crypto, "randomUUID", descriptor);
-			else Reflect.deleteProperty(crypto, "randomUUID");
+			if (descriptor) {
+				Object.defineProperty(crypto, "randomUUID", descriptor);
+			} else {
+				Reflect.deleteProperty(crypto, "randomUUID");
+			}
 		}
 	});
 
@@ -411,7 +426,9 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 			const option = [
 				...document.querySelectorAll<HTMLElement>('[role="option"]'),
 			].find((el) => el.textContent?.trim() === "Cloud (via gateway)");
-			if (option) await act(async () => option.click());
+			if (option) {
+				await act(async () => option.click());
+			}
 		}
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 10));
@@ -465,7 +482,7 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 			next === "voice-input" ? input("A") : { enabled: false }
 		);
 	});
-	for (const slot of ["url", "token", "jwt"] as const)
+	for (const slot of ["url", "token", "jwt"] as const) {
 		test(`${next}: ${slot} rotation is a distinct saved authority, with no stale A preference`, async () => {
 			await render(next);
 			await initialA();
@@ -482,6 +499,7 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 			});
 			expect(writes()).toHaveLength(0);
 		});
+	}
 	test(`${next}: late A GET cannot replace loaded B state or create a write`, async () => {
 		held = { slot: "A", method: "GET" };
 		await render(next);
@@ -535,7 +553,7 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 		await until(() => received("A").length === 2 && !disabled());
 		expect(state()).toBe(next === "voice-input" ? "Cloud (via gateway)" : true);
 	});
-	for (const outcome of [200, 503])
+	for (const outcome of [200, 503]) {
 		test(`${next}: held A PUT ${outcome} cannot alter B selection, emit B writes, or surface A's failure on B`, async () => {
 			await render(next);
 			await initialA();
@@ -570,8 +588,9 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 						: { enabled: false }
 			);
 		});
+	}
 
-	for (const status of [403, 500])
+	for (const status of [403, 500]) {
 		test(`${next}: refused ${status} initial GET cannot enable a default-based destructive write; retry reads saved policy`, async () => {
 			statuses["A:GET"] = status;
 			await render(next);
@@ -592,6 +611,7 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 			expect(state()).toBe(next === "voice-input" ? "Whisper" : false);
 			expect(writes()).toHaveLength(0);
 		});
+	}
 }
 
 test("voice-mode-readback: two real same-turn toggle events emit one full-policy PUT while its response is held", async () => {
@@ -658,12 +678,15 @@ for (const next of ["voice-input", "voice-mode-readback"] as const) {
 			const option = [
 				...document.querySelectorAll<HTMLElement>('[role="option"]'),
 			].find((el) => el.textContent?.trim() === "Whisper");
-			if (!option)
+			if (!option) {
 				throw new Error(
 					"Expected actual Whisper engine option after A acknowledgement"
 				);
+			}
 			await act(async () => option.click());
-		} else await act(async () => control().click());
+		} else {
+			await act(async () => control().click());
+		}
 		await until(
 			() =>
 				writes().length === 2 &&

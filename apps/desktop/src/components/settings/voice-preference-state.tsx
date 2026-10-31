@@ -2,11 +2,11 @@ import { Button } from "@ryu/ui/components/button";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { toTarget, type ApiTarget } from "@/src/lib/api/client.ts";
+import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 
 export interface VoicePreferenceAuthority {
-	target: ApiTarget;
 	pendingWrite: Promise<void> | null;
+	target: ApiTarget;
 }
 
 /** An opaque mount identity changes only when the request authority changes. */
@@ -58,13 +58,19 @@ export function useVoicePreference<T>(
 		try {
 			// Returning to an authority must read after its previous write settles.
 			await resource.pendingWrite;
-			if (!mounted.current || version !== readVersion.current) return;
+			if (!mounted.current || version !== readVersion.current) {
+				return;
+			}
 			const saved = await read(target);
-			if (!mounted.current || version !== readVersion.current) return;
+			if (!mounted.current || version !== readVersion.current) {
+				return;
+			}
 			setPrefs(saved);
 			setLoaded(true);
 		} catch {
-			if (mounted.current && version === readVersion.current) setError("read");
+			if (mounted.current && version === readVersion.current) {
+				setError("read");
+			}
 		}
 	}, [target, read, resource]);
 	useEffect(() => {
@@ -78,12 +84,12 @@ export function useVoicePreference<T>(
 	const persist = useCallback(
 		async (next: T) => {
 			if (
-				!mounted.current ||
-				!loaded ||
+				!(mounted.current && loaded) ||
 				pendingRef.current ||
 				resource.pendingWrite
-			)
+			) {
 				return;
+			}
 			pendingRef.current = true;
 			let settleWrite: () => void = () => {};
 			resource.pendingWrite = new Promise<void>((resolve) => {
@@ -92,13 +98,18 @@ export function useVoicePreference<T>(
 			setPending(true);
 			setError(null);
 			try {
-				if (!(await write(target, next)))
+				if (!(await write(target, next))) {
 					throw new Error("Voice preference was not saved.");
-				if (!mounted.current) return;
+				}
+				if (!mounted.current) {
+					return;
+				}
 				setPrefs(next);
 				failedSave.current = null;
 			} catch (cause) {
-				if (!mounted.current) return;
+				if (!mounted.current) {
+					return;
+				}
 				failedSave.current = next;
 				setError("write");
 				sileo.error({
@@ -109,14 +120,19 @@ export function useVoicePreference<T>(
 				resource.pendingWrite = null;
 				settleWrite();
 				pendingRef.current = false;
-				if (mounted.current) setPending(false);
+				if (mounted.current) {
+					setPending(false);
+				}
 			}
 		},
 		[loaded, target, write, resource]
 	);
 	const retry = () => {
-		if (error === "read") void load();
-		else if (failedSave.current !== null) void persist(failedSave.current);
+		if (error === "read") {
+			void load();
+		} else if (failedSave.current !== null) {
+			void persist(failedSave.current);
+		}
 	};
 	return {
 		prefs,
@@ -137,7 +153,9 @@ export function VoicePreferenceStatus({
 	retry: () => void;
 	pending: boolean;
 }) {
-	if (!error) return null;
+	if (!error) {
+		return null;
+	}
 	return (
 		<div role="alert">
 			<p>

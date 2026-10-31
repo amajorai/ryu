@@ -4,7 +4,10 @@ import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let target: ApiTarget = {
 	url: "https://wallpaper.fixture",
@@ -24,9 +27,9 @@ const roots: Root[] = [];
 const storageWrite = Storage.prototype.setItem;
 let refuseStorage = false;
 interface Call {
-	url: URL;
 	authorization: string | null;
 	identity: string | null;
+	url: URL;
 }
 let calls: Call[];
 let respond: (call: Call) => Response | Promise<Response>;
@@ -53,8 +56,9 @@ beforeEach(() => {
 		userJwt: "user-a",
 	};
 	Storage.prototype.setItem = function (key, value) {
-		if (key === WALLPAPER_STORAGE_KEY && refuseStorage)
+		if (key === WALLPAPER_STORAGE_KEY && refuseStorage) {
 			throw new DOMException("Storage refused", "QuotaExceededError");
+		}
 		return storageWrite.call(this, key, value);
 	};
 	respond = (call) =>
@@ -80,7 +84,9 @@ beforeEach(() => {
 });
 afterEach(async () => {
 	await act(async () => {
-		for (const root of roots.splice(0)) root.unmount();
+		for (const root of roots.splice(0)) {
+			root.unmount();
+		}
 	});
 	Storage.prototype.setItem = storageWrite;
 	globalThis.fetch = realFetch;
@@ -115,7 +121,9 @@ async function click(name: string) {
 			(element.getAttribute("aria-label") ?? element.textContent?.trim()) ===
 			name
 	);
-	if (!button) throw new Error(`Missing ${name}`);
+	if (!button) {
+		throw new Error(`Missing ${name}`);
+	}
 	await act(async () => button.click());
 	await settle();
 }
@@ -123,7 +131,9 @@ function link() {
 	const input = document.querySelector<HTMLInputElement>(
 		'[aria-label="Image link"]'
 	);
-	if (!input) throw new Error("Missing image link");
+	if (!input) {
+		throw new Error("Missing image link");
+	}
 	return input;
 }
 async function fill(value: string) {

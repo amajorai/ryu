@@ -32,6 +32,7 @@ GlobalRegistrator.register();
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const { act } = await import("react");
+const { formatMessage } = await import("@ryu/i18n");
 const { createRoot } = await import("react-dom/client");
 const { agentActs, unownedAsks } = await import("@ryuhq/protocol/interfaces");
 const { FIXTURE_CLOCK, FIXTURE_NOW, usefulStateFixture } = await import(
@@ -174,7 +175,7 @@ describe("quiz act props (test 21)", () => {
 					container.querySelector<HTMLElement>('[data-tally="off"]');
 				expect(tally?.textContent).toBe(offStageText(offStage));
 				expect(tally?.getAttribute("aria-label")).toBe(
-					offStageLabel(offStage.count)
+					offStageLabel(offStage.count, formatMessage)
 				);
 				act(() => tally?.click());
 				expect(queued()).toBe(1);
@@ -202,6 +203,7 @@ describe("quiz podium plates, rendered (15a)", () => {
 				looks: {} as never,
 				paths,
 				reduced: true,
+				tl: formatMessage,
 				view,
 			});
 			if (!spec) {

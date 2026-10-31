@@ -7,6 +7,7 @@ import type { ChatStatus, UIMessage } from "ai";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ToolRenderer } from "../tools/tool-renderer.tsx";
 import { TurnEndCards } from "../turn-end-cards.tsx";
+import { preloadAgentUI } from "./agent-ui-lazy.tsx";
 import {
 	type AgentUiSurface,
 	agentUiSurfaceFromPart,
@@ -23,6 +24,9 @@ import {
 	type AgentUiSurfaceHost,
 	AgentUiSurfaceHostProvider,
 } from "./surface-context.tsx";
+
+// Static markup cannot wait for the lazy renderer chunk: load it first.
+await preloadAgentUI();
 
 const flightsSpec = {
 	root: "card",

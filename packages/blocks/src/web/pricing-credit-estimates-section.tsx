@@ -1,4 +1,6 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { cn } from "@ryu/ui/lib/utils";
+import { landingContainerClass } from "./landing-typography.ts";
 import {
 	AGENT_STEP_MODEL,
 	agentStepCostUsd,
@@ -9,6 +11,7 @@ import {
 	smallBoxHourUsd,
 	toolCallUsd,
 } from "./pricing-credit-estimates.ts";
+import { SectionHeading } from "./sections.tsx";
 
 interface UsageMeasure {
 	description: string;
@@ -123,37 +126,26 @@ export function PricingCreditEstimatesSection() {
 	const plans = planCreditEstimates();
 	return (
 		<section
-			aria-labelledby="credit-estimates-heading"
-			className="container mx-auto px-4 pb-12"
+			aria-label="What your credits buy"
+			className={cn(landingContainerClass, "py-12 md:py-16")}
 			data-testid="pricing-credit-estimates"
 			id="what-credits-buy"
 		>
-			<div className="mx-auto max-w-6xl">
-				<h2
-					className="font-medium text-2xl tracking-tight md:text-3xl"
-					id="credit-estimates-heading"
-				>
-					What your credits buy
-				</h2>
-				<p className="mt-3 max-w-3xl text-muted-foreground text-sm leading-relaxed sm:text-base">
-					Each plan includes monthly AI credits. Here is roughly how far they go
-					if you spend them all on one kind of usage.
-				</p>
-				<div className="mt-6 grid gap-4 md:grid-cols-3">
-					{usageMeasures(tl).map((measure) => (
-						<UsageMeasureCard
-							key={measure.id}
-							measure={measure}
-							plans={plans}
-						/>
-					))}
-				</div>
-				<p className="mt-4 text-muted-foreground text-xs leading-relaxed">
-					These are estimates. Credits are shared across all your usage, so
-					spending on one thing leaves less for the others, and Box hours count
-					running time only.
-				</p>
+			<SectionHeading
+				className="mb-8 md:mb-10"
+				subtitle="Each plan includes monthly AI credits. Here is roughly how far they go if you spend them all on one kind of usage."
+				title="What your credits buy"
+			/>
+			<div className="grid gap-4 md:grid-cols-3">
+				{usageMeasures(tl).map((measure) => (
+					<UsageMeasureCard key={measure.id} measure={measure} plans={plans} />
+				))}
 			</div>
+			<p className="mt-4 text-muted-foreground text-xs leading-relaxed">
+				These are estimates. Credits are shared across all your usage, so
+				spending on one thing leaves less for the others, and Box hours count
+				running time only.
+			</p>
 		</section>
 	);
 }

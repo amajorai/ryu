@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 
 // Register before React and isolate this file from non-browser Bun suites.
 if (!GlobalRegistrator.isRegistered) {
@@ -13,6 +15,8 @@ const { AgentIdentityModePicker, identityModeAccountWarning } = await import(
 );
 
 import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 let root: ReturnType<typeof createRoot> | null = null;
 afterEach(async () => {
@@ -104,6 +108,7 @@ describe("identityModeAccountWarning", () => {
 	test("warns when its own identity drops the user's selected accounts", () => {
 		expect(
 			identityModeAccountWarning(
+				tl,
 				"individual",
 				// The Treg switch and the agent's own account are not yours.
 				["composio:ca_1", "platform:treg", "agent:acct"],
@@ -116,7 +121,7 @@ describe("identityModeAccountWarning", () => {
 
 	test("warns when acting as you drops the agent's own accounts", () => {
 		expect(
-			identityModeAccountWarning("managed", ["agent:acct", "composio:x"], 0)
+			identityModeAccountWarning(tl, "managed", ["agent:acct", "composio:x"], 0)
 		).toBe(
 			"1 of the agent's own accounts selected here won't be used while it acts as you."
 		);
@@ -125,6 +130,7 @@ describe("identityModeAccountWarning", () => {
 	test("an app on the agent's own Composio identity is the agent's, not yours", () => {
 		expect(
 			identityModeAccountWarning(
+				tl,
 				"individual",
 				["agent-composio:own_1", "agent:acct", "composio:ca_1"],
 				0
@@ -133,10 +139,11 @@ describe("identityModeAccountWarning", () => {
 			"1 of your accounts selected here won't be used while this agent has its own identity."
 		);
 		expect(
-			identityModeAccountWarning("individual", ["agent-composio:own_1"], 0)
+			identityModeAccountWarning(tl, "individual", ["agent-composio:own_1"], 0)
 		).toBeNull();
 		expect(
 			identityModeAccountWarning(
+				tl,
 				"managed",
 				["agent-composio:own_1", "agent:acct", "composio:ca_1"],
 				0
@@ -149,6 +156,7 @@ describe("identityModeAccountWarning", () => {
 	test("control of your desktop counts as yours; Treg does not", () => {
 		expect(
 			identityModeAccountWarning(
+				tl,
 				"individual",
 				["platform:desktop", "platform:treg", "provider:openai"],
 				0
@@ -159,19 +167,21 @@ describe("identityModeAccountWarning", () => {
 	});
 
 	test("names the event triggers that will stop firing, in any mode", () => {
-		expect(identityModeAccountWarning("mixed", ["composio:a"], 0, 1)).toBe(
+		expect(identityModeAccountWarning(tl, "mixed", ["composio:a"], 0, 1)).toBe(
 			"1 event trigger watches an account this agent may no longer use, so it will stop firing."
 		);
-		expect(identityModeAccountWarning("individual", ["composio:a"], 0, 2)).toBe(
+		expect(
+			identityModeAccountWarning(tl, "individual", ["composio:a"], 0, 2)
+		).toBe(
 			"1 of your accounts selected here won't be used while this agent has its own identity. 2 event triggers watch accounts this agent may no longer use, so they will stop firing."
 		);
-		expect(identityModeAccountWarning("managed", null, 0, 0)).toBeNull();
+		expect(identityModeAccountWarning(tl, "managed", null, 0, 0)).toBeNull();
 	});
 
 	test("stays quiet for both, and for an unrestricted agent", () => {
 		expect(
-			identityModeAccountWarning("mixed", ["agent:a", "composio:b"], 2)
+			identityModeAccountWarning(tl, "mixed", ["agent:a", "composio:b"], 2)
 		).toBeNull();
-		expect(identityModeAccountWarning("managed", null, 0)).toBeNull();
+		expect(identityModeAccountWarning(tl, "managed", null, 0)).toBeNull();
 	});
 });

@@ -93,8 +93,8 @@ export function RidesInterface({
 	const { acts, enabled: withActs, nowMs, privacy, unowned } = actsView;
 	// With acts, every trip's stage and row word come from the acts.
 	const actTrips = useMemo(
-		() => (withActs ? ridesActTrips(source, acts) : null),
-		[acts, source, withActs]
+		() => (withActs ? ridesActTrips(source, acts, tl) : null),
+		[acts, source, tl, withActs]
 	);
 	const rides = useMemo(
 		() =>

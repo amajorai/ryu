@@ -3,7 +3,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let changeMarkdown: (text: string) => void;
 let read: (path: string) => Promise<string>;
@@ -62,7 +64,9 @@ beforeEach(() => {
 	mounted = true;
 });
 afterEach(async () => {
-	if (mounted) await act(async () => root.unmount());
+	if (mounted) {
+		await act(async () => root.unmount());
+	}
 	container.remove();
 });
 async function render(path = "/project/notes.md") {
@@ -80,7 +84,9 @@ async function click(label: string) {
 	const button = Array.from(container.querySelectorAll("button")).find(
 		(item) => item.textContent?.trim() === label
 	);
-	if (!button) throw new Error(`Missing file editor action ${label}`);
+	if (!button) {
+		throw new Error(`Missing file editor action ${label}`);
+	}
 	await act(async () => button.click());
 }
 test("reads the selected file and provides capped assistant context without writing unchanged content", async () => {
@@ -112,7 +118,9 @@ test("debounces successive edits into one write of the latest complete markdown"
 test("a failed save retains edits and Retry persists the same content", async () => {
 	let failures = 1;
 	write = async () => {
-		if (failures-- > 0) throw new Error("Disk unavailable");
+		if (failures-- > 0) {
+			throw new Error("Disk unavailable");
+		}
 	};
 	await render();
 	await edit("Important unsaved changes");
@@ -176,10 +184,11 @@ test("closing the editor flushes a pending debounced write", async () => {
 test("autosave serializes writes so an older slow save cannot overwrite a newer edit", async () => {
 	let finishFirst: (() => void) | undefined;
 	write = async (_path, text) => {
-		if (text === "First version")
+		if (text === "First version") {
 			await new Promise<void>((resolve) => {
 				finishFirst = resolve;
 			});
+		}
 	};
 	await render();
 	await edit("First version");

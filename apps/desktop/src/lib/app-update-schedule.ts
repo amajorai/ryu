@@ -23,6 +23,7 @@
 // knows. So this file resolves an absolute instant and Rust stores it — a plain
 // wall-clock number, immune to a DST change between booking and the window.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { invoke } from "@tauri-apps/api/core";
 import type { UpdateCheck } from "@/src/lib/api/update.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
@@ -110,9 +111,18 @@ export function nextQuietWindow(now: Date) {
  * there; saying it here would be a promise this app cannot keep on a laptop
  * that is asleep at the hour.
  */
-export function describePendingAppUpdate(pending: PendingAppUpdate): string {
-	const when = formatDateTime(pending.scheduled_for_ms);
-	return `v${pending.version} will install the next time you open Ryu after ${when} (${pending.time_zone}).`;
+export function describePendingAppUpdate(
+	pending: PendingAppUpdate,
+	tl: LiteralMessage
+): string {
+	return tl(
+		"v{version} will install the next time you open Ryu after {when} ({timeZone}).",
+		{
+			version: pending.version,
+			when: formatDateTime(pending.scheduled_for_ms),
+			timeZone: pending.time_zone,
+		}
+	);
 }
 
 /** The booked install, or `null`. Never throws — outside Tauri there is none. */

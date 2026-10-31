@@ -96,7 +96,7 @@ function DialogOverlay({
 				// as `scrollbar-color` starts a transition on the closing dialog;
 				// when hover changes again that transition aborts and Base UI never
 				// finishes closing, leaving an inert dialog over the app.
-				"ryu-dialog-overlay data-open:fade-in-0 data-closed:fade-out-0 fixed inset-0 isolate z-50 rounded-[var(--ryu-window-radius,0px)] transition-none duration-(--modal-open-dur) ease-(--modal-ease) data-closed:animate-out data-open:animate-in data-closed:duration-(--modal-close-dur)",
+				"ryu-dialog-overlay data-open:fade-in-0 data-closed:fade-out-0 fixed inset-0 isolate z-50 rounded-[var(--ryu-window-radius,0px)] transition-none duration-(--duration-slow) ease-(--ease-enter) data-closed:animate-out data-open:animate-in data-closed:duration-(--duration-fast) data-closed:ease-(--ease-exit)",
 				className
 			)}
 			data-slot="dialog-overlay"
@@ -153,10 +153,10 @@ const dialogContentAppearance = {
 const dialogContentOverlayAppearance = {
 	default: "",
 	"gateway-settings": "",
-	"marketplace-guide": "bg-black/55 backdrop-blur-sm",
+	"marketplace-guide": "",
 	"license-browser": "",
 	"deferred-settings": "",
-	announcement: "bg-black/55 backdrop-blur-sm",
+	announcement: "",
 	"media-lightbox": "z-[80]",
 	"image-editor": "",
 	"package-install": "",

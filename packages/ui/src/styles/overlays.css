@@ -2,8 +2,14 @@
 :root {
 	--ryu-popup-overlay-background: rgb(0 0 0 / 18%);
 	--ryu-popup-overlay-blur: 8px;
+	/* Modal scrims (dialog, alert dialog, sheet, drawer) are a plain solid dim:
+	   no blur, no saturate. Light is 30% black, dark 50%. */
 	--ryu-dialog-overlay-background: rgb(0 0 0 / 30%);
-	--ryu-dialog-overlay-blur: 8px;
+}
+
+.dark,
+[data-ryu-theme="dark"] {
+	--ryu-dialog-overlay-background: rgb(0 0 0 / 50%);
 }
 
 /* Popup backdrops are opt-in on desktop. The Base UI backdrop parts stay in the
@@ -25,23 +31,21 @@ html:not([data-popup-overlay-blur="on"]) .ryu-popup-overlay {
 
 .ryu-dialog-overlay {
 	background-color: var(--ryu-dialog-overlay-background);
-	-webkit-backdrop-filter: blur(var(--ryu-dialog-overlay-blur));
-	backdrop-filter: blur(var(--ryu-dialog-overlay-blur));
 }
 
-/* Dialog transparent mode is OPT-OUT — the dimmed, blurred backdrop above is the
+/* Dialog transparent mode is OPT-OUT — the dimmed backdrop above is the
    CSS base state, so it is what a surface paints on the very first frame with no
    JS involved. `apps/web` has no toggle and never bootstraps the store, so the
    base state is exactly what it ships.
 
-   The DESKTOP default is the opposite: "Blur dialog backgrounds" is OFF, and the
+   The DESKTOP default is the opposite: "Dim dialog backgrounds" is OFF, and the
    desktop reaches that by stamping data-dialog-overlay-blur="off" on <html> from
    `apps/desktop/src/main.tsx` module scope, before the first render
    (hooks/use-dialog-overlay-blur.ts). The off branch drops the backdrop and the
    panel shadow for a flat transparent look.
 
    Do NOT invert this to an "on"-gated rule to match the desktop default: that
-   would unblur every apps/web dialog, since nothing there stamps an attribute. */
+   would undim every apps/web dialog, since nothing there stamps an attribute. */
 html[data-dialog-overlay-blur="off"] .ryu-dialog-overlay {
 	display: none;
 }

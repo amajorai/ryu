@@ -91,7 +91,10 @@ export function CommunityInterface({
 	const reactions = usePostReactions();
 	const { copiedId, share } = useCopiedShare();
 
-	const communities = useMemo(() => buildCommunities(snapshot), [snapshot]);
+	const communities = useMemo(
+		() => buildCommunities(snapshot, tl),
+		[snapshot, tl]
+	);
 	const posts = useMemo(
 		() => buildPosts(snapshot, communities),
 		[snapshot, communities]

@@ -2,6 +2,7 @@
 
 import { Wrench01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Popover,
@@ -30,6 +31,7 @@ export function PageToolsPopover({
 	onResult,
 	tools,
 }: PageToolsPopoverProps) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	if (tools.length === 0) {
@@ -51,7 +53,9 @@ export function PageToolsPopover({
 			<PopoverTrigger
 				render={
 					<Button
-						aria-label={`Page tools (${tools.length})`}
+						aria-label={tl("Page tools ({toolCount})", {
+							toolCount: tools.length,
+						})}
 						size="icon-sm"
 						title="Page tools"
 						variant="ghost-muted"

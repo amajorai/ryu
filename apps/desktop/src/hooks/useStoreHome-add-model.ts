@@ -3,6 +3,7 @@ import {
 	isBlockedFit,
 	isBlockedRepoFit,
 } from "@ryu/blocks/desktop/model-fit.ts";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchModelDetail,
@@ -21,15 +22,20 @@ import type { HomeCard } from "./useStoreHome-types.ts";
  */
 export async function addModelFromHome(
 	modelTarget: ApiTarget,
-	card: HomeCard
+	card: HomeCard,
+	tl: LiteralMessage
 ): Promise<void> {
 	const format = card.modelFormat ?? "gguf";
 	const detail = await fetchModelDetail(modelTarget, card.id, format);
 	if (format !== "gguf") {
 		if (isBlockedRepoFit(detail.repoFit, detail.device)) {
 			throw new Error(
-				fitBlockReason(detail.repoFit, detail.repoFitLabel, detail.device) ??
-					`${card.name} won't fit on this device.`
+				fitBlockReason(
+					detail.repoFit,
+					detail.repoFitLabel,
+					detail.device,
+					tl
+				) ?? `${card.name} won't fit on this device.`
 			);
 		}
 		await installModelSnapshot(modelTarget, card.id, format);
@@ -45,7 +51,7 @@ export async function addModelFromHome(
 	// quant of this model fits this device.
 	if (isBlockedFit(file.fit)) {
 		throw new Error(
-			fitBlockReason(file.fit, file.fitLabel, detail.device) ??
+			fitBlockReason(file.fit, file.fitLabel, detail.device, tl) ??
 				`${card.name} won't fit on this device.`
 		);
 	}

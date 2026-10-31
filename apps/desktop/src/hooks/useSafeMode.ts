@@ -44,7 +44,7 @@ export function useSafeMode(target: ApiTarget, pollInterval?: number) {
 		} catch {
 			/* An unreachable node has no effective-state answer. */
 		}
-		if (owns(signal))
+		if (owns(signal)) {
 			setResult((old) => ({
 				scope,
 				state,
@@ -52,6 +52,7 @@ export function useSafeMode(target: ApiTarget, pollInterval?: number) {
 				pending: old?.scope === scope ? old.pending : null,
 				busy: old?.scope === scope ? old.busy : false,
 			}));
+		}
 	}, [scope, owns]);
 	useEffect(() => {
 		scope.controller = new AbortController();
@@ -59,13 +60,17 @@ export function useSafeMode(target: ApiTarget, pollInterval?: number) {
 		const timer = pollInterval ? setInterval(refresh, pollInterval) : undefined;
 		return () => {
 			scope.controller.abort();
-			if (timer) clearInterval(timer);
+			if (timer) {
+				clearInterval(timer);
+			}
 		};
 	}, [scope, refresh, pollInterval]);
 	const apply = useCallback(
 		async (enabled: boolean) => {
 			const signal = scope.controller.signal;
-			if (!owns(signal) || scope.applying) return;
+			if (!owns(signal) || scope.applying) {
+				return;
+			}
 			scope.applying = true;
 			setResult((old) => ({
 				scope,
@@ -76,23 +81,30 @@ export function useSafeMode(target: ApiTarget, pollInterval?: number) {
 			}));
 			try {
 				await applySafeMode(scope.target, enabled, signal);
-				if (!owns(signal)) return;
+				if (!owns(signal)) {
+					return;
+				}
 				if (isLocalNode(scope.target)) {
 					await restartRyuCore().catch(() => undefined);
-					if (owns(signal)) await refresh();
+					if (owns(signal)) {
+						await refresh();
+					}
 				} else {
 					setResult((old) =>
 						old?.scope === scope ? { ...old, pending: enabled } : old
 					);
 				}
 			} catch (error) {
-				if (owns(signal)) throw error;
+				if (owns(signal)) {
+					throw error;
+				}
 			} finally {
 				scope.applying = false;
-				if (owns(signal))
+				if (owns(signal)) {
 					setResult((old) =>
 						old?.scope === scope ? { ...old, busy: false } : old
 					);
+				}
 			}
 		},
 		[scope, owns, refresh]

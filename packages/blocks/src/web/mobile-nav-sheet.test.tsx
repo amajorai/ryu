@@ -101,6 +101,7 @@ test("the Products sheet mirrors the desktop menu: one open section, summaries, 
 			"Build",
 			"Platform",
 			"Agent APIs",
+			"Features",
 		]);
 		// Every section has a disclosure button; only the first starts open.
 		const triggers = sections.map((section) =>
@@ -108,7 +109,7 @@ test("the Products sheet mirrors the desktop menu: one open section, summaries, 
 		);
 		expect(
 			triggers.map((trigger) => trigger?.getAttribute("aria-expanded"))
-		).toEqual(["true", "false", "false", "false"]);
+		).toEqual(["true", "false", "false", "false", "false"]);
 		const openLinks = Array.from(
 			sections[0]?.querySelectorAll<HTMLAnchorElement>("a[href]") ?? []
 		);

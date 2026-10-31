@@ -6,9 +6,10 @@ import {
 	createSitesServer,
 	type SitesServices,
 } from "../../../apps-store/sites/sidecar/src/server.ts";
+import type { LegacySiteRecord } from "../../../apps-store/sites/sidecar/src/spaces-database.ts";
 import { SitesStore } from "../../../apps-store/sites/sidecar/src/store.ts";
 import { visitorScript } from "../../../apps-store/sites/sidecar/src/visitor-bundle.ts";
-import type { LegacySiteRecord } from "../../../apps-store/sites/sidecar/src/spaces-database.ts";
+
 const desktopDirectory = path.resolve(import.meta.dirname, "..");
 const repositoryDirectory = path.resolve(desktopDirectory, "../..");
 const directory = await mkdtemp(

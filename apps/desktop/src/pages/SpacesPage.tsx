@@ -9,6 +9,7 @@ import {
 	type SpacesDetailProps,
 	SpacesView,
 } from "@ryu/blocks/desktop/spaces.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 
 import { AppDisabledNotice } from "@/src/components/AppDisabledNotice.tsx";
 import { BackupSettings } from "@/src/components/settings/BackupSettings.tsx";
@@ -32,6 +33,7 @@ export default function SpacesPage({
 	 * space on mount instead of defaulting to the first one. */
 	initialSpaceId?: string;
 }) {
+	const tl = useLiteralMessages();
 	const {
 		appDisabled,
 		createDatabase,
@@ -130,7 +132,8 @@ export default function SpacesPage({
 					await setRetrievalMode(selected.id, mode, {
 						onProgress: setRetrievalModeProgress,
 						signal: controller.signal,
-					})
+					}),
+					tl
 				)
 			);
 		} catch (err) {

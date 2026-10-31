@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { type InterfaceEvent, localDayKey } from "@ryuhq/protocol/interfaces";
 import type { TrackingParcel, TrackingStage } from "./tracking-model.ts";
 import { isMoving, STAGE_STEP } from "./tracking-model-stages.ts";
@@ -165,7 +166,7 @@ function latestDetail(parcel: TrackingParcel): string | null {
 	return null;
 }
 
-function latestScan(parcel: TrackingParcel): HistoryEntry {
+function latestScan(parcel: TrackingParcel, tl: LiteralMessage): HistoryEntry {
 	const name = courierName(parcel);
 	const base = {
 		at: parcel.thread.updatedAt,
@@ -176,17 +177,21 @@ function latestScan(parcel: TrackingParcel): HistoryEntry {
 	};
 	switch (parcel.stage) {
 		case "delivered":
-			return { ...base, title: `Delivered: ${name} replied`, tone: "success" };
+			return {
+				...base,
+				title: tl("Delivered: {name} replied", { name }),
+				tone: "success",
+			};
 		case "out":
 			return {
 				...base,
-				title: `Out for delivery: ${name} is writing back`,
+				title: tl("Out for delivery: {name} is writing back", { name }),
 				tone: "default",
 			};
 		case "transit":
 			return {
 				...base,
-				title: `In transit: ${name} is working`,
+				title: tl("In transit: {name} is working", { name }),
 				tone: "default",
 			};
 		case "exception":
@@ -224,9 +229,10 @@ function latestScan(parcel: TrackingParcel): HistoryEntry {
 export function trackingHistory(
 	parcel: TrackingParcel,
 	events: readonly InterfaceEvent[],
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): HistoryGroup[] {
-	const timed: HistoryEntry[] = [latestScan(parcel)];
+	const timed: HistoryEntry[] = [latestScan(parcel, tl)];
 	const groups: HistoryGroup[] = [];
 	// Routines belong to the courier, not the parcel: only the next one is
 	// shown, and only while it can still affect when this parcel moves.
@@ -243,7 +249,10 @@ export function trackingHistory(
 					estimated: true,
 					id: `event-${next.id}`,
 					location: null,
-					title: `${courierName(parcel)}'s next routine · ${next.title}`,
+					title: tl("{courier}'s next routine · {title}", {
+						courier: courierName(parcel),
+						title: next.title,
+					}),
 					tone: "scheduled",
 				},
 			],
@@ -267,7 +276,7 @@ export function trackingHistory(
 		}
 	}
 
-	const earlier = earlierScans(parcel);
+	const earlier = earlierScans(parcel, tl);
 	if (earlier.length > 0) {
 		groups.push({
 			entries: earlier,
@@ -279,7 +288,10 @@ export function trackingHistory(
 }
 
 /** Steps the stage implies happened before the latest activity. */
-function earlierScans(parcel: TrackingParcel): HistoryEntry[] {
+function earlierScans(
+	parcel: TrackingParcel,
+	tl: LiteralMessage
+): HistoryEntry[] {
 	const step = STAGE_STEP[parcel.stage];
 	const name = courierName(parcel);
 	const location = null;
@@ -291,7 +303,7 @@ function earlierScans(parcel: TrackingParcel): HistoryEntry[] {
 			estimated: false,
 			id: "picked-up",
 			location,
-			title: `Picked up by ${name}`,
+			title: tl("Picked up by {name}", { name }),
 			tone: "default",
 		});
 	}

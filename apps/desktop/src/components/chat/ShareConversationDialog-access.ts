@@ -5,6 +5,17 @@ import type {
 
 export type GeneralAccess = ConversationAccess["visibility"] | "public";
 
+/**
+ * The signed-in owner as the share sections render it. Structural so both the
+ * desktop vault account and the extension's token-free `Account` satisfy it;
+ * the sections never need (and must not receive) the bearer token.
+ */
+export interface ShareOwner {
+	email: string;
+	image?: string | null;
+	name?: string | null;
+}
+
 export function initials(name: string): string {
 	return (
 		name

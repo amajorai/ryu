@@ -13,7 +13,7 @@ import {
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveUserId, listAccounts } from "@/lib/auth-client.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -48,6 +48,8 @@ export function ShareConversationDialog({
 	title: string;
 }) {
 	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const activeUserId = getActiveUserId();
 	const owner = useMemo(
 		() =>
@@ -87,7 +89,9 @@ export function ShareConversationDialog({
 			]);
 			const nextPublicShare =
 				owner && nextAccess.can_manage
-					? await getPublicShare(conversationId).catch(() => null)
+					? await getPublicShare(conversationId, tlRef.current).catch(
+							() => null
+						)
 					: null;
 			setAccess(nextAccess);
 			setDirectory(nextDirectory);
@@ -212,7 +216,8 @@ export function ShareConversationDialog({
 		const nextShare = await publishPublicShare(
 			conversationId,
 			safeTitle,
-			messages
+			messages,
+			tl
 		);
 		setPublicShare(nextShare);
 		return nextShare;
@@ -282,7 +287,7 @@ export function ShareConversationDialog({
 			} else {
 				if (owner) {
 					// Only the caller's own public link is being turned off here.
-					await revokePublicShare(conversationId, owner.userId);
+					await revokePublicShare(conversationId, tl, owner.userId);
 				}
 				await setConversationAccess(target, conversationId, coreAccess);
 				setPublicShare(null);

@@ -6,6 +6,7 @@
 // tool list to a single agent's allowlist, and test-calls a tool. Wire shapes
 // mirror `apps/core/src/sidecar/mcp/mod.rs` (snake_case fields, no serde rename).
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { GhostActionInput } from "@ryuhq/core-client/mcp.ts";
 import { z } from "zod";
 import { type ApiTarget, authenticatedFetch, request } from "./client.ts";
@@ -425,13 +426,16 @@ export async function deleteMcpServer(
 export function callGhostAction(
 	target: ApiTarget,
 	agentId: string,
-	input: GhostActionInput
+	input: GhostActionInput,
+	tl: LiteralMessage
 ): Promise<McpCallResult> {
 	const call = ghostActionToCall(input);
 	if (!call) {
 		return Promise.resolve({
 			ok: false,
-			error: `Action '${input.kind}' requires a target parameter.`,
+			error: tl("Action '{kind}' requires a target parameter.", {
+				kind: input.kind,
+			}),
 		});
 	}
 	return callMcpTool(target, {

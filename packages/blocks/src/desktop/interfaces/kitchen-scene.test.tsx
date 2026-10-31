@@ -39,6 +39,7 @@ afterAll(async () => {
 });
 
 const { act } = await import("react");
+const { formatMessage } = await import("@ryu/i18n");
 const { createRoot } = await import("react-dom/client");
 const { agentActs, unownedAsks } = await import("@ryuhq/protocol/interfaces");
 const { FIXTURE_CLOCK, FIXTURE_NOW, usefulStateFixture } = await import(
@@ -123,6 +124,7 @@ function chefs(shown: ReadonlySet<string>, opened: string[]) {
 		shown,
 		slab: 0.16,
 		slots: slots.slots,
+		tl: formatMessage,
 	}).filter((spec) => !spec.id.includes(":helper:"));
 }
 

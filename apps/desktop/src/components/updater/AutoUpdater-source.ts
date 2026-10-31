@@ -1,4 +1,5 @@
 import { decideUpdateEligibility } from "@ryu/auth/lib/plans";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { notifyUpdateOutsideWindow } from "@/src/components/updater/AutoUpdater-window-notices.ts";
 import { resolveAppUpdateSource } from "@/src/components/updater/app-update-policy.ts";
 import type { UpdateCheck } from "@/src/lib/api/update.ts";
@@ -96,10 +97,11 @@ function sourceForUpdate(verdict: UpdateCheck, options?: AppUpdateOptions) {
 
 export async function prepareUpdate(
 	verdict: UpdateCheck,
+	tl: LiteralMessage,
 	options?: AppUpdateOptions
 ) {
 	if (!isEligibleForAppUpdate(verdict)) {
-		notifyUpdateOutsideWindow(verdict);
+		notifyUpdateOutsideWindow(verdict, tl);
 		return null;
 	}
 	const source = sourceForUpdate(verdict, options);

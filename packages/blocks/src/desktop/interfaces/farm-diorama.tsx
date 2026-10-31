@@ -1,5 +1,7 @@
 /* eslint-disable react/no-unknown-property */
+
 import { RoundedBox } from "@react-three/drei";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceAgentAct,
 	THREAD_STATUS_LABELS,
@@ -20,11 +22,11 @@ import {
 	growingScale,
 	inRect,
 	type PlacedBed,
-	plotLabel,
 	plotMood,
 	type Rect,
 	STAGE_NAMES,
 } from "./farm-model.ts";
+import { plotLabel } from "./farm-model-labels.ts";
 import { FARM_3D, FRUIT_3D } from "./farm-palette.ts";
 import type { OffStage, YouSpotSlot } from "./game3d-acts.ts";
 import { FlowerClusters, type FlowerPatch } from "./game3d-grass.tsx";
@@ -775,6 +777,7 @@ export function FarmDioramaScene({
 	shape,
 	theme,
 }: FarmDioramaProps) {
+	const tl = useLiteralMessages();
 	const paint = useMemo(() => groundPaint(diorama, night), [diorama, night]);
 	const avoid = useMemo(() => {
 		const barn = diorama.barn;
@@ -840,7 +843,7 @@ export function FarmDioramaScene({
 				// Facing the bed (to its left) while it works.
 				facing: pose === "working" ? -Math.PI / 2.6 : undefined,
 				id: plot.id,
-				label: `${plotLabel(plot)}, ${status}`,
+				label: `${plotLabel(plot, tl)}, ${status}`,
 				looks: {
 					...base,
 					tool: pose === "working" ? TOOLS[index % TOOLS.length] : undefined,
@@ -851,7 +854,7 @@ export function FarmDioramaScene({
 			});
 		}
 		return list;
-	}, [diorama, looks]);
+	}, [diorama, looks, tl]);
 	return (
 		<group>
 			<IsoIsland paint={paint} shape={shape} theme={theme} />
@@ -941,7 +944,7 @@ export function FarmDioramaScene({
 						at={[sign[0], 0.35, sign[1]]}
 						focusId={plot.id}
 						key={plot.id}
-						label={plotLabel(plot)}
+						label={plotLabel(plot, tl)}
 						onSelect={() => onOpenPlot(plot.id)}
 						pressed={selectedPlotId === plot.id}
 					>

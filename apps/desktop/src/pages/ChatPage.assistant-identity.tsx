@@ -4,6 +4,7 @@ import type {
 	AgentMessageContext,
 	AgentMessageIdentity,
 } from "@ryu/blocks/desktop/agent-elements/types.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Avatar } from "@ryu/ui/components/avatar.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -49,6 +50,7 @@ export function useChatAssistantIdentity({
 	teams,
 	botProduct,
 }: UseChatAssistantIdentityInput) {
+	const tl = useLiteralMessages();
 	// Remember the last picked agent so a new chat opens with it preselected. The
 	// agent itself is owned by Core (CRUD via U6); this is only the local "last
 	// used" hint, not agent storage.
@@ -284,13 +286,14 @@ export function useChatAssistantIdentity({
 			const warning = modelSwitchCacheWarning(
 				contextUsageRef.current,
 				nextModel,
-				Date.now()
+				Date.now(),
+				tl
 			);
 			if (warning) {
 				toast.warning({ id: "ryu-model-switch-cache", ...warning });
 			}
 		},
-		[botProduct]
+		[botProduct, tl]
 	);
 
 	const announceComposerSelection = useCallback(

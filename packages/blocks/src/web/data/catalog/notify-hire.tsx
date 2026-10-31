@@ -40,7 +40,6 @@ export const NOTIFY_TO_HIRE: Product[] = [
 			"Durable events, live activities, and delivery for products and agents.",
 		Icon: Bell,
 		hero: {
-			eyebrow: "Ryu Notify · Early access",
 			title: "Durable events for agents",
 			subtitle:
 				"Publish events, stream live progress, and collect approvals through one API.",
@@ -121,7 +120,6 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		tagline: "API-first email inboxes for agents.",
 		Icon: MailIcon,
 		hero: {
-			eyebrow: "Ryu Mail",
 			title: "Email inboxes for agents",
 			subtitle:
 				"Give each agent an inbox it can send from and receive into over an API. Run it with Ryu or standalone.",
@@ -185,7 +183,6 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		tagline: "SMS, WhatsApp, voice messages, and phone numbers for agents.",
 		Icon: MessageSquare,
 		hero: {
-			eyebrow: "Ryu Messaging · Early access",
 			title: "Message from your own numbers",
 			subtitle:
 				"Lease phone numbers and send SMS, MMS, WhatsApp, and voice messages through one API. Billed at the AWS price, no markup.",
@@ -263,7 +260,6 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		tagline: "Save, review, and deploy websites.",
 		Icon: Globe,
 		hero: {
-			eyebrow: "Ryu Sites · Early access",
 			title: "Deploy the version you reviewed",
 			subtitle: "Save each build and publish only the version you approve.",
 			primaryCta: EARLY_ACCESS,
@@ -329,7 +325,6 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		tagline: "We help you scope and set up your first agent.",
 		Icon: HeartHandshake,
 		hero: {
-			eyebrow: "Agents as a Service",
 			title: "Get help building your agents",
 			subtitle:
 				"Tell us the task and the tools it uses. We'll help scope and set up your first agent.",
@@ -383,7 +378,6 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		tagline: "Bring in a specialist agent for one task.",
 		Icon: Zap,
 		hero: {
-			eyebrow: "Ryu Hire · Early access",
 			title: "Hire specialist agents",
 			subtitle:
 				"Bring in a specialist agent for one task, with nothing to install.",

@@ -23,6 +23,10 @@ import {
 	fetchCloudEnvironments,
 } from "@/src/lib/api/cloud-environments.ts";
 import {
+	CLOUD_AGENT_MODE_LABELS,
+	executorAgentMode,
+} from "@/src/lib/cloud-agent-mode.ts";
+import {
 	CLOUD_EXECUTOR_LABELS,
 	type CloudTaskSelection,
 	managedCloudExecutor,
@@ -243,6 +247,16 @@ export function CloudEnvironmentPicker({
 													profile.runtime?.backend === "box" ? (
 														<span className="text-muted-foreground text-xs">
 															Fresh box
+														</span>
+													) : null}
+													{boxBackendEnabled &&
+													profile.runtime?.backend === "box" ? (
+														<span className="text-muted-foreground text-xs">
+															{
+																CLOUD_AGENT_MODE_LABELS[
+																	executorAgentMode(profile.runtime.executor)
+																]
+															}
 														</span>
 													) : null}
 													{boxBackendEnabled &&

@@ -1,5 +1,6 @@
 /* eslint-disable react/no-unknown-property */
 import { useFrame } from "@react-three/fiber";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { askAriaLabel, type InterfaceAsk } from "@ryuhq/protocol/interfaces";
 import { Mail, Package, ScrollText, StickyNote } from "lucide-react";
 import { useRef } from "react";
@@ -71,6 +72,7 @@ export function UnreadMark({
 	privacy?: "full" | "redacted";
 	reducedMotion: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const first = asks[0];
 	if (!first) {
 		return null;
@@ -101,7 +103,7 @@ export function UnreadMark({
 				icon={<Mail aria-hidden="true" />}
 				iconOnly={iconOnly}
 				kind="unread"
-				label={openerLabel(asks, ownerName, nowMs, privacy)}
+				label={openerLabel(asks, ownerName, nowMs, tl, privacy)}
 				onActivate={() => onOpen(first.id)}
 			>
 				{String(asks.length)}
@@ -136,6 +138,7 @@ export function SuggestionNote({
 	privacy?: "full" | "redacted";
 	reducedMotion: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const first = asks[0];
 	if (!first) {
 		return null;
@@ -173,7 +176,7 @@ export function SuggestionNote({
 				}
 				iconOnly={iconOnly}
 				kind="suggestion"
-				label={openerLabel(asks, ownerName, nowMs, privacy)}
+				label={openerLabel(asks, ownerName, nowMs, tl, privacy)}
 				onActivate={() => onOpen(first.id)}
 			>
 				{String(asks.length)}

@@ -2,6 +2,7 @@
 // `vault_denied: the `read` capability is required on `default/API_KEY``; the
 // code prefix is for programs, so the page shows only the sentence.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { isStepUpRequired } from "@/lib/step-up.ts";
 import { controlPlaneRefusalMessage } from "@/src/lib/access-refusal.ts";
 import { ApiError } from "@/src/lib/api/client.ts";
@@ -10,10 +11,11 @@ const CODE_PREFIX = /^vault_[a-z_]+:\s*/;
 
 export function vaultErrorMessage<TError>(
 	error: TError,
-	fallback: string
+	fallback: string,
+	tl: LiteralMessage
 ): string {
 	if (error instanceof ApiError) {
-		const refusal = controlPlaneRefusalMessage(error);
+		const refusal = controlPlaneRefusalMessage(error, tl);
 		if (refusal) {
 			return refusal;
 		}
@@ -22,7 +24,7 @@ export function vaultErrorMessage<TError>(
 			return text.charAt(0).toUpperCase() + text.slice(1);
 		}
 		if (error.status === 403) {
-			return "You do not have access to do that.";
+			return tl("You do not have access to do that.");
 		}
 		return fallback;
 	}

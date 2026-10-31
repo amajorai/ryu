@@ -30,8 +30,9 @@ export function GitPullRequestStatusIcon({
 }: {
 	pullRequest: GitPullRequest;
 }) {
+	const tl = useLiteralMessages();
 	const status = gitPullRequestStatus(pullRequest);
-	const label = gitPullRequestStatusLabel(status);
+	const label = gitPullRequestStatusLabel(status, tl);
 	const className = cn("size-4 shrink-0", statusColorClass(status));
 	const icon = statusIcon(status);
 	return (

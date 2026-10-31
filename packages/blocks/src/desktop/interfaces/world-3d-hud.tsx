@@ -48,24 +48,23 @@ export function Keycap({ className, ...props }: ComponentProps<"kbd">) {
 }
 
 /** The tracker's spoken name: where it goes, then what is waiting there. */
-export function trackerLabel(goal: TrackerGoal, tl?: LiteralMessage): string {
+export function trackerLabel(goal: TrackerGoal, tl: LiteralMessage): string {
 	const detail = goal.detail.replaceAll(" · ", ", ");
-	if (!goal.agentName) {
-		return detail ? `${goal.title}: ${detail}` : goal.title;
+	const { agentName, title } = goal;
+	if (!agentName) {
+		return detail ? `${title}: ${detail}` : title;
 	}
 	if (detail) {
-		return tl
-			? tl("Go to {agentName}: {detail}", { agentName: goal.agentName, detail })
-			: `Go to ${goal.agentName}: ${detail}`;
+		return tl("Go to {agentName}: {detail}", { agentName, detail });
 	}
 	// An ask's tracker opens the ask: its name says the ask and the wait.
-	if (goal.title.startsWith(`${goal.agentName} asks:`)) {
+	if (title.startsWith(`${agentName} asks:`)) {
 		const wait = goal.suffix?.replace(/^·\s*/, "");
-		return `Answer ${goal.agentName}: ${goal.title}${wait ? `, ${wait}` : ""}`;
+		return wait
+			? tl("Answer {agentName}: {title}, {wait}", { agentName, title, wait })
+			: tl("Answer {agentName}: {title}", { agentName, title });
 	}
-	return tl
-		? tl("Go to {agentName}", { agentName: goal.agentName })
-		: `Go to ${goal.agentName}`;
+	return tl("Go to {agentName}", { agentName });
 }
 
 /**

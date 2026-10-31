@@ -33,102 +33,55 @@ import { resolveRpcStream } from "./streaming-rpc.ts";
 // serves no CSP, so it looked fine right up to the installer). `apps/extension`
 // hit the same wall under MV3, where the page CSP cannot be loosened at all, and
 // had to move to a real sandbox page with `iframe src` — see
-// `apps/extension/entrypoints/sandbox/main.ts`.
+// `apps/extension/entrypoints/sandbox/main.ts`. Such a host passes `sandboxPage`:
+// the frame loads that page, which receives this same document once and writes
+// it over itself, so everything below (nonce, source identity, grant gate) holds.
 //
 // Before tightening a host surface's CSP, run `apps/desktop/e2e/companion-host.spec.ts`
 // — it mounts real app bundles under the shell policy read out of the Tauri config.
 // The full rationale for the shipped `script-src` / `script-src-elem` /
 // `script-src-attr` split lives in `docs/desktop-extension-host-spec.md` §3.1.
 
-import type { RefObject } from "react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { z } from "zod";
 import {
 	asRpcRequest,
 	assertGranted,
-	type Capability,
 	CodedRpcError,
 	dispatchRpc,
-	type HostPush,
-	type HostServices,
 	type RpcChunk,
 	type RpcResponse,
 	STREAMING_METHODS,
 	toRpcError,
 } from "./rpc.ts";
 
-// Window/port envelopes are decoded before lifecycle decisions and callbacks.
-const readyMessageSchema = z.object({
-	kind: z.literal("ryu-plugin-ready"),
-	nonce: z.string(),
-});
-const readyBoundarySchema = z.unknown().transform((data) => {
-	const parsed = readyMessageSchema.safeParse(data);
-	return parsed.success ? parsed.data : null;
-});
-const handshakeVersionSchema = z.object({ hostApiVersion: z.string().min(1) });
-const handshakeVersionBoundarySchema = z
-	.unknown()
-	.transform((data): string | null => {
-		const parsed = handshakeVersionSchema.safeParse(data);
-		return parsed.success ? parsed.data.hostApiVersion : null;
-	});
-export const frameMessageSchema = z.record(z.string(), z.unknown());
-export type ExtensionFrameMessage = z.infer<typeof frameMessageSchema>;
+export {
+	APP_DOWNLOAD_GRANT,
+	type ExtensionFrameMessage,
+	frameMessageSchema,
+	type HandshakeInputs,
+	handshakeHostApiVersion,
+	IFRAME_SANDBOX,
+	SANDBOX_DOCUMENT_KIND,
+	SANDBOX_READY_KIND,
+	type SandboxDocumentMessage,
+	sandboxDocumentMessageSchema,
+	sandboxForCompanion,
+	sandboxForDownloads,
+	shouldEnableCompanionFormEvents,
+	shouldSendSandboxDocument,
+	shouldTransferPort,
+} from "./extension-host-handshake.ts";
 
-/** The base iframe sandbox. Never add `allow-same-origin`, which would grant the
- *  frame the app's origin → parent DOM, cookies, storage, and Tauri IPC. Popups
- *  and top-navigation are always disabled. Forms are opt-in only for trusted
- *  compiled HTML Companions with `connect-src 'none'` and `form-action 'none'`
- *  CSP; downloads use their separate Gateway-approved grant. */
-export const IFRAME_SANDBOX = "allow-scripts";
-
-/** Manifest grant that lets a sandboxed Companion export a user-requested file. */
-export const APP_DOWNLOAD_GRANT = "files:download";
-
-/** Forms are enabled only for compiled-in first-party full-HTML Companions. */
-export function shouldEnableCompanionFormEvents(
-	firstParty: boolean,
-	isHtmlBundle: boolean
-): boolean {
-	return firstParty && isHtmlBundle;
-}
-
-/** Add only the browser download capability to the null-origin sandbox. */
-export function sandboxForDownloads(allowDownloads: boolean): string {
-	return allowDownloads ? `${IFRAME_SANDBOX} allow-downloads` : IFRAME_SANDBOX;
-}
-
-/**
- * Compose a first-party HTML Companion sandbox without enabling document
- * navigation. Local React form handlers need the `allow-forms` sandbox token,
- * while the companion CSP's `connect-src 'none'; form-action 'none'` keeps the
- * frame from reaching the network or submitting a form body. Callers opt in only
- * for trusted compiled HTML bundles; Path A and third-party frames retain the default.
- */
-export function sandboxForCompanion(options: {
-	allowDownloads?: boolean;
-	allowForms?: boolean;
-	srcdoc: string;
-}): string {
-	const tokens = [IFRAME_SANDBOX];
-	const csp = options.srcdoc.match(
-		/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i
-	)?.[1];
-	const egressLocked = csp
-		? /(?:^|;)\s*connect-src\s+'none'(?=\s*(?:;|$))/i.test(csp)
-		: false;
-	const formActionsLocked = csp
-		? /(?:^|;)\s*form-action\s+'none'(?=\s*(?:;|$))/i.test(csp)
-		: false;
-	if (options.allowForms && egressLocked && formActionsLocked) {
-		tokens.push("allow-forms");
-	}
-	if (options.allowDownloads) {
-		tokens.push("allow-downloads");
-	}
-	return tokens.join(" ");
-}
+import {
+	frameMessageSchema,
+	handshakeHostApiVersion,
+	SANDBOX_DOCUMENT_KIND,
+	type SandboxDocumentMessage,
+	sandboxForCompanion,
+	shouldSendSandboxDocument,
+	shouldTransferPort,
+} from "./extension-host-handshake.ts";
 
 /**
  * Attach the handshake listener during the COMMIT, not from a passive effect.
@@ -143,98 +96,9 @@ export function sandboxForCompanion(options: {
 const useHandshakeEffect =
 	globalThis.document === undefined ? useEffect : useLayoutEffect;
 
-/** Inputs to the handshake decision, pulled out of the DOM event so the decision
- *  is a pure function. */
-export interface HandshakeInputs {
-	/** Whether a port has already been transferred (a channel already exists). A
-	 *  second "ready" after connect must NEVER mint a second channel. */
-	alreadyConnected: boolean;
-	/** The nonce the host baked into `srcdoc` and expects echoed back. */
-	expectedNonce: string;
-	/** Whether `event.source === iframe.contentWindow` (the frame we created).
-	 *  `event.origin` is the literal "null" for a null-origin frame and is NOT a
-	 *  usable auth boundary, so source-identity + nonce carry the check. */
-	fromThisFrame: boolean;
-}
+export type { ExtensionHostProps } from "./extension-host-props.ts";
 
-/**
- * Decide whether to transfer a fresh RPC port in response to a window message.
- *
- * Returns `true` ONLY when the message is a `ryu-plugin-ready` echoing the
- * expected nonce, from the frame we created, and no channel exists yet. Pure so
- * the adversarial tests (`forged_nonce_rejected`, `wrong_source_rejected`,
- * `stolen_port_second_handshake_rejected`) can assert every rejection path
- * without a DOM.
- */
-export function shouldTransferPort(
-	data: z.input<typeof readyBoundarySchema>,
-	{ expectedNonce, fromThisFrame, alreadyConnected }: HandshakeInputs
-): boolean {
-	if (alreadyConnected) {
-		return false;
-	}
-	const msg = readyBoundarySchema.parse(data);
-	const isReady =
-		msg?.kind === "ryu-plugin-ready" && msg.nonce === expectedNonce;
-	return Boolean(isReady && fromThisFrame);
-}
-
-/**
- * Extract the `hostApiVersion` a frame announces in its `ryu-plugin-ready`
- * handshake, or `null` when absent (a LEGACY frame built before the envelope was
- * versioned). Pure so it is unit-testable without a DOM.
- *
- * The host TOLERATES a missing version this major — the contract is additive
- * within a major, so a `1.x` frame loads on a `1.y` (y ≥ x) host unchanged.
- * Absence is annotated (the caller stamps it on the iframe), never
- * rejected: {@link shouldTransferPort} — the accept/reject gate — deliberately
- * does NOT read this field.
- */
-export const handshakeHostApiVersion = handshakeVersionBoundarySchema.parse;
-
-export interface ExtensionHostProps {
-	/** True only when the Gateway-approved `files:download` grant is present. */
-	allowDownloads?: boolean;
-	/**
-	 * Opt into local HTML form handlers for a trusted compiled Companion. The
-	 * host additionally requires both `connect-src 'none'` and `form-action 'none'`
-	 * in `srcdoc`, so forms cannot reach the network, navigate, or transmit a body.
-	 * Default false keeps third-party and widget frames at the base sandbox.
-	 */
-	allowForms?: boolean;
-	/** Capabilities the host grants this plugin instance. For the MVP this is
-	 *  host-provided config; reading it from `manifest.json` grants is #443. */
-	granted: ReadonlySet<Capability>;
-	/** The host-generated nonce baked into `srcdoc`. The frame echoes it in its
-	 *  "ready" handshake; the host verifies it before transferring the RPC port. */
-	nonce: string;
-	/** Optional: notified when the bridge connects, for UI affordances. */
-	onConnected?: () => void;
-	/**
-	 * Optional host-owned messages emitted by the mounted frame. The callback is
-	 * invoked only for messages whose source is this iframe; RPC handshakes still
-	 * remain handled by the host below.
-	 */
-	onMessage?: (data: ExtensionFrameMessage) => void;
-	/** Optional (widget host, ADDITIVE): a ref the host fills with a push function
-	 *  once the port is live, so the caller can send `ryu-widget-set-globals` to the
-	 *  frame (spec §1.2 `HostPush`). Cleared to `null` on unmount. The plugin caller
-	 *  (`PluginHostPanel`) omits it and is unaffected. */
-	pushRef?: RefObject<((msg: HostPush) => void) | null>;
-	/** The privileged services the host runs on the plugin's behalf (the plugin
-	 *  never holds the Core token). */
-	services: HostServices;
-	/** The plugin's sandboxed document. Must already have `nonce` interpolated by
-	 *  its builder (see `example-plugin.ts`). */
-	srcdoc: string;
-	/** Live host privacy state; unknown hosts keep connected-app summaries hidden. */
-	streamingPrivacyActive?: boolean;
-	/** Resolved host theme tokens to push into a mounted companion without
-	 *  requiring the app to request the shell-integration capability. */
-	themeTokens?: Readonly<Record<string, string>>;
-	title: string;
-}
-
+import type { ExtensionHostProps } from "./extension-host-props.ts";
 import { createMcpAppBridge } from "./mcp-app-bridge.ts";
 
 export function ExtensionHost({
@@ -247,6 +111,7 @@ export function ExtensionHost({
 	onConnected,
 	onMessage,
 	pushRef,
+	sandboxPage,
 	themeTokens,
 	streamingPrivacyActive = true,
 	title,
@@ -272,6 +137,14 @@ export function ExtensionHost({
 	pushRefRef.current = pushRef;
 	const privacyRef = useRef(streamingPrivacyActive);
 	privacyRef.current = streamingPrivacyActive;
+	// Counts document changes for the sandbox-page transport's iframe key.
+	const documentGeneration = useRef({ generation: 0, srcdoc });
+	if (documentGeneration.current.srcdoc !== srcdoc) {
+		documentGeneration.current = {
+			generation: documentGeneration.current.generation + 1,
+			srcdoc,
+		};
+	}
 
 	useHandshakeEffect(() => {
 		const iframe = iframeRef.current;
@@ -280,15 +153,20 @@ export function ExtensionHost({
 			allowForms,
 			srcdoc,
 		});
+		const documentLoaded =
+			sandboxPage === undefined
+				? iframe?.srcdoc === srcdoc
+				: iframe?.getAttribute("src") === sandboxPage;
 		if (
-			!iframe ||
-			iframe.srcdoc !== srcdoc ||
+			!(iframe && documentLoaded) ||
 			iframe.getAttribute("sandbox") !== expectedSandbox
 		) {
 			return;
 		}
 		let port: MessagePort | null = null;
 		let disposed = false;
+		// Sandbox-page transport: the companion document is handed over once.
+		let documentSent = false;
 		// Active streaming calls (e.g. agent.run.stream), keyed by request id, so an
 		// `agent.cancel` can abort the matching in-flight stream and unmount can abort
 		// all of them.
@@ -458,6 +336,23 @@ export function ExtensionHost({
 			if (disposed) {
 				return;
 			}
+			if (
+				sandboxPage !== undefined &&
+				shouldSendSandboxDocument(event.data, {
+					alreadySent: documentSent,
+					fromThisFrame: event.source === iframe.contentWindow,
+				})
+			) {
+				documentSent = true;
+				const message: SandboxDocumentMessage = {
+					html: srcdoc,
+					kind: SANDBOX_DOCUMENT_KIND,
+					nonce,
+				};
+				// Opaque-origin page: "*" is unavoidable; the document carries no token.
+				iframe.contentWindow?.postMessage(message, "*");
+				return;
+			}
 			if (event.source === iframe.contentWindow) {
 				if (onMessageRef.current) {
 					const message = frameMessageSchema.safeParse(event.data);
@@ -528,7 +423,7 @@ export function ExtensionHost({
 				port = null;
 			}
 		};
-	}, [allowDownloads, allowForms, granted, nonce, srcdoc]);
+	}, [allowDownloads, allowForms, granted, nonce, sandboxPage, srcdoc]);
 
 	useHandshakeEffect(() => {
 		iframeRef.current?.contentWindow?.postMessage(
@@ -558,11 +453,14 @@ export function ExtensionHost({
 			// Dimension attributes keep the frame filling its container in hosts
 			// whose stylesheet does not generate the utility classes above.
 			height="100%"
-			key={sandboxForCompanion({
+			// A sandbox page's `src` never changes, so its key also carries the
+			// document generation: a new document (a retry's fresh nonce included)
+			// reloads the page, as a changed `srcdoc` reloads a srcdoc frame.
+			key={`${sandboxForCompanion({
 				allowDownloads,
 				allowForms,
 				srcdoc,
-			})}
+			})}${sandboxPage === undefined ? "" : ` ${documentGeneration.current.generation}`}`}
 			ref={iframeRef}
 			// The approved export grant adds downloads without changing the null origin.
 			sandbox={sandboxForCompanion({
@@ -570,7 +468,8 @@ export function ExtensionHost({
 				allowForms,
 				srcdoc,
 			})}
-			srcDoc={srcdoc}
+			src={sandboxPage}
+			srcDoc={sandboxPage === undefined ? srcdoc : undefined}
 			title={title}
 			width="100%"
 		/>

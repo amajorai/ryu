@@ -33,7 +33,9 @@ export default defineConfig({
 	},
 
 	optimizeDeps: {
-		entries: [path.resolve(harnessDir, "keyboard-shortcuts-authority-proof.html")],
+		entries: [
+			path.resolve(harnessDir, "keyboard-shortcuts-authority-proof.html"),
+		],
 		esbuildOptions: { target: "esnext" },
 	},
 });

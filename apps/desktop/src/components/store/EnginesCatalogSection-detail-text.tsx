@@ -162,6 +162,7 @@ export function TextEngineDetail({
 								<StatusBadge
 									kind="unavailable"
 									label={unsupportedReason(
+										tl,
 										engine.platforms,
 										engine.unsupportedReason
 									)}
@@ -259,7 +260,7 @@ export function TextEngineDetail({
 			)}
 			{unsupported && (
 				<EngineFootnote>
-					{unsupportedReason(engine.platforms, engine.unsupportedReason)}
+					{unsupportedReason(tl, engine.platforms, engine.unsupportedReason)}
 				</EngineFootnote>
 			)}
 			{state.gatewayStale && (

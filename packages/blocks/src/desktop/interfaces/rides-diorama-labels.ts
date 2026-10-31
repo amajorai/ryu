@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { RidesActTrip } from "./rides-acts.tsx";
 import {
 	chipText,
@@ -8,17 +9,32 @@ import {
 import type { RidesArt } from "./rides-palette.ts";
 
 /** What a car's plate says to a screen reader. */
-export function carLabel(car: RideCar, trip: RideTrip | undefined): string {
+export function carLabel(
+	car: RideCar,
+	trip: RideTrip | undefined,
+	tl: LiteralMessage
+): string {
 	if (car.state === "driving" && trip) {
-		return `${car.agent.name}, driving to ${trip.thread.title}`;
+		return tl("{name}, driving to {title}", {
+			name: car.agent.name,
+			title: trip.thread.title,
+		});
 	}
 	if (car.state === "arrived" && trip) {
-		return `${car.agent.name}, arrived at ${trip.thread.title}`;
+		return tl("{name}, arrived at {title}", {
+			name: car.agent.name,
+			title: trip.thread.title,
+		});
 	}
 	if (car.state === "queued" && trip) {
-		return `${car.agent.name}, requested for ${trip.thread.title}`;
+		return tl("{name}, requested for {title}", {
+			name: car.agent.name,
+			title: trip.thread.title,
+		});
 	}
-	return `${car.agent.name}, available. Book a trip with ${car.agent.name}`;
+	return tl("{name}, available. Book a trip with {name}", {
+		name: car.agent.name,
+	});
 }
 
 /** A route's colour: bright when picked, plain en route (and with acts), else its stage's. */

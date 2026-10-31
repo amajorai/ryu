@@ -4,10 +4,13 @@ import { Toaster, toast } from "@ryu/ui/components/sileo";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+
 const NativeResponse = globalThis.Response,
 	nativeFetch = globalThis.fetch,
 	nativeInterval = globalThis.setInterval;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let node: ApiTarget;
 mock.module("@/src/store/useNodeStore.ts", () => ({
@@ -22,11 +25,11 @@ interface Grant {
 	expiry: number | string | null;
 }
 interface Call {
+	body: unknown;
+	jwt: string | null;
 	key: string;
 	method: string;
 	token: string | null;
-	jwt: string | null;
-	body: unknown;
 }
 let grants: Record<string, Grant>,
 	calls: Call[],
@@ -61,14 +64,15 @@ beforeEach(() => {
 		nativeFetch
 	);
 	errorToast = spyOn(toast, "error");
-	intervalSpy = spyOn(globalThis, "setInterval").mockImplementation(
-		((...args: Parameters<typeof nativeInterval>) => {
-			const [handler, timeout] = args;
-			if (timeout === 15000 && typeof handler === "function")
-				poll = handler as () => void;
-			return nativeInterval(...args);
-		}) as typeof nativeInterval
-	);
+	intervalSpy = spyOn(globalThis, "setInterval").mockImplementation(((
+		...args: Parameters<typeof nativeInterval>
+	) => {
+		const [handler, timeout] = args;
+		if (timeout === 15_000 && typeof handler === "function") {
+			poll = handler as () => void;
+		}
+		return nativeInterval(...args);
+	}) as typeof nativeInterval);
 	server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
@@ -79,11 +83,12 @@ beforeEach(() => {
 			const jwt = request.headers.get("x-ryu-user-jwt"),
 				identity = jwt ?? "a",
 				grant = grants[identity];
-			if (!grant)
+			if (!grant) {
 				return NativeResponse.json(
 					{ error: "Unknown identity" },
 					{ status: 401 }
 				);
+			}
 			const body = request.method === "PUT" ? await request.json() : null;
 			calls.push({
 				key,
@@ -102,18 +107,21 @@ beforeEach(() => {
 				(request.method === "GET" ? deferredReads : deferredWrites).has(
 					identity
 				)
-			)
+			) {
 				await new Promise<void>((resolve) =>
 					(releases[identity] ??= []).push(resolve)
 				);
+			}
 			if (request.method === "PUT") {
-				if (refuse)
+				if (refuse) {
 					return NativeResponse.json(
 						{ error: "Grant revocation refused" },
 						{ status: 403 }
 					);
-				if (!ignoreWrites)
+				}
+				if (!ignoreWrites) {
 					grant.enabled = (body as { value: string }).value === "true";
+				}
 				return NativeResponse.json({ key, value: String(grant.enabled) });
 			}
 			return NativeResponse.json({ key, value: snapshot });
@@ -132,8 +140,11 @@ afterEach(async () => {
 	await act(async () => root.unmount());
 	deferredReads.clear();
 	deferredWrites.clear();
-	for (const group of Object.values(releases))
-		for (const release of group) release();
+	for (const group of Object.values(releases)) {
+		for (const release of group) {
+			release();
+		}
+	}
 	await idle();
 	await act(async () => {
 		for (const result of errorToast.mock.results) {
@@ -154,7 +165,9 @@ async function until(check: () => boolean) {
 		await act(async () => {
 			await Bun.sleep(10);
 		});
-		if (check()) return;
+		if (check()) {
+			return;
+		}
 	}
 	throw Error("Expected mounted state or actual HTTP request did not settle");
 }
@@ -176,7 +189,9 @@ async function idle() {
 }
 function button() {
 	const result = container.querySelector<HTMLButtonElement>("button");
-	if (!result) throw Error("Active grant has no End now action");
+	if (!result) {
+		throw Error("Active grant has no End now action");
+	}
 	return result;
 }
 function active() {
@@ -192,7 +207,9 @@ async function release(identity: string) {
 	deferredReads.delete(identity);
 	deferredWrites.delete(identity);
 	await act(async () => {
-		for (const resume of releases[identity] ?? []) resume();
+		for (const resume of releases[identity] ?? []) {
+			resume();
+		}
 	});
 	await idle();
 }
@@ -200,7 +217,7 @@ for (const [name, enabled, expiry, visible] of [
 	["unlimited active", true, 0, true],
 	["disabled", false, 0, false],
 	["expired", true, 1, false],
-] as const)
+] as const) {
 	test(`renders authoritative ${name} grant state`, async () => {
 		grants.a = { enabled, expiry };
 		await render();
@@ -222,6 +239,7 @@ for (const [name, enabled, expiry, visible] of [
 			},
 		]);
 	});
+}
 // Core privacy::support_access_local trims and parses i64, then defaults to
 // zero on parse failure. Exercise the actual HTTP preference reader and banner
 // together: a looser Number parser can hide an active grant or invent an expiry.
@@ -234,7 +252,7 @@ for (const raw of [
 	"\uFEFF1",
 	"9223372036854775808",
 	"-9223372036854775809",
-])
+]) {
 	test(`malformed expiry ${JSON.stringify(raw)} retains a revocable grant with no expiry`, async () => {
 		grants.a.expiry = raw;
 		await render();
@@ -247,7 +265,8 @@ for (const raw of [
 		expect(grants.a.enabled).toBe(false);
 		expect(writes().map((call) => call.body)).toEqual([{ value: "false" }]);
 	});
-for (const raw of [null, "0", "+0", "-0"])
+}
+for (const raw of [null, "0", "+0", "-0"]) {
 	test(`missing or signed zero expiry ${JSON.stringify(raw)} has no expiry`, async () => {
 		grants.a.expiry = raw;
 		await render();
@@ -256,7 +275,8 @@ for (const raw of [null, "0", "+0", "-0"])
 		expect(active()).toBe(true);
 		expect(container.textContent).toContain("no expiry set");
 	});
-for (const raw of ["-1", "-9223372036854775808", "0001"])
+}
+for (const raw of ["-1", "-9223372036854775808", "0001"]) {
 	test(`valid expired signed decimal ${raw} hides the expired grant`, async () => {
 		grants.a.expiry = raw;
 		await render();
@@ -265,6 +285,7 @@ for (const raw of ["-1", "-9223372036854775808", "0001"])
 		expect(active()).toBe(false);
 		expect(writes()).toHaveLength(0);
 	});
+}
 test("trimmed leading-plus decimal future expiry shows remaining time until Core expiry", async () => {
 	grants.a.expiry = ` \t\u00a0+${Date.now() + 90_000}\u0085\n`;
 	await render();
@@ -328,7 +349,9 @@ test("old-node End now completion cannot dismiss the new grant or unlock its pen
 	await until(() => writes().length === 2);
 	deferredWrites.delete("a");
 	await act(async () => {
-		for (const resume of releases.a ?? []) resume();
+		for (const resume of releases.a ?? []) {
+			resume();
+		}
 		await Bun.sleep(30);
 	});
 	expect(grants.a.enabled).toBe(false);
@@ -458,7 +481,7 @@ test("a late refused old-node revocation cannot report an error for the newly se
 });
 
 test("a timed active grant renders the remaining hours and minutes", async () => {
-	grants.a.expiry = Date.now() + 90 * 60000 + 5000;
+	grants.a.expiry = Date.now() + 90 * 60_000 + 5000;
 	await render();
 	await until(active);
 	expect(container.textContent).toContain("expires in 1 h 30 min");

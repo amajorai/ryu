@@ -1,5 +1,6 @@
 import { ComputerIcon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -26,6 +27,7 @@ import {
 
 export function SessionsTab() {
 	const queryClient = useQueryClient();
+	const tl = useLiteralMessages();
 
 	const { data, isLoading } = useQuery({
 		queryKey: ["sessions"],
@@ -144,9 +146,11 @@ export function SessionsTab() {
 										description={
 											<>
 												{session.ipAddress && `${session.ipAddress} · `}
-												Created{" "}
-												{formatDistanceToNow(new Date(session.createdAt), {
-													addSuffix: true,
+												{tl("Created {relativeTime}", {
+													relativeTime: formatDistanceToNow(
+														new Date(session.createdAt),
+														{ addSuffix: true }
+													),
 												})}
 											</>
 										}
@@ -189,7 +193,10 @@ export function SessionsTab() {
 						<AlertDialogTitle>Revoke this session?</AlertDialogTitle>
 						<AlertDialogDescription>
 							{pendingRevoke
-								? `${pendingRevoke.label} will be signed out and must sign in again to use your account.`
+								? tl(
+										"{deviceLabel} will be signed out and must sign in again to use your account.",
+										{ deviceLabel: pendingRevoke.label }
+									)
 								: ""}
 						</AlertDialogDescription>
 					</AlertDialogHeader>

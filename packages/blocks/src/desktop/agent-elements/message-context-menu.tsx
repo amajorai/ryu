@@ -16,7 +16,7 @@ import {
 	ContextMenuSubTrigger,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
-import { EmojiPicker } from "@ryu/ui/components/emoji-picker";
+import { LazyEmojiPicker } from "@ryu/ui/components/emoji-picker-lazy.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { Fragment, type ReactNode, useRef, useState } from "react";
@@ -152,7 +152,7 @@ function ReactionStrip({
 							className="overflow-hidden rounded-2xl [&_em-emoji-picker]:w-full!"
 							onKeyDown={(event) => event.stopPropagation()}
 						>
-							<EmojiPicker
+							<LazyEmojiPicker
 								onEmojiSelect={(emoji) => reactions.onToggle(emoji.native)}
 							/>
 						</div>

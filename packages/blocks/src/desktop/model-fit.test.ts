@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
 	FIT_RANK,
 	fitBlockReason,
@@ -8,6 +9,9 @@ import {
 	isSlowFit,
 	pickBestFit,
 } from "./model-fit.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 describe("model fit ranking", () => {
 	test("orders every verdict with blocked options last", () => {
@@ -50,30 +54,40 @@ describe("model fit ranking", () => {
 describe("fitBlockReason", () => {
 	test("quotes memory for too_big and free disk for no_space", () => {
 		expect(
-			fitBlockReason("too_big", "", {
-				ramHuman: "8 GB",
-				unifiedMemory: false,
-				vramHuman: "4 GB",
-			})
+			fitBlockReason(
+				"too_big",
+				"",
+				{
+					ramHuman: "8 GB",
+					unifiedMemory: false,
+					vramHuman: "4 GB",
+				},
+				tl
+			)
 		).toBe(
 			"Too large for your device's memory. This device has 8 GB of RAM and 4 GB of GPU memory."
 		);
 		expect(
-			fitBlockReason("no_space", "No room", { diskFreeHuman: "3 GB" })
+			fitBlockReason("no_space", "No room", { diskFreeHuman: "3 GB" }, tl)
 		).toBe("No room. Only 3 GB is free on the models drive.");
 	});
 
 	test("never doubles the period of a sentence-style label", () => {
 		expect(
-			fitBlockReason("too_big", "This 20 GB model may not fit.", {
-				ramHuman: "8 GB",
-			})
+			fitBlockReason(
+				"too_big",
+				"This 20 GB model may not fit.",
+				{
+					ramHuman: "8 GB",
+				},
+				tl
+			)
 		).toBe("This 20 GB model may not fit. This device has 8 GB of RAM.");
 	});
 
 	test("returns null for verdicts that do not block", () => {
-		expect(fitBlockReason("cpu", "Runs on your CPU", null)).toBeNull();
-		expect(fitBlockReason("unknown", "", null)).toBeNull();
+		expect(fitBlockReason("cpu", "Runs on your CPU", null, tl)).toBeNull();
+		expect(fitBlockReason("unknown", "", null, tl)).toBeNull();
 	});
 });
 

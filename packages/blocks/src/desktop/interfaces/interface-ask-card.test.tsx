@@ -7,6 +7,7 @@ GlobalRegistrator.register();
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { act, useRef, useState } = await import("react");
+const { formatMessage } = await import("@ryu/i18n");
 const { createRoot } = await import("react-dom/client");
 const { agentActs, unownedAsks } = await import("@ryuhq/protocol/interfaces");
 const { FIXTURE_CLOCK, FIXTURE_NOW, usefulStateFixture } = await import(
@@ -738,11 +739,11 @@ describe("act plates", () => {
 	});
 
 	test("openers are named by askAriaLabel plus and N more", () => {
-		const label = openerLabel(replies, "Gu", FIXTURE_NOW);
+		const label = openerLabel(replies, "Gu", FIXTURE_NOW, formatMessage);
 		expect(label.endsWith(`and ${replies.length - 1} more`)).toBe(
 			replies.length > 1
 		);
-		expect(openerLabel([], null, FIXTURE_NOW)).toBe("");
+		expect(openerLabel([], null, FIXTURE_NOW, formatMessage)).toBe("");
 	});
 
 	test("tally words", () => {
@@ -753,7 +754,9 @@ describe("act plates", () => {
 				count: 6,
 			})
 		).toBe("+6: 1 limited, 2 working, 1 delivering, 2 idle");
-		expect(offStageLabel(6)).toBe("6 more agents. Open the queue");
+		expect(offStageLabel(6, formatMessage)).toBe(
+			"6 more agents. Open the queue"
+		);
 	});
 
 	test("meters read real progress and the queue plate's wait", () => {

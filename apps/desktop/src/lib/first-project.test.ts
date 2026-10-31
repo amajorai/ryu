@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	buildFirstProjectInput,
 	FIRST_PROJECT_NAME_MAX,
 	firstProjectError,
 } from "./first-project.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 const draft = {
 	about: "  Launch the new site  ",
@@ -14,15 +19,18 @@ const draft = {
 
 describe("first project", () => {
 	test("requires a non-blank name within the limit", () => {
-		expect(firstProjectError(draft)).toBeNull();
-		expect(firstProjectError({ ...draft, name: "   " })).toBe(
+		expect(firstProjectError(draft, tl)).toBeNull();
+		expect(firstProjectError({ ...draft, name: "   " }, tl)).toBe(
 			"Give your project a name."
 		);
 		expect(
-			firstProjectError({
-				...draft,
-				name: "x".repeat(FIRST_PROJECT_NAME_MAX + 1),
-			})
+			firstProjectError(
+				{
+					...draft,
+					name: "x".repeat(FIRST_PROJECT_NAME_MAX + 1),
+				},
+				tl
+			)
 		).toContain("under");
 	});
 

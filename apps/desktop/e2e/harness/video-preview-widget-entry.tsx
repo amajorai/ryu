@@ -6,21 +6,22 @@ import type {
 	Scene,
 } from "../../../../apps-store/video-studio/shared/project.ts";
 import { SceneContactSheet } from "../../../../apps-store/video-studio/ui/src/SceneContactSheet.tsx";
+
 interface PreviewProps {
 	assets: Asset[];
-	scenes: Scene[];
 	project: { width: number; height: number };
+	scenes: Scene[];
 }
 const context = Reflect.get(window.ryu ?? {}, "context") as {
 	fixtureNonce: string;
 	fixtureProps: PreviewProps;
 };
-if (!context?.fixtureNonce || !Array.isArray(context.fixtureProps.assets)) {
+if (!(context?.fixtureNonce && Array.isArray(context.fixtureProps.assets))) {
 	throw new Error("Missing controlled preview context.");
 }
 interface ReceivedCompletion {
-	path: string;
 	outcome: "accepted" | "refused";
+	path: string;
 }
 const receivedCompletions: ReceivedCompletion[] = [];
 let renderReceivedCompletions = () => {};

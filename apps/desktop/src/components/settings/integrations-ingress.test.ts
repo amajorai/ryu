@@ -18,6 +18,8 @@
 // whether the Save gate can strand a retry.
 
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { ApiError } from "@/src/lib/api/client.ts";
 import {
 	ingressErrorDescription,
@@ -26,6 +28,8 @@ import {
 	ingressUrlSavedToast,
 	offersOwnRelay,
 } from "./integrations-ingress.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const ALL_KINDS = [
 	"ryu-relay",
@@ -100,15 +104,15 @@ describe("ingressSelectedToast", () => {
 		// wrong. Levels are asserted across every kind so a reintroduced warning
 		// fails loudly.
 		for (const kind of ALL_KINDS) {
-			expect(ingressSelectedToast(kind, true, "").level).toBe("success");
-			expect(ingressSelectedToast(kind, true, "https://x.example").level).toBe(
-				"success"
-			);
+			expect(ingressSelectedToast(kind, true, "", tl).level).toBe("success");
+			expect(
+				ingressSelectedToast(kind, true, "https://x.example", tl).level
+			).toBe("success");
 		}
 	});
 
 	test("own-relay with an empty saved URL points at the out-of-app source", () => {
-		const toast = ingressSelectedToast("own-relay", true, "   ");
+		const toast = ingressSelectedToast("own-relay", true, "   ", tl);
 		expect(toast.level).toBe("success");
 		expect(toast.title).toBe("Ingress set to Self-hosted relay");
 		expect(toast.description).toContain("RYU_WEBHOOK_INGRESS_URL");
@@ -117,7 +121,7 @@ describe("ingressSelectedToast", () => {
 	});
 
 	test("an unresolved pref read falls through to the generic success", () => {
-		const toast = ingressSelectedToast("own-relay", false, "");
+		const toast = ingressSelectedToast("own-relay", false, "", tl);
 		expect(toast.description).toBe(
 			"Restart this node for the change to take effect."
 		);
@@ -125,14 +129,14 @@ describe("ingressSelectedToast", () => {
 
 	test("a saved URL gives the plain success, and other kinds never mention the env var", () => {
 		expect(
-			ingressSelectedToast("own-relay", true, "https://x.example")
+			ingressSelectedToast("own-relay", true, "https://x.example", tl)
 		).toEqual({
 			level: "success",
 			title: "Ingress set to Self-hosted relay",
 			description: "Restart this node for the change to take effect.",
 		});
 		expect(
-			ingressSelectedToast("ryu-relay", true, "").description
+			ingressSelectedToast("ryu-relay", true, "", tl).description
 		).not.toContain("RYU_WEBHOOK_INGRESS_URL");
 	});
 });
@@ -140,25 +144,25 @@ describe("ingressSelectedToast", () => {
 describe("ingressUrlSavedToast", () => {
 	test("saving a URL succeeds quietly regardless of the active backend", () => {
 		for (const kind of ALL_KINDS) {
-			const toast = ingressUrlSavedToast("https://ryu.example.com", kind);
+			const toast = ingressUrlSavedToast("https://ryu.example.com", kind, tl);
 			expect(toast.level).toBe("success");
 			expect(toast.title).toBe("Public URL saved");
 		}
 	});
 
 	test("clearing under a live own-relay backend still warns — nothing re-validates the pref", () => {
-		const toast = ingressUrlSavedToast("", "own-relay");
+		const toast = ingressUrlSavedToast("", "own-relay", tl);
 		expect(toast.level).toBe("warning");
 		expect(toast.description).toContain("active backend");
 	});
 
 	test("clearing under any other backend must not claim the relay broke", () => {
 		for (const kind of ["ryu-relay", "tailscale-funnel", "cloudflared"]) {
-			const toast = ingressUrlSavedToast("  ", kind);
+			const toast = ingressUrlSavedToast("  ", kind, tl);
 			expect(toast.level).toBe("success");
 			expect(toast.description).toContain("unaffected");
 		}
-		expect(ingressUrlSavedToast("", "ryu-relay").description).toContain(
+		expect(ingressUrlSavedToast("", "ryu-relay", tl).description).toContain(
 			"Ryu Relay (managed)"
 		);
 	});

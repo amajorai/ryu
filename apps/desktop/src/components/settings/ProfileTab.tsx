@@ -1,4 +1,5 @@
 import { MarketplaceWallpaperPickerDialog } from "@ryu/blocks/desktop/marketplace-wallpaper-picker.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { AvatarUploadCropper, settingsApi } from "@ryu/settings";
 import { getMarketplaceBackdrops } from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -26,6 +27,7 @@ import { useProfileBanner } from "./profile-tab/use-profile-banner.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
 export function ProfileTab() {
+	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
 	const { data: sessionData, refetch: refetchSession } = useSession();
 	const user = sessionData?.user;
@@ -140,7 +142,8 @@ export function ProfileTab() {
 	const savePersonalization = () => {
 		const warning = personalizationCacheWarning(
 			savedPersonalization,
-			personalization
+			personalization,
+			tl
 		);
 		if (warning) {
 			setPersonalizationConfirmation(warning);

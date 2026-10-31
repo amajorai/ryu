@@ -291,7 +291,7 @@ export function SshConnectionsSection() {
 									</div>
 								}
 								description={
-									<span className="type-caption flex min-w-0 flex-wrap gap-x-1.5 gap-y-0.5 font-mono">
+									<span className="flex min-w-0 flex-wrap gap-x-1.5 gap-y-0.5 font-mono text-xs">
 										<span>
 											{connection.username
 												? `${connection.username}@${connection.host}`

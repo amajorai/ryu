@@ -12,7 +12,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { ComposerEditor } from "@ryu/ui/components/editor/composer-editor.tsx";
+import { LazyComposerEditor } from "@ryu/ui/components/editor/composer-editor-lazy.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useMemo, useState } from "react";
 import { useComposerAgentControls } from "@/components/agent-elements/input/composer-agent-controls.tsx";
@@ -171,7 +171,7 @@ export function AgentSetupComposer({
 			data-testid="agent-setup-composer"
 		>
 			<div className="min-h-36 px-4 pt-3 pb-2">
-				<ComposerEditor
+				<LazyComposerEditor
 					disabled={disabled}
 					markdown={instructions}
 					onChange={onInstructionsChange}

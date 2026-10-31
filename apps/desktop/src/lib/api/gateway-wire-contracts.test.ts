@@ -1,10 +1,15 @@
 import { expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	parseGatewayUsageRollupResponse,
 	subscribeGatewayTraffic,
 } from "./gateway.ts";
 import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 import { gatewayTrafficEventSchema } from "./gateway-traffic-contracts.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 const usage = {
 	timestamp: "2026-10-06T00:00:00Z",
@@ -170,6 +175,7 @@ test("real traffic SSE drops a malformed frame and continues delivering validate
 			);
 			unsubscribe = subscribeGatewayTraffic(
 				{ url: `http://127.0.0.1:${server.port}`, token: "fixture" },
+				tl,
 				(event) => {
 					clearTimeout(timer);
 					resolve(event);
@@ -210,6 +216,7 @@ test("traffic SSE reports a permission refusal's HTTP status so callers can stop
 			);
 			unsubscribe = subscribeGatewayTraffic(
 				{ url: `http://127.0.0.1:${server.port}`, token: "fixture" },
+				tl,
 				() => {
 					clearTimeout(timer);
 					reject(new Error("a refused feed must not deliver events"));

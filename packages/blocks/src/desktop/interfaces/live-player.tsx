@@ -135,7 +135,7 @@ export function LivePlayer({
 }) {
 	const tl = useLiteralMessages();
 	const [paused, setPaused] = useState(false);
-	const spec = liveArt(thread, agent);
+	const spec = liveArt(thread, agent, tl);
 	const streaming = live && thread?.running === true;
 	const animate = streaming && !paused && !reduceMotion;
 	const message = thread?.lastMessage?.trim() ?? "";

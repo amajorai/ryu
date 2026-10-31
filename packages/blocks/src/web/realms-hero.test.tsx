@@ -71,9 +71,8 @@ test("homepage leads with a centered headline over the shader sky", () => {
 	expect(html).toContain('data-testid="product-card-bot"');
 	expect(html).not.toContain("bg-muted/30 text-foreground");
 	expect(html).toContain("max-w-7xl");
-	expect(html).toContain(
-		"bg-gradient-to-t from-muted via-muted/85 to-transparent"
-	);
+	// No fade over the cards' labels: the figures stop above them.
+	expect(html).not.toContain("from-muted via-muted/85");
 	expect(html).toContain("after:border-foreground/55");
 	expect(html).not.toContain("blur-[0.5px]");
 	expect(html).not.toContain('role="tab"');
@@ -97,7 +96,12 @@ test("homepage leads with a centered headline over the shader sky", () => {
 	const productStart = html.indexOf('data-testid="product-paths"');
 	const productEnd = html.indexOf("</section>", productStart);
 	const productMarkup = html.slice(productStart, productEnd);
-	expect(productMarkup).not.toContain("<h2");
+	// One heading per card group, in priority order; the cards carry no headings.
+	expect(
+		[...productMarkup.matchAll(/<h2[^>]*>(?:<[^>]+>)*([^<]+)/g)].map(
+			([, title]) => title
+		)
+	).toEqual(["Get started", "Build", "Platform"]);
 	expect(productMarkup).not.toContain("<h3");
 });
 
@@ -134,17 +138,17 @@ test("the startup-program marquee server-renders one row of links", () => {
 const cardIds = (html: string) =>
 	[...html.matchAll(/data-testid="product-card-([^"]+)"/g)].map(([, id]) => id);
 
-test("homepage cards list every released product, launch products first", () => {
+test("homepage cards list every released product in priority order", () => {
 	// The public read's defaults: closed services and unlaunched products.
 	const hiddenProductIds = hiddenProductListings(null);
 	const html = renderToStaticMarkup(
 		<RealmsHero hiddenProductIds={hiddenProductIds} />
 	);
 	const released = [
-		"gateway",
-		"console",
 		"bot",
 		"desktop",
+		"console",
+		"gateway",
 		"agents",
 		"skills",
 		"marketplace",
@@ -164,7 +168,7 @@ test("homepage cards list every released product, launch products first", () => 
 		expect(
 			html.match(new RegExp(`data-testid="realm-card-${id}"`, "g"))
 		).toHaveLength(1);
-		// Every card draws its own minimal scene.
+		// Every card draws its product's figure (or, without one, its own scene).
 		expect(html).toContain(`data-testid="realm-visual-${id}"`);
 	}
 	// Pre-release realms stay on /products.
@@ -219,19 +223,27 @@ test("the hero carries no sample workspace or embedded demo", () => {
 	expect(html).toContain("py-20");
 });
 
-test("homepage card rows fill the wide grid without a ragged last row", () => {
+test("each homepage card group is an uneven bento that fills the wide grid", () => {
 	const html = renderToStaticMarkup(
 		<RealmsHero hiddenProductIds={hiddenProductListings(null)} />
 	);
-	const spans = [
+	const cards = [
 		...html.matchAll(
-			/<article class="[^"]*(xl:col-span-\d+)[^"]*" data-testid="product-card-/g
+			/<article class="[^"]*?(xl:col-span-\d+)(?: (xl:row-span-2))?[^"]*" data-card-size="(\w+)"/g
 		),
-	].map(([, span]) => span);
-	// Three launch cards in thirds, then seven cards as rows of four and three.
-	expect(spans).toEqual([
-		...Array.from({ length: 3 }, () => "xl:col-span-4"),
-		...Array.from({ length: 4 }, () => "xl:col-span-3"),
-		...Array.from({ length: 3 }, () => "xl:col-span-4"),
+	].map(([, col, row, size]) => [size, col, row ?? ""]);
+	// Get started: a big card beside a wide one over two small ones. Build: two
+	// tall cards around two stacked singles. Platform: an uneven pair.
+	expect(cards).toEqual([
+		["big", "xl:col-span-6", "xl:row-span-2"],
+		["wide", "xl:col-span-6", ""],
+		["small", "xl:col-span-3", ""],
+		["small", "xl:col-span-3", ""],
+		["tall", "xl:col-span-4", "xl:row-span-2"],
+		["single", "xl:col-span-4", ""],
+		["tall", "xl:col-span-4", "xl:row-span-2"],
+		["single", "xl:col-span-4", ""],
+		["single", "xl:col-span-7", ""],
+		["single", "xl:col-span-5", ""],
 	]);
 });

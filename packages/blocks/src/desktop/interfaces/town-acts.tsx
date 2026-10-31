@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type ClockOptions,
 	type InterfaceAgentAct,
@@ -223,6 +224,16 @@ export type TownActEntry =
 			text: string;
 	  };
 
+/** The run cue for a long run, with its elapsed time when known. */
+function longerThanUsual(
+	elapsed: string | null | undefined,
+	tl: LiteralMessage
+): string {
+	return elapsed
+		? tl("Longer than usual · {elapsed}", { elapsed })
+		: tl("Longer than usual");
+}
+
 /**
  * Every act prop and where it stands: per building (one alarm per counted
  * blocker, dim older ones, unread answers, suggestions) and at City Hall
@@ -238,6 +249,7 @@ export function townActEntries({
 	shown,
 	slots,
 	snapshot,
+	tl,
 	town,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
@@ -252,6 +264,7 @@ export function townActEntries({
 	shown: ReadonlySet<string>;
 	slots: readonly YouSpotSlot[];
 	snapshot: InterfaceSnapshot;
+	tl: LiteralMessage;
 	town: Town;
 }): TownActEntry[] {
 	const entries: TownActEntry[] = [];
@@ -298,7 +311,7 @@ export function townActEntries({
 			{
 				id: `limit:${id}`,
 				overlay: "limit",
-				text: limitWords(act, { clock, limitText: townLimitText, nowMs }),
+				text: limitWords(act, { clock, limitText: townLimitText(tl), nowMs }),
 			},
 			{
 				id: `progress:${id}`,
@@ -313,7 +326,7 @@ export function townActEntries({
 				text: act.stalled
 					? "stalled?"
 					: act.longerThanUsual
-						? `Longer than usual${act.elapsed ? ` · ${act.elapsed}` : ""}`
+						? longerThanUsual(act.elapsed, tl)
 						: null,
 			},
 		];

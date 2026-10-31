@@ -40,7 +40,6 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		tagline: "Link your Gmail, Slack, and other accounts to any Ryu agent.",
 		Icon: Cable,
 		hero: {
-			eyebrow: "Connections",
 			title: "Connect the apps your team uses",
 			// gateway.md N1, N9; Connect FAQ.
 			subtitle:
@@ -106,7 +105,6 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		tagline: "The Ryu runtime in your terminal: chat, runs, and servers.",
 		Icon: TerminalIcon,
 		hero: {
-			eyebrow: "Ryu CLI",
 			title: "Use Ryu from your terminal",
 			subtitle: "Chat, run agents, and manage servers from the command line.",
 			primaryCta: readTheDocs("/docs/surfaces/cli/getting-started"),
@@ -168,7 +166,6 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		tagline: "Define agents, workflows, tools, and skills in code.",
 		Icon: Blocks,
 		hero: {
-			eyebrow: "Ryu SDK",
 			title: "Build agents with the Ryu SDK",
 			subtitle: "Define agents, workflows, tools, and skills in TypeScript.",
 			primaryCta: readTheDocs("/docs/extend/develop/sdk"),
@@ -219,7 +216,6 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		tagline: "Hand off a task to managed AI, with nothing to set up.",
 		Icon: Bot,
 		hero: {
-			eyebrow: "Bot",
 			title: "Get work done with managed AI",
 			subtitle: "Hand off a task to managed AI with nothing to set up.",
 			primaryCta: DOWNLOAD,
@@ -277,7 +273,6 @@ export const CONNECTIONS_TO_OS: Product[] = [
 			"Run Ryu with the models, tools, permissions, and records you choose.",
 		Icon: Settings2,
 		hero: {
-			eyebrow: "Agent",
 			title: "Run your agents your way",
 			subtitle:
 				"Set the models, tools, and approvals your team uses, and review past runs.",
@@ -338,7 +333,6 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		tagline: "A desktop workspace for agents, apps, and windows.",
 		Icon: Monitor,
 		hero: {
-			eyebrow: "OS · Early access",
 			title: "Work across your Ryu apps",
 			subtitle: "Open apps from the dock and keep each task in its own window.",
 			primaryCta: EARLY_ACCESS,

@@ -1,6 +1,7 @@
 "use client";
 
 import { PlaceholderPlugin } from "@platejs/media/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -91,6 +92,7 @@ export function MediaToolbarButton({
 }: ComponentProps<typeof DropdownMenu> & { nodeType: string }) {
 	const currentConfig = MEDIA_CONFIG[nodeType] ?? MEDIA_CONFIG[KEYS.file]!;
 
+	const tl = useLiteralMessages();
 	const editor = useEditorRef();
 	const [open, setOpen] = useState(false);
 	const [dialogOpen, setDialogOpen] = useState(false);
@@ -137,7 +139,7 @@ export function MediaToolbarButton({
 						<DropdownMenuGroup>
 							<DropdownMenuItem onClick={() => openFilePicker()}>
 								{currentConfig.icon}
-								Upload from computer
+								{tl("Upload from computer")}
 							</DropdownMenuItem>
 							<DropdownMenuItem onClick={() => setDialogOpen(true)}>
 								<LinkIcon />

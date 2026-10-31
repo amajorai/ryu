@@ -2,12 +2,13 @@
 // decision a new user makes (cloud / local / existing node), rendered straight
 // from `@ryu/blocks/desktop/onboarding` with mock handlers.
 //
-// WHY IT NEEDS A BROWSER. The three runtime choices are tall, equal cards in a
-// lobby-style row. That layout only exists once the real Tailwind utilities
-// resolve, and the cards are borderless `bg-muted` tiles — a fill that is 3% off
-// the page background in light theme and 12% in dark. Whether they read as cards
-// at all is a fact about resolved colour in each scheme, so both themes render
-// side by side.
+// WHY IT NEEDS A BROWSER. The three runtime choices are equal, bordered cards
+// whose grid is a container query: one row once the step's column is 42rem
+// wide, stacked below that. That layout only exists once the real Tailwind
+// utilities resolve, so the half-width theme columns here exercise the stacked
+// form and `?choose-only&single` (one full-width column) the row. Both themes
+// render side by side because the card border is a fact about resolved colour
+// in each scheme.
 //
 // The local card is also the one that carries live install progress, so the
 // progress columns pin the component milestones emitted by the public installer

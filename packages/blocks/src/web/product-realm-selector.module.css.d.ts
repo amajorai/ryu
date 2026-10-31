@@ -1,6 +1,6 @@
 declare const styles: {
 	readonly explore: string;
 	readonly card: string;
-	readonly scrim: string;
+	readonly figure: string;
 };
 export default styles;

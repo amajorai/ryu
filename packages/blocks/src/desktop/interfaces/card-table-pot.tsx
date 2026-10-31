@@ -191,7 +191,7 @@ export function TablePot({
 						<span className="text-muted-foreground">Next deal</span>{" "}
 						{next.title}{" "}
 						<span className="text-muted-foreground tabular-nums">
-							{untilLabel(next.start, now)}
+							{untilLabel(next.start, now, tl)}
 						</span>
 					</span>
 				</p>

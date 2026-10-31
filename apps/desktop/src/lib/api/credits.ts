@@ -413,7 +413,6 @@ export async function createTopup(input: TopupInput): Promise<TopupResult> {
 // Polar customer returns 409 ("make a manual top-up first"), and with the
 // product unconfigured returns 503 — both surfaced as tailored messages.
 
-
 /** Coerce the server's `{ settings }` envelope into a typed view (or null). */
 /** Fetch the active org's auto-recharge settings, or null when unset. */
 export async function fetchAutoTopup(): Promise<AutoTopupSettings | null> {
@@ -460,7 +459,6 @@ export async function putAutoTopup(
 // Email the org's owners (or owners+admins) when the managed wallet balance
 // drops below a threshold. `recipients: "none"` is the OFF state. Independent of
 // auto-recharge: no saved card required, and the threshold is its own line.
-
 
 /** Coerce the server's `{ settings }` envelope into a typed view (or null). */
 /** Fetch the active org's low-balance alert settings, or null when unset. */

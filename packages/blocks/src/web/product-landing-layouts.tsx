@@ -17,13 +17,11 @@ import {
 function ProductStageHero({
 	actions,
 	background,
-	eyebrow,
 	subtitle,
 	title,
 }: {
 	actions: ReactNode;
 	background: ReactNode;
-	eyebrow: string;
 	subtitle: string;
 	title: string;
 }) {
@@ -39,9 +37,6 @@ function ProductStageHero({
 			/>
 			<StageFade />
 			<div className="pointer-events-none relative z-[2] mx-auto flex w-full max-w-4xl flex-1 flex-col items-center justify-center px-6 pt-28 pb-20 text-center [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
-				<p className="mb-4 font-medium text-muted-foreground text-sm">
-					{eyebrow}
-				</p>
 				<h1 className={landingHeadlineClass}>{title}</h1>
 				<p className={`${landingSubheadlineClass} mx-auto`}>{subtitle}</p>
 				<div className={`mt-10 ${landingCtaRowClass} sm:justify-center`}>
@@ -55,7 +50,6 @@ function ProductStageHero({
 export function ProductHeroFrame({
 	actions,
 	background,
-	eyebrow,
 	subtitle,
 	title,
 	visual,
@@ -63,7 +57,6 @@ export function ProductHeroFrame({
 	actions: ReactNode;
 	/** An animated backdrop: the hero becomes a full-viewport stage without the visual. */
 	background?: ReactNode;
-	eyebrow: string;
 	subtitle: string;
 	title: string;
 	/** Optional: without a visual the hero is a single text column. */
@@ -74,7 +67,6 @@ export function ProductHeroFrame({
 			<ProductStageHero
 				actions={actions}
 				background={background}
-				eyebrow={eyebrow}
 				subtitle={subtitle}
 				title={title}
 			/>
@@ -101,9 +93,6 @@ export function ProductHeroFrame({
 							: "mx-auto min-w-0 max-w-3xl text-center"
 					}
 				>
-					<p className="mb-4 font-medium text-muted-foreground text-sm">
-						{eyebrow}
-					</p>
 					<h1 className={landingHeadlineClass}>{title}</h1>
 					<p
 						className={

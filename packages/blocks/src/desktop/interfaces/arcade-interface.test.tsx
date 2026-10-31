@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -386,9 +387,11 @@ describe("arcade model", () => {
 		}
 		expect(site).toMatchObject({ jackpots: 1, machines: 2, running: 1 });
 		expect(docs).toMatchObject({ jackpots: 0, machines: 1, running: 0 });
-		expect(wallCabinetLabel(site, false)).toBe(
-			"Show project Website: 2 machines, 1 waiting on you, 1 running"
-		);
+		expect(
+			wallCabinetLabel(site, false, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("Show project Website: 2 machines, 1 waiting on you, 1 running");
 		// An unknown group shows the whole floor.
 		expect(buildFloor(SNAPSHOT, "nope").filter).toBeNull();
 	});

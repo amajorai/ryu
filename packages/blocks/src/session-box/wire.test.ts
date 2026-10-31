@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
 import {
 	COST_NOTICE_REQUIRED_CODE,
 	costNoticeHeading,
@@ -112,24 +113,28 @@ test("hourly rates read as dollars and the notice names the cost", () => {
 	expect(formatHourlyRate(40_000)).toBe("$0.04");
 	expect(formatHourlyRate(70_000)).toBe("$0.07");
 	expect(formatHourlyRate(1_500_000)).toBe("$1.50");
+	const tl = (
+		source: string,
+		values?: Parameters<typeof formatMessage>[1]
+	): string => formatMessage(source, values);
 	const small = {
 		minimumSecondsPerStart: 300,
 		ratePerHourMicroUsd: 25_000,
 		size: "small" as const,
 		waiting: false,
 	};
-	expect(costNoticeText(small)).toContain("small: 2 vCPU, 4 GB");
-	expect(costNoticeText(small)).toContain("$0.025 an hour");
-	expect(costNoticeText(small)).toContain(
+	expect(costNoticeText(small, tl)).toContain("small: 2 vCPU, 4 GB");
+	expect(costNoticeText(small, tl)).toContain("$0.025 an hour");
+	expect(costNoticeText(small, tl)).toContain(
 		"5-minute minimum each time the Box starts; a resume within the hour already paid owes no new minimum"
 	);
-	expect(costNoticeHeading(small)).toBe(
+	expect(costNoticeHeading(small, tl)).toBe(
 		"Computer use starts a cloud Box at $0.025/hour, 5-minute minimum per start"
 	);
 	expect(
-		costNoticeText({ ...small, ratePerHourMicroUsd: null, size: null })
+		costNoticeText({ ...small, ratePerHourMicroUsd: null, size: null }, tl)
 	).toContain("could not read its hourly rate");
-	expect(costNoticeHeading({ ...small, ratePerHourMicroUsd: null })).toBe(
+	expect(costNoticeHeading({ ...small, ratePerHourMicroUsd: null }, tl)).toBe(
 		"Computer use starts a paid cloud Box"
 	);
 	expect(minimumStartWords(90)).toBe("90-second");

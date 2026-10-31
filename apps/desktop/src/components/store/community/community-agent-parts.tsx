@@ -1,6 +1,6 @@
 import { Download01Icon, ShoppingCart01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { AGENT_IDENTITY_MODE_OPTIONS } from "@/src/components/agents/AgentIdentityModePicker.tsx";
 import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
@@ -14,16 +14,25 @@ import {
  * mode the agent arrives with; `null` (a listing that does not report one) gets
  * the sentence that holds for every mode.
  */
-export function communityAgentNotice(mode: AgentIdentityMode | null): string {
-	const lead =
-		"Written by another user, not by Ryu. Adding this Agent Template copies its instructions, model preference and Identity setting into a new agent of your own. It gets none of your credentials, Spaces or Composio actions.";
+export function communityAgentNotice(
+	tl: LiteralMessage,
+	mode: AgentIdentityMode | null
+): string {
+	const lead = tl(
+		"Written by another user, not by Ryu. Adding this Agent Template copies its instructions, model preference and Identity setting into a new agent of your own. It gets none of your credentials, Spaces or Composio actions."
+	);
 	if (mode === "individual") {
-		return `${lead} Set to Its own identity, it works with accounts of its own and never uses yours.`;
+		return `${lead} ${tl("Set to Its own identity, it works with accounts of its own and never uses yours.")}`;
 	}
-	const limit =
-		"You can limit which of your accounts it may use under Account access after adding it.";
+	const limit = tl(
+		"You can limit which of your accounts it may use under Account access after adding it."
+	);
 	if (mode === "managed" || mode === "mixed") {
-		return `${lead} Set to ${AGENT_IDENTITY_MODE_OPTIONS[mode].title}, it can use your connected accounts like an agent you create. ${limit}`;
+		const accountSentence = tl(
+			"Set to {title}, it can use your connected accounts like an agent you create.",
+			{ title: AGENT_IDENTITY_MODE_OPTIONS[mode].title }
+		);
+		return `${lead} ${accountSentence} ${limit}`;
 	}
 	return `${lead} ${limit}`;
 }

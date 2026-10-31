@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
 import type { UIMessage } from "ai";
 import {
 	clearUnreadMessageState,
@@ -26,7 +27,11 @@ describe("message-list unread state", () => {
 				message("user-2", "user"),
 			])
 		).toEqual(["assistant-1"]);
-		expect(getUnreadMessageLabel(3)).toBe("3 new messages");
+		expect(
+			getUnreadMessageLabel(3, (source, values) =>
+				formatMessage(source, values)
+			)
+		).toBe("3 new messages");
 	});
 
 	it("counts a streamed assistant message once, not once per text update", () => {

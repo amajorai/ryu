@@ -1,20 +1,21 @@
+// Shipping ChatPage/useChat/AnswerNowButton and SDK, with finite native Core wire.
+// The fixture completes its owned SSE response; no external model provider runs.
+import {
+	type APIRequestContext,
+	expect,
+	type Page,
+	test,
+} from "@playwright/test";
 import {
 	assertNativeWindowLifetime,
 	persistNativeLifetimeDiagnostics,
 } from "./chat-page-native-http-lifetime.ts";
-// Shipping ChatPage/useChat/AnswerNowButton and SDK, with finite native Core wire.
-// The fixture completes its owned SSE response; no external model provider runs.
 import {
-	expect,
-	test,
-	type Page,
-	type APIRequestContext,
-} from "@playwright/test";
-import {
-	chatPageControl,
-	chatPageState,
 	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
+	chatPageControl,
+	type chatPageState,
 } from "./chat-page-native-http-support.ts";
+
 const conversation = "conversation-toolbar-share-fixture";
 const turn = "chat-page-owned-reasoning-turn";
 const controlPath = "/api/chat/control";
@@ -50,14 +51,15 @@ async function begin(page: Page, request: APIRequestContext, native = true) {
 	failedStreams.set(page, failures);
 	page.on("pageerror", (e) => pageErrors.push(e.message));
 	page.on("requestfailed", (req) => {
-		if (req.url() === "http://127.0.0.1:5591/api/chat/stream")
+		if (req.url() === "http://127.0.0.1:5591/api/chat/stream") {
 			failures.push(req.failure()?.errorText ?? "unknown stream failure");
+		}
 	});
 	await page.goto("/chat-page-native-http.html?scenario=share");
 	await expect(
 		page.getByText("The organization copy is ready for review.", {
 			exact: true,
-		}),
+		})
 	).toBeVisible();
 	await chatPageControl(request, {
 		action: native ? "arm_reasoning_chat" : "arm_live_chat",
@@ -68,21 +70,22 @@ async function begin(page: Page, request: APIRequestContext, native = true) {
 		.getByPlaceholder("Ask a follow up")
 		.fill("Finish the native reasoning without stopping this turn.");
 	await page.getByRole("button", { name: "Send", exact: true }).click();
-	if (native)
+	if (native) {
 		await expect(
-			page.getByRole("button", { name: "Answer now", exact: true }),
+			page.getByRole("button", { name: "Answer now", exact: true })
 		).toBeVisible();
-	else
+	} else {
 		await expect(
-			page.getByText("Owned live response in progress.", { exact: true }),
+			page.getByText("Owned live response in progress.", { exact: true })
 		).toBeVisible();
+	}
 	await expect
 		.poll(async () => (await state(request)).liveChats.length)
 		.toBe(1);
 }
 function assertControls(
 	calls: Awaited<ReturnType<typeof chatPageState>>["calls"],
-	count: number,
+	count: number
 ) {
 	const controls = calls.filter((c) => c.path === controlPath);
 	expect(controls).toHaveLength(count);
@@ -96,7 +99,7 @@ function assertControls(
 	}
 	expect(calls.filter((c) => c.path === "/api/chat/cancel")).toEqual([]);
 	expect(
-		calls.filter((c) => c.path === "/api/chat/stream" && c.method === "POST"),
+		calls.filter((c) => c.path === "/api/chat/stream" && c.method === "POST")
 	).toHaveLength(1);
 }
 async function finish(page: Page, request: APIRequestContext) {
@@ -106,16 +109,16 @@ async function finish(page: Page, request: APIRequestContext) {
 			node: "a",
 			conversationId: conversation,
 			turnId: turn,
-		}),
+		})
 	).toEqual({ finished: true });
 	await expect(
-		page.getByText("Owned native answer continued.", { exact: true }),
+		page.getByText("Owned native answer continued.", { exact: true })
 	).toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "Answer now", exact: true }),
+		page.getByRole("button", { name: "Answer now", exact: true })
 	).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Finishing answer", exact: true }),
+		page.getByRole("button", { name: "Finishing answer", exact: true })
 	).toHaveCount(0);
 	const snapshot = await state(request);
 	expect(snapshot.liveChats[0]).toMatchObject({
@@ -152,7 +155,7 @@ test.afterEach(async ({ page, request }, testInfo) => {
 		expect.soft(errors.get(page) ?? []).toEqual([]);
 		expect.soft(failedStreams.get(page) ?? []).toEqual([]);
 		await page.evaluate(() =>
-			Reflect.get(window, "__chatPageNativeFixture")?.unmount(),
+			Reflect.get(window, "__chatPageNativeFixture")?.unmount()
 		);
 		await assertNativeWindowLifetime(page);
 	} finally {
@@ -175,7 +178,7 @@ test("Answer now remains pending until the real Core acknowledgment, then the sa
 	});
 	await page.getByRole("button", { name: "Answer now", exact: true }).click();
 	await expect(
-		page.getByRole("button", { name: "Finishing answer", exact: true }),
+		page.getByRole("button", { name: "Finishing answer", exact: true })
 	).toBeDisabled();
 	await expect
 		.poll(async () => (await state(request)).heldRequestIds.length)
@@ -193,13 +196,13 @@ test("Answer now remains pending until the real Core acknowledgment, then the sa
 			action: "release",
 			requestId: pending.heldRequestIds[0],
 			accept: true,
-		}),
+		})
 	).toEqual({ ok: true });
 	await expect
 		.poll(async () => (await state(request)).liveChats[0]?.answerNowAccepted)
 		.toBe(true);
 	await expect(
-		page.getByRole("button", { name: "Finishing answer", exact: true }),
+		page.getByRole("button", { name: "Finishing answer", exact: true })
 	).toBeDisabled();
 	await finish(page, request);
 	assertControls((await state(request)).calls, 1);
@@ -219,10 +222,10 @@ test("provider refusal is visible and keeps reasoning alive; identical real Answ
 	});
 	await page.getByRole("button", { name: "Answer now", exact: true }).click();
 	await expect(
-		page.getByText("Could not ask this turn to answer now.", { exact: true }),
+		page.getByText("Could not ask this turn to answer now.", { exact: true })
 	).toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "Answer now", exact: true }),
+		page.getByRole("button", { name: "Answer now", exact: true })
 	).toBeEnabled();
 	const refused = await state(request);
 	assertControls(refused.calls, 1);
@@ -249,7 +252,7 @@ test("a genuinely streaming unsupported route never offers native Answer now or 
 }) => {
 	await begin(page, request, false);
 	await expect(
-		page.getByRole("button", { name: "Answer now", exact: true }),
+		page.getByRole("button", { name: "Answer now", exact: true })
 	).toHaveCount(0);
 	const snapshot = await state(request);
 	assertControls(snapshot.calls, 0);

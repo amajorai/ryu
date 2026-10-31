@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
@@ -322,6 +323,7 @@ export function UpcomingList({
 	now: number;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
 	if (!events) {
 		return <WidgetEmpty>This host has no scheduled routines.</WidgetEmpty>;
 	}
@@ -357,7 +359,7 @@ export function UpcomingList({
 									dateTime={event.start}
 									title={when}
 								>
-									{untilLabel(event.start, now)}
+									{untilLabel(event.start, now, tl)}
 								</time>
 							</span>
 							<span className="truncate text-[13px] text-muted-foreground leading-[18px]">

@@ -11,7 +11,7 @@ import {
 } from "@ryu/ui/components/tooltip.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { DiffFilePreviewPopover } from "@/src/components/diffs/RichPatchDiff.tsx";
+import { DiffFilePreviewPopover } from "@/src/components/diffs/DiffFilePreviewPopover.tsx";
 import type { FileSummary } from "@/src/lib/api/git.ts";
 
 // ── Per-file summary row ──────────────────────────────────────────────────────

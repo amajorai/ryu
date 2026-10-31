@@ -27,17 +27,17 @@ import {
 import { initDialogOverlayBlur } from "@ryu/ui/hooks/use-dialog-overlay-blur";
 import { initPopupOverlayBlur } from "@ryu/ui/hooks/use-popup-overlay-blur";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { UIMessage } from "ai";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import type { UIMessage } from "ai";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
+import { ModelPicker } from "../../components/agent-elements/input/model-picker.tsx";
 import {
 	InputBar,
 	type InputBarProps,
 } from "../../components/agent-elements/input-bar.tsx";
-import { ModelPicker } from "../../components/agent-elements/input/model-picker.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
 import { AnimatedTitle } from "../../src/components/layout/animated-title.tsx";
 import { SidebarConversationPreview } from "../../src/components/layout/sidebar-conversation-preview.tsx";
@@ -96,7 +96,7 @@ function Consumers() {
 					<p data-testid="consumer-text">Readable interface text</p>
 					<pre data-testid="consumer-code">const result = 42;</pre>
 					<Button data-testid="consumer-button">Enabled action</Button>
-					<Button disabled data-testid="consumer-disabled-button">
+					<Button data-testid="consumer-disabled-button" disabled>
 						Disabled action
 					</Button>
 				</CardContent>
@@ -106,8 +106,8 @@ function Consumers() {
 					{ id: "gemma-id", name: "gemma-4-12B-it-Q4_K_M" },
 					{ id: "opus-id", name: "Opus" },
 				]}
-				value={model}
 				onChange={setModel}
+				value={model}
 			/>
 			<output data-testid="selected-model">{model}</output>
 			<Popover>
@@ -134,19 +134,19 @@ function Consumers() {
 						setTitle((t) =>
 							t === "First conversation"
 								? "Updated conversation"
-								: "First conversation",
+								: "First conversation"
 						)
 					}
 				>
 					Change consumer title
 				</Button>
 				<div
-					data-testid="consumer-chat"
 					className="flex h-[460px] min-h-0 flex-col"
+					data-testid="consumer-chat"
 				>
 					<AgentChat
-						slots={{ InputBar: ExpandableInputBar }}
 						classNames={{ inputBar: "consumer-composer" }}
+						currentUser={{ id: "appearance-user", name: "You" }}
 						messages={
 							[
 								{
@@ -156,9 +156,9 @@ function Consumers() {
 								},
 							] as UIMessage[]
 						}
-						status={streaming ? "streaming" : "ready"}
 						onSend={() => {}}
-						currentUser={{ id: "appearance-user", name: "You" }}
+						slots={{ InputBar: ExpandableInputBar }}
+						status={streaming ? "streaming" : "ready"}
 					/>
 				</div>
 				<Button
@@ -193,7 +193,7 @@ createRoot(document.getElementById("root")!).render(
 					defaultTheme="dark"
 					enableSystem={false}
 				>
-					<main className="h-dvh overflow-y-auto bg-background text-foreground p-8">
+					<main className="h-dvh overflow-y-auto bg-background p-8 text-foreground">
 						<Consumers />
 						<section data-testid="settings">
 							<AppearanceTab />
@@ -202,5 +202,5 @@ createRoot(document.getElementById("root")!).render(
 				</ThemeProvider>
 			</AppSurfaceProvider>
 		</QueryClientProvider>
-	</MemoryRouter>,
+	</MemoryRouter>
 );

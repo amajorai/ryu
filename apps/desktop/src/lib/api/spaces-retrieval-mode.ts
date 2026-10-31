@@ -23,11 +23,6 @@ export interface RetrievalModeProgress {
 	totalChunks: number;
 }
 
-/** `1 entity` / `2 entities`, without pulling in an i18n dependency. */
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
 /**
  * Plain-language summary of what a retrieval-mode switch did, for display next to
  * the control that caused it.
@@ -39,29 +34,30 @@ function plural(count: number, one: string, many: string): string {
  */
 export function describeRetrievalModeChange(
 	change: RetrievalModeChange,
-	tl?: LiteralMessage
+	tl: LiteralMessage
 ): string {
 	if (!change.graphRebuilt) {
-		return "Vector retrieval is on. The entity graph was discarded — switching back to Graph rebuilds it. Nothing was re-embedded.";
-	}
-	if (change.chunksScanned === 0) {
-		return "Graph retrieval is on. This space has no documents yet, so there was nothing to map — documents will be mapped as you add them.";
-	}
-	if (tl) {
-		// Counts go in preformatted: `#` would add digit grouping the English never had.
 		return tl(
-			"Graph retrieval is on. Mapped {nodes, plural, one {{nodesText} entity} other {{nodesText} entities}} and {edges, plural, one {{edgesText} connection} other {{edgesText} connections}} across {chunks, plural, one {{chunksText} chunk} other {{chunksText} chunks}} already in this space. Nothing was re-embedded.",
-			{
-				nodes: change.graphNodes,
-				nodesText: String(change.graphNodes),
-				edges: change.graphEdges,
-				edgesText: String(change.graphEdges),
-				chunks: change.chunksScanned,
-				chunksText: String(change.chunksScanned),
-			}
+			"Vector retrieval is on. The entity graph was discarded — switching back to Graph rebuilds it. Nothing was re-embedded."
 		);
 	}
-	return `Graph retrieval is on. Mapped ${plural(change.graphNodes, "entity", "entities")} and ${plural(change.graphEdges, "connection", "connections")} across ${plural(change.chunksScanned, "chunk", "chunks")} already in this space. Nothing was re-embedded.`;
+	if (change.chunksScanned === 0) {
+		return tl(
+			"Graph retrieval is on. This space has no documents yet, so there was nothing to map — documents will be mapped as you add them."
+		);
+	}
+	// Counts go in preformatted: `#` would add digit grouping the English never had.
+	return tl(
+		"Graph retrieval is on. Mapped {nodes, plural, one {{nodesText} entity} other {{nodesText} entities}} and {edges, plural, one {{edgesText} connection} other {{edgesText} connections}} across {chunks, plural, one {{chunksText} chunk} other {{chunksText} chunks}} already in this space. Nothing was re-embedded.",
+		{
+			nodes: change.graphNodes,
+			nodesText: String(change.graphNodes),
+			edges: change.graphEdges,
+			edgesText: String(change.graphEdges),
+			chunks: change.chunksScanned,
+			chunksText: String(change.chunksScanned),
+		}
+	);
 }
 
 interface RetrievalModeChangeWire {

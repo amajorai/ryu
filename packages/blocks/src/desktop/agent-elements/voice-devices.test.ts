@@ -1,4 +1,5 @@
 import { requireTestValue } from "../test-required.ts";
+
 /** Complete local navigator fixture carrier for these stop-only lifecycle
  * probes. It is deliberately not claimed to be a native MediaStream or a full
  * MediaDevices implementation; the production native SDK owner is unchanged. */

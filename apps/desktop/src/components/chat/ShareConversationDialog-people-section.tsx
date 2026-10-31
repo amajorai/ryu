@@ -15,13 +15,16 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
-import type { StoredAccount } from "@/lib/auth-client.ts";
 import type {
 	ConversationAccess,
 	ConversationAccessRole,
 	PrincipalDirectory,
 } from "@/src/lib/api/conversation-sharing.ts";
-import { initials, isAccessRole } from "./ShareConversationDialog-access.ts";
+import {
+	initials,
+	isAccessRole,
+	type ShareOwner,
+} from "./ShareConversationDialog-access.ts";
 
 type DirectoryMember = PrincipalDirectory["members"][number];
 
@@ -45,7 +48,7 @@ export function ShareConversationPeopleSection({
 	availableMembers: DirectoryMember[];
 	canManage: boolean;
 	memberById: Map<string, DirectoryMember>;
-	owner: StoredAccount | null;
+	owner: ShareOwner | null;
 	ownerEmail: string;
 	ownerIsCurrentUser: boolean;
 	ownerName: string;

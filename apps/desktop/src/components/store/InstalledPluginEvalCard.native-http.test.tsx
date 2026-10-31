@@ -8,6 +8,7 @@ import type {
 	PluginEvalOverview,
 	PluginEvalRunResult,
 } from "@/src/lib/api/plugins.ts";
+
 const NativeResponse = globalThis.Response;
 const nativeFetch = globalThis.fetch;
 GlobalRegistrator.register();
@@ -122,16 +123,14 @@ const server: ReturnType<typeof Bun.serve> = Bun.serve({
 		calls.push({ owner: scope, method: request.method, path, body });
 		if (
 			!(
-				request.method === "GET" &&
-				path === "/api/plugins/evals" &&
-				[appId, otherAppId].includes(url.searchParams.get("id") ?? "")
-			) &&
-			!(
-				request.method === "POST" &&
-				path === "/api/plugins/evals/run" &&
-				[appId, otherAppId].some(
-					(id) => JSON.stringify(body) === JSON.stringify({ id })
-				)
+				(request.method === "GET" &&
+					path === "/api/plugins/evals" &&
+					[appId, otherAppId].includes(url.searchParams.get("id") ?? "")) ||
+				(request.method === "POST" &&
+					path === "/api/plugins/evals/run" &&
+					[appId, otherAppId].some(
+						(id) => JSON.stringify(body) === JSON.stringify({ id })
+					))
 			)
 		) {
 			unexpected.push(`${request.method} ${url.href} ${JSON.stringify(body)}`);
@@ -142,17 +141,21 @@ const server: ReturnType<typeof Bun.serve> = Bun.serve({
 		}
 		const key = `${scope}:${request.method}`;
 		const gate = held.get(key);
-		if (gate) await gate.promise;
+		if (gate) {
+			await gate.promise;
+		}
 		const refusal = refusals.get(key);
-		if (refusal)
+		if (refusal) {
 			return NativeResponse.json(
 				{ error: { message: "Owned eval run refused" } },
 				{ status: refusal }
 			);
-		if (request.method === "GET")
+		}
+		if (request.method === "GET") {
 			return NativeResponse.json(
 				suite(scope, url.searchParams.get("id") ?? appId)
 			);
+		}
 		const value = result(scope, (body as { id: string }).id);
 		stored.set(scope, [...(stored.get(scope) ?? []), value]);
 		return NativeResponse.json(value);
@@ -181,7 +184,9 @@ function hold(target: ApiTarget, method: string) {
 }
 function release(key: string) {
 	const gate = held.get(key);
-	if (!gate) throw new Error("No actual held request");
+	if (!gate) {
+		throw new Error("No actual held request");
+	}
 	held.delete(key);
 	gate.release();
 }
@@ -206,7 +211,9 @@ function runButton() {
 	].find((item) =>
 		/^(Run evals|Running)$/.test(item.textContent?.trim() ?? "")
 	);
-	if (!button) throw new Error("Actual Run evals button missing");
+	if (!button) {
+		throw new Error("Actual Run evals button missing");
+	}
 	return button;
 }
 function click(button = runButton()) {
@@ -218,7 +225,9 @@ async function settle() {
 	});
 }
 async function until(predicate: () => boolean) {
-	for (let i = 0; i < 100 && !predicate(); i++) await settle();
+	for (let i = 0; i < 100 && !predicate(); i++) {
+		await settle();
+	}
 	expect(predicate()).toBe(true);
 }
 function posts() {
@@ -233,7 +242,9 @@ beforeEach(() => {
 });
 afterEach(async () => {
 	await act(async () => root.unmount());
-	for (const gate of held.values()) gate.release();
+	for (const gate of held.values()) {
+		gate.release();
+	}
 	held.clear();
 	await settle();
 	expect(unexpected).toEqual([]);
@@ -293,7 +304,7 @@ test("run503 does not fabricate evidence and identical retry submits one current
 	expect(container.textContent).toContain(`${owner(a)}:owned-case`);
 	expect(container.querySelector('[role="alert"]')).toBeNull();
 });
-for (const rotation of ["url", "token", "jwt"])
+for (const rotation of ["url", "token", "jwt"]) {
 	test(`suite and completed evidence are scoped to the actual ${rotation} authority`, async () => {
 		await render(a);
 		await until(() => !runButton().disabled);
@@ -316,18 +327,22 @@ for (const rotation of ["url", "token", "jwt"])
 		expect(posts().map((call) => call.owner)).toEqual([owner(a), owner(b)]);
 		expect(container.textContent).toContain(`${owner(b)}:owned-case`);
 	});
-for (const rotation of ["url", "token", "jwt", "aba", "unmount"])
-	for (const status of [200, 503])
+}
+for (const rotation of ["url", "token", "jwt", "aba", "unmount"]) {
+	for (const status of [200, 503]) {
 		test(`held A run${status} cannot publish evidence/error or unlock ${rotation}`, async () => {
 			await render(a);
 			await until(() => !runButton().disabled);
 			const key = hold(a, "POST");
 			await click();
 			await until(() => posts().length === 1);
-			if (status === 503) refusals.set(`${owner(a)}:POST`, 503);
+			if (status === 503) {
+				refusals.set(`${owner(a)}:POST`, 503);
+			}
 			let current = next(rotation);
-			if (rotation === "unmount") await act(async () => root.render(null));
-			else {
+			if (rotation === "unmount") {
+				await act(async () => root.render(null));
+			} else {
 				await render(current);
 				if (rotation === "aba") {
 					current = a;
@@ -352,6 +367,8 @@ for (const rotation of ["url", "token", "jwt", "aba", "unmount"])
 				expect(container.textContent).toContain(`${owner(current)}:owned-case`);
 			}
 		});
+	}
+}
 test("same-turn clicks submit one expensive eval run while the actual HTTP acknowledgement is held", async () => {
 	await render(a);
 	await until(() => !runButton().disabled);
@@ -390,8 +407,8 @@ test("suite403 offers an actual Retry and refuses all runs until the authenticat
 	expect(container.textContent).toContain(`${owner(a)}:owned-case`);
 });
 
-for (const rotation of ["url", "token", "jwt", "aba"])
-	for (const status of [200, 503])
+for (const rotation of ["url", "token", "jwt", "aba"]) {
+	for (const status of [200, 503]) {
 		test(`retired ${rotation} run${status} cannot unlock or replace a newer genuinely held run`, async () => {
 			await render(a);
 			await until(() => !runButton().disabled);
@@ -399,7 +416,9 @@ for (const rotation of ["url", "token", "jwt", "aba"])
 			const retiredGate = held.get(old);
 			await click();
 			await until(() => posts().length === 1);
-			if (status === 503) refusals.set(`${owner(a)}:POST`, 503);
+			if (status === 503) {
+				refusals.set(`${owner(a)}:POST`, 503);
+			}
 			let current = next(rotation);
 			await render(current);
 			if (rotation === "aba") {
@@ -419,7 +438,9 @@ for (const rotation of ["url", "token", "jwt", "aba"])
 				const oldGate = retiredGate!;
 				oldGate.release();
 				held.set(fresh, gate);
-			} else release(old);
+			} else {
+				release(old);
+			}
 			await settle();
 			expect(runButton().disabled).toBe(true);
 			expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -433,15 +454,19 @@ for (const rotation of ["url", "token", "jwt", "aba"])
 			expect(container.textContent).toContain(`${owner(current)}:owned-case`);
 			expect(posts()).toHaveLength(2);
 		});
+	}
+}
 
-for (const status of [200, 503])
+for (const status of [200, 503]) {
 	test(`switching installed artifact retires a held old-plugin run${status}`, async () => {
 		await render(a);
 		await until(() => !runButton().disabled);
 		const old = hold(a, "POST");
 		await click();
 		await until(() => posts().length === 1);
-		if (status === 503) refusals.set(`${owner(a)}:POST`, 503);
+		if (status === 503) {
+			refusals.set(`${owner(a)}:POST`, 503);
+		}
 		await render(a, otherAppId);
 		await until(
 			() => calls.some((call) => call.method === "GET") && !runButton().disabled
@@ -463,3 +488,4 @@ for (const status of [200, 503])
 		expect(container.textContent).toContain(`${owner(a)}:other-plugin-case`);
 		expect(stored.get(owner(a))?.at(-1)?.pluginId).toBe(otherAppId);
 	});
+}

@@ -72,10 +72,10 @@ export async function uploadSpaceFile(
 	target: ApiTarget,
 	spaceId: string,
 	file: File,
-	opts?: {
+	opts: {
 		onProgress?: (fraction: number) => void;
 		signal?: AbortSignal;
-		tl?: LiteralMessage;
+		tl: LiteralMessage;
 	}
 ): Promise<UploadedSpaceFile> {
 	// Refuse locally at the same ceiling the handler enforces, so a too-large file
@@ -107,7 +107,7 @@ export async function uploadSpaceFile(
 		}
 		xhr.upload.onprogress = (e) => {
 			if (e.lengthComputable && e.total > 0) {
-				opts?.onProgress?.(e.loaded / e.total);
+				opts.onProgress?.(e.loaded / e.total);
 			}
 		};
 		xhr.onerror = () =>
@@ -115,9 +115,9 @@ export async function uploadSpaceFile(
 		xhr.onabort = () => reject(new Error("Upload cancelled"));
 		xhr.onload = () => {
 			if (xhr.status < 200 || xhr.status >= 300) {
-				let detail = opts?.tl
-					? opts.tl("Upload failed ({status})", { status: xhr.status })
-					: `Upload failed (${xhr.status})`;
+				let detail = opts.tl("Upload failed ({status})", {
+					status: xhr.status,
+				});
 				try {
 					const parsed = spaceUploadErrorSchema.parse(
 						JSON.parse(xhr.responseText)
@@ -142,7 +142,7 @@ export async function uploadSpaceFile(
 				);
 			}
 		};
-		opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+		opts.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
 		xhr.send(body);
 	});
 	return {

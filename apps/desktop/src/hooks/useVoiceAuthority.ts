@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNodeStore, type Node } from "@/src/store/useNodeStore.ts";
+import { type Node, useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useActiveNode, useActiveNodeGetter } from "./useActiveNode.ts";
 
 const sameTarget = (a: Node, b: Node) =>
@@ -38,7 +38,9 @@ export function useVoiceAuthority(scope = "") {
 		};
 		const check = () => {
 			const next = currentGetter.current();
-			if (!sameTarget(observed, next)) retire();
+			if (!sameTarget(observed, next)) {
+				retire();
+			}
 			observed = next;
 		};
 		const unsubscribe = useNodeStore.subscribe(check);
@@ -46,7 +48,9 @@ export function useVoiceAuthority(scope = "") {
 		// if a same-turn toggle returns to its starting value before React renders.
 		const onStorage = () => {
 			const next = localStorage.getItem("ryu_node_tab_override_enabled");
-			if (next !== override) retire();
+			if (next !== override) {
+				retire();
+			}
 			override = next;
 		};
 		window.addEventListener("storage", onStorage);

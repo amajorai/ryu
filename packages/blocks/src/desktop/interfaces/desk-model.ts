@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type DeskView,
 	type DeskViewSection,
@@ -153,18 +154,24 @@ export function deskStartInput(view: DeskView | undefined): {
 }
 
 /** Accessible name for the view's "New conversation" button. */
-export function deskStartLabel(view: DeskView | undefined): string {
+export function deskStartLabel(
+	view: DeskView | undefined,
+	tl: LiteralMessage
+): string {
 	if (view && (view.kind === "agent" || view.kind === "team")) {
-		return `New conversation with ${view.label}`;
+		return tl("New conversation with {label}", { label: view.label });
 	}
 	if (view?.kind === "project") {
-		return `New conversation in ${view.label}`;
+		return tl("New conversation in {label}", { label: view.label });
 	}
 	return "New conversation";
 }
 
 /** Plain-language reason a thread has its status, for the details pane. */
-export function deskStatusExplanation(row: DeskRow): string {
+export function deskStatusExplanation(
+	row: DeskRow,
+	tl: LiteralMessage
+): string {
 	switch (row.status) {
 		case "attention":
 			return row.thread.runState === "interrupted"
@@ -172,15 +179,24 @@ export function deskStatusExplanation(row: DeskRow): string {
 				: "The last run failed. Read what happened and reply to retry.";
 		case "your-turn":
 			return row.lead
-				? `${row.lead.name} replied last and nothing is running, so it is waiting on you.`
+				? tl(
+						"{name} replied last and nothing is running, so it is waiting on you.",
+						{ name: row.lead.name }
+					)
 				: "The last reply is waiting on you and nothing is running.";
 		case "working":
-			return `${row.lead?.name ?? "An agent"} is running on this conversation right now.`;
+			return row.lead
+				? tl("{name} is running on this conversation right now.", {
+						name: row.lead.name,
+					})
+				: "An agent is running on this conversation right now.";
 		case "waiting":
 			if (!row.lead) {
 				return "You wrote last, but no agent is on this conversation, so nothing will run until one is added.";
 			}
-			return `You wrote last. ${row.lead.name} has not started a run yet.`;
+			return tl("You wrote last. {name} has not started a run yet.", {
+				name: row.lead.name,
+			});
 		default:
 			return row.lead
 				? "Nothing has been said in this conversation yet."
@@ -212,7 +228,10 @@ export function deskRelatedThreads(
 }
 
 /** What an empty view should say, by kind. */
-export function deskEmptyCopy(view: DeskView | undefined): {
+export function deskEmptyCopy(
+	view: DeskView | undefined,
+	tl: LiteralMessage
+): {
 	description: string;
 	title: string;
 } {
@@ -243,14 +262,18 @@ export function deskEmptyCopy(view: DeskView | undefined): {
 	}
 	if (view?.kind === "agent") {
 		return {
-			description: `Start one and it lands in ${view.label}'s inbox.`,
-			title: `No conversations with ${view.label} yet`,
+			description: tl("Start one and it lands in {label}'s inbox.", {
+				label: view.label,
+			}),
+			title: tl("No conversations with {label} yet", { label: view.label }),
 		};
 	}
 	if (view?.kind === "team" || view?.kind === "project") {
 		return {
-			description: `Start one and it is filed under ${view.label}.`,
-			title: `Nothing in ${view.label} yet`,
+			description: tl("Start one and it is filed under {label}.", {
+				label: view.label,
+			}),
+			title: tl("Nothing in {label} yet", { label: view.label }),
 		};
 	}
 	return {

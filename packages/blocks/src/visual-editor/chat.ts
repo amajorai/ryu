@@ -4,6 +4,7 @@
  * and answers with the same typed operations the canvas produces, so chat and
  * direct manipulation share validation, undo, and safety rules.
  */
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import {
 	MAX_OPERATIONS,
@@ -82,7 +83,10 @@ function extractJson(text: string): string {
 }
 
 /** Parse and validate a model reply. Nothing is applied here. */
-export function parseVisualEditResponse(text: string): VisualEditResponse {
+export function parseVisualEditResponse(
+	text: string,
+	tl: LiteralMessage
+): VisualEditResponse {
 	let raw: unknown;
 	try {
 		raw = JSON.parse(extractJson(text));
@@ -114,7 +118,15 @@ export function parseVisualEditResponse(text: string): VisualEditResponse {
 		const issue = operations.error.issues[0];
 		return {
 			ok: false,
-			error: `The model proposed an invalid edit${issue ? ` (${issue.path.join(".")}: ${issue.message})` : ""}.`,
+			error: issue
+				? tl(
+						"The model proposed an invalid edit ({issuePath}: {issueMessage}).",
+						{
+							issuePath: issue.path.join("."),
+							issueMessage: issue.message,
+						}
+					)
+				: tl("The model proposed an invalid edit."),
 		};
 	}
 	return {

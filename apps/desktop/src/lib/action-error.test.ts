@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { ApiError } from "@/src/lib/api/client.ts";
 import {
 	actionErrorDescription,
@@ -6,21 +8,24 @@ import {
 	ORG_ACCESS_NOT_IN_SESSION_MESSAGE,
 } from "./action-error.ts";
 
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
+
 test("describes an Error by its message", () => {
-	expect(actionErrorDescription(new Error("Core returned 500"))).toBe(
+	expect(actionErrorDescription(new Error("Core returned 500"), tl)).toBe(
 		"Core returned 500"
 	);
 });
 
 test("describes a thrown string by its text", () => {
-	expect(actionErrorDescription("  offline  ")).toBe("offline");
+	expect(actionErrorDescription("  offline  ", tl)).toBe("offline");
 });
 
 test("omits the description when the failure carries no message", () => {
 	// biome-ignore lint/suspicious/useErrorMessage: a whitespace-only message is the case under test
-	expect(actionErrorDescription(new Error("   "))).toBeUndefined();
-	expect(actionErrorDescription(null)).toBeUndefined();
-	expect(actionErrorDescription({ status: 500 })).toBeUndefined();
+	expect(actionErrorDescription(new Error("   "), tl)).toBeUndefined();
+	expect(actionErrorDescription(null, tl)).toBeUndefined();
+	expect(actionErrorDescription({ status: 500 }, tl)).toBeUndefined();
 });
 
 test("explains a sign-in that does not carry the node's organization", () => {
@@ -31,7 +36,7 @@ test("explains a sign-in that does not carry the node's organization", () => {
 		"org_access_not_in_session"
 	);
 	expect(isOrgAccessNotInSession(refused)).toBe(true);
-	expect(actionErrorDescription(refused)).toBe(
+	expect(actionErrorDescription(refused, tl)).toBe(
 		ORG_ACCESS_NOT_IN_SESSION_MESSAGE
 	);
 	expect(ORG_ACCESS_NOT_IN_SESSION_MESSAGE).toContain(
@@ -40,7 +45,7 @@ test("explains a sign-in that does not carry the node's organization", () => {
 	// A plain 403 keeps the error's own text.
 	const plain = new ApiError("/api/agents", 403);
 	expect(isOrgAccessNotInSession(plain)).toBe(false);
-	expect(actionErrorDescription(plain)).toBe("/api/agents failed: 403");
+	expect(actionErrorDescription(plain, tl)).toBe("/api/agents failed: 403");
 });
 
 test("explains the control plane's refusals of a forwarded request", () => {
@@ -51,7 +56,8 @@ test("explains the control plane's refusals of a forwarded request", () => {
 				status,
 				"Unauthorized",
 				code
-			)
+			),
+			tl
 		);
 	expect(refused(401, "user_jwt_org_not_admitted")).toContain(
 		"ryu-cli secrets confirm CODE --method totp"

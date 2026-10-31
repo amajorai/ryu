@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type { ReactNode } from "react";
 
 // The act props and keeper plates are drei `Html` plates over three.js
@@ -104,6 +105,7 @@ function renderStreet(width: number) {
 		shown,
 		slots: slots.slots,
 		stations,
+		tl: (source, values) => formatMessage(source, values),
 	}).filter((spec) => spec.actAgent);
 	const container = document.createElement("div");
 	document.body.append(container);

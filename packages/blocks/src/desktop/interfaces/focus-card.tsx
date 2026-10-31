@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -95,8 +96,9 @@ function FocusCardBody({
 	now: number;
 	titleId: string;
 }) {
+	const tl = useLiteralMessages();
 	const { thread } = item;
-	const reason = focusReason(item);
+	const reason = focusReason(item, tl);
 	const author = focusAuthor(item);
 	const age = focusAge(thread.updatedAt, now);
 	const counts = `${thread.messageCount} ${thread.messageCount === 1 ? "message" : "messages"}`;

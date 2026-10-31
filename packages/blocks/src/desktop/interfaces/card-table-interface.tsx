@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -567,6 +568,7 @@ export function CardTableInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["card-table"]>) {
+	const tl = useLiteralMessages();
 	const settings = cardTableSettings(params);
 	const kitSettings = useGameKitSettings();
 	// The Table/Cards switch keeps its choice (a setting), live from Settings.
@@ -1097,7 +1099,7 @@ export function CardTableInterface({
 								budgeted="tally"
 								focusable
 								kind="tally"
-								label={offStageLabel(staged.offStage.count)}
+								label={offStageLabel(staged.offStage.count, tl)}
 								onActivate={() => openQueue(queueOpener)}
 								tally="off"
 							>

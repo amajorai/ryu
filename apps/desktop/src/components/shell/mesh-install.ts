@@ -16,6 +16,7 @@
 // download center, so the existing downloads overlay already shows the transfer.
 // This only answers "did it work", which the overlay cannot.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -63,6 +64,7 @@ function dismissProgress(): void {
 export async function watchMeshInstall(
 	target: ApiTarget,
 	backend: MeshBackend,
+	tl: LiteralMessage,
 	onStatus?: (status: MeshStatus) => void,
 	isCurrent: () => boolean = () => true
 ): Promise<MeshStatus | null> {
@@ -79,8 +81,11 @@ export async function watchMeshInstall(
 				? "OpenTunnel"
 				: "Tailscale client";
 	progressToastId = sileo.info({
-		title: `Installing ${clientLabel}…`,
-		description: `Ryu is downloading ${clientLabel} for this node and will connect it when it's ready.`,
+		title: tl("Installing {clientLabel}…", { clientLabel }),
+		description: tl(
+			"Ryu is downloading {clientLabel} for this node and will connect it when it's ready.",
+			{ clientLabel }
+		),
 		duration: null,
 	});
 
@@ -139,9 +144,14 @@ export async function watchMeshInstall(
 				description: isTailcat
 					? "This node has a short-lived Tailcat address ready to share."
 					: status.publicUrl
-						? `Core is reachable at ${status.publicUrl}. Protected routes still require RYU_TOKEN.`
+						? tl(
+								"Core is reachable at {publicUrl}. Protected routes still require RYU_TOKEN.",
+								{ publicUrl: status.publicUrl }
+							)
 						: status.magicDnsName
-							? `This node is on the tailnet as ${status.magicDnsName}.`
+							? tl("This node is on the tailnet as {magicDnsName}.", {
+									magicDnsName: status.magicDnsName,
+								})
 							: "This node is on the tailnet.",
 			});
 			return status;
@@ -155,7 +165,7 @@ export async function watchMeshInstall(
 		if (installState?.state === "failed") {
 			dismissOwnedProgress();
 			sileo.error({
-				title: `${clientLabel} install failed`,
+				title: tl("{clientLabel} install failed", { clientLabel }),
 				description:
 					installState.error ?? "Ryu could not install the network client.",
 			});
@@ -170,7 +180,10 @@ export async function watchMeshInstall(
 	dismissOwnedProgress();
 	sileo.warning({
 		title: "Still setting up the mesh",
-		description: `${clientLabel} is taking a while to install. Check the downloads overlay — this node will connect once it finishes.`,
+		description: tl(
+			"{clientLabel} is taking a while to install. Check the downloads overlay — this node will connect once it finishes.",
+			{ clientLabel }
+		),
 	});
 	return last;
 }

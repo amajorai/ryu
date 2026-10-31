@@ -4,6 +4,7 @@
 // itself (`FirstProjectStep`) is presentation; validation and the request it
 // sends live here so they are testable without rendering.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import type { NewProjectInput } from "@/src/lib/api/hierarchy.ts";
 
@@ -24,16 +25,23 @@ export interface FirstProjectDraft {
 }
 
 /** The validation message for a draft, or null when it can be created. */
-export function firstProjectError(draft: FirstProjectDraft): string | null {
+export function firstProjectError(
+	draft: FirstProjectDraft,
+	tl: LiteralMessage
+): string | null {
 	const name = draft.name.trim();
 	if (!name) {
-		return "Give your project a name.";
+		return tl("Give your project a name.");
 	}
 	if ([...name].length > FIRST_PROJECT_NAME_MAX) {
-		return `Keep the name under ${FIRST_PROJECT_NAME_MAX} characters.`;
+		return tl("Keep the name under {maxCharacters} characters.", {
+			maxCharacters: String(FIRST_PROJECT_NAME_MAX),
+		});
 	}
 	if ([...draft.about].length > FIRST_PROJECT_ABOUT_MAX) {
-		return `Keep the description under ${FIRST_PROJECT_ABOUT_MAX} characters.`;
+		return tl("Keep the description under {maxCharacters} characters.", {
+			maxCharacters: String(FIRST_PROJECT_ABOUT_MAX),
+		});
 	}
 	return null;
 }

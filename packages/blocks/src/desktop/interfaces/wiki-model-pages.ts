@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -210,7 +211,10 @@ function threadsFor(
 }
 
 /** Every page in the wiki, as search and the category pages see them. */
-export function wikiEntries(snapshot: InterfaceSnapshot): WikiEntry[] {
+export function wikiEntries(
+	snapshot: InterfaceSnapshot,
+	tl: LiteralMessage
+): WikiEntry[] {
 	const entries: WikiEntry[] = [];
 	for (const agent of snapshot.agents) {
 		const threads = threadsFor(snapshot, (thread) =>
@@ -247,7 +251,9 @@ export function wikiEntries(snapshot: InterfaceSnapshot): WikiEntry[] {
 			.filter((name) => name !== undefined);
 		entries.push({
 			description:
-				names.length > 0 ? `Thread with ${names.join(", ")}` : "Thread",
+				names.length > 0
+					? tl("Thread with {names}", { names: names.join(", ") })
+					: tl("Thread"),
 			id: thread.id,
 			kind: "thread",
 			route: { id: thread.id, kind: "thread" },
@@ -284,7 +290,8 @@ export function categoryLetters(entries: WikiEntry[]): WikiLetterGroup[] {
 
 export function indexEntries(
 	snapshot: InterfaceSnapshot,
-	index: WikiIndex
+	index: WikiIndex,
+	tl: LiteralMessage
 ): WikiEntry[] {
 	const kind =
 		index === "agents"
@@ -294,7 +301,7 @@ export function indexEntries(
 				: index === "projects"
 					? "project"
 					: "thread";
-	return wikiEntries(snapshot).filter((entry) => entry.kind === kind);
+	return wikiEntries(snapshot, tl).filter((entry) => entry.kind === kind);
 }
 
 export type WikiThreadSort =

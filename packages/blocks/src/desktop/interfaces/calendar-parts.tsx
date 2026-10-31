@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
 	PopoverContent,
@@ -150,7 +151,8 @@ const FULL_TIME = new Intl.DateTimeFormat(undefined, {
 /** One sentence naming an item for assistive tech. */
 export function itemAccessibleName(
 	snapshot: InterfaceSnapshot,
-	item: CalendarItem
+	item: CalendarItem,
+	tl: LiteralMessage
 ): string {
 	if (item.kind === "thread") {
 		const agents = threadAgents(snapshot, item.thread)
@@ -166,7 +168,7 @@ export function itemAccessibleName(
 	return [
 		`Scheduled run: ${item.event.title}`,
 		RUN_OUTCOME_LABELS[runOutcome(item.event)],
-		runWhenPhrase(item),
+		runWhenPhrase(item, tl),
 	].join(", ");
 }
 
@@ -174,18 +176,22 @@ export function itemAccessibleName(
  * When a run happens, for assistive tech. An aggregate's start is only a
  * stand-in for its day, so it is named by its day and count, never a time.
  */
-function runWhenPhrase(item: RunItem): string {
+function runWhenPhrase(item: RunItem, tl: LiteralMessage): string {
 	const count = aggregateCount(item);
 	if (count === 0) {
 		return FULL_TIME.format(item.start);
 	}
-	const day =
-		localDayKey(item.start) === localDayKey(displayWallDate(Date.now()))
-			? "today"
-			: `on ${longDay(item.start)}`;
-	return item.event.kind === "upcoming"
-		? `${count} runs scheduled ${day}`
-		: `${count} runs ${day}`;
+	const values = { count: String(count), day: longDay(item.start) };
+	const today =
+		localDayKey(item.start) === localDayKey(displayWallDate(Date.now()));
+	if (item.event.kind === "upcoming") {
+		return today
+			? tl("{count} runs scheduled today", values)
+			: tl("{count} runs scheduled on {day}", values);
+	}
+	return today
+		? tl("{count} runs today", values)
+		: tl("{count} runs on {day}", values);
 }
 
 /**
@@ -338,12 +344,13 @@ export function RunPopover({
 	style?: CSSProperties;
 	tabStop: boolean;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<Popover onOpenChange={onOpenChange} open={open}>
 			<PopoverTrigger
 				{...{ [CALENDAR_ITEM_ATTRIBUTE]: item.key }}
 				aria-current={active ? "true" : undefined}
-				aria-label={itemAccessibleName(snapshot, item)}
+				aria-label={itemAccessibleName(snapshot, item, tl)}
 				className={className}
 				style={style}
 				tabIndex={tabStop ? 0 : -1}

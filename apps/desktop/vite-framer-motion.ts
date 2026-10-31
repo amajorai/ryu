@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import type { Plugin } from "vite";
 
 // Bun installs one framer-motion per requested range, so sileo's own
@@ -37,7 +37,12 @@ interface Canonical {
 }
 
 export function unifyFramerMotion(): Plugin {
-	const motionEntry = fileURLToPath(import.meta.resolve("motion"));
+	// Resolve from this file, not the importing config: Vite bundles this module
+	// into the consumer's node_modules/.vite-temp, where `import.meta.resolve`
+	// would look up `motion` from that app (apps/webapp has no direct `motion`
+	// dependency, and the isolated linker does not hoist it). Vite rewrites
+	// `import.meta.url` to this source file's URL when bundling the config.
+	const motionEntry = createRequire(import.meta.url).resolve("motion");
 	let canonical: Promise<Canonical | null> | undefined;
 	return {
 		name: "ryu-unify-framer-motion",

@@ -188,6 +188,7 @@ export default function Header({
 	showCatalogMenus = true,
 	homeHref = "/",
 	hiddenProductIds = NO_HIDDEN_PRODUCTS,
+	hiddenResourceHrefs = NO_HIDDEN_PRODUCTS,
 	// Account controls come from userMenu; signed-out portal pages show the brand link.
 	signedIn = false,
 	transparent = false,
@@ -230,6 +231,11 @@ export default function Header({
 	 * rollout flag is off). They are dropped from the Products menu.
 	 */
 	hiddenProductIds?: readonly string[];
+	/**
+	 * Resources-menu destinations the host has not rolled out (Challenges while
+	 * its flag is off). They are dropped from the menu.
+	 */
+	hiddenResourceHrefs?: readonly string[];
 	/** Let a landing visual continue behind the marketing header. */
 	transparent?: boolean;
 }) {
@@ -423,7 +429,10 @@ export default function Header({
 								</MotionNavigationMenuItem>
 
 								<MotionNavigationMenuItem value="resources">
-									<ResourcesMenu pathname={pathname} />
+									<ResourcesMenu
+										hiddenHrefs={hiddenResourceHrefs}
+										pathname={pathname}
+									/>
 								</MotionNavigationMenuItem>
 							</MotionNavigationMenuList>
 						</MotionNavigationMenu>

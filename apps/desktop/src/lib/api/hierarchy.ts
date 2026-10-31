@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/hierarchy.ts
@@ -137,19 +138,29 @@ export function projectAgentScope(projectId: string, agentId: string): string {
 /** Human label for where an inherited value comes from. */
 export function defaultSourceLabel(
 	source: DefaultSource | null,
+	tl: LiteralMessage,
 	names: { agent?: string; project?: string } = {}
 ): string {
 	switch (source) {
 		case "session":
 			return "Set for this session";
 		case "project_agent":
-			return `Inherited from ${names.agent ?? "this bot"} in ${names.project ?? "this project"}`;
+			return tl("Inherited from {agent} in {project}", {
+				agent: names.agent ?? tl("this bot"),
+				project: names.project ?? tl("this project"),
+			});
 		case "agent":
-			return `Inherited from ${names.agent ?? "this bot"}`;
+			return tl("Inherited from {agent}", {
+				agent: names.agent ?? tl("this bot"),
+			});
 		case "agent_binding":
-			return `${names.agent ?? "This bot"}'s own model`;
+			return tl("{agent}'s own model", {
+				agent: names.agent ?? tl("This bot"),
+			});
 		case "project":
-			return `Inherited from ${names.project ?? "this project"}`;
+			return tl("Inherited from {project}", {
+				project: names.project ?? tl("this project"),
+			});
 		case "settings":
 			return "Inherited from Settings › Models";
 		case "global":

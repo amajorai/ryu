@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 
 // Public share links leave the device: prove the real client only talks to the
 // configured control plane, with the active bearer, and never without one.
@@ -62,6 +64,8 @@ const {
 	revokePublicShare,
 } = await import("./conversation-sharing.ts");
 const previousToken = localStorage.getItem(TOKEN_KEY);
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 const share = { created_at: 1, updated_at: 2, url: "https://ryu.example/s/x" };
 const snapshot = [
 	{ content: "hi", created_at: 10, id: "m1", role: "user" as const },
@@ -97,16 +101,16 @@ afterAll(() => {
 test("signed-out publish, read and revoke refuse before any request is made", async () => {
 	localStorage.removeItem(TOKEN_KEY);
 	const message = "Sign in to publish a public link.";
-	await expect(publishPublicShare("c1", "T", snapshot)).rejects.toThrow(
+	await expect(publishPublicShare("c1", "T", snapshot, tl)).rejects.toThrow(
 		message
 	);
-	await expect(getPublicShare("c1")).rejects.toThrow(message);
-	await expect(revokePublicShare("c1", "user-1")).rejects.toThrow(message);
+	await expect(getPublicShare("c1", tl)).rejects.toThrow(message);
+	await expect(revokePublicShare("c1", tl, "user-1")).rejects.toThrow(message);
 	expect(ledger).toEqual([]);
 });
 
 test("publish sends the bearer, title and snapshot to the encoded control-plane path", async () => {
-	expect(await publishPublicShare("chat/1 ?", "Title", snapshot)).toEqual(
+	expect(await publishPublicShare("chat/1 ?", "Title", snapshot, tl)).toEqual(
 		share
 	);
 	expect(ledger).toEqual([
@@ -121,10 +125,10 @@ test("publish sends the bearer, title and snapshot to the encoded control-plane 
 
 test("a null share from publish is an error, while a null share from read means not published", async () => {
 	reply = { body: { share: null }, status: 200 };
-	await expect(publishPublicShare("c1", "T", snapshot)).rejects.toThrow(
+	await expect(publishPublicShare("c1", "T", snapshot, tl)).rejects.toThrow(
 		"The share link was not returned."
 	);
-	expect(await getPublicShare("c1")).toBeNull();
+	expect(await getPublicShare("c1", tl)).toBeNull();
 	expect(ledger.map((entry) => `${entry.method} ${entry.bearer}`)).toEqual([
 		"PUT Bearer session-A",
 		"GET Bearer session-A",
@@ -133,8 +137,8 @@ test("a null share from publish is an error, while a null share from read means 
 
 test("revoke names the owner only when one is given", async () => {
 	reply = { body: { ok: true }, status: 200 };
-	await revokePublicShare("c1", "user 1&x");
-	await revokePublicShare("c1");
+	await revokePublicShare("c1", tl, "user 1&x");
+	await revokePublicShare("c1", tl);
 	expect(ledger).toEqual([
 		{
 			bearer: "Bearer session-A",
@@ -153,13 +157,15 @@ test("revoke names the owner only when one is given", async () => {
 
 test("a refused request surfaces the server message, or a status fallback", async () => {
 	reply = { body: { message: "Not your conversation" }, status: 403 };
-	await expect(getPublicShare("c1")).rejects.toThrow("Not your conversation");
+	await expect(getPublicShare("c1", tl)).rejects.toThrow(
+		"Not your conversation"
+	);
 	reply = { body: { error: "nope" }, status: 500 };
-	await expect(revokePublicShare("c1")).rejects.toThrow(
+	await expect(revokePublicShare("c1", tl)).rejects.toThrow(
 		"Sharing request failed (500)"
 	);
 	reply = { body: { message: 7 }, status: 409 };
-	await expect(publishPublicShare("c1", "T", snapshot)).rejects.toThrow(
+	await expect(publishPublicShare("c1", "T", snapshot, tl)).rejects.toThrow(
 		"Sharing request failed (409)"
 	);
 });

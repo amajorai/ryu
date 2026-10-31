@@ -4,21 +4,21 @@ const STORY_URL = "/acp-runtime-settings-proof.html";
 const CONTROL_HEADERS = { "x-acp-proof-control": "finite-acp-fixture" };
 interface Settings {
 	idle_timeout_minutes: number;
-	max_parallel_agents: number | null;
 	keep_computer_awake: boolean;
+	max_parallel_agents: number | null;
 }
 interface Call {
+	authorization: string | null;
+	body: { acp: Settings } | null;
+	contentType: string | null;
 	method: "GET" | "PUT";
 	path: string;
-	authorization: string | null;
-	contentType: string | null;
-	body: { acp: Settings } | null;
 	status: "pending" | "accepted" | "refused";
 }
 interface FixtureState {
-	saved: Settings;
 	calls: Call[];
 	heldWrite: boolean;
+	saved: Settings;
 	unexpected: { method: string; path: string; reason: string }[];
 }
 const INITIAL: Settings = {
@@ -62,8 +62,11 @@ async function expectSettings(page: Page, expected: Settings): Promise<void> {
 			? "Auto (2)"
 			: String(expected.max_parallel_agents)
 	);
-	if (expected.keep_computer_awake) await expect(awake(page)).toBeChecked();
-	else await expect(awake(page)).not.toBeChecked();
+	if (expected.keep_computer_awake) {
+		await expect(awake(page)).toBeChecked();
+	} else {
+		await expect(awake(page)).not.toBeChecked();
+	}
 	await expect(
 		page
 			.getByTestId("acp-runtime-settings")
@@ -207,7 +210,9 @@ for (const scenario of refusals) {
 		]);
 		// Native pointer/keyboard actions while the real controls are disabled.
 		const bounds = await awake(page).boundingBox();
-		if (!bounds) throw new Error("Pending keep-awake control is missing.");
+		if (!bounds) {
+			throw new Error("Pending keep-awake control is missing.");
+		}
 		await page.mouse.click(
 			bounds.x + bounds.width / 2,
 			bounds.y + bounds.height / 2

@@ -2,15 +2,15 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 export interface UploadCall {
-	method: string;
-	path: string;
 	authorization: string | null;
-	userJwt: string | null;
 	body: unknown;
-	status: number | null;
 	clientId: string | null;
 	clientLabel: string | null;
+	method: string;
+	path: string;
+	status: number | null;
 	surface: string | null;
+	userJwt: string | null;
 }
 export function startSpacesUploadHost(
 	port = 5711,
@@ -57,7 +57,7 @@ export function startSpacesUploadHost(
 			const url = new URL(request.url),
 				route = url.pathname,
 				method = request.method;
-			if (method === "GET" && route === "/__state")
+			if (method === "GET" && route === "/__state") {
 				return json({
 					calls,
 					unexpected,
@@ -67,6 +67,7 @@ export function startSpacesUploadHost(
 						data_base64: readFileSync(file).toString("base64"),
 					})),
 				});
+			}
 			if (
 				method === "POST" &&
 				route === "/__control" &&
@@ -103,10 +104,12 @@ export function startSpacesUploadHost(
 				method === "OPTIONS" &&
 				apiPaths.includes(route) &&
 				request.headers.get("origin") === origin
-			)
+			) {
 				return new Response(null, { status: 204, headers });
-			if (method === "GET" && route === "/api/auth/get-session")
+			}
+			if (method === "GET" && route === "/api/auth/get-session") {
 				return json(null);
+			}
 			const body: unknown = ["POST", "PUT"].includes(method)
 				? await request.json()
 				: null;
@@ -146,10 +149,11 @@ export function startSpacesUploadHost(
 					value &&
 					Object.keys(value).join() === "value" &&
 					(value.value === "true" || value.value === "false")
-				)
+				) {
 					return output({ ok: true, key: route.split("/").at(-1) });
+				}
 			}
-			if (method === "GET" && route === "/api/spaces")
+			if (method === "GET" && route === "/api/spaces") {
 				return output({
 					spaces: [
 						{
@@ -163,7 +167,8 @@ export function startSpacesUploadHost(
 						},
 					],
 				});
-			if (method === "GET" && route === "/api/spaces/space-owned/documents")
+			}
+			if (method === "GET" && route === "/api/spaces/space-owned/documents") {
 				return output({
 					documents: documents.map(({ file, ...document }) => ({
 						...document,
@@ -174,6 +179,7 @@ export function startSpacesUploadHost(
 						chunk_count: document.index.state === "indexed" ? 1 : 0,
 					})),
 				});
+			}
 			if (method === "POST" && route === "/api/spaces/space-owned/files") {
 				const value = body as {
 					title?: unknown;
@@ -191,9 +197,12 @@ export function startSpacesUploadHost(
 				) {
 					const fail = refusal === value.title;
 					const gate = held;
-					if (gate) await gate;
-					if (fail)
+					if (gate) {
+						await gate;
+					}
+					if (fail) {
 						return output({ error: "Storage temporarily refused" }, 503);
+					}
 					const id = `document-${documents.length + 1}`,
 						file = path.join(directory, id);
 					const bytes = Buffer.from(value.data_base64, "base64");
@@ -233,4 +242,6 @@ export function startSpacesUploadHost(
 		},
 	};
 }
-if (import.meta.main) startSpacesUploadHost();
+if (import.meta.main) {
+	startSpacesUploadHost();
+}

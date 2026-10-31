@@ -88,7 +88,7 @@ export function AgentRoutinesPanel({
 		useMemo(() => {
 			const now = new Date();
 			const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-			const eventList = buildCalendarEvents(routines, start, now);
+			const eventList = buildCalendarEvents(routines, start, now, tl);
 			const grouped = groupEventsByJob(eventList);
 			const statuses = routines.map((job) =>
 				statusForJob(job, grouped.get(job.id) ?? [])
@@ -108,7 +108,7 @@ export function AgentRoutinesPanel({
 				windowEnd: now,
 				windowStart: start,
 			};
-		}, [routines]);
+		}, [routines, tl]);
 	const overallStatus: RoutineStatus =
 		overview.failed > 0
 			? "failed"
@@ -276,7 +276,8 @@ export function AgentRoutinesPanel({
 										entries={buildRunStatusTimelineEntries(
 											windowStart,
 											windowEnd,
-											events
+											events,
+											tl
 										)}
 										nowAt={windowEnd.getTime()}
 										showScale

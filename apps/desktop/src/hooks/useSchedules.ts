@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	createJob as apiCreateJob,
@@ -29,6 +30,9 @@ export interface UseSchedulesResult {
 /// mutation. Create rejects with the exact Core validation error on a bad
 /// cron/interval so the form can surface it.
 export function useSchedules(): UseSchedulesResult {
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const activeNode = useActiveNode();
 	const target: ApiTarget = {
 		url: activeNode.url,
@@ -64,7 +68,11 @@ export function useSchedules(): UseSchedulesResult {
 
 	const create = useCallback(
 		async (input: JobInput) => {
-			const job = await apiCreateJob({ url, token, userJwt }, input);
+			const job = await apiCreateJob(
+				{ url, token, userJwt },
+				input,
+				tlRef.current
+			);
 			setJobs((prev) => [...prev, job]);
 			return job;
 		},
@@ -81,7 +89,12 @@ export function useSchedules(): UseSchedulesResult {
 
 	const update = useCallback(
 		async (id: string, input: JobUpdateInput) => {
-			const job = await apiUpdateJob({ url, token, userJwt }, id, input);
+			const job = await apiUpdateJob(
+				{ url, token, userJwt },
+				id,
+				input,
+				tlRef.current
+			);
 			setJobs((prev) =>
 				prev.map((current) => (current.id === id ? job : current))
 			);

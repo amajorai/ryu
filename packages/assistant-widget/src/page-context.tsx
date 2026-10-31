@@ -2,6 +2,7 @@
 
 import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
 	PopoverContent,
@@ -46,6 +47,7 @@ function ContextChip({
 	previewDescription?: string;
 	previewTitle: string;
 }) {
+	const tl = useLiteralMessages();
 	const popupRef = useRef<HTMLDivElement>(null);
 	if (!included) {
 		return (
@@ -65,7 +67,9 @@ function ContextChip({
 				<PopoverTrigger
 					render={
 						<button
-							aria-label={`Review ${previewTitle.toLowerCase()}`}
+							aria-label={tl("Review {previewName}", {
+								previewName: previewTitle.toLowerCase(),
+							})}
 							className="min-w-0 truncate rounded-full hover:text-foreground"
 							type="button"
 						>
@@ -100,7 +104,9 @@ function ContextChip({
 				</PopoverContent>
 			</Popover>
 			<button
-				aria-label={`Remove ${previewTitle.toLowerCase()} from context`}
+				aria-label={tl("Remove {previewName} from context", {
+					previewName: previewTitle.toLowerCase(),
+				})}
 				className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-background hover:text-foreground"
 				onClick={() => onChange(false)}
 				type="button"
@@ -111,9 +117,11 @@ function ContextChip({
 	);
 }
 
-function previewText(text: string, limit: number): string {
+function previewText(text: string, limit: number, tl: LiteralMessage): string {
 	return text.length > limit
-		? `${text.slice(0, limit)}\n[Preview truncated]`
+		? tl("{previewText}\n[Preview truncated]", {
+				previewText: text.slice(0, limit),
+			})
 		: text;
 }
 
@@ -131,6 +139,7 @@ export function PageContextChips({
 	onIncludePageChange: (value: boolean) => void;
 	onIncludeSelectionChange: (value: boolean) => void;
 }) {
+	const tl = useLiteralMessages();
 	const hasPageContext = Boolean(
 		context.title || context.url || context.text.trim()
 	);
@@ -157,7 +166,7 @@ export function PageContextChips({
 							readOnly
 							rows={6}
 							size="context-preview"
-							value={previewText(context.text, MAX_BROWSER_PAGE_TEXT_CHARS)}
+							value={previewText(context.text, MAX_BROWSER_PAGE_TEXT_CHARS, tl)}
 							variant="read-only-preview"
 						/>
 					}
@@ -178,7 +187,7 @@ export function PageContextChips({
 							readOnly
 							rows={3}
 							size="selection-preview"
-							value={previewText(selection, MAX_BROWSER_SELECTION_CHARS)}
+							value={previewText(selection, MAX_BROWSER_SELECTION_CHARS, tl)}
 							variant="read-only-preview"
 						/>
 					}

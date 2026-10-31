@@ -11,6 +11,7 @@
  */
 
 import { modelDefaultCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ScopeDefault } from "@/src/lib/api/hierarchy.ts";
 import {
 	type AgentLane,
@@ -27,10 +28,11 @@ type Confirmation = { description: string; title: string } | null;
 export function scopeDefaultCacheWarning(
 	scopeLabel: string,
 	before: ScopeDefault,
-	after: ScopeDefault
+	after: ScopeDefault,
+	tl: LiteralMessage
 ): Confirmation {
 	return (
-		modelDefaultCacheWarning(scopeLabel, before, after) ??
+		modelDefaultCacheWarning(scopeLabel, before, after, tl) ??
 		modelDefaultCacheWarning(
 			scopeLabel,
 			{
@@ -40,7 +42,8 @@ export function scopeDefaultCacheWarning(
 			{
 				model: after.coordinatorModel ?? "",
 				provider: after.coordinatorProvider ?? "",
-			}
+			},
+			tl
 		)
 	);
 }
@@ -64,13 +67,16 @@ function laneModelKey(selection: AgentSelection) {
  * behind a set cloud lane, or a cloud-lane edit that lands on the model chats
  * already use, asks nothing.
  */
-export function laneDefaultCacheWarning(input: {
-	after: AgentSelection;
-	cloudSelection: AgentSelection;
-	lane: AgentLane;
-	localSelection: AgentSelection;
-	managed: boolean;
-}): Confirmation {
+export function laneDefaultCacheWarning(
+	input: {
+		after: AgentSelection;
+		cloudSelection: AgentSelection;
+		lane: AgentLane;
+		localSelection: AgentSelection;
+		managed: boolean;
+	},
+	tl: LiteralMessage
+): Confirmation {
 	const { after, cloudSelection, lane, localSelection, managed } = input;
 	const chatSelection = (local: AgentSelection, cloud: AgentSelection) => {
 		if (!isAgentSelectionEmpty(cloud)) {
@@ -85,9 +91,10 @@ export function laneDefaultCacheWarning(input: {
 			: chatSelection(localSelection, after);
 	return modelDefaultCacheWarning(
 		lane === "local"
-			? "the node-wide local default"
-			: "the node-wide cloud default",
+			? tl("the node-wide local default")
+			: tl("the node-wide cloud default"),
 		laneModelKey(before),
-		laneModelKey(next)
+		laneModelKey(next),
+		tl
 	);
 }

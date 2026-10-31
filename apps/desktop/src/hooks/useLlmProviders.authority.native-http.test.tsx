@@ -3,9 +3,12 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import type { Node } from "@/src/store/useNodeStore.ts";
+
 const nativeFetch = globalThis.fetch,
 	NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
@@ -166,11 +169,12 @@ const server: Bun.Server<undefined> = Bun.serve<undefined>({
 			}
 			return NativeResponse.json(response);
 		}
-		if (path.endsWith("/catalog") && refuseRead)
+		if (path.endsWith("/catalog") && refuseRead) {
 			return NativeResponse.json(
 				{ error: "Finite fresh catalog refused" },
 				{ status: 503 }
 			);
+		}
 		if (path.endsWith("/catalog") && holdRead) {
 			holdRead = false;
 			const snapshot = catalog(slot);
@@ -220,50 +224,49 @@ function Consumer() {
 			<output data-testid="pi-catalog">
 				{pi.catalog?.providers[0]?.accounts?.[0]?.label ?? "loading"}
 			</output>
-			<button type="button" onClick={() => select("A")}>
+			<button onClick={() => select("A")} type="button">
 				A
 			</button>
-			<button type="button" onClick={() => select("B")}>
+			<button onClick={() => select("B")} type="button">
 				B
 			</button>
-			<button type="button" onClick={() => p.reload()}>
+			<button onClick={() => p.reload()} type="button">
 				Reload
 			</button>
 			<button
-				type="button"
 				onClick={() => {
 					void p
 						.renameAccount("custom/service", "A-account", "A accepted rename")
 						.then(() => settled.push("old"))
 						.catch(() => undefined);
 				}}
+				type="button"
 			>
 				Rename A
 			</button>
 			<button
-				type="button"
 				onClick={() => {
 					void p
 						.renameAccount("custom/service", "A-account", "A newest rename")
 						.then(() => settled.push("new"))
 						.catch(() => undefined);
 				}}
+				type="button"
 			>
 				New rename A
 			</button>
 			<button
-				type="button"
 				onClick={() => {
 					void pi
 						.save({ provider: "A-provider", model: null })
 						.then(() => settled.push("save accepted"))
 						.catch(() => settled.push("save refused"));
 				}}
+				type="button"
 			>
 				Save A
 			</button>
 			<button
-				type="button"
 				onClick={() => {
 					void p
 						.activate({ provider: "A-provider", model: null })
@@ -271,11 +274,11 @@ function Consumer() {
 						.catch(() => settled.push("activate refused"));
 					flushSync(() => select("B"));
 				}}
+				type="button"
 			>
 				Activate then B
 			</button>
 			<button
-				type="button"
 				onClick={() => {
 					void pi
 						.save({ provider: "A-provider", model: null })
@@ -283,6 +286,7 @@ function Consumer() {
 						.catch(() => settled.push("save refused"));
 					flushSync(() => select("B"));
 				}}
+				type="button"
 			>
 				Save then B
 			</button>
@@ -297,7 +301,9 @@ async function until(check: () => boolean) {
 		await act(async () => {
 			await Bun.sleep(5);
 		});
-		if (check()) return;
+		if (check()) {
+			return;
+		}
 	}
 	expect(check()).toBe(true);
 }
@@ -305,7 +311,9 @@ async function click(name: string) {
 	const button = [...container.querySelectorAll("button")].find(
 		(b) => b.textContent === name
 	);
-	if (!button) throw new Error(`Missing actual hook control ${name}`);
+	if (!button) {
+		throw new Error(`Missing actual hook control ${name}`);
+	}
 	await act(async () => {
 		button.click();
 	});
@@ -317,7 +325,7 @@ async function mount() {
 	select("A");
 	client = new QueryClient({
 		defaultOptions: {
-			queries: { retry: false, staleTime: Infinity },
+			queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
 			mutations: { retry: false },
 		},
 	});
@@ -366,10 +374,11 @@ afterEach(async () => {
 			await Bun.sleep(10);
 		});
 	}
-	if (root)
+	if (root) {
 		await act(async () => {
 			root.unmount();
 		});
+	}
 	container?.remove();
 	client?.clear();
 	useNodeStore.setState(initial, true);
@@ -406,7 +415,9 @@ for (const authority of ["token", "jwt"] as const) {
 		);
 		const acknowledge = release;
 		release = null;
-		if (!acknowledge) throw new Error("Missing real held POST");
+		if (!acknowledge) {
+			throw new Error("Missing real held POST");
+		}
 		acknowledge();
 		await until(() => settled.includes("old"));
 		expect(text("catalog")).toBe("B saved account");
@@ -457,7 +468,9 @@ for (const authority of ["token", "jwt"] as const) {
 		await click("New rename A");
 		expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
 		const a = nodes().find((n) => n.name === "A");
-		if (!a) throw new Error("Missing actual A authority");
+		if (!a) {
+			throw new Error("Missing actual A authority");
+		}
 		await renameProviderAccount(
 			a,
 			"custom/service",
@@ -469,7 +482,9 @@ for (const authority of ["token", "jwt"] as const) {
 		).length;
 		const acknowledge = release;
 		release = null;
-		if (!acknowledge) throw new Error("Missing held actual response");
+		if (!acknowledge) {
+			throw new Error("Missing held actual response");
+		}
 		acknowledge();
 		await until(
 			() =>
@@ -504,7 +519,9 @@ for (const authority of ["token", "jwt"] as const) {
 		expect(text("save-error")).toBe("none");
 		const acknowledge = release;
 		release = null;
-		if (!acknowledge) throw new Error("Missing actual PUT");
+		if (!acknowledge) {
+			throw new Error("Missing actual PUT");
+		}
 		acknowledge();
 		await until(() => settled.includes("save refused"));
 		expect(text("save-error")).toBe("none");
@@ -547,7 +564,9 @@ test("an accepted account rename survives an older in-flight background catalog 
 	);
 	const acknowledge = readRelease;
 	readRelease = null;
-	if (!acknowledge) throw new Error("Missing actual held catalog GET");
+	if (!acknowledge) {
+		throw new Error("Missing actual held catalog GET");
+	}
 	acknowledge();
 	await until(
 		() =>
@@ -583,7 +602,9 @@ for (const authority of ["token", "jwt"] as const) {
 		refuseRead = true;
 		const acknowledge = release;
 		release = null;
-		if (!acknowledge) throw new Error("Missing held mutation acknowledgement");
+		if (!acknowledge) {
+			throw new Error("Missing held mutation acknowledgement");
+		}
 		acknowledge();
 		await until(
 			() =>

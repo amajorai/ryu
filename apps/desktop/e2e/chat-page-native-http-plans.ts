@@ -8,7 +8,7 @@ export const PLAN_MESSAGES = [
 		id: "saved-plan-message",
 		role: "assistant",
 		content: "A completed launch plan is ready.",
-		created_at: 1724000010000,
+		created_at: 1_724_000_010_000,
 		parts: [
 			{ type: "text", text: "A completed launch plan is ready." },
 			{
@@ -52,7 +52,7 @@ export function createPlanDocumentsFixture() {
 		): { body: unknown; status: number } {
 			const identity = key(node, jwt),
 				document = documents.get(identity);
-			if (path === "/api/spaces")
+			if (path === "/api/spaces") {
 				return {
 					body: {
 						spaces: [
@@ -70,17 +70,20 @@ export function createPlanDocumentsFixture() {
 					},
 					status: 200,
 				};
+			}
 			if (method === "POST") {
 				if (
 					JSON.stringify(body) !==
 					JSON.stringify({ title: PLAN_TITLE, content: PLAN_MARKDOWN })
-				)
+				) {
 					return {
 						body: { error: "Unexpected exact plan document payload" },
 						status: 400,
 					};
-				if (document)
+				}
+				if (document) {
 					return { body: { error: "Duplicate plan ingest" }, status: 409 };
+				}
 				const id = jwt === "plan-user-b" ? "owned-plan-2" : "owned-plan-1";
 				documents.set(identity, {
 					id,
@@ -99,8 +102,9 @@ export function createPlanDocumentsFixture() {
 						updated_at: 1,
 					}
 				: null;
-			if (path.endsWith("/documents"))
+			if (path.endsWith("/documents")) {
 				return { body: { documents: wire ? [wire] : [] }, status: 200 };
+			}
 			return wire && path.endsWith("/" + wire.id)
 				? { body: wire, status: 200 }
 				: {

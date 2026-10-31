@@ -34,7 +34,6 @@ export const COMPUTE_TO_MCP: Product[] = [
 		tagline: "Rent compute for a bounded run.",
 		Icon: Cpu,
 		hero: {
-			eyebrow: "Ryu Compute · Coming soon",
 			title: "Borrow the compute you need",
 			// ComputeShareSurface.tsx:44-55.
 			subtitle: "Planned: rent CPU or GPU capacity for one job.",
@@ -87,7 +86,6 @@ export const COMPUTE_TO_MCP: Product[] = [
 		tagline: "Share idle capacity without giving up your machine.",
 		Icon: Share2,
 		hero: {
-			eyebrow: "Ryu Share · Coming soon",
 			title: "Share your idle computer",
 			// ComputeShareSurface.tsx:66-67; services.md H4.
 			subtitle: "Planned: rent out your computer's spare CPU or GPU capacity.",
@@ -140,7 +138,6 @@ export const COMPUTE_TO_MCP: Product[] = [
 		tagline: "Build your own agent. Every part swappable, nothing locked in.",
 		Icon: Bot,
 		hero: {
-			eyebrow: "Agents",
 			title: "Build an agent for your workflow",
 			subtitle:
 				"Choose the models, tools, memory, and instructions your agent uses. Change any part later.",
@@ -193,7 +190,6 @@ export const COMPUTE_TO_MCP: Product[] = [
 		tagline: "Chain agents and tools into workflows you can see and resume.",
 		Icon: GitBranch,
 		hero: {
-			eyebrow: "Workflows",
 			title: "Build agent workflows",
 			subtitle: "Connect agents, tools, and skills on a visual canvas.",
 			primaryCta: DOWNLOAD,
@@ -245,7 +241,6 @@ export const COMPUTE_TO_MCP: Product[] = [
 		tagline: "Browse and install Agent Skills in one click.",
 		Icon: Sparkles,
 		hero: {
-			eyebrow: "Skills",
 			title: "Add skills to your agents",
 			subtitle:
 				"Search skills.sh and install open-standard Agent Skills into your agents in one click.",
@@ -308,7 +303,6 @@ export const COMPUTE_TO_MCP: Product[] = [
 		tagline: "Connect agents to configured MCP tools and services.",
 		Icon: Plug,
 		hero: {
-			eyebrow: "MCP",
 			title: "Connect agents and tools through MCP",
 			subtitle:
 				"Add any MCP server, then choose which agents may use its tools.",

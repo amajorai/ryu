@@ -30,6 +30,7 @@ import {
 	hasReadableAccountWindows,
 	subscriptionQueryKeys,
 } from "@/src/lib/api/usage.ts";
+import { AccountRoutingHeader } from "./OAuthAccountPoolControls-routing-header.tsx";
 
 const STRATEGIES: { label: string; value: OAuthAccountStrategy }[] = [
 	{ label: "Manual", value: "manual" },
@@ -273,20 +274,7 @@ function ScopedOAuthAccountPoolControls({
 			className="min-w-0 space-y-3 border-border border-t pt-3"
 			disabled={saving}
 		>
-			<div>
-				<h4 className="font-medium text-sm">Account routing</h4>
-				<p className="text-detail text-muted-foreground">
-					Applies to new conversations. Healthy conversations keep their account
-					for prompt caching.{" "}
-					{capabilities.quotaObservations
-						? "Unknown quota falls back to rotation."
-						: "Quota observations are unavailable."}
-					{!capabilities.quotaObservations &&
-					capabilities.strategies.includes("fill_first")
-						? " Fill first keeps the first eligible account until availability or priority changes."
-						: null}
-				</p>
-			</div>
+			<AccountRoutingHeader capabilities={capabilities} />
 			{capabilities.quotaObservations ? (
 				<div className="space-y-1.5">
 					<Button
@@ -313,7 +301,13 @@ function ScopedOAuthAccountPoolControls({
 					</Button>
 					<p aria-live="polite" className="text-detail text-muted-foreground">
 						{quotaRefresh.data?.scope === policyScope
-							? `Account-wide usage returned for ${quotaRefresh.data.available} of ${quotaRefresh.data.checked} accounts. Missing readings remain unknown.`
+							? tl(
+									"Account-wide usage returned for {available} of {checked} accounts. Missing readings remain unknown.",
+									{
+										available: quotaRefresh.data.available,
+										checked: quotaRefresh.data.checked,
+									}
+								)
 							: "Reads each enabled account separately. Quota readings expire after five minutes."}
 					</p>
 					{quotaRefresh.isError ? (
@@ -451,7 +445,13 @@ function ScopedOAuthAccountPoolControls({
 											Drain override (%)
 										</Label>
 										<Input
-											aria-label={`Drain override for ${account.label} on ${providerId}`}
+											aria-label={tl(
+												"Drain override for {label} on {providerId}",
+												{
+													label: account.label,
+													providerId,
+												}
+											)}
 											className="w-36"
 											disabled={saving}
 											id={`oauth-account-drain-${account.accountId}`}
@@ -476,10 +476,11 @@ function ScopedOAuthAccountPoolControls({
 						);
 					})}
 					<p className="mt-2 text-detail text-muted-foreground">
-						Lower priority numbers are tried first.
 						{capabilities.quotaObservations
-							? " Blank inherits the provider drain point; 0 disables proactive drain. Fully exhausted accounts remain unavailable."
-							: null}
+							? tl(
+									"Lower priority numbers are tried first. Blank inherits the provider drain point; 0 disables proactive drain. Fully exhausted accounts remain unavailable."
+								)
+							: tl("Lower priority numbers are tried first.")}
 					</p>
 				</div>
 			) : null}

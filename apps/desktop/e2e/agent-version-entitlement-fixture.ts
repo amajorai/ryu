@@ -22,24 +22,30 @@ export function createVersionEntitlementPreferences() {
 					: path === "/api/preferences/managed-inference-entitled"
 						? "managed-inference-entitled"
 						: null;
-			if (!key) return null;
-			if (method === "GET")
+			if (!key) {
+				return null;
+			}
+			if (method === "GET") {
 				return { status: 200, body: { key, value: values[scope][key] } };
-			if (method !== "PUT") return null;
+			}
+			if (method !== "PUT") {
+				return null;
+			}
 			if (
 				!body ||
 				typeof body !== "object" ||
 				Object.keys(body).length !== 1 ||
 				!Object.hasOwn(body, "value") ||
 				!["true", "false"].includes(
-					String((body as { value: unknown }).value),
+					String((body as { value: unknown }).value)
 				) ||
 				typeof (body as { value: unknown }).value !== "string"
-			)
+			) {
 				return {
 					status: 400,
 					body: { error: "Invalid owned entitlement preference DTO" },
 				};
+			}
 			values[scope][key] = (body as { value: string }).value;
 			return { status: 200, body: { key, value: values[scope][key] } };
 		},

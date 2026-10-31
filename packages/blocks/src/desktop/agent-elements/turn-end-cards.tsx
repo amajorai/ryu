@@ -3,7 +3,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { safeNavigationUrl } from "@ryu/ui/lib/safe-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ComponentProps } from "react";
-import { AgentUI } from "./agent-ui/agent-ui.tsx";
+import type { AgentUI } from "./agent-ui/agent-ui.tsx";
+import { LazyAgentUI } from "./agent-ui/agent-ui-lazy.tsx";
 import {
 	AgentUiSurfaceChip,
 	useAgentUiSurfaceHost,
@@ -57,7 +58,7 @@ function JsonRenderCard({
 				) : null}
 			</header>
 			<div className="p-3">
-				<AgentUI
+				<LazyAgentUI
 					format={card.format}
 					onSubmit={onSubmit}
 					persistKey={card.toolCallId}

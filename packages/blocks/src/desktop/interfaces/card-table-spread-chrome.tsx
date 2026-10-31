@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -60,6 +61,7 @@ export function FanBar({
 	onDeal: (agentId?: string) => void;
 	onGather: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const acts = useContext(SpreadActsContext);
 	const act = useDeckAct(deck);
@@ -127,7 +129,7 @@ export function FanBar({
 				<Button
 					onClick={() => onDeal(deck.agent?.id)}
 					size="sm"
-					title={dealLabel(deck)}
+					title={dealLabel(deck, tl)}
 					type="button"
 					variant="outline"
 				>

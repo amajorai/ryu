@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	isNativeNumber,
 	isNativeText,
@@ -66,6 +67,7 @@ function activeBearer(): string {
 async function controlPlaneRequest<T>(
 	path: string,
 	schema: z.ZodType<T>,
+	tl: LiteralMessage,
 	options: { body?: unknown; method?: string } = {}
 ): Promise<T> {
 	const response = await fetch(`${BACKEND_URL}${path}`, {
@@ -82,7 +84,7 @@ async function controlPlaneRequest<T>(
 		const parsed = z.object({ message: z.string() }).safeParse(body);
 		const message = parsed.success
 			? parsed.data.message
-			: `Sharing request failed (${response.status})`;
+			: tl("Sharing request failed ({status})", { status: response.status });
 		throw new Error(message);
 	}
 	return schema.parse(body);
@@ -164,11 +166,13 @@ const publicShareResponseSchema = z.object({
 });
 
 export async function getPublicShare(
-	conversationId: string
+	conversationId: string,
+	tl: LiteralMessage
 ): Promise<PublicShareStatus | null> {
 	const response = await controlPlaneRequest<PublicShareResponse>(
 		`/api/conversation-shares/conversation/${encodeURIComponent(conversationId)}`,
-		publicShareResponseSchema
+		publicShareResponseSchema,
+		tl
 	);
 	return response.share;
 }
@@ -176,11 +180,13 @@ export async function getPublicShare(
 export async function publishPublicShare(
 	conversationId: string,
 	title: string,
-	messages: PublicSnapshotMessage[]
+	messages: PublicSnapshotMessage[],
+	tl: LiteralMessage
 ): Promise<PublicShareStatus> {
 	const response = await controlPlaneRequest<PublicShareResponse>(
 		`/api/conversation-shares/conversation/${encodeURIComponent(conversationId)}`,
 		publicShareResponseSchema,
+		tl,
 		{ body: { messages, title }, method: "PUT" }
 	);
 	if (!response.share) {
@@ -197,6 +203,7 @@ export async function publishPublicShare(
  */
 export async function revokePublicShare(
 	conversationId: string,
+	tl: LiteralMessage,
 	ownerUserId?: string
 ): Promise<void> {
 	const query = ownerUserId
@@ -205,6 +212,7 @@ export async function revokePublicShare(
 	await controlPlaneRequest<{ ok: boolean }>(
 		`/api/conversation-shares/conversation/${encodeURIComponent(conversationId)}${query}`,
 		z.object({ ok: z.boolean() }),
+		tl,
 		{ method: "DELETE" }
 	);
 }

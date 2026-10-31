@@ -14,7 +14,9 @@ import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
 const headers = { "x-file-tree-proof": "finite-native-boundary" };
 const boot = await fetch("/__file-tree/state", { headers });
-if (!boot.ok) throw new Error("Independent project fixture unavailable");
+if (!boot.ok) {
+	throw new Error("Independent project fixture unavailable");
+}
 const { project, secondaryProject } = (await boot.json()) as {
 	project: string;
 	secondaryProject: string;
@@ -33,7 +35,9 @@ mockIPC(async (command, args) => {
 	});
 	const body = (await response.json()) as { result?: unknown; error?: string };
 	window.__fileTreeCompletions.push({ command, args });
-	if (!response.ok) throw new Error(body.error);
+	if (!response.ok) {
+		throw new Error(body.error);
+	}
 	return body.result;
 });
 useNodeStore.setState({
@@ -57,17 +61,17 @@ function ProjectFiles() {
 	return (
 		<section className="flex h-full min-h-0 flex-col p-4">
 			<header className="flex gap-2 pb-4">
-				<button type="button" onClick={() => setFolder(secondaryProject)}>
+				<button onClick={() => setFolder(secondaryProject)} type="button">
 					Open alternate project
 				</button>
-				<button type="button" onClick={() => setVisible(false)}>
+				<button onClick={() => setVisible(false)} type="button">
 					Close Files
 				</button>
-				<button type="button" onClick={() => setVisible(true)}>
+				<button onClick={() => setVisible(true)} type="button">
 					Reopen Files
 				</button>
 			</header>
-			<div data-testid="files" className="min-h-0 flex-1">
+			<div className="min-h-0 flex-1" data-testid="files">
 				{visible && <FileTreePanel folder={folder} />}
 			</div>
 		</section>
@@ -90,7 +94,7 @@ createRoot(document.getElementById("root")!).render(
 						<TooltipProvider delay={0}>
 							<main className="grid h-screen grid-cols-2 bg-background text-foreground">
 								<ProjectFiles />
-								<section data-testid="settings" className="overflow-auto p-4">
+								<section className="overflow-auto p-4" data-testid="settings">
 									<AppearanceTab />
 								</section>
 							</main>

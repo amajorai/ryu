@@ -27,6 +27,8 @@
  * walking the stages in order), never traffic, counts or rates from a real deployment.
  */
 
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 export interface Stage {
 	/** One plain sentence, for the slider's value text. */
 	does: string;
@@ -103,4 +105,9 @@ export function spokenOf(index: number) {
 }
 
 /** Read to assistive tech in place of a caption; nothing here is drawn as text. */
-export const DESCRIPTION = `Ryu Gateway's request pipeline: a request passes ${STAGE_COUNT} gates in a fixed order. Rate limits run first, the firewall can never be turned off, and audit always runs last. The four taller gates are pinned; the four lower ones can be reordered or turned off. The moving request is simulated, not live traffic.`;
+export function describePipeline(tl: LiteralMessage): string {
+	return tl(
+		"Ryu Gateway's request pipeline: a request passes {stageCount} gates in a fixed order. Rate limits run first, the firewall can never be turned off, and audit always runs last. The four taller gates are pinned; the four lower ones can be reordered or turned off. The moving request is simulated, not live traffic.",
+		{ stageCount: STAGE_COUNT }
+	);
+}

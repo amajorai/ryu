@@ -214,7 +214,7 @@ function StepUpDialogContent({ children }: { children: ReactNode }) {
 		<DialogPortal>
 			<DialogOverlay />
 			<DialogPrimitive.Popup
-				className="data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 fixed inset-0 top-0 left-0 z-50 grid h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border border-border bg-background p-0 text-popover-foreground text-sm shadow-none outline-none backdrop-blur-xl duration-(--modal-open-dur) ease-(--modal-ease) data-closed:animate-out data-open:animate-in data-closed:duration-(--modal-close-dur)"
+				className="data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 fixed inset-0 top-0 left-0 z-50 grid h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border border-border bg-background p-0 text-popover-foreground text-sm shadow-none outline-none duration-(--modal-open-dur) ease-(--modal-ease) data-closed:animate-out data-open:animate-in data-closed:duration-(--modal-close-dur)"
 				data-slot="dialog-content"
 				dir={direction}
 			>

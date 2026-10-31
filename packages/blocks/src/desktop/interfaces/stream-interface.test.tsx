@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -22,6 +24,8 @@ import {
 	statusLine,
 	threadCounts,
 } from "./stream-model.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const MINUTE = 60_000;
 const BASE = Date.parse("2026-10-12T12:00:00Z");
@@ -342,7 +346,7 @@ describe("stream model", () => {
 	test("says where each conversation stands", () => {
 		const posts = projectStreamPosts(SNAPSHOT);
 		const line = (id: string) =>
-			statusLine(posts.find((post) => post.threadId === id) ?? posts[0]!);
+			statusLine(posts.find((post) => post.threadId === id) ?? posts[0]!, tl);
 		expect(line("thread-triage")).toEqual({
 			text: "Grace is replying",
 			tone: "live",

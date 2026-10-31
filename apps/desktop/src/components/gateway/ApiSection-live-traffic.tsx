@@ -61,6 +61,8 @@ export function LiveTraffic({
 	const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const cancelledRef = useRef(false);
 	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 
 	useEffect(() => {
 		setDenied(false);
@@ -87,6 +89,7 @@ export function LiveTraffic({
 			}
 			unsubscribeRef.current = subscribeGatewayTraffic(
 				target,
+				tlRef.current,
 				(ev) => {
 					attempt = 0;
 					setConnected(true);

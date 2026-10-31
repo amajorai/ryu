@@ -2,9 +2,12 @@ import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch,
 	NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
@@ -60,13 +63,13 @@ const server: Bun.Server<undefined> = Bun.serve({
 						: undefined;
 		const route = path.replace(/^\/shared/, "");
 		if (
-			!slot ||
 			!(
-				(request.method === "GET" &&
+				slot &&
+				((request.method === "GET" &&
 					["/api/conversations", "/api/conversations/shared-%2Fid"].includes(
 						route
 					)) ||
-				(request.method === "POST" && Object.values(PATHS).includes(route))
+					(request.method === "POST" && Object.values(PATHS).includes(route)))
 			)
 		) {
 			unexpected.push(request.method + " " + path);
@@ -77,7 +80,7 @@ const server: Bun.Server<undefined> = Bun.serve({
 		}
 		const body = request.body ? await request.json() : null;
 		calls.push({ slot, method: request.method, path: route, body, jwt, auth });
-		if (request.method === "GET" && route === "/api/conversations")
+		if (request.method === "GET" && route === "/api/conversations") {
 			return NativeResponse.json({
 				conversations: [
 					{
@@ -94,17 +97,20 @@ const server: Bun.Server<undefined> = Bun.serve({
 					},
 				],
 			});
+		}
 		const responseStatus = httpStatus;
-		if (holding)
+		if (holding) {
 			await new Promise<void>((resolve) => {
 				release = resolve;
 			});
-		if (responseStatus !== 200)
+		}
+		if (responseStatus !== 200) {
 			return NativeResponse.json(
 				{ error: "Continuation refused" },
 				{ status: responseStatus }
 			);
-		if (request.method === "GET")
+		}
+		if (request.method === "GET") {
 			return NativeResponse.json({
 				has_older_messages: false,
 				messages: [
@@ -116,6 +122,7 @@ const server: Bun.Server<undefined> = Bun.serve({
 					},
 				],
 			});
+		}
 		return NativeResponse.json(
 			route === PATHS.edit
 				? { message_id: slot + "-edited-message" }
@@ -183,7 +190,9 @@ async function mount() {
 }
 async function until(check: () => boolean) {
 	for (let i = 0; i < 250; i++) {
-		if (check()) return;
+		if (check()) {
+			return;
+		}
 		await act(async () => {
 			await new Promise((r) => setTimeout(r, 4));
 		});
@@ -313,7 +322,7 @@ for (const kind of ["edit", "regenerate", "select"] as const) {
 	});
 }
 
-for (const kind of ["edit", "regenerate", "select"] as const)
+for (const kind of ["edit", "regenerate", "select"] as const) {
 	test(`current B ${kind} refusal retries identical actual request and returns valid B success`, async () => {
 		operation = kind;
 		await mount();
@@ -340,7 +349,8 @@ for (const kind of ["edit", "regenerate", "select"] as const)
 			body: kind === "edit" ? { content: "New B content" } : null,
 		});
 	});
-for (const mode of ["token", "jwt", "aba"] as const)
+}
+for (const mode of ["token", "jwt", "aba"] as const) {
 	test(`held newest-page A read is refused after ${mode} authority transition; fresh current read remains valid`, async () => {
 		credentialMode = mode === "token" ? "token" : "jwt";
 		select("A");
@@ -389,3 +399,4 @@ for (const mode of ["token", "jwt", "aba"] as const)
 				: "Bearer continuation-token"
 		);
 	});
+}

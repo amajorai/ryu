@@ -115,7 +115,7 @@ export function VisualEditor({
 
 	const apply = useCallback(
 		(operations: VisualOperation[], select?: string | null): boolean => {
-			const result = editHtml(working, operations, parser());
+			const result = editHtml(working, operations, parser(), tl);
 			if (!result.ok) {
 				setMessage({ text: result.error, tone: "error" });
 				return false;
@@ -127,7 +127,7 @@ export function VisualEditor({
 			}
 			return true;
 		},
-		[commitHtml, working]
+		[commitHtml, tl, working]
 	);
 
 	const travel = useCallback(
@@ -230,7 +230,7 @@ export function VisualEditor({
 					selectedHtml,
 				}),
 			});
-			const parsed = parseVisualEditResponse(reply);
+			const parsed = parseVisualEditResponse(reply, tl);
 			if (!parsed.ok) {
 				setMessage({ text: parsed.error, tone: "error" });
 				return;

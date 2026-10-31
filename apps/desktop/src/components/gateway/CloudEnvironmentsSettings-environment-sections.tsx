@@ -41,7 +41,7 @@ export function EnvironmentRuntimeSection({
 }) {
 	return (
 		<SettingsSection
-			caption="Choose where tasks run and which agent drives them."
+			caption="Choose where tasks run and which agent drives them. With Ryu, the agent stays on your computer and only commands and files run in the cloud. Claude Code, Codex, OpenCode and Cursor run inside the cloud box."
 			title="Runtime"
 		>
 			<div className="space-y-4 px-3">
@@ -75,7 +75,9 @@ export function EnvironmentRuntimeSection({
 					{boxBackendEnabled ? (
 						<p className="text-muted-foreground text-xs">
 							A new isolated Ryu Box is created for each chat and removed when
-							the session ends.
+							the session ends. With Ryu as the agent, only the workspace is in
+							the box (agent on your computer). Other agents run inside the box
+							(agent in the cloud).
 						</p>
 					) : null}
 					{boxPreviewBlocked ? (
@@ -107,9 +109,12 @@ export function EnvironmentRuntimeSection({
 						</NativeSelect>
 						{runtime.executor === "ryu" ? null : (
 							<p className="text-muted-foreground text-xs">
-								Bind the agent's API key (for example ANTHROPIC_API_KEY or
-								OPENAI_API_KEY) as a variable. The agent can read it; the GitHub
-								token is used only by Ryu to push.
+								This agent runs in the cloud. Bind its API key (for example
+								ANTHROPIC_API_KEY or OPENAI_API_KEY) as a variable instead of
+								signing in with your Claude or ChatGPT plan inside the box:
+								providers can restrict plan accounts used from cloud servers.
+								The agent can read the key; the GitHub token is used only by Ryu
+								to push.
 							</p>
 						)}
 					</div>

@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { HookInventoryItem, HookSource } from "@/src/lib/api/hooks.ts";
 
 export interface HookPhaseCopy {
@@ -69,19 +70,28 @@ const humanizePhase = (phase: string): string => {
 	return phrase ? phrase[0]?.toUpperCase() + phrase.slice(1) : "Hook";
 };
 
-export const hookPhaseCopy = (phase: string): HookPhaseCopy => {
+export const hookPhaseCopy = (
+	tl: LiteralMessage,
+	phase: string
+): HookPhaseCopy => {
 	const known = KNOWN_PHASE_COPY.get(phase);
 	if (known) {
 		return known;
 	}
 	const title = humanizePhase(phase);
-	return { description: `When ${title.toLowerCase()} runs`, title };
+	return {
+		description: tl("When {phaseName} runs", {
+			phaseName: title.toLowerCase(),
+		}),
+		title,
+	};
 };
 
 const sourceLabel = (source: HookSource): string =>
 	source === "config" ? "From config" : "From plugins";
 
 const groupOwnerHooks = (
+	tl: LiteralMessage,
 	ownerId: string,
 	ownerHooks: HookInventoryItem[]
 ): HookOwnerGroup => {
@@ -96,7 +106,7 @@ const groupOwnerHooks = (
 		ownerId,
 		ownerName: ownerHooks[0]?.ownerName ?? ownerId,
 		phases: [...phases.entries()].map(([phase, hooks]) => ({
-			...hookPhaseCopy(phase),
+			...hookPhaseCopy(tl, phase),
 			hooks,
 			phase,
 		})),
@@ -105,6 +115,7 @@ const groupOwnerHooks = (
 };
 
 export const groupHookInventory = (
+	tl: LiteralMessage,
 	hooks: readonly HookInventoryItem[]
 ): HookSourceGroup[] => {
 	const sourceOwners = new Map<HookSource, Map<string, HookInventoryItem[]>>();
@@ -125,7 +136,9 @@ export const groupHookInventory = (
 			{
 				label: sourceLabel(source),
 				owners: [...owners.entries()]
-					.map(([ownerId, ownerHooks]) => groupOwnerHooks(ownerId, ownerHooks))
+					.map(([ownerId, ownerHooks]) =>
+						groupOwnerHooks(tl, ownerId, ownerHooks)
+					)
 					.sort((left, right) => left.ownerName.localeCompare(right.ownerName)),
 				source,
 			},

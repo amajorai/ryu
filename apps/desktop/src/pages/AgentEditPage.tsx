@@ -4,6 +4,7 @@ import {
 	AgentSettingsForm,
 	type SlotOption,
 } from "@ryu/blocks/desktop/agent-edit.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { modeHasOwnAccounts } from "@/src/components/agents/AgentIdentityModePicker.tsx";
@@ -45,6 +46,7 @@ export default function AgentEditPage({
 	initialSettingId?: string;
 	onClose?: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const base = useAgentEditBase({ agentIdProp, onClose });
 	const formState = useAgentEditFormState({ ...base });
 	const composio = useAgentEditComposio({ ...base, ...formState });
@@ -61,6 +63,7 @@ export default function AgentEditPage({
 		...composio,
 		...loaders,
 		...hydrate,
+		tl,
 	});
 	const postureActions = useAgentEditPostureActions({
 		...base,

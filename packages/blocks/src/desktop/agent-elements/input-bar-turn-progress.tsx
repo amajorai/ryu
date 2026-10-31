@@ -6,7 +6,6 @@ import {
 	Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { PatchDiff } from "@pierre/diffs/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
@@ -23,6 +22,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { FileTypeIcon } from "./file-type-icon.tsx";
 import { hugeiconComponent } from "./icons/hugeicon-component.tsx";
 import type { InputBarTurnProgress } from "./input-bar-types.ts";
+import { LazyPatchDiff } from "./lazy-patch-diff.tsx";
 
 const IconCircle = hugeiconComponent(CircleIcon);
 const IconCircleCheck = hugeiconComponent(CheckmarkCircle02Icon);
@@ -67,7 +67,7 @@ function TurnProgressFile({
 					{file.path}
 				</div>
 				<div className="max-h-[28rem] overflow-auto rounded-xl border border-border bg-background/60">
-					<PatchDiff
+					<LazyPatchDiff
 						disableWorkerPool
 						options={{
 							diffStyle: "unified",

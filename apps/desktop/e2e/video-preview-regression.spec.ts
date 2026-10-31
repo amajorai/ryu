@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, type FrameLocator, type Page, test } from "@playwright/test";
 import type { VideoPreviewApi } from "./harness/video-preview-regression.types.ts";
+
 declare global {
 	interface Window {
 		__videoPreview: VideoPreviewApi;

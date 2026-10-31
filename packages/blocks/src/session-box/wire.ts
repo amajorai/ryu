@@ -13,6 +13,8 @@
 // WebSocket URL (a relative one is never resolved against the page), and a
 // relay grant must name a session-box relay path.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 export type SessionBoxSize = "small" | "default" | "large";
 export type SessionBoxState =
 	| "provisioning"
@@ -293,15 +295,24 @@ export function minimumStartWords(seconds: number): string {
 }
 
 /** The notice's heading: what starts, at what rate, with the minimum. */
-export function costNoticeHeading(notice: SessionBoxCostNotice): string {
+export function costNoticeHeading(
+	notice: SessionBoxCostNotice,
+	tl: LiteralMessage
+): string {
 	const minimum = minimumStartWords(notice.minimumSecondsPerStart);
 	return notice.ratePerHourMicroUsd === null
-		? "Computer use starts a paid cloud Box"
-		: `Computer use starts a cloud Box at ${formatHourlyRate(notice.ratePerHourMicroUsd)}/hour, ${minimum} minimum per start`;
+		? tl("Computer use starts a paid cloud Box")
+		: tl(
+				"Computer use starts a cloud Box at {hourlyRate}/hour, {minimum} minimum per start",
+				{ hourlyRate: formatHourlyRate(notice.ratePerHourMicroUsd), minimum }
+			);
 }
 
 /** The notice's sentence about what starts and what it costs. */
-export function costNoticeText(notice: SessionBoxCostNotice): string {
+export function costNoticeText(
+	notice: SessionBoxCostNotice,
+	tl: LiteralMessage
+): string {
 	const size = notice.size ?? "small";
 	const box = `a cloud Box of its own (${size}: ${SIZE_SPECS[size]})`;
 	const cost =
@@ -309,7 +320,10 @@ export function costNoticeText(notice: SessionBoxCostNotice): string {
 			? "Ryu could not read its hourly rate right now"
 			: `it costs ${formatHourlyRate(notice.ratePerHourMicroUsd)} an hour while it runs, from your credits`;
 	const minimum = minimumStartWords(notice.minimumSecondsPerStart);
-	return `Computer use and the browser run on ${box}, and ${cost}. Time is billed in whole minutes with a ${minimum} minimum each time the Box starts; a resume within the hour already paid owes no new minimum. It parks when idle and stops when credits run out. Ryu asks once.`;
+	return tl(
+		"Computer use and the browser run on {box}, and {cost}. Time is billed in whole minutes with a {minimum} minimum each time the Box starts; a resume within the hour already paid owes no new minimum. It parks when idle and stops when credits run out. Ryu asks once.",
+		{ box, cost, minimum }
+	);
 }
 
 /**

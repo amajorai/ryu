@@ -3,12 +3,16 @@
 
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { avatarStateFromRunStatus } from "@ryu/ui/components/avatar-conversation.tsx";
 import type { Dispatch, SetStateAction } from "react";
 import { conversationParticipantIds } from "@/src/lib/agent-conversation-groups.ts";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
-import type { ConversationRunStatusMeta } from "@/src/lib/conversation-run-status.ts";
+import {
+	type ConversationRunStatusMeta,
+	conversationRunStatusDescription,
+} from "@/src/lib/conversation-run-status.ts";
 import type { Conversation } from "@/types/chat.ts";
 import { ParticipantOrbitAvatar } from "./sidebar-chat-row-group-avatar.tsx";
 
@@ -34,7 +38,11 @@ export function ChatRowDisclosureButton({
 	// A state that cannot make progress without attention badges itself even when
 	// the chat is read. In particular, interrupted is not failed: it is a partial
 	// reply Core recovered after the local engine stopped, and it cannot auto-resume.
+	const tl = useLiteralMessages();
 	const showDot = runStatus?.needsAttention === true;
+	const runStatusDescription = runStatus
+		? conversationRunStatusDescription(runStatus, tl)
+		: undefined;
 	return (
 		<button
 			aria-label={rowExpanded ? "Collapse chat details" : "Expand chat details"}
@@ -88,21 +96,21 @@ export function ChatRowDisclosureButton({
 			{showDot &&
 				(latestAgent || groupConversation ? (
 					<span
-						aria-label={runStatus.description}
+						aria-label={runStatusDescription}
 						className={`absolute -top-0.5 -right-0.5 size-1.5 rounded-full ${dotRingClass} ${runStatus.dotClass}`}
 						role="img"
-						title={runStatus.description}
+						title={runStatusDescription}
 					/>
 				) : (
 					<span
-						aria-label={runStatus.description}
+						aria-label={runStatusDescription}
 						className={`absolute inset-0 m-auto size-1.5 rounded-full transition-opacity ${
 							rowExpanded
 								? "opacity-0"
 								: "opacity-100 group-hover/row:opacity-0"
 						} ${runStatus.dotClass}`}
 						role="img"
-						title={runStatus.description}
+						title={runStatusDescription}
 					/>
 				))}
 			{/* Chevron: hidden at rest, fades in on hover; always shown (and

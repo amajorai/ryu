@@ -101,7 +101,7 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 						<li className="flex min-w-0 flex-1" key={day.key}>
 							<button
 								aria-describedby={shown === index ? tooltipId : undefined}
-								aria-label={`${dayFormat.format(day.start)}: ${describeDay(day)}`}
+								aria-label={`${dayFormat.format(day.start)}: ${describeDay(day, tl)}`}
 								className={cn(
 									"w-full rounded-xs outline-none transition-opacity duration-100 hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card",
 									DAY_BAR[day.level],
@@ -141,7 +141,7 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 								className={cn("size-2 rounded-xs", DAY_BAR[shownDay.level])}
 							/>
 							{shownDay.level === "operational"
-								? describeDay(shownDay)
+								? describeDay(shownDay, tl)
 								: DAY_LEVEL_LABELS[shownDay.level]}
 						</p>
 						{shownDay.problems.length > 0 ? (

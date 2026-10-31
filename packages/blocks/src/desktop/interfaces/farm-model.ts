@@ -442,12 +442,6 @@ export function cropTitle(thread: InterfaceThread | undefined): string {
 	return thread?.title.trim() || "Untitled conversation";
 }
 
-/** The accessible name of a plant: what it is, whose it is, where it stands. */
-export function cropLabel(crop: FarmCrop, plotName: string): string {
-	const action = crop.stage === "ripe" ? "Harvest" : "Inspect";
-	return `${action} ${cropTitle(crop.thread)}: ${FRUIT_NAMES[crop.fruit]} in ${plotName}'s plot, ${STAGE_NAMES[crop.stage].toLowerCase()}`;
-}
-
 export function plural(count: number, noun: string, many = `${noun}s`) {
 	return `${count} ${count === 1 ? noun : many}`;
 }
@@ -481,9 +475,3 @@ export {
 	layoutDiorama,
 	plotFootprint,
 } from "./farm-model-diorama.ts";
-
-/** A plot's accessible name: whose it is, its team, and how much grows. */
-export function plotLabel(plot: Pick<FarmPlot, "crops" | "name" | "teams">) {
-	const team = plot.teams[0];
-	return `${plot.name}'s plot${team ? `, ${team}` : ""}: ${plural(plot.crops.length, "crop")}`;
-}

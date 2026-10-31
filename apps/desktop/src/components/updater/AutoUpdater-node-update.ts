@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { installUpdate } from "@/src/components/updater/AutoUpdater-install.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -60,7 +61,8 @@ export async function scheduleReleaseUpdate(
 export async function applyReleaseUpdate(
 	target: ApiTarget,
 	node: { url: string },
-	verdict: UpdateCheck
+	verdict: UpdateCheck,
+	tl: LiteralMessage
 ): Promise<string | null> {
 	if (!isLocalNode(node)) {
 		if (!verdict.asset) {
@@ -74,6 +76,6 @@ export async function applyReleaseUpdate(
 		const result = await applyNodeUpdate(target, verdict.asset);
 		return result.message;
 	}
-	await installUpdate(verdict, { node });
+	await installUpdate(verdict, tl, { node });
 	return null;
 }

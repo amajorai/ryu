@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 const base = "http://127.0.0.1:5866";
 async function control(body?: unknown) {
 	const response = await fetch(base + "/control", {
@@ -17,7 +18,7 @@ async function modelRow(page: import("@playwright/test").Page, name: string) {
 	const title = page.getByText(name, { exact: true });
 	await expect(title).toBeVisible();
 	return title.locator(
-		'xpath=ancestor::*[.//button or .//span[text()="Installed"]][1]',
+		'xpath=ancestor::*[.//button or .//span[text()="Installed"]][1]'
 	);
 }
 const evidence = new WeakMap<
@@ -50,11 +51,12 @@ test.beforeEach(async ({ page }) => {
 	evidence.set(page, recorded);
 	page.on("pageerror", (error) => recorded.pageErrors.push(error.message));
 	page.on("console", (message) => {
-		if (message.type() === "error")
+		if (message.type() === "error") {
 			recorded.consoleErrors.push({
 				text: message.text(),
 				url: message.location().url,
 			});
+		}
 	});
 	await page.route("**/*", async (route) => {
 		const url = new URL(route.request().url());
@@ -101,13 +103,15 @@ test.afterEach(async ({ page }, testInfo) => {
 	const receipt = await control();
 	const recorded = evidence.get(page)!;
 	const unexpectedConsole = recorded.consoleErrors.filter((error) => {
-		if (!/Failed to load resource:.*503/.test(error.text)) return true;
+		if (!/Failed to load resource:.*503/.test(error.text)) {
+			return true;
+		}
 		try {
 			const url = new URL(error.url);
 			return (
 				url.origin !== base ||
 				!receipt.calls.some(
-					(c: any) => c.path === url.pathname && c.status === 503,
+					(c: any) => c.path === url.pathname && c.status === 503
 				)
 			);
 		} catch {
@@ -121,7 +125,7 @@ test.afterEach(async ({ page }, testInfo) => {
 		unexpected: [
 			...recorded.unexpectedOrigins,
 			...receipt.calls.filter(
-				(c: any) => c.authorizationAccepted !== true || c.status === 404,
+				(c: any) => c.authorizationAccepted !== true || c.status === 404
 			),
 		],
 		browserErrors: [...recorded.pageErrors, ...unexpectedConsole],
@@ -161,8 +165,8 @@ async function paint(page: import("@playwright/test").Page) {
 	await page.evaluate(
 		() =>
 			new Promise<void>((resolve) =>
-				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-			),
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+			)
 	);
 }
 
@@ -187,7 +191,7 @@ test("Store confirmed running stop persists stopped and survives fresh document 
 	]);
 	const stop = r.calls.findIndex(
 		(c: any) =>
-			c.path === "/api/sidecar/ryutts/stop" && c.responseBody?.success === true,
+			c.path === "/api/sidecar/ryutts/stop" && c.responseBody?.success === true
 	);
 	expect(stop).toBeGreaterThanOrEqual(0);
 	expect(
@@ -198,9 +202,9 @@ test("Store confirmed running stop persists stopped and survives fresh document 
 					c.path === "/api/sidecar/status" &&
 					c.finished &&
 					c.responseBody?.sidecars.some(
-						(v: any) => v.name === "ryutts" && !v.running,
-					),
-			),
+						(v: any) => v.name === "ryutts" && !v.running
+					)
+			)
 	).toBe(true);
 	await page.reload();
 	await expect(runningSwitch(page)).not.toBeChecked();
@@ -216,11 +220,11 @@ test("Store refused restart stop cannot execute start and explicit retry complet
 	await expect(
 		page
 			.getByRole("dialog")
-			.getByText("Finite runtime stop refused", { exact: true }),
+			.getByText("Finite runtime stop refused", { exact: true })
 	).toBeVisible();
 	await expect(runningSwitch(page)).toBeChecked();
 	await expect(
-		page.getByRole("button", { name: "Restart", exact: true }),
+		page.getByRole("button", { name: "Restart", exact: true })
 	).toBeEnabled();
 	let r = await control();
 	expect(r.disk.runtimeRunning).toBe(true);
@@ -234,7 +238,7 @@ test("Store refused restart stop cannot execute start and explicit retry complet
 	r = await control();
 	expect(r.disk.runtimeRunning).toBe(true);
 	expect(
-		mutations(r).map((c: any) => [c.path, c.body, c.authorizationAccepted]),
+		mutations(r).map((c: any) => [c.path, c.body, c.authorizationAccepted])
 	).toEqual([
 		["/api/sidecar/ryutts/stop", null, true],
 		["/api/sidecar/ryutts/stop", null, true],
@@ -242,10 +246,10 @@ test("Store refused restart stop cannot execute start and explicit retry complet
 	]);
 	const successfulStop = r.calls.findIndex(
 		(c: any) =>
-			c.path === "/api/sidecar/ryutts/stop" && c.responseBody?.success === true,
+			c.path === "/api/sidecar/ryutts/stop" && c.responseBody?.success === true
 	);
 	const start = r.calls.findIndex(
-		(c: any) => c.path === "/api/sidecar/ryutts/start",
+		(c: any) => c.path === "/api/sidecar/ryutts/start"
 	);
 	expect(
 		r.calls
@@ -254,10 +258,10 @@ test("Store refused restart stop cannot execute start and explicit retry complet
 				(c: any) =>
 					c.path === "/api/sidecar/status" &&
 					c.responseBody?.sidecars.some(
-						(s: any) => s.name === "ryutts" && !s.running,
+						(s: any) => s.name === "ryutts" && !s.running
 					) &&
-					c.finished,
-			),
+					c.finished
+			)
 	).toBe(true);
 });
 
@@ -267,20 +271,20 @@ test("Store unreadable runtime health denies mutation and actual Refresh all rec
 	await control({ setState: { runtimeRunning: true }, failStatusRead: 100 });
 	await page.goto("/voice-store-native-http-outcomes.html");
 	await expect(
-		page.getByRole("dialog").getByText("Status unknown", { exact: true }),
+		page.getByRole("dialog").getByText("Status unknown", { exact: true })
 	).toBeVisible();
 	await expect(runningSwitch(page)).toBeDisabled();
 	await expect(
-		page.getByRole("button", { name: "Restart", exact: true }),
+		page.getByRole("button", { name: "Restart", exact: true })
 	).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Remove", exact: true }),
+		page.getByRole("button", { name: "Remove", exact: true })
 	).toHaveCount(0);
 	expect(mutations(await control())).toEqual([]);
 	expect((await control()).disk.runtimeRunning).toBe(true);
 	await control({ failStatusRead: 0 });
 	await page.evaluate(() =>
-		(window as any).__voiceOutcomeAuthority.refreshAll(),
+		(window as any).__voiceOutcomeAuthority.refreshAll()
 	);
 	await expect(runningSwitch(page)).toBeChecked();
 	await expect(runningSwitch(page)).toBeEnabled();
@@ -309,7 +313,7 @@ test("Store confirmed stopped uninstall persists removal and fresh catalog canno
 	await page.reload();
 	await expect(runningSwitch(page)).toBeDisabled();
 	await expect(
-		page.getByRole("button", { name: "Remove", exact: true }),
+		page.getByRole("button", { name: "Remove", exact: true })
 	).toHaveCount(0);
 	expect(mutations(await control())).toHaveLength(1);
 });
@@ -328,7 +332,7 @@ test("Store retired stop refusal cannot paint new authority or clear its held st
 		await expect.poll(async () => (await control()).held).toBe(1);
 		await control({ authority: "b", holdStart: 1 });
 		await page.evaluate(() =>
-			(window as any).__voiceOutcomeAuthority.select("b"),
+			(window as any).__voiceOutcomeAuthority.select("b")
 		);
 		await expect(runningSwitch(page)).toBeEnabled();
 		await expect(runningSwitch(page)).not.toBeChecked();
@@ -339,7 +343,7 @@ test("Store retired stop refusal cannot paint new authority or clear its held st
 		const response = page.waitForResponse(
 			(r) =>
 				r.url() === "http://127.0.0.1:5866/api/sidecar/ryutts/stop" &&
-				r.request().method() === "POST",
+				r.request().method() === "POST"
 		);
 		await control({ release: true, id: aHeld.id });
 		await (await response).finished();
@@ -347,7 +351,7 @@ test("Store retired stop refusal cannot paint new authority or clear its held st
 		await expect(
 			page
 				.getByRole("dialog")
-				.getByText("Finite runtime stop refused", { exact: true }),
+				.getByText("Finite runtime stop refused", { exact: true })
 		).toHaveCount(0);
 		await expect(runningSwitch(page)).toBeDisabled();
 		expect((await control()).authorities.b.disk.runtimeRunning).toBe(false);
@@ -381,7 +385,7 @@ test("Store retired stop refusal cannot paint new authority or clear its held st
 					authorities: r.authorities,
 					held: r.held,
 					heldReceipts: r.heldReceipts,
-				}),
+				})
 			),
 			contentType: "application/json",
 		});
@@ -395,49 +399,49 @@ test("Store confirmed running hero must stop claiming live after unreadable heal
 	await page.goto("/voice-store-native-http-outcomes.html");
 	await expect(runningSwitch(page)).toBeChecked();
 	await expect(
-		page.getByRole("img", { name: "Running", exact: true }).first(),
+		page.getByRole("img", { name: "Running", exact: true }).first()
 	).toBeVisible();
 	await expect
 		.poll(
 			async () =>
 				(await control()).calls.filter(
 					(c: any) =>
-						c.path === "/api/sidecar/status" && c.finished && c.status === 200,
-				).length,
+						c.path === "/api/sidecar/status" && c.finished && c.status === 200
+				).length
 		)
 		.toBeGreaterThanOrEqual(2);
 	await control({ failStatusRead: 100 });
 	await page.evaluate(() =>
-		(window as any).__voiceOutcomeAuthority.refreshAll(),
+		(window as any).__voiceOutcomeAuthority.refreshAll()
 	);
 	await expect(runningSwitch(page)).toBeDisabled();
 	await expect(
-		page.getByRole("dialog").getByText("Status unknown", { exact: true }),
+		page.getByRole("dialog").getByText("Status unknown", { exact: true })
 	).toBeVisible();
 	await expect(
-		page.getByRole("dialog").getByText("Unknown", { exact: true }).first(),
+		page.getByRole("dialog").getByText("Unknown", { exact: true }).first()
 	).toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "Restart", exact: true }),
+		page.getByRole("button", { name: "Restart", exact: true })
 	).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Remove", exact: true }),
+		page.getByRole("button", { name: "Remove", exact: true })
 	).toHaveCount(0);
 	// Actual accessible StatusBadge across list and hero must not imply a live process.
 	await expect(
-		page.getByRole("img", { name: "Running", exact: true }),
+		page.getByRole("img", { name: "Running", exact: true })
 	).toHaveCount(0);
 	const unreadable = await control();
 	expect(unreadable.disk.runtimeRunning).toBe(true);
 	expect(mutations(unreadable)).toEqual([]);
 	await control({ failStatusRead: 0 });
 	await page.evaluate(() =>
-		(window as any).__voiceOutcomeAuthority.refreshAll(),
+		(window as any).__voiceOutcomeAuthority.refreshAll()
 	);
 	await expect(runningSwitch(page)).toBeChecked();
 	await expect(runningSwitch(page)).toBeEnabled();
 	await expect(
-		page.getByRole("img", { name: "Running", exact: true }).first(),
+		page.getByRole("img", { name: "Running", exact: true }).first()
 	).toBeVisible();
 	expect(mutations(await control())).toEqual([]);
 	expect((await control()).disk.runtimeRunning).toBe(true);

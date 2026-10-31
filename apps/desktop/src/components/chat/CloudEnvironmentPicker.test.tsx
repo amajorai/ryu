@@ -136,6 +136,7 @@ test("with the preview off, box profiles are disabled previews with no badges", 
 	expect(box.textContent).toContain("Preview");
 	expect(box.textContent).not.toContain("Fresh box");
 	expect(box.textContent).not.toContain("Codex");
+	expect(box.textContent).not.toContain("Agent in the cloud");
 	expect(profileButton("Automatic environment").disabled).toBe(false);
 });
 
@@ -147,4 +148,8 @@ test("with the preview on, box profiles are selectable and badged", async () => 
 	expect(box.textContent).not.toContain("Preview");
 	expect(box.textContent).toContain("Fresh box");
 	expect(box.textContent).toContain("Codex");
+	expect(box.textContent).toContain("Agent in the cloud");
+	expect(profileButton("Automatic environment").textContent).not.toContain(
+		"Agent on your computer"
+	);
 });

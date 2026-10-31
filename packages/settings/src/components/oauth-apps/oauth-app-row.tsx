@@ -4,6 +4,7 @@ import {
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { formatDistanceToNow } from "date-fns";
 import type { OwnedOAuthApp } from "../../utils/api-client.ts";
@@ -24,6 +25,7 @@ export function OAuthAppRow({
 	onAction: (action: PendingAction) => void;
 	onCancelAction: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const isDeleting =
 		pendingAction?.kind === "delete" && pendingAction.clientId === app.clientId;
 	const isRotating =
@@ -32,7 +34,7 @@ export function OAuthAppRow({
 
 	const created = app.createdAt
 		? formatDistanceToNow(new Date(app.createdAt), { addSuffix: true })
-		: "recently";
+		: tl("recently");
 
 	return (
 		<SettingsItem
@@ -43,7 +45,9 @@ export function OAuthAppRow({
 				<div className={SETTINGS_ROW_REVEAL_CLASS}>
 					{app.clientType === "confidential" ? (
 						<Button
-							aria-label={`Rotate secret for ${app.clientName}`}
+							aria-label={tl("Rotate secret for {clientName}", {
+								clientName: app.clientName,
+							})}
 							disabled={isPending}
 							onClick={() =>
 								onAction({ clientId: app.clientId, kind: "rotate" })
@@ -55,7 +59,9 @@ export function OAuthAppRow({
 						</Button>
 					) : null}
 					<Button
-						aria-label={`Delete ${app.clientName}`}
+						aria-label={tl("Delete {clientName}", {
+							clientName: app.clientName,
+						})}
 						disabled={isPending}
 						onClick={() => onAction({ clientId: app.clientId, kind: "delete" })}
 						size="icon-sm"
@@ -65,12 +71,12 @@ export function OAuthAppRow({
 					</Button>
 				</div>
 			}
-			description={
-				<>
-					{app.clientType === "public" ? "Public" : "Confidential"} ·{" "}
-					{app.applicationType} · Created {created}
-				</>
-			}
+			description={tl("{clientType} · {applicationType} · Created {created}", {
+				clientType:
+					app.clientType === "public" ? tl("Public") : tl("Confidential"),
+				applicationType: app.applicationType,
+				created,
+			})}
 			title={
 				<span className="flex min-w-0 items-center gap-2">
 					<HugeiconsIcon

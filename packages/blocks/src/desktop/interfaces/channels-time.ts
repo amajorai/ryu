@@ -2,6 +2,8 @@
 // ("10:42 AM"), day dividers ("Today", "Monday, October 6th"), and the thread
 // bar's "Last reply …" phrase. Fixed to en-US so the copy stays stable.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 const SAME_WEEK_DAYS = 6;
@@ -85,27 +87,33 @@ export function dayLabel(iso: string, now: number = Date.now()): string {
 }
 
 /** The thread bar's "Last reply …" phrase, without the "Last reply" prefix. */
-export function lastReplyPhrase(iso: string, now: number = Date.now()): string {
+export function lastReplyPhrase(
+	iso: string,
+	tl: LiteralMessage,
+	now: number = Date.now()
+): string {
 	const date = parse(iso);
 	if (!date) {
 		return "";
 	}
 	const minutes = Math.floor((now - date.getTime()) / MINUTE);
 	if (minutes < 1) {
-		return "just now";
+		return tl("just now");
 	}
 	if (minutes < 60) {
-		return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
+		return tl("{minutes, plural, one {# minute ago} other {# minutes ago}}", {
+			minutes,
+		});
 	}
 	const days = daysAgo(date, now);
 	if (days <= 0) {
-		return `today at ${clockTime(iso)}`;
+		return tl("today at {time}", { time: clockTime(iso) });
 	}
 	if (days === 1) {
-		return `yesterday at ${clockTime(iso)}`;
+		return tl("yesterday at {time}", { time: clockTime(iso) });
 	}
 	if (days <= SAME_WEEK_DAYS) {
-		return `${days} days ago`;
+		return tl("{days} days ago", { days });
 	}
 	return `${shortMonthFormat.format(date)} ${ordinal(date.getDate())}`;
 }

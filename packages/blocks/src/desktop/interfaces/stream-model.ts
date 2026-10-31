@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -254,11 +255,17 @@ export function threadLabel(count: number): string {
 }
 
 /** Where the conversation stands, in a few words, or null when it is idle. */
-export function statusLine(post: StreamPost): StreamStatusLine | null {
+export function statusLine(
+	post: StreamPost,
+	tl: LiteralMessage
+): StreamStatusLine | null {
 	const lead = post.author?.name;
 	switch (post.status) {
 		case "working":
-			return { text: lead ? `${lead} is replying` : "Replying", tone: "live" };
+			return {
+				text: lead ? tl("{lead} is replying", { lead }) : "Replying",
+				tone: "live",
+			};
 		case "attention":
 			return {
 				text:
@@ -268,7 +275,9 @@ export function statusLine(post: StreamPost): StreamStatusLine | null {
 		case "your-turn":
 			return { text: "Your turn", tone: "strong" };
 		case "waiting":
-			return lead ? { text: `Waiting on ${lead}`, tone: "muted" } : null;
+			return lead
+				? { text: tl("Waiting on {lead}", { lead }), tone: "muted" }
+				: null;
 		default:
 			return null;
 	}

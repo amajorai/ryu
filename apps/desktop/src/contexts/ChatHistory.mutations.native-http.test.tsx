@@ -2,9 +2,12 @@ import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch,
 	NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
@@ -96,7 +99,7 @@ const server: Bun.Server<undefined> = Bun.serve({
 			authorization: auth,
 			jwt,
 		});
-		if (request.method === "GET")
+		if (request.method === "GET") {
 			return NativeResponse.json({
 				conversations: saved[slot].deleted
 					? []
@@ -115,21 +118,28 @@ const server: Bun.Server<undefined> = Bun.serve({
 							},
 						],
 			});
+		}
 		const responseStatus = status;
-		if (holding)
+		if (holding) {
 			await new Promise<void>((resolve) => {
 				release = resolve;
 			});
-		if (responseStatus !== 200)
+		}
+		if (responseStatus !== 200) {
 			return NativeResponse.json(
 				{ error: "Owned mutation refused" },
 				{ status: responseStatus }
 			);
-		if (request.method === "DELETE") saved[slot].deleted = true;
-		else if (route.endsWith("/title")) saved[slot].title = body.title;
-		else if (route.endsWith("/folder")) saved[slot].folder = body.folder_path;
-		else if (route.endsWith("/retitle"))
+		}
+		if (request.method === "DELETE") {
+			saved[slot].deleted = true;
+		} else if (route.endsWith("/title")) {
+			saved[slot].title = body.title;
+		} else if (route.endsWith("/folder")) {
+			saved[slot].folder = body.folder_path;
+		} else if (route.endsWith("/retitle")) {
 			saved[slot].title = "Generated A title";
+		}
 		return NativeResponse.json(
 			route.endsWith("/retitle") ? { title: saved[slot].title } : { ok: true }
 		);
@@ -201,7 +211,9 @@ function rows() {
 }
 async function until(check: () => boolean) {
 	for (let i = 0; i < 250; i++) {
-		if (check()) return;
+		if (check()) {
+			return;
+		}
 		await act(async () => {
 			await new Promise((r) => setTimeout(r, 4));
 		});
@@ -239,7 +251,7 @@ afterAll(() => {
 	globalThis.fetch = nativeFetch;
 });
 for (const mutation of ["rename", "delete", "folder", "retitle"] as const) {
-	for (const responseStatus of [200, 503])
+	for (const responseStatus of [200, 503]) {
 		test(`held A ${mutation} ${responseStatus} cannot mutate same-ID B row`, async () => {
 			action = mutation;
 			status = responseStatus;
@@ -279,9 +291,10 @@ for (const mutation of ["rename", "delete", "folder", "retitle"] as const) {
 			);
 			expect(results).toEqual([mutation === "retitle" ? "rejected" : false]);
 		});
+	}
 }
-for (const authorityMode of ["token", "jwt"] as const)
-	for (const mutation of ["rename", "delete"] as const)
+for (const authorityMode of ["token", "jwt"] as const) {
+	for (const mutation of ["rename", "delete"] as const) {
 		test(`old ${mutation} refusal is scoped across same-URL ${authorityMode}`, async () => {
 			mode = authorityMode;
 			action = mutation;
@@ -312,7 +325,9 @@ for (const authorityMode of ["token", "jwt"] as const)
 				[]
 			);
 		});
-for (const mutation of ["rename", "delete", "folder", "retitle"] as const)
+	}
+}
+for (const mutation of ["rename", "delete", "folder", "retitle"] as const) {
 	test(`same-authority ${mutation} refusal can retry and fresh mount reads saved policy`, async () => {
 		action = mutation;
 		status = 503;
@@ -363,3 +378,4 @@ for (const mutation of ["rename", "delete", "folder", "retitle"] as const)
 			deleted: false,
 		});
 	});
+}

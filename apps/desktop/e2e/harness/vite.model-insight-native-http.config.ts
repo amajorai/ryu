@@ -1,7 +1,8 @@
 import path from "node:path";
-import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/postcss";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+
 const harnessDir = import.meta.dirname;
 export default defineConfig({
 	root: harnessDir,

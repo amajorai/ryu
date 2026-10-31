@@ -19,6 +19,7 @@
 // the chat would get too narrow it auto-demotes to a floating overlay. Only the
 // floating overlay passes `onDismiss` — the docked column never self-dismisses.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef } from "react";
@@ -100,6 +101,7 @@ export function PinnedSummaryPanel({
 	showLineStats = true,
 	worktreeModeOverride,
 }: PinnedSummaryPanelProps) {
+	const tl = useLiteralMessages();
 	const interfaceLevel = useInterfaceLevel();
 	const simpleMode = interfaceLevel === "simple";
 	const worktreeBranch = useWorkspaceStore((state) => state.worktreeBranch);
@@ -270,6 +272,7 @@ export function PinnedSummaryPanel({
 		githubRepositoryQuery,
 		pullRequestsEnabled,
 		targetRef,
+		tl,
 	});
 
 	const {

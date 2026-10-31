@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -170,7 +171,8 @@ function threadIncident(
 function runIncident(
 	event: InterfaceEvent,
 	resolvedAt: string | null,
-	agents: ReadonlyMap<string, InterfaceAgent>
+	agents: ReadonlyMap<string, InterfaceAgent>,
+	tl: LiteralMessage
 ): StatusIncident {
 	const agentIds = event.agentId ? [event.agentId] : [];
 	return {
@@ -187,7 +189,7 @@ function runIncident(
 		severity: "outage",
 		stage: resolvedAt ? "Resolved" : "Failed",
 		threadId: null,
-		title: `${event.title} run failed`,
+		title: tl("{title} run failed", { title: event.title }),
 	};
 }
 
@@ -333,7 +335,8 @@ function overallState(
 /** Build the whole page from one snapshot at one moment. */
 export function buildStatusPage(
 	snapshot: InterfaceSnapshot,
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): StatusPage {
 	const agents = new Map(snapshot.agents.map((agent) => [agent.id, agent]));
 	const events = snapshot.events ?? [];
@@ -348,7 +351,7 @@ export function buildStatusPage(
 			continue;
 		}
 		runIncidents.push(
-			runIncident(event, resolutions.get(event.id) ?? null, agents)
+			runIncident(event, resolutions.get(event.id) ?? null, agents, tl)
 		);
 	}
 	const allIncidents = [...threadIncidents, ...runIncidents].sort(newestFirst);
@@ -456,12 +459,21 @@ export function buildStatusPage(
 }
 
 /** Plain-language summary of one day, for the bar tooltip and its label. */
-export function describeDay(day: UptimeDay): string {
+export function describeDay(day: UptimeDay, tl: LiteralMessage): string {
 	if (day.level === "operational") {
-		return `${DAY_LEVEL_LABELS.operational} on this day.`;
+		return tl("{operational} on this day.", {
+			operational: DAY_LEVEL_LABELS.operational,
+		});
 	}
 	const count = day.problems.length;
-	return `${DAY_LEVEL_LABELS[day.level]}: ${count} ${count === 1 ? "failed run" : "failed runs"}.`;
+	return tl(
+		"{level}: {failedCount, plural, one {{count} failed run} other {{count} failed runs}}.",
+		{
+			count: String(count),
+			failedCount: count,
+			level: DAY_LEVEL_LABELS[day.level],
+		}
+	);
 }
 
 /** What the day saw besides failures ("3 threads active, 1 scheduled run"). */

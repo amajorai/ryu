@@ -251,7 +251,7 @@ export function NodeButton({
 		return (
 			<button
 				{...common}
-				aria-label={nodeLabel(node, statusLabel)}
+				aria-label={nodeLabel(node, statusLabel, tl)}
 				className="flex size-full items-center justify-center rounded-md border border-border border-dashed bg-background text-muted-foreground text-xs outline-none transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 			>
 				{tl("{count} more", { count: String(node.count) })}
@@ -262,7 +262,7 @@ export function NodeButton({
 		return (
 			<button
 				{...common}
-				aria-label={nodeLabel(node, statusLabel)}
+				aria-label={nodeLabel(node, statusLabel, tl)}
 				aria-pressed={selected}
 				className={cn(
 					"relative flex size-full items-center gap-2 rounded-lg border border-dashed px-3 text-left text-[13px] outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -279,8 +279,8 @@ export function NodeButton({
 	}
 	const kindLabel =
 		node.kind === "agent" || node.kind === "team"
-			? `${nodeLabel(node, statusLabel)}, ${toneLabel(node.tone)}`
-			: nodeLabel(node, statusLabel);
+			? `${nodeLabel(node, statusLabel, tl)}, ${toneLabel(node.tone)}`
+			: nodeLabel(node, statusLabel, tl);
 	return (
 		<button
 			{...common}

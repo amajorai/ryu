@@ -150,6 +150,36 @@ test("contribution envelopes retain malformed and future raw specs for their hos
 		http_policy: undefined,
 	});
 });
+test("a companion Core sends with an undeclared icon and shortcut keeps the contributions feed", async () => {
+	// Core serializes the companion config's `Option<String>` icon and shortcut
+	// as null when the manifest declares none (Groups declares neither).
+	response = Response.json({
+		companions: [
+			{
+				id: "app__teams-companion",
+				plugin_id: "@ryu/teams",
+				name: "Groups",
+				label: "Groups",
+				icon: null,
+				shortcut: null,
+				has_ui: true,
+				csp: null,
+			},
+		],
+		sidebar_buttons: [],
+	});
+	const result = await getPluginContributions(target);
+	expect(result.companions).toHaveLength(1);
+	expect(result.companions[0]).toMatchObject({
+		id: "app__teams-companion",
+		pluginId: "@ryu/teams",
+		label: "Groups",
+		hasUi: true,
+	});
+	expect(result.companions[0]?.icon).toBeUndefined();
+	expect(result.companions[0]?.shortcut).toBeUndefined();
+});
+
 test("avatar contributions keep valid parts and drop unsafe or missing rows", async () => {
 	const beanie = {
 		id: "@acme/hats:beanie",

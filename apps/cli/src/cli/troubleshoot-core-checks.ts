@@ -102,7 +102,10 @@ export async function checkCore(
 			id: "core.reachable",
 			status: "pass",
 			title: "Core reachable",
-			detail: tf("Core {version} answers at {shownUrl}.", { version, shownUrl }),
+			detail: tf("Core {version} answers at {shownUrl}.", {
+				version,
+				shownUrl,
+			}),
 		});
 		return { health: health.value, reachable: true };
 	}
@@ -165,7 +168,9 @@ export async function checkCore(
 		status: "fail",
 		title: "Core reachable",
 		detail: local
-			? tf("Nothing is listening at {shownUrl}; Core is not running.", { shownUrl })
+			? tf("Nothing is listening at {shownUrl}; Core is not running.", {
+					shownUrl,
+				})
 			: tf("Could not reach the remote Core at {shownUrl} ({message}).", {
 					shownUrl,
 					message: health.message,

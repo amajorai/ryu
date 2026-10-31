@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { motion } from "motion/react";
 import {
@@ -113,6 +114,7 @@ export function WikiInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
@@ -253,7 +255,7 @@ export function WikiInterface({
 	if (chatOpen) {
 		heading = `Talk:${activeThread ? wikiThreadTitle(activeThread) : "New thread"}`;
 	} else {
-		heading = wikiPageHeading(snapshot, route, shownTab);
+		heading = wikiPageHeading(snapshot, route, shownTab, tl);
 	}
 	const articleLabel = route.kind === "main" ? "Main Page" : "Article";
 	let leftTabs: TabSpec[];

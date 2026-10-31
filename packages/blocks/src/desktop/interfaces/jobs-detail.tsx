@@ -145,7 +145,7 @@ export function JobDetail({
 					className="text-foreground/80 text-sm leading-5"
 					data-testid="jobs-status-detail"
 				>
-					{jobStatusDetail(row)}
+					{jobStatusDetail(row, tl)}
 				</p>
 			</motion.header>
 
@@ -324,7 +324,7 @@ export function JobFullView({
 								<JobStatusPill status={row.status} />
 							</div>
 							<p className="text-foreground/80 text-sm leading-5">
-								{jobStatusDetail(row)}
+								{jobStatusDetail(row, tl)}
 							</p>
 						</section>
 						<section className="flex flex-col gap-2">

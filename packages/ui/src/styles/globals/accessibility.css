@@ -86,7 +86,7 @@
 		background-color: var(--popover) !important;
 	}
 
-	.ryu-dialog-overlay,
+	/* Dialog scrims are already a solid dim (styles/overlays.css). */
 	.ryu-popup-overlay {
 		-webkit-backdrop-filter: none !important;
 		backdrop-filter: none !important;

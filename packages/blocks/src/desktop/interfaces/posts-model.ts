@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -52,13 +53,16 @@ export const POST_MARKER_LABELS: Record<PostMarker, string> = {
  * The status line a post shows, in the same words in the feed and the
  * details rail: named after the agent when there is one.
  */
-export function markerLabel(item: Pick<PostItem, "author" | "marker">): string {
+export function markerLabel(
+	item: Pick<PostItem, "author" | "marker">,
+	tl: LiteralMessage
+): string {
 	const name = item.author?.name;
 	if (item.marker === "in-progress") {
-		return name ? `${name} is working` : "In progress";
+		return name ? tl("{name} is working", { name }) : "In progress";
 	}
 	if (item.marker === "awaiting-reply") {
-		return name ? `Waiting on ${name}` : "Waiting for a reply";
+		return name ? tl("Waiting on {name}", { name }) : "Waiting for a reply";
 	}
 	return POST_MARKER_LABELS[item.marker];
 }

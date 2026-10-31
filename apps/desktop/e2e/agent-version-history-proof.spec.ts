@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 import { createVersionEntitlementPreferences } from "./agent-version-entitlement-fixture.ts";
 
@@ -108,7 +108,7 @@ async function install(page: Page) {
 			scope,
 			method,
 			path,
-			call.body,
+			call.body
 		);
 		if (preference) {
 			await fulfill(preference.body, preference.status);
@@ -116,12 +116,14 @@ async function install(page: Page) {
 		}
 
 		if (path === RESTORE && method === "POST") {
-			if (held) await held;
+			if (held) {
+				await held;
+			}
 			if (refuse) {
 				refuse = false;
 				await fulfill(
 					{ error: "Version restore refused; retry the checkpoint" },
-					503,
+					503
 				);
 				return;
 			}
@@ -133,7 +135,7 @@ async function install(page: Page) {
 			await fulfill({
 				agent: scope === "b" ? { ...initial, name: "Scope B agent" } : current,
 				source: JSON.stringify(
-					scope === "b" ? { ...initial, name: "Scope B agent" } : current,
+					scope === "b" ? { ...initial, name: "Scope B agent" } : current
 				),
 			});
 			return;
@@ -249,12 +251,12 @@ async function install(page: Page) {
 async function boot(page: Page) {
 	await page.goto("/agent-version-history-proof.html");
 	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		"Current agent",
+		"Current agent"
 	);
 }
 async function assertManagedEntitlementReadback(
 	page: Page,
-	fixture: Awaited<ReturnType<typeof install>>,
+	fixture: Awaited<ReturnType<typeof install>>
 ) {
 	await expect
 		.poll(() => fixture.managedInferencePreferences().a)
@@ -267,7 +269,7 @@ async function assertManagedEntitlementReadback(
 					authorization: "Bearer version-bearer-a",
 					"x-ryu-user-jwt": "version-user-a",
 				},
-			},
+			}
 		);
 		return { status: response.status, body: await response.json() };
 	});
@@ -279,22 +281,23 @@ async function assertManagedEntitlementReadback(
 		(call) =>
 			call.scope === "a" &&
 			call.path === "/api/preferences/managed-inference-entitled" &&
-			call.method === "PUT",
+			call.method === "PUT"
 	);
 	expect(writes.length).toBeGreaterThan(0);
-	for (const call of writes)
+	for (const call of writes) {
 		expect(call).toMatchObject({
 			authorization: "Bearer version-bearer-a",
 			jwt: "version-user-a",
 			body: { value: "false" },
 		});
+	}
 }
 
 async function history(page: Page) {
 	await page.getByRole("tab", { name: "Versions", exact: true }).click();
 	await page.getByRole("button", { name: /^History/ }).click();
 	await expect(
-		page.getByText("Immutable checkpoint", { exact: true }),
+		page.getByText("Immutable checkpoint", { exact: true })
 	).toBeVisible();
 }
 
@@ -306,14 +309,14 @@ test("actual AgentEditPage restores the complete checkpoint and a subsequent sav
 	await history(page);
 	await page.getByRole("button", { name: "Diff", exact: true }).click();
 	await expect(
-		page.locator("pre").filter({ hasText: "checkpoint-model" }).first(),
+		page.locator("pre").filter({ hasText: "checkpoint-model" }).first()
 	).toBeVisible();
 	await page.getByRole("button", { name: "Restore", exact: true }).click();
 	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		baseline.name,
+		baseline.name
 	);
 	await expect(page.getByLabel("Description", { exact: true })).toHaveValue(
-		baseline.description,
+		baseline.description
 	);
 	expect(fixture.calls.filter((c) => c.path === RESTORE)).toEqual([
 		{
@@ -328,27 +331,27 @@ test("actual AgentEditPage restores the complete checkpoint and a subsequent sav
 	expect(fixture.current()).toEqual(baseline);
 	await page.reload();
 	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		baseline.name,
+		baseline.name
 	);
 	await expect(page.getByLabel("Description", { exact: true })).toHaveValue(
-		baseline.description,
+		baseline.description
 	);
 	await page
 		.getByLabel("Name", { exact: true })
 		.fill("Restored checkpoint edited");
 	await expect(
-		page.getByRole("button", { name: "Save changes", exact: true }),
+		page.getByRole("button", { name: "Save changes", exact: true })
 	).toBeEnabled();
 	await page.getByRole("button", { name: "Save changes", exact: true }).click();
 	await expect
 		.poll(
 			() =>
 				fixture.calls.filter((c) => c.path === PATH && c.method === "PUT")
-					.length,
+					.length
 		)
 		.toBe(1);
 	const saved = fixture.calls.find(
-		(c) => c.path === PATH && c.method === "PUT",
+		(c) => c.path === PATH && c.method === "PUT"
 	)?.body;
 	expect(saved).toMatchObject({
 		name: "Restored checkpoint edited",
@@ -375,7 +378,7 @@ test("actual AgentEditPage restores the complete checkpoint and a subsequent sav
 	expect(saved).not.toHaveProperty("userJwt");
 	await page.reload();
 	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		"Restored checkpoint edited",
+		"Restored checkpoint edited"
 	);
 	expect(fixture.current()).toMatchObject({
 		name: "Restored checkpoint edited",
@@ -403,24 +406,24 @@ test("a real HTTP503 restore keeps the actual unsaved editor draft and explicit 
 	await history(page);
 	await page.getByRole("button", { name: "Restore", exact: true }).click();
 	await expect(
-		page.getByText(`${RESTORE} failed: 503`, { exact: true }),
+		page.getByText(`${RESTORE} failed: 503`, { exact: true })
 	).toBeVisible();
 	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		"Unsaved draft must survive refusal",
+		"Unsaved draft must survive refusal"
 	);
 	expect(fixture.current()).toEqual(initial);
 	expect(fixture.immutable()).toEqual(baseline);
 	await page.getByRole("button", { name: "Restore", exact: true }).click();
 	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		baseline.name,
+		baseline.name
 	);
 	expect(fixture.calls.filter((c) => c.path === RESTORE)).toHaveLength(2);
 	expect(fixture.calls.filter((c) => c.path === RESTORE)[0]).toEqual(
-		fixture.calls.filter((c) => c.path === RESTORE)[1],
+		fixture.calls.filter((c) => c.path === RESTORE)[1]
 	);
 	await page.reload();
 	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		baseline.name,
+		baseline.name
 	);
 	expect(fixture.entitlementPreferences().a).toBe("true");
 	await assertManagedEntitlementReadback(page, fixture);
@@ -440,7 +443,7 @@ test("a late restore acknowledgement from node A cannot replace the actual node 
 		.poll(() => fixture.calls.filter((c) => c.path === RESTORE).length)
 		.toBe(1);
 	await expect(
-		page.getByRole("button", { name: "Restore", exact: true }),
+		page.getByRole("button", { name: "Restore", exact: true })
 	).toBeDisabled();
 	try {
 		await page
@@ -449,30 +452,30 @@ test("a late restore acknowledgement from node A cannot replace the actual node 
 		await expect
 			.poll(() =>
 				fixture.calls.some(
-					(c) => c.scope === "b" && c.path === PATH && c.method === "GET",
-				),
+					(c) => c.scope === "b" && c.path === PATH && c.method === "GET"
+				)
 			)
 			.toBe(true);
 		await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-			"Scope B agent",
+			"Scope B agent"
 		);
 		// Changing authority resets the editor to Behavior; open the actual B history.
 		await history(page);
 		await expect(
-			page.getByRole("button", { name: "Restore", exact: true }),
+			page.getByRole("button", { name: "Restore", exact: true })
 		).toBeEnabled();
 		fixture.release();
 		await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-			"Scope B agent",
+			"Scope B agent"
 		);
 		await expect(
-			page.getByRole("button", { name: "Restore", exact: true }),
+			page.getByRole("button", { name: "Restore", exact: true })
 		).toBeEnabled();
 		await expect(
-			page.getByText("Immutable checkpoint", { exact: true }),
+			page.getByText("Immutable checkpoint", { exact: true })
 		).toBeVisible();
 		expect(
-			fixture.calls.filter((c) => c.scope === "b" && c.path === RESTORE),
+			fixture.calls.filter((c) => c.scope === "b" && c.path === RESTORE)
 		).toEqual([]);
 		expect(fixture.entitlementPreferences().a).toBe("true");
 		await assertManagedEntitlementReadback(page, fixture);

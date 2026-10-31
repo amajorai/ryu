@@ -174,7 +174,7 @@ function FlowCard({
 	const running = flow.modules.filter(
 		(item) => item.status === "working"
 	).length;
-	const updated = momentsUpdatedLabel(flow.latestAt, now);
+	const updated = momentsUpdatedLabel(flow.latestAt, now, tl);
 	return (
 		<button
 			className={cn(
@@ -225,7 +225,7 @@ function FlowCard({
 				<span className="mt-auto flex flex-col gap-2.5">
 					<FlowGlyphs flow={flow} />
 					<span className="truncate text-[13px] text-muted-foreground leading-5">
-						{momentsFlowSummary(flow)}
+						{momentsFlowSummary(flow, tl)}
 					</span>
 				</span>
 			</span>

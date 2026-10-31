@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
 import {
 	extensionSummaries,
 	implementationSummaries,
@@ -26,9 +27,12 @@ describe("surface support summaries", () => {
 		expect(surfaceSupportRows(null, entry)).toEqual(
 			entry.surface_support ?? []
 		);
-		expect(inheritedSurfaceLabel("desktop")).toBe(
-			"Uses the shared Desktop shell"
-		);
+		expect(
+			inheritedSurfaceLabel(
+				(source, values) => formatMessage(source, values),
+				"desktop"
+			)
+		).toBe("Uses the shared Desktop shell");
 		expect(surfaceSupportLabel("limited")).toBe("Limited");
 		expect(surfaceSupportLabel("future-level")).toBe("future-level");
 	});

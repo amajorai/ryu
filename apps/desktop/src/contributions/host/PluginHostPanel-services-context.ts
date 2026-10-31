@@ -1,6 +1,6 @@
 import type { OpenedFileAccess } from "@ryu/app-host/opened-file";
 import type { createScopedToastHost } from "@ryu/app-host/toast-host";
-import type { useI18n } from "@ryu/i18n/react";
+import type { LiteralMessage, useI18n } from "@ryu/i18n/react";
 import type { RealtimeConnection } from "@ryuhq/core-client/realtime.ts";
 import type { ContextType, RefObject } from "react";
 import type { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
@@ -47,6 +47,7 @@ export interface PluginHostServicesContext {
 	openTab: TabsContextValue["openTab"];
 	realtimeLifetimeRef: RefObject<AbortController | null>;
 	realtimeSessionsRef: RefObject<Map<string, ApplicationRealtimeSession>>;
+	tl: LiteralMessage;
 	toastHost: ReturnType<typeof createScopedToastHost>;
 	updateTabsIconWhere: TabsContextValue["updateTabsIconWhere"];
 	updateTabTitle: TabsContextValue["updateTabTitle"];

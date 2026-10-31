@@ -75,6 +75,7 @@
 // The moment one "Governed" badge stands for both, the bug is back — this time in
 // the UI, where it is harder to see than it was in Rust.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { summarizeAgentEgress } from "./agent-egress-badges.ts";
 import { classifyEgressLayer, findByPrefix } from "./agent-egress-layer.ts";
 import { classifyToolBridge } from "./agent-egress-tool-bridge.ts";
@@ -145,7 +146,8 @@ export type {
 export function classifyAgentEgress(
 	agent: EgressAgentInput,
 	catalog: readonly AgentCatalogEntry[],
-	prefs: EgressPrefs
+	prefs: EgressPrefs,
+	tl: LiteralMessage
 ): AgentEgress {
 	// Resolved once, here, and threaded into both halves. The `acp-exec:`/`sdk:`
 	// guard reproduces the original control flow, where those two branches
@@ -158,7 +160,7 @@ export function classifyAgentEgress(
 		engineForLookup.startsWith("sdk:")
 			? null
 			: findByPrefix(engineForLookup, catalog);
-	const egress = classifyEgressLayer(agent, catalog, prefs);
+	const egress = classifyEgressLayer(agent, catalog, prefs, tl);
 	return {
 		...egress,
 		tools: classifyToolBridge(agent, resolvedEntry, prefs, egress.mechanism),
@@ -218,7 +220,8 @@ async function canonicalEngine(
 
 /** Load every installed agent's model-egress state for a node. */
 export async function loadAgentEgress(
-	target: ApiTarget
+	target: ApiTarget,
+	tl: LiteralMessage
 ): Promise<AgentEgressView> {
 	const [agents, catalog, prefs] = await Promise.all([
 		fetchAgents(target),
@@ -238,7 +241,8 @@ export async function loadAgentEgress(
 				modelsLimited: engines[index]?.modelsLimited ?? false,
 			},
 			catalog,
-			prefs
+			prefs,
+			tl
 		)
 	);
 	return summarizeAgentEgress(rows);

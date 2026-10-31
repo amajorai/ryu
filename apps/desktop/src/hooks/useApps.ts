@@ -5,7 +5,7 @@
 // state immediately (optimistic) then confirm with the server response so the
 // UI reflects changes without a full refetch.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -19,10 +19,14 @@ import {
 	installApp as apiInstallApp,
 	uninstallApp as apiUninstallApp,
 	describeDependencyError,
+	describeGatewayRefusal,
 	fetchApps,
 } from "@/src/lib/api/plugins.ts";
 import { triggerGlobalRefresh } from "@/src/lib/core-refresh.ts";
-import { dependencyErrorOf } from "@/src/lib/plugin-dependency-errors.ts";
+import {
+	dependencyErrorOf,
+	gatewayRefusalOf,
+} from "@/src/lib/plugin-dependency-errors.ts";
 import { queryClient } from "@/src/lib/query-client.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
@@ -46,6 +50,28 @@ export interface UseAppsResult {
 		id: string,
 		options?: { cascade?: boolean; deleteStorage?: boolean }
 	) => Promise<void>;
+}
+
+/** A failed toggle's banner text. Gateway refusals re-render in the viewer's
+ *  language from the structured fields; other failures keep Core's message. */
+function toggleFailureMessage(
+	error: unknown,
+	enable: boolean,
+	tl: LiteralMessage
+): string {
+	const gatewayRefusal = gatewayRefusalOf(error);
+	const gatewayMessage = gatewayRefusal
+		? describeGatewayRefusal(gatewayRefusal, tl)
+		: null;
+	if (gatewayMessage) {
+		return gatewayMessage;
+	}
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return enable
+		? tl("Failed to enable extension")
+		: tl("Failed to disable extension");
 }
 
 export type AppToggleOutcome =
@@ -226,17 +252,16 @@ export function useApps(): UseAppsResult {
 						queryClient
 							.getQueryData<AppInfo[]>(queryKey)
 							?.find((a) => a.id === pluginId)?.name ?? pluginId;
-					const message = describeDependencyError(depError, nameOf);
+					const message = describeDependencyError(
+						depError,
+						tlRef.current,
+						nameOf
+					);
 					setToggleError(message);
 					return { error: message, success: false } as const;
 				}
 
-				const message =
-					e instanceof Error
-						? e.message
-						: enable
-							? tlRef.current("Failed to enable extension")
-							: tlRef.current("Failed to disable extension");
+				const message = toggleFailureMessage(e, enable, tlRef.current);
 				setToggleError(message);
 				return { error: message, success: false } as const;
 			}
@@ -270,11 +295,20 @@ export function useApps(): UseAppsResult {
 						queryClient
 							.getQueryData<AppInfo[]>(queryKey)
 							?.find((a) => a.id === pluginId)?.name ?? pluginId;
-					setToggleError(describeDependencyError(depError, nameOf));
+					setToggleError(
+						describeDependencyError(depError, tlRef.current, nameOf)
+					);
 					return;
 				}
+				const gatewayRefusal = gatewayRefusalOf(e);
+				const gatewayMessage = gatewayRefusal
+					? describeGatewayRefusal(gatewayRefusal, tlRef.current)
+					: null;
 				setToggleError(
-					e instanceof Error ? e.message : "Failed to uninstall extension"
+					gatewayMessage ??
+						(e instanceof Error
+							? e.message
+							: tlRef.current("Failed to uninstall extension"))
 				);
 			}
 		},

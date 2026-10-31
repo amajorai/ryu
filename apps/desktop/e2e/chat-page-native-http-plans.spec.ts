@@ -1,19 +1,20 @@
-import { expect, test, type Page } from "@playwright/test";
-import {
-	chatPageControl,
-	chatPageState,
-	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
-} from "./chat-page-native-http-support.ts";
-import {
-	PLAN_MESSAGES,
-	PLAN_TITLE,
-	PLAN_MARKDOWN,
-} from "./chat-page-native-http-plans.ts";
+import { expect, type Page, test } from "@playwright/test";
+import type { Node } from "../src/store/useNodeStore.ts";
 import {
 	assertNativeWindowLifetime,
 	persistNativeLifetimeDiagnostics,
 } from "./chat-page-native-http-lifetime.ts";
-import type { Node } from "../src/store/useNodeStore.ts";
+import {
+	PLAN_MARKDOWN,
+	PLAN_MESSAGES,
+	PLAN_TITLE,
+} from "./chat-page-native-http-plans.ts";
+import {
+	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
+	chatPageControl,
+	chatPageState,
+} from "./chat-page-native-http-support.ts";
+
 const CONVERSATION = "conversation-toolbar-share-fixture";
 const DOCS = "/api/spaces/artifacts-owned/documents";
 const errors = new WeakMap<Page, string[]>();
@@ -39,7 +40,9 @@ async function rotate(
 	});
 	await page.evaluate((userJwt) => {
 		const fixture = Reflect.get(window, "__chatPageNativeFixture");
-		if (!fixture) throw Error("Actual native ChatPage fixture absent");
+		if (!fixture) {
+			throw Error("Actual native ChatPage fixture absent");
+		}
 		fixture.nodeStore.setState((s: { nodes: Node[] }) => ({
 			nodes: s.nodes.map((node) =>
 				node.url === "http://127.0.0.1:5591" ? { ...node, userJwt } : node
@@ -80,11 +83,15 @@ test.afterEach(async ({ page, request }, testInfo) => {
 		expect(errors.get(page) ?? []).toEqual([]);
 		const mounted = await page.evaluate(() => {
 			const f = Reflect.get(window, "__chatPageNativeFixture");
-			if (!f) return false;
+			if (!f) {
+				return false;
+			}
 			f.unmount();
 			return true;
 		});
-		if (mounted) await assertNativeWindowLifetime(page);
+		if (mounted) {
+			await assertNativeWindowLifetime(page);
+		}
 	} finally {
 		await persistNativeLifetimeDiagnostics(testInfo, {
 			beforeCleanup: diagnostic,
@@ -118,7 +125,12 @@ test("actual ChatPage automatically ingests exact completed plan and reload reus
 	});
 	const read = await request.get(
 		"http://127.0.0.1:5591" + DOCS + "/owned-plan-1",
-		{ headers: { authorization: "Bearer " + CHAT_PAGE_NATIVE_NODE_A_TOKEN, origin: "http://127.0.0.1:5590" } }
+		{
+			headers: {
+				authorization: "Bearer " + CHAT_PAGE_NATIVE_NODE_A_TOKEN,
+				origin: "http://127.0.0.1:5590",
+			},
+		}
 	);
 	expect(read.status()).toBe(200);
 	expect(await read.json()).toMatchObject({
@@ -181,7 +193,7 @@ test("same URL/node token with a different user JWT saves an independent plan do
 		{
 			headers: {
 				authorization: "Bearer " + CHAT_PAGE_NATIVE_NODE_A_TOKEN,
-					origin: "http://127.0.0.1:5590",
+				origin: "http://127.0.0.1:5590",
 				"x-ryu-user-jwt": "plan-user-b",
 			},
 		}
@@ -192,7 +204,7 @@ test("same URL/node token with a different user JWT saves an independent plan do
 		{
 			headers: {
 				authorization: "Bearer " + CHAT_PAGE_NATIVE_NODE_A_TOKEN,
-					origin: "http://127.0.0.1:5590",
+				origin: "http://127.0.0.1:5590",
 				"x-ryu-user-jwt": "plan-user-b",
 			},
 		}

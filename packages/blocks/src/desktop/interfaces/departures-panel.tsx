@@ -148,6 +148,7 @@ function FlightCard({
 	now: number;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const agent = flight.gateAgentId
 		? snapshot.agents.find((candidate) => candidate.id === flight.gateAgentId)
@@ -157,7 +158,7 @@ function FlightCard({
 	const [origin, destination] =
 		flight.board === "departures" ? [you, gate] : [gate, you];
 	const position = planePosition(flight, now);
-	const steps = flightTimeline(flight, now);
+	const steps = flightTimeline(flight, now, tl);
 	return (
 		<section
 			aria-label="Flight details"

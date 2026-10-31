@@ -52,6 +52,7 @@ export function CalendarChip({
 	item: CalendarItem;
 	tabStop: boolean;
 }) {
+	const tl = useLiteralMessages();
 	if (item.kind === "run") {
 		return (
 			<RunPopover
@@ -74,7 +75,7 @@ export function CalendarChip({
 		<button
 			{...{ [CALENDAR_ITEM_ATTRIBUTE]: item.key }}
 			aria-current={active ? "true" : undefined}
-			aria-label={itemAccessibleName(handlers.snapshot, item)}
+			aria-label={itemAccessibleName(handlers.snapshot, item, tl)}
 			className={chipClassName(item, active)}
 			data-thread-id={item.thread.id}
 			onClick={() => handlers.onOpenThread(item.thread.id)}
@@ -102,13 +103,14 @@ function AgendaRow({
 	onChoose: () => void;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
 	const title =
 		item.kind === "thread" ? threadTitle(item.thread) : item.event.title;
 	const upcoming = item.kind === "run" && item.event.kind === "upcoming";
 	return (
 		<button
 			aria-current={active ? "true" : undefined}
-			aria-label={itemAccessibleName(snapshot, item)}
+			aria-label={itemAccessibleName(snapshot, item, tl)}
 			className={cn(
 				"flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-left text-xs outline-none transition-colors",
 				"hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",

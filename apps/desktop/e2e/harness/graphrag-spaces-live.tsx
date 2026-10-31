@@ -3,6 +3,7 @@ import {
 	type SpaceMatchRow,
 	SpacesView,
 } from "@ryu/blocks/desktop/spaces.tsx";
+import { formatMessage } from "@ryu/i18n";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -197,7 +198,11 @@ function LiveGraphRagProof() {
 					onProgress: setRetrievalProgress,
 				});
 				await loadSpace(space.id);
-				setRetrievalNotice(describeRetrievalModeChange(change));
+				setRetrievalNotice(
+					describeRetrievalModeChange(change, (source, values) =>
+						formatMessage(source, values ?? {})
+					)
+				);
 			} catch (error) {
 				setRetrievalError(
 					error instanceof Error

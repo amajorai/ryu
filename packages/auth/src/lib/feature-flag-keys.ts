@@ -46,6 +46,15 @@ export const STUDENT_PROGRAM_FLAG = "programs.students" as const;
 export const STARTUP_PROGRAM_FLAG = "programs.startups" as const;
 
 /**
+ * Stable key for community Challenges: the /challenges pages, their nav and
+ * Resources-menu links, the sitemap entries, and registering or submitting
+ * an entry. Off, the pages answer 404 and the API refuses participation;
+ * staff tooling under /admin keeps working so a challenge can be prepared
+ * before it opens.
+ */
+export const CHALLENGES_FLAG = "community.challenges" as const;
+
+/**
  * Stable key for the invite-only Template Rewards pilot: discretionary,
  * usage-based rewards for creators of Marketplace agent/workflow templates,
  * settled over the seller Stripe Connect rail.

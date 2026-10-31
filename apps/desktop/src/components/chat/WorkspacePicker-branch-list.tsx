@@ -193,7 +193,7 @@ export function BranchList({
 					</CommandItem>
 					{dirty && (
 						<p
-							className="type-caption px-2 py-1 text-muted-foreground"
+							className="px-2 py-1 text-muted-foreground text-xs"
 							id={dirtyReasonId}
 							role="note"
 						>

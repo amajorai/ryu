@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
@@ -138,6 +139,7 @@ export function PanelsHome({
 	onTarget: (target: PanelsTarget) => void;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const actions = buildPanelsActions(snapshot);
 	const nowMs = now.getTime();
@@ -150,7 +152,7 @@ export function PanelsHome({
 					transition: { delay: index * 0.06, duration: 0.4, ease: PANELS_EASE },
 				};
 	const panelProps = { now: nowMs, onTarget, snapshot };
-	const headerActions = panelHeaderActions(snapshot, nowMs);
+	const headerActions = panelHeaderActions(snapshot, nowMs, tl);
 	return (
 		<div className="@container min-h-full" data-testid="panels-home">
 			<div className="relative">

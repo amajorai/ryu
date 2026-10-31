@@ -1,5 +1,6 @@
 import {
 	OnboardingShell,
+	type OnboardingShellLayout,
 	type OnboardingShellWidth,
 } from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import type { ReactNode } from "react";
@@ -12,12 +13,14 @@ import { RyuOnboardingAvatar } from "./RyuOnboardingPersona.tsx";
  */
 export function ActivationStepShell({
 	children,
+	layout,
 	stepKey,
 	subtitle,
 	title,
 	width = "form",
 }: {
 	children: ReactNode;
+	layout?: OnboardingShellLayout;
 	stepKey?: string;
 	subtitle?: ReactNode;
 	title: ReactNode;
@@ -26,6 +29,7 @@ export function ActivationStepShell({
 	return (
 		<OnboardingShell
 			avatar={<RyuOnboardingAvatar size={48} />}
+			layout={layout}
 			stepKey={stepKey}
 			subtitle={subtitle}
 			title={title}

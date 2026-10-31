@@ -32,6 +32,8 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { runsLimitedOnManagedPi, runsOnRyuEngine } from "../agent-engine.ts";
 import {
 	type AgentEgress,
@@ -45,6 +47,9 @@ import {
 	type ToolBridgePlan,
 } from "./agent-egress.ts";
 import type { AgentCatalogEntry } from "./agents.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 // src/lib/api → src/lib → src → apps/desktop → apps → repo root.
 const REPO_ROOT = join(import.meta.dir, "../../../../..");
@@ -225,7 +230,8 @@ describe("mechanism anchors — the redirect each family actually uses", () => {
 			const row = classifyAgentEgress(
 				{ id: "agt_x", name: "x", engine, flagship: false },
 				[],
-				prefs({})
+				prefs({}),
+				tl
 			);
 			expect(`${engine}:${row.mechanism}`).toBe(`${engine}:local-engine`);
 		}
@@ -296,7 +302,8 @@ const classify = (
 			flagship: agent.flagship ?? false,
 		},
 		CATALOG,
-		prefs(over)
+		prefs(over),
+		tl
 	);
 
 describe("classifyAgentEgress mirrors Core's agent_route order", () => {
@@ -986,7 +993,8 @@ describe("a built-in bot on Ryu's engine is the flagship's route, not an engine'
 		classifyAgentEgress(
 			{ id: "jay-jr", name: "Jay Jr.", engine: "jay-jr", flagship: false },
 			JAY_CATALOG,
-			prefs(over)
+			prefs(over),
+			tl
 		);
 
 	it("mirrors Core's id set and its agent_route branch", () => {
@@ -1070,7 +1078,8 @@ describe("a limited custom agent on the Ryu engine runs Ryu's managed Pi", () =>
 				modelsLimited,
 			},
 			CATALOG,
-			prefs(over)
+			prefs(over),
+			tl
 		);
 
 	it("mirrors Core's predicate and its agent_route branch", () => {
@@ -1108,7 +1117,8 @@ describe("a limited custom agent on the Ryu engine runs Ryu's managed Pi", () =>
 			classifyAgentEgress(
 				{ id: "agent-a", name: "Agent A", engine: "acp:pi", flagship: false },
 				CATALOG,
-				prefs({})
+				prefs({}),
+				tl
 			)
 		);
 	});

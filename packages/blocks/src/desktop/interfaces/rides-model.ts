@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { PICKUP, type Point } from "./rides-model-city.ts";
 import { pointAlong, routeLength } from "./rides-model-routes.ts";
 import type { DriverOption } from "./rides-model-sheet.ts";
@@ -178,10 +179,13 @@ export function routeAhead(route: readonly Point[], progress: number): Point[] {
 }
 
 /** How a driver's availability reads in the booking list: one short phrase. */
-export function availabilityText(option: DriverOption): string {
+export function availabilityText(
+	option: DriverOption,
+	tl: LiteralMessage
+): string {
 	return option.available
 		? "Available now"
-		: `About ${option.waitMinutes} min wait`;
+		: tl("About {waitMinutes} min wait", { waitMinutes: option.waitMinutes });
 }
 
 /**
@@ -215,7 +219,10 @@ export function tripWord(
  * conversation's title) is the heading and the ETA the large figure, so
  * neither is repeated here.
  */
-export function tripHeadline(trip: RideTrip): {
+export function tripHeadline(
+	trip: RideTrip,
+	tl: LiteralMessage
+): {
 	detail: string;
 	status: string;
 } {
@@ -224,21 +231,25 @@ export function tripHeadline(trip: RideTrip): {
 		case "enroute":
 			return trip.carless
 				? {
-						detail: `${driver} starts this after the current trip`,
+						detail: tl("{driver} starts this after the current trip", {
+							driver,
+						}),
 						status: tripWord(trip),
 					}
 				: {
-						detail: `Estimated from ${driver}'s usual reply time`,
+						detail: tl("Estimated from {driver}'s usual reply time", {
+							driver,
+						}),
 						status: tripWord(trip),
 					};
 		case "arrived":
 			return {
-				detail: `${driver} replied.`,
+				detail: tl("{driver} replied.", { driver }),
 				status: tripWord(trip),
 			};
 		case "completed":
 			return {
-				detail: `${driver} replied. It's still your turn.`,
+				detail: tl("{driver} replied. It's still your turn.", { driver }),
 				status: tripWord(trip),
 			};
 		case "unassigned":
@@ -248,7 +259,7 @@ export function tripHeadline(trip: RideTrip): {
 			};
 		case "requested":
 			return {
-				detail: `Waiting for ${driver} to pick it up`,
+				detail: tl("Waiting for {driver} to pick it up", { driver }),
 				status: tripWord(trip),
 			};
 		case "cancelled":

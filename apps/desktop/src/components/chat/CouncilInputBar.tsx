@@ -517,7 +517,7 @@ export function CouncilInputBar({
 		>
 			{chatWidgetTemplates.length > 0 && (
 				<div className="mx-auto mb-2 flex w-full max-w-[880px] flex-wrap items-center gap-1.5 px-3">
-					<span className="type-caption text-muted-foreground">
+					<span className="text-muted-foreground text-xs">
 						Available widgets
 					</span>
 					{chatWidgetTemplates.map((template) => {
@@ -527,7 +527,7 @@ export function CouncilInputBar({
 						}
 						return (
 							<button
-								className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
+								className="rounded-full border border-border bg-background px-2.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 								key={`${template.plugin ?? "widget"}:${template.id}`}
 								onClick={() => onChange?.(prompt)}
 								type="button"

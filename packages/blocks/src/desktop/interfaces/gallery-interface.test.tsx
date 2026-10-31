@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -23,6 +25,8 @@ import {
 	galleryRelated,
 } from "./gallery-model.ts";
 
+const passthrough: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 const MINUTE = 60_000;
 const BASE = Date.parse("2026-10-12T12:00:00Z");
 const ago = (minutes: number) =>
@@ -302,12 +306,17 @@ describe("gallery model", () => {
 		expect(galleryByline(ada ? [ada] : [])).toBe("Ada");
 		expect(galleryByline(ada && grace ? [ada, grace] : [])).toBe("Ada +1");
 		expect(
-			galleryNoMatchText({ ...EMPTY_GALLERY_FILTER, query: "zebra" }, "Ada")
+			galleryNoMatchText(
+				{ ...EMPTY_GALLERY_FILTER, query: "zebra" },
+				"Ada",
+				passthrough
+			)
 		).toContain("“zebra”");
 		expect(
 			galleryNoMatchText(
 				{ ...EMPTY_GALLERY_FILTER, agentId: "agent-ada" },
-				"Ada"
+				"Ada",
+				passthrough
 			)
 		).toBe("Ada has no conversations in this view.");
 	});

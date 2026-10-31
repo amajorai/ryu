@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -14,7 +16,6 @@ import { FarmInterface } from "./farm-interface.tsx";
 import {
 	BED_SLOTS,
 	buildFarm,
-	cropLabel,
 	FRUITS,
 	farmDay,
 	fruitFor,
@@ -24,15 +25,16 @@ import {
 	PLANT_HEIGHT,
 	plantBed,
 	plotForThread,
-	plotLabel,
 	type Rect,
 	SHARED_PLOT_ID,
 	seedSlot,
 	stageFor,
 } from "./farm-model.ts";
+import { cropLabel, plotLabel } from "./farm-model-labels.ts";
 import { Plant } from "./farm-plants.tsx";
 import { usefulStateFixture } from "./game-acts-fixture.ts";
 
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 const MINUTE = 60_000;
 const BASE = Date.parse("2026-10-12T12:00:00Z");
 const ago = (minutes: number) =>
@@ -239,7 +241,7 @@ function cropButton(container: HTMLElement, threadId: string) {
 	if (!(crop && plot)) {
 		throw new Error(`No crop for ${threadId}`);
 	}
-	return byLabel(container, cropLabel(crop, plot.name));
+	return byLabel(container, cropLabel(crop, plot.name, tl));
 }
 
 function rectsOverlap(a: Rect, b: Rect): boolean {
@@ -365,7 +367,7 @@ describe("farm model", () => {
 
 	test("plot labels name the plot, its team and its crops", () => {
 		const { plots } = buildFarm(SNAPSHOT);
-		expect(plots.map(plotLabel)).toEqual([
+		expect(plots.map((plot) => plotLabel(plot, tl))).toEqual([
 			"Ada's plot: 1 crop",
 			"Grace's plot, Docs Crew: 2 crops",
 			"Linus's plot, Docs Crew: 1 crop",

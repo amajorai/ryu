@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { emptyPolicyRules } from "@ryu/blocks/desktop/guardrails/policy-model.ts";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	desktopPolicyWorkspaceClient,
 	GUARDRAIL_STEP_UP_REQUIRED,
@@ -9,6 +11,8 @@ import {
 } from "./guardrail-policies.ts";
 
 const originalFetch = globalThis.fetch;
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 const session = {
 	baseUrl: "http://control-plane.test/",
 	token: () => "account-session",
@@ -89,7 +93,8 @@ describe("desktop guardrail policy client", () => {
 		}));
 		const policies = await desktopPolicyWorkspaceClient(
 			session,
-			"org 1"
+			"org 1",
+			tl
 		).list();
 		expect(policies.map((policy) => policy.id)).toEqual(["gp_1"]);
 		expect(policies[0]?.rules.firewall).toEqual({ enabled: true });
@@ -104,7 +109,7 @@ describe("desktop guardrail policy client", () => {
 			body: { code: "version_conflict", error: "the policy changed" },
 			status: 409,
 		}));
-		const failure = await desktopPolicyWorkspaceClient(session, "o")
+		const failure = await desktopPolicyWorkspaceClient(session, "o", tl)
 			.update("gp_1", {
 				description: "",
 				expectedVersion: 4,
@@ -132,7 +137,7 @@ describe("desktop guardrail policy client", () => {
 					}
 				: { body: { deleted: true, id: "ga_1" }, status: 200 };
 		});
-		const client = desktopPolicyWorkspaceClient(session, "o");
+		const client = desktopPolicyWorkspaceClient(session, "o", tl);
 		const scopes: string[] = [];
 		const result = await runGuardrailWrite(
 			async (scope, action) => {
@@ -162,7 +167,7 @@ describe("desktop guardrail policy client", () => {
 				status: 200,
 			};
 		});
-		const options = await loadPolicyScopeOptions(session, "o");
+		const options = await loadPolicyScopeOptions(session, "o", tl);
 		expect(options.org).toEqual([{ id: "o", label: "Acme" }]);
 		expect(options.team).toEqual([{ id: "t1", label: "Platform" }]);
 		expect(options.member).toEqual([{ id: "u1", label: "u1 (admin)" }]);

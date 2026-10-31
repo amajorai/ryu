@@ -4,6 +4,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "./hero-stack.module.css";
+import { LinkArrow } from "./link-arrow.tsx";
 
 const SURFACES = [
 	{ id: "desktop", label: "Desktop" },
@@ -132,12 +133,13 @@ export default function HeroStack() {
 								{routeActive ? (
 									<motion.span
 										animate={{ opacity: 1, scale: 1 }}
-										className="type-compact rounded-full bg-foreground px-2 py-0.5 font-medium text-background"
+										className="type-compact inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 font-medium text-background"
 										exit={{ opacity: 0, scale: 0.9 }}
 										initial={{ opacity: 0, scale: 0.9 }}
 										key="routing"
 									>
-										routing →
+										routing
+										<LinkArrow />
 									</motion.span>
 								) : null}
 							</AnimatePresence>

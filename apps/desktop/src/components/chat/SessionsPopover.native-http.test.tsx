@@ -2,9 +2,12 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import type { Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch,
 	NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
 const { SessionsPopover } = await import("./SessionsPopover.tsx");
@@ -84,7 +87,7 @@ beforeEach(() => {
 			const auditPath =
 				u.pathname.replace("/alternate", "") === "/api/gateway/audit" &&
 				u.search === "?session_id=conversation&limit=200";
-			if (!sessionPath && !auditPath) {
+			if (!(sessionPath || auditPath)) {
 				unexpected.push(path);
 				return NativeResponse.json({}, { status: 503 });
 			}
@@ -99,31 +102,33 @@ beforeEach(() => {
 					release = resolve;
 				});
 			}
-			if (held && refuse)
+			if (held && refuse) {
 				return NativeResponse.json({ error: "old refused" }, { status: 503 });
-			if (sessionPath)
+			}
+			if (sessionPath) {
 				return NativeResponse.json({
 					sessions: ["idle", "running", "completed", "failed"].map((s, i) =>
 						session(held ? "Retired A" : identity, s, i)
 					),
 				});
+			}
 			return NativeResponse.json({
 				reachable: true,
 				count: 4,
 				entries: [
 					{
 						event_type: "model_call",
-						cost_micro_usd: identity === "B" ? 5000000 : 1000000,
+						cost_micro_usd: identity === "B" ? 5_000_000 : 1_000_000,
 						latency_ms: 500,
 					},
 					{
 						event_type: "model_call",
-						cost_micro_usd: 2000000,
+						cost_micro_usd: 2_000_000,
 						latency_ms: 1000,
 					},
 					{
 						event_type: "tool_call",
-						cost_micro_usd: 9000000,
+						cost_micro_usd: 9_000_000,
 						latency_ms: 9000,
 					},
 					{ event_type: null, cost_micro_usd: null, latency_ms: 100 },
@@ -158,13 +163,14 @@ async function render() {
 async function until(check: () => boolean) {
 	const end = Date.now() + 3000;
 	while (!check()) {
-		if (Date.now() > end)
+		if (Date.now() > end) {
 			throw Error(
 				"UI did not settle " +
 					document.body.textContent +
 					" " +
 					JSON.stringify(calls)
 			);
+		}
 		await act(async () => {
 			await Bun.sleep(5);
 		});
@@ -174,7 +180,9 @@ function trigger() {
 	const b = container.querySelector<HTMLButtonElement>(
 		'button[aria-label="Sessions"]'
 	);
-	if (!b) throw Error("Missing Sessions trigger");
+	if (!b) {
+		throw Error("Missing Sessions trigger");
+	}
 	return b;
 }
 async function toggle() {
@@ -200,10 +208,11 @@ test("real authenticated session rows sort newest first, show each status color 
 		["running", "bg-warning"],
 		["completed", "bg-success"],
 		["failed", "bg-destructive"],
-	])
+	]) {
 		expect(
 			document.querySelector(`[aria-label="${status}"]`)?.className
 		).toContain(color);
+	}
 	expect(text()).toContain("$3.00");
 	expect(text()).toContain("1.6s");
 	expect(calls).toEqual([
@@ -219,7 +228,7 @@ test("real authenticated session rows sort newest first, show each status color 
 		},
 	]);
 });
-for (const dimension of ["URL", "token", "JWT", "ABA"] as const)
+for (const dimension of ["URL", "token", "JWT", "ABA"] as const) {
 	test(`old held session read cannot replace current rows after ${dimension} rotation`, async () => {
 		hold = "sessions";
 		armed = true;
@@ -245,8 +254,11 @@ for (const dimension of ["URL", "token", "JWT", "ABA"] as const)
 		await settledResponse(before);
 		expect(text()).toContain(dimension === "ABA" ? "A worker 3" : "B worker 3");
 		expect(text()).not.toContain("Retired A worker");
-		if (dimension !== "ABA") expect(text()).not.toContain("A worker");
+		if (dimension !== "ABA") {
+			expect(text()).not.toContain("A worker");
+		}
 	});
+}
 test("old held refusal cannot publish an error in current JWT scope", async () => {
 	hold = "sessions";
 	armed = true;
@@ -283,7 +295,7 @@ test("close and reopen issues an explicit fresh session read after refusal", asy
 	expect(calls.filter((c) => c.path.includes("/sessions")).length).toBe(2);
 });
 
-for (const refused of [false, true])
+for (const refused of [false, true]) {
 	test(`retired audit ${refused ? "refusal" : "rollup"} cannot replace current model cost`, async () => {
 		hold = "audit";
 		armed = true;
@@ -305,3 +317,4 @@ for (const refused of [false, true])
 		expect(text()).toContain("B worker 3");
 		expect(text()).not.toContain("$3.00");
 	});
+}

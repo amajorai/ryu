@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -136,20 +137,24 @@ function newest(threads: readonly InterfaceThread[]): string | null {
 	return latest;
 }
 
+const PROFILE_DESCRIPTION =
+	"Threads you started with no agent, project, or team.";
+
 function describeCommunity(
 	kind: CommunityKind,
 	name: string,
+	tl: LiteralMessage,
 	agent?: InterfaceAgent
 ) {
 	switch (kind) {
 		case "project":
-			return `Threads filed under the ${name} project.`;
+			return tl("Threads filed under the {name} project.", { name });
 		case "team":
-			return `Threads the ${name} team works on together.`;
+			return tl("Threads the {name} team works on together.", { name });
 		case "agent":
-			return agent?.description.trim() || `Threads with ${name}.`;
+			return agent?.description.trim() || tl("Threads with {name}.", { name });
 		default:
-			return "Threads you started with no agent, project, or team.";
+			return tl("Threads you started with no agent, project, or team.");
 	}
 }
 
@@ -158,7 +163,10 @@ function describeCommunity(
  * profile comes last and only when some thread has nowhere else to go.
  * Handles stay unique by numbering repeats.
  */
-export function buildCommunities(snapshot: InterfaceSnapshot): Community[] {
+export function buildCommunities(
+	snapshot: InterfaceSnapshot,
+	tl: LiteralMessage
+): Community[] {
 	const taken = new Map<string, number>();
 	const unique = (name: string) => {
 		const base = communityHandle(name);
@@ -202,7 +210,7 @@ export function buildCommunities(snapshot: InterfaceSnapshot): Community[] {
 		communities.push(
 			finish({
 				agentId: null,
-				description: describeCommunity(group.kind, group.name),
+				description: describeCommunity(group.kind, group.name, tl),
 				handle: unique(group.name),
 				key: `${group.kind}:${group.id}`,
 				kind: group.kind,
@@ -224,7 +232,7 @@ export function buildCommunities(snapshot: InterfaceSnapshot): Community[] {
 		communities.push(
 			finish({
 				agentId: agent.id,
-				description: describeCommunity("agent", agent.name, agent),
+				description: describeCommunity("agent", agent.name, tl, agent),
 				handle: unique(agent.name),
 				key: `agent:${agent.id}`,
 				kind: "agent",
@@ -238,7 +246,7 @@ export function buildCommunities(snapshot: InterfaceSnapshot): Community[] {
 	}
 	const profile = finish({
 		agentId: null,
-		description: describeCommunity("profile", "you"),
+		description: describeCommunity("profile", "you", tl),
 		handle: "you",
 		key: PROFILE_KEY,
 		kind: "profile",
@@ -275,7 +283,7 @@ export function primaryCommunity(
 	return (
 		communities.find((community) => community.key === PROFILE_KEY) ?? {
 			agentId: null,
-			description: describeCommunity("profile", "you"),
+			description: PROFILE_DESCRIPTION,
 			handle: "you",
 			key: PROFILE_KEY,
 			kind: "profile",

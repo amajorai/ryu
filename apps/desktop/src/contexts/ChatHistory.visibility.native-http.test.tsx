@@ -2,9 +2,12 @@ import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useEffect, useState } from "react";
 import type { Root } from "react-dom/client";
+
 const nativeFetch = globalThis.fetch;
 const NativeResponse = globalThis.Response;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 globalThis.fetch = nativeFetch;
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const { createRoot } = await import("react-dom/client");
@@ -92,10 +95,11 @@ const server: Bun.Server<undefined> = Bun.serve({
 			pendingRequest &&
 			pendingRequest.slot === slot &&
 			pendingRequest.method === request.method
-		)
+		) {
 			await new Promise<void>((resolve) => {
 				release = resolve;
 			});
+		}
 		if (request.method === "POST") {
 			if (
 				!url.pathname.endsWith("/api/conversations/chat-%2Ffixture/visibility")
@@ -103,11 +107,12 @@ const server: Bun.Server<undefined> = Bun.serve({
 				unexpected.push("Invalid mutation path");
 				return NativeResponse.json({}, { status: 503 });
 			}
-			if (rejected)
+			if (rejected) {
 				return NativeResponse.json(
 					{ error: "visibility denied" },
 					{ status: 503 }
 				);
+			}
 			if (
 				!body ||
 				Object.keys(body).length !== 1 ||
@@ -181,8 +186,8 @@ function Consumer() {
 			</output>
 			<input
 				aria-label="Unrelated draft"
-				value={draft}
 				onInput={(e) => setDraft(e.currentTarget.value)}
+				value={draft}
 			/>
 			<button
 				onClick={() =>
@@ -216,7 +221,9 @@ async function unmount() {
 }
 async function until(check: () => boolean) {
 	for (let i = 0; i < 250; i++) {
-		if (check()) return;
+		if (check()) {
+			return;
+		}
 		await act(async () => {
 			await new Promise((r) => setTimeout(r, 4));
 		});

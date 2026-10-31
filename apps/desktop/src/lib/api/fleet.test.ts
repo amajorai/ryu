@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import { vaultHydrated } from "@/lib/auth-client.ts";
 import {
@@ -17,6 +19,8 @@ const originalStorage = Object.getOwnPropertyDescriptor(
 const originalSetTimeout = globalThis.setTimeout;
 const originalClearTimeout = globalThis.clearTimeout;
 const target = { token: "local-core-token", url: "http://127.0.0.1:7980" };
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 function storage(token: string | null): Storage {
 	return {
 		getItem: () => token,
@@ -106,6 +110,7 @@ describe("Fleet organization binding", () => {
 				name: "Studio workstation",
 				organizationId: "org-1",
 				target,
+				tl,
 			})
 		).resolves.toMatchObject({
 			enrolled: true,
@@ -161,6 +166,7 @@ describe("Fleet organization binding", () => {
 				name: "Studio workstation",
 				organizationId: "org-1",
 				target,
+				tl,
 			})
 		).rejects.toThrow("invalid enrollment code");
 		expect(
@@ -180,6 +186,7 @@ describe("Fleet organization binding", () => {
 				name: `  ${"n".repeat(129)}  `,
 				organizationId: "org-1",
 				target,
+				tl,
 			})
 		).rejects.toThrow("128 characters");
 		expect(requestCount).toBe(0);
@@ -203,6 +210,7 @@ describe("Fleet organization binding", () => {
 				name: "Studio workstation",
 				organizationId: "org-new",
 				target,
+				tl,
 			})
 		).rejects.toBeInstanceOf(NodeAlreadyBoundError);
 		expect(
@@ -327,6 +335,7 @@ test("cloud enrollment errors preserve message priority, whitespace, and status 
 				name: "node",
 				organizationId: "org",
 				target,
+				tl,
 			})
 		).rejects.toThrow(expected);
 	}

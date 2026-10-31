@@ -6,7 +6,7 @@ export default defineConfig({
 	fullyParallel: false,
 	workers: 1,
 	retries: 0,
-	timeout: 60000,
+	timeout: 60_000,
 	use: {
 		...devices["Desktop Chrome"],
 		baseURL: "http://127.0.0.1:5660",
@@ -19,7 +19,7 @@ export default defineConfig({
 			cwd: path.resolve(import.meta.dirname, ".."),
 			url: "http://127.0.0.1:5661/__ready",
 			reuseExistingServer: false,
-			timeout: 30000,
+			timeout: 30_000,
 		},
 		{
 			command:
@@ -27,7 +27,7 @@ export default defineConfig({
 			cwd: path.resolve(import.meta.dirname, ".."),
 			url: "http://127.0.0.1:5660/system-notifications-story.html",
 			reuseExistingServer: false,
-			timeout: 120000,
+			timeout: 120_000,
 		},
 	],
 });

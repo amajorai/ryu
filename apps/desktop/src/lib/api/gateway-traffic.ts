@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { type ApiTarget, apiUrl, requestHeaders } from "./client.ts";
 import {
 	gatewayTrafficUnavailableSchema,
@@ -102,6 +103,7 @@ export interface TrafficVerdict {
  */
 export function subscribeGatewayTraffic(
 	target: ApiTarget,
+	tl: LiteralMessage,
 	onEvent: (event: TrafficEvent) => void,
 	onError?: (message: string, detail?: { status: number }) => void,
 	onEnd?: () => void,
@@ -116,9 +118,10 @@ export function subscribeGatewayTraffic(
 				signal: controller.signal,
 			});
 			if (!resp.ok) {
-				onError?.(`traffic feed returned ${resp.status}`, {
-					status: resp.status,
-				});
+				onError?.(
+					tl("traffic feed returned {status}", { status: resp.status }),
+					{ status: resp.status }
+				);
 				return;
 			}
 			const contentType = resp.headers.get("content-type") ?? "";
@@ -132,7 +135,9 @@ export function subscribeGatewayTraffic(
 						JSON.parse(text)
 					);
 					if (parsed.error) {
-						message = `traffic feed: ${String(parsed.error)}`;
+						message = tl("traffic feed: {error}", {
+							error: String(parsed.error),
+						});
 					} else if (parsed.reachable === false) {
 						message = "traffic feed: gateway unreachable";
 					}

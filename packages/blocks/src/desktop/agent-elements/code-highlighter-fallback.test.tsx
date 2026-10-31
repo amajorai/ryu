@@ -123,7 +123,8 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Reflect.set(Element.prototype, "getAnimations", () => []);
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { Markdown } = await import("./markdown.tsx");
+const { Markdown, preloadMarkdown } = await import("./markdown.tsx");
+await preloadMarkdown();
 afterAll(async () => {
 	mock.restore();
 	await GlobalRegistrator.unregister();
@@ -172,7 +173,9 @@ test("real streamed Markdown preserves pending source and newest completed fallb
 			const copy = container.querySelector<HTMLButtonElement>(
 				'[data-streamdown="code-block-copy-button"]'
 			);
-			if (!copy) throw new Error("Actual streamed code copy control is absent");
+			if (!copy) {
+				throw new Error("Actual streamed code copy control is absent");
+			}
 			// Animation keeps code controls disabled while the reply is arriving.
 			expect(copy.disabled).toBe(true);
 			await act(async () => copy.click());
@@ -191,8 +194,9 @@ test("real streamed Markdown preserves pending source and newest completed fallb
 			const completedCopy = container.querySelector<HTMLButtonElement>(
 				'[data-streamdown="code-block-copy-button"]'
 			);
-			if (!completedCopy)
+			if (!completedCopy) {
 				throw new Error("Actual completed code copy control is absent");
+			}
 			expect(completedCopy.disabled).toBe(false);
 			await act(async () => completedCopy.click());
 			expect(copied).toEqual([`${newest}\n`]);

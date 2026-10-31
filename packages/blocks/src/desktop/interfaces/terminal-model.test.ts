@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	INTERFACE_PROTOCOL_VERSION,
 	type InterfaceSnapshot,
@@ -15,6 +17,8 @@ import {
 	statusMap,
 	terminalCounts,
 } from "./terminal-model.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 function thread(
 	input: Partial<InterfaceThread> & Pick<InterfaceThread, "id">
@@ -105,19 +109,19 @@ describe("terminal model", () => {
 	});
 
 	test("open resolves list numbers against the last listing, ids, and prefixes", () => {
-		expect(resolveOpenTarget(SNAPSHOT, "2", null)).toEqual({
+		expect(resolveOpenTarget(SNAPSHOT, "2", null, tl)).toEqual({
 			kind: "found",
 			number: 2,
 			threadId: "t-reply",
 		});
-		expect(resolveOpenTarget(SNAPSHOT, "1", ["t-run"])).toEqual({
+		expect(resolveOpenTarget(SNAPSHOT, "1", ["t-run"], tl)).toEqual({
 			kind: "found",
 			number: 1,
 			threadId: "t-run",
 		});
-		expect(resolveOpenTarget(SNAPSHOT, "t-mine", null).kind).toBe("found");
-		expect(resolveOpenTarget(SNAPSHOT, "t-r", null).kind).toBe("missing");
-		expect(resolveOpenTarget(SNAPSHOT, "9", null).kind).toBe("missing");
+		expect(resolveOpenTarget(SNAPSHOT, "t-mine", null, tl).kind).toBe("found");
+		expect(resolveOpenTarget(SNAPSHOT, "t-r", null, tl).kind).toBe("missing");
+		expect(resolveOpenTarget(SNAPSHOT, "9", null, tl).kind).toBe("missing");
 	});
 
 	test("an open miss counts threads in the right number", () => {
@@ -125,14 +129,14 @@ describe("terminal model", () => {
 			...SNAPSHOT,
 			threads: [thread({ id: "t-only" })],
 		};
-		expect(resolveOpenTarget(one, "9", null)).toMatchObject({
+		expect(resolveOpenTarget(one, "9", null, tl)).toMatchObject({
 			hint: "1 thread · ls to refresh",
 			kind: "missing",
 		});
-		expect(resolveOpenTarget(SNAPSHOT, "9", null)).toMatchObject({
+		expect(resolveOpenTarget(SNAPSHOT, "9", null, tl)).toMatchObject({
 			hint: "4 threads · ls to refresh",
 		});
-		expect(resolveOpenTarget(SNAPSHOT, "9", ["t-run"])).toMatchObject({
+		expect(resolveOpenTarget(SNAPSHOT, "9", ["t-run"], tl)).toMatchObject({
 			hint: "1 in the last listing · ls to refresh",
 		});
 	});

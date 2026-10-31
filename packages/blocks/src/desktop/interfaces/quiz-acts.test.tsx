@@ -6,6 +6,7 @@ GlobalRegistrator.register();
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const { act, useState } = await import("react");
+const { formatMessage } = await import("@ryu/i18n");
 const { createRoot } = await import("react-dom/client");
 const { agentActs } = await import("@ryuhq/protocol/interfaces");
 const { FIXTURE_CLOCK, FIXTURE_NOW, usefulStateFixture } = await import(
@@ -317,6 +318,7 @@ describe("quiz podium plates (15a)", () => {
 			looks: {} as never,
 			paths,
 			reduced: true,
+			tl: formatMessage,
 			view,
 		});
 		if (!spec) {

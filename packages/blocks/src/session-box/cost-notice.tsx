@@ -13,6 +13,7 @@
 // next computer-use step. `CostNoticeAllowed` says which until the Box
 // appears.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { useId, useState } from "react";
 import {
@@ -37,6 +38,7 @@ export function ComputerUseCostNotice({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const titleId = useId();
+	const tl = useLiteralMessages();
 	const rate = notice.ratePerHourMicroUsd;
 
 	const allow = async () => {
@@ -65,9 +67,9 @@ export function ComputerUseCostNotice({
 			data-testid="computer-use-cost-notice"
 		>
 			<h3 className="font-medium text-sm" id={titleId}>
-				{costNoticeHeading(notice)}
+				{costNoticeHeading(notice, tl)}
 			</h3>
-			<p className="text-muted-foreground">{costNoticeText(notice)}</p>
+			<p className="text-muted-foreground">{costNoticeText(notice, tl)}</p>
 			{error ? (
 				<p className="text-status-destructive" role="alert">
 					{error}

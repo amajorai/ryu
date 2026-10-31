@@ -2,14 +2,16 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import { installedIndividualIcons } from "./installed-individual-icons.ts";
 import { themePublisherHttp } from "./appearance-theme-publisher-http.ts";
+import { installedIndividualIcons } from "./installed-individual-icons.ts";
+
 const desktop =
 	process.env.RYU_APPEARANCE_DESKTOP ??
 	path.resolve(import.meta.dirname, "../..");
 const ownedCache = process.env.RYU_APPEARANCE_VITE_CACHE;
-if (!ownedCache || !path.isAbsolute(ownedCache))
+if (!(ownedCache && path.isAbsolute(ownedCache))) {
 	throw new Error("Fresh owned Vite cache path required");
+}
 export default defineConfig({
 	root: import.meta.dirname,
 	cacheDir: ownedCache,
@@ -42,7 +44,7 @@ export default defineConfig({
 	},
 	server: {
 		host: "127.0.0.1",
-		port: 33364,
+		port: 33_364,
 		strictPort: true,
 		fs: { allow: [path.resolve(desktop, "../.."), import.meta.dirname] },
 	},

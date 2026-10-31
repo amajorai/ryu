@@ -23,8 +23,8 @@ import {
 	NumberField,
 	TextField,
 } from "@/src/components/inference/fields.tsx";
-import { useVoiceAuthority } from "@/src/hooks/useVoiceAuthority.ts";
 import { useSpeechPlayback } from "@/src/hooks/useSpeechPlayback.ts";
+import { useVoiceAuthority } from "@/src/hooks/useVoiceAuthority.ts";
 import { useVoiceEngines } from "@/src/hooks/useVoiceEngines.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
@@ -153,7 +153,9 @@ export function TtsEngineSettings({
 	);
 
 	const refreshModels = useCallback(async () => {
-		if (!isCurrent()) return;
+		if (!isCurrent()) {
+			return;
+		}
 		const sequence = ++modelReads.current;
 		modelReadReady.current = { authority, known: false };
 		const live = () => isCurrent() && sequence === modelReads.current;
@@ -170,7 +172,7 @@ export function TtsEngineSettings({
 				setModelView({ authority, items, known: true, error: null });
 			}
 		} catch {
-			if (live())
+			if (live()) {
 				setModelView((old) => ({
 					authority,
 					items: old.authority === authority ? old.items : [],
@@ -178,6 +180,7 @@ export function TtsEngineSettings({
 					error:
 						"Couldn’t load the voice models. Retry to confirm installed models.",
 				}));
+			}
 		}
 	}, [target, authority]);
 
@@ -199,8 +202,9 @@ export function TtsEngineSettings({
 				}
 			})
 			.catch(() => {
-				if (!cancelled && isCurrent())
+				if (!cancelled && isCurrent()) {
 					setEngineFailure({ authority, failed: true });
+				}
 			});
 		void refreshModels();
 		return () => {
@@ -212,36 +216,43 @@ export function TtsEngineSettings({
 		async (name: string) => {
 			const engine = voiceSidecars.find((entry) => entry.name === name);
 			if (
-				!engine ||
-				!isCurrent() ||
+				!(engine && isCurrent()) ||
 				runtimeWrite.current ||
 				runtimeLoading ||
 				!engine.runningKnown
-			)
+			) {
 				return;
+			}
 			const ticket = {};
 			runtimeWrite.current = ticket;
 			setSidecarPending(true);
 			setActionView({ authority, error: null });
 			try {
-				if (engine.installState !== "installed")
+				if (engine.installState !== "installed") {
 					await installVoiceSidecar(name);
-				else if (!engine.running) await setVoiceRunning(name, true);
-				if (!isCurrent()) return;
+				} else if (!engine.running) {
+					await setVoiceRunning(name, true);
+				}
+				if (!isCurrent()) {
+					return;
+				}
 				setReloadNonce((n) => n + 1);
 			} catch {
-				if (isCurrent())
+				if (isCurrent()) {
 					setActionView({
 						authority,
 						error:
-							engine.installState !== "installed"
-								? "Couldn’t install the audio runtime. Try again."
-								: "Couldn’t start the audio runtime. Try again.",
+							engine.installState === "installed"
+								? "Couldn’t start the audio runtime. Try again."
+								: "Couldn’t install the audio runtime. Try again.",
 					});
+				}
 			} finally {
 				if (runtimeWrite.current === ticket) {
 					runtimeWrite.current = null;
-					if (isCurrent()) setSidecarPending(false);
+					if (isCurrent()) {
+						setSidecarPending(false);
+					}
 				}
 			}
 		},
@@ -271,8 +282,9 @@ export function TtsEngineSettings({
 				!modelsKnown ||
 				modelReadReady.current.authority !== authority ||
 				!modelReadReady.current.known
-			)
+			) {
 				return;
+			}
 			const ticket = {};
 			modelWrite.current = ticket;
 			setInstalling(model.model_name);
@@ -286,15 +298,18 @@ export function TtsEngineSettings({
 					await refreshModels();
 				}
 			} catch {
-				if (isCurrent())
+				if (isCurrent()) {
 					setActionView({
 						authority,
 						error: "Couldn’t install the voice model. Try again.",
 					});
+				}
 			} finally {
 				if (modelWrite.current === ticket) {
 					modelWrite.current = null;
-					if (isCurrent()) setInstalling(null);
+					if (isCurrent()) {
+						setInstalling(null);
+					}
 				}
 			}
 		},
@@ -400,7 +415,9 @@ export function TtsEngineSettings({
 		if (!ryutts) {
 			return null;
 		}
-		if (!ryutts.runningKnown) return { label: "Audio runtime status unknown" };
+		if (!ryutts.runningKnown) {
+			return { label: "Audio runtime status unknown" };
+		}
 		if (ryutts.installState !== "installed") {
 			return {
 				label: sidecarPending ? "Installing…" : "Install Ryu Audio engine",
@@ -415,8 +432,9 @@ export function TtsEngineSettings({
 		if (!audiocpp) {
 			return null;
 		}
-		if (!audiocpp.runningKnown)
+		if (!audiocpp.runningKnown) {
 			return { label: "Audio runtime status unknown" };
+		}
 		if (audiocpp.installState !== "installed") {
 			return {
 				label: sidecarPending ? "Installing…" : "Install audio.cpp runtime",
@@ -627,24 +645,26 @@ export function TtsEngineSettings({
 			</div>
 
 			{actionError && (
-				<p role="alert" className="px-3 pt-2 text-status-destructive text-xs">
+				<p className="px-3 pt-2 text-status-destructive text-xs" role="alert">
 					{actionError}
 				</p>
 			)}
 			{runtimeError && (
 				<div className="flex items-center gap-2 px-3 pt-2">
-					<p role="alert" className="text-status-destructive text-xs">
+					<p className="text-status-destructive text-xs" role="alert">
 						{runtimeError}
 					</p>
 					<button
-						type="button"
 						aria-label="Retry loading voice runtime status"
 						className="rounded-md px-2 py-1 text-xs hover:bg-muted/50"
 						onClick={() => {
 							void reloadRuntime().then(() => {
-								if (isCurrent()) setReloadNonce((n) => n + 1);
+								if (isCurrent()) {
+									setReloadNonce((n) => n + 1);
+								}
 							});
 						}}
+						type="button"
 					>
 						Retry
 					</button>
@@ -652,16 +672,16 @@ export function TtsEngineSettings({
 			)}
 			{modelError && (
 				<div className="flex items-center gap-2 px-3 pt-2">
-					<p role="alert" className="text-status-destructive text-xs">
+					<p className="text-status-destructive text-xs" role="alert">
 						{modelError}
 					</p>
 					<button
-						type="button"
 						aria-label="Retry loading voice models"
 						className="rounded-md px-2 py-1 text-xs hover:bg-muted/50"
 						onClick={() => {
 							void refreshModels();
 						}}
+						type="button"
 					>
 						Retry
 					</button>

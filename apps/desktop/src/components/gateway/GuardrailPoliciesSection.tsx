@@ -13,12 +13,14 @@ import {
 	SettingsCard,
 	SettingsSection,
 } from "@ryu/blocks/desktop/settings-items.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	type ReactNode,
 	useCallback,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { BACKEND_URL } from "@/lib/auth-client.ts";
@@ -88,6 +90,9 @@ export function GuardrailPoliciesSection() {
 }
 
 function OrgGuardrailPolicies({ orgId }: { orgId: string }) {
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const [access, setAccess] = useState<Access>("loading");
 	const [scopeOptions, setScopeOptions] = useState<PolicyScopeOptions>(() =>
 		emptyOptions(orgId)
@@ -109,7 +114,7 @@ function OrgGuardrailPolicies({ orgId }: { orgId: string }) {
 					setAccess("error");
 				}
 			});
-		loadPolicyScopeOptions(SESSION, orgId)
+		loadPolicyScopeOptions(SESSION, orgId, tlRef.current)
 			.then((next) => {
 				if (!cancelled) {
 					setScopeOptions(next);
@@ -122,7 +127,10 @@ function OrgGuardrailPolicies({ orgId }: { orgId: string }) {
 	}, [orgId]);
 
 	const client = useMemo(
-		() => desktopPolicyWorkspaceClient(SESSION, orgId),
+		() =>
+			desktopPolicyWorkspaceClient(SESSION, orgId, (source, values) =>
+				tlRef.current(source, values)
+			),
 		[orgId]
 	);
 	const { guard } = stepUp;

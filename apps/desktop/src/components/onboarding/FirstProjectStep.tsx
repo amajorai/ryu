@@ -89,7 +89,7 @@ export function FirstProjectStep({
 	const canPickFolder = isTauriReady();
 
 	const draft = { about, folder, icon, name };
-	const validation = firstProjectError(draft);
+	const validation = firstProjectError(draft, tl);
 
 	const chooseFolder = async () => {
 		try {

@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -34,12 +34,12 @@ interface Stat {
 }
 
 /** The headline counts: one row of four above the thread list. */
-function keyStats(quote: TickerQuote): Stat[] {
+function keyStats(quote: TickerQuote, tl: LiteralMessage): Stat[] {
 	const { stats } = quote;
 	return [
 		{
 			label: "Active today",
-			spoken: describeChange(quote.change, quote.changePercent),
+			spoken: describeChange(quote.change, quote.changePercent, tl),
 			tone: quote.change === 0 ? undefined : DIRECTION_TEXT[quote.direction],
 			value: formatChange(quote.change),
 		},
@@ -288,7 +288,7 @@ export function TickerDetail({
 				<h3 className={SECTION_HEADING} id="ticker-stats-heading">
 					Key statistics
 				</h3>
-				<StatGrid stats={keyStats(quote)} />
+				<StatGrid stats={keyStats(quote, tl)} />
 			</section>
 
 			<section aria-labelledby="ticker-threads-heading" className="mt-10">

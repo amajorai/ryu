@@ -1,3 +1,4 @@
+import { FEATURE_NAV_GROUP } from "./data/feature-nav.ts";
 import { productMenuGroupsFor } from "./data/product-realms.ts";
 import {
 	PLAN_LINKS,
@@ -28,21 +29,23 @@ export const NO_HIDDEN_PRODUCTS: readonly string[] = [];
 
 /**
  * Available products only, one group per nav group, without the realms the host
- * has not rolled out. Early-access and coming-soon products stay on /products,
+ * has not rolled out, then the Features group (./data/feature-nav.ts). Early-access and coming-soon products stay on /products,
  * which the sheet's "All products" link opens, exactly as in the desktop menu.
  */
 export function productSheet(
 	hiddenProductIds: readonly string[]
 ): SheetGroup[] {
-	return productMenuGroupsFor(hiddenProductIds).map((group) => ({
-		title: group.title,
-		links: group.items.map(({ description, label, href }) => ({
-			description,
-			label,
-			href,
-			external: false,
-		})),
-	}));
+	return [...productMenuGroupsFor(hiddenProductIds), FEATURE_NAV_GROUP].map(
+		(group) => ({
+			title: group.title,
+			links: group.items.map(({ description, label, href }) => ({
+				description,
+				label,
+				href,
+				external: false,
+			})),
+		})
+	);
 }
 
 export const PRODUCT_SHEET: readonly SheetGroup[] =
@@ -77,8 +80,8 @@ export type SheetKey = keyof typeof SHEET_TITLES;
 /** The desktop menus' footer links: Products has two, Resources none. */
 export const SHEET_FOOTERS: Record<SheetKey, readonly SheetLinkData[]> = {
 	products: [
-		{ label: "All products →", href: "/products", external: false },
-		{ label: "How it fits together →", href: "/platform", external: false },
+		{ label: "All products", href: "/products", external: false },
+		{ label: "How it fits together", href: "/platform", external: false },
 	],
 	resources: [],
 };

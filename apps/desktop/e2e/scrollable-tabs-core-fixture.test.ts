@@ -7,8 +7,9 @@ test("tab host cloud fixture passes the production wire decoder", () => {
 		"GET",
 		"/api/cloud-environments"
 	);
-	if (!response || !("json" in response))
+	if (!(response && "json" in response)) {
 		throw new Error("Missing cloud snapshot");
+	}
 	expect(parseCloudEnvironmentState(response.json)).toEqual({
 		schemaVersion: 1,
 		revision: 0,
@@ -30,8 +31,9 @@ test("presence heartbeat preserves reported status and rejects malformed writes"
 			clientId: "window-fixture",
 			status,
 		});
-		if (!response || !("json" in response))
+		if (!(response && "json" in response)) {
 			throw new Error("Missing presence snapshot");
+		}
 		expect(response.json).toMatchObject({
 			status,
 			source: "reported",

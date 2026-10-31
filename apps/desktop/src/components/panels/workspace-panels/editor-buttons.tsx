@@ -302,8 +302,16 @@ export function EditorButtonGroup({ folder }: { folder?: string | null }) {
 	);
 	const availableEditorIds = useAvailableEditorIds(canUseNativeShell);
 	const editorDefs = useMemo(
-		() => EDITOR_DEFS.filter((def) => availableEditorIds.has(def.id)),
-		[availableEditorIds]
+		() =>
+			EDITOR_DEFS.filter((def) => availableEditorIds.has(def.id)).map((def) =>
+				def.id === "explorer"
+					? {
+							...def,
+							label: tl("Show in {fileManagerName}", { fileManagerName }),
+						}
+					: def
+			),
+		[availableEditorIds, tl]
 	);
 	const activeDef =
 		editorDefs.find((d) => d.id === activeId) ??

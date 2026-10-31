@@ -1,5 +1,6 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -45,6 +46,7 @@ export function AvatarUploadCropper({
 	upload,
 	remove,
 }: AvatarUploadCropperProps) {
+	const tl = useLiteralMessages();
 	const removeImage = upload
 		? remove
 		: (remove ?? (() => settingsApi.profile.deleteAvatar()));
@@ -274,7 +276,9 @@ export function AvatarUploadCropper({
 					) : null}
 					{finalImageUrl ? (
 						<div
-							aria-label={`${userName ?? "User"} avatar`}
+							aria-label={tl("{userName} avatar", {
+								userName: userName ?? tl("User"),
+							})}
 							className="bg-(image:--avatar-image) size-full bg-center bg-cover"
 							role="img"
 							style={avatarImageStyle}

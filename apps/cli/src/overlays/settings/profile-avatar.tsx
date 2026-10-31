@@ -187,9 +187,7 @@ export function ProfileAvatar({
 			{message ? (
 				<text
 					fg={
-						message === errorMessage
-							? theme.colors.error
-							: theme.colors.success
+						message === errorMessage ? theme.colors.error : theme.colors.success
 					}
 				>
 					{message}

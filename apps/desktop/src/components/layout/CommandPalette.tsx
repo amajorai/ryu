@@ -11,6 +11,7 @@ import {
 } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import { CommandPalette as SharedCommandPalette } from "@ryu/command/CommandPalette";
 import type { CommandAction, CommandPaletteTab } from "@ryu/command/types";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useTheme } from "next-themes";
@@ -49,6 +50,7 @@ export function CommandPalette({
 	/** Open on mount: the shell loads the palette lazily on the first ⌘K. */
 	defaultOpen?: boolean;
 } = {}) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(defaultOpen);
 	const openSettings = useSettingsDialog((s) => s.openSettings);
 	const [importOpen, setImportOpen] = useState(false);
@@ -372,6 +374,7 @@ export function CommandPalette({
 			shadowResults,
 			spaceResults,
 			theme,
+			tl,
 			workbench,
 			workbenchTools,
 		});

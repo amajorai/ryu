@@ -7,13 +7,8 @@ import type {
 } from "@ryuhq/protocol/interfaces";
 import { Plus, Sprout, Warehouse } from "lucide-react";
 import { useId } from "react";
-import {
-	cropLabel,
-	cropTitle,
-	type FarmField,
-	plotLabel,
-	STAGE_NAMES,
-} from "./farm-model.ts";
+import { cropTitle, type FarmField, STAGE_NAMES } from "./farm-model.ts";
+import { cropLabel, plotLabel } from "./farm-model-labels.ts";
 import { PlantGlyph } from "./farm-plants.tsx";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
 import { ActStatus } from "./interface-ask-card.tsx";
@@ -114,7 +109,7 @@ export function FarmList({
 													selectedPlotId === plot.id ? "true" : undefined
 												}
 												aria-describedby={act ? describedBy : undefined}
-												aria-label={plotLabel(plot)}
+												aria-label={plotLabel(plot, tl)}
 												className={cn(
 													GAME_FOCUS,
 													"gk-display rounded-lg px-2 py-1 text-[15px] hover:bg-(--gk-plate-sunk)"
@@ -167,7 +162,7 @@ export function FarmList({
 																	? "true"
 																	: undefined
 															}
-															aria-label={cropLabel(crop, plot.name)}
+															aria-label={cropLabel(crop, plot.name, tl)}
 															className={cn(
 																GAME_FOCUS,
 																"flex items-center gap-2 rounded-xl border-(--gk-plate-sunk) border-2 px-2.5 py-1.5 text-start text-[13px] hover:bg-(--gk-plate-sunk)"

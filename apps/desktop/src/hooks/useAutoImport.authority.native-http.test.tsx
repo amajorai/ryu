@@ -10,8 +10,8 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
 
 const NativeResponse = globalThis.Response;
 const nativeFetch = globalThis.fetch;
@@ -55,7 +55,9 @@ function hold(target: ApiTarget, path: string) {
 }
 function release(key: string) {
 	const gate = gates.get(key);
-	if (!gate) throw new Error("No actual held request");
+	if (!gate) {
+		throw new Error("No actual held request");
+	}
 	gates.delete(key);
 	gate.release();
 }
@@ -75,19 +77,23 @@ const server: ReturnType<typeof Bun.serve> = Bun.serve({
 		const call = { scope: owner, method: request.method, path, body };
 		calls.push(call);
 		const gate = gates.get(`${owner}:${path}`);
-		if (gate) await gate.promise;
-		if (failures.has(`${owner}:${path}`))
+		if (gate) {
+			await gate.promise;
+		}
+		if (failures.has(`${owner}:${path}`)) {
 			return NativeResponse.json(
 				{ error: "Owned import refused" },
 				{ status: 503 }
 			);
+		}
 		const id = sharedNativeIds ? "same-native-id" : `${owner}:native-id`;
 		const cwd = sharedNativeIds
 			? "/shared/project"
 			: `/${node}/${token}/${jwt}/project`;
-		if (request.method === "GET" && path === "/api/agent-sync/profiles")
+		if (request.method === "GET" && path === "/api/agent-sync/profiles") {
 			return NativeResponse.json({ profiles: [] });
-		if (request.method === "GET" && path === "/api/agents/codex/threads")
+		}
+		if (request.method === "GET" && path === "/api/agents/codex/threads") {
 			return NativeResponse.json({
 				supported: true,
 				engine: "codex",
@@ -102,13 +108,15 @@ const server: ReturnType<typeof Bun.serve> = Bun.serve({
 					},
 				],
 			});
-		if (request.method === "GET" && path === "/api/workspace/list")
+		}
+		if (request.method === "GET" && path === "/api/workspace/list") {
 			return NativeResponse.json({
 				home: cwd,
 				path: cwd,
 				parent: null,
 				entries: [],
 			});
+		}
 		if (request.method === "POST" && path === "/api/import/scan") {
 			const data = body as { path: string };
 			return NativeResponse.json({
@@ -131,7 +139,7 @@ const server: ReturnType<typeof Bun.serve> = Bun.serve({
 			(path === "/api/agents/codex/threads/import" ||
 				path === "/api/import/run")
 		) {
-			if (path === "/api/import/run" && failedSetupOutcome)
+			if (path === "/api/import/run" && failedSetupOutcome) {
 				return NativeResponse.json({
 					root: cwd,
 					results: [
@@ -144,18 +152,22 @@ const server: ReturnType<typeof Bun.serve> = Bun.serve({
 						},
 					],
 				});
+			}
 			const prior = persisted.get(owner) ?? [];
 			const already = prior.some(
 				(row) => JSON.stringify(row) === JSON.stringify(body)
 			);
-			if (!already) persisted.set(owner, [...prior, body]);
-			if (path.endsWith("threads/import"))
+			if (!already) {
+				persisted.set(owner, [...prior, body]);
+			}
+			if (path.endsWith("threads/import")) {
 				return NativeResponse.json({
 					conversation_id: `${owner}:conversation`,
 					already_imported: already,
 					cwd,
 					message_count: 1,
 				});
+			}
 			return NativeResponse.json({
 				root: cwd,
 				results: [
@@ -223,7 +235,9 @@ async function settle() {
 	});
 }
 async function until(predicate: () => boolean) {
-	for (let i = 0; i < 100 && !predicate(); i++) await settle();
+	for (let i = 0; i < 100 && !predicate(); i++) {
+		await settle();
+	}
 	expect(predicate()).toBe(true);
 }
 function writePath(kind: Kind) {
@@ -255,7 +269,9 @@ beforeEach(() => {
 });
 afterEach(async () => {
 	await act(async () => root.unmount());
-	for (const gate of gates.values()) gate.release();
+	for (const gate of gates.values()) {
+		gate.release();
+	}
 	gates.clear();
 	await settle();
 	expect(unexpected).toEqual([]);
@@ -292,7 +308,7 @@ for (const kind of ["threads", "setup"] as const) {
 		await settle();
 		expect(writes()).toHaveLength(2);
 	});
-	for (const rotation of ["url", "token", "jwt", "aba", "unmount"])
+	for (const rotation of ["url", "token", "jwt", "aba", "unmount"]) {
 		for (const phase of ["profiles", "listing", "write"] as const) {
 			test(`${kind}: held ${phase} cannot publish or cross-write after ${rotation}`, async () => {
 				const path =
@@ -308,10 +324,13 @@ for (const kind of ["threads", "setup"] as const) {
 					calls.some((call) => call.scope === scope(a) && call.path === path)
 				);
 				const next = b(rotation);
-				if (rotation === "unmount") await act(async () => root.render(null));
-				else {
+				if (rotation === "unmount") {
+					await act(async () => root.render(null));
+				} else {
 					await render(kind, next);
-					if (rotation === "aba") await render(kind, a);
+					if (rotation === "aba") {
+						await render(kind, a);
+					}
 				}
 				release(key);
 				await settle();
@@ -320,7 +339,9 @@ for (const kind of ["threads", "setup"] as const) {
 				expect(folders).toEqual([]);
 				expect(refreshed).not.toHaveBeenCalled();
 				expect(writes()).toHaveLength(phase === "write" ? 1 : 0);
-				if (phase === "write") expect(writes()[0]!.scope).toBe(scope(a));
+				if (phase === "write") {
+					expect(writes()[0]!.scope).toBe(scope(a));
+				}
 				if (rotation !== "unmount") {
 					const current = rotation === "aba" ? a : next;
 					await focus();
@@ -333,10 +354,11 @@ for (const kind of ["threads", "setup"] as const) {
 				}
 			});
 		}
+	}
 }
 
 for (const kind of ["threads", "setup"] as const) {
-	for (const rotation of ["url", "token", "jwt"])
+	for (const rotation of ["url", "token", "jwt"]) {
 		test(`${kind}: equal native locators are imported independently for ${rotation} authority`, async () => {
 			sharedNativeIds = true;
 			await render(kind, a);
@@ -363,6 +385,7 @@ for (const kind of ["threads", "setup"] as const) {
 				keys.some((key) => key.includes(a.token!) || key.includes(a.userJwt!))
 			).toBe(false);
 		});
+	}
 	test(`${kind}: an unowned legacy seen record cannot suppress this Core import`, async () => {
 		sharedNativeIds = true;
 		const namespace =
@@ -398,7 +421,9 @@ for (const kind of ["threads", "setup"] as const) {
 			expect(writes()).toHaveLength(1);
 			expect(refreshed).toHaveBeenCalledTimes(1);
 		} finally {
-			if (original) Object.defineProperty(globalThis, "crypto", original);
+			if (original) {
+				Object.defineProperty(globalThis, "crypto", original);
+			}
 		}
 	});
 }

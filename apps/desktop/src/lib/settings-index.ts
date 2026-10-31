@@ -729,8 +729,8 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		dialog: "app",
 		section: "appearance",
 		group: "Interface",
-		label: "Blur dialog backgrounds",
-		keywords: "backdrop glass vibrancy",
+		label: "Dim dialog backgrounds",
+		keywords: "backdrop scrim dim overlay",
 	},
 	{
 		id: "appearance.interface.invert-overlay-backgrounds",

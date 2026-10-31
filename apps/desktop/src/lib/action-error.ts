@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { z } from "zod";
 import { controlPlaneRefusalMessage } from "./access-refusal.ts";
@@ -29,11 +30,14 @@ export function isOrgAccessNotInSession(error: unknown): boolean {
  * message when it has one, otherwise nothing (the title already says what
  * failed, so a generic "Unknown error" adds no information).
  */
-export function actionErrorDescription(error: unknown): string | undefined {
+export function actionErrorDescription(
+	error: unknown,
+	tl: LiteralMessage
+): string | undefined {
 	if (isOrgAccessNotInSession(error)) {
-		return ORG_ACCESS_NOT_IN_SESSION_MESSAGE;
+		return tl(ORG_ACCESS_NOT_IN_SESSION_MESSAGE);
 	}
-	const refusal = controlPlaneRefusalMessage(error);
+	const refusal = controlPlaneRefusalMessage(error, tl);
 	if (refusal) {
 		return refusal;
 	}
@@ -51,6 +55,10 @@ export function actionErrorDescription(error: unknown): string | undefined {
  * error toast instead of swallowing it. Use for fire-and-forget handlers whose
  * failure the person would otherwise never see.
  */
-export function toastActionError(title: string, error: unknown): void {
-	toast.error({ title, description: actionErrorDescription(error) });
+export function toastActionError(
+	title: string,
+	error: unknown,
+	tl: LiteralMessage
+): void {
+	toast.error({ title, description: actionErrorDescription(error, tl) });
 }

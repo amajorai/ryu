@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	blockerKindWord,
 	type InterfaceActivityKind,
@@ -287,6 +288,7 @@ export function actPickers({
 	shown,
 	slots,
 	stations,
+	tl,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
 	looks: ReadonlyMap<string, MemberLooks>;
@@ -297,6 +299,7 @@ export function actPickers({
 	shown: ReadonlySet<string>;
 	slots: readonly YouSpotSlot[];
 	stations: readonly PickerStation[];
+	tl: LiteralMessage;
 }): VillagerSpec[] {
 	const cast: VillagerSpec[] = [];
 	for (const station of stations) {
@@ -326,8 +329,8 @@ export function actPickers({
 			iconOnly: asking && spots.slot ? false : undefined,
 			id: act.agentId,
 			label: asking
-				? `${act.ariaLabel} Answer their ask.`
-				: `${act.ariaLabel} Show their orders.`,
+				? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+				: tl("{ariaLabel} Show their orders.", { ariaLabel: act.ariaLabel }),
 			life: actLife(act, spots, SKIN, { reduced }),
 			looks: {
 				...look,

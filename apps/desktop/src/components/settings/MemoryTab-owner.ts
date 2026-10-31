@@ -30,12 +30,13 @@ export function useMemoryOwner(target: ApiTarget) {
  * Run a preference write and surface a failure. The node is the only store for
  * these values, so a write that silently fails would leave the control showing a
  * setting the node never received — exactly the "settable value that cannot take
- * effect" this tab exists to avoid.
+ * effect" this tab exists to avoid. Callers pass the whole translated failure
+ * title (for example `tl("Couldn't save the recall limit")`).
  */
 export function persist(
 	write: Promise<boolean>,
 	isCurrent: CurrentMemoryOwner,
-	what: string,
+	failureTitle: string,
 	onFailure?: () => void
 ): void {
 	const failed = () => {
@@ -44,7 +45,7 @@ export function persist(
 		}
 		onFailure?.();
 		toast.error({
-			title: `Couldn't save ${what}`,
+			title: failureTitle,
 			description: "Your change wasn't saved. Please try again.",
 		});
 	};

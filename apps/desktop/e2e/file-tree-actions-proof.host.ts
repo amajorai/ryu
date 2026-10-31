@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -62,10 +62,12 @@ const nativeBuild = Bun.spawn(
 	],
 	{ cwd: repository, stdout: "inherit", stderr: "inherit" }
 );
-if (await nativeBuild.exited)
+if (await nativeBuild.exited) {
 	throw new Error("Actual production workspace filesystem bridge build failed");
-if (JSON.stringify(nativeSources) !== JSON.stringify(await sourceHashes()))
+}
+if (JSON.stringify(nativeSources) !== JSON.stringify(await sourceHashes())) {
 	throw new Error("Native bridge source changed while compiling");
+}
 const nativeExecutableSha = createHash("sha256")
 	.update(await readFile(bridgeExecutable))
 	.digest("hex");
@@ -89,8 +91,9 @@ async function native(args: string[]) {
 		createHash("sha256")
 			.update(await readFile(bridgeExecutable))
 			.digest("hex") !== nativeExecutableSha
-	)
+	) {
 		throw new Error("Native fixture source/executable freshness changed");
+	}
 	const process = Bun.spawn([bridgeExecutable, ...args], {
 		cwd: repository,
 		stdout: "pipe",
@@ -130,10 +133,12 @@ async function git(args: string[], cwd = project) {
 	]);
 	return { stdout, stderr, code };
 }
-if ((await git(["init", "--quiet"])).code !== 0)
+if ((await git(["init", "--quiet"])).code !== 0) {
 	throw new Error("Owned fixture git initialization failed");
-if ((await git(["init", "--quiet"], secondaryProject)).code !== 0)
+}
+if ((await git(["init", "--quiet"], secondaryProject)).code !== 0) {
 	throw new Error("Alternate fixture repository init failed");
+}
 async function reset() {
 	if (
 		heldMove ||
@@ -141,22 +146,25 @@ async function reset() {
 			(call) =>
 				call.command === "move_workspace_item" && call.outcome === "pending"
 		)
-	)
+	) {
 		throw new Error("Cannot reset pending native move");
+	}
 	for (const name of await readdir(project)) {
-		if (name !== ".git")
+		if (name !== ".git") {
 			await rm(path.join(project, name), { recursive: true, force: true });
+		}
 	}
 	for (const [name, bytes] of Object.entries(INITIAL)) {
 		await mkdir(path.dirname(path.join(project, name)), { recursive: true });
 		await Bun.write(path.join(project, name), bytes);
 	}
 	for (const name of await readdir(secondaryProject)) {
-		if (name !== ".git")
+		if (name !== ".git") {
 			await rm(path.join(secondaryProject, name), {
 				recursive: true,
 				force: true,
 			});
+		}
 	}
 	await mkdir(path.join(secondaryProject, "src"), { recursive: true });
 	await Bun.write(
@@ -169,7 +177,9 @@ async function reset() {
 	unexpected.length = 0;
 	refuseList = false;
 	refuseOpen = false;
-	if (heldMove) throw new Error("Cannot reset with pending physical operation");
+	if (heldMove) {
+		throw new Error("Cannot reset with pending physical operation");
+	}
 	holdMove = false;
 }
 await reset();
@@ -184,8 +194,9 @@ const build = Bun.spawn(
 	],
 	{ cwd: desktop, stdout: "inherit", stderr: "inherit" }
 );
-if (await build.exited)
+if (await build.exited) {
 	throw new Error("Production Files panel fixture build failed");
+}
 const json = (value: unknown, status = 200) => Response.json(value, { status });
 
 async function snapshot() {
@@ -196,13 +207,16 @@ async function snapshot() {
 		destination = files
 	) {
 		for (const entry of await readdir(directory, { withFileTypes: true })) {
-			if (!prefix && entry.name === ".git") continue;
+			if (!prefix && entry.name === ".git") {
+				continue;
+			}
 			const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
 			const absolute = path.join(directory, entry.name);
-			if (entry.isDirectory())
+			if (entry.isDirectory()) {
 				await readDirectory(absolute, relative, destination);
-			else if (entry.isFile())
+			} else if (entry.isFile()) {
 				destination[relative] = await readFile(absolute, "utf8");
+			}
 		}
 	}
 	await readDirectory(project);
@@ -224,7 +238,9 @@ const server = Bun.serve({
 	port: Number(process.env.RYU_FILE_TREE_ACTIONS_PORT ?? 5781),
 	async fetch(request) {
 		const route = new URL(request.url).pathname;
-		if (route === "/__ready") return new Response("ready");
+		if (route === "/__ready") {
+			return new Response("ready");
+		}
 		if (
 			route === "/api/plugins/contributions" &&
 			request.method === "GET" &&
@@ -233,36 +249,46 @@ const server = Bun.serve({
 			return json({ companions: [], file_handlers: [], themes: [] });
 		}
 		if (route.startsWith("/__file-tree/")) {
-			if (request.headers.get("x-file-tree-proof") !== "finite-native-boundary")
+			if (
+				request.headers.get("x-file-tree-proof") !== "finite-native-boundary"
+			) {
 				return json({ error: "Wrong fixture authority" }, 403);
-			if (route === "/__file-tree/state" && request.method === "GET")
+			}
+			if (route === "/__file-tree/state" && request.method === "GET") {
 				return json(await snapshot());
+			}
 			if (route === "/__file-tree/control" && request.method === "POST") {
 				const { action } = (await request.json()) as { action: string };
-				if (action === "reset") await reset();
-				else if (action === "create_collision")
+				if (action === "reset") {
+					await reset();
+				} else if (action === "create_collision") {
 					await Bun.write(
 						path.join(project, "src/blocked.ts"),
 						"collision bytes remain intact\n"
 					);
-				else if (action === "create_drag_collision")
+				} else if (action === "create_drag_collision") {
 					await Bun.write(
 						path.join(project, "archive/alpha.ts"),
 						"destination collision bytes\n"
 					);
-				else if (action === "remove_collision")
+				} else if (action === "remove_collision") {
 					await rm(path.join(project, "src/blocked.ts"));
-				else if (action === "hold_move_once" && !holdMove && !heldMove)
+				} else if (action === "hold_move_once" && !holdMove && !heldMove) {
 					holdMove = true;
-				else if (action === "release_move" && heldMove) heldMove();
-				else if (action === "track_initial") {
+				} else if (action === "release_move" && heldMove) {
+					heldMove();
+				} else if (action === "track_initial") {
 					const result = await git(["add", "--", "src", "archive"]);
-					if (result.code) throw new Error(result.stderr);
-				} else if (action === "refuse_list_once" && !refuseList)
+					if (result.code) {
+						throw new Error(result.stderr);
+					}
+				} else if (action === "refuse_list_once" && !refuseList) {
 					refuseList = true;
-				else if (action === "refuse_open_once" && !refuseOpen)
+				} else if (action === "refuse_open_once" && !refuseOpen) {
 					refuseOpen = true;
-				else return json({ error: "Unknown fixture transition" }, 409);
+				} else {
+					return json({ error: "Unknown fixture transition" }, 409);
+				}
 				return json({ ok: true });
 			}
 			if (route === "/__file-tree/invoke" && request.method === "POST") {
@@ -392,13 +418,14 @@ const server = Bun.serve({
 					Array.isArray(args.editors) &&
 					args.editors.every((id) => typeof id === "string") &&
 					new Set(args.editors).size === args.editors.length
-				)
+				) {
 					return json({
 						result: args.editors.map((id) => ({
 							id,
 							available: id === "explorer",
 						})),
 					});
+				}
 				if (
 					["open_workspace_item", "reveal_workspace_item"].includes(
 						body.command
@@ -432,8 +459,9 @@ const server = Bun.serve({
 			buildDirectory,
 			route === "/" ? "file-tree-actions-proof.html" : route.slice(1)
 		);
-		if (!absolute.startsWith(`${buildDirectory}/`))
+		if (!absolute.startsWith(`${buildDirectory}/`)) {
 			return new Response("Forbidden", { status: 403 });
+		}
 		const file = Bun.file(absolute);
 		return (await file.exists())
 			? new Response(file)

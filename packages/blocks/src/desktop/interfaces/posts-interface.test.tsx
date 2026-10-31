@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -391,18 +392,21 @@ describe("posts model", () => {
 
 	test("markers read the same everywhere, named after the agent", () => {
 		const [ada] = SNAPSHOT.agents;
-		expect(markerLabel({ author: ada ?? null, marker: "awaiting-reply" })).toBe(
-			"Waiting on Ada"
-		);
-		expect(markerLabel({ author: null, marker: "awaiting-reply" })).toBe(
-			"Waiting for a reply"
-		);
-		expect(markerLabel({ author: ada ?? null, marker: "in-progress" })).toBe(
-			"Ada is working"
-		);
-		expect(markerLabel({ author: ada ?? null, marker: "resolved" })).toBe(
-			"Resolved"
-		);
+		expect(
+			markerLabel(
+				{ author: ada ?? null, marker: "awaiting-reply" },
+				formatMessage
+			)
+		).toBe("Waiting on Ada");
+		expect(
+			markerLabel({ author: null, marker: "awaiting-reply" }, formatMessage)
+		).toBe("Waiting for a reply");
+		expect(
+			markerLabel({ author: ada ?? null, marker: "in-progress" }, formatMessage)
+		).toBe("Ada is working");
+		expect(
+			markerLabel({ author: ada ?? null, marker: "resolved" }, formatMessage)
+		).toBe("Resolved");
 	});
 
 	test("a view whose space or member left the snapshot falls back to Home", () => {

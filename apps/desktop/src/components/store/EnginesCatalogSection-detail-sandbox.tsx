@@ -109,7 +109,7 @@ export function SandboxEngineDetail({
 							)}
 						</>
 					}
-					tagline={sandboxDescription(backend)}
+					tagline={sandboxDescription(tl, backend)}
 				/>
 			}
 			stats={
@@ -147,7 +147,7 @@ export function SandboxEngineDetail({
 			)}
 			{!backend.supported && (
 				<EngineFootnote>
-					{unsupportedReason(SANDBOX_PLATFORMS.get(backend.name) ?? [])}
+					{unsupportedReason(tl, SANDBOX_PLATFORMS.get(backend.name) ?? [])}
 				</EngineFootnote>
 			)}
 			{state.error && (

@@ -9,7 +9,6 @@ import { useCallback, useMemo, useState } from "react";
 import { ResourceVisibilityConfirmationDialog } from "@/src/components/layout/ResourceVisibilityConfirmationDialog.tsx";
 import { AddToSpaceDialog } from "@/src/components/spaces/AddToSpaceDialog.tsx";
 import { CreateSpaceDialog } from "@/src/components/spaces/LazyCreateSpaceDialog.tsx";
-import { DestructiveConfirmDialog } from "@/src/components/ui/DestructiveConfirmDialog.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useCanManagePermission } from "@/src/hooks/useGatewayConfigurable.ts";
@@ -47,6 +46,7 @@ import {
 	sortItems,
 	usePaged,
 } from "./sidebar-sort-paging.ts";
+import { SpaceDeleteDialog } from "./sidebar-space-delete-dialog.tsx";
 import { SpacesPickerBody, spaceDocPath } from "./sidebar-space-picker.tsx";
 import { SpaceSidebarRow } from "./sidebar-space-row.tsx";
 import { SubSection } from "./sidebar-subsection.tsx";
@@ -476,24 +476,11 @@ export function SpacesSection({
 				}}
 				request={pendingVisibility}
 			/>
-			<DestructiveConfirmDialog
+			<SpaceDeleteDialog
 				busy={deleting}
-				description={
-					pendingDelete
-						? `"${pendingDelete.name}" and all its documents will be permanently deleted. This can't be undone.`
-						: ""
-				}
-				label={tl("Delete {name}", {
-					name: pendingDelete?.name ?? tl("this Space"),
-				})}
+				onClose={() => setPendingDelete(null)}
 				onConfirm={confirmDelete}
-				onOpenChange={(open) => {
-					if (!(open || deleting)) {
-						setPendingDelete(null);
-					}
-				}}
-				open={pendingDelete !== null}
-				title="Delete this Space?"
+				space={pendingDelete}
 			/>
 		</>
 	);

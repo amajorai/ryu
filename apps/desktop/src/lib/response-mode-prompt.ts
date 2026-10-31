@@ -9,6 +9,7 @@
  */
 
 import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { responseModeForInterface } from "@/src/lib/chat-routing.ts";
 import type { InterfaceLevel } from "@/src/lib/interface-level.ts";
 import type { ProductMode } from "@/src/lib/product-mode.ts";
@@ -32,12 +33,14 @@ export function interfaceLevelForProductMode(
  */
 export function responseModeCacheWarning(
 	current: InterfaceLevel,
-	next: InterfaceLevel
+	next: InterfaceLevel,
+	tl: LiteralMessage
 ): { description: string; title: string } | null {
 	const changed =
 		responseModeForInterface(current) !== responseModeForInterface(next);
 	return promptEditCacheWarning(
 		changed ? [RESPONSE_MODE_FIELD] : [],
-		"ryu-agent"
+		"ryu-agent",
+		tl
 	);
 }

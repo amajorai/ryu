@@ -101,7 +101,7 @@ export function WorkersList({
 												: tl("{name}'s screen: No task open. Open their desk", {
 														name: worker.name,
 													})
-											: screenLabel(worker)
+											: screenLabel(worker, tl)
 									}
 									className={cn(
 										GAME_FOCUS,

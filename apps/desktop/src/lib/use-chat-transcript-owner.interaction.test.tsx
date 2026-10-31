@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { useChat } from "@ai-sdk/react";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { DefaultChatTransport } from "ai";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -18,7 +18,9 @@ const HttpAbortSignal = globalThis.AbortSignal;
 const HttpReadableStream = globalThis.ReadableStream;
 const HttpTransformStream = globalThis.TransformStream;
 const HttpTextDecoderStream = globalThis.TextDecoderStream;
-if (typeof document === "undefined") GlobalRegistrator.register();
+if (typeof document === "undefined") {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Reflect.set(globalThis, "ReadableStream", HttpReadableStream);
 Reflect.set(globalThis, "TransformStream", HttpTransformStream);
@@ -98,10 +100,11 @@ function Harness({
 		}).then(async (response) => {
 			const text = await response.text();
 			readCompletions.push(text);
-			if (!cancelled && owner.isCurrent())
+			if (!cancelled && owner.isCurrent()) {
 				setMessages([
 					{ id: "history", role: "assistant", parts: [{ type: "text", text }] },
 				]);
+			}
 		});
 		return () => {
 			cancelled = true;
@@ -109,7 +112,7 @@ function Harness({
 	}, [url, token, jwt, owner.isCurrent, setMessages]);
 	return (
 		<>
-			<textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
+			<textarea onChange={(e) => setDraft(e.target.value)} value={draft} />
 			<button
 				onClick={() => {
 					void chat.sendMessage({ text: "new turn" }).then(() => {
@@ -191,10 +194,13 @@ beforeEach(() => {
 					let cancelled = false;
 					const stream = new HttpReadableStream({
 						start(controller) {
-							for (const frame of frames.slice(0, 3))
+							for (const frame of frames.slice(0, 3)) {
 								controller.enqueue(encoded(frame));
+							}
 							releaseStream = () => {
-								if (cancelled) return;
+								if (cancelled) {
+									return;
+								}
 								controller.enqueue(
 									encoded({
 										type: "text-delta",
@@ -202,8 +208,9 @@ beforeEach(() => {
 										delta: ":late-A",
 									})
 								);
-								for (const frame of frames.slice(3))
+								for (const frame of frames.slice(3)) {
 									controller.enqueue(encoded(frame));
+								}
 								controller.enqueue(
 									new TextEncoder().encode("data: [DONE]\n\n")
 								);
@@ -248,7 +255,9 @@ afterEach(async () => {
 	server.stop(true);
 });
 function currentView() {
-	if (!view) throw new Error("Actual mounted transcript owner is absent");
+	if (!view) {
+		throw new Error("Actual mounted transcript owner is absent");
+	}
 	return view;
 }
 async function render(props: Partial<Parameters<typeof Harness>[0]> = {}) {
@@ -267,10 +276,13 @@ async function eventually(expected: string) {
 		await act(async () => {
 			await Bun.sleep(5);
 		});
-		if (container.querySelector("output")?.textContent === expected) return;
+		if (container.querySelector("output")?.textContent === expected) {
+			return;
+		}
 	}
-	if (container.querySelector("pre")?.textContent)
+	if (container.querySelector("pre")?.textContent) {
 		throw new Error(container.querySelector("pre")?.textContent ?? "SDK error");
+	}
 	expect(container.querySelector("output")?.textContent).toBe(expected);
 }
 for (const field of ["url", "token", "jwt"] as const) {
@@ -453,8 +465,10 @@ test("without randomUUID the actual SDK mounts, preserves equivalent authority, 
 		expect(returned.id).not.toContain("A-token");
 		expect(returned.id).not.toContain("A-jwt");
 	} finally {
-		if (descriptor)
+		if (descriptor) {
 			Object.defineProperty(cryptoObject, "randomUUID", descriptor);
-		else Reflect.deleteProperty(cryptoObject, "randomUUID");
+		} else {
+			Reflect.deleteProperty(cryptoObject, "randomUUID");
+		}
 	}
 });

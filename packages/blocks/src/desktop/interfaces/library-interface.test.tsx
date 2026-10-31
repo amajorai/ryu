@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -32,6 +34,8 @@ import {
 	UNASSIGNED_BOOK_ID,
 	viewBooks,
 } from "./library-model.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const MINUTE = 60_000;
 const BASE = Date.now();
@@ -274,18 +278,18 @@ describe("library model", () => {
 		// Finished = the agent answered and nothing runs or failed.
 		expect(ada?.finishedCount).toBe(3);
 		expect(ada ? progressPercent(ada) : -1).toBe(75);
-		expect(ada ? progressLabel(ada) : "").toBe("3 of 4 chapters finished");
+		expect(ada ? progressLabel(ada, tl) : "").toBe("3 of 4 chapters finished");
 		expect(grace?.working).toBe(true);
 		expect(grace?.waiting.map((chapter) => chapter.status)).toEqual([
 			"attention",
 			"your-turn",
 		]);
 		expect(linus?.chapters).toHaveLength(0);
-		expect(linus ? progressLabel(linus) : "").toBe("No chapters yet");
+		expect(linus ? progressLabel(linus, tl) : "").toBe("No chapters yet");
 	});
 
 	test("projects, teams and loose conversations become collections", () => {
-		const collections = collectionBooks(SNAPSHOT);
+		const collections = collectionBooks(SNAPSHOT, tl);
 		expect(collections.map((book) => [book.id, book.title])).toEqual([
 			["project:project-site", "Website"],
 			["team:team-core", "Core"],
@@ -302,7 +306,7 @@ describe("library model", () => {
 			"thread-loose",
 		]);
 		expect(
-			collectionBooks({ ...SNAPSHOT, threads: [] }).some(
+			collectionBooks({ ...SNAPSHOT, threads: [] }, tl).some(
 				(book) => book.id === UNASSIGNED_BOOK_ID
 			)
 		).toBe(false);
@@ -326,7 +330,7 @@ describe("library model", () => {
 	});
 
 	test("Continue Reading lists each waiting book once, failures first", () => {
-		const items = continueReading(libraryShelves(SNAPSHOT));
+		const items = continueReading(libraryShelves(SNAPSHOT, tl));
 		expect(
 			items.map((item) => [item.book.id, item.chapter.thread.id, item.more])
 		).toEqual([
@@ -337,7 +341,7 @@ describe("library model", () => {
 	});
 
 	test("sorts by recency (empty books last) or title, and searches chapters", () => {
-		const shelves = libraryShelves(SNAPSHOT);
+		const shelves = libraryShelves(SNAPSHOT, tl);
 		expect(sortBooks(shelves.books, "recent").map((b) => b.title)).toEqual([
 			"Grace",
 			"Ada",
@@ -354,7 +358,7 @@ describe("library model", () => {
 	});
 
 	test("smart views pick waiting and finished books", () => {
-		const shelves = libraryShelves(SNAPSHOT);
+		const shelves = libraryShelves(SNAPSHOT, tl);
 		expect(viewBooks(shelves, "home").map((b) => b.title)).toEqual([
 			"Ada",
 			"Grace",
@@ -373,7 +377,7 @@ describe("library model", () => {
 	});
 
 	test("resume, neighbours and the book a chapter is read in", () => {
-		const shelves = libraryShelves(SNAPSHOT);
+		const shelves = libraryShelves(SNAPSHOT, tl);
 		const ada = findBook(shelves, agentBookId("agent-ada"));
 		// The newest chapter waiting on the user, even a shared team one.
 		expect(ada ? resumeChapter(ada)?.thread.id : "").toBe("thread-plan");

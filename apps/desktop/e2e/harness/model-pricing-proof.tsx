@@ -57,18 +57,18 @@ function ModelPricingProof() {
 			<nav aria-label="Choose fixture insight">
 				{models.map((model) => (
 					<button
-						key={model.id}
-						type="button"
 						data-testid={`model-row-${model.id}`}
+						key={model.id}
 						onClick={() => setSelectedId(model.id)}
+						type="button"
 					>
 						{model.name}
 					</button>
 				))}
 			</nav>
 			<section
-				data-testid="price-preview"
 				aria-label="Selected model price preview"
+				data-testid="price-preview"
 			>
 				{selected ? <ModelHoverPreview insight={selected} /> : null}
 			</section>
@@ -77,5 +77,7 @@ function ModelPricingProof() {
 }
 
 const root = document.getElementById("root");
-if (!root) throw new Error("Missing presentation fixture root");
+if (!root) {
+	throw new Error("Missing presentation fixture root");
+}
 createRoot(root).render(<ModelPricingProof />);

@@ -217,7 +217,7 @@ export function PersonaActivity({
 									dateTime={event.start}
 									title={fullTime(event.start)}
 								>
-									{untilLabel(event.start)}
+									{untilLabel(event.start, tl)}
 								</time>
 								<RunMark />
 								<span className="min-w-0 flex-1 truncate">

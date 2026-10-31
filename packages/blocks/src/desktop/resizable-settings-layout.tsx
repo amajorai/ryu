@@ -70,9 +70,9 @@ export default function ResizableSettingsLayout({
 	 * `dialog` (default): a flush `bg-sidebar` nav column beside a flush
 	 * `bg-background` content pane, split by a divider that shows on hover, in
 	 * the desktop Settings and Gateway dialogs.
-	 * `page`: a flush nav column beside a flush content pane, split by a
-	 * hairline, for a settings page that already sits on the app's background
-	 * (the web settings pages). It is one CSS-responsive tree with a
+	 * `page`: a floating, rounded nav panel beside the content pane, centered
+	 * as one frame, for a settings page that already sits on the app's
+	 * background (the web settings pages). It is one CSS-responsive tree with a
 	 * fixed-width sidebar, so crossing the phone breakpoint never remounts the
 	 * open section (its dialogs and unsaved edits survive a rotation) and the
 	 * server's HTML matches the first client render.
@@ -233,14 +233,17 @@ function PageSettingsLayout({
 	sidebar: React.ReactNode;
 }) {
 	return (
+		// One centered frame, so the content column sits right beside the nav
+		// instead of across a wide empty pane on a large screen.
 		<SidebarProvider
 			appearance="settings-frame"
-			className="!min-h-0 h-full flex-col overflow-hidden rounded-none bg-transparent md:flex-row"
+			className="!min-h-0 mx-auto h-full w-full max-w-6xl flex-col gap-2 overflow-hidden rounded-none bg-transparent p-2 md:flex-row md:gap-4 md:p-3"
 		>
-			<div className="max-h-[38%] min-h-0 shrink-0 overflow-hidden border-b md:h-full md:max-h-none md:w-[clamp(15rem,22%,20rem)] md:border-r md:border-b-0">
+			<div className="max-h-[38%] min-h-0 shrink-0 md:h-full md:max-h-none md:w-[clamp(15rem,24%,17rem)]">
+				{/* The floating sidebar of the desktop app: a rounded panel inset
+				    from the frame edge, not a full-height column split by a rule. */}
 				<Sidebar
-					appearance="settings-navigation"
-					className="h-full w-full bg-transparent py-2"
+					className="h-full w-full rounded-2xl border border-border/60 bg-sidebar py-2 shadow-xs"
 					collapsible="none"
 				>
 					<SidebarContent className="overflow-x-hidden" spacing="compact">
@@ -248,8 +251,6 @@ function PageSettingsLayout({
 					</SidebarContent>
 				</Sidebar>
 			</div>
-			{/* Flush like the desktop Settings window's content pane: no inset,
-			    rounding or second surface. */}
 			<div className="min-h-0 min-w-0 flex-1 overflow-hidden">
 				<div
 					className={cn(

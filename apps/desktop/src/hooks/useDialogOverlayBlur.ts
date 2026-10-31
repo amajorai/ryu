@@ -1,6 +1,6 @@
 // apps/desktop/src/hooks/useDialogOverlayBlur.ts
 //
-// Re-export of THE shared "Blur dialog backgrounds" toggle, which now lives in
+// Re-export of THE shared "Dim dialog backgrounds" toggle, which now lives in
 // `@ryu/ui` (`hooks/use-dialog-overlay-blur.ts`) so the desktop, `apps/web` and
 // any other surface read one module-level store rather than a copy each.
 //

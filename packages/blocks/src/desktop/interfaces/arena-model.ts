@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type ArenaCard,
 	type InterfaceAgent,
@@ -314,15 +315,19 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
 /** "in 5m", "in 3h", "in 2d": how soon a scheduled run starts. */
-export function untilLabel(start: string, now: number): string {
+export function untilLabel(
+	start: string,
+	now: number,
+	tl: LiteralMessage
+): string {
 	const delta = Math.max(0, Date.parse(start) - now);
 	const minutes = Math.max(1, Math.round(delta / MINUTE_MS));
 	if (minutes < 60) {
-		return `in ${minutes}m`;
+		return tl("in {minutes}m", { minutes });
 	}
 	const hours = Math.round(delta / HOUR_MS);
 	if (hours < 24) {
-		return `in ${hours}h`;
+		return tl("in {hours}h", { hours });
 	}
-	return `in ${Math.round(delta / DAY_MS)}d`;
+	return tl("in {days}d", { days: String(Math.round(delta / DAY_MS)) });
 }

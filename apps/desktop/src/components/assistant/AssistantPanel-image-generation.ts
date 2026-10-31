@@ -1,6 +1,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { UIMessage } from "ai";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { generateImage } from "@/src/lib/api/images.ts";
 
@@ -9,6 +10,9 @@ export function useAssistantImageGeneration(
 	chatTarget: ApiTarget,
 	setMessages: UseChatHelpers<UIMessage>["setMessages"]
 ) {
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	// Multimodal (image): generate from the composer text and surface the result
 	// inline, mirroring ChatPage's handler exactly so the Ask Ryu dock reads the
 	// same. Client-only — `/api/images/generate` is one-shot and not written to the
@@ -35,7 +39,7 @@ export function useAssistantImageGeneration(
 				},
 			]);
 			try {
-				const urls = await generateImage(chatTarget, prompt);
+				const urls = await generateImage(chatTarget, prompt, tlRef.current);
 				const [first, ...rest] = urls;
 				if (!first) {
 					settle([

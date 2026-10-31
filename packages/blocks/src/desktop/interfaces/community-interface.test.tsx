@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceSnapshot,
 	InterfaceThread,
@@ -148,7 +150,9 @@ const EMPTY: InterfaceSnapshot = {
 	version: 1,
 };
 
-const COMMUNITIES = buildCommunities(SNAPSHOT);
+const passthrough: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
+const COMMUNITIES = buildCommunities(SNAPSHOT, passthrough);
 const POSTS = buildPosts(SNAPSHOT, COMMUNITIES);
 
 function postById(id: string): CommunityPost {
@@ -196,23 +200,29 @@ describe("community model", () => {
 	});
 
 	test("the profile only appears when a thread has nowhere else to go", () => {
-		const housed = buildCommunities({
-			...SNAPSHOT,
-			threads: SNAPSHOT.threads.filter((item) => item.id !== "thread-loose"),
-		});
+		const housed = buildCommunities(
+			{
+				...SNAPSHOT,
+				threads: SNAPSHOT.threads.filter((item) => item.id !== "thread-loose"),
+			},
+			passthrough
+		);
 		expect(housed.some((community) => community.key === PROFILE_KEY)).toBe(
 			false
 		);
 	});
 
 	test("repeated names get numbered handles", () => {
-		const communities = buildCommunities({
-			...SNAPSHOT,
-			groups: [
-				...SNAPSHOT.groups,
-				{ id: "team-ada", kind: "team", memberAgentIds: [], name: "Ada" },
-			],
-		});
+		const communities = buildCommunities(
+			{
+				...SNAPSHOT,
+				groups: [
+					...SNAPSHOT.groups,
+					{ id: "team-ada", kind: "team", memberAgentIds: [], name: "Ada" },
+				],
+			},
+			passthrough
+		);
 		const handles = communities.map((community) => community.handle);
 		expect(handles).toContain("Ada");
 		expect(handles).toContain("Ada2");

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import { useMemo, useRef } from "react";
 import {
@@ -54,6 +55,7 @@ export function useTownActLayer({
 }) {
 	// The act layer (when the host sends asks): the townsfolk act out their
 	// acts, the act props join the DOM layer, the queue waits at City Hall.
+	const tl = useLiteralMessages();
 	const fallbackRef = useRef<HTMLHeadingElement>(null);
 	const actsView = useActs(snapshot);
 	const { acts, nowMs, privacy, unowned } = actsView;
@@ -142,10 +144,23 @@ export function useTownActLayer({
 						shown,
 						slots: slots.slots,
 						snapshot,
+						tl,
 						town,
 					})
 				: [],
-		[acts, actsOn, bubbles, clock, nowMs, owners, shown, slots, snapshot, town]
+		[
+			acts,
+			actsOn,
+			bubbles,
+			clock,
+			nowMs,
+			owners,
+			shown,
+			slots,
+			snapshot,
+			tl,
+			town,
+		]
 	);
 	const actAnchors = useMemo(() => townActAnchors(actEntries), [actEntries]);
 	// With acts the buildings' art (crane, beacon, bubble) follows the acts,

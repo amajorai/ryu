@@ -4,6 +4,7 @@ import type {
 	WidgetHostServices,
 	WidgetHostValue,
 } from "@ryu/blocks/desktop/agent-elements/widget-host-context.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import {
 	clearGoal,
@@ -61,6 +62,11 @@ export function useChatGoals({
 	sendMessage,
 	turnInFlightRef,
 }: UseChatGoalsInput) {
+	const tl = useLiteralMessages();
+	// `tl` is a fresh function on every render; callbacks read it through this
+	// ref so their identities stay stable.
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	// The AI SDK adds a normal user message optimistically before Core has
 	// acknowledged the turn. Mark only the message that belongs to a settled,
 	// non-temporary Core request so the shared transcript can show its single
@@ -212,7 +218,7 @@ export function useChatGoals({
 					appendGoalMessage(text);
 				})
 				.catch((error: unknown) => {
-					toastActionError("Couldn't set goal", error);
+					toastActionError("Couldn't set goal", error, tlRef.current);
 				});
 		},
 		[appendGoalMessage, chatTarget, convId]
@@ -231,7 +237,7 @@ export function useChatGoals({
 				setGoalDraftOpen(false);
 			})
 			.catch((error: unknown) => {
-				toastActionError("Couldn't clear goal", error);
+				toastActionError("Couldn't clear goal", error, tlRef.current);
 			});
 	}, [chatTarget, convId]);
 	const handleGoalPause = useCallback(() => {
@@ -244,7 +250,7 @@ export function useChatGoals({
 				setGoalCompletionMessageId(null);
 			})
 			.catch((error: unknown) => {
-				toastActionError("Couldn't pause goal", error);
+				toastActionError("Couldn't pause goal", error, tlRef.current);
 			});
 	}, [chatTarget, convId]);
 	const handleGoalResume = useCallback(() => {
@@ -257,7 +263,7 @@ export function useChatGoals({
 				setGoalCompletionMessageId(null);
 			})
 			.catch((error: unknown) => {
-				toastActionError("Couldn't resume goal", error);
+				toastActionError("Couldn't resume goal", error, tlRef.current);
 			});
 	}, [chatTarget, convId]);
 

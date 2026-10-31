@@ -5,6 +5,8 @@
 // is earned from a real catalog signal.
 
 import { describe, expect, it } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { AgentCatalogEntry } from "@/src/lib/api/agents.ts";
 import {
 	buildMysteryPool,
@@ -17,6 +19,9 @@ import {
 	templateRarity,
 	templateRarityReason,
 } from "./agent-mystery-box.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 function entry(over: Partial<AgentCatalogEntry> = {}): AgentCatalogEntry {
 	return {
@@ -141,13 +146,13 @@ describe("rarity", () => {
 			"common"
 		);
 		expect(
-			templateRarityReason(signals({ ratingAverage: 5, ratingCount: 1 }))
+			templateRarityReason(signals({ ratingAverage: 5, ratingCount: 1 }), tl)
 		).toBeNull();
 	});
 
 	it("explains a rating tier with the real numbers", () => {
 		expect(
-			templateRarityReason(signals({ ratingAverage: 4.75, ratingCount: 8 }))
+			templateRarityReason(signals({ ratingAverage: 4.75, ratingCount: 8 }), tl)
 		).toBe("Rated 4.8 by 8 people");
 	});
 });

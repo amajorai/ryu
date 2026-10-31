@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { startNotificationProofHost } from "./system-notifications-story.host.ts";
+
 let fixture: ReturnType<typeof startNotificationProofHost> | undefined;
 afterEach(() => {
 	fixture?.stop();
@@ -17,14 +18,15 @@ function start() {
 async function until(check: () => boolean) {
 	const end = Date.now() + 2000;
 	while (!check()) {
-		if (Date.now() > end)
+		if (Date.now() > end) {
 			throw Error("Native fixture lifecycle did not settle");
+		}
 		await Bun.sleep(10);
 	}
 }
 async function control(
 	host: ReturnType<typeof startNotificationProofHost>,
-	body: Record<string, unknown>,
+	body: Record<string, unknown>
 ) {
 	return fetch(new URL("/__proof/control", host.server.url), {
 		method: "POST",
@@ -44,7 +46,9 @@ test("finite authenticated host sends actual notification frames and records rea
 	});
 	expect(response.status).toBe(200);
 	const reader = response.body?.getReader();
-	if (!reader) throw Error("No real stream");
+	if (!reader) {
+		throw Error("No real stream");
+	}
 	const first = await reader.read();
 	expect(new TextDecoder().decode(first.value)).toContain(": connected");
 	expect(host.state.requests[0]).toMatchObject({
@@ -67,7 +71,7 @@ test("finite authenticated host sends actual notification frames and records rea
 				requestId: host.state.requests[0]?.id,
 				notification: payload,
 			})
-		).status,
+		).status
 	).toBe(200);
 	let frames = "";
 	while (!frames.includes("event: notifications")) {
@@ -75,7 +79,7 @@ test("finite authenticated host sends actual notification frames and records rea
 		frames += new TextDecoder().decode(next.value);
 	}
 	expect(frames).toContain(
-		`event: notifications\ndata: ${JSON.stringify(payload)}\n\n`,
+		`event: notifications\ndata: ${JSON.stringify(payload)}\n\n`
 	);
 	expect(host.state.requests[0]?.sent).toEqual([payload]);
 	abort.abort();
@@ -89,14 +93,14 @@ test("finite authenticated host sends actual notification frames and records rea
 				requestId: host.state.requests[0]?.id,
 				notification: payload,
 			})
-		).status,
+		).status
 	).toBe(409);
 	expect(host.state.requests[0]?.sent).toEqual([payload]);
 });
 test("an actual503 is distinct from a later authenticated successful SSE connection", async () => {
 	const host = start();
 	expect((await control(host, { action: "reset", refused: 1 })).status).toBe(
-		200,
+		200
 	);
 	const response = await fetch(new URL("/api/events/all", host.server.url), {
 		headers: auth,
@@ -122,7 +126,7 @@ test("unsupported verbs, unknown credentials and forged controls persist refusal
 	expect(unknown.status).toBe(503);
 	const unauthorized = await fetch(
 		new URL("/api/events/all", host.server.url),
-		{ headers: { ...auth, authorization: "Bearer unknown" } },
+		{ headers: { ...auth, authorization: "Bearer unknown" } }
 	);
 	expect(unauthorized.status).toBe(401);
 	const forged = await fetch(new URL("/__proof/control", host.server.url), {
@@ -149,7 +153,7 @@ test("actual browser preflight permits only the known GET stream and owned origi
 	});
 	expect(good.status).toBe(204);
 	expect(good.headers.get("access-control-allow-headers")).toContain(
-		"x-ryu-user-jwt",
+		"x-ryu-user-jwt"
 	);
 	const bad = await fetch(url, {
 		method: "OPTIONS",
@@ -176,7 +180,7 @@ test("native live socket diagnostics match the actual retained request and disap
 	expect(live.requests).toHaveLength(1);
 	expect(live.requests[0].closed).toBe(false);
 	expect(live.requests[0].lifecycle.observedPeer).toEqual(
-		live.requests[0].lifecycle.peer,
+		live.requests[0].lifecycle.peer
 	);
 	expect(live.requests[0].lifecycle.observedPeer.address).toBe("127.0.0.1");
 	expect(live.pendingServerRequests).toBe(2);
@@ -203,17 +207,19 @@ test("Linux kernel TCP observation independently identifies the owned establishe
 	const current = await (await fetch(stateUrl)).json();
 	expect(current.requests[0].lifecycle.localPort).toBe(host.server.port);
 	expect(current.requests[0].lifecycle.requestHeaders.authorization).toBe(
-		auth.authorization,
+		auth.authorization
 	);
 	expect(current.requests[0].lifecycle.requestHeaders["x-ryu-user-jwt"]).toBe(
-		auth["x-ryu-user-jwt"],
+		auth["x-ryu-user-jwt"]
 	);
-	if (process.platform === "linux")
+	if (process.platform === "linux") {
 		expect(current.requests[0].lifecycle.kernelTcp).toEqual({
 			supported: true,
 			states: ["01"],
 		});
-	else expect(current.requests[0].lifecycle.kernelTcp.supported).toBe(false);
+	} else {
+		expect(current.requests[0].lifecycle.kernelTcp.supported).toBe(false);
+	}
 	abort.abort();
 	await reader.cancel().catch(() => {});
 	await until(() => host.state.requests[0]?.closed === true);
@@ -221,8 +227,10 @@ test("Linux kernel TCP observation independently identifies the owned establishe
 	if (process.platform === "linux") {
 		expect(closed.requests[0].lifecycle.kernelTcp.supported).toBe(true);
 		expect(closed.requests[0].lifecycle.kernelTcp.states.includes("01")).toBe(
-			false,
+			false
 		);
-	} else expect(closed.requests[0].lifecycle.kernelTcp.supported).toBe(false);
+	} else {
+		expect(closed.requests[0].lifecycle.kernelTcp.supported).toBe(false);
+	}
 	expect(closed.unexpected).toEqual([]);
 });

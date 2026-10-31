@@ -213,8 +213,9 @@ export function useMessageReactions(
 				queryClient
 					.getQueryCache()
 					.find({ queryKey: context.queryKey, exact: true }) !== context.query
-			)
+			) {
 				return;
+			}
 			queryClient.setQueryData<ReactionBucket[]>(
 				context.queryKey,
 				(current) => {
@@ -238,12 +239,13 @@ export function useMessageReactions(
 						next.length > old.length
 					) {
 						const restored = next.pop();
-						if (restored)
+						if (restored) {
 							next.splice(
 								Math.min(context.previousIndex, next.length),
 								0,
 								restored
 							);
+						}
 					}
 					return next;
 				}
@@ -257,10 +259,11 @@ export function useMessageReactions(
 				applyReactionDelta(old ?? [], messageId, emoji, op, true)
 			);
 			const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-			if (!query)
+			if (!query) {
 				throw new Error(
 					"Reaction query cache disappeared during optimistic update"
 				);
+			}
 			let resource = reactionWriteResources.get(query);
 			if (!resource) {
 				resource = { pending: 0, revisions: new Map() };
@@ -282,14 +285,18 @@ export function useMessageReactions(
 			};
 		},
 		onSettled: (_data, _error, _vars, context) => {
-			if (!context) return;
+			if (!context) {
+				return;
+			}
 			context.resource.pending--;
-			if (context.resource.revisions.get(context.row) === context.revision)
+			if (context.resource.revisions.get(context.row) === context.revision) {
 				context.resource.revisions.delete(context.row);
+			}
 			// Read canonical membership only when all overlapping writes for this
 			// cache have settled; an earlier read must not erase a still-pending chip.
-			if (context.resource.pending === 0)
+			if (context.resource.pending === 0) {
 				void queryClient.invalidateQueries({ queryKey: context.queryKey });
+			}
 		},
 	});
 

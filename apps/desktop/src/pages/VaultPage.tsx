@@ -229,6 +229,7 @@ export default function VaultPage() {
 						})}
 
 						{renderVaultSecretList({
+							tl,
 							deleteMutation,
 							folder,
 							folderTree,
@@ -305,7 +306,7 @@ export default function VaultPage() {
 					</AlertDialogHeader>
 					{deleteMutation.error ? (
 						<p className="text-sm text-status-destructive" role="alert">
-							{vaultErrorMessage(deleteMutation.error, "Could not delete.")}
+							{vaultErrorMessage(deleteMutation.error, "Could not delete.", tl)}
 						</p>
 					) : null}
 					<AlertDialogFooter>

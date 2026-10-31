@@ -18,7 +18,8 @@ afterAll(async () => {
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Reflect.set(Element.prototype, "getAnimations", () => []);
 
-const { Markdown } = await import("./markdown.tsx");
+const { Markdown, preloadMarkdown } = await import("./markdown.tsx");
+await preloadMarkdown();
 
 // Every render of a mention link resolves its item with `mentionItems.find`, so
 // counting those calls counts renders of the finished block that holds the link.

@@ -21,8 +21,8 @@ createRoot(document.getElementById("root") as HTMLElement).render(
 	<I18nProvider>
 		<QueryClientProvider client={queryClient}>
 			<main className="mx-auto max-w-4xl p-8">
-				<h1 className="mb-4 text-2xl font-semibold">ACP runtime settings</h1>
-				<p className="mb-6 text-sm text-muted-foreground">
+				<h1 className="mb-4 font-semibold text-2xl">ACP runtime settings</h1>
+				<p className="mb-6 text-muted-foreground text-sm">
 					Production settings component and SDK against a finite HTTP fixture.
 					Hardware and active-agent counts are fixture projections; this does
 					not start ACP processes or inhibit OS sleep.

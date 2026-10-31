@@ -1,65 +1,31 @@
-import { useId } from "react";
-
-const SUN_RAY_PATHS = [
-	"M12 1.4v2.4",
-	"m20.3 3.7-2.5 2.5",
-	"M22.6 12h-2.4",
-	"M12 22.6v-2.4",
-	"M1.4 12h2.4",
-	"m20.3 20.3-2.5-2.5",
-	"m3.7 20.3 2.5-2.5",
-	"m3.7 3.7 2.5 2.5",
-] as const;
+import { Moon02Icon, Sun03Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@ryu/ui/lib/utils.ts";
 
 interface ClassicThemeIconProps {
 	className?: string;
 }
 
-/** Sun-to-crescent icon based on the Classic toggle from Toggles.dev. */
+/**
+ * Theme glyph that follows the active theme: the outline sun in light mode and
+ * the outline moon in dark mode, matching the Hugeicons set used elsewhere.
+ */
 export function ClassicThemeIcon({
 	className = "size-4",
 }: ClassicThemeIconProps) {
-	const clipMainId = `ryu-classic-theme-${useId().replaceAll(":", "")}`;
-
 	return (
-		<svg
+		<span
 			aria-hidden="true"
-			className={className}
-			focusable="false"
-			height="1em"
-			viewBox="0 0 24 24"
-			width="1em"
+			className={cn("relative inline-grid place-items-center", className)}
 		>
-			<defs>
-				<clipPath id={clipMainId}>
-					<path
-						className="classic-theme-icon__clip-shape"
-						d="M0 0h25a1 1 0 0010 10v14H0Z"
-					/>
-				</clipPath>
-			</defs>
-			<g stroke="currentColor" strokeLinecap="round">
-				<circle
-					className="classic-theme-icon__circle"
-					clipPath={`url(#${clipMainId})`}
-					cx={12}
-					cy={12}
-					fill="currentColor"
-					r={5}
-				/>
-				{SUN_RAY_PATHS.map((d) => (
-					<path
-						className="classic-theme-icon__ray"
-						d={d}
-						fill="none"
-						key={d}
-						paintOrder="stroke markers fill"
-						strokeLinejoin="round"
-						strokeMiterlimit={0}
-						strokeWidth={2}
-					/>
-				))}
-			</g>
-		</svg>
+			<HugeiconsIcon
+				className="col-start-1 row-start-1 size-full transition-[opacity,scale] duration-300 motion-reduce:transition-none dark:scale-0 dark:opacity-0"
+				icon={Sun03Icon}
+			/>
+			<HugeiconsIcon
+				className="col-start-1 row-start-1 size-full scale-0 opacity-0 transition-[opacity,scale] duration-300 motion-reduce:transition-none dark:scale-100 dark:opacity-100"
+				icon={Moon02Icon}
+			/>
+		</span>
 	);
 }

@@ -5,11 +5,11 @@ import {
 } from "./chat-page-native-http-background.ts";
 
 interface Call {
-	method: string;
-	url: string;
 	authorization: string | null;
 	body: string | null;
+	method: string;
 	responseStatus: number;
+	url: string;
 }
 const ledgers = new WeakMap<Page, { calls: Call[]; unexpected: Call[] }>();
 export function chatControlNativeNetworkLedger(page: Page) {
@@ -36,7 +36,9 @@ export async function installChatControlNativeNetwork(page: Page) {
 	await page.route("**/api/**", async (route) => {
 		const request = route.request();
 		const url = new URL(request.url());
-		if (!url.pathname.startsWith("/api/")) return route.continue();
+		if (!url.pathname.startsWith("/api/")) {
+			return route.continue();
+		}
 		const call: Call = {
 			method: request.method(),
 			url: request.url(),

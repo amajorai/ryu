@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import {
@@ -292,6 +293,7 @@ function WikiSearch({
 	onSearch: (query: string) => void;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
 	const nav = useWikiNav();
 	const reduceMotion = useReducedMotion();
 	const listId = useId();
@@ -302,10 +304,10 @@ function WikiSearch({
 	const trimmed = query.trim();
 	const hits = useMemo(
 		() =>
-			wikiSuggest(snapshot, trimmed, SUGGESTION_LIMIT).map((entry) => ({
+			wikiSuggest(snapshot, trimmed, tl, SUGGESTION_LIMIT).map((entry) => ({
 				entry,
 			})),
-		[snapshot, trimmed]
+		[snapshot, trimmed, tl]
 	);
 	// The suggestions, then a final "Search for pages containing" row.
 	const optionCount = trimmed ? hits.length + 1 : 0;

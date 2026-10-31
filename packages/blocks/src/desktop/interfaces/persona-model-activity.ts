@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceEvent,
 	type InterfaceGroup,
@@ -150,22 +151,26 @@ export function personaActivity(
 }
 
 /** "in 45m", "in 3h", "in 2d" for an upcoming run. */
-export function untilLabel(iso: string, now: number = Date.now()): string {
+export function untilLabel(
+	iso: string,
+	tl: LiteralMessage,
+	now: number = Date.now()
+): string {
 	const minutes = Math.round((Date.parse(iso) - now) / 60_000);
 	if (Number.isNaN(minutes)) {
 		return "";
 	}
 	if (minutes < 1) {
-		return "now";
+		return tl("now");
 	}
 	if (minutes < 60) {
-		return `in ${minutes}m`;
+		return tl("in {minutes}m", { minutes });
 	}
 	const hours = Math.round(minutes / 60);
 	if (hours < 48) {
-		return `in ${hours}h`;
+		return tl("in {hours}h", { hours });
 	}
-	return `in ${Math.round(hours / 24)}d`;
+	return tl("in {days}d", { days: String(Math.round(hours / 24)) });
 }
 
 /** "just now", "5m ago", "3h ago". */

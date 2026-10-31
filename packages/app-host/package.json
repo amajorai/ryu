@@ -24,6 +24,7 @@
     "./views": "./src/views.ts",
     "./live-activity": "./src/live-activity.ts",
     "./ExtensionHost": "./src/ExtensionHost.tsx",
+    "./extension-host-handshake": "./src/extension-host-handshake.ts",
     "./third-party-plugin": "./src/third-party-plugin.ts",
     "./widget-bootstrap": "./src/widget-bootstrap.ts",
     "./widget-state-store": "./src/widget-state-store.ts",

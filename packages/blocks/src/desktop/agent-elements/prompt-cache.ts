@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import type { ContextUsage } from "./context-usage.tsx";
@@ -238,7 +239,8 @@ export function modelSwitchLosesCache(
 export function modelSwitchCacheWarning(
 	usage: ContextUsage | null | undefined,
 	nextModel: string,
-	now: number
+	now: number,
+	tl: LiteralMessage
 ): { description: string; title: string } | null {
 	if (!(usage && modelSwitchLosesCache(usage, now))) {
 		return null;
@@ -249,13 +251,23 @@ export function modelSwitchCacheWarning(
 	const status = promptCacheStatus(usage, now);
 	const warmth =
 		status?.state === "warm" && status.remainingMs !== undefined
-			? ` The current cache is still warm for ${formatCacheCountdown(status.remainingMs)}.`
+			? ` ${tl("The current cache is still warm for {countdown}.", {
+					countdown: formatCacheCountdown(status.remainingMs),
+				})}`
 			: "";
+	const resend = tokens
+		? tl(
+				"Prompt caches are per model, so the next message re-sends {tokens} tokens of context at the full input price.",
+				{ tokens }
+			)
+		: tl(
+				"Prompt caches are per model, so the next message re-sends the context at the full input price."
+			);
 	return {
-		title: `Switching to ${nextModel} resets the prompt cache`,
-		description: `Prompt caches are per model, so the next message re-sends ${
-			tokens ? `${tokens} tokens of` : "the"
-		} context at the full input price.${warmth}`,
+		title: tl("Switching to {nextModel} resets the prompt cache", {
+			nextModel,
+		}),
+		description: `${resend}${warmth}`,
 	};
 }
 
@@ -271,14 +283,22 @@ export type PromptEditReach =
 	| "ryu-agent"
 	| "skill-threads";
 
-const REACH_LABEL: Record<PromptEditReach, string> = {
-	"all-threads": "every thread on this node",
-	bot: "this bot's threads, in every project",
-	"bot-in-project": "this bot's threads in this project",
-	project: "every thread in this project",
-	"ryu-agent": "every Ryu assistant thread",
-	"skill-threads": "every thread that loads skills",
-};
+function reachLabel(reach: PromptEditReach, tl: LiteralMessage): string {
+	switch (reach) {
+		case "all-threads":
+			return tl("every thread on this node");
+		case "bot":
+			return tl("this bot's threads, in every project");
+		case "bot-in-project":
+			return tl("this bot's threads in this project");
+		case "project":
+			return tl("every thread in this project");
+		case "ryu-agent":
+			return tl("every Ryu assistant thread");
+		default:
+			return tl("every thread that loads skills");
+	}
+}
 
 /** Field labels that read as plural nouns ("The instructions are …"). */
 const PLURAL_LABEL = /(instructions|skills|replies|goals)$/i;
@@ -295,7 +315,8 @@ const PLURAL_LABEL = /(instructions|skills|replies|goals)$/i;
  */
 export function promptEditCacheWarning(
 	changed: readonly string[],
-	reach: PromptEditReach
+	reach: PromptEditReach,
+	tl: LiteralMessage
 ): { description: string; title: string } | null {
 	const fields = changed.filter((field) => field.trim().length > 0);
 	if (fields.length === 0) {
@@ -303,11 +324,19 @@ export function promptEditCacheWarning(
 	}
 	const list =
 		fields.length === 1
-			? fields[0]
-			: `${fields.slice(0, -1).join(", ")} and ${fields.at(-1)}`;
+			? (fields[0] ?? "")
+			: tl("{items} and {last}", {
+					items: fields.slice(0, -1).join(", "),
+					last: fields.at(-1) ?? "",
+				});
+	const number =
+		fields.length === 1 && !PLURAL_LABEL.test(list) ? "singular" : "plural";
 	return {
-		title: "Apply now? This resets the prompt cache",
-		description: `${list} ${fields.length === 1 && !PLURAL_LABEL.test(list ?? "") ? "is" : "are"} part of the system prompt for ${REACH_LABEL[reach]}. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.`,
+		title: tl("Apply now? This resets the prompt cache"),
+		description: tl(
+			"{number, select, singular {{list} is part of the system prompt for {reach}. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.} other {{list} are part of the system prompt for {reach}. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.}}",
+			{ number, list, reach: reachLabel(reach, tl) }
+		),
 	};
 }
 
@@ -321,7 +350,8 @@ export function promptEditCacheWarning(
 export function modelDefaultCacheWarning(
 	scopeLabel: string,
 	before: { model: string; provider: string },
-	after: { model: string; provider: string }
+	after: { model: string; provider: string },
+	tl: LiteralMessage
 ): { description: string; title: string } | null {
 	const same = (left: string, right: string) => left.trim() === right.trim();
 	if (
@@ -331,7 +361,10 @@ export function modelDefaultCacheWarning(
 		return null;
 	}
 	return {
-		title: "Apply now? This resets the prompt cache",
-		description: `Every thread that inherits ${scopeLabel} switches model on its next message. Prompt caches are per model, so each of those threads re-sends its whole conversation at the full input price, once.`,
+		title: tl("Apply now? This resets the prompt cache"),
+		description: tl(
+			"Every thread that inherits {scopeLabel} switches model on its next message. Prompt caches are per model, so each of those threads re-sends its whole conversation at the full input price, once.",
+			{ scopeLabel }
+		),
 	};
 }

@@ -228,6 +228,7 @@ export function ArcadeFilters({
 	onClear: () => void;
 	onToggle: (groupId: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	if (cabinets.length === 0) {
 		return null;
 	}
@@ -250,7 +251,7 @@ export function ArcadeFilters({
 				const active = cabinet.group.id === filterId;
 				return (
 					<button
-						aria-label={wallCabinetLabel(cabinet, active, acted)}
+						aria-label={wallCabinetLabel(cabinet, active, tl, acted)}
 						aria-pressed={active}
 						className={cn(chip, GAME_FOCUS)}
 						data-arcade-wall={cabinet.group.id}

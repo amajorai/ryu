@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Progress } from "@ryu/ui/components/progress.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
@@ -103,6 +104,7 @@ function stateDetail(referee: CreditReferralReferee): string {
 }
 
 function RefereeRow({ referee }: { referee: CreditReferralReferee }) {
+	const tl = useLiteralMessages();
 	return (
 		<SettingsItem
 			actions={
@@ -120,7 +122,9 @@ function RefereeRow({ referee }: { referee: CreditReferralReferee }) {
 			description={
 				<>
 					{stateDetail(referee)}
-					{referee.joinedAt ? ` · Joined ${formatDate(referee.joinedAt)}` : ""}
+					{referee.joinedAt
+						? ` · ${tl("Joined {joinedDate}", { joinedDate: formatDate(referee.joinedAt) })}`
+						: ""}
 				</>
 			}
 			title={<span title={referee.label}>{referee.label}</span>}
@@ -147,6 +151,7 @@ function rewardTermsText(reward: CreditReferralDashboard["reward"]): string {
 }
 
 function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
+	const tl = useLiteralMessages();
 	// BRANCH on the uncapped case — a `0` ceiling means no limit, and both
 	// subtracting and dividing against it are wrong (negative headroom, NaN).
 	const usedPercent =
@@ -163,9 +168,10 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 						{formatCredits(cap.earnedMicroUsd)}
 					</dd>
 					<dd className="text-muted-foreground text-xs">
-						{cap.paidCount === 1
-							? "1 referral paid out"
-							: `${cap.paidCount} referrals paid out`}
+						{tl(
+							"{paidCount, plural, =1 {1 referral paid out} other {{paidCountText} referrals paid out}}",
+							{ paidCount: cap.paidCount, paidCountText: String(cap.paidCount) }
+						)}
 					</dd>
 				</div>
 				<div className="flex flex-col gap-1">
@@ -178,7 +184,9 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 					<dd className="text-muted-foreground text-xs">
 						{cap.remainingMicroUsd === null
 							? "No limit on your account"
-							: `of ${formatCredits(cap.capMicroUsd)} lifetime limit`}
+							: tl("of {lifetimeLimit} lifetime limit", {
+									lifetimeLimit: formatCredits(cap.capMicroUsd),
+								})}
 					</dd>
 				</div>
 			</dl>

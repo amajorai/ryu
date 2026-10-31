@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowLeft, ArrowRight } from "lucide-react";
@@ -22,7 +22,8 @@ import {
 /** A trip's word and sentence: the act's when there is one. */
 function tripWords(
 	trip: RideTrip | undefined,
-	actTrip: RidesActTrip | undefined
+	actTrip: RidesActTrip | undefined,
+	tl: LiteralMessage
 ): { detail: string; status: string } {
 	if (actTrip && trip?.stage !== "unassigned") {
 		return {
@@ -31,7 +32,7 @@ function tripWords(
 		};
 	}
 	return trip
-		? tripHeadline(trip)
+		? tripHeadline(trip, tl)
 		: { detail: "Your driver is on the way", status: "Requested" };
 }
 
@@ -50,10 +51,11 @@ export function RidesTrip({
 	threadView: ReactNode;
 	trip: RideTrip | undefined;
 }) {
+	const tl = useLiteralMessages();
 	const headingId = useId();
 	const actTrips = useContext(RidesActTrips);
 	const actTrip = trip ? actTrips?.get(trip.id) : undefined;
-	const headline = tripWords(trip, actTrip);
+	const headline = tripWords(trip, actTrip, tl);
 	const acted = useContext(RidesActed);
 	const etas = useContext(RidesActEtas);
 	// With acts the track only shows a real estimate's progress.
@@ -173,7 +175,7 @@ export function TripPreview({
 }) {
 	const tl = useLiteralMessages();
 	const acted = useContext(RidesActed);
-	const headline = tripWords(trip, useContext(RidesActTrips)?.get(trip.id));
+	const headline = tripWords(trip, useContext(RidesActTrips)?.get(trip.id), tl);
 	const etas = useContext(RidesActEtas);
 	const eta = acted ? (etas.get(trip.thread.id)?.label ?? null) : tripEta(trip);
 	return (

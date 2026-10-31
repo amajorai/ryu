@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -284,11 +286,16 @@ describe("messenger model", () => {
 	});
 
 	test("names who is typing", () => {
+		const tl: LiteralMessage = (source, values) =>
+			formatMessage(source, values);
 		const [ada, grace, linus] = SNAPSHOT.agents;
-		expect(typingLabel([])).toBe("");
-		expect(typingLabel(grace ? [grace] : [])).toBe("Grace is typing");
+		expect(typingLabel([], tl)).toBe("");
+		expect(typingLabel(grace ? [grace] : [], tl)).toBe("Grace is typing");
 		expect(
-			typingLabel([ada, grace, linus].filter((agent) => agent !== undefined))
+			typingLabel(
+				[ada, grace, linus].filter((agent) => agent !== undefined),
+				tl
+			)
 		).toBe("3 members are typing");
 	});
 });

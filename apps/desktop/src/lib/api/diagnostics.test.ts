@@ -8,8 +8,13 @@
 // client, the request choke point and its error mapping all run for real, so
 // the cases assert the result the Privacy page turns into a toast.
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { ApiError } from "./client.ts";
 import { sendDiagnosticsTestSpan } from "./diagnostics.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 interface Reply {
 	body?: string;
@@ -63,7 +68,7 @@ afterAll(() => {
 describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 	it("POSTs once with no body and the node's bearer, and resolves Core's endpoint on a 200", async () => {
 		replyWith(200, { ok: true, span: "ryu.test", endpoint: OWN_ENDPOINT });
-		expect(await sendDiagnosticsTestSpan(target)).toEqual({
+		expect(await sendDiagnosticsTestSpan(target, tl)).toEqual({
 			ok: true,
 			endpoint: OWN_ENDPOINT,
 		});
@@ -86,7 +91,7 @@ describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 		["an array", [{ ok: true, span: "ryu.test", endpoint: OWN_ENDPOINT }]],
 	])("reports an unexpected 200 body (%s) as a failure instead of a success", async (_name, body) => {
 		replyWith(200, body);
-		expect(await sendDiagnosticsTestSpan(target)).toEqual({
+		expect(await sendDiagnosticsTestSpan(target, tl)).toEqual({
 			ok: false,
 			status: 200,
 			message: "Core returned an unexpected test-span response.",
@@ -95,7 +100,7 @@ describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 
 	it("reports an empty 200 body as the same unexpected-response failure", async () => {
 		replyWith(200);
-		expect(await sendDiagnosticsTestSpan(target)).toEqual({
+		expect(await sendDiagnosticsTestSpan(target, tl)).toEqual({
 			ok: false,
 			status: 200,
 			message: "Core returned an unexpected test-span response.",
@@ -142,7 +147,7 @@ describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 		],
 	])("maps %s to a failure carrying Core's message and status", async (_name, status, body, message) => {
 		replyWith(status, body);
-		expect(await sendDiagnosticsTestSpan(target)).toEqual({
+		expect(await sendDiagnosticsTestSpan(target, tl)).toEqual({
 			ok: false,
 			status,
 			message,
@@ -151,7 +156,7 @@ describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 
 	it("says an older Core is too old when the route is a bare 404", async () => {
 		replyWith(404);
-		expect(await sendDiagnosticsTestSpan(target)).toEqual({
+		expect(await sendDiagnosticsTestSpan(target, tl)).toEqual({
 			ok: false,
 			status: 404,
 			message: "This Core is too old to send a test span.",
@@ -164,7 +169,7 @@ describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 		[503, "Core answered 503."],
 	])("falls back to the status when a %i carries no message", async (status, message) => {
 		replyWith(status);
-		expect(await sendDiagnosticsTestSpan(target)).toEqual({
+		expect(await sendDiagnosticsTestSpan(target, tl)).toEqual({
 			ok: false,
 			status,
 			message,
@@ -185,7 +190,7 @@ describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 		closed.stop(true);
 		let caught: unknown;
 		try {
-			await sendDiagnosticsTestSpan(unreachable);
+			await sendDiagnosticsTestSpan(unreachable, tl);
 		} catch (error) {
 			caught = error;
 		}
@@ -198,7 +203,7 @@ describe("sendDiagnosticsTestSpan against Core's test-span route", () => {
 		reply = { body: "<html>index</html>", status: 200 };
 		let caught: unknown;
 		try {
-			await sendDiagnosticsTestSpan(target);
+			await sendDiagnosticsTestSpan(target, tl);
 		} catch (error) {
 			caught = error;
 		}

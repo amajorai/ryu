@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import type {
@@ -103,10 +105,12 @@ function render(options: {
 	);
 }
 
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
+
 describe("community agent identity", () => {
 	test("the notice names what is never carried and where to limit access", () => {
 		for (const mode of ["managed", "mixed", null] as const) {
-			const notice = communityAgentNotice(mode);
+			const notice = communityAgentNotice(tl, mode);
 			expect(notice).toContain(
 				"It gets none of your credentials, Spaces or Composio actions."
 			);
@@ -115,11 +119,11 @@ describe("community agent identity", () => {
 			);
 			expect(notice).not.toContain("never gains");
 		}
-		expect(communityAgentNotice("managed")).toContain(
+		expect(communityAgentNotice(tl, "managed")).toContain(
 			"Set to Acts as you, it can use your connected accounts"
 		);
-		expect(communityAgentNotice("mixed")).toContain("Set to Both,");
-		expect(communityAgentNotice("individual")).toContain(
+		expect(communityAgentNotice(tl, "mixed")).toContain("Set to Both,");
+		expect(communityAgentNotice(tl, "individual")).toContain(
 			"Set to Its own identity, it works with accounts of its own and never uses yours."
 		);
 	});

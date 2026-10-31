@@ -3,6 +3,7 @@ import {
 	shouldSuggestReplyThread,
 } from "@ryu/blocks/desktop/agent-elements/reply-thread.ts";
 import type { MessageReply } from "@ryu/blocks/desktop/agent-elements/types.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { UIMessage } from "ai";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -56,6 +57,7 @@ function AssistantAvatar() {
 }
 
 function Story() {
+	const tl = useLiteralMessages();
 	const [quote, setQuote] = useState<string | null>(null);
 	const [reply, setReply] = useState<MessageReply | null>(null);
 	const [created, setCreated] = useState(false);
@@ -102,7 +104,7 @@ function Story() {
 												setReply(null);
 											},
 										},
-										description: replyThreadDescription(reply.chainLength),
+										description: replyThreadDescription(reply.chainLength, tl),
 										onClose: () => setReply(null),
 										title: "Long reply chain",
 									}

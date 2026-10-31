@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -69,6 +70,7 @@ export function useSeasonalActors({
 	unowned,
 	world,
 }: SeasonalActorsArgs) {
+	const tl = useLiteralMessages();
 	const cards = useActCards({
 		acts,
 		clock,
@@ -141,6 +143,7 @@ export function useSeasonalActors({
 				shown,
 				slots: slots.slots,
 				stations,
+				tl,
 			}),
 		[
 			acts,
@@ -153,6 +156,7 @@ export function useSeasonalActors({
 			shown,
 			slots,
 			stations,
+			tl,
 		]
 	);
 	const onAsk = (askId: string, opener?: HTMLElement) =>

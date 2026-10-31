@@ -35,7 +35,6 @@ import { Spinner } from "@ryu/ui/components/spinner";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
 import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useState } from "react";
-import { WorkspacePreview } from "./workspace-preview.tsx";
 
 export type LocalCoreSetupState =
 	| { phase: "downloading" }
@@ -321,7 +320,6 @@ export function LoginView({
 	onUseCloud,
 }: LoginViewProps) {
 	const t = useLoginText();
-	const [previewOpen, setPreviewOpen] = useState(true);
 
 	return (
 		// The empty area around the centered column is the start page's window
@@ -408,9 +406,6 @@ export function LoginView({
 							title={t("login.title", "Hey, I'm Ryu")}
 						/>
 
-						{previewOpen ? (
-							<WorkspacePreview onContinue={() => setPreviewOpen(false)} />
-						) : null}
 						<div className="flex w-full max-w-xs flex-col items-center gap-3">
 							{/* Sign-in runs directly against Better Auth (device flow), so it
 							    no longer waits on Core — the button is always enabled. Core

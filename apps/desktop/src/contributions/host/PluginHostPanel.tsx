@@ -54,6 +54,7 @@ import {
 	fetchPluginUiBundle,
 	type PluginCompanion,
 } from "@/src/lib/api/plugins.ts";
+import { companionSandboxPage } from "@/src/lib/companion-sandbox-page.ts";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 import { usePluginAssistantBridge } from "./PluginHostPanel-assistant-bridge.ts";
 import { useOpenedFilePush } from "./PluginHostPanel-opened-file-push.ts";
@@ -108,6 +109,12 @@ export function PluginHostPanel({
 	);
 	const i18n = useI18n();
 	const tl = useLiteralMessages();
+	// Host services read the current `tl` through a ref, so a locale change does
+	// not rebuild (and re-register) every service the companion is holding.
+	const tlRef = useRef(tl);
+	useEffect(() => {
+		tlRef.current = tl;
+	});
 	const { distributeInstalledSkill } = useSkillDistributionFlow();
 	const [connectedNonce, setConnectedNonce] = useState<string | null>(null);
 	const realtimeLifetimeRef = useRef<AbortController | null>(null);
@@ -340,6 +347,7 @@ export function PluginHostPanel({
 			openTab,
 			realtimeLifetimeRef,
 			realtimeSessionsRef,
+			tl: (source, values) => tlRef.current(source, values),
 			toastHost,
 			updateTabTitle,
 			updateTabsIconWhere,
@@ -444,6 +452,7 @@ export function PluginHostPanel({
 					onConnected={() => setConnectedNonce(nonce)}
 					onMessage={onMessage}
 					pushRef={filePushRef}
+					sandboxPage={companionSandboxPage(companion.defaultCspEnforced)}
 					services={services}
 					srcdoc={srcdoc}
 					streamingPrivacyActive={streamingPrivacyActive}

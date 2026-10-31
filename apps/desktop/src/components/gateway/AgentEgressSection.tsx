@@ -106,7 +106,7 @@ export function AgentEgressSection({ target }: { target: ApiTarget }) {
 	const tl = useLiteralMessages();
 	const query = useQuery({
 		queryKey: ["agent-egress", target.url],
-		queryFn: () => loadAgentEgress(target),
+		queryFn: () => loadAgentEgress(target, tl),
 		staleTime: 15_000,
 		refetchOnWindowFocus: false,
 	});

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -189,6 +190,7 @@ export function TicketTime({
 	className?: string;
 	now: number;
 }) {
+	const tl = useLiteralMessages();
 	if (at === 0) {
 		return null;
 	}
@@ -198,7 +200,7 @@ export function TicketTime({
 			dateTime={new Date(at).toISOString()}
 			title={ticketFullTime(at)}
 		>
-			{ticketTimeLabel(at, now)}
+			{ticketTimeLabel(at, now, tl)}
 		</time>
 	);
 }

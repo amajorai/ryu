@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
 const NativeResponse = globalThis.Response,
 	nativeFetch = globalThis.fetch;
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Object.assign(globalThis, { Response: NativeResponse, fetch: nativeFetch });
 mock.module("@/src/hooks/useFeatureFlag.ts", () => ({
@@ -63,10 +66,11 @@ function rawStatus(state: State) {
 	};
 }
 async function idle() {
-	for (let i = 0; i < 8; i++)
+	for (let i = 0; i < 8; i++) {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 5));
 		});
+	}
 }
 async function select(authority: Authority) {
 	await act(async () => {
@@ -92,17 +96,19 @@ async function mount(kind: "managed" | "mesh") {
 	await act(async () =>
 		root.render(
 			createElement(
-				kind === "managed" ? ManagedInferenceSettings : NetworkSettings,
-			),
-		),
+				kind === "managed" ? ManagedInferenceSettings : NetworkSettings
+			)
+		)
 	);
 	await idle();
 }
 function input(label: string) {
 	const node = container.querySelector<HTMLInputElement>(
-		`input[aria-label="${label}"]`,
+		`input[aria-label="${label}"]`
 	);
-	if (!node) throw new Error(`Actual control absent ${label}`);
+	if (!node) {
+		throw new Error(`Actual control absent ${label}`);
+	}
 	return node;
 }
 async function fill(label: string, value: string) {
@@ -110,7 +116,7 @@ async function fill(label: string, value: string) {
 		const node = input(label);
 		const setter = Object.getOwnPropertyDescriptor(
 			HTMLInputElement.prototype,
-			"value",
+			"value"
 		)?.set;
 		setter!.call(node, value);
 		node.dispatchEvent(new Event("input", { bubbles: true }));
@@ -121,19 +127,25 @@ async function clickSave() {
 	const button = [
 		...container.querySelectorAll<HTMLButtonElement>("button"),
 	].find((button) => button.textContent?.trim() === "Save");
-	if (!button) throw new Error("Actual Save absent");
+	if (!button) {
+		throw new Error("Actual Save absent");
+	}
 	await act(async () => button.click());
 	await idle();
 }
 async function toggle() {
 	const button = container.querySelector<HTMLElement>('[role="switch"]');
-	if (!button) throw new Error("Actual mesh switch absent");
+	if (!button) {
+		throw new Error("Actual mesh switch absent");
+	}
 	await act(async () => button.click());
 	await idle();
 }
 function release(key: string) {
 	holds.delete(key);
-	for (const done of releases.get(key) ?? []) done();
+	for (const done of releases.get(key) ?? []) {
+		done();
+	}
 	releases.delete(key);
 }
 beforeEach(async () => {
@@ -172,20 +184,22 @@ beforeEach(async () => {
 				unknown.push(scope);
 				return NativeResponse.json(
 					{ error: "Wrong authority" },
-					{ status: 403 },
+					{ status: 403 }
 				);
 			}
 			const key = `${scope}:${request.method}:${path}`;
 			const snapshot = structuredClone(state);
-			if (holds.has(key))
+			if (holds.has(key)) {
 				await new Promise<void>((resolve) => {
 					releases.set(key, [...(releases.get(key) ?? []), resolve]);
 				});
-			if (fail.delete(key))
+			}
+			if (fail.delete(key)) {
 				return NativeResponse.json(
 					{ error: "Owned network write refused" },
-					{ status: refusalStatuses.get(key) ?? 503 },
+					{ status: refusalStatuses.get(key) ?? 503 }
 				);
+			}
 			if (path.startsWith("/api/preferences/")) {
 				const pref = decodeURIComponent(path.slice("/api/preferences/".length));
 				if (
@@ -199,19 +213,21 @@ beforeEach(async () => {
 					unknown.push(path);
 					return NativeResponse.json(
 						{ error: "Unknown preference" },
-						{ status: 503 },
+						{ status: 503 }
 					);
 				}
-				if (request.method === "GET" && !Object.hasOwn(state.prefs, pref))
+				if (request.method === "GET" && !Object.hasOwn(state.prefs, pref)) {
 					return NativeResponse.json(
 						{ error: "preference_not_set" },
-						{ status: 404 },
+						{ status: 404 }
 					);
-				if (request.method === "GET")
+				}
+				if (request.method === "GET") {
 					return NativeResponse.json({
 						key: pref,
 						value: snapshot.prefs[pref],
 					});
+				}
 				if (
 					request.method === "PUT" &&
 					body &&
@@ -222,10 +238,12 @@ beforeEach(async () => {
 					return NativeResponse.json({ key: pref, value: body.value });
 				}
 			}
-			if (path === "/api/setup/status/tailscale" && request.method === "GET")
+			if (path === "/api/setup/status/tailscale" && request.method === "GET") {
 				return NativeResponse.json({ status: { state: "installed" } });
-			if (path === "/api/mesh/status" && request.method === "GET")
+			}
+			if (path === "/api/mesh/status" && request.method === "GET") {
 				return NativeResponse.json(rawStatus(snapshot));
+			}
 			if (
 				path === "/api/mesh/config" &&
 				request.method === "POST" &&
@@ -243,7 +261,7 @@ beforeEach(async () => {
 			unknown.push(`${request.method} ${path}`);
 			return NativeResponse.json(
 				{ error: "Unexpected contract" },
-				{ status: 503 },
+				{ status: 503 }
 			);
 		},
 	});
@@ -259,7 +277,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
 	await act(async () => root.unmount());
-	for (const key of new Set([...holds, ...releases.keys()])) release(key);
+	for (const key of new Set([...holds, ...releases.keys()])) {
+		release(key);
+	}
 	await idle();
 	server.stop(true);
 	success.mockRestore();
@@ -267,11 +287,17 @@ afterEach(async () => {
 	container.remove();
 	expect(unknown).toEqual([]);
 });
-for (const rotation of ["url", "token", "jwt"] as const)
+for (const rotation of ["url", "token", "jwt"] as const) {
 	test(`actual managed controls reload their owned values after ${rotation} authority changes`, async () => {
-		if (rotation === "token") b = { ...a, token: "owner-b" };
-		if (rotation === "jwt") b = { ...a, userJwt: "jwt-b" };
-		if (rotation === "url") b = { ...a, url: b.url };
+		if (rotation === "token") {
+			b = { ...a, token: "owner-b" };
+		}
+		if (rotation === "jwt") {
+			b = { ...a, userJwt: "jwt-b" };
+		}
+		if (rotation === "url") {
+			b = { ...a, url: b.url };
+		}
 		seed(b, "b");
 		await mount("managed");
 		expect(input("Fleet URL").value).toBe("https://fleet-a.example.test");
@@ -284,32 +310,39 @@ for (const rotation of ["url", "token", "jwt"] as const)
 		expect(writes).toHaveLength(2);
 		expect(writes.every((c) => c.scope === signature(b))).toBe(true);
 		expect(states[signature(a)]!.prefs["managed-gateway-url"]).toBe(
-			"https://fleet-a.example.test",
+			"https://fleet-a.example.test"
 		);
 		expect(states[signature(b)]!.prefs["managed-gateway-url"]).toBe(
-			"https://fleet-edited.example.test",
+			"https://fleet-edited.example.test"
 		);
 	});
+}
 test("a late A read cannot overwrite the current managed B controls", async () => {
-	for (const key of ["managed-gateway-url", "managed-gateway-token"])
+	for (const key of ["managed-gateway-url", "managed-gateway-token"]) {
 		holds.add(`${signature(a)}:GET:/api/preferences/${key}`);
+	}
 	await mount("managed");
 	await select(b);
 	expect(input("Fleet URL").value).toBe("https://fleet-b.example.test");
-	for (const key of [...holds]) release(key);
+	for (const key of [...holds]) {
+		release(key);
+	}
 	await idle();
 	expect(input("Fleet URL").value).toBe("https://fleet-b.example.test");
 	expect(input("Organization token").value).toBe("rgw_b");
 });
 test("a retired managed save cannot publish its global success into B", async () => {
 	await mount("managed");
-	for (const pref of ["managed-gateway-url", "managed-gateway-token"])
+	for (const pref of ["managed-gateway-url", "managed-gateway-token"]) {
 		holds.add(`${signature(a)}:PUT:/api/preferences/${pref}`);
+	}
 	await fill("Fleet URL", "https://old-owned-edit.example.test");
 	await clickSave();
 	await select(b);
 	expect(input("Fleet URL").value).toBe("https://fleet-b.example.test");
-	for (const key of [...holds]) release(key);
+	for (const key of [...holds]) {
+		release(key);
+	}
 	await idle();
 	expect(success.mock.calls).toEqual([]);
 	expect(error.mock.calls).toEqual([]);
@@ -317,7 +350,7 @@ test("a retired managed save cannot publish its global success into B", async ()
 	expect(
 		calls
 			.filter((c) => c.method === "PUT")
-			.every((c) => c.scope === signature(a)),
+			.every((c) => c.scope === signature(a))
 	).toBe(true);
 });
 test("managed refusal preserves its draft and retry saves the identical owner payload with remount readback", async () => {
@@ -329,12 +362,12 @@ test("managed refusal preserves its draft and retry saves the identical owner pa
 	expect(input("Fleet URL").value).toBe("https://retry-owned.example.test");
 	await clickSave();
 	expect(success.mock.calls.at(-1)?.[0].title).toBe(
-		"Managed inference connected",
+		"Managed inference connected"
 	);
 	const writes = calls.filter((c) => c.method === "PUT");
 	expect(writes).toHaveLength(4);
 	expect(writes.slice(0, 2).map((c) => c.body)).toEqual(
-		writes.slice(2).map((c) => c.body),
+		writes.slice(2).map((c) => c.body)
 	);
 	await act(async () => root.render(null));
 	await mount("managed");
@@ -345,14 +378,14 @@ test("mesh and Headscale read the selected B owner and never submit A's displaye
 	states[signature(a)]!.enabled = true;
 	await mount("mesh");
 	expect(input("Headscale control server URL").value).toBe(
-		"https://headscale-a.example.test",
+		"https://headscale-a.example.test"
 	);
 	await select(b);
 	expect(input("Headscale control server URL").value).toBe(
-		"https://headscale-b.example.test",
+		"https://headscale-b.example.test"
 	);
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("false");
 	await toggle();
 	expect(calls.filter((c) => c.path === "/api/mesh/config")).toEqual([
@@ -367,14 +400,14 @@ test("mesh and Headscale read the selected B owner and never submit A's displaye
 	]);
 	await fill(
 		"Headscale control server URL",
-		"https://headscale-edited.example.test",
+		"https://headscale-edited.example.test"
 	);
 	await clickSave();
 	expect(states[signature(a)]!.prefs["mesh-login-server"]).toBe(
-		"https://headscale-a.example.test",
+		"https://headscale-a.example.test"
 	);
 	expect(states[signature(b)]!.prefs["mesh-login-server"]).toBe(
-		"https://headscale-edited.example.test",
+		"https://headscale-edited.example.test"
 	);
 });
 test("held A mesh completion cannot change B's switch or publish stale success", async () => {
@@ -384,12 +417,12 @@ test("held A mesh completion cannot change B's switch or publish stale success",
 	await toggle();
 	await select(b);
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("false");
 	release(key);
 	await idle();
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("false");
 	expect(success.mock.calls).toEqual([]);
 });
@@ -400,7 +433,7 @@ test("switching nodes then saving without edits never copies A's managed credent
 	const writes = calls.filter((c) => c.method === "PUT");
 	expect(writes).toHaveLength(2);
 	expect(
-		writes.map((c) => ({ scope: c.scope, path: c.path, body: c.body })),
+		writes.map((c) => ({ scope: c.scope, path: c.path, body: c.body }))
 	).toEqual([
 		{
 			scope: signature(b),
@@ -440,7 +473,7 @@ test("retired A refusal cannot publish an error or reset the returning A owner's
 	await idle();
 	expect(success.mock.calls).toHaveLength(1);
 	expect(states[signature(a)]!.prefs["managed-gateway-url"]).toBe(
-		"https://second-a.example.test",
+		"https://second-a.example.test"
 	);
 });
 test("a real mesh refusal preserves its switch and identical owner retry is durable after remount", async () => {
@@ -448,14 +481,14 @@ test("a real mesh refusal preserves its switch and identical owner retry is dura
 	fail.add(`${signature(a)}:POST:/api/mesh/config`);
 	await toggle();
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("false");
 	expect(error.mock.calls.at(-1)?.[0].title).toBe(
-		"Failed to enable the tunnel",
+		"Failed to enable the tunnel"
 	);
 	await toggle();
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("true");
 	const writes = calls.filter((c) => c.path === "/api/mesh/config");
 	expect(writes).toHaveLength(2);
@@ -467,7 +500,7 @@ test("a real mesh refusal preserves its switch and identical owner retry is dura
 	await act(async () => root.render(null));
 	await mount("mesh");
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("true");
 });
 test("retired Headscale acknowledgment cannot publish a global success over the selected node", async () => {
@@ -478,17 +511,17 @@ test("retired Headscale acknowledgment cannot publish a global success over the 
 	await clickSave();
 	await select(b);
 	expect(input("Headscale control server URL").value).toBe(
-		"https://headscale-b.example.test",
+		"https://headscale-b.example.test"
 	);
 	release(key);
 	await idle();
 	expect(success.mock.calls).toEqual([]);
 	expect(error.mock.calls).toEqual([]);
 	expect(states[signature(a)]!.prefs["mesh-login-server"]).toBe(
-		"https://old-edit.example.test",
+		"https://old-edit.example.test"
 	);
 	expect(states[signature(b)]!.prefs["mesh-login-server"]).toBe(
-		"https://headscale-b.example.test",
+		"https://headscale-b.example.test"
 	);
 });
 test("the actual installation watcher stops polling and publishing after its mounted node owner retires", async () => {
@@ -496,10 +529,10 @@ test("the actual installation watcher stops polling and publishing after its mou
 	await mount("mesh");
 	await toggle();
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("true");
 	const readsBefore = calls.filter(
-		(c) => c.scope === signature(a) && c.path === "/api/mesh/status",
+		(c) => c.scope === signature(a) && c.path === "/api/mesh/status"
 	).length;
 	await select(b);
 	states[signature(a)]!.reachable = true;
@@ -509,13 +542,13 @@ test("the actual installation watcher stops polling and publishing after its mou
 	await idle();
 	expect(
 		calls.filter(
-			(c) => c.scope === signature(a) && c.path === "/api/mesh/status",
-		),
+			(c) => c.scope === signature(a) && c.path === "/api/mesh/status"
+		)
 	).toHaveLength(readsBefore);
 	expect(success.mock.calls).toEqual([]);
 	expect(error.mock.calls).toEqual([]);
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("false");
 }, 8000);
 test("a held old installation poll cannot launch the next probe or publish ready after node handoff", async () => {
@@ -535,27 +568,31 @@ test("a held old installation poll cannot launch the next probe or publish ready
 	expect(
 		calls.filter(
 			(c) =>
-				c.scope === signature(a) && c.path === "/api/setup/status/tailscale",
-		),
+				c.scope === signature(a) && c.path === "/api/setup/status/tailscale"
+		)
 	).toEqual([]);
 	expect(success.mock.calls).toEqual([]);
 	expect(error.mock.calls).toEqual([]);
 	expect(
-		container.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+		container.querySelector('[role="switch"]')?.getAttribute("aria-checked")
 	).toBe("false");
 }, 8000);
 function saveButton() {
 	const button = [
 		...container.querySelectorAll<HTMLButtonElement>("button"),
 	].find((button) => button.textContent?.trim() === "Save");
-	if (!button) throw new Error("Actual Save absent");
+	if (!button) {
+		throw new Error("Actual Save absent");
+	}
 	return button;
 }
 async function retryRead() {
 	const button = [
 		...container.querySelectorAll<HTMLButtonElement>("button"),
 	].find((button) => button.textContent?.trim() === "Retry");
-	if (!button) throw new Error("Actual read Retry absent");
+	if (!button) {
+		throw new Error("Actual read Retry absent");
+	}
 	await act(async () => button.click());
 	await idle();
 }
@@ -563,22 +600,25 @@ test("node credentials are never exposed as actual React subtree keys", async ()
 	await mount("managed");
 	const node = input("Fleet URL");
 	const fiberKey = Object.keys(node).find((key) =>
-		key.startsWith("__reactFiber$"),
+		key.startsWith("__reactFiber$")
 	);
-	if (!fiberKey)
+	if (!fiberKey) {
 		throw new Error("Actual mounted React Fiber was not available");
+	}
 	let fiber = Reflect.get(node, fiberKey);
 	const keys: string[] = [];
 	while (fiber) {
-		if (fiber.key !== null) keys.push(String(fiber.key));
+		if (fiber.key !== null) {
+			keys.push(String(fiber.key));
+		}
 		fiber = fiber.return;
 	}
 	expect(keys.length).toBeGreaterThan(0);
 	expect(
-		keys.some((key) => key.includes(a.token) || key.includes(a.userJwt!)),
+		keys.some((key) => key.includes(a.token) || key.includes(a.userJwt!))
 	).toBe(false);
 });
-for (const kind of ["managed", "mesh"] as const)
+for (const kind of ["managed", "mesh"] as const) {
 	test(`returning to A cannot let an acknowledged old200 overwrite a fresh ${kind} save`, async () => {
 		await mount(kind);
 		const pref =
@@ -603,21 +643,21 @@ for (const kind of ["managed", "mesh"] as const)
 		].find((button) => button.textContent?.trim() === "Save");
 		const blocked = existingSave === undefined || existingSave.disabled;
 		const readsBefore = calls.filter(
-			(c) => c.scope === signature(a) && c.method === "GET",
+			(c) => c.scope === signature(a) && c.method === "GET"
 		).length;
 		// Exercise the legacy race through its actually-enabled UI; the corrected UI
 		// must instead wait before any fresh GET or writable draft, then allow the intent.
 		holds.delete(key);
 		if (blocked) {
 			const loadingInput = container.querySelector<HTMLInputElement>(
-				`input[aria-label="${label}"]`,
+				`input[aria-label="${label}"]`
 			);
 			expect(loadingInput === null || loadingInput.disabled).toBe(true);
 			release(key);
 			await idle();
 			expect(
 				calls.filter((c) => c.scope === signature(a) && c.method === "GET")
-					.length,
+					.length
 			).toBeGreaterThan(readsBefore);
 			await fill(label, second);
 			await clickSave();
@@ -632,7 +672,7 @@ for (const kind of ["managed", "mesh"] as const)
 		expect(input(label).value).toBe(second);
 		expect(blocked).toBe(true);
 		expect(states[signature(b)]!.prefs[pref]).toBe(
-			kind === "managed" ? "rgw_b" : "https://headscale-b.example.test",
+			kind === "managed" ? "rgw_b" : "https://headscale-b.example.test"
 		);
 		expect(
 			calls
@@ -640,11 +680,12 @@ for (const kind of ["managed", "mesh"] as const)
 					(c) =>
 						c.scope === signature(a) &&
 						c.method === "PUT" &&
-						c.path.endsWith(pref),
+						c.path.endsWith(pref)
 				)
-				.map((c) => c.body),
+				.map((c) => c.body)
 		).toEqual([{ value: first }, { value: second }]);
 	});
+}
 test("closing and reopening managed controls waits for the shared owner's held write before reading editable values", async () => {
 	await mount("managed");
 	const key = `${signature(a)}:PUT:/api/preferences/managed-gateway-token`;
@@ -666,40 +707,43 @@ test("closing and reopening managed controls waits for the shared owner's held w
 for (const [kind, status, pref, title] of [
 	["managed", 503, "managed-gateway-url", "Could not load managed inference"],
 	["mesh", 403, "mesh-login-server", "Could not load network settings"],
-] as const)
+] as const) {
 	test(`${kind} initial read${status} is visible, cannot blank-save, and genuine Retry recovers owned values`, async () => {
 		const key = `${signature(a)}:GET:/api/preferences/${pref}`;
 		fail.add(key);
 		refusalStatuses.set(key, status);
 		await mount(kind);
 		expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-			title,
+			title
 		);
 		const save = [
 			...container.querySelectorAll<HTMLButtonElement>("button"),
 		].find((button) => button.textContent?.trim() === "Save");
 		expect(save === undefined || save.disabled).toBe(true);
-		if (save) await clickSave();
+		if (save) {
+			await clickSave();
+		}
 		expect(
-			calls.filter((c) => c.method === "PUT" || c.method === "POST"),
+			calls.filter((c) => c.method === "PUT" || c.method === "POST")
 		).toEqual([]);
 		await retryRead();
 		expect(container.querySelector('[role="alert"]')).toBeNull();
 		expect(saveButton().disabled).toBe(false);
 		expect(
 			input(kind === "managed" ? "Fleet URL" : "Headscale control server URL")
-				.value,
+				.value
 		).toBe(
 			kind === "managed"
 				? "https://fleet-a.example.test"
-				: "https://headscale-a.example.test",
+				: "https://headscale-a.example.test"
 		);
 		expect(
 			calls.filter(
-				(c) => c.path === `/api/preferences/${pref}` && c.method === "GET",
-			),
+				(c) => c.path === `/api/preferences/${pref}` && c.method === "GET"
+			)
 		).toHaveLength(2);
 	});
+}
 test("genuinely unset404 fleet values remain empty editable choices rather than a failed read", async () => {
 	delete states[signature(a)]!.prefs["managed-gateway-url"];
 	delete states[signature(a)]!.prefs["managed-gateway-token"];
@@ -724,27 +768,27 @@ test("switching from managed controls to network controls waits for the same nod
 	await mount("mesh");
 	expect(
 		container.querySelector(
-			'input[aria-label="Headscale control server URL"]',
-		) === null,
+			'input[aria-label="Headscale control server URL"]'
+		) === null
 	).toBe(true);
 	expect(calls.filter((call) => call.method === "GET")).toHaveLength(
-		readsBefore,
+		readsBefore
 	);
 	release(key);
 	await idle();
 	expect(input("Headscale control server URL").value).toBe(
-		"https://headscale-a.example.test",
+		"https://headscale-a.example.test"
 	);
 	await fill(
 		"Headscale control server URL",
-		"https://cross-card-a.example.test",
+		"https://cross-card-a.example.test"
 	);
 	await clickSave();
 	expect(states[signature(a)]!.prefs["mesh-login-server"]).toBe(
-		"https://cross-card-a.example.test",
+		"https://cross-card-a.example.test"
 	);
 	expect(states[signature(a)]!.prefs["managed-gateway-token"]).toBe(
-		"rgw_cross_card_a",
+		"rgw_cross_card_a"
 	);
 	expect(success.mock.calls).toHaveLength(1);
 });

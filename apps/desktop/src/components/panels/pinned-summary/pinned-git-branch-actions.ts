@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { MutableRefObject } from "react";
 import { invalidateGitPullRequest } from "@/src/hooks/useGitPullRequest.ts";
 import { invalidateGitStatus } from "@/src/hooks/useGitStatus.ts";
@@ -37,9 +38,11 @@ export function pinnedGitBranchActions(
 		githubRepositoryQuery,
 		pullRequestsEnabled,
 		targetRef,
+		tl,
 	}: PinnedGitContext & {
 		githubRepositoryQuery: { refetch: () => Promise<unknown> };
 		pullRequestsEnabled: boolean;
+		tl: LiteralMessage;
 	}
 ) {
 	const {
@@ -211,7 +214,7 @@ export function pinnedGitBranchActions(
 			}
 			setRepositoryOperation({
 				status: "error",
-				message: repositoryCreationErrorMessage(error),
+				message: repositoryCreationErrorMessage(error, tl),
 			});
 		} finally {
 			if (activeGitOperationRef.current === controller) {

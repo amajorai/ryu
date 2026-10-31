@@ -15,9 +15,22 @@ export const MFA_ENROLLMENT_TITLE = "Set up two-factor authentication";
 export const MFA_ENROLLMENT_REASON =
 	"Your Ryu account needs a passkey or an authenticator app before it can continue. Email codes don't count.";
 
+/** Formats one whole-sentence ICU message: `tf` for the terminal, plain English for `--json`. */
+export type MfaMessageFormatter = (
+	source: string,
+	values: Readonly<Record<string, string>>
+) => string;
+
 /** The one paragraph a one-shot command prints when the control plane refuses it. */
 export function mfaEnrollmentCommandMessage(
+	tl: MfaMessageFormatter,
 	setupUrl: string = MFA_ENROLLMENT_SETUP_URL
 ): string {
-	return `Two-factor authentication required. ${MFA_ENROLLMENT_REASON} Set one up at ${setupUrl}, then run this command again.`;
+	return tl(
+		"Two-factor authentication required. {mfaEnrollmentReason} Set one up at {setupUrl}, then run this command again.",
+		{
+			mfaEnrollmentReason: tl(MFA_ENROLLMENT_REASON, {}),
+			setupUrl,
+		}
+	);
 }

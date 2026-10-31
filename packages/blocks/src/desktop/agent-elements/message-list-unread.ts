@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { UIMessage } from "ai";
 
 export interface UnreadMessageState {
@@ -23,8 +24,14 @@ export function getIncomingMessageIds(
 	return ids;
 }
 
-export function getUnreadMessageLabel(count: number): string {
-	return `${count} new message${count === 1 ? "" : "s"}`;
+export function getUnreadMessageLabel(
+	count: number,
+	tl: LiteralMessage
+): string {
+	return tl(
+		"{count, plural, one {{countLabel} new message} other {{countLabel} new messages}}",
+		{ count, countLabel: String(count) }
+	);
 }
 
 export function createUnreadMessageState(

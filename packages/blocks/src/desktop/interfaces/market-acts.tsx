@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceActivityKind,
 	type InterfaceAgentAct,
@@ -280,6 +281,7 @@ export function actKeepers({
 	shown,
 	slots,
 	stations,
+	tl,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
 	looks: ReadonlyMap<string, MemberLooks>;
@@ -290,6 +292,7 @@ export function actKeepers({
 	shown: ReadonlySet<string>;
 	slots: readonly YouSpotSlot[];
 	stations: readonly KeeperStation[];
+	tl: LiteralMessage;
 }): VillagerSpec[] {
 	const cast: VillagerSpec[] = [];
 	for (const station of stations) {
@@ -313,8 +316,11 @@ export function actKeepers({
 			iconOnly: asking && spots.slot ? false : undefined,
 			id: `${station.shopId}\n${act.agentId}`,
 			label: asking
-				? `${act.ariaLabel} Answer their ask.`
-				: `${act.ariaLabel} Place an order with ${act.agentName}.`,
+				? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+				: tl("{ariaLabel} Place an order with {agentName}.", {
+						agentName: act.agentName,
+						ariaLabel: act.ariaLabel,
+					}),
 			life: actLife(act, spots, SKIN, { reduced }),
 			looks: {
 				...look,

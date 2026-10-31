@@ -160,7 +160,8 @@ export function DeepLinkConfirmDialog() {
 						fitBlockReason(
 							quant.fit,
 							quant.fitLabel,
-							modelDetail.data.device
+							modelDetail.data.device,
+							tl
 						) ?? "This model won't fit on this device"
 					);
 				}
@@ -260,7 +261,7 @@ export function DeepLinkConfirmDialog() {
 			const requiredFailures = result.failures.filter(
 				({ member }) => member.required
 			);
-			const manualNote = describeBundleManualSteps(result.manual);
+			const manualNote = describeBundleManualSteps(result.manual, tl);
 			if (requiredFailures.length > 0) {
 				sileo.error({
 					title: "Bundle installed with required items missing",

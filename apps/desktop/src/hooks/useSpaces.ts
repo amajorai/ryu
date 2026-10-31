@@ -1,6 +1,7 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { AppDisabledError } from "@/src/lib/api/client.ts";
 import {
 	createDatabase as apiCreateDatabase,
@@ -154,6 +155,9 @@ const EMPTY_DOCUMENT_REVISIONS: ReadonlyMap<string, number> = new Map();
 /// in sync so the UI reflects changes (e.g. document counts) without a manual
 /// reload.
 export function useSpaces(): UseSpacesResult {
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const activeNode = useActiveNode();
 	const { url } = activeNode;
 	const token = activeNode.token ?? null;
@@ -373,7 +377,7 @@ export function useSpaces(): UseSpacesResult {
 				{ url, token, userJwt },
 				spaceId,
 				file,
-				opts
+				{ ...opts, tl: tlRef.current }
 			);
 			bumpDocumentRevision(spaceId);
 			return uploaded;

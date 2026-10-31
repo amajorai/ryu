@@ -1,3 +1,5 @@
+"use client";
+
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import {
@@ -22,6 +24,7 @@ import {
 	landingSectionClass,
 	landingSubheadlineBodyClass,
 } from "./landing-typography.ts";
+import { LinkArrow } from "./link-arrow.tsx";
 import motionStyles from "./pricing-motion.module.css";
 import { SectionHeading } from "./sections.tsx";
 
@@ -96,7 +99,7 @@ function StandaloneProductPricingCard({
 				</p>
 				{/* One link per product: the product page carries the usage detail. */}
 				<Link
-					className="mt-auto inline-flex min-h-10 items-center self-start font-medium text-foreground text-sm underline-offset-4 hover:underline"
+					className="mt-auto inline-flex min-h-10 items-center gap-1 self-start font-medium text-foreground text-sm underline-offset-4 hover:underline"
 					href={productHref(entry.slug)}
 				>
 					{tlRich(
@@ -104,7 +107,7 @@ function StandaloneProductPricingCard({
 						{ name: entry.name },
 						{ srOnly: (content) => <span className="sr-only">{content}</span> }
 					)}
-					&nbsp;<span aria-hidden="true">→</span>
+					<LinkArrow />
 				</Link>
 			</CardContent>
 		</Card>
@@ -166,7 +169,8 @@ export function StandaloneProductPricingSection({ slug }: { slug: string }) {
 						className="inline-flex min-h-10 shrink-0 items-center gap-1 font-medium text-foreground text-sm underline-offset-4 hover:underline"
 						href="/pricing"
 					>
-						See all pricing <span aria-hidden="true">→</span>
+						See all pricing
+						<LinkArrow />
 					</Link>
 					{details.length > 0 ? (
 						<details className="min-w-0">

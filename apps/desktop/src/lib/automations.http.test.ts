@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { createJob } from "./api/schedules.ts";
 import { createScheduledAgentWorkflow } from "./automations.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 test("Calendar's real routine caller forwards atomic slot and omitted/null destinations with exact retry", async () => {
 	const calls: {
@@ -118,12 +123,20 @@ test("Calendar's real routine caller forwards atomic slot and omitted/null desti
 			expect(call.identity).toBe("delegated-reviewer");
 		}
 		calls.length = 0;
-		await createJob(target, {
-			name: "Independent",
-			schedule: args.schedule,
-			target: { type: "agent", agentId: "review-agent", prompt: "Independent" },
-			enabled: true,
-		});
+		await createJob(
+			target,
+			{
+				name: "Independent",
+				schedule: args.schedule,
+				target: {
+					type: "agent",
+					agentId: "review-agent",
+					prompt: "Independent",
+				},
+				enabled: true,
+			},
+			tl
+		);
 		expect(calls[0]?.body).toEqual({
 			name: "Independent",
 			schedule: args.schedule,

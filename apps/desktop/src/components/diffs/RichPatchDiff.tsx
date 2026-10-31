@@ -10,14 +10,9 @@ import { parseDiffFromFile } from "@pierre/diffs";
 import { Editor, type EditorOptions } from "@pierre/diffs/edit";
 import { EditProvider, FileDiff, PatchDiff } from "@pierre/diffs/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import {
-	HoverCard,
-	HoverCardContent,
-	HoverCardTrigger,
-} from "@ryu/ui/components/hover-card.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { CSSProperties, ReactElement, ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface ReviewCommentMetadata {
@@ -37,42 +32,6 @@ export interface RichPatchDiffProps {
 	patch: string;
 	showSave?: boolean;
 	style?: CSSProperties;
-}
-
-const DIFF_HEADER_RE = /^diff --git a\/(.+?) b\/(.+)$/gm;
-
-/** Pull one file's patch out of a multi-file unified diff. */
-export function patchForFile(unifiedDiff: string, path: string): string {
-	const matches = [...unifiedDiff.matchAll(DIFF_HEADER_RE)];
-	if (matches.length === 0) {
-		return unifiedDiff;
-	}
-	const matchIndex = matches.findIndex(
-		(match) => match[1] === path || match[2] === path
-	);
-	if (matchIndex < 0) {
-		return unifiedDiff;
-	}
-	const start = matches[matchIndex]?.index ?? 0;
-	const end = matches[matchIndex + 1]?.index ?? unifiedDiff.length;
-	return unifiedDiff.slice(start, end).trimEnd();
-}
-
-/** Split a git patch into the single-file patches expected by PatchDiff. */
-export function splitPatchByFile(
-	patch: string
-): { path: string; patch: string }[] {
-	return patch
-		.split(/\n(?=diff --git )/)
-		.map((chunk) => chunk.trim())
-		.filter(Boolean)
-		.map((chunk) => {
-			const match = chunk.match(/^diff --git a\/(.+?) b\/(.+)$/m);
-			return {
-				path: match?.[2] ?? chunk.slice(0, 60),
-				patch: chunk,
-			};
-		});
 }
 
 function isDiffAnnotation(
@@ -407,45 +366,5 @@ export function RichPatchDiff({
 				)}
 			</div>
 		</EditProvider>
-	);
-}
-
-export function DiffFilePreviewPopover({
-	children,
-	filePath,
-	patch,
-}: {
-	children: ReactElement;
-	filePath: string;
-	patch: string;
-}) {
-	return (
-		<HoverCard>
-			<HoverCardTrigger closeDelay={120} delay={180} render={children} />
-			<HoverCardContent
-				align="start"
-				appearance="composer-preview"
-				className="w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden"
-				side="left"
-				sideOffset={10}
-			>
-				<div className="mb-1 flex items-center gap-2 px-2 py-1 text-muted-foreground text-xs">
-					<span className="min-w-0 flex-1 truncate font-mono text-foreground">
-						{filePath}
-					</span>
-					<span>Preview</span>
-				</div>
-				<div className="max-h-[28rem] overflow-auto rounded-xl border border-border/60 bg-background/60">
-					<PatchDiff
-						disableWorkerPool
-						options={{
-							diffStyle: "unified",
-							lineHoverHighlight: "line",
-						}}
-						patch={patch}
-					/>
-				</div>
-			</HoverCardContent>
-		</HoverCard>
 	);
 }

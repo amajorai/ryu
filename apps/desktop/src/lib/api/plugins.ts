@@ -138,6 +138,7 @@ export type { AppLifecycleError } from "./plugins-lifecycle-errors.ts";
 export {
 	dependencyErrorSchema,
 	describeDependencyError,
+	describeGatewayRefusal,
 } from "./plugins-lifecycle-errors.ts";
 export { APP_LIFECYCLE_PERMISSIONS } from "./plugins-response-codecs.ts";
 export type {

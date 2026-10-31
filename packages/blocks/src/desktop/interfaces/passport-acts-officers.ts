@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { InterfaceAgentAct } from "@ryuhq/protocol/interfaces";
 import {
 	actBubble,
@@ -93,6 +94,7 @@ export function actOfficers({
 	onAsk,
 	reduced,
 	shown,
+	tl,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
 	layout: DeskLayout;
@@ -102,6 +104,7 @@ export function actOfficers({
 	onAsk: (askId: string) => void;
 	reduced: boolean;
 	shown: ReadonlySet<string>;
+	tl: LiteralMessage;
 }): VillagerSpec[] {
 	const cast: VillagerSpec[] = [];
 	for (const station of layout.stations) {
@@ -124,8 +127,8 @@ export function actOfficers({
 			facing: LIFE_FACE_CAMERA,
 			id: act.agentId,
 			label: asking
-				? `${act.ariaLabel} Answer their ask.`
-				: `${act.ariaLabel} Apply for a visa.`,
+				? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+				: tl("{ariaLabel} Apply for a visa.", { ariaLabel: act.ariaLabel }),
 			life: officerLife(act, at, reduced, narrow),
 			looks: look,
 			name: act.agentName,

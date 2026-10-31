@@ -220,17 +220,17 @@ export function AppUpdatesSettings() {
 				return;
 			}
 			if (!automaticDownload) {
-				showDownloadUpdatePrompt(verdict, { node });
+				showDownloadUpdatePrompt(verdict, tl, { node });
 				return;
 			}
 			try {
-				const prepared = await prepareUpdate(verdict, { node });
+				const prepared = await prepareUpdate(verdict, tl, { node });
 				if (prepared) {
-					showPreparedUpdatePrompt(verdict, { node });
+					showPreparedUpdatePrompt(verdict, tl, { node });
 				} else if (isEligibleForAppUpdate(verdict)) {
 					// Outside the updates window `prepareUpdate` already said so; a
 					// second "Download update" toast on top would only repeat it.
-					showDownloadUpdatePrompt(verdict, { node });
+					showDownloadUpdatePrompt(verdict, tl, { node });
 				}
 			} catch (error) {
 				sileo.error({
@@ -257,7 +257,10 @@ export function AppUpdatesSettings() {
 		try {
 			const booked = await scheduleAppUpdate(available);
 			setPending(booked);
-			sileo.info({ title: describePendingAppUpdate(booked), duration: 8000 });
+			sileo.info({
+				title: describePendingAppUpdate(booked, tl),
+				duration: 8000,
+			});
 		} catch (err) {
 			// A deferral that could not be written must never be reported as booked
 			// — that is the exact failure shape this whole feature exists to avoid.
@@ -302,7 +305,7 @@ export function AppUpdatesSettings() {
 				sileo.success({ title: "Ryu is up to date" });
 				return;
 			}
-			await installUpdate(verdict, { node });
+			await installUpdate(verdict, tl, { node });
 		} finally {
 			setChecking(false);
 		}
@@ -344,7 +347,7 @@ export function AppUpdatesSettings() {
 				autoUpdate={automaticDownload}
 				checking={checking}
 				deferredInstallNotice={
-					pending ? describePendingAppUpdate(pending) : undefined
+					pending ? describePendingAppUpdate(pending, tl) : undefined
 				}
 				installPreparedDisabled={checking}
 				installPreparedLabel={APP_UPDATE_INSTALL_ACTION}

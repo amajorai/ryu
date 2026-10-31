@@ -41,6 +41,10 @@ import {
 	SettingsAppearanceContext,
 	toItems,
 } from "./settings-items-grouped.tsx";
+import {
+	SETTINGS_SURFACE_CARD,
+	useSettingsSurface,
+} from "./settings-surface.tsx";
 
 export type { SettingsAppearance } from "./settings-items-grouped.tsx";
 
@@ -61,6 +65,7 @@ export const SettingsGroup = ({
 	children,
 	className,
 }: SettingsGroupProps) => {
+	const carded = useSettingsSurface() === "card";
 	if (appearance === "grouped") {
 		return (
 			<GroupedSettingsGroup className={className}>
@@ -68,11 +73,25 @@ export const SettingsGroup = ({
 			</GroupedSettingsGroup>
 		);
 	}
+	const list = (
+		<ItemGroup className={carded ? undefined : className} variant="flush">
+			{toItems(children)}
+		</ItemGroup>
+	);
 	return (
 		<SettingsAppearanceContext.Provider value="flush">
-			<ItemGroup className={className} variant="flush">
-				{toItems(children)}
-			</ItemGroup>
+			{carded ? (
+				// On a card surface the flush rows keep their hairlines; the card
+				// only adds the fill and a row inset.
+				<div
+					className={cn(SETTINGS_SURFACE_CARD, "px-3.5", className)}
+					data-slot="settings-group-card"
+				>
+					{list}
+				</div>
+			) : (
+				list
+			)}
 		</SettingsAppearanceContext.Provider>
 	);
 };
@@ -99,19 +118,24 @@ export const SettingsCard = ({
 	bare,
 	children,
 	className,
-}: SettingsCardProps) =>
-	appearance === "grouped" && !bare ? (
-		<div
-			className={cn(GROUPED_SURFACE, "p-3.5", className)}
-			data-slot="settings-card"
-		>
-			{children}
-		</div>
-	) : (
+}: SettingsCardProps) => {
+	const carded = useSettingsSurface() === "card";
+	if (appearance === "grouped" || carded) {
+		return (
+			<div
+				className={cn(!bare && GROUPED_SURFACE, !bare && "p-3.5", className)}
+				data-slot="settings-card"
+			>
+				{children}
+			</div>
+		);
+	}
+	return (
 		<div className={className} data-slot="settings-card">
 			{children}
 		</div>
 	);
+};
 
 interface SettingsItemProps {
 	actions?: ReactNode;

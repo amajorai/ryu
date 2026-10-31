@@ -31,7 +31,7 @@ function AlertDialogOverlay({
 	return (
 		<AlertDialogPrimitive.Backdrop
 			className={cn(
-				"ryu-dialog-overlay data-open:fade-in-0 data-closed:fade-out-0 fixed inset-0 isolate z-50 rounded-[var(--ryu-window-radius,0px)] duration-100 data-closed:animate-out data-open:animate-in",
+				"ryu-dialog-overlay data-open:fade-in-0 data-closed:fade-out-0 fixed inset-0 isolate z-50 rounded-[var(--ryu-window-radius,0px)] duration-(--duration-slow) ease-(--ease-enter) data-closed:animate-out data-open:animate-in data-closed:duration-(--duration-fast) data-closed:ease-(--ease-exit)",
 				className
 			)}
 			data-slot="alert-dialog-overlay"

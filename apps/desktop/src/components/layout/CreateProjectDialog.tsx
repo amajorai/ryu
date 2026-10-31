@@ -43,7 +43,7 @@ export function CreateProjectDialog({
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const draft = { about, folder: null, icon: null, name };
-	const validation = firstProjectError(draft);
+	const validation = firstProjectError(draft, tl);
 
 	const reset = () => {
 		setName("");

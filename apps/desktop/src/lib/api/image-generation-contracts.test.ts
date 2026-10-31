@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type GatewayJsonValue,
 	gatewayJsonValueSchema,
@@ -8,6 +10,9 @@ import {
 	imageGenerationReplySchema,
 } from "./image-generation-contracts.ts";
 import { generateImage } from "./images.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 interface CapturedGeneration {
 	authorization: string | null;
@@ -62,6 +67,7 @@ describe("native image generation transport", () => {
 				await generateImage(
 					{ url: server.url.origin, token: "fixture-token" },
 					"A tree",
+					tl,
 					{
 						count: 2,
 						provider: "fal",
@@ -132,19 +138,19 @@ describe("native image generation transport", () => {
 		});
 		const target = { url: server.url.origin, token: null };
 		try {
-			expect(await generateImage(target, "A tree")).toEqual([]);
+			expect(await generateImage(target, "A tree", tl)).toEqual([]);
 			mode = "refused";
-			await expect(generateImage(target, "A tree")).rejects.toThrow(
+			await expect(generateImage(target, "A tree", tl)).rejects.toThrow(
 				"provider unavailable"
 			);
 			mode = "non-json";
-			await expect(generateImage(target, "A tree")).rejects.toThrow(
+			await expect(generateImage(target, "A tree", tl)).rejects.toThrow(
 				"image generation failed: 502"
 			);
 			const controller = new AbortController();
 			controller.abort();
 			await expect(
-				generateImage(target, "A tree", { signal: controller.signal })
+				generateImage(target, "A tree", tl, { signal: controller.signal })
 			).rejects.toMatchObject({ name: "AbortError" });
 		} finally {
 			server.stop(true);

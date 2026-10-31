@@ -1,11 +1,13 @@
-import http from "node:http";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
+
 const apiPort = 5866,
 	uiOrigin = "http://127.0.0.1:5291";
 const dataRoot = process.env.RYU_VOICE_OUTCOMES_DATA_ROOT;
-if (!dataRoot || !path.isAbsolute(dataRoot) || !dataRoot.startsWith("/tmp/"))
+if (!(dataRoot && path.isAbsolute(dataRoot) && dataRoot.startsWith("/tmp/"))) {
 	throw Error("Explicit owned temporary data root required");
+}
 fs.mkdirSync(dataRoot, { recursive: true });
 const initial = () => ({
 	models: [
@@ -60,10 +62,10 @@ const sessions = new Map(
 				dataRoot,
 				authority === "a"
 					? "finite-native-state.json"
-					: `authority-${authority}.json`,
+					: `authority-${authority}.json`
 			),
 		},
-	]),
+	])
 );
 let calls = [],
 	held = [],
@@ -86,8 +88,9 @@ function persist(session) {
 	}
 }
 for (const session of sessions.values()) {
-	if (fs.existsSync(session.file))
+	if (fs.existsSync(session.file)) {
 		session.state = JSON.parse(fs.readFileSync(session.file, "utf8"));
+	}
 	persist(session);
 }
 const catalog = (state) =>
@@ -130,7 +133,7 @@ async function hold(session, route) {
 			authority: session.authority,
 			path: route,
 			release: resolve,
-		}),
+		})
 	);
 }
 function snapshot() {
@@ -152,7 +155,7 @@ function snapshot() {
 					state: structuredClone(s.state),
 					disk: JSON.parse(fs.readFileSync(s.file, "utf8")),
 				},
-			]),
+			])
 		),
 	};
 }
@@ -160,7 +163,7 @@ const server = http.createServer(async (req, res) => {
 	let raw = "";
 	for await (const chunk of req) {
 		raw += chunk;
-		if (raw.length > 16384) {
+		if (raw.length > 16_384) {
 			respond(res, 413, { error: "Bounded fixture body exceeded" });
 			return;
 		}
@@ -202,15 +205,20 @@ const server = http.createServer(async (req, res) => {
 				a.state = { ...a.state, ...body.state };
 				a.controls = { ...a.controls, ...body.controls };
 				calls = [];
-				for (const session of sessions.values()) persist(session);
+				for (const session of sessions.values()) {
+					persist(session);
+				}
 			} else if (body?.release) {
-				for (const session of sessions.values())
+				for (const session of sessions.values()) {
 					session.controls.holdModelInstall = false;
+				}
 				const selected = held.filter(
-					(h) => body.id === undefined || h.id === body.id,
+					(h) => body.id === undefined || h.id === body.id
 				);
 				held = held.filter((h) => !selected.includes(h));
-				for (const h of selected) h.release();
+				for (const h of selected) {
+					h.release();
+				}
 			} else {
 				const session = sessions.get(body?.authority ?? "a");
 				if (!session) {
@@ -224,8 +232,11 @@ const server = http.createServer(async (req, res) => {
 					};
 					persist(session);
 				}
-				for (const [key, value] of Object.entries(body ?? {}))
-					if (key in session.controls) session.controls[key] = value;
+				for (const [key, value] of Object.entries(body ?? {})) {
+					if (key in session.controls) {
+						session.controls[key] = value;
+					}
+				}
 			}
 		}
 		respond(res, 200, snapshot());
@@ -259,7 +270,9 @@ const server = http.createServer(async (req, res) => {
 		call.finished = true;
 	});
 	res.on("close", () => {
-		if (!res.writableFinished) call.disconnected = true;
+		if (!res.writableFinished) {
+			call.disconnected = true;
+		}
 	});
 	if (!authority) {
 		respond(res, 401, { error: "Native fixture admission refused" });
@@ -283,7 +296,9 @@ const server = http.createServer(async (req, res) => {
 			],
 		};
 		call.admittedSnapshot = structuredClone(payload);
-		if (controls.holdStatusRead-- > 0) await hold(session, pathname);
+		if (controls.holdStatusRead-- > 0) {
+			await hold(session, pathname);
+		}
 		respond(res, 200, payload);
 		return;
 	}
@@ -299,7 +314,7 @@ const server = http.createServer(async (req, res) => {
 						session.state.runtimeInstalled && session.state.runtimeRunning,
 					loaded: session.state.runtimeRunning,
 					languages: ["en"],
-					sample_rate: 24000,
+					sample_rate: 24_000,
 					size_mb: 1,
 					supports_cloning: false,
 					voices: ["af_heart"],
@@ -315,13 +330,15 @@ const server = http.createServer(async (req, res) => {
 		}
 		const payload = { data: structuredClone(session.state.models) };
 		call.admittedSnapshot = structuredClone(payload);
-		if (controls.holdModelsRead-- > 0) await hold(session, pathname);
+		if (controls.holdModelsRead-- > 0) {
+			await hold(session, pathname);
+		}
 		respond(res, 200, payload);
 		return;
 	}
 	if (req.method === "POST" && pathname === "/api/voice/tts-models/install") {
 		const selected = session.state.models.find(
-			(m) => m.engine === body?.engine && m.model_name === body?.model_name,
+			(m) => m.engine === body?.engine && m.model_name === body?.model_name
 		);
 		if (
 			!selected ||
@@ -336,11 +353,15 @@ const server = http.createServer(async (req, res) => {
 			respond(res, 503, { error: "Finite model download refused" });
 			return;
 		}
-		if (controls.holdModelInstall) await hold(session, pathname);
+		if (controls.holdModelInstall) {
+			await hold(session, pathname);
+		}
 		// Captured session only, even if browser authority changes while the response is held.
 		selected.installed = true;
 		persist(session);
-		if (controls.holdAcceptedModelAck-- > 0) await hold(session, pathname);
+		if (controls.holdAcceptedModelAck-- > 0) {
+			await hold(session, pathname);
+		}
 		respond(res, 200, { ok: true });
 		return;
 	}
@@ -371,7 +392,9 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 	if (req.method === "POST" && pathname === "/api/sidecar/ryutts/stop") {
-		if (controls.holdStop-- > 0) await hold(session, pathname);
+		if (controls.holdStop-- > 0) {
+			await hold(session, pathname);
+		}
 		if (controls.refuseStop-- > 0) {
 			respond(res, 200, {
 				success: false,
@@ -398,7 +421,9 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 	if (req.method === "POST" && pathname === "/api/sidecar/ryutts/start") {
-		if (controls.holdStart-- > 0) await hold(session, pathname);
+		if (controls.holdStart-- > 0) {
+			await hold(session, pathname);
+		}
 		if (controls.refuseStart) {
 			respond(res, 200, {
 				success: false,
@@ -420,11 +445,14 @@ const server = http.createServer(async (req, res) => {
 	});
 });
 server.listen(apiPort, "127.0.0.1", () =>
-	process.stdout.write("Finite voice outcomes HTTP " + apiPort + "\n"),
+	process.stdout.write("Finite voice outcomes HTTP " + apiPort + "\n")
 );
-for (const sig of ["SIGTERM", "SIGINT"])
+for (const sig of ["SIGTERM", "SIGINT"]) {
 	process.on(sig, () => {
-		for (const h of held.splice(0)) h.release();
+		for (const h of held.splice(0)) {
+			h.release();
+		}
 		server.close(() => process.exit(0));
 		server.closeAllConnections();
 	});
+}

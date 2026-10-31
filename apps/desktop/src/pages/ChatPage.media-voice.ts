@@ -1,4 +1,5 @@
 import type { ChatVoiceMode } from "@ryu/blocks/desktop/agent-elements/types.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { UIMessage } from "ai";
 import { useCallback, useRef } from "react";
@@ -46,6 +47,9 @@ export function useChatMediaAndVoice({
 	setVersions,
 	voiceInputEngine,
 }: UseChatMediaAndVoiceInput) {
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	// Multimodal: generate an image from the composer text and surface it inline as
 	// an assistant message. The result is client-only — Core's /api/images/generate
 	// is one-shot and isn't written to the conversation store, so the image is not
@@ -71,7 +75,11 @@ export function useChatMediaAndVoice({
 				},
 			]);
 			try {
-				const urls = await generateImage(chatTargetRef.current, prompt);
+				const urls = await generateImage(
+					chatTargetRef.current,
+					prompt,
+					tlRef.current
+				);
 				const [first, ...rest] = urls;
 				if (!first) {
 					settle([

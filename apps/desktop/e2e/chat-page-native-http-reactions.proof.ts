@@ -1,24 +1,35 @@
 import {
+	type APIRequestContext,
+	expect,
+	type Page,
+	test,
+} from "@playwright/test";
+import type { Call } from "./chat-page-native-http.host.ts";
+import {
 	assertNativeWindowLifetime,
 	persistNativeLifetimeDiagnostics,
 } from "./chat-page-native-http-lifetime.ts";
-import {
-	expect,
-	test,
-	type APIRequestContext,
-	type Page,
-} from "@playwright/test";
-import type { Call } from "./chat-page-native-http.host.ts";
 import { REACTION_MESSAGE_ID } from "./chat-page-native-http-reactions.ts";
 import {
 	CHAT_PAGE_NATIVE_CORE_A,
 	CHAT_PAGE_NATIVE_NODE_A_TOKEN,
 	chatPageControl,
 } from "./chat-page-native-http-support.ts";
+
 const conversation = "conversation-toolbar-share-fixture";
 const list = `/api/conversations/${conversation}/reactions`;
 const path = `/api/conversations/${conversation}/messages/${REACTION_MESSAGE_ID}/reactions`;
 const errors = new WeakMap<Page, string[]>();
+// A navigation re-evaluates the whole unbundled Layout graph before ChatPage
+// mounts; wait for the rendered thread, not a fixed default, before reading it.
+const pageReadyTimeout = 30_000;
+async function chatReady(page: Page) {
+	await expect(
+		page.getByText("The organization copy is ready for review.", {
+			exact: true,
+		})
+	).toBeVisible({ timeout: pageReadyTimeout });
+}
 async function state(request: APIRequestContext): Promise<{
 	calls: Call[];
 	unexpected: unknown[];
@@ -31,10 +42,12 @@ async function state(request: APIRequestContext): Promise<{
 }
 const writes = (calls: Call[]) =>
 	calls.filter(
-		(call) => call.path === path && ["POST", "DELETE"].includes(call.method),
+		(call) => call.path === path && ["POST", "DELETE"].includes(call.method)
 	);
 function assertWrite(call: Call | undefined, method: string, emoji: string) {
-	if (!call) throw new Error("Reaction HTTP write was never captured");
+	if (!call) {
+		throw new Error("Reaction HTTP write was never captured");
+	}
 	expect(call).toMatchObject({
 		node: "a",
 		method,
@@ -61,35 +74,38 @@ async function openReaction(page: Page) {
 async function assertBucket(page: Page, emoji: string) {
 	await openReaction(page);
 	await expect(
-		page.getByRole("button", { name: `${emoji} 1`, exact: true }),
+		page.getByRole("button", { name: `${emoji} 1`, exact: true })
 	).toHaveAttribute("aria-pressed", "true");
 }
 async function freshReadback(
 	page: Page,
 	request: APIRequestContext,
-	emoji: string | null,
+	emoji: string | null
 ) {
 	const before = (await state(request)).calls.filter(
-		(call) => call.path === list && call.method === "GET",
+		(call) => call.path === list && call.method === "GET"
 	).length;
 	await page.reload();
+	await chatReady(page);
+	// The reloaded page must read reactions from HTTP again, not from memory.
 	await expect
 		.poll(
 			async () =>
 				(await state(request)).calls.filter(
-					(call) => call.path === list && call.method === "GET",
-				).length,
+					(call) => call.path === list && call.method === "GET"
+				).length
 		)
 		.toBeGreaterThan(before);
 	await openReaction(page);
-	if (emoji)
+	if (emoji) {
 		await expect(
-			page.getByRole("button", { name: `${emoji} 1`, exact: true }),
+			page.getByRole("button", { name: `${emoji} 1`, exact: true })
 		).toHaveAttribute("aria-pressed", "true");
-	else
-		await expect(page.getByRole("button", { name: /^[👍🎉] 1$/ })).toHaveCount(
-			0,
+	} else {
+		await expect(page.getByRole("button", { name: /^[👍🎉] 1$/u })).toHaveCount(
+			0
 		);
+	}
 }
 test.beforeEach(async ({ page, request }) => {
 	const list: string[] = [];
@@ -100,21 +116,17 @@ test.beforeEach(async ({ page, request }) => {
 		scenario: "message-reactions-caller",
 	});
 	await page.goto(
-		"/chat-page-native-http.html?scenario=message-reactions-caller",
+		"/chat-page-native-http.html?scenario=message-reactions-caller"
 	);
-	await expect(
-		page.getByText("The organization copy is ready for review.", {
-			exact: true,
-		}),
-	).toBeVisible();
+	await chatReady(page);
 	await expect
 		.poll(
 			async () =>
 				(await state(request)).calls.filter(
 					(call) =>
 						call.path === `/api/conversations/${conversation}/reactions` &&
-						call.method === "GET",
-				).length,
+						call.method === "GET"
+				).length
 		)
 		.toBe(1);
 });
@@ -137,17 +149,18 @@ test.afterEach(async ({ page, request }, testInfo) => {
 	};
 	const beforeCleanup = await captureNative();
 	try {
-		for (const id of (await state(request)).heldRequestIds)
+		for (const id of (await state(request)).heldRequestIds) {
 			await chatPageControl(request, {
 				action: "release",
 				requestId: id,
 				accept: false,
 			});
+		}
 		expect((await state(request)).unexpected).toEqual([]);
 		expect((await state(request)).heldRequestIds).toEqual([]);
 		expect(errors.get(page)).toEqual([]);
 		await page.evaluate(() =>
-			Reflect.get(window, "__chatPageNativeFixture").unmount(),
+			Reflect.get(window, "__chatPageNativeFixture").unmount()
 		);
 		await assertNativeWindowLifetime(page);
 	} finally {
@@ -201,14 +214,16 @@ test("held refused Add rolls back the optimistic chip, retry uses actual picker 
 	expect((await state(request)).reactions).toEqual({});
 	await assertBucket(page, "👍");
 	const id = (await state(request)).heldRequestIds[0];
-	if (id === undefined) throw new Error("Held Add missing");
+	if (id === undefined) {
+		throw new Error("Held Add missing");
+	}
 	await chatPageControl(request, {
 		action: "release",
 		requestId: id,
 		accept: false,
 	});
 	await expect(
-		page.getByRole("button", { name: "👍 1", exact: true }),
+		page.getByRole("button", { name: "👍 1", exact: true })
 	).toHaveCount(0);
 	expect((await state(request)).reactions).toEqual({});
 	assertWrite(writes((await state(request)).calls)[0], "POST", "👍");
@@ -250,8 +265,8 @@ test("refused Remove retains the owned saved reaction and membership; a real chi
 		.poll(
 			async () =>
 				writes((await state(request)).calls).filter(
-					(call) => call.responseStatus === 503,
-				).length,
+					(call) => call.responseStatus === 503
+				).length
 		)
 		.toBe(1);
 	expect((await state(request)).reactions.a).toEqual(["👍"]);

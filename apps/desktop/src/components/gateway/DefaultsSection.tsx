@@ -202,13 +202,16 @@ function ScopedDefaultsSection({
 		if (!(canConfigure && loaded) || pending.current[lane]) {
 			return;
 		}
-		const confirmation = laneDefaultCacheWarning({
-			after: next,
-			cloudSelection,
-			lane,
-			localSelection,
-			managed,
-		});
+		const confirmation = laneDefaultCacheWarning(
+			{
+				after: next,
+				cloudSelection,
+				lane,
+				localSelection,
+				managed,
+			},
+			tl
+		);
 		const apply = () => {
 			save(lane, next).catch(() => undefined);
 		};

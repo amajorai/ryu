@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
 import {
-	createChatPageNativeHttpFixture,
 	CHAT_PAGE_NATIVE_HTTP_SERVER_OPTIONS,
+	createChatPageNativeHttpFixture,
 } from "./chat-page-native-http.host.ts";
+
 const origin = "http://owned-answer-now.test";
 const id = "conversation-toolbar-share-fixture";
 const turn = "chat-page-owned-reasoning-turn";
@@ -37,7 +38,7 @@ test("real native HTTP Answer now refuses provider failure, accepts identical ta
 					node: "a",
 					conversationId: id,
 				})
-			).status,
+			).status
 		).toBe(200);
 		const stream = await fetch(url + "/api/chat/stream", {
 			method: "POST",
@@ -87,7 +88,7 @@ test("real native HTTP Answer now refuses provider failure, accepts identical ta
 			fixture
 				.snapshot()
 				.calls.filter((c) => c.path === "/api/chat/control")
-				.map((c) => c.rawBody),
+				.map((c) => c.rawBody)
 		).toEqual([JSON.stringify(input), JSON.stringify(input)]);
 		expect(
 			(
@@ -96,7 +97,7 @@ test("real native HTTP Answer now refuses provider failure, accepts identical ta
 					headers,
 					body: JSON.stringify(input),
 				})
-			).status,
+			).status
 		).toBe(409);
 		expect(
 			await (
@@ -106,7 +107,7 @@ test("real native HTTP Answer now refuses provider failure, accepts identical ta
 					conversationId: id,
 					turnId: turn,
 				})
-			).json(),
+			).json()
 		).toEqual({ finished: true });
 		const final = new TextDecoder().decode((await reader.read()).value);
 		expect(final).toContain('"phase":"answering"');
@@ -122,7 +123,7 @@ test("real native HTTP Answer now refuses provider failure, accepts identical ta
 			fixtureClosed: false,
 		});
 		expect(
-			fixture.snapshot().calls.some((c) => c.path === "/api/chat/cancel"),
+			fixture.snapshot().calls.some((c) => c.path === "/api/chat/cancel")
 		).toBe(false);
 		expect(fixture.snapshot().unexpected).toEqual([]);
 	} finally {
@@ -153,7 +154,7 @@ test("native Answer now never accepts wrong authority or a stale turn, and refus
 					conversation_id: id,
 					turn_id: turn,
 				})
-			).status,
+			).status
 		).toBe(404);
 		const arm = await fetch(url + "/__proof/control", {
 			method: "POST",
@@ -181,16 +182,16 @@ test("native Answer now never accepts wrong authority or a stale turn, and refus
 					conversation_id: id,
 					turn_id: "old-turn",
 				})
-			).status,
+			).status
 		).toBe(404);
 
 		expect(
 			(
 				await request(
 					{ action: "answer_now", conversation_id: id, turn_id: turn },
-					"Bearer foreign",
+					"Bearer foreign"
 				)
-			).status,
+			).status
 		).toBe(403);
 		expect(
 			(
@@ -199,7 +200,7 @@ test("native Answer now never accepts wrong authority or a stale turn, and refus
 					conversation_id: "foreign",
 					turn_id: turn,
 				})
-			).status,
+			).status
 		).toBe(400);
 		expect(fixture.snapshot().liveChats[0]).toMatchObject({
 			answerNowAccepted: false,
@@ -214,7 +215,7 @@ test("native Answer now never accepts wrong authority or a stale turn, and refus
 					conversation_id: id,
 					turn_id: turn,
 				})
-			).status,
+			).status
 		).toBe(200);
 		expect(fixture.snapshot().liveChats[0]).toMatchObject({
 			answerNowAccepted: true,

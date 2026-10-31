@@ -4,6 +4,7 @@ import {
 	ZapIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useDisplayDayRevision } from "@ryu/ui/lib/display-day.ts";
@@ -57,6 +58,7 @@ export function CalendarContent({
 	emptyTitle = "No scheduled runs",
 	emptyDescription = "Create an automation to see its runs on the calendar.",
 }: CalendarContentProps) {
+	const tl = useLiteralMessages();
 	const locale = useCalendarLocale();
 	const [view, setView] = useState<CalendarView>("month");
 	// The calendar's days are civil dates in the display time zone, so "today"
@@ -90,10 +92,11 @@ export function CalendarContent({
 			visibleJobs,
 			range.start,
 			range.end,
+			tl,
 			workflowNames
 		);
 		return groupEventsByDay(events);
-	}, [visibleJobs, range, workflowNames]);
+	}, [visibleJobs, range, tl, workflowNames]);
 
 	const selectedDayEvents = useMemo(() => {
 		if (!selectedDay) {

@@ -7,6 +7,8 @@
 // panel, the Store Home one-click Add, and the deep-link dialog agree. Pure logic
 // with no React, so both `@ryu/marketplace` and the desktop app import it.
 
+import type { LiteralMessage } from "@ryu/i18n";
+
 /** Device-fit rank — lower is a better fit. Blocked verdicts rank last so a
  *  recommendation never prefers an option that cannot be installed. */
 export const FIT_RANK = {
@@ -81,18 +83,39 @@ export interface FitDeviceNumbers {
 	vramHuman?: string | null;
 }
 
-function memorySummary(device: FitDeviceNumbers): string | null {
-	if (device.unifiedMemory && device.ramHuman) {
-		return `${device.ramHuman} of unified memory`;
+/** The blocked-install sentence for a `too_big` verdict, quoting the memory
+ *  this device reports, or `null` when it reports none. */
+function memoryReason(
+	verdictLabel: string,
+	device: FitDeviceNumbers,
+	tl: LiteralMessage
+): string | null {
+	const { ramHuman, vramHuman } = device;
+	if (device.unifiedMemory && ramHuman) {
+		return tl("{verdictLabel}. This device has {ramHuman} of unified memory.", {
+			verdictLabel,
+			ramHuman,
+		});
 	}
-	const parts: string[] = [];
-	if (device.ramHuman) {
-		parts.push(`${device.ramHuman} of RAM`);
+	if (ramHuman && vramHuman) {
+		return tl(
+			"{verdictLabel}. This device has {ramHuman} of RAM and {vramHuman} of GPU memory.",
+			{ verdictLabel, ramHuman, vramHuman }
+		);
 	}
-	if (device.vramHuman) {
-		parts.push(`${device.vramHuman} of GPU memory`);
+	if (ramHuman) {
+		return tl("{verdictLabel}. This device has {ramHuman} of RAM.", {
+			verdictLabel,
+			ramHuman,
+		});
 	}
-	return parts.length > 0 ? parts.join(" and ") : null;
+	if (vramHuman) {
+		return tl("{verdictLabel}. This device has {vramHuman} of GPU memory.", {
+			verdictLabel,
+			vramHuman,
+		});
+	}
+	return null;
 }
 
 /**
@@ -103,7 +126,8 @@ function memorySummary(device: FitDeviceNumbers): string | null {
 export function fitBlockReason(
 	fit: string,
 	label: string | null | undefined,
-	device: FitDeviceNumbers | null | undefined
+	device: FitDeviceNumbers | null | undefined,
+	tl: LiteralMessage
 ): string | null {
 	if (!isBlockedFit(fit)) {
 		return null;
@@ -113,14 +137,16 @@ export function fitBlockReason(
 	const verdictLabel = (
 		label?.trim() || (isKnownFit(fit) ? FIT_LABELS[fit] : "")
 	).replace(/\.+$/, "");
-	let detail: string | null = null;
+	let reason: string | null = null;
 	if (fit === "no_space" && device?.diskFreeHuman) {
-		detail = `Only ${device.diskFreeHuman} is free on the models drive.`;
+		reason = tl(
+			"{verdictLabel}. Only {diskFreeHuman} is free on the models drive.",
+			{ verdictLabel, diskFreeHuman: device.diskFreeHuman }
+		);
 	} else if (fit === "too_big" && device) {
-		const memory = memorySummary(device);
-		detail = memory ? `This device has ${memory}.` : null;
+		reason = memoryReason(verdictLabel, device, tl);
 	}
-	return detail ? `${verdictLabel}. ${detail}` : `${verdictLabel}.`;
+	return reason ?? `${verdictLabel}.`;
 }
 
 /** The minimal file shape the recommendation ranking reads. */

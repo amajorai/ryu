@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -437,7 +438,8 @@ export function qaCount(count: number, noun: string): string {
 /** The feed heading for a filter, in Stack Overflow's words. */
 export function qaHeading(
 	snapshot: InterfaceSnapshot,
-	filter: QaFilter
+	filter: QaFilter,
+	tl: LiteralMessage
 ): string {
 	const topic = filter.topicId
 		? snapshot.groups.find((group) => group.id === filter.topicId)
@@ -449,13 +451,16 @@ export function qaHeading(
 		return "Search results";
 	}
 	if (topic && agent) {
-		return `${agent.name} in ${topic.name}`;
+		return tl("{agentName} in {topicName}", {
+			agentName: agent.name,
+			topicName: topic.name,
+		});
 	}
 	if (topic) {
-		return `Questions in ${topic.name}`;
+		return tl("Questions in {name}", { name: topic.name });
 	}
 	if (agent) {
-		return `Questions for ${agent.name}`;
+		return tl("Questions for {name}", { name: agent.name });
 	}
 	return "Top questions";
 }

@@ -1,7 +1,8 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Solid } from "../../kit/react/draw.tsx";
 import { GATES, PARCEL_PATHS, TRACK } from "./geometry.ts";
 import { GatewayPipelineLive } from "./live.tsx";
-import { DESCRIPTION } from "./model.ts";
+import { describePipeline } from "./model.ts";
 
 /**
  * Static parts of the figure, built on the server and handed to the live component in
@@ -35,10 +36,11 @@ const IN_FRONT = (
 );
 
 export function GatewayPipelineArt() {
+	const tl = useLiteralMessages();
 	return (
 		<GatewayPipelineLive
 			behind={BEHIND}
-			description={DESCRIPTION}
+			description={describePipeline(tl)}
 			inFront={IN_FRONT}
 			parcel={PARCEL}
 		/>

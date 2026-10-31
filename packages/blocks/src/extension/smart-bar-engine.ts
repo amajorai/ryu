@@ -8,7 +8,10 @@
 // shows before acting, so a wrong guess is one Tab away from correction).
 //
 // This module is PURE and dependency-free so both the new-tab page and the
-// background omnibox handler can share exactly one source of truth.
+// background omnibox handler can share exactly one source of truth. Labels
+// are worded through the caller's `tl`, so each surface translates them.
+
+import type { LiteralMessage } from "@ryu/i18n";
 
 export type SearchEngineId = "google" | "duckduckgo" | "bing";
 
@@ -319,7 +322,7 @@ export function looksLikeQuestion(input: string): boolean {
 	return s.split(WHITESPACE_SPLIT_RE).length >= 6;
 }
 
-function navigateIntent(input: string): SmartIntent {
+function navigateIntent(input: string, tl: LiteralMessage): SmartIntent {
 	const url = normalizeUrl(input.trim());
 	let host = input.trim();
 	try {
@@ -327,22 +330,26 @@ function navigateIntent(input: string): SmartIntent {
 	} catch {
 		// keep raw input as the label host
 	}
-	return { kind: "navigate", url, label: `Go to ${host}` };
+	return { kind: "navigate", url, label: tl("Go to {host}", { host }) };
 }
 
-function searchIntent(query: string, engineId: SearchEngineId): SmartIntent {
+function searchIntent(
+	query: string,
+	engineId: SearchEngineId,
+	tl: LiteralMessage
+): SmartIntent {
 	const engine = SEARCH_ENGINES[engineId];
 	return {
 		kind: "search",
 		engine: engineId,
 		query,
 		url: engine.buildUrl(query),
-		label: `Search ${engine.label}`,
+		label: tl("Search {engine}", { engine: engine.label }),
 	};
 }
 
-function aiIntent(prompt: string): SmartIntent {
-	return { kind: "ai", prompt, label: "Ask Ryu" };
+function aiIntent(prompt: string, tl: LiteralMessage): SmartIntent {
+	return { kind: "ai", prompt, label: tl("Ask Ryu") };
 }
 
 /**
@@ -351,12 +358,13 @@ function aiIntent(prompt: string): SmartIntent {
  */
 export function route(
 	raw: string,
+	tl: LiteralMessage,
 	engineId: SearchEngineId = DEFAULT_ENGINE
 ): RouteResult {
 	const input = raw.trim();
 
 	if (input.length === 0) {
-		return { primary: aiIntent(""), alternatives: [] };
+		return { primary: aiIntent("", tl), alternatives: [] };
 	}
 
 	// Explicit overrides win and do not offer a cycle.
@@ -367,7 +375,7 @@ export function route(
 				kind: "skill",
 				name,
 				rest: rest.join(" "),
-				label: name ? `Run /${name}` : "Pick a skill",
+				label: name ? tl("Run /{name}", { name }) : tl("Pick a skill"),
 			},
 			alternatives: [],
 		};
@@ -381,7 +389,9 @@ export function route(
 				kind: "mention",
 				targets,
 				rest: input,
-				label: `Ask Ryu with ${targets.map((t) => `@${t}`).join(" ")}`,
+				label: tl("Ask Ryu with {mentions}", {
+					mentions: targets.map((t) => `@${t}`).join(" "),
+				}),
 			},
 			alternatives: [],
 		};
@@ -407,32 +417,32 @@ export function route(
 		}
 		// Unknown bang: treat the whole thing as a search.
 		return {
-			primary: searchIntent(input.slice(1), engineId),
+			primary: searchIntent(input.slice(1), engineId, tl),
 			alternatives: [],
 		};
 	}
 	if (input.startsWith("?")) {
 		return {
-			primary: searchIntent(input.slice(1).trim(), engineId),
-			alternatives: [aiIntent(input.slice(1).trim())],
+			primary: searchIntent(input.slice(1).trim(), engineId, tl),
+			alternatives: [aiIntent(input.slice(1).trim(), tl)],
 		};
 	}
 
 	// Implicit routing with a visible, cyclable fallback chain.
 	if (looksLikeUrl(input)) {
 		return {
-			primary: navigateIntent(input),
-			alternatives: [searchIntent(input, engineId), aiIntent(input)],
+			primary: navigateIntent(input, tl),
+			alternatives: [searchIntent(input, engineId, tl), aiIntent(input, tl)],
 		};
 	}
 	if (looksLikeQuestion(input)) {
 		return {
-			primary: aiIntent(input),
-			alternatives: [searchIntent(input, engineId)],
+			primary: aiIntent(input, tl),
+			alternatives: [searchIntent(input, engineId, tl)],
 		};
 	}
 	return {
-		primary: searchIntent(input, engineId),
-		alternatives: [aiIntent(input)],
+		primary: searchIntent(input, engineId, tl),
+		alternatives: [aiIntent(input, tl)],
 	};
 }

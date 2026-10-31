@@ -1,6 +1,7 @@
 // Tests for the catalog friendly-display helpers. Pure functions, no React.
 
 import { describe, expect, it } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import type { ModelCard } from "@/src/lib/api/models.ts";
 import type { SkillCard } from "@/src/lib/api/skills.ts";
 import {
@@ -22,37 +23,40 @@ import {
 	titleCase,
 } from "./friendly.ts";
 
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
+
 describe("parseModelSize", () => {
 	it("reads a dense param count and picks the right tier", () => {
-		expect(parseModelSize("gemma-2-27b-it")).toMatchObject({
+		expect(parseModelSize("gemma-2-27b-it", tl)).toMatchObject({
 			tier: "Large",
 			raw: "27B",
 		});
-		expect(parseModelSize("llama-3-8b-instruct")?.tier).toBe("Medium");
-		expect(parseModelSize("qwen2.5-1.5b")?.tier).toBe("Small");
-		expect(parseModelSize("llama-3.1-70b")?.tier).toBe("Extra Large");
+		expect(parseModelSize("llama-3-8b-instruct", tl)?.tier).toBe("Medium");
+		expect(parseModelSize("qwen2.5-1.5b", tl)?.tier).toBe("Small");
+		expect(parseModelSize("llama-3.1-70b", tl)?.tier).toBe("Extra Large");
 	});
 
 	it("prefers the total param count over MoE active params for the tier", () => {
-		const size = parseModelSize("Qwen3-30B-A3B");
+		const size = parseModelSize("Qwen3-30B-A3B", tl);
 		expect(size?.tier).toBe("Large");
 		expect(size?.raw).toBe("30B");
 		expect(size?.tooltip).toContain("active");
 	});
 
 	it("handles effective-param (E2B) and million (M) suffixes", () => {
-		expect(parseModelSize("gemma-4-E2B-it")).toMatchObject({
+		expect(parseModelSize("gemma-4-E2B-it", tl)).toMatchObject({
 			tier: "Small",
 			raw: "E2B",
 		});
-		expect(parseModelSize("gemma-3-270m")).toMatchObject({
+		expect(parseModelSize("gemma-3-270m", tl)).toMatchObject({
 			tier: "Small",
 			raw: "270M",
 		});
 	});
 
 	it("returns null when there is no size token", () => {
-		expect(parseModelSize("my-cool-model")).toBeNull();
+		expect(parseModelSize("my-cool-model", tl)).toBeNull();
 	});
 });
 
@@ -288,7 +292,7 @@ describe("search haystacks", () => {
 	};
 
 	it("matches a model by org, derived token label, and size", () => {
-		const hay = modelHaystack(model);
+		const hay = modelHaystack(model, tl);
 		expect(matchesQuery(hay, "google")).toBe(true);
 		expect(matchesQuery(hay, "instruct")).toBe(true); // derived from "it"
 		expect(matchesQuery(hay, "27b")).toBe(true);
@@ -296,7 +300,7 @@ describe("search haystacks", () => {
 	});
 
 	it("requires all terms to match", () => {
-		const hay = modelHaystack(model);
+		const hay = modelHaystack(model, tl);
 		expect(matchesQuery(hay, "gemma large")).toBe(true);
 		expect(matchesQuery(hay, "gemma tiny")).toBe(false);
 	});

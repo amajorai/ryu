@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 const pageErrors = new WeakMap<object, string[]>();
 test.beforeEach(async ({ page }) => {
 	const errors: string[] = [];
@@ -177,7 +178,9 @@ async function authorityRotate(
 ) {
 	await page.evaluate((dimension) => {
 		const store = Reflect.get(window, "__modelInsightAuthorityStore");
-		if (!store) throw Error("Actual NodeStore not available");
+		if (!store) {
+			throw Error("Actual NodeStore not available");
+		}
 		store.setState(
 			(state: { nodes: import("../src/store/useNodeStore.ts").Node[] }) => ({
 				nodes: state.nodes.map((node) => ({
@@ -239,8 +242,9 @@ async function assertCurrentInsight(
 }
 test.afterEach(async ({ request }) => {
 	const state = await authorityState(request);
-	for (const id of state.held)
+	for (const id of state.held) {
 		await authorityControl(request, { action: "release", id });
+	}
 	expect(state.unexpected).toEqual([]);
 });
 test("authority: unchanged source rehover retains decoded pricing cache without extra HTTP", async ({
@@ -257,7 +261,7 @@ test("authority: unchanged source rehover retains decoded pricing cache without 
 	await assertCurrentInsight(page, "A");
 	expect((await authorityState(request)).calls).toHaveLength(1);
 });
-for (const dimension of ["url", "token", "jwt"] as const)
+for (const dimension of ["url", "token", "jwt"] as const) {
 	test(`authority: warmed same-model cache must read current ${dimension} source`, async ({
 		page,
 		request,
@@ -290,6 +294,7 @@ for (const dimension of ["url", "token", "jwt"] as const)
 		});
 		await expect(page.getByText("Insight A", { exact: true })).toHaveCount(0);
 	});
+}
 test("authority: consumed retired response cannot poison current B rehover cache", async ({
 	page,
 	request,
@@ -301,7 +306,9 @@ test("authority: consumed retired response cannot poison current B rehover cache
 		.poll(async () => (await authorityState(request)).held.length)
 		.toBe(1);
 	const id = (await authorityState(request)).held[0];
-	if (id === undefined) throw Error("Actual A request not held");
+	if (id === undefined) {
+		throw Error("Actual A request not held");
+	}
 	await page
 		.getByRole("textbox", { name: "Filter models", exact: true })
 		.hover();
@@ -330,7 +337,9 @@ test("authority: A to B to A creates fresh current read and consumed original A 
 		.poll(async () => (await authorityState(request)).held.length)
 		.toBe(1);
 	const id = (await authorityState(request)).held[0];
-	if (id === undefined) throw Error("Actual original A request not held");
+	if (id === undefined) {
+		throw Error("Actual original A request not held");
+	}
 	await page
 		.getByRole("textbox", { name: "Filter models", exact: true })
 		.hover();

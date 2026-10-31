@@ -20,6 +20,7 @@ import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // secret never leaves Core — see {@link ManagedBotPairing}, which has no field
 // for it. The desktop only ever sees nonce + deep link + status.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { activityJsonValueSchema } from "@ryuhq/core-client/activity.ts";
 import { z } from "zod";
 import { ApiError, type ApiTarget, request } from "./client.ts";
@@ -152,13 +153,19 @@ const managedBotErrorSchema = z
 	.nullable()
 	.catch(null);
 type ManagedBotError = z.output<typeof managedBotErrorSchema>;
-function unreachable(error: ManagedBotError): ManagedBotFailure {
+type ManagedBotErrorInput = Parameters<typeof managedBotErrorSchema.parse>[0];
+function unreachable(
+	error: ManagedBotError,
+	tl: LiteralMessage
+): ManagedBotFailure {
 	if (error instanceof ApiError) {
 		return {
 			kind: "unreachable",
 			message:
 				error.serverMessage ??
-				`The pairing service answered ${error.status}. Try again in a moment.`,
+				tl("The pairing service answered {status}. Try again in a moment.", {
+					status: error.status,
+				}),
 		};
 	}
 	return {
@@ -178,20 +185,21 @@ function unreachable(error: ManagedBotError): ManagedBotFailure {
  * exist — a Core too old to have it, or a manager that never mounted it. Both
  * mean the same thing to the user, so both collapse to `unsupported`.
  */
-const pairFailureSchema = managedBotErrorSchema.transform(
-	(error): ManagedBotFailure => {
-		if (
-			error instanceof ApiError &&
-			(error.status === 501 ||
-				error.status === 404 ||
-				error.serverMessage === UNSUPPORTED_ERROR)
-		) {
-			return unsupported();
-		}
-		return unreachable(error);
+export function classifyPairError(
+	input: ManagedBotErrorInput,
+	tl: LiteralMessage
+): ManagedBotFailure {
+	const error = managedBotErrorSchema.parse(input);
+	if (
+		error instanceof ApiError &&
+		(error.status === 501 ||
+			error.status === 404 ||
+			error.serverMessage === UNSUPPORTED_ERROR)
+	) {
+		return unsupported();
 	}
-);
-export const classifyPairError = pairFailureSchema.parse;
+	return unreachable(error, tl);
+}
 
 /**
  * Classify a failure from {@link getManagedBotStatus}.
@@ -202,23 +210,24 @@ export const classifyPairError = pairFailureSchema.parse;
  * is missing. Collapsing the two would drop the user into the manual fields with
  * a wrong explanation every time a link timed out.
  */
-const statusFailureSchema = managedBotErrorSchema.transform(
-	(error): ManagedBotFailure => {
-		if (error instanceof ApiError) {
-			if (error.status === 501 || error.serverMessage === UNSUPPORTED_ERROR) {
-				return unsupported();
-			}
-			if (error.status === 404) {
-				return {
-					kind: "expired",
-					message: "That pairing link is no longer valid.",
-				};
-			}
+export function classifyStatusError(
+	input: ManagedBotErrorInput,
+	tl: LiteralMessage
+): ManagedBotFailure {
+	const error = managedBotErrorSchema.parse(input);
+	if (error instanceof ApiError) {
+		if (error.status === 501 || error.serverMessage === UNSUPPORTED_ERROR) {
+			return unsupported();
 		}
-		return unreachable(error);
+		if (error.status === 404) {
+			return {
+				kind: "expired",
+				message: "That pairing link is no longer valid.",
+			};
+		}
 	}
-);
-export const classifyStatusError = statusFailureSchema.parse;
+	return unreachable(error, tl);
+}
 
 function preserveManagedBotReply<S extends z.ZodType>(fields: S) {
 	return z.custom<z.output<S>>(

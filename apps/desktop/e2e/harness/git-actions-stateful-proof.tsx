@@ -1,6 +1,7 @@
 import "@fontsource-variable/geist";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/geist-mono";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { openExternal } from "../../lib/tauri-bridge.ts";
@@ -103,6 +104,7 @@ function statusLabel(status: GitStatus): string {
 }
 
 function GitActionsStatefulProof() {
+	const tl = useLiteralMessages();
 	const [commitOpen, setCommitOpen] = useState(true);
 	const [branch, setBranch] = useState(INITIAL_BRANCH);
 	const [branches, setBranches] = useState(INITIAL_BRANCHES);
@@ -438,7 +440,7 @@ function GitActionsStatefulProof() {
 			setRepositoryOpen(false);
 		} catch (error) {
 			if (!controller.signal.aborted) {
-				setRepositoryError(repositoryCreationErrorMessage(error));
+				setRepositoryError(repositoryCreationErrorMessage(error, tl));
 			}
 		} finally {
 			clearActiveOperation(controller);

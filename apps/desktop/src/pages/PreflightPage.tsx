@@ -224,7 +224,8 @@ export function PreflightPage({
 									const message = await applyReleaseUpdate(
 										target,
 										node,
-										health.coreUpdate
+										health.coreUpdate,
+										tl
 									);
 									if (message) {
 										toast.info(message);

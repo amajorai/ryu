@@ -5,6 +5,7 @@ import { MotionConfig, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { SubscriptionProvidersGrid } from "./bring-your-subscription.tsx";
 import { landingSubheadlineBodyClass } from "./landing-typography.ts";
+import { LinkArrow } from "./link-arrow.tsx";
 import { Reveal } from "./reveal.tsx";
 import { SectionTitle } from "./section-title.tsx";
 
@@ -119,9 +120,10 @@ function ImportViz() {
 								? "var(--color-background)"
 								: "color-mix(in oklch, var(--color-foreground) 70%, transparent)",
 					}}
-					className="rounded-xl px-4 py-3 text-center font-medium text-sm"
+					className="flex items-center justify-center gap-1 rounded-xl px-4 py-3 text-center font-medium text-sm"
 				>
-					Ryu continues the thread →
+					Ryu continues the thread
+					<LinkArrow />
 				</motion.div>
 			</div>
 		</MotionConfig>

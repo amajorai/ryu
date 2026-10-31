@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { dispatchRpc, type HostServices } from "@ryu/app-host/rpc";
+import { formatMessage } from "@ryu/i18n";
 import { createCompanionMediaServices } from "./media-host-services.ts";
 
 // The actual Companion media services, driven through the bridge dispatcher
@@ -104,6 +105,7 @@ const services: HostServices = {
 			url: `${server.url.toString().replace(/\/$/, "")}/node`,
 			token: "fixture-node-admission",
 		},
+		tl: (source, values) => formatMessage(source, values ?? {}),
 	}),
 };
 const MEDIA = new Set(["media.generate"] as const);

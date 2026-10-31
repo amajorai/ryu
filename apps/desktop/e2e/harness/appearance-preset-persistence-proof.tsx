@@ -7,9 +7,12 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { LanguagePackBridge } from "../../src/components/LanguagePackBridge.tsx";
 import { AppearanceTab } from "../../src/components/settings/AppearanceTab.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
-import { initTheme } from "../../src/hooks/useThemePreset.ts";
+import {
+	initTheme,
+	publishThemePrefs,
+} from "../../src/hooks/useThemePreset.ts";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
-import { publishThemePrefs } from "../../src/hooks/useThemePreset.ts";
+
 const publisherNode = {
 	name: "appearance-owned",
 	url: "http://127.0.0.1:33364",
@@ -71,7 +74,7 @@ function installAppearanceProofApi(): () => void {
 		) {
 			const logKey = "ryu_appearance_language_requests";
 			const requests = JSON.parse(
-				window.localStorage.getItem(logKey) ?? "[]",
+				window.localStorage.getItem(logKey) ?? "[]"
 			) as Array<{ method: string; path: string }>;
 			requests.push({
 				method: init?.method ?? "GET",
@@ -119,7 +122,7 @@ function ProofSurface() {
 			new QueryClient({
 				defaultOptions: { queries: { retry: false } },
 			}),
-		[],
+		[]
 	);
 	return (
 		<QueryClientProvider client={queryClient}>
@@ -174,6 +177,6 @@ if (root) {
 	createRoot(root).render(
 		<MemoryRouter>
 			<ProofSurface />
-		</MemoryRouter>,
+		</MemoryRouter>
 	);
 }

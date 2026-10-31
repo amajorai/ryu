@@ -7,6 +7,7 @@ import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import Link from "next/link";
 import type { ReactNode, RefObject } from "react";
 import { useEffect } from "react";
+import { LinkArrow } from "./link-arrow.tsx";
 import {
 	focusableElements,
 	initialSheetGroup,
@@ -200,12 +201,13 @@ function Sheet({
 				>
 					{footer.map((link) => (
 						<SheetAnchor
-							className="flex min-h-11 items-center rounded-full px-2 font-medium text-foreground text-sm transition-colors hover:bg-muted"
+							className="flex min-h-11 items-center gap-1 rounded-full px-2 font-medium text-foreground text-sm transition-colors hover:bg-muted"
 							key={link.href}
 							link={link}
 							onClose={onClose}
 						>
 							<LocalizedCopy value={link.label} />
+							<LinkArrow />
 						</SheetAnchor>
 					))}
 				</div>

@@ -1,7 +1,7 @@
-import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 

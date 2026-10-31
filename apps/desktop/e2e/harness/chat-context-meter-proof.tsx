@@ -81,7 +81,6 @@ function MeterCard({
 					status="ready"
 				/>
 			</div>
-
 		</section>
 	);
 }

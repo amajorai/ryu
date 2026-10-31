@@ -128,7 +128,7 @@ export function TunnelLayer({
 			const result = await setMeshEnabled(target, next);
 			await query.refetch();
 			if (next && result.installing) {
-				await watchMeshInstall(target, backend);
+				await watchMeshInstall(target, backend, tl);
 				await query.refetch();
 				return;
 			}
@@ -185,7 +185,7 @@ export function TunnelLayer({
 		}
 		await query.refetch();
 		if (enabled && result.installing) {
-			await watchMeshInstall(target, next);
+			await watchMeshInstall(target, next, tl);
 			await query.refetch();
 			return;
 		}
@@ -251,7 +251,7 @@ export function TunnelLayer({
 				await selectPlugin(provider.id);
 			}
 		} catch (error) {
-			sileo.error({ title: describeBindingFailure(error, provider.name) });
+			sileo.error({ title: describeBindingFailure(error, provider.name, tl) });
 			return;
 		}
 		await pickBackend(MESH_BACKEND_PLUGIN, backend === MESH_BACKEND_PLUGIN);
@@ -264,7 +264,7 @@ export function TunnelLayer({
 			await enablePlugin(provider);
 			await selectPlugin(provider.id);
 		} catch (error) {
-			sileo.error({ title: describeBindingFailure(error, provider.name) });
+			sileo.error({ title: describeBindingFailure(error, provider.name, tl) });
 			return;
 		}
 		await pickBackend(MESH_BACKEND_PLUGIN, backend === MESH_BACKEND_PLUGIN);

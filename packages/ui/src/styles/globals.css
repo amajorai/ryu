@@ -9,7 +9,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "./classic-theme-icon.css";
 @import "./css-backdrops.css";
 @import "./globals/base.css";
 @import "./globals/theme-utilities.css";

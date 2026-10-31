@@ -187,7 +187,7 @@ export function CloneFolderDialog({
 							value={url}
 							variant="code-caption"
 						/>
-						<p className="type-caption text-muted-foreground">
+						<p className="text-muted-foreground text-xs">
 							Use an HTTPS or SSH clone URL. Private repositories use the Git
 							credentials or SSH keys configured on this node.
 						</p>

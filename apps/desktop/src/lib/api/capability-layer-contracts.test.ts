@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	capabilityBindingsReplySchema,
 	capabilityReadModelSchema,
@@ -9,6 +11,9 @@ import {
 	setCapabilityBinding,
 } from "./capability-layers.ts";
 import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 describe("capability Core response boundaries", () => {
 	it("retains complete rows, native future metadata and own prototype keys", () => {
@@ -113,7 +118,7 @@ describe("capability Core response boundaries", () => {
 				"search"
 			).catch((error) => error);
 			expect(failure).toBeInstanceOf(CapabilityBindingConflictError);
-			expect(describeBindingFailure(failure, "Search")).toBe(
+			expect(describeBindingFailure(failure, "Search", tl)).toBe(
 				"App is unbound (consumer) · ambiguous"
 			);
 			expect(

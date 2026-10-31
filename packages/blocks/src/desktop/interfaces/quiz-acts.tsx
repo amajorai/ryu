@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceActivityKind,
 	InterfaceAgentAct,
@@ -153,6 +154,7 @@ export function quizContestant({
 	looks,
 	paths,
 	reduced,
+	tl,
 	view,
 }: {
 	act: InterfaceAgentAct;
@@ -162,6 +164,7 @@ export function quizContestant({
 	looks: MemberLooks;
 	paths: LifePaths;
 	reduced: boolean;
+	tl: LiteralMessage;
 	view: QuizActView;
 }): VillagerSpec[] {
 	const spots: ActSpots = {
@@ -188,7 +191,7 @@ export function quizContestant({
 				: undefined,
 		iconOnly: queued ? false : undefined,
 		label: ask
-			? `${act.ariaLabel} Answer their ask.`
+			? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
 			: `${act.ariaLabel} ${label}`,
 		life: actLife(act, spots, QUIZ_ACT_SKIN, { reduced }),
 		looks: {

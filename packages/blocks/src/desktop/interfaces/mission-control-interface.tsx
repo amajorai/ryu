@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import { AnimatePresence } from "motion/react";
@@ -91,10 +92,11 @@ export function MissionControlInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["mission-control"]>) {
+	const tl = useLiteralMessages();
 	const now = useNow(WALL_TICK_MS);
 	const view = useMemo(
-		() => buildMissionControl(snapshot, now),
-		[snapshot, now]
+		() => buildMissionControl(snapshot, now, tl),
+		[snapshot, now, tl]
 	);
 	const panelOpen = threadView !== null && threadView !== undefined;
 	const rootRef = useRef<HTMLDivElement>(null);

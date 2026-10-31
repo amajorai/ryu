@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -75,9 +75,10 @@ export function StreamStatus({ line }: { line: StreamStatusLine }) {
 /** The parts of the line beside the facepile: who is in it and where it stands. */
 function metaParts(
 	post: StreamPost,
-	withReplies: boolean
+	withReplies: boolean,
+	tl: LiteralMessage
 ): { key: string; node: ReactNode }[] {
-	const status = statusLine(post);
+	const status = statusLine(post, tl);
 	const parts: { key: string; node: ReactNode }[] = [];
 	if (withReplies && post.replyCount > 0) {
 		parts.push({ key: "replies", node: replyLabel(post.replyCount) });
@@ -340,8 +341,9 @@ function PagePost({
 	onReply: () => void;
 	post: StreamPost;
 }) {
+	const tl = useLiteralMessages();
 	const authorName = post.author?.name ?? "You";
-	const parts = metaParts(post, false);
+	const parts = metaParts(post, false, tl);
 	const date = fullDate(post.updatedAt);
 	return (
 		<article
@@ -392,12 +394,13 @@ export function StreamPostItem({
 	page?: boolean;
 	post: StreamPost;
 }) {
+	const tl = useLiteralMessages();
 	const open = () => actions.onOpen(post.threadId);
 	if (page) {
 		return <PagePost actions={actions} onReply={onReply ?? open} post={post} />;
 	}
 	const authorName = post.author?.name ?? "You";
-	const parts = metaParts(post, false);
+	const parts = metaParts(post, false, tl);
 	// The line runs down to the faces only when there is something to say
 	// beside them; a lone agent's count already sits in the action row.
 	const threaded = post.replyCount > 0 && parts.length > 0;

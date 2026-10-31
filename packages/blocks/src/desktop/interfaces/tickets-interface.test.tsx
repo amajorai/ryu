@@ -3,6 +3,8 @@
 // React handlers against a port that records what it was asked to do.
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -38,6 +40,8 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 // Renders read the wall clock, so fixtures are relative to the real now.
 const NOW = Date.now();
+const passthrough: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 const ago = (minutes: number) => new Date(NOW - minutes * MINUTE).toISOString();
 
 function thread(
@@ -271,7 +275,11 @@ describe("tickets model", () => {
 			lastMessageRole: "user",
 			runState: "failed",
 		});
-		const ticket = buildTickets({ ...SNAPSHOT, threads: [failed] }, NOW)[0];
+		const ticket = buildTickets(
+			{ ...SNAPSHOT, threads: [failed] },
+			NOW,
+			passthrough
+		)[0];
 		expect(ticket?.status).toBe("open");
 		expect(ticket ? ticketStatusHint(ticket) : "").toBe(TICKET_ATTENTION_HINT);
 		expect(
@@ -294,21 +302,29 @@ describe("tickets model", () => {
 
 	test("the SLA counts down while the ticket waits on you and pauses otherwise", () => {
 		const updated = NOW - 95 * MINUTE;
-		const breached = ticketSla("open", "urgent", updated, NOW);
+		const breached = ticketSla("open", "urgent", updated, NOW, passthrough);
 		expect(breached?.state).toBe("breached");
 		expect(breached?.label).toBe("-35m");
 		expect(breached?.longLabel).toBe("Reply overdue by 35 minutes");
 
-		const soon = ticketSla("open", "high", NOW - 160 * MINUTE, NOW);
+		const soon = ticketSla(
+			"open",
+			"high",
+			NOW - 160 * MINUTE,
+			NOW,
+			passthrough
+		);
 		expect(soon?.state).toBe("due-soon");
 		expect(soon?.label).toBe("1h");
 
-		const fine = ticketSla("open", "high", NOW - 30 * MINUTE, NOW);
+		const fine = ticketSla("open", "high", NOW - 30 * MINUTE, NOW, passthrough);
 		expect(fine?.state).toBe("on-track");
 		expect(fine?.label).toBe("3h");
 
-		expect(ticketSla("pending", "normal", updated, NOW)).toBeNull();
-		expect(ticketSla("solved", "low", updated, NOW)).toBeNull();
+		expect(
+			ticketSla("pending", "normal", updated, NOW, passthrough)
+		).toBeNull();
+		expect(ticketSla("solved", "low", updated, NOW, passthrough)).toBeNull();
 	});
 
 	test("compact durations use the largest whole unit", () => {
@@ -336,7 +352,7 @@ describe("tickets model", () => {
 	test("tags follow Zendesk's lowercase underscore form", () => {
 		expect(ticketTag("Website Redesign")).toBe("website_redesign");
 		expect(ticketTag("  Launch Crew! ")).toBe("launch_crew");
-		const notes = buildTickets(SNAPSHOT, NOW).find(
+		const notes = buildTickets(SNAPSHOT, NOW, passthrough).find(
 			(ticket) => ticket.id === "thread-notes"
 		);
 		expect(notes?.tags).toEqual(["website_redesign"]);
@@ -345,7 +361,7 @@ describe("tickets model", () => {
 	});
 
 	test("views count what they match", () => {
-		const tickets = buildTickets(SNAPSHOT, NOW);
+		const tickets = buildTickets(SNAPSHOT, NOW, passthrough);
 		expect(ticketViewCounts(tickets, NOW)).toEqual({
 			all: 6,
 			open: 3,
@@ -358,7 +374,7 @@ describe("tickets model", () => {
 	});
 
 	test("rows group by status in lifecycle order and filter by query", () => {
-		const tickets = buildTickets(SNAPSHOT, NOW);
+		const tickets = buildTickets(SNAPSHOT, NOW, passthrough);
 		const rows = ticketViewRows(
 			tickets,
 			"unsolved",
@@ -389,7 +405,7 @@ describe("tickets model", () => {
 	});
 
 	test("SLA sort keeps tickets without a running SLA last both ways", () => {
-		const tickets = buildTickets(SNAPSHOT, NOW);
+		const tickets = buildTickets(SNAPSHOT, NOW, passthrough);
 		for (const direction of ["asc", "desc"] as const) {
 			const sorted = sortTickets(tickets, { direction, key: "sla" });
 			const firstPaused = sorted.findIndex((ticket) => ticket.sla === null);
@@ -402,7 +418,10 @@ describe("tickets model", () => {
 	});
 
 	test("grouping by priority follows urgency", () => {
-		const sections = groupTickets(buildTickets(SNAPSHOT, NOW), "priority");
+		const sections = groupTickets(
+			buildTickets(SNAPSHOT, NOW, passthrough),
+			"priority"
+		);
 		expect(sections.map((section) => section.id)).toEqual([
 			"urgent",
 			"high",
@@ -412,7 +431,7 @@ describe("tickets model", () => {
 	});
 
 	test("other tickets and activity come from what the snapshot knows", () => {
-		const tickets = buildTickets(SNAPSHOT, NOW);
+		const tickets = buildTickets(SNAPSHOT, NOW, passthrough);
 		const flaky = tickets.find((ticket) => ticket.id === "thread-flaky");
 		if (!flaky) {
 			throw new Error("missing ticket");
@@ -420,22 +439,28 @@ describe("tickets model", () => {
 		expect(requesterTickets(tickets, flaky).map((ticket) => ticket.id)).toEqual(
 			["thread-triage"]
 		);
-		expect(ticketActivity(flaky, NOW).map((item) => item.id)).toEqual([
-			"sla",
-			"run",
-			"reply",
-		]);
+		expect(
+			ticketActivity(flaky, NOW, passthrough).map((item) => item.id)
+		).toEqual(["sla", "run", "reply"]);
 		const triage = tickets.find((ticket) => ticket.id === "thread-triage");
-		expect(triage && ticketActivity(triage, NOW)[0]?.id).toBe("running");
+		expect(triage && ticketActivity(triage, NOW, passthrough)[0]?.id).toBe(
+			"running"
+		);
 	});
 
 	test("time labels read like a help desk", () => {
-		expect(ticketTimeLabel(NOW - 20 * 1000, NOW)).toBe("Just now");
-		expect(ticketTimeLabel(NOW - 18 * MINUTE, NOW)).toBe("18 min ago");
-		expect(ticketTimeLabel(0, NOW)).toBe("");
+		expect(ticketTimeLabel(NOW - 20 * 1000, NOW, passthrough)).toBe("Just now");
+		expect(ticketTimeLabel(NOW - 18 * MINUTE, NOW, passthrough)).toBe(
+			"18 min ago"
+		);
+		expect(ticketTimeLabel(0, NOW, passthrough)).toBe("");
 		const noon = new Date(2026, 9, 14, 12, 0).getTime();
-		expect(ticketTimeLabel(noon - 3 * HOUR, noon)).toStartWith("Today ");
-		expect(ticketTimeLabel(noon - 24 * HOUR, noon)).toStartWith("Yesterday ");
+		expect(ticketTimeLabel(noon - 3 * HOUR, noon, passthrough)).toStartWith(
+			"Today "
+		);
+		expect(ticketTimeLabel(noon - 24 * HOUR, noon, passthrough)).toStartWith(
+			"Yesterday "
+		);
 	});
 });
 

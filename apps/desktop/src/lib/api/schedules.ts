@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/schedules.ts
 //
@@ -362,7 +363,8 @@ export async function fetchJobs(target: ApiTarget): Promise<ScheduledJob[]> {
  */
 export async function createJob(
 	target: ApiTarget,
-	input: JobInput
+	input: JobInput,
+	tl: LiteralMessage
 ): Promise<ScheduledJob> {
 	const resp = await authenticatedFetch(target, "/heartbeat/jobs", {
 		method: "POST",
@@ -373,7 +375,7 @@ export async function createJob(
 	if (!resp.ok) {
 		const message = scheduledErrorResponseSchema.safeParse(json).success
 			? scheduledErrorResponseSchema.parse(json).error
-			: `Failed to create job (${resp.status})`;
+			: tl("Failed to create job ({status})", { status: resp.status });
 		throw new Error(message);
 	}
 	return toJob(scheduledJobResponseSchema.parse(json).job);
@@ -395,7 +397,8 @@ export interface ProviderAccountJobInput {
  */
 export async function createProviderAccountJob(
 	target: ApiTarget,
-	input: ProviderAccountJobInput
+	input: ProviderAccountJobInput,
+	tl: LiteralMessage
 ): Promise<ScheduledJob> {
 	const accountTarget: ScheduledProviderAccountTargetBody = {
 		type: "provider_account",
@@ -421,7 +424,7 @@ export async function createProviderAccountJob(
 	if (!resp.ok) {
 		const message = scheduledErrorResponseSchema.safeParse(json).success
 			? scheduledErrorResponseSchema.parse(json).error
-			: `Failed to create job (${resp.status})`;
+			: tl("Failed to create job ({status})", { status: resp.status });
 		throw new Error(message);
 	}
 	return toJob(scheduledJobResponseSchema.parse(json).job);
@@ -431,7 +434,8 @@ export async function createProviderAccountJob(
 export async function updateJob(
 	target: ApiTarget,
 	id: string,
-	input: JobUpdateInput
+	input: JobUpdateInput,
+	tl: LiteralMessage
 ): Promise<ScheduledJob> {
 	const resp = await authenticatedFetch(
 		target,
@@ -446,7 +450,7 @@ export async function updateJob(
 	if (!resp.ok) {
 		const message = scheduledErrorResponseSchema.safeParse(json).success
 			? scheduledErrorResponseSchema.parse(json).error
-			: `Failed to update job (${resp.status})`;
+			: tl("Failed to update job ({status})", { status: resp.status });
 		throw new Error(message);
 	}
 	return toJob(scheduledJobResponseSchema.parse(json).job);

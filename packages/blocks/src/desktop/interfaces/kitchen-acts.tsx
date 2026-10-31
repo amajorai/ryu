@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceActivityKind,
 	InterfaceAgentAct,
@@ -213,6 +214,7 @@ export function kitchenActVillagers({
 	shown,
 	slab,
 	slots,
+	tl,
 }: {
 	acts: ReadonlyMap<string, InterfaceAgentAct>;
 	centreZ: number;
@@ -225,6 +227,7 @@ export function kitchenActVillagers({
 	shown: ReadonlySet<string>;
 	slab: number;
 	slots: readonly YouSpotSlot[];
+	tl: LiteralMessage;
 }): VillagerSpec[] {
 	const cast: VillagerSpec[] = [];
 	for (const station of service.stations) {
@@ -245,8 +248,8 @@ export function kitchenActVillagers({
 			iconOnly: asking && slot ? false : undefined,
 			id: act.agentId,
 			label: asking
-				? `${act.ariaLabel} Answer their ask.`
-				: `${act.ariaLabel} Open their tickets.`,
+				? tl("{ariaLabel} Answer their ask.", { ariaLabel: act.ariaLabel })
+				: tl("{ariaLabel} Open their tickets.", { ariaLabel: act.ariaLabel }),
 			life: actLife(
 				act,
 				{

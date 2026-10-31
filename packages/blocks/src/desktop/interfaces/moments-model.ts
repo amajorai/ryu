@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -321,7 +322,11 @@ function clockTime(date: Date): string {
  * The flow subtitle, as MercuryOS words it: "Updated just now" for today's
  * activity, else "Yesterday, 9:48 PM" or "Oct 5, 9:48 PM".
  */
-export function momentsUpdatedLabel(iso: string, now: number): string {
+export function momentsUpdatedLabel(
+	iso: string,
+	now: number,
+	tl: LiteralMessage
+): string {
 	const at = Date.parse(iso);
 	if (Number.isNaN(at)) {
 		return "";
@@ -334,10 +339,10 @@ export function momentsUpdatedLabel(iso: string, now: number): string {
 			return "Updated just now";
 		}
 		if (minutes < 60) {
-			return `Updated ${minutes} min ago`;
+			return tl("Updated {minutes} min ago", { minutes: String(minutes) });
 		}
 		const hours = Math.floor(minutes / 60);
-		return `Updated ${hours} hr ago`;
+		return tl("Updated {hours} hr ago", { hours: String(hours) });
 	}
 	if (key === localDayKey(new Date(now - DAY_MS))) {
 		return `Yesterday, ${clockTime(date)}`;
@@ -387,12 +392,18 @@ export function momentsNameList(names: string[]): string {
  * "6 items from Atlas, Brook, and Cipher". One conversation shared by several
  * agents reads "1 item with Atlas, Echo, and Forge": they are on it together.
  */
-export function momentsFlowSummary(flow: MomentsFlow): string {
+export function momentsFlowSummary(
+	flow: MomentsFlow,
+	tl: LiteralMessage
+): string {
 	const count = flow.modules.length;
-	const items = `${count} ${count === 1 ? "item" : "items"}`;
 	if (flow.agents.length === 0) {
-		return `${items} with no agent assigned`;
+		return tl(
+			"{count, plural, one {{itemCount} item} other {{itemCount} items}} with no agent assigned",
+			{ count, itemCount: String(count) }
+		);
 	}
+	const items = `${count} ${count === 1 ? "item" : "items"}`;
 	const names = momentsNameList(flow.agents.map((agent) => agent.name));
 	const joiner = count === 1 && flow.agents.length > 1 ? "with" : "from";
 	return `${items} ${joiner} ${names}`;

@@ -40,7 +40,7 @@ export function CategoryPage({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
-	const entries = indexEntries(snapshot, index);
+	const entries = indexEntries(snapshot, index, tl);
 	const letters = categoryLetters(entries);
 	const label = WIKI_INDEX_LABELS[index];
 	return (

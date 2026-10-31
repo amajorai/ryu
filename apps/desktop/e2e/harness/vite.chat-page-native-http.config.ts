@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { inlineDevImageImports } from "./inline-dev-image-imports.ts";
 
 const root = import.meta.dirname;
 
@@ -15,7 +16,8 @@ export default defineConfig({
 		include: ["@tauri-apps/api/window"],
 		esbuildOptions: { target: "esnext" },
 	},
-	plugins: [react()],
+	// One module request per statically imported image would bloat every reload.
+	plugins: [react(), inlineDevImageImports(root)],
 	// Mirrors the shipping Desktop build target: the Layout graph's noVNC decoder
 	// uses top-level await, which Vite's default browser target rejects.
 	build: { target: "chrome105" },

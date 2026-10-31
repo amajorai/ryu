@@ -17,7 +17,7 @@ export function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 	const tl = useLiteralMessages();
 	const now = new Date();
 	const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-	const events = buildCalendarEvents(jobs, start, now);
+	const events = buildCalendarEvents(jobs, start, now, tl);
 	const eventsByJob = groupEventsByJob(events);
 	const failed = events.filter(
 		(event) => event.kind === "past" && event.outcome === "failure"
@@ -50,7 +50,7 @@ export function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 					{ count: String(jobs.length) }
 				)}
 				endAt={now.getTime()}
-				entries={buildRunStatusTimelineEntries(start, now, events)}
+				entries={buildRunStatusTimelineEntries(start, now, events, tl)}
 				nowAt={now.getTime()}
 				showScale
 				startAt={start.getTime()}
@@ -68,7 +68,7 @@ export function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 									{job.name}
 								</span>
 								<span className="shrink-0 text-muted-foreground">
-									{job.enabled ? describeSchedule(job.schedule) : "Paused"}
+									{job.enabled ? describeSchedule(job.schedule, tl) : "Paused"}
 								</span>
 							</div>
 							<RunStatusTimeline
@@ -77,7 +77,12 @@ export function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 								})}
 								className="mt-1"
 								endAt={now.getTime()}
-								entries={buildRunStatusTimelineEntries(start, now, jobEvents)}
+								entries={buildRunStatusTimelineEntries(
+									start,
+									now,
+									jobEvents,
+									tl
+								)}
 								startAt={start.getTime()}
 							/>
 							<p className="mt-1 truncate text-muted-foreground text-xs">

@@ -12,7 +12,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ComponentProps } from "react";
-import { AgentUI } from "../../desktop/agent-elements/agent-ui/agent-ui.tsx";
+import type { AgentUI } from "../../desktop/agent-elements/agent-ui/agent-ui.tsx";
+import { LazyAgentUI } from "../../desktop/agent-elements/agent-ui/agent-ui-lazy.tsx";
 import type { AgentUiSurface } from "../../desktop/agent-elements/agent-ui/surface.ts";
 
 export interface IslandLiveSurfaceProps {
@@ -95,7 +96,7 @@ export function IslandLiveSurface({
 							updating && "opacity-60"
 						)}
 					>
-						<AgentUI
+						<LazyAgentUI
 							format={surface.format}
 							onSubmit={onSubmit}
 							spec={surface.spec}

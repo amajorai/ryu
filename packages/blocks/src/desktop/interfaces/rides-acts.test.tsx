@@ -1,5 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 
 // The DOM must exist before the dialog primitives load (they read it on import).
 GlobalRegistrator.register();
@@ -21,6 +23,8 @@ import type {
 	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import type { ReactElement } from "react";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 afterAll(async () => {
 	await GlobalRegistrator.unregister();
@@ -229,7 +233,7 @@ describe("rides useful state (fallback rows)", () => {
 
 describe("rides trips from the acts", () => {
 	test("rows, stages and arrivals agree with the act counters", () => {
-		const trips = ridesActTrips(fixture, actsNow);
+		const trips = ridesActTrips(fixture, actsNow, tl);
 		const of = (id: string) => trips.get(id);
 		expect(of("t-ada")).toMatchObject({
 			stage: "requested",
@@ -304,7 +308,8 @@ describe("rides trips from the acts", () => {
 		if (!(ada?.act === "asking" && ada.ask && ada.threadId)) {
 			throw new Error("Ada asking on a thread");
 		}
-		const detail = ridesActTrips(live, acts).get(ada.threadId)?.detail ?? "";
+		const detail =
+			ridesActTrips(live, acts, tl).get(ada.threadId)?.detail ?? "";
 		expect(detail).toContain(ada.ask.text.replace(/`/g, ""));
 	});
 
@@ -314,7 +319,7 @@ describe("rides trips from the acts", () => {
 		);
 		const hidden = usefulStateFixture({ privacy: "redacted" });
 		const acts = agentActs(hidden, FIXTURE_NOW, FIXTURE_CLOCK);
-		const words = [...ridesActTrips(hidden, acts).values()]
+		const words = [...ridesActTrips(hidden, acts, tl).values()]
 			.flatMap((trip) => [trip.word, trip.detail])
 			.join("\n");
 		for (const secret of FIXTURE_PRIVATE_STRINGS) {
@@ -337,7 +342,7 @@ describe("rides trips from the acts", () => {
 			),
 		};
 		const acts = agentActs(group, FIXTURE_NOW, FIXTURE_CLOCK);
-		expect(ridesActTrips(group, acts).get("t-ada")?.detail).toStartWith(
+		expect(ridesActTrips(group, acts, tl).get("t-ada")?.detail).toStartWith(
 			"Ada is asking you:"
 		);
 	});
@@ -350,7 +355,7 @@ describe("rides trips from the acts", () => {
 			),
 		};
 		const acts = agentActs(unread, FIXTURE_NOW, FIXTURE_CLOCK);
-		const trip = ridesActTrips(unread, acts).get("agentrun_ha1");
+		const trip = ridesActTrips(unread, acts, tl).get("agentrun_ha1");
 		expect(trip?.stage).not.toBe("arrived");
 		expect(trip?.word).not.toBe("Answer ready");
 	});
@@ -375,7 +380,7 @@ describe("rides trips from the acts", () => {
 			limited.threads.find((thread) => thread.id === "t-di")?.blocker?.kind
 		).toBe("rate-limited");
 		const acts = agentActs(limited, FIXTURE_NOW, FIXTURE_CLOCK);
-		const trip = ridesActTrips(limited, acts).get("t-di");
+		const trip = ridesActTrips(limited, acts, tl).get("t-di");
 		expect(trip?.stage).not.toBe("cancelled");
 		expect(trip?.tone).not.toBe("alert");
 	});
@@ -391,7 +396,7 @@ describe("rides trips from the acts", () => {
 		const { buildRides, finishedTrips, tripHistory } = await import(
 			"./rides-model.ts"
 		);
-		const trips = ridesActTrips(fixture, actsNow);
+		const trips = ridesActTrips(fixture, actsNow, tl);
 		// Far past every PARKED_FOR and day boundary: the stages hold.
 		const later = FIXTURE_NOW + 3 * 24 * 60 * 60 * 1000;
 		const city = buildRides(fixture, later, {
@@ -440,8 +445,8 @@ describe("rides kerb and words", () => {
 	test("a limit is a red light; the phone kerb is one diagonal", () => {
 		const fa = [...actsNow.values()].find((item) => item.agentName === "Fa");
 		if (fa) {
-			expect(ridesLimitText(fa, "15:10")).toBe("Red light till 15:10");
-			expect(ridesLimitText(fa, null)).toBe("Red light");
+			expect(ridesLimitText(tl)(fa, "15:10")).toBe("Red light till 15:10");
+			expect(ridesLimitText(tl)(fa, null)).toBe("Red light");
 		}
 		const { layout } = ridesYouSpot([0, 0, 0], true);
 		const screen = (["you-1", "you-2", "you-3", "you-4"] as const).map(

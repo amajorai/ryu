@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import {
@@ -114,6 +115,7 @@ export function GalleryInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["gallery"]>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const boardRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
@@ -250,7 +252,8 @@ export function GalleryInterface({
 			<GalleryNoMatch
 				description={galleryNoMatchText(
 					{ agentId, query: filter.query, status: filter.status },
-					filterAgent?.name
+					filterAgent?.name,
+					tl
 				)}
 				onClear={clearFilters}
 			/>

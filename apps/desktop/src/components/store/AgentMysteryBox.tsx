@@ -206,7 +206,7 @@ export function AgentMysteryBox({
 	};
 
 	const pricing = prize?.kind === "template" ? prize.card.pricing : null;
-	const reason = prize ? mysteryRarityReason(prize) : null;
+	const reason = prize ? mysteryRarityReason(prize, tl) : null;
 	const showPrize = cardVisible && prize && style;
 
 	return (

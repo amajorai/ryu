@@ -1,4 +1,5 @@
 import type { EngineInstallState } from "@ryu/blocks/desktop/store-engines.tsx";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { StatusKind } from "@ryu/ui/components/status-badge.tsx";
 import type { SandboxBackendEntry } from "@/src/hooks/useSandboxBackends.ts";
 
@@ -88,6 +89,7 @@ export const EMPTY_ROW_STATE: RowState = {
  * `platforms` message is only the fallback for an older Core that omits it.
  */
 export function unsupportedReason(
+	tl: LiteralMessage,
 	platforms: string[],
 	coreReason?: string | null
 ): string {
@@ -99,7 +101,7 @@ export function unsupportedReason(
 		return "Not available on this node";
 	}
 	const labels = platforms.map((p) => PLATFORM_LABELS.get(p) ?? p).join(" / ");
-	return `Requires ${labels} — the connected node can't run it`;
+	return tl("Requires {labels} — the connected node can't run it", { labels });
 }
 
 /**
@@ -188,9 +190,12 @@ export const SANDBOX_PLATFORMS = new Map<string, string[]>([
 	["singularity", ["linux"]],
 ]);
 
-export function sandboxDescription(backend: SandboxBackendEntry): string {
+export function sandboxDescription(
+	tl: LiteralMessage,
+	backend: SandboxBackendEntry
+): string {
 	if (!backend.supported) {
-		return unsupportedReason(SANDBOX_PLATFORMS.get(backend.name) ?? []);
+		return unsupportedReason(tl, SANDBOX_PLATFORMS.get(backend.name) ?? []);
 	}
 	if (backend.detected) {
 		return "Detected on this node and ready to use.";

@@ -52,6 +52,7 @@ export function useMessageScrollerFollow({
 	setRailOverflowing,
 	navigation,
 	railFrameRef,
+	railJumpRef,
 }: UseMessageScrollerFollowInput) {
 	const activeRailFrameRef = useRef(0);
 	const scrollToEnd = useCallback(
@@ -61,6 +62,9 @@ export function useMessageScrollerFollow({
 				return;
 			}
 
+			// Heading for the live edge supersedes a rail jump still landing.
+			railJumpRef.current?.cancel();
+			railJumpRef.current = null;
 			setFollowing(true);
 			programmaticScrollRef.current = true;
 			if (isNativeFunction(viewport.scrollTo)) {
@@ -130,9 +134,16 @@ export function useMessageScrollerFollow({
 		}
 	}, [followThreshold, setFollowing, updateActiveRailItem]);
 
+	// Wheel, touch and keys mean the reader is scrolling: stop following and
+	// let a rail jump in flight end where it is instead of re-centring.
 	const leaveLiveEdge = useCallback(() => {
 		programmaticScrollRef.current = false;
-	}, []);
+		if (railJumpRef.current) {
+			railJumpRef.current.cancel();
+			railJumpRef.current = null;
+			updateActiveRailItem();
+		}
+	}, [updateActiveRailItem]);
 
 	useLayoutEffect(() => {
 		setFollowing(followOutput);
@@ -283,6 +294,7 @@ export function useMessageScrollerFollow({
 			if (activeRailFrameRef.current) {
 				cancelAnimationFrame(activeRailFrameRef.current);
 			}
+			railJumpRef.current?.cancel();
 		},
 		[]
 	);

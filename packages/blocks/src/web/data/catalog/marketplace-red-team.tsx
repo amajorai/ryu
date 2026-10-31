@@ -28,7 +28,6 @@ export const MARKETPLACE_TO_RED_TEAM: Product[] = [
 		tagline: "An app store for AI agents. Install agents, tools, and skills.",
 		Icon: Box,
 		hero: {
-			eyebrow: "Marketplace",
 			title: "Find apps, skills, and models",
 			subtitle: "Browse the catalog and install in one click.",
 			primaryCta: DOWNLOAD,
@@ -89,7 +88,6 @@ export const MARKETPLACE_TO_RED_TEAM: Product[] = [
 		tagline: "Extend Ryu with plugins.",
 		Icon: Puzzle,
 		hero: {
-			eyebrow: "Extensions",
 			title: "Extend Ryu with plugins",
 			subtitle:
 				"Add tools, model providers, and screens to Ryu. Plugins run in open-source Ryu Core.",
@@ -142,7 +140,6 @@ export const MARKETPLACE_TO_RED_TEAM: Product[] = [
 		tagline: "Probe your agents for common security failures.",
 		Icon: Bug,
 		hero: {
-			eyebrow: "Red Teaming",
 			title: "Test your agents for security failures",
 			subtitle:
 				"A self-serve tool for Ryu Desktop and the CLI. Run ten built-in probes against each agent and see which ones it withstands.",

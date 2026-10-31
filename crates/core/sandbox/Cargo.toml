@@ -28,8 +28,8 @@ toml = "0.8"
 # Optional: wasmtime sandbox backend (feature sandbox-wasmtime). Matches the
 # versions Core used before this crate owned the backend; off by default to keep
 # `cargo test`/CI lean (spike 0188), enabled by the shipped dev/release binaries.
-wasmtime = { version = "48.0.7", features = ["wat"], optional = true }
-wasmtime-wasi = { version = "48.0.7", features = ["p1", "p2"], optional = true }
+wasmtime = { version = "48.0.8", features = ["wat"], optional = true }
+wasmtime-wasi = { version = "48.0.8", features = ["p1", "p2"], optional = true }
 wasmparser = { version = "0.254", optional = true }
 
 # Native sidecar OS isolation (`os_isolation`): Landlock + no_new_privs on

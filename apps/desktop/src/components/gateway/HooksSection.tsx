@@ -238,7 +238,7 @@ export function HooksSection({
 		queryKey: governanceQueryKey(target),
 		queryFn: ({ signal }) => fetchGatewayGovernance(target, signal),
 	});
-	const groups = groupHookInventory(hooksQuery.data?.hooks ?? []);
+	const groups = groupHookInventory(tl, hooksQuery.data?.hooks ?? []);
 
 	const updatePolicy = async (
 		hook: HookInventoryItem,

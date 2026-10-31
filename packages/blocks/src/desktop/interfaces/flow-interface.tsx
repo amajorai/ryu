@@ -94,19 +94,20 @@ export function FlowInterface({
 				expanded,
 				originStub: true,
 				stubFor,
+				tl,
 			}),
-		[activeThreadId, composer, engaged, expanded, snapshot, stubFor]
+		[activeThreadId, composer, engaged, expanded, snapshot, stubFor, tl]
 	);
-	const starts = useMemo(() => flowStartActions(snapshot), [snapshot]);
+	const starts = useMemo(() => flowStartActions(snapshot, tl), [snapshot, tl]);
 	const newSections = useMemo((): FlowMenuSection[] => {
 		const first = starts.all.filter(
 			(action) => action.id === "review" || action.id === "blank"
 		);
 		return [
 			...(first.length > 0 ? [{ id: "start", items: first, label: null }] : []),
-			...connectSections(snapshot, "origin"),
+			...connectSections(snapshot, "origin", tl),
 		];
-	}, [snapshot, starts.all]);
+	}, [snapshot, starts.all, tl]);
 	const empty =
 		snapshot.threads.length === 0 && engaged.length === 0 && composer === null;
 	const panelW = panelOpen ? panelWidth(size.width) : 0;
@@ -328,6 +329,7 @@ export function FlowInterface({
 		shown,
 		size,
 		snapshot,
+		tl,
 	});
 	const transition = reduceMotion
 		? { duration: 0 }

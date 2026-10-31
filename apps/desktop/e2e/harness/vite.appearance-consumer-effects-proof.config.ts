@@ -8,7 +8,10 @@ const desktopRoot = path.resolve(harnessDir, "../..");
 
 export default defineConfig({
 	plugins: [react()],
-	optimizeDeps: { entries: ["appearance-consumer-effects-proof.html"], esbuildOptions: { target: "esnext" } },
+	optimizeDeps: {
+		entries: ["appearance-consumer-effects-proof.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	base: "./",
 	css: {
 		postcss: {

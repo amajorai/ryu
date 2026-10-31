@@ -1,5 +1,5 @@
-import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");

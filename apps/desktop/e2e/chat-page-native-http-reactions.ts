@@ -31,7 +31,7 @@ export function createReactionHttpFixture(conversationId: string) {
 		},
 		handle(node: "a" | "b", method: string, body: unknown) {
 			const emojis = owned.get(node) ?? [];
-			if (method === "GET")
+			if (method === "GET") {
 				return {
 					reactions: emojis.map((emoji) => ({
 						message_id: REACTION_MESSAGE_ID,
@@ -40,6 +40,7 @@ export function createReactionHttpFixture(conversationId: string) {
 						reacted_by_me: true,
 					})),
 				};
+			}
 			if (
 				!body ||
 				typeof body !== "object" ||
@@ -47,8 +48,9 @@ export function createReactionHttpFixture(conversationId: string) {
 				Object.keys(body).length !== 1 ||
 				!("emoji" in body) ||
 				!["👍", "🎉"].includes(String(body.emoji))
-			)
+			) {
 				return null;
+			}
 			const emoji = String(body.emoji);
 			owned.set(
 				node,

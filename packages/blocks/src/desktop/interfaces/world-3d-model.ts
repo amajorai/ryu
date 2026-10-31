@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	askBubble,
 	compareAsks,
@@ -140,11 +141,13 @@ export function trackerGoal({
 	loading,
 	player,
 	threads,
+	tl,
 }: {
 	entities: readonly WorldEntity[];
 	loading: boolean;
 	player: WorldPoint;
 	threads: readonly InterfaceThread[];
+	tl: LiteralMessage;
 }): TrackerGoal {
 	if (loading) {
 		return {
@@ -192,8 +195,8 @@ export function trackerGoal({
 			status: urgency.status,
 			title:
 				urgency.status === "attention"
-					? `${entity.name} needs you`
-					: `${entity.name} replied`,
+					? tl("{agentName} needs you", { agentName: entity.name })
+					: tl("{agentName} replied", { agentName: entity.name }),
 		};
 	}
 	const working = entities.filter(
@@ -205,7 +208,9 @@ export function trackerGoal({
 		agentName: nearest?.name ?? null,
 		detail: `${plural(entities.length, "agent")} · ${working} working`,
 		status: null,
-		title: nearest ? `Talk to ${nearest.name}` : "Explore",
+		title: nearest
+			? tl("Talk to {agentName}", { agentName: nearest.name })
+			: "Explore",
 	};
 }
 

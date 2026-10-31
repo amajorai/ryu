@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
 import { interfaceEventsAround } from "./use-interface-events.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const NOW = Date.UTC(2026, 9, 15, 12, 30, 0);
 const HOUR_MS = 3_600_000;
@@ -42,7 +46,8 @@ describe("interfaceEventsAround", () => {
 					],
 				}),
 			],
-			NOW
+			NOW,
+			tl
 		);
 		const upcoming = events.filter((event) => event.kind === "upcoming");
 		const past = events.filter((event) => event.kind === "past");
@@ -55,7 +60,11 @@ describe("interfaceEventsAround", () => {
 	});
 
 	test("a disabled job contributes history only", () => {
-		const events = interfaceEventsAround([hourlyJob({ enabled: false })], NOW);
+		const events = interfaceEventsAround(
+			[hourlyJob({ enabled: false })],
+			NOW,
+			tl
+		);
 		expect(events).toEqual([]);
 	});
 });

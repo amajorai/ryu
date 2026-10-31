@@ -1,6 +1,6 @@
-import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const desktopDir = path.resolve(import.meta.dirname, "..");

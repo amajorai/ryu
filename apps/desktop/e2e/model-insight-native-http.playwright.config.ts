@@ -5,7 +5,7 @@ export default defineConfig({
 	testMatch: "model-insight-native-http.proof.ts",
 	workers: 1,
 	fullyParallel: false,
-	timeout: 30000,
+	timeout: 30_000,
 	use: { baseURL: "http://127.0.0.1:5610", trace: "retain-on-failure" },
 	projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 	webServer: [

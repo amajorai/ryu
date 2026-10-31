@@ -2,6 +2,7 @@
 
 import { InternetIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenuContent,
 	DropdownMenuGroup,
@@ -214,6 +215,7 @@ export function DownloadDropdownContent({
 	 * (the docs site passes the main site URL). */
 	siteOrigin?: string;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const [os, setOs] = useState<DownloadOS>("macos");
 	const [arch, setArch] = useState<DownloadArch>("intel");
 	const [allReleases, setAllReleases] = useState<Release[]>([]);
@@ -282,12 +284,19 @@ export function DownloadDropdownContent({
 
 			<DropdownMenuGroup>
 				<SectionLabel>
-					Desktop App
-					{primaryNote ? (
-						<span className="ml-1 font-normal tabular-nums">
-							· {primaryNote}
-						</span>
-					) : null}
+					{primaryNote
+						? tlRich(
+								"Desktop App<note>· {primaryNote}</note>",
+								{ primaryNote },
+								{
+									note: (chunks) => (
+										<span className="ml-1 font-normal tabular-nums">
+											{chunks}
+										</span>
+									),
+								}
+							)
+						: "Desktop App"}
 				</SectionLabel>
 				<DownloadItem
 					arch={arch}

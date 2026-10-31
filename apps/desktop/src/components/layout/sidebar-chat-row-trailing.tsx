@@ -4,12 +4,16 @@
 
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { ContinuedOnBadge } from "@/src/components/chat/ContinuedOnBanner.tsx";
 import type { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import type { ConversationRunStatusMeta } from "@/src/lib/conversation-run-status.ts";
+import {
+	type ConversationRunStatusMeta,
+	conversationRunStatusDescription,
+} from "@/src/lib/conversation-run-status.ts";
 import { compactAge } from "@/src/lib/time.ts";
 import type { Conversation } from "@/types/chat.ts";
 import {
@@ -52,6 +56,7 @@ export function ChatRowTrailing({
 	target: ApiTarget;
 	unreadMessageCount: number;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<>
 			{interfaceLevel !== "simple" &&
@@ -107,7 +112,7 @@ export function ChatRowTrailing({
 							? "text-status-destructive"
 							: "text-status-warning"
 					}`}
-					title={runStatus.description}
+					title={conversationRunStatusDescription(runStatus, tl)}
 				>
 					{runStatus.label}
 				</span>

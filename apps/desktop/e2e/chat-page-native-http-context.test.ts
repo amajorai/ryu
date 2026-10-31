@@ -4,6 +4,7 @@ import {
 	CONTEXT_PANEL_BREAKDOWN,
 	CONTEXT_PANEL_STATS,
 } from "./chat-page-native-http-context.ts";
+
 const origin = "http://owned-context-browser.fixture";
 const fixture = createChatPageNativeHttpFixture(origin);
 const server = Bun.serve({

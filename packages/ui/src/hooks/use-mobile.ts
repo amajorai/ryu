@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 /** Phone-ish widths: the sidebar becomes a Sheet, docks become overlays. */
 const MOBILE_BREAKPOINT = 768;
@@ -37,9 +37,20 @@ export function useMediaQuery(query: string): boolean {
 const MOBILE_QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
 const COMPACT_QUERY = `(max-width: ${COMPACT_BREAKPOINT - 1}px)`;
 
+/**
+ * Pins the phone layout decision for a subtree whose viewport width says nothing
+ * about the device. A desktop-browser extension popup is a fixed 380px pointer
+ * surface: it provides `false` so its menus stay anchored dropdowns with hover
+ * submenus instead of becoming phone bottom sheets. `null` (the default) means
+ * "follow the viewport".
+ */
+export const MobileLayoutContext = createContext<boolean | null>(null);
+
 /** True below 768px — the width at which the sidebar becomes a Sheet. */
 export function useIsMobile(): boolean {
-	return useMediaQuery(MOBILE_QUERY);
+	const pinned = useContext(MobileLayoutContext);
+	const viewportIsMobile = useMediaQuery(MOBILE_QUERY);
+	return pinned ?? viewportIsMobile;
 }
 
 /**

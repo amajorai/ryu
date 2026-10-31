@@ -232,7 +232,7 @@ export function TownActProps({
 							budgeted="tally"
 							focusable
 							kind="tally"
-							label={overflowLabel(entry.count)}
+							label={overflowLabel(entry.count, tl)}
 							onActivate={handlers.onQueue}
 							tally="you"
 							youSpot="tally"
@@ -276,7 +276,7 @@ export function TownActProps({
 							label={
 								entry.kind === "notice" || entry.kind === "tray"
 									? askAriaLabel(first, entry.agentName, nowMs, privacy)
-									: openerLabel(entry.asks, entry.agentName, nowMs, privacy)
+									: openerLabel(entry.asks, entry.agentName, nowMs, tl, privacy)
 							}
 							onActivate={() => handlers.onAsk(first.id)}
 							youSpot={

@@ -80,10 +80,10 @@ export const DAY_MS = 86_400_000;
 
 /** Display-zone civil starts; rolling windows count dates, not 24-hour spans. */
 export interface DateBucketCivilStarts {
-	yesterday: number;
-	lastWeek: number;
 	lastMonth: number;
+	lastWeek: number;
 	lastYear: number;
+	yesterday: number;
 }
 
 /** Normalize a timestamp (epoch ms, ISO string, or absent) to a comparable epoch. */
@@ -107,7 +107,7 @@ export function toEpoch(value: number | string | null | undefined): number {
  * A non-positive epoch is treated as absent — no row in this app predates the epoch.
  */
 export function stampEpoch(
-	value: number | string | null | undefined,
+	value: number | string | null | undefined
 ): number | null {
 	if (value == null || value === "") {
 		return null;
@@ -120,7 +120,7 @@ export function stampEpoch(
 export function dateBucketKey(
 	ts: number,
 	startOfToday: number,
-	civilStarts?: DateBucketCivilStarts,
+	civilStarts?: DateBucketCivilStarts
 ): DatedBucketKey {
 	if (ts >= startOfToday) {
 		return "today";
@@ -162,7 +162,7 @@ export function bucketByDate<T>(
 	items: readonly T[],
 	stampOf: (item: T) => number | string | null | undefined,
 	startOfToday: number,
-	civilStarts?: DateBucketCivilStarts,
+	civilStarts?: DateBucketCivilStarts
 ): DateBucket<T>[] {
 	const byKey = new Map<DateBucketKey, { epoch: number; item: T }[]>();
 	const undated: T[] = [];

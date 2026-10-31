@@ -53,7 +53,7 @@ export function ModelDetailHeader({
 	onSelectOrg: (org: string) => void;
 }) {
 	const tl = useLiteralMessages();
-	const size = parseModelSize(card.name);
+	const size = parseModelSize(card.name, tl);
 	const tokens = displayTokens(extractTokens(card.name, card.tags), friendly);
 	return (
 		<header className="flex flex-col gap-2">

@@ -376,7 +376,7 @@ export function DeskInterface({
 		return () => document.removeEventListener("keydown", onPageKeyDown);
 	}, [loading]);
 
-	const startLabel = deskStartLabel(view);
+	const startLabel = deskStartLabel(view, tl);
 	const showList = !(stacked && conversationOpen);
 	const showConversation = !stacked || conversationOpen;
 

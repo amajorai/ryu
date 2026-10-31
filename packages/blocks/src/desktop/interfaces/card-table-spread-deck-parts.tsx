@@ -183,8 +183,8 @@ export function DeckTitle({
 	);
 }
 
-export function dealLabel(deck: Deck): string {
+export function dealLabel(deck: Deck, tl: LiteralMessage): string {
 	return deck.agent
-		? `Deal a thread with ${deck.name}`
-		: "Deal a thread with no agent";
+		? tl("Deal a thread with {name}", { name: deck.name })
+		: tl("Deal a thread with no agent");
 }

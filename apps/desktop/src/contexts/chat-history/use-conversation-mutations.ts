@@ -2,8 +2,14 @@
 // folder, linked pull requests, seeded titles, delete, rename, glyph and
 // visibility, each written through to Core. Called only by ChatHistoryProvider.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
-import { type RefObject, type SetStateAction, useCallback } from "react";
+import {
+	type RefObject,
+	type SetStateAction,
+	useCallback,
+	useRef,
+} from "react";
 import { toastActionError } from "@/src/lib/action-error.ts";
 import {
 	regenerateConversationTitle,
@@ -33,6 +39,11 @@ export function useConversationMutations({
 	localDraftIds: RefObject<Set<string>>;
 	refresh: () => Promise<void> | void;
 }) {
+	const tl = useLiteralMessages();
+	// `tl` is a fresh function on every render; callbacks read it through this
+	// ref so their identities stay stable.
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const createConversation = useCallback(
 		(id: string, init?: DraftInit) => {
 			setConversations((prev) => {
@@ -238,7 +249,11 @@ export function useConversationMutations({
 			Promise.resolve(
 				setConversationIcon({ url, token, userJwt }, id, icon)
 			).catch((error: unknown) => {
-				toastActionError("Couldn't save the conversation icon", error);
+				toastActionError(
+					"Couldn't save the conversation icon",
+					error,
+					tlRef.current
+				);
 			});
 		},
 		[activeNode, ownsAuthority, setConversations]

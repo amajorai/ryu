@@ -28,10 +28,8 @@ import {
 	DiffReviewApplyActions,
 } from "@/src/components/chat/DiffReviewPane-apply-actions.tsx";
 import { FileSummaryRow } from "@/src/components/chat/DiffReviewPane-file-summary-row.tsx";
-import {
-	patchForFile,
-	RichPatchDiff,
-} from "@/src/components/diffs/RichPatchDiff.tsx";
+import { LazyRichPatchDiff } from "@/src/components/diffs/LazyRichPatchDiff.tsx";
+import { patchForFile } from "@/src/components/diffs/patch-split.ts";
 import {
 	diffViewPrefsToOptions,
 	useDiffViewPrefs,
@@ -289,7 +287,7 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 								)}
 							</div>
 							<div className="max-h-[34rem] overflow-auto p-2">
-								<RichPatchDiff
+								<LazyRichPatchDiff
 									editMode={editMode}
 									filePath={selectedFile?.path}
 									newFile={fullFiles?.newFile}

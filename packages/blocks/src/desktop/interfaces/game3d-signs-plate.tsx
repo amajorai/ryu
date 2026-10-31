@@ -1,5 +1,6 @@
 /* eslint-disable react/no-unknown-property */
 import { Html } from "@react-three/drei";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { askAriaLabel, type InterfaceAsk } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
@@ -128,6 +129,7 @@ export function openerLabel(
 	asks: readonly InterfaceAsk[],
 	ownerName: string | null,
 	nowMs: number,
+	tl: LiteralMessage,
 	privacy: "full" | "redacted" = "full"
 ): string {
 	const first = asks[0];
@@ -135,7 +137,9 @@ export function openerLabel(
 		return "";
 	}
 	const label = askAriaLabel(first, ownerName, nowMs, privacy);
-	return asks.length > 1 ? `${label} and ${asks.length - 1} more` : label;
+	return asks.length > 1
+		? tl("{label} and {count} more", { count: String(asks.length - 1), label })
+		: label;
 }
 
 /** A small post: the base of notices and signs. */

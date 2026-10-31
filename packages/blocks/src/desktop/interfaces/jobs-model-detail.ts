@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { JobRow, JobStatus } from "./jobs-model-core.ts";
 
 // ---------------------------------------------------------------------------
@@ -5,20 +6,31 @@ import type { JobRow, JobStatus } from "./jobs-model-core.ts";
 // ---------------------------------------------------------------------------
 
 /** One honest sentence on why the job has its status. */
-export function jobStatusDetail(row: JobRow): string {
+export function jobStatusDetail(row: JobRow, tl: LiteralMessage): string {
 	const name = row.freelancer?.name;
 	switch (row.status) {
 		case "review":
-			return `${name ?? "The freelancer"} delivered. Review the work and reply to request changes.`;
+			return name
+				? tl(
+						"{freelancerName} delivered. Review the work and reply to request changes.",
+						{ freelancerName: name }
+					)
+				: tl(
+						"The freelancer delivered. Review the work and reply to request changes."
+					);
 		case "in-progress":
-			return `${name ?? "The freelancer"} is working on this now.`;
+			return name
+				? tl("{freelancerName} is working on this now.", {
+						freelancerName: name,
+					})
+				: tl("The freelancer is working on this now.");
 		case "on-hold":
 			return row.thread.runState === "interrupted"
 				? "The last run was interrupted before it finished. Reply to resume."
 				: "The last run failed. Reply to retry.";
 		case "open":
 			return name
-				? `You wrote last. ${name} has not started on it yet.`
+				? tl("You wrote last. {name} has not started on it yet.", { name })
 				: "No freelancer is assigned, so nothing will run until one is hired.";
 		default:
 			return row.thread.messageCount > 0

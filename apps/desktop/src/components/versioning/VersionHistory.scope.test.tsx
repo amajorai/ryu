@@ -3,7 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { VersionHistory, type VersionSource } from "./VersionHistory.tsx";
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let root: Root | undefined;
 afterEach(async () => {
@@ -48,9 +51,9 @@ async function render(
 	await act(async () => {
 		root!.render(
 			<VersionHistory
-				source={value}
 				currentValue={current}
 				onRestored={onRestored}
+				source={value}
 			/>
 		);
 	});
@@ -59,7 +62,9 @@ function button(name: string): HTMLButtonElement {
 	const item = Array.from(document.querySelectorAll("button")).find((b) =>
 		b.textContent?.trim().startsWith(name)
 	);
-	if (!item) throw Error("Missing button " + name);
+	if (!item) {
+		throw Error("Missing button " + name);
+	}
 	return item;
 }
 async function click(name: string) {
@@ -155,7 +160,9 @@ test("current refusal stays inline across a draft refresh and explicit retry com
 		restored = 0;
 	const restore = async () => {
 		attempts++;
-		if (attempts === 1) throw Error("Current restore refused");
+		if (attempts === 1) {
+			throw Error("Current restore refused");
+		}
 	};
 	await render(source(scope, { restore }), "Draft", () => restored++);
 	await click("History");

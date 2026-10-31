@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	DAY,
 	HOUR,
@@ -19,14 +20,21 @@ export interface TicketActivity {
 }
 
 /** Newest first: live run, last run outcome, last reply, and the SLA mark. */
-export function ticketActivity(ticket: Ticket, now: number): TicketActivity[] {
-	const requester = ticket.requester?.name ?? "The agent";
+export function ticketActivity(
+	ticket: Ticket,
+	now: number,
+	tl: LiteralMessage
+): TicketActivity[] {
+	const requester = ticket.requester?.name;
 	const items: TicketActivity[] = [];
 	if (ticket.thread.running) {
 		items.push({
 			at: null,
 			id: "running",
-			label: `${requester} is working on a reply`,
+			label:
+				requester === undefined
+					? tl("The agent is working on a reply")
+					: tl("{requester} is working on a reply", { requester }),
 			tone: "live",
 		});
 	}
@@ -51,8 +59,8 @@ export function ticketActivity(ticket: Ticket, now: number): TicketActivity[] {
 			id: "reply",
 			label:
 				ticket.thread.lastMessageRole === "user"
-					? "You replied"
-					: `${requester} replied`,
+					? tl("You replied")
+					: requesterReplied(requester, tl),
 			tone: "default",
 		});
 	}
@@ -75,6 +83,15 @@ export function ticketActivity(ticket: Ticket, now: number): TicketActivity[] {
 	// A live run (no time) is happening now, so it leads.
 	const when = (item: TicketActivity) => item.at ?? now;
 	return items.sort((a, b) => when(b) - when(a));
+}
+
+function requesterReplied(
+	requester: string | undefined,
+	tl: LiteralMessage
+): string {
+	return requester === undefined
+		? tl("The agent replied")
+		: tl("{requester} replied", { requester });
 }
 
 // ---------------------------------------------------------------------------
@@ -111,29 +128,33 @@ const FULL = new Intl.DateTimeFormat(undefined, {
  * The "Updated" column, the way help desks print it: minutes for the last
  * hour, then "Today 14:02", "Yesterday 09:15", "Oct 3", "Oct 3, 2025".
  */
-export function ticketTimeLabel(at: number, now: number): string {
+export function ticketTimeLabel(
+	at: number,
+	now: number,
+	tl: LiteralMessage
+): string {
 	if (at === 0) {
 		return "";
 	}
 	const delta = now - at;
 	if (delta >= 0 && delta < MINUTE) {
-		return "Just now";
+		return tl("Just now");
 	}
 	if (delta >= 0 && delta < HOUR) {
-		return `${Math.floor(delta / MINUTE)} min ago`;
+		return tl("{minutes} min ago", { minutes: Math.floor(delta / MINUTE) });
 	}
 	const date = new Date(at);
 	const today = new Date(now);
 	if (sameLocalDay(date, today)) {
-		return `Today ${CLOCK.format(date)}`;
+		return tl("Today {time}", { time: CLOCK.format(date) });
 	}
 	const yesterday = new Date(now - DAY);
 	if (sameLocalDay(date, yesterday)) {
-		return `Yesterday ${CLOCK.format(date)}`;
+		return tl("Yesterday {time}", { time: CLOCK.format(date) });
 	}
 	const tomorrow = new Date(now + DAY);
 	if (sameLocalDay(date, tomorrow)) {
-		return `Tomorrow ${CLOCK.format(date)}`;
+		return tl("Tomorrow {time}", { time: CLOCK.format(date) });
 	}
 	return date.getFullYear() === today.getFullYear()
 		? MONTH_DAY.format(date)

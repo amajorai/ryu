@@ -173,7 +173,7 @@ function ResolvedLine({
 				<>
 					<span className="text-foreground">{resolved.model}</span>
 					{" · "}
-					{defaultSourceLabel(resolved.model_source, names)}
+					{defaultSourceLabel(resolved.model_source, tl, names)}
 				</>
 			) : (
 				"the node picks a model"
@@ -183,6 +183,7 @@ function ResolvedLine({
 						effort: resolved.effort,
 						effortSource: defaultSourceLabel(
 							resolved.effort_source,
+							tl,
 							names
 						).toLowerCase(),
 					})}`
@@ -276,7 +277,7 @@ export function ScopeDefaultsPanel({
 		after: ScopeDefault
 	): Promise<boolean> => {
 		const confirmation =
-			modelDefaultCacheWarning(label, before, after) ??
+			modelDefaultCacheWarning(label, before, after, tl) ??
 			modelDefaultCacheWarning(
 				label,
 				{
@@ -286,7 +287,8 @@ export function ScopeDefaultsPanel({
 				{
 					model: after.coordinatorModel ?? "",
 					provider: after.coordinatorProvider ?? "",
-				}
+				},
+				tl
 			);
 		if (!confirmation) {
 			return Promise.resolve(true);

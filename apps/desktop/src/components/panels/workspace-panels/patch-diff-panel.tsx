@@ -28,10 +28,8 @@ import {
 	useMemo,
 	useState,
 } from "react";
-import {
-	RichPatchDiff,
-	splitPatchByFile,
-} from "@/src/components/diffs/RichPatchDiff.tsx";
+import { LazyRichPatchDiff } from "@/src/components/diffs/LazyRichPatchDiff.tsx";
+import { splitPatchByFile } from "@/src/components/diffs/patch-split.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import {
 	diffViewPrefsToOptions,
@@ -304,7 +302,7 @@ export function PatchDiffPanel({
 		body = (
 			<div className="flex flex-col gap-3">
 				{files.map((file, i) => (
-					<RichPatchDiff
+					<LazyRichPatchDiff
 						editMode={editMode}
 						filePath={file.path}
 						key={file.path}

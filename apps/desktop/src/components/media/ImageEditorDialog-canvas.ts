@@ -2,6 +2,7 @@ import type {
 	BrowserImageRuntimeStatus,
 	BrowserImageSegment,
 } from "@ryu/browser-local-ai";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type ImageResizeAspect,
 	localImageResizeDimensions,
@@ -24,9 +25,12 @@ export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 	});
 }
 
-export async function blobToCanvas(blob: Blob): Promise<HTMLCanvasElement> {
+export async function blobToCanvas(
+	tl: LiteralMessage,
+	blob: Blob
+): Promise<HTMLCanvasElement> {
 	const bitmap = await createImageBitmap(blob);
-	const dimensionError = imageDimensionError(bitmap.width, bitmap.height);
+	const dimensionError = imageDimensionError(tl, bitmap.width, bitmap.height);
 	if (dimensionError) {
 		bitmap.close();
 		throw new Error(dimensionError);

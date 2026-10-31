@@ -1,5 +1,7 @@
 "use client";
 
+import { Notification01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Slot, Slottable } from "@radix-ui/react-slot";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -25,11 +27,6 @@ import styles from "./notification-bell.module.css";
 interface BellSwingStyle extends MotionStyle {
 	"--notification-bell-1-rotate"?: MotionStyle["rotate"];
 	"--notification-bell-1-transform-origin"?: MotionStyle["transformOrigin"];
-}
-interface ClapperSwingStyle extends MotionStyle {
-	"--notification-bell-2-rotate"?: MotionStyle["rotate"];
-	"--notification-bell-2-transform-box"?: MotionStyle["transformBox"];
-	"--notification-bell-2-transform-origin"?: MotionStyle["transformOrigin"];
 }
 interface DigitRollStyle extends MotionStyle {
 	"--notification-bell-3-y"?: MotionStyle["y"];
@@ -83,7 +80,6 @@ const SWING_SPRING = {
 	mass: 1,
 	restDelta: 0.01,
 } as const;
-const CLAPPER_SPRING = { stiffness: 300, damping: 14, mass: 1 };
 const COLUMN_SPRING = { stiffness: 400, damping: 30, mass: 0.9 };
 const ENTER_SPRING = { type: "spring", stiffness: 600, damping: 20 } as const;
 const FADE = { duration: 0.15 } as const;
@@ -92,8 +88,6 @@ const FADE = { duration: 0.15 } as const;
 const IMPULSE = 500;
 const MAX_VELOCITY = 900;
 const BURST = 5;
-const CLAPPER_SWEEP = 13;
-const CLAPPER_VELOCITY = 450;
 
 // how many digits to keep above and below, and how far behind the spring can get
 const WINDOW = 3;
@@ -119,15 +113,6 @@ function badgeMetrics(size: number, dot: boolean) {
 
 function useBellRing(total: number, reduced: boolean) {
 	const swing = useMotionValue(0);
-	const swingVelocity = useVelocity(swing);
-	// clapper follows the bell's speed, so it lags behind on its own
-	const clapperLag = useTransform(
-		swingVelocity,
-		[-CLAPPER_VELOCITY, 0, CLAPPER_VELOCITY],
-		[CLAPPER_SWEEP, 0, -CLAPPER_SWEEP],
-		{ clamp: true }
-	);
-	const clapper = useSpring(clapperLag, CLAPPER_SPRING);
 	const previous = useRef(total);
 	const ringing = useRef<AnimationPlaybackControls | null>(null);
 
@@ -151,50 +136,29 @@ function useBellRing(total: number, reduced: boolean) {
 
 	useEffect(() => () => ringing.current?.stop(), []);
 
-	return { swing, clapper };
+	return swing;
 }
 
 function BellIcon({
 	side,
 	swing,
-	clapper,
 }: {
 	side: number;
 	swing: MotionValue<number>;
-	clapper: MotionValue<number>;
 }) {
 	const bellSwingStyle: BellSwingStyle = {
 		"--notification-bell-1-rotate": swing,
 		"--notification-bell-1-transform-origin": "50% 12%",
 	};
-	const clapperSwingStyle: ClapperSwingStyle = {
-		"--notification-bell-2-rotate": clapper,
-		"--notification-bell-2-transform-box": "fill-box",
-		"--notification-bell-2-transform-origin": "50% 0%",
-	};
 	return (
-		<motion.svg
+		<motion.span
 			aria-hidden
 			// the bell hangs from the top, spinning from the middle looks wrong
-			className={drawingStyles.bellSwing}
-			fill="currentColor"
-			height={side}
+			className={cn("grid place-items-center", drawingStyles.bellSwing)}
 			style={bellSwingStyle}
-			viewBox="0 0 18 18"
-			width={side}
 		>
-			<path
-				clipRule="evenodd"
-				d="M3.5 6.5C3.5 3.46279 5.96279 1 9 1C12.0372 1 14.5 3.46279 14.5 6.5V10.75C14.5 11.4408 15.0592 12 15.75 12C16.1642 12 16.5 12.3358 16.5 12.75C16.5 13.1642 16.1642 13.5 15.75 13.5H2.25C1.83579 13.5 1.5 13.1642 1.5 12.75C1.5 12.3358 1.83579 12 2.25 12C2.94079 12 3.5 11.4408 3.5 10.75V6.5Z"
-				fillOpacity={0.55}
-				fillRule="evenodd"
-			/>
-			<motion.path
-				className={drawingStyles.clapperSwing}
-				d="M10.2 15H7.80099C7.64999 15 7.50799 15.068 7.41299 15.185C7.31799 15.302 7.28099 15.456 7.31199 15.603C7.48499 16.425 8.17999 17 9.00099 17C9.82199 17 10.517 16.425 10.69 15.603C10.721 15.456 10.684 15.302 10.589 15.185C10.494 15.068 10.351 15 10.2 15Z"
-				style={clapperSwingStyle}
-			/>
-		</motion.svg>
+			<HugeiconsIcon icon={Notification01Icon} size={side} />
+		</motion.span>
 	);
 }
 
@@ -391,7 +355,7 @@ export function NotificationBell({
 	const reduced = useReducedMotion() ?? false;
 	const total = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
 	// use the total so a weird count cannot ring the bell
-	const { swing, clapper } = useBellRing(total, reduced);
+	const swing = useBellRing(total, reduced);
 
 	const badge = (
 		<CountBadge
@@ -412,7 +376,7 @@ export function NotificationBell({
 				: "Notifications"}
 		</span>
 	);
-	const bell = <BellIcon clapper={clapper} side={size * ICON} swing={swing} />;
+	const bell = <BellIcon side={size * ICON} swing={swing} />;
 
 	if (asChild) {
 		return (

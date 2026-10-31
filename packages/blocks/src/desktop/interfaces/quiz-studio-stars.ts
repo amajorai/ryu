@@ -48,6 +48,7 @@ export function useQuizStars({
 					looks: base,
 					paths,
 					reduced: reducedMotion,
+					tl,
 					view: actView,
 				});
 				if (star) {

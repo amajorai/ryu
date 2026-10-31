@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { RunSummary } from "@/src/hooks/useRuns.ts";
 import { abortableDelay } from "../abortable-delay.ts";
 import {
@@ -14,6 +15,8 @@ interface RunFeed {
 	loaded: boolean;
 	runs: RunSummary[];
 	statuses: Map<string, string>;
+	/** The latest run-list subscriber's translator, for OS notification titles. */
+	tl: LiteralMessage | null;
 }
 const feeds = new Map<string, RunFeed>();
 const EMPTY_RUNS: RunSummary[] = [];
@@ -53,10 +56,16 @@ function receive(feed: RunFeed, frame: RunStreamFrame) {
 		const status = run.run_status ?? "";
 		if (
 			feed.listeners.size > 0 &&
+			feed.tl &&
 			feed.statuses.get(run.id) === "running" &&
 			(status === "completed" || status === "failed")
 		) {
-			fireRunNotification(run, status, () => !feed.controller.signal.aborted);
+			fireRunNotification(
+				run,
+				status,
+				() => !feed.controller.signal.aborted,
+				feed.tl
+			);
 		}
 		if (status) {
 			feed.statuses.set(run.id, status);
@@ -105,6 +114,7 @@ function acquire(target: ApiTarget) {
 			listeners: new Set(),
 			runs: EMPTY_RUNS,
 			statuses: new Map(),
+			tl: null,
 		};
 		feeds.set(scope, feed);
 	}
@@ -123,9 +133,11 @@ function release(scope: string, feed: RunFeed) {
 }
 export function subscribeRuns(
 	target: ApiTarget,
-	listener: () => void
+	listener: () => void,
+	tl: LiteralMessage
 ): () => void {
 	const { scope, feed, start } = acquire(target);
+	feed.tl = tl;
 	const notify = () => listener();
 	feed.listeners.add(notify);
 	if (start) {
@@ -165,7 +177,8 @@ export function subscribeRunFrames(
 function fireRunNotification(
 	run: RunSummary,
 	status: string,
-	isCurrent: () => boolean
+	isCurrent: () => boolean,
+	tl: LiteralMessage
 ) {
 	if (!isCurrent()) {
 		return;
@@ -188,9 +201,11 @@ function fireRunNotification(
 			// keep the run-centric titles.
 			let title: string;
 			if (sender) {
-				title = completed ? sender.name : `${sender.name} · Run failed`;
+				title = completed
+					? sender.name
+					: tl("{name} · Run failed", { name: sender.name });
 			} else {
-				title = completed ? "Run completed" : "Run failed";
+				title = completed ? tl("Run completed") : tl("Run failed");
 			}
 			return showOsNotification({
 				title,

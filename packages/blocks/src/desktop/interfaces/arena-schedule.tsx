@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfaceSnapshot,
@@ -28,6 +29,7 @@ export function ArenaSchedule({
 	now: number;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
 	const runs = arenaUpcomingRuns(snapshot.events, now);
 	if (runs.length === 0) {
 		return null;
@@ -63,7 +65,7 @@ export function ArenaSchedule({
 								dateTime={event.start}
 								title={TIME_FORMAT.format(new Date(event.start))}
 							>
-								{untilLabel(event.start, now)}
+								{untilLabel(event.start, now, tl)}
 							</time>
 							<span className="min-w-0 truncate">
 								<span className="font-medium text-foreground">

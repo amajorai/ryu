@@ -11,6 +11,7 @@
  * page-tree design of corebunch/instatic (MIT); the single action layer shared
  * by UI and agent follows BuilderIO/agent-native (MIT). No code is copied.
  */
+import type { LiteralMessage } from "@ryu/i18n";
 import {
 	type DropPosition,
 	type DropTarget,
@@ -310,13 +311,16 @@ export function prepareHtml(html: string, parser: HtmlParser): string {
 export function editHtml(
 	html: string,
 	operations: readonly unknown[],
-	parser: HtmlParser
+	parser: HtmlParser,
+	tl: LiteralMessage
 ): EditResult {
 	const parsed = VisualOperationListSchema.safeParse(operations);
 	if (!parsed.success) {
 		return {
 			ok: false,
-			error: `Invalid edit: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+			error: tl("Invalid edit: {reason}", {
+				reason: parsed.error.issues[0]?.message ?? "unknown",
+			}),
 		};
 	}
 	const document = parser.parseFromString(html, "text/html");
@@ -332,7 +336,11 @@ export function editHtml(
 				cause instanceof EditError ? cause.message : "The edit failed";
 			return {
 				ok: false,
-				error: `Edit ${position + 1} (${operation.kind}): ${message}`,
+				error: tl("Edit {position} ({kind}): {message}", {
+					position: String(position + 1),
+					kind: operation.kind,
+					message,
+				}),
 			};
 		}
 	}

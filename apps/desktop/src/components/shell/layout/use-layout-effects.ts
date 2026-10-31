@@ -28,6 +28,7 @@ import { useRegisterEditorAi } from "@/src/hooks/useRegisterEditorAi.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { fetchRecentActivity } from "@/src/lib/api/clips.ts";
 import { getCurrentContext } from "@/src/lib/api/shadow.ts";
+import { warmChatRenderers } from "@/src/lib/chat-render-preload.ts";
 import {
 	buildClipsQuickAttachPrompt,
 	CLIPS_QUICK_ATTACH_EVENT,
@@ -122,6 +123,8 @@ export function useLayoutAppSubscriptions() {
 	// Warm a route's chunk (and its preloaded data) on hover/focus of any
 	// `data-prefetch-path` link, then idle-warm the visible ones.
 	useEffect(() => installRoutePrefetch(), []);
+	// Reply rendering is lazy; load it in idle time after the first paint.
+	useEffect(() => warmChatRenderers(), []);
 
 	// Live refresh for the contributions cache: Core broadcasts on the
 	// `system:plugins` realtime room after every plugin enable/disable/grants

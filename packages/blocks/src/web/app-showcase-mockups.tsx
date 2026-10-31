@@ -14,6 +14,7 @@ import {
 	MockupSidebar,
 	MockupWindow,
 } from "./app-showcase-primitives.tsx";
+import { LinkArrow } from "./link-arrow.tsx";
 
 /* -------------------------------------------------------------------------- */
 /* App-specific mockups                                                       */
@@ -67,8 +68,9 @@ export function SitesMockup({ compact = false }: { compact?: boolean }) {
 									<span className="type-tiny rounded bg-foreground px-2 py-1 text-background">
 										Start here
 									</span>
-									<span className="type-tiny text-muted-foreground">
-										Read the story →
+									<span className="type-tiny inline-flex items-center gap-1 text-muted-foreground">
+										Read the story
+										<LinkArrow />
 									</span>
 								</div>
 							</div>

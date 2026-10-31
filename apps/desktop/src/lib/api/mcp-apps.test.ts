@@ -1,5 +1,10 @@
 import { expect, spyOn, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { openMcpApp } from "./mcp-apps.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 test("pending activation reveals its thread and polls the unchanged idempotent request", async () => {
 	const key = "e7a784ef-d1e8-4418-91b3-60f3aab78c2a";
@@ -54,6 +59,7 @@ test("pending activation reveals its thread and polls the unchanged idempotent r
 		const part = await openMcpApp(
 			{ url: "http://fixture.test", token: "fixture" },
 			{ toolId: "server.parts.open", agentId: "agent", idempotencyKey: key },
+			tl,
 			{ onPending: (id) => pending.push(id) }
 		);
 		expect(pending).toEqual(["app-conversation"]);
@@ -79,6 +85,7 @@ test("an aborted activation cannot fetch or publish another actor's pending thre
 					agentId: "agent",
 					idempotencyKey: "e7a784ef-d1e8-4418-91b3-60f3aab78c2a",
 				},
+				tl,
 				{ signal: controller.signal }
 			)
 		).rejects.toThrow("canceled");
@@ -113,6 +120,7 @@ test("an abort after the pending thread stops polling the opener", async () => {
 			openMcpApp(
 				{ url: "http://fixture.test", token: "fixture" },
 				{ toolId: "parts.open", agentId: "agent", idempotencyKey: key },
+				tl,
 				{ signal: controller.signal, onPending: () => controller.abort() }
 			)
 		).rejects.toThrow("canceled");
@@ -152,6 +160,7 @@ test("a pending response cannot attach a different conversation", async () => {
 					idempotencyKey: key,
 					conversationId: "expected-conversation",
 				},
+				tl,
 				{
 					onPending: (id) => {
 						if (id) {

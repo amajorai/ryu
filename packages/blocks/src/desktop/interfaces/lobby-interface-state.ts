@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceParamsByRenderer,
 	resolveInterfaceParams,
@@ -39,6 +40,7 @@ export function useLobbyInterfaceState({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<InterfaceParamsByRenderer["lobby"]>) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	// The live settings (a bare `{}` resolves to the defaults).
 	// SAFETY: resolveInterfaceParams fills every field (each falls back to
@@ -126,6 +128,7 @@ export function useLobbyInterfaceState({
 			buildQuestBoard(
 				snapshot,
 				members,
+				tl,
 				withActs
 					? {
 							answered,
@@ -144,6 +147,7 @@ export function useLobbyInterfaceState({
 			firstAskThread,
 			blocking.length,
 			nowMs,
+			tl,
 		]
 	);
 	const news = useMemo(() => newsItems(snapshot), [snapshot]);

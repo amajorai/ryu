@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -277,17 +278,25 @@ export function entryForThread(
 }
 
 /** "Forge is typing", "Atlas and Echo are typing", "3 members are typing". */
-export function typingLabel(working: readonly InterfaceAgent[]): string {
+export function typingLabel(
+	working: readonly InterfaceAgent[],
+	tl: LiteralMessage
+): string {
 	if (working.length === 0) {
 		return "";
 	}
 	if (working.length === 1) {
-		return `${working[0]?.name} is typing`;
+		return tl("{name} is typing", { name: working[0]?.name ?? "" });
 	}
 	if (working.length === 2) {
-		return `${working[0]?.name} and ${working[1]?.name} are typing`;
+		return tl("{name} and {otherName} are typing", {
+			name: working[0]?.name ?? "",
+			otherName: working[1]?.name ?? "",
+		});
 	}
-	return `${working.length} members are typing`;
+	return tl("{memberCount} members are typing", {
+		memberCount: String(working.length),
+	});
 }
 
 /** Whether new conversations can be started with this contact. */

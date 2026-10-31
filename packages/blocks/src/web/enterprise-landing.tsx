@@ -51,7 +51,6 @@ export default function EnterpriseLanding() {
 		<div data-testid="enterprise-page">
 			<ProductHero
 				background={<HeroBackground id="page-enterprise" />}
-				eyebrow="Ryu Enterprise"
 				primaryCta={SALES_CTA}
 				secondaryCta={readTheDocsCta(CONTROLS_DOCS_PATH)}
 				subtitle="Run agents across your company with single sign-on, permissions, and audit records."

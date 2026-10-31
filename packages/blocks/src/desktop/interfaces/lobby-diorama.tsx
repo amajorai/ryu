@@ -1,5 +1,5 @@
 /* eslint-disable react/no-unknown-property */
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgentAct,
@@ -129,6 +129,7 @@ export function LobbyDiorama({
 	world,
 }: LobbyDioramaProps) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const paint = useMemo(() => {
 		const paving = linearRgb(night ? LOBBY_3D.pavingNight : LOBBY_3D.paving);
 		const alternate = linearRgb(
@@ -207,6 +208,7 @@ export function LobbyDiorama({
 					looks: base,
 					paths,
 					reduced: reducedMotion,
+					tl,
 					view: actView,
 				});
 				if (squadMember) {
@@ -225,7 +227,7 @@ export function LobbyDiorama({
 			});
 		}
 		return out;
-	}, [actOf, actView, looks, paths, reducedMotion, world]);
+	}, [actOf, actView, looks, paths, reducedMotion, tl, world]);
 	const firstOpen = world.spots.findIndex((spot) => !spot.member);
 	const openSlots = world.spots.filter((spot) => !spot.member).length;
 	const selectedSpot = world.spots.find(
@@ -379,12 +381,19 @@ export function LobbyDiorama({
 			    queue's (and on a phone the board gives way to the queue). */}
 			{acts && narrow ? null : (
 				<IsoLabel at={matchAt(-1)}>
-					Recent matches
-					{acts ? null : (
-						<span className="ps-1.5 text-(--gk-ink-muted) text-[12px]">
-							{tl("{waiting} waiting", { waiting: String(waiting) })}
-						</span>
-					)}
+					{acts
+						? tl("Recent matches")
+						: tlRich(
+								"Recent matches<muted>{waiting} waiting</muted>",
+								{ waiting: String(waiting) },
+								{
+									muted: (chunks) => (
+										<span className="ps-1.5 text-(--gk-ink-muted) text-[12px]">
+											{chunks}
+										</span>
+									),
+								}
+							)}
 				</IsoLabel>
 			)}
 			{acts && narrow ? null : world.matches.threads.length === 0 ? (

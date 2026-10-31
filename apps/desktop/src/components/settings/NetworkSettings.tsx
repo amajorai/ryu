@@ -146,6 +146,7 @@ function NetworkSettingsForNode({ target }: { target: ApiTarget }) {
 				await watchMeshInstall(
 					target,
 					meshBackend,
+					tl,
 					(next) => {
 						if (active.current) {
 							setMeshStatus(next);

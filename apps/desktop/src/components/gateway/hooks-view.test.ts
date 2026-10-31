@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { HookInventoryItem } from "@/src/lib/api/hooks.ts";
 import { groupHookInventory, hookPhaseCopy } from "./hooks-view.ts";
+
+const tl: LiteralMessage = (source, values) => formatMessage(source, values);
 
 const hook = (
 	overrides: Partial<HookInventoryItem> = {}
@@ -24,7 +28,7 @@ const hook = (
 
 describe("groupHookInventory", () => {
 	it("groups by source and owner while preserving review counts", () => {
-		const groups = groupHookInventory([
+		const groups = groupHookInventory(tl, [
 			hook(),
 			hook({
 				hookKey: "com.example.security::start",
@@ -54,14 +58,14 @@ describe("groupHookInventory", () => {
 
 describe("hookPhaseCopy", () => {
 	it("uses plain-language copy for known phases", () => {
-		expect(hookPhaseCopy("post_tool_use")).toEqual({
+		expect(hookPhaseCopy(tl, "post_tool_use")).toEqual({
 			description: "After a tool finishes",
 			title: "Post tool use",
 		});
 	});
 
 	it("humanizes future phases instead of hiding their hooks", () => {
-		expect(hookPhaseCopy("agent_handoff")).toEqual({
+		expect(hookPhaseCopy(tl, "agent_handoff")).toEqual({
 			description: "When agent handoff runs",
 			title: "Agent handoff",
 		});

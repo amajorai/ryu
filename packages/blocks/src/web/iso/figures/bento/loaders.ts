@@ -76,6 +76,7 @@ export const BENTO_GROUP_LOADERS = {
 	security: () => import("./security/index.ts"),
 	pro: () => import("./pro/index.ts"),
 	platform: () => import("./platform/index.ts"),
+	interfaces: () => import("./interfaces/index.ts"),
 } as const;
 
 export type BentoGroupId = keyof typeof BENTO_GROUP_LOADERS;

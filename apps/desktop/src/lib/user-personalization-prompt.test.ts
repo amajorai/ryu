@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import { DEFAULT_USER_PERSONALIZATION } from "@/src/lib/api/preferences.ts";
 import {
 	changedPersonalizationFields,
 	personalizationCacheWarning,
 } from "./user-personalization-prompt.ts";
+
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
 
 const saved = {
 	aboutOrganization: "Cedar Research Group",
@@ -16,11 +20,15 @@ describe("About you prompt-cache confirmation", () => {
 	test("an unchanged or whitespace-only edit asks nothing", () => {
 		expect(changedPersonalizationFields(saved, { ...saved })).toEqual([]);
 		expect(
-			personalizationCacheWarning(saved, {
-				...saved,
-				nickname: "  Rae ",
-				aboutYou: "I build accessible tools.\n",
-			})
+			personalizationCacheWarning(
+				saved,
+				{
+					...saved,
+					nickname: "  Rae ",
+					aboutYou: "I build accessible tools.\n",
+				},
+				tl
+			)
 		).toBeNull();
 	});
 
@@ -34,7 +42,7 @@ describe("About you prompt-cache confirmation", () => {
 			"Nickname",
 			"About your organization",
 		]);
-		const warning = personalizationCacheWarning(saved, after);
+		const warning = personalizationCacheWarning(saved, after, tl);
 		expect(warning?.title).toBe("Apply now? This resets the prompt cache");
 		expect(warning?.description).toStartWith(
 			"Nickname and About your organization are part of the system prompt for every thread on this node."
@@ -43,10 +51,14 @@ describe("About you prompt-cache confirmation", () => {
 
 	test("filling an empty profile counts as a change", () => {
 		expect(
-			personalizationCacheWarning(DEFAULT_USER_PERSONALIZATION, {
-				...DEFAULT_USER_PERSONALIZATION,
-				aboutYou: "Hello",
-			})?.description
+			personalizationCacheWarning(
+				DEFAULT_USER_PERSONALIZATION,
+				{
+					...DEFAULT_USER_PERSONALIZATION,
+					aboutYou: "Hello",
+				},
+				tl
+			)?.description
 		).toStartWith("More about you is part of the system prompt");
 	});
 

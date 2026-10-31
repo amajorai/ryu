@@ -73,12 +73,11 @@ function marketingCopy(product: Product): string[] {
 	].filter(Boolean);
 }
 
-/** Copy that also renders, including the FAQ, eyebrow, tagline and link labels. */
+/** Copy that also renders, including the FAQ, tagline and link labels. */
 function allCopy(product: Product): string[] {
 	return [
 		product.name,
 		product.tagline,
-		product.hero.eyebrow,
 		product.hero.primaryCta.label,
 		product.hero.secondaryCta?.label ?? "",
 		product.cta.primaryCta.label,
@@ -174,7 +173,7 @@ test("the catalog uses the canonical four-group taxonomy", () => {
 	expect(getProduct("chrome-extension")?.name).toBe("Ryu for Chrome");
 });
 
-test("pre-release products carry a status that matches their eyebrow", () => {
+test("pre-release products carry a status", () => {
 	const statuses = Object.fromEntries(
 		products
 			.filter((product) => product.status)
@@ -196,12 +195,6 @@ test("pre-release products carry a status that matches their eyebrow", () => {
 		"chrome-extension": "Early access",
 		devices: "Coming soon",
 	});
-	for (const product of products) {
-		const label = productStatusLabel(product);
-		expect(product.hero.eyebrow).toBe(
-			label ? `${product.name} · ${label}` : product.name
-		);
-	}
 });
 
 test("every public product renders its content through the shared page", () => {
@@ -365,14 +358,13 @@ test("buyer copy contains no internal jargon or unsourced claims", () => {
 
 test("Ryu Hire is early access with no live run, price, or metering claims", () => {
 	const hire = getProduct("hire");
-	expect(hire?.hero.eyebrow).toBe("Ryu Hire · Early access");
 	if (!hire) {
 		throw new Error("Ryu Hire product entry is missing");
 	}
+	expect(productStatusLabel(hire)).toBe("Early access");
 	const html = renderToStaticMarkup(
 		createElement(ProductLandingPage, { product: hire })
 	);
-	expect(html).toContain("Early access");
 	// No Hire runtime, estimate, credit debit, or receipt exists yet.
 	for (const claim of [
 		/pay per run/i,
@@ -394,7 +386,6 @@ test("Ryu Messaging is early access, passes AWS prices through, and owns SMS", (
 	if (!messaging) {
 		throw new Error("Ryu Messaging product entry is missing");
 	}
-	expect(messaging.hero.eyebrow).toBe("Ryu Messaging · Early access");
 	const html = renderToStaticMarkup(
 		createElement(ProductLandingPage, { product: messaging })
 	);
@@ -421,7 +412,6 @@ test("unreleased workspaces never offer a Download button", () => {
 		];
 		expect([slug, labels.includes("Download")]).toEqual([slug, false]);
 	}
-	expect(getProduct("island")?.hero.eyebrow).toBe("Ryu Island · Coming soon");
 	expect(
 		getProduct("island")?.faq?.find(
 			(item) => item.q === "Can I use Island today?"

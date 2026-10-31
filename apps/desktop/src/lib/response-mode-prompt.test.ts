@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
 	interfaceLevelForProductMode,
 	RESPONSE_MODE_FIELD,
 	responseModeCacheWarning,
 } from "./response-mode-prompt.ts";
 
+const tl: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
+
 describe("response mode prompt-cache confirmation", () => {
 	test("keeping the same level asks nothing", () => {
-		expect(responseModeCacheWarning("simple", "simple")).toBeNull();
-		expect(responseModeCacheWarning("expert", "expert")).toBeNull();
+		expect(responseModeCacheWarning("simple", "simple", tl)).toBeNull();
+		expect(responseModeCacheWarning("expert", "expert", tl)).toBeNull();
 	});
 
 	test("switching between Ryu Work and Code names the response mode for Ryu assistant threads", () => {
@@ -16,7 +20,7 @@ describe("response mode prompt-cache confirmation", () => {
 			["simple", "expert"],
 			["expert", "simple"],
 		] as const) {
-			const warning = responseModeCacheWarning(current, next);
+			const warning = responseModeCacheWarning(current, next, tl);
 			expect(warning?.title).toBe("Apply now? This resets the prompt cache");
 			expect(warning?.description).toStartWith(
 				`${RESPONSE_MODE_FIELD} is part of the system prompt for every Ryu assistant thread.`

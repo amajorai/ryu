@@ -7,3 +7,16 @@
 	width: var(--onboarding-progress);
 	transition-property: width;
 }
+
+/* Long (split-layout) steps read like Settings: each block that shares a parent
+   with the step's action row sits on the rounded grouped-card fill, and the
+   action row stays outside the cards. */
+.cardedContent:has(> [data-slot="onboarding-actions"])
+> :not([data-slot="onboarding-actions"]):not(:empty),
+.cardedContent
+	:where(:has(> [data-slot="onboarding-actions"]))
+	> :not([data-slot="onboarding-actions"]):not(:empty) {
+	padding: 0.875rem;
+	background: var(--grouped-card);
+	border-radius: var(--radius-xl, 0.75rem);
+}

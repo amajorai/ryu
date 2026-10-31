@@ -180,7 +180,10 @@ export function portOwnerHint(host: TroubleshootHost, port: number): string {
 }
 
 /** Terminal colour codes (`ESC[…m`) that tracing writes into log files. */
-export const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
+export const ANSI = new RegExp(
+	`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`,
+	"g"
+);
 export const ERROR_LINE = /\b(ERROR|FATAL|CRITICAL)\b|panicked at|\bpanic:/;
 
 /** The newest error lines across the given log tails, redacted. */

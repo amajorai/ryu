@@ -16,7 +16,9 @@ function requireSegment(
 	key: string
 ) {
 	const segment = segments.find((candidate) => candidate.key === key);
-	if (!segment) throw new Error(`Expected composer trigger segment ${key}`);
+	if (!segment) {
+		throw new Error(`Expected composer trigger segment ${key}`);
+	}
 	return segment;
 }
 

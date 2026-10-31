@@ -3,6 +3,7 @@
 // grants / gateway-down) or the control plane's second-factor refusal reads as a
 // clear sentence, never a raw dump.
 
+import { formatMessage } from "@ryu/i18n/core";
 import {
 	isMfaEnrollmentRequiredError,
 	MFA_ENROLLMENT_REQUIRED_CODE,
@@ -17,7 +18,7 @@ import {
 	mfaEnrollmentCommandMessage,
 } from "../core/mfaEnrollment.ts";
 import { accessRefusalHint } from "../core/native-errors.ts";
-import { tr } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { localizedTextOf, renderLocalized } from "./localizedText.ts";
 
 /** Terminal columns a cell occupies, so CJK and emoji cells keep alignment. */
@@ -82,7 +83,7 @@ export function formatError(
 		return String(error);
 	}
 	if (isMfaEnrollmentRequiredError(parsed.data)) {
-		return tr(mfaEnrollmentCommandMessage());
+		return mfaEnrollmentCommandMessage(tf);
 	}
 	const refusal = accessRefusalHint(parsed.data);
 	if (refusal) {
@@ -123,7 +124,9 @@ export function errorToJson(
 	if (isMfaEnrollmentRequiredError(parsed.data)) {
 		return {
 			code: MFA_ENROLLMENT_REQUIRED_CODE,
-			error: mfaEnrollmentCommandMessage(),
+			error: mfaEnrollmentCommandMessage((source, values) =>
+				formatMessage(source, values)
+			),
 			setupUrl: MFA_ENROLLMENT_SETUP_URL,
 		};
 	}

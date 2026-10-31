@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { type RefObject, useMemo, useRef } from "react";
 import { benchOf, farmActVillagers, farmPaths } from "./farm-acts.tsx";
@@ -60,6 +61,7 @@ export function useFarmActLayer({
 	snapshot,
 	unowned,
 }: FarmActLayerInput) {
+	const tl = useLiteralMessages();
 	const cards = useActCards({
 		acts,
 		clock,
@@ -112,6 +114,7 @@ export function useFarmActLayer({
 						reduced,
 						shown,
 						slots: slots.slots,
+						tl,
 					})
 				: [],
 		[
@@ -126,6 +129,7 @@ export function useFarmActLayer({
 			reduced,
 			shown,
 			slots,
+			tl,
 		]
 	);
 	const actScene: FarmActScene | null = actsOn

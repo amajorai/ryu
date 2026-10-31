@@ -107,7 +107,12 @@ export function useGhostAction(target: ApiTarget): UseGhostActionResult {
 			}));
 
 			try {
-				const res = await callGhostAction(target, agentId, action);
+				const res = await callGhostAction(
+					target,
+					agentId,
+					action,
+					tlRef.current
+				);
 				if (activeGeneration !== generation.current) {
 					return;
 				}

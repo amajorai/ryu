@@ -1,6 +1,7 @@
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+
 const baseURL = `http://127.0.0.1:${Number(process.env.RYU_ACP_RUNTIME_PROOF_PORT ?? 5554)}/`;
 export default defineConfig({
 	testDir: ".",

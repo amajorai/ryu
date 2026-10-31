@@ -1,4 +1,5 @@
 import type { AppWidget } from "@ryu/blocks/desktop/agent-elements/app-widget.tsx";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ComponentProps } from "react";
 import { z } from "zod";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
@@ -41,6 +42,7 @@ export async function openMcpApp(
 		conversationId?: string;
 		arguments?: Record<string, GatewayJsonValue>;
 	},
+	tl: LiteralMessage,
 	options?: {
 		onPending?: (conversationId?: string) => void;
 		signal?: AbortSignal;
@@ -102,7 +104,7 @@ export async function openMcpApp(
 				.safeParse(await response.json().catch(() => null));
 			const message = parsed.success
 				? parsed.data.error
-				: `Could not open app (${response.status})`;
+				: tl("Could not open app ({status})", { status: response.status });
 			throw new Error(message);
 		}
 		const part = mcpAppPartSchema.parse(await response.json());

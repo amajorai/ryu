@@ -36,7 +36,9 @@ describe("contextRingColor", () => {
 	});
 
 	test("switches to the semantic destructive token at critical usage", () => {
-		expect(contextRingColor(CONTEXT_CRITICAL_PCT)).toBe("text-status-destructive");
+		expect(contextRingColor(CONTEXT_CRITICAL_PCT)).toBe(
+			"text-status-destructive"
+		);
 	});
 
 	test("keeps over-limit usage destructive", () => {

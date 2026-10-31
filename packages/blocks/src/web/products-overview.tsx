@@ -1,3 +1,6 @@
+"use client";
+
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import Link from "next/link";
 import {
 	type Product,
@@ -7,7 +10,9 @@ import {
 	productsByCategory,
 } from "./data/products.tsx";
 import { landingSubheadlineClass } from "./landing-typography.ts";
+import { LinkArrow } from "./link-arrow.tsx";
 import { nextLinkHref } from "./next-link-href.ts";
+import { productHref } from "./product-href.ts";
 import { SectionTitle } from "./section-title.tsx";
 
 /** One line per group, drawn from the taglines of the available products inside it. */
@@ -31,16 +36,6 @@ const MERGED_INTO: Partial<Record<ProductCategory, ProductCategory>> = {
 const PLATFORM_WITH_APIS_LINE =
 	"The runtime, gateway, managed cloud, and agent APIs your product builds on.";
 
-/** Bot and Agent have their own short routes; everything else is under /products. */
-const SHORT_ROUTES = new Map([
-	["bot", "/bot"],
-	["agent", "/agent"],
-]);
-
-export function productHref(product: Product): string {
-	return SHORT_ROUTES.get(product.slug) ?? `/products/${product.slug}`;
-}
-
 function isAvailable(product: Product): boolean {
 	return productStatusLabel(product) === undefined;
 }
@@ -57,12 +52,7 @@ function ProductName({ product }: { product: Product }) {
 			<span className="font-heading font-medium text-base text-foreground underline-offset-4 group-hover:underline">
 				{product.name}
 			</span>
-			<span
-				aria-hidden="true"
-				className="ml-1 text-muted-foreground transition-colors group-hover:text-foreground"
-			>
-				→
-			</span>
+			<LinkArrow className="ml-1 text-muted-foreground transition-colors group-hover:text-foreground" />
 		</>
 	);
 }
@@ -118,6 +108,7 @@ const EARLY_ACCESS_NAMED = 4;
  * the early-access products; the rest stay reachable from the header nav.
  */
 function EarlyAccessLine({ products }: { products: readonly Product[] }) {
+	const tlRich = useRichLiteralMessages();
 	const named = products.slice(0, EARLY_ACCESS_NAMED);
 	if (named.length === 0) {
 		return null;
@@ -128,19 +119,24 @@ function EarlyAccessLine({ products }: { products: readonly Product[] }) {
 			className="text-pretty text-[15px] text-muted-foreground leading-relaxed"
 			data-product-group="Early access"
 		>
-			Also in early access:{" "}
-			{named.map((product, index) => (
-				<span key={product.slug}>
-					<Link
-						className={quietLineLinkClass}
-						href={nextLinkHref(productHref(product))}
-					>
-						{product.name}
-					</Link>
-					{index < named.length - 1 || more ? ", " : "."}
-				</span>
-			))}
-			{more ? "and more." : null}
+			{tlRich(
+				"Also in early access: <products></products>{hasMore, select, yes {and more.} other {}}",
+				{ hasMore: more ? "yes" : "no" },
+				{
+					products: () =>
+						named.map((product, index) => (
+							<span key={product.slug}>
+								<Link
+									className={quietLineLinkClass}
+									href={nextLinkHref(productHref(product))}
+								>
+									{product.name}
+								</Link>
+								{index < named.length - 1 || more ? ", " : "."}
+							</span>
+						)),
+				}
+			)}
 		</p>
 	);
 }

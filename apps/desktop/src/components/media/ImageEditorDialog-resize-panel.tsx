@@ -109,7 +109,7 @@ export function ImageEditorResizePanel({
 							<span className="font-medium text-xs leading-4">
 								{preset.label}
 							</span>
-							<span className="type-compact text-muted-foreground tabular-nums leading-3">
+							<span className="text-muted-foreground text-xs tabular-nums leading-4">
 								{aspectLabel} · {target.width.toLocaleString()} ×{" "}
 								{target.height.toLocaleString()} px
 							</span>

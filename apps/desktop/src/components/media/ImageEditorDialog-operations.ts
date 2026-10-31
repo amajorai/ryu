@@ -102,6 +102,7 @@ export function useImageEditorOperations(
 				modelId: models.backgroundRemovalModelId,
 			});
 			const outputDimensionError = imageDimensionError(
+				tl,
 				output.width,
 				output.height
 			);
@@ -232,7 +233,7 @@ export function useImageEditorOperations(
 			if (controller.signal.aborted) {
 				return;
 			}
-			const next = await blobToCanvas(resized);
+			const next = await blobToCanvas(tl, resized);
 			if (
 				controller.signal.aborted ||
 				aiResizeAbortRef.current !== controller
@@ -297,7 +298,7 @@ export function useImageEditorOperations(
 		}
 		const width = current.width + padding * 2;
 		const height = current.height + padding * 2;
-		const dimensionError = imageDimensionError(width, height);
+		const dimensionError = imageDimensionError(tl, width, height);
 		if (dimensionError) {
 			setError(dimensionError);
 			return;
@@ -353,7 +354,7 @@ export function useImageEditorOperations(
 		setModelSettingsOpen(false);
 		setTool("select");
 		try {
-			installCanvas(await blobToCanvas(original));
+			installCanvas(await blobToCanvas(tl, original));
 			setMarkups([]);
 		} catch (resetError) {
 			setError(

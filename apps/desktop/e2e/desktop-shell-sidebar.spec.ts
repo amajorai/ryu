@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
+
 const proof =
 	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-shell-flows/sidebar";
 const registry = "ryu:standalone-apps:v1:http://127.0.0.1:5493";
@@ -31,7 +32,9 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(async ({ page }, testInfo) => {
 	const state = diagnostics.get(page);
-	if (!state) throw new Error("Standalone diagnostics were not initialized");
+	if (!state) {
+		throw new Error("Standalone diagnostics were not initialized");
+	}
 	const ledgerPath = testInfo.outputPath("standalone-native-http-errors.json");
 	await writeFile(ledgerPath, JSON.stringify(state, null, 2), "utf8");
 	await testInfo.attach("standalone-native-http-errors", {
@@ -54,7 +57,7 @@ async function setup(page: Page) {
 	const requests: string[] = [];
 	await page.addInitScript(
 		({ registry }) => {
-			if (!sessionStorage.getItem("sidebar-seeded"))
+			if (!sessionStorage.getItem("sidebar-seeded")) {
 				localStorage.setItem(
 					registry,
 					JSON.stringify([
@@ -65,6 +68,7 @@ async function setup(page: Page) {
 						},
 					])
 				);
+			}
 			sessionStorage.setItem("sidebar-seeded", "true");
 			const state = { calls: [] as string[], failClose: true };
 			Object.defineProperty(window, "__sidebarHost", { value: state });
@@ -82,11 +86,13 @@ async function setup(page: Page) {
 							window,
 							"__recordStandaloneNativeInvocation"
 						);
-						if (typeof record !== "function")
+						if (typeof record !== "function") {
 							throw new Error("Missing persistent native ledger binding");
+						}
 						await record({ command, args: args ?? null });
-						if (command === "close_current_window" && state.failClose)
+						if (command === "close_current_window" && state.failClose) {
 							throw new Error("Window close denied");
+						}
 						return null;
 					},
 				},
@@ -98,10 +104,14 @@ async function setup(page: Page) {
 		const url = new URL(route.request().url());
 		const path = url.pathname;
 		// Vite source-module URLs may contain /lib/api/; they are not API endpoints.
-		if (!path.startsWith("/api/")) return route.continue();
+		if (!path.startsWith("/api/")) {
+			return route.continue();
+		}
 		requests.push(path);
 		const state = diagnostics.get(page);
-		if (!state) throw new Error("Missing standalone HTTP diagnostics");
+		if (!state) {
+			throw new Error("Missing standalone HTTP diagnostics");
+		}
 		const request = route.request();
 		const entry = {
 			url: request.url(),
@@ -199,8 +209,9 @@ async function setup(page: Page) {
 					records: [{ id: "a/b ?&", name: "Design review", owner: "Jiawei" }],
 				},
 			});
-		} else
+		} else {
 			await route.fulfill({ status: 503, json: { error: "Fixture boundary" } });
+		}
 	});
 	await page.goto("/desktop-shell-sidebar.html");
 	await expect(
@@ -285,7 +296,7 @@ test("removal cancel retains registry; native failure stays visible and retries 
 	expect(calls).toHaveLength(2);
 	expect(
 		requests.every(
-			(path) => !path.includes("/uninstall") && !path.includes("/disable")
+			(path) => !(path.includes("/uninstall") || path.includes("/disable"))
 		)
 	).toBe(true);
 	await page.reload();

@@ -263,14 +263,15 @@ const pluginCompanionWireResponseSchema = z
 		default_csp_enforced: z.boolean().optional(),
 		first_party: z.boolean().optional(),
 		has_ui: z.boolean().optional(),
-		icon: z.string().optional(),
+		// Core serializes an undeclared `Option<String>` icon/shortcut as null.
+		icon: z.string().nullish(),
 		id: z.string(),
 		label: z.string(),
 		mcpToolId: z.string().optional(),
 		name: z.string(),
 		navigationVisible: z.boolean().optional(),
 		plugin_id: z.string().optional(),
-		shortcut: z.string().optional(),
+		shortcut: z.string().nullish(),
 	})
 	.catchall(pluginValueSchema) satisfies z.ZodType<PluginCompanionWire>;
 

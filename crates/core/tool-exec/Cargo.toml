@@ -30,8 +30,8 @@ tokio = { version = "1", features = ["io-util", "process", "time", "rt", "macros
 uuid = { version = "1", features = ["v4"] }
 # The JavaScript sandbox (feature `js-sandbox`). Same wasmtime major as
 # ryu-sandbox / apps/core so the workspace links one copy.
-wasmtime = { version = "48.0.7", optional = true }
-wasmtime-wasi = { version = "48.0.7", features = ["p1"], optional = true }
+wasmtime = { version = "48.0.8", optional = true }
+wasmtime-wasi = { version = "48.0.8", features = ["p1"], optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
 
 [target.'cfg(unix)'.dependencies]

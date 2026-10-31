@@ -66,6 +66,7 @@ export const STAGE_PAGES = {
 	"/academy": "page-academy",
 	"/contact": "page-contact",
 	"/apps": "page-apps",
+	"/interfaces": "page-interfaces",
 } as const;
 
 export type StagePageId = (typeof STAGE_PAGES)[keyof typeof STAGE_PAGES];

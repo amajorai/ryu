@@ -31,7 +31,6 @@ export interface Product {
 	/** An interactive anatomy figure shown full width after the hero. */
 	figure?: ProductFigureId;
 	hero: {
-		eyebrow: string;
 		title: string;
 		subtitle: string;
 		primaryCta: CtaLink;
