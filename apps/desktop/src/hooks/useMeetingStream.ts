@@ -9,6 +9,7 @@ import {
 	streamMeetingEvents,
 } from "@/src/lib/api/meetings.ts";
 import { useEnabledApps } from "@/src/lib/gating/useEnabledApps.ts";
+import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { useMeetingRecordingStore } from "@/src/store/useMeetingRecordingStore.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
@@ -92,6 +93,7 @@ export function useMeetingStream(): void {
 							{ title: event.title }
 						),
 					});
+					playSound("meeting-detected", { source: "stream" });
 					break;
 				case "segment":
 					Promise.resolve(

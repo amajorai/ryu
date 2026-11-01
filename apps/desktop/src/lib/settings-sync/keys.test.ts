@@ -64,6 +64,7 @@ const MUST_NEVER_SYNC = [
 	"ryu_workspace_projects_v1",
 	"ryu_default_microphone",
 	"ryu_default_speaker",
+	"ryu:sound-volume",
 	"ryu_session_tabs",
 	"ryu_workbench_layout_v2",
 	"ryu_pinned_dock_tabs",
@@ -121,6 +122,12 @@ describe("the sync allowlist", () => {
 		]) {
 			expect(isSyncableKey(key)).toBe(false);
 		}
+	});
+
+	it("syncs UI sound choices but keeps the volume on this device", () => {
+		expect(isSyncableKey("ryu:sound-prefs")).toBe(true);
+		expect(groupForKey("ryu:sound-prefs")).toBe("behavior");
+		expect(isSyncableKey("ryu:sound-volume")).toBe(false);
 	});
 
 	it("includes the composer send shortcut in chat sync", () => {

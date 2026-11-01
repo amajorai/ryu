@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type Alert, streamMonitorAlerts } from "@/src/lib/api/monitors.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
+import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 /** Raise an OS notification (no-op when the user turned them off). */
@@ -47,6 +48,7 @@ export function useMonitorAlertsStream(): void {
 
 		const onAlert = (alert: Alert) => {
 			toast.error({ title: alert.title, description: alert.message });
+			playSound("alert", { source: "stream" });
 			osNotify(
 				alert,
 				() =>

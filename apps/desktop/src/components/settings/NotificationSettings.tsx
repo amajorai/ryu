@@ -23,6 +23,7 @@ import {
 	canOpenNotificationSettings,
 	openNotificationSettings,
 } from "@/src/lib/os/permissions.ts";
+import { previewSound } from "@/src/lib/sounds/play-sound.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -134,6 +135,13 @@ export function NotificationSettings() {
 										Open notification settings
 									</Button>
 								)}
+								<Button
+									onClick={() => previewSound("message")}
+									size="sm"
+									variant="ghost"
+								>
+									Play a sound
+								</Button>
 								<Button onClick={sendTest} size="sm" variant="secondary">
 									Send test notification
 								</Button>

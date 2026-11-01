@@ -14,6 +14,9 @@ const { OS_NOTIFICATIONS_ENABLED_KEY } = await import(
 const { showOsNotification } = await import(
 	"@/src/lib/notifications/os-notify.ts"
 );
+const { __setSoundSinkForTests } = await import(
+	"@/src/lib/sounds/play-sound.ts"
+);
 const { NotificationSettings } = await import("./NotificationSettings.tsx");
 
 type Grant = "granted" | "default" | "denied";
@@ -57,6 +60,7 @@ afterEach(async () => {
 	});
 	document.body.replaceChildren();
 	Reflect.set(globalThis, "Notification", originalNotification);
+	__setSoundSinkForTests(null);
 });
 
 async function flush() {
@@ -130,6 +134,26 @@ test("turning notifications on asks the browser and persists the choice across a
 	await mount();
 	expect(isChecked(notificationSwitch())).toBe(true);
 	expect(FakeNotification.prompts).toBe(1);
+});
+
+test("Play a sound previews the message sound from the delivery check row", async () => {
+	const cues: string[] = [];
+	__setSoundSinkForTests((id, options) => {
+		cues.push(`${options.kind}:${id}`);
+	});
+	await mount();
+	expect(document.body.textContent).not.toContain("Play a sound");
+	await click(notificationSwitch());
+
+	const playSound = Array.from(document.querySelectorAll("button")).find(
+		(candidate) => candidate.textContent?.trim() === "Play a sound"
+	);
+	if (!playSound) {
+		throw new Error("Missing play a sound button");
+	}
+	await click(playSound);
+	expect(cues).toEqual(["preview:message"]);
+	expect(FakeNotification.shown).toEqual([]);
 });
 
 test("a declined permission prompt is not saved as enabled and shows the blocked help", async () => {

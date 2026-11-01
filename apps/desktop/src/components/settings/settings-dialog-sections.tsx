@@ -21,6 +21,7 @@ import { ProfileTab } from "./ProfileTab.tsx";
 import { RyuAppsTab } from "./RyuAppsTab.tsx";
 import { SessionsTab } from "./SessionsTab.tsx";
 import { SettingsSyncTab } from "./SettingsSyncTab.tsx";
+import { SoundSettings } from "./SoundSettings.tsx";
 import { StatsTab } from "./StatsTab.tsx";
 import { SettingsGroup, SettingsSection } from "./shared/settings-items.tsx";
 import { TeamsBillingTab } from "./TeamsBillingTab.tsx";
@@ -100,6 +101,8 @@ export function SectionContent({ value }: { value: string }) {
 			return <AppearanceTab />;
 		case "keyboard":
 			return <KeyboardShortcutsTab />;
+		case "sounds":
+			return <SoundSettings />;
 		case "sync":
 			return <SettingsSyncTab />;
 		case "updates":

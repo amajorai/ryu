@@ -8,6 +8,7 @@ import {
 	openCreditAlertStream,
 } from "@/src/lib/api/credits.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
+import { playSound } from "@/src/lib/sounds/play-sound.ts";
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 10_000;
@@ -78,6 +79,7 @@ export function useCreditAlertEvents(): void {
 				title: event.title,
 				description: "Top up your Ryu credits to keep managed work running.",
 			});
+			playSound("credit-alert", { source: "stream" });
 			osNotify(event, controller.signal);
 		}).catch(() => undefined);
 		return () => controller.abort();

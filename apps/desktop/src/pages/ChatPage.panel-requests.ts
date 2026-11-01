@@ -21,6 +21,7 @@ import { cancelChat } from "@/src/lib/api/chat.ts";
 import { reverseGitEdits } from "@/src/lib/api/git.ts";
 import type { ArtifactView } from "@/src/lib/live-artifacts.ts";
 import { CHAT_RECOVERY_STOP_EVENT } from "@/src/lib/reconnect-retry.ts";
+import { markRunStopped } from "@/src/lib/sounds/play-sound.ts";
 import { useChatHotkeyTargets } from "@/src/store/useChatHotkeyTargets.ts";
 import { useFileTreeSearchStore } from "@/src/store/useFileTreeSearchStore.ts";
 import type { useChatAnswerNow } from "./ChatPage.answer-now.ts";
@@ -268,13 +269,16 @@ export function useChatPanelRequests({
 	// ignored so Stop always feels instant. The id is the same session key sent as
 	// `conversation_id` on each turn.
 	const handleStop = useCallback(() => {
+		const conversationId = convIdRef.current ?? draftConvId.current;
+		// Before `stop()` settles the turn: a Stop is not a completion, so neither
+		// the chat nor the run feed may play run-complete or run-failed for it.
+		markRunStopped(conversationId);
 		stop();
 		// A resumed turn is read by our own fetch, not by useChat — `stop()` does
 		// not touch it, so abort that reader explicitly or Stop would look dead.
 		resumeAbort.current?.abort();
 		setResumeStreaming(false);
 		resumeSuppressedUntil.current = Date.now() + RESUME_STOP_GRACE_MS;
-		const conversationId = convIdRef.current ?? draftConvId.current;
 		window.dispatchEvent(
 			new CustomEvent(CHAT_RECOVERY_STOP_EVENT, {
 				detail: { conversationId, nodeUrl: chatTargetRef.current.url },

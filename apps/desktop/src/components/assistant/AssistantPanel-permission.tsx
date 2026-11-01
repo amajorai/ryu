@@ -8,6 +8,7 @@ import {
 import type { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { respondPermission } from "@/src/lib/api/acp.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { usePermissionPromptSound } from "@/src/lib/sounds/use-permission-prompt-sound.ts";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
 
 /**
@@ -72,6 +73,7 @@ export function useAssistantPermission({
 		() => findActivePermission(messages, new Set(resolvedInScope)),
 		[messages, resolvedInScope]
 	);
+	usePermissionPromptSound(activePermission?.requestId);
 	const respondingPermissions = useRef(new Set<string>());
 	const [permissionError, setPermissionError] = useState<{
 		key: string;

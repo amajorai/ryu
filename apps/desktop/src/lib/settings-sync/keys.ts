@@ -319,6 +319,9 @@ export const SYNCABLE_KEYS: SyncableKey[] = [
 		group: "behavior",
 	},
 	{ key: "ryu:timezone", label: "Time zone", group: "behavior" },
+	// UI sounds: master switch, pack and per-event toggles. Volume
+	// ("ryu:sound-volume") stays device-local, like the default speaker.
+	{ key: "ryu:sound-prefs", label: "UI sounds", group: "behavior" },
 	{
 		key: "ryu_picker_recents_limit",
 		label: "Picker recents limit",

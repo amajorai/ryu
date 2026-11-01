@@ -6,6 +6,7 @@ import {
 	streamDesktopNotifications,
 } from "@/src/lib/api/events.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
+import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 /** Raise an OS notification (no-op when the user turned them off). */
@@ -36,11 +37,10 @@ export function useDesktopNotificationsStream(): void {
 		const target: ApiTarget = { url, token, userJwt };
 
 		const onNotification = (n: DesktopNotification) => {
-			const notify =
-				n.level === "error" || n.level === "warning"
-					? toast.error
-					: toast.success;
+			const isAlert = n.level === "error" || n.level === "warning";
+			const notify = isAlert ? toast.error : toast.success;
 			notify({ title: n.title, description: n.body ?? undefined });
+			playSound(isAlert ? "alert" : "message", { source: "stream" });
 			osNotify(
 				n,
 				() =>

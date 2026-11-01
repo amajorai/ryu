@@ -14,6 +14,7 @@ import { extractAssistantText } from "@/src/lib/chat-message-selectors.ts";
 import { getChatTabBusySpeed } from "@/src/lib/chat-tab-busy-speed.ts";
 import { observeChatPresence } from "@/src/lib/realtime/chat-presence-observation.ts";
 import { useRealtimeRoom } from "@/src/lib/realtime/use-realtime-room.ts";
+import { useChatTurnSounds } from "@/src/lib/sounds/use-chat-turn-sounds.ts";
 import { useMeetingRecordingStore } from "@/src/store/useMeetingRecordingStore.ts";
 import type { useChatAssistantIdentity } from "./ChatPage.assistant-identity.tsx";
 import type { useChatConversationState } from "./ChatPage.conversation-state.ts";
@@ -274,6 +275,9 @@ export function useChatPresence({
 		acp.acpOptionValues,
 		updateTabBusy,
 	]);
+	// Send tick, run-complete and run-failed cues. Same id as `handleStop`'s
+	// `markRunStopped`, so a Stop stays silent.
+	useChatTurnSounds(status, convId ?? draftConvId.current);
 
 	// Clear busy on unmount so a closed streaming tab doesn't leave a stale spinner.
 	useEffect(() => {

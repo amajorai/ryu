@@ -17,6 +17,7 @@ import {
 	parseSlashCommandContribution,
 	type SlashCommand,
 } from "@/src/lib/slash-commands.ts";
+import { usePermissionPromptSound } from "@/src/lib/sounds/use-permission-prompt-sound.ts";
 import { resolveWorkspaceFilePath } from "@/src/lib/workspace-links.ts";
 import { useDockPanelRequestStore } from "@/src/store/useDockPanelRequestStore.ts";
 import {
@@ -123,6 +124,8 @@ export function useChatPermissionsAndLinks({
 		permissionNodeUrl,
 		chatId,
 	]);
+	// Knock once per prompt that lands on screen (silent on re-renders).
+	usePermissionPromptSound(activePermission?.requestId);
 
 	// Deliver a decision for one permission request. Keeping the request id in
 	// this callback makes the composer card answer the exact gate that is on

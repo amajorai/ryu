@@ -12,6 +12,7 @@ import {
 	type UserNotificationEvent,
 } from "@/src/lib/api/notifications.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
+import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { getUserAvailabilitySnapshot } from "@/src/lib/user-availability.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
@@ -85,14 +86,14 @@ export function useNotificationEvents(): void {
 				event,
 				getUserAvailabilitySnapshot().streamingPrivacyActive
 			);
-			const notify =
-				visibleEvent.level === "error" || visibleEvent.level === "warning"
-					? toast.error
-					: toast.info;
+			const isAlert =
+				visibleEvent.level === "error" || visibleEvent.level === "warning";
+			const notify = isAlert ? toast.error : toast.info;
 			notify({
 				title: visibleEvent.title,
 				description: visibleEvent.body ?? undefined,
 			});
+			playSound(isAlert ? "alert" : "message", { source: "stream" });
 			osNotify(visibleEvent, () => {
 				if (inboxOwnerRef.current) {
 					openTab("/inbox");

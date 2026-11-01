@@ -96,6 +96,8 @@ const SECTION_SOURCES = {
 		"VoiceReadbackSettings.tsx",
 		"TtsEngineSettings.tsx",
 	],
+	// The event rows live in the `SoundSettings-events.tsx` split.
+	sounds: ["SoundSettings.tsx"],
 	privacy: [
 		"PrivacySettings.tsx",
 		"DevicePermissionsSettings.tsx",
@@ -274,6 +276,18 @@ describe("searchSettings", () => {
 			).not.toContain(entry.id);
 		}
 	});
+	it("finds the Sounds tab by the words people type for it", () => {
+		const ids = (query: string) => searchSettings(query).map((e) => e.id);
+		expect(ids("chime")).toContain("sounds.general.play-sounds");
+		expect(ids("ringtone")).toContain("sounds.events.calling");
+		expect(ids("mute sounds")).toContain("sounds.general.play-sounds");
+		const pack = searchSettings("retro").find(
+			(entry) => entry.id === "sounds.general.sound-pack"
+		);
+		expect(pack && sectionLabel(pack)).toBe("Sounds");
+		expect(pack && subpageFor(pack)).toBeNull();
+	});
+
 	it("finds the interface colour theme switch", () => {
 		expect(searchSettings("colour theme").map((result) => result.id)).toContain(
 			"appearance.interfaces.use-interface-color-themes"

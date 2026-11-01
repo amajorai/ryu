@@ -33,6 +33,7 @@ export type SettingsSectionValue =
 	| "credits"
 	| "usage"
 	| "voice"
+	| "sounds"
 	| "goals"
 	| "double-check"
 	| "developer";

@@ -144,9 +144,16 @@ mock.module(
 		}),
 	})
 );
-const { sessionsRouter } = await import(
-	"../../../../../packages/api/src/routers/sessions.ts"
-);
+// Loaded through a computed path, like the mocks above: a literal specifier
+// makes the desktop type-check walk the whole API server graph, which exceeds
+// its heap and its `lib` target. Only `fetch` is used here.
+const sessionsRouterPath = new URL(
+	"../../../../../packages/api/src/routers/sessions.ts",
+	import.meta.url
+).pathname;
+const { sessionsRouter } = (await import(sessionsRouterPath)) as {
+	sessionsRouter: { fetch: (request: Request) => Response | Promise<Response> };
+};
 const server = Bun.serve({
 	hostname: "127.0.0.1",
 	port: 0,

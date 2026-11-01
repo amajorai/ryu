@@ -16,6 +16,7 @@ import {
 	UserCircleIcon,
 	UserIcon,
 	UserMultiple02Icon,
+	VolumeHighIcon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
@@ -90,6 +91,7 @@ export const NAV_GROUPS: NavGroup[] = [
 				label: "Appearance",
 				icon: ColorsIcon,
 			},
+			{ value: "sounds", label: "Sounds", icon: VolumeHighIcon },
 			{
 				value: "keyboard",
 				label: "Keyboard Shortcuts",

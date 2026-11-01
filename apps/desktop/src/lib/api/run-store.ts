@@ -5,6 +5,7 @@ import {
 	resolveNotificationSender,
 	showOsNotification,
 } from "../notifications/os-notify.ts";
+import { playSound } from "../sounds/play-sound.ts";
 import type { ApiTarget } from "./client.ts";
 import { type RunStreamFrame, streamRuns } from "./runStream.ts";
 
@@ -60,6 +61,12 @@ function receive(feed: RunFeed, frame: RunStreamFrame) {
 			feed.statuses.get(run.id) === "running" &&
 			(status === "completed" || status === "failed")
 		) {
+			// The cue sits beside the banner, not inside it, so turning OS banners
+			// off keeps the sound. `run:<id>` dedupes against the foreground chat.
+			playSound(status === "completed" ? "run-complete" : "run-failed", {
+				key: `run:${run.id}`,
+				source: "stream",
+			});
 			fireRunNotification(
 				run,
 				status,

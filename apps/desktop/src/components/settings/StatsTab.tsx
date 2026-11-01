@@ -28,11 +28,10 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { USAGE_STREAK_HINT } from "@ryu/ui/lib/usage-streak.ts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import { useTheme } from "next-themes";
 import { useMemo, useState } from "react";
-import { sileo } from "sileo";
 import { useSession } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import {
@@ -40,12 +39,12 @@ import {
 	fetchProfileStats,
 	fetchProfileUnlocks,
 	fetchUsageDaily,
-	unlockFeature,
 	wrappedUrl,
 } from "@/src/lib/api/profile.ts";
 import { formatNumber } from "./StatsTab-format.ts";
 import { TeamSection } from "./StatsTab-team-section.tsx";
 import { UnlockCard } from "./StatsTab-unlock-card.tsx";
+import { useUnlockFeatureMutation } from "./StatsTab-unlock-mutation.ts";
 import { StatsUsageSections } from "./StatsTab-usage-sections.tsx";
 import { SettingsSection } from "./shared/settings-items.tsx";
 
@@ -70,7 +69,6 @@ function useInitials(name: string | undefined): string {
 
 export function StatsTab() {
 	const tl = useLiteralMessages();
-	const queryClient = useQueryClient();
 	const { resolvedTheme } = useTheme();
 	const [clipOpen, setClipOpen] = useState(false);
 	const { data: sessionData } = useSession();
@@ -101,23 +99,7 @@ export function StatsTab() {
 		queryFn: fetchProfileUnlocks,
 	});
 
-	const unlockMutation = useMutation({
-		mutationFn: unlockFeature,
-		onSuccess: (result) => {
-			queryClient.invalidateQueries({ queryKey: ["profile", "unlocks"] });
-			queryClient.invalidateQueries({ queryKey: ["profile", "me"] });
-			sileo.success({
-				title: "Feature unlocked",
-				description: tl("{points} points remaining", {
-					points: formatNumber(result.pointsBalance),
-				}),
-			});
-		},
-		onError: (error) =>
-			sileo.error({
-				title: error instanceof Error ? error.message : "Failed to unlock",
-			}),
-	});
+	const unlockMutation = useUnlockFeatureMutation();
 
 	const initials = useInitials(user?.name ?? profileQuery.data?.name);
 

@@ -29,6 +29,8 @@ import { useTitleBarClearsContent } from "@/src/hooks/useTitleBarClearsContent.t
 import { engineForAgent } from "@/src/lib/agent-logos.tsx";
 import { cancelChat } from "@/src/lib/api/chat.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { markRunStopped } from "@/src/lib/sounds/play-sound.ts";
+import { useChatTurnSounds } from "@/src/lib/sounds/use-chat-turn-sounds.ts";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
 import { useAssistantComposers } from "./AssistantPanel-composers.ts";
 import { useAssistantConversation } from "./AssistantPanel-conversation.ts";
@@ -187,6 +189,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	});
 	const statusRef = useRef(status);
 	statusRef.current = status;
+	useChatTurnSounds(status, convId);
 	const saveSurfaceThread = useAssistantStore((s) => s.saveSurfaceThread);
 	useEffect(() => {
 		if (isAppSurfaceThread && messages.length > 0) {
@@ -204,8 +207,9 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	// turn keeps running there after its request is gone. Builder turns are not
 	// persisted, so the abort alone ends them.
 	const handleStop = useCallback(() => {
-		void stop();
 		const conversationId = convIdRef.current;
+		markRunStopped(conversationId);
+		void stop();
 		if (!builderRef.current && conversationId) {
 			cancelChat(chatTarget, conversationId).catch(() => {
 				// No live turn, or Core is unreachable; the abort above still stands.

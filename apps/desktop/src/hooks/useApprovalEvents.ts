@@ -12,6 +12,7 @@ import {
 	resolveNotificationSender,
 	showOsNotification,
 } from "@/src/lib/notifications/os-notify.ts";
+import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 import { useUserAvailability } from "./useUserAvailability.ts";
 
@@ -77,6 +78,10 @@ export function useApprovalEvents(): void {
 				toast.info({
 					title: "Approval needed",
 					description: event.request.title,
+				});
+				playSound("approval-needed", {
+					key: `approval:${event.request.id}`,
+					source: "stream",
 				});
 				osNotify(
 					event.request,

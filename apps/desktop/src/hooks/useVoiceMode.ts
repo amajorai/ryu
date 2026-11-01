@@ -13,6 +13,11 @@ import { VoiceSessionConnection } from "@ryuhq/core-client/voice-session.ts";
 import type { RvpCallEnded, VoiceState } from "@ryuhq/protocol/voice";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import {
+	playSound,
+	setVoiceCallActive,
+	startLoopingSound,
+} from "@/src/lib/sounds/play-sound.ts";
 
 /** Overlay-facing phase: the server states plus a local `connecting` step. */
 export type VoiceModePhase = VoiceState | "connecting";
@@ -99,6 +104,20 @@ export function useVoiceMode(
 	const turnSeqRef = useRef(0);
 	const levelsRef = useRef<number[]>(SILENT_LEVELS.slice());
 	const callStartedAtRef = useRef<number | null>(null);
+	// Whether THIS instance holds the engine's call-ducking count. The hook is
+	// mounted per chat tab and in the composer, so only the instance whose call
+	// went live may release it (another tab unmounting must not un-duck).
+	const holdsCallDuckRef = useRef(false);
+	const setCallDucking = useCallback((live: boolean) => {
+		if (holdsCallDuckRef.current === live) {
+			return;
+		}
+		holdsCallDuckRef.current = live;
+		setVoiceCallActive(live);
+	}, []);
+	// Mirrors `muted` so `toggleMute` decides (and cues) outside a state updater,
+	// which StrictMode runs twice.
+	const mutedRef = useRef(false);
 
 	const resetLevels = useCallback(() => {
 		const silent = SILENT_LEVELS.slice();
@@ -121,15 +140,24 @@ export function useVoiceMode(
 	optionsRef.current = options;
 
 	const stop = useCallback(() => {
-		connRef.current?.close();
+		// Only a call that connected says goodbye; a never-ready one stays silent.
+		const wasLive = callStartedAtRef.current !== null;
+		const conn = connRef.current;
+		// Detach before closing so its `onClose` sees a hang-up, not a remote end.
 		connRef.current = null;
+		callStartedAtRef.current = null;
+		conn?.close();
+		setCallDucking(false);
+		if (wasLive) {
+			playSound("call-leave");
+		}
 		setActive(false);
 		setElapsedSeconds(0);
 		setPhase("idle");
+		mutedRef.current = false;
 		setMuted(false);
-		callStartedAtRef.current = null;
 		resetLevels();
-	}, [resetLevels]);
+	}, [resetLevels, setCallDucking]);
 
 	const start = useCallback(() => {
 		if (connRef.current) {
@@ -140,6 +168,7 @@ export function useVoiceMode(
 		setCaption("");
 		setTurns([]);
 		setElapsedSeconds(0);
+		mutedRef.current = false;
 		setMuted(false);
 		callStartedAtRef.current = null;
 		resetLevels();
@@ -149,12 +178,25 @@ export function useVoiceMode(
 		setActive(true);
 
 		const callOptions = optionsRef.current;
+		// One failure cue per attempt: an error frame, the socket closing and
+		// `start()` rejecting can all report the same failed connect.
+		let failureCued = false;
+		const cueConnectFailure = () => {
+			if (failureCued || callStartedAtRef.current !== null) {
+				return;
+			}
+			failureCued = true;
+			playSound("call-error");
+		};
 		const conn = new VoiceSessionConnection(targetRef.current, {
 			conversationId: optionsRef.current.conversationId,
 			agentId: optionsRef.current.agentId,
 			sttEngine: optionsRef.current.sttEngine,
 			ttsEngine: optionsRef.current.ttsEngine,
 			ttsVoice: optionsRef.current.ttsVoice,
+			// The Ryu ring replaces the built-in one; muted or disabled sounds give
+			// a silent connect rather than falling back to the default ring.
+			ringback: () => startLoopingSound("call-ring"),
 			handlers: {
 				onCallEnded: (summary) => {
 					if (mountedRef.current) {
@@ -164,6 +206,8 @@ export function useVoiceMode(
 				onReady: () => {
 					if (connRef.current === conn) {
 						callStartedAtRef.current = Date.now();
+						setCallDucking(true);
+						playSound("call-join");
 					}
 				},
 				onAudioLevel: pushAudioLevel,
@@ -215,15 +259,28 @@ export function useVoiceMode(
 					// The assistant turn is done — the next delta opens a new line.
 					assistantIdRef.current = null;
 				},
-				onError: (_code, message) => setError(message),
+				onError: (_code, message) => {
+					setError(message);
+					if (connRef.current === conn) {
+						cueConnectFailure();
+					}
+				},
 				onClose: () => {
+					// A hang-up already detached this connection (and cued the leave).
 					if (connRef.current !== conn) {
 						return;
 					}
+					if (callStartedAtRef.current === null) {
+						cueConnectFailure();
+					} else {
+						playSound("call-leave");
+					}
 					connRef.current = null;
+					setCallDucking(false);
 					setActive(false);
 					setElapsedSeconds(0);
 					setPhase("idle");
+					mutedRef.current = false;
 					setMuted(false);
 					callStartedAtRef.current = null;
 					resetLevels();
@@ -235,6 +292,7 @@ export function useVoiceMode(
 			if (connRef.current !== conn) {
 				return;
 			}
+			cueConnectFailure();
 			setError(
 				e instanceof Error
 					? e.message
@@ -242,21 +300,21 @@ export function useVoiceMode(
 			);
 			stop();
 		});
-	}, [pushAudioLevel, resetLevels, stop]);
+	}, [pushAudioLevel, resetLevels, setCallDucking, stop]);
 
 	const interrupt = useCallback(() => {
 		connRef.current?.abort();
 	}, []);
 
 	const toggleMute = useCallback(() => {
-		setMuted((current) => {
-			const next = !current;
-			connRef.current?.setMuted(next);
-			if (next) {
-				resetLevels();
-			}
-			return next;
-		});
+		const next = !mutedRef.current;
+		mutedRef.current = next;
+		connRef.current?.setMuted(next);
+		playSound(next ? "mute" : "unmute", { gesture: true });
+		if (next) {
+			resetLevels();
+		}
+		setMuted(next);
 	}, [resetLevels]);
 
 	useEffect(() => {
@@ -281,8 +339,9 @@ export function useVoiceMode(
 			mountedRef.current = false;
 			connRef.current?.close();
 			connRef.current = null;
+			setCallDucking(false);
 		};
-	}, []);
+	}, [setCallDucking]);
 
 	return {
 		agentName: options.agentName?.trim() || "Ryu",

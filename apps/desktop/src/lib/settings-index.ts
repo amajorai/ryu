@@ -23,7 +23,7 @@
 // rows are readouts (a metric, a status line) and are deliberately not indexed.
 //
 // COVERAGE (stated plainly rather than implied):
-//   - ROW-LEVEL: General, Appearance, Developer, Account, Voice (App dialog);
+//   - ROW-LEVEL: General, Appearance, Developer, Account, Voice, Sounds (App dialog);
 //     Privacy, Storage, Encryption, Danger zone, Network, Integrations,
 //     Connections, Routing, Budgets, Updates (Gateway dialog).
 //   - GROUP-LEVEL only: Keys, Guardrails, Providers, Workspace, Defaults, Usage,
@@ -39,6 +39,7 @@ import { APP_APPEARANCE_SETTINGS_ENTRIES } from "./settings-index/app-appearance
 import { APP_APPEARANCE_MORE_SETTINGS_ENTRIES } from "./settings-index/app-appearance-more.ts";
 import { APP_GENERAL_SETTINGS_ENTRIES } from "./settings-index/app-general.ts";
 import { APP_OTHER_SETTINGS_ENTRIES } from "./settings-index/app-other.ts";
+import { APP_SOUNDS_SETTINGS_ENTRIES } from "./settings-index/app-sounds.ts";
 import { GATEWAY_SETTINGS_ENTRIES } from "./settings-index/gateway.ts";
 import { GATEWAY_MORE_SETTINGS_ENTRIES } from "./settings-index/gateway-more.ts";
 
@@ -157,6 +158,7 @@ export const SETTINGS_SECTION_LABELS = {
 	keyboard: "Keyboard Shortcuts",
 	updates: "Updates",
 	voice: "Voice",
+	sounds: "Sounds",
 	developer: "Developer",
 	sync: "Settings Sync",
 	account: "Account",
@@ -210,6 +212,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 	...APP_APPEARANCE_SETTINGS_ENTRIES,
 	...APP_APPEARANCE_MORE_SETTINGS_ENTRIES,
 	...APP_OTHER_SETTINGS_ENTRIES,
+	...APP_SOUNDS_SETTINGS_ENTRIES,
 	...GATEWAY_SETTINGS_ENTRIES,
 	...GATEWAY_MORE_SETTINGS_ENTRIES,
 ];

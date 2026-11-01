@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type QuestEvent, streamQuestEvents } from "@/src/lib/api/quests.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
+import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 /** Raise an OS notification (no-op when the user turned them off). */
@@ -59,6 +60,10 @@ export function useQuestEvents(): void {
 					}),
 					description: event.reason,
 				});
+				playSound("quest-suggest", {
+					key: `quest-suggest:${event.quest.id}`,
+					source: "stream",
+				});
 				osNotify(
 					`Finished "${event.quest.title}"?`,
 					event.reason,
@@ -72,6 +77,10 @@ export function useQuestEvents(): void {
 					description:
 						event.quest.suggestion?.reason ?? "Detected from your activity.",
 				});
+				playSound("quest-complete", {
+					key: `quest:${event.quest.id}`,
+					source: "stream",
+				});
 				osNotify(
 					`Done: ${event.quest.title}`,
 					"Ryu detected this task as finished.",
@@ -79,6 +88,14 @@ export function useQuestEvents(): void {
 					() =>
 						currentAuthority.current === authority && !controller.signal.aborted
 				);
+			} else if (event.type === "completed") {
+				// A manual completion (Inbox accept, the quests app) has no toast,
+				// but the reward cue still lands. The stream is the one source, so
+				// the mutation's onSuccess must not play it too.
+				playSound("quest-complete", {
+					key: `quest:${event.quest.id}`,
+					source: "stream",
+				});
 			}
 			refreshQuests();
 		};

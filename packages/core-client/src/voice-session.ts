@@ -38,14 +38,18 @@ import {
 	appendWebSocketTicket,
 	requestWebSocketTicket,
 } from "./client.ts";
-import { startVoiceRingback } from "./voice-ringback.ts";
+import { audioLevel, downsample, floatToPcm16 } from "./voice-pcm.ts";
+import {
+	startVoiceRingback,
+	type VoiceRingbackFactory,
+} from "./voice-ringback.ts";
+
+export type { VoiceRingbackFactory } from "./voice-ringback.ts";
 
 /** Rate the server's VAD + STT expect; the client resamples the mic to this. */
 const TARGET_SAMPLE_RATE = 16_000;
 /** ScriptProcessor buffer size (frames). 4096 ≈ 85 ms @ 48 kHz — low latency. */
 const CAPTURE_BUFFER_SIZE = 4096;
-/** Visual gain applied to the mic RMS before it reaches the UI (0..1). */
-const AUDIO_LEVEL_GAIN = 5;
 /** `WebSocket.OPEN`. */
 const WEBSOCKET_OPEN = 1;
 
@@ -83,6 +87,8 @@ export interface VoiceSessionOptions {
 	handlers?: VoiceSessionHandlers;
 	/** The user-identity JWT (Better Auth). Omit for the local user. */
 	jwt?: string | null;
+	/** Ring while connecting. Omit = built-in ringback; false = silent; factory = custom. */
+	ringback?: VoiceRingbackFactory | false;
 	/** STT engine hint (`"whisper"` | `"audiocpp"` | `"parakeet"`). */
 	sttEngine?: string;
 	/** TTS engine hint (`"outetts"` | a RyuTTS engine id). */
@@ -96,50 +102,6 @@ export function voiceWsUrl(target: ApiTarget, _jwt?: string | null): string {
 	const url = new URL(apiUrl(target, "/api/voice/ws"));
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 	return url.toString();
-}
-
-/** Downsample mono Float32 PCM to the target rate (linear interpolation). */
-function downsample(
-	input: Float32Array,
-	inRate: number,
-	outRate: number
-): Float32Array {
-	if (outRate >= inRate) {
-		return input;
-	}
-	const ratio = inRate / outRate;
-	const outLength = Math.floor(input.length / ratio);
-	const out = new Float32Array(outLength);
-	for (let i = 0; i < outLength; i++) {
-		const pos = i * ratio;
-		const idx = Math.floor(pos);
-		const frac = pos - idx;
-		const a = input[idx] ?? 0;
-		const b = input[idx + 1] ?? a;
-		out[i] = a + (b - a) * frac;
-	}
-	return out;
-}
-
-/** Convert mono Float32 (−1..1) to little-endian PCM16 bytes. */
-function floatToPcm16(samples: Float32Array): ArrayBuffer {
-	const buffer = new ArrayBuffer(samples.length * 2);
-	const view = new DataView(buffer);
-	for (let i = 0; i < samples.length; i++) {
-		const s = Math.max(-1, Math.min(1, samples[i] ?? 0));
-		view.setInt16(i * 2, s < 0 ? s * 0x80_00 : s * 0x7f_ff, true);
-	}
-	return buffer;
-}
-
-/** Convert one mono Float32 frame into a visual-friendly normalized RMS level. */
-function audioLevel(samples: Float32Array): number {
-	let sumSquares = 0;
-	for (const sample of samples) {
-		sumSquares += sample * sample;
-	}
-	const rms = Math.sqrt(sumSquares / (samples.length || 1));
-	return Math.min(1, rms * AUDIO_LEVEL_GAIN);
 }
 
 /**
@@ -187,7 +149,7 @@ export class VoiceSessionConnection {
 		if (this.closed) {
 			return;
 		}
-		this.stopRingback = startVoiceRingback();
+		this.startRinging();
 		// Acquire the mic first — with AEC/NS/AGC so the assistant's own TTS output
 		// doesn't feed back into the mic and cause false barge-in.
 		let mic: MediaStream;
@@ -298,6 +260,17 @@ export class VoiceSessionConnection {
 		this.closed = true;
 		this.socket?.close();
 		this.socket = null;
+	}
+
+	private startRinging(): void {
+		const { ringback } = this.options;
+		const ring = ringback === undefined ? startVoiceRingback : ringback;
+		try {
+			this.stopRingback = ring ? ring() : null;
+		} catch {
+			// A failing custom ring must never block the call itself.
+			this.stopRingback = null;
+		}
 	}
 
 	private stopRinging(): void {

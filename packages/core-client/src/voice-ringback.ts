@@ -1,3 +1,9 @@
+/**
+ * Starts a connecting ring and returns the function that stops it. Pass one as
+ * `VoiceSessionOptions.ringback` to replace the built-in telephone ring.
+ */
+export type VoiceRingbackFactory = () => () => void;
+
 /** Telephone-style double ring, followed by a pause. No downloaded audio. */
 export function startVoiceRingback(): () => void {
 	if (!globalThis.AudioContext) {
