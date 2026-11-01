@@ -56,14 +56,14 @@ const initial = {
 	},
 	version: "2.0.0",
 };
-type Call = {
-	scope: string;
+interface Call {
+	authorization: string | undefined;
+	body: unknown;
+	jwt: string | undefined;
 	method: string;
 	path: string;
-	body: unknown;
-	authorization: string | undefined;
-	jwt: string | undefined;
-};
+	scope: string;
+}
 async function install(page: Page) {
 	const immutable = structuredClone(baseline);
 	let current = structuredClone(initial);
@@ -115,6 +115,22 @@ async function install(page: Page) {
 			return;
 		}
 
+		// The editor's account-access panel asks Core whether the agent would
+		// start (useAgentLaunchCheck, added in #860 / 4f7563c79d). It is a
+		// read-only POST that persists nothing, so it is not a fixture mutation.
+		if (path === "/api/agents/launch-check" && method === "POST") {
+			await fulfill({
+				launchable: true,
+				reason: null,
+				code: null,
+				sandbox_supported: true,
+				runs_on_managed_pi: false,
+				vendor_provider: null,
+				limited_model_source: null,
+				model_warning: null,
+			});
+			return;
+		}
 		if (path === RESTORE && method === "POST") {
 			if (held) {
 				await held;

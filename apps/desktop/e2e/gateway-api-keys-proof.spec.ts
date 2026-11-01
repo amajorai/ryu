@@ -13,10 +13,14 @@ const evidence = (name: string) =>
 				name
 			);
 
-/** A client key's row title in the key list. The CLI setup panel above the
- * list names the same tools (Claude Code, Gemini CLI), so match the list. */
+/** A client key's row title in the key list. The CLI setup panel names the
+ * same tools (Claude Code, Gemini CLI) and, since the Ryu Quiet flat-row pass
+ * (fc38dd6ea6), renders them as the same settings rows, so match only the
+ * revocable key rows. */
 function keyEntry(page: Page, name: string) {
 	return page
+		.locator('[data-slot="item"]')
+		.filter({ has: page.getByRole("button", { name: "Revoke" }) })
 		.locator('[data-slot="item-title"]')
 		.getByText(name, { exact: true });
 }
@@ -107,7 +111,8 @@ test("creates a key from Enter and trims the submitted name", async ({
 
 test("revokes a key and refreshes the visible key list", async ({ page }) => {
 	await page.getByRole("button", { name: "Revoke" }).click();
-	await expect(page.getByText("No keys", { exact: true })).toBeVisible();
+	// fc38dd6ea6 (Ryu Quiet) shortened the empty row to a single muted line.
+	await expect(page.getByText("No keys yet", { exact: true })).toBeVisible();
 	await expect(page.getByText("Cursor", { exact: true })).toHaveCount(0);
 	const revokedKeys = await page.evaluate(() => {
 		// SAFETY: These controlled create/revoke actions publish registerByoaKey/removeByoaKey auth.api_keys patches; the native ApiSection creates string name/key entries, the fixture seeds string entries, and its capture retains that exact JSON body.

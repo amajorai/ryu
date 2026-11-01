@@ -55,10 +55,13 @@ const forcedTheme =
 		? "dark"
 		: undefined;
 if (root) {
+	// next-themes 0.4 derives `resolvedTheme` from the stored theme and ignores
+	// `forcedTheme`, so `?theme=dark` must also seed the default for the backdrop
+	// (which reads `resolvedTheme`) to pick its dark variant.
 	createRoot(root).render(
 		<ThemeProvider
 			attribute="class"
-			defaultTheme="light"
+			defaultTheme={forcedTheme ?? "light"}
 			enableSystem={false}
 			forcedTheme={forcedTheme}
 		>

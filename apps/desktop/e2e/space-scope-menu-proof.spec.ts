@@ -416,9 +416,11 @@ test.describe("Desktop Space scope menu", () => {
 		const blade = confirmDialog.getByRole("slider", {
 			name: "Delete Synthetic Space",
 		});
+		// The confirm is a ticket stub torn downward: ArrowDown advances it one of
+		// five steps (KEY_DELTAS in cut-to-confirm-config.ts, so at 07d403e33).
 		await blade.focus();
 		for (let step = 0; step < 5; step += 1) {
-			await blade.press("ArrowRight");
+			await blade.press("ArrowDown");
 		}
 		await expect(page.getByTestId("last-error")).toContainText(
 			"/api/spaces/space-scope-proof failed: 503"
@@ -427,7 +429,7 @@ test.describe("Desktop Space scope menu", () => {
 		await expect(confirmDialog).toBeVisible();
 		await blade.focus();
 		for (let step = 0; step < 5; step += 1) {
-			await blade.press("ArrowRight");
+			await blade.press("ArrowDown");
 		}
 		await expect(confirmDialog).toBeHidden();
 		await expect(page.getByTestId("space-name")).toHaveText("deleted");

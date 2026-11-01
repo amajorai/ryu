@@ -6,6 +6,7 @@ import {
 	createUnreadMessageState,
 	getIncomingMessageIds,
 	getUnreadMessageLabel,
+	isAtLiveEdge,
 	reconcileUnreadMessageState,
 } from "./message-list-unread.ts";
 
@@ -110,5 +111,20 @@ describe("message-list unread state", () => {
 		);
 
 		expect(trimmed.unreadIds).toEqual([]);
+	});
+});
+
+describe("isAtLiveEdge", () => {
+	it("is true only when the last pixel is already in view", () => {
+		expect(
+			isAtLiveEdge({ clientHeight: 600, scrollHeight: 2909, scrollTop: 2309 })
+		).toBe(true);
+		// Sub-pixel scroll positions still count as the end.
+		expect(
+			isAtLiveEdge({ clientHeight: 600, scrollHeight: 2909, scrollTop: 2308.5 })
+		).toBe(true);
+		expect(
+			isAtLiveEdge({ clientHeight: 600, scrollHeight: 2909, scrollTop: 2100 })
+		).toBe(false);
 	});
 });

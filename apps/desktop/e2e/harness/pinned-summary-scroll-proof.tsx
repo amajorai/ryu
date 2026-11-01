@@ -140,7 +140,7 @@ function Story() {
 
 				<div
 					aria-hidden="true"
-					className="w-(--workspace-content-inset) shrink-0 transition-all duration-300 ease-(--proof-dock-ease)"
+					className="w-(--workspace-content-inset) shrink-0 transition-[width] duration-300 ease-(--proof-dock-ease)"
 					data-testid="sidebar-spacer"
 				/>
 

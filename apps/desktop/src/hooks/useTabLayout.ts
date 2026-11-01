@@ -1,5 +1,6 @@
 import { useIsMobile } from "@ryu/ui/hooks/use-mobile.ts";
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 import { isDetachedTabWindow } from "@/src/lib/tab-transfer.ts";
 
 /** Tab layout preference: the compact title-bar strip, sidebar list, center-pane
@@ -60,5 +61,5 @@ export function setTabLayout(layout: TabLayout) {
 	localStorage.setItem(KEY, layout);
 	// Same-document listeners don't get the native `storage` event, so broadcast
 	// one ourselves — every useTabLayout() consumer re-reads on this.
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 }

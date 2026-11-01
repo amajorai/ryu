@@ -117,8 +117,10 @@ test("approval list retry and manual refresh recover the feeds with real loaded 
 	).toBeVisible();
 
 	await page.evaluate(() => window.__approvalsProof.clearCalls());
-	await frame.getByRole("button", { name: "Refresh" }).click();
-	await expect(frame.getByRole("button", { name: "Refresh" })).toBeEnabled();
+	await frame.getByRole("button", { exact: true, name: "Refresh" }).click();
+	await expect(
+		frame.getByRole("button", { exact: true, name: "Refresh" })
+	).toBeEnabled();
 	await expect
 		.poll(async () => {
 			const methods = (await calls(page)).map((call) => call.method);
@@ -168,7 +170,9 @@ test("pull-to-refresh keeps the drag gesture and reloads each inbox feed", async
 			].every((method) => methods.includes(method));
 		})
 		.toBe(true);
-	await expect(frame.getByRole("button", { name: "Refresh" })).toBeEnabled();
+	await expect(
+		frame.getByRole("button", { exact: true, name: "Refresh" })
+	).toBeEnabled();
 });
 
 test("approve and reject commit decisions, serialize in-flight actions, and leave history", async ({

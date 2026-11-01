@@ -222,6 +222,10 @@ queryClient.setDefaultOptions({
 	queries: { retry: false, refetchOnWindowFocus: false },
 });
 useProductModeStore.getState().setConsoleAccess(true);
+// OS is held behind its rollout flag (`osAccess`); without it the requested
+// OS mode resolves to Bot, which hides the menu bar's Notifications and
+// Downloads controls this proof walks.
+useProductModeStore.getState().setOsAccess(true);
 setProductMode("os");
 const rootElement = document.getElementById("root");
 if (!rootElement) {

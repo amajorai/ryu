@@ -17,6 +17,9 @@ export default defineConfig({
 	optimizeDeps: {
 		entries: ["extension-waitlist-scope-proof.html"],
 		include: ["lucide-react", "zustand"],
+		// esbuild 0.28 refuses to lower destructuring for Vite's default
+		// pre-bundle targets, which kills the dev server; target what Chromium runs.
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		dedupe: ["react", "react-dom"],

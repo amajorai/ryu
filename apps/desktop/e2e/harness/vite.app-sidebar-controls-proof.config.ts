@@ -18,6 +18,11 @@ export default defineConfig({
 		alias: { "@": path.resolve(import.meta.dirname, "../..") },
 	},
 	build: {
+		// Match the desktop webview target (vite.config.ts): the sidebar section
+		// graph reaches @tauri-apps/plugin-store through useNodeStore, whose
+		// `const [value, exists] = await …` esbuild cannot lower to Vite's
+		// default es2020 browser targets, so the preview build failed.
+		target: "chrome105",
 		rollupOptions: {
 			input: path.resolve(
 				import.meta.dirname,

@@ -383,9 +383,12 @@ export function FileTreePanel({
 			    scroller, so every ancestor needs a definite height. Keyed on the
 			    constructor-time OPTIONS (not the whole prefs blob) so display options
 			    take effect — theme is applied as host CSS variables instead, and
-			    keying on it would throw away expansion/scroll state on every switch. */}
+			    keying on it would throw away expansion/scroll state on every switch.
+			    The tree's shadow `:host` declares `color-scheme: light dark`, which
+			    would follow the OS; pin it to the app's light/dark mode instead (an
+			    explicit value: the CSS minifier rewrites `inherit` to `normal`). */}
 			<div
-				className="min-h-0 flex-1 overflow-hidden p-1"
+				className="min-h-0 flex-1 overflow-hidden p-1 [&_file-tree-container]:[color-scheme:light] dark:[&_file-tree-container]:[color-scheme:dark]"
 				inert={viewerPath !== null}
 				ref={treeThemeHost}
 			>

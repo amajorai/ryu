@@ -3,12 +3,18 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { browserContentKeyHost } from "./browser-content-key-host.ts";
 
 const harnessDir = path.resolve(import.meta.dirname);
 const desktopRoot = path.resolve(harnessDir, "../..");
 
 export default defineConfig({
-	plugins: [react()],
+	plugins: [
+		// The sealed workbench layout needs a content key; see
+		// browser-content-key-host.ts.
+		browserContentKeyHost(),
+		react(),
+	],
 	define: { "process.env": {} },
 	css: {
 		postcss: {

@@ -136,7 +136,9 @@ test("ReferencePanel validates analysis, persists and clears profiles, and copie
 	);
 	const title = uniqueTitle("Coverage reference study");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await openOverflowTab(page, "Reference", "reference");
 
 	const source = page.getByLabel("Reference video");
@@ -273,7 +275,9 @@ test("ReferencePanel validates analysis, persists and clears profiles, and copie
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "Reference", "reference");
 	await expect(page.getByLabel("Reference video")).toHaveValue(asset.id);
 	await expect(page.getByLabel("Reference brief")).toHaveValue(
@@ -353,7 +357,9 @@ test("ReferencePanel validates analysis, persists and clears profiles, and copie
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "Reference", "reference");
 	await expect(page.getByLabel("Reference video")).toHaveValue("");
 	await expect(

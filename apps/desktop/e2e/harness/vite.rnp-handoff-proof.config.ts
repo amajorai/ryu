@@ -8,6 +8,9 @@ const harnessDir = path.resolve(import.meta.dirname);
 export default defineConfig({
 	plugins: [react()],
 	build: {
+		// The desktop webview target (vite.config.ts): the locked esbuild cannot
+		// lower dependency destructuring to Vite's default es2020 build targets.
+		target: "chrome105",
 		outDir: path.resolve(harnessDir, "dist-rnp-handoff"),
 		emptyOutDir: true,
 		rollupOptions: {

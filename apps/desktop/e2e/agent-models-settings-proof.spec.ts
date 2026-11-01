@@ -80,7 +80,8 @@ test("keeps agent probing lazy and renders each advertised model source", async 
 	).toBeVisible();
 	await openAgent(page, "Self Selecting Agent");
 	await expect(
-		page.getByText(/This agent advertises no model list of its own/u)
+		// Copy shortened in 1ca1de7ee8 (Ryu Quiet #914, one-line captions).
+		page.getByText(/This agent picks its own models/u)
 	).toBeVisible();
 
 	snapshot = await readState(page);

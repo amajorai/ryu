@@ -126,7 +126,12 @@ test("overview routes to the correct chat actions and remembers collapse state",
 		.poll(async () => (await requestsTo(page, "/api/activity?limit=24")).length)
 		.toBe(1);
 	await expect
-		.poll(async () => (await requestsTo(page, "/api/approvals")).length)
+		// The list opts in to app-job approvals (approvalsListPath, ec6fac15e2,
+		// before #914), so the exact read carries `?include=app_jobs`.
+		.poll(
+			async () =>
+				(await requestsTo(page, "/api/approvals?include=app_jobs")).length
+		)
 		.toBe(1);
 	await expect
 		.poll(
@@ -163,7 +168,7 @@ test("overview routes to the correct chat actions and remembers collapse state",
 	).toEqual(
 		[
 			"GET /api/activity?limit=24",
-			"GET /api/approvals",
+			"GET /api/approvals?include=app_jobs",
 			"GET /api/conversations/chat-goal/goal",
 			"GET /api/conversations/chat-passive/goal",
 		].sort()
@@ -415,13 +420,31 @@ test("feed filters and reactions stay local, survive reload, and offer a data re
 		summaryPost.getByText("Keep this in the launch review.", { exact: true })
 	).toBeVisible();
 	await expect(commentInput).toHaveValue("");
-	const engagement = await page.evaluate(() =>
-		JSON.parse(localStorage.getItem("ryu:bot-feed-engagement:v1") ?? "{}")
+	// Feed engagement is sealed at rest (content-seal.ts SEALED_LOCAL_KEYS,
+	// before #914): read it back through the app's own loader, and check that
+	// no plaintext copy of the comment reached localStorage.
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				/* SAFETY: bot-profile-card-proof.tsx installs __botProfileCardProof before this proof page is evaluated. */ (
+					window as Window & {
+						__botProfileCardProof?: { readEngagement: () => unknown };
+					}
+				).__botProfileCardProof?.readEngagement()
+			)
+		)
+		.toEqual({
+			comments: { "activity-summary": ["Keep this in the launch review."] },
+			liked: ["activity-summary"],
+		});
+	const rawStorage = await page.evaluate(() =>
+		Object.entries(localStorage).map(([key, value]) => `${key}=${value}`)
 	);
-	expect(engagement).toEqual({
-		comments: { "activity-summary": ["Keep this in the launch review."] },
-		liked: ["activity-summary"],
-	});
+	expect(
+		rawStorage.filter((entry) =>
+			entry.includes("Keep this in the launch review.")
+		)
+	).toEqual([]);
 
 	await card.getByRole("button", { name: "Customize feed" }).first().click();
 	await page.getByRole("checkbox", { name: "Show Watch" }).first().click();

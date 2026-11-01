@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 const STORY_URL = "/button-label-overflow-proof.html";
+// FadeOverflowText masks a clipped label with the `fade-text-edge` utility;
+// `text-fade-edge` is only a legacy alias that no shared control applies.
 
 const CASES = [
 	{
@@ -46,7 +48,7 @@ test("shared controls fade their clipped labels at their max width", async ({
 			.poll(() =>
 				label.evaluate((element) => ({
 					clipped: element.scrollWidth > element.clientWidth + 1,
-					faded: element.classList.contains("text-fade-edge"),
+					faded: element.classList.contains("fade-text-edge"),
 				}))
 			)
 			.toEqual({ clipped: true, faded: true });
@@ -83,7 +85,7 @@ test("a short label stays crisp across the shared button primitive", async ({
 	const label = page.getByTestId("short-trigger").locator("span").first();
 
 	await expect(label).toHaveText("Project");
-	await expect(label).not.toHaveClass(/text-fade-edge/);
+	await expect(label).not.toHaveClass(/fade-text-edge/);
 	await label.hover();
 	await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0);
 });
@@ -99,7 +101,7 @@ test("select value overflow state follows selection changes", async ({
 	await trigger.click();
 	await page.getByRole("option", { name: "Project", exact: true }).click();
 	await expect(label).toHaveText("Project");
-	await expect(label).not.toHaveClass(/text-fade-edge/);
+	await expect(label).not.toHaveClass(/fade-text-edge/);
 	await label.hover();
 	await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0);
 
@@ -118,7 +120,7 @@ test("select value overflow state follows selection changes", async ({
 		.poll(() =>
 			label.evaluate((element) => ({
 				clipped: element.scrollWidth > element.clientWidth + 1,
-				faded: element.classList.contains("text-fade-edge"),
+				faded: element.classList.contains("fade-text-edge"),
 			}))
 		)
 		.toEqual({

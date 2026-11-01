@@ -78,7 +78,13 @@ export default defineConfig({
 	],
 	define: { "process.env": {} },
 	css: { postcss: { plugins: [tailwindcss()] } },
-	optimizeDeps: { entries: ["provider-routing-regressions-proof.html"] },
+	optimizeDeps: {
+		entries: ["provider-routing-regressions-proof.html"],
+		// The prebundled graph (posthog, better-auth, react-query) uses syntax
+		// esbuild cannot lower to the default browser target; every other proof
+		// harness prebundles for esnext too.
+		esbuildOptions: { target: "esnext" },
+	},
 	resolve: {
 		alias: [
 			{

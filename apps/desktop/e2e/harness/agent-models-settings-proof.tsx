@@ -173,6 +173,9 @@ function installFixture(): AgentModelsProofState {
 					configOptions: [
 						{
 							category: "model",
+							// ACP select options always report their current value; the
+							// core-client contract rejects a select without one.
+							currentValue: "opencode-balanced",
 							id: "model",
 							name: "Model",
 							options: [
@@ -210,7 +213,15 @@ function installFixture(): AgentModelsProofState {
 					[body.model]: body.enabled,
 				};
 				persist(stored);
-				return response({ agentModelOverrides: stored.agentModelOverrides });
+				// Core answers with the whole catalog, and Desktop validates its
+				// required `apiTypes`, `providers` and `thinkingLevels` before
+				// reading the overrides.
+				return response({
+					agentModelOverrides: stored.agentModelOverrides,
+					apiTypes: [],
+					providers: [],
+					thinkingLevels: [],
+				});
 			}
 			return response({ error: "fixture_route_not_found" }, 404);
 		}

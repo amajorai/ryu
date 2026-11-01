@@ -304,13 +304,22 @@ test.describe("sidebar chat row — contributed rows on both menus", () => {
 					chatPayload: transfer.getData(
 						"application/x-ryu-resource-visibility-chat"
 					),
+					sidebarChatsPayload: transfer.getData(
+						"application/x-ryu-sidebar-chats"
+					),
 				};
 			});
+			// The row also carries the multi-chat sidebar payload since
+			// 7c09ea06d2 (SIDEBAR_CHATS_DND_MIME in sidebar-chat-selection.tsx).
 			expect(dragPayload.types).toEqual([
 				"application/x-ryu-resource-visibility",
 				"application/x-ryu-resource-visibility-chat",
+				"application/x-ryu-sidebar-chats",
 				"text/plain",
 			]);
+			expect(JSON.parse(dragPayload.sidebarChatsPayload)).toEqual({
+				ids: ["conv-alpha"],
+			});
 			expect(JSON.parse(dragPayload.payload)).toEqual({
 				from: "private",
 				id: "conv-alpha",

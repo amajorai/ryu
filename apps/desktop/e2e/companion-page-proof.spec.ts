@@ -44,7 +44,11 @@ async function waitForCompletedFit(page: Page) {
 	await expect
 		.poll(() =>
 			page.evaluate(() => {
-				const content = document.querySelector("#root > div");
+				// The always-mounted toaster anchor (data-slot="toaster") is also a
+				// direct #root child and precedes the Companion content.
+				const content = document.querySelector(
+					'#root > div:not([data-slot="toaster"])'
+				);
 				return (
 					content instanceof HTMLElement &&
 					Math.abs(

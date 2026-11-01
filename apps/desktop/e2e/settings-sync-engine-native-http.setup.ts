@@ -48,8 +48,10 @@ export default async function setup(config: FullConfig) {
 			waitUntil: "networkidle",
 			timeout: 30_000,
 		});
+		// 99500215a7 dropped the section title that repeated the pane title
+		// ("Settings Sync"); the opt-in row is now the tab's first content.
 		await expect(
-			page.getByRole("heading", { name: "Settings Sync", exact: true })
+			page.getByText("Sync My Settings Across Machines", { exact: true })
 		).toBeVisible({ timeout: 10_000 });
 		browserIdentity = await page.evaluate(() => ({
 			userAgent: navigator.userAgent,

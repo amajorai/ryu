@@ -209,8 +209,10 @@ test("chooses a contributed local model and saves while Shadow is stopped", asyn
 	);
 	expect(captureWrites).toEqual([{ body: savedCapture, status: 502 }]);
 	await expect(
+		// The Capture group holds both the Screen recording and Pause all capture
+		// switches, so scope to the Screen recording row itself.
 		page
-			.getByRole("list")
+			.locator('[data-slot="item"]')
 			.filter({ hasText: "Screen recording" })
 			.getByRole("switch")
 	).not.toBeChecked();

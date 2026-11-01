@@ -1,5 +1,8 @@
 import { FolderAddIcon } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { I18nProvider } from "@ryu/i18n/react";
+import { SidebarProvider } from "@ryu/ui/components/sidebar.tsx";
+import { MobileLayoutContext } from "@ryu/ui/hooks/use-mobile.ts";
 import { type ComponentType, type ReactNode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -383,7 +386,11 @@ function Story() {
 				data-testid="projects-section"
 			>
 				<h1 className="mb-2 px-2 font-semibold text-sm">Sidebar controls</h1>
-				<SectionFixture />
+				{/* The paging controls render production SidebarMenuButton rows since
+				    306ce31b7f, which read the real sidebar context like the app shell. */}
+				<SidebarProvider className="min-h-0 flex-col">
+					<SectionFixture />
+				</SidebarProvider>
 			</div>
 		</main>
 	);
@@ -391,5 +398,15 @@ function Story() {
 
 const root = document.getElementById("root");
 if (root) {
-	createRoot(root).render(<Story />);
+	// The overflow popover's search label reads the i18n catalog (useI18n).
+	// The desktop window never drops below 800px (tauri.conf.json minWidth), so
+	// pin the pointer layout: the 640px proof viewport would otherwise turn the
+	// section menus into phone sheets whose submenus never open from ArrowRight.
+	createRoot(root).render(
+		<I18nProvider>
+			<MobileLayoutContext.Provider value={false}>
+				<Story />
+			</MobileLayoutContext.Provider>
+		</I18nProvider>
+	);
 }

@@ -33,13 +33,22 @@ test.beforeEach(async ({ page }) => {
 	);
 });
 
+// 1ca1de7ee8 (Ryu Quiet) moved the Connected/Configured badge onto the row's
+// meta line after the API type, so a card's name reads
+// "<label> <api> · <status>".
+const CHATGPT_CONNECTED = /^ChatGPT openai-completions · Connected$/;
+const OPENROUTER_CONFIGURED = /^OpenRouter openai-completions · Configured$/;
+const LOCAL_SERVER_CONFIGURED =
+	/Local model server openai-responses · custom · Configured$/;
+
 test("ChatGPT OAuth account routing saves strategy and priority", async ({
 	page,
 }) => {
 	await page.goto("/provider-connections-proof.html");
-	await page.getByRole("button", { name: /^ChatGPT Connected/ }).click();
+	await page.getByRole("button", { name: CHATGPT_CONNECTED }).click();
+	// The pool controls' heading is "Account routing" (already so at 07d403e33).
 	await expect(
-		page.getByRole("heading", { name: "OAuth account routing" })
+		page.getByRole("heading", { name: "Account routing", exact: true })
 	).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "ChatGPT account 2", exact: true })
@@ -52,7 +61,7 @@ test("ChatGPT OAuth account routing saves strategy and priority", async ({
 		page.getByRole("button", { name: "Save routing" })
 	).toBeDisabled();
 	const routingPanel = page
-		.getByRole("heading", { name: "OAuth account routing" })
+		.getByRole("heading", { name: "Account routing", exact: true })
 		.locator("xpath=../..");
 	await routingPanel.scrollIntoViewIfNeeded();
 	await routingPanel.screenshot({
@@ -62,7 +71,7 @@ test("ChatGPT OAuth account routing saves strategy and priority", async ({
 		),
 	});
 	await page.reload();
-	await page.getByRole("button", { name: /^ChatGPT Connected/ }).click();
+	await page.getByRole("button", { name: CHATGPT_CONNECTED }).click();
 	await expect(page.getByLabel("Strategy")).toContainText("Round robin");
 	await expect(page.locator("#oauth-priority-chatgpt-b")).toHaveValue("2");
 });
@@ -104,7 +113,7 @@ test("provider connection groups and account actions render without errors", asy
 		page.getByRole("button", { name: /Claude account 2 You/ })
 	).toBeVisible();
 
-	await page.getByRole("button", { name: /OpenRouter Configured/ }).click();
+	await page.getByRole("button", { name: OPENROUTER_CONFIGURED }).click();
 	await expect(
 		page.getByRole("button", { name: "Login", exact: true })
 	).toBeVisible();
@@ -135,9 +144,7 @@ test("custom provider shows saved model discovery after its endpoint goes offlin
 	page,
 }) => {
 	await page.goto("/provider-connections-proof.html");
-	await page
-		.getByRole("button", { name: /Local model server Configured/ })
-		.click();
+	await page.getByRole("button", { name: LOCAL_SERVER_CONFIGURED }).click();
 	await expect(
 		page.getByText("Showing models saved from the last successful discovery.")
 	).toBeVisible();
@@ -156,12 +163,19 @@ test("custom provider saves a replacement key from its existing card", async ({
 	page,
 }) => {
 	await page.goto("/provider-connections-proof.html");
-	await page
-		.getByRole("button", { name: /Local model server Configured/ })
-		.click();
+	await page.getByRole("button", { name: LOCAL_SERVER_CONFIGURED }).click();
 	const keyInput = page.locator("#key-local-model-server");
 	await keyInput.fill("synthetic-ui-replacement-key");
-	await page.getByRole("button", { name: "Save", exact: true }).click();
+	// Saving a key needs the spending-limit acknowledgement (SpendLimitConfirm,
+	// already gating at 07d403e33, before Ryu Quiet).
+	const save = page.getByRole("button", { name: "Save", exact: true });
+	await expect(save).toBeDisabled();
+	await page
+		.getByRole("checkbox", {
+			name: "I have set a spending limit for this key at Local model server",
+		})
+		.click();
+	await save.click();
 	await expect(
 		page.getByRole("button", { name: /Local API key You/ })
 	).toBeVisible();

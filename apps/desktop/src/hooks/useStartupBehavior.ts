@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 /** What the main window opens on when the app launches — a Chrome-style
     "On startup" preference:
@@ -44,5 +45,5 @@ export function setStartupBehavior(behavior: StartupBehavior) {
 	localStorage.setItem(KEY, behavior);
 	// Same-document listeners don't get the native `storage` event, so broadcast
 	// one ourselves — every useStartupBehavior() consumer re-reads on this.
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 }

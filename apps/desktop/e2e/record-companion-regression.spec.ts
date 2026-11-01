@@ -99,7 +99,9 @@ for (const config of recordCases) {
 		page,
 	}) => {
 		const companion = await mount(page, config.app);
+		// The toolbar action; an empty People directory repeats it in its empty state.
 		await companion
+			.getByRole("banner")
 			.getByRole("button", { name: config.open, exact: true })
 			.click();
 		const dialog = companion.getByRole("dialog");
@@ -137,7 +139,9 @@ for (const config of recordCases) {
 		page,
 	}) => {
 		const companion = await mount(page, config.app);
+		// The toolbar action; an empty People directory repeats it in its empty state.
 		await companion
+			.getByRole("banner")
 			.getByRole("button", { name: config.open, exact: true })
 			.click();
 		const dialog = companion.getByRole("dialog");

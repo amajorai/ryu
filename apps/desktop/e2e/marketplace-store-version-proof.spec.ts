@@ -59,6 +59,8 @@ async function installProductFixture(page: Page) {
 			"Read workspace notes and organize them into a concise report.",
 		permission_grants: [],
 		first_party: true,
+		// Required by the catalog entry wire contract.
+		built_in: false,
 	};
 	await page.route("**/*", async (route) => {
 		const request = route.request();
@@ -96,6 +98,19 @@ async function installProductFixture(page: Page) {
 				entitlement: { marketplaceApps: false },
 				features: null,
 				lifetime: null,
+			});
+			return;
+		}
+		if (method === "GET" && url.pathname === "/api/auth/get-session") {
+			// The account's feature-flag scope reads its active organization from
+			// the control-plane session with the buyer's bearer; no organization.
+			expect(url.search).toBe("");
+			expect(request.headers().authorization).toBe(
+				"Bearer store-version-buyer"
+			);
+			await reply({
+				session: { activeOrganizationId: null },
+				user: { id: "store-version-user" },
 			});
 			return;
 		}
@@ -158,10 +173,18 @@ async function installProductFixture(page: Page) {
 									runnables: [],
 									built_in: false,
 									local_only: false,
+									sidecar_name: null,
+									windows_first: false,
 								},
 							]
 						: [],
 				});
+				return;
+			}
+			if (url.pathname === "/api/gateway/org-features") {
+				// useAppsCatalog feature-detects org policy; an unmanaged node.
+				expect(url.search).toBe("");
+				await reply({ available: true, features: {}, managed: false });
 				return;
 			}
 			if (url.pathname === "/api/marketplace/packages/installed") {

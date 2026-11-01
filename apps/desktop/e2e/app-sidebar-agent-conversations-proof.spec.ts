@@ -7,6 +7,9 @@ test("agent thread rows open the exact conversation from pointer and keyboard", 
 	page,
 }) => {
 	await page.goto(STORY_URL);
+	// Agent rows are one line since 306ce31b7f: the thread toggle and edit
+	// actions swap in for the time stamp only while the row is hovered.
+	await page.getByTestId("messaging-agent-row").hover();
 	await page
 		.getByRole("button", { name: "Show 2 threads for Builder" })
 		.click();
@@ -219,7 +222,13 @@ test("messaging agent preview controls toggle threads and route edit without ope
 }, testInfo) => {
 	await page.goto(STORY_URL);
 	const row = page.getByTestId("messaging-agent-row");
-	await expect(row).toContainText("The branch has the revised layout.");
+	// Since 306ce31b7f the latest message is in the name's tooltip, not on a
+	// second row line, and the row actions appear while it is hovered.
+	await expect(row).not.toContainText("The branch has the revised layout.");
+	await row.getByText("Builder", { exact: true }).hover();
+	await expect(page.getByTestId("agent-chat-preview-builder")).toContainText(
+		"The branch has the revised layout."
+	);
 	const expandThreads = page.getByRole("button", {
 		name: "Show 2 threads for Builder",
 		exact: true,
@@ -247,7 +256,8 @@ test("messaging agent preview controls toggle threads and route edit without ope
 		])
 	);
 
-	await page.getByText("Builder", { exact: true }).click();
+	// The open name tooltip repeats "Builder"; click the row's own name.
+	await row.getByText("Builder", { exact: true }).click();
 	await expect(page.getByTestId("route-events")).toHaveText(
 		JSON.stringify([
 			{ options: { title: "Builder" }, path: "/agents/builder/edit" },

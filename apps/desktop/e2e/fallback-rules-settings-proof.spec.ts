@@ -221,15 +221,17 @@ test("creates and persists Ryu, provider-credit, and subscription-window rules t
 		},
 	});
 	card = ruleCard(section, ruleId);
+	// The scope picker is labelled "Subscription" (already so at 07d403e33,
+	// before Ryu Quiet): it offers Ryu subscription accounts beside agent logins.
 	await chooseOption(
 		page,
-		card.getByRole("combobox", { name: "Agent" }),
+		card.getByRole("combobox", { name: "Subscription" }),
 		"codex"
 	);
 	snapshot = await waitForWriteCount(page, 7);
-	await expect(card.getByRole("combobox", { name: "Agent" })).toContainText(
-		"codex"
-	);
+	await expect(
+		card.getByRole("combobox", { name: "Subscription" })
+	).toContainText("codex");
 	expect(snapshot.policy.rules[0]?.when).toMatchObject({ agent_id: "codex" });
 	card = ruleCard(section, ruleId);
 	await chooseOption(
@@ -394,8 +396,9 @@ test("a member without gateway.configure can read but cannot write fallback rule
 }) => {
 	await openRouting(page, "reset=true&scenario=lifecycle&permission=denied");
 	const section = fallbackSection(page);
+	// bc2b817e36 (Ryu Quiet) shortened the read-only banner to one line.
 	await expect(
-		page.getByText(/do not have the gateway.configure permission/i)
+		page.getByText(/Read-only\. Ask a workspace admin for gateway\.configure\./)
 	).toBeVisible();
 	await expect(
 		section.getByRole("button", { name: "Add rule", exact: true })

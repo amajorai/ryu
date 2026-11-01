@@ -17,6 +17,7 @@ import {
 import type { PiCatalog } from "../../src/lib/api/pi-config.ts";
 import { setInterfaceLevel } from "../../src/lib/interface-level.ts";
 import { parseProofJson } from "../fixture-json.ts";
+import { GATEWAY_CONFIG_REQUIRED_SECTIONS } from "./gateway-proof-contracts.ts";
 import "../../src/index.css";
 
 const TARGET: ApiTarget = {
@@ -122,6 +123,21 @@ const SmartRoutingSchema = z.object({
 	escalation_confirmations: z.number().optional(),
 	escalation_recent_message_window: z.number().optional(),
 	escalation_message_chars: z.number().optional(),
+	// The pool fields the card always writes back (smart-routing-save.ts); a
+	// Gateway serves them, so the fixture keeps them instead of stripping them.
+	allowed_models: z.array(z.string()).optional(),
+	allowed_providers: z.array(z.string()).optional(),
+	agent_pools: z
+		.record(
+			z.string(),
+			z.object({
+				allowed_models: z.array(z.string()),
+				allowed_providers: z.array(z.string()),
+			})
+		)
+		.optional(),
+	// This fixture serves no per-agent route overrides.
+	agent_routes: z.record(z.string(), z.never()).optional(),
 });
 const RoutingSchema = z.object({
 	default_provider: z.enum([
@@ -256,9 +272,9 @@ function installGatewayMock(): void {
 			if (state.omitSmartRoutingOnNextConfigRead) {
 				state.omitSmartRoutingOnNextConfigRead = false;
 				const routing = { ...config.routing, smart_routing: undefined };
-				return jsonResponse({ routing });
+				return jsonResponse({ ...GATEWAY_CONFIG_REQUIRED_SECTIONS, routing });
 			}
-			return jsonResponse(config);
+			return jsonResponse({ ...GATEWAY_CONFIG_REQUIRED_SECTIONS, ...config });
 		}
 		if (path.endsWith("/api/pi-config/catalog")) {
 			return jsonResponse(CATALOG);

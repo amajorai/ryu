@@ -1,96 +1,16 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import {
+	applyPromptCacheReset,
+	boot,
+	consumedResponse,
+	control,
+	independentRead,
+	PATH,
+	state,
+	switchTo,
+	writes,
+} from "./agent-posture-native-http.fixture.ts";
 
-const CORE = "http://127.0.0.1:5731";
-const PATH = "/api/agents/version-proof";
-interface Call {
-	authorization: string | null;
-	body: unknown;
-	id: number;
-	jwt: string | null;
-	method: string;
-	path: string;
-	scope: "a" | "b" | null;
-	status: number | null;
-}
-interface Agent {
-	lifecycle_status: string;
-	name: string;
-	safety_profile: string;
-	skills: string[];
-	system_prompt: string;
-	tools: string[];
-}
-interface State {
-	calls: Call[];
-	held: number[];
-	records: { a: Agent; b: Agent };
-	unexpected: Call[];
-}
-async function state(page: Page): Promise<State> {
-	const response = await page.request.get(`${CORE}/__state`);
-	expect(response.status()).toBe(200);
-	return response.json();
-}
-async function control(page: Page, body: unknown) {
-	const response = await page.request.post(`${CORE}/__control`, {
-		headers: { "x-proof-control": "owned-posture-proof" },
-		data: body,
-	});
-	expect(response.status()).toBe(200);
-}
-const writes = (snapshot: State) =>
-	snapshot.calls.filter((call) => call.path === PATH && call.method === "PUT");
-async function boot(page: Page) {
-	await page.goto("/agent-posture-native-http.html");
-	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		"Current agent"
-	);
-	await page
-		.getByRole("tab", { name: "Tools & knowledge", exact: true })
-		.click();
-	await expect(page.getByLabel("Agent lifecycle")).toHaveValue("active");
-}
-async function switchTo(page: Page, scope: "a" | "b") {
-	await page
-		.getByRole("button", {
-			name: `Use scope ${scope.toUpperCase()}`,
-			exact: true,
-		})
-		.click();
-	await page.getByRole("tab", { name: "Behavior", exact: true }).click();
-	await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-		scope === "a" ? "Current agent" : "Scope B agent"
-	);
-	const tab = page.getByRole("tab", { name: "Tools & knowledge", exact: true });
-	if (!(await page.getByLabel("Agent lifecycle").isVisible())) {
-		await tab.click();
-	}
-	await expect(page.getByLabel("Agent lifecycle")).toHaveValue(
-		scope === "a" ? "active" : "trial"
-	);
-}
-async function independentRead(page: Page, scope: "a" | "b"): Promise<Agent> {
-	const response = await page.request.get(`${CORE}/scope-${scope}${PATH}`, {
-		headers: {
-			authorization: `Bearer version-bearer-${scope}`,
-			"x-ryu-user-jwt": `version-user-${scope}`,
-		},
-	});
-	expect(response.status()).toBe(200);
-	return (await response.json()).agent;
-}
-async function consumedResponse(
-	page: Page,
-	response: Promise<import("@playwright/test").Response>
-) {
-	await (await response).finished();
-	await page.evaluate(
-		() =>
-			new Promise<void>((resolve) =>
-				requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-			)
-	);
-}
 let errors: string[] = [];
 test.beforeEach(async ({ page }) => {
 	errors = [];
@@ -500,6 +420,7 @@ test("held genuine full agent Save owns the same physical policy barrier across 
 	await page.getByLabel("Name", { exact: true }).fill("Full save durable name");
 	await control(page, { action: "next", hold: true, status: 200 });
 	await page.getByRole("button", { name: "Save changes", exact: true }).click();
+	await applyPromptCacheReset(page);
 	await expect.poll(async () => (await state(page)).held.length).toBe(1);
 	const pending = (await state(page)).held[0];
 	expect(pending).toBeDefined();

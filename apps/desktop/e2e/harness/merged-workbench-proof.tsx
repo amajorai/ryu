@@ -7,6 +7,7 @@ import { AuthProvider } from "../../contexts/auth-context.tsx";
 import Layout from "../../src/components/layout/Layout.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
+import { hydrateSealedLocalStorage } from "../../src/lib/content-seal.ts";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { queryClient } from "../../src/lib/query-client.ts";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
@@ -24,6 +25,9 @@ useNodeStore.setState({
 		},
 	],
 });
+// Like main.tsx: the workbench layout is sealed at rest and read synchronously
+// by the first render, so a reload restores placement only after hydration.
+await hydrateSealedLocalStorage();
 createRoot(document.getElementById("root")!).render(
 	<QueryClientProvider client={queryClient}>
 		<BrowserRouter>

@@ -106,7 +106,9 @@ test("Avatar panel edits render, rig, persist, and remove avatars from the proje
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage avatar stage");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await openOverflowTab(page, "Avatars", "avatars");
 
 	await page.getByRole("button", { name: "Add 2.5D avatar" }).click();
@@ -174,7 +176,9 @@ test("Avatar panel edits render, rig, persist, and remove avatars from the proje
 	});
 
 	await page.reload();
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "Avatars", "avatars");
 	await expect(page.getByLabel("Avatar 1 Width")).toHaveValue("0.36");
 	await expect(page.getByLabel("Avatar 1 pose")).toHaveValue("wave");
@@ -220,7 +224,9 @@ test("Avatar panel edits render, rig, persist, and remove avatars from the proje
 	).toEqual([expect.objectContaining({ id: savedAvatar?.id })]);
 
 	await page.reload();
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "Avatars", "avatars");
 	await page.getByRole("spinbutton", { name: "Playhead" }).fill("1.25");
 	await page.getByRole("spinbutton", { name: "Playhead" }).press("Tab");

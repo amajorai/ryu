@@ -166,7 +166,9 @@ test("Transcript windows stop safely, failed retry recovers, and word/highlight 
 	);
 	const title = uniqueTitle("Coverage transcript recovery");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await page
 		.getByRole("button", { name: `Add ${asset.name} to timeline`, exact: true })
 		.click();
@@ -304,7 +306,8 @@ test("Transcript windows stop safely, failed retry recovers, and word/highlight 
 			request.method === "POST"
 	);
 	expect(transcriptCreates).toHaveLength(3);
-	expect(transcriptCreates[0]?.body).toBeUndefined();
+	// The first window sends only the chosen transcript language, no restart.
+	expect(transcriptCreates[0]?.body).toEqual({ language: "auto" });
 	expect(transcriptCreates[1]?.body).toMatchObject({
 		restart: true,
 		revision: stopped.revision,
@@ -392,7 +395,9 @@ test("Transcript windows stop safely, failed retry recovers, and word/highlight 
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	const savedProject = await page.request.get(
 		`/__studio/projects/${projectId}`
 	);

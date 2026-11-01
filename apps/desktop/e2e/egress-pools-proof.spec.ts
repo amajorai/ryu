@@ -54,10 +54,24 @@ test("creates and assigns an outbound proxy pool", async ({ page }) => {
 			});
 			return;
 		}
+		// GET /api/gateway/config always carries `auth` and the core `providers`
+		// slots, and the client's response contract requires them (already so at
+		// 07d403e33, before Ryu Quiet); an egress-only body is rejected.
 		await route.fulfill({
 			status: 200,
 			contentType: "application/json",
-			body: JSON.stringify({ egress }),
+			body: JSON.stringify({
+				auth: { api_keys: [], require_auth: false },
+				providers: {
+					anthropic: null,
+					core: null,
+					genai: null,
+					local: null,
+					openai: null,
+					openrouter: null,
+				},
+				egress,
+			}),
 		});
 	});
 	await page.route("**/api/gateway/restart", async (route) => {

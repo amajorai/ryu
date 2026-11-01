@@ -229,6 +229,9 @@ export function createScrollableTabsCoreFixture() {
 				up: false,
 			},
 			"/api/models/context-window": { contextLength: null },
+			// ChatPage's model-parameters composer section (inference.ts).
+			"/api/inference/presets": { presets: [] },
+			"/api/inference/sampling-fields": { local: false, fields: [] },
 			"/api/voice/tts-engines": { data: [] },
 			"/api/voice/tts-models": { data: [] },
 			"/api/embeddings/model": {
@@ -333,6 +336,16 @@ export function createScrollableTabsCoreFixture() {
 		}
 		if (method !== "GET") {
 			return undefined;
+		}
+		if (
+			pathname.startsWith("/api/session-boxes/") &&
+			pathname !== "/api/session-boxes/cost-notice"
+		) {
+			// api/session-box.ts: 404 is Core's "this conversation has no Box".
+			return {
+				status: 404,
+				json: { error: "No session Box for this conversation" },
+			};
 		}
 		if (pathname === "/api/routing/advice") {
 			// api/routing.ts: a no-rule result preserves the requested target.

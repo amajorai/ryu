@@ -79,6 +79,9 @@ window.fetch = async (input) => {
 				id: "wallet-proof",
 				ownerId: PROOF_ORG_ID,
 				ownerType: "organization",
+				// Required (nullable) by the credits wire contract.
+				subscriptionBalanceMicroUsd: null,
+				topupBalanceMicroUsd: null,
 				updatedAt: "2026-08-23T08:00:00.000Z",
 			},
 		});
@@ -86,9 +89,12 @@ window.fetch = async (input) => {
 
 	if (path.endsWith("/api/billing/subscription-status")) {
 		return jsonResponse({
+			// The billing wire contract requires every entitlement field; without
+			// `marketplaceApps` the status fails to parse and the wallet hides.
 			entitlement: {
 				desktopAccess: true,
 				managedInference: true,
+				marketplaceApps: true,
 				monthlyCreditPoolMicroUsd: 50_000_000,
 				plan: "teams",
 				seats: 5,

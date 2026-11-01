@@ -13,6 +13,7 @@ import {
 	updateProofStoreValueSchemas,
 	updateProofStringSchema,
 } from "../app-update-transaction-proof.contracts.ts";
+import { answerDesktopSecretSlot } from "./desktop-secret-slots.ts";
 import "../../src/index.css";
 
 declare global {
@@ -148,6 +149,19 @@ mockIPC((command, payload) => {
 	const args = record.success ? record.data : {};
 	window.updateProofCalls.push(command);
 	window.updateProofIpcRequests.push({ command, args: payload });
+	// AppUpdatesSettings scopes its update window to the active account
+	// (lib/updates-window.ts -> lib/auth-client.ts), and the auth client
+	// subscribes to `desktop-secret-changed` and reads the sealed `auth-vault`
+	// slot (empty: a signed-out device). Malformed slot calls still throw and
+	// fall through to the unknown-command record below.
+	try {
+		const slot = answerDesktopSecretSlot(sessionStorage, command, args);
+		if (slot.handled) {
+			return slot.value;
+		}
+	} catch {
+		// Recorded as an unknown command below.
+	}
 	if (command === "plugin:store|load" && record.success) {
 		const path = updateProofStringSchema.safeParse(args.path);
 		const store = path.success ? proofStores.get(path.data) : undefined;

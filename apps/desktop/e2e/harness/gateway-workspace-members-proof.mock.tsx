@@ -224,7 +224,8 @@ export function installGatewayWorkspaceFetch(): void {
 			const organizations = queryFlag("emptyOrgs")
 				? []
 				: server.organizations.map((organization) => ({
-						createdAt: null,
+						// No createdAt: control-plane GET /orgs sends the row's Date (or
+						// omits it), never null, and org.ts's list codec rejects null.
 						id: organization.id,
 						name: organization.name,
 						role:
@@ -532,6 +533,11 @@ export function useSession() {
 		},
 		isPending: false,
 	};
+}
+
+/** org.ts reads the control-plane bearer through this auth-client export. */
+export function getActiveToken(): string | null {
+	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
 }
 
 export function getActiveUserId(): string {

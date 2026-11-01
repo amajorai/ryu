@@ -505,11 +505,26 @@ test("opens, retries, annotates, reads back, and closes a local browser workspac
 	await reloadedSurface
 		.getByRole("button", { name: "Ask Ryu to address notes", exact: true })
 		.click();
-	expect((await readProof(page)).assistant).toEqual({
-		mode: "sidebar",
-		pendingPrompt:
-			"Review the embedded browser context and every saved annotation. Address each requested visual change in the live tab, using the browser context, snapshot, and control tools as needed.",
-	});
+	// The prompt carries the formatted browser context after the instruction
+	// (formatBrowserContext, appended already at 07d403e33); its rect is layout-sized.
+	const asked = (await readProof(page)).assistant;
+	expect(asked.mode).toBe("sidebar");
+	const prompt = asked.pendingPrompt ?? "";
+	expect(
+		prompt.startsWith(
+			"Review the embedded browser context and every saved annotation. Address each requested visual change in the live tab, using the browser context, snapshot, and control tools as needed.\n\n"
+		)
+	).toBe(true);
+	for (const line of [
+		`Page: ${NEW_TAB.title}`,
+		`URL: ${NEW_TAB.url}`,
+		"Saved visual annotations:",
+		`- [area] ${NOTE_COMMENT} rect=`,
+		`style={"font_size":"${NOTE_STYLE.font_size}","color":"${NOTE_STYLE.color}"}`,
+		"Accessibility snapshot:",
+	]) {
+		expect(prompt).toContain(line);
+	}
 
 	await reloadedSurface
 		.getByRole("button", { name: "Remove annotation 1", exact: true })

@@ -371,7 +371,9 @@ test("Meaning search filters by Space, handles no matches and retry, then adds a
 	);
 	const title = uniqueTitle("Coverage meaning search edit");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await openSearchPanel(page);
 	const source = page.getByLabel("Source to index");
 	const spaceName = page.getByLabel("Transcript index Space");
@@ -504,7 +506,9 @@ test("Meaning search filters by Space, handles no matches and retry, then adds a
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await expect(page.getByRole("button", { name: clipName })).toBeVisible();
 	const reloaded = await page.request.get(`/__studio/projects/${projectId}`);
 	expect(reloaded.ok()).toBe(true);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 export type NodeDisplayMode = "compact-dropdown" | "persistent-sidebar";
 
@@ -27,7 +28,7 @@ export function useNodeDisplayMode(): NodeDisplayMode {
 
 export function setNodeDisplayMode(mode: NodeDisplayMode) {
 	localStorage.setItem(KEY_DISPLAY_MODE, mode);
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY_DISPLAY_MODE);
 }
 
 export function useNodeTabOverride(): boolean {
@@ -50,5 +51,5 @@ export function useNodeTabOverride(): boolean {
 
 export function setNodeTabOverride(enabled: boolean) {
 	localStorage.setItem(KEY_TAB_OVERRIDE, String(enabled));
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY_TAB_OVERRIDE);
 }

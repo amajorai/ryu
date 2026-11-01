@@ -35,7 +35,7 @@ function Proof() {
 					<div>
 						<p className="font-medium text-sm">Island voice input</p>
 						<p className="text-muted-foreground text-xs">
-							The lower-edge glow follows microphone level.
+							A static dot and a small level meter follow the microphone.
 						</p>
 					</div>
 					<div className="rounded-2xl border border-border/70 bg-card/80 p-3 shadow-lg backdrop-blur-xl">
@@ -46,7 +46,7 @@ function Proof() {
 					<div>
 						<p className="font-medium text-sm">Continuous voice mode</p>
 						<p className="text-muted-foreground text-xs">
-							The beam sweeps while the assistant is thinking.
+							One orb grows with the voice level while the assistant thinks.
 						</p>
 					</div>
 					<div className="h-[360px] overflow-hidden rounded-4xl border border-border/70 bg-card/85 shadow-xl backdrop-blur-xl">

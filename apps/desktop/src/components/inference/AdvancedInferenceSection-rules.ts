@@ -4,11 +4,30 @@ import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import type { SamplingConfig } from "@/src/lib/api/inference.ts";
 
-export const jsonObjectSchema = z.record(z.string(), z.json());
-export const logitBiasSchema = z.record(
-	z.string().regex(/^\d+$/),
-	z.number().min(-100).max(100)
-);
+const NOT_A_JSON_OBJECT = "Must be a JSON object";
+const BIAS_RANGE = "Bias values must be numbers from -100 to 100.";
+const TOKEN_IDS = "Token IDs must be non-negative integers.";
+const TOKEN_ID_PATTERN = /^\d+$/;
+
+// Each failure carries the user-facing copy the inline field shows (the CLI's
+// inference-config editor uses the same strings); zod's own messages ("Invalid
+// input: expected record, received array") are not meant for people.
+export const jsonObjectSchema = z.record(z.string(), z.json(), {
+	error: NOT_A_JSON_OBJECT,
+});
+export const logitBiasSchema = z
+	.record(
+		z.string(),
+		z
+			.number({ error: BIAS_RANGE })
+			.min(-100, { error: BIAS_RANGE })
+			.max(100, { error: BIAS_RANGE }),
+		{ error: NOT_A_JSON_OBJECT }
+	)
+	.refine(
+		(bias) => Object.keys(bias).every((token) => TOKEN_ID_PATTERN.test(token)),
+		{ error: TOKEN_IDS }
+	);
 export type Key = keyof SamplingConfig;
 
 export type NumberKey = {

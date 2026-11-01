@@ -9,9 +9,14 @@ test("proves the managed Bot desktop shell keeps Build controls hidden", async (
 	await page.goto("/bot-product-shell-proof.html?reset=1");
 
 	await expect(page.locator('[data-product="ryu-bot"]')).toBeVisible();
+	// Since 306ce31b7f (P2) the lockup is the interface's size-4 icon plus its
+	// label: the Ryu logo wordmark left the mode switcher.
+	await expect(
+		page.getByTestId("product-mode-lockup").locator("svg")
+	).toHaveCount(1);
 	await expect(
 		page.getByTestId("product-mode-lockup").getByText("Ryu", { exact: true })
-	).toBeVisible();
+	).toHaveCount(0);
 	await expect(
 		page.getByTestId("product-mode-lockup").getByText("Bot", { exact: true })
 	).toBeVisible();

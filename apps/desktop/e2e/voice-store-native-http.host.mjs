@@ -2,11 +2,11 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 
-const apiPort = 5866,
-	uiOrigin = "http://127.0.0.1:5291";
+const apiPort = 5866;
+const uiOrigin = "http://127.0.0.1:5291";
 const dataRoot = process.env.RYU_VOICE_OUTCOMES_DATA_ROOT;
 if (!(dataRoot && path.isAbsolute(dataRoot) && dataRoot.startsWith("/tmp/"))) {
-	throw Error("Explicit owned temporary data root required");
+	throw new Error("Explicit owned temporary data root required");
 }
 fs.mkdirSync(dataRoot, { recursive: true });
 const initial = () => ({
@@ -67,11 +67,11 @@ const sessions = new Map(
 		},
 	])
 );
-let calls = [],
-	held = [],
-	nextHeld = 1;
+let calls = [];
+let held = [];
+let nextHeld = 1;
 function persist(session) {
-	const temp = session.file + ".tmp";
+	const temp = `${session.file}.tmp`;
 	const fd = fs.openSync(temp, "w", 0o600);
 	try {
 		fs.writeFileSync(fd, JSON.stringify(session.state));
@@ -175,7 +175,7 @@ const server = http.createServer(async (req, res) => {
 		respond(res, 400, { error: "Invalid JSON" });
 		return;
 	}
-	const rawPath = new URL(req.url, "http://127.0.0.1:" + apiPort).pathname;
+	const rawPath = new URL(req.url, `http://127.0.0.1:${apiPort}`).pathname;
 	if (req.method === "OPTIONS") {
 		respond(res, 204, {});
 		return;
@@ -278,8 +278,8 @@ const server = http.createServer(async (req, res) => {
 		respond(res, 401, { error: "Native fixture admission refused" });
 		return;
 	}
-	const session = sessions.get(authority),
-		controls = session.controls;
+	const session = sessions.get(authority);
+	const controls = session.controls;
 	if (req.method === "GET" && pathname === "/api/catalog") {
 		respond(res, 200, { sidecars: catalog(session.state) });
 		return;
@@ -383,6 +383,11 @@ const server = http.createServer(async (req, res) => {
 		respond(res, 200, { active: "wasmtime", available: [] });
 		return;
 	}
+	if (req.method === "GET" && pathname === "/api/gateway/org-features") {
+		// The Store's engine and app catalogs feature-detect org policy.
+		respond(res, 200, { available: true, features: {}, managed: false });
+		return;
+	}
 	if (req.method === "GET" && pathname === "/api/plugins") {
 		respond(res, 200, { apps: [] });
 		return;
@@ -441,11 +446,11 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 	respond(res, 404, {
-		error: "Unsupported finite route " + req.method + " " + pathname,
+		error: `Unsupported finite route ${req.method} ${pathname}`,
 	});
 });
 server.listen(apiPort, "127.0.0.1", () =>
-	process.stdout.write("Finite voice outcomes HTTP " + apiPort + "\n")
+	process.stdout.write(`Finite voice outcomes HTTP ${apiPort}\n`)
 );
 for (const sig of ["SIGTERM", "SIGINT"]) {
 	process.on(sig, () => {

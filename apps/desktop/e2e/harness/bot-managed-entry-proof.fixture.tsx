@@ -31,6 +31,11 @@ export function useCreditsWallet() {
 	return { entitlement, loading: false, refresh: async () => undefined };
 }
 export const TOKEN_KEY = "bot-proof-account-token";
+// lib/api/client.ts reads the signed-in session token for the Marketplace
+// buyer header (client-transport.ts); this entry proof sends none.
+export function getActiveToken(): string | null {
+	return null;
+}
 export async function getRealtimeJwt() {
 	return null;
 }

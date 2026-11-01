@@ -470,9 +470,12 @@ test("copies the active organization and account IDs to the clipboard", async ({
 	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 	await openWorkspace(page);
 
+	// The Organization ID row carries a description between its label and the
+	// ID (pre-#914), so match the row's label and its exact ID separately.
 	const activeOrganization = page
 		.getByRole("list")
-		.filter({ hasText: "Organization IDorg-atlas" });
+		.filter({ hasText: "Organization ID" })
+		.filter({ has: page.getByText("org-atlas", { exact: true }) });
 	await expect(
 		activeOrganization.getByRole("button", { name: "Copy organization ID" })
 	).toHaveCount(1);

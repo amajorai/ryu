@@ -59,6 +59,9 @@ async function openSettings(page: Page, query = ""): Promise<void> {
 	).toBeVisible();
 }
 
+// fc38dd6ea6 (Ryu Quiet #914, "quiet status") dropped the Allowed/Off badge
+// beside each switch: the switch's own checked state is the status, and a
+// failed save is one sentence with the raw error on its title attribute.
 test("saves the selected device's locked-use policy and reads it back after reload", async ({
 	page,
 }) => {
@@ -66,11 +69,10 @@ test("saves the selected device's locked-use policy and reads it back after relo
 	const toggle = page.getByRole("switch", { name: "Allow locked use" });
 	await expect(toggle).toBeEnabled();
 	await expect(toggle).not.toBeChecked();
-	await expect(page.getByText("Off", { exact: true })).toBeVisible();
+	await expect(page.getByText(/^(Allowed|Off)$/u)).toHaveCount(0);
 
 	await toggle.click();
 	await expect(toggle).toBeChecked();
-	await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
 	await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
 	const enabled = await proofSnapshot(page);
 	expect(configWrites(enabled)).toEqual([
@@ -84,7 +86,6 @@ test("saves the selected device's locked-use policy and reads it back after relo
 
 	await page.reload();
 	await expect(toggle).toBeChecked();
-	await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
 	const readback = await proofSnapshot(page);
 	expect(readback.computerUse).toEqual({ locked_use: true });
 	expect(configRequests(readback)).toEqual([
@@ -104,7 +105,7 @@ test("saves the selected device's locked-use policy and reads it back after relo
 
 	await toggle.click();
 	await expect(toggle).not.toBeChecked();
-	await expect(page.getByText("Off", { exact: true })).toBeVisible();
+	await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
 	const disabled = await proofSnapshot(page);
 	expect(configWrites(disabled)).toEqual([
 		{
@@ -128,8 +129,11 @@ test("rolls back a rejected policy write and lets the user retry the same value"
 
 	await toggle.click();
 	await expect(toggle).not.toBeChecked();
-	await expect(page.getByText(/503/u)).toBeVisible();
-	await expect(page.getByText("Off", { exact: true })).toBeVisible();
+	const saveError = page.getByText("Couldn’t save device settings.", {
+		exact: true,
+	});
+	await expect(saveError).toBeVisible();
+	await expect(saveError).toHaveAttribute("title", /503/u);
 	const rejected = await proofSnapshot(page);
 	expect(rejected.computerUse).toEqual({ locked_use: false });
 	expect(configWrites(rejected)).toEqual([
@@ -180,7 +184,11 @@ test("keeps the policy read-only without configuration access and unavailable of
 	const readOnlyToggle = page.getByRole("switch", { name: "Allow locked use" });
 	await expect(readOnlyToggle).toBeDisabled();
 	await expect(
-		page.getByText(/need device configuration access/u)
+		// One-line caption since b8715a5645 (Ryu Quiet #914): "View only:
+		// changing them needs device configuration access."
+		page.getByText(
+			/View only: changing them needs device configuration access/u
+		)
 	).toBeVisible();
 	const readOnly = await proofSnapshot(page);
 	expect(configRequests(readOnly)).toEqual([

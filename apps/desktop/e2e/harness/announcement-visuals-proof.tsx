@@ -16,7 +16,8 @@ const NEWEST: Announcement = {
 	color: "#67e8f9",
 	createdAt: "2026-08-18T08:00:00.000Z",
 	icon: "megaphone",
-	iconUrl: "http://127.0.0.1:5177/announcement-visual-art.svg",
+	// Served by this story's own dev server (5182), not another harness port.
+	iconUrl: `${location.origin}/announcement-visual-art.svg`,
 	id: "announcement-visual-newest",
 	linkLabel: "Read the release",
 	linkUrl: "https://ryu.example.test/releases/visuals",
@@ -53,7 +54,7 @@ const OLDER: Announcement = {
 	visualIconBackground: "#30105c",
 	visualIconDither: null,
 	visualIcon: null,
-	visualIconUrl: "http://127.0.0.1:5177/announcement-custom-icon.svg",
+	visualIconUrl: `${location.origin}/announcement-custom-icon.svg`,
 };
 
 function AnnouncementVisualsProof() {

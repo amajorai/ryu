@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 /** How Ctrl/Cmd+Tab cycles open window tabs: visual left-to-right order
     (default, browser-style) or most-recently-active order (VS Code / Chrome
@@ -32,5 +33,5 @@ export function setTabSwitchBehavior(behavior: TabSwitchBehavior) {
 	localStorage.setItem(KEY, behavior);
 	// Same-document listeners don't get the native `storage` event, so broadcast
 	// one ourselves — every useTabSwitchBehavior() consumer re-reads on this.
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 }

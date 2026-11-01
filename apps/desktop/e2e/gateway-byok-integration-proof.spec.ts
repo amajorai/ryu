@@ -30,6 +30,22 @@ async function clearKey(page: Page, label: string) {
 	await page.getByRole("menuitem", { name: "Clear", exact: true }).click();
 }
 
+/** A typed key saves only after its spending-limit acknowledgement
+ * (SpendLimitConfirm, which gates GatewayProviderKeyRow's Save). */
+async function confirmSpendLimit(page: Page, label: string) {
+	const save = providerRow(page, label).getByRole("button", {
+		name: "Save",
+		exact: true,
+	});
+	await expect(save).toBeDisabled();
+	await page
+		.getByRole("checkbox", {
+			name: `I have set a spending limit for this key at ${label}`,
+		})
+		.click();
+	await expect(save).toBeEnabled();
+}
+
 function providerRow(page: Page, label: string) {
 	return page.locator('[data-slot="item"]').filter({
 		has: page.getByRole("textbox", { name: `${label} API key`, exact: true }),
@@ -44,6 +60,7 @@ test("writes each provider key to the Gateway config, then mirrors it into the O
 		const row = providerRow(page, label);
 		const input = row.getByRole("textbox", { name: `${label} API key` });
 		await input.fill(key);
+		await confirmSpendLimit(page, label);
 		await row.getByRole("button", { name: "Save", exact: true }).click();
 		await expect(row.getByText("Key set", { exact: true })).toBeVisible();
 		await expect(
@@ -150,6 +167,7 @@ test("shows the Gateway-held key and the credential-store error after a failed m
 		name: "Anthropic API key",
 	});
 	await input.fill("sk-ant-retry-test");
+	await confirmSpendLimit(page, "Anthropic");
 	await anthropicRow.getByRole("button", { name: "Save", exact: true }).click();
 	// The Gateway persisted the key, so the card refreshes and shows it even
 	// though the OS credential store mirror refused the write.

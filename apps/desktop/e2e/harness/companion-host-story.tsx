@@ -87,11 +87,22 @@ function mount(options: MountOptions): void {
 		options.grants
 	);
 	// Path B apps drive Core through host-side verbs. This cert is about the
-	// handshake, not the verbs, so only the two REQUIRED members are implemented —
-	// the rest are optional, and an unbound call replies with an error over the same
-	// live port, exactly as it would in the shell.
+	// handshake, not the verbs, so only the REQUIRED members plus an in-memory KV
+	// store are implemented — the rest are optional, and an unbound call replies
+	// with an error over the same live port, exactly as it would in the shell. The
+	// KV store stands in for Core's per-plugin storage: Slides fails closed when
+	// its granted `storage:kv` read errors, so without it the fixture can only
+	// render "Slides storage unavailable".
+	const kv = new Map<string, string>();
+	const kvKey = (input: { namespace?: string; key: string }) =>
+		`${input.namespace ?? ""}\u0000${input.key}`;
 	const services: HostServices = {
 		listAgents: () => Promise.resolve([]),
+		storageGet: (input) => Promise.resolve(kv.get(kvKey(input)) ?? null),
+		storageSet: (input) => {
+			kv.set(kvKey(input), input.value);
+			return Promise.resolve();
+		},
 		uiToastDismiss: (input) => toastHost.dismiss(input),
 		uiToastShow: (input) => toastHost.show(input),
 		uiToastUpdate: (input) => toastHost.update(input),

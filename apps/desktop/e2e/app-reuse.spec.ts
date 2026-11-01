@@ -110,6 +110,13 @@ for (const theme of ["light", "dark"]) {
 		await page.getByRole("button", { name: "Open dialog" }).click();
 		const dialog = page.getByRole("dialog");
 		await expect(dialog).toBeVisible();
+		// Below `sm` the dialog is a bottom sheet that slides in from 1rem below
+		// its resting edge, so measure where it settles, not a mid-animation frame.
+		await dialog.evaluate((element) =>
+			Promise.all(
+				element.getAnimations().map((animation) => animation.finished)
+			)
+		);
 		const box = await dialog.boundingBox();
 		expect(box).not.toBeNull();
 		expect(box!.x).toBeGreaterThanOrEqual(0);

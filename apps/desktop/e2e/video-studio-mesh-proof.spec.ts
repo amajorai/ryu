@@ -318,7 +318,9 @@ test("Mesh panel imports embedded material/texture, persists rig and motion edit
 
 	const title = uniqueTitle("Coverage textured rig");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	const texture = await createTextureDataUri(page);
 	const gltfFile = {
 		buffer: makeTexturedRigGltf(texture),
@@ -365,7 +367,9 @@ test("Mesh panel imports embedded material/texture, persists rig and motion edit
 		expect(seedResponse.ok()).toBeTruthy();
 	}
 	await page.reload();
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "Meshes", "meshes");
 	await expect(
 		page.getByText("Interactive skeletal rig · 2 joints")
@@ -517,7 +521,9 @@ test("Mesh panel imports embedded material/texture, persists rig and motion edit
 	await saveScreenshot(page, "video-studio-mesh-material-rig-persisted.png");
 
 	await page.reload();
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "Meshes", "meshes");
 	await expect(page.getByText("Mesh 1", { exact: true })).toBeVisible();
 	await expect(page.getByLabel("Mesh 1 Offset X")).toHaveValue("0.25");
@@ -585,7 +591,9 @@ test("Mesh panel imports embedded material/texture, persists rig and motion edit
 	).toEqual([expect.objectContaining({ id: firstMesh?.id })]);
 
 	await page.reload();
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "Meshes", "meshes");
 	await expect(page.getByText("Mesh 1", { exact: true })).toBeVisible();
 	await expect(page.getByText("Mesh 2", { exact: true })).toHaveCount(0);

@@ -29,6 +29,16 @@ const evidence = (name: string) =>
 		name
 	);
 
+// A project row is a SettingsNavRow: its button is named by the folder
+// basename, and the full path is the row's muted value beside the chevron
+// (outside the button). Pick the row by that exact path, then its button.
+function projectRowButton(page: Page, projectPath: string) {
+	return page
+		.locator('[data-slot="item"]')
+		.filter({ has: page.getByTitle(projectPath, { exact: true }) })
+		.getByRole("button", { name: /\bEdit$/ });
+}
+
 async function openProjectSettings(
 	page: Page,
 	path = PROJECT_PATH,
@@ -38,7 +48,7 @@ async function openProjectSettings(
 	await expect(
 		page.getByRole("heading", { name: "Project environments", exact: true })
 	).toBeVisible();
-	await page.locator("button").filter({ hasText: path }).first().click();
+	await projectRowButton(page, path).click();
 	const dialog = page.getByRole("dialog").first();
 	await expect(
 		dialog.getByRole("heading", { name: "Edit project" })
@@ -349,10 +359,7 @@ test("manages source folders with node-browser and clone fixtures and persists t
 	expect(workspace.projects[0]?.folders).toEqual([CLONED_PATH, ADDED_PATH]);
 
 	await page.reload();
-	const reloadedProject = page
-		.locator("button")
-		.filter({ hasText: CLONED_PATH })
-		.first();
+	const reloadedProject = projectRowButton(page, CLONED_PATH);
 	await reloadedProject.click();
 	const reloadedSettings = page.getByRole("dialog").first();
 	const reloadedRows = reloadedSettings.locator("[data-project-source-folder]");

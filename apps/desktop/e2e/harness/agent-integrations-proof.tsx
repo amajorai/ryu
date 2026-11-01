@@ -14,12 +14,13 @@ declare global {
 		__agentIntegrationProof: AgentIntegrationProofState;
 	}
 }
-const proof = (window.__agentIntegrationProof = {
+const proof: AgentIntegrationProofState = {
 	calls: [],
 	requests: [],
 	unexpected: [],
 	refuseDocsOnce: false,
-} as AgentIntegrationProofState);
+};
+window.__agentIntegrationProof = proof;
 const expectedDocs =
 	"https://app.ryuhq.com/docs/extend/develop/agent-integration-guide";
 mockIPC(async (command, args) => {
@@ -57,6 +58,18 @@ mockIPC(async (command, args) => {
 		JSON.stringify(args) === JSON.stringify({ rid: 4218 })
 	) {
 		return null;
+	}
+	// The auth vault subscribes once to the native secret-change event so other
+	// windows' sign-ins reload it (lib/auth-client.ts listenForVaultChanges).
+	// Only that one read-only subscription is accepted.
+	if (
+		command === "plugin:event|listen" &&
+		args &&
+		typeof args === "object" &&
+		"event" in args &&
+		args.event === "desktop-secret-changed"
+	) {
+		return 1;
 	}
 	call.outcome = "unexpected";
 	proof.unexpected.push({ command, args });

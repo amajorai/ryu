@@ -11,6 +11,14 @@ declare global {
 
 export const STORY_URL = "/marketplace-store-interactions.html";
 export const AUTH_TOKEN_KEY = "ryu_session_token";
+/** The fixed control-plane origin of the harness's auth-client and core-url
+ *  mocks (`harness/marketplace-store-mocks/`), whatever port serves the story. */
+export const MOCK_BACKEND_ORIGIN = "http://127.0.0.1:5189";
+/** The story's own origin, which the active-node mock uses for Core. Derived
+ *  configs serve the same story on another port and set this, or every Core
+ *  read here would go unrouted. */
+export const STORE_ORIGIN =
+	process.env.RYU_STORE_TEST_API_ORIGIN ?? MOCK_BACKEND_ORIGIN;
 export const EVIDENCE_DIR = resolve(
 	import.meta.dirname,
 	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
@@ -264,7 +272,7 @@ export async function installLocalFixture(
 	await page.addInitScript((key) => {
 		localStorage.setItem(key, "fixture-session");
 	}, AUTH_TOKEN_KEY);
-	await page.route("http://127.0.0.1:5189/api/**", async (route) => {
+	const handleApi = async (route: Route) => {
 		const request = route.request();
 		const url = new URL(request.url());
 		const method = request.method();
@@ -582,7 +590,11 @@ export async function installLocalFixture(
 			return;
 		}
 		await json(route, 200, {});
-	});
+	};
+	await page.route(`${STORE_ORIGIN}/api/**`, handleApi);
+	if (STORE_ORIGIN !== MOCK_BACKEND_ORIGIN) {
+		await page.route(`${MOCK_BACKEND_ORIGIN}/api/**`, handleApi);
+	}
 	return fixture;
 }
 

@@ -1,6 +1,21 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
+// `fetchGatewayConfig` validates the whole served document, and a Gateway
+// always serves `auth` and `providers`; a bare `{ acp }` body is rejected as an
+// unreadable config (the same base `computer-use-settings-proof.tsx` serves).
+const SERVED_CONFIG_BASE = {
+	auth: { api_keys: [], require_auth: false },
+	providers: {
+		anthropic: null,
+		core: null,
+		genai: null,
+		local: null,
+		openai: null,
+		openrouter: null,
+	},
+};
+
 declare global {
 	interface Window {
 		keepAwakeCommands: boolean[];
@@ -25,6 +40,7 @@ test("keep-awake reads are serialized, scoped and native recovery checks are pre
 		});
 	});
 	const config = {
+		...SERVED_CONFIG_BASE,
 		acp: {
 			idle_timeout_minutes: 10,
 			max_parallel_agents: null,

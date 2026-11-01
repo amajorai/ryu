@@ -156,7 +156,9 @@ async function projectAfterReload(
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	const playhead = page.getByRole("spinbutton", { name: "Playhead" });
 	await playhead.fill("0.5");
 	await playhead.press("Tab");
@@ -172,7 +174,9 @@ test("Vector graphics add, validate, edit all treatments, preview, and persist a
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage vector shape edit");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	const playhead = page.getByRole("spinbutton", { name: "Playhead" });
 	await openGraphicsPanel(page);
 	const add = page.getByRole("button", {
@@ -206,13 +210,14 @@ test("Vector graphics add, validate, edit all treatments, preview, and persist a
 	const left = page.getByLabel("Graphic 1 Left");
 	await left.fill("1.2");
 	await left.press("Tab");
-	await expect(left).toHaveValue("0.08");
+	// NumberField clamps an out-of-range entry to its [min, max] bounds.
+	await expect(left).toHaveValue("1");
 	await setGraphicNumber(page, "Graphic 1 Left", "0.22");
 	await setGraphicNumber(page, "Graphic 1 Top", "0.24");
 	const width = page.getByLabel("Graphic 1 Width");
 	await width.fill("0.01");
 	await width.press("Tab");
-	await expect(width).toHaveValue("0.42");
+	await expect(width).toHaveValue("0.02");
 	await setGraphicNumber(page, "Graphic 1 Width", "0.55");
 	await setGraphicNumber(page, "Graphic 1 Height", "0.33");
 	await setGraphicNumber(page, "Graphic 1 Opacity", "0.75");
@@ -220,7 +225,7 @@ test("Vector graphics add, validate, edit all treatments, preview, and persist a
 	const strokeWidth = page.getByLabel("Vector shape 1 stroke width");
 	await strokeWidth.fill("0.1");
 	await strokeWidth.press("Tab");
-	await expect(strokeWidth).toHaveValue("0");
+	await expect(strokeWidth).toHaveValue("0.08");
 	await setGraphicNumber(page, "Vector shape 1 stroke width", "0.025");
 	await setColor(page, "Graphic 1 fill color", "#E74795");
 	await setColor(page, "Vector shape 1 stroke color", "#FBBF24");
@@ -308,7 +313,9 @@ test("Removing a vector graphic preserves its sibling and persists an empty laye
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage vector shape removal");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	const playhead = page.getByRole("spinbutton", { name: "Playhead" });
 	await playhead.fill("0.5");
 	await playhead.press("Tab");

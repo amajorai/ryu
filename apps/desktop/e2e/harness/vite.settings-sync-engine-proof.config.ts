@@ -12,7 +12,13 @@ if (!control) {
 }
 export default defineConfig({
 	root: import.meta.dirname,
-	optimizeDeps: { entries: ["settings-sync-engine-proof.html"] },
+	optimizeDeps: {
+		entries: ["settings-sync-engine-proof.html"],
+		// Pre-bundle for the dev browser: the default target cannot lower the
+		// async destructuring in @tauri-apps/plugin-store, so dep optimization
+		// failed and the page never mounted (same setting as the other harnesses).
+		esbuildOptions: { target: "esnext" },
+	},
 	plugins: [react()],
 	cacheDir: path.join(control, "vite-cache"),
 	define: {

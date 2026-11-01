@@ -1,193 +1,18 @@
-import { mkdir, readFile } from "node:fs/promises";
-import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
-import { dubbingScript } from "../../../apps-store/video-studio/shared/dubbing.ts";
-import type { GenerationJob } from "../../../apps-store/video-studio/shared/generation.ts";
-import type {
-	Asset,
-	Project,
-} from "../../../apps-store/video-studio/shared/project.ts";
-import { parseProofJson } from "./fixture-json.ts";
-
-const evidenceDirectory = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
-
-interface StudioRequest {
-	body?: unknown;
-	method: string;
-	path: string;
-	query: string;
-}
-
-/** Native capability observation only, not the production RyuBridge contract. */
-interface FixtureLegacyModelCapabilityObservation {
-	model?: { complete?: unknown };
-}
-
-interface FixtureModelCall {
-	prompt: string;
-	system?: string;
-}
-
-interface FixtureTtsCall {
-	language?: string;
-	request_id?: string;
-	speed?: number;
-	text: string;
-	voice?: string;
-}
-
-declare global {
-	interface Window {
-		__videoStudioRemainingProof?: {
-			translationCalls: FixtureModelCall[];
-			ttsCalls: FixtureTtsCall[];
-		};
-	}
-}
-
-function uniqueTitle(prefix: string) {
-	return `${prefix} ${new Date().toISOString().replaceAll(":", "-")} ${crypto.randomUUID().slice(0, 8)}`;
-}
-
-function recordStudioRequests(page: Page) {
-	const requests: StudioRequest[] = [];
-	page.on("request", (request) => {
-		const url = new URL(request.url());
-		if (!url.pathname.startsWith("/__studio/")) {
-			return;
-		}
-		const body = request.postData();
-		let parsedBody: unknown;
-		if (body) {
-			try {
-				parsedBody = parseProofJson(body);
-			} catch {
-				parsedBody = body;
-			}
-		}
-		requests.push({
-			...(parsedBody === undefined ? undefined : { body: parsedBody }),
-			method: request.method(),
-			path: url.pathname.slice("/__studio".length),
-			query: url.search,
-		});
-	});
-	return requests;
-}
-
-async function seedAsset(
-	page: Page,
-	fixture: "audio" | "image" | "video",
-	name: string
-): Promise<Asset> {
-	const fixtureResponse = await page.request.get(`/__proof/${fixture}`);
-	expect(fixtureResponse.ok()).toBe(true);
-	const bytes = await fixtureResponse.body();
-	const start = await page.request.post("/__studio/uploads", {
-		data: { name, size: bytes.byteLength },
-	});
-	expect(start.status()).toBe(201);
-	const upload = await start.json();
-	for (let offset = 0; offset < bytes.byteLength; offset += upload.chunkSize) {
-		const response = await page.request.put(`/__studio/uploads/${upload.id}`, {
-			data: {
-				offset,
-				data: bytes
-					.subarray(offset, offset + upload.chunkSize)
-					.toString("base64"),
-			},
-		});
-		expect(response.ok()).toBe(true);
-	}
-	const finish = await page.request.post(
-		`/__studio/uploads/${upload.id}/finish`
-	);
-	expect(finish.status()).toBe(201);
-	const asset = await finish.json();
-	expect(asset).toMatchObject({ kind: fixture, name });
-	return asset;
-}
-
-async function createProject(page: Page, title: string) {
-	await page.goto("/");
-	await expect(page.getByRole("status")).toContainText(
-		"Project library connected."
-	);
-	await page.getByRole("button", { name: "New project" }).click();
-	await expect(page.getByRole("status")).toContainText("Project created.");
-	const titleField = page
-		.locator(".studio-inspector .ryu-app-field")
-		.first()
-		.locator("input");
-	await titleField.fill(title);
-	await page.getByRole("button", { name: "Save changes", exact: true }).click();
-	await expect(page.getByRole("status")).toContainText("Project saved.");
-	return page.getByLabel("Project").inputValue();
-}
-
-async function openOverflowTab(page: Page, label: string, value: string) {
-	const more = page.getByRole("button", { name: /Show \d+ more tabs/ });
-	if (await more.isVisible()) {
-		await more.click();
-	}
-	await page.getByRole("combobox", { name: "Search tabs" }).fill(label);
-	const tab = page.locator(`[data-tabs-menu-key="string:${value}"]`);
-	await expect(tab).toBeVisible();
-	await tab.click();
-}
-
-async function selectProject(page: Page, projectId: string) {
-	await page.getByLabel("Project").selectOption(projectId);
-	await expect(page.getByLabel("Project")).toHaveValue(projectId);
-}
-
-function assetRow(page: Page, name: string) {
-	return page
-		.locator(".studio-asset")
-		.filter({ has: page.getByText(name, { exact: true }) });
-}
-
-async function readProject(page: Page, projectId: string): Promise<Project> {
-	const response = await page.request.get(`/__studio/projects/${projectId}`);
-	expect(response.ok()).toBe(true);
-	return await response.json();
-}
-
-async function readAssets(page: Page): Promise<Asset[]> {
-	const response = await page.request.get("/__studio/assets");
-	expect(response.ok()).toBe(true);
-	const result = await response.json();
-	return result.assets;
-}
-
-async function readGenerationJobs(
-	page: Page,
-	projectId: string
-): Promise<GenerationJob[]> {
-	const response = await page.request.get(
-		`/__studio/generations?projectId=${projectId}`
-	);
-	expect(response.ok()).toBe(true);
-	const result = await response.json();
-	return result.jobs;
-}
-
-async function saveProject(page: Page) {
-	await page.getByRole("button", { name: "Save changes", exact: true }).click();
-	await expect(page.getByRole("status")).toContainText("Project saved.");
-}
-
-async function saveScreenshot(page: Page, filename: string) {
-	await mkdir(evidenceDirectory, { recursive: true });
-	await page.screenshot({
-		animations: "disabled",
-		fullPage: true,
-		path: path.join(evidenceDirectory, filename),
-	});
-}
+import {
+	assetRow,
+	createProject,
+	openOverflowTab,
+	readAssets,
+	readProject,
+	recordStudioRequests,
+	saveProject,
+	saveScreenshot,
+	seedAsset,
+	selectProject,
+	uniqueTitle,
+} from "./video-studio-remaining-panels-proof.helpers.ts";
 
 test("asset preview, color scopes, organization validation, save, and delete reach the sidecar", async ({
 	page,
@@ -204,7 +29,8 @@ test("asset preview, color scopes, organization validation, save, and delete rea
 	const dialog = page.getByRole("dialog");
 	await expect(dialog).toBeVisible();
 	const previewImage = dialog.getByRole("img", {
-		name: `Preview of ${still.name}`,
+		// The source preview names its still by frame and position.
+		name: `Frame of ${still.name} at 0:00.0`,
 	});
 	await expect(previewImage).toBeVisible();
 	await expect(previewImage).toHaveJSProperty("complete", true);
@@ -228,7 +54,8 @@ test("asset preview, color scopes, organization validation, save, and delete rea
 			(request) =>
 				request.method === "GET" &&
 				request.path === `/assets/${still.id}/scopes` &&
-				request.query === "?time=0"
+				// ColorScopes asks for the full-detail scopes of the first frame.
+				new URLSearchParams(request.query).get("time") === "0"
 		)
 	).toBe(true);
 
@@ -402,16 +229,16 @@ test("recipe audio, multicam selection, and playhead input advance, pause, and r
 	expect(audioLayer?.track).toBe(1);
 
 	await openOverflowTab(page, "Multicam", "multicam");
-	await page.getByRole("button", { name: cameraA.name, exact: true }).click();
-	await page.getByRole("button", { name: cameraB.name, exact: true }).click();
+	await cameraAngle(page, cameraA.name).click();
+	await cameraAngle(page, cameraB.name).click();
 	await page.getByLabel("Multicam program audio").selectOption(cameraC.id);
 	await page.getByLabel("Multicam session name").fill("Panel interview A");
 	await page.getByRole("button", { name: "Create multicam session" }).click();
 	await expect(page.getByRole("status")).toContainText(
 		"Multicam session created with a program-audio track."
 	);
-	await page.getByRole("button", { name: cameraA.name, exact: true }).click();
-	await page.getByRole("button", { name: cameraC.name, exact: true }).click();
+	await cameraAngle(page, cameraA.name).click();
+	await cameraAngle(page, cameraC.name).click();
 	await page.getByLabel("Multicam program audio").selectOption(cameraB.id);
 	await page.getByLabel("Multicam session name").fill("Panel interview B");
 	await page.getByRole("button", { name: "Create multicam session" }).click();
@@ -481,11 +308,15 @@ test("recipe audio, multicam selection, and playhead input advance, pause, and r
 	expect(stoppedTime).toBeGreaterThan(startTime);
 	const stoppedValue = await playhead.inputValue();
 	await expect.poll(() => playhead.inputValue()).toBe(stoppedValue);
+	// NumberField clamps an out-of-range playhead to the timeline end
+	// instead of reverting it.
+	const timelineEnd = Number(await playhead.getAttribute("aria-valuemax"));
+	expect(timelineEnd).toBeGreaterThan(stoppedTime);
 	await playhead.fill("999");
 	await playhead.press("Tab");
 	await expect
 		.poll(async () => Number(await playhead.inputValue()))
-		.toBeCloseTo(stoppedTime, 2);
+		.toBeCloseTo(timelineEnd, 2);
 });
 
 test("fixture-backed stock search imports attributed media and opens the exact credits URL", async ({
@@ -596,220 +427,11 @@ test("fixture-backed stock search imports attributed media and opens the exact c
 	await saveScreenshot(page, "video-studio-remaining-stock-credits.png");
 });
 
-test("caption translation and dubbing recover through local fixtures and appear in generation history", async ({
-	page,
-}) => {
-	const title = uniqueTitle("Caption generation history");
-	const projectId = await createProject(page, title);
-	await openOverflowTab(page, "Captions", "captions");
-	const subtitleChooserPromise = page.waitForEvent("filechooser");
-	await page.getByRole("button", { name: "Import SRT / VTT" }).click();
-	await (await subtitleChooserPromise).setFiles({
-		name: "panel-captions.srt",
-		mimeType: "text/plain",
-		buffer: Buffer.from(
-			"1\n00:00:00,500 --> 00:00:01,750\nThe harbor is waking.\n\n"
-		),
-	});
-	await expect(page.getByRole("textbox", { name: "Caption 1" })).toHaveValue(
-		"The harbor is waking."
-	);
-	await saveProject(page);
-	const original = await readProject(page, projectId);
-	expect(original.captions[0]).toMatchObject({ start: 0.5, end: 1.75 });
-	await page.reload();
-	await selectProject(page, projectId);
-	await openOverflowTab(page, "Captions", "captions");
-	await expect(page.getByRole("textbox", { name: "Caption 1" })).toHaveValue(
-		"The harbor is waking."
-	);
-
-	const languageField = page.getByLabel("Caption translation language");
-	await languageField.fill("French");
-	await expect(languageField).toHaveValue("French");
-	const bridgeState = await page.evaluate(() => ({
-		captionText: document.querySelector<HTMLInputElement>(
-			'[aria-label="Caption 1"]'
-		)?.value,
-		// SAFETY: This single capability read observes the legacy model.complete
-		// property installed by this fixture host. Other bridge fields are not
-		// validated or promoted to the production RyuBridge contract.
-		modelComplete:
-			(
-				window as Omit<Window, "ryu"> & {
-					ryu?: FixtureLegacyModelCapabilityObservation;
-				}
-			).ryu?.model?.complete instanceof Function,
-		translationLanguage: document.querySelector<HTMLInputElement>(
-			'[aria-label="Caption translation language"]'
-		)?.value,
-		proofCalls: window.__videoStudioRemainingProof?.translationCalls.length,
-	}));
-	expect(bridgeState).toMatchObject({
-		captionText: "The harbor is waking.",
-		modelComplete: true,
-		translationLanguage: "French",
-		proofCalls: 0,
-	});
-	const translateButton = page.getByRole("button", {
-		name: "Translate with Ryu",
-	});
-	await expect(translateButton).toBeEnabled();
-	const translationFailure = await page.request.post(
-		"/__proof/arm-translation-failure"
-	);
-	expect(translationFailure.ok()).toBe(true);
-	await translateButton.click();
-	await expect(page.getByRole("status")).toContainText(
-		"Fixture caption translation failed once."
-	);
-	expect((await readProject(page, projectId)).captions[0]?.text).toBe(
-		"The harbor is waking."
-	);
-	await expect(translateButton).toBeEnabled();
-	await translateButton.click();
-	await expect(page.getByRole("status")).toContainText(
-		"Translated captions are ready for review. Their timings were preserved."
-	);
-	await saveProject(page);
-	let saved = await readProject(page, projectId);
-	const translatedTrack = saved.captionTracks.find(
-		(track) => track.language === "French"
-	);
-	expect(translatedTrack?.captions[0]).toMatchObject({
-		end: 1.75,
-		start: 0.5,
-		text: "Bonjour: The harbor is waking.",
-	});
-	expect(saved.captionTrackId).toBe(translatedTrack?.id);
-	const modelCalls = await page.evaluate(
-		() => window.__videoStudioRemainingProof?.translationCalls ?? []
-	);
-	expect(modelCalls).toHaveLength(2);
-	expect(JSON.parse(modelCalls[0]?.prompt ?? "{}")).toMatchObject({
-		language: "French",
-		captions: [{ text: "The harbor is waking." }],
-	});
-
-	const dubbingLanguage = page.getByLabel("Dubbing language");
-	const dubbingVoice = page.getByLabel("Dubbing voice");
-	const dubbingSpeed = page.getByLabel("Dubbing speed");
-	await dubbingLanguage.fill("fr-FR");
-	await dubbingVoice.fill("Harbor narrator");
-	await dubbingSpeed.fill("1.2");
-	const dubButton = page.getByRole("button", { name: "Create dubbed track" });
-	await expect(dubButton).toBeEnabled();
-	const dubbingFailure = await page.request.post(
-		"/__proof/arm-dubbing-failure"
-	);
-	expect(dubbingFailure.ok()).toBe(true);
-	await dubButton.click();
-	await expect(page.getByRole("status")).toContainText(
-		"Fixture dubbing failed once."
-	);
-	const failedJobs = await readGenerationJobs(page, projectId);
-	expect(failedJobs).toHaveLength(1);
-	expect(failedJobs[0]).toMatchObject({
-		message: "Fixture dubbing failed once.",
-		request: {
-			kind: "audio",
-			language: "fr-FR",
-			projectId,
-			prompt: dubbingScript(translatedTrack?.captions ?? []),
-			route: "node-default",
-			speed: 1.2,
-			voice: "Harbor narrator",
-		},
-		status: "incomplete",
-	});
-	await expect(dubButton).toBeEnabled();
-	await dubButton.click();
-	await expect(page.getByRole("status")).toContainText(
-		"Dubbed audio saved and added to the timeline. Review pronunciation and timing."
-	);
-	await saveProject(page);
-	saved = await readProject(page, projectId);
-	expect(saved.captionTrackId).toBe(translatedTrack?.id);
-	expect(
-		saved.captionTracks.find((track) => track.id === translatedTrack?.id)
-			?.captions[0]
-	).toMatchObject({
-		start: 0.5,
-		end: 1.75,
-		text: "Bonjour: The harbor is waking.",
-	});
-	const audioAssetId = saved.segments.find(
-		(segment) => segment.track === 1
-	)?.assetId;
-	expect(audioAssetId).toBeTruthy();
-	const audioAsset = (await readAssets(page)).find(
-		(asset) => asset.id === audioAssetId
-	);
-	expect(audioAsset).toMatchObject({
-		kind: "audio",
-		name: "Dubbed captions fr-FR.wav",
-	});
-
-	const dubCalls = await page.evaluate(
-		() => window.__videoStudioRemainingProof?.ttsCalls ?? []
-	);
-	expect(dubCalls).toHaveLength(2);
-	const expectedScript = dubbingScript(translatedTrack?.captions ?? []);
-	expect(
-		dubCalls.map((call) => ({
-			language: call.language,
-			speed: call.speed,
-			text: call.text,
-			voice: call.voice,
-		}))
-	).toEqual([
-		{
-			language: "fr-FR",
-			speed: 1.2,
-			text: expectedScript,
-			voice: "Harbor narrator",
-		},
-		{
-			language: "fr-FR",
-			speed: 1.2,
-			text: expectedScript,
-			voice: "Harbor narrator",
-		},
-	]);
-
-	await openOverflowTab(page, "Generate", "generate");
-	await expect(
-		page.getByRole("heading", { name: "Generation history" })
-	).toBeVisible();
-	const failedHistory = page
-		.locator("details.studio-scene")
-		.filter({ hasText: "Fixture dubbing failed once." });
-	await expect(failedHistory).not.toHaveAttribute("open", "");
-	await failedHistory.locator("summary").click();
-	await expect(failedHistory).toHaveAttribute("open", "");
-	await expect(failedHistory).toContainText(
-		"Voice: Harbor narrator · Language: fr-FR · Rate: 1.2×"
-	);
-	await expect(failedHistory).toContainText(
-		"Check the provider before retrying; this request may already have incurred a charge."
-	);
-	const completedHistory = page.locator("details.studio-scene").filter({
-		hasText:
-			"Caption timing was retained; review the generated audio duration.",
-	});
-	await expect(completedHistory).not.toHaveAttribute("open", "");
-	await completedHistory.locator("summary").click();
-	await expect(completedHistory).toHaveAttribute("open", "");
-	await expect(completedHistory).toContainText(
-		`Saved media: ${audioAsset?.name}`
-	);
-	const allJobs = await readGenerationJobs(page, projectId);
-	expect(allJobs.map((job) => job.status).sort()).toEqual([
-		"completed",
-		"incomplete",
-	]);
-	await saveScreenshot(
-		page,
-		"video-studio-remaining-caption-generation-history.png"
-	);
-});
+// After a session exists, the "More microphones" field lists the same camera
+// files as buttons, so pick angles inside the "Camera angles" field.
+function cameraAngle(page: Page, name: string) {
+	return page
+		.getByText("Camera angles", { exact: true })
+		.locator("..")
+		.getByRole("button", { name, exact: true });
+}

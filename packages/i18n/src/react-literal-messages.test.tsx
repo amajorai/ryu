@@ -71,3 +71,27 @@ test("formats untranslated copy in English inside a provider", async () => {
 		)
 	).toBe("Applied 1 change.");
 });
+
+test("keeps the same tl across re-renders so effects that depend on it run once", async () => {
+	const seen: unknown[] = [];
+	function Recorder({ tick }: { tick: number }) {
+		const tl = useLiteralMessages();
+		seen.push(tl);
+		return <output>{tl(SOURCE, { count: tick })}</output>;
+	}
+	const mount = document.createElement("div");
+	document.body.append(mount);
+	const root = createRoot(mount);
+	await act(async () => {
+		root.render(<Recorder tick={1} />);
+	});
+	await act(async () => {
+		root.render(<Recorder tick={2} />);
+	});
+	expect(mount.querySelector("output")?.textContent).toBe("Applied 2 changes.");
+	expect(seen.length).toBeGreaterThanOrEqual(2);
+	expect(new Set(seen).size).toBe(1);
+	await act(async () => {
+		root.unmount();
+	});
+});

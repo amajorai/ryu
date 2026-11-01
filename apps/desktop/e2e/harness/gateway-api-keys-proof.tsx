@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { ApiSection } from "../../src/components/gateway/ApiSection.tsx";
 import type { GatewayConfig } from "../../src/lib/api/gateway.ts";
 import "../../src/index.css";
+import { GATEWAY_CONFIG_REQUIRED_SECTIONS } from "./gateway-proof-contracts.ts";
 
 const ConfigSchema = z.object({
 	auth: z.object({
@@ -71,7 +72,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 				key: "***",
 			}));
 		}
-		return Response.json(redacted);
+		return Response.json({ ...GATEWAY_CONFIG_REQUIRED_SECTIONS, ...redacted });
 	}
 	const patch = ConfigSchema.parse(JSON.parse(String(init?.body ?? "{}")));
 	state.lastWrite = patch;

@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
 	testDir: ".",
-	testMatch: /prompt-studio-proof\.spec\.ts$/,
+	testMatch: /prompt-studio(-import|-runs)?-proof\.spec\.ts$/,
 	fullyParallel: false,
 	use: { baseURL: "http://127.0.0.1:5188/" },
 	projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

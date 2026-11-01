@@ -1,7 +1,20 @@
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 test.describe.configure({ timeout: 90_000 });
+
+// Adding an account needs the spending-limit acknowledgement
+// (SpendLimitConfirm, already gating at 07d403e33, before Ryu Quiet): "Add account" stays disabled until it is ticked.
+async function addAccount(page: Page, providerLabel: string): Promise<void> {
+	const add = page.getByRole("button", { name: "Add account" });
+	await expect(add).toBeDisabled();
+	await page
+		.getByRole("checkbox", {
+			name: `I have set a spending limit for this key at ${providerLabel}`,
+		})
+		.click();
+	await add.click();
+}
 
 test("Fal provider keys support masked multiple accounts", async ({ page }) => {
 	await page.goto("/gemini-accounts-proof.html?provider=fal", {
@@ -11,7 +24,7 @@ test("Fal provider keys support masked multiple accounts", async ({ page }) => {
 		timeout: 70_000,
 	});
 	await page.getByLabel("Fal API key").fill("third-fal-secret");
-	await page.getByRole("button", { name: "Add account" }).click();
+	await addAccount(page, "Fal");
 	await expect(page.getByText("Account 3 · key hidden")).toBeVisible();
 	await page.getByRole("button", { name: "Remove Fal account 1" }).click();
 	await expect(page.getByText("Account 3 · key hidden")).toHaveCount(0);
@@ -34,7 +47,7 @@ test("Replicate provider keys support masked multiple accounts", async ({
 		timeout: 70_000,
 	});
 	await page.getByLabel("Replicate API key").fill("third-replicate-secret");
-	await page.getByRole("button", { name: "Add account" }).click();
+	await addAccount(page, "Replicate");
 	await expect(page.getByText("Account 3 · key hidden")).toBeVisible();
 	await page
 		.getByRole("button", { name: "Remove Replicate account 1" })
@@ -59,7 +72,7 @@ test("Modal provider keys support masked multiple accounts and removal", async (
 		timeout: 70_000,
 	});
 	await page.getByLabel("Modal API key").fill("third-modal-secret");
-	await page.getByRole("button", { name: "Add account" }).click();
+	await addAccount(page, "Modal");
 	await expect(page.getByText("Account 3 · key hidden")).toBeVisible();
 	await page.getByRole("button", { name: "Remove Modal account 1" }).click();
 	await expect(page.getByText("Account 3 · key hidden")).toHaveCount(0);
@@ -85,7 +98,7 @@ test("Gemini provider keys show multiple accounts and support add and remove", a
 	await expect(page.getByText("Account 1 · key hidden")).toBeVisible();
 	await expect(page.getByText("Account 2 · key hidden")).toBeVisible();
 	await page.getByLabel("Gemini API key").fill("third-secret");
-	await page.getByRole("button", { name: "Add account" }).click();
+	await addAccount(page, "Gemini");
 	await expect(page.getByText("Account 3 · key hidden")).toBeVisible();
 	await page.screenshot({
 		path: path.resolve(
@@ -192,7 +205,14 @@ test("Live account save accepts applied settings without a Gateway restart", asy
 		provider: "fal",
 		account_action: "configure",
 		accountId: "a".repeat(64),
-		accountPolicy: { name: "Cache affinity", enabled: true, priority: 10 },
+		// A blank drain field is sent as null (already so at 07d403e33, before
+		// Ryu Quiet); GatewayProviderKeyRow.test.tsx pins the same wire value.
+		accountPolicy: {
+			drain_threshold_percent: null,
+			name: "Cache affinity",
+			enabled: true,
+			priority: 10,
+		},
 	});
 	expect(errors).toEqual([]);
 	await page.screenshot({

@@ -281,20 +281,26 @@ test.describe("bare settings rows", () => {
 		}
 	});
 
-	test("the rows around a bare row keep their card", async ({ page }) => {
-		// The regression `bare` must not cause: breaking the card around the whole
-		// group instead of just around the tall control.
+	test("the bare row stays inside the one flush list around it", async ({
+		page,
+	}) => {
+		// The regression `bare` must not cause: breaking the list around the whole
+		// group instead of just laying out the tall control. Since 0b6db0e694
+		// (F5c) a SettingsGroup is one flush ItemGroup with hairlines and no card,
+		// so the bare row and the rows on either side share that single list.
 		const groups = page
 			.getByTestId("settings-pane")
 			.locator('[data-slot="item-group"]');
-		await expect(groups).toHaveCount(2);
-		for (const group of await groups.all()) {
-			const painted = await group.evaluate((n) => {
-				const style = getComputedStyle(n);
-				return style.backgroundColor !== "rgba(0, 0, 0, 0)";
-			});
-			expect(painted).toBe(true);
-		}
+		await expect(groups).toHaveCount(1);
+		const group = groups.first();
+		await expect(group.getByTestId("ordinary-switch")).toHaveCount(1);
+		await expect(group.getByTestId("bare-textarea")).toHaveCount(1);
+		await expect(group.getByTestId("trailing-switch")).toHaveCount(1);
+		const painted = await group.evaluate((n) => {
+			const style = getComputedStyle(n);
+			return style.backgroundColor !== "rgba(0, 0, 0, 0)";
+		});
+		expect(painted).toBe(false);
 	});
 
 	test("the bare row's textarea spans the full column width", async ({

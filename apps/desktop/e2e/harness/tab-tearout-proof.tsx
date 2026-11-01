@@ -13,6 +13,10 @@ import { LanguagePackBridge } from "../../src/components/LanguagePackBridge.tsx"
 import Layout from "../../src/components/layout/Layout.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
+import {
+	hydrateSealedLocalStorage,
+	sealedLocalStorage,
+} from "../../src/lib/content-seal.ts";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { initializeTabTransfer } from "../../src/lib/tab-transfer.ts";
 import { useArtifactStore } from "../../src/store/useArtifactStore.ts";
@@ -114,6 +118,14 @@ if (params.get("window") !== "tab") {
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
+// The session snapshot and workbench layout are sealed (content-seal.ts):
+// plaintext is only ever the seed. Expose the app's own sealed reader so the
+// proofs read exactly what a restart restores, and hydrate before the first
+// render (as main.tsx does) so a reload restores the sealed values.
+Object.defineProperty(window, "__readSealedLocalStorage", {
+	value: (key: string) => sealedLocalStorage.getItem(key),
+});
+await hydrateSealedLocalStorage();
 await initializeTabTransfer();
 const root = document.getElementById("root");
 if (root) {

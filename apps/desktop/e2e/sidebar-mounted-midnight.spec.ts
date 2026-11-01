@@ -466,8 +466,11 @@ for (const [season, before, latest] of [
 		await clockStamp.evaluate((node) => {
 			Reflect.set(node, "__midnightIdentity", "retained");
 		});
-		// The preview lives in the agent name's tooltip on the one-line row.
+		// The preview lives in the agent name's tooltip on the one-line row
+		// (306ce31b7f). The page clock is paused one second before midnight, so
+		// let the tooltip's 600 ms open delay elapse without crossing midnight.
 		await row.hover();
+		await page.clock.runFor(700);
 		await expect(
 			page.getByTestId("agent-chat-preview-midnight-agent")
 		).toContainText("Retained agent preview");
@@ -490,8 +493,10 @@ for (const [season, before, latest] of [
 		expect(
 			await utc.evaluate((node) => Reflect.get(node, "__midnightIdentity"))
 		).toBe("retained");
-		// The preview lives in the agent name's tooltip on the one-line row.
+		// The preview lives in the agent name's tooltip on the one-line row; the
+		// paused clock has to run for the tooltip's open delay.
 		await row.hover();
+		await page.clock.runFor(700);
 		await expect(
 			page.getByTestId("agent-chat-preview-midnight-agent")
 		).toContainText("Retained agent preview");

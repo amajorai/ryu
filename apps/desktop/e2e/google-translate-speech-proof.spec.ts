@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { AppRequestValue } from "@ryuhq/core-client/app-request-json";
 import { z } from "zod";
 import {
@@ -20,6 +20,15 @@ const speechInputProofSchema = z.custom<
 		pluginDocumentSchema.safeParse(value).success &&
 		gatewaySpeechEditInputSchema.safeParse(value).success
 );
+
+// The BYOK card always carries the spending-limit warning (an Alert, role
+// "alert", already at 07d403e33, before Ryu Quiet). Every other alert is a
+// failure the proof must not show.
+function failureAlerts(page: Page): Locator {
+	return page
+		.getByRole("alert")
+		.filter({ hasNotText: "Set a spending limit on every provider key" });
+}
 
 test("Google Translate opt-in persists independently of Edge and Google Cloud", async ({
 	page,
@@ -166,7 +175,7 @@ test("Google Translate opt-in persists independently of Edge and Google Cloud", 
 	);
 	await mkdir(proof, { recursive: true });
 	await toggle.scrollIntoViewIfNeeded();
-	await expect(page.getByRole("alert")).toHaveCount(0);
+	await expect(failureAlerts(page)).toHaveCount(0);
 	await page.screenshot({
 		path: path.join(proof, "enabled.png"),
 		fullPage: true,
@@ -184,7 +193,7 @@ test("Google Translate opt-in persists independently of Edge and Google Cloud", 
 	).toBeVisible();
 	expect(pageErrors).toEqual([]);
 	await toggle.scrollIntoViewIfNeeded();
-	await expect(page.getByRole("alert")).toHaveCount(0);
+	await expect(failureAlerts(page)).toHaveCount(0);
 	await page.screenshot({
 		path: path.join(proof, "disabled.png"),
 		fullPage: true,

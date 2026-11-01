@@ -53,6 +53,14 @@ window.fetch = async (input, init) => {
 			status: 200,
 		});
 	}
+	// The proof stands in for Core's presence API with page.route; let the
+	// heartbeat and gaming settings reach it instead of answering 404 here.
+	if (
+		requestUrl.pathname === "/api/presence" ||
+		requestUrl.pathname === "/api/presence/gaming"
+	) {
+		return nativeFetch(input, init);
+	}
 	if (requestUrl.pathname.startsWith("/api/")) {
 		return new Response(JSON.stringify({}), { headers, status: 404 });
 	}

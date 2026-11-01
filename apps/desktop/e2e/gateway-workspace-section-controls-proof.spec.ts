@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
-import { type ProofJsonValue, parseProofJson } from "./fixture-json.ts";
+import type { ProofJsonValue } from "./fixture-json.ts";
 
 interface WorkspaceRoleSnapshot {
 	requests: Array<{
@@ -148,10 +147,13 @@ test("role save locks the draft while pending, preserves it after failure, and r
 				method === "POST" &&
 				url.pathname === "/api/control-plane/orgs/org-atlas/roles"
 			) {
-				let body: ProofJsonValue = null;
-				if (isNativeText(init?.body)) {
-					body = parseProofJson(init.body);
-				}
+				// This runs in the page, where the Node-side isNativeText and
+				// parseProofJson imports do not exist; read the body as the browser
+				// would.
+				const body: ProofJsonValue =
+					init?.body == null
+						? null
+						: JSON.parse(await new Response(init.body).text());
 				window.__WORKSPACE_ROLE_WRITE_ATTEMPTS__?.push({
 					body,
 					method,

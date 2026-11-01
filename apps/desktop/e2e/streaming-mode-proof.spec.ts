@@ -62,6 +62,16 @@ test("renders Streaming detection settings and persists user app names", async (
 		}
 		await route.fulfill({ json: streamingSettings });
 	});
+	// The Chats section also renders the resume-interrupted-chats switch
+	// (7c09ea06d2), which reads this Core preference; answer it as unset.
+	await page.route(
+		"**/api/preferences/auto-resume-interrupted-threads",
+		async (route) => {
+			await route.fulfill({
+				json: { key: "auto-resume-interrupted-threads", value: null },
+			});
+		}
+	);
 	await page.route("**/api/presence/gaming", async (route) => {
 		await route.fulfill({
 			json: {

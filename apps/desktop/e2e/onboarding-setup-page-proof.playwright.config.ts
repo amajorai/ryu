@@ -7,7 +7,7 @@ export default defineConfig({
 	outputDir: `${tmpdir()}/ryu-onboarding-setup-page-playwright-results`,
 	testDir: ".",
 	testMatch:
-		/(onboarding-setup-page-proof|node-onboarding-settings-story)\.spec\.ts$/,
+		/(onboarding-setup-page(-connections|-agents)?-proof|node-onboarding-settings-story)\.spec\.ts$/,
 	fullyParallel: false,
 
 	// The full production page imports the desktop runtime on a cold Vite start.

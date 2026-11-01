@@ -176,6 +176,16 @@ function installProofNetwork() {
 				},
 			});
 		}
+		// `useAgentUsage` first lists Core's subscription providers (without
+		// usage) to learn whether a non-ACP agent id such as `claude` is a Ryu
+		// provider. None is here, so it settles on the agent usage route below.
+		if (url.includes("/api/usage/subscriptions?usage=none")) {
+			return json({
+				generatedAt: "2026-10-01T00:00:00.000Z",
+				providers: [],
+				version: 1,
+			});
+		}
 		if (url.includes("/api/agents/") && url.endsWith("/usage")) {
 			return json({
 				agent_id: "claude",

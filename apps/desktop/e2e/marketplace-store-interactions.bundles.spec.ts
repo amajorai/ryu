@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
 	installLocalFixture,
+	MOCK_BACKEND_ORIGIN,
 	STORY_URL,
 } from "./marketplace-store-interactions.fixture.ts";
 
@@ -114,7 +115,9 @@ test("agent templates disclose stripped access, fail safely, and retry the same 
 	).toEqual({
 		accountId: "marketplace-store-fixture-user",
 		id: "fixture/research-agent",
-		node: "http://127.0.0.1:5189",
+		// The default Core URL comes from the harness's core-url mock, which is
+		// fixed whatever port serves the story.
+		node: MOCK_BACKEND_ORIGIN,
 	});
 	expect(
 		fixture.calls.some((call) => call.path === "/api/plugins/catalog/install")

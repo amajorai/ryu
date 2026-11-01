@@ -28,8 +28,12 @@ interface Approval {
 	title: string;
 }
 
+// Matches the companion's quest projection (`apps-store/approvals/ui/src/schemas.ts`),
+// which rejects a list whose rows lack the required condition and timestamps.
 interface Quest {
 	completed_at?: string | null;
+	completion_condition: string;
+	created_at: string;
 	id: string;
 	status: string;
 	suggestion?: {
@@ -38,6 +42,7 @@ interface Quest {
 		suggested_at: string;
 	} | null;
 	title: string;
+	updated_at: string;
 }
 
 interface Notification extends NotificationRecord {
@@ -180,6 +185,8 @@ function initialState(): FixtureState {
 		],
 		quests: [
 			{
+				completion_condition: "Release notes are drafted.",
+				created_at: timestamp,
 				id: "quest-complete",
 				status: "open",
 				suggestion: {
@@ -188,8 +195,11 @@ function initialState(): FixtureState {
 					suggested_at: timestamp,
 				},
 				title: "Prepare release notes",
+				updated_at: timestamp,
 			},
 			{
+				completion_condition: "The changelog is reviewed.",
+				created_at: timestamp,
 				id: "quest-snooze",
 				status: "open",
 				suggestion: {
@@ -198,6 +208,7 @@ function initialState(): FixtureState {
 					suggested_at: timestamp,
 				},
 				title: "Review changelog",
+				updated_at: timestamp,
 			},
 		],
 		suggestions: [

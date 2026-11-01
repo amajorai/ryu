@@ -30,7 +30,7 @@ const harnesses = [
 		name: "gateway-ai-providers",
 		port: 5297,
 		ready: "gateway-ai-providers-proof.html",
-		spec: /gateway-ai-providers-proof\.spec\.ts$/,
+		spec: /gateway-ai-providers(-signin)?-proof\.spec\.ts$/,
 		vite: "harness/vite.gateway-ai-providers-proof.config.ts",
 		viewport: { width: 1280, height: 720 },
 	},

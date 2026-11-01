@@ -31,11 +31,14 @@ test.describe("node personalization onboarding", () => {
 		await expect(
 			page.getByText("Build shared company knowledge next", { exact: true })
 		).toHaveCount(0);
+		// Since 448d296ed7 (P10) the step is flat: no Card, and its Continue
+		// action row (OnboardingActions) carries no hairline above it.
+		const setup = page.getByTestId("onboarding-node-setup");
+		await expect(setup.locator('[data-slot="card"]')).toHaveCount(0);
+		await expect(setup.locator('[data-slot="card-footer"]')).toHaveCount(0);
 		await expect(
-			page
-				.getByTestId("onboarding-node-setup")
-				.locator('[data-slot="card-footer"]')
-		).not.toHaveClass(/(?:^| )border-t(?: |$)/);
+			page.getByRole("button", { name: "Continue" }).locator("xpath=..")
+		).toHaveCSS("border-top-width", "0px");
 		const personalRadio = await page
 			.getByRole("radio", { name: "Personal use" })
 			.boundingBox();

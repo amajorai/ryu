@@ -1,9 +1,26 @@
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import {
 	type PluginDocument,
 	pluginDocumentSchema,
 } from "../src/lib/api/plugin-wire-values.ts";
+
+// Replacing a credential needs the spending-limit acknowledgement
+// (SpendLimitConfirm, already gating at 07d403e33, before Ryu Quiet): the
+// button stays disabled until it is ticked.
+async function replaceCredential(page: Page): Promise<void> {
+	const replace = page.getByRole("button", {
+		name: "Replace credential",
+		exact: true,
+	});
+	await expect(replace).toBeDisabled();
+	await page
+		.getByRole("checkbox", {
+			name: "I have set a spending limit for this key at Groq",
+		})
+		.click();
+	await replace.click();
+}
 
 test("provider source permissions, targeted replacement and endpoint context", async ({
 	page,
@@ -43,9 +60,7 @@ test("provider source permissions, targeted replacement and endpoint context", a
 	await page
 		.getByLabel("Groq Personal replacement credential")
 		.fill("synthetic-replacement");
-	await page
-		.getByRole("button", { name: "Replace credential", exact: true })
-		.click();
+	await replaceCredential(page);
 	await expect.poll(() => requests.length).toBe(1);
 	expect(requests[0]).toMatchObject({
 		provider: "genai-groq",
@@ -123,9 +138,7 @@ test("saved credentials without live application keep the draft and explain the 
 	await page
 		.getByLabel("Groq Personal replacement credential")
 		.fill("synthetic-replacement");
-	await page
-		.getByRole("button", { name: "Replace credential", exact: true })
-		.click();
+	await replaceCredential(page);
 	await expect(page.getByRole("alert")).toHaveText(
 		"Connection saved. Restart your externally managed Gateway to apply it."
 	);
@@ -159,9 +172,7 @@ test("a mismatched live application receipt preserves the credential draft", asy
 	await page
 		.getByLabel("Groq Personal replacement credential")
 		.fill("synthetic-replacement");
-	await page
-		.getByRole("button", { name: "Replace credential", exact: true })
-		.click();
+	await replaceCredential(page);
 	await expect(page.getByRole("alert")).toHaveText(
 		"Connection saved, but Gateway acknowledged a different configuration. Refresh the node before editing again."
 	);

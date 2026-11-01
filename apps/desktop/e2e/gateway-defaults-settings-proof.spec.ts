@@ -114,6 +114,19 @@ async function chooseProviderModel(
 	).toHaveCount(0);
 }
 
+/** Changing the node-wide cloud model asks before it resets every inheriting
+ * thread's prompt cache (node-default-cache-warning, pre-#914); apply it. */
+async function applyCacheReset(
+	page: import("@playwright/test").Page
+): Promise<void> {
+	const confirm = page.getByRole("alertdialog", {
+		name: "Apply now? This resets the prompt cache",
+	});
+	await expect(confirm).toBeVisible();
+	await confirm.getByRole("button", { name: "Apply now" }).click();
+	await expect(confirm).toHaveCount(0);
+}
+
 function writesFor(snapshot: ProofSnapshot, key: string): CapturedRequest[] {
 	return snapshot.requests.filter(
 		(request) =>
@@ -143,7 +156,8 @@ test("saves local and managed Bot realm defaults with their full selection and r
 	).toContainText("gemma-4-E2B-it-Q4_K_M");
 
 	await expect(page.getByTestId("bot-realm-default-card")).toContainText(
-		"Console owners and admins can choose the provider and model"
+		// BotRealmDefaultCard names organization owners (pre-#914 copy change).
+		"Organization owners and admins can choose the provider and model"
 	);
 	await expect(
 		page.getByRole("button", { name: "Default cloud agent or model" })
@@ -200,6 +214,7 @@ test("saves local and managed Bot realm defaults with their full selection and r
 		"Auto cloud",
 		"anthropic/claude-sonnet-4"
 	);
+	await applyCacheReset(page);
 	await expect(
 		page.getByRole("button", { name: "Default cloud agent or model" })
 	).toContainText("anthropic/claude-sonnet-4");
@@ -251,6 +266,9 @@ test("saves local and managed Bot realm defaults with their full selection and r
 			.getByRole("dialog")
 			.getByText("Use the default", { exact: true })
 			.click();
+		if (key === CLOUD_SELECTION_KEY) {
+			await applyCacheReset(page);
+		}
 		await expect(page.getByRole("button", { name: buttonName })).toBeVisible();
 		await expect
 			.poll(async () => writesFor(await readProof(page), key))
@@ -410,6 +428,7 @@ test("rolls failed lane and auto-unload writes back to saved values and allows r
 		"Auto cloud",
 		"anthropic/claude-sonnet-4"
 	);
+	await applyCacheReset(page);
 	const cloudTrigger = page.getByRole("button", {
 		name: "Default cloud agent or model",
 	});
@@ -430,6 +449,7 @@ test("rolls failed lane and auto-unload writes back to saved values and allows r
 		"Auto cloud",
 		"anthropic/claude-sonnet-4"
 	);
+	await applyCacheReset(page);
 	await expect(cloudTrigger).toContainText("anthropic/claude-sonnet-4");
 	await expect
 		.poll(async () => writesFor(await readProof(page), CLOUD_SELECTION_KEY))

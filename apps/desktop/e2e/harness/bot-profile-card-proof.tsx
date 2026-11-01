@@ -17,6 +17,15 @@ import {
 	useTabsContext,
 } from "../../src/contexts/TabsContext.tsx";
 import type { ActivityItem } from "../../src/lib/api/activity.ts";
+import {
+	BOT_FEED_ENGAGEMENT_KEY,
+	type BotFeedEngagement,
+	loadBotFeedEngagement,
+} from "../../src/lib/bot-feed.ts";
+import {
+	hydrateSealedLocalStorage,
+	sealedLocalStorage,
+} from "../../src/lib/content-seal.ts";
 import { useLiveActivityStore } from "../../src/store/useLiveActivityStore.ts";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import type { Conversation } from "../../types/chat.ts";
@@ -47,6 +56,9 @@ interface ProofState {
 		path: string;
 		title: string;
 	}>;
+	/** The bot-feed engagement as the app reads it back. It is sealed at rest
+	 * (SEALED_LOCAL_KEYS in content-seal.ts), so raw localStorage never holds it. */
+	readEngagement: () => BotFeedEngagement;
 	requests: ProofRequest[];
 }
 
@@ -171,7 +183,15 @@ const conversations: Conversation[] = [
 ];
 
 const pendingApproval = {
-	action: { type: "tool_call", tool_id: "send_message" },
+	// The full tool_call wire action (core-client approvalRequestSchema); a
+	// partial action fails validation and the card shows the queue unavailable.
+	action: {
+		arguments: {},
+		configure_approved: false,
+		profile_ids: [],
+		tool_id: "send_message",
+		type: "tool_call",
+	},
 	agent_id: "ryu",
 	conversation_id: "chat-goal",
 	created_at: new Date((now - 2 * 60 * 60) * 1000).toISOString(),
@@ -230,10 +250,10 @@ function installProofData() {
 		for (const key of [
 			"ryu:bot-profile-card-collapsed:v1",
 			"ryu:bot-feed-preferences:v1",
-			"ryu:bot-feed-engagement:v1",
 		]) {
 			localStorage.removeItem(key);
 		}
+		sealedLocalStorage.removeItem(BOT_FEED_ENGAGEMENT_KEY);
 	}
 	const proof: ProofState = {
 		activeTabId: "",
@@ -247,6 +267,7 @@ function installProofData() {
 			goalResume: 0,
 		},
 		openedTabs: [],
+		readEngagement: loadBotFeedEngagement,
 		requests: [],
 	};
 	window.__botProfileCardProof = proof;
@@ -454,5 +475,10 @@ function Story() {
 
 const root = document.getElementById("root");
 if (root) {
-	createRoot(root).render(<Story />);
+	const reactRoot = createRoot(root);
+	// As in src/main.tsx: sealed values (the feed engagement) are read
+	// synchronously by the first render, so open them before it.
+	hydrateSealedLocalStorage()
+		.catch(() => undefined)
+		.then(() => reactRoot.render(<Story />));
 }

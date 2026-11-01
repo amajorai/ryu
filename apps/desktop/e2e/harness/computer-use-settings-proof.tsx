@@ -23,6 +23,17 @@ const TARGET: ApiTarget = {
 };
 
 const PERSISTENCE_KEY = "ryu.desktop.computer-use-settings-proof";
+const SERVED_CONFIG_BASE = {
+	auth: { api_keys: [], require_auth: false },
+	providers: {
+		anthropic: null,
+		core: null,
+		genai: null,
+		local: null,
+		openai: null,
+		openrouter: null,
+	},
+};
 const query = new URLSearchParams(window.location.search);
 
 function readPersistedComputerUse(): GatewayComputerUseConfig {
@@ -109,10 +120,15 @@ function installGatewayMock(): () => void {
 			}
 
 			requests.push({ body: null, method, path, status: 200 });
-			return new Response(JSON.stringify({ computer_use: computerUse }), {
-				headers: { "content-type": "application/json" },
-				status: 200,
-			});
+			// A Gateway always serves `auth` and `providers`, and Desktop validates
+			// the full served shape before any card reads `computer_use`.
+			return new Response(
+				JSON.stringify({ ...SERVED_CONFIG_BASE, computer_use: computerUse }),
+				{
+					headers: { "content-type": "application/json" },
+					status: 200,
+				}
+			);
 		},
 		{ preconnect: nativeFetch.preconnect }
 	);

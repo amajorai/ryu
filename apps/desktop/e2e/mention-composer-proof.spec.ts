@@ -119,8 +119,16 @@ test("renders capability mentions and gates Composio integrations", async ({
 	);
 
 	const slash = page.getByTestId("slash-command-proof");
-	await expect(slash.getByText("Commands", { exact: true })).toBeVisible();
-	await expect(slash.getByText("Skills", { exact: true })).toBeVisible();
+	// The shared composer menu shows group labels only with more than two
+	// groups since 093203904b (P3), so with Commands and Skills alone each row
+	// carries its source instead: the plugin command first, the skill after it.
+	await expect(slash.getByText("Commands", { exact: true })).toHaveCount(0);
+	const slashOptions = slash.getByRole("option");
+	await expect(slashOptions).toHaveCount(2);
+	await expect(slashOptions.nth(0)).toHaveAccessibleName(/^\/deploy\b/);
+	await expect(slashOptions.nth(0)).toContainText("Plugin");
+	await expect(slashOptions.nth(1)).toHaveAccessibleName(/^\/pdf\b/);
+	await expect(slashOptions.nth(1)).toContainText("Skill");
 	await slash.getByRole("option", { name: "/pdf" }).click();
 	await expect(slash.getByTestId("slash-command-value")).toHaveText("/pdf ");
 	await slash.getByTestId("slash-command-input").fill("/deploy");

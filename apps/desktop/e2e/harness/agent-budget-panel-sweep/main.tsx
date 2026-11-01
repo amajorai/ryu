@@ -9,6 +9,7 @@ import type {
 } from "../../../src/lib/api/gateway.ts";
 import { useNodeStore } from "../../../src/store/useNodeStore.ts";
 import { gatewayBudgetWriteProofSchema } from "../../gateway-budget-proof.contracts.ts";
+import { GATEWAY_CONFIG_REQUIRED_SECTIONS } from "../gateway-proof-contracts.ts";
 import "../../../src/index.css";
 
 const AGENT_ID = "agent-budget-sweep-agent";
@@ -147,7 +148,12 @@ const fixtureFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 			);
 		}
 		proof.requests.push({ body: null, method, path, status: 200 });
-		return response({ budgets: readBudgets() });
+		// Desktop validates the full served config shape, which always carries
+		// `auth` and `providers`; a budgets-only body is rejected as invalid.
+		return response({
+			...GATEWAY_CONFIG_REQUIRED_SECTIONS,
+			budgets: readBudgets(),
+		});
 	}
 	if (url.pathname === "/api/gateway/budget/spend") {
 		const budgets = readBudgets();

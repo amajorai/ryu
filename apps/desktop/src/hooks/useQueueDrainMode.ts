@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 /** How the message queue drains while a run is streaming.
  *
@@ -55,5 +56,5 @@ export function setQueueDrainMode(mode: QueueDrainMode) {
 	localStorage.setItem(KEY, mode);
 	// Same-document listeners don't get the native `storage` event, so broadcast
 	// one ourselves — every useQueueDrainMode() consumer re-reads on this.
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 }

@@ -69,7 +69,13 @@ const initialContext: BrowserContextResult = {
 	viewport,
 };
 
-const previewImage = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+// `safeMediaUrl` (the surface's src guard) rejects `data:image/svg+xml`, so a
+// data-URL preview never rendered a frame. A blob: URL is an allowed scheme and
+// an <img> never runs SVG script, so the same drawing reaches the surface.
+const previewImage = URL.createObjectURL(
+	new Blob(
+		[
+			`
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
   <rect width="1440" height="900" fill="#f8fafc"/>
   <rect width="1440" height="76" fill="#ffffff"/>
@@ -98,7 +104,11 @@ const previewImage = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
   <text x="862" y="496" fill="#475569" font-family="Inter,Arial,sans-serif" font-size="14" font-weight="600">Preview</text>
   <text x="150" y="704" fill="#94a3b8" font-family="Inter,Arial,sans-serif" font-size="14">Live preview · 1440 × 900 · embedded browser context</text>
 </svg>
-`)}`;
+`,
+		],
+		{ type: "image/svg+xml" }
+	)
+);
 
 function nextSelection(
 	selections: BrowserRect[]

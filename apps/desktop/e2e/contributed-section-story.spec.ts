@@ -6,8 +6,8 @@
 // What it certifies, none of which a type-check can see:
 //   • `source.filter` really slices the endpoint (the `completed` run is absent,
 //     so Working and Done can be two sections over one feed);
-//   • a row whose mapped subtitle resolves renders TALLER than one whose does not
-//     — the two-line row is the whole point of the feature;
+//   • a row whose mapped subtitle resolves shows it in its hover preview, and a
+//     row whose does not shows none (rows are one line since 306ce31b7f);
 //   • `subtitleTransform: "basename"` shows the PROJECT (`ryu-closed`), not the
 //     absolute folder path;
 //   • an `itemTarget` carrying an allowlisted query parameter opens a
@@ -37,18 +37,35 @@ test.describe("app-contributed sidebar section — real component in isolation",
 		await expect(page.getByText("Ship the sidebar")).toHaveCount(0);
 	});
 
-	test("shows the project as a second line, and only when there is one", async ({
+	test("shows the project in the row's hover preview, and only when there is one", async ({
 		page,
 	}) => {
 		await page.goto(STORY_URL);
-		// The basename of `/Users/dev/code/ryu-closed`, not the whole path.
-		await expect(page.getByText("ryu-closed", { exact: true })).toBeVisible();
-
+		// Since 306ce31b7f (P2) every contributed row is one h-8 line and its
+		// subtitle moves into the hover preview, so both rows share a height and
+		// the project shows only once its row is hovered.
 		const withProject = row(page, "Fix the flaky auth test");
 		const withoutProject = row(page, "Draft the release notes");
 		const tall = await withProject.boundingBox();
 		const short = await withoutProject.boundingBox();
-		expect(tall?.height ?? 0).toBeGreaterThan(short?.height ?? 0);
+		expect(tall?.height ?? 0).toBe(short?.height ?? -1);
+		await expect(page.getByText("ryu-closed", { exact: true })).toHaveCount(0);
+
+		const preview = page.locator('[data-slot="hover-card-content"]');
+		await page.getByText("Fix the flaky auth test").hover();
+		// The basename of `/Users/dev/code/ryu-closed`, not the whole path.
+		await expect(
+			preview.getByText("ryu-closed", { exact: true })
+		).toBeVisible();
+		await expect(preview).not.toContainText("/Users/dev/code");
+
+		await page.mouse.move(0, 0);
+		await expect(preview).toHaveCount(0);
+		await page.getByText("Draft the release notes").hover();
+		await expect(preview).toContainText("Draft the release notes");
+		await expect(preview.getByText("ryu-closed", { exact: true })).toHaveCount(
+			0
+		);
 	});
 
 	test("clicking a row opens its conversation, not a blank chat", async ({

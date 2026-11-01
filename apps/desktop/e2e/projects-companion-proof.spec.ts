@@ -147,6 +147,8 @@ test("create validates and persists a project through the Spaces mirror, then fi
 		description: "Deliver the quarter plan.",
 		dueDate: "2026-10-20",
 		executionMode: "local",
+		// The create dialog's optional Goal field posts its (blank) value too.
+		goal: "",
 		name: "Coverage roadmap",
 		owner: "Avery",
 	});
@@ -258,9 +260,10 @@ test("project edits roll back on a rejected write, retry successfully, and task 
 	await expect(page.getByLabel("Project owner")).toHaveValue("Jordan");
 	await expect(page.getByLabel("Project status")).toHaveValue("blocked");
 	await expect(page.getByLabel("Project execution mode")).toHaveValue("cloud");
-	await expect(page.getByRole("listitem")).toContainText(
-		"Prepare rollout notes"
-	);
+	// The seeded "Review launch brief" task is a listitem too.
+	await expect(
+		page.getByRole("listitem").filter({ hasText: "Prepare rollout notes" })
+	).toHaveCount(1);
 	await capture(page, "projects-edit-task-status-reload.png");
 	const state = await fixtureState(page);
 	const patches = state.calls.filter((call) => call.method === "PATCH");
@@ -341,7 +344,9 @@ test("context, coordinator retry, workers, and every subscription kind reach nod
 		.getByLabel("Worker task")
 		.fill("Verify migration on a clean install.");
 	await page.getByRole("button", { name: "Dispatch worker" }).click();
-	await expect(page.locator(".projects-worker")).toContainText("QA handoff");
+	await expect(
+		page.locator(".projects-worker").filter({ hasText: "QA handoff" })
+	).toHaveCount(1);
 	await expect
 		.poll(
 			async () => (await fixtureState(page)).workers["project-launch"]?.length
@@ -404,8 +409,12 @@ test("context, coordinator retry, workers, and every subscription kind reach nod
 	await expect(page.locator(".projects-context-list")).toContainText(
 		"Release rule"
 	);
-	await expect(page.locator(".projects-worker")).toContainText("QA handoff");
-	await expect(page.locator(".projects-worker")).toContainText("Morning pulse");
+	await expect(
+		page.locator(".projects-worker").filter({ hasText: "QA handoff" })
+	).toHaveCount(1);
+	await expect(
+		page.locator(".projects-worker").filter({ hasText: "Morning pulse" })
+	).toHaveCount(1);
 	await capture(page, "projects-context-coordinator-workers-subscriptions.png");
 	expect(pageErrors).toEqual([]);
 });

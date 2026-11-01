@@ -323,9 +323,12 @@ test("validates deep-clean scope and explains the chosen data before cancellatio
 	await page
 		.getByRole("option", { name: "Everything, including downloads" })
 		.click();
-	await options
-		.getByRole("switch", { name: "Also clear shadow and ghost" })
-		.uncheck();
+	// Shadow and ghost state live inside each profile's data folder, so the
+	// dialog no longer offers a separate machine-wide clear (removed before Ryu
+	// Quiet; DangerZoneSettings.coverage already asserts its absence).
+	await expect(
+		options.getByRole("switch", { name: "Also clear shadow and ghost" })
+	).toHaveCount(0);
 	await expect(
 		options.getByText(
 			"Deletes the whole data folder, engines and models included."
@@ -430,9 +433,7 @@ test("deep-cleans selected profiles with the default useful depth and restarts o
 	await expect(confirmation).toContainText(
 		"clear its data folder while keeping downloaded engines and models"
 	);
-	await expect(confirmation).toContainText(
-		"Shadow and ghost are shared by every profile"
-	);
+	await expect(confirmation).not.toContainText("shared by every profile");
 	const reloaded = page.waitForEvent("load");
 	await confirmation
 		.getByRole("button", { name: "Remove them", exact: true })
@@ -443,11 +444,11 @@ test("deep-cleans selected profiles with the default useful depth and restarts o
 		state.invokeCalls.filter((call) => call.command === "deep_clean_node")
 	).toEqual([
 		{
-			args: { depth: "state", profile: "release", shared: true },
+			args: { depth: "state", profile: "release" },
 			command: "deep_clean_node",
 		},
 		{
-			args: { depth: "state", profile: "dev", shared: true },
+			args: { depth: "state", profile: "dev" },
 			command: "deep_clean_node",
 		},
 	]);

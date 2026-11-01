@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: import.meta.dirname,
-	testMatch: "tab-tearout-proof.spec.ts",
+	testMatch: /tab-tearout-proof(?:\.drag)?\.spec\.ts$/,
 	workers: 1,
 	timeout: 90_000,
 	expect: { timeout: 20_000 },

@@ -1,5 +1,6 @@
 import { THEME_APPEARANCE_CHANGE_EVENT } from "@ryu/ui/theme/prefs.ts";
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 const KEY = "ryu_inverted_backgrounds";
 
@@ -35,6 +36,6 @@ export function useInvertedBackgrounds(): boolean {
 export function setInvertedBackgrounds(enabled: boolean) {
 	localStorage.setItem(KEY, String(enabled));
 	applyInvertedBackgrounds(enabled);
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 	window.dispatchEvent(new Event(THEME_APPEARANCE_CHANGE_EVENT));
 }

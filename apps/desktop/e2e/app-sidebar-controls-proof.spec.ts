@@ -13,6 +13,16 @@ async function openFreshProof(page: Page) {
 	await page.reload();
 }
 
+/** Radio items keep the section menu open. Close the submenu, then the menu,
+ *  before reopening it: clicking the trigger of a still-open menu toggled it
+ *  shut mid-sequence, so the next keyboard submenu opened inside a closing menu. */
+async function closeSectionMenu(page: Page) {
+	await page.keyboard.press("Escape");
+	await expect(page.getByRole("menu")).toHaveCount(1);
+	await page.keyboard.press("Escape");
+	await expect(page.getByRole("menu")).toHaveCount(0);
+}
+
 test.describe("AppSidebar section and navigation controls", () => {
 	test("scope picker writes and restores the selected project scope", async ({
 		page,
@@ -147,6 +157,8 @@ test.describe("AppSidebar section and navigation controls", () => {
 		await expect(nameAscending).toBeVisible();
 		await nameAscending.focus();
 		await page.keyboard.press("Enter");
+		// Radio items keep the menu open; close it before reopening.
+		await closeSectionMenu(page);
 		await expect(page.getByTestId("sort-value")).toHaveText("name-asc");
 		await expect(page.getByTestId("visible-items")).toHaveText("AlphaBravo");
 		await expect(
@@ -169,6 +181,7 @@ test.describe("AppSidebar section and navigation controls", () => {
 		await expect(fiveItems).toBeVisible();
 		await fiveItems.focus();
 		await page.keyboard.press("Enter");
+		await closeSectionMenu(page);
 		await expect(page.getByTestId("page-size")).toHaveText("5");
 		await expect(page.getByTestId("visible-items")).toHaveText(
 			"AlphaBravoCharlieDeltaEcho"

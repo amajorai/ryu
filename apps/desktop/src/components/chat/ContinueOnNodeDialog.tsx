@@ -319,7 +319,12 @@ export function ContinueOnNodeDialog({
 			}}
 			open={open}
 		>
-			<DialogContent appearance="continue-on-node">
+			{/* The working-tree review can outgrow a short window; scroll inside the
+			    dialog so the footer actions stay reachable. */}
+			<DialogContent
+				appearance="continue-on-node"
+				className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+			>
 				<DialogHeader>
 					<DialogTitle>Continue on another node</DialogTitle>
 					<DialogDescription>

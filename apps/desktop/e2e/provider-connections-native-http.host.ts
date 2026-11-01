@@ -12,8 +12,12 @@ export function startProviderConnectionsProofHost(
 		status: number;
 	}> = [];
 	const unexpected: string[] = [];
+	// The settings page also mounts Model parameters, whose local-model picker
+	// reads Core's engine model catalog (already so at 07d403e33, before Ryu
+	// Quiet); serve it as an empty catalog.
 	const known = [
 		"/api/agents",
+		"/api/engines/models",
 		"/api/auth/get-session",
 		"/api/preferences/entitlement-active",
 		"/api/preferences/managed-inference-entitled",
@@ -62,6 +66,15 @@ export function startProviderConnectionsProofHost(
 					{ error: { message: "Unknown or unauthenticated fixture request" } },
 					403
 				);
+			}
+			if (request.method === "GET" && url.pathname === "/api/engines/models") {
+				calls.push({
+					method: "GET",
+					path: url.pathname,
+					body: null,
+					status: 200,
+				});
+				return output({ models: {} });
 			}
 			if (request.method === "GET" && url.pathname === "/api/agents") {
 				calls.push({

@@ -47,7 +47,7 @@ test("a completed eval exposes the full truncated prompt and exact run request",
 	).toContainText("91%");
 	await expect(
 		page.getByRole("row", { name: /A release engineer opens/u })
-	).toContainText("pass");
+	).toContainText("Pass"); // fc38dd6ea6 (Ryu Quiet): the pass badge is muted "Pass" text
 
 	const requestState = await page.evaluate(
 		() =>

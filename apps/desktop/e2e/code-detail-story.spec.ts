@@ -28,24 +28,29 @@ test("below Detailed, a long code block is capped and scrolls", async ({
 	await page.goto(STORY_URL);
 	const body = page.getByTestId("capped").locator(BODY);
 	await expect(body).toBeVisible();
+	// The reply renderer loads lazily since 523665000e: its fallback is the
+	// plain text in the same box and the highlighted block replaces it, so the
+	// geometry is read (and re-read) until the rendered block settles.
+	await expect(async () => {
+		const metrics = await body.evaluate((el) => ({
+			clientHeight: el.clientHeight,
+			scrollHeight: el.scrollHeight,
+			maxHeight: getComputedStyle(el).maxHeight,
+			overflowY: getComputedStyle(el).overflowY,
+		}));
+		// The cap landed on this element at all…
+		expect(metrics.maxHeight).not.toBe("none");
+		// …it is doing something (content exceeds the box)…
+		expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+		// …and the overflow is reachable rather than clipped away.
+		expect(["auto", "scroll"]).toContain(metrics.overflowY);
 
-	const metrics = await body.evaluate((el) => ({
-		clientHeight: el.clientHeight,
-		scrollHeight: el.scrollHeight,
-		maxHeight: getComputedStyle(el).maxHeight,
-		overflowY: getComputedStyle(el).overflowY,
-	}));
-	// The cap landed on this element at all…
-	expect(metrics.maxHeight).not.toBe("none");
-	// …it is doing something (content exceeds the box)…
-	expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
-	// …and the overflow is reachable rather than clipped away.
-	expect(["auto", "scroll"]).toContain(metrics.overflowY);
-
-	await body.evaluate((el) => {
-		el.scrollTop = el.scrollHeight;
-	});
-	expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+		const scrolled = await body.evaluate((el) => {
+			el.scrollTop = el.scrollHeight;
+			return el.scrollTop;
+		});
+		expect(scrolled).toBeGreaterThan(0);
+	}).toPass();
 });
 
 test("at Detailed, the same block renders uncapped", async ({ page }) => {

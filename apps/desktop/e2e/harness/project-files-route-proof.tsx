@@ -1,5 +1,6 @@
 import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -9,7 +10,13 @@ import { useWorkspaceStore } from "../../src/store/useWorkspaceStore.ts";
 import "../../src/index.css";
 
 interface BridgeCall {
-	args?: { cwd?: string; command?: string; path?: string; opener?: string };
+	args?: {
+		cwd?: string;
+		command?: string;
+		path?: string;
+		opener?: string;
+		root?: string;
+	};
 	command: string;
 }
 interface Fixture {
@@ -52,48 +59,36 @@ proofWindow.__TAURI_INTERNALS__ = {
 	invoke: async (command, args) => {
 		fixture.calls.push({ command, args });
 		if (failures.delete(command)) {
-			if (command === "shell_execute") {
-				return {
-					code: 128,
-					stderr: "Fixture repository read denied",
-					stdout: "",
-				};
+			if (command === "list_workspace_files") {
+				throw new Error("Fixture repository read denied");
 			}
 			throw new Error("Fixture workspace item unavailable");
 		}
-		if (command === "shell_execute") {
+		// The file tree lists through the native `list_workspace_files` command
+		// (JSON paths, absent cached entries filtered), not a shelled `git ls-files`.
+		if (command === "list_workspace_files") {
 			if (params.has("hold")) {
 				params.delete("hold");
-				return new Promise<{ code: number; stderr: string; stdout: string }>(
-					(resolve) => {
-						fixture.releaseHeldListing = () =>
-							new Promise<void>((completed) => {
-								resolve({ code: 0, stderr: "", stdout: "README.md\n" });
-								requestAnimationFrame(() =>
-									requestAnimationFrame(() => completed())
-								);
-							});
-					}
-				);
+				return new Promise<string[]>((resolve) => {
+					fixture.releaseHeldListing = () =>
+						new Promise<void>((completed) => {
+							resolve(["README.md"]);
+							requestAnimationFrame(() =>
+								requestAnimationFrame(() => completed())
+							);
+						});
+				});
 			}
 			if (params.has("failure")) {
 				params.delete("failure");
-				return {
-					code: 128,
-					stderr: "Fixture repository read denied",
-					stdout: "",
-				};
+				throw new Error("Fixture repository read denied");
 			}
-			return {
-				code: 0,
-				stderr: "",
-				stdout:
-					args?.cwd === "/tmp/ryu-new-project-fixture"
-						? "new-project.ts\n"
-						: params.has("empty")
-							? ""
-							: "README.md\nsrc/index.ts\nsrc/untracked.ts\n",
-			};
+			if (args?.root === "/tmp/ryu-new-project-fixture") {
+				return ["new-project.ts"];
+			}
+			return params.has("empty")
+				? []
+				: ["README.md", "src/index.ts", "src/untracked.ts"];
 		}
 		if (command === "get_editor_availability") {
 			return [
@@ -127,13 +122,21 @@ function ProofPage() {
 	);
 }
 
+// The file context menu reads plugin file handlers through React Query
+// (usePluginContributions), as the shipped app provides at its root.
+const queryClient = new QueryClient({
+	defaultOptions: { queries: { retry: false } },
+});
+
 createRoot(document.getElementById("root")!).render(
-	<AppSurfaceProvider surface={params.has("web") ? "web" : "desktop"}>
-		<ThemeProvider attribute="class" defaultTheme="dark" forcedTheme="dark">
-			<TooltipProvider delay={0}>
-				<ProofPage />
-				<Toaster />
-			</TooltipProvider>
-		</ThemeProvider>
-	</AppSurfaceProvider>
+	<QueryClientProvider client={queryClient}>
+		<AppSurfaceProvider surface={params.has("web") ? "web" : "desktop"}>
+			<ThemeProvider attribute="class" defaultTheme="dark" forcedTheme="dark">
+				<TooltipProvider delay={0}>
+					<ProofPage />
+					<Toaster />
+				</TooltipProvider>
+			</ThemeProvider>
+		</AppSurfaceProvider>
+	</QueryClientProvider>
 );

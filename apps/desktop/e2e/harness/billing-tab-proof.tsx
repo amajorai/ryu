@@ -1,3 +1,4 @@
+import { DESKTOP_TRIAL_FLAG } from "@ryu/auth/lib/feature-flag-keys";
 import { I18nProvider } from "@ryu/i18n/react";
 import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
@@ -223,7 +224,9 @@ function subscriptionStatus(state: BillingFixtureState) {
 	if (state.scenario === "trial") {
 		return {
 			entitlement: null,
-			features: {},
+			// The desktop trial is a rollout flag; off, the gate resolves as
+			// "Free during beta" with no trial clock and no paywall.
+			features: { [DESKTOP_TRIAL_FLAG]: true },
 			lifetime: null,
 			organizationId: FIXTURE_ORG_ID,
 			plan: null,

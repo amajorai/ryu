@@ -1,5 +1,7 @@
 declare const window: ProofWindow;
 
+// Must stay first: installs the Tauri bridge before lib/auth-client.ts loads.
+import "./fallback-rules-settings-proof-bridge.ts";
 import { I18nProvider } from "@ryu/i18n/react";
 import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
@@ -183,18 +185,6 @@ function installFixture(): void {
 			writeFailuresLeft,
 		}),
 	};
-	const tauriWindow = window;
-	const proofTauriKernel = {
-		invoke: async () => undefined,
-		transformCallback: () => 1,
-	};
-	// SAFETY: This browser fixture installs this exact complete private two-method kernel.
-	// The mutation view owns only that fixture slot, not a public Tauri result contract.
-	(
-		tauriWindow as Omit<typeof tauriWindow, "__TAURI_INTERNALS__"> & {
-			__TAURI_INTERNALS__: typeof proofTauriKernel;
-		}
-	).__TAURI_INTERNALS__ = proofTauriKernel;
 	appQueryClient.clear();
 	queryClient.clear();
 

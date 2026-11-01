@@ -117,6 +117,27 @@ async function capture(
 	});
 }
 
+// The mastery row is `<Progress aria-label="… mastery">` followed by the
+// two-decimal number in one span. Base UI's Progress renders a visually hidden
+// presentation "x" inside that span, so its text is "x0.62", not "0.62";
+// assert the bar's value and the number next to it instead of an exact text
+// node.
+async function expectMastery(
+	companion: FrameLocator,
+	skill: string,
+	mastery: number
+): Promise<void> {
+	const bar = companion.getByRole("progressbar", {
+		name: `${skill} mastery`,
+		exact: true,
+	});
+	await expect(bar).toHaveAttribute(
+		"aria-valuenow",
+		String(Math.round(mastery * 100))
+	);
+	await expect(bar.locator("xpath=..")).toContainText(mastery.toFixed(2));
+}
+
 test("Study plans with minutes, answers three item kinds, and persists the completed attempt trail", async ({
 	page,
 }) => {
@@ -245,7 +266,7 @@ test("Skills adds a named skill, refreshes mastery projections, and reloads stor
 	await expect(
 		companion.getByText("Not enough history to say yet")
 	).toBeVisible();
-	await expect(companion.getByText("0.62", { exact: true })).toBeVisible();
+	await expectMastery(companion, "Cellular respiration", 0.62);
 
 	const input = companion.getByPlaceholder("Add a skill", { exact: true });
 	await input.fill("Oxidative phosphorylation");
@@ -253,7 +274,7 @@ test("Skills adds a named skill, refreshes mastery projections, and reloads stor
 	await expect(
 		companion.getByText("Oxidative phosphorylation", { exact: true })
 	).toBeVisible();
-	await expect(companion.getByText("0.50", { exact: true })).toBeVisible();
+	await expectMastery(companion, "Oxidative phosphorylation", 0.5);
 	const createSkill = await waitForCall(page, "POST", "/skills");
 	expect(createSkill.body).toEqual({
 		name: "Oxidative phosphorylation",

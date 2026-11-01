@@ -23,6 +23,10 @@ import {
 	TabsProvider,
 	useTabsContext,
 } from "../../src/contexts/TabsContext.tsx";
+import {
+	hydrateSealedLocalStorage,
+	sealedLocalStorage,
+} from "../../src/lib/content-seal.ts";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { queryClient } from "../../src/lib/query-client.ts";
 import { useCreateAgentDialog } from "../../src/store/useCreateAgentDialog.ts";
@@ -45,6 +49,16 @@ declare global {
 		__APP_SIDEBAR_PROOF__?: SidebarProofState;
 	}
 }
+
+// The session snapshot is sealed (content-seal.ts): plaintext
+// `ryu_session_tabs` is never written. Expose the app's own sealed reader and
+// flush so the proof reads exactly what a restart restores.
+Object.defineProperty(window, "__readSessionTabs", {
+	value: () => sealedLocalStorage.getItem("ryu_session_tabs"),
+});
+Object.defineProperty(window, "__flushSealedStorage", {
+	value: () => sealedLocalStorage.flush(),
+});
 
 const PROJECT_PATH = "/Users/proof/Project Alpha";
 const INITIAL_ACTIVE_FOLDER =
@@ -285,4 +299,8 @@ if (!root) {
 	throw new Error("AppSidebar proof root is missing");
 }
 
-createRoot(root).render(<ProofSurface />);
+// Hydrate sealed storage before the first render, as main.tsx does, so a
+// reload restores the sealed session tabs.
+hydrateSealedLocalStorage()
+	.then(() => createRoot(root).render(<ProofSurface />))
+	.catch(() => undefined);

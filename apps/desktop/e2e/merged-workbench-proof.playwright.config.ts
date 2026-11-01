@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: ".",
-	testMatch: /merged-workbench-proof\.spec\.ts$/,
+	testMatch: /merged-workbench(-regions)?-proof\.spec\.ts$/,
 	workers: 1,
 	expect: { timeout: 30_000 },
 	timeout: 60_000,

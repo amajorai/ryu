@@ -83,6 +83,9 @@ async function fixture(page: Page) {
 							active: id === account,
 							gatewayActive: false,
 							kind: "api_key",
+							// Core stamps every catalog account; the catalog contract requires
+							// it (already so at 07d403e33, before Ryu Quiet).
+							updatedAt: 1,
 						})),
 					},
 				],
@@ -110,7 +113,21 @@ async function fixture(page: Page) {
 		} else if (endpoint === "/api/models/installed") {
 			result = { models: [] };
 		} else if (endpoint === "/api/gateway/config") {
-			result = { providers: { accounts: { openai: [gateway] } } };
+			// The Gateway config contract requires `auth` and the core provider
+			// slots (already so at 07d403e33, before Ryu Quiet); without them the
+			// whole read is rejected and RyuPiConfig reports a load failure.
+			result = {
+				auth: { api_keys: [], require_auth: false },
+				providers: {
+					accounts: { openai: [gateway] },
+					anthropic: null,
+					core: null,
+					genai: null,
+					local: null,
+					openai: null,
+					openrouter: null,
+				},
+			};
 		} else if (endpoint === "/api/gateway/providers") {
 			const decodedPolicy = z
 				.record(z.string(), z.json())

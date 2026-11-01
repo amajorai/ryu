@@ -343,12 +343,13 @@ test("late prior-file read cannot overwrite the newly selected file", async ({
 	await setup(page, [], "?hold");
 	await expect
 		.poll(() =>
-			page.evaluate(() =>
-				Boolean(
-					/* SAFETY: diff-review-proof.tsx installs __diffReleaseRead before this proof page is evaluated. */ (
-						window as Window & { __diffReleaseRead?: () => void }
-					).__diffReleaseRead
-				)
+			page.evaluate(
+				() =>
+					typeof (
+						/* SAFETY: diff-review-proof.tsx installs __diffReleaseRead before this proof page is evaluated. */ (
+							window as Window & { __diffReleaseRead?: () => void }
+						).__diffReleaseRead
+					)
 			)
 		)
 		.toBe("function");

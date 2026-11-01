@@ -311,6 +311,9 @@ export function InboxCenter({
 						items={stackItems}
 						maxVisible={5}
 						onViewAll={showInbox ? openInbox : undefined}
+						// The tray clips its overflow, so it has to grow with the
+						// expanded cards (no fixed min-height since db2d4ccc2a).
+						reserveExpandedHeight
 					/>
 				</TrayMorph>
 				<AnnouncementDetailDialog

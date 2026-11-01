@@ -58,6 +58,8 @@ export function GovernanceScopeSwitcher({
 	// as the iOS footer caption under the card.
 	const control = (
 		<Tabs
+			// Shrinkable, so the scrollable segmented list fits a narrow row.
+			className="min-w-0"
 			onValueChange={(next) => {
 				const parsed = governanceViewSchema.safeParse(next);
 				if (parsed.success) {

@@ -1,3 +1,5 @@
+// Must stay first: installs the Tauri bridge before lib/auth-client.ts loads.
+import "./teams-billing-settings-proof-bridge.ts";
 import { hostedAgentIncludedCreditUsd } from "@ryu/blocks/web/pricing.tsx";
 import { I18nProvider } from "@ryu/i18n/react";
 import { Toaster } from "@ryu/ui/components/sileo.tsx";
@@ -48,9 +50,23 @@ interface FixtureState {
 	tauriCalls: { args: ProofJsonRecord | null; command: string }[];
 }
 
-interface TauriInternalsBridge {
-	invoke: (command: string, args?: ProofJsonRecord) => Promise<null>;
-	transformCallback: () => number;
+function sealedAuthVault(): string | null {
+	const token = localStorage.getItem(TOKEN_KEY);
+	if (!token) {
+		return null;
+	}
+	return JSON.stringify({
+		accounts: [
+			{
+				email: "owner@example.test",
+				image: null,
+				name: "Billing owner",
+				token,
+				userId: USER_ID,
+			},
+		],
+		activeUserId: USER_ID,
+	});
 }
 
 // The spec reads this object through the same declaration, so the two cannot
@@ -303,20 +319,22 @@ function installFixture(): void {
 		snapshot: () => structuredClone(readState()),
 	};
 	window.__teamsBillingSettingsProof = proof;
-	const tauriInternals: TauriInternalsBridge = {
-		invoke: async (command, args) => {
-			const current = readState();
-			const recordedArgs = args ?? null;
-			current.tauriCalls.push({ args: recordedArgs, command });
-			if (command === "open_external" && isNativeText(args?.url)) {
-				current.externalUrls.push(args.url);
-			}
-			writeState(current);
-			return null;
-		},
-		transformCallback: () => 0,
-	};
-	Object.assign(window, { __TAURI_INTERNALS__: tauriInternals });
+	window.__setTeamsBillingTauriHandler(async (command, args) => {
+		const current = readState();
+		const recordedArgs = args ?? null;
+		current.tauriCalls.push({ args: recordedArgs, command });
+		if (command === "open_external" && isNativeText(args?.url)) {
+			current.externalUrls.push(args.url);
+		}
+		writeState(current);
+		// With a Tauri bridge present the auth vault reads the sealed native
+		// slot, never the plaintext token key. Serve the seeded session as
+		// that slot's one account, or an empty slot when signed out.
+		if (command === "desktop_secret_get") {
+			return sealedAuthVault();
+		}
+		return null;
+	});
 
 	const nativeFetch = window.fetch.bind(window);
 	window.fetch = async (input, init) => {

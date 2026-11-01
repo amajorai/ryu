@@ -5,6 +5,11 @@ import blueprint from "../../../../apps-store/blueprint/manifest.json" with {
 };
 export const TOKEN_KEY = "declarative-proof-session";
 export const BACKEND_URL = window.location.origin;
+// lib/api/client.ts reads the signed-in session token for the Marketplace
+// buyer header (client-transport.ts, already at 07d403e33); this proof sends none.
+export function getActiveToken(): string | null {
+	return null;
+}
 function useScope() {
 	const [scope, setScope] = useState({
 		token: "declarative-node-token",

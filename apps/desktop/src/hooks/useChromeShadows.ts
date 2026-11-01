@@ -1,5 +1,6 @@
 import { THEME_APPEARANCE_CHANGE_EVENT } from "@ryu/ui/theme/prefs.ts";
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 // Controls the drop/box shadows on the titlebar navigation + custom action
 // groups and the floating sidebar. Default OFF (separation comes from tone, not
@@ -40,6 +41,6 @@ export function useChromeShadows(): boolean {
 export function setChromeShadows(enabled: boolean) {
 	localStorage.setItem(KEY, String(enabled));
 	applyDataAttribute(enabled);
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 	window.dispatchEvent(new Event(THEME_APPEARANCE_CHANGE_EVENT));
 }

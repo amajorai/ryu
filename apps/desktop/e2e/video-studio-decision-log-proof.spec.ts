@@ -102,7 +102,9 @@ test("Decision log trims and appends choices, retains entries through save retry
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage decision history");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await openPlanPanel(page);
 
 	const category = page.getByLabel("Decision category");
@@ -168,9 +170,10 @@ test("Decision log trims and appends choices, retains entries through save retry
 	await expect(choice).toHaveValue("");
 	await expect(rationale).toHaveValue("");
 	await expect(append).toBeDisabled();
+	// Autosave state is a toolbar badge (AutosaveIndicator), not a button.
 	await expect(
-		page.getByRole("button", { name: "Saved", exact: true })
-	).toBeDisabled();
+		page.getByLabel("Autosave: Saved", { exact: true })
+	).toBeVisible();
 	const firstPersisted = await projectDecisions(page, projectId);
 	expect(firstPersisted).toHaveLength(1);
 	expect(firstPersisted[0]).toMatchObject({
@@ -228,7 +231,9 @@ test("Decision log trims and appends choices, retains entries through save retry
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openPlanPanel(page);
 	const reloadedList = page
 		.locator(".studio-activity-list")

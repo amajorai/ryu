@@ -30,6 +30,11 @@ test("actual Markdown fallback completes independent colored blocks and copies e
 		WebAssembly.instantiate = refuse;
 		WebAssembly.compile = refuse;
 	});
+	// Since 4f7563c79d a streaming reply also runs the text animation, and
+	// Streamdown disables a code block's Copy button while it animates. Reduced
+	// motion keeps the blocks on the streaming highlighter path (isStreaming)
+	// without the animation, so Copy stays reachable for the exact-source check.
+	await page.emulateMedia({ reducedMotion: "reduce" });
 	await page.goto("/highlighter-proof.html");
 	const first =
 		"<script>const answer = 42;</script><button>Hello</button>  \n\n";

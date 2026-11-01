@@ -1,19 +1,40 @@
 import path from "node:path";
 import { expect, type Route, test } from "@playwright/test";
 
+// A complete `/api/plugins` manifest row. The desktop roster contract
+// (`appManifestWireResponseSchema`, strict since before Ryu Quiet) rejects rows that
+// omit Core's always-present built_in/installed_version/local_only/
+// sidecar_name/windows_first fields, which left the gate at "Apps unavailable".
 const roster = (enabled: boolean) => ({
 	apps: [
 		{
 			id: "@ryu/meetings",
 			name: "Meetings",
+			built_in: false,
 			enabled,
 			installed: true,
+			installed_version: "1.0.0",
+			local_only: false,
+			sidecar_name: null,
 			version: "1.0.0",
+			windows_first: false,
 			capabilities: [],
 			runnables: [],
 			permission_grants: [],
 		},
 	],
+});
+// The lifecycle acknowledgement must be a complete AppRecord
+// (`appRecordWireResponseSchema`); a partial one is rejected as malformed.
+const appRecord = (enabled: boolean) => ({
+	approved_grants: [],
+	config: {},
+	created_at: null,
+	enabled,
+	id: "@ryu/meetings",
+	installed: true,
+	updated_at: null,
+	version: "1.0.0",
 });
 test("app gates reuse the shared roster and stop Meetings work on disable", async ({
 	page,
@@ -44,7 +65,7 @@ test("app gates reuse the shared roster and stop Meetings work on disable", asyn
 			enabled = url.pathname.endsWith("/enable");
 			return route.fulfill({
 				json: {
-					app: { id: "@ryu/meetings", enabled, installed: true, config: {} },
+					app: appRecord(enabled),
 				},
 			});
 		}
@@ -150,7 +171,7 @@ test("a denied app enable shows the failure and retries before refreshing its fe
 			enabled = true;
 			return route.fulfill({
 				json: {
-					app: { id: "@ryu/meetings", enabled, installed: true, config: {} },
+					app: appRecord(enabled),
 				},
 			});
 		}

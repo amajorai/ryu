@@ -270,6 +270,11 @@ test("test-send requires a recipient, saves unsaved transport first, and exposes
 	await expect(
 		page.getByText("Test email failed", { exact: true })
 	).toBeVisible();
+	// Send test sits at the row's end, under the bottom-right toast stack, so
+	// the click leaves the pointer resting on the earlier "Enter a recipient"
+	// toast. Sileo expands only the toast under the pointer; move it off the
+	// stack as a reader would, and the newest toast opens to show the error.
+	await page.mouse.move(0, 0);
 	await expect(
 		page.getByText("SMTP relay rejected the message.", { exact: true })
 	).toBeVisible();

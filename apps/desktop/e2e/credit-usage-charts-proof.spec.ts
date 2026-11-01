@@ -66,19 +66,24 @@ test("shows canonical gateway rollup totals beside the credit ledger", async ({
 	await expect(
 		page.getByRole("heading", { name: "Credit usage analytics" })
 	).toBeVisible();
-	await expect(page.getByTestId("usage-kpi-requests")).toContainText("6");
+	// The harness reports three organization events: one managed Ryu Router
+	// call (1 request, 2100 ms) and two BYOK OpenAI rollups (4 + 2 requests,
+	// 3 errors, 1500 ms over 4 samples). Every event counts toward the totals.
+	await expect(page.getByTestId("usage-kpi-requests")).toContainText("7");
 	await expect(page.getByTestId("usage-kpi-errors")).toContainText("3");
 	await expect(page.getByTestId("usage-kpi-avg-latency")).toContainText(
-		"375 ms"
+		"720 ms"
 	);
 	await expect(page.getByTestId("usage-kpi-active-nodes")).toContainText("1");
 	await expect(page.getByTestId("usage-trend-metric")).toBeVisible();
-	await expect(page.getByTestId("usage-trend-selected")).toContainText("6");
+	await expect(page.getByTestId("usage-trend-selected")).toContainText("7");
 	await page
 		.getByTestId("usage-trend-metric")
 		.getByRole("button", { name: "Tokens", exact: true })
 		.click();
-	await expect(page.getByTestId("usage-trend-selected")).toContainText("150");
+	await expect(page.getByTestId("usage-trend-selected")).toContainText(
+		"12,850"
+	);
 	await expect(page.getByTestId("usage-analytics-chart-trend")).toContainText(
 		"Tokens at"
 	);
@@ -86,7 +91,7 @@ test("shows canonical gateway rollup totals beside the credit ledger", async ({
 		.getByTestId("usage-trend-metric")
 		.getByRole("button", { name: "Requests", exact: true })
 		.click();
-	await expect(page.getByTestId("usage-trend-selected")).toContainText("6");
+	await expect(page.getByTestId("usage-trend-selected")).toContainText("7");
 
 	for (const kind of [
 		"trend",
@@ -138,15 +143,15 @@ test("keeps totals stable across controls, empties, and recovery", async ({
 	await expect(
 		page.getByText("Only usage routed through the selected node.")
 	).toBeVisible();
-	await expect(requests).toContainText("6");
+	await expect(requests).toContainText("7");
 	await expect(errors).toContainText("3");
-	await expect(averageLatency).toContainText("375 ms");
+	await expect(averageLatency).toContainText("720 ms");
 
 	await page.getByRole("button", { name: "15 min", exact: true }).click();
 	await expect(page.getByText("Requests at 15 min resolution.")).toBeVisible();
-	await expect(requests).toContainText("6");
+	await expect(requests).toContainText("7");
 	await expect(errors).toContainText("3");
-	await expect(averageLatency).toContainText("375 ms");
+	await expect(averageLatency).toContainText("720 ms");
 
 	await page.getByRole("combobox", { name: "Filter by provider" }).click();
 	await page.getByRole("option", { name: "openai", exact: true }).click();

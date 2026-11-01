@@ -45,6 +45,7 @@ const shippedProfiles = Object.entries(shippedProfileFiles).map(
 			id: file.split("/").at(-1)?.replace(/\.md$/, ""),
 			name: fields.name,
 			description: fields.description ?? "",
+			editable: false,
 			source: "plugin",
 			active: false,
 			forced: false,

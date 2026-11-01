@@ -1,3 +1,4 @@
+import { SidebarProvider } from "@ryu/ui/components/sidebar.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import type { ContextType } from "react";
@@ -153,65 +154,71 @@ function Story() {
 		>
 			<QueryClientProvider client={queryClient}>
 				<TabsContext.Provider value={createTabsProofContext({ openTab })}>
-					<main className="min-h-screen bg-background p-6 text-foreground">
-						<div className="mx-auto grid max-w-[1040px] gap-6 lg:grid-cols-2">
-							<section className="rounded-xl border border-border bg-sidebar p-3">
-								<h1 className="mb-3 px-2 font-semibold text-sm">Agents</h1>
-								<div
-									aria-label="Open Builder agent conversation"
-									className="group/row flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
-									data-testid="messaging-agent-row"
-									onClick={() =>
-										openTab("/chat/agent/builder", { title: BUILDER.name })
-									}
-									onKeyDown={(event) => {
-										if (event.key === "Enter") {
-											openTab("/chat/agent/builder", { title: BUILDER.name });
+					{/* Thread lists page with production SidebarMenuButton rows since
+					    306ce31b7f, which read the sidebar context like the app shell. */}
+					<SidebarProvider className="min-h-0 flex-col">
+						<main className="min-h-screen bg-background p-6 text-foreground">
+							<div className="mx-auto grid max-w-[1040px] gap-6 lg:grid-cols-2">
+								<section className="rounded-xl border border-border bg-sidebar p-3">
+									<h1 className="mb-3 px-2 font-semibold text-sm">Agents</h1>
+									<div
+										aria-label="Open Builder agent conversation"
+										className="group/row flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
+										data-testid="messaging-agent-row"
+										onClick={() =>
+											openTab("/chat/agent/builder", { title: BUILDER.name })
 										}
-									}}
-									role="button"
-									tabIndex={0}
-								>
-									<MessagingAgentRowBody
-										agent={BUILDER}
-										conversation={DIRECT_THREADS[0]}
-										onEdit={() =>
-											openTab("/agents/builder/edit", { title: BUILDER.name })
-										}
-										onToggleThreads={() =>
-											setThreadsExpanded((current) => !current)
-										}
-										threadCount={DIRECT_THREADS.length}
-										threadsExpanded={threadsExpanded}
-										usageBarVisible={false}
-									/>
-								</div>
-								{threadsExpanded ? (
-									<AgentThreadList
-										loadMessages={async () => []}
-										onMarkRead={chatHandlers.onMarkRead}
-										onMarkUnread={chatHandlers.onMarkUnread}
-										onOpen={(id) => openTab("/chat", { conversationId: id })}
-										onOpenQuickReply={chatHandlers.onOpenQuickReply}
+										onKeyDown={(event) => {
+											if (event.key === "Enter") {
+												openTab("/chat/agent/builder", { title: BUILDER.name });
+											}
+										}}
+										role="button"
+										tabIndex={0}
+									>
+										<MessagingAgentRowBody
+											agent={BUILDER}
+											conversation={DIRECT_THREADS[0]}
+											onEdit={() =>
+												openTab("/agents/builder/edit", { title: BUILDER.name })
+											}
+											onToggleThreads={() =>
+												setThreadsExpanded((current) => !current)
+											}
+											threadCount={DIRECT_THREADS.length}
+											threadsExpanded={threadsExpanded}
+											usageBarVisible={false}
+										/>
+									</div>
+									{threadsExpanded ? (
+										<AgentThreadList
+											loadMessages={async () => []}
+											onMarkRead={chatHandlers.onMarkRead}
+											onMarkUnread={chatHandlers.onMarkUnread}
+											onOpen={(id) => openTab("/chat", { conversationId: id })}
+											onOpenQuickReply={chatHandlers.onOpenQuickReply}
+											pageSize={1}
+											threads={DIRECT_THREADS}
+											unreadIds={unreadIds}
+										/>
+									) : null}
+								</section>
+								<section className="rounded-xl border border-border bg-sidebar p-3">
+									<h2 className="mb-3 px-2 font-semibold text-sm">
+										Other chats
+									</h2>
+									<SidebarConversationList
+										conversations={GROUP_THREADS}
+										handlers={chatHandlers}
 										pageSize={1}
-										threads={DIRECT_THREADS}
-										unreadIds={unreadIds}
 									/>
-								) : null}
-							</section>
-							<section className="rounded-xl border border-border bg-sidebar p-3">
-								<h2 className="mb-3 px-2 font-semibold text-sm">Other chats</h2>
-								<SidebarConversationList
-									conversations={GROUP_THREADS}
-									handlers={chatHandlers}
-									pageSize={1}
-								/>
-							</section>
-						</div>
-						<output className="sr-only" data-testid="route-events">
-							{JSON.stringify(events)}
-						</output>
-					</main>
+								</section>
+							</div>
+							<output className="sr-only" data-testid="route-events">
+								{JSON.stringify(events)}
+							</output>
+						</main>
+					</SidebarProvider>
 				</TabsContext.Provider>
 			</QueryClientProvider>
 		</ThemeProvider>

@@ -90,10 +90,26 @@ test("clears when the reader reaches the unread boundary or latest message", asy
 	await expect(affordance).toBeVisible();
 	await affordance.focus();
 	await page.keyboard.press("Enter");
-	await expect(
-		page.getByRole("button", { name: "Scroll to latest" })
-	).toBeVisible();
+	// Choosing the live edge follows the newest reply: the count-carrying
+	// affordance and the boundary marker both clear, and the transcript sits at
+	// its end. Since the quiet transcript (3cf89b6e68) this story's 24 messages
+	// already reach the bottom here, which is the case the click must settle
+	// itself (it scrolls nothing, so the scroller reports no follow change).
+	await expect(affordance).toHaveCount(0);
+	await expect(page.getByRole("button", { name: /new message/ })).toHaveCount(
+		0
+	);
 	await expect(page.locator('[data-slot="unread-message-marker"]')).toHaveCount(
 		0
 	);
+	await expect
+		.poll(() =>
+			page
+				.locator('[data-slot="message-scroller-viewport"]')
+				.evaluate(
+					(viewport) =>
+						viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
+				)
+		)
+		.toBeLessThanOrEqual(1);
 });

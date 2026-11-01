@@ -74,3 +74,16 @@ export function clearUnreadMessageState(
 ): UnreadMessageState {
 	return { ...state, unreadIds: [] };
 }
+
+/**
+ * Whether a scroll viewport already shows its last pixel. Scrolling such a
+ * viewport to its end moves nothing and fires no scroll event, so a caller that
+ * relies on the scroller's follow callback has to settle the state itself.
+ */
+export function isAtLiveEdge(
+	viewport: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">
+): boolean {
+	return (
+		viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1
+	);
+}

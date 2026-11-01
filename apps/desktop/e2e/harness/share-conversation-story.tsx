@@ -267,9 +267,11 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 							codeCommit,
 							branch: "main",
 							messageCount: restoredTranscript.messages.length,
+							// `custom` is required by the history entry schema since 7c09ea06d2.
 							redactions: {
 								pii: sensitiveStory ? 1 : 0,
 								secrets: sensitiveStory ? 1 : 0,
+								custom: 0,
 							},
 							updatedAt: portableTranscript.updatedAt,
 						},

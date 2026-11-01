@@ -97,11 +97,9 @@ test("all catalog widget kinds produce their exact callback kind and default lay
 				created: {
 					kind: kind.id,
 					title,
-					source: {
-						endpoint: "agents.list",
-						selector: null,
-						type: "core_endpoint",
-					},
+					// The dialog opens on the static source since ec6fac15e2 (the one source
+					// every node supports); core endpoints are covered by the next test.
+					source: { data: null, type: "static" },
 					refresh_interval: "30s",
 					config: {},
 					layout: kind.layout,
@@ -115,6 +113,7 @@ test("core endpoint options and trimmed selector reach the create callback exact
 	page,
 }) => {
 	await page.goto(STORY_URL);
+	await selectSource(page, "Core metric (built-in)");
 	await selectOption(page, 2, "gateway.health");
 	await page.getByLabel("Selector (optional)").fill("  status  ");
 	await page.getByLabel("Title").fill("  Gateway status  ");
@@ -282,6 +281,8 @@ test("custom config JSON, invalid-JSON fallback, default title, and blank refres
 	await page.goto(STORY_URL);
 	await page.getByRole("combobox").nth(0).click();
 	await page.getByRole("option", { name: "Line chart", exact: true }).click();
+	// Static data (the default source since ec6fac15e2) disables the refresh field.
+	await selectSource(page, "Core metric (built-in)");
 	await page.getByLabel("Title").fill("   ");
 	await page.getByLabel("Refresh every").fill("   ");
 	await page.getByText("Advanced: display config (JSON)").click();

@@ -6,7 +6,7 @@ const baseURL = "http://127.0.0.1:5297/";
 export default defineConfig({
 	outputDir: `${tmpdir()}/ryu-gateway-ai-providers-playwright-results`,
 	testDir: ".",
-	testMatch: /gateway-ai-providers-proof\.spec\.ts$/,
+	testMatch: /gateway-ai-providers(-signin)?-proof\.spec\.ts$/,
 	fullyParallel: false,
 	retries: 0,
 	use: {

@@ -57,6 +57,20 @@ if ((await build.exited) !== 0) {
 	throw new Error("ACP production settings harness build failed.");
 }
 const json = (data: unknown, status = 200) => Response.json(data, { status });
+// Desktop validates GET /api/gateway/config against the full served shape
+// (since 4f7563c79d), and a Gateway always serves `auth` and `providers`; a
+// fixture that returned only `acp` was rejected before the card saw it.
+const SERVED_CONFIG_BASE = {
+	auth: { api_keys: [], require_auth: false },
+	providers: {
+		anthropic: null,
+		core: null,
+		genai: null,
+		local: null,
+		openai: null,
+		openrouter: null,
+	},
+};
 const saved = async () =>
 	(await Bun.file(stateFile).json()) as GatewayAcpSettings;
 function validateSettings(value: unknown): value is GatewayAcpSettings {
@@ -167,6 +181,7 @@ const server = Bun.serve({
 				}
 				const settings = await saved();
 				return json({
+					...SERVED_CONFIG_BASE,
 					acp: {
 						...settings,
 						active_agents: 1,

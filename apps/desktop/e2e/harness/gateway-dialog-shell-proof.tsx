@@ -1,3 +1,5 @@
+// Must stay first: installs the Tauri bridge before lib/auth-client.ts loads.
+import "./gateway-dialog-shell-proof-bridge.ts";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { z } from "zod";
 
@@ -93,16 +95,8 @@ interface GatewayDialogShellState {
 	tauriCalls: CapturedTauriCall[];
 }
 
-interface GatewayDialogShellWindow extends Window {
-	__gatewayDialogShellProof: GatewayDialogShellState;
-	__TAURI_INTERNALS__?: {
-		invoke: (
-			command: string,
-			args?: Parameters<typeof import("@tauri-apps/api/core").invoke>[1]
-		) => Promise<undefined>;
-		transformCallback: (...args: unknown[]) => number;
-	};
-}
+/** The auth vault's sealed-slot read (lib/auth-client.ts AUTH_VAULT_SLOT). */
+const AUTH_VAULT_READ = z.object({ name: z.literal("auth-vault") });
 
 declare global {
 	interface Window {
@@ -219,15 +213,33 @@ function installGatewayDialogFixture(): void {
 		}),
 	};
 	window.__gatewayDialogShellProof = state;
-	// SAFETY: The typed local state was published on window immediately above; this private write view now installs the two controlled bridge callbacks. Captured args and bridge results remain unknown.
-	const tauriWindow = window as GatewayDialogShellWindow;
-	tauriWindow.__TAURI_INTERNALS__ = {
-		invoke: async (command, args) => {
-			state.tauriCalls.push({ command: String(command), args: args ?? null });
-			return undefined;
-		},
-		transformCallback: () => 1,
-	};
+	const readOnlySession =
+		params.get("runtimeProof") === "true" && params.get("readOnly") === "true";
+	window.__setGatewayDialogShellTauriHandler(async (command, args) => {
+		state.tauriCalls.push({ command: String(command), args: args ?? null });
+		// With a Tauri bridge present the auth vault reads its sealed native slot,
+		// never the plaintext token key: serve the read-only session as that
+		// slot's one account. Every other command keeps the unanswered fallback.
+		if (
+			readOnlySession &&
+			command === "desktop_secret_get" &&
+			AUTH_VAULT_READ.safeParse(args).success
+		) {
+			return JSON.stringify({
+				accounts: [
+					{
+						email: "runtime-reader@example.test",
+						image: null,
+						name: "Runtime reader",
+						token: "runtime-read-only-session",
+						userId: "runtime-read-only-user",
+					},
+				],
+				activeUserId: "runtime-read-only-user",
+			});
+		}
+		return undefined;
+	});
 
 	const realFetch = window.fetch.bind(window);
 	window.fetch = async (input, init) => {

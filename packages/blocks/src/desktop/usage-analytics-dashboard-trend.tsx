@@ -117,7 +117,9 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 		<div className="min-w-0" data-testid="usage-analytics-chart-trend">
 			<SettingsSection
 				caption={
-					showForecast
+					// Name the forecast only when the chart draws one: a too-detailed
+					// resolution or an ended range shows a gap message instead.
+					model.forecastGap === null
 						? tl(
 								"{metric} at {resolution} resolution, with a trend forecast for the {horizon}.",
 								{

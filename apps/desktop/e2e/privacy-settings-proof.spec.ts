@@ -211,8 +211,11 @@ test("saves each privacy choice and analytics inspector action", async ({
 	await expect(
 		page.getByText("Share anonymous usage analytics", { exact: true })
 	).toBeVisible();
+	// Usage & crash data has four switches in order: usage analytics,
+	// community stats, profile activity, crash reports. Turn each one off.
 	const sharingSwitches = page.getByRole("switch");
-	for (const index of [0, 1, 2]) {
+	await expect(sharingSwitches).toHaveCount(4);
+	for (const index of [0, 1, 2, 3]) {
 		const control = sharingSwitches.nth(index);
 		await control.click();
 		await expect(control).not.toBeChecked();
@@ -222,6 +225,9 @@ test("saves each privacy choice and analytics inspector action", async ({
 		.toBe("false");
 	await expect
 		.poll(() => fixtures.preferences.get("community-stats-enabled"))
+		.toBe("false");
+	await expect
+		.poll(() => fixtures.preferences.get("profile-activity-enabled"))
 		.toBe("false");
 	await expect
 		.poll(() => fixtures.preferences.get("crash-reports-enabled"))

@@ -38,6 +38,13 @@ test("reset clears coordinator and thread model defaults", async ({ page }) => {
 	const reset = dialog.getByRole("button", { name: "Reset to defaults" });
 	await expect(reset).toBeVisible();
 	await reset.click();
+	// Resetting the node-wide model defaults asks before it resets every
+	// inheriting thread's prompt cache (node-default-cache-warning, pre-#914).
+	const confirm = page.getByRole("alertdialog", {
+		name: "Apply now? This resets the prompt cache",
+	});
+	await confirm.getByRole("button", { name: "Apply now" }).click();
+	await expect(confirm).toHaveCount(0);
 	await expect
 		.poll(
 			async () =>

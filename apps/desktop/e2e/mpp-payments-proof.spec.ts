@@ -262,8 +262,11 @@ test("reviews an exact HTTP charge and settles to a safe receipt", async ({
 	await expect(
 		page.getByText("Payment verified and receipt saved.")
 	).toBeVisible();
+	// The receipt detail has no "Payment settled" label (since the MPP UI
+	// landed in c0185f150d it shows a sealed amount plus settlement fields), so
+	// prove settlement by the on-chain network the receipt was verified on.
 	await expect(page.getByLabel("Receipt detail")).toContainText(
-		"Payment settled"
+		"Tempo testnet · 42431"
 	);
 	await expect(page.getByLabel("Receipt detail")).toContainText("0.25 pathUSD");
 	await expect(page.getByLabel("Receipt detail")).toContainText(
@@ -384,8 +387,11 @@ test("keeps the settled ledger usable at a mobile viewport", async ({
 		"aria-selected",
 		"true"
 	);
+	// The receipt detail has no "Payment settled" label (since the MPP UI
+	// landed in c0185f150d it shows a sealed amount plus settlement fields), so
+	// prove settlement by the on-chain network the receipt was verified on.
 	await expect(page.getByLabel("Receipt detail")).toContainText(
-		"Payment settled"
+		"Tempo testnet · 42431"
 	);
 	await expect(page.getByLabel("Receipt detail")).toContainText("0.25 pathUSD");
 	await expect

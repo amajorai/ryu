@@ -1,7 +1,10 @@
+// The pure constants module, not channels.tsx: the dialog module pulls in the
+// shared Button, whose CSS module (button-drawing.module.css, added in
+// ec6fac15e2) cannot load in the Playwright Node process.
 import {
 	CHANNEL_TYPES,
 	GROUP_REPLY_MODES,
-} from "@ryu/blocks/desktop/channels.tsx";
+} from "@ryu/blocks/desktop/channels-constants.ts";
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import type { ComponentProps } from "react";
 import { z } from "zod";

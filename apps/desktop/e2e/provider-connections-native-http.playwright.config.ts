@@ -2,7 +2,7 @@ import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
 	testDir: import.meta.dirname,
-	testMatch: "provider-connections-native-http.spec.ts",
+	testMatch: /provider-connections-native-http(-accounts)?\.spec\.ts$/,
 	workers: 1,
 	retries: 0,
 	timeout: 45_000,

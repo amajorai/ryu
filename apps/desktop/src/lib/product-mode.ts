@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { isRyuBot } from "./product.ts";
+import { announceLocalStorageChange } from "./same-document-storage-event.ts";
 
 export type ProductMode = "bot" | "console" | "os";
 export type StartupRealm = "last-used" | ProductMode;
@@ -86,9 +87,7 @@ export function setStartupRealm(
 			error: "Startup realm could not be saved. Allow local storage and retry.",
 		};
 	}
-	if (globalThis.window !== undefined) {
-		window.dispatchEvent(new Event("storage"));
-	}
+	announceLocalStorageChange(STARTUP_REALM_KEY);
 	return { ok: true, realm: startupRealm };
 }
 

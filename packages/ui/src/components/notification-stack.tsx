@@ -65,6 +65,10 @@ export interface NotificationStackProps {
 	onExpandedChange?: (expanded: boolean) => void;
 	onItemClick?: (item: NotificationStackItem) => void;
 	onViewAll?: () => void;
+	/** Reserve the expanded height in flow while expanded, so a container that
+	 *  clips its overflow (a tray popover) grows with the expanded cards instead
+	 *  of cutting them off above the compact footprint. */
+	reserveExpandedHeight?: boolean;
 }
 
 const STACK_PEEK = 8;
@@ -179,6 +183,7 @@ export function NotificationStack({
 	onExpandedChange,
 	onItemClick,
 	onViewAll,
+	reserveExpandedHeight = false,
 }: NotificationStackProps) {
 	const reduce = useReducedMotion();
 	const tl = useLiteralMessages();
@@ -267,11 +272,26 @@ export function NotificationStack({
 				}
 			}}
 		>
-			{/* The invisible card reserves the compact footprint while the visible
-			   cards are free to spring between the stacked and expanded layouts. */}
-			<div aria-hidden="true" className="invisible block p-2">
-				<div className="block rounded-2xl border border-transparent px-4">
-					<NotificationCardContent classNames={classNames} item={primaryItem} />
+			{/* The invisible cards reserve the compact footprint (or, with
+			   `reserveExpandedHeight`, the expanded one) while the visible cards
+			   are free to spring between the stacked and expanded layouts. */}
+			<div
+				aria-hidden="true"
+				className="invisible block p-2"
+				data-slot="notification-stack-reserve"
+			>
+				<div className="grid gap-1">
+					{(reserveExpandedHeight && isExpanded
+						? visibleItems
+						: [primaryItem]
+					).map((item) => (
+						<div
+							className="block rounded-2xl border border-transparent px-4"
+							key={item.id}
+						>
+							<NotificationCardContent classNames={classNames} item={item} />
+						</div>
+					))}
 				</div>
 				<div className="mt-2 h-9" />
 			</div>

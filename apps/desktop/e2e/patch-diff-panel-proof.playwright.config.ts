@@ -16,6 +16,13 @@ export default defineConfig({
 	webServer: {
 		command:
 			"bunx vite build --config harness/vite.patch-diff-panel-proof.config.ts && bunx vite preview --config harness/vite.patch-diff-panel-proof.config.ts --host 127.0.0.1 --strictPort --port 5238",
+		// The production build of the diff panel graph needs more than Node's
+		// default heap on smaller hosts (as in reply-message-proof.global-setup.ts).
+		env: {
+			NODE_OPTIONS: [process.env.NODE_OPTIONS, "--max-old-space-size=6144"]
+				.filter(Boolean)
+				.join(" "),
+		},
 		url: "http://127.0.0.1:5238/patch-diff-panel-proof.html",
 		reuseExistingServer: false,
 		timeout: 180_000,

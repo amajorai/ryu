@@ -174,7 +174,9 @@ test("SourceAnalysis cancels and retries local analysis, maps measured edits, an
 	);
 	const title = uniqueTitle("Coverage source analysis project");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	const videoRow = assetRow(page, video.name);
 	const audioRow = assetRow(page, audio.name);
 
@@ -243,7 +245,7 @@ test("SourceAnalysis cancels and retries local analysis, maps measured edits, an
 	const sceneStart = boundaries[1] ?? 0;
 	const sceneEnd = boundaries[2] ?? video.duration;
 	const sceneRange = videoRow.getByRole("button", {
-		name: `Add ${sceneStart.toFixed(1)} – ${sceneEnd.toFixed(1)} s`,
+		name: `Add ${sceneStart.toFixed(1)}–${sceneEnd.toFixed(1)}s`,
 		exact: true,
 	});
 	await sceneRange.click();
@@ -267,7 +269,7 @@ test("SourceAnalysis cancels and retries local analysis, maps measured edits, an
 		.getByRole("button", { name: "Add estimated beat markers" })
 		.click();
 	await expect(page.getByRole("status")).toContainText(
-		`Added ${extraBeatTimes.length} estimated beat marker${extraBeatTimes.length === 1 ? "" : "s"} from ${video.name}.`
+		`Added ${extraBeatTimes.length} beat marker${extraBeatTimes.length === 1 ? "" : "s"} from ${video.name}.`
 	);
 	await saveProject(page);
 	const markedProject = await getProject(page, projectId);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { formatMessage, type MessageValuesInput } from "./format.ts";
 import { messageIdForLiteral } from "./literal-catalog.ts";
 import {
@@ -21,15 +21,19 @@ export type LiteralMessage = (
 const subscribeNowhere = () => () => undefined;
 const noVersion = () => 0;
 
-/** The Companion host's literal answers, re-rendering when one arrives. */
-function useLiteralRemote(): LiteralRemote | null {
+/** The Companion host's literal answers, re-rendering when one arrives. The
+ *  version changes with every answer, so `tl` can change identity with it. */
+function useLiteralRemote(): {
+	remote: LiteralRemote | null;
+	version: number;
+} {
 	const remote = companionLiteralRemote();
-	useSyncExternalStore(
+	const version = useSyncExternalStore(
 		remote?.subscribe ?? subscribeNowhere,
 		remote?.version ?? noVersion,
 		noVersion
 	);
-	return remote;
+	return { remote, version };
 }
 
 /**
@@ -43,25 +47,33 @@ function useLiteralRemote(): LiteralRemote | null {
  */
 export function useLiteralMessages(): LiteralMessage {
 	const i18n = useOptionalI18n();
-	const remote = useLiteralRemote();
-	return (source, values = {}) => {
-		const locale = i18n?.locale ?? "en";
-		const id = messageIdForLiteral(source);
-		const translated = i18n ? i18n.t(id, values, source) : source;
-		// The runtime returns unknown literal copy verbatim; format it here.
-		const local =
-			translated === source
-				? formatMessage(source, values, locale)
-				: translated;
-		const hosted = remote?.resolve({
-			english: local,
-			hasLocalPack: (packId) =>
-				i18n?.availablePacks.some((pack) => pack.id === packId) ?? false,
-			id,
-			localOutput: translated,
-			source,
-			values,
-		});
-		return hosted ?? local;
-	};
+	const { remote, version } = useLiteralRemote();
+	// Stable across renders until the locale, catalog or a hosted answer changes.
+	// Components list `tl` in effect and callback deps; a fresh function every
+	// render re-ran those effects on every render (the browser sidecar panel
+	// re-fetched its tabs and wiped its error banner in a loop).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the hosted-answer revision `remote.resolve` reads.
+	return useCallback<LiteralMessage>(
+		(source, values = {}) => {
+			const locale = i18n?.locale ?? "en";
+			const id = messageIdForLiteral(source);
+			const translated = i18n ? i18n.t(id, values, source) : source;
+			// The runtime returns unknown literal copy verbatim; format it here.
+			const local =
+				translated === source
+					? formatMessage(source, values, locale)
+					: translated;
+			const hosted = remote?.resolve({
+				english: local,
+				hasLocalPack: (packId) =>
+					i18n?.availablePacks.some((pack) => pack.id === packId) ?? false,
+				id,
+				localOutput: translated,
+				source,
+				values,
+			});
+			return hosted ?? local;
+		},
+		[i18n, remote, version]
+	);
 }

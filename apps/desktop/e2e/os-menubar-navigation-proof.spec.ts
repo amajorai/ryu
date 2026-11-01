@@ -51,11 +51,21 @@ test("OS keeps compact user navigation visible in its menu bar", async ({
 			});
 		});
 	await expect(navigation).toBeVisible();
-	const controls = [
-		navigation.getByRole("button", { name: "Account", exact: true }),
-		navigation.getByRole("button", { name: "Notifications", exact: true }),
-		navigation.getByRole("button", { name: "Downloads", exact: true }),
-	];
+	const accountButton = navigation.getByRole("button", {
+		name: "Account",
+		exact: true,
+	});
+	const notificationsButton = navigation.getByRole("button", {
+		name: "Notifications",
+		exact: true,
+	});
+	const downloadsButton = navigation.getByRole("button", {
+		name: "Downloads",
+		exact: true,
+	});
+	// Left to right. Since 2643ab5fab (P2) the bell sits last, at the edge,
+	// with Downloads between it and the account.
+	const controls = [accountButton, downloadsButton, notificationsButton];
 	const controlBoxes = await Promise.all(
 		controls.map(async (control) => {
 			await expect(control).toBeVisible();
@@ -81,7 +91,7 @@ test("OS keeps compact user navigation visible in its menu bar", async ({
 			}
 		}
 	}
-	const notificationIcon = await controls[1]
+	const notificationIcon = await notificationsButton
 		.locator("svg")
 		.first()
 		.boundingBox();
@@ -90,7 +100,7 @@ test("OS keeps compact user navigation visible in its menu bar", async ({
 		expect(notificationIcon.width).toBeLessThanOrEqual(16);
 		expect(notificationIcon.height).toBeLessThanOrEqual(16);
 	}
-	await controls[0].click();
+	await accountButton.click();
 	await expect(
 		page.getByRole("menuitem", { name: "Settings", exact: true })
 	).toBeVisible();
@@ -122,7 +132,7 @@ test("OS keeps compact user navigation visible in its menu bar", async ({
 		throw new Error("OS menu bar has no visible bounds at 320px");
 	}
 	const narrowMenubarBottom = narrowTopbarBox.y + narrowTopbarBox.height;
-	await controls[1].click();
+	await notificationsButton.click();
 	const narrowNotificationsTray = page.locator(TRAY_SELECTOR);
 	await expect(narrowNotificationsTray).toContainText("All caught up");
 	await expect
@@ -143,7 +153,7 @@ test("OS keeps compact user navigation visible in its menu bar", async ({
 		throw new Error("OS menu bar has no visible bounds");
 	}
 	const menubarBottom = topbarBox.y + topbarBox.height;
-	await controls[1].click();
+	await notificationsButton.click();
 	const notificationsTray = page.locator(TRAY_SELECTOR);
 	await expect(notificationsTray).toContainText("All caught up");
 	await expect
@@ -160,7 +170,7 @@ test("OS keeps compact user navigation visible in its menu bar", async ({
 	await page.keyboard.press("Escape");
 	await expect(page.locator(TRAY_SELECTOR)).toHaveCount(0);
 
-	await controls[2].click();
+	await downloadsButton.click();
 	const downloadsTray = page.locator(TRAY_SELECTOR);
 	await expect(downloadsTray).toContainText("Nothing downloading");
 	await expect
@@ -184,12 +194,12 @@ test("OS keeps compact user navigation visible in its menu bar", async ({
 	await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0);
 	const chatWindow = page.getByTestId("os-window-window-chat");
 	await expect(topbar.getByText("Ready", { exact: true })).toHaveCount(0);
-	const statusDot = controls[0].locator(".bg-success");
+	const statusDot = accountButton.locator(".bg-success");
 	await expect(statusDot).toHaveCount(1);
 	await expect(navigation.locator(".bg-success")).toHaveCount(1);
 	await expect(statusDot).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
 	const dotBox = await statusDot.boundingBox();
-	const accountBox = await controls[0].boundingBox();
+	const accountBox = await accountButton.boundingBox();
 	expect(dotBox).not.toBeNull();
 	expect(accountBox).not.toBeNull();
 	if (dotBox && accountBox) {

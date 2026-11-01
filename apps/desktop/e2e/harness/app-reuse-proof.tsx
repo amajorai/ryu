@@ -2,7 +2,7 @@ import {
 	RyuAppMain,
 	RyuAppShell,
 	RyuAppToolbar,
-} from "@ryu/blocks/companion/app-ui.tsx";
+} from "@ryu/blocks/companion/app-ui";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { type ComponentType, useState } from "react";
 import { createRoot } from "react-dom/client";

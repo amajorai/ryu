@@ -79,7 +79,12 @@ test("marketplace defaults and plugin wallpapers render and keep their credits",
 	);
 	await expect(
 		page.getByTestId("backdrop-customize").getByRole("link", { name: "Remocn" })
-	).toHaveAttribute("href", "https://www.remocn.dev/docs/components");
+	).toHaveAttribute(
+		"href",
+		// The bundled mesh gradient credits Remocn's shader docs
+		// (marketplace-backdrops.ts, since 2c1f700028).
+		"https://remocn.dev/docs/shaders/getting-started/introduction"
+	);
 	await page.screenshot({
 		path: path.join(PROOF_DIR, "marketplace-default-shaders.png"),
 		fullPage: true,

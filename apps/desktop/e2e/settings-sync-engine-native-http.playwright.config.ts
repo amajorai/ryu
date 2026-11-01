@@ -16,7 +16,8 @@ export default defineConfig({
 	),
 	metadata: { proofControl: control },
 	testDir: ".",
-	testMatch: "settings-sync-engine-native-http.spec.ts",
+	// One suite split by area: .spec.ts plus .<area>.spec.ts parts.
+	testMatch: /settings-sync-engine-native-http(\.[a-z-]+)?\.spec\.ts$/,
 	workers: 1,
 	retries: 0,
 	fullyParallel: false,

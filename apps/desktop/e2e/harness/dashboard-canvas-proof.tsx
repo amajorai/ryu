@@ -288,6 +288,8 @@ function DashboardCanvasProof() {
 							onCreate={onCreateWidget}
 							onOpenChange={setAddDialogOpen}
 							open={addDialogOpen}
+							// Required since ec6fac15e2: the dialog lists only the node's source types.
+							sourceTypes={["core_endpoint", "static"]}
 						/>
 					</main>
 				</ChatDisplayPrefsProvider>

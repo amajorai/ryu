@@ -42,7 +42,11 @@ async function installFixture(
 			name: "Versioned Plugin",
 			version: "2.0.0",
 			source: "marketplace",
-			origin: "marketplace",
+			// The catalog wire contract accepts only "community" | "first_party" |
+			// null for origin and requires built_in; a signed marketplace listing is
+			// first-party.
+			origin: "first_party",
+			built_in: false,
 			kinds: ["tool"],
 			tags: [],
 			description: "A signed listing with historical releases",
@@ -53,6 +57,7 @@ async function installFixture(
 			name: "Builtin Plugin",
 			version: "2.0.0",
 			source: "built-in",
+			built_in: true,
 			kinds: ["tool"],
 			tags: [],
 			description: "Built-in archive refusal",
@@ -64,6 +69,7 @@ async function installFixture(
 			version: "2.0.0",
 			source: "github-topic",
 			origin: "community",
+			built_in: false,
 			kinds: ["tool"],
 			tags: [],
 			description: "Community archive refusal",
@@ -135,10 +141,18 @@ async function installFixture(
 									runnables: [],
 									built_in: false,
 									local_only: false,
+									sidecar_name: null,
+									windows_first: false,
 								},
 							]
 						: [],
 				});
+				return;
+			}
+			if (pathname === "/api/gateway/org-features") {
+				// useAppsCatalog feature-detects org policy; an unmanaged node.
+				expect(url.search).toBe("");
+				await reply({ available: true, features: {}, managed: false });
 				return;
 			}
 			if (pathname === "/api/marketplace/packages/installed") {

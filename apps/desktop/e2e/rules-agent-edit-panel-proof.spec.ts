@@ -140,7 +140,20 @@ async function openAgentEditRoute(page: Page, query = "") {
 	await expect(
 		page.getByText("architecture.mdc", { exact: true })
 	).toBeVisible();
-	await expect(page.getByLabel("Search agent settings")).toBeVisible();
+	// The proof opens in the default Bot realm, whose editor is the
+	// essentials-only form (simpleEditor in AgentEditPage-base.ts, before
+	// #914): it has no settings search, which only the full Agent/Console
+	// editor carries. Assert the essentials tab set it does render instead.
+	const tabs = page.getByRole("tablist");
+	await expect(tabs.getByRole("tab")).toHaveText([
+		"Behavior",
+		"Tools & knowledge",
+		"Triggers",
+	]);
+	await expect(
+		tabs.getByRole("tab", { exact: true, name: "Behavior" })
+	).toHaveAttribute("aria-selected", "true");
+	await expect(page.getByLabel("Search agent settings")).toHaveCount(0);
 }
 
 async function chooseMode(page: Page, triggerId: string, option: string) {

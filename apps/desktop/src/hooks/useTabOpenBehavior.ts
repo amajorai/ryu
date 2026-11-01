@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 /** Where sidebar / palette navigation lands: a fresh tab (default, Chrome-style)
     or the currently focused tab (a browser's "open in current tab"). Window-local
@@ -33,5 +34,5 @@ export function setTabOpenBehavior(behavior: TabOpenBehavior) {
 	localStorage.setItem(KEY, behavior);
 	// Same-document listeners don't get the native `storage` event, so broadcast
 	// one ourselves — every useTabOpenBehavior() consumer re-reads on this.
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 }

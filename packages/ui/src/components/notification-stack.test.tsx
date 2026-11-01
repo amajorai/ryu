@@ -39,4 +39,43 @@ describe("NotificationStack", () => {
 		expect(card).not.toContain("border-left");
 		expect(accent).toContain(`border-left-color: var(${ACCENT_VARIABLE})`);
 	});
+
+	it("reserves the expanded height in flow only when asked", () => {
+		const items = [
+			{ id: "first", title: "First notice" },
+			{ id: "second", title: "Second notice" },
+			{ id: "third", title: "Third notice" },
+		];
+		const reserve = (html: string) =>
+			html.slice(
+				html.indexOf('data-slot="notification-stack-reserve"'),
+				html.indexOf("absolute inset-x-0 bottom-0")
+			);
+
+		const compact = reserve(
+			renderToStaticMarkup(<NotificationStack defaultExpanded items={items} />)
+		);
+		expect(compact).toContain("First notice");
+		expect(compact).not.toContain("Second notice");
+
+		const reserved = reserve(
+			renderToStaticMarkup(
+				<NotificationStack
+					defaultExpanded
+					items={items}
+					reserveExpandedHeight
+				/>
+			)
+		);
+		expect(reserved).toContain("First notice");
+		expect(reserved).toContain("Second notice");
+		expect(reserved).toContain("Third notice");
+
+		const collapsed = reserve(
+			renderToStaticMarkup(
+				<NotificationStack items={items} reserveExpandedHeight />
+			)
+		);
+		expect(collapsed).not.toContain("Second notice");
+	});
 });

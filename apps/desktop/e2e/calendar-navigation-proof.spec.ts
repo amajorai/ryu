@@ -148,10 +148,12 @@ test("saved agent calendar filters actual wire jobs and navigates exact Month/We
 			next: "Saturday, October 3, 2026",
 			previous: "Thursday, October 1, 2026",
 		},
+		// The Agenda label is Intl `formatRange` output since 179c3de013 (localized
+		// calendar labels), which collapses a repeated month: "Oct 2 – 31, 2026".
 		{
 			view: "Agenda",
-			current: "Oct 2 – Oct 31, 2026",
-			next: "Nov 1 – Nov 30, 2026",
+			current: "Oct 2 – 31, 2026",
+			next: "Nov 1 – 30, 2026",
 			previous: "Sep 2 – Oct 1, 2026",
 		},
 	];

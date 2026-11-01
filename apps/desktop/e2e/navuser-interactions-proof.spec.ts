@@ -216,7 +216,12 @@ test("availability and Settings entries open the real General settings dialog", 
 	await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
 	const dialog = page.getByRole("dialog");
 	await expect(dialog).toBeVisible();
-	await expect(dialog.getByRole("heading", { name: "General" })).toBeVisible();
+	// The Settings body is a deferred chunk (DeferredSettingsDialog shows
+	// "Opening settings" until it loads). On a cold dev server compiling that
+	// chunk alone takes 15-20s, past the default 5s expect budget.
+	await expect(dialog.getByRole("heading", { name: "General" })).toBeVisible({
+		timeout: 60_000,
+	});
 	// Once the modal closes, the footer's Inbox and Downloads trays (mounted as
 	// inert dialogs) are exposed again, so follow the Settings dialog by its page.
 	const settingsDialog = dialog.filter({

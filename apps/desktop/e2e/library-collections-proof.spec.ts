@@ -17,13 +17,13 @@ interface CapturedRequest {
 
 interface TeamWire {
 	coordination: string;
-	created_at: number;
+	created_at: string;
 	description: string | null;
 	id: string;
 	lead_agent_id: string | null;
 	members: string[];
 	name: string;
-	updated_at: number;
+	updated_at: string;
 }
 
 interface LibraryCollectionsSnapshot {
@@ -145,8 +145,11 @@ async function openTeamMenu(page: Page, name: string): Promise<void> {
 async function slideDelete(page: Page, label: string): Promise<void> {
 	const slider = page.getByRole("slider", { name: label });
 	await slider.focus();
+	// CutToConfirm is a vertical blade: ArrowDown advances one of its five steps
+	// and ArrowRight is deliberately unbound (KEY_DELTAS in
+	// packages/ui/src/components/cut-to-confirm-config.ts).
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowRight");
+		await slider.press("ArrowDown");
 	}
 }
 
@@ -162,11 +165,30 @@ test("global Library search filters teams and resets search and type state acros
 
 	// A non-empty query searches all collections, including the team records
 	// surfaced by the page's shared Core data even though Groups owns a contributed
-	// tab of its own.
-	await searchBox(page).fill("Release Review");
+	// tab of its own. "Release" matches the group by name and the agent by its
+	// description, so the mixed result holds two types.
+	await searchBox(page).fill("Release");
 	await expect(teamCard(page)).toBeVisible();
-	await page.getByRole("button", { name: "Group", exact: true }).click();
+	await expect(
+		page.getByRole("button", { name: /Atlas Research Agent/ })
+	).toBeVisible();
+	// a2c35527d2 folded the type chips into one "All types" dropdown, offered
+	// only while the mixed view holds two or more types.
+	await page.getByRole("button", { name: "Filter by type: All types" }).click();
+	await page.getByRole("menuitemradio", { name: "Group" }).click();
+	// Desktop radio menus stay open after a pick (DropdownMenuRadioItem sets
+	// closeOnClick only on mobile); Escape dismisses it.
+	await page.keyboard.press("Escape");
+	await expect(page.getByRole("menuitemradio", { name: "Group" })).toHaveCount(
+		0
+	);
+	await expect(
+		page.getByRole("button", { name: "Filter by type: Group" })
+	).toBeVisible();
 	await expect(teamCard(page)).toBeVisible();
+	await expect(
+		page.getByRole("button", { name: /Atlas Research Agent/ })
+	).toHaveCount(0);
 	await expect(
 		page.getByRole("button", { name: /Regression chat from Library/ })
 	).toHaveCount(0);

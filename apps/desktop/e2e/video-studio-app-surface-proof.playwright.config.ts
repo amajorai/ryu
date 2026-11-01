@@ -5,7 +5,7 @@ const baseURL = "http://127.0.0.1:5406/";
 
 export default defineConfig({
 	testDir: ".",
-	testMatch: /video-studio-app-surface-proof\.spec\.ts$/,
+	testMatch: /video-studio-app-surface-proof(\.timeline)?\.spec\.ts$/,
 	fullyParallel: false,
 	retries: 0,
 	workers: 1,

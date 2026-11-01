@@ -170,6 +170,15 @@ Object.assign(window, {
 				listeners.delete(args.eventId);
 				return null;
 			}
+			// content-seal.ts (session tabs, workbench layout) asks for its webview
+			// store key; answer as a host without a keychain key does (`null`), so
+			// it falls back to the browser device key, like browser-content-key-host.
+			if (
+				command === "desktop_content_key" &&
+				Object.keys(args).join(",") === "store"
+			) {
+				return null;
+			}
 			// The auth client's sealed `auth-vault` slot (empty: a signed-out
 			// device), its change subscription, and the empty legacy store it
 			// probes to migrate.

@@ -107,7 +107,9 @@ export function BudgetRuleDialog({
 	return (
 		<Dialog onOpenChange={handleOpenChange} open={open}>
 			<DialogTrigger render={trigger} />
-			<DialogContent>
+			{/* A Restrict or Downgrade rule with an error line is taller than a
+			    short window; scroll inside the dialog so Save stays reachable. */}
+			<DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle>{title}</DialogTitle>
 					<DialogDescription>{description}</DialogDescription>

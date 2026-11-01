@@ -5,6 +5,7 @@ import proofStyles from "./overflow-story.module.css";
 // real browser without Core, Tauri, or seed data. Not part of the plugin-runtime
 // cert; served by the same harness Vite config via its own html entry.
 
+import { I18nProvider } from "@ryu/i18n/react";
 import { createRoot } from "react-dom/client";
 import { SectionOverflowPopover } from "../../src/components/layout/AppSidebar.tsx";
 import "../../src/index.css";
@@ -51,5 +52,10 @@ function Story() {
 
 const root = document.getElementById("root");
 if (root) {
-	createRoot(root).render(<Story />);
+	// The popover reads `useI18n`, which throws outside an I18nProvider.
+	createRoot(root).render(
+		<I18nProvider>
+			<Story />
+		</I18nProvider>
+	);
 }

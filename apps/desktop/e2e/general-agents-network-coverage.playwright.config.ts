@@ -39,7 +39,7 @@ const proofs: Proof[] = [
 	},
 	{
 		name: "desktop-general-settings",
-		spec: /desktop-general-settings-proof\.spec\.ts$/,
+		spec: /desktop-general-settings-proof(-[a-z]+)?\.spec\.ts$/,
 		harness: "vite.desktop-general-settings-proof.config.ts",
 		port: 5201,
 		page: "desktop-general-settings-proof.html",

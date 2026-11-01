@@ -192,7 +192,7 @@ test("refresh retries the exact time-window query while search and event filters
 		agent_id: AGENT_ID,
 		limit: "100",
 	});
-	expectWindowStart(initialAudit?.query.from, 24 * 60 * 60_000);
+	await expectWindowStart(page, initialAudit?.query.from, 24 * 60 * 60_000);
 	expect(state.auditEntries.map((entry) => entry.id)).toEqual([
 		"audit-proof-success",
 		"audit-proof-error",
@@ -225,7 +225,7 @@ test("refresh retries the exact time-window query while search and event filters
 	expect(auditReads.map((request) => request.status)).toEqual([200, 503, 200]);
 	for (const request of auditReads.slice(1)) {
 		expect(request.query).toMatchObject({ agent_id: AGENT_ID, limit: "100" });
-		expectWindowStart(request.query.from, 24 * 60 * 60_000);
+		await expectWindowStart(page, request.query.from, 24 * 60 * 60_000);
 	}
 
 	const requestsBeforeLocalFilters = auditReads.length;
@@ -252,7 +252,7 @@ test("refresh retries the exact time-window query while search and event filters
 		agent_id: AGENT_ID,
 		limit: "100",
 	});
-	expectWindowStart(sevenDayRead?.query.from, 7 * 24 * 60 * 60_000);
+	await expectWindowStart(page, sevenDayRead?.query.from, 7 * 24 * 60 * 60_000);
 	const readsAfterWindowChange = requestsFor(
 		state,
 		"GET",
@@ -378,7 +378,11 @@ test("saved views trim, persist, reapply, and delete the exact local query/filte
 		agent_id: AGENT_ID,
 		limit: "100",
 	});
-	expectWindowStart(appliedViewRead?.query.from, 7 * 24 * 60 * 60_000);
+	await expectWindowStart(
+		page,
+		appliedViewRead?.query.from,
+		7 * 24 * 60 * 60_000
+	);
 	expectKnownFixtureRequests(appliedViewState);
 	await page.screenshot({
 		animations: "disabled",

@@ -175,36 +175,35 @@ test("opens Apps as live windows from the OS dock and App Launcher", async ({
 	).toBeVisible();
 	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
 	await page.keyboard.press("Escape");
-	await expect(page.getByRole("dialog")).toBeHidden();
+	// The menu bar's Downloads and Notifications trays stay mounted as inert
+	// dialogs, so name the dialogs this proof opens.
+	await expect(page.getByRole("dialog", { name: "App Launcher" })).toBeHidden();
 
 	await page.getByRole("menuitem", { name: "View" }).click();
 	await page.getByRole("menuitemradio", { name: "Quiet places" }).click();
-	await expect(wallpaper).toHaveAttribute(
-		"data-wallpaper-id",
-		/deep-forest|golden-trees/
-	);
+	// Every wallpaper in the Quiet places set (src/lib/wallpaper.ts); shuffling
+	// stays inside the chosen set.
+	const QUIET_PLACES =
+		/^(deep-forest|golden-trees|forest-path|fairy-glen|lake-dock)$/;
+	await expect(wallpaper).toHaveAttribute("data-wallpaper-id", QUIET_PLACES);
 	const selectedQuietWallpaper =
 		(await wallpaper.getAttribute("data-wallpaper-id")) ?? "";
 	await page.getByRole("menuitem", { name: /Shuffle wallpaper/ }).click();
-	await expect(wallpaper).toHaveAttribute(
-		"data-wallpaper-id",
-		/deep-forest|golden-trees/
-	);
+	await expect(wallpaper).toHaveAttribute("data-wallpaper-id", QUIET_PLACES);
 	const menuShuffledWallpaper =
 		(await wallpaper.getAttribute("data-wallpaper-id")) ?? "";
 	expect(menuShuffledWallpaper).not.toBe(selectedQuietWallpaper);
 	await page.getByTestId("os-wallpaper-shuffle").click();
-	await expect(wallpaper).toHaveAttribute(
-		"data-wallpaper-id",
-		/deep-forest|golden-trees/
-	);
+	await expect(wallpaper).toHaveAttribute("data-wallpaper-id", QUIET_PLACES);
 	const toolbarShuffledWallpaper =
 		(await wallpaper.getAttribute("data-wallpaper-id")) ?? "";
 	expect(toolbarShuffledWallpaper).not.toBe(menuShuffledWallpaper);
 
 	await page.getByRole("menuitem", { name: "View" }).click();
 	await page.getByRole("menuitem", { name: "Customize desktop…" }).click();
-	const settingsDialog = page.getByRole("dialog");
+	const settingsDialog = page.getByRole("dialog", {
+		name: "Customize desktop",
+	});
 	const clockSwitch = settingsDialog.getByRole("switch", { name: "Clock" });
 	await expect(clockSwitch).toHaveAttribute("aria-checked", "true");
 	await clockSwitch.click();
@@ -216,7 +215,9 @@ test("opens Apps as live windows from the OS dock and App Launcher", async ({
 	await expect(settingsDialog).toBeHidden();
 	await page.getByRole("button", { name: "Customize desktop" }).click();
 	await expect(
-		page.getByRole("dialog").getByRole("switch", { name: "Clock" })
+		page
+			.getByRole("dialog", { name: "Customize desktop" })
+			.getByRole("switch", { name: "Clock" })
 	).toHaveAttribute("aria-checked", "false");
 	await page.keyboard.press("Escape");
 

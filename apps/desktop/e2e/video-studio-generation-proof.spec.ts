@@ -1,143 +1,18 @@
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
-import { z } from "zod";
+import { expect, test } from "@playwright/test";
 import {
 	capturedJsonArray,
 	capturedJsonField,
 } from "./captured-json-observations.ts";
-
-const evidenceDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
-
-interface StudioRequest {
-	body?: unknown;
-	method: string;
-	path: string;
-}
-
-interface MediaCall {
-	input: {
-		prompt?: string;
-		provider?: string;
-		model?: string;
-		count?: number;
-		request_id: string;
-		project_id: string;
-		text?: string;
-		speed?: number;
-		voice?: string;
-		language?: string;
-	};
-	kind: string;
-}
-
-function uniqueTitle(prefix: string) {
-	return `${prefix} ${new Date().toISOString().replaceAll(":", "-")} ${crypto.randomUUID().slice(0, 8)}`;
-}
-
-function recordStudioRequests(page: Page) {
-	const requests: StudioRequest[] = [];
-	page.on("request", (request) => {
-		const url = new URL(request.url());
-		if (!url.pathname.startsWith("/__studio/")) {
-			return;
-		}
-		const body = request.postData();
-		let parsedBody: unknown;
-		if (body) {
-			try {
-				parsedBody = JSON.parse(body);
-			} catch {
-				parsedBody = body;
-			}
-		}
-		requests.push({
-			...(parsedBody === undefined ? undefined : { body: parsedBody }),
-			method: request.method(),
-			path: url.pathname.slice("/__studio".length),
-		});
-	});
-	return requests;
-}
-
-async function createProject(page: Page, title: string) {
-	await page.goto("/");
-	await expect(page.getByRole("status")).toContainText(
-		"Project library connected."
-	);
-	await page.getByRole("button", { name: "New project" }).click();
-	await expect(page.getByRole("status")).toContainText("Project created.");
-	const titleField = page
-		.locator(".studio-inspector .ryu-app-field")
-		.first()
-		.locator("input");
-	await titleField.fill(title);
-	await page.getByRole("button", { name: "Save changes" }).click();
-	await expect(page.getByRole("status")).toContainText("Project saved.");
-}
-
-async function openGenerationPanel(page: Page) {
-	await page.getByRole("button", { name: /Show \d+ more tabs/ }).click();
-	await page.getByRole("combobox", { name: "Search tabs" }).fill("Generate");
-	const tab = page.locator('[data-tabs-menu-key="string:generate"]');
-	await expect(tab).toBeVisible();
-	await tab.click();
-	await expect(
-		page.getByRole("heading", { name: "Generate with Ryu" })
-	).toBeVisible();
-}
-
-function appField(page: Page, label: string) {
-	return page
-		.locator(".ryu-app-field")
-		.filter({ hasText: label })
-		.locator("input, textarea")
-		.first();
-}
-
-async function saveScreenshot(page: Page, filename: string) {
-	await mkdir(evidenceDir, { recursive: true });
-	await page.screenshot({
-		animations: "disabled",
-		fullPage: true,
-		path: path.join(evidenceDir, filename),
-	});
-}
-
-async function generationCalls(page: Page): Promise<MediaCall[]> {
-	const response = await page.request.get("/__proof/state");
-	expect(response.ok()).toBe(true);
-	const state = z
-		.object({
-			calls: z.array(
-				z.object({
-					kind: z.string(),
-					input: z.object({
-						prompt: z.string().optional(),
-						provider: z.string().optional(),
-						model: z.string().optional(),
-						count: z.number().optional(),
-						request_id: z.string(),
-						project_id: z.string(),
-						text: z.string().optional(),
-						speed: z.number().optional(),
-						voice: z.string().optional(),
-						language: z.string().optional(),
-					}),
-				})
-			),
-		})
-		.parse(await response.json());
-	return state.calls;
-}
-
-async function resetMediaFixture(page: Page) {
-	const response = await page.request.post("/__proof/reset");
-	expect(response.ok()).toBe(true);
-}
+import {
+	appField,
+	createProject,
+	generationCalls,
+	openGenerationPanel,
+	recordStudioRequests,
+	resetMediaFixture,
+	saveScreenshot,
+	uniqueTitle,
+} from "./video-studio-generation-proof.helpers.ts";
 
 test("Generation saves exact image settings and its sidecar asset survives reload", async ({
 	page,
@@ -146,7 +21,9 @@ test("Generation saves exact image settings and its sidecar asset survives reloa
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage generated image");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await openGenerationPanel(page);
 
 	const generate = page.getByRole("button", {
@@ -288,7 +165,9 @@ test("Generation saves exact image settings and its sidecar asset survives reloa
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openGenerationPanel(page);
 	const reloadedEntry = page
 		.locator("details.studio-scene")
@@ -318,7 +197,9 @@ test("Narration settings are recorded, fixture failure stays reviewable, and ret
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage narration retry");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await openGenerationPanel(page);
 	await page.getByLabel("Generation type").selectOption("audio");
 	await expect(page.getByPlaceholder("Words for your narrator…")).toBeVisible();
@@ -347,20 +228,18 @@ test("Narration settings are recorded, fixture failure stays reviewable, and ret
 	for (const invalidRate of ["0.4", "2.5"]) {
 		await speakingRate.fill(invalidRate);
 		await generate.click();
+		// GenerationPanel rejects an out-of-range speaking rate before it builds
+		// a request, so the invalid rate never reaches the sidecar.
 		await expect(page.getByRole("status")).toContainText(
-			"The request does not match the Video Studio contract."
+			"Choose a speaking rate between 0.5 and 2."
 		);
-		// SAFETY: These controlled audio submissions use authored finite rates 0.4/2.5 through GenerationPanel Number(input.value); its real request serializer publishes numeric speed even when the server rejects the range.
 		const rejectedRate = requests.find(
 			(request) =>
 				request.path === "/generations" &&
 				request.method === "POST" &&
 				(request.body as { speed?: number }).speed === Number(invalidRate)
 		);
-		expect(rejectedRate?.body).toMatchObject({
-			kind: "audio",
-			speed: Number(invalidRate),
-		});
+		expect(rejectedRate).toBeUndefined();
 		expect(await generationCalls(page)).toHaveLength(0);
 		await expect(
 			page.getByText("No generation requests recorded for this project.")
@@ -486,7 +365,9 @@ test("Narration settings are recorded, fixture failure stays reviewable, and ret
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openGenerationPanel(page);
 	const reloadedFailed = page
 		.locator("details.studio-scene")
@@ -516,7 +397,9 @@ test("Video generation sends selected settings and persists the imported MP4 fix
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage generated video");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await openGenerationPanel(page);
 	await page.getByLabel("Generation type").selectOption("video");
 	await page
@@ -584,7 +467,9 @@ test("Video generation sends selected settings and persists the imported MP4 fix
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openGenerationPanel(page);
 	const reloaded = page
 		.locator("details.studio-scene")

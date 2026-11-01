@@ -6,7 +6,8 @@ const baseURL = `http://127.0.0.1:${hostPort}/`;
 
 export default defineConfig({
 	testDir: ".",
-	testMatch: /sites-companion-proof\.spec\.ts$/,
+	// One proof split across sites-companion-proof{,-settings,-visitors}.spec.ts.
+	testMatch: /sites-companion-proof(?:-[a-z]+)?\.spec\.ts$/,
 	fullyParallel: false,
 	retries: 0,
 	workers: 1,

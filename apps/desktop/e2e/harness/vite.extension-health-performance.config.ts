@@ -30,6 +30,9 @@ export default defineConfig({
 		},
 	},
 	build: {
+		// esbuild 0.28 refuses to lower destructuring for Vite's default build
+		// targets, which fails the proof build; target what Chromium runs.
+		target: "esnext",
 		rollupOptions: {
 			input: path.resolve(
 				import.meta.dirname,

@@ -24,9 +24,10 @@ test("lets a Console admin choose the managed Bot realm default", async ({
 	await expect(
 		card.getByRole("button", { name: "Default cloud agent or model" })
 	).toContainText("Ryu");
+	// The caption names Organization owners since ec6fac15e2 (pre-#914 copy).
 	await expect(
 		card.getByText(
-			/Console owners and admins can choose the provider and model/
+			/Organization owners and admins can choose the provider and model/
 		)
 	).toBeVisible();
 	await expect(page.locator("body")).not.toHaveAttribute(

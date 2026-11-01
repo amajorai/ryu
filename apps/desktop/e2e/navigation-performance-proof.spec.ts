@@ -161,9 +161,11 @@ test("warm switching avoids unrelated route renders and preserves working state"
 		page.getByRole("heading", { name: "New workspace", exact: true })
 	).toBeVisible();
 	await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-	const saved = await page.evaluate(() =>
-		JSON.parse(localStorage.getItem("ryu_session_tabs") ?? "{}")
-	);
+	const saved = await page.evaluate(() => {
+		// Sealed since content-seal.ts: read through the app's sealed storage.
+		const read = Reflect.get(window, "__readSessionTabs");
+		return JSON.parse(typeof read === "function" ? (read() ?? "{}") : "{}");
+	});
 	expect(saved.tabs[saved.activeIndex].title).toBe("New workspace");
 	expect(errors).toEqual([]);
 	await mkdir(proofDir, { recursive: true });

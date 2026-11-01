@@ -3,6 +3,7 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { browserContentKeyHost } from "./browser-content-key-host.ts";
 
 const harnessDir = path.resolve(import.meta.dirname);
 const desktopRoot = path.resolve(harnessDir, "../..");
@@ -18,7 +19,8 @@ export default defineConfig({
 		entries: ["vertical-tab-row-proof.html"],
 		force: true,
 	},
-	plugins: [react()],
+	// The sealed session needs a content key; see browser-content-key-host.ts.
+	plugins: [browserContentKeyHost(), react()],
 	publicDir: path.resolve(desktopRoot, "public"),
 	resolve: {
 		alias: [

@@ -21,7 +21,9 @@ test("dashboard cards and tab split feedback settle into the intended state", as
 		3
 	);
 
-	const widgetHandle = page.locator(".widget-drag-handle").first();
+	// WidgetCard marks its header with `data-widget-drag-handle` (the react-grid-layout
+	// handle selector in DashboardGrid); there is no `.widget-drag-handle` class.
+	const widgetHandle = page.locator("[data-widget-drag-handle]").first();
 	const widgetBox = await widgetHandle.boundingBox();
 	if (!widgetBox) {
 		throw new Error("dashboard widget did not receive geometry");

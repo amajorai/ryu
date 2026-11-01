@@ -59,8 +59,14 @@ test("Slides fixture mounts in the real Path-B Companion host", async ({
 	await expect(
 		companion.getByRole("heading", { name: "Layers" })
 	).toBeVisible();
+	// "Bring in the signal." was never a heading in the Slides bundle this proof
+	// mounts (absent from apps-store/slides at 07d403e33 too). A fresh project
+	// shows its canvas beside the Media tools panel, so assert those instead.
 	await expect(
-		companion.getByRole("heading", { name: "Bring in the signal." })
+		companion.getByRole("application", { name: "Untitled project canvas" })
+	).toBeVisible();
+	await expect(
+		companion.getByRole("heading", { name: "Media tools" })
 	).toBeVisible();
 	const dismiss = companion.getByRole("button", { name: "Dismiss message" });
 	if (await dismiss.count()) {

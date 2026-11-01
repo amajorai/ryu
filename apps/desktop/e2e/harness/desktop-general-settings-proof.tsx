@@ -24,92 +24,27 @@ import {
 	pluginRecord,
 } from "../../src/lib/api/plugin-wire-values.ts";
 import { createChatPageNativeDependencies } from "./chat-page-native-http-dependencies.ts";
+import {
+	exactBooleanArgument,
+	type GeneralGatewayCall,
+	type GeneralProofCall,
+	type GeneralProofWindow,
+	generalUnknownCommands,
+	handleSecretSlot,
+	readFixtureBoolean,
+	readFixtureValue,
+	SERVED_GATEWAY_CONFIG_BASE,
+} from "./desktop-general-settings-proof-fixture.ts";
 import { installEarlyTauriHandler } from "./early-tauri-bridge.ts";
 import "../../src/index.css";
-
-interface GeneralProofCall {
-	args?: Record<string, unknown>;
-	command: string;
-}
-
-interface GeneralGatewayCall {
-	body: PluginDocument | null;
-	method: string;
-	path: string;
-}
-
-interface GeneralProofFixture {
-	failNextCommand: (command: string, message?: string) => void;
-	failNextFolderDialog: (message?: string) => void;
-	failNextGatewayRequest: (path: string, message?: string) => void;
-	setFolderSelection: (path: string | null) => void;
-}
-
-interface GeneralProofWindow extends Window {
-	__GENERAL_NATIVE_STORE_MODE__?: "native" | "browser-fallback";
-	__generalGatewayCalls: GeneralGatewayCall[];
-	__generalNativeStoreCalls: Array<{
-		args?: Record<string, unknown>;
-		command: string;
-		acknowledged: boolean;
-		value?: unknown;
-	}>;
-	__generalProofCalls: GeneralProofCall[];
-	__generalProofFixture: GeneralProofFixture;
-	__generalUnknownCommands: string[];
-	__TAURI_INTERNALS__?: {
-		invoke: (
-			command: string,
-			args?: Record<string, unknown>
-		) => Promise<unknown>;
-		transformCallback: (...args: unknown[]) => number;
-	};
-}
-
-function readFixtureBoolean(key: string, fallback: boolean): boolean {
-	const stored = localStorage.getItem(key);
-	return stored === null ? fallback : stored === "true";
-}
-
-function readFixtureValue<T>(
-	key: string,
-	fallback: T,
-	schema: z.ZodType<T>
-): T {
-	try {
-		const stored = localStorage.getItem(key);
-		return stored === null ? fallback : schema.parse(JSON.parse(stored));
-	} catch {
-		return fallback;
-	}
-}
 
 // This narrowed Window installs the declared fixture ledgers and controls.
 // HTTP envelopes are validated at their seam; stored readback stays independent.
 const proofWindow = window;
 const generalProofCalls: GeneralProofCall[] = [];
-const generalUnknownCommands: string[] = [];
 const generalGatewayCalls: GeneralGatewayCall[] = [];
 const generalNativeStoreCalls: GeneralProofWindow["__generalNativeStoreCalls"] =
 	[];
-function exactBooleanArgument(
-	command: string,
-	args: Record<string, unknown> | undefined,
-	key: string
-) {
-	const value = args?.[key];
-	if (
-		!args ||
-		typeof args !== "object" ||
-		Array.isArray(args) ||
-		Object.keys(args).length !== 1 ||
-		typeof value !== "boolean"
-	) {
-		generalUnknownCommands.push(command);
-		throw new Error(`Invalid Boolean General native request: ${command}`);
-	}
-	return value;
-}
 const nativeStores = createChatPageNativeDependencies({
 	getItem: (key) =>
 		localStorage.getItem(
@@ -135,6 +70,13 @@ let safeModeEnabled = readFixtureBoolean(
 	"general-proof:safe-mode-sentinel",
 	false
 );
+let hardwareAcceleration = readFixtureBoolean(
+	"general-proof:hardware-acceleration",
+	true
+);
+// The webview applies GPU switches at launch, so a change is pending until a
+// restart: `active` keeps the value this page started with.
+const hardwareAccelerationActive = hardwareAcceleration;
 let folderSelection: string | null = "/Users/test/Projectless";
 let folderDialogFailure: string | null = null;
 proofWindow.__generalProofCalls = generalProofCalls;
@@ -155,39 +97,6 @@ proofWindow.__generalProofFixture = {
 		folderSelection = path;
 	},
 };
-const SECRET_SLOT_PREFIX = "general-proof:sealed-slot:";
-// The desktop's sealed secret slots (`desktop_secret_*`). The native command
-// seals with the desktop key; this fixture only models the slot boundary, with
-// a record that survives reload. In browser-fallback mode the host has no
-// slots: an unknown command resolves `undefined`, which the auth client reads
-// as "no native backend" and keeps the vault in memory only.
-function handleSecretSlot(
-	command: string,
-	args: Record<string, unknown> | undefined
-): string | null | undefined {
-	if (proofWindow.__GENERAL_NATIVE_STORE_MODE__ === "browser-fallback") {
-		return undefined;
-	}
-	const name = args?.name;
-	if (name !== "auth-vault" && name !== "license-key") {
-		generalUnknownCommands.push(command);
-		throw new Error(`Invalid secret slot request: ${command}`);
-	}
-	const key = `${SECRET_SLOT_PREFIX}${name}`;
-	if (command === "desktop_secret_get") {
-		return localStorage.getItem(key);
-	}
-	if (command === "desktop_secret_set" && typeof args?.value === "string") {
-		localStorage.setItem(key, args.value);
-		return null;
-	}
-	if (command === "desktop_secret_delete") {
-		localStorage.removeItem(key);
-		return null;
-	}
-	generalUnknownCommands.push(command);
-	throw new Error(`Invalid secret slot request: ${command}`);
-}
 proofWindow.__TAURI_INTERNALS__ = {
 	invoke: async (command, args) => {
 		generalProofCalls.push({ command, args });
@@ -273,6 +182,33 @@ proofWindow.__TAURI_INTERNALS__ = {
 				throw new Error("Invalid default-node fixture request");
 			}
 			localStorage.setItem("general-proof:native-default-node", args.name);
+			return null;
+		}
+		if (command === "list_nodes") {
+			// The native registry holds only this device's local node in the story.
+			return {
+				default:
+					localStorage.getItem("general-proof:native-default-node") ?? "local",
+				nodes: [{ name: "local", token: null, url: DEFAULT_CORE_URL }],
+			};
+		}
+		if (command === "local_node_token") {
+			// No local token: the story's Core fixture does not require one.
+			return { token: "" };
+		}
+		if (command === "get_hardware_acceleration") {
+			return {
+				active: hardwareAccelerationActive,
+				enabled: hardwareAcceleration,
+				supported: true,
+			};
+		}
+		if (command === "set_hardware_acceleration") {
+			hardwareAcceleration = exactBooleanArgument(command, args, "enabled");
+			localStorage.setItem(
+				"general-proof:hardware-acceleration",
+				String(hardwareAcceleration)
+			);
 			return null;
 		}
 		if (command === "get_default_projectless_task_folder") {
@@ -591,10 +527,13 @@ function installGatewayMock(): () => void {
 					status: 200,
 				});
 			}
-			return new Response(JSON.stringify(gatewayConfig), {
-				headers: { "content-type": "application/json" },
-				status: 200,
-			});
+			return new Response(
+				JSON.stringify({ ...SERVED_GATEWAY_CONFIG_BASE, ...gatewayConfig }),
+				{
+					headers: { "content-type": "application/json" },
+					status: 200,
+				}
+			);
 		},
 		nativeFetch
 	);

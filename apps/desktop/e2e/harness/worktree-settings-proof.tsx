@@ -97,7 +97,9 @@ window.fetch = async (input, init) => {
 			return jsonResponse({ error: "Invalid update" }, 400);
 		}
 		const body = observation.data;
-		governance = parseGatewayGovernanceSnapshot({
+		// Round-trip through JSON like the wire: a parsed snapshot carries
+		// `undefined` for unset fields, which the snapshot parser rejects.
+		const next = {
 			...governance,
 			layers: governance.layers.map((layer) =>
 				layer.scope === body.scope
@@ -108,7 +110,10 @@ window.fetch = async (input, init) => {
 						}
 					: layer
 			),
-		});
+		};
+		governance = parseGatewayGovernanceSnapshot(
+			JSON.parse(JSON.stringify(next))
+		);
 		sessionStorage.setItem(
 			"proof-worktree-settings",
 			JSON.stringify(governance)

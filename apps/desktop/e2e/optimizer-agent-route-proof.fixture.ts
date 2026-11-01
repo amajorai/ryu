@@ -237,6 +237,9 @@ export function createOptimizerAgentCoreFixture() {
 						},
 						"/api/gateway/config": { auth: { api_keys: [] }, providers: {} },
 						[`${agentPath}/optimizations`]: state(),
+						// AgentGoalPanel (#860, pre-#914) reads the agent scope's guidance;
+						// an unset scope answers without `guidance`.
+						[`/api/scope-guidance/agent%3A${agentId}`]: {},
 						[`/api/preferences/ryu.agent-banner.v1%3A${agentId}`]: {
 							value: null,
 						},
@@ -316,6 +319,33 @@ export function createOptimizerAgentCoreFixture() {
 			) {
 				known = true;
 				value = { entries: [], total: 0 };
+			}
+			// The editor's account-access panel asks whether the agent would start
+			// (useAgentLaunchCheck, #860, pre-#914): a read-only POST that persists
+			// nothing. Only this agent's exact current-identity question is known.
+			if (
+				method === "POST" &&
+				!url.search &&
+				url.pathname === "/api/agents/launch-check" &&
+				JSON.stringify(body) ===
+					JSON.stringify({
+						engine: "claude",
+						identity_mode: "managed",
+						account_access: null,
+						agent_id: agentId,
+					})
+			) {
+				known = true;
+				value = {
+					launchable: true,
+					reason: null,
+					code: null,
+					sandbox_supported: true,
+					runs_on_managed_pi: false,
+					vendor_provider: null,
+					limited_model_source: null,
+					model_warning: null,
+				};
 			}
 			if (
 				method === "POST" &&

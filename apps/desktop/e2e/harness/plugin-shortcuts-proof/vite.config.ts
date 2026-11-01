@@ -37,6 +37,9 @@ export default defineConfig({
 			"@ryu/ui > qrcode",
 			"cron-parser",
 			"@ai-sdk/react",
+			// Served raw, `ai` pulls @ai-sdk/gateway's browser import of the
+			// CommonJS @vercel/oidc build, which has no ESM named exports.
+			"ai",
 			"@pierre/diffs",
 			// Subpaths imported by source; served raw they load CommonJS lru_map.
 			"@pierre/diffs/edit",

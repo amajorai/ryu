@@ -17,7 +17,7 @@ if (
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 export default defineConfig({
 	testDir: ".",
-	testMatch: /desktop-general-settings-proof\.spec\.ts$/,
+	testMatch: /desktop-general-settings-proof(-[a-z]+)?\.spec\.ts$/,
 	workers: 1,
 	fullyParallel: false,
 	retries: 0,

@@ -40,6 +40,11 @@ export function resolveDefaultCoreUrl() {
 export function getActiveUserId() {
 	return "library-engine-fixture-user";
 }
+// lib/api/credits.ts and lib/api/client-transport.ts read the control-plane
+// session token; this fixture models no signed-in control-plane session.
+export function getActiveToken(): string | null {
+	return null;
+}
 export function useSession() {
 	return {
 		data: {

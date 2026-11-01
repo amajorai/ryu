@@ -14,8 +14,10 @@ export default defineConfig({
 		trace: "retain-on-failure",
 	},
 	webServer: {
+		// `vite preview` only serves an existing build, so build first: a clean
+		// checkout has no target/extension-parity-proof-build and the server never came up.
 		command:
-			"bunx vite preview --config harness/vite.extension-parity-proof.config.ts",
+			"NODE_OPTIONS=--max-old-space-size=8192 bunx vite build --emptyOutDir --config harness/vite.extension-parity-proof.config.ts && bunx vite preview --config harness/vite.extension-parity-proof.config.ts",
 		url: "http://127.0.0.1:5232/extension-parity-proof.html",
 		reuseExistingServer: true,
 		timeout: 180_000,

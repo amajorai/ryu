@@ -35,6 +35,9 @@ export default defineConfig({
 	define: { "process.env": {} },
 	optimizeDeps: {
 		entries: ["approvals-behavior-proof.html"],
+		// esbuild 0.28 refuses to lower destructuring for Vite's default
+		// pre-bundle targets, which kills the dev server; target what Chromium runs.
+		esbuildOptions: { target: "esnext" },
 		force: true,
 	},
 	root: harnessDir,

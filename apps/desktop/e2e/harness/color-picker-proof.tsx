@@ -3,7 +3,7 @@ import {
 	RyuAppSection,
 	RyuAppShell,
 	RyuAppToolbar,
-} from "@ryu/blocks/companion/app-ui.tsx";
+} from "@ryu/blocks/companion/app-ui";
 import {
 	ColorPicker,
 	ColorPickerContent,

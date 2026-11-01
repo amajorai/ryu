@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import type {
 	PiCatalog,
 	PiProvider,
@@ -62,6 +62,13 @@ const INITIAL: PiCatalog = {
 		provider("chatgpt", "ChatGPT", "subscription", {
 			supportsOAuth: true,
 			configured: true,
+			// The account routing controls render only for a provider whose catalog
+			// entry declares a routable pool (already so at 07d403e33).
+			accountRouting: {
+				credentialKinds: ["oauth"],
+				quotaObservations: false,
+				strategies: ["manual", "round_robin"],
+			},
 			accounts: [
 				account("chatgpt-a", "ChatGPT account 1", true),
 				account("chatgpt-b", "ChatGPT account 2", false),
@@ -114,8 +121,27 @@ const INITIAL: PiCatalog = {
 	],
 };
 
+// One catalog for every caller. The real hook reads a shared query cache, and
+// each provider card calls it again for its live provider (already so at
+// 07d403e33, before Ryu Quiet); per-call state left the cards on the initial
+// catalog after a switch, a key save, or a plan connect.
+let sharedCatalog: PiCatalog = INITIAL;
+const catalogListeners = new Set<() => void>();
+
+function subscribeCatalog(listener: () => void): () => void {
+	catalogListeners.add(listener);
+	return () => catalogListeners.delete(listener);
+}
+
+function setCatalog(next: PiCatalog | ((previous: PiCatalog) => PiCatalog)) {
+	sharedCatalog = typeof next === "function" ? next(sharedCatalog) : next;
+	for (const listener of catalogListeners) {
+		listener();
+	}
+}
+
 export function useLlmProviders() {
-	const [catalog, setCatalog] = useState(INITIAL);
+	const catalog = useSyncExternalStore(subscribeCatalog, () => sharedCatalog);
 	return {
 		catalog,
 		config: {

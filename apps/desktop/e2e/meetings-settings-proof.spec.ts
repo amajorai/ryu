@@ -62,6 +62,11 @@ const catalog = {
 	apiTypes: ["openai-completions"],
 	providers: [
 		{
+			// `fetchPiCatalog` validates each provider; `api` and `authEnv` are
+			// required, and a provider without them makes the whole catalog
+			// unreadable (no thinking levels for the effort select).
+			api: "openai-completions",
+			authEnv: "OPENAI_API_KEY",
 			authKind: "api-key",
 			configured: true,
 			custom: false,

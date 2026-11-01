@@ -173,9 +173,20 @@ test("Canvas controls report add, refresh, and remove against the real widget no
 	await expect(
 		page.getByText("Canvas proof widget", { exact: true })
 	).toBeVisible();
+	// Since a4f17eda27 (Ryu Quiet P8) a widget error is a quiet InlineErrorRow: one
+	// plain sentence, with the raw failure behind "Copy details" instead of on screen.
+	const widgetError = page
+		.getByRole("alert")
+		.filter({ hasText: "This widget could not load." });
+	await expect(widgetError).toBeVisible();
 	await expect(
 		page.getByText("Fixture source is temporarily unavailable", { exact: true })
-	).toBeVisible();
+	).toHaveCount(0);
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await widgetError.getByRole("button", { name: "Copy details" }).click();
+	await expect
+		.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+		.toBe("Fixture source is temporarily unavailable");
 	await expect(page.locator(".react-flow__controls")).toBeVisible();
 	await expect(page.locator(".react-flow__minimap")).toBeVisible();
 
@@ -205,6 +216,11 @@ test("Canvas controls report add, refresh, and remove against the real widget no
 	await addWidgetButton.click();
 	const createDialog = page.getByRole("dialog", { name: "Add widget" });
 	await expect(createDialog).toBeVisible();
+	// The dialog opens on static data since ec6fac15e2; pick the Core metric source.
+	await createDialog.getByRole("combobox").nth(1).click();
+	await page
+		.getByRole("option", { name: "Core metric (built-in)", exact: true })
+		.click();
 	await createDialog.getByLabel("Title").fill("Canvas metric");
 	await createDialog
 		.getByRole("button", { name: "Add widget", exact: true })
@@ -279,9 +295,7 @@ test("Canvas controls report add, refresh, and remove against the real widget no
 	await expect(
 		page.getByText("Refreshed fixture result", { exact: true })
 	).toBeVisible();
-	await expect(
-		page.getByText("Fixture source is temporarily unavailable", { exact: true })
-	).toBeHidden();
+	await expect(widgetError).toBeHidden();
 	await expect(refreshItem).toBeHidden();
 	await page.screenshot({ fullPage: true, path: PROOF_PATH });
 

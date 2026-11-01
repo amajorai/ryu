@@ -284,7 +284,12 @@ export const SettingsItem = ({
 					)}
 				</div>
 				{actions && !fullBleedAction ? (
-					<ItemActions className="ml-auto shrink-0">{actions}</ItemActions>
+					// Capped at the row so a wide control (a segmented scope switcher)
+					// that wrapped under the title scrolls inside the row instead of
+					// widening the page.
+					<ItemActions className="ml-auto min-w-0 max-w-full shrink-0">
+						{actions}
+					</ItemActions>
 				) : null}
 			</div>
 			{actions && fullBleedAction ? renderControl(actions) : null}

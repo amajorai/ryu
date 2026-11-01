@@ -19,14 +19,14 @@
 //   3. ONE COLUMN when narrow. Below the breakpoint the rail stacks under the main
 //      column — the small-window presentation, which must not be a squeezed
 //      two-up.
-//   4. THE HERO TILE'S WASH COVERS ITS BOX. Not geometry, but the same "only a real
-//      browser can answer it" class: the tile's glyph is hardcoded `text-white`
-//      because it sits on the hero above the scrim, so the wash under it must be
-//      opaque. Every packaged manifest now declares a spec that DISSOLVES to
-//      transparent, and painted as-is the tile's far end would be the banner
-//      behind it — near-white in light theme, taking the glyph with it. The hero
-//      runs the spec through `opaqueDither` for exactly this, and the only honest
-//      check of that is reading the canvas's own alpha.
+//   4. THE HERO TILE'S MATERIAL COVERS ITS GLYPH. Not geometry, but the same "only
+//      a real browser can answer it" class: an art-less hero tile is the SVG icon
+//      material behind a theme-gated layer, and the glyph sits on it, so the
+//      material the active theme shows must be opaque under the glyph. The only
+//      honest check is rasterising the computed background and reading its alpha.
+//      (The tile used to be a dither canvas run through `opaqueDither`; the icon
+//      material replaced it before 07d403e33, which left the old canvas probe
+//      with nothing to find.)
 
 import { expect, test } from "@playwright/test";
 
@@ -153,40 +153,63 @@ test("stat strip scrolls inside its own band", async ({ page }) => {
 	expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("the hero tile's wash stays opaque under its white glyph", async ({
+test("the hero tile's material stays opaque under its glyph", async ({
 	page,
 }) => {
 	await page.setViewportSize(WIDE);
-	// Two canvases live in the hero: the full-bleed banner and the icon tile. They
-	// are told apart by size rather than by DOM order, because order is an
-	// implementation detail of the hero's markup and a box under ~7rem can only be
-	// the tile (the banner spans the dialog).
-	const canvases = page.locator("[data-testid='dialog'] canvas");
-	await expect(canvases.first()).toBeVisible();
-	const total = await canvases.count();
-	const tiles: number[] = [];
-	for (let i = 0; i < total; i++) {
-		const box = await canvases.nth(i).boundingBox();
-		if (box && box.width <= 112) {
-			tiles.push(i);
-		}
-	}
-	expect(tiles).toHaveLength(1);
+	// The hero tile is `AppIcon`'s `hero` variant. It no longer paints a dither
+	// CANVAS (the banner gets an item-declared gradient here, so no canvas exists
+	// in the hero at all): an art-less tile is the SVG icon material, a light
+	// rounded plate in light theme and a dark one in dark theme, applied as the
+	// `--catalog-icon-material` background of a theme-gated layer. The tile is
+	// told apart from the banner by its box, as before.
+	const tile = page.locator(
+		"[data-testid='dialog'] [data-app-icon='fallback']"
+	);
+	await expect(tile).toHaveCount(1);
+	await expect(tile).toBeVisible();
+	const box = await tile.boundingBox();
+	expect(box?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(112);
 
-	// The MINIMUM alpha across the whole backing canvas, not a sampled pixel: a
-	// dissolve is a gradient, so any single sample can land on the solid end and
-	// pass while the other end is see-through. A two-tone ramp paints every cell,
-	// so its minimum is the opacity multiplier — full here.
-	const minAlpha = await canvases.nth(tiles[0]).evaluate((el) => {
-		if (!(el instanceof HTMLCanvasElement)) {
-			throw new Error("Expected proof element to be an HTMLCanvasElement.");
+	// The MINIMUM alpha over the glyph's area of the material the theme actually
+	// shows, rasterised from the computed background — not a sampled pixel, so a
+	// dissolving wash cannot pass on its solid end. The rounded corners are outside
+	// the measured inner 60% square on purpose: they are transparent by design.
+	const minAlpha = await tile.evaluate(async (el) => {
+		const layer = Array.from(el.children).find(
+			(child) =>
+				child instanceof HTMLElement &&
+				getComputedStyle(child).display !== "none" &&
+				getComputedStyle(child).backgroundImage.startsWith("url(")
+		);
+		if (!(layer instanceof HTMLElement)) {
+			throw new Error("no visible material layer on the hero tile");
 		}
-		const canvas = el;
+		const source = /^url\("(.*)"\)$/s.exec(
+			getComputedStyle(layer).backgroundImage
+		)?.[1];
+		if (!source) {
+			throw new Error("the material layer has no url() background");
+		}
+		const image = new Image();
+		image.src = source;
+		await image.decode();
+		const size = 256;
+		const canvas = document.createElement("canvas");
+		canvas.width = size;
+		canvas.height = size;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) {
-			throw new Error("no 2d context on the tile canvas");
+			throw new Error("no 2d context for the material probe");
 		}
-		const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		ctx.drawImage(image, 0, 0, size, size);
+		const inset = Math.round(size * 0.2);
+		const { data } = ctx.getImageData(
+			inset,
+			inset,
+			size - inset * 2,
+			size - inset * 2
+		);
 		let min = 255;
 		for (let i = 3; i < data.length; i += 4) {
 			if (data[i] < min) {

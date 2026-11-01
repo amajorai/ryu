@@ -153,7 +153,15 @@ export function telegramManagedBotFixture(): Plugin {
 						});
 						return;
 					}
-					sendJson(response, 200, { status: "ready" });
+					// The node saved the channel itself, so the ready arm carries the
+					// bot identity and channel id but no token (managedBotStatusSchema
+					// requires bot_id and bot_username on every ready reply).
+					sendJson(response, 200, {
+						bot_id: 5_010_000_123,
+						bot_username: "ryu_fixture_bot",
+						channel_id: "fixture-channel-1",
+						status: "ready",
+					});
 					return;
 				}
 

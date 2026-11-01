@@ -15,7 +15,6 @@ import {
 import { renderSlideToSvg } from "@office-kit/pptx-preview";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
-import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import {
 	forwardRef,
 	useEffect,
@@ -24,16 +23,13 @@ import {
 	useState,
 } from "react";
 import type { FileEditorHandle } from "./DocxEditor.tsx";
+import { slidePreviewSrc } from "./slide-preview-url.ts";
 
 interface SlidesEditorProps {
 	bytes: ArrayBuffer;
 	mime: string;
 	onDirty: () => void;
 	onLoadError: (message: string) => void;
-}
-
-function svgDataUrl(svg: string): string {
-	return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
@@ -91,7 +87,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 			() =>
 				presentation
 					? getSlides(presentation).map((item) =>
-							svgDataUrl(renderSlideToSvg(presentation, item))
+							slidePreviewSrc(renderSlideToSvg(presentation, item))
 						)
 					: [],
 			[presentation, revision]
@@ -139,7 +135,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 								alt=""
 								className="aspect-video w-full bg-white object-contain"
 								height={72}
-								src={safeMediaUrl(previewUrls[index]) ?? undefined}
+								src={previewUrls[index]}
 								width={128}
 							/>
 							<span className="mt-1 block px-1 text-muted-foreground text-xs">
@@ -155,7 +151,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 						})}
 						className="aspect-video w-full max-w-5xl border border-border bg-white object-contain shadow-xl"
 						height={720}
-						src={safeMediaUrl(previewUrls[activeSlide]) ?? undefined}
+						src={previewUrls[activeSlide]}
 						width={1280}
 					/>
 				</main>

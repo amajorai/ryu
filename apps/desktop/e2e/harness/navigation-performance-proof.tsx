@@ -18,6 +18,7 @@ import {
 } from "@/src/contexts/TitleBarContext.tsx";
 import { RouteOutlet } from "@/src/contributions/RouteOutlet.tsx";
 import { contributionRegistry } from "@/src/contributions/registry.ts";
+import { sealedLocalStorage } from "@/src/lib/content-seal.ts";
 import "../../src/index.css";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
 
@@ -37,6 +38,11 @@ localStorage.setItem(
 		})),
 	})
 );
+// The session snapshot is sealed (content-seal.ts): plaintext
+// `ryu_session_tabs` is never written back, so expose the app's own reader.
+Object.defineProperty(window, "__readSessionTabs", {
+	value: () => sealedLocalStorage.getItem("ryu_session_tabs"),
+});
 const nativeFetch = window.fetch.bind(window);
 window.fetch = (input, init) => {
 	const url = input instanceof Request ? input.url : String(input);

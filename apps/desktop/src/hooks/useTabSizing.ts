@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 /** Tab sizing preference for the horizontal title-bar strip.
     - `fit`: Chrome-style — tabs share the available width equally, shrinking as
@@ -33,5 +34,5 @@ export function setTabSizing(sizing: TabSizing) {
 	localStorage.setItem(KEY, sizing);
 	// Same-document listeners don't get the native `storage` event, so broadcast
 	// one ourselves — every useTabSizing() consumer re-reads on this.
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 }

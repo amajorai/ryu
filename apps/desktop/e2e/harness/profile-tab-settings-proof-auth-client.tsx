@@ -24,7 +24,14 @@ const INITIAL_SESSION: ProfileSession = {
 	},
 };
 
-configureSettingsApi({ getToken: () => "profile-tab-proof-token" });
+const PROOF_TOKEN = "profile-tab-proof-token";
+
+configureSettingsApi({ getToken: () => PROOF_TOKEN });
+
+/** The profile banner captures the active token to drop stale-account writes. */
+export function getActiveToken(): string {
+	return PROOF_TOKEN;
+}
 
 export function useSession() {
 	const [data, setData] = useState<ProfileSession | null>(null);

@@ -105,7 +105,9 @@ test("Stage panel generates a local world, edits a block, and removes only the a
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage local stage world");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	const playhead = page.getByRole("spinbutton", { name: "Playhead" });
 	await playhead.fill("0.5");
 	await playhead.press("Tab");
@@ -208,7 +210,9 @@ test("Stage panel generates a local world, edits a block, and removes only the a
 	).toEqual(generatedObjectIds);
 
 	await page.reload();
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "3D stage", "stage");
 	await playhead.fill("1");
 	await playhead.press("Tab");
@@ -233,7 +237,9 @@ test("Stage camera bounds, keyframe path, and rendered position persist after re
 	const requests = recordStudioRequests(page);
 	const title = uniqueTitle("Coverage stage camera path");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	const playhead = page.getByRole("spinbutton", { name: "Playhead" });
 	await playhead.fill("0.5");
 	await playhead.press("Tab");
@@ -311,7 +317,9 @@ test("Stage camera bounds, keyframe path, and rendered position persist after re
 	expect(savedProject.spatialObjects).toHaveLength(1);
 
 	await page.reload();
-	await page.getByLabel("Project").selectOption({ label: title });
+	await page
+		.getByLabel("Project", { exact: true })
+		.selectOption({ label: title });
 	await openOverflowTab(page, "3D stage", "stage");
 	await expect(page.getByLabel("Stage camera Camera X")).toHaveValue("0.25");
 	await expect(page.getByLabel("Stage camera Zoom")).toHaveValue("1.25");

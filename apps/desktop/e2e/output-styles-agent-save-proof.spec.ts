@@ -27,6 +27,19 @@ async function pick(page: Page, name: string) {
 	await expect(page.locator("#agent-personality-profile")).toContainText(name);
 }
 
+/** Saves a profile change on the saved agent. Since 4f7563c79d a change to the
+ *  bot's system prompt (the output style is part of it) first asks to confirm
+ *  the one-time prompt-cache reset; the write only happens after Apply now. */
+async function saveProfileChange(page: Page) {
+	await page.getByRole("button", { name: "Save changes", exact: true }).click();
+	const confirm = page.getByRole("alertdialog", {
+		name: "Apply now? This resets the prompt cache",
+	});
+	await expect(confirm).toBeVisible();
+	await confirm.getByRole("button", { name: "Apply now", exact: true }).click();
+	await expect(confirm).toHaveCount(0);
+}
+
 test("production agent editor saves profile, retries refusal and reads persisted choice after reopening", async ({
 	page,
 }) => {
@@ -54,7 +67,7 @@ test("production agent editor saves profile, retries refusal and reads persisted
 	await page.evaluate(() =>
 		window.__outputStylesAgentProof?.failNextAgentWrite()
 	);
-	await page.getByRole("button", { name: "Save changes", exact: true }).click();
+	await saveProfileChange(page);
 	await expect(
 		page.getByText(`${agentPath} failed: 503`, { exact: true })
 	).toBeVisible();
@@ -69,7 +82,7 @@ test("production agent editor saves profile, retries refusal and reads persisted
 	await expect(page.locator("#agent-personality-profile")).toContainText(
 		"Concise"
 	);
-	await page.getByRole("button", { name: "Save changes", exact: true }).click();
+	await saveProfileChange(page);
 	await expect(page.getByTestId("agent-list-returned")).toBeVisible();
 	state = await snapshot(page);
 	writes = state.requests.filter(
@@ -108,7 +121,7 @@ test("production agent editor saves profile, retries refusal and reads persisted
 		fullPage: true,
 	});
 	await pick(page, "Agent's own voice");
-	await page.getByRole("button", { name: "Save changes", exact: true }).click();
+	await saveProfileChange(page);
 	await expect(page.getByTestId("agent-list-returned")).toBeVisible();
 	state = await snapshot(page);
 	expect(state.outputStyleId).toBeNull();

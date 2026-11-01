@@ -6,7 +6,7 @@ const baseURL = "http://127.0.0.1:5442/";
 export default defineConfig({
 	outputDir: `${tmpdir()}/ryu-vertical-tab-row-playwright-results`,
 	testDir: ".",
-	testMatch: /vertical-tab-row-proof\.spec\.ts$/,
+	testMatch: /vertical-tab-row-proof(?:\.splits)?\.spec\.ts$/,
 	fullyParallel: false,
 	retries: 0,
 	use: {

@@ -114,6 +114,13 @@ const server = Bun.serve({
 			state.composioTriggers = structuredClone(input.composioTriggers ?? []);
 			return json({ ok: true });
 		}
+		// Arms failures without resetting state, for reads the editor issues
+		// after it has opened (its own opening read must not consume them).
+		if (url.pathname === "/__fixture/fail" && request.method === "POST") {
+			const input = parseWorkflowFixtureReset(await readArgs(request));
+			state.failures = { ...state.failures, ...input.failures };
+			return json({ ok: true });
+		}
 		if (
 			url.pathname === "/__fixture/external-save" &&
 			request.method === "POST"

@@ -16,6 +16,7 @@ import { useMessageListFollow } from "./message-list-follow.ts";
 import type { MessageListScope } from "./message-list-scope.ts";
 import { useMessageListTurns } from "./message-list-turns.tsx";
 import type { MessageListProps } from "./message-list-types.ts";
+import { isAtLiveEdge } from "./message-list-unread.ts";
 import { PinnedUserMessageBar } from "./pinned-user-message-bar.tsx";
 import { SelectionQuoteToolbar } from "./quote.tsx";
 import { DEFAULT_STATS_PLUGIN_ENABLED } from "./stats-model.ts";
@@ -246,6 +247,14 @@ export const MessageList = memo(function MessageList({
 						setScrollDirection("down");
 						const viewport = viewportRef.current;
 						if (!viewport) {
+							return;
+						}
+						// Already at the end (a short transcript, or new replies that
+						// landed while the reader sat at the bottom): scrolling moves
+						// nothing, so the scroller reports no follow change and the
+						// unread count would never clear. Choose the live edge here.
+						if (isAtLiveEdge(viewport)) {
+							handleFollowChange(true);
 							return;
 						}
 						if (nativeSdkCallable(viewport.scrollTo)) {

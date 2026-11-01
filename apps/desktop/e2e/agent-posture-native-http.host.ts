@@ -266,6 +266,10 @@ export function startAgentPostureProofHost(port = 5731) {
 					"can_create_agents",
 					"safety_profile",
 					"memory",
+					// The editor's identity mode and account allowlist travel with every
+					// full save since identity modes landed (#860, pre-#914).
+					"identity_mode",
+					"account_access",
 				];
 				const fullUpdate =
 					keys.length === fullKeys.length &&
@@ -297,6 +301,12 @@ export function startAgentPostureProofHost(port = 5731) {
 							typeof value === "object" &&
 							!Array.isArray(value)
 					) &&
+					["managed", "individual", "mixed"].includes(
+						String(dto.identity_mode)
+					) &&
+					(dto.account_access === null ||
+						(Array.isArray(dto.account_access) &&
+							dto.account_access.every((item) => typeof item === "string"))) &&
 					typeof dto.safety_profile === "string" &&
 					[
 						"read_only",
@@ -433,6 +443,9 @@ export function startAgentPostureProofHost(port = 5731) {
 					tools: [],
 					mcpTools: [{ name: "terminal.execute" }],
 				},
+				// AgentGoalPanel reads the agent scope's guidance (Core answers an
+				// unset scope with no `guidance`); in the editor since #860.
+				[`/api/scope-guidance/${encodeURIComponent(`agent:${AGENT}`)}`]: {},
 				[`${POSTURE_PATH}/versions`]: { versions: [] },
 				[`${POSTURE_PATH}/prompt-versions`]: { versions: [] },
 				[`${POSTURE_PATH}/accounts`]: { accounts: [] },

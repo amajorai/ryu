@@ -53,6 +53,9 @@ export default defineConfig({
 	server: { host: "127.0.0.1", port: 5231, strictPort: true },
 	preview: { host: "127.0.0.1", port: 5232, strictPort: true },
 	build: {
+		// esbuild 0.28 refuses to lower destructuring for Vite's default build
+		// targets; target what Chromium runs, as the global proof build does.
+		target: "esnext",
 		outDir: path.resolve(
 			desktopRoot,
 			"../../target/extension-parity-proof-build"

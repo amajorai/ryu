@@ -255,6 +255,18 @@ function installFixture(): RequestRecord[] {
 		const url = new URL(requestUrl, window.location.origin);
 		const route = url.pathname.match(/^\/api\/models\/([^/]+)\/launch-config$/);
 		const preferenceRoute = url.pathname.match(/^\/api\/preferences\/(.+)$/);
+		const nativeOptionsRoute = url.pathname.match(
+			/^\/api\/engines\/([^/]+)\/launch-options$/
+		);
+		if (nativeOptionsRoute) {
+			// The harness dir has an index.html, so an unrouted read would get the
+			// SPA fallback page and render a native-options load alert. This proof
+			// covers the launch-config contract, so the engine advertises none.
+			return jsonResponse({
+				engine: decodeURIComponent(nativeOptionsRoute[1]),
+				options: [],
+			});
+		}
 		if (!(route || preferenceRoute)) {
 			return originalFetch(input, init);
 		}

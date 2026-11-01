@@ -6,7 +6,7 @@ const baseURL = "http://127.0.0.1:5269/";
 export default defineConfig({
 	outputDir: `${tmpdir()}/ryu-gateway-guardrails-playwright-results`,
 	testDir: ".",
-	testMatch: /gateway-guardrails-settings-proof\.spec\.ts$/,
+	testMatch: /gateway-guardrails-settings(-controls)?-proof\.spec\.ts$/,
 	fullyParallel: true,
 	retries: 0,
 	use: { baseURL, ...devices["Desktop Chrome"] },

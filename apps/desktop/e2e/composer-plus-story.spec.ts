@@ -9,81 +9,17 @@
 // this has to be clicked to be certified.
 
 import { writeFile } from "node:fs/promises";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import {
+	collectCompactMorphEvidence,
+	plusIn,
+} from "./composer-plus-story.helpers.ts";
 
 // The story pulls a large module graph; vite compiles it on first navigation, so
 // allow generous headroom over the 30s default for cold-start CI runs.
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/composer-plus-story.html";
-
-interface CompactMorphEvidence {
-	finalHeight: number;
-	frameDeltas: number[];
-	initialHeight: number;
-	sameToolbarNode: boolean;
-	samples: {
-		height: number;
-		layout: string | null;
-		time: number;
-	}[];
-}
-
-async function collectCompactMorphEvidence(
-	page: Page
-): Promise<CompactMorphEvidence> {
-	return page.evaluate(
-		() =>
-			new Promise<CompactMorphEvidence>((resolve, reject) => {
-				const toolbar = document.querySelector<HTMLElement>(
-					'[data-testid="compact"] [data-composer-layout]'
-				);
-				if (!toolbar) {
-					reject(new Error("compact composer layout marker is missing"));
-					return;
-				}
-
-				const initialToolbar = toolbar;
-				const initialHeight = toolbar.getBoundingClientRect().height;
-				const samples: CompactMorphEvidence["samples"] = [];
-				const startedAt = performance.now();
-
-				const collect = (now: number) => {
-					const rect = toolbar.getBoundingClientRect();
-					samples.push({
-						height: rect.height,
-						layout: toolbar.getAttribute("data-composer-layout"),
-						time: now - startedAt,
-					});
-					if (now - startedAt < 800) {
-						requestAnimationFrame(collect);
-						return;
-					}
-
-					resolve({
-						finalHeight: samples.at(-1)?.height ?? initialHeight,
-						frameDeltas: samples
-							.slice(1)
-							.map((sample, index) => sample.height - samples[index]!.height),
-						initialHeight,
-						sameToolbarNode:
-							initialToolbar ===
-							document.querySelector(
-								'[data-testid="compact"] [data-composer-layout]'
-							),
-						samples,
-					});
-				};
-
-				requestAnimationFrame(collect);
-			})
-	);
-}
-
-/** The "+" trigger inside one of the story's two mounts. */
-function plusIn(page: import("@playwright/test").Page, testId: string) {
-	return page.getByTestId(testId).getByRole("button", { name: "Add" });
-}
 
 test.describe("composer + menu — real InputBar in isolation", () => {
 	test("a surface wiring ONLY attach still gets the dropdown", async ({
@@ -131,10 +67,14 @@ test.describe("composer + menu — real InputBar in isolation", () => {
 		await page.goto(STORY_URL);
 		const mount = page.getByTestId("minimal");
 
-		await expect(mount.locator("textarea")).toHaveClass(/text-\[14px\]/);
-		await expect(
-			mount.getByRole("button", { name: "Send" }).locator("svg")
-		).toHaveClass(/tabler-icon-arrow-up/);
+		// The composer input is text-comfortable (15/24) since 86c8dcb7fc (P3),
+		// and Send is a Hugeicons arrow since 093203904b (tabler is gone).
+		await expect(mount.locator("textarea")).toHaveClass(
+			/text-\(length:--text-comfortable\)/
+		);
+		const send = mount.getByRole("button", { name: "Send" });
+		await expect(send.locator("svg")).toHaveCount(1);
+		await expect(send.locator("svg")).not.toHaveClass(/tabler-icon/);
 	});
 
 	test("an attachment-only turn uses Send instead of live voice mode", async ({
@@ -152,20 +92,32 @@ test.describe("composer + menu — real InputBar in isolation", () => {
 
 		await expect(mount.getByTestId("attachment-stage")).toHaveText("attached");
 		await expect(mount.getByRole("img", { name: "brief.png" })).toBeVisible();
-		await expect(
-			mount.getByRole("button", { name: "Start voice call", exact: true })
-		).toHaveCount(0);
+		// Since 093203904b (P3, D6) voice call is its own ghost button beside
+		// the mic and never takes the send slot, so it stays; what matters is
+		// that the trailing slot is an enabled Send to the right of it.
+		const voiceCall = mount.getByRole("button", {
+			name: "Start voice call",
+			exact: true,
+		});
+		await expect(voiceCall).toHaveCount(1);
 		const send = mount.getByRole("button", { name: "Send", exact: true });
 		await expect(send).toBeEnabled();
+		const voiceCallBox = await voiceCall.boundingBox();
+		const sendBox = await send.boundingBox();
+		expect(voiceCallBox && sendBox).toBeTruthy();
+		if (voiceCallBox && sendBox) {
+			expect(sendBox.x).toBeGreaterThan(voiceCallBox.x + voiceCallBox.width);
+		}
 		await page.screenshot({
 			path: "test-results/attachment-only-send-proof.png",
 			fullPage: true,
 		});
 
 		await send.click();
-		await expect(mount.getByTestId("attachment-sent")).toHaveText(
-			"sent-attachment-only"
-		);
+		// Attaching appends the file's own `@image-1` mention to the draft
+		// (composer-attachment-mentions.ts), so the turn carries that token and
+		// no typed text.
+		await expect(mount.getByTestId("attachment-sent")).toHaveText("@image-1");
 		await expect(mount.getByTestId("attachment-stage")).toHaveText("empty");
 		await expect(mount.getByTestId("voice-mode-started")).toHaveText("idle");
 	});

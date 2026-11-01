@@ -37,6 +37,7 @@ import {
 import { type ReactNode, useMemo, useState } from "react";
 import { useOptionalChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
+import { useAfterDragStart } from "@/src/hooks/useAfterDragStart.ts";
 import {
 	BOT_CHAT_SECTION_COLLAPSED_KEY,
 	BOT_CHAT_SECTION_ORDER_KEY,
@@ -344,7 +345,11 @@ export function BotModeChatSectionsBody({
 		nesting
 	);
 	const chatDragging = useSidebarChatSelection((state) => state.dragging);
-	const anyDragging = chatDragging || nested.dnd.draggingKey !== null;
+	// The hint below inserts a row, so it waits a frame past dragstart (see
+	// useAfterDragStart) or Chromium cancels the drag that revealed it.
+	const anyDragging = useAfterDragStart(
+		chatDragging || nested.dnd.draggingKey !== null
+	);
 	const conversationIds = useMemo(
 		() => new Set(loose.map((conversation) => conversation.id)),
 		[loose]

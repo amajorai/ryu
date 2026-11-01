@@ -19,8 +19,10 @@ export default defineConfig({
 		},
 	],
 	webServer: {
+		// Preview serves the built harness, so build it first: a fresh checkout has
+		// no dist-rnp-handoff and the preview server never answered.
 		command:
-			"bunx vite preview --config harness/vite.rnp-handoff-proof.config.ts --port 5197 --strictPort",
+			"bunx vite build --config harness/vite.rnp-handoff-proof.config.ts && bunx vite preview --config harness/vite.rnp-handoff-proof.config.ts --port 5197 --strictPort",
 		url: `${proofUrl}rnp-handoff-proof.html`,
 		reuseExistingServer: false,
 		timeout: 120_000,

@@ -11,7 +11,7 @@ const harnesses = [
 	{
 		name: "settings",
 		port: 5209,
-		spec: /appearance-settings-proof\.spec\.ts$/,
+		spec: /appearance-settings-proof(-[a-z]+)?\.spec\.ts$/,
 		timeout: 120_000,
 	},
 	{

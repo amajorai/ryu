@@ -2,7 +2,7 @@ import path from "node:path";
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
 	testDir: ".",
-	testMatch: "gateway-dialog-accounts-proof.spec.ts",
+	testMatch: /gateway-dialog-accounts(-replace|-revision)?-proof\.spec\.ts$/,
 	timeout: 90_000,
 	use: {
 		baseURL: "http://127.0.0.1:5199",

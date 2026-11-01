@@ -170,6 +170,8 @@ async function install(page: Page) {
 			}
 			await reply(200, {
 				total: rows.length,
+				limit: query.limit ?? 50,
+				offset: query.offset ?? 0,
 				has_more: (query.offset ?? 0) + (query.limit ?? 50) < rows.length,
 				items: rows.slice(
 					query.offset ?? 0,
@@ -225,7 +227,9 @@ async function install(page: Page) {
 			}
 			if (method === "DELETE") {
 				record.deleted_at = timestamp;
-				await reply(204, null);
+				// `delete_record` answers `{ ok, purged }` (apps-store/crm/backend/src/api/records.rs),
+				// which the client's `deleteReplySchema` parses; a bodyless 204 reads as a failure.
+				await reply(200, { ok: true, purged: false });
 				return;
 			}
 			await reply(200, record);
@@ -236,7 +240,13 @@ async function install(page: Page) {
 			return;
 		}
 		if (record && url.pathname.endsWith("/activities")) {
-			await reply(200, { items: [], total: 0, has_more: false });
+			await reply(200, {
+				items: [],
+				total: 0,
+				limit: 100,
+				offset: 0,
+				has_more: false,
+			});
 			return;
 		}
 		await reply(404, { error: `Unexpected table request ${key}` });
@@ -442,7 +452,7 @@ test("selection, denied bulk deletion, retry, full-view CSV export, and record c
 			}))
 	).toEqual([
 		{ path: "/api/crm/records/deal_1", body: null, status: 403 },
-		{ path: "/api/crm/records/deal_1", body: null, status: 204 },
+		{ path: "/api/crm/records/deal_1", body: null, status: 200 },
 	]);
 	fixture.fail("GET", "/api/crm/exports/views/view_all");
 	await page.getByRole("button", { name: "Export CSV" }).click();

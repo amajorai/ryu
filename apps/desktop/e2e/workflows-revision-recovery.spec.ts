@@ -39,7 +39,7 @@ for (const action of ["Save", "Save version"]) {
 			}
 		});
 		await page.request.post("/__fixture/reset", {
-			data: { workflows: [seed], failures: { "workflows.get": 1 } },
+			data: { workflows: [seed] },
 		});
 		await page.goto("/?workflowId=revision-workflow");
 		const name = page.getByRole("textbox", {
@@ -47,6 +47,17 @@ for (const action of ["Save", "Save version"]) {
 			exact: true,
 		});
 		await expect(name).toHaveValue(seed.name);
+		// The editor opens the single-workflow view (loadForEditor in the
+		// Workflows App.tsx, before #914), so exactly one read precedes any
+		// reload; the reload failure below is armed after it.
+		const openingRead = { method: "workflows.get", args: { id: seed.id } };
+		await expect
+			.poll(async () =>
+				(await state(page)).calls.filter(
+					(call) => call.method === "workflows.get"
+				)
+			)
+			.toEqual([openingRead]);
 		await name.fill("My unsaved draft");
 		await page.locator('.react-flow__node[data-id="__trigger__"]').click();
 		await page.getByLabel("When this runs").click();
@@ -148,7 +159,10 @@ for (const action of ["Save", "Save version"]) {
 			(await state(page)).calls.filter(
 				(call) => call.method === "workflows.get"
 			)
-		).toHaveLength(0);
+		).toEqual([openingRead]);
+		await page.request.post("/__fixture/fail", {
+			data: { failures: { "workflows.get": 1 } },
+		});
 		await page.getByRole("button", { name: "Reload latest workflow" }).click();
 		await page
 			.getByRole("button", { name: "Discard edits and reload", exact: true })
@@ -234,6 +248,7 @@ for (const action of ["Save", "Save version"]) {
 		expect(
 			saved.calls.filter((call) => call.method === "workflows.get")
 		).toEqual([
+			openingRead,
 			{ method: "workflows.get", args: { id: seed.id } },
 			{ method: "workflows.get", args: { id: seed.id } },
 		]);

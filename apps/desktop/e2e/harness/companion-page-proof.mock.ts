@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 export const TOKEN_KEY = "companion-proof-session";
 export const BACKEND_URL = location.origin;
 export const FRONTEND_URL = "https://ryuhq.com";
@@ -56,4 +56,15 @@ export function useActiveNodeGetter() {
 		token: "companion-node-token",
 		userJwt: null,
 	});
+}
+
+// useActiveNode.ts also exports the ApiTarget forms of the two hooks above
+// (c0185f150d); production call sites import them, so the stub must too.
+export function useActiveTarget() {
+	const { url, token, userJwt } = useActiveNode();
+	return useMemo(() => ({ url, token, userJwt }), [url, token, userJwt]);
+}
+export function useActiveTargetGetter() {
+	const getNode = useActiveNodeGetter();
+	return useCallback(() => getNode(), [getNode]);
 }

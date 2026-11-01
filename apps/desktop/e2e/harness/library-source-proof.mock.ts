@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 export const TOKEN_KEY = "library-source-proof-session";
 export const getRealtimeJwt = async () => null;
+// lib/api/client-transport.ts reads the control-plane session for the buyer
+// header on a loopback Core; this proof has no signed-in account.
+export const getActiveToken = (): string | null => null;
 export function useActiveNode() {
 	const [node, setNode] = useState({
 		url: window.location.origin,

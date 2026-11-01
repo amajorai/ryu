@@ -59,6 +59,22 @@ async function focusVisible(locator: Locator): Promise<boolean> {
 	return await locator.evaluate((element) => element.matches(":focus-visible"));
 }
 
+/** cd49c035c5 (Ryu Quiet) fixed the settings dialog at 880px, so the canvas
+ * (about 610px) is below its 640px narrow width and opens on the table; switch
+ * to the map the way a user does. */
+async function showMap(page: Page): Promise<void> {
+	const view = page.getByRole("group", { name: "View" });
+	await expect(view.getByRole("button", { name: "Table" })).toHaveAttribute(
+		"aria-pressed",
+		"true"
+	);
+	await view.getByRole("button", { name: "Map" }).click();
+	await expect(view.getByRole("button", { name: "Map" })).toHaveAttribute(
+		"aria-pressed",
+		"true"
+	);
+}
+
 async function pulseCount(page: Page): Promise<number> {
 	return await page.locator("[data-traffic-map] animateMotion").count();
 }
@@ -128,6 +144,7 @@ test.describe("Traffic map section", () => {
 		page,
 	}) => {
 		await page.goto(`${HARNESS}?org=1&rate=50`);
+		await showMap(page);
 		const map = page.locator("[data-traffic-map]");
 		await expect(
 			map.getByRole("button", { name: /^This gateway, Gateway/ })
@@ -205,6 +222,7 @@ test.describe("Traffic map section", () => {
 	}) => {
 		await page.emulateMedia({ reducedMotion: "reduce" });
 		await page.goto(`${HARNESS}?org=1&rate=50`);
+		await showMap(page);
 		const map = page.locator("[data-traffic-map]");
 		await expect(
 			map.getByRole("button", { name: /^This gateway, Gateway/ })

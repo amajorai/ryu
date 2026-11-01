@@ -6,7 +6,7 @@ const baseURL = "http://127.0.0.1:5452/";
 export default defineConfig({
 	outputDir: `${tmpdir()}/ryu-app-sidebar-interactions-playwright-results`,
 	testDir: ".",
-	testMatch: /app-sidebar-interactions-proof\.spec\.ts$/,
+	testMatch: /app-sidebar-interactions-proof(-[a-z-]+)?\.spec\.ts$/,
 	fullyParallel: false,
 	retries: 0,
 	use: {

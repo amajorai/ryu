@@ -122,6 +122,11 @@ export function catalogPerformanceApi(): Plugin {
 									enabled: enabled.get(node) ?? false,
 									installed: true,
 									version: "1.0.0",
+									installed_version: "1.0.0",
+									built_in: false,
+									local_only: false,
+									sidecar_name: null,
+									windows_first: false,
 									capabilities: [],
 									runnables: [],
 									permission_grants: [],
@@ -150,7 +155,14 @@ export function catalogPerformanceApi(): Plugin {
 						const value = endpoint.endsWith("/enable");
 						enabled.set(node, value);
 						send({
-							app: { id: "app-1", enabled: value, config: {}, installed: true },
+							app: {
+								id: "app-1",
+								version: "1.0.0",
+								enabled: value,
+								approved_grants: [],
+								created_at: null,
+								updated_at: null,
+							},
 						});
 						return;
 					}
@@ -169,6 +181,8 @@ export function catalogPerformanceApi(): Plugin {
 								...doc,
 								space_id: "space-1",
 								kind: "file",
+								chunk_count: 0,
+								created_at: 0,
 							})),
 						});
 						return;

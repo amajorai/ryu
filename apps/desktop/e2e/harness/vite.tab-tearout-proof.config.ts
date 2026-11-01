@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { browserContentKeyHost } from "./browser-content-key-host.ts";
 
 const root = import.meta.dirname;
 export default defineConfig({
@@ -16,6 +17,8 @@ export default defineConfig({
 	},
 	assetsInclude: ["**/*.glb"],
 	plugins: [
+		// The sealed session needs a content key; see browser-content-key-host.ts.
+		browserContentKeyHost(),
 		react(),
 		{
 			name: "native-tab-proof-entry",

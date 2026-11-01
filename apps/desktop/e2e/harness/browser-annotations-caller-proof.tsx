@@ -9,10 +9,10 @@ import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { TOKEN_KEY } from "../../lib/auth-client.ts";
-import {
-	BrowserTabPanel,
-	PanelToggleButtons,
-} from "../../src/components/panels/WorkspacePanels.tsx";
+import { PanelToggleButtons } from "../../src/components/panels/WorkspacePanels.tsx";
+// bb3be22857 (Ryu Quiet P4) moved the browser panel into its own module, which the
+// dock loads lazily, so WorkspacePanels.tsx no longer re-exports it.
+import { BrowserTabPanel } from "../../src/components/panels/workspace-panels/browser-panel.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import type { AppInfo } from "../../src/lib/api/plugins.ts";
 import { queryClient } from "../../src/lib/query-client.ts";

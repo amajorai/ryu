@@ -106,6 +106,9 @@ function Story() {
 		onTogglePin: noop,
 		pinnedIds: new Set(),
 		projectNameForFolder: () => "ryu",
+		// Required since the move-to-project targets landed (4f7563c79d); the
+		// story's chats have no folder, so no single-row move targets apply.
+		projectTargets: [],
 		target: { token: "token", url: `${window.location.origin}/node` },
 		unreadIds: new Set(),
 	};

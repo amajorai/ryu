@@ -74,12 +74,23 @@ export function expectKnownFixtureRequests(snapshot: ProofSnapshot): void {
 	);
 }
 
-export function expectWindowStart(
+/**
+ * The requested window must end at the page's "now" when the read was sent.
+ * The installed clock starts at PROOF_TIME and keeps running, so a flow with
+ * fills and reloads can take a few real seconds: bound the start between the
+ * clock's install time and its reading after the request, instead of a fixed
+ * tolerance around PROOF_TIME that a slow machine can exceed.
+ */
+export async function expectWindowStart(
+	page: Page,
 	value: string | undefined,
 	durationMs: number
-): void {
+): Promise<void> {
 	expect(value).toBeTruthy();
 	const requestedStart = Date.parse(value ?? "");
-	const expectedStart = PROOF_TIME.getTime() - durationMs;
-	expect(Math.abs(requestedStart - expectedStart)).toBeLessThan(2000);
+	const pageNow = await page.evaluate(() => Date.now());
+	expect(requestedStart).toBeGreaterThanOrEqual(
+		PROOF_TIME.getTime() - durationMs
+	);
+	expect(requestedStart).toBeLessThanOrEqual(pageNow - durationMs);
 }

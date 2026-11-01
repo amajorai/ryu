@@ -14,6 +14,10 @@ import {
 	useTabsContext,
 } from "../../src/contexts/TabsContext.tsx";
 import { type TabLayout, useTabLayout } from "../../src/hooks/useTabLayout.ts";
+import {
+	hydrateSealedLocalStorage,
+	sealedLocalStorage,
+} from "../../src/lib/content-seal.ts";
 import { EntitlementProvider } from "./vertical-tab-row-entitlement.mock.tsx";
 import {
 	initializeVerticalTabFixture,
@@ -225,4 +229,14 @@ const rootElement = document.getElementById("root");
 if (!rootElement) {
 	throw new Error("Missing root element");
 }
-createRoot(rootElement).render(<ProofSurface />);
+// The session snapshot is sealed (content-seal.ts): plaintext
+// `ryu_session_tabs` is only the seed and is never written back. Expose the
+// app's own sealed reader so the proof reads exactly what a restart restores,
+// and hydrate before the first render (as main.tsx does) so a reload restores
+// the sealed session instead of the seed.
+Object.defineProperty(window, "__readSessionTabs", {
+	value: () => sealedLocalStorage.getItem("ryu_session_tabs"),
+});
+hydrateSealedLocalStorage()
+	.then(() => createRoot(rootElement).render(<ProofSurface />))
+	.catch(() => undefined);

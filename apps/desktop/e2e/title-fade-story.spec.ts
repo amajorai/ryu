@@ -90,9 +90,11 @@ test.describe("clipped title edge fade — real components in isolation", () => 
 			.toBe(0);
 	});
 
-	test("a rename uses Torph's accessible morph root and active segments", async ({
+	test("a rename crossfades the new title in place", async ({
 		page,
 	}, testInfo) => {
+		// Since 0db714a247 (P1) a title change is a quiet 150ms opacity
+		// crossfade of the whole title, not Torph's per-character morph.
 		const title = page.getByTestId("animated-title");
 		await expect(title.locator("[data-animated-title]")).toHaveAttribute(
 			"data-animated-title-state",
@@ -105,29 +107,25 @@ test.describe("clipped title edge fade — real components in isolation", () => 
 			"data-animated-title-state",
 			"transitioning"
 		);
-		await page.waitForTimeout(160);
-		await page.screenshot({
-			path: testInfo.outputPath("title-rename-overlap-proof.png"),
-		});
-		const morph = animated.locator("[torph-root]");
-		await expect(morph).toHaveCount(1);
-		await expect(morph.locator("[torph-sr]")).toHaveText("New title");
+		await expect(animated).toHaveText("New title");
+		await expect(animated.locator("[torph-root]")).toHaveCount(0);
 		await expect
 			.poll(() =>
-				morph.evaluate(
+				animated.evaluate(
 					(element) => element.getAnimations({ subtree: true }).length
 				)
 			)
 			.toBeGreaterThan(0);
-		await expect
-			.poll(() => morph.locator("[torph-item]").count())
-			.toBeGreaterThan(0);
+		await page.screenshot({
+			path: testInfo.outputPath("title-rename-crossfade-proof.png"),
+		});
 
 		await expect(animated).toHaveAttribute(
 			"data-animated-title-state",
 			"settled",
 			{ timeout: 2000 }
 		);
+		await expect(animated).toHaveText("New title");
 	});
 
 	test("the tab-title tooltip variant fades busy and resting alike", async ({

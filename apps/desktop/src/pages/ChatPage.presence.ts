@@ -215,24 +215,28 @@ export function useChatPresence({
 				setDiffConvId(convId);
 			}
 			// Auto read-back when enabled (Voice settings), unless a meeting is recording.
-			getVoiceModeReadbackPrefs(chatTargetRef.current).then((prefs) => {
-				if (!prefs.enabled) {
-					return;
-				}
-				if (useMeetingRecordingStore.getState().active) {
-					return;
-				}
-				const lastAssistant = messages
-					.filter((m) => m.role === "assistant")
-					.at(-1);
-				if (!lastAssistant) {
-					return;
-				}
-				const text = extractAssistantText(lastAssistant);
-				if (text) {
-					handleSpeakRef.current(text)?.catch(() => undefined);
-				}
-			});
+			getVoiceModeReadbackPrefs(chatTargetRef.current)
+				.then((prefs) => {
+					if (!prefs.enabled) {
+						return;
+					}
+					if (useMeetingRecordingStore.getState().active) {
+						return;
+					}
+					const lastAssistant = messages
+						.filter((m) => m.role === "assistant")
+						.at(-1);
+					if (!lastAssistant) {
+						return;
+					}
+					const text = extractAssistantText(lastAssistant);
+					if (text) {
+						handleSpeakRef.current(text)?.catch(() => undefined);
+					}
+				})
+				// An unreadable preference only skips read-back for this turn; it must
+				// not surface as an unhandled rejection.
+				.catch(() => undefined);
 			// The chat-title plugin may re-title after a completed turn. Refresh
 			// once more so the sidebar picks up the new title without a reload.
 			const t = setTimeout(refresh, 2500);

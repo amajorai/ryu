@@ -161,9 +161,11 @@ function SettingsPane() {
 			</SettingsSection>
 
 			<SettingsSection title="Cards">
-				{/* The control group: the SAME textarea inside an ordinary card, which
-				    is the doubled chrome the `bare` variant removes. */}
-				<SettingsCard>
+				{/* The control group: the SAME textarea inside a painted card, which
+				    is the doubled chrome the `bare` variant removes. Settings render
+				    flush since 0b6db0e694 (F5c), so the contrast card opts into the
+				    retained `grouped` surface to keep a card to compare against. */}
+				<SettingsCard appearance="grouped">
 					<Textarea
 						className="min-h-24"
 						data-testid="carded-textarea"

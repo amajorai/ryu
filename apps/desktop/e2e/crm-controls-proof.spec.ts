@@ -50,8 +50,8 @@ async function install(page: Page) {
 			...field("stage", "stage", "Stage", "select"),
 			config: {
 				options: [
-					{ id: "new", label: "New" },
-					{ id: "won", label: "Won" },
+					{ id: "new", label: "New", position: 0 },
+					{ id: "won", label: "Won", position: 1 },
 				],
 			},
 		},
@@ -182,7 +182,9 @@ async function install(page: Page) {
 						: [
 								{
 									record_id: "deal_1",
+									object_id: "obj_deal",
 									object_slug: "deal",
+									rank: 1,
 									title: `Result ${q}`,
 									snippet: "Fixture search hit",
 								},
@@ -193,7 +195,7 @@ async function install(page: Page) {
 		if (method === "POST" && url.pathname === queryPath) {
 			const query = z
 				.object({
-					search: z.string().optional(),
+					search: z.string().nullish(),
 					sorts: z
 						.array(
 							z.object({
@@ -221,6 +223,8 @@ async function install(page: Page) {
 			}
 			await reply(200, {
 				total: rows.length,
+				limit: query.limit ?? 50,
+				offset: query.offset ?? 0,
 				has_more: (query.offset ?? 0) + (query.limit ?? 50) < rows.length,
 				items: rows.slice(
 					query.offset ?? 0,
@@ -279,7 +283,9 @@ async function install(page: Page) {
 			}
 			if (method === "DELETE") {
 				record.deleted_at = timestamp;
-				await reply(204, null);
+				// `delete_record` answers `{ ok, purged }` (apps-store/crm/backend/src/api/records.rs),
+				// which the client's `deleteReplySchema` parses; a bodyless 204 reads as a failure.
+				await reply(200, { ok: true, purged: false });
 				return;
 			}
 			await reply(200, record);
@@ -290,7 +296,13 @@ async function install(page: Page) {
 			return;
 		}
 		if (record && url.pathname.endsWith("/activities")) {
-			await reply(200, { items: [], total: 0, has_more: false });
+			await reply(200, {
+				items: [],
+				total: 0,
+				limit: 100,
+				offset: 0,
+				has_more: false,
+			});
 			return;
 		}
 		await reply(404, { error: `Unexpected table request ${key}` });
@@ -498,9 +510,11 @@ test("detail editors validate, cancel, commit typed values and read back", async
 		});
 	}
 	expect(f.records.get("deal_1")?.values?.hidden).toBe("Keep hidden value");
+	// `safeHref` validates with `new URL` but returns the authored string unchanged
+	// (src/components/panels/crm/url-safety.ts), so no trailing slash is added.
 	await expect(
 		detail.getByRole("link", { name: "https://example.com" })
-	).toHaveAttribute("href", "https://example.com/");
+	).toHaveAttribute("href", "https://example.com");
 	await expect(
 		detail.getByRole("link", { name: "person@example.com" })
 	).toHaveAttribute("href", "mailto:person@example.com");

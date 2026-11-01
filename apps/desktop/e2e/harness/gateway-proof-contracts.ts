@@ -145,3 +145,19 @@ export const piCatalogProofSchema = z
 		thinkingLevels: z.array(z.string()),
 	})
 	.catchall(z.json());
+
+/** The sections `/api/gateway/config` must always carry under the #860
+ * response contract (`auth` and `providers`), as a Gateway with no client keys
+ * and no providers configured serves them. A harness that serves only the
+ * sections it exercises spreads this in first. */
+export const GATEWAY_CONFIG_REQUIRED_SECTIONS = {
+	auth: { api_keys: [], require_auth: false },
+	providers: {
+		anthropic: null,
+		core: null,
+		genai: null,
+		local: null,
+		openai: null,
+		openrouter: null,
+	},
+} as const;

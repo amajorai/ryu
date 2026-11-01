@@ -96,6 +96,8 @@ declare global {
 }
 
 const now = "2026-09-25T03:00:00.000Z";
+/** Core serves Space timestamps as epoch milliseconds (listSpacesResponseCodec). */
+const nowMs = Date.parse(now);
 const initialState = window.__GATEWAY_STORAGE_PROOF__;
 const state: GatewayStorageState = initialState ?? {
 	apiCalls: [],
@@ -122,13 +124,13 @@ const state: GatewayStorageState = initialState ?? {
 	dialogCalls: [],
 	spaces: [
 		{
-			created_at: now,
+			created_at: nowMs,
 			description: "Proof workspace",
 			document_count: 3,
 			id: "space-proof",
 			name: "Research Space",
 			retrieval_mode: "vector",
-			updated_at: now,
+			updated_at: nowMs,
 		},
 	],
 	tauriCalls: [],

@@ -11,6 +11,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { TOKEN_KEY, useSession } from "../../lib/auth-client.ts";
 import { AccountList } from "../../src/components/layout/NavUser.tsx";
+import { SkillDistributionProvider } from "../../src/components/skills/SkillDistributionProvider.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
 import StorePage from "../../src/pages/StorePage.tsx";
@@ -74,13 +75,17 @@ createRoot(root).render(
 				<MemoryRouter>
 					<EntitlementProvider>
 						<TabsProvider>
-							<main className="h-screen bg-background text-foreground">
-								{location.search.includes("account-lifetime") ? (
-									<ReviewAccountControls />
-								) : null}
-								<StorePage initialSection="bundles" />
-								<Toaster />
-							</main>
+							{/* Layout mounts this inside TabsProvider; the Store's skill
+							    catalog hooks require it. */}
+							<SkillDistributionProvider>
+								<main className="h-screen bg-background text-foreground">
+									{location.search.includes("account-lifetime") ? (
+										<ReviewAccountControls />
+									) : null}
+									<StorePage initialSection="bundles" />
+									<Toaster />
+								</main>
+							</SkillDistributionProvider>
 						</TabsProvider>
 					</EntitlementProvider>
 				</MemoryRouter>

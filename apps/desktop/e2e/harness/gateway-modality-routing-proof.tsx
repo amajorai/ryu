@@ -11,6 +11,7 @@ import type {
 } from "../../src/lib/api/gateway.ts";
 import { parseProofJson } from "../fixture-json.ts";
 import { routingProofSchema } from "./gateway-configuration-proof.contracts.ts";
+import { GATEWAY_CONFIG_REQUIRED_SECTIONS } from "./gateway-proof-contracts.ts";
 import "../../src/index.css";
 
 declare const window: Window;
@@ -159,7 +160,10 @@ window.fetch = async (input, init) => {
 		}
 		return jsonResponse({ ok: true });
 	}
-	return jsonResponse(readPersistedConfig());
+	return jsonResponse({
+		...GATEWAY_CONFIG_REQUIRED_SECTIONS,
+		...readPersistedConfig(),
+	});
 };
 
 const queryClient = new QueryClient({

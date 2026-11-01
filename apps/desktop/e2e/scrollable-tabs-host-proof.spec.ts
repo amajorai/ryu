@@ -66,7 +66,16 @@ async function setup(page: Page) {
 				route.request().method() === "POST" &&
 				path === "/api/ws/ticket" &&
 				response.status === 503;
-			if ((response.status ?? 200) >= 400 && !expectedTicketRefusal) {
+			// A restored chat tab asks for its session Box; none exists here.
+			const expectedNoSessionBox =
+				route.request().method() === "GET" &&
+				path.startsWith("/api/session-boxes/") &&
+				response.status === 404;
+			if (
+				(response.status ?? 200) >= 400 &&
+				!expectedTicketRefusal &&
+				!expectedNoSessionBox
+			) {
 				unexpectedApiCalls
 					.get(page)
 					?.push(
@@ -123,9 +132,12 @@ async function setup(page: Page) {
 	await expect(page.locator("[data-tab-view-card]")).toHaveCount(3);
 }
 async function session(page: Page) {
-	const raw = await page.evaluate(() =>
-		localStorage.getItem("ryu_session_tabs")
-	);
+	// Read through the app's sealed facade (see the harness): plaintext
+	// `ryu_session_tabs` only ever holds the seed.
+	const raw = await page.evaluate(() => {
+		const read = Reflect.get(window, "__readSessionTabs");
+		return typeof read === "function" ? read() : null;
+	});
 	return sessionReadbackSchema.parse(JSON.parse(raw ?? "{}"));
 }
 test("full Layout keyboard focus moves through consecutive cards and boundaries", async ({

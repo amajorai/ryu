@@ -23,6 +23,8 @@
     "src/components/store/MarketplaceStrip.language.test.tsx",
     "e2e/language-settings.playwright.config.ts",
     "e2e/language-settings-storage.spec.ts",
+    "e2e/language-settings-keyboard.spec.ts",
+    "e2e/language-settings-proof-helpers.ts",
     "e2e/harness/language-settings-proof.tsx",
     "e2e/harness/vite.language-settings.config.ts"
   ]

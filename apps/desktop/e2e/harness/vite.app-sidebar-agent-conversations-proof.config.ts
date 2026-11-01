@@ -18,6 +18,9 @@ export default defineConfig({
 		alias: { "@": path.resolve(import.meta.dirname, "../..") },
 	},
 	build: {
+		// Match the desktop webview target (vite.config.ts): esbuild cannot lower
+		// dependency destructuring to Vite's default es2020 browser targets.
+		target: "chrome105",
 		rollupOptions: {
 			input: path.resolve(
 				import.meta.dirname,

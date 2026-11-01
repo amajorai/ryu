@@ -75,6 +75,10 @@ async function installFixture(page: Page) {
 		let status = 200;
 		if (pathname.startsWith("/api/cloud-environments/task-binding/")) {
 			response = { cloudEnvironmentId: null };
+		} else if (pathname.startsWith("/api/preferences/")) {
+			// An unset node preference, as Core answers it. The completed turn
+			// reads the voice read-back preference.
+			response = { value: null };
 		} else if (pathname === "/api/agents") {
 			response = {
 				agents: [

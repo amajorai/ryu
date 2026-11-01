@@ -1,3 +1,4 @@
+import { I18nProvider } from "@ryu/i18n/react";
 import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -115,5 +116,11 @@ function Story() {
 
 const root = document.getElementById("root");
 if (root) {
-	createRoot(root).render(<Story />);
+	// GroupHeaderPill and SplitPresetSettings read their copy through @ryu/i18n,
+	// which throws outside an I18nProvider, as the app shell provides one.
+	createRoot(root).render(
+		<I18nProvider>
+			<Story />
+		</I18nProvider>
+	);
 }

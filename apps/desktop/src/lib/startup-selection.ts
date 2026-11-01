@@ -1,3 +1,5 @@
+import { announceLocalStorageChange } from "./same-document-storage-event.ts";
+
 export type StartupSelectionMode = "always" | "defaults" | "never";
 
 export interface StartupSelectionPreferences {
@@ -28,10 +30,8 @@ function isMode(value: string | null): value is StartupSelectionMode {
 	return value !== null && VALID_MODES.some((mode) => mode === value);
 }
 
-function notifyChanged(): void {
-	if (globalThis.window !== undefined) {
-		window.dispatchEvent(new Event("storage"));
-	}
+function notifyChanged(key: string): void {
+	announceLocalStorageChange(key);
 }
 
 export function readStartupSelectionPreferences(): StartupSelectionPreferences {
@@ -46,7 +46,7 @@ export function readStartupSelectionPreferences(): StartupSelectionPreferences {
 
 export function setStartupSelectionMode(mode: StartupSelectionMode): void {
 	storage()?.setItem(MODE_KEY, mode);
-	notifyChanged();
+	notifyChanged(MODE_KEY);
 }
 
 export function setStartupDefaultAccountId(userId: string | null): void {
@@ -59,7 +59,7 @@ export function setStartupDefaultAccountId(userId: string | null): void {
 	} else {
 		store.removeItem(DEFAULT_ACCOUNT_KEY);
 	}
-	notifyChanged();
+	notifyChanged(DEFAULT_ACCOUNT_KEY);
 }
 
 export function setStartupDefaultNodeName(name: string | null): void {
@@ -72,7 +72,7 @@ export function setStartupDefaultNodeName(name: string | null): void {
 	} else {
 		store.removeItem(DEFAULT_NODE_KEY);
 	}
-	notifyChanged();
+	notifyChanged(DEFAULT_NODE_KEY);
 }
 
 /** The account applied during vault hydration when startup defaults are enabled. */

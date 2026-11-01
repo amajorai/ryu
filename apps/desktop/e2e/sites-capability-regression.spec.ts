@@ -347,6 +347,11 @@ test("Sites database connection retries an exact revision, persists its real Sit
 	await query.fill("SELECT key,value FROM data ORDER BY key");
 	const run = companion.getByRole("button", { name: "Run query", exact: true });
 	const queryPath = `/projects/${baseline.id}/database/query`;
+	// The Database tab also lists the Visitor data table, so scope the SQL
+	// result assertions to the table whose columns are the SELECTed ones.
+	const resultTable = companion.getByRole("table").filter({
+		has: companion.getByRole("columnheader", { name: "key", exact: true }),
+	});
 	let release: () => void = () => {};
 	const held = new Promise<void>((resolve) => {
 		release = resolve;
@@ -381,7 +386,7 @@ test("Sites database connection retries an exact revision, persists its real Sit
 		schema: [],
 		truncated: false,
 	});
-	await expect(companion.getByRole("table")).toContainText("Keep rollback");
+	await expect(resultTable).toContainText("Keep rollback");
 	await page.unroute(route);
 	await query.fill("SELECT missing_column FROM data");
 	await run.click();
@@ -396,11 +401,11 @@ test("Sites database connection retries an exact revision, persists its real Sit
 	await expect(companion.getByRole("alert")).toHaveText(
 		"The operation could not be completed"
 	);
-	await expect(companion.getByRole("table")).toHaveCount(0);
+	await expect(resultTable).toHaveCount(0);
 	await query.fill("SELECT key,value FROM data ORDER BY key");
 	await run.click();
 	await waitCalls(page, "POST", queryPath, 3);
-	await expect(companion.getByRole("table")).toContainText("Verify import");
+	await expect(resultTable).toContainText("Verify import");
 	expect(await owned(page)).toEqual(bound);
 });
 

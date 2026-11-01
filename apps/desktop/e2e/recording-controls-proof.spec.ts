@@ -456,6 +456,7 @@ test("recording caller discards late start responses after node credential chang
 	let release!: () => void;
 	let started = 0;
 	const calls: string[] = [];
+	const stopAuthorizations: (string | undefined)[] = [];
 	await page.route("**/api/**", async (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (!path.startsWith("/api/")) {
@@ -463,6 +464,9 @@ test("recording caller discards late start responses after node credential chang
 			return;
 		}
 		calls.push(path);
+		if (path.endsWith("/stop")) {
+			stopAuthorizations.push(route.request().headers().authorization);
+		}
 		let body: PluginValue = {};
 		if (path === "/api/plugins") {
 			body = { apps: [clipsApp] };
@@ -526,9 +530,13 @@ test("recording caller discards late start responses after node credential chang
 	await expect(
 		page.getByRole("button", { name: "Stop recording" })
 	).toHaveCount(0);
-	expect(calls.filter((path) => /\/(pause|resume|stop)$/.test(path))).toEqual(
-		[]
-	);
+	// Changing scope abandons the live recording, and useClipStore's
+	// abandonRecording stops it once on the node that owns it, with that
+	// node's credential; the discarded late start never had a clip to stop.
+	await expect
+		.poll(() => calls.filter((path) => /\/(pause|resume|stop)$/.test(path)))
+		.toEqual(["/api/clips/fixture-recording/stop"]);
+	expect(stopAuthorizations).toEqual(["Bearer new-node-token"]);
 	writeFileSync(
 		test.info().outputPath("recording-node-scope-calls.json"),
 		JSON.stringify(calls, null, 2)

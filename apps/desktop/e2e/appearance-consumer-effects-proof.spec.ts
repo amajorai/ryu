@@ -249,23 +249,30 @@ test("pointer preference changes enabled controls and preserves disabled control
 	await expect(enabled).toHaveCSS("cursor", "default");
 });
 
-test("shadow preference removes and restores actual shared desktop chrome filters", async ({
+// Chrome shadows default off since 0db714a247 (Ryu Quiet #914: "Chrome shadows
+// default off"; separation comes from tone). The preference is now an opt-in:
+// prove it adds the real filter and shadow, persists, and strips them again.
+test("shadow preference adds and removes actual shared desktop chrome filters", async ({
 	page,
 }) => {
 	const chrome = page
 		.getByTestId("consumer-shell")
 		.locator(".ryu-chrome-shadow");
-	const original = await css(chrome, "filter");
-	expect(original).not.toBe("none");
+	await expect(chrome).toHaveCSS("filter", "none");
+	await expect(chrome).toHaveCSS("box-shadow", "none");
+	await open(page, "Interface");
+	await toggle(page, "chrome-shadows-toggle", true);
+	await expect.poll(() => css(chrome, "filter")).not.toBe("none");
+	await expect.poll(() => css(chrome, "box-shadow")).not.toBe("none");
+	const enabled = await css(chrome, "filter");
+	await page.reload();
+	await expect.poll(() => css(chrome, "filter")).toBe(enabled);
 	await open(page, "Interface");
 	await toggle(page, "chrome-shadows-toggle", false);
 	await expect(chrome).toHaveCSS("filter", "none");
 	await expect(chrome).toHaveCSS("box-shadow", "none");
 	await page.reload();
 	await expect(chrome).toHaveCSS("filter", "none");
-	await open(page, "Interface");
-	await toggle(page, "chrome-shadows-toggle", true);
-	await expect.poll(() => css(chrome, "filter")).toBe(original);
 });
 
 // The modal scrim is a plain solid dim (30% black light, 50% dark): never a blur.

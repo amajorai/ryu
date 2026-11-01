@@ -135,7 +135,17 @@ test("the actual agent editor reloads a committed apply failure and recovers its
 	expect(optimizerWrites).toBe(1);
 	expect(newerWrites).toBe(1);
 	expect(applyAttempts).toBe(3);
-	expect(calls.filter((call) => call.method === "POST")).toEqual([
+	const launchChecks = calls.filter(
+		(call) => call.path === "/api/agents/launch-check"
+	);
+	expect(launchChecks.length).toBeGreaterThan(0);
+	expect(launchChecks.every((call) => call.status === 200)).toBe(true);
+	expect(
+		calls.filter(
+			(call) =>
+				call.method === "POST" && call.path !== "/api/agents/launch-check"
+		)
+	).toEqual([
 		{
 			method: "POST",
 			path: `${optimizerPath}/original%2Fsuggestion/apply`,

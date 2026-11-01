@@ -4,7 +4,7 @@ test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/keyboard-shortcuts-search-proof.html";
 
-test("keeps the large filter above an independently scrolling shortcut list", async ({
+test("keeps the filter above an independently scrolling shortcut list", async ({
 	page,
 }) => {
 	await page.goto(STORY_URL);
@@ -16,7 +16,10 @@ test("keeps the large filter above an independently scrolling shortcut list", as
 	await expect(filter).toHaveAttribute("placeholder", "Search");
 	await expect(resetAll).toBeVisible();
 	await expect(resetAll).toHaveText("Reset all to defaults");
-	await expect(resetAll).toHaveClass(/bg-primary/);
+	// 57c69af9a9 (Ryu Quiet settings sweep) made Reset all a quiet outline
+	// button instead of the primary fill.
+	await expect(resetAll).toHaveClass(/border-border bg-background/);
+	await expect(resetAll).not.toHaveClass(/bg-primary/);
 	await expect(scroller).toBeVisible();
 
 	const metrics = await filter.evaluate((element) => {
@@ -34,7 +37,7 @@ test("keeps the large filter above an independently scrolling shortcut list", as
 		const resetBox = reset.getBoundingClientRect();
 		return {
 			filterHeight: filterBox.height,
-			hasLargeSize: element.classList.contains("h-10"),
+			hasDefaultSize: element.classList.contains("h-9"),
 			listTop: listBox.top,
 			filterBottom: filterBox.bottom,
 			resetTop: resetBox.top,
@@ -45,8 +48,10 @@ test("keeps the large filter above an independently scrolling shortcut list", as
 	if (!metrics) {
 		throw new Error("Keyboard shortcut layout did not render");
 	}
-	expect(metrics.filterHeight).toBeGreaterThanOrEqual(38);
-	expect(metrics.hasLargeSize).toBe(true);
+	// 57c69af9a9 moved the filter from the lg Input (h-10) to the default
+	// Input size (h-9, 36px).
+	expect(metrics.filterHeight).toBe(36);
+	expect(metrics.hasDefaultSize).toBe(true);
 	expect(metrics.resetTop).toBeLessThan(metrics.listTop);
 	expect(metrics.listTop).toBeGreaterThanOrEqual(metrics.filterBottom);
 	expect(metrics.isScrollFade).toBe(true);

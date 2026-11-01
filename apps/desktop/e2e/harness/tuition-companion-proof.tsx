@@ -345,7 +345,27 @@ function routeTuitionRequest(input: TuitionRequestPayload) {
 				throw new Error("Review candidate was not found.");
 			}
 			candidate.status = decision === "accept" ? "accepted" : "rejected";
-			result = { status: candidate.status };
+			// Mirrors the Tuition backend: accept answers `{ ok, item }` with the
+			// exact-answer item it created under the labelled skill; reject `{ ok }`.
+			if (decision === "accept") {
+				const item: Item = {
+					archived: false,
+					choices: [],
+					id: `item-${candidate.id}`,
+					kind: "exact",
+					prompt: candidate.prompt,
+					skill_id:
+						fixtures.skills.find(
+							(skill) =>
+								skill.subject_id === candidate.subject_id &&
+								skill.name === candidate.skill_label
+						)?.id ?? "skill-respiration",
+				};
+				fixtures.items.push(item);
+				result = { ok: true, item: copy(item) };
+			} else {
+				result = { ok: true };
+			}
 		} else if (method === "GET" && path === "/settings") {
 			result = responseSettings();
 		} else if (method === "PUT" && path === "/settings") {

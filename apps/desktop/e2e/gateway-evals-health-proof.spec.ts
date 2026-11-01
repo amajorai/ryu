@@ -75,7 +75,7 @@ test("runs built-in quality cases with the selected model and renders returned s
 	).toContainText("90%");
 	await expect(
 		page.getByRole("row", { name: /What is 2 \+ 2\?/ })
-	).toContainText("pass");
+	).toContainText("Pass"); // fc38dd6ea6 (Ryu Quiet): the pass badge is muted "Pass" text
 	await expect(
 		page
 			.getByText("Substring match", { exact: true })

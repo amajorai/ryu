@@ -18,12 +18,8 @@ test("project files sends the exact scoped listing and persists density and sear
 			)
 		)
 		.toContainEqual({
-			command: "shell_execute",
-			args: {
-				command: "git ls-files --cached --others --exclude-standard",
-				cwd: "/tmp/ryu-project-files-fixture",
-				shell: null,
-			},
+			command: "list_workspace_files",
+			args: { root: "/tmp/ryu-project-files-fixture" },
 		});
 	await page.getByRole("button", { name: "Compact", exact: true }).click();
 	await expect(
@@ -171,12 +167,24 @@ test("browser surfaces expose no native file context actions", async ({
 	page,
 }) => {
 	await page.goto("/project-files-route-proof.html?web=1");
-	await page
-		.getByRole("treeitem", { name: "README.md", exact: true })
-		.click({ button: "right" });
+	// Without the native shell the route never lists the folder (the listing
+	// effect has required canUseNativeShell since before 07d403e33), so there is
+	// no file row to open native actions from at all.
 	await expect(
-		page.getByRole("menu", { name: "Actions for README.md" })
+		page.getByRole("heading", { name: "Project files" })
+	).toBeVisible();
+	await expect(
+		page.getByRole("treeitem", { name: "README.md", exact: true })
 	).toHaveCount(0);
+	await expect(page.getByRole("menuitem")).toHaveCount(0);
+	const listings = await page.evaluate(() =>
+		/* SAFETY: project-files-route-proof.tsx installs __projectFiles before this proof page is evaluated. */ (
+			window as Window & { __projectFiles: { calls: { command: string }[] } }
+		).__projectFiles.calls.filter(
+			(call) => call.command === "list_workspace_files"
+		)
+	);
+	expect(listings).toEqual([]);
 	const mutations = await page.evaluate(() =>
 		/* SAFETY: project-files-route-proof.tsx installs __projectFiles before this proof page is evaluated. */ (
 			window as Window & { __projectFiles: { calls: { command: string }[] } }

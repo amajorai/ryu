@@ -8,6 +8,9 @@ const desktopRoot = path.resolve(harnessDir, "../..");
 
 export default defineConfig({
 	build: {
+		// The desktop webview target (vite.config.ts): the locked esbuild cannot
+		// lower dependency destructuring to Vite's default es2020 build targets.
+		target: "chrome105",
 		outDir: path.resolve(harnessDir, "dist-spaces-import-proof"),
 		rollupOptions: {
 			input: path.resolve(harnessDir, "spaces-import-proof.html"),

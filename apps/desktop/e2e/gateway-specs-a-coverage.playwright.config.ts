@@ -157,7 +157,7 @@ const proofs: Proof[] = [
 	},
 	{
 		name: "guardrails",
-		spec: /gateway-guardrails-settings-proof\.spec\.ts$/,
+		spec: /gateway-guardrails-settings(-controls)?-proof\.spec\.ts$/,
 		harness: "guardrails",
 	},
 	{
@@ -188,7 +188,7 @@ const proofs: Proof[] = [
 	},
 	{
 		name: "dialog-accounts",
-		spec: /gateway-dialog-accounts-proof\.spec\.ts$/,
+		spec: /gateway-dialog-accounts(-replace|-revision)?-proof\.spec\.ts$/,
 		harness: "dialog-accounts",
 		device: false,
 		timeout: 90_000,

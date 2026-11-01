@@ -158,6 +158,24 @@ async function storedIds(page: Page, key: string): Promise<string[]> {
 	return parsed.success ? parsed.data : [];
 }
 
+/** Library favorites are stored as `{ type, id }` refs (lib/library.ts), not
+ *  bare ids, so they need their own reader. */
+async function storedFavorites(
+	page: Page
+): Promise<Array<{ id: string; type: string }>> {
+	const values = await page.evaluate(() => {
+		try {
+			return JSON.parse(localStorage.getItem("ryu:library-favorites") ?? "[]");
+		} catch {
+			return [];
+		}
+	});
+	const parsed = z
+		.array(z.object({ id: z.string(), type: z.string() }))
+		.safeParse(values);
+	return parsed.success ? parsed.data : [];
+}
+
 test("Library chat menu opens the real destinations and persists transcript, flags, favorite, and app action", async ({
 	page,
 }) => {
@@ -282,9 +300,9 @@ test("Library chat menu opens the real destinations and persists transcript, fla
 	await page
 		.getByRole("menuitem", { name: "Add to favorites", exact: true })
 		.click();
-	expect(await storedIds(page, "ryu:library-favorites")).toEqual([
-		{ id: CHAT_ID, type: "chat" },
-	]);
+	await expect
+		.poll(() => storedFavorites(page))
+		.toEqual([{ id: CHAT_ID, type: "chat" }]);
 	await openChatMenu(page);
 	await expect(
 		page.getByRole("menuitem", { name: "Remove from favorites", exact: true })
@@ -292,7 +310,7 @@ test("Library chat menu opens the real destinations and persists transcript, fla
 	await page
 		.getByRole("menuitem", { name: "Remove from favorites", exact: true })
 		.click();
-	expect(await storedIds(page, "ryu:library-favorites")).toEqual([]);
+	await expect.poll(() => storedFavorites(page)).toEqual([]);
 
 	await openChatMenu(page);
 	await page
@@ -392,8 +410,11 @@ test("delete cancel and failed confirmation preserve the chat; retry deletes it 
 		name: "Delete Fixture conversation",
 	});
 	await slider.focus();
+	// CutToConfirm is a vertical blade: ArrowDown advances one of its five steps
+	// and ArrowRight is deliberately unbound (KEY_DELTAS in
+	// packages/ui/src/components/cut-to-confirm-config.ts).
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowRight");
+		await slider.press("ArrowDown");
 	}
 	await expect
 		.poll(
@@ -415,7 +436,7 @@ test("delete cancel and failed confirmation preserve the chat; retry deletes it 
 	await captureProductScreenshot(page, "library-chat-delete-error-retry");
 
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowRight");
+		await slider.press("ArrowDown");
 	}
 	await expect
 		.poll(

@@ -1,5 +1,6 @@
 import { THEME_APPEARANCE_CHANGE_EVENT } from "@ryu/ui/theme/prefs.ts";
 import { useEffect, useState } from "react";
+import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 const KEY = "ryu_pointer_cursor";
 
@@ -34,6 +35,6 @@ export function usePointerCursor(): boolean {
 export function setPointerCursor(enabled: boolean) {
 	localStorage.setItem(KEY, String(enabled));
 	applyDataAttribute(enabled);
-	window.dispatchEvent(new Event("storage"));
+	announceLocalStorageChange(KEY);
 	window.dispatchEvent(new Event(THEME_APPEARANCE_CHANGE_EVENT));
 }

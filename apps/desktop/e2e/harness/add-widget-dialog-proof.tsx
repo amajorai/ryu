@@ -6,6 +6,18 @@ import { AddWidgetDialog } from "@/src/components/dashboard/AddWidgetDialog.tsx"
 import type { WidgetInput } from "@/src/lib/api/dashboard.ts";
 import "../../src/index.css";
 
+// Every source the dialog offers; the dialog lists only the node's supported source types
+// (the required `sourceTypes` prop from ec6fac15e2), and this proof walks all of them.
+const PROOF_SOURCE_TYPES = [
+	"core_endpoint",
+	"monitor",
+	"workflow",
+	"composio",
+	"http",
+	"agent",
+	"static",
+];
+
 function AddWidgetDialogProof() {
 	const [open, setOpen] = useState(true);
 	const [created, setCreated] = useState<WidgetInput | null>(null);
@@ -37,6 +49,7 @@ function AddWidgetDialogProof() {
 						}}
 						onOpenChange={setOpen}
 						open={open}
+						sourceTypes={PROOF_SOURCE_TYPES}
 					/>
 				</main>
 			</I18nDirectionProvider>

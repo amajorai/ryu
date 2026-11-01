@@ -43,15 +43,18 @@ interface ConversationWire {
 	worktree_path: string | null;
 }
 
+// Core relays the Groups app's TeamRecord, whose timestamps are RFC 3339
+// strings (`Option<String>` in crates/core/teams-contracts); the shared
+// core-client parser rejects a numeric team timestamp.
 interface TeamWire {
 	coordination: string;
-	created_at: number;
+	created_at: string;
 	description: string | null;
 	id: string;
 	lead_agent_id: string | null;
 	members: string[];
 	name: string;
-	updated_at: number;
+	updated_at: string;
 }
 
 interface CoreState {
@@ -89,13 +92,13 @@ declare global {
 
 const teamSchema = z.object({
 	coordination: z.string(),
-	created_at: z.number(),
+	created_at: z.string(),
 	description: z.string().nullable(),
 	id: z.string(),
 	lead_agent_id: z.string().nullable(),
 	members: z.array(z.string()),
 	name: z.string(),
-	updated_at: z.number(),
+	updated_at: z.string(),
 });
 const conversationSchema = z.object({
 	agent_id: z.string().nullable(),
@@ -145,13 +148,13 @@ function seedState(): CoreState {
 		teams: [
 			{
 				coordination: "broadcast",
-				created_at: now - 60_000,
+				created_at: new Date(now - 60_000).toISOString(),
 				description: "Reviews release changes",
 				id: TEAM_ID,
 				lead_agent_id: null,
 				members: [AGENT_ID],
 				name: "Release Review Group",
-				updated_at: now - 15_000,
+				updated_at: new Date(now - 15_000).toISOString(),
 			},
 		],
 	};
@@ -233,13 +236,13 @@ function installFixture(): LibraryCollectionsFixture {
 			const input = teamSchema.partial().nullable().parse(body);
 			const team: TeamWire = {
 				coordination: input?.coordination ?? "broadcast",
-				created_at: Date.now(),
+				created_at: new Date().toISOString(),
 				description: input?.description ?? null,
 				id: "library-collections-created-team",
 				lead_agent_id: input?.lead_agent_id ?? null,
 				members: input?.members ?? [],
 				name: input?.name ?? "",
-				updated_at: Date.now(),
+				updated_at: new Date().toISOString(),
 			};
 			state.teams = [...state.teams, team];
 			localStorage.setItem(CORE_STATE_KEY, JSON.stringify(state));
@@ -263,7 +266,7 @@ function installFixture(): LibraryCollectionsFixture {
 							...(input?.lead_agent_id === undefined
 								? undefined
 								: { lead_agent_id: input.lead_agent_id }),
-							updated_at: Date.now(),
+							updated_at: new Date().toISOString(),
 						}
 					: team
 			);
@@ -278,7 +281,9 @@ function installFixture(): LibraryCollectionsFixture {
 		) {
 			state.teams = state.teams.filter((team) => team.id !== TEAM_ID);
 			localStorage.setItem(CORE_STATE_KEY, JSON.stringify(state));
-			response = json({ ok: true });
+			// The Groups backend answers a delete with `{ success: true }`
+			// (apps-store/teams/backend/src/api.rs), which core-client requires.
+			response = json({ success: true });
 		} else if (url.pathname === "/api/agents" && method === "GET") {
 			response = json({
 				agents: [

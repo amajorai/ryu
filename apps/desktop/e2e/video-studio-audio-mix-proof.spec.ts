@@ -153,7 +153,9 @@ test("local soundtrack settings flow into a storyboard scene and retryable manua
 	);
 	const title = uniqueTitle("Audio production project");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	expect((await getProject(page, projectId)).requireApproval).toBe(false);
 
 	await openOverflowTab(page, "Plan", "storyboard");
@@ -169,9 +171,11 @@ test("local soundtrack settings flow into a storyboard scene and retryable manua
 	});
 
 	await openOverflowTab(page, "Media", "media");
+	// The mood select became the "Soundtrack style" preset, which resets the
+	// tempo to the style's default, so pick the style before the custom tempo.
+	await page.getByLabel("Soundtrack style").selectOption("tense");
 	await fillNumber(page, "Soundtrack duration", "6");
 	await fillNumber(page, "Soundtrack tempo", "112");
-	await page.getByLabel("Soundtrack mood").selectOption("tense");
 	const soundtrackName = "Local tense soundtrack 112 BPM.wav";
 	const soundtrackFault = await page.request.post(
 		"/__proof/fail-next-soundtrack"
@@ -357,6 +361,7 @@ test("local soundtrack settings flow into a storyboard scene and retryable manua
 	});
 
 	await fillNumber(page, "Playhead", "1");
-	await expect(page.locator(".font-mono")).toContainText("0:01.0 /");
+	// The "Go to timecode" field shares the transport readout's font-mono class.
+	await expect(page.getByText(/^0:01\.0 \/ /)).toBeVisible();
 	await saveScreenshot(page, "video-studio-audio-mix-sync.png");
 });

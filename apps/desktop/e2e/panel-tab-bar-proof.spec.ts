@@ -114,9 +114,14 @@ test("pin, pinned tooltip, and Move to transfer the same tab between both dock c
 		)
 		.toBe(true);
 
+	// Hover the pin glyph itself (the first tooltip trigger; the second is the
+	// label's overflow tooltip). The title button's pl-1.5 puts the glyph at
+	// x=6, so the old fixed x=5 offset landed on padding and never opened it.
 	await bottom
 		.getByRole("button", { name: "Files", exact: true })
-		.hover({ position: { x: 5, y: 16 } });
+		.locator('[data-slot="tooltip-trigger"]')
+		.first()
+		.hover();
 	await expect(
 		page
 			.locator('[data-slot="tooltip-content"]')

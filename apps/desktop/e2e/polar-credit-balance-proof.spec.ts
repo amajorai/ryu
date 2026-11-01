@@ -50,10 +50,20 @@ test("shows the Polar aggregate and provider-specific allocation", async ({
 	await expect(
 		proof.getByText("Polar maintains this aggregate credit meter")
 	).toBeVisible();
-	await expect(proof.getByText("Provider-specific allocations")).toBeVisible();
-	await expect(proof.getByText("Ryu Fast")).toBeVisible();
+	// The breakdown folds provider allocations into one "Free credit" row and
+	// never names a tier or provider (credit-balance-breakdown.test.tsx pins
+	// that; it predates 07d403e33), so assert the row and that "Ryu Fast" stays
+	// out of the surface.
+	await expect(
+		proof.getByText("Free credit", { exact: true }).first()
+	).toBeVisible();
 	await expect(proof.getByText("$2.50")).toBeVisible();
-	await expect(proof.getByText("Allocated free provider only")).toBeVisible();
+	await expect(
+		proof.getByText(
+			"Used automatically on models marked Free · Expires Sep 30, 2026"
+		)
+	).toBeVisible();
+	await expect(proof.getByText("Ryu Fast")).toHaveCount(0);
 	await expect(proof.getByText("Plan credits")).toHaveCount(0);
 	await expect(proof.getByText("On-demand credits")).toHaveCount(0);
 	await expect(proof.getByTestId("proof-status")).toContainText(

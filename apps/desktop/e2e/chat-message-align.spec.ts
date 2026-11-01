@@ -1,16 +1,18 @@
 // Real-browser spec for how a USER turn sits in the transcript column
 // (`packages/blocks/src/desktop/agent-elements/message-list.tsx`), reusing the
 // chat-scroll story because it mounts the REAL `AgentChat` the way ChatPage does
-// — including `currentUser`, so every user turn carries its avatar.
+// — including `currentUser`. Since 3cf89b6e68 (P3, quiet transcript) a
+// one-to-one chat shows no avatars, so the user's bubble is the turn's
+// right-most element.
 //
 // Two edges are asserted, and neither can be read off the classnames:
 //
-//  1. The user avatar's right edge lands on the COMPOSER's right edge. The
+//  1. The user bubble's right edge lands on the COMPOSER's right edge. The
 //     transcript and the composer are two independently-padded columns
 //     (`max-w-[904px] px-3` vs the input bar's `px-3` around `max-w-[880px]`);
 //     they only agree because those numbers were matched on purpose. When the
 //     transcript was narrower than the composer it sat inside the composer on
-//     each side, which reads as a gap to the right of the avatar.
+//     each side, which reads as a gap to the right of the bubble.
 //  2. The user turn's hover toolbar sits just to the LEFT of the BUBBLE, not at
 //     the left edge of the transcript column. The bubble is right-aligned and
 //     shrink-to-fit, so its left edge is content-derived: the toolbar only lands
@@ -53,7 +55,6 @@ async function edges(page: Page) {
 		const left = (el: Element | null | undefined) =>
 			el ? el.getBoundingClientRect().left : Number.NaN;
 		const row = [...document.querySelectorAll(".group\\/user-message")].at(-1);
-		const avatar = row?.querySelector('[data-slot="avatar"]');
 		// The composer's own centered column — the box whose edges the transcript
 		// is supposed to match.
 		const composer = document.querySelector("textarea")?.closest("div.mx-auto");
@@ -72,12 +73,12 @@ async function edges(page: Page) {
 		);
 		return {
 			rowLeft: left(row),
-			avatarRight: right(avatar),
+			bubbleRight: right(bubble),
 			bubbleLeft: left(bubble),
 			composerLeft: left(composer),
 			composerRight: right(composer),
 			toolbarButtonLeft: left(toolbarButton),
-			hasAvatar: Boolean(avatar),
+			hasAvatar: Boolean(row?.querySelector('[data-slot="avatar"]')),
 			hasBubble: Boolean(bubble),
 			hasToolbarButton: Boolean(toolbarButton),
 		};
@@ -95,13 +96,13 @@ for (const size of [
 		await openStory(page);
 		const m = await edges(page);
 
-		// Guard the selectors: a silently-missing avatar would make every edge
-		// assertion below vacuously pass.
-		expect(m.hasAvatar).toBe(true);
+		// Guard the selectors: a silently-missing bubble would make every edge
+		// assertion below vacuously pass. One-to-one turns carry no avatar.
+		expect(m.hasAvatar).toBe(false);
 		expect(m.hasBubble).toBe(true);
 		expect(m.hasToolbarButton).toBe(true);
 
-		expect(Math.abs(m.avatarRight - m.composerRight)).toBeLessThanOrEqual(
+		expect(Math.abs(m.bubbleRight - m.composerRight)).toBeLessThanOrEqual(
 			EDGE_SLACK_PX
 		);
 		expect(Math.abs(m.rowLeft - m.composerLeft)).toBeLessThanOrEqual(

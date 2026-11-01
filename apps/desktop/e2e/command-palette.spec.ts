@@ -129,13 +129,24 @@ test.describe("shared command palette — real component in isolation", () => {
 		const composer = page.getByPlaceholder("Write a message…");
 		await expect(page.locator('[data-composer-layout="full"]')).toBeVisible();
 		const dialog = page.getByRole("dialog");
+		// Since 240b3d5e1c (P1) the Search/Compose pair sits inside the frame,
+		// above the composer: the pair opens the frame and the composer keeps
+		// its small inset below the pair rather than below the frame's edge.
+		const modeSwitch = dialog.getByRole("tablist", {
+			name: "Search and compose",
+		});
 		const dialogTop = await dialog.evaluate(
 			(element) => element.getBoundingClientRect().top
 		);
+		const switchBox = await modeSwitch.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { bottom: rect.bottom, top: rect.top };
+		});
+		expect(Math.abs(switchBox.top - dialogTop)).toBeLessThanOrEqual(1);
 		const entryTop = await dialog
 			.locator(".composer-container")
 			.evaluate((element) => element.getBoundingClientRect().top);
-		const topInset = entryTop - dialogTop;
+		const topInset = entryTop - switchBox.bottom;
 		expect(topInset).toBeGreaterThanOrEqual(9);
 		expect(topInset).toBeLessThanOrEqual(10.5);
 		await composer.focus();

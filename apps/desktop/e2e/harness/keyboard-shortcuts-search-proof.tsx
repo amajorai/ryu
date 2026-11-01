@@ -48,7 +48,7 @@ function readProofMetrics() {
 	return {
 		filterHeight: Math.round(inputBox.height),
 		filterValue: input.value,
-		largeFilter: input.classList.contains("h-10"),
+		defaultFilter: input.classList.contains("h-9"),
 		listTop: Math.round(scrollBox.top),
 		scrollFade: scroller.classList.contains("scroll-fade"),
 		scrollHeight: scroller.scrollHeight,
@@ -74,7 +74,7 @@ function Story() {
 	}, []);
 
 	const verified =
-		metrics?.largeFilter && metrics.scrollFade && initialOverflow;
+		metrics?.defaultFilter && metrics.scrollFade && initialOverflow;
 
 	return (
 		<main className="min-h-screen bg-background p-6 text-foreground">
@@ -86,7 +86,7 @@ function Story() {
 						</p>
 						<h1 className="font-semibold text-2xl">Keyboard shortcut search</h1>
 						<p className="mt-1 text-muted-foreground text-sm">
-							The real settings tab keeps its large filter above an independent
+							The real settings tab keeps its filter above an independent
 							scroll-fade list.
 						</p>
 					</div>

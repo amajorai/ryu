@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { parseMarketplaceWallpaperSelection } from "@ryuhq/protocol/marketplace-wallpaper";
+import { defaultPublicProfileContent } from "@ryuhq/protocol/public-profile";
 import { z } from "zod";
 import type { ProofJsonValue } from "./fixture-json.ts";
 
@@ -21,6 +22,57 @@ function field<RawInput>(
 ): ProofJsonValue | undefined {
 	const parsed = z.record(z.string(), z.json()).safeParse(value);
 	return parsed.success ? parsed.data[key] : undefined;
+}
+
+/** A complete public-profile wire response. `parsePublicProfileResponse`
+ *  rejects a partial body, so the preview only shows the banner when every
+ *  required profile field is present. */
+function publicProfileBody(bannerWallpaper: unknown): string {
+	return JSON.stringify({
+		profile: {
+			bannerWallpaper,
+			displayUsername: "proof-user",
+			image: null,
+			joinedAt: null,
+			level: 1,
+			name: "Ryu User",
+			publicProfile: defaultPublicProfileContent(),
+			username: "proof-user",
+			verificationDetails: { methods: [], verifiedSince: null },
+		},
+		stats: null,
+		usage: null,
+	});
+}
+
+/** A complete `/api/profile/me/profile` body: the desktop's ProfileMe parser
+ *  (src/lib/api/profile.ts) rejects a body carrying only the banner, which the
+ *  Profile tab's load-and-sync path reports as a failed public sync. */
+function profileMeBody(bannerWallpaper: unknown): string {
+	const totals = {
+		agentSeconds: 0,
+		costMicroUsd: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		requestCount: 0,
+		sessionCount: 0,
+	};
+	return JSON.stringify({
+		bannerWallpaper,
+		displayUsername: "proof-user",
+		image: null,
+		joinedAt: "2026-01-01T00:00:00.000Z",
+		level: 1,
+		name: "Ryu User",
+		plan: "free",
+		pointsBalance: 0,
+		profileVisibility: "public",
+		streak: { current: 0, longest: 0 },
+		totals,
+		userId: "proof-user",
+		username: "proof-user",
+		xp: 0,
+	});
 }
 
 function parseJson(value: string | null) {
@@ -77,7 +129,7 @@ test("node and account wallpaper banners render and persist on their owning scop
 		route.fulfill({
 			status: 200,
 			contentType: "application/json",
-			body: JSON.stringify({ bannerWallpaper: accountBanner }),
+			body: profileMeBody(accountBanner),
 		})
 	);
 	await page.route("**/api/profile/me/banner-wallpaper", async (route) => {
@@ -98,7 +150,7 @@ test("node and account wallpaper banners render and persist on their owning scop
 		route.fulfill({
 			status: 200,
 			contentType: "application/json",
-			body: JSON.stringify({ profile: { bannerWallpaper: accountBanner } }),
+			body: publicProfileBody(accountBanner),
 		})
 	);
 	await page.route("**/api/auth/**", (route) =>
@@ -247,7 +299,7 @@ async function profileBannerFixture(page: Page) {
 		route.fulfill({
 			status: 200,
 			contentType: "application/json",
-			body: JSON.stringify({ bannerWallpaper: accountBanner }),
+			body: profileMeBody(accountBanner),
 		})
 	);
 	await page.route("**/api/profile/me/banner-wallpaper", async (route) => {
@@ -284,7 +336,7 @@ async function profileBannerFixture(page: Page) {
 		route.fulfill({
 			status: 200,
 			contentType: "application/json",
-			body: JSON.stringify({ profile: { bannerWallpaper: accountBanner } }),
+			body: publicProfileBody(accountBanner),
 		})
 	);
 	await page.route("**/api/auth/**", (route) =>

@@ -180,7 +180,9 @@ test("Clip inspector saves visual changes, effect/transition values, and editabl
 	);
 	const title = uniqueTitle("Inspector visual project");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	const mediaRow = assetRow(page, video.name);
 	await mediaRow
 		.getByRole("button", { name: `Add ${video.name} to timeline` })
@@ -195,8 +197,9 @@ test("Clip inspector saves visual changes, effect/transition values, and editabl
 	await fillNumber(page, "Softness (px)", "6");
 	await fillNumber(page, "Exposure", "0.5");
 	await page.getByLabel("Visual effect").selectOption("grayscale");
-	await page.getByLabel("Effect stack").selectOption("blur");
-	await fillNumber(page, "blur amount (%)", "35");
+	// The effect stack is built from an "Add effect" picker (EffectsSection).
+	await page.getByLabel("Add effect").selectOption("blur");
+	await fillNumber(page, "Blur amount (%)", "35");
 	await page.getByLabel("Entry transition").selectOption("slide-left");
 	await fillNumber(page, "Transition seconds", "0.6");
 	await page.getByLabel("Animation property").selectOption("x");
@@ -252,7 +255,7 @@ test("Clip inspector saves visual changes, effect/transition values, and editabl
 		effects: [],
 		entryTransition: "none",
 	});
-	await page.getByRole("button", { name: "1 s", exact: true }).click();
+	await seekOnRuler(page, 1);
 	await waitForPreviewFrame(page, 1);
 	await captureScreenshot(page, "video-studio-inspector-save-failure.png");
 
@@ -277,7 +280,7 @@ test("Clip inspector saves visual changes, effect/transition values, and editabl
 	);
 
 	await page
-		.getByRole("button", { name: "Remove blur effect", exact: true })
+		.getByRole("button", { name: "Remove Blur effect", exact: true })
 		.click();
 	await page
 		.getByRole("button", { name: "Remove keyframe", exact: true })
@@ -295,14 +298,16 @@ test("Clip inspector saves visual changes, effect/transition values, and editabl
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await expect(page.getByLabel("Project")).toHaveValue(projectId);
+	await expect(page.getByLabel("Project", { exact: true })).toHaveValue(
+		projectId
+	);
 	await page
 		.getByRole("button", {
 			name: `Select ${video.name} at 0.00 seconds`,
 			exact: true,
 		})
 		.click();
-	await page.getByRole("button", { name: "1 s", exact: true }).click();
+	await seekOnRuler(page, 1);
 	await waitForPreviewFrame(page, 1);
 	await expect(page.getByRole("spinbutton", { name: "top" })).toHaveValue(
 		"0.12"
@@ -317,7 +322,8 @@ test("Clip inspector saves visual changes, effect/transition values, and editabl
 		"0.5"
 	);
 	await expect(page.getByLabel("Visual effect")).toHaveValue("grayscale");
-	await expect(page.getByLabel("Effect stack")).toHaveValue("none");
+	await expect(page.getByLabel("Add effect")).toHaveValue("");
+	await expect(page.getByRole("list", { name: "Effects" })).toHaveCount(0);
 	await expect(page.getByLabel("Entry transition")).toHaveValue("slide-left");
 	await expect(
 		page.getByRole("spinbutton", { name: "Transition seconds" })
@@ -347,7 +353,9 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 	);
 	const title = uniqueTitle("Inspector audio project");
 	await createProject(page, title);
-	const projectId = await page.getByLabel("Project").inputValue();
+	const projectId = await page
+		.getByLabel("Project", { exact: true })
+		.inputValue();
 	await assetRow(page, video.name)
 		.getByRole("button", { name: `Add ${video.name} to timeline` })
 		.click();
@@ -409,7 +417,9 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 			?.linkGroupId
 	).toBeUndefined();
 
-	await page.getByLabel("Audio processing").selectOption("normalize");
+	// Loudness normalization is part of the graded audio cleanup now; turning
+	// it on clears the legacy audioProcessing preset (cleanupPatch).
+	await page.getByLabel("Normalize loudness").selectOption("on");
 	await page.getByLabel("Duck under other audio").selectOption("yes");
 	await page.getByLabel("Audio visualization").selectOption("waveform");
 	await page
@@ -429,7 +439,8 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 		(segment) => segment.id === audioSegmentId
 	);
 	expect(savedAudio).toMatchObject({
-		audioProcessing: "normalize",
+		audioCleanup: expect.objectContaining({ normalize: true }),
+		audioProcessing: "none",
 		duckUnderVoice: true,
 		visualization: "waveform",
 		waveformColor: "#FF4F87",
@@ -445,7 +456,8 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 	expect(lastSave?.body).toMatchObject({
 		segments: expect.arrayContaining([
 			expect.objectContaining({
-				audioProcessing: "normalize",
+				audioCleanup: expect.objectContaining({ normalize: true }),
+				audioProcessing: "none",
 				duckUnderVoice: true,
 				visualization: "waveform",
 				waveformColor: "#FF4F87",
@@ -458,7 +470,9 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 	await expect(page.getByRole("status")).toContainText(
 		"Project library connected."
 	);
-	await expect(page.getByLabel("Project")).toHaveValue(projectId);
+	await expect(page.getByLabel("Project", { exact: true })).toHaveValue(
+		projectId
+	);
 	await page
 		.getByRole("button", {
 			name: `Select ${audio.name} at 0.00 seconds`,
@@ -466,7 +480,7 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 		})
 		.click();
 	await waitForPreviewFrame(page);
-	await expect(page.getByLabel("Audio processing")).toHaveValue("normalize");
+	await expect(page.getByLabel("Normalize loudness")).toHaveValue("on");
 	await expect(page.getByLabel("Duck under other audio")).toHaveValue("yes");
 	await expect(page.getByLabel("Audio visualization")).toHaveValue("waveform");
 	await expect(
@@ -479,7 +493,8 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 	expect(
 		reloadedProject.segments.find((segment) => segment.id === audioSegmentId)
 	).toMatchObject({
-		audioProcessing: "normalize",
+		audioCleanup: expect.objectContaining({ normalize: true }),
+		audioProcessing: "none",
 		duckUnderVoice: true,
 		visualization: "waveform",
 		waveformColor: "#FF4F87",
@@ -496,3 +511,14 @@ test("Clip inspector links overlapping audio/video clips and persists audio proc
 		"video-studio-inspector-audio-controls-after-reload.png"
 	);
 });
+
+// TimelineRuler draws its ticks on a canvas; a press seeks to the time under
+// the pointer, measured from the ruler's left edge at the current zoom.
+async function seekOnRuler(page: Page, seconds: number) {
+	const pixelsPerSecond = Number(
+		await page.getByLabel("Timeline zoom", { exact: true }).inputValue()
+	);
+	await page
+		.locator("[data-timeline-ruler]")
+		.click({ position: { x: seconds * pixelsPerSecond, y: 20 } });
+}

@@ -124,6 +124,30 @@ const services: SitesServices = {
 				}
 			).count;
 		},
+		// The per-visitor reads the sidecar's database snapshot and visitor-data
+		// panel use (SitesSpacesDatabase since c0185f150d).
+		ownerUsage: async (input) => {
+			assertBinding(input);
+			return database
+				.query(
+					"SELECT owner, COUNT(*) AS records, SUM(LENGTH(value)) AS bytes FROM data GROUP BY owner ORDER BY owner"
+				)
+				.all() as { owner: string; records: number; bytes: number }[];
+		},
+		ownerRecords: async (input, id) => {
+			assertBinding(input);
+			return (
+				database
+					.query(
+						"SELECT collection,key,value FROM data WHERE owner=? ORDER BY key"
+					)
+					.all(id) as { collection: string; key: string; value: string }[]
+			).map((record) => ({ ...record, value: JSON.parse(record.value) }));
+		},
+		deleteOwnerRecords: async (input, id) => {
+			assertBinding(input);
+			return database.query("DELETE FROM data WHERE owner=?").run(id).changes;
+		},
 		records: async (input, id, collection, key) => {
 			assertBinding(input);
 			return (
@@ -338,7 +362,7 @@ const host = Bun.serve({
 				? "sites-capability-regression.html"
 				: url.pathname.slice(1)
 		);
-		if (!filePath.startsWith(hostBuild + "/")) {
+		if (!filePath.startsWith(`${hostBuild}/`)) {
 			return new Response("Forbidden", { status: 403 });
 		}
 		const file = Bun.file(filePath);
