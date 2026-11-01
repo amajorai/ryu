@@ -2,7 +2,13 @@
 
 import { Logo } from "@ryu/ui/components/logo";
 import { cn } from "@ryu/ui/lib/utils";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import {
 	isAssistantSelectionChange,
 	readBrowserPageSelection,
@@ -24,6 +30,12 @@ export interface RyuAssistantWidgetProps {
 	docsBaseUrl?: string;
 	initialMode?: AssistantMode;
 	inline?: boolean;
+	/**
+	 * A host-owned card docked just above the floating launcher while the panel
+	 * is closed, e.g. the marketing site's landing-page launch offer. The host
+	 * owns its content and dismissal; it hides whenever Ask Ryu is open.
+	 */
+	launcherPromo?: ReactNode;
 	openOnMount?: boolean;
 	/**
 	 * Show the "Powered by Ryu" badge under the transcript. Off by default, which
@@ -75,6 +87,7 @@ export function RyuAssistantWidget({
 	docsBaseUrl,
 	initialMode = "browser",
 	inline = false,
+	launcherPromo,
 	openOnMount = false,
 	poweredByRyu = false,
 	showLauncher = true,
@@ -137,6 +150,9 @@ export function RyuAssistantWidget({
 			ref={contextRootRef}
 		>
 			{selectionAnnouncement}
+			{launcherPromo && !open ? (
+				<div className={cn("fixed", styles.launcherPromo)}>{launcherPromo}</div>
+			) : null}
 			<RyuAssistantMorph
 				bgClassName={ASSISTANT_GLASS_FILL}
 				chromeClassName={ASSISTANT_GLASS_CHROME}

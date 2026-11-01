@@ -8,3 +8,10 @@
 	bottom: calc(1rem + var(--ryu-assistant-launcher-lift, 0px));
 	z-index: 1000000001;
 }
+/* A host promo card sits above the 40px launcher, same right edge and lift. */
+.launcherPromo {
+	right: 1rem;
+	bottom: calc(4rem + var(--ryu-assistant-launcher-lift, 0px));
+	z-index: 1000000001;
+	width: min(20rem, calc(100vw - 2rem));
+}

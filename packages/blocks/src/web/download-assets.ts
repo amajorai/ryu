@@ -3,7 +3,7 @@
  *
  * Kept free of JSX and `@ryu/ui` imports on purpose: this is the part with real
  * logic (which file a given machine should get), so it has to be unit-testable
- * without a React or design-system resolver — same shape as `island-snap.ts`.
+ * without a React or design-system resolver — a pure module.
  * The presentational `download.tsx` re-exports everything here; OS/arch
  * detection lives in `download-platform.ts` and is re-exported from here.
  */

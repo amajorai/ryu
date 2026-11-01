@@ -49,6 +49,21 @@ describe("RyuAssistantWidget", () => {
 		expect(html).not.toContain("Loading Ask Ryu");
 	});
 
+	test("docks a host launcher promo above the closed launcher only", () => {
+		const promo = <p data-testid="launch-promo">Launch offer</p>;
+		expect(
+			renderToStaticMarkup(<RyuAssistantWidget launcherPromo={promo} />)
+		).toContain("Launch offer");
+		expect(
+			renderToStaticMarkup(
+				<RyuAssistantWidget launcherPromo={promo} openOnMount />
+			)
+		).not.toContain("Launch offer");
+		expect(
+			renderToStaticMarkup(<RyuAssistantWidget inline launcherPromo={promo} />)
+		).not.toContain("Launch offer");
+	});
+
 	test("matches Desktop's floating header: settings, no mode tabs, a greeting instead of a title", () => {
 		const html = renderToStaticMarkup(
 			<RyuAssistantWidget

@@ -39,7 +39,6 @@ export const DETAIL_SIZES: IslandDetailSizes = {
 	idle: { width: 96, height: 40, radius: 20 },
 	suggestion: { width: 300, height: 62, radius: 20 },
 	expanded: { width: 400, height: 480, radius: 28 },
-	promo: { width: 400, height: 440, radius: 28 },
 };
 export const ACTION_PILL_WIDTH = 72;
 export const ACTION_PILL_HEIGHT = 30;
