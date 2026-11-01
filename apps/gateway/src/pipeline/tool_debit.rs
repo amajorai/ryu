@@ -246,6 +246,7 @@ pub(crate) fn spawn_managed_tool_debit(
             .org_limit_subject
             .map(|subject| subject.tags.clone())
             .unwrap_or_default(),
+        scope: crate::org_limits::LedgerScope::of(debit.org_limit_subject),
         estimated: Some(debit.estimated),
         ..Default::default()
     };

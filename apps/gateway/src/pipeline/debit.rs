@@ -51,6 +51,10 @@ pub(super) struct DebitAttribution {
     /// The caller's builder tags (`x-ryu-tags`, Treg parity C6). Sent only
     /// when non-empty, so an untagged debit keeps the legacy body.
     pub(super) tags: Vec<String>,
+    /// The credential, team, project and bot ids the ledger groups per-scope
+    /// spend by (`keyId`, `teamIds`, `projectId`, `botId`). Each is sent only
+    /// when present, so an unscoped debit keeps the legacy body.
+    pub(super) scope: crate::org_limits::LedgerScope,
 }
 
 /// Keep the existing human-facing label for a fallback charge. The explicit
@@ -136,6 +140,7 @@ pub(super) fn debit_request_body(
     if !attribution.tags.is_empty() {
         obj.insert("tags".to_string(), json!(attribution.tags));
     }
+    put_ledger_scope(obj, &attribution.scope);
     for (key, value) in [
         ("inputTokens", attribution.input_tokens),
         ("outputTokens", attribution.output_tokens),
@@ -146,6 +151,38 @@ pub(super) fn debit_request_body(
         }
     }
     body
+}
+
+/// Stamp the ledger scope ids (contract §3), each only when present.
+fn put_ledger_scope(
+    obj: &mut serde_json::Map<String, Value>,
+    scope: &crate::org_limits::LedgerScope,
+) {
+    let present = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| Value::String(id.to_owned()))
+    };
+    for (key, value) in [
+        ("keyId", &scope.key_id),
+        ("projectId", &scope.project_id),
+        ("botId", &scope.bot_id),
+    ] {
+        if let Some(id) = present(value) {
+            obj.insert(key.to_string(), id);
+        }
+    }
+    let teams: Vec<&str> = scope
+        .team_ids
+        .iter()
+        .map(|team| team.trim())
+        .filter(|team| !team.is_empty())
+        .collect();
+    if !teams.is_empty() {
+        obj.insert("teamIds".to_string(), json!(teams));
+    }
 }
 
 /// Post-call wallet debit (#486). Computes the marked-up debit for a metered
@@ -352,5 +389,69 @@ pub(super) async fn debit_wallet_for_request(
                 state.wallet.set_org_accounting_unavailable(&org_id, true);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod ledger_scope_tests {
+    use super::*;
+
+    fn body(scope: crate::org_limits::LedgerScope) -> Value {
+        debit_request_body(
+            "o1",
+            10,
+            CreditDebitReason::GatewayUsage,
+            "req_1",
+            None,
+            None,
+            &DebitAttribution {
+                scope,
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn debit_body_carries_the_ledger_scope_ids_only_when_present() {
+        let full = body(crate::org_limits::LedgerScope {
+            key_id: Some("cred_1".into()),
+            team_ids: vec!["team_a".into(), " ".into(), "team_b".into()],
+            project_id: Some("proj_1".into()),
+            bot_id: Some("bot_1".into()),
+        });
+        assert_eq!(full["keyId"], "cred_1");
+        assert_eq!(full["teamIds"], serde_json::json!(["team_a", "team_b"]));
+        assert_eq!(full["projectId"], "proj_1");
+        assert_eq!(full["botId"], "bot_1");
+
+        let blank = body(crate::org_limits::LedgerScope {
+            key_id: Some("  ".into()),
+            team_ids: vec![String::new()],
+            ..Default::default()
+        });
+        for key in ["keyId", "teamIds", "projectId", "botId"] {
+            assert!(blank.get(key).is_none(), "{key} must be absent, not null");
+        }
+    }
+
+    #[test]
+    fn a_stored_subject_maps_to_its_ledger_scope() {
+        let subject = crate::org_limits::OrgLimitSubject {
+            org_id: "o1".into(),
+            credential_id: Some("cred_1".into()),
+            team_ids: (0..40).map(|index| format!("t{index}")).collect(),
+            project_id: Some("proj_1".into()),
+            bot_id: Some("bot_1".into()),
+            ..Default::default()
+        };
+        let scope = crate::org_limits::LedgerScope::of(Some(&subject));
+        assert_eq!(scope.key_id.as_deref(), Some("cred_1"));
+        assert_eq!(scope.team_ids.len(), 32, "at most 32 team ids travel");
+        assert_eq!(scope.project_id.as_deref(), Some("proj_1"));
+        assert_eq!(scope.bot_id.as_deref(), Some("bot_1"));
+        assert_eq!(
+            crate::org_limits::LedgerScope::of(None),
+            crate::org_limits::LedgerScope::default()
+        );
     }
 }

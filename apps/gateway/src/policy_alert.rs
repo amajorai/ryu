@@ -83,7 +83,9 @@ impl PolicyAlert {
             | BudgetScope::Team
             | BudgetScope::Key
             | BudgetScope::ServiceAccount
-            | BudgetScope::Tag => Self::budget(
+            | BudgetScope::Tag
+            | BudgetScope::Project
+            | BudgetScope::Bot => Self::budget(
                 scope_label(d.scope),
                 &d.key,
                 enforcement_label(d.action),
@@ -274,6 +276,8 @@ fn scope_label(scope: BudgetScope) -> &'static str {
         BudgetScope::Key => "key",
         BudgetScope::ServiceAccount => "service_account",
         BudgetScope::Tag => "tag",
+        BudgetScope::Project => "project",
+        BudgetScope::Bot => "bot",
     }
 }
 

@@ -311,6 +311,11 @@ pub enum BudgetScope {
     /// A control-plane builder tag budget (Treg parity C6): spend of calls the
     /// caller tagged with `x-ryu-tags`, counted per organization and tag.
     Tag,
+    /// A control-plane per-project cap (the resolved credential's project).
+    Project,
+    /// A control-plane per-bot cap, keyed by a verified agent id. Distinct
+    /// from the local-budget [`BudgetScope::Agent`].
+    Bot,
 }
 
 impl BudgetScope {
@@ -325,6 +330,8 @@ impl BudgetScope {
             BudgetScope::Key => "key",
             BudgetScope::ServiceAccount => "service_account",
             BudgetScope::Tag => "tag",
+            BudgetScope::Project => "project",
+            BudgetScope::Bot => "bot",
         }
     }
 }

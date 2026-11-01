@@ -136,6 +136,7 @@ pub async fn poll_media_job(
                     .as_ref()
                     .map(|subject| subject.tags.clone())
                     .unwrap_or_default();
+                let scope = crate::org_limits::LedgerScope::of(job.org_limit_subject.as_ref());
                 let task_label = media_task_label(&job.modality, estimated);
                 let debit_ref = format!("{job_id}:{}", job.modality.as_str());
                 let state_debit = state.clone();
@@ -161,6 +162,7 @@ pub async fn poll_media_job(
                             user_id,
                             task_label: Some(task_label),
                             tags,
+                            scope,
                             ..Default::default()
                         },
                     )

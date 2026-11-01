@@ -1094,6 +1094,7 @@ pub(super) fn settle_completion(
             let state = Arc::clone(state);
             let ctx = ctx.clone();
             let tags = crate::org_limits::tags_for(&ctx);
+            let scope = crate::org_limits::LedgerScope::for_request(&ctx);
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
                     debit_wallet_for_request(
@@ -1119,6 +1120,7 @@ pub(super) fn settle_completion(
                             estimated: Some(reported.is_none()),
                             task_label: receipt.purpose.map(str::to_owned),
                             tags,
+                            scope,
                             ..Default::default()
                         },
                     )

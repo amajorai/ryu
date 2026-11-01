@@ -223,6 +223,7 @@ impl StreamObserverState {
             // provider's own report is an estimate on the statement.
             estimated: Some(usage.estimated || reported_cost.is_none()),
             tags: crate::org_limits::tags_for(&self.ctx),
+            scope: crate::org_limits::LedgerScope::for_request(&self.ctx),
         };
         let state = Arc::clone(&self.state);
         let ref_id = self.ctx.request_id.clone();

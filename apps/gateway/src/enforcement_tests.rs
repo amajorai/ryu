@@ -47,6 +47,8 @@ fn resolved(
         policy: crate::policy::EffectivePolicy::default(),
         credential_id: Some("cred_ladder".to_owned()),
         service_account_id: None,
+        project_id: None,
+        funding_draw_source: None,
         credential: None,
         identity_salt_epoch: 1,
         team_id: None,

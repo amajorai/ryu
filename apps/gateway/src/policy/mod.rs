@@ -26,6 +26,7 @@ use serde::Deserialize;
 
 mod cache;
 mod drift;
+mod project_scope;
 mod tool_policy;
 mod user_jwt;
 mod user_policy;
@@ -238,6 +239,10 @@ pub struct ResolvedOrg {
     /// `credential.serviceAccountId`). Keys the shared service-account cap.
     /// `None` for node keys and on a control plane that does not send it.
     pub service_account_id: Option<String>,
+    /// Validated `x-project-id` (wire `credential.projectId`); keys the project cap.
+    pub project_id: Option<String>,
+    /// Wallet's next debit source (`fundingDrawSource`); `None` = unknown/both.
+    pub funding_draw_source: Option<crate::org_limits::FundingSource>,
     /// Everything the resolve said about the presenting credential (wire
     /// `credential`): its id, node, team, owner, creator, purpose and whether
     /// it serves a tenant's own end users. `None` on a control plane that does
@@ -482,6 +487,12 @@ struct ResolveResponse {
     /// changes `policyVersion`. Missing or `null` on older planes.
     #[serde(default)]
     limits_spend: Option<crate::org_limits::RemoteSpend>,
+    /// Wire: `fundingDrawSource`. Missing, `null` or unknown ⇒ `None`.
+    #[serde(
+        default,
+        deserialize_with = "crate::org_limits::lenient_funding_source"
+    )]
+    funding_draw_source: Option<crate::org_limits::FundingSource>,
     /// Gateways serving the org recently. Kept outside `limits` so it never
     /// changes `policyVersion`. Missing or `null` on older planes.
     #[serde(default)]
@@ -514,6 +525,9 @@ struct ResolveCredential {
     /// Set when the credential belongs to an org service account.
     #[serde(default)]
     service_account_id: Option<String>,
+    /// The project the resolve validated from `x-project-id`.
+    #[serde(default)]
+    project_id: Option<String>,
     /// The node this credential belongs to; stable across rotation.
     #[serde(default)]
     node_id: Option<String>,
@@ -625,6 +639,7 @@ impl ResolveResponse {
             .map(|value| value.with_timezone(&chrono::Utc));
         let credential_id = resolved_id(self.credential.id);
         let service_account_id = resolved_id(self.credential.service_account_id);
+        let project_id = resolved_id(self.credential.project_id);
         let credential = credential_id.clone().map(|credential_id| {
             std::sync::Arc::new(crate::identity::CredentialIdentity {
                 credential_id,
@@ -695,6 +710,8 @@ impl ResolveResponse {
             },
             credential_id,
             service_account_id,
+            project_id,
+            funding_draw_source: self.funding_draw_source,
             credential,
             identity_salt_epoch: self
                 .identity
@@ -863,15 +880,10 @@ pub async fn resolve_token(
     } else {
         request = request.header("x-ryu-node-timezone", local_timezone());
     }
-    // A gateway running for one project applies that project's policy layers.
-    if credential_use == CredentialUse::NodeControl {
-        if let Some(project) = std::env::var("RYU_PROJECT_ID")
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-        {
-            request = request.header("x-project-id", project);
-        }
+    // A gateway running for one project applies that project's policy layers
+    // and, on every use, its project cap (`credential.projectId`).
+    if let Some(project) = project_scope::configured_project_id() {
+        request = request.header(project_scope::PROJECT_HEADER, project);
     }
     let mut resp = request
         .send()

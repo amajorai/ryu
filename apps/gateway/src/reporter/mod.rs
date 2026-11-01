@@ -17,6 +17,7 @@ use crate::{
     state::SharedState,
 };
 
+mod scoped_daily;
 pub mod violations;
 pub mod windows;
 
@@ -738,6 +739,10 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
     // `userDaily`. Empty when no row carries a hosted key id / team id.
     let key_daily = build_key_daily(state, &entries);
     let team_daily = build_team_daily(state, &entries);
+    // Org-scoped per-project and per-bot rollups (scoped budgets), the same
+    // shape as `teamDaily`.
+    let project_daily = scoped_daily::build_project_daily(state, &entries);
+    let bot_daily = scoped_daily::build_bot_daily(state, &entries);
 
     let payload = json!({
         "report": {
@@ -756,6 +761,8 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
         "agentDaily": agent_daily,
         "keyDaily": key_daily,
         "teamDaily": team_daily,
+        "projectDaily": project_daily,
+        "botDaily": bot_daily,
     });
 
     // `/api` is part of the route: the control plane mounts `aggregationRouter` at
@@ -1032,12 +1039,12 @@ mod tests {
     use crate::state::{AppState, SharedState};
     use std::sync::Arc;
 
-    fn test_state() -> SharedState {
+    pub(super) fn test_state() -> SharedState {
         Arc::new(AppState::new_for_test_default())
     }
 
     /// A fully-defaulted audit row; tests override only the fields they exercise.
-    fn base_entry() -> AuditEntry {
+    pub(super) fn base_entry() -> AuditEntry {
         AuditEntry {
             key_id: None,
             id: 1,

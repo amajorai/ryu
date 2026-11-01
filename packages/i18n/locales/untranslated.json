@@ -6515,6 +6515,12 @@
     ],
     "reason": "'Pause' is the French word"
   },
+  "Per bot": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Per bot' is the Italian phrase"
+  },
   "Perl": {
     "locales": [
       "ar",
@@ -11851,6 +11857,20 @@
     ],
     "reason": "placeholder plus key name Esc"
   },
+  "{label} {source}: {amount}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "only placeholders and punctuation"
+  },
   "{label} — {tokenCount} tokens": {
     "locales": [
       "es",
@@ -12011,6 +12031,20 @@
       "fr"
     ],
     "reason": "'messages' is the French word"
+  },
+  "{source}: {amount}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "only placeholders and punctuation"
   },
   "{speed} tok/s": {
     "locales": [

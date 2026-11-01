@@ -330,6 +330,7 @@ pub async fn submit_media_job(
                     .as_ref()
                     .map(|subject| subject.tags.clone())
                     .unwrap_or_default();
+                let scope = crate::org_limits::LedgerScope::of(job_org_limit_subject.as_ref());
                 let task_label = media_task_label(&modality, estimated);
                 let debit_ref = format!("{job_id}:{label}");
                 let state_debit = state.clone();
@@ -354,6 +355,7 @@ pub async fn submit_media_job(
                             task_label: Some(task_label),
                             estimated: Some(estimated),
                             tags,
+                            scope,
                             ..Default::default()
                         },
                     )

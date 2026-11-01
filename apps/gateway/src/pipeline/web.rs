@@ -487,6 +487,7 @@ fn settle(
     let estimated = cost.estimated;
     let user = ctx.user_id.clone();
     let tags = crate::org_limits::tags_for(ctx);
+    let scope = crate::org_limits::LedgerScope::for_request(ctx);
     let elapsed = start.elapsed().as_millis() as u64;
     let (reason, task_label) = debit_reason(ctx, route.operation);
     tokio::spawn(async move {
@@ -508,6 +509,7 @@ fn settle(
                 estimated: Some(estimated),
                 task_label: Some(task_label.to_owned()),
                 tags,
+                scope,
                 ..Default::default()
             },
         )

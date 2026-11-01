@@ -10,6 +10,8 @@ fn stored_id_settlement_charges_org_member_team_key_and_service_account_scopes()
         service_account_id: Some("sa1".into()),
         tags: vec!["eu".into()],
         budgeted_tags: vec!["eu".into()],
+        project_id: Some("p1".into()),
+        bot_id: Some("bot1".into()),
     };
     // An async video completion / external-tool receipt settles from
     // stored ids, after the request context is gone.
@@ -38,6 +40,8 @@ fn stored_id_settlement_charges_org_member_team_key_and_service_account_scopes()
     assert_eq!(spent("team", "org1:t2"), 40);
     assert_eq!(spent("key", "cred1"), 40);
     assert_eq!(spent("service_account", "org1:sa1"), 40);
+    assert_eq!(spent("project", "org1:p1"), 40);
+    assert_eq!(spent("bot", "org1:bot1"), 40);
 }
 #[test]
 fn account_affinity_isolates_callers_and_ambiguous_scope_segments() {
@@ -1626,6 +1630,10 @@ fn debit_body_omits_attribution_it_was_not_given() {
         "outputTokens",
         "durationMs",
         "estimated",
+        "keyId",
+        "teamIds",
+        "projectId",
+        "botId",
     ] {
         assert!(bare.get(key).is_none(), "{key} must be absent, not null");
     }
@@ -1648,6 +1656,7 @@ fn debit_body_omits_attribution_it_was_not_given() {
             task_label: Some("3 tool calls".to_string()),
             estimated: None,
             tags: vec!["checkout".to_string(), "eu".to_string()],
+            scope: Default::default(),
         },
     );
     assert_eq!(full["provider"], "openrouter");

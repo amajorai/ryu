@@ -496,7 +496,8 @@ pub(super) async fn authenticate_identity(
                         api_key_label,
                         Some(resolved.org_id.clone()),
                         team_ids.first().cloned(),
-                        None,
+                        // The project the resolve validated (`x-project-id`).
+                        resolved.project_id.clone(),
                         // `rgw_` bearer tokens are resolved by the control plane,
                         // but the forwarded identity headers are still caller
                         // input. Dynamic credentials have no trusted-forwarder
@@ -516,17 +517,18 @@ pub(super) async fn authenticate_identity(
                     context.openrouter_routing_enabled = resolved.openrouter_routing_enabled;
                     context.credit_accounting_unavailable = credit.accounting_unavailable;
                     state.pool_allowances.observe(&resolved.pool_allowances);
-                    context.org_limits = Some(Arc::new(crate::org_limits::OrgLimitContext {
-                        org_id: resolved.org_id.clone(),
-                        limits: Arc::clone(resolved.enforced_limits(bills_tenants)),
-                        credential_id: resolved.credential_id.clone(),
-                        service_account_id: resolved.service_account_id.clone(),
-                        bound_user_id,
-                        team_ids,
-                        remote_spend: resolved.limits_spend.clone(),
-                        active_gateways: resolved.active_gateways,
-                        tags: crate::org_limits::current_spend_tags(),
-                    }));
+                    context.org_limits =
+                        Some(Arc::new(crate::org_limits::OrgLimitContext::from_resolved(
+                            &resolved,
+                            bills_tenants,
+                            crate::org_limits::ResolvedSubject {
+                                bound_user_id,
+                                team_ids,
+                                configured_project_id: None,
+                                // Core-proven above (`dynamic_agent_id`).
+                                verified_bot_id: context.agent_id.clone(),
+                            },
+                        )));
                     // `api_key` intentionally stays an org label for audit and
                     // org-level accounting. Job ownership must still distinguish
                     // two valid bearers in the same organization.

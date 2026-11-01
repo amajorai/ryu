@@ -3299,6 +3299,9 @@ fn a_keyless_gateway_keeps_metering_on_a_legacy_plaintext_spend_db() {
         remote_spend: None,
         active_gateways: None,
         tags: Vec::new(),
+        project_id: None,
+        bot_id: None,
+        funding_draw_source: None,
     }));
     assert!(
         super::spend_store_gate(&state, &tenant).is_none(),

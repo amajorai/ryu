@@ -4649,6 +4649,7 @@ async fn run_multimodal_bound_attached(
                             task_label: Some(media_task_label(&modality, estimated_media_cost)),
                             estimated: Some(estimated_media_cost),
                             tags: crate::org_limits::tags_for(&ctx),
+                            scope: crate::org_limits::LedgerScope::for_request(&ctx),
                             ..Default::default()
                         };
                         tokio::spawn(async move {
