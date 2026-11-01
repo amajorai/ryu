@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+	approvalDeclaredSurface,
 	classifyDeviceSurface,
 	countSessionsBySurface,
 	deviceGrantSurface,
+	scopeDeclaringSurface,
 	sessionCountsTowardDeviceLimit,
 	sessionDeviceSurface,
 } from "./device-surface.ts";
@@ -52,7 +54,7 @@ describe("classifyDeviceSurface", () => {
 		expect(
 			classifyDeviceSurface({
 				clientId: "ryu-desktop",
-				declaredSurface: "cli",
+				declaredSurface: "extension",
 				origin: null,
 			})
 		).toBe("self_hosted");
@@ -175,5 +177,60 @@ describe("countSessionsBySurface", () => {
 			self_hosted: 1,
 			web: 2,
 		});
+	});
+});
+
+describe("approval-time surface declarations", () => {
+	test("an undeclared Core grant may be declared mobile or CLI", () => {
+		expect(
+			approvalDeclaredSurface("ryu-desktop", "openid profile email", "mobile")
+		).toBe("mobile");
+		expect(approvalDeclaredSurface("ryu-desktop", null, "mobile")).toBe(
+			"mobile"
+		);
+		expect(
+			approvalDeclaredSurface("ryu-desktop", "openid profile email", "cli")
+		).toBe("cli");
+	});
+
+	test("nothing else can be declared, and nothing is overridden", () => {
+		expect(approvalDeclaredSurface("ryu-desktop", "openid", "web")).toBeNull();
+		expect(
+			approvalDeclaredSurface("ryu-desktop", "openid", "desktop")
+		).toBeNull();
+		expect(
+			approvalDeclaredSurface("ryu-desktop", "openid", "self_hosted")
+		).toBeNull();
+		expect(approvalDeclaredSurface("ryu-desktop", "openid", 42)).toBeNull();
+		expect(
+			approvalDeclaredSurface(
+				"ryu-desktop",
+				"openid ryu:surface:desktop",
+				"mobile"
+			)
+		).toBeNull();
+		expect(
+			approvalDeclaredSurface("ryu-extension", "openid", "mobile")
+		).toBeNull();
+	});
+
+	test("a recorded mobile declaration classifies the grant as mobile", () => {
+		const scope = scopeDeclaringSurface("openid profile email", "mobile");
+		expect(scope).toBe("openid profile email ryu:surface:mobile");
+		expect(scopeDeclaringSurface(null, "mobile")).toBe("ryu:surface:mobile");
+		expect(deviceGrantSurface("ryu-desktop", "mobile")).toBe("mobile");
+		expect(
+			classifyDeviceSurface({
+				clientId: "ryu-desktop",
+				declaredSurface: "mobile",
+				origin: null,
+			})
+		).toBe("mobile");
+	});
+
+	test("a recorded CLI declaration classifies the grant as CLI", () => {
+		const scope = scopeDeclaringSurface("openid profile email", "cli");
+		expect(scope).toBe("openid profile email ryu:surface:cli");
+		expect(deviceGrantSurface("ryu-desktop", "cli")).toBe("cli");
 	});
 });

@@ -3,6 +3,7 @@
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { request } from "@ryuhq/core-client/client";
 import { AUTH_BACKEND_URL } from "../../core/authBackend.ts";
+import { declareCliSurface } from "../../core/device-approval-link.ts";
 import { tf, tr } from "../../i18n/translate.ts";
 import { LocalizedError, localize } from "../localizedText.ts";
 import { type Command, UsageError } from "../types.ts";
@@ -149,10 +150,12 @@ export const loginCommand: Command = {
 		}
 		const login = {
 			userCode: isCommandString(result?.userCode) ? result.userCode : null,
+			// The approval link declares the CLI surface, so the session Core
+			// creates counts as a CLI device rather than a self-hosted one.
 			verificationUri: isCommandString(result?.verificationUriComplete)
-				? result.verificationUriComplete
+				? declareCliSurface(result.verificationUriComplete)
 				: isCommandString(result?.verificationUri)
-					? result.verificationUri
+					? declareCliSurface(result.verificationUri)
 					: null,
 		};
 		if (!(login.userCode || login.verificationUri)) {

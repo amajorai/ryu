@@ -79,10 +79,39 @@ export const DEVICE_LIMIT_REACHED_ERROR = "device_limit_reached";
  *
  * Desktop, the hosted web app build of the same flow, and Core share the
  * `ryu-desktop` client id; this lets the server tell them apart at approval
- * time (`ryu:surface:desktop`, `ryu:surface:web`, `ryu:surface:self_hosted`). It is a provenance hint, not attestation:
- * it only chooses which bucket a session counts against, never exempts one.
+ * time (`ryu:surface:desktop`, `ryu:surface:web`, `ryu:surface:self_hosted`,
+ * and `ryu:surface:mobile`, which is recorded at approval time). It is a
+ * provenance hint, not attestation: it only chooses which bucket a session
+ * counts against, never exempts one.
  */
 export const DEVICE_SURFACE_SCOPE_PREFIX = "ryu:surface:";
+
+/**
+ * Surfaces the account owner may declare for an undeclared Core grant while
+ * approving it. The Ryu mobile app and the Ryu CLI have no device flow of
+ * their own: each signs in through its Core node, whose grant otherwise counts
+ * as self-hosted, and tags its approval link with its surface.
+ */
+export const APPROVAL_DECLARABLE_SURFACES: readonly DeviceSurface[] = [
+	"mobile",
+	"cli",
+];
+
+/**
+ * Query parameter that carries an approval-time declaration from a client's
+ * approval link (`/device?user_code=...&surface=mobile`, or `surface=cli`) to
+ * `/device/approve`, whose request body sends it as `surface`.
+ */
+export const DEVICE_SURFACE_QUERY_PARAM = "surface";
+
+/** The approval-declarable surface in `value`, or null. */
+export function approvalDeclarableSurface(
+	value: unknown
+): DeviceSurface | null {
+	return isDeviceSurface(value) && APPROVAL_DECLARABLE_SURFACES.includes(value)
+		? value
+		: null;
+}
 
 /** Path of the per-surface usage summary served next to `/api/sessions`. */
 export const DEVICE_LIMITS_API_PATH = "/api/sessions/device-limits";

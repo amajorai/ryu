@@ -26,6 +26,10 @@
  */
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import {
+	rememberGrantSurface,
+	takeGrantSurface,
+} from "./device-limit-grant-surfaces.ts";
+import {
 	countLiveSessionsBySurfaceForUser,
 	type DeviceLimitPolicy,
 	resolveDeviceLimitPolicy,
@@ -40,8 +44,19 @@ import {
 	deviceLimitReachedMessage,
 	isDeviceSurface,
 } from "./device-limits.ts";
-import { classifyDeviceSurface, deviceGrantSurface } from "./device-surface.ts";
+import {
+	approvalDeclaredSurface,
+	classifyDeviceSurface,
+	deviceGrantSurface,
+	scopeDeclaringSurface,
+} from "./device-surface.ts";
 import { resolveSessionForHook } from "./step-up-plugin.ts";
+
+// biome-ignore lint/performance/noBarrelFile: keeps the plugin's public import path for the grant cache stable after the split.
+export {
+	rememberGrantSurface,
+	takeGrantSurface,
+} from "./device-limit-grant-surfaces.ts";
 
 const DEVICE_APPROVE_PATH = "/device/approve";
 const DEVICE_TOKEN_PATH = "/device/token";
@@ -56,6 +71,12 @@ export interface DeviceLimitContext {
 				model: string;
 				where: { field: string; value: string }[];
 			}): Promise<T | null>;
+			/** Records an approval-time surface declaration on the grant. */
+			update?<T>(input: {
+				model: string;
+				update: Record<string, unknown>;
+				where: { field: string; value: string }[];
+			}): Promise<T | null>;
 		};
 		internalAdapter: { findUserById(userId: string): Promise<unknown> };
 	};
@@ -67,6 +88,7 @@ export interface DeviceLimitContext {
 interface DeviceCodeRow {
 	clientId?: string | null;
 	expiresAt?: Date | string;
+	id?: string;
 	scope?: string | null;
 	status?: string;
 	userCode?: string;
@@ -186,50 +208,6 @@ export async function failOpenPreCheck(
 			throw error;
 		}
 	}
-}
-
-// --- `/device/token` -> session hook hand-off -------------------------------
-
-const GRANT_SURFACE_TTL_MS = 120_000;
-const GRANT_SURFACE_PRUNE_SIZE = 1000;
-const grantSurfaces = new Map<
-	string,
-	{ expiresAt: number; surface: DeviceSurface }
->();
-
-/** Remember the surface `/device/token` computed for `deviceCode`. */
-export function rememberGrantSurface(
-	deviceCode: string,
-	surface: DeviceSurface,
-	now: number = Date.now()
-): void {
-	if (grantSurfaces.size >= GRANT_SURFACE_PRUNE_SIZE) {
-		for (const [key, entry] of grantSurfaces) {
-			if (entry.expiresAt <= now) {
-				grantSurfaces.delete(key);
-			}
-		}
-		if (grantSurfaces.size >= GRANT_SURFACE_PRUNE_SIZE) {
-			const oldest = grantSurfaces.keys().next();
-			if (!oldest.done) {
-				grantSurfaces.delete(oldest.value);
-			}
-		}
-	}
-	grantSurfaces.set(deviceCode, {
-		expiresAt: now + GRANT_SURFACE_TTL_MS,
-		surface,
-	});
-}
-
-/** Read and forget the remembered surface for `deviceCode`. */
-export function takeGrantSurface(
-	deviceCode: string,
-	now: number = Date.now()
-): DeviceSurface | null {
-	const entry = grantSurfaces.get(deviceCode);
-	grantSurfaces.delete(deviceCode);
-	return entry && entry.expiresAt > now ? entry.surface : null;
 }
 
 // --- Session-create hook ----------------------------------------------------
@@ -359,6 +337,12 @@ export interface DeviceLimitPreCheckDeps {
  * `/device/approve`: refuse approving a grant whose surface is at its cap.
  * Anything the endpoint itself rejects (unknown, expired, already processed,
  * someone else's code) is left to the endpoint.
+ *
+ * The approving account owner may also declare the surface of an undeclared
+ * Core grant (`surface: "mobile"` in the approve body, which the Ryu mobile
+ * app's approval link carries). The declaration is checked against that
+ * surface's cap and recorded in the grant's scope, so `/device/token` stamps
+ * the session with it.
  */
 export async function deviceApprovePreCheck(
 	ctx: DeviceLimitContext,
@@ -378,9 +362,14 @@ export async function deviceApprovePreCheck(
 	if (approverId !== userId) {
 		return;
 	}
+	const approvalDeclared = approvalDeclaredSurface(
+		row.clientId,
+		row.scope,
+		readBodyString(ctx.body, "surface")
+	);
 	const surface = deviceGrantSurface(
 		row.clientId,
-		declaredDeviceSurface(row.scope)
+		approvalDeclared ?? declaredDeviceSurface(row.scope)
 	);
 	const refusal = await deviceLimitRefusalFor(
 		ctx,
@@ -390,6 +379,18 @@ export async function deviceApprovePreCheck(
 	);
 	if (refusal) {
 		throw refusal;
+	}
+	// Recorded here, before Better Auth approves (and before later before-hooks
+	// such as required-MFA can still refuse): writing after approval would race
+	// Core's next token poll, which could redeem the grant unlabelled. Only the
+	// code's own account reaches this line and the label only picks a bucket, so
+	// a declaration left on a refused approval is the owner's own choice.
+	if (approvalDeclared && row.id) {
+		await ctx.context.adapter.update?.({
+			model: "deviceCode",
+			update: { scope: scopeDeclaringSurface(row.scope, approvalDeclared) },
+			where: [{ field: "id", value: row.id }],
+		});
 	}
 }
 
@@ -438,19 +439,41 @@ export async function deviceTokenPreCheck(
 	rememberGrantSurface(deviceCode, surface, now.getTime());
 }
 
+/**
+ * The registered `/device/approve` check: `deviceApprovePreCheck`, fail-open.
+ * Only a device-limit refusal blocks the approval; a failed read or a failed
+ * mobile-declaration write leaves the grant as it was (counted self-hosted).
+ */
+export function guardedDeviceApprovePreCheck(
+	ctx: DeviceLimitContext,
+	deps: DeviceLimitPreCheckDeps = {}
+): Promise<void> {
+	return failOpenPreCheck(() => deviceApprovePreCheck(ctx, deps));
+}
+
+/** The registered `/device/token` check: `deviceTokenPreCheck`, fail-open. */
+export function guardedDeviceTokenPreCheck(
+	ctx: DeviceLimitContext,
+	deps: DeviceLimitPreCheckDeps = {}
+): Promise<void> {
+	return failOpenPreCheck(() => deviceTokenPreCheck(ctx, deps));
+}
+
 /** `hooks.before` entries for the device-authorization pre-checks. */
 export function deviceLimitBeforeHooks() {
 	return [
 		{
 			matcher: (ctx: { path?: string }) => ctx.path === DEVICE_APPROVE_PATH,
 			handler: createAuthMiddleware(async (ctx) => {
-				await deviceApprovePreCheck(ctx as unknown as DeviceLimitContext);
+				await guardedDeviceApprovePreCheck(
+					ctx as unknown as DeviceLimitContext
+				);
 			}),
 		},
 		{
 			matcher: (ctx: { path?: string }) => ctx.path === DEVICE_TOKEN_PATH,
 			handler: createAuthMiddleware(async (ctx) => {
-				await deviceTokenPreCheck(ctx as unknown as DeviceLimitContext);
+				await guardedDeviceTokenPreCheck(ctx as unknown as DeviceLimitContext);
 			}),
 		},
 	];

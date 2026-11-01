@@ -41,6 +41,7 @@ import {
 } from "../core/account-response.ts";
 import { AUTH_BACKEND_URL, accountBackendTarget } from "../core/authBackend.ts";
 import { useCore } from "../core/CoreContext.tsx";
+import { declareCliSurface } from "../core/device-approval-link.ts";
 import { refreshCliIdentityAfterAccountChange } from "../core/identity.ts";
 import {
 	nativeErrorMessage as errText,
@@ -253,7 +254,9 @@ export function AccountTab({
 			}
 			return;
 		}
-		const url = start.verificationUriComplete ?? start.verificationUri ?? null;
+		const link = start.verificationUriComplete ?? start.verificationUri ?? null;
+		// Declares the CLI surface so the new session counts as a CLI device.
+		const url = link ? declareCliSurface(link) : null;
 		if (
 			mountedRef.current &&
 			!controller.signal.aborted &&

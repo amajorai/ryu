@@ -12,8 +12,12 @@
  *    use: a surface the client declared in its scope (`ryu:surface:desktop`,
  *    `ryu:surface:web`, or `ryu:surface:self_hosted`), then the request Origin.
  *    A Tauri webview origin is Desktop, any other browser origin is the hosted
- *    web app, and no Origin at all is a Core runtime (self-hosted, headless,
- *    or a CLI/mobile sign-in routed through a node).
+ *    web app, and no Origin at all is a Core runtime (self-hosted, headless).
+ *    A Core grant can be declared a mobile or CLI sign-in at approval time:
+ *    the Ryu mobile app and the Ryu CLI sign in through a Core node and open
+ *    the approval link with `surface=mobile` or `surface=cli`; the approving
+ *    account owner's `/device/approve` request carries it and the grant's
+ *    scope records `ryu:surface:<surface>` (see `approvalDeclaredSurface`).
  * 3. The Expo client's `expo-origin` header for direct mobile sign-ins.
  * 4. Anything else is a web browser sign-in.
  *
@@ -23,8 +27,11 @@
  */
 import { TAURI_DESKTOP_ORIGINS } from "./cors-origins.ts";
 import {
+	approvalDeclarableSurface,
 	DEVICE_SURFACE_FIELD,
 	type DeviceSurface,
+	declaredDeviceSurface,
+	deviceSurfaceScopeToken,
 	isDeviceSurface,
 } from "./device-limits.ts";
 
@@ -46,14 +53,17 @@ export const DEVICE_CLIENT_SURFACES = {
 const DESKTOP_CLIENT_ID = "ryu-desktop";
 
 /**
- * Surfaces a `ryu-desktop` grant may declare for itself: the Tauri build
- * (`desktop`), the hosted web app build of the same flow (`web`), and Core
- * (`self_hosted`).
+ * Surfaces a `ryu-desktop` grant's scope may declare: the Tauri build
+ * (`desktop`), the hosted web app build of the same flow (`web`), Core
+ * (`self_hosted`), and a mobile or CLI sign-in routed through a Core node
+ * (`mobile`, `cli`, recorded at approval time).
  */
 const DESKTOP_CLIENT_DECLARABLE: readonly DeviceSurface[] = [
 	"desktop",
 	"web",
 	"self_hosted",
+	"mobile",
+	"cli",
 ];
 
 export interface DeviceSurfaceSignals {
@@ -107,6 +117,34 @@ export function classifyDeviceSurface(
 		return "mobile";
 	}
 	return "web";
+}
+
+/**
+ * The surface an approval request declares for a grant, or null when the
+ * declaration does not apply. It applies only to a `ryu-desktop` grant whose
+ * scope declares nothing yet (a Core runtime), and only for a surface in
+ * `APPROVAL_DECLARABLE_SURFACES` (`device-limits.ts`). Like every other signal it only chooses the
+ * bucket; it never exempts a session from counting.
+ */
+export function approvalDeclaredSurface(
+	clientId: string | null | undefined,
+	scope: string | null | undefined,
+	requested: unknown
+): DeviceSurface | null {
+	if (clientId !== DESKTOP_CLIENT_ID || declaredDeviceSurface(scope) !== null) {
+		return null;
+	}
+	return approvalDeclarableSurface(requested);
+}
+
+/** `scope` with the token that declares `surface` appended. */
+export function scopeDeclaringSurface(
+	scope: string | null | undefined,
+	surface: DeviceSurface
+): string {
+	const base = typeof scope === "string" ? scope.trim() : "";
+	const token = deviceSurfaceScopeToken(surface);
+	return base.length > 0 ? `${base} ${token}` : token;
 }
 
 /** The surface a device-authorization grant will be counted against. */

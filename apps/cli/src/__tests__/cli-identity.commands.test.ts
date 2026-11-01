@@ -286,8 +286,10 @@ test("ryu login and logout use Core's device-flow routes and exact backend paylo
 		},
 	]);
 	expect(loginIo.out()).toContain("ABCD-EFGH");
+	// The printed approval link declares the CLI surface, so the session Core
+	// creates counts as a CLI device rather than a self-hosted one.
 	expect(loginIo.out()).toContain(
-		"https://auth.example.test/device?code=ABCD-EFGH"
+		"https://auth.example.test/device?code=ABCD-EFGH&surface=cli"
 	);
 
 	const dryRunIo = makeIo();
