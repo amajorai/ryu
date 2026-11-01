@@ -79,3 +79,12 @@ describe("Button overflow labels", () => {
 		expect(html).not.toContain(">Save<");
 	});
 });
+
+describe("Button press feedback", () => {
+	test("does not shift or animate the button on click", () => {
+		const html = renderToStaticMarkup(<Button>Press</Button>);
+
+		expect(html).not.toContain("active:not-aria-[haspopup]:translate-y-px");
+		expect(html).not.toContain("active:duration-75");
+	});
+});
