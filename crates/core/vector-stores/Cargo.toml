@@ -1,6 +1,6 @@
 [package]
 name = "ryu-vector-stores"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Pluggable vector stores for Ryu: one `VectorStore` trait (ensure_collection / upsert / query with a metadata filter / delete) with a local sqlite-vec implementation (the default) and REST/wire clients for Qdrant, Chroma (v2), Pinecone, Weaviate, Milvus (v2) and Postgres pgvector. An extracted Core capability crate with ZERO dependency on apps/core: Core resolves the provider, the data-dir path, and the credential reference (`apps/core/src/rag_host.rs`) and hands this crate plain config."

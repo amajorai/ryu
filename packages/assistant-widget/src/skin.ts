@@ -23,3 +23,16 @@ export const ASSISTANT_GLASS_CHROME =
  * above it.
  */
 export const ASSISTANT_POPUP_LAYER = "z-[1000000002]";
+
+/**
+ * The closed launcher wears the Island's logo circle rather than the panel glass:
+ * the same hairline ring, floating shadow and heavy blur as the Island's
+ * Translucent skin (`apps/island/.../island-shell-geometry.ts`), around a
+ * Liquid Glass body. Token colours only, so it follows light and dark.
+ */
+export const ASSISTANT_ISLAND_LAUNCHER_SKIN =
+	"isolate overflow-hidden text-foreground shadow-2xl ring-1 ring-border backdrop-blur-2xl [@media(prefers-reduced-transparency:reduce)]:backdrop-blur-none";
+
+/** The Island's Translucent scrim: a popover tint, solid under reduced transparency. */
+export const ASSISTANT_ISLAND_LAUNCHER_SCRIM =
+	"bg-popover/85 bg-none! [@media(prefers-reduced-transparency:reduce)]:bg-popover";

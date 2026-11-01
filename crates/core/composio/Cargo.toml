@@ -1,6 +1,6 @@
 [package]
 name = "ryu-composio"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Composio integration orchestration (Core side): the user's Composio account seam. Owns the preferences-first API-key resolver, the toolkit/action/trigger catalog client, connection initiate/status, the persisted trigger-subscription store (poll + fail-closed HMAC-SHA256 webhook verification), and the MCP execute-action HTTP path with connection-required elicitation detection. An extracted Core capability crate — in-process default (no IPC on any hot path). The only workflow/agent-engine couplings (run a workflow / run an agent when a trigger fires) are inverted through the ComposioHost trait so this crate has ZERO dependency on apps/core. The gateway's governed-egress composio execute is a separate package."
@@ -9,7 +9,7 @@ repository = "https://github.com/amajorai/ryu"
 # Versions are matched to apps/core/Cargo.toml so the in-process consumption by
 # Core has no version skew. This crate has ZERO dependency on apps/core.
 [dependencies]
-ryu-gw-contracts = { path = "../../gateway/contracts", version = "0.5.0" }
+ryu-gw-contracts = { path = "../../gateway/contracts", version = "0.5.1" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,7 +24,7 @@ rusqlite = { version = "0.40.0", features = ["bundled"] }
 # not linked into consumers that reach ryu-crypto only through here, such as the
 # standalone Gateway. Core and other custody consumers depend on ryu-crypto
 # directly with its defaults, so their keychain behavior is unchanged.
-ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false }
+ryu-crypto = { path = "../crypto", version = "0.5.1", default-features = false }
 hex = "0.4"
 base64 = "0.22"
 url = "2"

@@ -14,8 +14,8 @@ import { useBackdropGate } from "./use-backdrop-gate.ts";
  * hues, and the stage follows the page's theme in both.
  *
  * Sources: React Bits and Spell UI components vendored under ./vendor (see
- * ./vendor/README.md); Starfield, RadiantLines, DesktopWindows and
- * InterfaceReel are Ryu's own.
+ * ./vendor/README.md); Starfield, RadiantLines and InterfaceReel are Ryu's
+ * own.
  *
  * An effect mounts (and its chunk downloads) only after the first idle period,
  * and a WebGL effect only when the browser has a hardware GPU for it (see
@@ -32,7 +32,6 @@ const AnimatedGradient = load(
 const Antigravity = load(() => import("./vendor/react-bits/Antigravity.tsx"));
 const Beams = load(() => import("./vendor/react-bits/Beams.tsx"));
 const ColorBends = load(() => import("./vendor/react-bits/ColorBends.tsx"));
-const DesktopWindows = load(() => import("./desktop-windows.tsx"));
 const Dither = load(() => import("./vendor/react-bits/Dither.tsx"));
 const Galaxy = load(() => import("./vendor/react-bits/Galaxy.tsx"));
 const InterfaceReel = load(() => import("./interface-reel.tsx"));
@@ -60,7 +59,6 @@ const BRAND = "#0099ff";
 const CANVAS_2D_BACKDROPS: ReadonlySet<StageKey> = new Set([
 	"bot",
 	"connect",
-	"desktop",
 	"page-partners",
 	"page-startups",
 	"page-interfaces",
@@ -75,6 +73,8 @@ const PULSE = { preset: "Pulse" } as const;
 const PRISM = { preset: "Prism" } as const;
 const LAVA = { preset: "Lava" } as const;
 const AGENT_RAYS = { mode: "single", color: "#639AFF" } as const;
+// Deep navy through brand blue to sky: one family, read as a desktop wallpaper.
+export const DESKTOP_WALLPAPER = ["#0b2a6b", "#0080ff", "#3fb6ff", "#7fd0ff"];
 const PRO_RAYS = {
 	mode: "multi",
 	color1: "#639AFF",
@@ -142,8 +142,22 @@ export const HERO_BACKGROUNDS = {
 	bot: () => <Starfield />,
 	agent: () => <SpellRays raysColor={AGENT_RAYS} />,
 	os: () => <AnimatedGradient config={LAVA} forceDark />,
-	// Windows on a desktop, focus passing between them.
-	desktop: () => <DesktopWindows color="#4fb3ff" />,
+	// A slow, glassy OS wallpaper in Ryu blues behind the app.
+	desktop: () => (
+		<ColorBends
+			colors={DESKTOP_WALLPAPER}
+			frequency={1.2}
+			intensity={1.1}
+			mouseInfluence={0.6}
+			noise={0.08}
+			parallax={0.4}
+			rotation={-35}
+			scale={1.15}
+			speed={0.15}
+			transparent
+			warpStrength={0.9}
+		/>
+	),
 	island: () => <Plasma color="#8b7bff" />,
 	mobile: () => <GradientWaves />,
 	"chrome-extension": () => (

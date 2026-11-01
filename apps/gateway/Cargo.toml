@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gateway"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 
@@ -9,7 +9,7 @@ name = "ryu-gateway"
 path = "src/main.rs"
 
 [dependencies]
-ryu-composio = { path = "../../crates/core/composio", version = "0.5.0" }
+ryu-composio = { path = "../../crates/core/composio", version = "0.5.1" }
 ryu-gw-credentials = { path = "../../crates/gateway/credentials" }
 # OTLP exporter presets (Langfuse, LangSmith, Braintrust, Phoenix, Helicone,
 # Datadog): pure endpoint/header/resource mapping shared with Core telemetry.
@@ -17,9 +17,9 @@ ryu-tracing = { path = "../../crates/core/tracing" }
 # `gateway.toml` secret sealing: the component subkey Core delivers, or one a
 # standalone Gateway derives from `RYU_MASTER_KEY` / the data-dir key file. No OS
 # keychain backend (no libdbus in the Gateway build), same as ryu-composio.
-ryu-crypto = { path = "../../crates/core/crypto", version = "0.5.0", default-features = false }
+ryu-crypto = { path = "../../crates/core/crypto", version = "0.5.1", default-features = false }
 # The data-dir layout shared with Core (`state/`, `secrets/` slots).
-ryu-sidecar-runtime = { path = "../../crates/core/sidecar-runtime", version = "0.5.0" }
+ryu-sidecar-runtime = { path = "../../crates/core/sidecar-runtime", version = "0.5.1" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["macros", "ws", "multipart"] }
 tower = "0.5"

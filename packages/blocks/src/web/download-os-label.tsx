@@ -29,7 +29,9 @@ export function DownloadOsLabel({
 }) {
 	return (
 		<span className="inline-flex items-center">
-			<span className="mr-1.5">Download for</span>
+			<span className="mr-2.5" data-slot="download-for">
+				Download for
+			</span>
 			<span
 				className={cn(
 					"inline-flex items-center transition-opacity duration-200 motion-reduce:transition-none",
@@ -46,7 +48,7 @@ export function DownloadOsLabel({
 			</span>
 			{arch ? (
 				<span
-					className="grid grid-cols-[minmax(0,0fr)] opacity-0 transition-[grid-template-columns,opacity] duration-300 ease-out group-focus-visible/download:grid-cols-[minmax(0,1fr)] group-focus-visible/download:opacity-100 group-hover/download:grid-cols-[minmax(0,1fr)] group-hover/download:opacity-100 motion-reduce:transition-none"
+					className="grid grid-cols-[minmax(0,0fr)] opacity-0 transition-[grid-template-columns,opacity] duration-300 ease-out group-hover/download:grid-cols-[minmax(0,1fr)] group-hover/download:opacity-100 group-focus-visible/download:grid-cols-[minmax(0,1fr)] group-focus-visible/download:opacity-100 motion-reduce:transition-none"
 					data-slot="download-arch"
 				>
 					<span className="min-w-0 overflow-hidden whitespace-nowrap">

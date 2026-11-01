@@ -14,11 +14,11 @@ import {
 import { Textarea } from "@ryu/ui/components/textarea";
 import { type ReactNode, useRef } from "react";
 import type { BrowserPageContext } from "./browser-context.ts";
+import { useAssistantPopupLayer } from "./color-scheme.tsx";
 import {
 	MAX_BROWSER_PAGE_TEXT_CHARS,
 	MAX_BROWSER_SELECTION_CHARS,
 } from "./docs.ts";
-import { ASSISTANT_POPUP_LAYER } from "./skin.ts";
 
 /**
  * One opt-in context chip, in Desktop's page-context chip style: a quiet
@@ -48,6 +48,7 @@ function ContextChip({
 	previewTitle: string;
 }) {
 	const tl = useLiteralMessages();
+	const popupLayer = useAssistantPopupLayer();
 	const popupRef = useRef<HTMLDivElement>(null);
 	if (!included) {
 		return (
@@ -85,7 +86,7 @@ function ContextChip({
 					initialFocus={popupRef}
 					onClick={(event) => event.stopPropagation()}
 					onMouseDown={(event) => event.stopPropagation()}
-					positionerClassName={ASSISTANT_POPUP_LAYER}
+					positionerClassName={popupLayer}
 					ref={popupRef}
 					spacing="compact"
 				>

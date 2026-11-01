@@ -1,0 +1,58 @@
+/* Motion for the post-download guide. Every animation stops under
+ * prefers-reduced-motion; the static frame still points the right way. */
+
+@keyframes nudge {
+	0%,
+	100% {
+		transform: translate(0, 0);
+	}
+	50% {
+		transform: translate(6px, -6px);
+	}
+}
+
+@keyframes ring {
+	0% {
+		opacity: 0.7;
+		transform: scale(0.6);
+	}
+	80%,
+	100% {
+		opacity: 0;
+		transform: scale(1.8);
+	}
+}
+
+@keyframes fill {
+	from {
+		transform: scaleX(0.15);
+	}
+	to {
+		transform: scaleX(1);
+	}
+}
+
+.nudge {
+	animation: nudge 1.4s ease-in-out infinite;
+}
+
+.ring {
+	animation: ring 1.8s ease-out infinite;
+}
+
+.progress {
+	transform-origin: left center;
+	animation: fill 2.4s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.nudge,
+	.ring,
+	.progress {
+		animation: none;
+	}
+
+	.ring {
+		opacity: 0;
+	}
+}

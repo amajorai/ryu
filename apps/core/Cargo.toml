@@ -1,6 +1,6 @@
 [package]
 name = "ryu-core"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -138,7 +138,7 @@ ryu-improvement-contracts = { path = "../../crates/core/improvement-contracts" }
 ryu-optimizer = { path = "../../crates/core/optimizer" }
 ryu-vad = { path = "../../crates/core/vad" }
 # `peer-probe` - the loopback peer proof Core runs before it sends Shadow its bearer.
-ryu-sidecar-runtime = { path = "../../crates/core/sidecar-runtime", version = "0.5.0", features = ["peer-probe"] }
+ryu-sidecar-runtime = { path = "../../crates/core/sidecar-runtime", version = "0.5.1", features = ["peer-probe"] }
 ryu-engines = { path = "../../crates/core/engines" }
 ryu-rag = { path = "../../crates/core/rag" }
 ryu-vector-stores = { path = "../../crates/core/vector-stores" }

@@ -133,7 +133,8 @@ body:has(
 	animation: ryu-interface-mode-gradient 3s ease infinite;
 }
 
-@custom-variant dark (&:is(.dark *));
+/* A subtree pinned to light (`.ryu-color-scheme-light`) opts out of `dark:`. */
+@custom-variant dark (&:is(.dark *):not(.ryu-color-scheme-light *));
 
 @keyframes ryu-voice-activity-beam-sweep {
 	0% {

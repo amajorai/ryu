@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gw-cache"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
@@ -18,8 +18,8 @@ tracing = "0.1"
 # `rt-multi-thread` for `block_in_place`, which lets the legacy sync cache verbs
 # reach Redis on the Gateway's multi-thread runtime.
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
-ryu-redis-wire = { path = "../../core/redis-wire", version = "0.5.0" }
+ryu-redis-wire = { path = "../../core/redis-wire", version = "0.5.1" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
-ryu-redis-wire = { path = "../../core/redis-wire", version = "0.5.0", features = ["testing"] }
+ryu-redis-wire = { path = "../../core/redis-wire", version = "0.5.1", features = ["testing"] }

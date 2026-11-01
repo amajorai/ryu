@@ -55,6 +55,7 @@ import {
 } from "./sidebar-chat-selection.tsx";
 import { ChatRow, SidebarSideChats } from "./sidebar-conversation-rows.tsx";
 import { SidebarMoreUnreads } from "./sidebar-more-unreads.tsx";
+import { SidebarProjectRailFrame } from "./sidebar-project-rail.tsx";
 // The section vocabulary (built-in keys + labels + glyphs) and the order
 // persistence/reconciliation that goes with it. Kept in its own module so the
 // part that must never lose a user's saved layout is unit-testable without a DOM.
@@ -195,6 +196,7 @@ export const SidebarPanelContent = memo(function SidebarPanelContent({
 		chatRowHandlers,
 		pinned,
 		projectList,
+		railProjects,
 		rest,
 	} = useSidebarChatRows({
 		activeConversationId,
@@ -262,104 +264,106 @@ export const SidebarPanelContent = memo(function SidebarPanelContent({
 
 	return (
 		<ChatGroupingContext.Provider value={chatGrouping}>
-			<SidebarSectionNav items={sectionNavItems} />
-			<SidebarPanelHeader
-				activeMode={activeMode}
-				activeTabbedKey={activeTabbedKey}
-				botProduct={botProduct}
-				canSwitchToConsole={canSwitchToConsole}
-				chromeDnd={chromeDnd}
-				chromeMenu={chromeMenu}
-				contributedButtons={contributedButtons}
-				conversations={conversations}
-				handleNewConversation={handleNewConversation}
-				hiddenChrome={hiddenChrome}
-				renderChromeOrder={renderChromeOrder}
-				sectionLabels={sectionLabels}
-				setActiveTabbedSection={setActiveTabbedSection}
-				tabbedKeys={tabbedKeys}
-			/>
+			<SidebarProjectRailFrame disabled={botProduct} projects={railProjects}>
+				<SidebarSectionNav items={sectionNavItems} />
+				<SidebarPanelHeader
+					activeMode={activeMode}
+					activeTabbedKey={activeTabbedKey}
+					botProduct={botProduct}
+					canSwitchToConsole={canSwitchToConsole}
+					chromeDnd={chromeDnd}
+					chromeMenu={chromeMenu}
+					contributedButtons={contributedButtons}
+					conversations={conversations}
+					handleNewConversation={handleNewConversation}
+					hiddenChrome={hiddenChrome}
+					renderChromeOrder={renderChromeOrder}
+					sectionLabels={sectionLabels}
+					setActiveTabbedSection={setActiveTabbedSection}
+					tabbedKeys={tabbedKeys}
+				/>
 
-			{/* Positioned wrapper so the "More unreads" pills can float over the
+				{/* Positioned wrapper so the "More unreads" pills can float over the
 			    scrolling list without living inside it. */}
-			<div className="relative flex min-h-0 flex-1 flex-col" ref={listRef}>
-				<SidebarMoreUnreads containerRef={listRef} />
-				{/* Right-clicking the sidebar background (not a row — each row's own
+				<div className="relative flex min-h-0 flex-1 flex-col" ref={listRef}>
+					<SidebarMoreUnreads containerRef={listRef} />
+					{/* Right-clicking the sidebar background (not a row — each row's own
 			    context menu stops propagation) opens the sidebar-wide menu. */}
-				<ContextMenu>
-					<ContextMenuTrigger
-						render={
-							// One shift-click range per panel: the docked and floating
-							// sidebars can both be mounted.
-							<SidebarContent
-								{...SIDEBAR_CHAT_SCOPE_ATTRIBUTES}
-								spacing="compact"
-							/>
-						}
-					>
-						{activeMode.layout === "stacked" ? (
-							activeMode.key === "computers" ? (
-								<AllComputersSidebar
-									onNewChatOn={(node) =>
-										openTab("/chat", { forceNew: true, node: node.name })
-									}
-									renderLocalSections={() =>
-										renderOrder.map((key) => renderSection(key))
-									}
+					<ContextMenu>
+						<ContextMenuTrigger
+							render={
+								// One shift-click range per panel: the docked and floating
+								// sidebars can both be mounted.
+								<SidebarContent
+									{...SIDEBAR_CHAT_SCOPE_ATTRIBUTES}
+									spacing="compact"
 								/>
+							}
+						>
+							{activeMode.layout === "stacked" ? (
+								activeMode.key === "computers" ? (
+									<AllComputersSidebar
+										onNewChatOn={(node) =>
+											openTab("/chat", { forceNew: true, node: node.name })
+										}
+										renderLocalSections={() =>
+											renderOrder.map((key) => renderSection(key))
+										}
+									/>
+								) : (
+									renderOrder.map((key) => renderSection(key))
+								)
 							) : (
-								renderOrder.map((key) => renderSection(key))
-							)
-						) : (
-							activeTabbedKey && renderSection(activeTabbedKey, true)
+								activeTabbedKey && renderSection(activeTabbedKey, true)
+							)}
+						</ContextMenuTrigger>
+						{!botProduct && (
+							<SidebarRootContextMenuContent
+								activeMode={activeMode}
+								handleCollapseAll={handleCollapseAll}
+								handleExpandAll={handleExpandAll}
+								handleResetSidebar={handleResetSidebar}
+								setCustomizeOpen={setCustomizeOpen}
+								setSidebarMode={setSidebarMode}
+								sidebarModes={sidebarModes}
+							/>
 						)}
-					</ContextMenuTrigger>
-					{!botProduct && (
-						<SidebarRootContextMenuContent
-							activeMode={activeMode}
-							handleCollapseAll={handleCollapseAll}
-							handleExpandAll={handleExpandAll}
-							handleResetSidebar={handleResetSidebar}
-							setCustomizeOpen={setCustomizeOpen}
-							setSidebarMode={setSidebarMode}
-							sidebarModes={sidebarModes}
-						/>
-					)}
-				</ContextMenu>
-			</div>
-			<ResourceVisibilityConfirmationDialog
-				canMakePrivate={canMakePrivate}
-				changing={changingChatVisibility}
-				onConfirm={() => {
-					confirmConversationVisibility().catch(() => undefined);
-				}}
-				onOpenChange={(open) => {
-					if (!(open || changingChatVisibility)) {
-						setPendingChatVisibility(null);
-					}
-				}}
-				request={pendingChatVisibility}
-			/>
+					</ContextMenu>
+				</div>
+				<ResourceVisibilityConfirmationDialog
+					canMakePrivate={canMakePrivate}
+					changing={changingChatVisibility}
+					onConfirm={() => {
+						confirmConversationVisibility().catch(() => undefined);
+					}}
+					onOpenChange={(open) => {
+						if (!(open || changingChatVisibility)) {
+							setPendingChatVisibility(null);
+						}
+					}}
+					request={pendingChatVisibility}
+				/>
 
-			{/* Ongoing work (agent runs, downloads, approvals, recording, app-contributed
+				{/* Ongoing work (agent runs, downloads, approvals, recording, app-contributed
 			    activities) pinned above the announcements block. Self-hides when
 			    nothing is live. */}
-			{!botProduct && <LiveActivitiesSection />}
+				{!botProduct && <LiveActivitiesSection />}
 
-			{/* Admin-authored announcements, pinned just above the account footer
+				{/* Admin-authored announcements, pinned just above the account footer
 			    (outside the scroll/reorder area). Self-hides when the feed is empty;
 			    toggleable via the Customize dialog's "Bottom buttons" group. */}
-			{!botProduct &&
-				notificationLayout === "split" &&
-				!hiddenChrome.has("announcements") && <AnnouncementsSection />}
+				{!botProduct &&
+					notificationLayout === "split" &&
+					!hiddenChrome.has("announcements") && <AnnouncementsSection />}
 
-			<SidebarFooter>
-				<NavUser
-					hiddenChrome={hiddenChrome}
-					notificationLayout={notificationLayout}
-					onHideChrome={(key) => setChromeHidden(key, true)}
-				/>
-			</SidebarFooter>
+				<SidebarFooter>
+					<NavUser
+						hiddenChrome={hiddenChrome}
+						notificationLayout={notificationLayout}
+						onHideChrome={(key) => setChromeHidden(key, true)}
+					/>
+				</SidebarFooter>
+			</SidebarProjectRailFrame>
 
 			{!botProduct && (
 				<SidebarCustomizeDialog

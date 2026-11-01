@@ -9,9 +9,11 @@ import type { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { useAgents } from "@/src/hooks/useAgents.ts";
 import type { useApps } from "@/src/hooks/useApps.ts";
 import { useBotChatSections } from "@/src/hooks/useBotChatSections.ts";
+import { useSidebarProjectFocus } from "@/src/hooks/useSidebarProjectRail.ts";
 import type { useVisibilityAdminAccess } from "@/src/hooks/useVisibilityAdminAccess.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import type { VisibilityChangeRequest } from "@/src/lib/resource-visibility.ts";
+import { focusSidebarProjects } from "@/src/lib/sidebar-project-focus.ts";
 import { useConversationFlagsStore } from "@/src/store/useConversationFlagsStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import { buildSidebarChatBulkActions } from "./AppSidebar-chat-bulk.ts";
@@ -122,14 +124,7 @@ export function useSidebarChatRows({
 		requestScrollToMessage,
 		workspaceProjects,
 	});
-	const {
-		agentModeOtherChats,
-		allConversations,
-		archived,
-		pinned,
-		projectList,
-		rest,
-	} = buildSidebarProjects({
+	const allBuckets = buildSidebarProjects({
 		activeMode,
 		agents,
 		archivedIds,
@@ -141,6 +136,12 @@ export function useSidebarChatRows({
 		workspaceFolder,
 		workspaceProjects,
 	});
+	// The project rail narrows the visible sections to its focused project; move
+	// targets and bulk actions still see every project.
+	const projectFocus = useSidebarProjectFocus();
+	const { agentModeOtherChats, archived, pinned, projectList, rest } =
+		focusSidebarProjects(allBuckets, projectFocus);
+	const { allConversations, projectList: railProjects } = allBuckets;
 
 	useSidebarChatSelectionEscape();
 	const chatGroups = useBotChatSections();
@@ -168,7 +169,7 @@ export function useSidebarChatRows({
 		onDeleteConversation,
 		pinnedIds,
 		projectFolderFor,
-		projectList,
+		projectList: railProjects,
 		projectNameForFolder,
 		tl,
 	});
@@ -207,7 +208,7 @@ export function useSidebarChatRows({
 		onToggleArchive: handleToggleArchive,
 		onTogglePin: handleTogglePin,
 		projectNameForFolder,
-		projectTargets: projectList,
+		projectTargets: railProjects,
 		canMakePrivate,
 		pullRequestsEnabled,
 		schedulingEnabled: pluginApps.some(
@@ -225,6 +226,7 @@ export function useSidebarChatRows({
 		chatRowHandlers,
 		pinned,
 		projectList,
+		railProjects,
 		rest,
 	};
 }

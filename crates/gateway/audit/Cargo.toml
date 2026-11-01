@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gw-audit"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
@@ -9,7 +9,7 @@ description = "Ryu Gateway audit stage: the SQLite-backed append-only request lo
 [dependencies]
 ryu-gw-credentials = { path = "../credentials" }
 # The data-dir layout (`layout::db_file`) and profile suffix shared with Core.
-ryu-sidecar-runtime = { path = "../../core/sidecar-runtime", version = "0.5.0" }
+ryu-sidecar-runtime = { path = "../../core/sidecar-runtime", version = "0.5.1" }
 serde = { version = "1", features = ["derive"] }
 dashmap = "6"
 rusqlite = { version = "0.40.0", features = ["bundled"] }

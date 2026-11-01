@@ -109,6 +109,12 @@ test("every enabled Interface switch changes and persists its choice", async ({
 			storedValue: (enabled: boolean) => (enabled ? "inset" : "floating"),
 		},
 		{
+			id: "sidebar-project-rail-toggle",
+			label: "Project rail",
+			key: "ryu:sidebar-project-rail",
+			storedValue: (enabled: boolean) => String(enabled),
+		},
+		{
 			id: "agent-row-messaging-toggle",
 			label: "Messaging-style agent rows",
 			key: "ryu:agent-row-style",

@@ -288,7 +288,7 @@ function Sidebar({
 				{...props}
 			>
 				<div
-					className="relative flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-3xl group-data-[variant=floating]:border group-data-[variant=floating]:border-background"
+					className="ryu-chrome-shadow relative flex size-full flex-col bg-sidebar group-data-[variant=floating]:inset-shadow-sm group-data-[variant=floating]:rounded-3xl group-data-[variant=floating]:border group-data-[variant=floating]:border-background group-data-[variant=floating]:drop-shadow-2xl"
 					data-sidebar="sidebar"
 					data-slot="sidebar-inner"
 				>

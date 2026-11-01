@@ -34,7 +34,7 @@
     },
     "apps/cli": {
       "name": "cli",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "bin": {
         "ryu-cli": "./src/index.tsx",
       },
@@ -75,11 +75,11 @@
     },
     "apps/core": {
       "name": "core",
-      "version": "0.5.0",
+      "version": "0.5.1",
     },
     "apps/desktop": {
       "name": "desktop",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@ai-sdk/react": "catalog:",
         "@base-ui/react": "^1.3.0",
@@ -187,11 +187,11 @@
     },
     "apps/gateway": {
       "name": "gateway",
-      "version": "0.5.0",
+      "version": "0.5.1",
     },
     "apps/island": {
       "name": "island",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@ai-sdk/react": "catalog:",
         "@fontsource-variable/geist": "^5.2.8",
@@ -236,7 +236,7 @@
     },
     "apps/mcp": {
       "name": "@ryuhq/mcp",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "bin": {
         "ryu-mcp": "./dist/index.js",
       },
@@ -280,7 +280,7 @@
     },
     "packages/assistant-widget": {
       "name": "@ryu/assistant-widget",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@ai-sdk/react": "catalog:",
         "@hugeicons/core-free-icons": "^4.3.5",
@@ -403,7 +403,7 @@
     },
     "packages/browser-local-ai": {
       "name": "@ryu/browser-local-ai",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@huggingface/transformers": "^4.2.0",
         "zod": "catalog:",
@@ -416,7 +416,7 @@
     },
     "packages/client": {
       "name": "@ryuhq/client",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "bin": {
         "box-tunnel": "./dist/box-tunnel.js",
       },
@@ -451,11 +451,11 @@
     },
     "packages/config": {
       "name": "@ryu/config",
-      "version": "0.5.0",
+      "version": "0.5.1",
     },
     "packages/core-client": {
       "name": "@ryuhq/core-client",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@ryu/i18n": "workspace:*",
         "@ryuhq/protocol": "workspace:*",
@@ -483,7 +483,7 @@
     },
     "packages/github-action": {
       "name": "@ryuhq/github-action",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@actions/core": "^1.11.1",
         "@ryuhq/core-client": "workspace:*",
@@ -510,7 +510,7 @@
     },
     "packages/i18n": {
       "name": "@ryu/i18n",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "fflate": "^0.8.3",
         "zod": "catalog:",
@@ -554,7 +554,7 @@
     },
     "packages/portable-packages": {
       "name": "@ryu/portable-packages",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@ryu/i18n": "workspace:*",
         "@ryuhq/protocol": "workspace:*",
@@ -569,7 +569,7 @@
     },
     "packages/protocol": {
       "name": "@ryuhq/protocol",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "zod": "catalog:",
       },

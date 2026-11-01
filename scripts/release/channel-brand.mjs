@@ -314,11 +314,27 @@ function buildIconSet(channel) {
 	return false;
 }
 
+// Tauri CLI 2.12 refuses an rpm version that contains "-" (rpm reserves it for
+// the release field), and every prerelease build stamps one
+// (`0.5.1-canary.20261101.136`), so the rpm target failed the whole Linux
+// desktop job on canary and nightly. A Linux prerelease bundles deb and AppImage
+// only; a stable `X.Y.Z` keeps every target. The workflows narrow Windows to
+// NSIS for the same kind of reason (MSI refuses these versions).
+export function applyLinuxBundleTargets(config, version, platform) {
+	if (platform !== "linux" || !version?.includes("-")) {
+		return config;
+	}
+	config.bundle ??= {};
+	config.bundle.targets = ["deb", "appimage"];
+	return config;
+}
+
 // ── Config stamp ─────────────────────────────────────────────────────────────
 
-function stamp(channel, table, configPath) {
+function stamp(channel, table, configPath, version) {
 	const config = JSON.parse(readFileSync(configPath, "utf8"));
 	applyProfileIdentity(config, channel);
+	applyLinuxBundleTargets(config, version, process.platform);
 	const name = `${APP_NAME} (${labelFor(channel, table)})`;
 	config.productName = name;
 	if (config.app?.windows?.[0]) {
@@ -366,7 +382,7 @@ function main() {
 	if (!channel) {
 		die("--channel needs a value");
 	}
-	stamp(channel, table, configPath);
+	stamp(channel, table, configPath, version);
 }
 
 if (

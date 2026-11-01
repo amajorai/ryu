@@ -20,3 +20,13 @@
 	background: var(--grouped-card);
 	border-radius: var(--radius-xl, 0.75rem);
 }
+
+/* Split layout: center the step's content against the header, not the content
+   plus its action row. A step with an action row gets a matching invisible
+   counterweight above it (the h-10 row plus the column's gap-6), so the cards
+   sit on the header's center line and the buttons hang below them. */
+@media (min-width: 64rem) {
+	.splitColumn:has([data-slot="onboarding-actions"]) {
+		padding-top: calc(3rem + 2.5rem + 1.5rem);
+	}
+}

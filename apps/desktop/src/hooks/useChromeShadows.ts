@@ -3,9 +3,8 @@ import { useEffect, useState } from "react";
 import { announceLocalStorageChange } from "@/src/lib/same-document-storage-event.ts";
 
 // Controls the drop/box shadows on the titlebar navigation + custom action
-// groups and the floating sidebar. Default OFF (separation comes from tone, not
-// shadow); the Appearance setting can turn them on, and a stored opt-in is
-// kept. We mark those elements with the `ryu-chrome-shadow` class and gate
+// groups and the floating sidebar. Default ON; the Appearance setting can turn
+// them off, and a stored opt-out is kept. We mark those elements with the `ryu-chrome-shadow` class and gate
 // the shadow via a documentElement data attribute styled in index.css, so the
 // toggle is a single attribute flip with no React re-render of the chrome.
 const KEY = "ryu_chrome_shadows";
@@ -19,17 +18,17 @@ function applyDataAttribute(enabled: boolean) {
 }
 
 export function initChromeShadows() {
-	applyDataAttribute(localStorage.getItem(KEY) === "true");
+	applyDataAttribute(localStorage.getItem(KEY) !== "false");
 }
 
 export function useChromeShadows(): boolean {
 	const [enabled, setEnabled] = useState(
-		() => localStorage.getItem(KEY) === "true"
+		() => localStorage.getItem(KEY) !== "false"
 	);
 
 	useEffect(() => {
 		const handler = () => {
-			setEnabled(localStorage.getItem(KEY) === "true");
+			setEnabled(localStorage.getItem(KEY) !== "false");
 		};
 		window.addEventListener("storage", handler);
 		return () => window.removeEventListener("storage", handler);

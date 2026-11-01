@@ -15,8 +15,8 @@ use crate::deep_link_profile;
 #[cfg(target_os = "macos")]
 use crate::macos_window::apply_macos_titlebar_mask;
 use crate::{
-    clips_quick_attach, core_autostart, profile, quick_capture, standalone, startup, tray,
-    update_recovery,
+    clips_quick_attach, core_autostart, notification_identity, profile, quick_capture, standalone,
+    startup, tray, update_recovery,
 };
 
 /// Desktop setup hook passed to `tauri::Builder::setup`.
@@ -42,6 +42,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     }
 
     tray::setup_tray(app)?;
+    notification_identity::register(app.handle());
     update_recovery::schedule_retention(app.handle());
 
     // Register the `ryu://` scheme with the OS at runtime. Production

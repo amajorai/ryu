@@ -114,16 +114,18 @@ fn build_notification(
     notification.action("default", "");
     #[cfg(windows)]
     {
-        // Same rule as tauri-plugin-notification: the AppUserModelID only
-        // resolves for the installed app, not a `target/` build.
-        if let Ok(exe) = tauri::utils::platform::current_exe() {
-            let in_target = exe.parent().is_some_and(|dir| {
+        // The AppUserModelID decides the toast's header icon and name. It
+        // resolves once `notification_identity` registered it; otherwise only
+        // through the installer's shortcut, which a `target/` build lacks
+        // (same rule as tauri-plugin-notification).
+        let in_target = tauri::utils::platform::current_exe().is_ok_and(|exe| {
+            exe.parent().is_some_and(|dir| {
                 dir.ends_with(Path::new("target").join("debug"))
                     || dir.ends_with(Path::new("target").join("release"))
-            });
-            if !in_target {
-                notification.app_id(identifier);
-            }
+            })
+        });
+        if crate::notification_identity::is_registered() || !in_target {
+            notification.app_id(identifier);
         }
     }
     #[cfg(target_os = "macos")]

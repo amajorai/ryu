@@ -172,6 +172,11 @@ export const SYNCABLE_KEYS: SyncableKey[] = [
 	{ key: "ryu:sidebar-mode", label: "Sidebar mode", group: "layout" },
 	{ key: "ryu:sidebar-variant", label: "Sidebar variant", group: "layout" },
 	{
+		key: "ryu:sidebar-project-rail",
+		label: "Project rail",
+		group: "layout",
+	},
+	{
 		key: "ryu:sidebar-section-order",
 		label: "Sidebar section order",
 		group: "layout",

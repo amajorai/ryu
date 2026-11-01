@@ -1,6 +1,6 @@
 [package]
 name = "ryu-redis-wire"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Minimal, binary-safe RESP2 client for Ryu's pluggable state stores: an incremental frame codec plus a small pooled async connection (plain TCP or TLS, AUTH + SELECT from a redis:// / rediss:// URL). Shared by the durable checkpoint store and the Gateway response/embedding caches so neither pulls a full Redis client crate. ZERO dependency on apps/core."

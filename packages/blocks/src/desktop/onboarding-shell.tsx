@@ -83,9 +83,15 @@ export function OnboardingShell({
 	}
 	const split = layout === "split";
 	const header = (
+		// Full-size header: the subtitle matches the title's size and weight. The
+		// `max-w-md` cap keeps both lines to a readable measure rather than running
+		// the full width of the column.
 		<PageHeader
-			className={cn("w-full text-center", split && "lg:text-left")}
-			size="app"
+			className={cn(
+				"mx-auto w-full max-w-md text-center",
+				split && "lg:mx-0 lg:text-left"
+			)}
+			stagger={false}
 			subtitle={
 				liveSubtitle && typeof subtitle === "string" ? (
 					<TextSwap>{subtitle}</TextSwap>
@@ -93,7 +99,7 @@ export function OnboardingShell({
 					subtitle
 				)
 			}
-			subtitleClassName="text-balance"
+			subtitleClassName={cn("text-balance", split && "lg:text-2xl")}
 			title={typeof title === "string" ? <TextSwap>{title}</TextSwap> : title}
 			titleClassName={cn("text-balance", split && "lg:text-2xl")}
 		/>
@@ -135,7 +141,8 @@ export function OnboardingShell({
 						SHELL_WIDTH[width],
 						split &&
 							"scroll-fade lg:max-h-full lg:max-w-none lg:overflow-y-auto lg:px-1 lg:py-12",
-						split && styles.cardedContent
+						split && styles.cardedContent,
+						split && styles.splitColumn
 					)}
 				>
 					{children}

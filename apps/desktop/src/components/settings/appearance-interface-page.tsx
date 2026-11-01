@@ -14,6 +14,7 @@ import { setInvertedBackgrounds } from "@/src/hooks/useInvertedBackgrounds.ts";
 import { setPointerCursor } from "@/src/hooks/usePointerCursor.ts";
 import { setPopupOverlayBlur } from "@/src/hooks/usePopupOverlayBlur.ts";
 import { sidebarModeSchema } from "@/src/hooks/useSidebarMode.ts";
+import { useSidebarProjectRailPreference } from "@/src/hooks/useSidebarProjectRail.ts";
 import { NOTIFICATION_LAYOUT_STEPS } from "@/src/lib/notification-layout.ts";
 import { NotificationLayoutSlider } from "./appearance-level-sliders.tsx";
 import { CHAT_PICKER_PLACEMENT_OPTIONS } from "./appearance-options.tsx";
@@ -30,6 +31,7 @@ export function AppearanceInterfacePage({
 	state: AppearanceTabState;
 }) {
 	const tl = useLiteralMessages();
+	const [projectRail, setProjectRail] = useSidebarProjectRailPreference();
 	const {
 		isDesktop,
 		pointerCursorEnabled,
@@ -297,6 +299,17 @@ export function AppearanceInterfacePage({
 					}
 					description="Sidebar flush with the window, content as its own rounded card."
 					title="Inset sidebar"
+				/>
+				<SettingsItem
+					actions={
+						<Switch
+							checked={projectRail}
+							id="sidebar-project-rail-toggle"
+							onCheckedChange={setProjectRail}
+						/>
+					}
+					description="Project icons down the left of the sidebar, like servers in Discord. Pick one to show only its chats."
+					title="Project rail"
 				/>
 				<SettingsItem
 					actions={

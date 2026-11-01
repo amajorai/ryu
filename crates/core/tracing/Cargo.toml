@@ -1,6 +1,6 @@
 [package]
 name = "ryu-tracing"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Per-run observability trace primitive for Ryu: the hierarchical span store (trace_id/span_id/parent_span_id, agent_run/workflow_run/workflow_step/model_call/tool_call/retrieval/memory/guardrail kinds, status, attributes, consent-gated inputs/outputs) backed by SQLite, the run trace tree and trace search reads behind the desktop trace viewer, and the OTLP exporter presets (Langfuse, LangSmith, Braintrust, Arize Phoenix, Helicone, Datadog). Token counts and cost stay Gateway-side; this store holds NO token or cost fields. ZERO dependency on apps/core: `TraceStore::open` takes an explicit db path."

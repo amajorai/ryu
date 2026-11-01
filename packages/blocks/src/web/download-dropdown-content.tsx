@@ -45,6 +45,7 @@ import {
 	stableReleases,
 	WEBAPP_URL,
 } from "./download.tsx";
+import { announceDownloadStarted } from "./download-started.ts";
 import { GITHUB_SVGL, OS_SVGL, SvglIcon } from "./svgl-icon.tsx";
 
 /**
@@ -106,8 +107,21 @@ function DownloadItem({
 	if (state.kind === "unavailable" || state.kind === "building") {
 		return <DropdownMenuItem disabled>{body}</DropdownMenuItem>;
 	}
+	// A row that hands over the installer itself opens the post-download guide;
+	// a releases-page fallback row does not.
+	const asset = state.kind === "ready" ? state.asset : null;
+	const announce = asset
+		? () =>
+				announceDownloadStarted({
+					arch,
+					assetName: asset.name,
+					href: asset.browser_download_url,
+					os: platformId,
+				})
+		: undefined;
 	return (
 		<DropdownMenuItem
+			onClick={announce}
 			render={
 				<a
 					href={

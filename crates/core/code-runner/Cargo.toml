@@ -1,6 +1,6 @@
 [package]
 name = "ryu-code-runner"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Core-side language runners for Ryu workflow code steps: Lean 4, Bend and BAML programs run or checked through the swappable sandbox backend (Lean/Bend) or a scrubbed, gateway-only host server (BAML). An extracted Core capability crate with ZERO dependency on apps/core."
@@ -15,7 +15,7 @@ repository = "https://github.com/amajorai/ryu"
 
 [dependencies]
 reqwest = { version = "0.12", features = ["json"] }
-ryu-sandbox = { path = "../sandbox", version = "0.5.0" }
+ryu-sandbox = { path = "../sandbox", version = "0.5.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

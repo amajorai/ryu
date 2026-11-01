@@ -46,4 +46,12 @@ describe("DownloadOsLabel", () => {
 		);
 		expect(logo?.[1]).toContain("opacity-0");
 	});
+
+	test('keeps a visible gap between "Download for" and the OS logo', () => {
+		const html = renderToStaticMarkup(
+			<DownloadOsLabel arch={null} detected iconSize={16} os="macos" />
+		);
+		const lead = html.match(/<span class="([^"]*)" data-slot="download-for">/);
+		expect(lead?.[1]).toContain("mr-2.5");
+	});
 });

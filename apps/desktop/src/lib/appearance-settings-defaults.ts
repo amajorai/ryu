@@ -112,7 +112,7 @@ export const APPEARANCE_DEFAULTS = {
 	friendlyNames: DEFAULT_FRIENDLY_MODE,
 	botTerminology: DEFAULT_BOT_TERMINOLOGY,
 	pointerCursor: false,
-	chromeShadows: false,
+	chromeShadows: true,
 	// Flat transparent dialog backdrops are the shared default (see
 	// @ryu/ui hooks/use-dialog-overlay-blur.ts); Reset must restore that, not
 	// the dimmed + blurred look. Keep this in step with

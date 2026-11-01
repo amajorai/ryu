@@ -18,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	applyLinuxBundleTargets,
 	applyProfileIdentity,
 	channelOfVersion,
 	labelFor,
@@ -92,4 +93,25 @@ test("branding never installs a CLI from the registry", () => {
 	const source = readFileSync(join(HERE, "channel-brand.mjs"), "utf8");
 	assert.doesNotMatch(source, /\bnpx\b/);
 	assert.match(source, /--no-install/);
+});
+
+test("a Linux prerelease bundles without rpm; stable and other hosts keep every target", () => {
+	const narrowed = applyLinuxBundleTargets(
+		{ bundle: { targets: "all" } },
+		"0.5.1-canary.20261101.136",
+		"linux"
+	);
+	assert.deepEqual(narrowed.bundle.targets, ["deb", "appimage"]);
+	for (const [version, platform] of [
+		["0.5.1", "linux"],
+		["0.5.1-nightly.20261101.265", "darwin"],
+		["0.5.1-canary.20261101.136", "win32"],
+	]) {
+		const config = applyLinuxBundleTargets(
+			{ bundle: { targets: "all" } },
+			version,
+			platform
+		);
+		assert.equal(config.bundle.targets, "all");
+	}
 });

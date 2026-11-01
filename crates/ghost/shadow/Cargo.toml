@@ -1,6 +1,6 @@
 [package]
 name = "ryu-shadow-core"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "Screen/audio/input capture, OCR, and semantic search engine for Shadow."
 license = "Apache-2.0"
@@ -25,7 +25,7 @@ env_logger = "0.11"
 libc = "0.2"
 # Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
 # backend: the key arrives from Core (RYU_SEAL_KEY) or RYU_MASTER_KEY.
-ryu-crypto = { path = "../../core/crypto", version = "0.5.0", default-features = false, features = ["sqlite"] }
+ryu-crypto = { path = "../../core/crypto", version = "0.5.1", default-features = false, features = ["sqlite"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { HERO_BACKGROUNDS, HeroBackground } from "./hero-background.tsx";
+import {
+	DESKTOP_WALLPAPER,
+	HERO_BACKGROUNDS,
+	HeroBackground,
+} from "./hero-background.tsx";
 import { StageSection } from "./stage-section.tsx";
 
 function effectOf(id: keyof typeof HERO_BACKGROUNDS): unknown {
@@ -13,13 +17,20 @@ describe("hero backgrounds", () => {
 		expect(effectOf("bot")).toBe(effectOf("page-startups"));
 	});
 
-	test("Desktop has a backdrop of its own", () => {
-		const desktop = effectOf("desktop");
+	test("Desktop opens on a Color Bends wallpaper in its own palette", () => {
+		const desktop = HERO_BACKGROUNDS.desktop() as ReactElement<{
+			colors: string[];
+		}>;
+		expect<unknown>(desktop.type).toBe(effectOf("chrome-extension"));
+		expect(desktop.props.colors).toBe(DESKTOP_WALLPAPER);
 		for (const id of Object.keys(HERO_BACKGROUNDS) as Array<
 			keyof typeof HERO_BACKGROUNDS
 		>) {
-			if (id !== "desktop") {
-				expect(effectOf(id)).not.toBe(desktop);
+			const other = HERO_BACKGROUNDS[id]() as ReactElement<{
+				colors?: string[];
+			}>;
+			if (id !== "desktop" && other.type === desktop.type) {
+				expect(other.props.colors).not.toEqual(DESKTOP_WALLPAPER);
 			}
 		}
 	});

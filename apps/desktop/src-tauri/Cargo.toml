@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -78,6 +78,9 @@ chrono = "0.4"
 # OS notifications with the sender's avatar image (see `os_notifications.rs`);
 # the same backend tauri-plugin-notification uses, without dropping the image.
 notify-rust = "4.18"
+# Encodes the window icon registered as the Windows toast icon
+# (`notification_identity.rs`); the same `png` Tauri links for `image-png`.
+png = "0.18"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }
@@ -92,6 +95,7 @@ windows = { version = "0.59", features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_Storage_FileSystem",
     "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",

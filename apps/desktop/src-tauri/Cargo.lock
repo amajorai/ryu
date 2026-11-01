@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -988,6 +988,7 @@ dependencies = [
  "nix 0.29.0",
  "notify-rust",
  "objc",
+ "png",
  "reqwest 0.12.28",
  "ryu-crypto",
  "ryu-gw-credentials",
@@ -1746,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-permissions"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "gio"
@@ -4122,7 +4123,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "ryu-crypto"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4164,7 +4165,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-runtime-install"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "fs4",
@@ -4178,7 +4179,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-sidecar-runtime"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "dirs 5.0.1",
  "hmac",

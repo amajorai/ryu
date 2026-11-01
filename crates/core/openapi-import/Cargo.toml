@@ -1,6 +1,6 @@
 [package]
 name = "ryu-openapi-import"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Pure OpenAPI/Swagger to HTTP tool descriptor transform shared by Ryu Core's install-time importer and the generated tool catalog tier. Part of the Ryu monorepo (github.com/amajorai/ryu)."

@@ -224,7 +224,7 @@ export function FloatingSidebarPeek({
 		>
 			<div
 				className={cn(
-					"ryu-sidebar-surface absolute top-2 bottom-2 left-2 flex flex-col overflow-hidden rounded-2xl border border-border bg-sidebar shadow-xl",
+					"ryu-sidebar-surface absolute top-2 bottom-2 left-2 flex flex-col overflow-hidden rounded-2xl bg-card shadow-2xl",
 					layoutStyles.inline4
 				)}
 				data-sidebar-preview-boundary=""

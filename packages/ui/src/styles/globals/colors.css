@@ -1,4 +1,7 @@
-:root {
+/* `.ryu-color-scheme-light` pins a subtree (e.g. an embedded Ask Ryu widget set
+   to light) to these light tokens even inside a `.dark` page. */
+:root,
+.ryu-color-scheme-light {
 	--card: oklch(1 0 0);
 	--card-foreground: oklch(0.145 0 0);
 	/* iOS/macOS grouped settings. A `grouped-pane` paints the grouped

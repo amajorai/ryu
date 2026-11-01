@@ -20,7 +20,7 @@ import { Separator } from "@ryu/ui/components/separator";
 import { cn } from "@ryu/ui/lib/utils";
 import type { SyntheticEvent } from "react";
 import { useEffect, useId, useState } from "react";
-import { ASSISTANT_POPUP_LAYER } from "./skin.ts";
+import { useAssistantPopupLayer } from "./color-scheme.tsx";
 
 export type AssistantMode = "browser" | "node" | "guest";
 
@@ -223,6 +223,7 @@ export function RuntimeSettings({
 	onModeChange,
 	...props
 }: RuntimeSettingsProps) {
+	const popupLayer = useAssistantPopupLayer();
 	const [open, setOpen] = useState(false);
 	return (
 		<Popover onOpenChange={setOpen} open={open}>
@@ -244,7 +245,7 @@ export function RuntimeSettings({
 				data-lenis-prevent=""
 				data-ryu-assistant-widget="true"
 				onMouseDown={(event) => event.stopPropagation()}
-				positionerClassName={ASSISTANT_POPUP_LAYER}
+				positionerClassName={popupLayer}
 				spacing="dense-menu"
 			>
 				<RuntimeSettingsMenu

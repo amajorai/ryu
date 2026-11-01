@@ -16,6 +16,7 @@ import {
 import type { SubmitEvent } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { z } from "zod";
+import { useAssistantPopupLayer } from "./color-scheme.tsx";
 import {
 	buildToolInput,
 	displayTitle,
@@ -25,7 +26,6 @@ import {
 	toolFields,
 	toolIsWrite,
 } from "./page-tools-schema.ts";
-import { ASSISTANT_POPUP_LAYER } from "./skin.ts";
 import type { WebMcpPageTool } from "./webmcp.ts";
 import type { WebMcpRecord } from "./webmcp-contract.ts";
 
@@ -47,6 +47,7 @@ function ToolFieldControl({
 	onChange: (value: ToolValue) => void;
 	value: ToolValue | undefined;
 }) {
+	const popupLayer = useAssistantPopupLayer();
 	const id = useId();
 	const label = `${fieldLabel(field.key)}${field.required ? " *" : ""}`;
 	const hint = field.description ? (
@@ -88,7 +89,7 @@ function ToolFieldControl({
 					<SelectContent
 						data-ryu-assistant-widget="true"
 						onMouseDown={(event) => event.stopPropagation()}
-						positionerClassName={ASSISTANT_POPUP_LAYER}
+						positionerClassName={popupLayer}
 					>
 						{options.map((option) => (
 							<SelectItem key={option} value={option}>

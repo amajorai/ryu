@@ -28,6 +28,7 @@ mod macos_glass;
 mod macos_window;
 mod midnight_wipe;
 mod nodes;
+mod notification_identity;
 mod os_notifications;
 mod permissions;
 mod plugin_file_resource;

@@ -20,8 +20,15 @@ afterAll(async () => {
 });
 
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { RELEASES_PAGE } = await import("./download-assets.ts");
+const { act } = await import("react");
+const { createRoot } = await import("react-dom/client");
+const { RELEASES_PAGE, resetReleasesCache } = await import(
+	"./download-assets.ts"
+);
 const { DownloadMenu } = await import("./download-menu.tsx");
+const { subscribeDownloadStarted } = await import("./download-started.ts");
+type DownloadStartedDetail =
+	import("./download-started.ts").DownloadStartedDetail;
 
 const MENU_SOURCE = readFileSync(
 	new URL("./download-menu.tsx", import.meta.url),
@@ -78,4 +85,109 @@ describe("DownloadMenu", () => {
 			"() => ({ default: DownloadDropdownFallback })"
 		);
 	});
+});
+
+const WINDOWS_UA =
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+const SETUP_ASSET = {
+	browser_download_url:
+		"https://github.com/amajorai/ryu/releases/download/v0.1.1/Ryu_0.1.1_x64-setup.exe",
+	name: "Ryu_0.1.1_x64-setup.exe",
+};
+
+/** Wait on the clock for the releases fetch and React to commit. */
+async function settle(done: () => boolean, timeoutMs = 10_000) {
+	const deadline = Date.now() + timeoutMs;
+	while (!done() && Date.now() < deadline) {
+		await act(async () => {
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		});
+	}
+}
+
+/** Click the primary link without letting the DOM follow it. */
+function clickPrimary(anchor: HTMLAnchorElement) {
+	const swallow = (event: Event) => event.preventDefault();
+	document.addEventListener("click", swallow);
+	anchor.dispatchEvent(
+		new MouseEvent("click", { bubbles: true, cancelable: true })
+	);
+	document.removeEventListener("click", swallow);
+}
+
+describe("DownloadMenu post-download guide", () => {
+	test("announces a direct installer download, never the releases-page fallback", async () => {
+		Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+		Object.defineProperty(navigator, "userAgent", {
+			configurable: true,
+			value: WINDOWS_UA,
+		});
+		resetReleasesCache();
+		const originalFetch = globalThis.fetch;
+		let resolveReleases: (response: Response) => void = () => undefined;
+		const releasesResponse = new Promise<Response>((resolve) => {
+			resolveReleases = resolve;
+		});
+		globalThis.fetch = (() => releasesResponse) as unknown as typeof fetch;
+		const announced: DownloadStartedDetail[] = [];
+		const unsubscribe = subscribeDownloadStarted((detail) => {
+			announced.push(detail);
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => {
+				root.render(<DownloadMenu />);
+			});
+			const primary = () =>
+				container.querySelector<HTMLAnchorElement>('[role="group"] a[href]');
+
+			// Releases not loaded yet: the button opens the releases page.
+			expect(primary()?.getAttribute("href")).toBe(RELEASES_PAGE);
+			await act(async () => {
+				clickPrimary(primary() as HTMLAnchorElement);
+			});
+			expect(announced).toEqual([]);
+
+			resolveReleases(
+				new Response(
+					JSON.stringify([
+						{
+							assets: [SETUP_ASSET],
+							html_url: `${RELEASES_PAGE}/tag/v0.1.1`,
+							id: 1,
+							name: "v0.1.1",
+							published_at: "2026-10-01T00:00:00Z",
+							tag_name: "v0.1.1",
+						},
+					]),
+					{ status: 200 }
+				)
+			);
+			await settle(
+				() =>
+					primary()?.getAttribute("href") === SETUP_ASSET.browser_download_url
+			);
+			expect(primary()?.getAttribute("download")).toBe(SETUP_ASSET.name);
+			await act(async () => {
+				clickPrimary(primary() as HTMLAnchorElement);
+			});
+			expect(announced).toEqual([
+				{
+					arch: "intel",
+					assetName: SETUP_ASSET.name,
+					href: SETUP_ASSET.browser_download_url,
+					os: "windows",
+				},
+			]);
+		} finally {
+			unsubscribe();
+			await act(async () => root.unmount());
+			container.remove();
+			globalThis.fetch = originalFetch;
+			resetReleasesCache();
+			Reflect.deleteProperty(navigator, "userAgent");
+		}
+	}, 30_000);
 });

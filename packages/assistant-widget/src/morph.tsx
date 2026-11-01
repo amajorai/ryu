@@ -94,6 +94,11 @@ export interface RyuAssistantMorphProps {
 	triggerClassName?: string;
 	triggerLabel?: string;
 	triggerSize?: number;
+	/**
+	 * Fill and chrome for the closed launcher only, replacing `bgClassName` and
+	 * `chromeClassName` on it, e.g. the Island-style launcher skin.
+	 */
+	triggerSkinClassName?: string;
 }
 
 /**
@@ -127,6 +132,7 @@ export function RyuAssistantMorph({
 	triggerClassName,
 	triggerLabel,
 	triggerSize = DEFAULT_TRIGGER_SIZE,
+	triggerSkinClassName,
 	style,
 }: RyuAssistantMorphProps) {
 	const prefersReducedMotion = useReducedMotion();
@@ -263,8 +269,7 @@ export function RyuAssistantMorph({
 				className={cn(
 					"absolute right-0 bottom-0 flex items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring",
 					styles.trigger,
-					bgClassName,
-					chromeClassName,
+					triggerSkinClassName ?? cn(bgClassName, chromeClassName),
 					triggerClassName
 				)}
 				initial={false}

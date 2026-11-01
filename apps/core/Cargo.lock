@@ -2477,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2493,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-permissions"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "gif"
@@ -5689,7 +5689,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "ryu-a2a"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "a2a-lf",
  "base64 0.22.1",
@@ -5713,7 +5713,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-acp-server"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "agent-client-protocol",
  "base64 0.22.1",
@@ -5731,7 +5731,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-activity"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5745,7 +5745,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-agent-contracts"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -5754,7 +5754,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-app-events"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -5766,7 +5766,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-backup"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5792,7 +5792,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-code-runner"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "libc",
  "reqwest 0.12.28",
@@ -5807,7 +5807,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-collab"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5821,7 +5821,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-composio"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5842,7 +5842,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6002,7 +6002,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-crypto"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6027,7 +6027,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-deletion-guard"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "regex",
  "shell-words",
@@ -6035,7 +6035,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-downloads"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6056,7 +6056,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-durable"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "native-tls",
  "postgres-native-tls",
@@ -6071,7 +6071,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-egress"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "reqwest 0.12.28",
  "tokio",
@@ -6080,7 +6080,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-email-send"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "lettre",
  "serde",
@@ -6090,7 +6090,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-engines"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ryu-model-catalog",
  "serde",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-eval-code"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ryu-sandbox",
  "ryu-tool-exec",
@@ -6111,7 +6111,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-contracts"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -6138,7 +6138,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-providers"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aws-credential-types",
  "aws-sigv4",
@@ -6163,7 +6163,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-router"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "fastrand",
  "serde",
@@ -6173,7 +6173,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-hardware"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -6201,14 +6201,14 @@ dependencies = [
 
 [[package]]
 name = "ryu-healing-contracts"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ryu-image"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "reqwest 0.12.28",
  "serde_json",
@@ -6218,7 +6218,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-improvement"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "rusqlite",
  "ryu-improvement-contracts",
@@ -6228,14 +6228,14 @@ dependencies = [
 
 [[package]]
 name = "ryu-improvement-contracts"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ryu-json-store"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -6245,7 +6245,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-kernel-contracts"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "schemars 1.2.2",
  "semver",
@@ -6256,7 +6256,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-knowledge"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "noyalib",
@@ -6268,7 +6268,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-learning"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6290,7 +6290,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-mcp-catalog"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6302,7 +6302,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-memory"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6318,7 +6318,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-mesh"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6329,7 +6329,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-model-catalog"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6347,14 +6347,14 @@ dependencies = [
 
 [[package]]
 name = "ryu-model-format"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ryu-notify"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "reqwest 0.12.28",
  "ryu-egress",
@@ -6365,7 +6365,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-openapi-import"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "noyalib",
  "serde_json",
@@ -6373,7 +6373,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-optimizer"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "ryu-json-store",
@@ -6398,7 +6398,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-predict"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -6409,7 +6409,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-rag"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6427,7 +6427,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-realtime"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde_json",
  "tokio",
@@ -6436,7 +6436,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-redis-wire"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "native-tls",
  "tokio",
@@ -6447,7 +6447,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-runtime-install"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "fs4",
@@ -6471,7 +6471,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-sandbox"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "landlock",
@@ -6494,7 +6494,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-search"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6508,7 +6508,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-sidecar-runtime"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "dirs",
  "hmac 0.12.1",
@@ -6521,7 +6521,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-skills"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -6541,7 +6541,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-spaces"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6568,7 +6568,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-storage"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -6579,7 +6579,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-stt"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6596,14 +6596,14 @@ dependencies = [
 
 [[package]]
 name = "ryu-teams-contracts"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ryu-tool-exec"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6619,7 +6619,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-tool-registry"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -6628,7 +6628,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-tracing"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6644,7 +6644,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-usage"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6661,7 +6661,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-vad"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "ryu-downloads",
@@ -6672,7 +6672,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-vault"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6696,7 +6696,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-vector-stores"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6716,7 +6716,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-webhook-ingress"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6732,7 +6732,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-workspace"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "dirs",

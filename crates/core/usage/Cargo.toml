@@ -1,6 +1,6 @@
 [package]
 name = "ryu-usage"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "Per-agent subscription usage meters for Ryu: reads existing credentials for Claude Code, Codex, Cursor, Copilot, Grok, Z.ai GLM, Devin, Antigravity, and OpenCode Go, then calls vendor usage endpoints and returns normalized quota windows and balances. Never refreshes or writes provider credentials, and never spends a banked reset."

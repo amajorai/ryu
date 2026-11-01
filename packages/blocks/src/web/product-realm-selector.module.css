@@ -19,12 +19,14 @@
 /*
  * A product's Anatomy figure inside its card: capped to the card's drawing
  * area, and its paper (the fill that hides faces behind faces) matched to
- * the card's muted tone in both themes.
+ * the card's muted tone in both themes. Its width shrinks to the height cap,
+ * so it is centred in the card's full-width drawing area.
  */
 .figure [class~="iso-svg"] {
 	width: auto;
 	max-width: 100%;
 	max-height: 13rem;
+	margin-inline: auto;
 }
 .figure [class~="iso"][class~="iso-quiet"] {
 	--anatomy-paper: color-mix(in oklab, var(--muted) 60%, var(--background));

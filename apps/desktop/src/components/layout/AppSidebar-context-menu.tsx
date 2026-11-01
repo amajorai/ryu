@@ -21,6 +21,7 @@ import {
 	type useSidebarMode,
 } from "@/src/hooks/useSidebarMode.ts";
 import type { useSidebarModes } from "@/src/hooks/useSidebarModes.ts";
+import { useSidebarProjectRailPreference } from "@/src/hooks/useSidebarProjectRail.ts";
 import { useSidebarVariant } from "@/src/hooks/useSidebarVariant.ts";
 import { setTabLayout, useTabLayout } from "@/src/hooks/useTabLayout.ts";
 import {
@@ -56,6 +57,7 @@ export function SidebarRootContextMenuContent({
 }) {
 	const tabLayout = useTabLayout();
 	const [sidebarVariant, setSidebarVariant] = useSidebarVariant();
+	const [projectRail, setProjectRail] = useSidebarProjectRailPreference();
 	const [groupByDate, setGroupByDate] = useChatDateGrouping();
 	const [groupedNav, setGroupedNav] = useSidebarGroupedNav();
 	const [showSidebarChatPreview, setShowSidebarChatPreview] =
@@ -90,6 +92,12 @@ export function SidebarRootContextMenuContent({
 				onClick={() => setSidebarVariant("inset")}
 			>
 				Inset
+			</CheckedContextMenuItem>
+			<CheckedContextMenuItem
+				checked={projectRail}
+				onClick={() => setProjectRail(!projectRail)}
+			>
+				Project rail
 			</CheckedContextMenuItem>
 			<ContextMenuSeparator />
 			<SidebarListAppearanceMenuItems

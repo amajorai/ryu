@@ -1,5 +1,6 @@
 "use client";
 
+import { GlassScrimCard } from "@ryu/ui/components/glasscn/glass-scrim-card.tsx";
 import { Logo } from "@ryu/ui/components/logo";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -14,15 +15,27 @@ import {
 	readBrowserPageSelection,
 } from "./browser-context.ts";
 import {
+	type AssistantColorScheme,
+	AssistantColorSchemeProvider,
+	colorSchemeClass,
+	useResolvedColorScheme,
+} from "./color-scheme.tsx";
+import {
 	DeferredAssistantSession,
 	preloadAssistantSession,
 } from "./deferred-session.tsx";
 import { RyuAssistantMorph } from "./morph.tsx";
 import styles from "./public-widget.module.css";
 import type { AssistantMode } from "./runtime-controls.tsx";
-import { ASSISTANT_GLASS_CHROME, ASSISTANT_GLASS_FILL } from "./skin.ts";
+import {
+	ASSISTANT_GLASS_CHROME,
+	ASSISTANT_GLASS_FILL,
+	ASSISTANT_ISLAND_LAUNCHER_SCRIM,
+	ASSISTANT_ISLAND_LAUNCHER_SKIN,
+} from "./skin.ts";
 import { useWebMcpPageTools } from "./webmcp.ts";
 
+export type { AssistantColorScheme } from "./color-scheme.tsx";
 export type { AssistantMode } from "./runtime-controls.tsx";
 
 export interface RyuAssistantWidgetProps {
@@ -44,15 +57,48 @@ export interface RyuAssistantWidgetProps {
 	 */
 	poweredByRyu?: boolean;
 	showLauncher?: boolean;
+	/**
+	 * Light or dark appearance. `auto` (default) detects the host page's theme
+	 * (a `.dark` class or `data-theme` on `<html>`/`<body>`, its CSS
+	 * `color-scheme`, its background, then the visitor's system setting) and
+	 * follows changes; `light` or `dark` pins the widget for any page.
+	 */
+	theme?: AssistantColorScheme;
 }
 
-// Same geometry and launcher as Desktop's floating Ask Ryu (AssistantDock): a
-// 400 × 620 panel that springs out of a 40px circle wearing the 34px eyes.
+// Same geometry as Desktop's floating Ask Ryu (AssistantDock): a 400 × 620 panel
+// that springs out of a 40px circle wearing the 34px eyes, dressed as the
+// Island's logo circle.
 const MORPH_CONTENT_HEIGHT = 620;
 const MORPH_CONTENT_WIDTH = 400;
 const LAUNCHER_EYES_SIZE = "34px";
 /** The panel's corner radius once open, matching `RyuAssistantMorph`. */
 const INLINE_PANEL_RADIUS = "rounded-2xl";
+
+/**
+ * The launcher's face: the Island's logo circle (Liquid Glass under a popover
+ * scrim) wearing the 34px eyes, so the widget reads as the Island on any site.
+ */
+function IslandLauncherFace() {
+	return (
+		<GlassScrimCard
+			appearance="island"
+			className="h-full w-full"
+			contour="round"
+			data-ryu-launcher-face="island"
+			scrimClassName={ASSISTANT_ISLAND_LAUNCHER_SCRIM}
+			surfaceClassName="h-full w-full rounded-full"
+		>
+			<span className="relative z-[2] flex h-full w-full items-center justify-center">
+				<Logo
+					className="text-current"
+					size={LAUNCHER_EYES_SIZE}
+					variant="eyes"
+				/>
+			</span>
+		</GlassScrimCard>
+	);
+}
 
 /** The visitor's page selection, for the live region and the context chips. */
 function usePageSelection(): string | null {
@@ -91,7 +137,11 @@ export function RyuAssistantWidget({
 	openOnMount = false,
 	poweredByRyu = false,
 	showLauncher = true,
+	theme = "auto",
 }: RyuAssistantWidgetProps) {
+	const scheme = useResolvedColorScheme(theme);
+	const schemeClass = colorSchemeClass(scheme);
+	const schemeStyle = scheme ? { colorScheme: scheme } : undefined;
 	const [open, setOpen] = useState(openOnMount || inline);
 	const selection = usePageSelection();
 	const pageTools = useWebMcpPageTools();
@@ -122,20 +172,25 @@ export function RyuAssistantWidget({
 	if (inline) {
 		// The inline section wears the same glass card the launcher opens into.
 		return (
-			<div
-				className={cn(
-					"w-full overflow-hidden",
-					INLINE_PANEL_RADIUS,
-					ASSISTANT_GLASS_FILL,
-					ASSISTANT_GLASS_CHROME,
-					styles.inline
-				)}
-				data-ryu-assistant-widget="true"
-				ref={contextRootRef}
-			>
-				{selectionAnnouncement}
-				{session}
-			</div>
+			<AssistantColorSchemeProvider scheme={scheme}>
+				<div
+					className={cn(
+						"w-full overflow-hidden",
+						INLINE_PANEL_RADIUS,
+						ASSISTANT_GLASS_FILL,
+						ASSISTANT_GLASS_CHROME,
+						styles.inline,
+						schemeClass
+					)}
+					data-ryu-assistant-widget="true"
+					data-ryu-color-scheme={scheme ?? undefined}
+					ref={contextRootRef}
+					style={schemeStyle}
+				>
+					{selectionAnnouncement}
+					{session}
+				</div>
+			</AssistantColorSchemeProvider>
 		);
 	}
 
@@ -144,39 +199,41 @@ export function RyuAssistantWidget({
 	}
 
 	return (
-		<div
-			data-placement="floating"
-			data-ryu-assistant-widget="true"
-			ref={contextRootRef}
-		>
-			{selectionAnnouncement}
-			{launcherPromo && !open ? (
-				<div className={cn("fixed", styles.launcherPromo)}>{launcherPromo}</div>
-			) : null}
-			<RyuAssistantMorph
-				bgClassName={ASSISTANT_GLASS_FILL}
-				chromeClassName={ASSISTANT_GLASS_CHROME}
-				className={cn("fixed h-10 w-10", styles.launcher)}
-				contentHeight={MORPH_CONTENT_HEIGHT}
-				contentMaxHeight="calc(100svh - 2rem - var(--ryu-assistant-launcher-lift, 0px))"
-				contentMaxWidth="calc(100vw - 2rem)"
-				contentWidth={MORPH_CONTENT_WIDTH}
-				dialogLabel="Ask Ryu"
-				isOpen={open}
-				keepContentMounted
-				onOpenChange={setOpen}
-				onTriggerIntent={preloadAssistantSession}
-				trigger={
-					<Logo
-						className="text-current"
-						size={LAUNCHER_EYES_SIZE}
-						variant="eyes"
-					/>
-				}
-				triggerLabel="Open Ask Ryu"
+		<AssistantColorSchemeProvider scheme={scheme}>
+			<div
+				className={schemeClass}
+				data-placement="floating"
+				data-ryu-assistant-widget="true"
+				data-ryu-color-scheme={scheme ?? undefined}
+				ref={contextRootRef}
+				style={schemeStyle}
 			>
-				{session}
-			</RyuAssistantMorph>
-		</div>
+				{selectionAnnouncement}
+				{launcherPromo && !open ? (
+					<div className={cn("fixed", styles.launcherPromo)}>
+						{launcherPromo}
+					</div>
+				) : null}
+				<RyuAssistantMorph
+					bgClassName={ASSISTANT_GLASS_FILL}
+					chromeClassName={ASSISTANT_GLASS_CHROME}
+					className={cn("fixed h-10 w-10", styles.launcher)}
+					contentHeight={MORPH_CONTENT_HEIGHT}
+					contentMaxHeight="calc(100svh - 2rem - var(--ryu-assistant-launcher-lift, 0px))"
+					contentMaxWidth="calc(100vw - 2rem)"
+					contentWidth={MORPH_CONTENT_WIDTH}
+					dialogLabel="Ask Ryu"
+					isOpen={open}
+					keepContentMounted
+					onOpenChange={setOpen}
+					onTriggerIntent={preloadAssistantSession}
+					trigger={<IslandLauncherFace />}
+					triggerLabel="Open Ask Ryu"
+					triggerSkinClassName={ASSISTANT_ISLAND_LAUNCHER_SKIN}
+				>
+					{session}
+				</RyuAssistantMorph>
+			</div>
+		</AssistantColorSchemeProvider>
 	);
 }

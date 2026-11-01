@@ -3516,7 +3516,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "ryu-composio"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3537,7 +3537,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-crypto"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3561,7 +3561,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-deletion-guard"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "regex",
  "shell-words",
@@ -3569,7 +3569,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gateway"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3635,7 +3635,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-audit"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3654,7 +3654,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-budget"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "dashmap",
  "rusqlite",
@@ -3666,7 +3666,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-cache"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -3682,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-channels"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3704,7 +3704,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-contracts"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3731,7 +3731,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-evals"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "dashmap",
  "regex",
@@ -3743,7 +3743,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-firewall"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "regex",
  "ryu-deletion-guard",
@@ -3755,7 +3755,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-governance"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -3765,14 +3765,14 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-passthrough"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ryu-gw-providers"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aws-credential-types",
  "aws-sigv4",
@@ -3797,7 +3797,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-router"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "fastrand",
  "serde",
@@ -3807,7 +3807,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-gw-screening"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -3830,7 +3830,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-redis-wire"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "native-tls",
  "tokio",
@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-sidecar-runtime"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "dirs",
  "serde",
@@ -3850,7 +3850,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-tool-registry"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -3859,7 +3859,7 @@ dependencies = [
 
 [[package]]
 name = "ryu-tracing"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

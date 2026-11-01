@@ -113,6 +113,17 @@ them and focusing or selecting inside them never replaces the stored page select
 composer or transcript. Hosts that call `captureBrowserPageContext` or `isAssistantSelectionChange`
 around their own assistant popups should mark those popups the same way.
 
+The closed launcher wears the Island's logo circle (`ASSISTANT_ISLAND_LAUNCHER_SKIN` and
+`ASSISTANT_ISLAND_LAUNCHER_SCRIM` around a Liquid Glass body) instead of the panel glass.
+
+`theme` sets light or dark: `"auto"` (default) detects the host page's theme (a `.dark`/`.light`
+class or `data-theme`-style attribute on `<html>`/`<body>`, its CSS `color-scheme`, its background
+lightness, then `prefers-color-scheme`) and follows changes; `"light"` or `"dark"` pins it. A dark
+widget wears the `dark` class and a light one `ryu-color-scheme-light`, which `@ryu/ui` maps to its
+light tokens and excludes from the `dark:` variant. Hosts with their own token stylesheet should
+declare their light tokens on `.ryu-color-scheme-light` too. Portaled popups pick the scheme up
+through `useAssistantPopupLayer`.
+
 Use `inline openOnMount showLauncher={false}` for an expanded page section. For a custom trigger
 or a host-owned runtime, compose `RyuAssistantMorph` with `RyuAssistantChat` instead, passing
 `ASSISTANT_GLASS_FILL` and `ASSISTANT_GLASS_CHROME` from `@ryu/assistant-widget/skin` as its

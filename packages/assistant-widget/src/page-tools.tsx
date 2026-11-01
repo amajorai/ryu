@@ -13,9 +13,9 @@ import {
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
 import { useState } from "react";
+import { useAssistantPopupLayer } from "./color-scheme.tsx";
 import { PageToolForm } from "./page-tools-form.tsx";
 import { displayTitle, toolCategory } from "./page-tools-schema.ts";
-import { ASSISTANT_POPUP_LAYER } from "./skin.ts";
 import type { WebMcpPageTool } from "./webmcp.ts";
 import type { WebMcpRecord } from "./webmcp-contract.ts";
 
@@ -32,6 +32,7 @@ export function PageToolsPopover({
 	tools,
 }: PageToolsPopoverProps) {
 	const tl = useLiteralMessages();
+	const popupLayer = useAssistantPopupLayer();
 	const [open, setOpen] = useState(false);
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	if (tools.length === 0) {
@@ -70,7 +71,7 @@ export function PageToolsPopover({
 				data-lenis-prevent=""
 				data-ryu-assistant-widget="true"
 				onMouseDown={(event) => event.stopPropagation()}
-				positionerClassName={ASSISTANT_POPUP_LAYER}
+				positionerClassName={popupLayer}
 			>
 				{selected ? (
 					<PageToolForm

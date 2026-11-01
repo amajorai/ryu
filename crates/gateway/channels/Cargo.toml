@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gw-channels"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
@@ -24,4 +24,4 @@ base64 = "0.22"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 # Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
 # backend: the key arrives from Core (RYU_SEAL_KEY) or RYU_MASTER_KEY.
-ryu-crypto = { path = "../../core/crypto", version = "0.5.0", default-features = false }
+ryu-crypto = { path = "../../core/crypto", version = "0.5.1", default-features = false }

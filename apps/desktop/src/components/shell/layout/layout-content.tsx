@@ -386,10 +386,6 @@ export function LayoutContent({
 				className={cn(
 					cn(
 						"relative flex flex-col overflow-hidden",
-						// Inset is the flush default: the content sits beside the
-						// sidebar on tone alone, without the primitive's card margin,
-						// radius or shadow.
-						"md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0 md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none",
 						osProduct && "m-0",
 						// Inset mode normally keeps mr-2 so the canvas clears the window
 						// edge; when the Ask Ryu rail is docked it plays the same role as

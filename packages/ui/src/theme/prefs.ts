@@ -180,7 +180,7 @@ export function defaultThemePrefs(): ThemePrefs {
 		scale: DEFAULT_SCALE,
 		cardSpacing: null,
 		pointerCursor: false,
-		chromeShadows: false,
+		chromeShadows: true,
 		dialogOverlayBlur: false,
 		popupOverlayBlur: false,
 		invertedBackgrounds: false,

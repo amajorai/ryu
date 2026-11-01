@@ -1,3 +1,5 @@
+"use client";
+
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useState } from "react";

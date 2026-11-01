@@ -14,6 +14,7 @@ import { ChevronDown } from "lucide-react";
 import {
 	type ComponentType,
 	lazy,
+	type MouseEvent,
 	Suspense,
 	useCallback,
 	useEffect,
@@ -34,8 +35,13 @@ import {
 	resolveDownloadState,
 	stableReleases,
 } from "./download-assets.ts";
+import {
+	DownloadGuideHost,
+	preloadDownloadGuide,
+} from "./download-guide-overlay.tsx";
 import styles from "./download-menu.module.css";
 import { DownloadOsLabel } from "./download-os-label.tsx";
+import { announceDownloadStarted } from "./download-started.ts";
 import { useSendDownloadLink } from "./send-download-link.tsx";
 import { OS_SVGL, SvglIcon } from "./svgl-icon.tsx";
 import { whenBrowserIdle } from "./when-browser-idle.ts";
@@ -146,8 +152,16 @@ export function DownloadMenu({
 			});
 	}, []);
 
+	// The post-download guide is only wanted once a visitor reaches for the
+	// primary button, so its chunk warms on that intent, never at idle.
+	const requestPrimary = useCallback(() => {
+		requestReleases();
+		preloadDownloadGuide();
+	}, [requestReleases]);
+
 	const requestMenu = useCallback(() => {
 		requestReleases();
+		preloadDownloadGuide();
 		setMenuRequested(true);
 	}, [requestReleases]);
 
@@ -178,7 +192,23 @@ export function DownloadMenu({
 	const resolvedArch = arch ?? "intel";
 	const state = resolveDownloadState(releases, os, resolvedArch);
 	const ready = arch !== null && state.kind === "ready";
-	const href = ready ? state.asset.browser_download_url : RELEASES_PAGE;
+	const readyAsset = ready ? state.asset : null;
+	const href = readyAsset ? readyAsset.browser_download_url : RELEASES_PAGE;
+	// A phone's tap is intercepted by the send-link drawer; the releases-page
+	// fallback opens a new tab. Only a click that hands over the installer
+	// itself opens the post-download guide.
+	const handlePrimaryClick = (event: MouseEvent<HTMLElement>) => {
+		sendLink.intercept(event);
+		if (event.defaultPrevented || !readyAsset) {
+			return;
+		}
+		announceDownloadStarted({
+			arch,
+			assetName: readyAsset.name,
+			href: readyAsset.browser_download_url,
+			os,
+		});
+	};
 	const primaryLabel = showPlatform
 		? arch
 			? tl("Download for {osName} ({archLabel})", {
@@ -236,15 +266,15 @@ export function DownloadMenu({
 							: "joined"
 					}
 					nativeButton={false}
-					onClick={sendLink.intercept}
-					onFocus={requestReleases}
-					onPointerEnter={requestReleases}
+					onClick={handlePrimaryClick}
+					onFocus={requestPrimary}
+					onPointerEnter={requestPrimary}
 					render={
 						<a
-							download={ready ? state.asset.name : undefined}
+							download={readyAsset ? readyAsset.name : undefined}
 							href={href}
 							rel="noopener noreferrer"
-							{...(ready ? {} : { target: "_blank" })}
+							{...(readyAsset ? {} : { target: "_blank" })}
 						/>
 					}
 					size={size}
@@ -328,6 +358,7 @@ export function DownloadMenu({
 				) : null}
 			</div>
 			{sendLink.drawer}
+			<DownloadGuideHost />
 		</>
 	);
 }

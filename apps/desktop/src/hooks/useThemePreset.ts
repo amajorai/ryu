@@ -161,7 +161,7 @@ function buildThemePrefs(localeOverride?: string): ThemePrefs {
 		scale: Number(localStorage.getItem(STORAGE_KEYS.scale) ?? DEFAULT_SCALE),
 		cardSpacing: storedCardSpacing === null ? null : Number(storedCardSpacing),
 		pointerCursor: localStorage.getItem("ryu_pointer_cursor") === "true",
-		chromeShadows: localStorage.getItem("ryu_chrome_shadows") === "true",
+		chromeShadows: localStorage.getItem("ryu_chrome_shadows") !== "false",
 		dialogOverlayBlur:
 			localStorage.getItem("ryu_dialog_overlay_blur") === "true",
 		popupOverlayBlur: localStorage.getItem("ryu_popup_overlay_blur") === "true",
