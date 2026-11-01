@@ -41,6 +41,14 @@ pub(crate) const SUBSCRIPTION_BACKENDS_FLAG: &str = "cloud_tasks.subscription_ba
 /// `packages/auth/src/lib/feature-flags.ts`.
 pub(crate) const HOSTED_OPENAI_FLAG: &str = "cloud_tasks.subscription_backends_hosted_openai";
 
+/// The Claude plan on a Ryu-hosted (managed) node. A managed node sends the plan's
+/// traffic from a datacenter IP, which Anthropic can restrict for personal plans, so
+/// this stays off unless Ryu turns it on. Claude Code inside a Ryu Box is a separate,
+/// disclosed path and does not read it. Must equal
+/// `CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG` in
+/// `packages/auth/src/lib/feature-flags.ts`.
+pub(crate) const HOSTED_ANTHROPIC_FLAG: &str = "cloud_tasks.subscription_backends_hosted_anthropic";
+
 /// A backend a cloud task can run on.
 #[derive(
     Clone,
@@ -269,6 +277,20 @@ pub(crate) async fn rollout_allows(auth: &ResolvedAuthorization) -> bool {
 /// allowed. A Ryu-managed node is a hosted app, which needs OpenAI's approval, so it
 /// needs [`HOSTED_OPENAI_FLAG`] in the caller's signed flags.
 pub(crate) async fn openai_plan_allowed(auth: &ResolvedAuthorization) -> bool {
+    hosted_plan_allowed(auth, HOSTED_OPENAI_FLAG).await
+}
+
+/// Whether this caller may use a Claude plan on this node. A self-hosted node (the
+/// owner's own computer or VM) sends it from the owner's own network and is allowed. A
+/// Ryu-managed node would send it from a datacenter IP, so it needs
+/// [`HOSTED_ANTHROPIC_FLAG`] in the caller's signed flags.
+pub(crate) async fn anthropic_plan_allowed(auth: &ResolvedAuthorization) -> bool {
+    hosted_plan_allowed(auth, HOSTED_ANTHROPIC_FLAG).await
+}
+
+/// A self-hosted node always allows a plan; a Ryu-managed node only with `flag` in the
+/// caller's verified signed flags.
+async fn hosted_plan_allowed(auth: &ResolvedAuthorization, flag: &str) -> bool {
     if !crate::sidecar::control_plane::is_managed_node() {
         return true;
     }
@@ -277,7 +299,7 @@ pub(crate) async fn openai_plan_allowed(auth: &ResolvedAuthorization) -> bool {
     };
     crate::identity_verify::verified_feature_flags(token)
         .await
-        .is_some_and(|flags| flags.keys.contains(HOSTED_OPENAI_FLAG))
+        .is_some_and(|flags| flags.keys.contains(flag))
 }
 
 /// Whether this caller may use a ChatGPT plan in Ryu's own cloud (a Ryu Box), which is

@@ -9,6 +9,7 @@ import {
 	CATALOG_AUDIENCE_RULE_ID,
 	CLOUD_TASKS_BOX_BACKEND_FLAG,
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG,
+	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG,
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG,
 	COMPUTE_SHARE_FLAG,
 	catalogAudienceRule,
@@ -506,19 +507,20 @@ describe("audience declarations", () => {
 		);
 	});
 
-	it("keeps hosted OpenAI plan backends off, closed, and carried to Core", () => {
-		expect(
-			featureFlagByKey(CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG)
-		).toMatchObject({
-			coreClaim: true,
-			defaultValue: false,
-			exposure: "client",
-			failMode: "closed",
-			key: "cloud_tasks.subscription_backends_hosted_openai",
-		});
-		expect(
-			featureFlagFallback(CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG)
-		).toBe(false);
+	it("keeps hosted plan backends off, closed, and carried to Core", () => {
+		for (const [key, provider] of [
+			[CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG, "openai"],
+			[CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG, "anthropic"],
+		] as const) {
+			expect(featureFlagByKey(key)).toMatchObject({
+				coreClaim: true,
+				defaultValue: false,
+				exposure: "client",
+				failMode: "closed",
+				key: `cloud_tasks.subscription_backends_hosted_${provider}`,
+			});
+			expect(featureFlagFallback(key)).toBe(false);
+		}
 	});
 
 	it("uses only known audiences in the catalog", () => {

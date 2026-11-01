@@ -9,6 +9,11 @@ use axum::response::Response;
 use axum::Extension;
 use serde_json::{json, Value};
 
+/// The Claude plan's hosted-node gate. Declared here because the parent suite is over
+/// the file-size limit; it sits beside this file under `tests/`.
+#[path = "hosted_anthropic.rs"]
+mod hosted_anthropic;
+
 async fn reply(response: Response) -> (StatusCode, Value) {
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)

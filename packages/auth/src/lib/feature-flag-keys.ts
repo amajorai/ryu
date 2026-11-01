@@ -156,6 +156,14 @@ export const CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG =
 	"cloud_tasks.subscription_backends_hosted_openai" as const;
 
 /**
+ * Hosted (Ryu-managed node) use of the Claude plan backends. A managed node sends the
+ * plan's traffic from a datacenter IP, which Anthropic can restrict, so this stays off.
+ * Claude Code in a Ryu Box does not read it. Core reads it from the signed `ryu_flags`.
+ */
+export const CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG =
+	"cloud_tasks.subscription_backends_hosted_anthropic" as const;
+
+/**
  * Stable key for the hosted Ryu Managed Agents surface (`/api/v1/managed-agents`,
  * docs/managed-agents-spec.md). Platform level: off answers every route 503
  * `managed_agents_disabled` and the sweeper skips its passes. Data is kept.

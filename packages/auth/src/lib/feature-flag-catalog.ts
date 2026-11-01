@@ -10,6 +10,7 @@ import {
 	CHALLENGES_FLAG,
 	CLOUD_TASKS_BOX_BACKEND_FLAG,
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG,
+	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG,
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG,
 	COMPUTE_SHARE_FLAG,
 	DESKTOP_TRIAL_FLAG,
@@ -383,6 +384,15 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
 		key: CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG,
 		description:
 			"Allow Codex plan backends and new Sign in with ChatGPT sign-ins on Ryu-managed (hosted) nodes. Off until OpenAI approves Ryu through its Sign in with ChatGPT interest form; local and self-hosted nodes do not need it.",
+		defaultValue: false,
+		exposure: "client",
+		failMode: "closed",
+		coreClaim: true,
+	},
+	{
+		key: CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG,
+		description:
+			"Allow Claude plan backends on Ryu-managed (hosted) nodes, which send the plan from a datacenter IP that Anthropic can restrict. Self-hosted nodes and Claude Code in a Ryu Box do not need it.",
 		defaultValue: false,
 		exposure: "client",
 		failMode: "closed",
