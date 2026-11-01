@@ -1,12 +1,12 @@
 THE FOLLOWING SETS FORTH ATTRIBUTION NOTICES FOR THIRD PARTY SOFTWARE THAT MAY BE CONTAINED IN PORTIONS OF THIS PRODUCT
 
-Ryu Desktop includes 2,363 third-party packages from its JavaScript and Rust dependency graphs.
+Ryu Desktop includes 2,364 third-party packages from its JavaScript and Rust dependency graphs.
 The inventory below keeps each package's version and license metadata together with the notice text shipped by its upstream package when available.
 Packages that publish only metadata are listed as such; no missing upstream license text is invented here.
 
 DEPENDENCY INVENTORY
 
-JAVASCRIPT PACKAGES (1684)
+JAVASCRIPT PACKAGES (1685)
 
 @ai-sdk/gateway (4.0.59)
 License: Apache-2.0
@@ -608,84 +608,84 @@ Author: MUI Team
 Repository: https://github.com/mui/base-ui
 Notice text: notice-0016
 
-@better-auth/api-key (1.7.1)
+@better-auth/api-key (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/cimd (1.7.1)
+@better-auth/cimd (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/core (1.7.1)
+@better-auth/core (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/drizzle-adapter (1.7.1)
+@better-auth/drizzle-adapter (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/expo (1.7.1)
+@better-auth/expo (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/i18n (1.7.1)
+@better-auth/i18n (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/kysely-adapter (1.7.1)
+@better-auth/kysely-adapter (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/mcp (1.7.1)
+@better-auth/mcp (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/memory-adapter (1.7.1)
+@better-auth/memory-adapter (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/mongo-adapter (1.7.1)
+@better-auth/mongo-adapter (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/oauth-provider (1.7.1)
+@better-auth/oauth-provider (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/passkey (1.7.1)
+@better-auth/passkey (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/prisma-adapter (1.7.1)
+@better-auth/prisma-adapter (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/scim (1.7.1)
+@better-auth/scim (1.7.7)
 License: MIT
 Author: Jonathan Samines
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/sso (1.7.1)
+@better-auth/sso (1.7.7)
 License: MIT
 Author: Bereket Engida
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
 
-@better-auth/telemetry (1.7.1)
+@better-auth/telemetry (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
@@ -703,6 +703,11 @@ Repository: https://github.com/better-auth/utils
 Notice text: not shipped with this package
 
 @better-fetch/fetch (1.3.1)
+License: MIT
+Repository: https://github.com/better-auth/better-fetch
+Notice text: notice-0018
+
+@better-fetch/fetch (1.3.2)
 License: MIT
 Repository: https://github.com/better-auth/better-fetch
 Notice text: notice-0018
@@ -3930,7 +3935,7 @@ Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 Repository: wooorm/bcp-47-match
 Notice text: notice-0154
 
-better-auth (1.7.1)
+better-auth (1.7.7)
 License: MIT
 Repository: https://github.com/better-auth/better-auth
 Notice text: notice-0017
@@ -15437,11 +15442,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 notice-0017
-Used by: @better-auth/api-key@1.7.1, @better-auth/cimd@1.7.1, @better-auth/core@1.7.1, @better-auth/drizzle-adapter@1.7.1
-Used by: @better-auth/expo@1.7.1, @better-auth/i18n@1.7.1, @better-auth/kysely-adapter@1.7.1, @better-auth/mcp@1.7.1
-Used by: @better-auth/memory-adapter@1.7.1, @better-auth/mongo-adapter@1.7.1, @better-auth/oauth-provider@1.7.1, @better-auth/passkey@1.7.1
-Used by: @better-auth/prisma-adapter@1.7.1, @better-auth/scim@1.7.1, @better-auth/sso@1.7.1, @better-auth/telemetry@1.7.1
-Used by: better-auth@1.7.1
+Used by: @better-auth/api-key@1.7.7, @better-auth/cimd@1.7.7, @better-auth/core@1.7.7, @better-auth/drizzle-adapter@1.7.7
+Used by: @better-auth/expo@1.7.7, @better-auth/i18n@1.7.7, @better-auth/kysely-adapter@1.7.7, @better-auth/mcp@1.7.7
+Used by: @better-auth/memory-adapter@1.7.7, @better-auth/mongo-adapter@1.7.7, @better-auth/oauth-provider@1.7.7, @better-auth/passkey@1.7.7
+Used by: @better-auth/prisma-adapter@1.7.7, @better-auth/scim@1.7.7, @better-auth/sso@1.7.7, @better-auth/telemetry@1.7.7
+Used by: better-auth@1.7.7
 
 --- LICENSE.md ---
 The MIT License (MIT)
@@ -15466,7 +15471,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 notice-0018
-Used by: @better-fetch/fetch@1.3.1
+Used by: @better-fetch/fetch@1.3.1, @better-fetch/fetch@1.3.2
 
 --- LICENSE ---
 MIT License

@@ -74,6 +74,34 @@ describe("FeaturedUpdates", () => {
 		expect(html).toContain('alt="Post plain"');
 	});
 
+	it("renders a dark-mode banner that only the dark theme shows", () => {
+		const html = renderToStaticMarkup(
+			<FeaturedUpdates
+				items={[
+					{
+						...item("themed", "/content/blog/themed/banner.webp"),
+						imageDark: "/content/blog/themed/banner-dark.webp",
+					},
+				]}
+			/>
+		);
+		const light = html.match(/<img[^>]*banner\.webp[^>]*>/)?.[0] ?? "";
+		const dark = html.match(/<img[^>]*banner-dark\.webp[^>]*>/)?.[0] ?? "";
+		expect(light).toContain("dark:hidden");
+		expect(dark).toContain("hidden");
+		expect(dark).toContain("dark:block");
+	});
+
+	it("shows a single image when there is no dark-mode banner", () => {
+		const html = renderToStaticMarkup(
+			<FeaturedUpdates
+				items={[item("plain", "/content/blog/plain/banner.webp")]}
+			/>
+		);
+		expect(html.match(/<img/g)).toHaveLength(1);
+		expect(html).not.toContain("dark:hidden");
+	});
+
 	it("drops an unsafe image URL in favour of the fallback card", () => {
 		const html = renderToStaticMarkup(
 			<FeaturedUpdates items={[item("unsafe", "javascript:alert(1)")]} />

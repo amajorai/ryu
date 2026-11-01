@@ -11,14 +11,16 @@ import { formatPublicationDate } from "./publication-date.ts";
 /**
  * One item in a featured tier: a blog post, a changelog release, or anything
  * else with a page, a date, and a card image. `image` is the item's own banner
- * when it has one; `fallbackImage` (the page's generated social card) takes
- * over when there is no banner or the banner fails to load.
+ * when it has one, and `imageDark` its dark-mode banner; `fallbackImage` (the
+ * page's generated social card) takes over when there is no banner or the
+ * banner fails to load.
  */
 export interface FeaturedUpdateData {
 	date: string;
 	fallbackImage?: string;
 	href: string;
 	image?: string;
+	imageDark?: string;
 	key: string;
 	/** Short collection name shown before the date ("Blog", "Changelog"). */
 	label?: string;
@@ -30,38 +32,80 @@ const IMAGE_FRAME_CLASS =
 	"aspect-[1200/630] w-full overflow-hidden rounded-md bg-muted";
 
 /**
- * The card image with a broken-image guard: a failed banner falls back to the
- * generated card, and if that fails too the frame stays as a muted block.
+ * One image with a broken-image guard: each failed source falls back to the
+ * next, and when none is left nothing renders, leaving the frame muted.
+ */
+function FallbackImage({
+	alt,
+	className,
+	darkVariant = false,
+	sources,
+}: {
+	alt: string;
+	className?: string;
+	/** Marks the dark-mode copy so text exports of the page skip it. */
+	darkVariant?: boolean;
+	sources: readonly (string | undefined)[];
+}) {
+	const usable = sources
+		.map((source) => safeMediaUrl(source))
+		.filter((source): source is string => Boolean(source));
+	const [failedCount, setFailedCount] = useState(0);
+	const src = usable[failedCount];
+
+	return src ? (
+		<Image
+			alt={alt}
+			className={cn(
+				"h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105",
+				className
+			)}
+			data-theme-variant={darkVariant ? "dark" : undefined}
+			height={630}
+			key={src}
+			onError={() => setFailedCount((count) => count + 1)}
+			src={src}
+			unoptimized
+			width={1200}
+		/>
+	) : null;
+}
+
+/**
+ * The card image: the banner, or the generated card when there is none. A
+ * dark-mode banner renders beside it and the theme shows one of the two.
  */
 function FeaturedUpdateImage({
 	alt,
 	fallbackImage,
 	image,
+	imageDark,
 }: {
 	alt: string;
 	fallbackImage?: string;
 	image?: string;
+	imageDark?: string;
 }) {
-	const sources = [safeMediaUrl(image), safeMediaUrl(fallbackImage)].filter(
-		(source): source is string => Boolean(source)
-	);
-	const [failedCount, setFailedCount] = useState(0);
-	const src = sources[failedCount];
-
+	if (!(image && imageDark)) {
+		return (
+			<div className={IMAGE_FRAME_CLASS}>
+				<FallbackImage alt={alt} sources={[image, fallbackImage]} />
+			</div>
+		);
+	}
 	return (
 		<div className={IMAGE_FRAME_CLASS}>
-			{src ? (
-				<Image
-					alt={alt}
-					className="h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105"
-					height={630}
-					key={src}
-					onError={() => setFailedCount((count) => count + 1)}
-					src={src}
-					unoptimized
-					width={1200}
-				/>
-			) : null}
+			<FallbackImage
+				alt={alt}
+				className="dark:hidden"
+				sources={[image, fallbackImage]}
+			/>
+			<FallbackImage
+				alt={alt}
+				className="hidden dark:block"
+				darkVariant
+				sources={[imageDark, image, fallbackImage]}
+			/>
 		</div>
 	);
 }
@@ -134,6 +178,7 @@ function FeaturedUpdateCard({
 				alt={item.title}
 				fallbackImage={item.fallbackImage}
 				image={item.image}
+				imageDark={item.imageDark}
 			/>
 			<div className="flex flex-col gap-3">
 				<FeaturedUpdateMeta item={item} />

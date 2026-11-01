@@ -19,6 +19,7 @@ import { formatPublicationDate } from "./publication-date.ts";
  */
 export interface ChangelogEntryData {
 	banner?: string;
+	bannerDark?: string;
 	body?: ReactNode;
 	content: string;
 	date: string;
@@ -33,6 +34,7 @@ export interface ChangelogEntryData {
 export function ChangelogCard({ entry }: { entry: ChangelogEntryData }) {
 	const formattedDate = formatPublicationDate(entry.date, "short");
 	const bannerSrc = safeMediaUrl(entry.banner);
+	const bannerDarkSrc = safeMediaUrl(entry.bannerDark);
 
 	return (
 		<div className="group">
@@ -43,9 +45,22 @@ export function ChangelogCard({ entry }: { entry: ChangelogEntryData }) {
 							{}
 							<img
 								alt={entry.title}
-								className="h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105"
+								className={cn(
+									"h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105",
+									bannerDarkSrc && "dark:hidden"
+								)}
+								loading={bannerDarkSrc ? "lazy" : undefined}
 								src={bannerSrc}
 							/>
+							{bannerDarkSrc ? (
+								<img
+									alt={entry.title}
+									className="hidden h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105 dark:block"
+									data-theme-variant="dark"
+									loading="lazy"
+									src={bannerDarkSrc}
+								/>
+							) : null}
 						</div>
 					) : null}
 					<div className="flex flex-col gap-2">
@@ -93,6 +108,7 @@ export function ChangelogEntry({
 }) {
 	const formattedDate = formatPublicationDate(entry.date, "long");
 	const bannerSrc = safeMediaUrl(entry.banner);
+	const bannerDarkSrc = safeMediaUrl(entry.bannerDark);
 	// SAFETY: the host app serves /changelog/[slug]; this shared block cannot see
 	// that app's generated typedRoutes list.
 	const href = `/changelog/${entry.slug}` as Route;
@@ -163,9 +179,22 @@ export function ChangelogEntry({
 						{}
 						<img
 							alt={entry.title}
-							className="h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105"
+							className={cn(
+								"h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105",
+								bannerDarkSrc && "dark:hidden"
+							)}
+							loading={bannerDarkSrc ? "lazy" : undefined}
 							src={bannerSrc}
 						/>
+						{bannerDarkSrc ? (
+							<img
+								alt={entry.title}
+								className="hidden h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105 dark:block"
+								data-theme-variant="dark"
+								loading="lazy"
+								src={bannerDarkSrc}
+							/>
+						) : null}
 					</Link>
 				) : null}
 

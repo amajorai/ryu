@@ -19,6 +19,7 @@ import {
 import { FeaturedUpdates } from "./featured-updates.tsx";
 import { formatPublicationDate } from "./publication-date.ts";
 import { outlineCtaClass } from "./sections.tsx";
+import { ThemedImage } from "./themed-image.tsx";
 
 /**
  * Block-local author shape. The live app's MDX `Author` type is a structural
@@ -38,6 +39,7 @@ export interface BlogAuthorData {
 export interface BlogPostData {
 	authors?: BlogAuthorData[];
 	banner?: string;
+	bannerDark?: string;
 	content: string;
 	date: string;
 	id: string;
@@ -258,6 +260,7 @@ export function BlogFeatured({ posts }: { posts: BlogPostData[] }) {
 				fallbackImage: `/blog/${post.slug}/opengraph-image`,
 				href: `/blog/${post.slug}`,
 				image: post.banner,
+				imageDark: post.bannerDark,
 				key: post.id,
 				label: post.tag,
 				title: post.title,
@@ -279,9 +282,10 @@ export function BlogPostCard({ post }: { post: BlogPostData }) {
 					<LinkPendingIndicator className="top-3 right-3" />
 					{bannerSrc ? (
 						<div className="mb-4 aspect-video w-full overflow-hidden rounded-md">
-							<Image
+							<ThemedImage
 								alt={post.title}
 								className="h-full w-full object-cover transition-transform duration-200 motion-safe:group-hover:scale-105"
+								darkSrc={safeMediaUrl(post.bannerDark)}
 								height={337}
 								src={bannerSrc}
 								unoptimized
