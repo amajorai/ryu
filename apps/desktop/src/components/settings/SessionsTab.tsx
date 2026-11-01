@@ -18,6 +18,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { sileo } from "sileo";
+import { fetchDeviceLimitSummary } from "./device-limits-api.ts";
+import {
+	deviceSurfaceLabels,
+	SessionsDeviceLimits,
+	sessionSurface,
+} from "./SessionsDeviceLimits.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -39,6 +45,13 @@ export function SessionsTab() {
 		queryKey: ["sessions"],
 		queryFn: settingsApi.sessions.list,
 	});
+	// Keyed under "sessions" so revoking a session refreshes the usage too. A
+	// failure only hides the usage section; the session list stays usable.
+	const { data: deviceLimits } = useQuery({
+		queryKey: ["sessions", "device-limits"],
+		queryFn: fetchDeviceLimitSummary,
+	});
+	const surfaceLabels = deviceSurfaceLabels(tl);
 
 	const revokeMutation = useMutation({
 		mutationFn: settingsApi.sessions.revoke,
@@ -139,6 +152,7 @@ export function SessionsTab() {
 					<SettingsGroup>
 						{sessions.map((session) => {
 							const isCurrent = session.isCurrent === true;
+							const surface = sessionSurface(session);
 
 							return (
 								<SettingsItem
@@ -187,6 +201,7 @@ export function SessionsTab() {
 									    close the card after every session and split one list
 									    into a stack of single-row cards. */}
 									<p className="text-muted-foreground text-xs">
+										{surface && `${surfaceLabels[surface]} · `}
 										{session.ipAddress && `${session.ipAddress} · `}
 										{tl("Created {timeAgo}", {
 											timeAgo: formatDistanceToNow(
@@ -203,6 +218,7 @@ export function SessionsTab() {
 					</SettingsGroup>
 				)}
 			</SettingsSection>
+			<SessionsDeviceLimits summary={deviceLimits} />
 			<AlertDialog
 				onOpenChange={(open) => {
 					if (!open) {

@@ -87,6 +87,9 @@ pub const MCP_SAFE_ALLOWLIST: &[&str] = &[
     // screen the desktop app streams. The variable names the display, not a secret;
     // the spawned MCP child inherits whatever display the node operator configured.
     "DISPLAY",
+    // `headless_session()` in ghost-hands reads these to refuse physical input.
+    "WAYLAND_DISPLAY",
+    "RYU_GHOST_HEADLESS",
     // Research: an operator-set explicit engine address (Core no longer seeds it;
     // the app derives its profile-shifted engine port itself). Passed through so
     // an explicit override reaches the app's MCP child. Loopback URL, not a secret.
@@ -265,6 +268,9 @@ mod tests {
             ("RYU_PORT_OFFSET", "1000"),
             // A virtual-desktop node: the X display the desktop app streams.
             ("DISPLAY", ":99"),
+            // Read by ghost-hands `headless_session()` to gate physical input.
+            ("WAYLAND_DISPLAY", "wayland-0"),
+            ("RYU_GHOST_HEADLESS", "1"),
             // A neighbouring RYU_* var that is NOT allowlisted must still drop —
             // the entries above are individual decisions, not a prefix rule.
             ("RYU_GATEWAY_URL", "http://127.0.0.1:7981"),
@@ -275,6 +281,14 @@ mod tests {
         assert!(has(&out, "GHOST_DATA_DIR"));
         assert!(has(&out, "GHOST_MODELS_DIR"));
         assert!(has(&out, "DISPLAY"), "the virtual display must reach Ghost");
+        assert!(
+            has(&out, "WAYLAND_DISPLAY"),
+            "the Wayland display must reach Ghost"
+        );
+        assert!(
+            has(&out, "RYU_GHOST_HEADLESS"),
+            "the headless override must reach Ghost"
+        );
         assert!(
             !has(&out, "XAUTHORITY"),
             "the display authentication cookie must not cross the generic MCP boundary"

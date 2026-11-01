@@ -20,11 +20,13 @@ cargo build -p ghost-hands
 ## What it provides
 
 - **Click** (`click.rs`): `mouse_click`, `hover`, `drag`, `long_press`, `MouseButton`.
-- **Keyboard** (`keyboard.rs`): `type_text`, `press_key`, `send_hotkey`.
+- **Keyboard** (`keyboard/`): `type_text`, `press_key`, `send_hotkey`, plus `press_key_with` / `send_hotkey_with` taking `KeyOptions`. Typed text is never logged, only its length.
+- **Hotkey policy** (`policy.rs`): `KeyCombo` canonicalizes keys and modifier aliases (`cmd`/`win`/`super` => `meta`, `option` => `alt`, `escape` => `esc`, `backspace` => `delete`), and `check_key` / `check_hotkey` refuse session-ending or desktop-hijacking combos per OS (for example `cmd+q` on macOS, `alt+f4` and `win+l` on Windows, `ctrl+alt+f1`..`f12` on Linux) with `KeyError` (`POLICY_DENIED`), and unknown keys or modifiers with `INVALID_ARGS`. The policy is on by default in `press_key` and `send_hotkey`; only `KeyOptions { force: true }` bypasses it, and the dispatched combo is exactly the checked one.
+- **Click planning** (`mode.rs`): `plan_click` / `plan_click_with` (with an `allow_hid` gate), `headless_session()` (`RYU_GHOST_HEADLESS=1`, or Linux without `DISPLAY`/`WAYLAND_DISPLAY`) and `hid_permitted()`.
 - **Scroll** (`scroll.rs`): `scroll`.
 - **Window control** (`window.rs`): `focus_app`, `window_action`, `WindowAction`.
 - Per-platform backends (Win32 / Core Graphics / X11 XTEST + evdev) behind one API. Functions are synchronous; callers wrap in `spawn_blocking` for async contexts.
 
 ## License
 
-Apache-2.0; see [LICENSE](./LICENSE). Incorporates MIT-licensed portions of [Ghost OS](https://github.com/ghostwright/ghost-os); see [NOTICE](./NOTICE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](./LICENSE). Incorporates MIT-licensed portions of [Ghost OS](https://github.com/ghostwright/ghost-os) and adapts the hotkey policy from [agent-desktop](https://github.com/vercel-labs/agent-desktop) (Apache-2.0); see [NOTICE](./NOTICE). © 2026 A Major Pte. Ltd.

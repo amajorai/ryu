@@ -3,6 +3,7 @@ import {
 	type LocalCoreSetupState,
 	LoginView,
 } from "@ryu/blocks/desktop/login.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
@@ -26,11 +27,13 @@ import {
 } from "@/lib/prefer-local-node.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { reportError } from "@/src/lib/crash.ts";
+import { signInErrorDescription } from "@/src/lib/device-limit-copy.ts";
 // Keep device auth on the shared desktop implementation; the extension
 // supplies its own auth-client module through the host adapter.
 import {
 	localizeVerificationUrl,
 	pollAuthStatus,
+	SIGN_IN_TIMED_OUT_MESSAGE,
 	startDeviceAuth,
 } from "../../lib/oauth.ts";
 import { useAppStore } from "../store/useAppStore.ts";
@@ -38,6 +41,7 @@ import { useAppStore } from "../store/useAppStore.ts";
 const IS_WEBAPP = import.meta.env.VITE_RYU_SURFACE === "webapp";
 
 export default function LoginPage() {
+	const tl = useLiteralMessages();
 	const [waiting, setWaiting] = useState(false);
 	const [userCode, setUserCode] = useState<string | null>(null);
 	const [verificationUri, setVerificationUri] = useState<string | null>(null);
@@ -185,13 +189,19 @@ export default function LoginPage() {
 					}
 					useAppStore.getState().setPendingAuthToken(token);
 				},
-				() => {
-					// The poll only calls back here when sign-in times out. Explain why
-					// the code screen is disappearing instead of silently bouncing the
-					// user back to the start with no idea what happened.
-					toast.error("Sign-in timed out", {
-						description: "That took too long. Please try signing in again.",
-					});
+				(error) => {
+					// Explain why the code screen is disappearing instead of silently
+					// bouncing the user back to the start: a timeout, or a refusal such
+					// as a declined request or a reached device limit.
+					if (error.message === SIGN_IN_TIMED_OUT_MESSAGE) {
+						toast.error("Sign-in timed out", {
+							description: "That took too long. Please try signing in again.",
+						});
+					} else {
+						toast.error("Couldn't sign in", {
+							description: signInErrorDescription(tl, error),
+						});
+					}
 					setWaiting(false);
 					setPolling(false);
 					setUserCode(null);

@@ -1,5 +1,16 @@
 import { z } from "zod";
+import {
+	type InterfaceColorTheme,
+	parseInterfaceColorTheme,
+} from "./interface-color-theme.ts";
 import { isMarketplaceId, type JsonValue } from "./marketplace-wallpaper.ts";
+
+export {
+	type InterfaceColorTheme,
+	interfaceColorThemeId,
+	MAX_INTERFACE_COLOR_THEME_ID_BYTES,
+	parseInterfaceColorTheme,
+} from "./interface-color-theme.ts";
 
 /**
  * Ryu Interface Protocol (v1).
@@ -1334,6 +1345,8 @@ export function parseInterfaceSettings(
 /** One interface the switcher can offer. */
 export interface InterfaceDescriptor {
 	attribution?: string;
+	/** Marketplace only: colour theme per mode, painted while active. */
+	colorTheme?: InterfaceColorTheme;
 	description: string;
 	id: string;
 	label: string;
@@ -1357,6 +1370,7 @@ const contributionSchema = z.object({
 		.max(MAX_LABEL)
 		.optional()
 		.catch(undefined),
+	colorTheme: z.unknown().optional(),
 	description: z
 		.string()
 		.trim()
@@ -1412,8 +1426,10 @@ export function parseInterfaceContribution(
 		row.settings === undefined
 			? null
 			: parseInterfaceSettings(row.renderer, row.settings, row.params ?? {});
+	const colorTheme = parseInterfaceColorTheme(row.colorTheme, row.plugin);
 	return {
 		...(row.attribution ? { attribution: row.attribution } : {}),
+		...(colorTheme ? { colorTheme } : {}),
 		description: row.description ?? "",
 		id: row.id,
 		label: row.label,

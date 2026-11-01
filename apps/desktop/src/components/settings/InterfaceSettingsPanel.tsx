@@ -2,7 +2,8 @@
 // fields its renderer or Marketplace contribution declares), read from the
 // same schema the protocol validates, saved as per-interface overrides, and
 // applied live by the interface host. The shared "Hide work details" option
-// sits here too, since it applies to every interface.
+// sits here too, since it applies to every interface, as does the switch that
+// lets Marketplace interfaces paint their own colour theme.
 
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -25,6 +26,7 @@ import {
 	settingValueFits,
 } from "@ryuhq/protocol/interfaces";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import {
 	useActiveInterfaceFromStore,
 	useInterfaceStore,
@@ -33,6 +35,11 @@ import { availableInterfaces } from "@/src/interfaces/registry.ts";
 import { useInterfacePrefs } from "@/src/interfaces/use-interface-prefs.ts";
 import { useInterfaceSettings } from "@/src/interfaces/use-interface-settings.ts";
 import { useProductModeStore } from "@/src/lib/product-mode.ts";
+import { findVariant } from "@/src/lib/themes/presets.ts";
+import {
+	INTERFACE_COLOR_THEMES_DEFAULT,
+	INTERFACE_COLOR_THEMES_KEY,
+} from "@/src/lib/themes/theme-override.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -206,6 +213,48 @@ function currentValue(
 	return settingValueFits(field, value) ? value : field.default;
 }
 
+/** A theme's display name: its label when it resolves, else the raw id. */
+function themeName(id: string): string {
+	return findVariant(id)?.label ?? id;
+}
+
+/** Names the colour theme an interface brings, per mode, when it has one. */
+function InterfaceColorThemeNote({
+	descriptor,
+}: {
+	descriptor: InterfaceDescriptor;
+}) {
+	const tl = useLiteralMessages();
+	const light = descriptor.colorTheme?.light;
+	const dark = descriptor.colorTheme?.dark;
+	let text: string | null = null;
+	if (light && dark) {
+		text = tl(
+			"Brings its own colors: {light} in light mode, {dark} in dark mode.",
+			{ dark: themeName(dark), light: themeName(light) }
+		);
+	} else if (light) {
+		text = tl("Brings its own colors in light mode: {light}.", {
+			light: themeName(light),
+		});
+	} else if (dark) {
+		text = tl("Brings its own colors in dark mode: {dark}.", {
+			dark: themeName(dark),
+		});
+	}
+	if (!text) {
+		return null;
+	}
+	return (
+		<p
+			className="px-1 pb-2 text-muted-foreground text-sm"
+			data-testid="interface-settings-color-theme"
+		>
+			{text}
+		</p>
+	);
+}
+
 export function InterfaceSettingsPanel() {
 	const tl = useLiteralMessages();
 	const active = useActiveInterfaceFromStore();
@@ -238,6 +287,10 @@ export function InterfaceSettingsPanel() {
 	const hideWorkDetails = useInterfacePrefs((state) => state.hideWorkDetails);
 	const setHideWorkDetails = useInterfacePrefs(
 		(state) => state.setHideWorkDetails
+	);
+	const [useColorThemes, setUseColorThemes] = usePersistedToggle(
+		INTERFACE_COLOR_THEMES_KEY,
+		INTERFACE_COLOR_THEMES_DEFAULT
 	);
 
 	const fields = interfaceSettingsFor(selected);
@@ -288,6 +341,7 @@ export function InterfaceSettingsPanel() {
 			<SettingsSection
 				title={tl("{label} settings", { label: selected.label })}
 			>
+				<InterfaceColorThemeNote descriptor={selected} />
 				{fields.length > 0 ? (
 					<SettingsGroup>
 						{fields.map((field) => (
@@ -346,6 +400,20 @@ export function InterfaceSettingsPanel() {
 						}
 						description="Show kinds and counts but no thread titles or message text, for a shared screen."
 						title="Hide work details"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Use interface color themes"
+								checked={useColorThemes}
+								data-testid="interface-settings-color-themes"
+								onCheckedChange={(checked) =>
+									setUseColorThemes(checked === true)
+								}
+							/>
+						}
+						description="Marketplace interfaces can bring their own colors. Turn this off to keep your theme everywhere."
+						title="Use interface color themes"
 					/>
 				</SettingsGroup>
 			</SettingsSection>

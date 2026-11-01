@@ -6,8 +6,10 @@ import navigationStyles from "./settings-nav.module.css";
 // Every settings surface (App Settings tabs, Gateway panes, web settings)
 // renders through these so the rows stay consistent instead of each tab
 // inventing its own borders, card blocks and header sizes. The standard look is
-// quiet and flush: a section is a small semibold title, its rows are separated
-// by full-width hairlines, and nothing sits in a card.
+// iOS-style inset grouping: a section is a small semibold title over a rounded
+// grouped card, and the card's rows are separated by hairlines. The card comes
+// from the settings surface (`settings-surface.tsx`, `card` by default); a
+// `plain` surface drops it.
 //
 // - `SettingsSection` is the load-bearing wrapper: title + arbitrary children +
 //   caption. Use it for anything that is NOT a simple row (sliders, colour
@@ -43,6 +45,7 @@ import {
 } from "./settings-items-grouped.tsx";
 import {
 	SETTINGS_SURFACE_CARD,
+	SettingsSurfaceProvider,
 	useSettingsSurface,
 } from "./settings-surface.tsx";
 
@@ -56,9 +59,10 @@ interface SettingsGroupProps {
 }
 
 /**
- * One flush list of rows with full-width hairlines between them and none after
- * the last. Rows render their own descriptions; a `bare` row (a tall text
- * control) sits in the list like any other.
+ * One list of rows with hairlines between them and none after the last, on a
+ * rounded grouped card (unless the surface is `plain`). Rows render their own
+ * descriptions; a `bare` row (a tall text control) sits in the list like any
+ * other.
  */
 export const SettingsGroup = ({
 	appearance = "flush",
@@ -87,7 +91,11 @@ export const SettingsGroup = ({
 					className={cn(SETTINGS_SURFACE_CARD, "px-3.5", className)}
 					data-slot="settings-group-card"
 				>
-					{list}
+					{/* Blocks inside the card sit on it, so they never paint a
+					    second card of their own. */}
+					<SettingsSurfaceProvider surface="plain">
+						{list}
+					</SettingsSurfaceProvider>
 				</div>
 			) : (
 				list
@@ -100,8 +108,8 @@ interface SettingsCardProps {
 	/** `grouped` restores the legacy padded card surface. Default `flush`. */
 	appearance?: SettingsAppearance;
 	/**
-	 * Drop the card surface under `appearance="grouped"`, so the child's own
-	 * border is the only edge. A flush card never paints a surface.
+	 * Drop the card surface, so the child's own border is the only edge. A
+	 * flush card on a `plain` surface never paints one.
 	 */
 	bare?: boolean;
 	children: ReactNode;
@@ -110,8 +118,9 @@ interface SettingsCardProps {
 
 /**
  * A container for arbitrary (non-row) settings content — sliders, colour
- * pickers, forms, an avatar uploader. Flush by default: a plain block with no
- * fill, padding or border, so it sits in the pane like the rows around it.
+ * pickers, forms, an avatar uploader. On the default `card` surface it is a
+ * padded rounded grouped card, like the row groups around it; `bare` drops the
+ * fill and padding so the child's own border is the only edge.
  */
 export const SettingsCard = ({
 	appearance = "flush",
@@ -126,7 +135,14 @@ export const SettingsCard = ({
 				className={cn(!bare && GROUPED_SURFACE, !bare && "p-3.5", className)}
 				data-slot="settings-card"
 			>
-				{children}
+				{bare ? (
+					children
+				) : (
+					// Blocks inside the card sit on it; they never nest a second card.
+					<SettingsSurfaceProvider surface="plain">
+						{children}
+					</SettingsSurfaceProvider>
+				)}
 			</div>
 		);
 	}
@@ -293,7 +309,7 @@ interface SettingsSectionProps {
 /**
  * The standard settings block: a semibold title, a body (any children —
  * typically a {@link SettingsGroup} but can be sliders, grids, lists), and an
- * optional caption. Sections are 32px apart; the first one has no top margin.
+ * optional caption, both inset to the card's rows on a `card` surface. Sections are 32px apart; the first one has no top margin.
  */
 export const SettingsSection = ({
 	appearance = "flush",
@@ -304,6 +320,7 @@ export const SettingsSection = ({
 	title,
 }: SettingsSectionProps) => {
 	const i18n = useOptionalI18n();
+	const carded = useSettingsSurface() === "card";
 	const localizedTitle = localizeSettingText(i18n, title, undefined, "title");
 	const localizedCaption = localizeSettingText(
 		i18n,
@@ -335,10 +352,19 @@ export const SettingsSection = ({
 			</div>
 		);
 	}
+	// On a card surface the title and caption line up with the rows inside the
+	// card, as iOS inset-grouped headers do.
+	const inset = carded ? "px-3.5" : undefined;
 	return (
 		<div className={cn("mt-8 first:mt-0", className)}>
 			{localizedTitle || headerAction ? (
-				<div className="mb-1 flex items-center justify-between gap-2">
+				<div
+					className={cn(
+						"flex items-center justify-between gap-2",
+						carded ? "mb-1.5" : "mb-1",
+						inset
+					)}
+				>
 					{localizedTitle ? (
 						<h3 className="font-semibold text-foreground text-sm">
 							{localizedTitle}
@@ -351,7 +377,7 @@ export const SettingsSection = ({
 			) : null}
 			{children}
 			{localizedCaption ? (
-				<p className="mt-2 text-detail text-muted-foreground">
+				<p className={cn("mt-2 text-detail text-muted-foreground", inset)}>
 					{localizedCaption}
 				</p>
 			) : null}

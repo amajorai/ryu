@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import {
 	disableApp,
@@ -10,6 +12,10 @@ import {
 	updateInstalledPlugin,
 	updateInstalledPluginAtVersion,
 } from "./plugins.ts";
+import {
+	describeDependencyError,
+	parseLifecycleError,
+} from "./plugins-lifecycle-errors.ts";
 
 const target = { token: "node-token", url: "http://127.0.0.1:7980" };
 const scopedId = "@ryu/spaces";
@@ -88,7 +94,7 @@ test("historical plugin actions forward the exact version", async () => {
 
 	expect(bodies).toEqual([
 		{ id: scopedId, version: "v0.9.0" },
-		{ force: true, version: "v0.8.0" },
+		{ version: "v0.8.0" },
 	]);
 });
 
@@ -108,4 +114,95 @@ test("uninstall keeps app storage unless deleteStorage is requested", async () =
 	}
 
 	expect(bodies).toEqual([null, JSON.stringify({ delete_storage: true })]);
+});
+
+const english: LiteralMessage = (source, values) =>
+	formatMessage(source, values ?? {});
+
+test("version requirements render a floor only for bare versions", () => {
+	const mismatch = (required: string) =>
+		describeDependencyError(
+			{
+				code: "version_mismatch",
+				dependency: "@ryu/spaces",
+				installed: "2.0.0",
+				plugin: "@ryu/meetings",
+				required,
+			},
+			english
+		);
+	expect(mismatch("2.1.0")).toBe(
+		"@ryu/meetings needs @ryu/spaces 2.1.0 or newer, but 2.0.0 is installed. Update it first."
+	);
+	expect(mismatch(">=1.2, <2")).toBe(
+		"@ryu/meetings needs @ryu/spaces >=1.2, <2, but 2.0.0 is installed."
+	);
+	expect(
+		describeDependencyError(
+			{
+				code: "missing_dependency",
+				dependency: "@ryu/spaces",
+				plugin: "@ryu/meetings",
+				required: "^1.2",
+			},
+			english
+		)
+	).toBe("@ryu/meetings needs @ryu/spaces (^1.2). Install it first.");
+});
+
+test("dependent_version_mismatch does not offer a force the desktop cannot send", () => {
+	expect(
+		describeDependencyError(
+			{
+				code: "dependent_version_mismatch",
+				dependency: "@ryu/spaces",
+				incoming: "1.0.0",
+				plugin: "@ryu/meetings",
+				required: "1.2.0",
+			},
+			english
+		)
+	).toBe(
+		"Updating @ryu/spaces to 1.0.0 would break @ryu/meetings, which needs 1.2.0. Update @ryu/meetings first."
+	);
+});
+
+test("only a 403 carrying denied_grants is a Gateway grant denial", async () => {
+	const mandatory = await parseLifecycleError(
+		Response.json(
+			{
+				code: "mandatory",
+				error: "app 'core' is required for Ryu to run and cannot be disabled",
+				hint: "this app is part of Core; force does not override it",
+			},
+			{ status: 403 }
+		),
+		"/api/plugins/core/disable"
+	);
+	expect(mandatory.grantsDenied).toBe(false);
+	expect(mandatory.message).toBe(
+		"app 'core' is required for Ryu to run and cannot be disabled"
+	);
+
+	const acl = await parseLifecycleError(
+		Response.json(
+			{
+				error: "app_lifecycle_permission_denied",
+				required_permission: "apps:manage",
+			},
+			{ status: 403 }
+		),
+		"/api/plugins/core/disable"
+	);
+	expect(acl.grantsDenied).toBe(false);
+	expect(acl.message).toBe(
+		"You don't have permission (apps:manage) to change apps on this node."
+	);
+
+	const gateway = await parseLifecycleError(
+		Response.json({ denied_grants: ["fs:write"] }, { status: 403 }),
+		"/api/plugins/core/enable"
+	);
+	expect(gateway.grantsDenied).toBe(true);
+	expect(gateway.message).toBe("Gateway denied grants: fs:write");
 });

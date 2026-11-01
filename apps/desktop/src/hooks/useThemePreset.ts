@@ -32,14 +32,17 @@ import { setThemePrefs } from "@/src/lib/api/preferences.ts";
 import {
 	type CustomTokens,
 	customTokensToVariant,
-	DEFAULT_DARK_ID,
-	DEFAULT_LIGHT_ID,
-	findVariant,
 	loadCustomThemes,
 	loadPluginThemes,
 	STORAGE_KEYS,
 	type ThemeVariant,
 } from "@/src/lib/themes/presets.ts";
+import {
+	activeVariant,
+	overrideCoversMode,
+	userPresetId,
+	useThemeOverride,
+} from "@/src/lib/themes/theme-override.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 export const DEFAULT_RADIUS = DEFAULT_THEME_RADIUS;
@@ -147,10 +150,9 @@ function buildThemePrefs(localeOverride?: string): ThemePrefs {
 	return {
 		version: THEME_PREFS_VERSION,
 		mode,
-		lightPreset:
-			localStorage.getItem(STORAGE_KEYS.lightPreset) ?? DEFAULT_LIGHT_ID,
-		darkPreset:
-			localStorage.getItem(STORAGE_KEYS.darkPreset) ?? DEFAULT_DARK_ID,
+		// The user's own presets, never an interface's temporary colour theme.
+		lightPreset: userPresetId(false),
+		darkPreset: userPresetId(true),
 		contrast: currentContrast(),
 		radius: Number(localStorage.getItem(STORAGE_KEYS.radius) ?? DEFAULT_RADIUS),
 		spacing: Number(
@@ -206,10 +208,6 @@ function applyFonts(uiFont: string, headingFont: string, codeFont: string) {
 }
 
 export function initTheme() {
-	const lightId =
-		localStorage.getItem(STORAGE_KEYS.lightPreset) ?? DEFAULT_LIGHT_ID;
-	const darkId =
-		localStorage.getItem(STORAGE_KEYS.darkPreset) ?? DEFAULT_DARK_ID;
 	const uiFont = localStorage.getItem(STORAGE_KEYS.uiFont) ?? UI_FONTS[0].value;
 	const headingFont =
 		localStorage.getItem(STORAGE_KEYS.headingFont) ?? HEADING_FONTS[0].value;
@@ -229,11 +227,6 @@ export function initTheme() {
 		localStorage.getItem(STORAGE_KEYS.chatWidth) ?? DEFAULT_CHAT_WIDTH
 	);
 
-	const variant = findVariant(storedIsDark() ? darkId : lightId);
-	if (variant) {
-		applyVariant(variant);
-	}
-
 	applyFonts(uiFont, headingFont, codeFont);
 	document.documentElement.style.setProperty("--radius", `${radius}rem`);
 	applyWindowRadius(radius);
@@ -251,26 +244,30 @@ export function initTheme() {
 		`${chatWidth}px`
 	);
 	document.documentElement.classList.remove("high-contrast");
+	// Last, so a theme's own --radius / --font-* tokens win over the settings
+	// above and give them back when the theme changes.
+	const variant = activeVariant(storedIsDark());
+	if (variant) {
+		applyVariant(variant);
+	}
 }
 
 export function useThemePreset() {
 	const { theme, resolvedTheme } = useTheme();
 	const { locale } = useI18n();
+	// An active interface's colour theme repaints when it starts or ends.
+	const override = useThemeOverride();
 
 	useEffect(() => {
-		const lightId =
-			localStorage.getItem(STORAGE_KEYS.lightPreset) ?? DEFAULT_LIGHT_ID;
-		const darkId =
-			localStorage.getItem(STORAGE_KEYS.darkPreset) ?? DEFAULT_DARK_ID;
 		const dark = isDarkMode(theme, resolvedTheme);
-		const variant = findVariant(dark ? darkId : lightId);
+		const variant = activeVariant(dark, override);
 		if (variant) {
 			applyVariant(variant);
 		} else {
 			clearVariant();
 		}
 		publishThemePrefs(locale);
-	}, [locale, resolvedTheme, theme]);
+	}, [locale, override, resolvedTheme, theme]);
 
 	useEffect(() => {
 		const publish = () => publishThemePrefs();
@@ -293,21 +290,19 @@ export function useThemePreset() {
  * Core so the island companion re-resolves against the same list.
  */
 export function reapplyActivePreset() {
-	const id =
-		localStorage.getItem(
-			storedIsDark() ? STORAGE_KEYS.darkPreset : STORAGE_KEYS.lightPreset
-		) ?? (storedIsDark() ? DEFAULT_DARK_ID : DEFAULT_LIGHT_ID);
-	const variant = findVariant(id);
+	const variant = activeVariant(storedIsDark());
 	if (variant) {
 		applyVariant(variant);
 	}
 	publishThemePrefs();
 }
 
+// A pick made while an interface's colour theme covers that mode is saved but
+// not painted; it shows once the interface is left.
 export function setLightPreset(id: string) {
 	localStorage.setItem(STORAGE_KEYS.lightPreset, id);
 	if (!storedIsDark()) {
-		const variant = findVariant(id);
+		const variant = activeVariant(false);
 		if (variant) {
 			applyVariant(variant);
 		}
@@ -318,7 +313,7 @@ export function setLightPreset(id: string) {
 export function setDarkPreset(id: string) {
 	localStorage.setItem(STORAGE_KEYS.darkPreset, id);
 	if (storedIsDark()) {
-		const variant = findVariant(id);
+		const variant = activeVariant(true);
 		if (variant) {
 			applyVariant(variant);
 		}
@@ -330,7 +325,12 @@ export function applyCustomTokensLive(
 	mode: "light" | "dark",
 	tokens: CustomTokens
 ) {
-	if ((mode === "dark") !== storedIsDark()) {
+	// Like a preset pick, an edit under an interface's colour theme is not
+	// painted over it; the user's theme shows once the interface is left.
+	if (
+		(mode === "dark") !== storedIsDark() ||
+		overrideCoversMode(mode === "dark")
+	) {
 		return;
 	}
 	const variant = customTokensToVariant("_preview", "_preview", mode, tokens);

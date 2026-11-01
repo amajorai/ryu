@@ -144,6 +144,7 @@ pub mod onboarding_state;
 pub mod openapi;
 pub mod plugin_bridge_api;
 pub mod plugin_rollback;
+mod plugin_update_deps;
 pub mod plugin_uninstall;
 pub mod portable_package_runtime;
 pub mod preferences;
@@ -23908,7 +23909,7 @@ async fn resolve_plugin_from_catalog_inner(
             .get("manifest")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let manifest: crate::plugin_manifest::PluginManifest =
+        let mut manifest: crate::plugin_manifest::PluginManifest =
             match serde_json::from_value(manifest_value) {
                 Ok(m) => m,
                 Err(e) => {
@@ -23919,6 +23920,11 @@ async fn resolve_plugin_from_catalog_inner(
                     continue;
                 }
             };
+        // Same dependency-id canonicalization the local loader applies, so a
+        // catalog manifest that still says `requires.apps: [{ id: "shadow" }]`
+        // resolves against the installed `@ryu/shadow` instead of being reported
+        // as a missing dependency.
+        crate::plugin_manifest::canonicalize_dependency_ids(&mut manifest);
         // The signed surface must carry the sandbox JS itself. `ryu publish` inlines
         // every `code_file` before signing, which is what puts the whole hook body
         // INSIDE the signature; a `code_file` here would name a file that no signed
@@ -26375,6 +26381,10 @@ mod contribution_provenance_tests {
             )]),
             attribution: None,
             settings: Vec::new(),
+            color_theme: Some(ryu_kernel_contracts::InterfaceColorTheme {
+                light: None,
+                dark: Some("ryu-dark".to_owned()),
+            }),
         };
         let contributes = Contributes {
             interfaces: vec![
@@ -26393,6 +26403,7 @@ mod contribution_provenance_tests {
         assert_eq!(rows[0]["plugin"], "@example/pixel-town");
         assert_eq!(rows[0]["renderer"], "world-2d");
         assert_eq!(rows[0]["params"]["theme"], "night");
+        assert_eq!(rows[0]["colorTheme"]["dark"], "ryu-dark");
     }
 }
 
@@ -28974,8 +28985,10 @@ async fn update_app_handler(
     //     `@ryu/meetings` declares `">=1.2, <2"` satisfies every forward edge and
     //     still leaves a broken dependent enabled. Refuse by default and name the
     //     blocker; `force=true` is the deliberate override, matching how `disable`
-    //     treats its own `blocked_by_dependents` refusal.
-    if !(body.force || requested_version.is_some()) {
+    //     treats its own `blocked_by_dependents` refusal. An explicit `version`
+    //     pin only carries downgrade authority (step 3), not "break my
+    //     dependents" authority — rollback gates the same way.
+    if !body.force {
         let installed_now: Vec<crate::plugin_manifest::PluginManifest> =
             state.app_manifests.read().await.clone();
         if let Err(dep_err) =
@@ -28993,6 +29006,19 @@ async fn update_app_handler(
                 .into_response();
         }
     }
+    // 3c. The capability half of the reverse gate: an enabled consumer must still
+    //     bind once this version's `provides` replaces the installed one.
+    if !body.force {
+        if let Some(response) = plugin_rollback::refuse_capability_breaking_transition(
+            &state,
+            &manifest,
+            "pass force=true to update anyway",
+        )
+        .await
+        {
+            return response;
+        }
+    }
 
     // 4. Resolve + install any NEW dependencies the new version declares.
     let installed_dependencies =
@@ -29000,7 +29026,7 @@ async fn update_app_handler(
             .await
         {
             Ok(deps) => deps,
-            Err((status, msg)) => return json_error(status, msg),
+            Err(response) => return response,
         };
 
     if body.dry_run {
@@ -29102,6 +29128,14 @@ async fn update_app_handler(
             // what makes it sweep every one of the app's sidecars rather than the
             // arbitrary one whose key happens to equal the plugin id.
             state.mcp.clear_ext_api_routes(&id);
+            // An enabled target must not run on top of disabled dependencies: the
+            // new version's new deps were installed disabled above.
+            let dependency_enable = plugin_update_deps::enable_dependencies_after_update(
+                &state,
+                &manifest,
+                updated.enabled,
+            )
+            .await;
             // The app's agents are kept across this update (it never deactivates
             // them), so the new version's identity modes are reconciled here:
             // narrowed when the user never changed the mode, otherwise reported
@@ -29132,6 +29166,7 @@ async fn update_app_handler(
                 "channel": channel_to_persist.as_deref().unwrap_or(target_channel.as_str()),
                 "installed_dependencies": installed_dependencies,
             });
+            dependency_enable.attach(&mut payload);
             if !agent_identity.is_empty() {
                 payload["agent_identity"] = json!(agent_identity);
             }
@@ -29176,7 +29211,7 @@ async fn install_new_dependencies_for_update(
     manifest: &crate::plugin_manifest::PluginManifest,
     buyer_token: Option<String>,
     dry_run: bool,
-) -> Result<Vec<String>, (StatusCode, String)> {
+) -> Result<Vec<String>, axum::response::Response> {
     use crate::plugin_manifest::PluginManifest;
 
     let installed: Vec<PluginManifest> = state.app_manifests.read().await.clone();
@@ -29207,7 +29242,7 @@ async fn install_new_dependencies_for_update(
             continue;
         }
         if visited.len() > crate::plugins::catalog::MAX_INSTALL_CLOSURE {
-            return Err((
+            return Err(json_error(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 format!(
                     "`{}` pulls in more than {} plugins; refusing the update",
@@ -29234,7 +29269,7 @@ async fn install_new_dependencies_for_update(
             Ok((m, ui_code, provenance)) => {
                 provenances.insert(next.clone(), provenance);
                 if m.id != next {
-                    return Err((
+                    return Err(json_error(
                         StatusCode::BAD_GATEWAY,
                         format!("catalog returned manifest `{}` for `{next}`", m.id),
                     ));
@@ -29273,11 +29308,18 @@ async fn install_new_dependencies_for_update(
     let dep_order =
         match crate::plugins::lifecycle::plan_update_dep_closure(manifest, &installed, &fetched) {
             Ok(order) => order,
+            // Typed, like the reverse gate: clients render `dependency_error`
+            // (code + ids) instead of string-parsing the message.
             Err(e) => {
                 return Err((
                     StatusCode::CONFLICT,
-                    format!("dependency resolution failed for `{}`: {e}", manifest.id),
-                ));
+                    Json(json!({
+                        "success": false,
+                        "error": format!("dependency resolution failed for `{}`: {e}", manifest.id),
+                        "dependency_error": e,
+                    })),
+                )
+                    .into_response());
             }
         };
     if dep_order.is_empty() {
@@ -29313,7 +29355,7 @@ async fn install_new_dependencies_for_update(
             if status != StatusCode::CONFLICT {
                 rollback_plugin_install(state, &failure.failed).await;
             }
-            Err((
+            Err(json_error(
                 status,
                 format!(
                     "dependency `{}` of `{}` failed to install: {msg}",

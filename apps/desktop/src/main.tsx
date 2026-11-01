@@ -19,6 +19,7 @@ import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/inter";
 import "./index.css";
 import { initDialogOverlayBlur } from "./hooks/useDialogOverlayBlur.ts";
+import { initLiquidGlass } from "./hooks/useLiquidGlass.ts";
 import { initPopupOverlayBlur } from "./hooks/usePopupOverlayBlur.ts";
 import { initializeProjectlessTaskFolder } from "./hooks/useProjectlessTaskFolder.ts";
 import { initWindowTransparency } from "./hooks/useWindowTransparency.ts";
@@ -40,6 +41,7 @@ installConsoleCapture();
 initDialogOverlayBlur();
 initPopupOverlayBlur();
 initWindowTransparency();
+initLiquidGlass();
 
 const root = document.getElementById("root");
 if (!root) {

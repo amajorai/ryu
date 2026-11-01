@@ -82,6 +82,78 @@ pub fn cursor_undisturbed(left_at: (i32, i32), observed_now: (i32, i32), tol: i3
     (left_at.0 - observed_now.0).abs() <= tol && (left_at.1 - observed_now.1).abs() <= tol
 }
 
+/// A click plan was refused by the caller's input policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanError {
+    /// The plan needs physical (HID) input and the caller disallowed it.
+    HidNotAllowed,
+}
+
+impl std::fmt::Display for PlanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HidNotAllowed => f.write_str("POLICY_DENIED: physical input is not allowed here"),
+        }
+    }
+}
+
+impl std::error::Error for PlanError {}
+
+/// [`plan_click`] with a physical-input gate. With `allow_hid = false`, `Hid` is
+/// refused and `Auto`/`Ax` press through accessibility only (no HID fallback).
+pub fn plan_click_with(
+    mode: ClickMode,
+    resolved_via_ax: bool,
+    has_explicit_xy: bool,
+    allow_hid: bool,
+) -> Result<ClickPlan, PlanError> {
+    if allow_hid {
+        return Ok(plan_click(mode, resolved_via_ax, has_explicit_xy));
+    }
+    match mode {
+        ClickMode::Hid => Err(PlanError::HidNotAllowed),
+        ClickMode::Auto | ClickMode::Ax => Ok(ClickPlan::AxOnly),
+    }
+}
+
+/// Env flag that marks a session as headless (no physical input).
+pub const HEADLESS_ENV: &str = "RYU_GHOST_HEADLESS";
+
+fn env_set(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// Pure core of [`headless_session`]: the flag is `1`/`true` (case-insensitive),
+/// or on Linux neither display variable is set.
+pub(crate) fn headless_from(
+    flag: Option<&str>,
+    display: Option<&str>,
+    wayland_display: Option<&str>,
+    linux: bool,
+) -> bool {
+    let flagged = flag.is_some_and(|v| {
+        let v = v.trim();
+        v == "1" || v.eq_ignore_ascii_case("true")
+    });
+    flagged || (linux && display.is_none() && wayland_display.is_none())
+}
+
+/// True if env `RYU_GHOST_HEADLESS` is `1`/`true`, or (Linux) neither `DISPLAY`
+/// nor `WAYLAND_DISPLAY` is set. Physical input is never synthesized then.
+pub fn headless_session() -> bool {
+    headless_from(
+        env_set(HEADLESS_ENV).as_deref(),
+        env_set("DISPLAY").as_deref(),
+        env_set("WAYLAND_DISPLAY").as_deref(),
+        cfg!(target_os = "linux"),
+    )
+}
+
+/// `requested && !headless_session()`.
+pub fn hid_permitted(requested: bool) -> bool {
+    requested && !headless_session()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +213,69 @@ mod tests {
         // User grabbed the mouse and moved it away → do not restore.
         assert!(!cursor_undisturbed((500, 400), (520, 400), 2));
         assert!(!cursor_undisturbed((500, 400), (500, 430), 2));
+    }
+
+    #[test]
+    fn plan_click_with_allow_hid_matches_plan_click() {
+        for mode in [ClickMode::Auto, ClickMode::Hid, ClickMode::Ax] {
+            for ax in [false, true] {
+                for xy in [false, true] {
+                    assert_eq!(
+                        plan_click_with(mode, ax, xy, true),
+                        Ok(plan_click(mode, ax, xy))
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn plan_click_with_disallowed_hid_never_plans_hid() {
+        for ax in [false, true] {
+            for xy in [false, true] {
+                assert_eq!(
+                    plan_click_with(ClickMode::Hid, ax, xy, false),
+                    Err(PlanError::HidNotAllowed)
+                );
+                assert_eq!(
+                    plan_click_with(ClickMode::Auto, ax, xy, false),
+                    Ok(ClickPlan::AxOnly)
+                );
+                assert_eq!(
+                    plan_click_with(ClickMode::Ax, ax, xy, false),
+                    Ok(ClickPlan::AxOnly)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plan_error_display_has_one_code_prefix() {
+        let text = PlanError::HidNotAllowed.to_string();
+        assert_eq!(text, "POLICY_DENIED: physical input is not allowed here");
+    }
+
+    #[test]
+    fn headless_from_honours_flag_and_linux_displays() {
+        assert!(headless_from(Some("1"), Some(":0"), None, true));
+        assert!(headless_from(Some("TRUE"), None, None, false));
+        assert!(!headless_from(Some("0"), Some(":0"), None, true));
+        assert!(!headless_from(None, Some(":0"), None, true));
+        assert!(!headless_from(None, None, Some("wayland-0"), true));
+        assert!(headless_from(None, None, None, true));
+        // Off Linux, missing display variables mean nothing.
+        assert!(!headless_from(None, None, None, false));
+    }
+
+    #[test]
+    fn headless_session_honours_env_flag() {
+        // The only test that touches this env var.
+        std::env::set_var(HEADLESS_ENV, "1");
+        let headless = headless_session();
+        let permitted = hid_permitted(true);
+        std::env::remove_var(HEADLESS_ENV);
+        assert!(headless);
+        assert!(!permitted);
+        assert!(!hid_permitted(false));
     }
 }

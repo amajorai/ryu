@@ -48,6 +48,7 @@
   "Browser actions on": "Browseraktionen an",
   "Browser bookmark": "Browser-Lesezeichen",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "Browser-Engine fehlgeschlagen — zu Core gewechselt. Erneut versuchen oder Browser in den Einstellungen auswählen. {error}",
+  "Browser extension": "Browser-Erweiterung",
   "Browser model": "Browser-Modell",
   "Browser runtime is unavailable.": "Browser-Laufzeit ist nicht verfügbar.",
   "Browser session link unavailable: {error}": "Link zur Browsersitzung nicht verfügbar: {error}",

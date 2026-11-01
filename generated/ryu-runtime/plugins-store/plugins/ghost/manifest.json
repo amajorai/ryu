@@ -7,10 +7,10 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/ghost",
   "name": "Ghost",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "stable",
   "category": "Automation",
-  "description": "Desktop automation: 29 screen perception and input control tools. Cross-platform (Windows, macOS, Linux).",
+  "description": "Desktop automation: 31 screen perception and input control tools. Cross-platform (Windows, macOS, Linux).",
   "tagline": "Let agents see and drive your desktop",
   "icon": "cursor-02",
   "iconDither": { "from": 354, "to": "transparent", "direction": "down" },
@@ -33,7 +33,7 @@
       "command": "ghost",
       "command_env": "RYU_GHOST_BIN",
       "args": ["mcp"],
-      "description": "Ghost — desktop automation (29 tools: screen perception + input control). Cross-platform (Windows, macOS, Linux); install the `ghost` sidecar to enable. Unavailable until installed."
+      "description": "Ghost — desktop automation (31 tools: screen perception + input control). Cross-platform (Windows, macOS, Linux); install the `ghost` sidecar to enable. Unavailable until installed."
     }
   },
   "provides": [

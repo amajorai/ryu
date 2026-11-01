@@ -60,7 +60,7 @@
   "requires": {
     "apps": [
       {
-        "id": "shadow",
+        "id": "@ryu/shadow",
         "min_version": "0.1.14"
       }
     ]

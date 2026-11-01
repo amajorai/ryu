@@ -46,7 +46,7 @@
           "type": "string"
         },
         "min_version": {
-          "description": "Optional **minimum** version the dependency must satisfy.\n\nA bare version (`\"1.2.0\"`) is a *minimum*, i.e. `\">=1.2.0\"` — deliberately\nNOT semver's default caret (`^1.2.0`), which would reject `2.0.0`. Explicit\ncomparator syntax (`\">=1.2, <2\"`, `\"^1.2\"`, `\"~1.2\"`) is honoured verbatim.\nSee [`parse_min_version`], the single parser both validation and resolution\nuse.",
+          "description": "Optional **minimum** version the dependency must satisfy.\n\nA bare version (`\"1.2.0\"`, or partial `\"1.2\"`) is a *minimum*, i.e. `\">=1.2.0\"` — deliberately\nNOT semver's default caret (`^1.2.0`), which would reject `2.0.0`. Explicit\ncomparator syntax (`\">=1.2, <2\"`, `\"^1.2\"`, `\"~1.2\"`) is honoured verbatim.\nSee [`parse_min_version`], the single parser both validation and resolution\nuse.",
           "type": [
             "string",
             "null"
@@ -1051,7 +1051,7 @@
           "type": "array"
         },
         "interfaces": {
-          "description": "**Interfaces**: alternative presentations of the same agents, threads and\nmessages (Slack-style channels, a social feed, a 2D or 3D world).\n\nData-only, exactly like [`Contributes::backgrounds`]: each entry names a\nhost-owned renderer from [`CONTRIBUTABLE_INTERFACE_RENDERERS`] plus bounded\nparams. An interface never ships rendering code and never gets its own chat\npath; the host renders it over the one chat engine, so a hostile interface\ncan at worst look wrong. Not a catalog kind, for the argument\n[`Contributes::themes`] makes: it inherits install, signing, the Store and\nthe trust scorecard from the plugin. See [`InterfaceContribution`].",
+          "description": "**Interfaces**: alternative presentations of the same agents, threads and\nmessages (Slack-style channels, a social feed, a 2D or 3D world).\n\nData-only, exactly like [`Contributes::backgrounds`]: each entry names a\nhost-owned renderer from [`CONTRIBUTABLE_INTERFACE_RENDERERS`] plus bounded\nparams. An interface never ships rendering code and never gets its own chat\npath; the host renders it over the one chat engine, so a hostile interface\ncan at worst look wrong. Not a catalog kind, for the argument\n[`Contributes::themes`] makes: it inherits install, signing, the Store and\nthe trust scorecard from the plugin. An entry may also name a colour\ntheme from [`Contributes::themes`] (`colorTheme`). See [`InterfaceContribution`].",
           "items": {
             "$ref": "#/$defs/InterfaceContribution"
           },
@@ -1845,6 +1845,26 @@
       },
       "type": "object"
     },
+    "InterfaceColorTheme": {
+      "description": "The colour theme an interface paints while it is active, one optional slot per\nmode. At least one slot must be present.\n\n```json\n\"colorTheme\": { \"light\": \"@acme/pixel-town:day\", \"dark\": \"@acme/pixel-town:night\" }\n```",
+      "properties": {
+        "dark": {
+          "description": "Theme painted in dark mode: a theme this plugin contributes with\n`mode: \"dark\"` (`\"<plugin-id>:<local-id>\"`), or a built-in preset id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "light": {
+          "description": "Theme painted in light mode: a theme this plugin contributes with\n`mode: \"light\"` (`\"<plugin-id>:<local-id>\"`), or a built-in preset id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "InterfaceContribution": {
       "description": "One interface a plugin contributes (`contributes.interfaces`).\n\nThe wire shape matches `InterfaceDescriptor` in `@ryuhq/protocol/interfaces`\nminus the host-added `origin` and `plugin` tags.",
       "properties": {
@@ -1854,6 +1874,17 @@
             "string",
             "null"
           ]
+        },
+        "colorTheme": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterfaceColorTheme"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Colour theme painted while this interface is active, per mode: a theme\nthis plugin contributes in `themes` or a built-in preset id. A temporary\noverride, never saved as the user's preset."
         },
         "description": {
           "description": "One line shown under the label in the switcher.",

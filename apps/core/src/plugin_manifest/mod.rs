@@ -2513,14 +2513,7 @@ impl PluginManifestLoader {
         // after ghost became `@ryu/ghost`, or the dependency graph reports a missing
         // dependency and refuses to enable the plugin. Applies to third-party
         // manifests that will never be updated, which is the whole point of the map.
-        if let Some(requires) = manifest.requires.as_mut() {
-            for dep in &mut requires.apps {
-                let canonical = canonical_plugin_id(&dep.id);
-                if canonical != dep.id {
-                    dep.id = canonical.to_owned();
-                }
-            }
-        }
+        canonicalize_dependency_ids(&mut manifest);
 
         hydrate_manifest_code_files(&mut manifest, code_base)
             .map_err(|e| format!("{e} (source: {source})"))?;
@@ -2828,5 +2821,25 @@ fn warn_legacy_inline_deno_once(plugin: &str, runnable: &str, source: &str) {
     }
 }
 
+/// Rewrite every `requires.apps[].id` edge to its canonical plugin id
+/// ([`canonical_plugin_id`]), so a dependency written with a legacy id
+/// (`"ghost"`) resolves against the installed `@ryu/ghost`.
+///
+/// The local loader applies this to every manifest it reads; manifests fetched
+/// from a catalog must go through it too, or the graph reports the legacy-named
+/// dependency as missing and the install/update is refused.
+pub fn canonicalize_dependency_ids(manifest: &mut PluginManifest) {
+    if let Some(requires) = manifest.requires.as_mut() {
+        for dep in &mut requires.apps {
+            let canonical = canonical_plugin_id(&dep.id);
+            if canonical != dep.id {
+                dep.id = canonical.to_owned();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod canonical_ids_tests;
 #[cfg(test)]
 mod tests;

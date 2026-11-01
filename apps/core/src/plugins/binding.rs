@@ -71,7 +71,9 @@ use std::collections::BTreeMap;
 use std::sync::{OnceLock, RwLock};
 
 use crate::plugin_manifest::PluginManifest;
-use crate::plugin_manifest::{parse_min_version, AppDependency, CapabilityReq};
+use crate::plugin_manifest::{
+    min_version_satisfied, parse_min_version, AppDependency, CapabilityReq,
+};
 
 /// User-supplied binding overrides — the tie-breaker when two or more installed
 /// plugins provide the same capability. Absent/empty for the zero-config case.
@@ -815,7 +817,7 @@ impl<'a> BindingRegistry<'a> {
                     reason: format!("provider version is not valid semver: {e}"),
                 }
             })?;
-            if !want.matches(&have) {
+            if !min_version_satisfied(&want, &have) {
                 return Err(BindingError::VersionUnsatisfied {
                     capability: req.capability.clone(),
                     provider: provider.id.clone(),

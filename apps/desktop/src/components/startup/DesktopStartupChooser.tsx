@@ -31,6 +31,7 @@ import {
 	switchAccount,
 } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { signInErrorDescription } from "@/src/lib/device-limit-copy.ts";
 
 import { useWallpaper } from "@/src/lib/wallpaper.ts";
 import {
@@ -162,7 +163,7 @@ export function DesktopStartupChooser() {
 				cancelAddAccount.current = null;
 				toast.error({
 					title: "Couldn't add account",
-					description: error.message,
+					description: signInErrorDescription(tl, error),
 				});
 			},
 		});

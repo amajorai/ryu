@@ -48,6 +48,7 @@
   "Browser actions on": "Действия в браузере включены",
   "Browser bookmark": "Закладка браузера",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "Сбой движка браузера — выполнено переключение на Core. Повторите попытку или выберите «Браузер» в настройках. {error}",
+  "Browser extension": "Расширение браузера",
   "Browser model": "Модель браузера",
   "Browser runtime is unavailable.": "Среда выполнения браузера недоступна.",
   "Browser session link unavailable: {error}": "Ссылка на сеанс браузера недоступна: {error}",

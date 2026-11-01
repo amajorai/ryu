@@ -5,6 +5,7 @@
 mod click;
 mod keyboard;
 pub mod mode;
+pub mod policy;
 mod scroll;
 mod window;
 
@@ -15,7 +16,8 @@ pub use click::{
     ax_press_at, cursor_position, drag, execute_click, execute_drag, hover, long_press,
     mouse_click, warp_cursor, MouseButton,
 };
-pub use keyboard::{press_key, send_hotkey, type_text};
+pub use keyboard::{press_key, press_key_with, send_hotkey, send_hotkey_with, type_text};
 pub use mode::{plan_click, ClickMode, ClickPlan};
+pub use policy::{check_hotkey, check_key, KeyCombo, KeyError, KeyOptions};
 pub use scroll::scroll;
 pub use window::{focus_app, window_action, WindowAction};

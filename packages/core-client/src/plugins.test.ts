@@ -178,3 +178,51 @@ test("lifecycle previews use the dry-run body/query without mutating verbs", asy
 		},
 	]);
 });
+
+test("a 403 without denied_grants keeps Core's reason instead of the Gateway sentence", async () => {
+	const bodies = [
+		{
+			code: "mandatory",
+			error:
+				"app '@ryu/core' is required for Ryu to run and cannot be disabled",
+			success: false,
+		},
+		{
+			error: "app_lifecycle_permission_denied",
+			required_permission: "apps:manage",
+		},
+		{
+			denied_grants: ["fs:write"],
+			error: "Gateway denied one or more grants",
+		},
+	];
+	let index = 0;
+	globalThis.fetch = Object.assign(
+		() => Promise.resolve(Response.json(bodies[index++], { status: 403 })),
+		{ preconnect: realFetch.preconnect }
+	);
+	const target: ApiTarget = {
+		token: "node-token",
+		url: "http://127.0.0.1:7980",
+		userJwt: null,
+	};
+	const errors: unknown[] = [];
+	for (const _ of bodies) {
+		errors.push(await disableApp(target, "@ryu/core").catch((e) => e));
+	}
+
+	expect(errors[0]).toMatchObject({
+		grantsDenied: false,
+		message:
+			"app '@ryu/core' is required for Ryu to run and cannot be disabled",
+	});
+	expect(errors[1]).toMatchObject({
+		grantsDenied: false,
+		message:
+			"You don't have permission (apps:manage) to change apps on this node.",
+	});
+	expect(errors[2]).toMatchObject({
+		grantsDenied: true,
+		message: "Gateway denied grants: fs:write",
+	});
+});

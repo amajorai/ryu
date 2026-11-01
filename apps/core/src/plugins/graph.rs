@@ -44,7 +44,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::plugin_manifest::{parse_min_version, PluginManifest};
+use crate::plugin_manifest::{min_version_satisfied, parse_min_version, PluginManifest};
 
 /// A typed dependency-graph failure.
 ///
@@ -320,7 +320,7 @@ fn visit_deps(
                     ),
                 }
             })?;
-            if !req.matches(&have) {
+            if !min_version_satisfied(&req, &have) {
                 return Err(DependencyError::VersionMismatch {
                     plugin: manifest.id.clone(),
                     dependency: dep.id.clone(),
@@ -414,7 +414,7 @@ pub fn validate_dependents_of_update(
                 requirement: min.clone(),
                 reason: e,
             })?;
-            if !req.matches(&incoming) {
+            if !min_version_satisfied(&req, &incoming) {
                 return Err(DependencyError::DependentVersionMismatch {
                     plugin: dependent.id.clone(),
                     dependency: updated.id.clone(),

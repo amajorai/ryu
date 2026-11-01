@@ -159,9 +159,10 @@ export async function updateInstalledPlugin(
 	return toAppRecord(json.app);
 }
 
-/** Reinstall one exact historical Marketplace version. The explicit `force`
- *  authority is scoped to this user-selected version so Core can safely allow a
- *  downgrade without changing ordinary update semantics. */
+/** Reinstall one exact historical Marketplace version. The explicit `version`
+ *  is itself Core's downgrade authority, so no `force` is sent: `force` would
+ *  also skip the reverse-dependency gate, and a pin that breaks an installed
+ *  dependent must come back as a 409 `dependent_version_mismatch`. */
 export async function updateInstalledPluginAtVersion(
 	target: ApiTarget,
 	id: string,
@@ -174,7 +175,7 @@ export async function updateInstalledPluginAtVersion(
 		{
 			method: "POST",
 			headers: makeHeaders(target.token, target.userJwt),
-			body: JSON.stringify({ force: true, version }),
+			body: JSON.stringify({ version }),
 		}
 	);
 	if (!resp.ok) {

@@ -37,7 +37,7 @@ describe("registered Desktop settings", () => {
 		);
 
 		expect(new Set(ids).size).toBe(ids.length);
-		expect(counts).toEqual({ appearance: 53, general: 6, shortcuts: 2 });
+		expect(counts).toEqual({ appearance: 54, general: 6, shortcuts: 2 });
 		for (const entry of entries) {
 			expect(entry.id.trim().length).toBeGreaterThan(0);
 			expect(entry.reset).toBeInstanceOf(Function);

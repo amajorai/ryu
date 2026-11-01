@@ -5040,6 +5040,22 @@
     ],
     "reason": "product/framework brand name"
   },
+  "Liquid Glass": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Apple material name kept untranslated, as in Apple's localized OS"
+  },
   "Lisp": {
     "locales": [
       "ar",

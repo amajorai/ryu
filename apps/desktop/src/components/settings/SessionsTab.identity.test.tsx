@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, type ComponentType } from "react";
 import type { Root } from "react-dom/client";
 import { sileo } from "sileo";
+import { DEVICE_LIMIT_DEFAULTS } from "../../../../../packages/auth/src/lib/device-limits.ts";
 
 const NativeResponse = globalThis.Response;
 const NativeRequest = globalThis.Request;
@@ -27,6 +28,7 @@ interface NativeSession {
 	createdAt: Date;
 	expiresAt: Date;
 	id: string;
+	surface?: string;
 	token: string;
 	userAgent: string;
 	userId: string;
@@ -43,8 +45,40 @@ const calls: Array<{
 	status: number;
 }> = [];
 const authRevocations: string[] = [];
+let deviceLimitsEnforced = false;
+interface MockWhereClause {
+	field: string;
+	operator?: string;
+	value: unknown;
+}
+// The device-limit summary counts live sessions through the Better Auth
+// adapter (the same bounded reader enforcement uses), not listSessions.
+const mockSessionAdapter = {
+	findMany: async ({
+		where,
+		limit,
+	}: {
+		where: MockWhereClause[];
+		limit?: number;
+	}) => {
+		const userId = where.find((clause) => clause.field === "userId")?.value;
+		const liveAfter = where.find(
+			(clause) => clause.field === "expiresAt" && clause.operator === "gt"
+		)?.value;
+		return sessions
+			.filter(
+				(session) =>
+					session.userId === userId &&
+					(!(liveAfter instanceof Date) ||
+						new Date(session.expiresAt) > liveAfter)
+			)
+			.slice(0, limit ?? 500)
+			.map((session) => ({ ...session }));
+	},
+};
 mock.module("@ryu/auth", () => ({
 	auth: {
+		$context: Promise.resolve({ adapter: mockSessionAdapter }),
 		api: {
 			listSessions: async () => sessions.map((session) => ({ ...session })),
 			revokeSession: async ({ body }: { body: { token: string } }) => {
@@ -98,6 +132,18 @@ mock.module(
 		},
 	})
 );
+mock.module(
+	new URL(
+		"../../../../../packages/api/src/lib/device-limit-policy.ts",
+		import.meta.url
+	).pathname,
+	() => ({
+		resolveDeviceLimitPolicyForUser: async () => ({
+			enforced: deviceLimitsEnforced,
+			limits: { ...DEVICE_LIMIT_DEFAULTS, desktop: 1 },
+		}),
+	})
+);
 const { sessionsRouter } = await import(
 	"../../../../../packages/api/src/routers/sessions.ts"
 );
@@ -110,6 +156,7 @@ const server = Bun.serve({
 			!(
 				[
 					"/api/sessions",
+					"/api/sessions/device-limits",
 					"/api/sessions/newer-remote",
 					"/api/sessions/older-current",
 				].includes(path) && ["GET", "DELETE"].includes(request.method)
@@ -140,6 +187,15 @@ const server = Bun.serve({
 	},
 });
 process.env.NEXT_PUBLIC_SERVER_URL = server.url.origin;
+// The desktop tab reads device-limit usage with the auth client's origin and
+// active bearer, exactly what the shared settings API client is configured with.
+mock.module(
+	new URL("../../../lib/auth-client.ts", import.meta.url).pathname,
+	() => ({
+		BACKEND_URL: server.url.origin,
+		getActiveToken: () => identity.token,
+	})
+);
 const { configureSettingsApi } = await import("@ryu/settings");
 configureSettingsApi({ getToken: () => identity.token });
 const shared = await import(
@@ -162,10 +218,12 @@ function fixture(
 	id: string,
 	token: string,
 	userAgent: string,
-	date: string
+	date: string,
+	surface?: string
 ): NativeSession {
 	return {
 		id,
+		surface,
 		token,
 		userAgent,
 		userId: "signed-in-user",
@@ -186,9 +244,11 @@ beforeEach(() => {
 			"newer-remote",
 			"remote-token",
 			"Firefox remote device",
-			"2026-08-20"
+			"2026-08-20",
+			"desktop"
 		),
 	];
+	deviceLimitsEnforced = false;
 	calls.length = authRevocations.length = 0;
 	refuse = held = false;
 	release = undefined;
@@ -280,6 +340,9 @@ async function revokeWithConfirmation() {
 }
 function writes() {
 	return calls.filter((call) => call.method === "DELETE");
+}
+function reads(path: string) {
+	return calls.filter((call) => call.method === "GET" && call.path === path);
 }
 for (const [surface, Component] of surfaces) {
 	test(`${surface}: older authenticated session stays current while the newer remote session refuses, retries, persists and reloads`, async () => {
@@ -412,3 +475,38 @@ for (const [surface, Component] of surfaces) {
 		expect(writes()).toEqual([]);
 	});
 }
+test("Desktop: each session names its surface and enforced device limits show per-surface usage", async () => {
+	deviceLimitsEnforced = true;
+	sessions = sessions.map((session) =>
+		session.id === "older-current" ? { ...session, surface: "web" } : session
+	);
+	await render(desktop.SessionsTab);
+	await until(
+		() =>
+			container.querySelector('[data-device-limit-usage="desktop"]') !== null
+	);
+	expect(container.textContent).toContain("Web browsers · ");
+	expect(container.textContent).toContain("Ryu Desktop · ");
+	expect(container.textContent).toContain("Device limits");
+	const desktopUsage = container.querySelector(
+		'[data-device-limit-usage="desktop"]'
+	);
+	expect(desktopUsage?.textContent).toBe("1 of 1 · Limit reached");
+	expect(
+		container.querySelector('[data-device-limit-usage="web"]')?.textContent
+	).toBe("1 of 10");
+	expect(container.querySelectorAll("[data-device-limit-usage]")).toHaveLength(
+		6
+	);
+	expect(reads("/api/sessions/device-limits")[0]).toMatchObject({
+		authorization: "Bearer older-current-token",
+		status: 200,
+	});
+});
+test("Desktop: unenforced device limits stay hidden while sessions still name their surface", async () => {
+	await render(desktop.SessionsTab);
+	await until(() => reads("/api/sessions/device-limits").length > 0);
+	expect(container.textContent).toContain("Ryu Desktop · ");
+	expect(container.textContent).not.toContain("Device limits");
+	expect(container.querySelector("[data-device-limit-usage]")).toBeNull();
+});

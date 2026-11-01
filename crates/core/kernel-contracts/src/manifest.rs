@@ -2109,6 +2109,14 @@ impl Contributes {
                     ));
                 }
             }
+            if let Some(color_theme) = &interface.color_theme {
+                crate::interface_color_theme::validate_interface_color_theme(
+                    plugin_id,
+                    &interface.id,
+                    color_theme,
+                    &self.themes,
+                )?;
+            }
         }
         Ok(())
     }
@@ -2715,7 +2723,8 @@ pub struct Contributes {
     /// path; the host renders it over the one chat engine, so a hostile interface
     /// can at worst look wrong. Not a catalog kind, for the argument
     /// [`Contributes::themes`] makes: it inherits install, signing, the Store and
-    /// the trust scorecard from the plugin. See [`InterfaceContribution`].
+    /// the trust scorecard from the plugin. An entry may also name a colour
+    /// theme from [`Contributes::themes`] (`colorTheme`). See [`InterfaceContribution`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub interfaces: Vec<InterfaceContribution>,
 
@@ -4003,6 +4012,11 @@ pub struct InterfaceContribution {
     /// falls back to the renderer's own settings when any is invalid.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub settings: Vec<InterfaceSettingField>,
+    /// Colour theme painted while this interface is active, per mode: a theme
+    /// this plugin contributes in `themes` or a built-in preset id. A temporary
+    /// override, never saved as the user's preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_theme: Option<crate::interface_color_theme::InterfaceColorTheme>,
 }
 
 /// One setting a Marketplace interface shows. Mirrors the contribution form
@@ -7189,7 +7203,7 @@ pub struct AppDependency {
 
     /// Optional **minimum** version the dependency must satisfy.
     ///
-    /// A bare version (`"1.2.0"`) is a *minimum*, i.e. `">=1.2.0"` — deliberately
+    /// A bare version (`"1.2.0"`, or partial `"1.2"`) is a *minimum*, i.e. `">=1.2.0"` — deliberately
     /// NOT semver's default caret (`^1.2.0`), which would reject `2.0.0`. Explicit
     /// comparator syntax (`">=1.2, <2"`, `"^1.2"`, `"~1.2"`) is honoured verbatim.
     /// See [`parse_min_version`], the single parser both validation and resolution
@@ -7310,7 +7324,8 @@ impl Surface {
 /// the graph resolver (which checks satisfiability against the installed set).
 ///
 /// A bare version is a **minimum**, not a caret range:
-/// `"1.2.0"` → `">=1.2.0"` (so an installed `2.0.0` satisfies it). This differs
+/// `"1.2.0"` → `">=1.2.0"` (so an installed `2.0.0` satisfies it), and a bare
+/// partial `"1.2"` / `"1"` → `">=1.2"` / `">=1"`. This differs
 /// from [`semver::VersionReq::parse`], whose bare form means `^1.2.0` and would
 /// reject `2.0.0`. Anything that is not a bare version (`"^1.2"`, `">=1.0, <2"`,
 /// `"*"`) is passed through to `VersionReq` verbatim.
@@ -7324,8 +7339,53 @@ pub fn parse_min_version(raw: &str) -> Result<semver::VersionReq, String> {
         return semver::VersionReq::parse(&format!(">={v}"))
             .map_err(|e| format!("invalid min_version '{raw}': {e}"));
     }
+    // A bare PARTIAL version ("1.2", "1") is a minimum too. `VersionReq` would read
+    // it as a caret ("^1.2") and cap the major. Wildcards ("1.*", "1.2.x") contain
+    // non-digits and fall through unchanged.
+    let is_bare_partial = trimmed.split('.').count() <= 3
+        && trimmed
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    if is_bare_partial {
+        return semver::VersionReq::parse(&format!(">={trimmed}"))
+            .map_err(|e| format!("invalid min_version '{raw}': {e}"));
+    }
     // Otherwise it is comparator syntax — honour it as written.
     semver::VersionReq::parse(trimmed).map_err(|e| format!("invalid min_version '{raw}': {e}"))
+}
+
+/// Whether `have` satisfies a requirement produced by [`parse_min_version`].
+///
+/// **The single satisfaction check** for dependency and capability floors. Use it
+/// instead of [`semver::VersionReq::matches`], which rejects every pre-release
+/// (`1.0.1-beta.2`, `0.0.13-nightly.…`, `2.0.0-rc.1`) unless a comparator names a
+/// pre-release on the same `major.minor.patch`. That would make a plugin on the
+/// beta or nightly channel fail every plain floor, contradicting "min_version is a
+/// minimum".
+///
+/// A pre-release that `VersionReq` rejects is judged by its release core
+/// (`1.0.1-beta.2` → `1.0.1`), but only when no comparator carries its own
+/// pre-release tag and the core is not equal to a lower bound. So under semver
+/// precedence `1.0.1-beta.2` meets `>=0.1.14`, while `1.2.0-beta.1` still fails
+/// `>=1.2.0` and `2.0.0-rc.1` still fails `>=1.0, <2`.
+pub fn min_version_satisfied(req: &semver::VersionReq, have: &semver::Version) -> bool {
+    if req.matches(have) {
+        return true;
+    }
+    if have.pre.is_empty() || req.comparators.iter().any(|c| !c.pre.is_empty()) {
+        return false;
+    }
+    let core = semver::Version::new(have.major, have.minor, have.patch);
+    let above_lower_bounds = req.comparators.iter().all(|c| {
+        let is_lower_bound = matches!(
+            c.op,
+            semver::Op::GreaterEq | semver::Op::Exact | semver::Op::Caret | semver::Op::Tilde
+        );
+        !is_lower_bound
+            || (c.major, c.minor.unwrap_or(0), c.patch.unwrap_or(0))
+                != (core.major, core.minor, core.patch)
+    });
+    above_lower_bounds && req.matches(&core)
 }
 
 /// The trust/distribution tier of a plugin.
@@ -8756,6 +8816,7 @@ mod tests {
             params: BTreeMap::from([("theme".to_owned(), serde_json::json!("night"))]),
             attribution: None,
             settings: Vec::new(),
+            color_theme: None,
         }
     }
 
@@ -9602,6 +9663,45 @@ mod tests {
     fn parse_min_version_bare_is_minimum() {
         let req = parse_min_version("1.2.0").unwrap();
         assert!(req.matches(&semver::Version::parse("2.0.0").unwrap()));
+    }
+
+    #[test]
+    fn parse_min_version_bare_partial_is_minimum() {
+        let v = |s: &str| semver::Version::parse(s).unwrap();
+        let minor = parse_min_version("1.2").unwrap();
+        assert!(minor.matches(&v("2.0.0")), "'1.2' must not cap the major");
+        assert!(minor.matches(&v("1.2.0")));
+        assert!(!minor.matches(&v("1.1.9")));
+        let major = parse_min_version("1").unwrap();
+        assert!(major.matches(&v("2.0.0")));
+        assert!(!major.matches(&v("0.9.0")));
+        // Wildcards and explicit comparators keep their own meaning.
+        assert!(!parse_min_version("1.*").unwrap().matches(&v("2.0.0")));
+        assert!(!parse_min_version("^1.2").unwrap().matches(&v("2.0.0")));
+    }
+
+    #[test]
+    fn min_version_satisfied_accepts_prereleases_above_the_floor() {
+        let v = |s: &str| semver::Version::parse(s).unwrap();
+        let ok = |req: &str, have: &str| {
+            min_version_satisfied(&parse_min_version(req).unwrap(), &v(have))
+        };
+        assert!(ok("0.1.14", "1.0.1-beta.2"));
+        assert!(ok("1.0.0", "2.0.0-rc.1"));
+        assert!(ok("0.0.12", "0.0.13-nightly.20260728.932"));
+        assert!(ok("1.2", "1.3.0-beta.1"));
+        // A pre-release of the floor itself precedes the floor.
+        assert!(!ok("1.2.0", "1.2.0-beta.1"));
+        assert!(!ok("1.2", "1.2.0-beta.1"));
+        // Upper bounds still hold.
+        assert!(!ok(">=1.0, <2", "2.0.0-rc.1"));
+        assert!(ok(">=1.0, <2", "1.5.0-beta.1"));
+        // Explicit pre-release comparators are honoured verbatim.
+        assert!(ok(">=1.2.0-beta.1", "1.2.0-beta.2"));
+        assert!(!ok(">=1.2.0-beta.3", "1.2.0-beta.2"));
+        // Stable versions behave as before.
+        assert!(ok("1.2.0", "1.2.0"));
+        assert!(!ok("1.2.0", "1.1.9"));
     }
 
     // ── surfaces map: present is authoritative, absent delegates to targets ──────

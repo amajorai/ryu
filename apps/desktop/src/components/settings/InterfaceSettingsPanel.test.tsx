@@ -47,7 +47,7 @@ function switchFor(host: HTMLElement, label: string): HTMLElement {
 beforeEach(() => {
 	localStorage.clear();
 	useProductModeStore.setState({ osAccess: true });
-	useInterfaceStore.setState({ workspaceInterfaces: true });
+	useInterfaceStore.setState({ contributed: [], workspaceInterfaces: true });
 	useInterfaceSettings.setState({ focusedId: WORLD_3D, overrides: {} });
 	useInterfacePrefs.setState({ hideWorkDetails: false });
 });
@@ -104,6 +104,50 @@ test("Hide work details is the shared interface preference", () => {
 	const host = render();
 	act(() => switchFor(host, "Hide work details").click());
 	expect(useInterfacePrefs.getState().hideWorkDetails).toBe(true);
+});
+
+test("Use interface color themes is on by default and persists off", () => {
+	const host = render();
+	const control = switchFor(host, "Use interface color themes");
+	expect(control.getAttribute("aria-checked")).toBe("true");
+	act(() => control.click());
+	expect(localStorage.getItem("ryu:interface-color-themes")).toBe("false");
+	expect(
+		switchFor(host, "Use interface color themes").getAttribute("aria-checked")
+	).toBe("false");
+});
+
+test("an interface with a colour theme names it per mode", () => {
+	const TOWN = "@acme/pixel-town:town";
+	useInterfaceStore.setState({
+		contributed: [
+			{
+				colorTheme: { dark: "@acme/pixel-town:night", light: "ryu-light" },
+				description: "A tiny town.",
+				id: TOWN,
+				label: "Pixel Town",
+				origin: "marketplace",
+				params: {},
+				renderer: "channels",
+			},
+		],
+	});
+	useInterfaceSettings.setState({ focusedId: TOWN });
+	const host = render();
+	const note = host.querySelector(
+		'[data-testid="interface-settings-color-theme"]'
+	);
+	// A resolvable id shows its label; an unknown one falls back to the id.
+	expect(note?.textContent).toBe(
+		"Brings its own colors: Ryu in light mode, @acme/pixel-town:night in dark mode."
+	);
+});
+
+test("an interface without a colour theme shows no note", () => {
+	const host = render();
+	expect(
+		host.querySelector('[data-testid="interface-settings-color-theme"]')
+	).toBeNull();
 });
 
 test("the switcher's entry opens the Interfaces sub-page", async () => {

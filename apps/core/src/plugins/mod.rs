@@ -27,9 +27,13 @@ pub mod lifecycle;
 pub mod rollback;
 pub mod runtime;
 pub mod seed;
+pub mod update_bindings;
 
 #[cfg(test)]
 mod shipped_grants_runtime_tests;
+
+#[cfg(test)]
+mod graph_prerelease_tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

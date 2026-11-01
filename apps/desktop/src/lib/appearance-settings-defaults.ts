@@ -10,6 +10,10 @@ import {
 } from "@/src/hooks/useChatPickerPlacement.ts";
 import { DEFAULT_FRIENDLY_MODE } from "@/src/hooks/useFriendlyMode.ts";
 import {
+	DEFAULT_LIQUID_GLASS,
+	LIQUID_GLASS_KEY,
+} from "@/src/hooks/useLiquidGlass.ts";
+import {
 	DEFAULT_NODE_SELECTOR_DETAIL,
 	NODE_SELECTOR_DETAIL_KEY,
 } from "@/src/hooks/useNodeSelectorDetail.ts";
@@ -88,6 +92,7 @@ export const APPEARANCE_KEYS = {
 	botTerminology: BOT_TERMINOLOGY_STORAGE_KEY,
 	sidebarTransparency: SIDEBAR_TRANSPARENCY_KEY,
 	windowTransparency: WINDOW_TRANSPARENCY_KEY,
+	liquidGlass: LIQUID_GLASS_KEY,
 } as const;
 
 /** Defaults for Appearance toggles / presets (local UI sync after reset). */
@@ -160,6 +165,7 @@ export const APPEARANCE_DEFAULTS = {
 	timezone: DEFAULT_TIMEZONE,
 	sidebarTransparency: DEFAULT_SIDEBAR_TRANSPARENCY,
 	windowTransparency: DEFAULT_WINDOW_TRANSPARENCY,
+	liquidGlass: DEFAULT_LIQUID_GLASS,
 } as const;
 
 export type ThemeModeSetter = ((mode: string) => void) | null;

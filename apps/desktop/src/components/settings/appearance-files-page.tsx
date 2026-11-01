@@ -34,7 +34,10 @@ export function AppearanceFilesPage({ state }: { state: AppearanceTabState }) {
 	const { fileTreePrefs, treePreviewStyle, treePreviewClasses } = state;
 	return (
 		<SettingsSection caption="How the workspace Files tab renders your project.">
-			<SettingsCard className="mb-2 overflow-hidden rounded-xl border border-border">
+			<SettingsCard
+				bare
+				className="mb-2 overflow-hidden rounded-xl border border-border"
+			>
 				<div className="border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
 					Live preview
 				</div>

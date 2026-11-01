@@ -48,6 +48,7 @@
   "Browser actions on": "إجراءات المتصفح مفعّلة",
   "Browser bookmark": "إشارة مرجعية في المتصفح",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "فشل محرك المتصفح — تم التبديل إلى Core. أعد المحاولة أو اختر المتصفح في الإعدادات. {error}",
+  "Browser extension": "إضافة المتصفح",
   "Browser model": "نموذج المتصفح",
   "Browser runtime is unavailable.": "بيئة تشغيل المتصفح غير متاحة.",
   "Browser session link unavailable: {error}": "رابط جلسة المتصفح غير متاح: {error}",

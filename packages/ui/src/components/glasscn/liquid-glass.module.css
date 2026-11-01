@@ -33,3 +33,9 @@
 		linear-gradient(#000 0 0);
 	-webkit-mask-composite: xor;
 }
+
+/* Liquid Glass turned off: the specular rim is part of the glass material, so
+ * it goes with it. See liquid-glass.drawing.module.css. */
+html[data-ryu-liquid-glass="off"] .rim {
+	display: none;
+}

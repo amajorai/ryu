@@ -30,3 +30,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----------------------------------------------------------------------
+
+ghost-hands also adapts ideas from agent-desktop
+(https://github.com/vercel-labs/agent-desktop), by the agent-desktop
+contributors, licensed under the Apache License, Version 2.0.
+
+Adapted portion (reimplemented, not copied):
+- src/policy.rs: the canonical key-combo model and the per-OS blocked-hotkey
+  tables with the superset rule (quit, log out, lock, app switch and
+  virtual-terminal switch combos are refused unless explicitly forced).
+
+agent-desktop ships no NOTICE file of its own. A copy of the Apache License 2.0
+is in LICENSE.

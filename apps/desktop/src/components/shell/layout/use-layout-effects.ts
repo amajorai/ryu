@@ -25,6 +25,7 @@ import {
 import { useQuestEvents } from "@/src/hooks/useQuestEvents.ts";
 import { useReconnectRetry } from "@/src/hooks/useReconnectRetry.ts";
 import { useRegisterEditorAi } from "@/src/hooks/useRegisterEditorAi.ts";
+import { useInterfaceColorThemeSync } from "@/src/interfaces/use-interface-color-theme.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { fetchRecentActivity } from "@/src/lib/api/clips.ts";
 import { getCurrentContext } from "@/src/lib/api/shadow.ts";
@@ -137,6 +138,8 @@ export function useLayoutAppSubscriptions() {
 	// Appearance settings: a theme must resolve at boot and survive the user never
 	// opening settings at all.
 	usePluginThemeSync();
+	// The active Marketplace interface may bring its own colour theme.
+	useInterfaceColorThemeSync();
 	usePluginBackgroundSync();
 	return reconnectRetryState;
 }

@@ -2,6 +2,7 @@ import { WAITLIST_MANAGED_ONLY_FLAG } from "@ryuhq/protocol/feature-flags";
 import {
 	A_MAJOR_PASS_FLAG,
 	ABUSE_JOBS_FLAG,
+	AUTH_DEVICE_LIMITS_FLAG,
 	BILLING_PERIODS_FLAG,
 	CATALOG_AGENTS_AS_A_SERVICE_FLAG,
 	CATALOG_RED_TEAM_FLAG,
@@ -441,5 +442,13 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
 		exposure: "private",
 		// A kill switch: a failed read keeps the jobs running, as before the flag existed.
 		failMode: "open",
+	},
+	{
+		key: AUTH_DEVICE_LIMITS_FLAG,
+		description:
+			"Refuse new sign-ins over the per-surface device caps (web, desktop, self-hosted, mobile, extension, CLI). Surface stamping and the usage summary work regardless.",
+		defaultValue: false,
+		exposure: "private",
+		failMode: "closed",
 	},
 ];

@@ -32,7 +32,7 @@ import {
 } from "./LlmProvidersSettings-shared.ts";
 import { ModelParametersSettings } from "./ModelParametersSettings.tsx";
 import { ProviderKeySafetyNotice } from "./shared/provider-key-safety.tsx";
-import { SettingsSection } from "./shared/settings-items.tsx";
+import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
 export function LlmProvidersSettings({
 	canSetGatewayAccount = true,
@@ -142,33 +142,38 @@ export function LlmProvidersSettings({
 		await configure(input);
 	};
 
+	// One grouped card per list; each provider is a hairline-separated row on it.
 	const renderProviderCards = (providers: PiProvider[]) =>
-		providers.map((provider) => (
-			<ProviderCard
-				activeConfig={config}
-				canSetGatewayAccount={canSetGatewayAccount}
-				check={check}
-				discover={discover}
-				hasPrepaidManagedBalance={hasPrepaidManagedBalance}
-				key={provider.id}
-				onActivate={handleActivate}
-				onConfigure={handleConfigure}
-				onReload={reload}
-				onRemove={handleRemove}
-				onRemoveAccount={async (providerId, accountId) => {
-					return await removeAccount(providerId, accountId);
-				}}
-				onRenameAccount={async (providerId, accountId, label) => {
-					await renameAccount(providerId, accountId, label);
-				}}
-				onSwitchAccount={async (providerId, accountId, target) => {
-					await switchAccount(providerId, accountId, target);
-				}}
-				onToggleModel={handleToggleModel}
-				provider={provider}
-				thinkingLevels={cat.thinkingLevels}
-			/>
-		));
+		providers.length === 0 ? null : (
+			<SettingsCard className="py-0">
+				{providers.map((provider) => (
+					<ProviderCard
+						activeConfig={config}
+						canSetGatewayAccount={canSetGatewayAccount}
+						check={check}
+						discover={discover}
+						hasPrepaidManagedBalance={hasPrepaidManagedBalance}
+						key={provider.id}
+						onActivate={handleActivate}
+						onConfigure={handleConfigure}
+						onReload={reload}
+						onRemove={handleRemove}
+						onRemoveAccount={async (providerId, accountId) => {
+							return await removeAccount(providerId, accountId);
+						}}
+						onRenameAccount={async (providerId, accountId, label) => {
+							await renameAccount(providerId, accountId, label);
+						}}
+						onSwitchAccount={async (providerId, accountId, target) => {
+							await switchAccount(providerId, accountId, target);
+						}}
+						onToggleModel={handleToggleModel}
+						provider={provider}
+						thinkingLevels={cat.thinkingLevels}
+					/>
+				))}
+			</SettingsCard>
+		);
 
 	return (
 		<div className="flex flex-col gap-8">

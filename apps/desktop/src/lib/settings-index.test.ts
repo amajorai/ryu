@@ -260,7 +260,7 @@ describe("searchSettings", () => {
 		const interfaceEntries = SETTINGS_ENTRIES.filter((entry) =>
 			entry.id.startsWith("appearance.interfaces.")
 		);
-		expect(interfaceEntries).toHaveLength(3);
+		expect(interfaceEntries).toHaveLength(4);
 		const results = interfaceEntries.flatMap((entry) =>
 			searchSettings(entry.label)
 		);
@@ -273,6 +273,11 @@ describe("searchSettings", () => {
 				visibleSettingsEntries(results, true, false).map((result) => result.id)
 			).not.toContain(entry.id);
 		}
+	});
+	it("finds the interface colour theme switch", () => {
+		expect(searchSettings("colour theme").map((result) => result.id)).toContain(
+			"appearance.interfaces.use-interface-color-themes"
+		);
 	});
 	it("returns nothing for an empty query", () => {
 		expect(searchSettings("")).toEqual([]);

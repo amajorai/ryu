@@ -48,6 +48,7 @@
   "Browser actions on": "Actions du navigateur activées",
   "Browser bookmark": "Favori du navigateur",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "Échec du moteur du navigateur — bascule vers Core effectuée. Réessayez ou choisissez Navigateur dans les Paramètres. {error}",
+  "Browser extension": "Extension de navigateur",
   "Browser model": "Modèle du navigateur",
   "Browser runtime is unavailable.": "L'environnement d'exécution du navigateur n'est pas disponible.",
   "Browser session link unavailable: {error}": "Lien de session du navigateur indisponible : {error}",

@@ -7,22 +7,26 @@ import {
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { Children, type ReactNode } from "react";
 
-// Quiet, flush settings primitives for @ryu/settings.
+// iOS-style inset-grouped settings primitives for @ryu/settings.
 //
 // Local equivalents of SettingsSection / SettingsGroup / SettingsItem /
 // SettingsCard from `packages/blocks/src/desktop/settings-items.tsx`, which this
 // package cannot import (@ryu/settings does not depend on @ryu/blocks). Keep the
-// classes in step with that file so the shared web tabs look like the desktop
-// Settings panes: a section is a small semibold title, its rows are separated by
-// full-width hairlines, and nothing sits in a card. Deliberately smaller: no
-// i18n lookup (the @ryu/ui primitives localize themselves) and no `bare` rows.
+// classes in step with that file (and its default `card` settings surface) so
+// the shared web tabs look like the desktop Settings panes: a section is a small
+// semibold title over a rounded grouped card whose rows are separated by
+// hairlines. Deliberately smaller: no i18n lookup (the @ryu/ui primitives
+// localize themselves), no surface context and no `bare` rows.
 
 /** Section header class, for a header that must be a `legend`/`label`. */
 export const SETTINGS_SECTION_HEADER_CLASS =
 	"font-semibold text-foreground text-sm";
 
-/** Muted caption below a section body. */
-const SETTINGS_CAPTION_CLASS = "mt-2 text-detail text-muted-foreground";
+/** Muted caption below a section body, inset to the card's rows. */
+const SETTINGS_CAPTION_CLASS = "mt-2 px-3.5 text-detail text-muted-foreground";
+
+/** The rounded grouped card behind a group or a card block (iOS Settings). */
+export const SETTINGS_CARD_SURFACE_CLASS = "rounded-xl bg-grouped-card";
 
 /** The flush row geometry: 48px, no card inset, set off by hairlines alone. */
 const FLUSH_ROW =
@@ -51,8 +55,9 @@ interface SettingsSectionProps {
 }
 
 /**
- * A semibold title, a body and an optional caption. Sections are 32px apart;
- * the first one has no top margin.
+ * A semibold title, a body and an optional caption; the title and caption are
+ * inset to line up with the rows inside the card. Sections are 32px apart; the
+ * first one has no top margin.
  */
 export function SettingsSection({
 	as: Root = "div",
@@ -69,7 +74,7 @@ export function SettingsSection({
 			className={cn("mt-8 first:mt-0", className)}
 		>
 			{title || headerAction ? (
-				<div className="mb-1 flex items-center justify-between gap-2">
+				<div className="mb-1.5 flex items-center justify-between gap-2 px-3.5">
 					{title ? (
 						<h3 className={SETTINGS_SECTION_HEADER_CLASS} id={titleId}>
 							{title}
@@ -92,16 +97,19 @@ interface SettingsGroupProps {
 }
 
 /**
- * One flush list of rows with full-width hairlines between them and none after
+ * One rounded grouped card of rows with hairlines between them and none after
  * the last. Children are usually {@link SettingsItem}s, or
  * `Item purpose="settings-row"` when a row needs custom markup (e.g. rendered
  * as a `label`).
  */
 export function SettingsGroup({ children, className }: SettingsGroupProps) {
 	return (
-		<ItemGroup className={className} variant="flush">
-			{Children.toArray(children)}
-		</ItemGroup>
+		<div
+			className={cn(SETTINGS_CARD_SURFACE_CLASS, "px-3.5", className)}
+			data-slot="settings-group-card"
+		>
+			<ItemGroup variant="flush">{Children.toArray(children)}</ItemGroup>
+		</div>
 	);
 }
 
@@ -145,18 +153,27 @@ export function SettingsItem({
 }
 
 interface SettingsCardProps {
+	/** Drop the card fill and padding, so the child's own border is the edge. */
+	bare?: boolean;
 	children: ReactNode;
 	className?: string;
 }
 
 /**
  * A container for non-row content (empty states, forms with several fields,
- * charts, tables, long lists). Flush: a plain block with no fill, padding or
- * border, so it sits in the pane like the rows around it.
+ * charts, tables, long lists): a padded rounded grouped card, like the row
+ * groups around it.
  */
-export function SettingsCard({ children, className }: SettingsCardProps) {
+export function SettingsCard({ bare, children, className }: SettingsCardProps) {
 	return (
-		<div className={className} data-slot="settings-card">
+		<div
+			className={cn(
+				!bare && SETTINGS_CARD_SURFACE_CLASS,
+				!bare && "p-3.5",
+				className
+			)}
+			data-slot="settings-card"
+		>
 			{children}
 		</div>
 	);

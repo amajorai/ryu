@@ -48,6 +48,7 @@
   "Browser actions on": "Azioni del browser attive",
   "Browser bookmark": "Segnalibro del browser",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "Errore del motore del browser: passato a Core. Riprova o scegli Browser nelle Impostazioni. {error}",
+  "Browser extension": "Estensione del browser",
   "Browser model": "Modello del browser",
   "Browser runtime is unavailable.": "Il runtime del browser non è disponibile.",
   "Browser session link unavailable: {error}": "Link della sessione del browser non disponibile: {error}",

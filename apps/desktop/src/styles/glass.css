@@ -195,3 +195,18 @@ html[data-scrolling] [data-slot="sidebar-inset"] {
 	-webkit-backdrop-filter: none !important;
 	backdrop-filter: none !important;
 }
+
+/* Liquid Glass (Settings → Appearance → Liquid Glass). On by default; when the
+   user turns it off, useLiquidGlass marks <html> with
+   data-ryu-liquid-glass="off" and the native shell drops its NSGlassEffectView
+   backdrop. Web surfaces that draw their own glass material (the startup
+   chooser, the OS launcher) carry `ryu-glass-material`: they lose the backdrop
+   blur and keep their tint over a flat dark layer, so content stays legible
+   without refraction. The window/sidebar transparency rules above are a
+   separate preference and are deliberately untouched. The glasscn LiquidGlass
+   component and the Ask Ryu skin handle the same attribute in their own files. */
+html[data-ryu-liquid-glass="off"] .ryu-glass-material {
+	background-image: linear-gradient(rgb(0 0 0 / 0.42), rgb(0 0 0 / 0.42));
+	-webkit-backdrop-filter: none !important;
+	backdrop-filter: none !important;
+}

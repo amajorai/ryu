@@ -19,6 +19,12 @@ import { useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../utils/api-client.ts";
 import {
+	fetchDeviceLimitSummary,
+	occupiedDeviceLimits,
+	sessionSurface,
+} from "../utils/device-limits-api.ts";
+import { localizedDeviceSurfaceLabel } from "../utils/device-surface-labels.ts";
+import {
 	SETTINGS_ROW_REVEAL_CLASS,
 	SettingsGroup,
 	SettingsItem,
@@ -34,6 +40,14 @@ export function SessionsTab() {
 		queryFn: settingsApi.sessions.list,
 		staleTime: 5 * 60 * 1000, // 5 minutes
 	});
+
+	// Shares the "sessions" key prefix, so a revoke refreshes the counts too.
+	const { data: deviceLimits } = useQuery({
+		queryKey: ["sessions", "device-limits"],
+		queryFn: fetchDeviceLimitSummary,
+		staleTime: 5 * 60 * 1000,
+	});
+	const occupiedLimits = occupiedDeviceLimits(deviceLimits);
 
 	const revokeMutation = useMutation({
 		mutationFn: settingsApi.sessions.revoke,
@@ -107,6 +121,22 @@ export function SessionsTab() {
 				}
 				title="Active sessions"
 			>
+				{occupiedLimits.length > 0 && (
+					<p
+						className="pb-2 text-detail text-muted-foreground"
+						data-testid="device-limit-usage"
+					>
+						{occupiedLimits
+							.map((usage) =>
+								tl("{surfaceLabel}: {count} of {limit}", {
+									count: usage.count,
+									limit: usage.limit,
+									surfaceLabel: localizedDeviceSurfaceLabel(tl, usage.surface),
+								})
+							)
+							.join(" · ")}
+					</p>
+				)}
 				{sessions.length === 0 ? (
 					<p className="py-3 text-muted-foreground text-sm">
 						No active sessions.
@@ -115,6 +145,7 @@ export function SessionsTab() {
 					<SettingsGroup>
 						{sessions.map((session) => {
 							const isCurrent = session.isCurrent === true;
+							const surface = sessionSurface(session);
 
 							return (
 								// A block wrapper, not `display: contents`: the flush group
@@ -145,6 +176,8 @@ export function SessionsTab() {
 										}
 										description={
 											<>
+												{surface &&
+													`${localizedDeviceSurfaceLabel(tl, surface)} · `}
 												{session.ipAddress && `${session.ipAddress} · `}
 												{tl("Created {relativeTime}", {
 													relativeTime: formatDistanceToNow(

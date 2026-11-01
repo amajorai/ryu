@@ -32,7 +32,7 @@
   "requires": {
     "apps": [
       {
-        "id": "ghost",
+        "id": "@ryu/ghost",
         "min_version": "0.1.14"
       }
     ]

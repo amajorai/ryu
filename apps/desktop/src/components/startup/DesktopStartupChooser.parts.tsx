@@ -32,9 +32,11 @@ export type StartupStep = "account" | "node";
  * Liquid-glass surface in the macOS 27 style: a frosted, saturated backdrop,
  * a bright specular rim on top, a faint inner shadow below, and a soft drop
  * shadow. CSS only, so it renders the same in WebView2 and WKWebView.
+ * `ryu-glass-material` lets the Liquid Glass preference swap it for the flat
+ * fallback (styles/glass.css).
  */
 export const GLASS = cn(
-	"border border-white/25 bg-white/[0.12]",
+	"ryu-glass-material border border-white/25 bg-white/[0.12]",
 	sceneStyles.glass
 );
 

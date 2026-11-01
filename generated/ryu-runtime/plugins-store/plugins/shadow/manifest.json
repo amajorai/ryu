@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/shadow",
   "name": "Shadow",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "stable",
   "description": "Search everything Shadow has captured (screen text, audio transcripts, input) and summarize recent activity. Exposed as declarative HTTP tools that reach the device-local Shadow sidecar through Core's authenticated `/api/shadow/*` proxy (which injects Shadow's bearer token).",
   "icon": "record",
@@ -163,7 +163,7 @@
         },
         "fail_open": false,
         "unwrap_body": true,
-        "description": "Use the configured Shadow computer-use planner (Shadow, Jev Ultrafast, or an enabled local model plugin) to perform a user-requested task through the current accessibility tree. Requires an explicit user request. The task is bounded to the configured step limit, and Shadow rechecks the focused window and selected control immediately before acting. It can click visible controls, enter requested text, and scroll; it never presses Enter or submits a form automatically.",
+        "description": "Use the configured Shadow computer-use planner (Shadow, Jev Ultrafast, or an enabled local model plugin) to perform a user-requested task through the current accessibility tree. Requires an explicit user request. The task is bounded to the configured step limit, and Shadow rechecks the focused window and selected control immediately before acting. It runs accessibility actions to press visible controls and replace a field's text, falls back to mouse and keyboard input only on a desktop session, and can scroll; it never presses Enter or submits a form automatically. Password field values are never sent to the planner. A failed step ends the run as blocked.",
         "input_schema": {
           "type": "object",
           "properties": {

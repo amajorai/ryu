@@ -3,7 +3,6 @@ import type { useInputBarBars } from "./input-bar-bars.tsx";
 import type { getInputBarEditor } from "./input-bar-editor.tsx";
 import type { useInputBarKeyboard } from "./input-bar-keyboard.tsx";
 import type { useInputBarState } from "./input-bar-state.tsx";
-import type { getInputBarSurface } from "./input-bar-surface.tsx";
 import type { InputBarProps } from "./input-bar-types.ts";
 
 /** The props after InputBar's parameter defaults are applied. */
@@ -24,5 +23,4 @@ export type InputBarScope = InputBarBaseScope &
 	ReturnType<typeof useComposerAutoGrow> &
 	ReturnType<typeof useInputBarBars> &
 	ReturnType<typeof useInputBarKeyboard> &
-	ReturnType<typeof getInputBarEditor> &
-	ReturnType<typeof getInputBarSurface>;
+	ReturnType<typeof getInputBarEditor>;

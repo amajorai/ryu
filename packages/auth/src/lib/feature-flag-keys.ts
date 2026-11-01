@@ -198,3 +198,10 @@ export const WATCH_GITHUB_PARTNER_FLAG = "watch.github_partner" as const;
  * applies the ledger inline.
  */
 export const ABUSE_JOBS_FLAG = "abuse.jobs" as const;
+
+/**
+ * Stable key for per-surface device limits (`device-limits.ts`). Server-only, default off: on
+ * refuses a new sign-in once the account already holds the cap of live sessions for that
+ * surface. Surface stamping and the usage summary run regardless of the flag.
+ */
+export const AUTH_DEVICE_LIMITS_FLAG = "auth.device_limits" as const;

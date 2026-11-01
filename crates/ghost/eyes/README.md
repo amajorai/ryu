@@ -19,9 +19,15 @@ cargo build -p ghost-eyes
 
 - **Screen capture** (`screen.rs`): `ScreenCapture`, `Frame`, `DisplayInfo`, `quick_screenshot`, `get_primary_display_size`.
 - **Window tracking** (`window.rs`): `WindowTracker`, `WindowInfo`, `AppInfo`.
-- **Accessibility** (`accessibility.rs`): `AXTree`, `AXTreeNode`, `Bounds` for UI-tree perception.
+- **Accessibility** (`accessibility/`): `AXTree`, `AXTreeNode`, `Bounds` for UI-tree perception, plus the shared role vocabulary, strict element resolution, action verification and the semantic action ladder.
+- **Error contract** (`contract.rs`): `GhostError`, `ErrorCode`, `Delivery` and `Retry`, shared by Ghost and Shadow.
 - **Input monitoring** (`input.rs`): `InputMonitor`, `InputEvent` observation.
 - Per-platform backends (Win32 / Core Graphics / X11 + AT-SPI2) behind one trait surface.
+
+## Credits
+
+- [Ghost OS](https://github.com/ghostwright/ghost-os) (MIT): the original perception code.
+- [agent-desktop](https://github.com/vercel-labs/agent-desktop) (Apache-2.0): the role vocabulary, strict resolution, verification and action-chain designs in `accessibility/{roles,resolve,verify,chain}.rs` are adapted (and modified) from it. See [NOTICE](./NOTICE).
 
 ## License
 

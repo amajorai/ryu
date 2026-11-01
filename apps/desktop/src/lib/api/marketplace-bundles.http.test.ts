@@ -351,7 +351,13 @@ test("409 duplicates, permission refusal, semantic failure and unsupported model
 	installed.add("@ryu/projects");
 	failures.set("@ryu/denied", {
 		status: 403,
-		body: { error: "permission denied", message: "permission denied" },
+		// Core's GrantsDenied shape: only a 403 carrying `denied_grants` is a
+		// Gateway grant denial (a mandatory/ACL 403 keeps Core's own reason).
+		body: {
+			denied_grants: ["fs:write"],
+			error: "Gateway denied one or more grants",
+			success: false,
+		},
 	});
 	failures.set("ryu/broken", {
 		status: 200,
@@ -378,7 +384,7 @@ test("409 duplicates, permission refusal, semantic failure and unsupported model
 	expect(
 		result.failures.map(({ member: item, error }) => [item.id, error])
 	).toEqual([
-		["@ryu/denied", "Gateway denied one or more permission grants."],
+		["@ryu/denied", "Gateway denied grants: fs:write"],
 		["ryu/broken", "source unavailable"],
 	]);
 	expect(

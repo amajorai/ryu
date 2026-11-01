@@ -42,6 +42,58 @@ const ALL_THEME_VARS = [
 // distinct, so --card keeps its own per-variant value.)
 const MUTED_DERIVED_VARS = new Set(["--popover", "--popover-foreground"]);
 
+const MUTED_BASE_VARS = ["--muted-base", "--muted-foreground-base"];
+
+// Keys applyVariant always clears itself; anything else a variant writes is an
+// "extra" token whose prior inline value is tracked so it can be restored.
+const CORE_THEME_VARS = new Set([...ALL_THEME_VARS, ...MUTED_BASE_VARS]);
+
+interface WrittenExtraToken {
+	/** The inline value the key had before the variant wrote it ("" = none). */
+	previous: string;
+	/** The inline value the variant wrote, as the browser stored it. */
+	written: string;
+}
+
+// Per root element: the extra tokens (e.g. --chart-1, --radius, --font-sans)
+// the last applyVariant wrote, so a temporary theme never leaks past a switch.
+const writtenExtraTokens = new WeakMap<
+	HTMLElement,
+	Map<string, WrittenExtraToken>
+>();
+
+function removeThemeVars(el: HTMLElement) {
+	for (const v of ALL_THEME_VARS) {
+		el.style.removeProperty(v);
+	}
+	for (const v of MUTED_BASE_VARS) {
+		el.style.removeProperty(v);
+	}
+}
+
+/**
+ * Undo the extra tokens the last variant wrote. A key still holding the
+ * variant's value gets its earlier inline value back (or is removed); a key
+ * something else changed since (e.g. the radius slider) is left alone.
+ */
+function restoreExtraTokens(el: HTMLElement) {
+	const extras = writtenExtraTokens.get(el);
+	if (!extras) {
+		return;
+	}
+	writtenExtraTokens.delete(el);
+	for (const [key, { previous, written }] of extras) {
+		if (el.style.getPropertyValue(key) !== written) {
+			continue;
+		}
+		if (previous === "") {
+			el.style.removeProperty(key);
+		} else {
+			el.style.setProperty(key, previous);
+		}
+	}
+}
+
 export const DEFAULT_CONTRAST = 50;
 export const DEFAULT_RADIUS = 0.625;
 
@@ -105,17 +157,24 @@ export function applyVariant(
 	contrast: number = DEFAULT_CONTRAST
 ) {
 	const el = document.documentElement;
-	for (const v of ALL_THEME_VARS) {
-		el.style.removeProperty(v);
-	}
-	el.style.removeProperty("--muted-base");
-	el.style.removeProperty("--muted-foreground-base");
+	removeThemeVars(el);
+	restoreExtraTokens(el);
 
+	const extras = new Map<string, WrittenExtraToken>();
 	for (const [key, value] of Object.entries(variant.tokens)) {
 		if (MUTED_DERIVED_VARS.has(key)) {
 			continue;
 		}
+		if (CORE_THEME_VARS.has(key)) {
+			el.style.setProperty(key, value);
+			continue;
+		}
+		const previous = el.style.getPropertyValue(key);
 		el.style.setProperty(key, value);
+		extras.set(key, { previous, written: el.style.getPropertyValue(key) });
+	}
+	if (extras.size > 0) {
+		writtenExtraTokens.set(el, extras);
 	}
 	const mutedBase = variant.tokens["--muted"];
 	if (mutedBase) {
@@ -131,11 +190,8 @@ export function applyVariant(
 
 export function clearVariant() {
 	const el = document.documentElement;
-	for (const v of ALL_THEME_VARS) {
-		el.style.removeProperty(v);
-	}
-	el.style.removeProperty("--muted-base");
-	el.style.removeProperty("--muted-foreground-base");
+	removeThemeVars(el);
+	restoreExtraTokens(el);
 }
 
 export function applyRadius(radiusRem: number) {

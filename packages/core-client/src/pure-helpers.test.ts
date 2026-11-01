@@ -23,7 +23,7 @@ import { isInFlight, isTerminal } from "./downloads.ts";
 import { generateGatewayKey } from "./gateway.ts";
 import { isLocalEngine } from "./inference.ts";
 import { normalizeMeshStatus } from "./mesh.ts";
-import { describeDependencyError } from "./plugins.ts";
+import { describeDependencyError, isBareVersionFloor } from "./plugins.ts";
 import { updateCheckFailed } from "./updates.ts";
 import { voiceWsUrl } from "./voice-session.ts";
 
@@ -244,6 +244,45 @@ describe("describeDependencyError", () => {
 		);
 	});
 
+	test("version_mismatch with a range does not claim a floor or advise updating", () => {
+		expect(
+			describeDependencyError({
+				code: "version_mismatch",
+				plugin: "a",
+				dependency: "b",
+				required: ">=1.2, <2",
+				installed: "2.0.0",
+			})
+		).toBe("a needs b >=1.2, <2, but 2.0.0 is installed.");
+	});
+
+	test("missing_dependency with a range renders the requirement verbatim", () => {
+		expect(
+			describeDependencyError({
+				code: "missing_dependency",
+				plugin: "a",
+				dependency: "b",
+				required: "^1.2",
+			})
+		).toBe("a needs b (^1.2). Install it first.");
+	});
+
+	test("isBareVersionFloor mirrors Core's parse_min_version floor forms", () => {
+		for (const bare of ["1.2.0", "1.2", "1", " 2.0.0 ", "1.0.1-beta.2"]) {
+			expect(isBareVersionFloor(bare)).toBe(true);
+		}
+		for (const range of [
+			"^1.2",
+			"~1.2",
+			">=1.2, <2",
+			"1.*",
+			"1.2.x",
+			"v1.2.0",
+		]) {
+			expect(isBareVersionFloor(range)).toBe(false);
+		}
+	});
+
 	test("dependent_version_mismatch names the dependent an update would break", () => {
 		expect(
 			describeDependencyError({
@@ -254,7 +293,7 @@ describe("describeDependencyError", () => {
 				incoming: "2.0.0",
 			})
 		).toBe(
-			"Updating @ryu/spaces to 2.0.0 would break @ryu/meetings, which needs >=1.2, <2. Update @ryu/meetings first, or force the update."
+			"Updating @ryu/spaces to 2.0.0 would break @ryu/meetings, which needs >=1.2, <2. Update @ryu/meetings first."
 		);
 	});
 

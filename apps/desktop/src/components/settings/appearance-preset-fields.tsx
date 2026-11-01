@@ -20,6 +20,10 @@ import type {
 	ThemeVariant,
 } from "@/src/lib/themes/presets.ts";
 import { themeManifestJson } from "@/src/lib/themes/publish.ts";
+import {
+	overrideCoversMode,
+	useThemeOverride,
+} from "@/src/lib/themes/theme-override.ts";
 import appearanceStyles from "./appearance.module.css";
 import {
 	type AppearancePaintStyle,
@@ -117,6 +121,33 @@ export async function shareTheme(variant: ThemeVariant) {
 }
 
 /**
+ * While the active interface paints its own colours for this mode, say so above
+ * the presets: a pick is saved but only shows once the user leaves it.
+ */
+export function InterfaceThemeOverrideNote({
+	mode,
+}: {
+	mode?: "light" | "dark";
+}) {
+	const tl = useLiteralMessages();
+	const override = useThemeOverride();
+	if (!(mode && override && overrideCoversMode(mode === "dark", override))) {
+		return null;
+	}
+	return (
+		<p
+			className="px-2 py-1.5 text-muted-foreground text-xs"
+			data-testid="theme-override-note"
+		>
+			{tl(
+				"{label} is using its own colors. Your theme returns when you leave it.",
+				{ label: override.label || tl("This interface") }
+			)}
+		</p>
+	);
+}
+
+/**
  * The preset dropdown, split into provenance groups with shadcn `SelectGroup` /
  * `SelectLabel` headers. Empty groups are dropped entirely rather than rendered as a
  * bare header (a fresh install has no custom or installed themes, and a lone
@@ -124,10 +155,14 @@ export async function shareTheme(variant: ThemeVariant) {
  */
 export function PresetSelectGroups({ groups }: { groups: GroupedVariants }) {
 	const populated = PRESET_GROUP_ORDER.filter((key) => groups[key].length > 0);
+	// Every group holds one mode's variants; the note needs to know which.
+	const mode = populated.map((key) => groups[key][0]?.mode).find(Boolean);
+	const note = <InterfaceThemeOverrideNote mode={mode} />;
 	// A single group needs no header at all — the trigger already says what it is.
 	if (populated.length < 2) {
 		return (
 			<>
+				{note}
 				{populated.flatMap((key) =>
 					groups[key].map((v) => <PresetSelectItem key={v.id} variant={v} />)
 				)}
@@ -136,6 +171,7 @@ export function PresetSelectGroups({ groups }: { groups: GroupedVariants }) {
 	}
 	return (
 		<>
+			{note}
 			{populated.map((key, index) => (
 				// The separator sits BETWEEN groups, not inside one: a `SelectGroup`
 				// is a labelled region, and a rule nested under its label reads as

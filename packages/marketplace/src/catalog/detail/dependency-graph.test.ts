@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	type DependencyLookup,
 	type DependencyRecord,
+	formatMinVersion,
 	resolveDependencyTree,
 	tallyDependencies,
 } from "./dependency-graph.tsx";
@@ -117,4 +118,11 @@ describe("tallyDependencies", () => {
 			total: 3,
 		});
 	});
+});
+
+test("formatMinVersion marks only bare versions as a floor", () => {
+	expect(formatMinVersion("1.2.0")).toBe("≥ 1.2.0");
+	expect(formatMinVersion("1.2")).toBe("≥ 1.2");
+	expect(formatMinVersion("^1.2")).toBe("^1.2");
+	expect(formatMinVersion(">=1.2, <2")).toBe(">=1.2, <2");
 });

@@ -186,6 +186,19 @@ export function tallyDependencies(
 	return tally;
 }
 
+/** How a declared `min_version` reads in the tree. Core treats only a bare
+ *  version (`1.2.0`, `1.2`, `1`) as a floor; comparator syntax (`^1.2`,
+ *  `>=1.2, <2`, `1.*`) is honoured as written, so it must not gain a "≥".
+ *  Mirrors `isBareVersionFloor` in `@ryuhq/core-client/plugins` (this package
+ *  does not depend on core-client). */
+export function formatMinVersion(minVersion: string): string {
+	const trimmed = minVersion.trim();
+	const bare =
+		/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(trimmed) ||
+		/^\d+(?:\.\d+){0,2}$/.test(trimmed);
+	return bare ? `≥ ${trimmed}` : trimmed;
+}
+
 /** English plural without a formatting dependency ("1 app", "3 apps"). */
 function plural(count: number, one: string, many: string): string {
 	return `${formatNumber(count)} ${count === 1 ? one : many}`;
@@ -282,7 +295,7 @@ function DependencyRows({
 						</span>
 						{node.minVersion ? (
 							<span className="shrink-0 text-muted-foreground text-xs">
-								≥ {node.minVersion}
+								{formatMinVersion(node.minVersion)}
 							</span>
 						) : null}
 						<code className="hidden shrink-0 truncate font-mono text-muted-foreground text-xs sm:block">

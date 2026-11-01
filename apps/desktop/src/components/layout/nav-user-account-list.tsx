@@ -46,6 +46,7 @@ import {
 	switchAccount,
 } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { signInErrorDescription } from "@/src/lib/device-limit-copy.ts";
 // Keep the shared desktop OAuth implementation on the extension build path;
 // the extension swaps only its auth-client module, not this device-flow API.
 import {
@@ -175,7 +176,7 @@ export function AccountList({
 				setAdding(false);
 				toast.error({
 					title: "Couldn't add account",
-					description: err.message,
+					description: signInErrorDescription(tl, err),
 				});
 			},
 		});

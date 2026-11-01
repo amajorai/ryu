@@ -403,7 +403,10 @@ pub fn plan_install_closure(
     }
 
     // Lower capability edges so a required capability's provider is pulled into the
-    // install closure too (fetched + installed like any transitive app dep).
+    // install closure too — but only a provider that is already installed or was
+    // fetched as an app dependency: catalog discovery walks `requires.apps` only,
+    // so an unprovided capability is skipped here and refused (typed `Unprovided`)
+    // at enable time instead.
     let combined = crate::plugins::binding::lower_manifests(
         &combined,
         &crate::plugins::binding::active_config(),

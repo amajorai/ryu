@@ -48,6 +48,7 @@
   "Browser actions on": "浏览器操作已开启",
   "Browser bookmark": "浏览器书签",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "浏览器引擎失败，已切换到 Core。请重试，或在设置中选择浏览器。{error}",
+  "Browser extension": "浏览器扩展",
   "Browser model": "浏览器模型",
   "Browser runtime is unavailable.": "浏览器运行时不可用。",
   "Browser session link unavailable: {error}": "浏览器会话链接不可用：{error}",

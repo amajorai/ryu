@@ -48,6 +48,7 @@
   "Browser actions on": "ब्राउज़र कार्रवाइयाँ चालू",
   "Browser bookmark": "ब्राउज़र बुकमार्क",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "ब्राउज़र इंजन विफल — Core पर स्विच किया गया। फिर से कोशिश करें या सेटिंग्स में ब्राउज़र चुनें। {error}",
+  "Browser extension": "ब्राउज़र एक्सटेंशन",
   "Browser model": "ब्राउज़र मॉडल",
   "Browser runtime is unavailable.": "ब्राउज़र रनटाइम उपलब्ध नहीं है।",
   "Browser session link unavailable: {error}": "ब्राउज़र सत्र लिंक उपलब्ध नहीं है: {error}",

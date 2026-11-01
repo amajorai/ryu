@@ -46,6 +46,21 @@ function supportsSvgBackdropFilter() {
 	return isChromium && !/Firefox/.test(ua);
 }
 
+/**
+ * Whether the host turned Liquid Glass off. Desktop marks `<html>` with
+ * `data-ryu-liquid-glass="off"` (Settings → Appearance → Liquid Glass); no other
+ * host sets it, so every other consumer keeps the full material. The CSS
+ * modules carry the visual fallback; this only skips building the SVG filter.
+ */
+export function isLiquidGlassDisabled() {
+	if (globalThis.document === undefined) {
+		return false;
+	}
+	return (
+		document.documentElement.getAttribute("data-ryu-liquid-glass") === "off"
+	);
+}
+
 // NOTE: Per-corner radii and percentage radii are NOT supported. The map
 // reads only borderTopLeftRadius in px. If a future consumer needs
 // asymmetric corners, extend the corner SDF branch to accept four radii.
@@ -236,11 +251,6 @@ export const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
 			return () => observer.disconnect();
 		}, [bezel]);
 
-		const mapUrl = useMemo(
-			() => (geometry ? createDisplacementMap(geometry) : ""),
-			[geometry]
-		);
-
 		// -------------------------------------------------------------------------
 		// Browser capability gate
 		//
@@ -251,8 +261,29 @@ export const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
 		const [supported, setSupported] = useState(false);
 
 		useEffect(() => {
-			setSupported(supportsSvgBackdropFilter());
+			const browserSupports = supportsSvgBackdropFilter();
+			const update = () =>
+				setSupported(browserSupports && !isLiquidGlassDisabled());
+			update();
+			if (!browserSupports || typeof MutationObserver === "undefined") {
+				return;
+			}
+			// Follow the host's Liquid Glass switch live, so turning it back on
+			// restores refraction without a remount.
+			const observer = new MutationObserver(update);
+			observer.observe(document.documentElement, {
+				attributeFilter: ["data-ryu-liquid-glass"],
+				attributes: true,
+			});
+			return () => observer.disconnect();
 		}, []);
+
+		// No refraction (unsupported browser, or Liquid Glass turned off) means no
+		// displacement map to render either.
+		const mapUrl = useMemo(
+			() => (geometry && supported ? createDisplacementMap(geometry) : ""),
+			[geometry, supported]
+		);
 
 		const refractionActive = supported && mapUrl !== "";
 		const backdropFilter = refractionActive

@@ -15,6 +15,7 @@ import { useFileTreeThemeStyles } from "@/src/hooks/useFileTreeThemeStyles.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { useInvertedBackgrounds } from "@/src/hooks/useInvertedBackgrounds.ts";
+import { useLiquidGlass } from "@/src/hooks/useLiquidGlass.ts";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import { usePointerCursor } from "@/src/hooks/usePointerCursor.ts";
 import { usePopupOverlayBlur } from "@/src/hooks/usePopupOverlayBlur.ts";
@@ -87,6 +88,7 @@ export function useAppearancePrefs() {
 	const [sidebarTransparency, setSidebarTransparency] =
 		useSidebarTransparency();
 	const [windowTransparency, setWindowTransparency] = useWindowTransparency();
+	const [liquidGlass, setLiquidGlass] = useLiquidGlass();
 	// The STORED choice, not the drawn one: Bot mode forces messaging rows, and a
 	// switch that flipped itself on when the user picked a sidebar mode would have
 	// nothing left to restore when they left it.
@@ -306,6 +308,8 @@ export function useAppearancePrefs() {
 		setSidebarTransparency,
 		windowTransparency,
 		setWindowTransparency,
+		liquidGlass,
+		setLiquidGlass,
 		agentRowStyle,
 		sidebarChatPreview,
 		setSidebarChatPreview,

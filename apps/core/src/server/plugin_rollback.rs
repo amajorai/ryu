@@ -26,6 +26,54 @@ use crate::plugin_manifest::PluginManifest;
 use crate::plugins::rollback::{self, RollbackSnapshot};
 use crate::plugins::PluginRecord;
 
+/// The capability half of the reverse update/rollback gate.
+///
+/// `validate_dependents_of_update` sees only `requires.apps` edges. This refuses
+/// (409, the same `binding_error` shape the enable path returns) a transition that
+/// would leave an enabled capability consumer unbound once `incoming` replaces the
+/// installed manifest. `None` means the transition is safe to continue.
+pub(super) async fn refuse_capability_breaking_transition(
+    state: &ServerState,
+    incoming: &PluginManifest,
+    hint: &str,
+) -> Option<Response> {
+    let records = match state.app_store.list().await {
+        Ok(records) => records,
+        Err(e) => return Some(json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    };
+    let enabled_ids: std::collections::HashSet<&str> = records
+        .iter()
+        .filter(|r| r.enabled)
+        .map(|r| r.id.as_str())
+        .collect();
+    let enabled: Vec<PluginManifest> = state
+        .app_manifests
+        .read()
+        .await
+        .iter()
+        .filter(|m| enabled_ids.contains(m.id.as_str()))
+        .cloned()
+        .collect();
+    let (plugin, source) = crate::plugins::update_bindings::post_transition_binding_error(
+        &enabled,
+        incoming,
+        &crate::plugins::binding::active_config(),
+    )?;
+    Some(
+        (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "success": false,
+                "error": source.to_string(),
+                "plugin": plugin,
+                "binding_error": source.code(),
+                "hint": hint,
+            })),
+        )
+            .into_response(),
+    )
+}
+
 /// Optional body for `POST /api/plugins/:id/rollback`.
 #[derive(Debug, Default, Deserialize)]
 pub struct RollbackAppBody {
@@ -156,6 +204,36 @@ pub async fn rollback_app_handler(
                 })),
             )
                 .into_response();
+        }
+        // FORWARD gate: the restored version's own `requires.apps` must still be
+        // met by what is installed now (a rollback installs nothing, so nothing
+        // is fetched). A dependency since uninstalled comes back as a typed
+        // `missing_dependency`; a floor above the installed version as
+        // `version_mismatch`.
+        if let Err(dep_err) = crate::plugins::lifecycle::plan_update_dep_closure(
+            &snapshot.manifest,
+            &installed_now,
+            &[],
+        ) {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "success": false,
+                    "error": dep_err.to_string(),
+                    "dependency_error": dep_err,
+                    "hint": "pass force=true to roll back anyway",
+                })),
+            )
+                .into_response();
+        }
+        if let Some(response) = refuse_capability_breaking_transition(
+            &state,
+            &snapshot.manifest,
+            "pass force=true to roll back anyway",
+        )
+        .await
+        {
+            return response;
         }
     }
 

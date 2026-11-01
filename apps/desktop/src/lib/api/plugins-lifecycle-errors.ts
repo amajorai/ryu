@@ -1,6 +1,9 @@
 import { formatMessage } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
-import type { DependencyError } from "@ryuhq/core-client/plugins.ts";
+import {
+	type DependencyError,
+	isBareVersionFloor,
+} from "@ryuhq/core-client/plugins.ts";
 import { z } from "zod";
 import {
 	type PluginDocument,
@@ -60,26 +63,45 @@ export function describeDependencyError(
 				plugin: displayName(err.plugin),
 				dependency: displayName(err.dependency),
 			};
-			return err.required
+			if (!err.required) {
+				return tl("{plugin} needs {dependency}. Install it first.", values);
+			}
+			// Core honours comparator ranges (`^1.2`, `>=1.2, <2`) as written; only a
+			// bare version is a floor that "or newer" describes.
+			return isBareVersionFloor(err.required)
 				? tl(
 						"{plugin} needs {dependency} ({required} or newer). Install it first.",
 						{ ...values, required: err.required }
 					)
-				: tl("{plugin} needs {dependency}. Install it first.", values);
+				: tl("{plugin} needs {dependency} ({required}). Install it first.", {
+						...values,
+						required: err.required,
+					});
 		}
-		case "version_mismatch":
-			return tl(
-				"{plugin} needs {dependency} {required} or newer, but {installed} is installed. Update it first.",
-				{
-					plugin: displayName(err.plugin),
-					dependency: displayName(err.dependency),
-					required: err.required,
-					installed: err.installed,
-				}
-			);
+		case "version_mismatch": {
+			const values = {
+				plugin: displayName(err.plugin),
+				dependency: displayName(err.dependency),
+				required: err.required,
+				installed: err.installed,
+			};
+			// A range can fail because the installed version is too NEW, so "update
+			// it" is only advice for a bare floor.
+			return isBareVersionFloor(err.required)
+				? tl(
+						"{plugin} needs {dependency} {required} or newer, but {installed} is installed. Update it first.",
+						values
+					)
+				: tl(
+						"{plugin} needs {dependency} {required}, but {installed} is installed.",
+						values
+					);
+		}
 		case "dependent_version_mismatch":
+			// The desktop update actions cannot send `force`; name only the fix the
+			// user can take here.
 			return tl(
-				"Updating {dependency} to {incoming} would break {plugin}, which needs {required}. Update {plugin} first, or force the update.",
+				"Updating {dependency} to {incoming} would break {plugin}, which needs {required}. Update {plugin} first.",
 				{
 					dependency: displayName(err.dependency),
 					incoming: err.incoming,
@@ -207,7 +229,14 @@ export async function parseLifecycleError(
 		pluginStringField(body.error) ??
 		`${path} failed: ${status}`;
 
-	const grantsDenied = status === 403;
+	// Core answers 403 for more than Gateway grant denials (a `mandatory` plugin,
+	// a node-scope/ACL lifecycle refusal). Only the GrantsDenied arm carries
+	// `denied_grants`; every other 403 keeps Core's own reason.
+	const parsedDenied = z.array(pluginValueSchema).safeParse(body.denied_grants);
+	const grantsDenied = status === 403 && parsedDenied.success;
+	const lifecyclePermissionDenied =
+		status === 403 &&
+		pluginStringField(body.error) === "app_lifecycle_permission_denied";
 	const gatewayUnreachable = status === 503;
 	// 409 = the dependency graph refused (an enabled dependent blocks a disable, a
 	// dependency is missing/too old, or the graph cycles). Core flipped nothing, and
@@ -215,7 +244,6 @@ export async function parseLifecycleError(
 	const dependencyError =
 		status === 409 ? toDependencyError(body.dependency_error) : null;
 
-	const parsedDenied = z.array(pluginValueSchema).safeParse(body.denied_grants);
 	const deniedGrants =
 		grantsDenied && parsedDenied.success
 			? parsedDenied.data.join(", ") || null
@@ -243,6 +271,16 @@ export async function parseLifecycleError(
 		message = englishMessages(
 			"This change conflicts with the current plugin dependencies."
 		);
+	} else if (lifecyclePermissionDenied) {
+		const permission = pluginStringField(body.required_permission);
+		message = permission
+			? englishMessages(
+					"You don't have permission ({permission}) to change apps on this node.",
+					{ permission }
+				)
+			: englishMessages(
+					"You don't have permission to change apps on this node."
+				);
 	} else {
 		message =
 			describeGatewayRefusal(gatewayRefusal, englishMessages) ?? message;

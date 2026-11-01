@@ -2,3 +2,14 @@
 	-webkit-backdrop-filter: var(--liquid-glass-1--webkit-backdrop-filter);
 	backdrop-filter: var(--liquid-glass-1-backdrop-filter);
 }
+
+/* Liquid Glass turned off (Desktop: Settings → Appearance → Liquid Glass sets
+ * this attribute on <html>; nothing else does, so other hosts are unaffected).
+ * The refraction and backdrop blur drop, and a plain translucent fill keeps the
+ * light glass content legible. --liquid-glass-fallback-bg is the override
+ * channel for callers that need a different fallback tint. */
+html[data-ryu-liquid-glass="off"] .glassRefraction {
+	background-color: var(--liquid-glass-fallback-bg, rgb(24 24 28 / 0.78));
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}

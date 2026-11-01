@@ -47,7 +47,7 @@ for (const [index, x] of CHANNELS.entries()) {
 		const y = SLOT_Y + (SLOT_D * tick) / 4;
 		s.line(lineOnTop([x + 4, y], [x + 6.5, y], DESK_H, s.P), { tone: "faint" });
 	}
-	const y = SLOT_Y + SLOT_D * (1 - LEVELS[index]) - 4;
+	const y = SLOT_Y + SLOT_D * (1 - (LEVELS[index] ?? 0)) - 4;
 	s.solid(
 		slabOf({ x: x - 5, y, w: 10, d: 8, r: 1.5 }, DESK_H, 5, s.P, 3, 0.5),
 		index === LIT ? { lit: true } : {}

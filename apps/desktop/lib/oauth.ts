@@ -1,6 +1,13 @@
+import type { DeviceSurface } from "@ryu/auth/lib/device-limits";
 import { z } from "zod";
 import { FRONTEND_URL } from "@/lib/app-urls.ts";
 import { addAccount } from "@/lib/auth-client.ts";
+import { isTauriReady } from "@/src/lib/tauri-ready.ts";
+import {
+	DeviceLimitReachedError,
+	deviceCodeScope,
+	deviceLimitSignInMessage,
+} from "./device-limit-error.ts";
 import { localizeDevVerificationUrl } from "./device-verification-url.ts";
 
 // Device Authorization Grant (RFC 8628) run DIRECTLY against Better Auth — no
@@ -20,6 +27,21 @@ const LOCAL_FRONTEND_CONFIGURED =
 	FRONTEND_URL.includes("localhost") ||
 	FRONTEND_URL.includes("127.0.0.1") ||
 	FRONTEND_URL.includes("[::1]");
+
+/** Message for the poll's own deadline, so callers can tell it from a refusal. */
+export const SIGN_IN_TIMED_OUT_MESSAGE = "Login timed out";
+
+/**
+ * The surface this build declares on its device-code request: the hosted
+ * webapp build declares `web`, the Tauri desktop app `desktop`. The extension
+ * dashboard shares this module with no Tauri bridge and declares nothing.
+ */
+function declaredDeviceCodeSurface(): DeviceSurface | null {
+	if (import.meta.env.VITE_RYU_SURFACE === "webapp") {
+		return "web";
+	}
+	return isTauriReady() ? "desktop" : null;
+}
 
 /**
  * Normalize a device-auth URL at the final browser-open boundary as well as
@@ -79,7 +101,7 @@ export async function startDeviceAuth(
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
 			client_id: DEVICE_CLIENT_ID,
-			scope: OAUTH_SCOPES,
+			scope: deviceCodeScope(OAUTH_SCOPES, declaredDeviceCodeSurface()),
 		}),
 	});
 	if (!res.ok) {
@@ -143,6 +165,7 @@ export function pollAuthStatus(
 			}
 
 			let data: z.output<typeof deviceTokenResponseSchema>;
+			let body: unknown;
 			try {
 				// This Better Auth deployment enforces application/json on every auth
 				// route (form-urlencoded → 415), so the RFC 8628 token request goes as
@@ -156,7 +179,8 @@ export function pollAuthStatus(
 						client_id: DEVICE_CLIENT_ID,
 					}),
 				});
-				data = deviceTokenResponseSchema.parse(await res.json());
+				body = await res.json();
+				data = deviceTokenResponseSchema.parse(body);
 			} catch {
 				// Transient network error — keep polling until the deadline.
 				continue;
@@ -192,6 +216,12 @@ export function pollAuthStatus(
 				}
 				return;
 			}
+			if (deviceLimitSignInMessage(body)) {
+				if (!cancelled) {
+					onError(new DeviceLimitReachedError(body));
+				}
+				return;
+			}
 			if (error) {
 				if (!cancelled) {
 					onError(new Error(`Sign-in failed: ${error}`));
@@ -200,7 +230,7 @@ export function pollAuthStatus(
 			}
 		}
 		if (!cancelled) {
-			onError(new Error("Login timed out"));
+			onError(new Error(SIGN_IN_TIMED_OUT_MESSAGE));
 		}
 	})();
 

@@ -23,8 +23,10 @@ import {
 	osAppCategory,
 } from "./OsDesktopSurface.apps.tsx";
 
+// `ryu-glass-material`: the Liquid Glass preference swaps this for the flat
+// fallback (styles/glass.css).
 export const LAUNCHER_GLASS =
-	"border border-white/20 bg-os-launcher-glass shadow-(--shadow-os-launcher-glass) backdrop-blur-2xl backdrop-saturate-(--backdrop-saturate-os-launcher)";
+	"ryu-glass-material border border-white/20 bg-os-launcher-glass shadow-(--shadow-os-launcher-glass) backdrop-blur-2xl backdrop-saturate-(--backdrop-saturate-os-launcher)";
 
 /**
  * Full-screen launcher in the macOS 27 style: Mission Control's spread of open

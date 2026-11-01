@@ -15,6 +15,7 @@
 
 pub mod avatar;
 pub mod host_api;
+pub mod interface_color_theme;
 pub mod manifest;
 pub mod runnable;
 pub mod schema;
@@ -23,10 +24,11 @@ pub mod tenancy;
 // ── Root re-exports (the headline surface) ────────────────────────────────────
 
 pub use host_api::HOST_API_VERSION;
+pub use interface_color_theme::{InterfaceColorTheme, MAX_INTERFACE_COLOR_THEME_ID_BYTES};
 pub use manifest::{
     canonical_plugin_id, cookie_namespace_prefix, is_app_event, is_env_var_name,
-    is_kernel_event_id, kernel_event, kernel_event_in, parse_min_version, plugin_dir_name,
-    split_hook_event_id, validate_cli_command_path, validate_event_subscription,
+    is_kernel_event_id, kernel_event, kernel_event_in, min_version_satisfied, parse_min_version,
+    plugin_dir_name, split_hook_event_id, validate_cli_command_path, validate_event_subscription,
     validate_forwarded_cookie_names, validate_hook_event, validate_plugin_id, AppDependency,
     CompanionSurface, CompatibilityVerdict, Contributes, ContributionId, EnginesReq,
     EventSubscription, HookEventContribution, HookMatch, HookMode, HostVersions, KernelEventSpec,

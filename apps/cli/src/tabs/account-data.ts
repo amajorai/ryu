@@ -13,7 +13,7 @@ import {
 } from "../core/auth-status-wire.ts";
 import { accountBackendTarget } from "../core/authBackend.ts";
 import { nativeErrorMessage as errText } from "../core/native-errors.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import {
 	type SecuritySessionResponse as SessionWire,
 	securityPasswordStatusResponseSchema,
@@ -118,6 +118,12 @@ export async function pollOnce(
 	return { failed: "cancelled" };
 }
 
+// RFC 8628 `error` the auth server sends when the account is at its device
+// cap for this surface (`DEVICE_LIMIT_REACHED_ERROR` in
+// packages/auth/src/lib/device-limits.ts); Core records it verbatim in
+// `lastFlow.error`.
+const DEVICE_LIMIT_REACHED_ERROR = "device_limit_reached";
+
 // Human copy for a device flow that ended without signing in.
 export function describeFlowFailure(reason: string): string {
 	if (reason === "access_denied") {
@@ -128,6 +134,13 @@ export function describeFlowFailure(reason: string): string {
 	}
 	if (reason === "cancelled") {
 		return "Sign-in was cancelled";
+	}
+	if (reason === DEVICE_LIMIT_REACHED_ERROR) {
+		// Same sentence as the desktop and extension pollers' generic refusal:
+		// Core keeps only the `error` string, not the surface or its cap.
+		return tr(
+			"Device limit reached: this account is already signed in on as many devices of this kind as it allows. Sign out of one you no longer use, then try again."
+		);
 	}
 	return tf("Sign-in failed: {reason}", { reason });
 }

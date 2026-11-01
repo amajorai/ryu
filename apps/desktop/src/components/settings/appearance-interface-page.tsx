@@ -50,6 +50,8 @@ export function AppearanceInterfacePage({
 		setSidebarTransparency,
 		windowTransparency,
 		setWindowTransparency,
+		liquidGlass,
+		setLiquidGlass,
 		agentRowStyle,
 		sidebarChatPreview,
 		setSidebarChatPreview,
@@ -160,6 +162,19 @@ export function AppearanceInterfacePage({
 					}
 					description="Menus, popovers and tooltips use the page background."
 					title="Invert overlay backgrounds"
+				/>
+				<SettingsItem
+					actions={
+						<Switch
+							aria-label="Liquid Glass"
+							checked={liquidGlass}
+							id="liquid-glass-toggle"
+							onCheckedChange={setLiquidGlass}
+						/>
+					}
+					description="Use the macOS Liquid Glass material where available. Turn off for the flat, frosted look instead."
+					settingsId="appearance.liquid-glass"
+					title="Liquid Glass"
 				/>
 				{isDesktop && (
 					<>

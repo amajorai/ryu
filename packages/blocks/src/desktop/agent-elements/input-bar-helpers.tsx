@@ -7,11 +7,11 @@ import {
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { useEffect, useLayoutEffect } from "react";
 import { FileTypeIcon } from "./file-type-icon.tsx";
+import type { InputConfig } from "./input-bar-defaults.ts";
 import type {
 	AttachedFile,
 	AttachedImage,
 	InputBarTurnProgress,
-	InputConfig,
 } from "./input-bar-types.ts";
 
 /**

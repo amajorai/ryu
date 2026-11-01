@@ -30,3 +30,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----------------------------------------------------------------------
+
+ghost-eyes also includes portions adapted from agent-desktop (https://github.com/vercel-labs/agent-desktop), licensed under the Apache License, Version 2.0 (see LICENSE). Those portions have been modified.

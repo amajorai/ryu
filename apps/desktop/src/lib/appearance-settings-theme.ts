@@ -5,6 +5,7 @@ import { setChromeShadows } from "@/src/hooks/useChromeShadows.ts";
 import { setDialogOverlayBlur } from "@/src/hooks/useDialogOverlayBlur.ts";
 import { setFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import { setInvertedBackgrounds } from "@/src/hooks/useInvertedBackgrounds.ts";
+import { setLiquidGlass } from "@/src/hooks/useLiquidGlass.ts";
 import { setPersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import { setPointerCursor } from "@/src/hooks/usePointerCursor.ts";
 import { setPopupOverlayBlur } from "@/src/hooks/usePopupOverlayBlur.ts";
@@ -198,6 +199,13 @@ export function registerAppearanceThemeSettings(): void {
 		category: "appearance",
 		label: "Transparent window",
 		reset: () => setWindowTransparency(APPEARANCE_DEFAULTS.windowTransparency),
+	});
+
+	registerSetting({
+		id: "appearance.liquid-glass",
+		category: "appearance",
+		label: "Liquid Glass",
+		reset: () => setLiquidGlass(APPEARANCE_DEFAULTS.liquidGlass),
 	});
 
 	registerSetting({

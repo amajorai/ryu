@@ -48,6 +48,7 @@
   "Browser actions on": "ブラウザ操作 オン",
   "Browser bookmark": "ブラウザのブックマーク",
   "Browser engine failed — switched to Core. Retry or choose Browser in Settings. {error}": "ブラウザエンジンでエラーが発生したため、Core に切り替えました。再試行するか、設定でブラウザを選択してください。{error}",
+  "Browser extension": "ブラウザー拡張機能",
   "Browser model": "ブラウザモデル",
   "Browser runtime is unavailable.": "ブラウザランタイムを利用できません。",
   "Browser session link unavailable: {error}": "ブラウザセッションのリンクを利用できません: {error}",

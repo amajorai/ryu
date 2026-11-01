@@ -21,6 +21,12 @@
  * client's token. Callers use it as a strong nudge toward the Ryu clients.
  */
 import type { BetterAuthPlugin } from "better-auth";
+import {
+	type DeviceLimitContext,
+	deviceLimitBeforeHooks,
+	stampDeviceLimitSession,
+} from "./device-limit-plugin.ts";
+import { DEVICE_SURFACE_FIELD } from "./device-limits.ts";
 
 /** Session field holding the device-authorization client id. */
 export const ISSUED_CLIENT_ID_FIELD = "issuedClientId";
@@ -135,9 +141,17 @@ export function ryuClientSessionPlugin(): BetterAuthPlugin {
 						required: false,
 						input: false,
 					},
+					// Device-limit surface (`device-limits.ts`), stamped on every
+					// new session by `stampDeviceLimitSession`.
+					[DEVICE_SURFACE_FIELD]: {
+						type: "string",
+						required: false,
+						input: false,
+					},
 				},
 			},
 		},
+		hooks: { before: deviceLimitBeforeHooks() },
 		init: () => ({
 			options: {
 				databaseHooks: {
@@ -145,12 +159,17 @@ export function ryuClientSessionPlugin(): BetterAuthPlugin {
 						create: {
 							before: async (session, context) => {
 								const clientId = deviceGrantClientId(context);
-								if (!clientId) {
-									return { data: session };
-								}
-								return {
-									data: { ...session, [ISSUED_CLIENT_ID_FIELD]: clientId },
-								};
+								const issued = clientId
+									? { ...session, [ISSUED_CLIENT_ID_FIELD]: clientId }
+									: session;
+								// Stamps `surface` always; throws the device-limit refusal
+								// only when `auth.device_limits` is on for this user.
+								const data = await stampDeviceLimitSession(
+									issued,
+									context as DeviceLimitContext | null,
+									clientId
+								);
+								return { data };
 							},
 						},
 					},

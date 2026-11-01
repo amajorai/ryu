@@ -126,6 +126,7 @@ export const SYNCABLE_KEYS: SyncableKey[] = [
 		label: "Transparent window",
 		group: "appearance",
 	},
+	{ key: "ryu:liquid-glass", label: "Liquid Glass", group: "appearance" },
 	{ key: "ryu_pointer_cursor", label: "Pointer cursor", group: "appearance" },
 	{
 		key: "ryu:agent-row-style",

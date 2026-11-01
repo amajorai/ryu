@@ -36,7 +36,10 @@ export function AppearanceDiffPage({ state }: { state: AppearanceTabState }) {
 	const { diffPrefs } = state;
 	return (
 		<SettingsSection caption="How diffs render in the workspace Changes tab.">
-			<SettingsCard className="mb-2 overflow-hidden rounded-xl border border-border">
+			<SettingsCard
+				bare
+				className="mb-2 overflow-hidden rounded-xl border border-border"
+			>
 				<div className="border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
 					Live preview
 				</div>

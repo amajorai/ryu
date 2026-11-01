@@ -5,18 +5,20 @@ import { createContext, type ReactNode, useContext } from "react";
 /**
  * What a flush settings block sits on.
  *
- * - `plain` (default): nothing; the desktop Settings dialog and Gateway panes
- *   set rows straight on the pane.
- * - `card`: each `SettingsGroup` and `SettingsCard` paints a rounded card
- *   behind its flush rows, for a page frame (the web organization console)
- *   whose sections would otherwise float on the page background. Rows,
- *   hairlines and descriptions are unchanged; only the surface is added.
+ * - `card` (default): each `SettingsGroup` and `SettingsCard` paints a rounded
+ *   grouped card behind its rows, as in iOS/macOS Settings. Rows, hairlines and
+ *   descriptions are unchanged; only the surface is added. Every settings
+ *   surface (the desktop Settings dialog, Gateway panes, web account and
+ *   organization settings) uses it.
+ * - `plain`: no surface, for a block that is already inside a card (a carded
+ *   `SettingsGroup` sets it for its own children so cards never nest) or a
+ *   caller that draws its own frame.
  *
  * An explicit `appearance="grouped"` still wins over the surface.
  */
 export type SettingsSurface = "plain" | "card";
 
-const SettingsSurfaceContext = createContext<SettingsSurface>("plain");
+const SettingsSurfaceContext = createContext<SettingsSurface>("card");
 
 export function SettingsSurfaceProvider({
 	children,
