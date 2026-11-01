@@ -116,16 +116,27 @@ export function passImageUrl(facts: PassShareFacts): string {
 }
 
 /**
- * The public page to share. Carries the referral code as well, so the post
- * unfurls the card AND credits the sharer when someone signs up from it.
+ * A referral code safe to put in a path segment. Mirrors `isReferralCode` in
+ * `apps/web/src/lib/referral-share.ts`, which is what `/pass/CODE` accepts.
+ */
+const SHORT_PASS_CODE = /^[A-Za-z0-9]{4,64}$/;
+
+/**
+ * The public page to share. Carries the referral code, so the post unfurls the
+ * card AND credits the sharer when someone signs up from it.
+ *
+ * With a referral code this is the short `/pass/CODE` form — the page resolves
+ * the rest of the card from the code — instead of spelling every fact out in
+ * the query string. Without one there is nothing to look up, so it falls back to
+ * the long `/pass?name=…` form, which the page still serves for every link
+ * already shared.
  *
  * `origin` is passed in rather than read off `window`: the desktop shell's own
  * origin is `tauri.localhost`, so it supplies the web app's URL instead.
  */
 export function passPageUrl(facts: PassShareFacts, origin: string): string {
-	const params = passShareParams(facts);
-	if (facts.ref) {
-		params.set("ref", facts.ref);
+	if (facts.ref && SHORT_PASS_CODE.test(facts.ref)) {
+		return `${origin}/pass/${facts.ref}`;
 	}
-	return `${origin}/pass?${params.toString()}`;
+	return `${origin}/pass?${passShareParams(facts).toString()}`;
 }
