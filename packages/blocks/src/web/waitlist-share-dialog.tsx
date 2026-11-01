@@ -1,7 +1,10 @@
 "use client";
 
 import { formatPassDate } from "@ryu/ui/components/waitlist-pass.tsx";
-import type { PassShareFacts } from "@ryu/ui/lib/pass-share.ts";
+import {
+	type PassShareFacts,
+	passBackdropSeed,
+} from "@ryu/ui/lib/pass-share.ts";
 import { useMemo } from "react";
 import { PassShareDialog } from "./pass-share-dialog.tsx";
 
@@ -43,9 +46,9 @@ export function WaitlistShareDialog({
 	onShareOnX: () => void;
 	open: boolean;
 }) {
-	// The card's OWN backdrop seed — the handle first, then the name. Anything
-	// else and the exported card is a different colour from the one on screen.
-	const seed = facts.username || facts.name.trim() || "ryu";
+	// The card's OWN backdrop seed, by the live card's rule. Anything else and
+	// the exported card is a different colour from the one on screen.
+	const seed = passBackdropSeed(facts);
 	// Memoized because it is the scene's identity: a fresh object every render
 	// would rebuild the type layer on every keystroke behind the dialog.
 	const content = useMemo(

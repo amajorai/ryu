@@ -2,6 +2,7 @@
 
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { memberPassName } from "@ryu/ui/lib/pass-share.ts";
 import { USAGE_STREAK_HINT } from "@ryu/ui/lib/usage-streak.ts";
 
 import { EntityAvatar } from "./entity-avatar.tsx";
@@ -128,7 +129,7 @@ export function WrappedPass({
 	// Seeded off the NAME so the card is the member's own colour and two people
 	// never hold the same one. Falls back to a stable literal rather than a fresh
 	// value per render, which would rehash the backdrop on every paint for nothing.
-	const displayName = name?.trim() || "A Ryu Developer";
+	const displayName = memberPassName(name);
 	const seed = displayName;
 
 	return (

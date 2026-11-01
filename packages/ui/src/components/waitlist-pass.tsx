@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { isNativeNumber } from "../lib/native-primitive-observation.ts";
+import { passBackdropSeed } from "../lib/pass-share.ts";
 import { cn } from "../lib/utils.ts";
 import { EntityAvatar } from "./entity-avatar.tsx";
 import { Logo } from "./logo.tsx";
@@ -331,7 +332,7 @@ export function WaitlistPass({
 	// claiming one has to repaint the card — that moment is the whole reward of
 	// reserving a handle, and a card that did not change would read as the claim
 	// not having worked.
-	const backdropSeed = username || name?.trim() || "ryu";
+	const backdropSeed = passBackdropSeed({ name, username });
 	// The glyph in the circle follows the canonical avatar seed (id, then email,
 	// then name) so it is the SAME placeholder the account menu trigger draws —
 	// an avatar that disagreed with the one in the corner of the app would read

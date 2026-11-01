@@ -299,7 +299,11 @@ const PNG_COLOR_TYPE_RGB = 2;
  * thirty lines of spec is cheaper to own than a dependency in a Docker build
  * that is already fragile about native modules.
  */
-const encodePng = (width: number, height: number, rgb: Uint8Array): Buffer => {
+export const encodePng = (
+	width: number,
+	height: number,
+	rgb: Uint8Array
+): Buffer => {
 	const stride = width * 3;
 	const raw = Buffer.alloc(height * (stride + 1));
 	for (let y = 0; y < height; y++) {

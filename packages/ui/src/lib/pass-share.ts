@@ -20,7 +20,7 @@ import { z } from "zod";
  *
  * It lives here rather than next to the renderer so the `/pass` page can declare
  * it in `og:image:width/height` without importing `pass-card.tsx`, which would
- * drag takumi's native binding into a page render for one number.
+ * drag the OG renderer into a page render for one number.
  */
 export const PASS_OG_SIZE = { width: 1200, height: 675 } as const;
 
@@ -47,6 +47,40 @@ export interface PassShareFacts {
 	/** Referral code, so a click on the shared post is still attributed. */
 	ref?: string | null;
 	username?: string | null;
+}
+
+/**
+ * The string a waitlist pass's backdrop (warp hue and QR tint) is hashed from.
+ *
+ * The HANDLE first — claiming one has to repaint the card — then the trimmed
+ * name, then "Member": the name every shared surface prints for a member who
+ * has neither (`waitlistShareFacts`, `/pass`, the referral lookup). One function
+ * because four places draw this card — the live `WaitlistPass`, the share
+ * dialog's export, the `/pass` page and the `/api/og/pass` raster a shared link
+ * unfurls as — and each used to spell the rule itself. The raster seeded from
+ * the clamped name, and the live card fell back to "ryu" while the shared facts
+ * said "Member", so a long or blank name unfurled in a different colour from the
+ * card its owner was looking at.
+ */
+export function passBackdropSeed(facts: {
+	name?: string | null;
+	username?: string | null;
+}): string {
+	return facts.username || facts.name?.trim() || "Member";
+}
+
+/**
+ * The name a member pass (Wrapped, profile) prints and hashes its backdrop
+ * from: the trimmed name, or a stable stand-in. Shared by the live cards and
+ * their OG rasters so a padded or blank name lands on the same hue in both.
+ */
+export function memberPassName(name?: string | null): string {
+	return name?.trim() || "A Ryu Developer";
+}
+
+/** The certificate pass's backdrop seed: the holder, or "ryu" when blank. */
+export function certificatePassSeed(holderName?: string | null): string {
+	return holderName?.trim() || "ryu";
 }
 
 /**
