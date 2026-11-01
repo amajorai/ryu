@@ -48,9 +48,11 @@ mock.module("@/src/lib/api/billing.ts", () => ({
 const { activeOrgQueryKey } = await import("@/src/lib/api/orgs.ts");
 const ACTIVE_ORG = activeOrgQueryKey("user-a");
 const { queryClient } = await import("@/src/lib/query-client.ts");
-const { useFeatureFlag, useFeatureFlagState } = await import(
-	"./useFeatureFlag.ts"
-);
+const {
+	subscribeFeatureFlagScopeDeferred,
+	useFeatureFlag,
+	useFeatureFlagState,
+} = await import("./useFeatureFlag.ts");
 const { captureFeatureFlagScope, publishFeatureFlags } = await import(
 	"@/src/lib/feature-flags.ts"
 );
@@ -139,4 +141,20 @@ test("a never-read scope is unsettled until its first refresh, and later publica
 		await new Promise((resolve) => setTimeout(resolve, 0));
 	});
 	expect(seen.at(-1)).toEqual({ enabled: true, settled: true });
+});
+
+test("the deferred scope subscription coalesces a burst and stays silent after unsubscribe", async () => {
+	let calls = 0;
+	const unsubscribe = subscribeFeatureFlagScopeDeferred(() => {
+		calls += 1;
+	});
+	queryClient.setQueryData(["scope-burst", 1], 1);
+	queryClient.setQueryData(["scope-burst", 2], 2);
+	expect(calls).toBe(0);
+	await Promise.resolve();
+	expect(calls).toBe(1);
+	queryClient.setQueryData(["scope-burst", 3], 3);
+	unsubscribe();
+	await Promise.resolve();
+	expect(calls).toBe(1);
 });

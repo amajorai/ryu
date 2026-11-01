@@ -43,6 +43,37 @@ import {
 	subscribeFeatureFlagScope,
 } from "@/src/lib/feature-flags.ts";
 
+/**
+ * {@link subscribeFeatureFlagScope} with each notification moved off the call
+ * stack. The scope source is the whole query cache, and a sibling's `useQuery`
+ * adds its query DURING render; a synchronous notify would then update every
+ * flag reader while React is rendering another component ("Cannot update a
+ * component while rendering a different component"). `useSyncExternalStore`
+ * still compares snapshots on every render, so nothing is missed by deferring.
+ */
+export function subscribeFeatureFlagScopeDeferred(
+	onChange: () => void
+): () => void {
+	let active = true;
+	let queued = false;
+	const unsubscribe = subscribeFeatureFlagScope(() => {
+		if (queued) {
+			return;
+		}
+		queued = true;
+		queueMicrotask(() => {
+			queued = false;
+			if (active) {
+				onChange();
+			}
+		});
+	});
+	return () => {
+		active = false;
+		unsubscribe();
+	};
+}
+
 /** Current best answer for `key`, with the compiled-in default as the floor. */
 function resolveNow(key: string): boolean {
 	return readFeatureFlag(key) ?? featureFlagFallback(key);
@@ -85,7 +116,7 @@ export function useFeatureFlagState(key: string): FeatureFlagState {
 	// Re-run the effect below whenever the (account, org) scope changes, so an
 	// org switch re-reads and refetches rather than serving the old org's map.
 	const scopeKey = useSyncExternalStore(
-		subscribeFeatureFlagScope,
+		subscribeFeatureFlagScopeDeferred,
 		featureFlagScopeKey,
 		featureFlagScopeKey
 	);
@@ -156,7 +187,7 @@ export function useAppListingAllowed(): (appId: string) => boolean {
 	const [flags, setFlags] = useState(resolveAppRolloutFlags);
 	// Same (account, org) scope tracking as `useFeatureFlag`.
 	const scopeKey = useSyncExternalStore(
-		subscribeFeatureFlagScope,
+		subscribeFeatureFlagScopeDeferred,
 		featureFlagScopeKey,
 		featureFlagScopeKey
 	);

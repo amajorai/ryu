@@ -1,5 +1,6 @@
 import { Share08Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { INDIVIDUAL_PLANS_FLAG } from "@ryu/auth/lib/feature-flags";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { settingsApi, useSubscription } from "@ryu/settings";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -13,6 +14,7 @@ import { sileo } from "sileo";
 import { useSession } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
+import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import { useActiveOrgId } from "@/src/lib/api/orgs.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
@@ -42,6 +44,10 @@ export function BillingTab() {
 		enabled: !sessionPending,
 	});
 	const { plan: organizationPlan } = useOrgBillingStatus();
+	// Lifetime is an individual plan: while `billing.individual_plans` is off the
+	// pricing page hides it and the billing router refuses its checkout, so the
+	// tab offers no purchase. An owner still sees their updates window.
+	const individualPlansEnabled = useFeatureFlag(INDIVIDUAL_PLANS_FLAG);
 	const stepUp = useStepUp();
 
 	const [pendingAction, setPendingAction] = useState<
@@ -169,56 +175,60 @@ export function BillingTab() {
 
 			<SpendControlsSection />
 
-			<SettingsSection title="Lifetime access">
-				{subLoading ? (
-					<SkeletonRows rows={1} />
-				) : (
-					<SettingsGroup>
-						<SettingsItem
-							actions={
-								<Button
-									className="shrink-0"
-									loading={lifetimePending}
-									onClick={handleLifetimeCheckout}
-									size="sm"
-									variant="outline"
-								>
-									{!lifetimePending && (
-										<HugeiconsIcon icon={Share08Icon} size={14} />
-									)}
-									{isLifetime
-										? lifetime?.expired
-											? "Renew — buy lifetime again"
-											: "Extend — buy lifetime again"
-										: "Get lifetime access"}
-								</Button>
-							}
-							description={
-								isLifetime && lifetime ? (
-									<>
-										{tl("Updates included until {date}", {
-											date: formatDate(lifetime.updatesExpiresAt, {
-												year: "numeric",
-												month: "long",
-												day: "numeric",
-											}),
-										})}
-										{lifetime.expired && (
-											<span className="mt-1 block text-status-destructive">
-												Updates expired. Buy lifetime access again at the
-												current price to extend them.
-											</span>
-										)}
-									</>
-								) : (
-									"Pay once, own it forever. Includes 1 year of updates."
-								)
-							}
-							title="Lifetime"
-						/>
-					</SettingsGroup>
-				)}
-			</SettingsSection>
+			{individualPlansEnabled || isLifetime ? (
+				<SettingsSection title="Lifetime access">
+					{subLoading ? (
+						<SkeletonRows rows={1} />
+					) : (
+						<SettingsGroup>
+							<SettingsItem
+								actions={
+									individualPlansEnabled ? (
+										<Button
+											className="shrink-0"
+											loading={lifetimePending}
+											onClick={handleLifetimeCheckout}
+											size="sm"
+											variant="outline"
+										>
+											{!lifetimePending && (
+												<HugeiconsIcon icon={Share08Icon} size={14} />
+											)}
+											{isLifetime
+												? lifetime?.expired
+													? "Renew — buy lifetime again"
+													: "Extend — buy lifetime again"
+												: "Get lifetime access"}
+										</Button>
+									) : undefined
+								}
+								description={
+									isLifetime && lifetime ? (
+										<>
+											{tl("Updates included until {date}", {
+												date: formatDate(lifetime.updatesExpiresAt, {
+													year: "numeric",
+													month: "long",
+													day: "numeric",
+												}),
+											})}
+											{lifetime.expired && (
+												<span className="mt-1 block text-status-destructive">
+													Updates expired. Buy lifetime access again at the
+													current price to extend them.
+												</span>
+											)}
+										</>
+									) : (
+										"Pay once, own it forever. Includes 1 year of updates."
+									)
+								}
+								title="Lifetime"
+							/>
+						</SettingsGroup>
+					)}
+				</SettingsSection>
+			) : null}
 
 			<SettingsSection title="Invoice history">
 				{invoicesLoading ? (

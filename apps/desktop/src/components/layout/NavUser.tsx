@@ -1,3 +1,4 @@
+import { INDIVIDUAL_PLANS_FLAG } from "@ryu/auth/lib/feature-flags";
 import { AgentAvailabilityDot } from "@ryu/blocks/desktop/agent-availability.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { settingsApi, useSubscription } from "@ryu/settings";
@@ -33,6 +34,7 @@ import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
 import { APPROVALS_ALIAS } from "@/src/contributions/companion-alias.ts";
 import { useCompanionAlias } from "@/src/contributions/use-companion-alias.ts";
 import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
+import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import { useUserAvailability } from "@/src/hooks/useUserAvailability.ts";
 // # 0.1.0: Capture toggle disabled — uncomment with the User Nav item below.
@@ -55,6 +57,7 @@ import { HideChromeContextMenu } from "./nav-user-menu-items.tsx";
 import {
 	formatDate,
 	nextTierName,
+	offerLifetimeAccess,
 	planLabel,
 	showTrialCountdown,
 	trialDaysLabel,
@@ -206,6 +209,9 @@ export function NavUser(props: NavUserProps) {
 	// Free during beta (trial rollout off): no upgrade or Lifetime pitch in the
 	// menu. Payers resolve as "subscription"/"license" and keep theirs.
 	const showUpsell = verdict?.reason !== "beta";
+	// Lifetime is an individual plan: hidden (and refused by the billing router)
+	// while the `billing.individual_plans` rollout is off.
+	const individualPlansEnabled = useFeatureFlag(INDIVIDUAL_PLANS_FLAG);
 	const creditsLeft = (() => {
 		if (wallet) {
 			return formatMicroUsd(wallet.balanceMicroUsd, wallet.currency);
@@ -254,7 +260,11 @@ export function NavUser(props: NavUserProps) {
 		creditsLeft,
 		currentPlanLabel,
 		hasSubscription,
-		isLifetime,
+		offerLifetime: offerLifetimeAccess({
+			individualPlansEnabled,
+			isLifetime,
+			showUpsell,
+		}),
 		openLifetimeCheckout,
 		openPricing,
 		organization,

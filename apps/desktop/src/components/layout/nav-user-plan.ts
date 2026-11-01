@@ -53,6 +53,20 @@ export function nextTierName(plan: string | null | undefined): string | null {
 	return "Pro";
 }
 
+/**
+ * Whether the account menu offers "Get Lifetime Access". Lifetime is an
+ * individual plan, so it is listed only while `billing.individual_plans` is on
+ * (the web pricing page and the billing router apply the same rule), never
+ * during beta (no upsell), and never to someone who already owns it.
+ */
+export function offerLifetimeAccess(input: {
+	individualPlansEnabled: boolean;
+	isLifetime: boolean;
+	showUpsell: boolean;
+}): boolean {
+	return input.individualPlansEnabled && input.showUpsell && !input.isLifetime;
+}
+
 export function nextTierLabel(
 	plan: string | null | undefined,
 	tl: LiteralMessage

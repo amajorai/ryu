@@ -67,7 +67,7 @@ interface PlanView {
 	creditsLeft: string;
 	currentPlanLabel: string;
 	hasSubscription: boolean;
-	isLifetime: boolean;
+	offerLifetime: boolean;
 	openLifetimeCheckout: () => void;
 	openPricing: () => void;
 	organization: unknown;
@@ -138,7 +138,7 @@ function PlanSubmenu({
 						See all plans
 					</DropdownMenuItem>
 				) : null}
-				{plan.showUpsell && !plan.isLifetime ? (
+				{plan.offerLifetime ? (
 					<DropdownMenuItem onClick={plan.openLifetimeCheckout}>
 						<HugeiconsIcon className="size-4" icon={ArrowUp01Icon} />
 						Get Lifetime Access
