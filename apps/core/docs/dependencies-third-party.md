@@ -85,16 +85,14 @@ and the `ryu-collab` crate.
 ### opus
 
 Ryu Hardware Protocol (RHP v1) audio bridging. The device link speaks Opus while the rest of Core
-speaks WAV/PCM (whisper STT, OuteTTS). The `opus` crate wraps libopus through
-`audiopus-sys`/`opus-sys`, whose build script BUILDS libopus FROM VENDORED SOURCE via CMake when
-pkg-config cannot find a system copy (the default on Windows and on any box without libopus-dev), so
-`cargo check` is self-contained. Its API is plain slices (`encode(&[i16], &mut [u8])` and
+speaks WAV/PCM (whisper STT, OuteTTS). The `opus` crate (0.4) wraps libopus through `opusic-sys`,
+whose default `bundled` feature BUILDS libopus FROM VENDORED SOURCE via CMake, so `cargo check` is
+self-contained and needs no system libopus. Its API is plain slices (`encode(&[i16], &mut [u8])` and
 `decode(&[u8], &mut [i16], fec)`), unlike audiopus's wrapper types.
 
-Advisory: `opus` depends on `audiopus_sys`, and there is no safe upstream upgrade for
-RUSTSEC-2026-0150. The advisory is ignored in the repository `deny.toml`, which points at the
-note beside `opus` in `apps/core/Cargo.toml`, and that note points here. Keep the ignore visible
-until the voice transport moves.
+Advisory: `opus` 0.3 depended on the unmaintained `audiopus_sys` (RUSTSEC-2026-0150). `opus` 0.4
+moved to the maintained `opusic-sys` with the same `Encoder`/`Decoder` slice API, so the advisory no
+longer applies and is no longer ignored in the repository `deny.toml`.
 
 ### hound
 

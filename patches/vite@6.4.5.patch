@@ -1,6 +1,7 @@
-diff --git a/dist/node/chunks/dep-3O3b9SCF.js b/dist/node/chunks/dep-3O3b9SCF.js
---- a/dist/node/chunks/dep-3O3b9SCF.js
-+++ b/dist/node/chunks/dep-3O3b9SCF.js
+diff --git a/dist/node/chunks/dep-CkSfqg8D.js b/dist/node/chunks/dep-CkSfqg8D.js
+index c2a41aa..5b2bf0a 100644
+--- a/dist/node/chunks/dep-CkSfqg8D.js
++++ b/dist/node/chunks/dep-CkSfqg8D.js
 @@ -12197,7 +12197,7 @@ function extractJsonErrorPosition(errorMessage, inputLength) {
    return errorMessageList ? Math.max(parseInt(errorMessageList[1], 10) - 1, 0) : void 0;
  }

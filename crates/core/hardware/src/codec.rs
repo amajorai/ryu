@@ -6,8 +6,8 @@
 //!   - **Downlink** TTS: Opus, mono, 24 kHz, 60 ms frames (1440 samples/frame).
 //!
 //! This module owns the codec edges so [`super::session`] only ever deals in
-//! decoded PCM / WAV bytes. Opus runs through `audiopus` (which vendors libopus
-//! via `audiopus_sys`, so no system libopus is required); WAV read/write runs
+//! decoded PCM / WAV bytes. Opus runs through `opus` (which vendors libopus
+//! via `opusic-sys`, so no system libopus is required); WAV read/write runs
 //! through `hound`.
 
 use anyhow::{Context, Result};

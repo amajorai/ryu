@@ -9,7 +9,14 @@ requires-python = ">=3.11,<3.15"
 dependencies = []
 
 [project.optional-dependencies]
-server = ["fastapi==0.115.12", "uvicorn==0.34.0", "cactus-needle==3.0.1"]
+# FastAPI 0.115.x capped Starlette below 0.47 (PYSEC-2026-161/248/249/1941/1942/2280/2281);
+# 0.142.2 accepts the patched Starlette 1.x line pinned beside it.
+server = [
+  "fastapi==0.142.2",
+  "starlette==1.7.0",
+  "uvicorn==0.34.0",
+  "cactus-needle==3.0.1",
+]
 
 [project.scripts]
 ryu-needle3 = "ryu_needle3.server:run"

@@ -127,7 +127,7 @@ ryu-gw-channels = { path = "../../crates/gateway/channels" }
 
 # WASM policy tier (gateway plugin plane — in-process third-party policy code).
 # Pinned to v48 to match Core's sandbox dep (apps/core/Cargo.toml) so the tree
-# holds ONE wasmtime. Default features (proven to build on this machine via Core);
+# holds ONE wasmtime. Default features minus `cache` (see the note below);
 # the sandbox posture comes entirely from the runtime `Config`/`Linker`/`StoreLimits`
 # (zero-import linker, NO WASI, fuel + epoch + memory caps), NOT from Cargo features,
 # so trimming features would buy no security and risk the build. Untrusted policy
@@ -135,7 +135,11 @@ ryu-gw-channels = { path = "../../crates/gateway/channels" }
 # fresh (Core's spike has none of the fuel/epoch/limit hardening) — the shared
 # `ryu-wasm-host` crate that would dedupe this AND retrofit Core is a documented
 # follow-up (see src/wasm_policy/mod.rs).
-wasmtime = "48.0.8"
+# wasmtime's default features minus `cache`: the on-disk compilation cache is never
+# configured (no `Config::cache`), and it is the only path that links zstd 0.13,
+# whose zstd-safe 7 carries RUSTSEC-2026-0391/0398/0403 with no wasmtime release on
+# zstd 0.14. Keep this list in sync across gateway, sandbox and tool-exec.
+wasmtime = { version = "48.0.8", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
 
 # OpenTelemetry seam (#540, P1): mirrors Core's seam (apps/core/Cargo.toml). The
 # vendor-neutral instrumentation export path. `tracing-opentelemetry` 0.33 bridges

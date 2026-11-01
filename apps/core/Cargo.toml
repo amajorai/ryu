@@ -54,7 +54,7 @@ tempfile = "3"
 cap-std = "=3.4.6"
 hex = "0.4"
 semver = { version = "1", features = ["serde"] }
-indicatif = "0.17"
+indicatif = "0.18"
 tokio-util = { version = "0.7", features = ["io"] }
 flate2 = "1"
 bzip2 = "0.5"
@@ -65,7 +65,7 @@ chrono-tz = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
 sqlite-vec = "=0.1.6"
 humantime = "2"
-zstd = "0.13"
+zstd = "0.14.3"
 urlencoding = "2"
 unicode-normalization = "0.1"
 base64 = { version = "0.22", features = ["alloc"] }
@@ -97,11 +97,11 @@ native-tls = "0.2"
 tokio-native-tls = "0.3"
 x509-parser = { version = "0.18", features = ["verify"] }
 yrs = "0.27"
-# RUSTSEC-2026-0150 (audiopus_sys) is ignored in deny.toml; see docs/dependencies-third-party.md#opus.
-opus = "0.3"
+# opus 0.4 builds vendored libopus through `opusic-sys`; see docs/dependencies-third-party.md#opus.
+opus = "0.4"
 hound = "3"
 # Depend on resvg alone (it re-exports usvg/tiny-skia) to keep one version of each.
-resvg = "0.44"
+resvg = "0.49"
 png = "0.17"
 # Exact pin. `unstable_mcp_over_acp` stays OFF on purpose; see docs/dependencies-third-party.md.
 agent-client-protocol = { version = "=3.5.0", features = [

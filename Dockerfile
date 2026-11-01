@@ -40,7 +40,8 @@
 FROM rust:1-trixie AS builder
 
 # Core and Gateway build deps. cmake + a C/C++ toolchain are needed for Core's
-# vendored audio codec (audiopus_sys builds libopus via CMake); protobuf-compiler
+# vendored audio codec (`opusic-sys` builds libopus from source via CMake >= 3.16
+# and links it statically, so no system libopus); protobuf-compiler
 # for prost-build; libssl-dev + libdbus-1-dev + pkg-config for the rest. GitHub's
 # ubuntu runners ship cmake preinstalled, so the release workflow omits it; a
 # bare debian builder does not, so install it explicitly.

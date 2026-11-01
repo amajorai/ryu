@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-zstd = "0.13"
+zstd = "0.14.3"
 ryu-rag = { path = "../rag", version = "0.5.0" }
 # The shared tenancy composition layer (`ResourceKey`). A pure-data contract
 # crate (serde/schemars/semver only) — NOT apps/core — so depending on it to
