@@ -14,7 +14,7 @@ export const BOX_ROUTES: ServiceRouteTable = {
 		{ method: "POST", path: "/v1/boxes/{id}/fork", required: true },
 	],
 	// A replayed create or fork answers 200 with `Idempotent-Replayed: true`
-	// and `type: "box.existing"` (apps/box/src/service.ts). The shim reads the
+	// and `type: "box.existing"` (apps/box/src/box-service/box-endpoints.ts). The shim reads the
 	// header first; the body marker covers Box servers that predate it.
 	replayedBodyField: "type",
 	replayedBodyValue: "box.existing",

@@ -113,6 +113,7 @@ export function RealmsHeroSurface() {
 							>
 								<DownloadMenu
 									label="Download"
+									showOsLogo
 									showSeparator={false}
 									size="lg"
 									transparentBackground

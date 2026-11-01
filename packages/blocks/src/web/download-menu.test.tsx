@@ -47,6 +47,16 @@ describe("DownloadMenu", () => {
 		expect(html).not.toContain('aria-label="More download options"');
 	});
 
+	test("showOsLogo renders the logo label inside a hover group", () => {
+		const html = renderToStaticMarkup(
+			<DownloadMenu showOsLogo transparentBackground variant="outline" />
+		);
+		expect(html).toContain("Download for");
+		expect(html).toContain('data-slot="download-os-logo"');
+		expect(html).toContain("group/download");
+		expect(html).not.toContain(">Download<");
+	});
+
 	test("loads the dropdown body on intent, never with the page", () => {
 		// A static import (or re-export) would put the whole menu body and the
 		// page-level download.tsx graph into every page's header chunk.

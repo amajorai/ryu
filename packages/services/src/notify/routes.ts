@@ -1,7 +1,7 @@
 // packages/services/src/notify/routes.ts
 //
 // Ryu Notify: routes whose writes the server deduplicates by `Idempotency-Key`.
-// apps/notify/src/service.ts reads the header in two places: `publishEvent`
+// apps/notify/src/routes/ reads the header in two places: `publishEvent`
 // (`POST /v1/events` and `POST /v1/topics/:topic`, key optional) and the
 // activity create (`POST /v1/activities`, key required, 400 without one).
 // Keys are at most 128 characters; a UUID fits. test/conformance/notify.test.ts

@@ -35,6 +35,7 @@ import {
 	stableReleases,
 } from "./download-assets.ts";
 import styles from "./download-menu.module.css";
+import { DownloadOsLabel } from "./download-os-label.tsx";
 import { useSendDownloadLink } from "./send-download-link.tsx";
 import { OS_SVGL, SvglIcon } from "./svgl-icon.tsx";
 import { whenBrowserIdle } from "./when-browser-idle.ts";
@@ -80,6 +81,7 @@ export function DownloadMenu({
 	contentAlign = "start",
 	label = "Download",
 	showChevron = true,
+	showOsLogo = false,
 	showPlatform = false,
 	showSeparator = false,
 	separatorClassName,
@@ -92,6 +94,8 @@ export function DownloadMenu({
 	contentAlign?: "center" | "end" | "start";
 	label?: string;
 	showChevron?: boolean;
+	/** "Download for <OS logo>", with the CPU architecture morphing in on hover/focus. */
+	showOsLogo?: boolean;
 	/** Use the longer OS-aware label reserved for the dedicated download page. */
 	showPlatform?: boolean;
 	showSeparator?: boolean;
@@ -106,6 +110,7 @@ export function DownloadMenu({
 }) {
 	const tl = useLiteralMessages();
 	const [os, setOs] = useState<DownloadOS>("macos");
+	const [osDetected, setOsDetected] = useState(false);
 	const [arch, setArch] = useState<DownloadArch | null>(null);
 	const [releases, setReleases] = useState<Release[]>([]);
 
@@ -155,6 +160,7 @@ export function DownloadMenu({
 	useEffect(() => {
 		active.current = true;
 		setOs(detectDownloadOS());
+		setOsDetected(true);
 		const synchronousArch = detectDownloadArch();
 
 		void detectDownloadArchAsync().then((detectedArch) => {
@@ -182,6 +188,16 @@ export function DownloadMenu({
 			: "Download"
 		: label;
 	const iconSize = size === "lg" ? 18 : 16;
+	const buttonLabel = showOsLogo ? (
+		<DownloadOsLabel
+			arch={arch}
+			detected={osDetected}
+			iconSize={iconSize}
+			os={os}
+		/>
+	) : (
+		primaryLabel
+	);
 	// Public pages draw outline buttons as borderless text, so a split control
 	// would leave the label and chevron floating apart. As a secondary CTA the
 	// outline variant is one plain "Download" link with no menu. Beam-wrapped
@@ -211,7 +227,7 @@ export function DownloadMenu({
 							: "download-primary"
 					}
 					aria-haspopup={sendLink.mobile ? "dialog" : undefined}
-					className={className}
+					className={cn(showOsLogo && "group/download", className)}
 					// The button base draws a transparent, padding-clipped border; on a mono
 					// split it would leave a strip of page beside the divider, so join it.
 					edge={
@@ -245,7 +261,7 @@ export function DownloadMenu({
 							spec={OS_SVGL[os]}
 						/>
 					) : null}
-					{primaryLabel}
+					{buttonLabel}
 				</Button>
 				{separatorVisible ? (
 					<span
