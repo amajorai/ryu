@@ -1,24 +1,10 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { PlaneLanding, PlaneTakeoff, Plus } from "lucide-react";
 import { motion } from "motion/react";
-import {
-	Fragment,
-	type KeyboardEvent,
-	type ReactNode,
-	type Ref,
-	type RefObject,
-	useId,
-	useLayoutEffect,
-	useRef,
-	useState,
-} from "react";
-import {
-	BlankFlap,
-	BlankFlapText,
-	Flap,
-	FlapText,
-} from "./departures-flap.tsx";
+import { Fragment, type KeyboardEvent, type Ref, useId } from "react";
+import { Flap, FlapText } from "./departures-flap.tsx";
 import {
 	BLINKING_STATUSES,
 	BOARD_LABELS,
@@ -34,7 +20,16 @@ import {
 	flightAccessibleName,
 	STATUS_FLAP_LENGTH,
 } from "./departures-model.ts";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
+
+export {
+	BoardEmpty,
+	BoardFooter,
+	BoardLoadingRows,
+	BoardSpareRows,
+	spareRowCount,
+} from "./departures-board-rows.tsx";
 
 /** Seconds between one row starting to flip and the next. */
 const ROW_STAGGER_SECONDS = 0.035;
@@ -79,10 +74,10 @@ export const LAMP_TEXT: Record<FlightLamp, string> = {
 	off: "text-(--dep-ink-dim)",
 };
 
-const ROW_GRID = "flex items-center gap-4 px-4 @5xl:gap-5 @5xl:px-5";
+export const ROW_GRID = "flex items-center gap-4 px-4 @5xl:gap-5 @5xl:px-5";
 /** Every board row, live or spare, is one 48px module. */
 export const ROW_HEIGHT_PX = 48;
-const SMALL_CAPS =
+export const SMALL_CAPS =
 	"font-medium font-mono text-[11px] uppercase tracking-[0.12em]";
 
 /** Whether a flight's lamp blinks: boarding and fresh landings, not held ones. */
@@ -170,10 +165,14 @@ export function BoardMasthead({
 	const hintId = useId();
 	const Icon = board === "departures" ? PlaneTakeoff : PlaneLanding;
 	const summary = loading
-		? "Updating"
+		? tr("Updating")
 		: [
-				`${count} ${count === 1 ? "flight" : "flights"}`,
-				board === "departures" && airborne > 0 ? `${airborne} in flight` : null,
+				tr("{count, plural, one {# flight} other {# flights}}", {
+					count,
+				}),
+				board === "departures" && airborne > 0
+					? tr("{count} in flight", { count: airborne })
+					: null,
 			]
 				.filter(Boolean)
 				.join(" · ");
@@ -189,7 +188,7 @@ export function BoardMasthead({
 			End: "arrivals",
 			Home: "departures",
 		};
-		const next = keys[event.key];
+		const next = keys[logicalArrowKey(event.key, event.currentTarget)];
 		if (next) {
 			event.preventDefault();
 			onSwitch(next, true);
@@ -241,7 +240,7 @@ export function BoardMasthead({
 					</div>
 				</div>
 				<p
-					className={cn("truncate @2xl:pl-9 text-(--dep-ink-dim)", SMALL_CAPS)}
+					className={cn("truncate @2xl:ps-9 text-(--dep-ink-dim)", SMALL_CAPS)}
 				>
 					{summary}
 				</p>
@@ -263,7 +262,7 @@ export function BoardMasthead({
 			</div>
 			<time
 				aria-label={`${boardDate(now)}, ${boardTime(now)}`}
-				className="@md:flex hidden shrink-0 flex-col items-end gap-2 @2xl:border-(--dep-rule) @2xl:border-l @2xl:pl-5"
+				className="@md:flex hidden shrink-0 flex-col items-end gap-2 @2xl:border-(--dep-rule) @2xl:border-s @2xl:ps-5"
 				dateTime={new Date(now).toISOString()}
 			>
 				<FlapText
@@ -414,7 +413,7 @@ export function FlightRow({
 			{active ? (
 				<span
 					aria-hidden="true"
-					className="absolute inset-y-0 left-0 w-0.75 bg-(--dep-ink)"
+					className="absolute inset-y-0 start-0 w-0.75 bg-(--dep-ink)"
 				/>
 			) : null}
 			<span className={COLUMN.time} role="gridcell">
@@ -482,180 +481,6 @@ export function FlightRow({
 			>
 				<Remarks flight={flight} />
 			</span>
-		</div>
-	);
-}
-
-const MAX_SPARE_ROWS = 40;
-
-/** Whole rows that fit a height, so the board never ends on a cut-off row. */
-export function spareRowCount(height: number): number {
-	return Math.max(
-		0,
-		Math.min(MAX_SPARE_ROWS, Math.floor(height / ROW_HEIGHT_PX))
-	);
-}
-
-/** How many whole spare rows fit the space the flights leave. */
-function useSpareRows(): [RefObject<HTMLDivElement | null>, number] {
-	const ref = useRef<HTMLDivElement>(null);
-	const [rows, setRows] = useState(0);
-	useLayoutEffect(() => {
-		const node = ref.current;
-		if (!node) {
-			return;
-		}
-		const measure = () => setRows(spareRowCount(node.clientHeight));
-		measure();
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver(measure);
-		observer.observe(node);
-		return () => observer.disconnect();
-	}, []);
-	return [ref, rows];
-}
-
-/**
- * Unused board positions: blank flaps, the same hardware as a live row with
- * nothing printed on it. They fill the height the flights leave, in whole
- * rows; what is left under the last one is the board's frame.
- */
-export function BoardSpareRows({
-	offset,
-	showTerminal,
-}: {
-	/** Rows already on the board, so the shading keeps alternating. */
-	offset: number;
-	showTerminal: boolean;
-}) {
-	const [ref, count] = useSpareRows();
-	const rows = Array.from({ length: count }, (_, row) => `spare-${row}`);
-	return (
-		<div
-			aria-hidden="true"
-			className="flex min-h-0 flex-1 flex-col overflow-hidden"
-			ref={ref}
-		>
-			{rows.map((row, index) => (
-				<div
-					className={cn(
-						ROW_GRID,
-						"h-12 shrink-0",
-						(index + offset) % 2 === 1
-							? "bg-(--dep-row-alt)"
-							: "bg-(--dep-board)"
-					)}
-					key={row}
-				>
-					<span className={COLUMN.time}>
-						<BlankFlapText length={5} />
-					</span>
-					<span className={COLUMN.flight}>
-						<BlankFlapText length={7} />
-					</span>
-					<span className={COLUMN.title}>
-						<BlankFlap className="h-7 w-full" />
-					</span>
-					<span className={COLUMN.gate}>
-						<BlankFlap className="h-7 w-full" />
-					</span>
-					{showTerminal ? <span className={COLUMN.terminal} /> : null}
-					<span className={COLUMN.status}>
-						<span className="size-2 shrink-0" />
-						<BlankFlapText className="@6xl:hidden" length={3} />
-						<BlankFlapText
-							className="@6xl:inline-flex hidden"
-							length={STATUS_FLAP_LENGTH}
-						/>
-					</span>
-					<span className={COLUMN.remarks} />
-				</div>
-			))}
-		</div>
-	);
-}
-
-const LOADING_ROWS = Array.from({ length: 12 }, (_, row) => `loading-${row}`);
-
-/** While the first snapshot loads: soft bars in the column slots, pulsing. */
-export function BoardLoadingRows() {
-	const bar =
-		"h-7 rounded-[0.18em] bg-(--dep-tile-bottom) motion-safe:animate-pulse";
-	return (
-		<div
-			aria-hidden="true"
-			className="flex min-h-0 flex-1 flex-col overflow-hidden border-(--dep-rule) border-t"
-		>
-			{LOADING_ROWS.map((row, index) => (
-				<div
-					className={cn(
-						ROW_GRID,
-						"h-12 shrink-0",
-						index % 2 === 1 ? "bg-(--dep-row-alt)" : "bg-(--dep-board)"
-					)}
-					key={row}
-				>
-					<span className={cn(COLUMN.time, bar)} />
-					<span className={cn(COLUMN.flight, bar)} />
-					<span className={cn(COLUMN.title, bar)} />
-					<span className={cn(COLUMN.gate, bar)} />
-					<span className={COLUMN.status}>
-						<span className="size-2 shrink-0" />
-						<span className={cn("flex-1", bar)} />
-					</span>
-					<span className={COLUMN.remarks} />
-				</div>
-			))}
-		</div>
-	);
-}
-
-/** The board's foot line: how to drive it, printed like a FIDS ticker. */
-export function BoardFooter({ panelOpen }: { panelOpen: boolean }) {
-	const hints = [
-		"↑ ↓ Select",
-		"Enter Open",
-		"← → Switch board",
-		panelOpen ? "Esc Close" : null,
-	].filter(Boolean);
-	return (
-		<p
-			className={cn(
-				"@3xl:flex hidden h-8 shrink-0 items-center gap-6 border-(--dep-rule) border-t @5xl:px-5 px-4 text-(--dep-ink-faint)",
-				SMALL_CAPS
-			)}
-		>
-			{hints.map((hint) => (
-				<span key={hint}>{hint}</span>
-			))}
-		</p>
-	);
-}
-
-/** The board with nothing on it: a flap message and one plain line. */
-export function BoardEmpty({
-	action,
-	board,
-	description,
-}: {
-	action?: ReactNode;
-	board: DeparturesBoard;
-	description: string;
-}) {
-	const message = `No ${BOARD_LABELS[board].toLowerCase()}`;
-	return (
-		<div className="flex flex-1 flex-col items-center justify-center gap-4 border-(--dep-rule) border-t px-6 py-16 text-center">
-			<p className="sr-only">{message}</p>
-			<FlapText
-				className="font-mono font-semibold text-lg"
-				length={message.length}
-				tileClassName="h-8 w-[22px]"
-				value={message}
-			/>
-			<p className="max-w-sm text-(--dep-ink-dim) text-sm">{description}</p>
-			{action}
 		</div>
 	);
 }

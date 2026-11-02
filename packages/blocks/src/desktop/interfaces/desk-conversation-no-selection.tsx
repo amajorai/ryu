@@ -1,16 +1,13 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { Inbox, SquarePen } from "lucide-react";
 import type { ReactNode } from "react";
 import { DeskAvatar } from "./desk-avatar.tsx";
-import { type DeskRow, pluralize } from "./desk-model.ts";
+import type { DeskRow } from "./desk-model.ts";
 import { DeskStatusIcon, DeskStatusPill } from "./desk-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
 
 /** Needs-you threads the empty conversation pane can point at. */
 export interface DeskNeedsYouHint {
@@ -76,7 +73,7 @@ function QueueStat({ count, status }: { count: number; status: ThreadStatus }) {
 		<li className="flex flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3 text-card-foreground">
 			<span className="flex items-center gap-1.5 text-muted-foreground text-xs">
 				<DeskStatusIcon status={status} />
-				{THREAD_STATUS_LABELS[status]}
+				{threadStatusLabel(status)}
 			</span>
 			<span
 				className={cn(
@@ -101,7 +98,7 @@ function NextUpCard({
 	row: DeskRow;
 }) {
 	const tl = useLiteralMessages();
-	const age = compactAge(row.thread.updatedAt, now);
+	const age = relativeAge(row.thread.updatedAt, now);
 	return (
 		<article
 			aria-label={tl("Next up: {title}", { title: row.title })}
@@ -110,17 +107,26 @@ function NextUpCard({
 			<header className="flex items-center gap-3">
 				<DeskAvatar agent={row.lead} size={36} />
 				<div className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate font-semibold text-base text-foreground">
+					<span
+						className="truncate font-semibold text-base text-foreground"
+						data-ryu-i18n="off"
+					>
 						{row.title}
 					</span>
-					<span className="truncate text-muted-foreground text-sm">
+					<span
+						className="truncate text-muted-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{row.actorLabel}
 						{row.group ? ` · ${row.group.name}` : ""}
 					</span>
 				</div>
 				<DeskStatusPill status={row.status} />
 			</header>
-			<p className="line-clamp-4 text-foreground/80 text-sm leading-6">
+			<p
+				className="line-clamp-4 text-foreground/80 text-sm leading-6"
+				data-ryu-i18n="off"
+			>
 				{row.preview}
 			</p>
 			<footer className="flex items-center gap-3">
@@ -128,8 +134,10 @@ function NextUpCard({
 					Open next
 				</Button>
 				<span className="text-muted-foreground text-xs tabular-nums">
-					{pluralize(row.thread.messageCount, "message")}
-					{age ? ` ${tl("· updated {age} ago", { age })}` : ""}
+					{tl("{count, plural, one {# message} other {# messages}}", {
+						count: row.thread.messageCount,
+					})}
+					{age ? ` ${tl("· updated {age}", { age })}` : ""}
 				</span>
 			</footer>
 		</article>

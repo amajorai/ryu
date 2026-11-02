@@ -10,7 +10,7 @@ import { CategorySwatch, ForumAvatar, TEXT_BUTTON } from "./forum-parts.tsx";
 import { agentById, compactAge } from "./interface-renderer.ts";
 
 const HEAD_CELL =
-	"h-10 px-2 text-left align-middle font-normal text-muted-foreground text-sm";
+	"h-10 px-2 text-start align-middle font-normal text-muted-foreground text-sm";
 
 function LatestCell({
 	category,
@@ -73,7 +73,7 @@ function CategoryRow({
 	const working = category.agent?.status === "working";
 	return (
 		<tr className="border-border border-b" data-category-id={category.id}>
-			<td className="py-3.5 pr-2 pl-3 align-top">
+			<td className="py-3.5 ps-3 pe-2 align-top">
 				<div className="flex min-w-0 items-start gap-3">
 					<CategorySwatch category={category} className="mt-[5px] size-3" />
 					<div className="min-w-0">
@@ -83,6 +83,7 @@ function CategoryRow({
 									TEXT_BUTTON,
 									"truncate font-semibold text-[15px] text-foreground leading-5"
 								)}
+								data-ryu-i18n="off"
 								onClick={() => onSelect(category.id)}
 								type="button"
 							>
@@ -93,7 +94,10 @@ function CategoryRow({
 							) : null}
 						</div>
 						{category.description ? (
-							<p className="mt-0.5 line-clamp-2 text-muted-foreground text-sm leading-5">
+							<p
+								className="mt-0.5 line-clamp-2 text-muted-foreground text-sm leading-5"
+								data-ryu-i18n="off"
+							>
 								{category.description}
 							</p>
 						) : null}
@@ -103,7 +107,7 @@ function CategoryRow({
 			<td className="px-2 py-3.5 text-center align-top text-foreground text-sm tabular-nums leading-5">
 				{category.topicIds.length}
 			</td>
-			<td className="@min-[720px]:table-cell hidden py-3 pr-3 pl-2 align-top">
+			<td className="@min-[720px]:table-cell hidden py-3 ps-2 pe-3 align-top">
 				<LatestCell
 					category={category}
 					now={now}
@@ -145,14 +149,14 @@ export function CategoriesTable({
 			</colgroup>
 			<thead>
 				<tr className="border-border border-b">
-					<th className={cn(HEAD_CELL, "pl-3")} scope="col">
+					<th className={cn(HEAD_CELL, "ps-3")} scope="col">
 						Category
 					</th>
 					<th className={cn(HEAD_CELL, "text-center")} scope="col">
 						Topics
 					</th>
 					<th
-						className={cn(HEAD_CELL, "@min-[720px]:table-cell hidden pr-3")}
+						className={cn(HEAD_CELL, "@min-[720px]:table-cell hidden pe-3")}
 						scope="col"
 					>
 						Latest
@@ -163,7 +167,7 @@ export function CategoriesTable({
 				<tbody key={section.kind}>
 					<tr>
 						<th
-							className="px-3 pt-6 pb-2 text-left font-medium text-foreground text-xs uppercase tracking-wide"
+							className="px-3 pt-6 pb-2 text-start font-medium text-foreground text-xs uppercase tracking-wide"
 							colSpan={3}
 							scope="colgroup"
 						>

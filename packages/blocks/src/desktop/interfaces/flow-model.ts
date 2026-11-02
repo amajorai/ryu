@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceAgent,
@@ -75,22 +76,18 @@ export function agentTarget(agent: InterfaceAgent): FlowTarget {
 	return {
 		agentId: agent.id,
 		groupKey: `agent:${agent.id}`,
-		label: `Message ${agent.name}`,
+		label: tr("Message {name}", { name: agent.name }),
 	};
-}
-
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
 }
 
 function agentActions(snapshot: InterfaceSnapshot): FlowAction[] {
 	return snapshot.agents.map((agent) => ({
 		agent,
-		description: agent.description.trim() || "Start a conversation",
+		description: agent.description.trim() || tr("Start a conversation"),
 		icon: "agent",
 		id: `agent:${agent.id}`,
 		target: agentTarget(agent),
-		title: `Message ${agent.name}`,
+		title: tr("Message {name}", { name: agent.name }),
 	}));
 }
 
@@ -98,15 +95,18 @@ function teamActions(snapshot: InterfaceSnapshot): FlowAction[] {
 	return snapshot.groups
 		.filter((group) => group.kind === "team")
 		.map((group) => ({
-			description: `Reaches ${plural(group.memberAgentIds.length, "member", "members")}`,
+			description: tr(
+				"{count, plural, one {Reaches # member} other {Reaches # members}}",
+				{ count: group.memberAgentIds.length }
+			),
 			icon: "team",
 			id: `team:${group.id}`,
 			target: {
 				groupKey: `team:${group.id}`,
-				label: `Message ${group.name}`,
+				label: tr("Message {name}", { name: group.name }),
 				teamId: group.id,
 			},
-			title: `Message ${group.name}`,
+			title: tr("Message {name}", { name: group.name }),
 		}));
 }
 
@@ -117,7 +117,7 @@ function projectActions(
 	return snapshot.groups
 		.filter((group) => group.kind === "project")
 		.map((group) => ({
-			description: "File a new conversation under it",
+			description: tl("File a new conversation under it"),
 			icon: "project",
 			id: `project:${group.id}`,
 			target: {
@@ -223,7 +223,7 @@ export function connectSections(
 		if (team) {
 			base = {
 				groupKey: `team:${team.id}`,
-				label: `Message ${team.name}`,
+				label: tr("Message {name}", { name: team.name }),
 				teamId: team.id,
 			};
 			name = team.name;
@@ -258,7 +258,7 @@ export function connectSections(
 				id: `project:${project.id}`,
 				target: {
 					...start,
-					label: `${name} in ${project.name}`,
+					label: tr("{name} in {project}", { name, project: project.name }),
 					projectId: project.id,
 				},
 				title: tl("Add to {name}", { name: project.name }),
@@ -277,17 +277,29 @@ export function nodeLabel(
 ): string {
 	switch (node.kind) {
 		case "origin":
-			return "You";
+			return tl("You");
 		case "agent":
-			return `${node.agent.name}, ${plural(node.conversations, "conversation", "conversations")}`;
+			return tl(
+				"{name}, {count, plural, one {# conversation} other {# conversations}}",
+				{ count: node.conversations, name: node.agent.name }
+			);
 		case "team":
-			return `${node.group.name} team, ${plural(node.conversations, "conversation", "conversations")}`;
+			return tl(
+				"{name} team, {count, plural, one {# conversation} other {# conversations}}",
+				{ count: node.conversations, name: node.group.name }
+			);
 		case "lane":
-			return `${node.label}, ${plural(node.conversations, "conversation", "conversations")}`;
+			return tl(
+				"{name}, {count, plural, one {# conversation} other {# conversations}}",
+				{ count: node.conversations, name: node.label }
+			);
 		case "thread":
-			return `${node.thread.title.trim() || "Untitled conversation"}, ${statusLabel(node.status)}`;
+			return tl("{title}, {status}", {
+				status: statusLabel(node.status),
+				title: node.thread.title.trim() || tl("Untitled conversation"),
+			});
 		case "more":
-			return tl("Show {count} more", { count: String(node.count) });
+			return tl("Show {count} more", { count: node.count });
 		case "stub":
 			return "Connect";
 		default:

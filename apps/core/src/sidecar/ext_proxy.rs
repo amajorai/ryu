@@ -68,6 +68,9 @@ use crate::plugin_manifest::schema::{HttpProxySpec, RouteAuth, SidecarSpec};
 use crate::server::ServerState;
 use crate::sidecar::manager::{ForwardDenied, ForwardTarget};
 
+#[path = "ext_proxy_response_cookies.rs"]
+mod response_cookies;
+
 /// Env var carrying the per-plugin shared secret Core injects into a sidecar and
 /// re-stamps on every proxied hop / expects on the host-API callback.
 pub const ENV_EXT_TOKEN: &str = "RYU_EXT_TOKEN";
@@ -1855,6 +1858,12 @@ async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
         {
             continue;
         }
+        // All apps share Core's origin: only the hop's declared cookies may be set.
+        if name == reqwest::header::SET_COOKIE
+            && !response_cookies::set_cookie_allowed(value.as_bytes(), forward_cookie_names)
+        {
+            continue;
+        }
         if let (Ok(n), Ok(v)) = (
             axum::http::HeaderName::from_bytes(name.as_str().as_bytes()),
             axum::http::HeaderValue::from_bytes(value.as_bytes()),
@@ -2608,7 +2617,7 @@ const KERNEL_CAPABILITIES: &[KernelCapability] = &[
     // field. `grant: None` because the row-level gate depends on the recipient:
     // writing to the node's own active user needs only the minted token + the
     // enabled-app check, while naming any OTHER member requires the approved
-    // `notifications:send-to-user` grant (checked in `app_notify::deliver_for_app`,
+    // `notifications:send-to-user` grant (checked in `app_notify::deliver_for_app_localized`,
     // which the `events.emit` notify hint shares) plus org-roster membership on a
     // managed node.
     KernelCapability {
@@ -2843,6 +2852,12 @@ const KERNEL_CAPABILITIES: &[KernelCapability] = &[
         cap: "vault.totpEnroll",
         grant: Some(crate::server::vault_agent_accounts_api::GRANT_VAULT_FILL),
     },
+    // Relay a page's WebAuthn ceremony to the owner's desktop security key
+    // (`server::security_key_relay`); held until answered, `200` + outcome.
+    KernelCapability {
+        cap: ryu_webauthn_relay::HOST_CAPABILITY,
+        grant: Some(ryu_webauthn_relay::GRANT),
+    },
 ];
 
 /// The [`KernelCapability`] row for `cap`, or `None` when the name belongs to the
@@ -2867,7 +2882,8 @@ pub(crate) struct EventEmitBody {
     #[serde(default)]
     conversation_id: Option<String>,
     /// OPTIONAL user-facing notification to raise alongside the fan-out
-    /// (`{ title, body?, level?, target_user_id? }`). Delivered into the app-inbox
+    /// (`{ title, body?, level?, target_user_id?, i18n? }`; `i18n` renders it
+    /// per recipient locale, as on `notify.deliver`). Delivered into the app-inbox
     /// feed with `source_app_id` = the calling plugin (the desktop Inbox then shows
     /// the app's icon on the row) — the same delivery [`notify.deliver`] performs,
     /// so "emit an event AND ping the user" is one governed call. Best-effort: a
@@ -2972,6 +2988,9 @@ pub(crate) struct EventEmitNotify {
     level: Option<String>,
     #[serde(default)]
     target_user_id: Option<String>,
+    /// Optional localizable text, the `notify.deliver` `i18n` shape.
+    #[serde(default)]
+    i18n: Option<serde_json::Value>,
 }
 
 /// `events.emit` — fan an app event out to its subscribers.
@@ -3059,7 +3078,11 @@ async fn host_events_emit(
     if let Some(notify) = &body.notify {
         let title = notify.title.trim();
         if !title.is_empty() {
-            let _ = crate::server::app_notify::deliver_for_app(
+            let text = notify
+                .i18n
+                .as_ref()
+                .and_then(crate::i18n::AlertText::from_wire);
+            let _ = crate::server::app_notify::deliver_for_app_localized(
                 &state.client,
                 &plugin_id,
                 &grants,
@@ -3067,6 +3090,7 @@ async fn host_events_emit(
                 title,
                 notify.body.as_deref().unwrap_or(""),
                 notify.level.as_deref(),
+                text.as_ref(),
             )
             .await;
         }
@@ -3253,6 +3277,14 @@ async fn dispatch_kernel_capability(
                 headers,
                 body!(crate::server::vault_agent_accounts_api::FillBody),
             )
+            .await
+        }
+        // Boxed: the held ceremony's future is large and would otherwise grow
+        // every capability call's stack frame.
+        ryu_webauthn_relay::HOST_CAPABILITY => {
+            Box::pin(crate::server::security_key_relay::host_security_key_request(
+                state, headers, body,
+            ))
             .await
         }
         "vault.totpEnroll" => {
@@ -7550,6 +7582,7 @@ mod tests {
                 "workflows.rerun",
                 "vault.credentialFill",
                 "vault.totpEnroll",
+                "securityKey.request",
             ],
             "KERNEL_CAPABILITIES changed — add the matching arm to \
              `dispatch_kernel_capability` (a missing arm 501s) and update this list"
@@ -7629,7 +7662,9 @@ mod tests {
     #[test]
     fn callers_declare_the_grant_their_kernel_capability_requires() {
         let healing = fixture(include_str!("../../../../generated/ryu-runtime/apps-store/healing/manifest.json"));
-        let cases: [(&str, &str, &crate::plugin_manifest::PluginManifest); 9] = [
+        let browser = fixture(include_str!("../../../../generated/ryu-runtime/apps-store/browser/manifest.json"));
+        let cases: [(&str, &str, &crate::plugin_manifest::PluginManifest); 10] = [
+            ("securityKey.request", "browser", &browser),
             ("approvals.request", "healing", &healing),
             ("runs.rerunAgent", "healing", &healing),
             ("workflows.rerun", "healing", &healing),

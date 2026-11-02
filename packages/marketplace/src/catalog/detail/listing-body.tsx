@@ -78,7 +78,7 @@ export function ListingInfoGrid({ rows }: { rows: ListingInfoRow[] }) {
 					<dt className="shrink-0 text-muted-foreground text-xs">
 						{row.label}
 					</dt>
-					<dd className="min-w-0 truncate text-right font-medium text-xs">
+					<dd className="min-w-0 truncate text-end font-medium text-xs">
 						{row.value}
 					</dd>
 				</div>

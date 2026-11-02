@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAgent,
 	InterfaceGroup,
@@ -76,9 +77,11 @@ export function firstSentence(text: string): string {
 export function threadExcerpt(thread: InterfaceThread): string {
 	const line = thread.lastMessage?.trim();
 	if (!line) {
-		return "No messages yet";
+		return tr("No messages yet");
 	}
-	return thread.lastMessageRole === "user" ? `You: ${line}` : line;
+	return thread.lastMessageRole === "user"
+		? tr("You: {text}", { text: line })
+		: line;
 }
 
 export function lowerFirst(text: string): string {

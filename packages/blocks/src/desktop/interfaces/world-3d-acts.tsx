@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 /* eslint-disable react/no-unknown-property */
 import type {
 	ClockOptions,
@@ -140,7 +141,7 @@ export function worldCarry(act: InterfaceAgentAct): LifeItem | null {
 
 /** "Back 15:10": a limit on the porch clock (the kit adds "Likely"). */
 export const worldLimitText: LimitText = (_act, at) =>
-	at ? `Back ${at}` : "Resting";
+	at ? tr("Back {time}", { time: at }) : tr("Resting");
 
 /**
  * Where a door's pieces sit round its agent (the doorstep is a tile in

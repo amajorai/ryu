@@ -423,7 +423,7 @@ export function WorkbenchLayout({
 					<>
 						<button
 							aria-label={tl("Close {region}", {
-								region: REGION_LABELS[overlayRegion],
+								region: tl(REGION_LABELS[overlayRegion]),
 							})}
 							className="absolute inset-0 z-40 cursor-default bg-black/30 dark:bg-black/50"
 							data-workbench-overlay-scrim={overlayRegion}

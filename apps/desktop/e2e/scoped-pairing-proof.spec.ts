@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { ScopedPairingProofPublisher } from "./harness/scoped-pairing-proof.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare const window: Window & {
 	__SCOPED_PAIRING_PROOF__: ScopedPairingProofPublisher;
@@ -21,10 +22,7 @@ type PairingProofSnapshot = Pick<
 // the tracked proof ledger; without it the committed evidence is refreshed.
 const PROOF_DIRECTORY =
 	process.env.RYU_PROOF_EVIDENCE_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 /**
  * The waiting request's human code. NodeAccessSettings renders it through the

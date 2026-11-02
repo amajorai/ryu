@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { sso } from "@better-auth/sso";
 import type { BetterAuthPlugin } from "better-auth";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { createAuthEndpoint } from "better-auth/api";
+import { createAuthEndpoint, createAuthMiddleware } from "better-auth/api";
 import { z } from "zod";
 import {
 	isScimProvisioningPath,
@@ -89,6 +90,16 @@ describe("SCIM admin-email predicates", () => {
 	});
 });
 
+const ORGANIZATION_ID = "org-acme";
+
+/** Authenticates the probes as a SCIM connection of `ORGANIZATION_ID`. */
+const scimConnectionProbe = createAuthMiddleware(async () => ({
+	scimConnection: {
+		id: "scim-connection",
+		provisioningDomainId: ORGANIZATION_ID,
+	},
+}));
+
 /**
  * Drive the guard through Better Auth's real database hooks with endpoints on
  * the SCIM paths that make the same internal-adapter calls as
@@ -99,6 +110,20 @@ function scimFixture() {
 	const database: Record<string, Record<string, unknown>[]> = {
 		account: [],
 		session: [],
+		// The organization has verified acme.com, so the domain binding in
+		// `scim-email-domain-guard.ts` lets these addresses through and the
+		// admin-email rule is what decides.
+		ssoProvider: [
+			{
+				domain: "acme.com,ryu.example",
+				domainVerified: true,
+				id: "sso-acme",
+				issuer: "https://idp.acme.com",
+				organizationId: ORGANIZATION_ID,
+				providerId: "acme",
+				userId: "owner",
+			},
+		],
 		user: [],
 		verification: [],
 	};
@@ -107,7 +132,11 @@ function scimFixture() {
 		endpoints: {
 			scimCreateProbe: createAuthEndpoint(
 				"/scim/v2/Users",
-				{ method: "POST", body: z.object({ email: z.string() }) },
+				{
+					method: "POST",
+					body: z.object({ email: z.string() }),
+					use: [scimConnectionProbe],
+				},
 				async (ctx) => {
 					const user = await ctx.context.internalAdapter.createUser(
 						{ email: ctx.body.email, name: "Directory user" },
@@ -118,7 +147,11 @@ function scimFixture() {
 			),
 			scimUpdateProbe: createAuthEndpoint(
 				"/scim/v2/Users/:userId",
-				{ method: "PUT", body: z.object({ email: z.string() }) },
+				{
+					method: "PUT",
+					body: z.object({ email: z.string() }),
+					use: [scimConnectionProbe],
+				},
 				async (ctx) => {
 					const current = database.user?.find(
 						(row) => row.id === ctx.params.userId
@@ -138,7 +171,11 @@ function scimFixture() {
 	const auth = betterAuth({
 		baseURL: "http://localhost:3000",
 		database: memoryAdapter(database),
-		plugins: [scimProbe, scimAdminEmailGuardPlugin()],
+		plugins: [
+			sso({ domainVerification: { enabled: true } }),
+			scimProbe,
+			scimAdminEmailGuardPlugin(),
+		],
 		secret: SECRET,
 	});
 	return { auth, database };

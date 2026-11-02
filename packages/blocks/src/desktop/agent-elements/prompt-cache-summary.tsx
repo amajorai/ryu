@@ -38,15 +38,22 @@ function statusTone(status: PromptCacheStatus): string | undefined {
 	return;
 }
 
-function policyCaption(status: PromptCacheStatus): string | null {
+function policyCaption(
+	status: PromptCacheStatus,
+	tl: LiteralMessage
+): string | null {
 	const { policy } = status;
 	if (!policy) {
-		return "Provider cache lifetime unknown.";
+		return tl("Provider cache lifetime unknown.");
 	}
 	if (policy.kind === "managed") {
 		return `${policy.provider}: ${policy.note}`;
 	}
-	return `${policy.provider} · ${formatCacheTtl(policy.ttlMs)} TTL. ${policy.note}`;
+	return tl("{provider} · {ttl} TTL. {note}", {
+		note: policy.note,
+		provider: policy.provider,
+		ttl: formatCacheTtl(policy.ttlMs),
+	});
 }
 
 /** Re-render once a second while a countdown is on screen; idle otherwise. */
@@ -102,7 +109,7 @@ export function PromptCacheSummary({
 	if (!status) {
 		return null;
 	}
-	const caption = policyCaption(status);
+	const caption = policyCaption(status, tl);
 	return (
 		<div className={cn("flex flex-col gap-1.5", className)}>
 			<div className="font-medium">Prompt cache</div>

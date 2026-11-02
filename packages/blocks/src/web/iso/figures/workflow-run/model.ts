@@ -34,58 +34,67 @@
  * retry and restart rules above are the context its hidden description leans on.
  */
 
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 export interface WorkflowNode {
-	/** One plain sentence, for the figure's spoken value text. */
-	does: string;
+	/** One plain sentence, for the figure's spoken value text, in the reader's language. */
+	does: (tl: LiteralMessage) => string;
 	id: string;
 	/** The node kind as Core names it. */
 	kind: string;
-	/** The node's short name, spoken with its state. */
-	name: string;
+	/** The node's short name, spoken with its state, in the reader's language. */
+	name: (tl: LiteralMessage) => string;
 }
 
 export const NODES: readonly WorkflowNode[] = [
 	{
 		id: "input",
 		kind: "Input",
-		name: "input",
-		does: "Reads the run's input.",
+		name: (tl) => tl("input"),
+		does: (tl) => tl("Reads the run's input."),
 	},
 	{
 		id: "prompt",
 		kind: "Prompt",
-		name: "prompt",
-		does: "Asks a model.",
+		name: (tl) => tl("prompt"),
+		does: (tl) => tl("Asks a model."),
 	},
 	{
 		id: "condition",
 		kind: "Condition",
-		name: "condition",
-		does: "Picks one branch; the other branch is skipped.",
+		name: (tl) => tl("condition"),
+		does: (tl) => tl("Picks one branch; the other branch is skipped."),
 	},
 	{
 		id: "tool",
 		kind: "Tool",
-		name: "tool",
-		does: "Calls a tool. It has a retry policy, so a failed attempt is retried after a backoff.",
+		name: (tl) => tl("tool"),
+		does: (tl) =>
+			tl(
+				"Calls a tool. It has a retry policy, so a failed attempt is retried after a backoff."
+			),
 	},
 	{
 		id: "webhook",
 		kind: "Webhook",
-		name: "webhook",
-		does: "On the branch the condition did not take, so it is skipped.",
+		name: (tl) => tl("webhook"),
+		does: (tl) =>
+			tl("On the branch the condition did not take, so it is skipped."),
 	},
 	{
 		id: "approval",
 		kind: "Awakeable",
-		name: "approval",
-		does: "An approval gate: the run waits here, awaiting input, until someone approves.",
+		name: (tl) => tl("approval"),
+		does: (tl) =>
+			tl(
+				"An approval gate: the run waits here, awaiting input, until someone approves."
+			),
 	},
 	{
 		id: "output",
 		kind: "Output",
-		name: "output",
-		does: "Returns the run's result.",
+		name: (tl) => tl("output"),
+		does: (tl) => tl("Returns the run's result."),
 	},
 ];
 
@@ -113,6 +122,14 @@ export const nodeAt = (index: number): WorkflowNode =>
 	NODES[Math.min(NODE_COUNT - 1, Math.max(0, index))] ?? {
 		id: "",
 		kind: "",
-		name: "",
-		does: "",
+		name: () => "",
+		does: () => "",
 	};
+
+/** Read to assistive tech in place of a caption; nothing here is drawn as text. */
+export function describeWorkflowRun(tl: LiteralMessage): string {
+	return tl(
+		"One Ryu workflow run, drawn as a marble rolling through {nodeCount} nodes in order: input, prompt, a condition, then one of two branches (tool or webhook), an approval gate and output. The condition takes the tool branch, so the webhook branch fades out as skipped. The marble waits at the approval gate until the run is approved. A pin rises on each node as it finishes: the checkpoint Core writes to disk after every node, which is what lets an interrupted run resume. Every checkpoint is kept; only the latest pin is drawn standing. This is a slowed simulation with an example graph. Arrow keys pick a node to hear its state.",
+		{ nodeCount: NODE_COUNT }
+	);
+}

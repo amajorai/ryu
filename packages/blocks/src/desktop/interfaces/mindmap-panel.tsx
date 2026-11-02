@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -32,7 +33,7 @@ function people(snapshot: InterfaceSnapshot, thread: InterfaceThread): string {
 		}
 	}
 	if (names.length === 0) {
-		return "No agent";
+		return tr("No agent");
 	}
 	return names.length > 3
 		? `${names.slice(0, 3).join(", ")} +${names.length - 3}`
@@ -64,32 +65,36 @@ export function MindmapThreadPanel({
 }) {
 	const tl = useLiteralMessages();
 	const title = thread
-		? thread.title.trim() || "Untitled thread"
-		: "New thread";
+		? thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
 	const lead = agentById(snapshot, thread?.agentIds[0]);
 	const subtitle = thread
 		? [people(snapshot, thread), branchLabel].filter(Boolean).join(" · ")
-		: "New conversation";
+		: tl("New conversation");
 	return (
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={tl("Thread: {title}", { title })}
-			className="@max-[767px]:absolute @max-[767px]:inset-0 @max-[767px]:z-20 flex min-h-0 @max-[767px]:w-full w-[min(560px,48%)] @max-[767px]:min-w-0 min-w-[380px] shrink-0 flex-col border-border border-l @max-[767px]:border-l-0 bg-background"
+			className="@max-[767px]:absolute @max-[767px]:inset-0 @max-[767px]:z-20 flex min-h-0 @max-[767px]:w-full w-[min(560px,48%)] @max-[767px]:min-w-0 min-w-[380px] shrink-0 flex-col border-border border-s @max-[767px]:border-s-0 bg-background"
 			data-testid="mindmap-thread-panel"
 			initial={animate ? { opacity: 0, x: 16 } : false}
 			transition={{ duration: animate ? 0.2 : 0, ease: MINDMAP_EASE }}
 		>
-			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b pr-2 pl-4">
+			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b ps-4 pe-2">
 				{lead ? <BoardAvatar agent={lead} name={lead.name} size={28} /> : null}
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<h2
 						className="truncate font-semibold text-foreground text-sm leading-5 outline-none"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>
 						{title}
 					</h2>
-					<p className="truncate text-muted-foreground text-xs leading-4">
+					<p
+						className="truncate text-muted-foreground text-xs leading-4"
+						data-ryu-i18n="off"
+					>
 						{subtitle}
 					</p>
 				</div>

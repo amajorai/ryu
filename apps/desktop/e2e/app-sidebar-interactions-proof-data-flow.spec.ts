@@ -1,5 +1,4 @@
 import { mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import {
 	sidebarPersistedConversationIds,
@@ -15,15 +14,11 @@ import {
 	jsonResponse,
 	STORY_URL,
 } from "./app-sidebar-interactions-proof.fixture-data.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 registerAppSidebarProofHooks();
 
-const DATA_FLOW_PROOF = fileURLToPath(
-	new URL(
-		"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-data-flows/import-browse/",
-		import.meta.url
-	)
-);
+const DATA_FLOW_PROOF = `${proofEvidencePath("test-coverage-sweep-20260924/parallel/desktop-data-flows/import-browse")}/`;
 
 test("data-flow import retries denied lists and failed-only batches through the real sidebar", async ({
 	page,

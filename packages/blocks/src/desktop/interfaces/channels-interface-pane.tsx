@@ -162,7 +162,7 @@ export function ChannelPane({
 				value={view}
 			>
 				<header className="shrink-0 border-border border-b">
-					<div className="flex h-12 items-center gap-2 pr-3 @max-[640px]:pl-2 pl-5">
+					<div className="flex h-12 items-center gap-2 @max-[640px]:ps-2 ps-5 pe-3">
 						<Button
 							aria-label="All channels"
 							className="@min-[640px]:hidden text-foreground/70"
@@ -171,7 +171,7 @@ export function ChannelPane({
 							title="All channels"
 							variant="ghost-muted"
 						>
-							<ChevronLeft aria-hidden="true" />
+							<ChevronLeft aria-hidden="true" className="rtl:-scale-x-100" />
 						</Button>
 						{isDm ? (
 							<span className="relative flex shrink-0 text-foreground/70">
@@ -181,7 +181,7 @@ export function ChannelPane({
 						) : (
 							<Hash
 								aria-hidden="true"
-								className="-mr-1 size-4 shrink-0 text-foreground/70"
+								className="-me-1 size-4 shrink-0 text-foreground/70"
 							/>
 						)}
 						<h2 className="min-w-0 truncate font-bold! text-foreground text-lg">
@@ -248,14 +248,14 @@ export function ChannelPane({
 					aria-label="Thread"
 					// Side by side down to 720px (the rail and sidebar give way
 					// first), then the thread takes the whole pane.
-					className="@max-[720px]:absolute @max-[720px]:inset-0 @max-[720px]:z-30 flex @max-[1100px]:w-[min(420px,50%)] @max-[720px]:w-full w-[420px] shrink-0 flex-col border-border border-l @max-[720px]:border-l-0 bg-background"
+					className="@max-[720px]:absolute @max-[720px]:inset-0 @max-[720px]:z-30 flex @max-[1100px]:w-[min(420px,50%)] @max-[720px]:w-full w-[420px] shrink-0 flex-col border-border border-s @max-[720px]:border-s-0 bg-background"
 					initial={reduceMotion ? false : { opacity: 0, x: 12 }}
 					transition={{ duration: 0.18, ease: "easeOut" }}
 				>
 					{/* Two rows, like the channel header beside it, so the rule
 					    under both headers runs straight across the split. */}
 					<header className="shrink-0 border-border border-b">
-						<div className="flex h-12 items-center gap-2 pr-3 pl-5">
+						<div className="flex h-12 items-center gap-2 ps-5 pe-3">
 							<h2 className="min-w-0 flex-1 truncate font-bold! text-base text-foreground">
 								Thread
 							</h2>
@@ -270,7 +270,7 @@ export function ChannelPane({
 								<X aria-hidden="true" />
 							</Button>
 						</div>
-						<p className="flex h-9 min-w-0 items-center gap-1 pr-3 pl-5 text-foreground/70 text-sm">
+						<p className="flex h-9 min-w-0 items-center gap-1 ps-5 pe-3 text-foreground/70 text-sm">
 							{isDm ? null : (
 								<Hash aria-hidden="true" className="size-4 shrink-0" />
 							)}

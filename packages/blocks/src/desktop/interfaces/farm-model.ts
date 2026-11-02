@@ -1,3 +1,5 @@
+import { translate as tr } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -6,6 +8,15 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+
+export {
+	FRUIT_NAMES,
+	fruitName,
+	STAGE_HINTS,
+	STAGE_NAMES,
+	STAGE_WORDS,
+	stageName,
+} from "./farm-model-names.ts";
 
 /**
  * The Farm's view model: agents become plots, projects become fenced fields
@@ -23,15 +34,6 @@ export const FRUITS = [
 ] as const;
 export type FruitKind = (typeof FRUITS)[number];
 
-export const FRUIT_NAMES: Record<FruitKind, string> = {
-	apple: "Apple tree",
-	blueberry: "Blueberries",
-	grapes: "Grapes",
-	pumpkin: "Pumpkin",
-	strawberry: "Strawberries",
-	tomato: "Tomatoes",
-};
-
 /** Seed: you wrote. Growing: a run is live. Ripe: your turn. */
 export type CropStage = "fallow" | "growing" | "ripe" | "seed" | "withered";
 
@@ -41,23 +43,6 @@ const STAGE_BY_STATUS: Record<ThreadStatus, CropStage> = {
 	waiting: "seed",
 	working: "growing",
 	"your-turn": "ripe",
-};
-
-export const STAGE_NAMES: Record<CropStage, string> = {
-	fallow: "Fallow",
-	growing: "Growing",
-	ripe: "Ripe",
-	seed: "Seeded",
-	withered: "Withered",
-};
-
-/** What the stage asks of the user, in the farm's own words. */
-export const STAGE_HINTS: Record<CropStage, string> = {
-	fallow: "Nothing said yet",
-	growing: "Agent is working",
-	ripe: "Ready to harvest",
-	seed: "Watered, waiting on the agent",
-	withered: "The run failed",
 };
 
 export interface FarmCrop {
@@ -311,7 +296,7 @@ export function makePlot(
 		crops: sorted,
 		hidden: Math.max(0, sorted.length - BED_SLOTS),
 		id,
-		name: agent?.name ?? "Shared bed",
+		name: agent?.name ?? tr("Shared bed"),
 		planted: plantBed(shown, shape),
 		rows: shape.rows,
 		shown,
@@ -439,11 +424,12 @@ export function plotForThread(
 }
 
 export function cropTitle(thread: InterfaceThread | undefined): string {
-	return thread?.title.trim() || "Untitled conversation";
+	return thread?.title.trim() || tr("Untitled conversation");
 }
 
-export function plural(count: number, noun: string, many = `${noun}s`) {
-	return `${count} ${count === 1 ? noun : many}`;
+/** "3 crops": a crop count as an ICU message. */
+export function cropCount(count: number, tl: LiteralMessage = tr) {
+	return tl("{count, plural, one {# crop} other {# crops}}", { count });
 }
 
 /** Days the farm has been running: the oldest conversation is day one. */

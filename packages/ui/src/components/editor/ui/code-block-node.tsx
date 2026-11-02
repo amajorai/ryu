@@ -1,6 +1,7 @@
 "use client";
 
 import { formatCodeBlock, isLangSupported } from "@platejs/code-block";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import {
 	Command,
@@ -144,6 +145,7 @@ export function CodeBlockElement({
 	...props
 }: CodeBlockElementProps) {
 	const { editor, element } = props;
+	const tl = useLiteralMessages();
 
 	return (
 		<PlateElement
@@ -151,7 +153,10 @@ export function CodeBlockElement({
 			{...props}
 		>
 			<div className="relative rounded-md bg-muted/50">
-				<pre className="overflow-x-auto p-8 pe-4 font-mono text-sm leading-[normal] [tab-size:2] print:break-inside-avoid">
+				<pre
+					className="overflow-x-auto p-8 pe-4 text-start font-mono text-sm leading-[normal] [tab-size:2] print:break-inside-avoid"
+					dir="ltr"
+				>
 					<code>{props.children}</code>
 				</pre>
 
@@ -164,7 +169,7 @@ export function CodeBlockElement({
 							className="size-6 text-xs"
 							onClick={() => formatCodeBlock(editor, { element })}
 							size="icon"
-							title="Format code"
+							title={tl("Format code")}
 							variant="ghost"
 						>
 							<BracesIcon className="!size-3.5 text-muted-foreground" />
@@ -190,6 +195,7 @@ function CodeBlockCombobox({
 }: {
 	showLanguageLabel: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const readOnly = useReadOnly();
 	const editor = useEditorRef();
@@ -228,7 +234,7 @@ function CodeBlockCombobox({
 					/>
 				}
 			>
-				{getCodeBlockLanguageLabel(value) ?? "Plain Text"}
+				{localizedLanguageLabel(value, tl)}
 			</PopoverTrigger>
 			<PopoverContent
 				className="w-[200px] p-0"
@@ -275,6 +281,22 @@ function CodeBlockCombobox({
 	);
 }
 
+/**
+ * The language trigger's text. The trigger stays inside the editable, which
+ * the DOM localizer skips, so the two worded choices are literal tl() calls;
+ * language names stay as written.
+ */
+function localizedLanguageLabel(lang: string, tl: LiteralMessage) {
+	switch (lang.trim()) {
+		case "auto":
+			return tl("Auto");
+		case "plaintext":
+			return tl("Plain Text");
+		default:
+			return getCodeBlockLanguageLabel(lang) ?? tl("Plain Text");
+	}
+}
+
 function CodeBlockLanguageLabel({ lang }: { lang?: string | null }) {
 	const label = getCodeBlockLanguageLabel(lang);
 
@@ -297,6 +319,7 @@ function CopyButton({
 	"value"
 >) {
 	const [hasCopied, setHasCopied] = useState(false);
+	const tl = useLiteralMessages();
 
 	useEffect(() => {
 		setTimeout(() => {
@@ -316,7 +339,7 @@ function CopyButton({
 			}}
 			{...props}
 		>
-			<span className="sr-only">Copy</span>
+			<span className="sr-only">{tl("Copy")}</span>
 			{hasCopied ? (
 				<CheckIcon className="!size-3" />
 			) : (

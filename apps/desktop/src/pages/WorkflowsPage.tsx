@@ -200,7 +200,7 @@ export default function WorkflowsPage({
 			{/* Left rail: pick a workflow to build with AI, or start fresh. Mirrors the
 			    Create-menu "Build with AI" entry so any existing workflow is reachable
 			    for NL editing (the canvas lives in the companion app). */}
-			<aside className="flex w-60 shrink-0 flex-col border-border border-r">
+			<aside className="flex w-60 shrink-0 flex-col border-border border-e">
 				<div className="flex items-center gap-2 border-border border-b px-3 py-2.5">
 					<HugeiconsIcon
 						className="size-4 opacity-70"
@@ -281,7 +281,10 @@ export default function WorkflowsPage({
 
 					<div className="rounded-lg border bg-card p-4 text-card-foreground">
 						<p className="mb-2 font-medium text-sm">Current workflow</p>
-						<pre className="overflow-x-auto whitespace-pre-wrap text-muted-foreground text-xs leading-relaxed">
+						<pre
+							className="overflow-x-auto whitespace-pre-wrap text-muted-foreground text-xs leading-relaxed"
+							dir="auto"
+						>
 							{builderSnapshot}
 						</pre>
 					</div>

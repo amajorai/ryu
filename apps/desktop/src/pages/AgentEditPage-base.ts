@@ -1,5 +1,6 @@
 import type { AgentBannerPreferenceStore } from "@ryu/blocks/desktop/agent-banner-dialog.tsx";
 import type { SlotOption } from "@ryu/blocks/desktop/agent-edit.tsx";
+import { translate as tl } from "@ryu/i18n/core";
 import { getMarketplaceBackdrops } from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -122,7 +123,9 @@ export function useAgentEditBase({
 			options.push({
 				id,
 				label:
-					activeEngine?.active === id ? `${agent.name} (active)` : agent.name,
+					activeEngine?.active === id
+						? tl("{name} (active)", { name: agent.name })
+						: agent.name,
 			});
 		}
 		return options;

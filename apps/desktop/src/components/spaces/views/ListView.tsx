@@ -42,7 +42,7 @@ export function ListView({
 							: String(titleValue);
 					return (
 						<button
-							className="group flex items-center gap-3 px-3 py-2 text-left hover:bg-muted/50"
+							className="group flex items-center gap-3 px-3 py-2 text-start hover:bg-muted/50"
 							key={row.__id}
 							onClick={() => onOpenRow(row)}
 							type="button"

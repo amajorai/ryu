@@ -182,7 +182,7 @@ describe("compact editor controls", () => {
 		).toBe(
 			normalizeClasses(
 				renderComparableMarkup(
-					<Badge className="gap-1 pr-1" variant="secondary" />
+					<Badge className="gap-1 pe-1" variant="secondary" />
 				)
 			)
 		);

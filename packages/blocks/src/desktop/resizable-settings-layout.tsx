@@ -243,7 +243,7 @@ function PageSettingsLayout({
 				{/* The floating sidebar of the desktop app: a rounded panel inset
 				    from the frame edge, not a full-height column split by a rule. */}
 				<Sidebar
-					className="h-full w-full rounded-2xl border border-border/60 bg-sidebar py-2 shadow-xs"
+					className="h-full w-full rounded-2xl border border-border bg-sidebar py-2 shadow-xs"
 					collapsible="none"
 				>
 					<SidebarContent className="overflow-x-hidden" spacing="compact">

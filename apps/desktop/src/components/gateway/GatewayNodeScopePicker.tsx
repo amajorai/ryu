@@ -82,7 +82,7 @@ export function GatewayNodeScopePicker({
 					aria-label={tl("Settings for {computerName}. Choose a computer", {
 						computerName: nodeSettingsLabel(activeNode),
 					})}
-					className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring"
+					className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-start text-sm outline-none transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring"
 				>
 					<HugeiconsIcon
 						className="size-4 shrink-0 text-muted-foreground"

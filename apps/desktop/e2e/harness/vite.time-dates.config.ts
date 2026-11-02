@@ -18,7 +18,16 @@ export default defineConfig({
 	css: { postcss: { plugins: [tailwindcss()] } },
 	define: { "process.env": {} },
 	optimizeDeps: {
-		entries: [story],
+		// Pre-bundle for every story the specs open, not only the configured one:
+		// a story first discovered at navigation time makes Vite re-optimize and
+		// reload mid-test, and the stale chunks then load a second React.
+		entries: [
+			...new Set([
+				story,
+				"timezone-picker-story.html",
+				"sidebar-picker-story.html",
+			]),
+		],
 		exclude: [
 			"@hugeicons/core-free-icons",
 			"@tabler/icons-react",

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -101,13 +102,27 @@ const STAGE_BY_STATUS: Record<ThreadStatus, TripStage> = {
 };
 
 export const STAGE_LABELS: Record<TripStage, string> = {
-	arrived: "Arrived",
-	cancelled: "Cancelled",
-	completed: "Completed",
-	enroute: "En route",
-	requested: "Requested",
-	unassigned: "No driver assigned",
-	unstarted: "Not started",
+	get arrived() {
+		return tr("Arrived");
+	},
+	get cancelled() {
+		return tr("Cancelled");
+	},
+	get completed() {
+		return tr("Completed");
+	},
+	get enroute() {
+		return tr("En route");
+	},
+	get requested() {
+		return tr("Requested");
+	},
+	get unassigned() {
+		return tr("No driver assigned");
+	},
+	get unstarted() {
+		return tr("Not started");
+	},
 };
 
 /** Stages whose route and pin are drawn on the map. */

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -43,11 +44,11 @@ function RecipientChip({
 	const tl = useLiteralMessages();
 	return (
 		<span
-			className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background pr-1 pl-0.5 text-foreground text-sm"
+			className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background ps-0.5 pe-1 text-foreground text-sm"
 			data-testid="mail-compose-recipient"
 		>
 			<BoardAvatar agent={agent} name={agent.name} size={20} />
-			{agent.name}
+			<span data-ryu-i18n="off">{agent.name}</span>
 			<button
 				aria-label={tl("Remove {name}", { name: agent.name })}
 				className="flex size-5 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
@@ -164,7 +165,7 @@ function RecipientField({
 			/>
 			{expanded && agents.length > 0 ? (
 				<div
-					className="absolute top-full right-2 left-2 z-20 mt-1 max-h-60 overflow-y-auto rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+					className="absolute start-2 end-2 top-full z-20 mt-1 max-h-60 overflow-y-auto rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg"
 					id={listId}
 					role="listbox"
 				>
@@ -193,12 +194,15 @@ function RecipientField({
 								<BoardAvatar agent={agent} name={agent.name} size={28} />
 								<span className="flex min-w-0 flex-col">
 									<span className="truncate text-foreground text-sm">
-										{agent.name}
-										<span className="ml-1.5 text-muted-foreground text-xs">
+										<span data-ryu-i18n="off">{agent.name}</span>
+										<span className="ms-1.5 text-muted-foreground text-xs">
 											{agentHandle(agent.name)}
 										</span>
 									</span>
-									<span className="truncate text-muted-foreground text-xs">
+									<span
+										className="truncate text-muted-foreground text-xs"
+										data-ryu-i18n="off"
+									>
 										{agent.description}
 									</span>
 								</span>
@@ -289,7 +293,7 @@ export function MailCompose({
 			animate={{ opacity: 1, y: 0 }}
 			aria-labelledby={titleId}
 			className={cn(
-				"pointer-events-auto absolute right-4 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-xl border border-border border-b-0 bg-background shadow-2xl",
+				"pointer-events-auto absolute end-4 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-xl border border-border border-b-0 bg-background shadow-2xl",
 				minimized
 					? "w-72"
 					: "h-[min(520px,calc(100%-4rem))] w-[min(540px,calc(100%-2rem))]"
@@ -300,14 +304,14 @@ export function MailCompose({
 			onKeyDown={onKeyDown}
 			transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
 		>
-			<header className="flex h-10 shrink-0 items-center gap-1 bg-muted pr-1 pl-4">
+			<header className="flex h-10 shrink-0 items-center gap-1 bg-muted ps-4 pe-1">
 				<button
-					className="min-w-0 flex-1 truncate text-left font-medium text-foreground text-sm outline-none focus-visible:underline"
+					className="min-w-0 flex-1 truncate text-start font-medium text-foreground text-sm outline-none focus-visible:underline"
 					id={titleId}
 					onClick={() => setMinimized(!minimized)}
 					type="button"
 				>
-					{subject.trim() || "New Message"}
+					{subject.trim() || tr("New Message")}
 				</button>
 				<MailIconButton
 					className="size-8"
@@ -373,11 +377,13 @@ export function MailCompose({
 						</Button>
 						{filedUnder ? (
 							<span
-								className="inline-flex h-6 min-w-0 items-center gap-1 rounded bg-muted pr-0.5 pl-1.5 text-foreground/80 text-xs"
+								className="inline-flex h-6 min-w-0 items-center gap-1 rounded bg-muted ps-1.5 pe-0.5 text-foreground/80 text-xs"
 								data-testid="mail-compose-label"
 							>
 								<Tag aria-hidden="true" className="size-3 shrink-0" />
-								<span className="truncate">{filedUnder.name}</span>
+								<span className="truncate" data-ryu-i18n="off">
+									{filedUnder.name}
+								</span>
 								<button
 									aria-label={tl("Remove label {name}", {
 										name: filedUnder.name,
@@ -390,7 +396,7 @@ export function MailCompose({
 								</button>
 							</span>
 						) : null}
-						<span className="ml-auto flex items-center gap-2">
+						<span className="ms-auto flex items-center gap-2">
 							<span className="hidden text-muted-foreground text-xs sm:inline">
 								Ctrl Enter to send
 							</span>

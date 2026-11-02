@@ -1,8 +1,9 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { BellRing, CircleAlert, Inbox, Move3d, Sparkles } from "lucide-react";
 import type { WebGLSupport } from "./aquarium-hooks.ts";
 import type { AquariumActsLayer } from "./aquarium-interface-acts.ts";
-import { plural, type TankSummary } from "./aquarium-model.ts";
+import type { TankSummary } from "./aquarium-model.ts";
 import { BubblesGlyph, PearlGlyph } from "./aquarium-parts.tsx";
 import {
 	GAME_FOCUS,
@@ -33,7 +34,12 @@ export function AquariumFooter({
 	webgl,
 	webglMissing,
 }: AquariumFooterProps) {
+	const tl = useLiteralMessages();
 	const { actsOn, tally } = actsLayer;
+	const unassigned = tl(
+		"{count, plural, one {# unassigned thread} other {# unassigned threads}}",
+		{ count: summary.unassigned }
+	);
 	return (
 		<footer className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end justify-between @min-[672px]:gap-3 gap-2 @min-[672px]:p-4 p-2.5">
 			{actsOn ? (
@@ -92,7 +98,7 @@ export function AquariumFooter({
 			<div className="flex flex-col items-end @min-[672px]:gap-3 gap-2">
 				{summary.unassigned > 0 ? (
 					<button
-						aria-label={plural(summary.unassigned, "unassigned thread")}
+						aria-label={unassigned}
 						className={cn(
 							GAME_PLATE,
 							"gk-display pointer-events-auto flex h-12 items-center gap-2 whitespace-nowrap ps-2 pe-4 text-[16px] transition-colors hover:bg-(--gk-plate-sunk)",
@@ -107,9 +113,7 @@ export function AquariumFooter({
 						>
 							<Inbox className="size-4" strokeWidth={2.5} />
 						</span>
-						{compactHud
-							? summary.unassigned
-							: plural(summary.unassigned, "unassigned thread")}
+						{compactHud ? summary.unassigned : unassigned}
 					</button>
 				) : null}
 				<div className="flex items-end @min-[672px]:gap-3 gap-2">

@@ -53,7 +53,7 @@ function scoreBar(value: number) {
 					style={gatewayScoreVariables1}
 				/>
 			</div>
-			<span className="w-10 text-right text-xs tabular-nums">{pct}%</span>
+			<span className="w-10 text-end text-xs tabular-nums">{pct}%</span>
 		</div>
 	);
 }
@@ -116,36 +116,36 @@ function CasesTable({ cases }: { cases: EvalCaseScore[] }) {
 			<SettingsCard className="overflow-x-auto">
 				<table className="w-full text-sm">
 					<thead>
-						<tr className="border-b text-left text-muted-foreground text-xs">
-							<th className="pr-4 pb-2 font-medium">Prompt</th>
-							<th className="pr-4 pb-2 font-medium">Overall</th>
-							<th className="pr-4 pb-2 font-medium">Latency</th>
-							<th className="pr-4 pb-2 font-medium">Token eff.</th>
-							<th className="pr-4 pb-2 font-medium">Policy</th>
+						<tr className="border-b text-start text-muted-foreground text-xs">
+							<th className="pe-4 pb-2 font-medium">Prompt</th>
+							<th className="pe-4 pb-2 font-medium">Overall</th>
+							<th className="pe-4 pb-2 font-medium">Latency</th>
+							<th className="pe-4 pb-2 font-medium">Token eff.</th>
+							<th className="pe-4 pb-2 font-medium">Policy</th>
 							<th className="pb-2 font-medium">Substr.</th>
 						</tr>
 					</thead>
 					<tbody>
 						{cases.map((c) => (
 							<tr className="border-b last:border-0" key={c.prompt}>
-								<td className="max-w-48 truncate py-2 pr-4">
+								<td className="max-w-48 truncate py-2 pe-4">
 									<Tooltip>
 										<TooltipTrigger render={<span>{c.prompt}</span>} />
 										<TooltipContent>{c.prompt}</TooltipContent>
 									</Tooltip>
 								</td>
-								<td className="py-2 pr-4 text-xs tabular-nums">
+								<td className="py-2 pe-4 text-xs tabular-nums">
 									{Math.round(c.overall * 100)}%
 								</td>
-								<td className="py-2 pr-4 text-xs tabular-nums">
+								<td className="py-2 pe-4 text-xs tabular-nums">
 									{c.latency_available === false
 										? "—"
 										: `${Math.round(c.latency_score * 100)}%`}
 								</td>
-								<td className="py-2 pr-4 text-xs tabular-nums">
+								<td className="py-2 pe-4 text-xs tabular-nums">
 									{Math.round(c.token_efficiency * 100)}%
 								</td>
-								<td className="py-2 pr-4">
+								<td className="py-2 pe-4">
 									{c.policy_available === false ? (
 										<span className="text-muted-foreground text-xs">
 											not measured

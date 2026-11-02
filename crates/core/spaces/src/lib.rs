@@ -54,6 +54,9 @@ mod version_history_tests;
 #[cfg(test)]
 mod seal_tests;
 
+#[cfg(test)]
+mod system_space_doc_tests;
+
 pub mod backup;
 
 use std::collections::{HashMap, VecDeque};
@@ -467,6 +470,8 @@ pub const UPLOADS_SPACE_NAME: &str = "Uploads";
 ///     explicitly shared (`visibility` in `org`/`team`) within the caller's org. An
 ///     untenanted (NULL-owner) document is INVISIBLE on a bound node — matching the
 ///     by-id ACL's fail-closed reading of an unattributable legacy row.
+///     A document in a SYSTEM space (Uploads, Artifacts, …) inherits nothing from
+///     it: the space row is shared, but each document stays its creator's.
 const DOC_TENANCY_VISIBLE_PREDICATE: &str = "(
         :bound = 0
         OR (:bound = 2 AND d.owner_user_id IS NULL AND d.org_id IS NULL)
@@ -478,15 +483,12 @@ const DOC_TENANCY_VISIBLE_PREDICATE: &str = "(
         OR EXISTS (
             SELECT 1 FROM spaces inherited_space
             WHERE inherited_space.id = d.space_id
-              AND (
-                  inherited_space.system = 1
-                  OR (:uid IS NOT NULL AND :org IS NOT NULL
-                      AND inherited_space.org_id = :org
-                      AND (inherited_space.visibility = 'org'
-                           OR (inherited_space.visibility = 'team'
-                               AND inherited_space.team_id IN
-                                   (SELECT value FROM json_each(:teams)))))
-              )
+              AND :uid IS NOT NULL AND :org IS NOT NULL
+              AND inherited_space.org_id = :org
+              AND (inherited_space.visibility = 'org'
+                   OR (inherited_space.visibility = 'team'
+                       AND inherited_space.team_id IN
+                           (SELECT value FROM json_each(:teams))))
         )
      )";
 
@@ -3419,9 +3421,8 @@ impl SpaceStore {
     ///   - **Node ORG-BOUND**: attribute every untenanted, NON-system space +
     ///     document to the LOCAL OWNER (the signed-in vault account). System spaces
     ///     (`system = 1`) are SKIPPED — they must stay shared, and the predicate's
-    ///     `OR s.system = 1` branch already keeps them (and their documents, via the
-    ///     document backfill leaving system-space docs owned by whoever created
-    ///     them) reachable. Idempotent via a `space_meta` marker.
+    ///     `OR s.system = 1` branch already keeps the space rows reachable; their
+    ///     documents are attributed below and stay private to that owner. Idempotent via a `space_meta` marker.
     ///   - **Node ORG-BOUND with no local account**: nobody to attribute to; leave
     ///     NULL + warn. Fail closed (the ACL denies them).
     ///
@@ -5617,13 +5618,15 @@ impl SpaceStore {
         let meta = conn
             .query_row(
                 "SELECT d.owner_user_id, d.org_id,
+                        -- A system space is shared as a container only; its
+                        -- documents keep their own (default private) visibility.
                         CASE
-                            WHEN s.system = 1 THEN 'org'
-                            WHEN s.visibility IN ('org', 'team') THEN s.visibility
+                            WHEN s.system = 0 AND s.visibility IN ('org', 'team')
+                                THEN s.visibility
                             ELSE d.visibility
                         END,
                         CASE
-                            WHEN s.system = 1 OR s.visibility IN ('org', 'team')
+                            WHEN s.system = 0 AND s.visibility IN ('org', 'team')
                                 THEN s.team_id
                             ELSE d.team_id
                         END

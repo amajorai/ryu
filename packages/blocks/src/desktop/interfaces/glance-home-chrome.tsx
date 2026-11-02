@@ -26,7 +26,7 @@ export const W = {
 } as const;
 
 export const ROW_BUTTON =
-	"-mx-[1.6cqw] flex w-[calc(100%+3.2cqw)] min-w-0 rounded-[1.8cqw] px-[1.6cqw] text-left outline-none transition-colors corner-squircle hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring active:bg-foreground/[0.08]";
+	"-mx-[1.6cqw] flex w-[calc(100%+3.2cqw)] min-w-0 rounded-[1.8cqw] px-[1.6cqw] text-start outline-none transition-colors corner-squircle hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring active:bg-foreground/[0.08]";
 
 export function Widget({
 	accessory,

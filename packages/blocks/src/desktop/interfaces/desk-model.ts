@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type DeskView,
@@ -9,6 +10,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { fullTimestamp } from "./interface-renderer.ts";
 
 /** List order the user picked in the conversation list header. */
 export type DeskSort = "newest" | "oldest";
@@ -33,13 +35,13 @@ export interface DeskRow {
 }
 
 export function deskThreadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled conversation";
+	return thread.title.trim() || tr("Untitled conversation");
 }
 
 function actorLabel(agents: InterfaceAgent[]): string {
 	const [lead] = agents;
 	if (!lead) {
-		return "No agent";
+		return tr("No agent");
 	}
 	return agents.length > 1 ? `${lead.name} +${agents.length - 1}` : lead.name;
 }
@@ -47,9 +49,11 @@ function actorLabel(agents: InterfaceAgent[]): string {
 function previewText(thread: InterfaceThread): string {
 	const line = thread.lastMessage?.trim();
 	if (!line) {
-		return "No messages yet";
+		return tr("No messages yet");
 	}
-	return thread.lastMessageRole === "user" ? `You: ${line}` : line;
+	return thread.lastMessageRole === "user"
+		? tr("You: {text}", { text: line })
+		: line;
 }
 
 export function deskRow(
@@ -282,17 +286,22 @@ export function deskEmptyCopy(
 	};
 }
 
-const FULL_TIME = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "medium",
-	timeStyle: "short",
-});
-
-/** "Oct 12, 2026, 1:04 PM", or an empty string for a bad timestamp. */
+/** "Oct 12, 2026, 1:04 PM" in the UI locale, or "" for a bad timestamp. */
 export function deskFullTimestamp(iso: string): string {
-	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : FULL_TIME.format(time);
+	return fullTimestamp(iso);
 }
 
-export function pluralize(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
+/** "3 conversations · 1 needs you": a list's count line, as one ICU message. */
+export function conversationCount(
+	count: number,
+	tl: LiteralMessage = tr
+): string {
+	return tl("{count, plural, one {# conversation} other {# conversations}}", {
+		count,
+	});
+}
+
+/** "1 needs you", "2 need you". */
+export function needsYouCount(count: number, tl: LiteralMessage = tr): string {
+	return tl("{count, plural, one {# needs you} other {# need you}}", { count });
 }

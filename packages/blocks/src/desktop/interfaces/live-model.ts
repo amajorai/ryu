@@ -1,3 +1,8 @@
+import {
+	activeLocale,
+	relativeTimeFormatter,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	ditherAvatarHue,
@@ -9,10 +14,10 @@ import {
 	type InterfaceGroup,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * Live's view model, after Twitch: every agent is a channel, the thread it is
@@ -235,8 +240,11 @@ export function liveUptime(iso: string, now: number): string {
 	return `${hours.toString()}:${pad(minutes)}:${pad(total % 60)}`;
 }
 
-function plural(count: number, unit: string): string {
-	return `${count.toString()} ${unit}${count === 1 ? "" : "s"}`;
+function ago(count: number, unit: "day" | "hour" | "minute" | "month"): string {
+	return relativeTimeFormatter(activeLocale(), "long", "always").format(
+		-count,
+		unit
+	);
 }
 
 /** "Just now", "12 minutes ago", "Yesterday", "3 days ago". */
@@ -247,27 +255,29 @@ export function liveAgo(iso: string, now: number): string {
 	}
 	const elapsed = Math.max(0, now - then);
 	if (elapsed < MINUTE) {
-		return "Just now";
+		return tr("Just now");
 	}
 	if (elapsed < HOUR) {
-		return `${plural(Math.floor(elapsed / MINUTE), "minute")} ago`;
+		return ago(Math.floor(elapsed / MINUTE), "minute");
 	}
 	if (elapsed < DAY) {
-		return `${plural(Math.floor(elapsed / HOUR), "hour")} ago`;
+		return ago(Math.floor(elapsed / HOUR), "hour");
 	}
 	const days = Math.floor(elapsed / DAY);
 	if (days === 1) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
 	if (days < 30) {
-		return `${plural(days, "day")} ago`;
+		return ago(days, "day");
 	}
-	return `${plural(Math.floor(days / 30), "month")} ago`;
+	return ago(Math.floor(days / 30), "month");
 }
 
 /** "1 message", "14 messages". */
 export function liveMessages(count: number): string {
-	return plural(count, "message");
+	return tr("{count, plural, one {# message} other {# messages}}", {
+		count,
+	});
 }
 
 /** The tag a thread wears beside its category; none while live (the badge says it). */
@@ -279,7 +289,7 @@ export function liveStatusTag(thread: InterfaceThread): string | null {
 	if (status === "attention") {
 		return thread.runState === "interrupted" ? "Interrupted" : "Run failed";
 	}
-	return THREAD_STATUS_LABELS[status];
+	return threadStatusLabel(status);
 }
 
 /** Who said the latest line, for the caption's speaker label. */
@@ -290,7 +300,7 @@ export function liveSpeaker(
 	if (thread.lastMessageRole === "user") {
 		return "You";
 	}
-	return agent?.name ?? "Agent";
+	return agent?.name ?? tr("Agent");
 }
 
 /** Splits a message into caption lines of whole words, at most `limit` characters each. */
@@ -407,7 +417,7 @@ export function liveArt(
 		kind,
 		neutral: !agent,
 		seed,
-		speaker: thread ? liveSpeaker(thread, agent) : (agent?.name ?? "Agent"),
+		speaker: thread ? liveSpeaker(thread, agent) : (agent?.name ?? tr("Agent")),
 		title:
 			thread?.title ??
 			(agent

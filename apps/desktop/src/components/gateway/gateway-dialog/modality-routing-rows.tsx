@@ -159,10 +159,10 @@ export function ModalityRoutingRows({
 											<span className="sr-only">
 												{mapping
 													? tl("Edit {label} routing", {
-															label: MODALITY_COPY[modality].label,
+															label: tl(MODALITY_COPY[modality].label),
 														})
 													: tl("Set {label} routing", {
-															label: MODALITY_COPY[modality].label,
+															label: tl(MODALITY_COPY[modality].label),
 														})}
 											</span>
 										</Button>
@@ -180,7 +180,7 @@ export function ModalityRoutingRows({
 									/>
 									<span className="sr-only">
 										{tl("Clear {label} routing", {
-											label: MODALITY_COPY[modality].label,
+											label: tl(MODALITY_COPY[modality].label),
 										})}
 									</span>
 								</Button>

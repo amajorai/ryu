@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -6,21 +7,20 @@ import type {
 } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
 import {
-	MARKING_LABELS,
 	MARKING_ORDER,
+	markingLabel,
 	mrzLines,
 	type Passport,
 	type PassportCountry,
 	type PassportPage,
 	type PassportStamp,
-	plural,
 	stampDate,
 	stampDayMonth,
 	stampLabel,
 	stampTime,
 	UNASSIGNED_CODE,
-	UNASSIGNED_LABEL,
 	UNASSIGNED_STYLE,
+	unassignedLabel,
 } from "./passport-model.ts";
 import { PAGE_HEIGHT, PAGE_WIDTH } from "./passport-pages.tsx";
 import { DESK_FACE_VARS, PASSPORT_VARS, stampInk } from "./passport-palette.ts";
@@ -119,7 +119,7 @@ function FaceStamp({
 				<EntryStamp
 					code={country?.code ?? UNASSIGNED_CODE}
 					large
-					name={country?.agent.name ?? UNASSIGNED_LABEL}
+					name={country?.agent.name ?? unassignedLabel()}
 					selected={active}
 					stamp={stamp}
 					style={country?.style ?? UNASSIGNED_STYLE}
@@ -146,10 +146,14 @@ export function VisaFace({
 }) {
 	const tl = useLiteralMessages();
 	const code = country?.code ?? UNASSIGNED_CODE;
-	const name = country?.agent.name ?? UNASSIGNED_LABEL;
+	const name = country?.agent.name ?? unassignedLabel();
 	return (
 		<Face
-			header={`Visas · ${code}${page.first ? "" : " (cont.)"}`}
+			header={
+				page.first
+					? tl("Visas · {code}", { code })
+					: tl("Visas · {code} (cont.)", { code })
+			}
 			number={page.number}
 		>
 			{page.first ? (
@@ -169,7 +173,7 @@ export function VisaFace({
 					</div>
 					<div className="flex min-w-0 flex-1 flex-col gap-1.5">
 						<h2 className="truncate font-bold font-serif text-[50px] leading-[52px]">
-							{name}
+							<span data-ryu-i18n="off">{name}</span>
 						</h2>
 						<div className="flex items-center gap-3">
 							<CountryEmblem
@@ -314,7 +318,7 @@ export function NotesFace({
 						)}
 						key={marking}
 					>
-						{MARKING_LABELS[marking]}
+						{markingLabel(marking)}
 					</li>
 				))}
 			</ul>
@@ -332,7 +336,10 @@ export function NotesFace({
 									{stampDayMonth(start)} {stampTime(start)}
 									{agent ? ` · ${agent.name}` : ""}
 								</span>
-								<span className="truncate font-medium text-[18px] leading-6">
+								<span
+									className="truncate font-medium text-[18px] leading-6"
+									data-ryu-i18n="off"
+								>
 									{event.title}
 								</span>
 							</li>
@@ -388,7 +395,9 @@ export function CoverFace({ stamps }: { stamps: number }) {
 				Passport
 			</span>
 			<span className="font-mono text-[15px] uppercase tracking-[0.3em]">
-				{plural(stamps, "stamp", "stamps")}
+				{tr("{count, plural, one {# stamp} other {# stamps}}", {
+					count: stamps,
+				})}
 			</span>
 		</div>
 	);

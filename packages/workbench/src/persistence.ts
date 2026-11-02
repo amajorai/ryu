@@ -26,6 +26,7 @@ export interface WorkbenchIds extends DefaultWorkbenchIds {
 export interface LegacySessionTab {
 	conversationId?: string;
 	path: string;
+	pinned?: true;
 	title: string;
 }
 
@@ -296,6 +297,7 @@ const legacyTabSchema = z.object({
 	path: sourceTextSchema,
 	title: titleSchema,
 	conversationId: sourceTextSchema.optional().catch(undefined),
+	pinned: trueOnlySchema,
 });
 const legacyEnvelopeSchema = z.unknown().pipe(
 	z.object({
@@ -318,10 +320,13 @@ function parseLegacySessionTabs(
 		if (!result.success) {
 			return [];
 		}
-		const { path, title, conversationId } = result.data;
+		const { path, title, conversationId, pinned } = result.data;
 		const resultTab: LegacySessionTab = { path, title };
 		if (conversationId !== undefined) {
 			resultTab.conversationId = conversationId;
+		}
+		if (pinned) {
+			resultTab.pinned = true;
 		}
 		return [{ sourceIndex, tab: resultTab }];
 	});
@@ -518,7 +523,9 @@ export function migrateWorkbenchSnapshot(
 		addMigratedItem(state, ids, {
 			closable: true,
 			duplicable: true,
-			pinned: false,
+			// A pinned session tab stays pinned: the tab strip reconciles its
+			// restored tabs against these items, so a dropped pin unpins it.
+			pinned: tab.tab.pinned === true,
 			preferredRegion: "center",
 			scope: tab.tab.conversationId
 				? {

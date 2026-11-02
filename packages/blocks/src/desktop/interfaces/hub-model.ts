@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -6,6 +7,23 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { formatNameList } from "./interface-renderer.ts";
+
+export {
+	type HubClock,
+	hubClock,
+	hubClockDateTime,
+	hubDate,
+	hubGreeting,
+} from "./hub-model-clock.ts";
+
+export {
+	hubAgo,
+	hubFailedRuns,
+	hubNextRunHeadline,
+	hubRunWhen,
+	hubUpcoming,
+} from "./hub-model-time.ts";
 
 /**
  * Pure view-model for the Hub (after a smart display's ambient screen and
@@ -103,64 +121,6 @@ export function isHubTypingTarget(target: EventTarget | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Clock
-// ---------------------------------------------------------------------------
-
-export interface HubClock {
-	/** "AM"/"PM" in 12-hour locales, empty in 24-hour ones. */
-	dayPeriod: string;
-	/** "10:42" without the day period, like the reference's ambient clock. */
-	time: string;
-}
-
-/** "22:42", the machine-readable form for a `<time>` element. */
-export function hubClockDateTime(now: number): string {
-	const date = new Date(now);
-	const pad = (value: number) => String(value).padStart(2, "0");
-	return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-export function hubClock(now: number, locale?: string): HubClock {
-	const parts = new Intl.DateTimeFormat(locale, {
-		hour: "numeric",
-		minute: "2-digit",
-	}).formatToParts(new Date(now));
-	let time = "";
-	let dayPeriod = "";
-	for (const part of parts) {
-		if (part.type === "dayPeriod") {
-			dayPeriod = part.value;
-		} else {
-			time += part.value;
-		}
-	}
-	return { dayPeriod, time: time.trim() };
-}
-
-/** "Wednesday, October 14". */
-export function hubDate(now: number, locale?: string): string {
-	return new Intl.DateTimeFormat(locale, {
-		day: "numeric",
-		month: "long",
-		weekday: "long",
-	}).format(new Date(now));
-}
-
-export function hubGreeting(now: number): string {
-	const hour = new Date(now).getHours();
-	if (hour < 5) {
-		return "Good evening";
-	}
-	if (hour < 12) {
-		return "Good morning";
-	}
-	if (hour < 18) {
-		return "Good afternoon";
-	}
-	return "Good evening";
-}
-
-// ---------------------------------------------------------------------------
 // Threads
 // ---------------------------------------------------------------------------
 
@@ -185,11 +145,20 @@ const STATUS_PARTS: {
 	status: "attention" | "working" | "your-turn";
 }[] = [
 	{
-		phrase: (count) => `${count} ${count === 1 ? "needs" : "need"} attention`,
+		phrase: (count) =>
+			tr("{count, plural, one {# needs attention} other {# need attention}}", {
+				count,
+			}),
 		status: "attention",
 	},
-	{ phrase: (count) => `${count} working`, status: "working" },
-	{ phrase: (count) => `${count} waiting on you`, status: "your-turn" },
+	{
+		phrase: (count) => tr("{count} working", { count }),
+		status: "working",
+	},
+	{
+		phrase: (count) => tr("{count} waiting on you", { count }),
+		status: "your-turn",
+	},
 ];
 
 /**
@@ -216,7 +185,9 @@ export function hubStatusParts(
 ): string[] {
 	if (snapshot.threads.length === 0 && counts.attention === 0) {
 		return [
-			snapshot.agents.length === 0 ? "No agents yet" : "No conversations yet",
+			snapshot.agents.length === 0
+				? tr("No agents yet")
+				: tr("No conversations yet"),
 		];
 	}
 	const parts: string[] = [];
@@ -229,7 +200,9 @@ export function hubStatusParts(
 	if (parts.length > 0) {
 		return parts;
 	}
-	return [omit && omit !== "clear" ? "Nothing else waiting" : "All caught up"];
+	return [
+		omit && omit !== "clear" ? tr("Nothing else waiting") : tr("All caught up"),
+	];
 }
 
 /**
@@ -270,7 +243,7 @@ export function hubGlyphCount(glyph: HubGlyph, counts: HubCounts): number {
 /** "1 needs attention", "3 working", "All caught up": the glyph's spoken name. */
 export function hubGlyphLabel(glyph: HubGlyph, count: number): string {
 	if (glyph === "clear") {
-		return "All caught up";
+		return tr("All caught up");
 	}
 	const part = STATUS_PARTS.find((candidate) => candidate.status === glyph);
 	return part ? part.phrase(count) : `${count}`;
@@ -299,7 +272,7 @@ export function hubThreads(
 }
 
 export function hubThreadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled conversation";
+	return thread.title.trim() || tr("Untitled conversation");
 }
 
 export function hubThreadAgents(
@@ -319,13 +292,12 @@ export function hubThreadAgents(
 /** "Forge" / "Atlas, Echo +1" / "No agent". */
 export function hubAgentNames(agents: InterfaceAgent[]): string {
 	if (agents.length === 0) {
-		return "No agent";
+		return tr("No agent");
 	}
-	const shown = agents
-		.slice(0, 2)
-		.map((agent) => agent.name)
-		.join(", ");
-	return agents.length > 2 ? `${shown} +${agents.length - 2}` : shown;
+	const shown = formatNameList(agents.slice(0, 2).map((agent) => agent.name));
+	return agents.length > 2
+		? tr("{names} +{count}", { count: agents.length - 2, names: shown })
+		: shown;
 }
 
 /**
@@ -334,13 +306,13 @@ export function hubAgentNames(agents: InterfaceAgent[]): string {
  */
 export function hubNameList(agents: InterfaceAgent[]): string {
 	const names = agents.map((agent) => agent.name);
-	if (names.length <= 2) {
-		return names.join(" and ");
+	if (names.length <= 3) {
+		return formatNameList(names);
 	}
-	if (names.length === 3) {
-		return `${names[0]}, ${names[1]} and ${names[2]}`;
-	}
-	return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+	return tr("{names} and {count} more", {
+		count: names.length - 2,
+		names: names.slice(0, 2).join(", "),
+	});
 }
 
 /** Live work per agent: how many of its threads are running. */
@@ -394,141 +366,6 @@ export function hubAgents(
 			Number(hubAgentLive(b, runs)) - Number(hubAgentLive(a, runs)) ||
 			a.name.localeCompare(b.name)
 	);
-}
-
-// ---------------------------------------------------------------------------
-// Time
-// ---------------------------------------------------------------------------
-
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
-/** "now", "4 min ago", "3 hr ago", "Yesterday", "Oct 5". */
-export function hubAgo(iso: string, now: number, locale?: string): string {
-	const then = Date.parse(iso);
-	if (Number.isNaN(then)) {
-		return "";
-	}
-	const elapsed = Math.max(0, now - then);
-	if (elapsed < MINUTE_MS) {
-		return "now";
-	}
-	if (elapsed < HOUR_MS) {
-		return `${Math.floor(elapsed / MINUTE_MS)} min ago`;
-	}
-	if (elapsed < DAY_MS) {
-		return `${Math.floor(elapsed / HOUR_MS)} hr ago`;
-	}
-	if (elapsed < 2 * DAY_MS) {
-		return "Yesterday";
-	}
-	return new Intl.DateTimeFormat(locale, {
-		day: "numeric",
-		month: "short",
-	}).format(new Date(then));
-}
-
-function startOfDay(time: number): number {
-	const date = new Date(time);
-	date.setHours(0, 0, 0, 0);
-	return date.getTime();
-}
-
-/**
- * When a scheduled run starts, in the reference's words: "In 40 min",
- * "In 3 hr", "Tomorrow, 9:00 AM", "Fri, 5:00 PM", "Oct 23, 9:00 AM". Every
- * dated form carries its time, so rows in one list read alike.
- */
-export function hubRunWhen(iso: string, now: number, locale?: string): string {
-	const start = Date.parse(iso);
-	if (Number.isNaN(start)) {
-		return "";
-	}
-	const until = start - now;
-	if (until < MINUTE_MS) {
-		return "Now";
-	}
-	const minutes = Math.round(until / MINUTE_MS);
-	if (minutes < 60) {
-		return `In ${minutes} min`;
-	}
-	// Within a few hours a countdown reads faster than a clock time, even
-	// across midnight.
-	if (minutes < 6 * 60) {
-		return `In ${Math.round(minutes / 60)} hr`;
-	}
-	const days = Math.round((startOfDay(start) - startOfDay(now)) / DAY_MS);
-	const time = new Intl.DateTimeFormat(locale, {
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(new Date(start));
-	if (days === 0) {
-		return `Today, ${time}`;
-	}
-	if (days === 1) {
-		return `Tomorrow, ${time}`;
-	}
-	if (days < 7) {
-		const weekday = new Intl.DateTimeFormat(locale, {
-			weekday: "short",
-		}).format(new Date(start));
-		return `${weekday}, ${time}`;
-	}
-	const day = new Intl.DateTimeFormat(locale, {
-		day: "numeric",
-		month: "short",
-	}).format(new Date(start));
-	return `${day}, ${time}`;
-}
-
-/**
- * The Upcoming card's headline from `hubRunWhen`: "Next run in 40 min",
- * "Next run tomorrow at 9:00 AM", "Next run Fri at 5:00 PM". The day period
- * stays with its time when the headline wraps.
- */
-export function hubNextRunHeadline(when: string): string {
-	if (!when) {
-		return "Next run soon";
-	}
-	if (when === "Now") {
-		return "A run is starting now";
-	}
-	const unbroken = when.replace(/\s(?=[AP]M\b)/, "\u00a0");
-	const relative = /^(In|Today|Tomorrow)\b/.test(unbroken);
-	const phrase = relative
-		? unbroken.charAt(0).toLowerCase() + unbroken.slice(1)
-		: unbroken;
-	// "tomorrow, 9:00 AM" reads as "tomorrow at 9:00 AM"; "today" drops out.
-	const spoken = phrase.replace(/^today, /, "at ").replace(/, (?=\d)/, " at ");
-	return `Next run ${spoken}`;
-}
-
-export function hubUpcoming(
-	events: InterfaceEvent[] | undefined,
-	now: number
-): InterfaceEvent[] {
-	return (events ?? [])
-		.filter(
-			(event) =>
-				event.kind === "upcoming" && Date.parse(event.start) >= now - MINUTE_MS
-		)
-		.sort((a, b) => a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
-}
-
-/** Past runs that failed in the last day, shown under failed threads. */
-export function hubFailedRuns(
-	events: InterfaceEvent[] | undefined,
-	now: number
-): InterfaceEvent[] {
-	return (events ?? [])
-		.filter(
-			(event) =>
-				event.kind === "past" &&
-				event.outcome === "failure" &&
-				now - Date.parse(event.start) < 2 * DAY_MS
-		)
-		.sort((a, b) => b.start.localeCompare(a.start));
 }
 
 // ---------------------------------------------------------------------------
@@ -624,5 +461,7 @@ export function hubTopicPrompt(
 	topic: string | undefined,
 	typed: string
 ): string {
-	return topic ? `About the run "${topic}": ${typed}` : typed;
+	return topic
+		? tr('About the run "{topic}": {typed}', { topic, typed })
+		: typed;
 }

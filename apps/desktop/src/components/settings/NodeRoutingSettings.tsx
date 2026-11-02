@@ -31,6 +31,7 @@ import {
 	serializeNodeRoutingPreferences,
 	setNodeRoutingPreferences,
 } from "@/src/lib/api/preferences.ts";
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
 import { NodeRoutingBusinessSections } from "./NodeRoutingSettings-business-sections.tsx";
 import { NodeRoutingOpenRouterSection } from "./NodeRoutingSettings-openrouter-section.tsx";
 import {
@@ -268,7 +269,7 @@ function ScopedNodeRoutingSettings({ target }: { target: ApiTarget }) {
 				title: "Routing preferences are too large",
 				description: tl(
 					"Keep the saved settings under {maxBytes} bytes. Remove some provider entries or advanced options and try again.",
-					{ maxBytes: NODE_ROUTING_PREFS_MAX_BYTES.toLocaleString() }
+					{ maxBytes: formatLocalNumber(NODE_ROUTING_PREFS_MAX_BYTES) }
 				),
 			});
 			return;

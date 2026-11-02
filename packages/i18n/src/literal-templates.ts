@@ -1,186 +1,49 @@
 import { formatMessage } from "./format.ts";
-import { placeholderNames } from "./icu-syntax.ts";
 import {
 	collapseLiteralWhitespace,
 	type LiteralCatalog,
 } from "./literal-catalog.ts";
+import {
+	type CompiledTemplate,
+	capturesFitTemplate,
+	compileTemplate,
+	parseLiteralTemplate,
+	type Template,
+} from "./literal-template-parse.ts";
 import { MAX_MESSAGE_LENGTH } from "./pack.ts";
+
+export {
+	MIN_TEMPLATE_LETTERS,
+	parseLiteralTemplate,
+} from "./literal-template-parse.ts";
 
 // Template matching for dynamic sentences. When text has no exact catalog
 // entry, the literal catalog's ICU templates with only simple arguments
 // (`Deleted {name}`, never plural/select) are tried as anchored patterns; a
 // match formats the translation with the captured values. Captured values are
-// inserted verbatim: they are data, never re-translated and never ICU-parsed.
+// inserted verbatim and never ICU-parsed: they are data. The one exception is
+// a relayed reason (`Synthesis failed: {error}`): when the captured value is
+// itself catalog copy, an exact entry or (under depth and length caps) another
+// template, its translation is inserted, so the reason is not left in English.
 
-/** One `{name}` argument, the only argument shape a template may use. */
-const SIMPLE_ARGUMENT = /^\{\s*([A-Za-z][A-Za-z0-9_.-]*)\s*\}/u;
-/** Rich-text tags (`<b>`, `</count>`) never reach DOM text as written. */
-const RICH_TAG = /<\/?[A-Za-z][\w-]*\s*\/?>/u;
-const LETTER = /[A-Za-zÀ-￿]/gu;
-const REGEX_SPECIAL = /[\\^$.*+?()[\]{}|/]/gu;
-
-/** Fewest letters a template must carry outside its placeholders. */
-export const MIN_TEMPLATE_LETTERS = 3;
 /** Longest text tried against templates; dynamic UI sentences are short,
  * and the cap bounds lazy-capture backtracking. */
 export const MAX_TEMPLATE_TEXT_LENGTH = 500;
-/** Captured prose words allowed per literal word, so a short template
- * (`Open {name}`) does not rewrite one word of arbitrary user prose. */
-const CAPTURED_WORDS_PER_LITERAL_WORD = 2;
-/** Captured prose words always allowed (`Deleted Q3 plan`). */
-const MIN_CAPTURED_WORDS = 2;
+/** Arguments that relay another message (an error's or a reason's text). */
+const RELAY_ARGUMENTS = new Set([
+	"cause",
+	"detail",
+	"error",
+	"message",
+	"reason",
+	"value",
+]);
+/** Nested relay levels translated below the outer sentence. */
+export const MAX_RELAY_DEPTH = 2;
+/** Longest relayed value looked up; longer text is raw output, not copy. */
+export const MAX_RELAY_VALUE_LENGTH = 300;
 /** Most texts whose answer an index remembers between lookups. */
 const RESULT_CACHE_LIMIT = 512;
-
-interface ParsedTemplate {
-	/** Literal text around the arguments; one longer than `names`. */
-	literals: string[];
-	names: string[];
-}
-
-/** A catalog template, compiled the first time a lookup tests it. */
-interface Template {
-	/** Undefined until first tested; null when the entry is unusable. */
-	compiled?: CompiledTemplate | null;
-	order: number;
-	parsed?: ParsedTemplate | null | undefined;
-	/** Whitespace-collapsed English source. */
-	source: string;
-	translation: string;
-}
-
-interface CompiledTemplate extends ParsedTemplate {
-	/** Literal words with a letter; bounds how many words captures may hold. */
-	literalWords: number;
-	pattern: RegExp;
-	/** Literal characters; the longest matching template wins. */
-	specificity: number;
-}
-
-/** A lowercase dictionary-like word, as running prose is made of; names,
- * titles, numbers, paths and codes (`Q3`, `report.pdf`) are not. */
-const PROSE_WORD = /^[a-zß-ÿ]{2,}[.,;:!?]?$/u;
-
-/** Whitespace-separated words carrying at least one letter. */
-function letterWords(text: string): number {
-	let count = 0;
-	for (const word of text.split(" ")) {
-		if (/[A-Za-zÀ-￿]/u.test(word)) {
-			count += 1;
-		}
-	}
-	return count;
-}
-
-function proseWords(text: string): number {
-	let count = 0;
-	for (const word of text.split(" ")) {
-		if (PROSE_WORD.test(word)) {
-			count += 1;
-		}
-	}
-	return count;
-}
-
-/** Whether captured values are short enough relative to the template's own
- * words to be values, rather than prose that merely starts like it. */
-function capturesFitTemplate(
-	compiled: CompiledTemplate,
-	values: Record<string, string>
-): boolean {
-	const captured = proseWords(Object.values(values).join(" "));
-	return (
-		captured <=
-		Math.max(
-			MIN_CAPTURED_WORDS,
-			CAPTURED_WORDS_PER_LITERAL_WORD * compiled.literalWords
-		)
-	);
-}
-
-/**
- * Split a whitespace-collapsed English source into literals and simple
- * arguments, or null when it is not a usable template: no argument, a
- * plural/select/other complex argument, a stray brace, rich-text tags, two
- * adjacent arguments (ambiguous), or fewer than {@link MIN_TEMPLATE_LETTERS}
- * literal letters.
- */
-export function parseLiteralTemplate(source: string): ParsedTemplate | null {
-	if (RICH_TAG.test(source)) {
-		return null;
-	}
-	const literals: string[] = [];
-	const names: string[] = [];
-	let literal = "";
-	let cursor = 0;
-	while (cursor < source.length) {
-		const open = source.indexOf("{", cursor);
-		const close = source.indexOf("}", cursor);
-		if (close >= 0 && (open < 0 || close < open)) {
-			return null;
-		}
-		if (open < 0) {
-			literal += source.slice(cursor);
-			break;
-		}
-		literal += source.slice(cursor, open);
-		const argument = SIMPLE_ARGUMENT.exec(source.slice(open));
-		if (!argument?.[1] || (names.length > 0 && literal === "")) {
-			return null;
-		}
-		literals.push(literal);
-		names.push(argument[1]);
-		literal = "";
-		cursor = open + argument[0].length;
-	}
-	literals.push(literal);
-	const letters = literals.join("").match(LETTER)?.length ?? 0;
-	return names.length > 0 && letters >= MIN_TEMPLATE_LETTERS
-		? { literals, names }
-		: null;
-}
-
-function compilePattern(template: ParsedTemplate): RegExp {
-	const seen = new Map<string, number>();
-	let pattern = "^";
-	template.literals.forEach((literal, index) => {
-		pattern += literal.replace(REGEX_SPECIAL, "\\$&");
-		const name = template.names[index];
-		if (name === undefined) {
-			return;
-		}
-		const group = seen.get(name);
-		if (group === undefined) {
-			seen.set(name, seen.size + 1);
-			pattern += "(.+?)";
-		} else {
-			// A repeated argument must repeat the same value.
-			pattern += `\\${group}`;
-		}
-	});
-	return new RegExp(`${pattern}$`, "u");
-}
-
-/** Parse, check the translation's arguments and compile one template. */
-function compileTemplate(template: Template): CompiledTemplate | null {
-	const parsed =
-		template.parsed === undefined
-			? parseLiteralTemplate(template.source)
-			: template.parsed;
-	if (
-		parsed === null ||
-		JSON.stringify(placeholderNames(template.translation)) !==
-			JSON.stringify([...new Set(parsed.names)].sort())
-	) {
-		return null;
-	}
-	return {
-		...parsed,
-		literalWords: letterWords(parsed.literals.join(" ")),
-		pattern: compilePattern(parsed),
-		specificity: parsed.literals.join("").length,
-	};
-}
 
 /** Templates sharing one leading literal, keyed by their trailing literal. */
 interface HeadBucket {
@@ -222,10 +85,13 @@ export class LiteralTemplateIndex {
 	private readonly unindexed: Template[] = [];
 	private readonly results = new Map<string, string | null>();
 	private catalog: LiteralCatalog | null;
+	/** The whole catalog, kept for exact lookups of relayed values. */
+	private readonly entries: LiteralCatalog;
 	private size = 0;
 
 	constructor(catalog: LiteralCatalog) {
 		this.catalog = catalog;
+		this.entries = catalog;
 	}
 
 	/** Number of indexed candidate templates (builds the index). */
@@ -350,10 +216,52 @@ export class LiteralTemplateIndex {
 		if (cached !== undefined) {
 			return cached ?? undefined;
 		}
+		const output = this.find(collapsed, locale, 0);
+		if (this.results.size >= RESULT_CACHE_LIMIT) {
+			this.results.clear();
+		}
+		this.results.set(cacheKey, output);
+		return output ?? undefined;
+	}
+
+	/**
+	 * A relayed value's translation: its exact catalog entry, else a template
+	 * match one level deeper, else the value unchanged. Past
+	 * {@link MAX_RELAY_DEPTH} or {@link MAX_RELAY_VALUE_LENGTH} it stays as is.
+	 */
+	private relayed(value: string, locale: string, depth: number): string {
+		if (
+			depth >= MAX_RELAY_DEPTH ||
+			!value ||
+			value.length > MAX_RELAY_VALUE_LENGTH
+		) {
+			return value;
+		}
+		const exact = Object.hasOwn(this.entries, value)
+			? this.entries[value]
+			: undefined;
+		if (
+			typeof exact === "string" &&
+			!value.includes("{") &&
+			exact.trim() &&
+			exact.length <= MAX_MESSAGE_LENGTH
+		) {
+			return exact;
+		}
+		return this.find(value, locale, depth + 1) ?? value;
+	}
+
+	/** The best template's translation of collapsed `text`, or null. */
+	private find(
+		collapsed: string,
+		locale: string,
+		depth: number
+	): string | null {
 		this.build();
 		let best: {
 			compiled: CompiledTemplate;
 			order: number;
+			relayed: Record<string, string> | null;
 			translation: string;
 			values: Record<string, string>;
 		} | null = null;
@@ -384,23 +292,64 @@ export class LiteralTemplateIndex {
 					group += 1;
 				}
 			}
+			let relayed: Record<string, string> | null = null;
 			if (!capturesFitTemplate(compiled, values)) {
-				continue;
+				relayed = this.relayedFit(compiled, values, locale, depth);
+				if (relayed === null) {
+					continue;
+				}
 			}
 			best = {
 				compiled,
 				order: template.order,
+				relayed,
 				translation: template.translation,
 				values,
 			};
 		}
-		const output = best
-			? formatMessage(best.translation, best.values, locale)
-			: null;
-		if (this.results.size >= RESULT_CACHE_LIMIT) {
-			this.results.clear();
+		if (!best) {
+			return null;
 		}
-		this.results.set(cacheKey, output);
-		return output ?? undefined;
+		let values = best.relayed;
+		if (values === null) {
+			values = {};
+			for (const [name, value] of Object.entries(best.values)) {
+				values[name] = RELAY_ARGUMENTS.has(name)
+					? this.relayed(value, locale, depth)
+					: value;
+			}
+		}
+		return formatMessage(best.translation, values, locale);
+	}
+
+	/**
+	 * A relay carries a whole sentence (`Failed: {error}`), more prose than
+	 * the capture budget allows. Accept it only when every relayed value is
+	 * itself catalog copy and the other values fit; returns the values with
+	 * the relays translated, or null.
+	 */
+	private relayedFit(
+		compiled: CompiledTemplate,
+		values: Record<string, string>,
+		locale: string,
+		depth: number
+	): Record<string, string> | null {
+		const plain: Record<string, string> = {};
+		const output: Record<string, string> = {};
+		let relays = 0;
+		for (const [name, value] of Object.entries(values)) {
+			if (!RELAY_ARGUMENTS.has(name)) {
+				plain[name] = value;
+				output[name] = value;
+				continue;
+			}
+			const translated = this.relayed(value, locale, depth);
+			if (translated === value) {
+				return null;
+			}
+			output[name] = translated;
+			relays += 1;
+		}
+		return relays > 0 && capturesFitTemplate(compiled, plain) ? output : null;
 	}
 }

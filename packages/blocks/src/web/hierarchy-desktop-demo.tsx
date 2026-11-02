@@ -138,7 +138,7 @@ export function HierarchyDesktopDemo({ className }: { className?: string }) {
 									Defaults
 								</button>
 								{defaultsOpen ? (
-									<div className="absolute top-8 right-0 z-10 w-64 rounded-xl border border-border bg-popover p-3 text-left shadow-lg">
+									<div className="absolute end-0 top-8 z-10 w-64 rounded-xl border border-border bg-popover p-3 text-start shadow-lg">
 										<p className="font-medium text-sm">Model defaults</p>
 										<p className="mt-1 text-muted-foreground text-xs">
 											<span className="text-foreground">claude-sonnet</span>

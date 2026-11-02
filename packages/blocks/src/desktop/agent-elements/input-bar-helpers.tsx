@@ -13,6 +13,7 @@ import type {
 	AttachedImage,
 	InputBarTurnProgress,
 } from "./input-bar-types.ts";
+import { usePierreShadowLocalizer } from "./use-pierre-shadow-localizer.ts";
 
 /**
  * Bars in the full-width recording waveform that replaces the textarea while the
@@ -85,9 +86,10 @@ export function TurnProgressFile({
 }: {
 	file: InputBarTurnProgress["files"][number];
 }) {
+	const localizeDiffCopy = usePierreShadowLocalizer();
 	const row = (
 		<button
-			className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-muted"
+			className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-start text-sm hover:bg-muted"
 			type="button"
 		>
 			<FileTypeIcon className="size-4 shrink-0" path={file.path} />
@@ -118,7 +120,10 @@ export function TurnProgressFile({
 				<div className="mb-1 px-2 py-1 font-mono text-muted-foreground text-xs">
 					{file.path}
 				</div>
-				<div className="max-h-[28rem] overflow-auto rounded-xl border border-border bg-background/60">
+				<div
+					className="max-h-[28rem] overflow-auto rounded-xl border border-border bg-background/60"
+					ref={localizeDiffCopy}
+				>
 					<PatchDiff
 						disableWorkerPool
 						options={{

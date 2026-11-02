@@ -1,8 +1,6 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
-	compareAsks,
-	estimateProgress,
 	type InterfaceAgent,
-	type InterfaceAgentAct,
 	type InterfaceAsk,
 	type InterfaceEvent,
 	type InterfaceSnapshot,
@@ -10,10 +8,22 @@ import {
 	localDayKey,
 	medianRunMs,
 	type ThreadStatus,
-	threadClaims,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { actHasBlocker } from "./game3d-acts.ts";
+
+export {
+	actTickets,
+	type TicketAct,
+} from "./kitchen-model-acts.ts";
+
+export {
+	chefLabel,
+	roughDuration,
+	spokenAge,
+	ticketLabel,
+	ticketStateLabel,
+	ticketTimer,
+} from "./kitchen-model-labels.ts";
 
 /**
  * Kitchen view model: pure functions that turn the snapshot into a service.
@@ -152,7 +162,7 @@ export const ROW_SPACING = 3.6;
 export const PASS_SLOTS = 6;
 const DISH_SPACING = 1.05;
 
-function toTicket(snapshot: InterfaceSnapshot, thread: InterfaceThread) {
+export function toTicket(snapshot: InterfaceSnapshot, thread: InterfaceThread) {
 	const chefId = thread.agentIds[0];
 	const parsed = Date.parse(thread.updatedAt);
 	return {
@@ -162,7 +172,7 @@ function toTicket(snapshot: InterfaceSnapshot, thread: InterfaceThread) {
 		id: thread.id,
 		state: TICKET_STATE[threadStatus(thread)],
 		thread,
-		title: thread.title.trim() || "Untitled order",
+		title: thread.title.trim() || tr("Untitled order"),
 		updatedAt: Number.isNaN(parsed) ? 0 : parsed,
 	} satisfies KitchenTicket;
 }
@@ -423,207 +433,10 @@ export function chefOrders(
 		});
 }
 
-/**
- * Ticket timer since the last update. Cooking tickets run a live kitchen
- * timer (`m:ss`, then `1:02:05`); every other ticket shows a compact age
- * (`now`, `4m`, `3h`, `2d`, `5w`), so one rail never mixes the two for the
- * same kind of ticket.
- */
-export function ticketTimer(
-	updatedAt: number,
-	now: number,
-	live = false
-): string {
-	if (updatedAt <= 0) {
-		return "";
-	}
-	const seconds = Math.max(0, Math.floor((now - updatedAt) / 1000));
-	if (live) {
-		const hours = Math.floor(seconds / 3600);
-		const minutes = Math.floor((seconds % 3600) / 60);
-		const rest = String(seconds % 60).padStart(2, "0");
-		return hours > 0
-			? `${hours}:${String(minutes).padStart(2, "0")}:${rest}`
-			: `${minutes}:${rest}`;
-	}
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 1) {
-		return "now";
-	}
-	if (minutes < 60) {
-		return `${minutes}m`;
-	}
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) {
-		return `${hours}h`;
-	}
-	const days = Math.floor(hours / 24);
-	return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
-}
-
-/** Spoken form of the timer, for accessible names. */
-export function spokenAge(updatedAt: number, now: number): string {
-	if (updatedAt <= 0) {
-		return "no updates yet";
-	}
-	const minutes = Math.max(0, Math.floor((now - updatedAt) / 60_000));
-	if (minutes < 1) {
-		return "updated just now";
-	}
-	if (minutes < 60) {
-		return `updated ${plural(minutes, "minute")} ago`;
-	}
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) {
-		return `updated ${plural(hours, "hour")} ago`;
-	}
-	return `updated ${plural(Math.floor(hours / 24), "day")} ago`;
-}
-
-export function plural(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-/** Short duration for the estimate note ("about 6 min"). */
-export function roughDuration(ms: number): string {
-	const minutes = Math.max(1, Math.round(ms / 60_000));
-	if (minutes < 60) {
-		return `${minutes} min`;
-	}
-	const hours = Math.round(minutes / 6) / 10;
-	return `${hours} h`;
-}
-
-/**
- * Accessible name for a ticket button. With the act layer (`act`) the
- * words come from the act and the only time said is the run's exact
- * elapsed time: a last-update time is never spoken.
- */
-export function ticketLabel(
-	ticket: KitchenTicket,
-	now: number,
-	act?: Pick<TicketAct, "elapsed" | "label"> | null
-): string {
-	const chef = ticket.chef ? `, ${ticket.chef.name}` : ", no chef";
-	if (act) {
-		const running = act.elapsed ? `, running ${act.elapsed}` : "";
-		return `${ticket.title}: ${act.label}${chef}${running}`;
-	}
-	return `${ticket.title}: ${TICKET_LABELS[ticket.state]}${chef}, ${spokenAge(ticket.updatedAt, now)}`;
-}
-
-/** Accessible name for a chef (plate or roster button). */
-export function chefLabel(station: KitchenStation): string {
-	const parts = [station.agent.name];
-	if (station.working) {
-		parts.push("cooking");
-	}
-	const ready = station.orders.filter((order) => order.state === "ready");
-	if (ready.length > 0) {
-		parts.push(`${ready.length} ready`);
-	}
-	if (station.burnt) {
-		parts.push("burnt order");
-	}
-	return parts.join(", ");
-}
-
 /** Next or previous index in a list, wrapping. */
 export function cycleIndex(length: number, index: number, step: number) {
 	if (length === 0) {
 		return -1;
 	}
 	return (((index + step) % length) + length) % length;
-}
-
-/**
- * What a ticket shows when the host sends asks, from the acts alone: its
- * place on the rail (`rank`: an ask that needs you, a stop or limit, a
- * run, an unread answer), its words and colour, the ask its patience bar
- * drains from (a blocking ask, else an unread answer; never a suggestion),
- * the run's elapsed time (exact starts only) and its estimate (a cron
- * routine's own firing only).
- */
-export interface TicketAct {
-	ask: InterfaceAsk | null;
-	elapsed: string | null;
-	estimate: number | null;
-	label: string;
-	rank: number;
-	state: TicketState;
-}
-
-/** The rail from the acts: what needs you first, in ask order, then the rest. */
-export function actTickets(
-	snapshot: InterfaceSnapshot,
-	acts: ReadonlyMap<string, InterfaceAgentAct>,
-	nowMs: number
-): { rail: KitchenTicket[]; views: Map<string, TicketAct> } {
-	const claims = threadClaims(snapshot);
-	const asks = [...(snapshot.asks ?? [])].sort(compareAsks);
-	const views = new Map<string, TicketAct>();
-	const tickets: KitchenTicket[] = [];
-	for (const thread of snapshot.threads) {
-		const act = acts.get(claims.get(thread.id) ?? "");
-		const blocking = asks.find(
-			(ask) => ask.threadId === thread.id && ask.blocking
-		);
-		const reply = asks.find(
-			(ask) => ask.threadId === thread.id && ask.kind === "reply"
-		);
-		// By value and claim (the kit's check), never object identity.
-		const counted =
-			act && actHasBlocker(act, thread, claims) ? thread.blocker : null;
-		// A rate limit is not a failure: it reads 86'd, never burnt.
-		const limit = counted?.kind === "rate-limited";
-		const stopped = limit ? null : counted;
-		let view: Omit<TicketAct, "ask" | "elapsed" | "estimate"> | null = null;
-		if (blocking) {
-			view = { label: "Needs you", rank: 0, state: "needs" };
-		} else if (stopped) {
-			view = {
-				label: stopped.kind === "interrupted" ? "Pulled" : "Burnt",
-				rank: 1,
-				state: "burnt",
-			};
-		} else if (
-			limit ||
-			(act?.act === "limited" && act.threadId === thread.id)
-		) {
-			view = { label: "86'd", rank: 1, state: "limited" };
-		} else if (thread.running) {
-			view = { label: "Cooking", rank: 2, state: "cooking" };
-		} else if (reply) {
-			view = { label: "Ready", rank: 3, state: "ready" };
-		}
-		if (!view) {
-			continue;
-		}
-		const estimate = estimateProgress(thread, nowMs, snapshot.events);
-		views.set(thread.id, {
-			...view,
-			ask: blocking ?? reply ?? null,
-			elapsed:
-				act?.act === "working" && act.threadId === thread.id
-					? act.elapsed
-					: null,
-			estimate:
-				estimate && estimate.total > 0 ? estimate.done / estimate.total : null,
-		});
-		tickets.push(toTicket(snapshot, thread));
-	}
-	const order = (ticket: KitchenTicket) => views.get(ticket.id);
-	tickets.sort((a, b) => {
-		const left = order(a);
-		const right = order(b);
-		const rank = (left?.rank ?? 9) - (right?.rank ?? 9);
-		if (rank !== 0) {
-			return rank;
-		}
-		if (left?.ask && right?.ask && left.rank === 0) {
-			return compareAsks(left.ask, right.ask);
-		}
-		return compareTickets(a, b);
-	});
-	return { rail: tickets, views };
 }

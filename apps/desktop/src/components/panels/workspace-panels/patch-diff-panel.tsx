@@ -4,6 +4,7 @@ import {
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -198,7 +199,7 @@ export function PatchDiffPanel({
 			}
 			await writeProjectFile(joinPath(folder, path), file.contents);
 			invalidateGitStatus(folder);
-			toast.success(`${path} saved`);
+			toast.success(tl("{path} saved", { path }));
 		},
 		[folder, mode]
 	);
@@ -433,7 +434,7 @@ export function PatchDiffPanel({
 				<div className="flex-1" />
 				{/* Quick split ↔ stacked toggle. Full option set lives in
 				    Settings › Appearance › Diff viewer. */}
-				<div className="mr-1 flex shrink-0 items-center gap-0.5">
+				<div className="me-1 flex shrink-0 items-center gap-0.5">
 					{(
 						[
 							["split", "Split"],

@@ -1,6 +1,7 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { Plus, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
@@ -12,6 +13,7 @@ import {
 	TeamGlyph,
 	toneLabel,
 } from "./flow-parts.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 const NODE_SURFACE =
 	"rounded-lg border bg-card text-foreground shadow-xs ring-[3px] outline-none transition-[border-color,box-shadow,background-color] duration-150";
@@ -104,7 +106,10 @@ function NodeBody({ node }: { node: FlowNode }): ReactNode {
 						name={node.agent.name}
 						size={20}
 					/>
-					<span className="min-w-0 flex-1 truncate font-medium">
+					<span
+						className="min-w-0 flex-1 truncate font-medium"
+						data-ryu-i18n="off"
+					>
 						{node.agent.name}
 					</span>
 					<FlowDot tone={node.tone} />
@@ -116,7 +121,10 @@ function NodeBody({ node }: { node: FlowNode }): ReactNode {
 					<span className="flex size-5 items-center justify-center rounded-[5px] bg-muted">
 						<TeamGlyph className="size-3 text-foreground/70" />
 					</span>
-					<span className="min-w-0 flex-1 truncate font-medium">
+					<span
+						className="min-w-0 flex-1 truncate font-medium"
+						data-ryu-i18n="off"
+					>
 						{node.group.name}
 					</span>
 					<FlowDot tone={node.tone} />
@@ -132,8 +140,8 @@ function NodeBody({ node }: { node: FlowNode }): ReactNode {
 			return (
 				<>
 					<ConversationGlyph />
-					<span className="min-w-0 flex-1 truncate">
-						{node.thread.title.trim() || "Untitled conversation"}
+					<span className="min-w-0 flex-1 truncate" data-ryu-i18n="off">
+						{node.thread.title.trim() || tr("Untitled conversation")}
 					</span>
 					<FlowDot tone={node.status} />
 				</>
@@ -201,8 +209,7 @@ export function NodeButton({
 		tabIndex: focusId === node.id ? 0 : -1,
 		type: "button" as const,
 	};
-	const statusLabel = (status: keyof typeof THREAD_STATUS_LABELS) =>
-		THREAD_STATUS_LABELS[status];
+	const statusLabel = (status: ThreadStatus) => threadStatusLabel(status, tl);
 	if (node.kind === "origin") {
 		return (
 			<button
@@ -265,7 +272,7 @@ export function NodeButton({
 				aria-label={nodeLabel(node, statusLabel, tl)}
 				aria-pressed={selected}
 				className={cn(
-					"relative flex size-full items-center gap-2 rounded-lg border border-dashed px-3 text-left text-[13px] outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+					"relative flex size-full items-center gap-2 rounded-lg border border-dashed px-3 text-start text-[13px] outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
 					selected && "border-primary",
 					onPath && "border-primary/40",
 					!(selected || onPath) &&
@@ -279,7 +286,10 @@ export function NodeButton({
 	}
 	const kindLabel =
 		node.kind === "agent" || node.kind === "team"
-			? `${nodeLabel(node, statusLabel, tl)}, ${toneLabel(node.tone)}`
+			? tl("{label}, {status}", {
+					label: nodeLabel(node, statusLabel, tl),
+					status: toneLabel(node.tone, tl),
+				})
 			: nodeLabel(node, statusLabel, tl);
 	return (
 		<button
@@ -287,7 +297,7 @@ export function NodeButton({
 			aria-label={kindLabel}
 			aria-pressed={selected}
 			className={cn(
-				"relative flex size-full items-center gap-2 px-3 text-left text-[13px]",
+				"relative flex size-full items-center gap-2 px-3 text-start text-[13px]",
 				nodeSurface(selected, onPath)
 			)}
 		>

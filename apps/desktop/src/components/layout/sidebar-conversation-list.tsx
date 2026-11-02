@@ -133,7 +133,7 @@ function GroupChatRow({
 					type="button"
 				>
 					<HugeiconsIcon
-						className={`size-3 transition-transform ${expanded ? "" : "-rotate-90"}`}
+						className={`size-3 transition-transform ${expanded ? "" : "-rotate-90 rtl:rotate-90"}`}
 						icon={ArrowDown01Icon}
 					/>
 				</button>
@@ -165,7 +165,7 @@ function GroupChatRow({
 				) : null}
 			</div>
 			{expanded ? (
-				<div className="relative ml-7 border-border border-l pl-2">
+				<div className="relative ms-7 border-border border-s ps-2">
 					<SidebarMenu>
 						{paged.visible.map((conversation) => (
 							<ChatRow
@@ -223,12 +223,12 @@ function SessionDisclosure({
 		<li className="list-none">
 			<button
 				aria-expanded={open}
-				className="flex w-full items-center gap-1 rounded-lg py-0.5 pr-2 pl-8 text-left text-muted-foreground text-xs hover:text-foreground"
+				className="flex w-full items-center gap-1 rounded-lg py-0.5 ps-8 pe-2 text-start text-muted-foreground text-xs hover:text-foreground"
 				onClick={() => setOpen((current) => !current)}
 				type="button"
 			>
 				<HugeiconsIcon
-					className={open ? "rotate-0" : "-rotate-90"}
+					className={open ? "rotate-0" : "-rotate-90 rtl:rotate-90"}
 					icon={ArrowDown01Icon}
 					size={14}
 				/>

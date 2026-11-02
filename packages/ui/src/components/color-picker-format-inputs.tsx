@@ -24,8 +24,8 @@ const inputGroupItemVariants = cva(
 		variants: {
 			position: {
 				first: "rounded-e-none",
-				middle: "-ms-px rounded-none border-l-0",
-				last: "-ms-px rounded-s-none border-l-0",
+				middle: "-ms-px rounded-none border-s-0",
+				last: "-ms-px rounded-s-none border-s-0",
 				isolated: "",
 			},
 		},

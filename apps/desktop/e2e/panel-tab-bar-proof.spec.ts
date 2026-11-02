@@ -1,17 +1,12 @@
-import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
 	type PanelTabBarProofSnapshot,
 	panelTabBarProofSnapshotSchema,
 } from "./panel-tab-bar-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 function screenshotPath(name: string): string {
-	return path.resolve(
-		import.meta.dirname,
-		"../../..",
-		"docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	return proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 }
 
 async function readState(page: Page): Promise<PanelTabBarProofSnapshot> {

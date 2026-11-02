@@ -573,7 +573,7 @@ function expectedNotices(prefix: string) {
 			tag: `approval-${prefix} approval`,
 		},
 		{
-			title: `Finished "${prefix} quest"?`,
+			title: `Finished “${prefix} quest”?`,
 			body: `Reason ${prefix} quest`,
 			tag: `quest-${prefix} quest`,
 		},

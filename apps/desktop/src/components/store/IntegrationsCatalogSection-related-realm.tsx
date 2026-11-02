@@ -1,7 +1,7 @@
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import type {
 	StoreSearchRealm,
 	useStoreSearch,
@@ -30,13 +30,13 @@ export function RelatedRealmSection({
 					variant="ghost"
 				>
 					See all
-					<HugeiconsIcon className="size-3.5" icon={ArrowRight01Icon} />
+					<DirectionalIcon className="size-3.5" icon={ArrowRight01Icon} />
 				</Button>
 			</div>
 			<div className="flex flex-col gap-0.5">
 				{group.items.map((item) => (
 					<button
-						className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-(--duration-fast) hover:bg-muted hover:duration-0"
+						className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-start transition-colors duration-(--duration-fast) hover:bg-muted hover:duration-0"
 						key={item.id}
 						onClick={() => onOpenRealm(group.realm, brandName)}
 						type="button"

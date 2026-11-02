@@ -1,7 +1,7 @@
-import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const sectionOrderSchema = z.array(z.string());
 
@@ -76,9 +76,8 @@ test.describe("AppSidebar section and navigation controls", () => {
 			page.getByRole("button", { name: "Alpha", exact: true })
 		).toHaveCount(0);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-overflow-search.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-overflow-search.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -198,9 +197,8 @@ test.describe("AppSidebar section and navigation controls", () => {
 		await page.getByRole("menuitem", { name: "Customize sidebar" }).click();
 		await expect(page.getByTestId("customize-open")).toHaveText("true");
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-section-menu.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-section-menu.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -238,9 +236,8 @@ test.describe("AppSidebar section and navigation controls", () => {
 		await expect(page.getByTestId("last-action")).toHaveText("Add folder");
 		await expect(page.getByTestId("projects-content")).toBeVisible();
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-add-actions.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-add-actions.png"
 			),
 			fullPage: true,
 			animations: "disabled",

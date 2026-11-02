@@ -112,7 +112,7 @@ export function RegularTab({
 						render={
 							<span
 								aria-hidden
-								className="mr-1.5 size-1.5 shrink-0 rounded-full bg-success"
+								className="me-1.5 size-1.5 shrink-0 rounded-full bg-success"
 							/>
 						}
 					/>
@@ -195,8 +195,8 @@ export function RegularTab({
 					{...dragHandlers}
 					{...shiftProps}
 				>
-					{showBefore && <DropIndicator side="left" />}
-					{showAfter && <DropIndicator side="right" />}
+					{showBefore && <DropIndicator side="start" />}
+					{showAfter && <DropIndicator side="end" />}
 					<MorphingTabSurface floatingTabs={floatingTabs} isActive={isActive} />
 					{/* Icon zone — page icon morphs to close X on tab hover */}
 					<button
@@ -206,7 +206,7 @@ export function RegularTab({
 							`Close ${tab.title}`
 						)}
 						className={cn(
-							"relative z-10 ml-2 flex size-4 shrink-0 items-center justify-center rounded-full",
+							"relative z-10 ms-2 flex size-4 shrink-0 items-center justify-center rounded-full",
 							isActive ? "text-foreground" : "text-muted-foreground"
 						)}
 						onClick={() => closeTab(tab.id)}
@@ -239,7 +239,7 @@ export function RegularTab({
 					{isEditing ? (
 						<div
 							className={cn(
-								"relative z-10 flex h-full min-w-0 flex-1 items-center overflow-hidden pr-3 pl-1.5",
+								"relative z-10 flex h-full min-w-0 flex-1 items-center overflow-hidden ps-1.5 pe-3",
 								isActive ? "text-foreground" : "text-muted-foreground"
 							)}
 						>
@@ -254,7 +254,7 @@ export function RegularTab({
 					) : (
 						<button
 							className={cn(
-								"relative z-10 flex h-full min-w-0 flex-1 items-center overflow-hidden pr-3 pl-1.5",
+								"relative z-10 flex h-full min-w-0 flex-1 items-center overflow-hidden ps-1.5 pe-3",
 								isActive ? "text-foreground" : "text-muted-foreground"
 							)}
 							onClick={() => activateTab(tab.id)}

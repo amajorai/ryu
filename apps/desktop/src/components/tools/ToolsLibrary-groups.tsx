@@ -57,7 +57,7 @@ export function ServerToolGroup({
 			<div className="flex items-center gap-2 px-1">
 				<CollapsibleTrigger appearance="tools-server">
 					<HugeiconsIcon
-						className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`}
+						className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90 rtl:rotate-90"}`}
 						icon={ArrowDown01Icon}
 					/>
 					<HugeiconsIcon

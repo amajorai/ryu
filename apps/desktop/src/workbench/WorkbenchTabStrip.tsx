@@ -6,6 +6,7 @@ import {
 	ContextMenu,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { useReorderShift } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type {
@@ -30,6 +31,7 @@ import {
 	splitTargetGroupId,
 	stripDropIndex,
 } from "./workbench-drop.ts";
+import { tabIndexForKey } from "./workbench-tab-keys.ts";
 import {
 	REGION_LABELS,
 	WorkbenchStripActions,
@@ -47,7 +49,7 @@ function DropIndicator({ side }: { side: "left" | "right" }) {
 			aria-hidden
 			className={cn(
 				"pointer-events-none absolute inset-y-1 z-20 w-0.5 rounded-full bg-primary",
-				side === "left" ? "-left-0.5" : "-right-0.5"
+				side === "left" ? "-start-0.5" : "-end-0.5"
 			)}
 		/>
 	);
@@ -60,26 +62,6 @@ interface WorkbenchTabStripProps {
 	onCloseItem?: (item: WorkbenchItem) => void;
 }
 
-/** Index reached by an arrow/Home/End key in a horizontal tab list, if any. */
-function tabIndexForKey(
-	key: string,
-	currentIndex: number,
-	count: number
-): number | undefined {
-	switch (key) {
-		case "ArrowLeft":
-			return (currentIndex - 1 + count) % count;
-		case "ArrowRight":
-			return (currentIndex + 1) % count;
-		case "Home":
-			return 0;
-		case "End":
-			return count - 1;
-		default:
-			return undefined;
-	}
-}
-
 export function WorkbenchTabStrip({
 	focused,
 	group,
@@ -90,7 +72,8 @@ export function WorkbenchTabStrip({
 	const { addMenu, drag, movableRegions, prepareItemForSplit, renderItemIcon } =
 		useWorkbenchChrome();
 	const tl = useLiteralMessages();
-	const regionLabel = REGION_LABELS[group.region];
+	const direction = useDirection();
+	const regionLabel = tl(REGION_LABELS[group.region]);
 	const tabListRef = useRef<HTMLDivElement | null>(null);
 	const [dropTarget, setDropTarget] = useState<StripDropTarget | null>(null);
 	const draggingId = drag?.draggingId ?? null;
@@ -176,7 +159,7 @@ export function WorkbenchTabStrip({
 		event: KeyboardEvent<HTMLButtonElement>,
 		index: number
 	) => {
-		const nextIndex = tabIndexForKey(event.key, index, items.length);
+		const nextIndex = tabIndexForKey(event.key, index, items.length, direction);
 		if (nextIndex === undefined) {
 			return;
 		}
@@ -331,7 +314,7 @@ export function WorkbenchTabStrip({
 								{showBefore ? <DropIndicator side="left" /> : null}
 								<button
 									aria-selected={active}
-									className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+									className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-start text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 									onAuxClick={(event) => {
 										// Middle-click closes a tab, as in editor tab strips.
 										if (event.button === 1) {
@@ -364,7 +347,7 @@ export function WorkbenchTabStrip({
 									<Button
 										appearance="workbench-tab-close"
 										aria-label={tl("Close {title}", { title: item.title })}
-										className="mr-0.5"
+										className="me-0.5"
 										onClick={() => closeItem(item)}
 										size="icon-xs"
 										tabIndex={active ? 0 : -1}

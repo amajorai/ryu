@@ -32,6 +32,7 @@ import {
 	type JobFilters,
 	type JobStatus,
 	type JobUpdatedWithin,
+	jobStatusLabel,
 	jobUpdatedPhrase,
 	pillLabel,
 	toggleValue,
@@ -191,9 +192,8 @@ export function JobsToolbar({
 }: JobsToolbarProps) {
 	const set = (patch: Partial<JobFilters>) =>
 		onFiltersChange({ ...filters, ...patch });
-	const statusNames = filters.statuses.map(
-		(status) => JOB_STATUS_LABELS[status]
-	);
+	const tl = useLiteralMessages();
+	const statusNames = filters.statuses.map((status) => jobStatusLabel(status));
 	const freelancerNames = agents
 		.filter((agent) => filters.freelancerIds.includes(agent.id))
 		.map((agent) => agent.name);
@@ -263,16 +263,16 @@ export function JobsToolbar({
 					className={cn(
 						"flex min-w-0 items-center gap-2 py-1",
 						compact
-							? "order-last -mx-4 basis-full overflow-x-auto pr-8 pl-4"
-							: "flex-1 overflow-x-auto pr-8 pl-1",
+							? "order-last -mx-4 basis-full overflow-x-auto ps-4 pe-8"
+							: "flex-1 overflow-x-auto ps-1 pe-8",
 						// A trailing fade says more pills scroll in from the right.
 						"[mask-image:linear-gradient(to_right,black_calc(100%_-_2rem),transparent)] [scrollbar-width:none]"
 					)}
 				>
 					<FilterPill
 						active={filters.statuses.length > 0}
-						label={pillLabel("Status", statusNames)}
-						menuLabel="Status"
+						label={pillLabel(tl("Status"), statusNames)}
+						menuLabel={tl("Status")}
 					>
 						{JOB_STATUS_ORDER.map((status: JobStatus) => (
 							<DropdownMenuCheckboxItem
@@ -291,8 +291,8 @@ export function JobsToolbar({
 					</FilterPill>
 					<FilterPill
 						active={filters.freelancerIds.length > 0}
-						label={pillLabel("Freelancer", freelancerNames)}
-						menuLabel="Freelancer"
+						label={pillLabel(tl("Freelancer"), freelancerNames)}
+						menuLabel={tl("Freelancer")}
 					>
 						{agents.map((agent) => (
 							<DropdownMenuCheckboxItem
@@ -316,8 +316,8 @@ export function JobsToolbar({
 					</FilterPill>
 					<FilterPill
 						active={filters.companyIds.length > 0}
-						label={pillLabel("Company", companyNames)}
-						menuLabel="Company"
+						label={pillLabel(tl("Company"), companyNames)}
+						menuLabel={tl("Company")}
 					>
 						{companies.map((company) => (
 							<DropdownMenuCheckboxItem
@@ -342,7 +342,7 @@ export function JobsToolbar({
 					<FilterPill
 						active={filters.updated !== "any"}
 						label={jobUpdatedPhrase(filters.updated)}
-						menuLabel="Last updated"
+						menuLabel={tl("Last updated")}
 					>
 						<DropdownMenuRadioGroup
 							onValueChange={(value: unknown) => {

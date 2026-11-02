@@ -223,11 +223,12 @@ export async function rollback(
 		...coordsFrom(args),
 		version,
 	});
-	return reportWrite(
-		ctx,
-		result,
-		(current) =>
-			`Rolled ${name} back to version ${version} (now version ${current}).`
+	return reportWrite(ctx, result, (current) =>
+		tf("Rolled {name} back to version {version} (now version {current}).", {
+			name,
+			version: String(version),
+			current: String(current),
+		})
 	);
 }
 
@@ -237,7 +238,7 @@ export async function restore(
 ): Promise<number> {
 	const name = arg(args, 1, "restore NAME");
 	const result = await restoreVaultSecret(ctx.target, name, coordsFrom(args));
-	return reportWrite(ctx, result, () => `Restored ${name}.`);
+	return reportWrite(ctx, result, () => tf("Restored {name}.", { name }));
 }
 
 export async function exportSecrets(

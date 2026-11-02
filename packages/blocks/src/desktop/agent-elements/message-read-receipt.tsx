@@ -1,6 +1,11 @@
 import { Tick02Icon, TickDouble02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale } from "@ryu/i18n/core";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -15,6 +20,7 @@ import {
 } from "@ryu/ui/components/popover";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
+import { formatList } from "./locale-format.ts";
 
 /** Display data for one person who has read a message. */
 export interface MessageReader {
@@ -69,27 +75,31 @@ function uniqueReaders(
 	});
 }
 
-function readerName(reader: MessageReader): string {
-	return reader.name.trim() || "Someone";
+function readerName(reader: MessageReader, tl: LiteralMessage): string {
+	return reader.name.trim() || tl("Someone");
 }
 
 function namesLabel(
 	readers: readonly MessageReader[],
-	tl: LiteralMessage
+	tl: LiteralMessage,
+	locale: string
 ): string {
-	const names = readers.map(readerName);
+	const names = readers.map((reader) => readerName(reader, tl));
 	if (names.length <= 3) {
-		return names.join(", ");
+		return formatList(names, "unit", locale);
 	}
-	return tl("{names} and {otherCount} others", {
-		names: names.slice(0, 2).join(", "),
-		otherCount: names.length - 2,
-	});
+	return tl(
+		"{otherCount, plural, one {{names} and # other} other {{names} and # others}}",
+		{
+			names: formatList(names.slice(0, 2), "unit", locale),
+			otherCount: names.length - 2,
+		}
+	);
 }
 
 function ReaderAvatar({ reader }: { reader: MessageReader }) {
 	const tl = useLiteralMessages();
-	const name = readerName(reader);
+	const name = readerName(reader, tl);
 	const avatar = safeAvatarUrl(reader.avatar);
 	return (
 		<Avatar
@@ -121,8 +131,8 @@ function SeenByList({ readers }: { readers: readonly MessageReader[] }) {
 				{readers.map((reader) => (
 					<li className="flex items-center gap-2" key={reader.id}>
 						<ReaderAvatar reader={reader} />
-						<span className="truncate text-xs" title={readerName(reader)}>
-							{readerName(reader)}
+						<span className="truncate text-xs" title={readerName(reader, tl)}>
+							{readerName(reader, tl)}
 						</span>
 					</li>
 				))}
@@ -148,14 +158,15 @@ export function MessageReadReceipt({
 	showSent?: boolean;
 }): ReactNode {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale ?? activeLocale();
 	const seenBy = uniqueReaders(readers, messageAuthorId);
 	if (!((showSent && delivered) || seenBy.length > 0)) {
 		return null;
 	}
 	const isRead = seenBy.length > 0;
 	const label = isRead
-		? tl("Seen by {names}", { names: namesLabel(seenBy, tl) })
-		: "Sent";
+		? tl("Seen by {names}", { names: namesLabel(seenBy, tl, locale) })
+		: tl("Sent");
 	const tick = (
 		<HugeiconsIcon
 			aria-hidden="true"

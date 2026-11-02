@@ -225,7 +225,7 @@ export default function PackCatalogCard({
 			{/* The install affordance rides the tile's corner so the pack can be
 			    taken wholesale without opening it first. */}
 			{installable ? (
-				<div className="absolute right-2 bottom-2 z-20">
+				<div className="absolute end-2 bottom-2 z-20">
 					<button
 						aria-label={tl("Install the {name} pack", { name: pack.name })}
 						className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-border bg-background font-medium text-xs transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/40"

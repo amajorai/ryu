@@ -34,6 +34,7 @@ import {
 	type ReflectSettings,
 	updateReflectSettings,
 } from "@/src/lib/api/memory.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 
 const PERIOD_LABELS = {
 	"7d": "Last 7 days",
@@ -53,9 +54,7 @@ function formatTrend(trend: number | null): string | null {
 }
 
 function formatHour(hour: number): string {
-	return new Intl.DateTimeFormat(undefined, {
-		hour: "numeric",
-	}).format(new Date(2020, 0, 1, hour));
+	return formatLocalDateTime(new Date(2020, 0, 1, hour), { hour: "numeric" });
 }
 
 // Mirrors Core's defaults so the switches don't flash a different state while

@@ -74,8 +74,8 @@ describe("ConnectionStatusToast", () => {
 		)?.[1];
 		expect(surfaceClass).toBeDefined();
 		const surfaceClasses = new Set(surfaceClass?.split(/\s+/));
-		expect(surfaceClasses.has("pl-2")).toBe(true);
-		expect(surfaceClasses.has("pr-4")).toBe(true);
+		expect(surfaceClasses.has("ps-2")).toBe(true);
+		expect(surfaceClasses.has("pe-4")).toBe(true);
 		expect(html).toContain("whitespace-nowrap");
 		expect(html).not.toContain("truncate");
 		expect(html).toContain('data-slot="connection-status-detail"');

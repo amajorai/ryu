@@ -227,9 +227,10 @@ export function AgentCode({
 	return (
 		<pre
 			className={cn(
-				"m-0 overflow-x-auto whitespace-pre font-mono text-foreground/85 text-xs leading-5",
+				"m-0 overflow-x-auto whitespace-pre text-start font-mono text-foreground/85 text-xs leading-5",
 				className
 			)}
+			dir="ltr"
 		>
 			<code>
 				{lines.map((line, index) => (

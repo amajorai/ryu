@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedRequest {
 	body: unknown;
@@ -24,10 +25,7 @@ function evidencePath(name: string): string {
 	if (override) {
 		return path.join(override, `${name}.png`);
 	}
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 async function openExistingResource(

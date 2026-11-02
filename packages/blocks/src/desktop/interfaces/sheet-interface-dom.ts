@@ -68,12 +68,12 @@ export function keyIsOurs(
 
 /** Mirror the scroll offsets onto the container for the frozen-edge shadows. */
 export function markScrolled(element: HTMLElement) {
-	const x = String(element.scrollLeft > 0);
+	// Right-to-left scrollers report negative offsets toward the inline end.
+	const offset = Math.abs(element.scrollLeft);
+	const x = String(offset > 0);
 	const y = String(element.scrollTop > 0);
-	// Columns cut off at the right edge: a cast shadow says there is more.
-	const right = String(
-		element.scrollWidth - element.clientWidth - element.scrollLeft > 1
-	);
+	// Columns cut off at the inline end: a cast shadow says there is more.
+	const right = String(element.scrollWidth - element.clientWidth - offset > 1);
 	if (element.dataset.scrolledX !== x) {
 		element.dataset.scrolledX = x;
 	}

@@ -253,7 +253,7 @@ export function WallpaperCatalogSection({
 				<div className="flex flex-wrap items-center gap-2">
 					<div className="relative min-w-48 flex-1 sm:max-w-sm">
 						<HugeiconsIcon
-							className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+							className="absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 							icon={Search01Icon}
 						/>
 						<Input

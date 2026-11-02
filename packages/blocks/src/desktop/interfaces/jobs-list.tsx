@@ -24,7 +24,7 @@ import {
 	type JobRow,
 	type JobSort,
 	jobAge,
-	pluralize,
+	jobSortLabel,
 } from "./jobs-model.ts";
 import { CompanyLogo, JobStatusPill } from "./jobs-parts.tsx";
 
@@ -79,7 +79,7 @@ function JobCard({
 			<span
 				aria-hidden="true"
 				className={cn(
-					"absolute inset-y-0 left-0 z-10 w-0.5 bg-primary transition-opacity",
+					"absolute inset-y-0 start-0 z-10 w-0.5 bg-primary transition-opacity",
 					selected ? "opacity-100" : "opacity-0"
 				)}
 			/>
@@ -93,7 +93,10 @@ function JobCard({
 				>
 					{row.title}
 				</p>
-				<p className="truncate text-foreground/80 text-sm leading-5">
+				<p
+					className="truncate text-foreground/80 text-sm leading-5"
+					data-ryu-i18n="off"
+				>
 					{row.company.name}
 				</p>
 				<div className="mt-1.5 flex h-5 min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-muted-foreground">
@@ -107,7 +110,7 @@ function JobCard({
 								size={20}
 							/>
 							<span className="truncate text-foreground/80">
-								{row.freelancer.name}
+								<span data-ryu-i18n="off">{row.freelancer.name}</span>
 								{row.agents.length > 1 ? ` +${row.agents.length - 1}` : ""}
 							</span>
 						</span>
@@ -204,9 +207,9 @@ export function JobsList({
 							render={
 								<Button
 									aria-label={tl("Sort by {sortLabel}", {
-										sortLabel: JOB_SORT_LABELS[sort],
+										sortLabel: jobSortLabel(sort),
 									})}
-									className="-mr-2 shrink-0 font-normal"
+									className="-me-2 shrink-0 font-normal"
 									size="xs"
 									type="button"
 									variant="ghost"
@@ -246,8 +249,11 @@ export function JobsList({
 					className="text-[13px] text-muted-foreground leading-[18px]"
 				>
 					{showSkeleton
-						? "Loading jobs"
-						: `${pluralize(rows.length, "result")}${review > 0 ? ` · ${review} ready for review` : ""}`}
+						? tl("Loading jobs")
+						: tl(
+								"{count, plural, one {# result} other {# results}}{review, plural, =0 {} other { · # ready for review}}",
+								{ count: rows.length, review }
+							)}
 				</p>
 			</header>
 

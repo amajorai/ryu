@@ -90,6 +90,20 @@ export function overlapTitlebarScrollports(frame: HTMLElement, inset: number) {
 	};
 }
 
+/**
+ * How far the title bar (and its glass) reaches over page content: the 56px
+ * (h-14) bar, which includes its 8px top offset, plus the 24px progressive fade
+ * below its controls. Both sidebar variants start content at the window's top
+ * edge since 0db714a247 ("quiet shell frame: flush inset"), so this is one
+ * value: the glass height in TitleBar and every page's top clearance read it.
+ */
+export const TITLEBAR_CLEARANCE_PX = 80;
+
+/** The CSS length of the title-bar clearance (`--ryu-titlebar-inset`). */
+export function titlebarInsetLength(inset: number): string {
+	return `calc(var(--spacing) * ${inset / 4})`;
+}
+
 export function TitlebarPage({
 	children,
 	inset,
@@ -134,10 +148,10 @@ export function TitlebarPage({
 		};
 	}, [inset, selfInset]);
 	const cssVariables1: LayoutCssVariables = {
-		"--ryu-titlebar-inset": `calc(var(--spacing) * ${inset / 4})`,
+		"--ryu-titlebar-inset": titlebarInsetLength(inset),
 		"--desktop-inline1-padding-Top": selfInset
 			? "0px"
-			: `calc(var(--spacing) * ${inset / 4})`,
+			: titlebarInsetLength(inset),
 	};
 	return (
 		<div

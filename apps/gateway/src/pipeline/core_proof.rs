@@ -209,46 +209,9 @@ pub(super) struct BoxOrgBudget {
     pub(super) pool_budgets_micro_usd: std::collections::HashMap<String, i64>,
     #[serde(default)]
     pub(super) openrouter_routing_enabled: bool,
-}
-
-/// The credit fields a `gwb1` tenant is gated on. Mirrors
-/// `ResolvedOrg::metered_credit`: on a gateway that bills tenants, "not
-/// managed" means "not funded", and an unreadable tier is an accounting
-/// outage (503), never an empty wallet.
-pub(super) fn box_tenant_credit(
-    budget: &BoxOrgBudget,
-    gateway_bills_tenants: bool,
-) -> crate::policy::TenantCredit {
-    use crate::policy::TenantCredit;
-    if !gateway_bills_tenants || (budget.managed_inference && !budget.managed_tier_unavailable) {
-        return TenantCredit {
-            managed_inference: budget.managed_inference,
-            remaining_budget_micro_usd: budget.remaining_budget_micro_usd,
-            unrestricted_budget_micro_usd: budget.unrestricted_budget_micro_usd,
-            pool_budgets_micro_usd: budget.pool_budgets_micro_usd.clone(),
-            accounting_unavailable: false,
-        };
-    }
-    if budget.managed_tier_unavailable {
-        return box_accounting_unavailable();
-    }
-    TenantCredit {
-        managed_inference: true,
-        remaining_budget_micro_usd: Some(budget.remaining_budget_micro_usd.unwrap_or(0).min(0)),
-        unrestricted_budget_micro_usd: Some(0),
-        pool_budgets_micro_usd: std::collections::HashMap::new(),
-        accounting_unavailable: false,
-    }
-}
-
-pub(super) fn box_accounting_unavailable() -> crate::policy::TenantCredit {
-    crate::policy::TenantCredit {
-        managed_inference: true,
-        remaining_budget_micro_usd: None,
-        unrestricted_budget_micro_usd: None,
-        pool_budgets_micro_usd: std::collections::HashMap::new(),
-        accounting_unavailable: true,
-    }
+    /// The org's policy, limits and standing; `None` from an older plane.
+    #[serde(default)]
+    pub(super) governance: Option<super::auth_identity::box_governance::BoxOrgGovernance>,
 }
 
 /// Where and how the hosted org budget lookup authenticates.
@@ -339,16 +302,19 @@ pub(super) fn box_budget_cache() -> &'static dashmap::DashMap<String, (Instant, 
     CACHE.get_or_init(dashmap::DashMap::new)
 }
 
-/// The org's managed-credit view for a hosted `gwb1` request, cached for
-/// [`BOX_ORG_BUDGET_TTL`]. Returns the view and when it was fetched.
+/// The org's managed-credit and governance view for a hosted `gwb1` request
+/// and its Box member, cached for [`BOX_ORG_BUDGET_TTL`]. Returns the view
+/// and when it was fetched.
 pub(super) async fn box_org_budget(
     http: &reqwest::Client,
     credits: &crate::config::CreditsConfig,
     org_id: &str,
+    user_id: Option<&str>,
 ) -> Result<(Arc<BoxOrgBudget>, Instant), BoxBudgetError> {
     let source = box_budget_source(credits).ok_or(BoxBudgetError::NotConfigured)?;
     let control_plane_url = source.url.as_str();
-    let cache_key = format!("{control_plane_url}\n{org_id}");
+    let user_id = user_id.unwrap_or_default();
+    let cache_key = format!("{control_plane_url}\n{org_id}\n{user_id}");
     if let Some(entry) = box_budget_cache().get(&cache_key) {
         let (fetched_at, budget) = entry.value();
         if fetched_at.elapsed() < BOX_ORG_BUDGET_TTL {
@@ -358,8 +324,11 @@ pub(super) async fn box_org_budget(
     let base = control_plane_url.trim_end_matches('/');
     let base = base.strip_suffix("/api").unwrap_or(base);
     let endpoint = format!("{base}{BOX_ORG_BUDGET_PATH}/{org_id}/budget");
-    let mut response = http
-        .get(&endpoint)
+    let mut request = http.get(&endpoint);
+    if !user_id.is_empty() {
+        request = request.query(&[("userId", user_id)]);
+    }
+    let mut response = request
         .header(source.header, source.secret.as_str())
         .header(
             crate::policy::GATEWAY_INSTANCE_HEADER,

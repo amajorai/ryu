@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface ComputerUseProofRequest {
 	body: unknown;
@@ -25,11 +25,7 @@ declare global {
 }
 
 function evidencePath(name: string): string {
-	return path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	return proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 }
 
 async function proofSnapshot(page: Page): Promise<ComputerUseProofSnapshot> {

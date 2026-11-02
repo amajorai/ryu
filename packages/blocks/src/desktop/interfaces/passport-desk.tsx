@@ -32,7 +32,7 @@ import {
 	type PassportSpread,
 	type PassportStamp,
 	UNASSIGNED_CODE,
-	UNASSIGNED_LABEL,
+	unassignedLabel,
 } from "./passport-model.ts";
 import { PHOTO_FEET } from "./passport-page-face.tsx";
 import type { DeskArt } from "./passport-palette.ts";
@@ -106,7 +106,7 @@ export function stationLabel(
 		"{name} ({code}): {stampCount, plural, one {{stampTotal} stamp} other {{stampTotal} stamps}}. Open its visa pages",
 		{
 			code: station.country?.code ?? UNASSIGNED_CODE,
-			name: station.country?.agent.name ?? UNASSIGNED_LABEL,
+			name: station.country?.agent.name ?? unassignedLabel(),
 			stampCount: station.stamps.length,
 			stampTotal: String(station.stamps.length),
 		}

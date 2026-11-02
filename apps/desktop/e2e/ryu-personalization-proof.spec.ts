@@ -1,12 +1,10 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/ryu-personalization-proof.html";
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/ryu-personalization"
-);
+const PROOF_DIR = proofEvidencePath("ryu-personalization");
 
 test("personalizes Ryu before opening Add your agents", async ({ page }) => {
 	const response = await page.goto(STORY_URL, {

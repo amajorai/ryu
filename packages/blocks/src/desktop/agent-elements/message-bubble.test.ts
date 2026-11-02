@@ -7,25 +7,25 @@ import {
 describe("messageBubbleRadius", () => {
 	test("flattens the touching left corners for an incoming run", () => {
 		expect(messageBubbleRadius("start", "first")).toBe(
-			"rounded-2xl rounded-bl-md"
+			"rounded-2xl rounded-es-md"
 		);
 		expect(messageBubbleRadius("start", "middle")).toBe(
-			"rounded-2xl rounded-l-md"
+			"rounded-2xl rounded-s-md"
 		);
 		expect(messageBubbleRadius("start", "last")).toBe(
-			"rounded-2xl rounded-tl-md"
+			"rounded-2xl rounded-ss-md"
 		);
 	});
 
 	test("mirrors the contact corners for an outgoing run", () => {
 		expect(messageBubbleRadius("end", "first")).toBe(
-			"rounded-2xl rounded-br-md"
+			"rounded-2xl rounded-ee-md"
 		);
 		expect(messageBubbleRadius("end", "middle")).toBe(
-			"rounded-2xl rounded-r-md"
+			"rounded-2xl rounded-e-md"
 		);
 		expect(messageBubbleRadius("end", "last")).toBe(
-			"rounded-2xl rounded-tr-md"
+			"rounded-2xl rounded-se-md"
 		);
 	});
 });

@@ -13,6 +13,7 @@ import {
 	type ArenaCardView,
 	type ArenaFilter,
 	type ArenaNextUp,
+	arenaFilterLabel,
 	isArenaFilter,
 } from "./arena-model.ts";
 
@@ -34,10 +35,6 @@ export const FILTER_EMPTY: Record<
 		title: "Nothing running.",
 	},
 };
-
-function agentsLabel(count: number): string {
-	return `${count} ${count === 1 ? "agent" : "agents"}`;
-}
 
 interface ArenaFilterBarProps {
 	busyNeedingYou: ArenaCardView[];
@@ -66,7 +63,7 @@ export function ArenaFilterBar({
 	setFilter,
 }: ArenaFilterBarProps) {
 	const tl = useLiteralMessages();
-	const nextUpTitle = nextUp?.thread.title.trim() || "Untitled thread";
+	const nextUpTitle = nextUp?.thread.title.trim() || tl("Untitled thread");
 	const nextUpState = nextUp?.status === "attention" ? "failed" : "other";
 
 	return (
@@ -92,7 +89,13 @@ export function ArenaFilterBar({
 				value={[filter]}
 			>
 				{ARENA_FILTERS.map((option) => {
-					const label = `${ARENA_FILTER_LABELS[option]} (${agentsLabel(filterCounts[option])})`;
+					const label = tl(
+						"{filter} ({count, plural, one {# agent} other {# agents}})",
+						{
+							count: filterCounts[option],
+							filter: arenaFilterLabel(option, tl),
+						}
+					);
 					return (
 						<ToggleGroupItem
 							aria-label={label}

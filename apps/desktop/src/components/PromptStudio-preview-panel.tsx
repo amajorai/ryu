@@ -80,7 +80,7 @@ export function PreviewPanel({
 			<div className="flex items-center gap-2">
 				<span className="font-medium text-sm">Preview response</span>
 				{isStreaming ? (
-					<Badge className="ml-auto" motion="pulse" variant="secondary">
+					<Badge className="ms-auto" motion="pulse" variant="secondary">
 						Streaming…
 					</Badge>
 				) : null}

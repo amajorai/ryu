@@ -39,7 +39,7 @@ function GoalProgress({
 		>
 			<motion.div
 				animate={{ scaleX: ratio }}
-				className="h-full origin-left rounded-full bg-primary"
+				className="h-full origin-left rounded-full bg-primary rtl:origin-right"
 				initial={reduceMotion ? false : { scaleX: 0 }}
 				transition={{ duration: reduceMotion ? 0 : 0.5, ease: [0.2, 0, 0, 1] }}
 			/>
@@ -70,7 +70,11 @@ function GoalRow({
 		<li className="flex flex-col gap-3 py-5 first:pt-2">
 			<div className="flex items-center gap-3">
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<h4 className="truncate font-medium text-base" id={headingId}>
+					<h4
+						className="truncate font-medium text-base"
+						data-ryu-i18n="off"
+						id={headingId}
+					>
 						{goal.group.name}
 					</h4>
 					<p className="text-muted-foreground text-sm tabular-nums">

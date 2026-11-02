@@ -2,8 +2,8 @@ import {
 	ArrowLeft01Icon,
 	CalendarCheckIn01Icon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { QuietEmpty } from "@/src/components/agents/shared/quiet-empty.tsx";
 import { EventRow } from "@/src/components/calendar/event-display.tsx";
 import { useCalendarLocale } from "@/src/components/calendar/use-calendar-locale.ts";
@@ -21,8 +21,8 @@ export function DayPanel({
 }) {
 	const locale = useCalendarLocale();
 	return (
-		<aside className="flex w-72 shrink-0 flex-col border-l">
-			<div className="flex h-10 shrink-0 items-center justify-between gap-2 border-border border-b pr-1 pl-3">
+		<aside className="flex w-72 shrink-0 flex-col border-s">
+			<div className="flex h-10 shrink-0 items-center justify-between gap-2 border-border border-b ps-3 pe-1">
 				<p className="min-w-0 truncate text-sm">
 					<span className="font-medium">
 						{formatCalendarDate(day, "weekday", locale)}
@@ -37,7 +37,7 @@ export function DayPanel({
 					size="icon-sm"
 					variant="ghost-muted"
 				>
-					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+					<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 				</Button>
 			</div>
 			<div className="scroll-fade flex-1 overflow-auto px-3 py-1">

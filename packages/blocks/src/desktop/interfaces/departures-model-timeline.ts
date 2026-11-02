@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
 import {
@@ -164,7 +165,9 @@ export function flightTimeline(
 						flight.etaAt !== null && flight.etaAt < now ? "Overdue" : "ETA",
 					state: "next",
 					time:
-						flight.etaAt === null ? null : `${boardTime(flight.etaAt)} est.`,
+						flight.etaAt === null
+							? null
+							: tr("{time} est.", { time: boardTime(flight.etaAt) }),
 					tone: "idle",
 				},
 			];
@@ -191,7 +194,7 @@ export function flightTimeline(
 		case "at-gate":
 			return [
 				{
-					detail: gate ? `${gate} replied` : "Reply received",
+					detail: gate ? tr("{gate} replied", { gate }) : tr("Reply received"),
 					key: "landed",
 					label: "Landed",
 					state: "done",

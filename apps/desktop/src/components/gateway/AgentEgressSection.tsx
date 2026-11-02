@@ -143,8 +143,22 @@ export function AgentEgressSection({ target }: { target: ApiTarget }) {
 	// have Ryu's tools and still talk to its provider directly, so a single total
 	// would be a number with no referent.
 	const caption = view
-		? `Tools: ${view.toolsOnCount} have Ryu's tools · ${view.toolsOffCount} do not · ${view.toolsOtherCount} not applicable. ` +
-			`Model traffic: ${view.governedCount} through the gateway · ${view.bestEffortCount} pointed at it · ${view.directCount} straight to the provider · ${view.otherCount} local or unknown. ` +
+		? `${tl(
+				"Tools: {toolsOnCount} have Ryu's tools · {toolsOffCount} do not · {toolsOtherCount} not applicable.",
+				{
+					toolsOnCount: String(view.toolsOnCount),
+					toolsOffCount: String(view.toolsOffCount),
+					toolsOtherCount: String(view.toolsOtherCount),
+				}
+			)} ${tl(
+				"Model traffic: {governedCount} through the gateway · {bestEffortCount} pointed at it · {directCount} straight to the provider · {otherCount} local or unknown.",
+				{
+					governedCount: String(view.governedCount),
+					bestEffortCount: String(view.bestEffortCount),
+					directCount: String(view.directCount),
+					otherCount: String(view.otherCount),
+				}
+			)} ` +
 			"Only calls that reach the gateway are filtered by the rules above, counted against your spending limits, or recorded in the activity log. " +
 			"These are the only two layers shown here. Command approval above is node-wide, and plugin hooks are a separate layer again."
 		: "What each agent can reach: Ryu's tools, and whether its model calls pass through this gateway.";

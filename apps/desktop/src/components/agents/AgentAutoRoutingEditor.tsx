@@ -314,7 +314,7 @@ export function AgentAutoRoutingEditor() {
 										).map(([val, label]) => (
 											<SelectItem key={val} value={val}>
 												<span className="font-medium">{label}</span>
-												<span className="ml-1 text-muted-foreground text-xs">
+												<span className="ms-1 text-muted-foreground text-xs">
 													— {strategyCopy.descriptions[val]}
 												</span>
 											</SelectItem>
@@ -408,7 +408,7 @@ export function AgentAutoRoutingEditor() {
 									{routableAgents.map((a) => (
 										<SelectItem key={a.id} value={a.id}>
 											<span className="font-medium">{a.name}</span>
-											<span className="ml-1 text-muted-foreground text-xs">
+											<span className="ms-1 text-muted-foreground text-xs">
 												— {a.id}
 											</span>
 										</SelectItem>

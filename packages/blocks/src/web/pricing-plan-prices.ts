@@ -2,7 +2,6 @@ import {
 	businessIncludedCreditUsd,
 	businessMonthlyPriceUsd,
 } from "./business-pricing.ts";
-import { PRICING_COPY } from "./data/standalone-pricing.ts";
 import {
 	normalizeTeamsSeatCount,
 	TEAMS_MIN_SEATS,
@@ -153,10 +152,6 @@ export const ALWAYS_ON_SERVER_COPY = "An always-on Ryu server included";
  */
 export const SINGAPORE_SERVER_COPY =
 	"Singapore servers come with Teams and Business only";
-
-/** The current monthly deposit-fee line every managed plan card quotes. */
-export const depositFeeLine = (rate: string): string =>
-	`${rate} deposit fee (${PRICING_COPY.depositFeeMinimum} minimum, Ryu keeps at most ${PRICING_COPY.depositFeeCap})`;
 
 /**
  * Shared monthly AI credits for an organization. Teams and Teams Lite add one

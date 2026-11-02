@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -7,14 +8,11 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceThread,
-	THREAD_STATUS_LABELS,
-	threadStatus,
-} from "@ryuhq/protocol/interfaces";
+import { type InterfaceThread, threadStatus } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import type { TickerQuote } from "./ticker-model.ts";
 import { STATUS_TEXT, SYMBOL_TEXT } from "./ticker-parts.tsx";
@@ -44,14 +42,14 @@ export function TickerThreadPanel({
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread
-		? thread.title.trim() || "Untitled thread"
+		? thread.title.trim() || tr("Untitled thread")
 		: "New thread";
 	const status = thread ? threadStatus(thread) : null;
 	return (
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={tl("Thread: {title}", { title })}
-			className="absolute inset-0 z-20 flex min-h-0 flex-col border-border bg-background xl:static xl:w-[clamp(26rem,38vw,40rem)] xl:shrink-0 xl:border-l"
+			className="absolute inset-0 z-20 flex min-h-0 flex-col border-border bg-background xl:static xl:w-[clamp(26rem,38vw,40rem)] xl:shrink-0 xl:border-s"
 			data-testid="ticker-thread-panel"
 			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
 			transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
@@ -78,7 +76,7 @@ export function TickerThreadPanel({
 							<>
 								<span aria-hidden="true">·</span>
 								<span className={cn("shrink-0", STATUS_TEXT[status])}>
-									{THREAD_STATUS_LABELS[status]}
+									{threadStatusLabel(status)}
 								</span>
 							</>
 						) : null}

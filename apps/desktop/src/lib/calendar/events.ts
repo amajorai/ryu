@@ -25,15 +25,14 @@ import {
 	startOfDisplayDayMs,
 } from "@ryu/ui/lib/timezone.ts";
 import { CronExpressionParser } from "cron-parser";
-import type {
-	ExecOutcome,
-	Schedule,
-	ScheduledJob,
-} from "@/src/lib/api/schedules.ts";
+import type { ExecOutcome, ScheduledJob } from "@/src/lib/api/schedules.ts";
 import {
 	displayDayKey,
 	displayMidday,
 } from "@/src/lib/calendar/display-days.ts";
+import { describeSchedule } from "@/src/lib/calendar/schedule-label.ts";
+
+export { describeSchedule } from "@/src/lib/calendar/schedule-label.ts";
 
 export type CalendarEventKind = "past" | "upcoming";
 
@@ -118,63 +117,6 @@ function targetInfo(
 		conversationId: job.target.conversationId || undefined,
 		requireApproval,
 	};
-}
-
-// ── Schedule formatting ──────────────────────────────────────────────────────
-
-const DAYS_OF_WEEK = [
-	"Sunday",
-	"Monday",
-	"Tuesday",
-	"Wednesday",
-	"Thursday",
-	"Friday",
-	"Saturday",
-];
-
-const DAILY_CRON = /^0 (\d+) \* \* \*$/;
-const WEEKLY_CRON = /^0 (\d+) \* \* (\d)$/;
-
-function formatHour(h: number): string {
-	if (h === 0) {
-		return "12 AM";
-	}
-	if (h === 12) {
-		return "12 PM";
-	}
-	return h < 12 ? `${h} AM` : `${h - 12} PM`;
-}
-
-/** Human-readable phrase for a job's schedule, shared with the automations list. */
-export function describeSchedule(
-	schedule: Schedule,
-	tl: LiteralMessage
-): string {
-	if (schedule.kind === "every") {
-		const labels = new Map([
-			["5m", "Every 5 minutes"],
-			["10m", "Every 10 minutes"],
-			["15m", "Every 15 minutes"],
-			["30m", "Every 30 minutes"],
-			["1h", "Every hour"],
-			["3600", "Every hour"],
-		]);
-		return labels.get(schedule.interval) ?? `Every ${schedule.interval}`;
-	}
-	const expr = schedule.expr.trim();
-	const daily = DAILY_CRON.exec(expr);
-	if (daily) {
-		return tl("Daily at {time}", { time: formatHour(Number(daily[1])) });
-	}
-	const weekly = WEEKLY_CRON.exec(expr);
-	if (weekly) {
-		const day = DAYS_OF_WEEK[Number(weekly[2])] ?? weekly[2];
-		return tl("Weekly on {day} at {time}", {
-			day,
-			time: formatHour(Number(weekly[1])),
-		});
-	}
-	return `cron: ${expr}`;
 }
 
 // ── Interval parsing ─────────────────────────────────────────────────────────

@@ -9,6 +9,10 @@
 
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
+import {
+	GHOST_INTENT_COPY,
+	type GhostIntentKind,
+} from "../renderer/lib/ghost-intent-copy.ts";
 
 export type GhostCursorPhase =
 	| "move"
@@ -21,9 +25,14 @@ export type GhostCursorPhase =
 export interface GhostCursorEvent {
 	agent: string;
 	identity?: GhostCursorIdentity;
+	/** English prose; the label when `kind` is absent (older Ghost builds). */
 	intent: string;
+	/** Stable intent kind the overlay renders in the user's language. */
+	kind?: GhostIntentKind;
 	phase: GhostCursorPhase;
 	seq: number;
+	/** The element a `click` names, shown verbatim inside the label. */
+	target?: string;
 	tool: string;
 	ts: number;
 	x: number;
@@ -150,33 +159,32 @@ export function ghostCursorHueFor(
 	return Math.abs(hash) % 360;
 }
 
+/** The intent kind a tool narrates when Ghost sends no more specific one. */
+export function defaultGhostIntentKind(
+	phase: GhostCursorPhase,
+	tool: string
+): GhostIntentKind {
+	const byTool: Record<string, GhostIntentKind> = {
+		ghost_click: "clicking",
+		ghost_type: "typing",
+		ghost_scroll: "scrolling",
+		ghost_drag: "dragging",
+		ghost_hover: "hovering",
+		ghost_long_press: "holding",
+	};
+	return byTool[tool] ?? (phase === "done" ? "done" : "working");
+}
+
 /** Give older Ghost sidecars a useful label while they roll forward. */
 export function defaultGhostIntent(
 	phase: GhostCursorPhase,
 	tool: string
 ): string {
-	if (tool === "ghost_click") {
-		return "Clicking";
-	}
-	if (tool === "ghost_type") {
-		return "Typing";
-	}
-	if (tool === "ghost_scroll") {
-		return "Scrolling";
-	}
-	if (tool === "ghost_drag") {
-		return "Dragging";
-	}
-	if (tool === "ghost_hover") {
-		return "Hovering";
-	}
-	if (tool === "ghost_long_press") {
-		return "Holding";
-	}
-	if (phase === "done") {
-		return "Done";
-	}
-	return "Working";
+	return GHOST_INTENT_COPY[defaultGhostIntentKind(phase, tool)];
+}
+
+function isGhostIntentKind(value: unknown): value is GhostIntentKind {
+	return typeof value === "string" && Object.hasOwn(GHOST_INTENT_COPY, value);
 }
 
 function normalizeGhostIntent(
@@ -194,12 +202,23 @@ function normalizeGhostIntent(
 	return `${intent.slice(0, MAX_GHOST_INTENT_LENGTH - 1).trimEnd()}…`;
 }
 
+function legacyIntentKind(
+	intent: string,
+	phase: GhostCursorPhase,
+	tool: string
+): GhostIntentKind | undefined {
+	const kind = defaultGhostIntentKind(phase, tool);
+	return intent === GHOST_INTENT_COPY[kind] ? kind : undefined;
+}
+
 const ghostCursorBodySchema = z.object({
 	phase: ghostPhaseSchema,
 	x: z.number(),
 	y: z.number(),
 	tool: z.string().catch(""),
 	intent: z.string().catch(""),
+	kind: z.string().optional().catch(undefined),
+	target: boundedTextSchema(MAX_GHOST_INTENT_LENGTH),
 	identity: cursorIdentitySchema,
 	seq: z.number().catch(0),
 	ts: z.number().catch(0),
@@ -218,12 +237,20 @@ export function parseGhostCursorEvent(
 			return null;
 		}
 		const event = parsed.data;
-		const { identity, ...fields } = event;
-		const result: GhostCursorEvent = {
-			...fields,
-			agent,
-			intent: normalizeGhostIntent(event.intent, event.phase, event.tool),
-		};
+		const { identity, kind: rawKind, target, ...fields } = event;
+		const intent = normalizeGhostIntent(event.intent, event.phase, event.tool);
+		const result: GhostCursorEvent = { ...fields, agent, intent };
+		// Older Ghost builds send only English prose; their tool defaults still
+		// map back to a kind, so the overlay can show them translated.
+		const kind = isGhostIntentKind(rawKind)
+			? rawKind
+			: legacyIntentKind(intent, event.phase, event.tool);
+		if (kind) {
+			result.kind = kind;
+		}
+		if (kind === "click" && target) {
+			result.target = target;
+		}
 		if (identity) {
 			result.identity = identity;
 		}

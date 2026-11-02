@@ -1,0 +1,7 @@
+{
+  "A failed run was diagnosed": "已诊断一次失败的运行",
+  "Auto-fix attempts used: {count}. Review it manually.": "已使用的自动修复次数:{count}。请手动检查。",
+  "Auto-fix gave up": "自动修复已放弃",
+  "Fix waiting in your inbox: {diagnosis}": "收件箱中有待处理的修复：{diagnosis}",
+  "heal engine unavailable": "修复引擎不可用"
+}

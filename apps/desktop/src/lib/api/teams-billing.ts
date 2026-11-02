@@ -16,6 +16,7 @@
 //   GET  /api/billing/portal              -> the Polar billing portal URL
 //   GET  /api/credits/wallet              -> the pooled org wallet balance
 
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	type AppRequestValue,
 	appRequestValueSchema,
@@ -129,7 +130,7 @@ async function toError(resp: Response): Promise<TeamsBillingError> {
 	}
 	return new TeamsBillingError(
 		"unknown",
-		String(message ?? `Request failed: ${resp.status}`)
+		String(message ?? tl("Request failed: {status}", { status: resp.status }))
 	);
 }
 

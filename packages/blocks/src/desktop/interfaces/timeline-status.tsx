@@ -1,8 +1,6 @@
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * Status marks for the Timeline, from the user's theme only. Colour is kept
@@ -133,7 +131,7 @@ export function TimelineStatusCallout({
 	}
 	return (
 		<span className={cn("font-medium", tone, className)} data-status={status}>
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }

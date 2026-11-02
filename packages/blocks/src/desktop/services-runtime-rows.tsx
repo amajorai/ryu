@@ -69,7 +69,7 @@ export function GatewayRow({
 							size="sm"
 							variant="ghost"
 						>
-							<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={Square01Icon} />
+							<HugeiconsIcon className="me-1 h-3.5 w-3.5" icon={Square01Icon} />
 							Stop
 						</Button>
 						<Button
@@ -80,7 +80,7 @@ export function GatewayRow({
 							variant="ghost"
 						>
 							<HugeiconsIcon
-								className="mr-1 h-3.5 w-3.5"
+								className="me-1 h-3.5 w-3.5"
 								icon={RotateClockwiseIcon}
 							/>
 							Restart
@@ -94,7 +94,7 @@ export function GatewayRow({
 						size="sm"
 						variant="ghost"
 					>
-						<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={PlayIcon} />
+						<HugeiconsIcon className="me-1 h-3.5 w-3.5" icon={PlayIcon} />
 						Start
 					</Button>
 				)}
@@ -155,14 +155,14 @@ export function SandboxRow({
 						{enabled ? (
 							<>
 								<HugeiconsIcon
-									className="mr-1 h-3.5 w-3.5"
+									className="me-1 h-3.5 w-3.5"
 									icon={Square01Icon}
 								/>
 								Disable
 							</>
 						) : (
 							<>
-								<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={PlayIcon} />
+								<HugeiconsIcon className="me-1 h-3.5 w-3.5" icon={PlayIcon} />
 								Enable
 							</>
 						)}

@@ -261,7 +261,7 @@ async fn handoff_posts_escaped_dial_twiml_and_refuses_unsafe_requests() {
         .ends_with(&format!("/Accounts/{ACCOUNT}/Calls/{VICTIM_CALL}.json")));
     assert_eq!(
         form_value(&requests[0].body, "Twiml").unwrap(),
-        format!("<Response><Say>Connecting you with the account owner.</Say><Dial callerId=\"{LINE_CALLER_ID}\" answerOnBridge=\"true\"><Number>{LINE_TRANSFER}</Number></Dial></Response>")
+        format!("<Response><Say language=\"en-US\">Connecting you with the account owner.</Say><Dial callerId=\"{LINE_CALLER_ID}\" answerOnBridge=\"true\"><Number>{LINE_TRANSFER}</Number></Dial></Response>")
     );
 
     // A number carrying markup is refused by line validation, before Twilio.

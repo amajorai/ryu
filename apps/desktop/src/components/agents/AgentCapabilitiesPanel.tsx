@@ -7,7 +7,7 @@
 // `_userConfiguredCapabilities`). The effective flags gate the composer controls
 // and annotate the Tools allowlist below.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useCallback } from "react";
 import {
@@ -74,16 +74,16 @@ const ROWS: {
 	},
 ];
 
-function sourceLabel(source: string): string {
+function sourceLabel(source: string, tl: LiteralMessage): string {
 	switch (source) {
 		case "acp_probe":
-			return "detected from the agent's session config";
+			return tl("detected from the agent's session config");
 		case "acp_probe+gguf":
-			return "detected from the agent's session config and the local model";
+			return tl("detected from the agent's session config and the local model");
 		case "gguf":
-			return "detected from the model's chat template";
+			return tl("detected from the model's chat template");
 		default:
-			return "not auto-detected for this agent";
+			return tl("not auto-detected for this agent");
 	}
 }
 
@@ -177,7 +177,17 @@ export function AgentCapabilitiesPanel({
 											value={tri}
 										/>
 									}
-									description={`${row.hint} (${detected ? "supported" : "not supported"}, ${sourceLabel(capabilities.source)})`}
+									description={
+										detected
+											? tl("{hint} (supported, {source})", {
+													hint: tl(row.hint),
+													source: sourceLabel(capabilities.source, tl),
+												})
+											: tl("{hint} (not supported, {source})", {
+													hint: tl(row.hint),
+													source: sourceLabel(capabilities.source, tl),
+												})
+									}
 									key={row.key}
 									title={row.label}
 								/>

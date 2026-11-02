@@ -23,6 +23,7 @@ import { FileTypeIcon } from "./file-type-icon.tsx";
 import { hugeiconComponent } from "./icons/hugeicon-component.tsx";
 import type { InputBarTurnProgress } from "./input-bar-types.ts";
 import { LazyPatchDiff } from "./lazy-patch-diff.tsx";
+import { usePierreShadowLocalizer } from "./use-pierre-shadow-localizer.ts";
 
 const IconCircle = hugeiconComponent(CircleIcon);
 const IconCircleCheck = hugeiconComponent(CheckmarkCircle02Icon);
@@ -33,9 +34,10 @@ function TurnProgressFile({
 }: {
 	file: InputBarTurnProgress["files"][number];
 }) {
+	const localizeDiffCopy = usePierreShadowLocalizer();
 	const row = (
 		<button
-			className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-muted"
+			className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-start text-sm hover:bg-muted"
 			type="button"
 		>
 			<FileTypeIcon className="size-4 shrink-0" path={file.path} />
@@ -66,7 +68,10 @@ function TurnProgressFile({
 				<div className="mb-1 px-2 py-1 font-mono text-muted-foreground text-xs">
 					{file.path}
 				</div>
-				<div className="max-h-[28rem] overflow-auto rounded-xl border border-border bg-background/60">
+				<div
+					className="max-h-[28rem] overflow-auto rounded-xl border border-border bg-background/60"
+					ref={localizeDiffCopy}
+				>
 					<LazyPatchDiff
 						disableWorkerPool
 						options={{

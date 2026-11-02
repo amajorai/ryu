@@ -1,12 +1,9 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const PROOF_DIR = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"../../../docs/proof/wallpaper-backgrounds"
-);
+const PROOF_DIR = proofEvidencePath("wallpaper-backgrounds");
 
 test.beforeEach(async ({ page }) => {
 	await page.goto("/desktop-startup-selection-story.html", {

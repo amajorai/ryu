@@ -78,7 +78,7 @@ export function PaneChooserPage() {
 					<div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
 						{PANE_ROUTES.map((route) => (
 							<button
-								className="group flex h-10 items-center gap-2 rounded-lg px-3 text-left transition-colors duration-150 hover:bg-muted hover:duration-0"
+								className="group flex h-10 items-center gap-2 rounded-lg px-3 text-start transition-colors duration-150 hover:bg-muted hover:duration-0"
 								key={route.path}
 								onClick={() => setTabRoute(tabId, route.path)}
 								type="button"
@@ -105,7 +105,7 @@ export function PaneChooserPage() {
 						<div className="flex flex-col gap-1">
 							{movable.map((tab) => (
 								<button
-									className="flex h-10 items-center gap-3 rounded-lg px-3 text-left transition-colors duration-150 hover:bg-muted hover:duration-0"
+									className="flex h-10 items-center gap-3 rounded-lg px-3 text-start transition-colors duration-150 hover:bg-muted hover:duration-0"
 									key={tab.id}
 									onClick={() => replacePaneTab(tabId, tab.id)}
 									type="button"

@@ -16,16 +16,16 @@
 // cannot grow a different text CTA on another surface.
 
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
 function ShelfChevron() {
 	return (
-		<HugeiconsIcon
+		<DirectionalIcon
 			aria-hidden
-			className="size-4 shrink-0 self-center text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5 motion-reduce:transition-none"
+			className="size-4 shrink-0 self-center text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5 motion-reduce:transition-none rtl:group-hover:-translate-x-0.5"
 			icon={ArrowRight01Icon}
 		/>
 	);
@@ -68,7 +68,7 @@ export default function StoreShelfHeading({
 				{onOpen ? (
 					<button
 						aria-label={buttonLabel}
-						className="group flex min-w-0 items-center gap-1 text-left"
+						className="group flex min-w-0 items-center gap-1 text-start"
 						onClick={onOpen}
 						type="button"
 					>

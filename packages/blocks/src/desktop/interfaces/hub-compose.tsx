@@ -18,6 +18,7 @@ import {
 import { HubCardEmpty, HubCardFrame, useHubRows } from "./hub-card.tsx";
 import { HUB_CARD_LABELS, hubAgentLive } from "./hub-model.ts";
 import { HubAvatar } from "./hub-parts.tsx";
+import { logicalArrowKey, logicalScroll } from "./inline-direction.ts";
 
 const AGENT_GRID_LIMIT = 6;
 const MAX_PROMPT_LENGTH = 8000;
@@ -92,7 +93,10 @@ export function HubAgentsCard({
 										<HubAvatar agent={agent} className="size-16 text-[28px]" />
 									</span>
 									<span className="flex max-w-full flex-col items-center">
-										<span className="max-w-full truncate font-medium text-[17px] text-foreground leading-6">
+										<span
+											className="max-w-full truncate font-medium text-[17px] text-foreground leading-6"
+											data-ryu-i18n="off"
+										>
 											{agent.name}
 										</span>
 										<span
@@ -181,10 +185,12 @@ export function HubComposeCard({
 			return;
 		}
 		const at = agents.indexOf(recipient);
+		// Left and right follow the row's reading direction.
+		const key = logicalArrowKey(event.key, event.currentTarget);
 		let next: InterfaceAgent | undefined;
-		if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+		if (key === "ArrowRight" || key === "ArrowDown") {
 			next = agents[(at + 1) % agents.length];
-		} else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+		} else if (key === "ArrowLeft" || key === "ArrowUp") {
 			next = agents[(at - 1 + agents.length) % agents.length];
 		}
 		if (!next) {
@@ -219,7 +225,7 @@ export function HubComposeCard({
 								<button
 									aria-checked={selected}
 									className={cn(
-										"inline-flex h-11 shrink-0 items-center gap-2 rounded-full pr-4 pl-1.5 font-medium text-sm outline-none transition-colors duration-150 focus-visible:ring-3 focus-visible:ring-ring/40",
+										"inline-flex h-11 shrink-0 items-center gap-2 rounded-full ps-1.5 pe-4 font-medium text-sm outline-none transition-colors duration-150 focus-visible:ring-3 focus-visible:ring-ring/40",
 										selected
 											? "bg-primary text-primary-foreground"
 											: "text-foreground ring-1 ring-border ring-inset hover:bg-muted/70"
@@ -232,7 +238,7 @@ export function HubComposeCard({
 									type="button"
 								>
 									<HubAvatar agent={agent} className="size-8 text-sm" />
-									{agent.name}
+									<span data-ryu-i18n="off">{agent.name}</span>
 								</button>
 							);
 						})}
@@ -263,7 +269,7 @@ export function HubComposeCard({
 						Shift + Enter for a new line
 					</p>
 					<Button
-						className="ml-auto h-12 gap-2 rounded-full pr-6 pl-5 font-medium text-[17px]"
+						className="ms-auto h-12 gap-2 rounded-full ps-5 pe-6 font-medium text-[17px]"
 						disabled={!trimmed}
 						type="submit"
 					>
@@ -303,16 +309,22 @@ function RecipientRow({
 	onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
 }) {
 	const rowRef = useRef<HTMLDivElement>(null);
-	const [edges, setEdges] = useState({ end: false, start: false });
+	// Physical sides, because the fade masks are physical.
+	const [edges, setEdges] = useState({ left: false, right: false });
 	const measure = useCallback(() => {
 		const row = rowRef.current;
 		if (!row) {
 			return;
 		}
-		const start = row.scrollLeft > 1;
-		const end = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
+		const { max, position, sign } = logicalScroll(row);
+		const start = position > 1;
+		const end = position < max - 1;
+		const left = sign === 1 ? start : end;
+		const right = sign === 1 ? end : start;
 		setEdges((current) =>
-			current.start === start && current.end === end ? current : { end, start }
+			current.left === left && current.right === right
+				? current
+				: { left, right }
 		);
 	}, []);
 	useEffect(() => {
@@ -330,8 +342,8 @@ function RecipientRow({
 			aria-label="Send to"
 			className={cn(
 				"-mx-6 flex gap-2 overflow-x-auto px-6 py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-				edges.end && "mask-r-from-[calc(100%-4rem)]",
-				edges.start && "mask-l-from-[calc(100%-4rem)]"
+				edges.right && "mask-r-from-[calc(100%-4rem)]",
+				edges.left && "mask-l-from-[calc(100%-4rem)]"
 			)}
 			data-testid="hub-recipients"
 			onKeyDown={onKeyDown}

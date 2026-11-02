@@ -12,6 +12,12 @@ import {
 	DocxExportComponents,
 	DocxExportKit,
 } from "../plugins/docx-export-kit.tsx";
+import {
+	exportDocumentLanguage,
+	htmlLanguageAttributes,
+	markBlocksDirectionAuto,
+} from "./export-document-language.ts";
+import { alignRightToLeftBlocksForWord } from "./export-docx-direction.ts";
 
 const CUSTOM_PROPERTY = /var\((--[\w-]+)(?:,\s*([^)]*))?\)/g;
 const FONT_FAMILY_DECLARATION = /(font-family\s*:\s*)([^;]*)/g;
@@ -20,6 +26,8 @@ const QUOTED_FONT_NAME = /"([^"]*)"/g;
 /** Word's HTML importer needs concrete declarations, not CSS variable references. */
 function resolveDocxVariables(html: string): string {
 	const document = new DOMParser().parseFromString(html, "text/html");
+	markBlocksDirectionAuto(document.body);
+	alignRightToLeftBlocksForWord(document.body);
 	for (const element of document.querySelectorAll<HTMLElement>("[style]")) {
 		for (const property of Array.from(element.style)) {
 			const value = element.style.getPropertyValue(property);
@@ -77,7 +85,8 @@ export async function serializeEditorDocxHtml(value: Value): Promise<string> {
 		...DocxExportComponents,
 	};
 	const body = await serializeHtml(editor);
-	const html = `<html lang="en"><head><meta charset="utf-8"><style>${DOCX_EXPORT_STYLES}\n${docxStyles}</style></head><body>${body}</body></html>`;
+	const language = htmlLanguageAttributes(exportDocumentLanguage());
+	const html = `<html${language}><head><meta charset="utf-8"><style>${DOCX_EXPORT_STYLES}\n${docxStyles}</style></head><body>${body}</body></html>`;
 	return resolveDocxVariables(
 		juice(html, {
 			removeStyleTags: false,

@@ -152,7 +152,7 @@ export function CodeBlock({
 				<span className="text-muted-foreground text-xs">{language}</span>
 				<span
 					className={cn(
-						"ml-auto inline-flex shrink-0 items-center gap-1 font-medium text-xs",
+						"ms-auto inline-flex shrink-0 items-center gap-1 font-medium text-xs",
 						streaming ? "text-status-info" : "text-status-success"
 					)}
 				>
@@ -191,11 +191,15 @@ export function CodeBlock({
 					css.inline1,
 					"scrollbar-hide overflow-auto border-border border-t py-2",
 				].join(" ")}
+				dir="ltr"
 				ref={viewportRef}
 				role={streaming ? "log" : undefined}
 				style={inline1Style}
 			>
-				<pre className="m-0 min-w-max font-mono text-foreground text-xs leading-5">
+				<pre
+					className="m-0 min-w-max text-start font-mono text-foreground text-xs leading-5"
+					dir="ltr"
+				>
 					<code>
 						{lines.map((line, index) => {
 							const lineNumber = index + 1;
@@ -210,6 +214,8 @@ export function CodeBlock({
 									)}
 									key={line.offset}
 								>
+									{/* The code viewport is pinned dir="ltr", so the line-number
+									    gutter stays physical (right-aligned against the code). */}
 									{showLineNumbers ? (
 										<span className="select-none pr-3 text-right text-muted-foreground/70 tabular-nums">
 											{lineNumber}

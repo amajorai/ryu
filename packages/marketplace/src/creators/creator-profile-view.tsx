@@ -8,9 +8,11 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { numberFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -21,6 +23,7 @@ import {
 } from "@ryu/ui/components/empty.tsx";
 import { EntityAvatar } from "@ryu/ui/components/entity-avatar.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { useFormatLocale } from "@ryu/ui/hooks/use-format-locale.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { marketplaceBrowseKindLabel } from "../catalog/chrome/marketplace-sections.ts";
@@ -34,7 +37,7 @@ import {
 	creatorLinks,
 	creatorSinceLabel,
 	filterListingsByKind,
-	pluralCount,
+	ratingStatLabel,
 } from "./creator-format.ts";
 import type {
 	MarketplaceCreator,
@@ -43,6 +46,12 @@ import type {
 	MarketplaceCreatorsService,
 } from "./creator-types.ts";
 import { CreatorGridSkeleton } from "./creators-directory.tsx";
+
+/** One decimal, as the rating stat has always read. */
+const RATING_DIGITS: Intl.NumberFormatOptions = {
+	maximumFractionDigits: 1,
+	minimumFractionDigits: 1,
+};
 
 export const LINK_ICONS = {
 	github: GithubIcon,
@@ -94,7 +103,7 @@ export function CreatorProfileView({
 
 	const back = (
 		<Button className="self-start" onClick={onBack} size="sm" variant="ghost">
-			<HugeiconsIcon aria-hidden="true" icon={ArrowLeft01Icon} />
+			<DirectionalIcon aria-hidden="true" icon={ArrowLeft01Icon} />
 			All creators
 		</Button>
 	);
@@ -172,25 +181,36 @@ export function CreatorProfileHeader({
 	listings: MarketplaceCreatorListing[];
 }) {
 	const tl = useLiteralMessages();
+	const formatLocale = useFormatLocale();
 	const handle = creatorHandle(creator);
-	const since = creatorSinceLabel(tl, creator.firstPublishedAt);
+	const since = creatorSinceLabel(tl, creator.firstPublishedAt, formatLocale);
 	const links = creatorLinks(creator);
 	const downloads = listings.reduce(
 		(sum, listing) => sum + (listing.communityStats?.downloads ?? 0),
 		0
 	);
 	const stats = [
-		{ label: "Listings", value: formatCount(creator.listingCount) ?? "0" },
-		{ label: "Followers", value: formatCount(creator.followerCount) ?? "0" },
+		{
+			label: tl("Listings"),
+			value: formatCount(creator.listingCount) ?? "0",
+		},
+		{
+			label: tl("Followers"),
+			value: formatCount(creator.followerCount) ?? "0",
+		},
 		{
 			label:
 				creator.ratingCount > 0
-					? `Rating (${pluralCount(creator.ratingCount, "review")})`
-					: "Rating",
+					? ratingStatLabel(tl, creator.ratingCount)
+					: tl("Rating"),
 			value:
-				creator.ratingCount > 0 ? creator.ratingAverage.toFixed(1) : "None",
+				creator.ratingCount > 0
+					? numberFormatter(formatLocale, RATING_DIGITS).format(
+							creator.ratingAverage
+						)
+					: tl("None"),
 		},
-		{ label: "Downloads", value: formatCount(downloads) ?? "0" },
+		{ label: tl("Downloads"), value: formatCount(downloads) ?? "0" },
 	];
 
 	return (

@@ -96,7 +96,7 @@ export function MessageScroller(componentProps: MessageScrollerProps) {
 					previewContainerClassName="right-3 left-8"
 					previewSide="after"
 					railClassName={cn(
-						"absolute inset-y-3 left-1 w-7 content-center py-1 [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-start [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-left",
+						"absolute inset-y-3 left-1 w-7 content-center py-1 [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-start [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-left rtl:[&_[data-slot=preview-rail-tick]]:origin-right",
 						railOverflowing
 							? "pointer-events-auto opacity-100"
 							: "pointer-events-none opacity-0",
@@ -121,9 +121,10 @@ export function MessageScroller(componentProps: MessageScrollerProps) {
 				<Button
 					aria-label={
 						newMessageCount > 0
-							? tl("{count} new messages. Scroll to latest", {
-									count: String(newMessageCount),
-								})
+							? tl(
+									"{count, plural, one {# new message} other {# new messages}}. Scroll to latest",
+									{ count: newMessageCount }
+								)
 							: "Scroll to latest message"
 					}
 					className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 gap-1.5 rounded-full border border-primary/30 bg-background/95 px-3 shadow-lg backdrop-blur-md"
@@ -136,9 +137,12 @@ export function MessageScroller(componentProps: MessageScrollerProps) {
 					<HugeiconsIcon icon={ArrowDown02Icon} size={15} strokeWidth={2} />
 					<span>
 						{newMessageCount > 0
-							? tl("{count} new messages", {
-									count: newMessageCount > 99 ? "99+" : String(newMessageCount),
-								})
+							? newMessageCount > 99
+								? tl("99+ new messages")
+								: tl(
+										"{count, plural, one {# new message} other {# new messages}}",
+										{ count: newMessageCount }
+									)
 							: "Latest messages"}
 					</span>
 				</Button>

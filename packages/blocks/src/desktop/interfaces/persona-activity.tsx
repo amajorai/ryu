@@ -1,14 +1,12 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { Clock3 } from "lucide-react";
 import type { ReactNode } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import { PersonaAvatar } from "./persona-avatar.tsx";
 import {
 	type ActivityEntry,
@@ -28,7 +26,7 @@ import {
 const TIME_COLUMN = "w-16 shrink-0 text-muted-foreground text-xs tabular-nums";
 
 function agentName(snapshot: InterfaceSnapshot, agentId: string | null) {
-	return agentById(snapshot, agentId)?.name ?? "Unassigned";
+	return agentById(snapshot, agentId)?.name ?? tr("Unassigned");
 }
 
 /**
@@ -87,7 +85,9 @@ function LogRow({
 				{time}
 				<RunMark failed={failed} />
 				<span className="min-w-0 flex-1 truncate">
-					<span className="font-medium">{event.title}</span>
+					<span className="font-medium" data-ryu-i18n="off">
+						{event.title}
+					</span>
 					<span className="text-muted-foreground">
 						{" "}
 						· {agentName(snapshot, event.agentId)}
@@ -110,7 +110,7 @@ function LogRow({
 	return (
 		<li>
 			<button
-				className="-mx-2 flex h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+				className="-mx-2 flex h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 text-start text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 				onClick={() => onOpen(thread.id)}
 				type="button"
 			>
@@ -119,7 +119,7 @@ function LogRow({
 					<BoardStatusDot status={status} />
 				</MarkSlot>
 				<span className="min-w-0 flex-1 truncate">
-					<span className="font-medium">{thread.title || "Untitled"}</span>
+					<span className="font-medium">{thread.title || tr("Untitled")}</span>
 					<span className="text-muted-foreground">
 						{" "}
 						· {owner ? agentName(snapshot, owner) : "You"}
@@ -133,7 +133,7 @@ function LogRow({
 							: "text-muted-foreground"
 					)}
 				>
-					{THREAD_STATUS_LABELS[status]}
+					{threadStatusLabel(status)}
 				</span>
 			</button>
 		</li>
@@ -177,16 +177,17 @@ export function PersonaActivity({
 									<PersonaAvatar agent={owner} name="No agent" size={32} />
 									<div className="flex min-w-0 flex-1 flex-col">
 										<p className="truncate font-medium text-sm">
-											{thread.title || "Untitled"}
+											{thread.title || tr("Untitled")}
 										</p>
 										<p className="truncate text-muted-foreground text-xs">
 											<span className="text-destructive">Run stopped</span> ·{" "}
-											{owner?.name ?? "No agent"} · {agoLabel(thread.updatedAt)}
+											{owner?.name ?? tr("No agent")} ·{" "}
+											{agoLabel(thread.updatedAt)}
 										</p>
 									</div>
 									<Button
 										aria-label={tl("Review {threadTitle}", {
-											threadTitle: thread.title || "Untitled",
+											threadTitle: thread.title || tr("Untitled"),
 										})}
 										onClick={() => onOpen(thread.id)}
 										size="sm"
@@ -221,7 +222,9 @@ export function PersonaActivity({
 								</time>
 								<RunMark />
 								<span className="min-w-0 flex-1 truncate">
-									<span className="font-medium">{event.title}</span>
+									<span className="font-medium" data-ryu-i18n="off">
+										{event.title}
+									</span>
 									<span className="text-muted-foreground">
 										{" "}
 										· {agentName(snapshot, event.agentId)}
@@ -229,7 +232,7 @@ export function PersonaActivity({
 								</span>
 								<span className="@max-[639px]:hidden shrink-0 text-muted-foreground text-xs">
 									{event.count
-										? tl("{count} runs · ", { count: String(event.count) })
+										? `${tl("{count, plural, one {# run} other {# runs}}", { count: event.count })} · `
 										: ""}
 									{event.label}
 								</span>

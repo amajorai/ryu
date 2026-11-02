@@ -6,6 +6,7 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { numberFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -22,6 +23,7 @@ import {
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { useFormatLocale } from "@ryu/ui/hooks/use-format-locale.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ReactNode, useEffect, useState } from "react";
@@ -104,7 +106,7 @@ export function CreatorsDirectory({
 				<div className="relative min-w-48 flex-1">
 					<HugeiconsIcon
 						aria-hidden="true"
-						className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+						className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 						icon={Search01Icon}
 					/>
 					<Input
@@ -221,6 +223,12 @@ export function CreatorGridSkeleton() {
 	);
 }
 
+/** One decimal, as the rating stat has always read. */
+const RATING_DIGITS: Intl.NumberFormatOptions = {
+	maximumFractionDigits: 1,
+	minimumFractionDigits: 1,
+};
+
 export function CreatorStat({
 	label,
 	value,
@@ -241,6 +249,7 @@ export function CreatorStat({
 
 export function RatingStat({ creator }: { creator: MarketplaceCreator }) {
 	const tl = useLiteralMessages();
+	const formatLocale = useFormatLocale();
 	if (creator.ratingCount <= 0) {
 		return null;
 	}
@@ -252,14 +261,16 @@ export function RatingStat({ creator }: { creator: MarketplaceCreator }) {
 				icon={StarIcon}
 			/>
 			<span className="font-medium text-foreground tabular-nums">
-				{creator.ratingAverage.toFixed(1)}
+				{numberFormatter(formatLocale, RATING_DIGITS).format(
+					creator.ratingAverage
+				)}
 			</span>
 			<span className="sr-only">
 				{tl(
 					"average rating from {count, plural, one {{formatted} review} other {{formatted} reviews}}",
 					{
 						count: creator.ratingCount,
-						formatted: creator.ratingCount.toLocaleString(),
+						formatted: formatCount(creator.ratingCount) ?? "0",
 					}
 				)}
 			</span>
@@ -296,7 +307,7 @@ export function CreatorCard({
 					<div className="flex min-w-0 items-center gap-1">
 						<h3 className="truncate font-medium">
 							<button
-								className="text-left outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/30"
+								className="text-start outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/30"
 								onClick={onOpen}
 								type="button"
 							>
@@ -336,11 +347,15 @@ export function CreatorCard({
 
 			<div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1">
 				<CreatorStat
-					label={creator.listingCount === 1 ? "listing" : "listings"}
+					label={tl("{count, plural, one {listing} other {listings}}", {
+						count: creator.listingCount,
+					})}
 					value={formatCount(creator.listingCount)}
 				/>
 				<CreatorStat
-					label={creator.followerCount === 1 ? "follower" : "followers"}
+					label={tl("{count, plural, one {follower} other {followers}}", {
+						count: creator.followerCount,
+					})}
 					value={formatCount(creator.followerCount)}
 				/>
 				<RatingStat creator={creator} />

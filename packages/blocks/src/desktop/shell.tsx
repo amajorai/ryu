@@ -234,7 +234,7 @@ export function DesktopShell({
 									<Avatar className="size-7">
 										<AvatarFallback>JW</AvatarFallback>
 									</Avatar>
-									<div className="flex min-w-0 flex-col text-left leading-tight">
+									<div className="flex min-w-0 flex-col text-start leading-tight">
 										<span className="truncate font-medium text-sm">
 											Jia Wei
 										</span>

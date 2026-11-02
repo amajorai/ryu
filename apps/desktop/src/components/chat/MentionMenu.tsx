@@ -72,7 +72,7 @@ export function MentionMenu({
 	return (
 		<ComposerMenu
 			anchorRef={anchorRef}
-			className="absolute bottom-full left-0 z-50 mb-2"
+			className="absolute start-0 bottom-full z-50 mb-2"
 			groups={menuGroups}
 			onDismiss={onDismiss}
 			onSelect={(item) => {

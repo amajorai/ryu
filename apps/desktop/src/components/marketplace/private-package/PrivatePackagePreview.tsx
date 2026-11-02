@@ -8,6 +8,7 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DialogFooter } from "@ryu/ui/components/dialog.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import type { PrivatePackageSharePreview } from "@/src/lib/api/marketplace.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
@@ -184,7 +185,7 @@ export function PrivatePackagePreview({
 							{loading ? <Spinner className="size-4" /> : null}
 							{loading ? "Installing…" : "Install package"}
 							{loading ? null : (
-								<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
+								<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
 							)}
 						</Button>
 					</>

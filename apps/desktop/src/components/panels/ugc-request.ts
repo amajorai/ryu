@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import type { AppJsonValue } from "@ryuhq/core-client/app-request-json.ts";
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json.ts";
 import { z } from "zod";
@@ -13,7 +14,8 @@ const ugcErrorFieldsSchema = z
 	.catch({});
 
 export function readUgcError(body: string, status: number): AppJsonValue {
-	const fallback = body.trim() || `Request failed (${status})`;
+	const fallback =
+		body.trim() || tl("Request failed ({status})", { status: String(status) });
 	try {
 		const parsed = ugcErrorFieldsSchema.parse(JSON.parse(body));
 		return parsed.error ?? parsed.message ?? fallback;

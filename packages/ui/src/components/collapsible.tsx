@@ -19,7 +19,7 @@ const triggerAppearance = {
 	"settings-detail":
 		"gap-3 rounded-lg px-3.5 py-2 text-muted-foreground text-xs hover:bg-muted/40",
 	"tools-server":
-		"flex min-w-0 flex-1 items-center gap-2 rounded py-1 text-left hover:bg-muted/40",
+		"flex min-w-0 flex-1 items-center gap-2 rounded py-1 text-start hover:bg-muted/40",
 };
 
 const contentSpacing = {

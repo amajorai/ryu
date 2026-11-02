@@ -153,7 +153,7 @@ export function SpacesPickerBody({
 		<>
 			{groupByDate ? (
 				<DateGroupedRows
-					className="ml-2 space-y-0.5"
+					className="ms-2 space-y-0.5"
 					collapsedKey={
 						dateBucketStorageKeys(`spaces-picker:${spaceIds}`).collapsedKey
 					}
@@ -222,7 +222,7 @@ function SpaceDocRows({
 						<ContextMenu>
 							<ContextMenuTrigger>
 								<button
-									className="flex h-7 w-full items-center gap-2 rounded-lg pr-2 pl-8 text-left transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
+									className="flex h-7 w-full items-center gap-2 rounded-lg ps-8 pe-2 text-start transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 									data-prefetch-path={spaceDocPath(doc.spaceId, doc)}
 									onAuxClick={(e) => {
 										if (e.button === 1) {
@@ -369,22 +369,22 @@ export function SidebarSpaceDocs({
 	);
 
 	if (loading) {
-		return <p className="py-1 pl-8 text-muted-foreground text-xs">Loading…</p>;
+		return <p className="py-1 ps-8 text-muted-foreground text-xs">Loading…</p>;
 	}
 	if (docs.length === 0) {
 		return (
-			<p className="py-1 pl-8 text-muted-foreground text-xs">No pages yet</p>
+			<p className="py-1 ps-8 text-muted-foreground text-xs">No pages yet</p>
 		);
 	}
 	if (!groupByDate) {
 		return renderRows(docs);
 	}
-	// `ml-6` rather than the Chats buckets' `ml-2`: these rows are already indented
-	// to `pl-8` under their space, so a bucket header at the section indent would
-	// float far to the left of what it introduces.
+	// `ms-6` rather than the Chats buckets' `ms-2`: these rows are already indented
+	// to `ps-8` under their space, so a bucket header at the section indent would
+	// float far from the start of what it introduces.
 	return (
 		<DateGroupedRows
-			className="ml-6 space-y-0.5"
+			className="ms-6 space-y-0.5"
 			collapsedKey={dateBucketStorageKeys(`space:${spaceId}`).collapsedKey}
 			items={docs}
 			orderKey={dateBucketStorageKeys(`space:${spaceId}`).orderKey}

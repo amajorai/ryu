@@ -9,6 +9,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	SidebarGroup,
 	SidebarGroupContent,
@@ -17,7 +18,7 @@ import type { ReactNode } from "react";
 import { nodeSettingsLabel } from "@/src/components/gateway/GatewayNodeScopePicker.tsx";
 import { useNodeConversations } from "@/src/hooks/useNodeConversations.ts";
 import { useNodeOnline } from "@/src/hooks/useNodeOnline.ts";
-import { compactAge } from "@/src/lib/time.ts";
+import { compactAgo } from "@/src/lib/time.ts";
 import type { Node } from "@/src/store/useNodeStore.ts";
 import { RemoteThreadList } from "./AllComputersSidebar-thread-list.tsx";
 import { NodeStatusDot } from "./NodeStatusDot.tsx";
@@ -47,11 +48,11 @@ function ComputerGroupHeader({
 		<div className="group/computer flex h-8 items-center gap-1 px-1">
 			<button
 				aria-expanded={!collapsed}
-				className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left font-medium text-sidebar-foreground text-sm outline-hidden transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+				className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-start font-medium text-sidebar-foreground text-sm outline-hidden transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 				onClick={onToggle}
 				type="button"
 			>
-				<HugeiconsIcon
+				<DirectionalIcon
 					className="shrink-0 text-muted-foreground"
 					icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon}
 					size={14}
@@ -109,7 +110,7 @@ export function RemoteComputerGroup({
 		disabledReason = "Turn on per-tab computers to open this thread";
 	} else if (offline) {
 		disabledReason = updatedAt
-			? tl("Offline. Last seen {age} ago", { age: compactAge(updatedAt) })
+			? tl("Offline. Last seen {when}", { when: compactAgo(updatedAt) })
 			: "Offline";
 	}
 	let body: ReactNode;

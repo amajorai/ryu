@@ -172,7 +172,9 @@ export function PlanetsInterface({
 		setSelection(bodyId);
 		const planet = system.planets.find((item) => item.id === bodyId);
 		setAnnouncement(
-			planet ? `Visiting ${planet.name}` : "Visiting you, the star"
+			planet
+				? tl("Visiting {name}", { name: planet.name })
+				: tl("Visiting you, the star")
 		);
 	};
 	const openThread = (threadId: string, bodyId?: string) => {

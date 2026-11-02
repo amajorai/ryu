@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	isNativeBoolean,
 	isNativeNumber,
@@ -251,7 +252,7 @@ export function validateFormValues(
 		const value = values[field.name];
 		if (value === undefined || value === "") {
 			if (field.required) {
-				return `${field.title} is required`;
+				return tl("{title} is required", { title: field.title });
 			}
 			continue;
 		}
@@ -261,7 +262,7 @@ export function validateFormValues(
 				(field.minItems !== undefined && value.length < field.minItems) ||
 				(field.maxItems !== undefined && value.length > field.maxItems)
 			) {
-				return `${field.title} has an invalid selection`;
+				return tl("{title} has an invalid selection", { title: field.title });
 			}
 			if (
 				!field.suggestions &&
@@ -270,7 +271,7 @@ export function validateFormValues(
 					(item) => !field.choices.some((choice) => choice.value === item)
 				)
 			) {
-				return `Choose options for ${field.title}`;
+				return tl("Choose options for {title}", { title: field.title });
 			}
 			if (
 				value.some(
@@ -281,7 +282,7 @@ export function validateFormValues(
 							[...item].length > field.maxLength)
 				)
 			) {
-				return `${field.title} has an invalid length`;
+				return tl("{title} has an invalid length", { title: field.title });
 			}
 			continue;
 		}
@@ -290,13 +291,15 @@ export function validateFormValues(
 				!(isNativeNumber(value) && Number.isFinite(value)) ||
 				(field.type === "integer" && !Number.isInteger(value))
 			) {
-				return `${field.title} needs a valid number`;
+				return tl("{title} needs a valid number", { title: field.title });
 			}
 			if (
 				(field.minimum !== undefined && value < field.minimum) ||
 				(field.maximum !== undefined && value > field.maximum)
 			) {
-				return `${field.title} is outside the allowed range`;
+				return tl("{title} is outside the allowed range", {
+					title: field.title,
+				});
 			}
 		}
 		if (
@@ -304,14 +307,14 @@ export function validateFormValues(
 			((field.minLength !== undefined && [...value].length < field.minLength) ||
 				(field.maxLength !== undefined && [...value].length > field.maxLength))
 		) {
-			return `${field.title} has an invalid length`;
+			return tl("{title} has an invalid length", { title: field.title });
 		}
 		if (
 			!field.suggestions &&
 			field.choices.length &&
 			!field.choices.some((choice) => choice.value === value)
 		) {
-			return `Choose an option for ${field.title}`;
+			return tl("Choose an option for {title}", { title: field.title });
 		}
 	}
 }

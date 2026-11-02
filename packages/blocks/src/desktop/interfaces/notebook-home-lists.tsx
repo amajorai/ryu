@@ -65,7 +65,7 @@ export function RunTime({ iso, now }: { iso: string; now: number }) {
  * hover when it opens a page, and stays still when it is information only.
  */
 export const LIST_ROW_PAD = cn(
-	"flex w-full items-center gap-3 rounded-md px-2 text-left",
+	"flex w-full items-center gap-3 rounded-md px-2 text-start",
 	LIST_ROW
 );
 

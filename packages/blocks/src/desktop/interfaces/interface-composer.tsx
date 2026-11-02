@@ -86,7 +86,7 @@ export function InterfaceComposer({
 				{agents && agents.length > 1 ? (
 					<NativeSelect
 						aria-label="Agent"
-						className="mr-auto w-44"
+						className="me-auto w-44"
 						onChange={(event) => setPickedAgentId(event.target.value)}
 						size="sm"
 						value={agentId}

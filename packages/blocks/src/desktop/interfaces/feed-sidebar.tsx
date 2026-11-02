@@ -132,7 +132,7 @@ export function WhatsHappening({
 							<li key={post.threadId}>
 								<button
 									className={cn(
-										"flex w-full flex-col px-4 py-3 text-left transition-colors hover:bg-muted/60",
+										"flex w-full flex-col px-4 py-3 text-start transition-colors hover:bg-muted/60",
 										FEED_FOCUS_INSET
 									)}
 									onClick={() => onOpen(post.threadId)}
@@ -149,8 +149,13 @@ export function WhatsHappening({
 									<span
 										className={cn("mt-0.5 text-[13px] leading-4", FEED_META)}
 									>
-										{compactCount(post.replyCount)}{" "}
-										{post.replyCount === 1 ? "reply" : "replies"}
+										{tl(
+											"{count, plural, one {{shown} reply} other {{shown} replies}}",
+											{
+												count: post.replyCount,
+												shown: compactCount(post.replyCount),
+											}
+										)}
 									</span>
 								</button>
 							</li>
@@ -223,7 +228,10 @@ export function AgentRow({
 					</Button>
 				</div>
 				{bio && agent.description ? (
-					<p className="mt-1 text-[15px] text-foreground leading-5">
+					<p
+						className="mt-1 text-[15px] text-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{agent.description}
 					</p>
 				) : null}
@@ -268,7 +276,7 @@ export function AgentsCard({
 			</ul>
 			<button
 				className={cn(
-					"w-full px-4 py-4 text-left text-[15px] text-primary leading-5 transition-colors hover:bg-muted/60",
+					"w-full px-4 py-4 text-start text-[15px] text-primary leading-5 transition-colors hover:bg-muted/60",
 					FEED_FOCUS_INSET
 				)}
 				onClick={onShowAll}

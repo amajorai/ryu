@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -6,7 +7,12 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { agentHue } from "./interface-renderer.ts";
+import {
+	agentHue,
+	formatNameList,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 /** How a title is set over its art, the way each show has its own logo. */
 export type CinemaTitleType = "caps" | "display" | "serif";
@@ -200,22 +206,24 @@ export function cinemaCollectionTitle(
 ): string {
 	switch (id) {
 		case "continue":
-			return "Continue";
+			return tr("Continue");
 		case "live":
-			return "Live now";
+			return tr("Live now");
 		case "attention":
-			return "Needs attention";
+			return tr("Needs attention");
 		case "list":
-			return "Pinned";
+			return tr("Pinned");
 		case "recent":
-			return "Recently updated";
+			return tr("Recently updated");
 		case "top":
-			return "Most active";
+			return tr("Most active");
 		default: {
 			const agent = snapshot.agents.find(
 				(candidate) => candidate.id === id.slice("agent:".length)
 			);
-			return agent ? `With ${agent.name}` : "With an agent";
+			return agent
+				? tr("With {name}", { name: agent.name })
+				: tr("With an agent");
 		}
 	}
 }
@@ -420,43 +428,35 @@ export function cinemaPages(
 
 /** "Forge", "Forge and Brook", "Forge, Brook and Echo". */
 export function cinemaNames(agents: readonly InterfaceAgent[]): string {
-	const names = agents.map((agent) => agent.name);
-	if (names.length <= 1) {
-		return names[0] ?? "";
-	}
-	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+	return formatNameList(agents.map((agent) => agent.name));
 }
 
 /** Who spoke last, in the user's terms. */
 export function cinemaLastSpeaker(title: CinemaTitle): string {
 	if (title.thread.lastMessageRole === "user") {
-		return "You";
+		return tr("You");
 	}
-	return title.agents[0]?.name ?? "Agent";
+	return title.agents[0]?.name ?? tr("Agent");
 }
 
 /** "9 messages", "1 message". */
 export function cinemaMessages(count: number): string {
-	return `${count} ${count === 1 ? "message" : "messages"}`;
+	return tr("{count, plural, one {# message} other {# messages}}", {
+		count,
+	});
 }
 
 /** The status line the posters and previews use, in plain words. */
 export function cinemaStatusText(title: CinemaTitle): string {
 	if (title.status === "attention") {
 		return title.thread.runState === "interrupted"
-			? "Run interrupted"
-			: "Run failed";
+			? tr("Run interrupted")
+			: tr("Run failed");
 	}
 	if (title.status === "working") {
-		return "Live";
+		return tr("Live");
 	}
-	if (title.status === "your-turn") {
-		return "Your turn";
-	}
-	if (title.status === "waiting") {
-		return "Waiting on agent";
-	}
-	return "Not started";
+	return threadStatusLabel(title.status);
 }
 
 /** "Project", "Team", or nothing for a thread outside any group. */
@@ -464,13 +464,12 @@ export function cinemaGroupLabel(group: InterfaceGroup | null): string | null {
 	if (!group) {
 		return null;
 	}
-	return `${group.kind === "project" ? "Project" : "Team"} · ${group.name}`;
+	return group.kind === "project"
+		? tr("Project · {name}", { name: group.name })
+		: tr("Team · {name}", { name: group.name });
 }
 
-/** "Just now", "5m ago", "2d ago": the age line previews and the modal use. */
-export function cinemaAge(age: string): string {
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "Just now" : `${age} ago`;
+/** "now", "5m ago", "2d ago": the age line previews and the modal use. */
+export function cinemaAge(iso: string, now: number = Date.now()): string {
+	return relativeAge(iso, now);
 }

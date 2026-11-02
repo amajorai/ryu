@@ -172,7 +172,7 @@ export function ImportWizard({
 						<Label htmlFor="crm-import-file">CSV file</Label>
 						<input
 							accept=".csv,text/csv"
-							className="block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm"
+							className="block w-full text-sm file:me-3 file:rounded-lg file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm"
 							disabled={busy}
 							id="crm-import-file"
 							onChange={(event) => {

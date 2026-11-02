@@ -21,6 +21,7 @@
 // them and the surface must hide itself rather than guess a row by URL, which
 // would write one node's settings onto another's.
 
+import { translate as tl } from "@ryu/i18n/core";
 import { z } from "zod";
 import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 import { pluginRecord, pluginValueSchema } from "./plugin-wire-values.ts";
@@ -148,7 +149,9 @@ async function request<S extends z.ZodType>(
 		const body = pluginRecord(await resp.json().catch(() => null));
 		throw new NodeTimeZoneError(
 			resp.status,
-			String(body?.message ?? `Request failed: ${resp.status}`)
+			String(
+				body?.message ?? tl("Request failed: {status}", { status: resp.status })
+			)
 		);
 	}
 	return schema.parse(await resp.json());

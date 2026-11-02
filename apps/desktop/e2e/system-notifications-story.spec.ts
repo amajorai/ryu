@@ -16,11 +16,16 @@ interface NativeNotice {
 	body: string | null;
 	title: string;
 }
+/** What the desktop host received: os-notify.ts delivers through the
+ *  `show_os_notification` command (the webview Notification API is inert in
+ *  WKWebView and WebView2) and listens for `os-notification-clicked`. */
+interface NativeNotifications {
+	clickListeners: number;
+	failed: NativeNotice[];
+	shown: NativeNotice[];
+}
 interface ProofWindow extends Window {
-	__notificationNative: {
-		constructed: NativeNotice[];
-		permissionRequests: number;
-	};
+	__notificationNative: NativeNotifications;
 	__notificationNodeStore: {
 		getState: () => {
 			nodes: Array<{
@@ -63,63 +68,92 @@ async function state(
 	expect(result.status()).toBe(200);
 	return result.json();
 }
-async function installBoundaries(page: Page, permission: "granted" | "denied") {
-	await page.addInitScript((permissionValue) => {
+/** The desktop host's notification commands. `delivery: "fails"` makes the
+ *  native banner refuse, as a host whose notification service is unavailable. */
+async function installBoundaries(page: Page, delivery: "shown" | "fails") {
+	await page.addInitScript((deliveryValue) => {
 		const fixture = {
-			constructed: [] as NativeNotice[],
-			permissionRequests: 0,
+			clickListeners: 0,
+			failed: [] as NativeNotice[],
+			shown: [] as NativeNotice[],
 		};
 		const unexpected: string[] = [];
 		Object.defineProperty(window, "__notificationNative", { value: fixture });
 		Object.defineProperty(window, "__notificationUnexpectedNative", {
 			value: unexpected,
 		});
-		class CapturedNotification {
-			static get permission() {
-				return permissionValue;
-			}
-			static async requestPermission() {
-				fixture.permissionRequests++;
-				return permissionValue;
-			}
-			onclick: (() => void) | null = null;
-			constructor(title: string, options?: NotificationOptions) {
-				fixture.constructed.push({ title, body: options?.body ?? null });
-			}
-		}
-		Object.defineProperty(window, "Notification", {
-			value: CapturedNotification,
-			configurable: true,
-		});
+		const refuse = (command: string) => {
+			unexpected.push(command);
+			throw new Error(`Unexpected native command: ${command}`);
+		};
 		Object.defineProperty(window, "__TAURI_INTERNALS__", {
 			value: {
 				metadata: {
 					currentWindow: { label: "main" },
 					currentWebview: { label: "main" },
 				},
-				invoke: async (command: string) => {
-					unexpected.push(command);
-					throw new Error(`Unexpected native command: ${command}`);
+				invoke: async (command: string, args?: Record<string, unknown>) => {
+					if (command === "plugin:event|listen") {
+						// os-notify.ts routes banner clicks through this one event.
+						if (
+							args?.event !== "os-notification-clicked" ||
+							typeof args.handler !== "number"
+						) {
+							return refuse(`${command}:${String(args?.event)}`);
+						}
+						fixture.clickListeners++;
+						return fixture.clickListeners;
+					}
+					if (command !== "show_os_notification") {
+						return refuse(command);
+					}
+					// Exactly the DTO os-notify.ts sends: no sender, so no image, and a
+					// generated tag for click routing.
+					const input = args?.input;
+					if (
+						!input ||
+						typeof input !== "object" ||
+						Object.keys(args).join() !== "input" ||
+						Object.keys(input).sort().join() !==
+							"body,imagePngBase64,tag,title" ||
+						Reflect.get(input, "imagePngBase64") !== null ||
+						typeof Reflect.get(input, "tag") !== "string" ||
+						typeof Reflect.get(input, "title") !== "string" ||
+						!(
+							Reflect.get(input, "body") === null ||
+							typeof Reflect.get(input, "body") === "string"
+						)
+					) {
+						return refuse(`${command}:${JSON.stringify(args)}`);
+					}
+					const body = Reflect.get(input, "body");
+					const notice: NativeNotice = {
+						title: String(Reflect.get(input, "title")),
+						body: typeof body === "string" ? body : null,
+					};
+					if (deliveryValue === "fails") {
+						fixture.failed.push(notice);
+						throw new Error("Notification service unavailable");
+					}
+					fixture.shown.push(notice);
+					return null;
 				},
-				transformCallback: () => {
-					unexpected.push("transformCallback");
-					throw new Error("Unexpected native callback");
-				},
+				transformCallback: () => refuse("transformCallback"),
 			},
 			configurable: true,
 		});
-	}, permission);
+	}, delivery);
 }
 async function open(
 	page: Page,
 	request: APIRequestContext,
 	{
-		permission = "granted",
+		delivery = "shown",
 		refused = 0,
-	}: { permission?: "granted" | "denied"; refused?: number } = {}
+	}: { delivery?: "shown" | "fails"; refused?: number } = {}
 ) {
 	await control(request, { action: "reset", refused });
-	await installBoundaries(page, permission);
+	await installBoundaries(page, delivery);
 	await page.goto(STORY_URL);
 	await expect(
 		page.getByRole("heading", { name: "System notifications", exact: true })
@@ -226,7 +260,7 @@ test.afterEach(async ({ page, request }, testInfo) => {
 	).toEqual([]);
 	expect((await state(request)).unexpected).toEqual([]);
 });
-test("delivers authenticated Core completion notifications to actual toasts and the captured OS interface", async ({
+test("delivers authenticated Core completion notifications to actual toasts and the desktop host's OS banner", async ({
 	page,
 	request,
 }) => {
@@ -274,7 +308,9 @@ test("delivers authenticated Core completion notifications to actual toasts and 
 	await expect
 		.poll(() => native(page))
 		.toEqual({
-			constructed: [
+			clickListeners: 1,
+			failed: [],
+			shown: [
 				{
 					title: "App installed",
 					body: "Clips is installed and ready to enable.",
@@ -284,7 +320,6 @@ test("delivers authenticated Core completion notifications to actual toasts and 
 					body: "Two of three delegated tasks completed.",
 				},
 			],
-			permissionRequests: 0,
 		});
 	const proof = await state(request);
 	expect(proof.requests).toHaveLength(1);
@@ -308,11 +343,11 @@ test("delivers authenticated Core completion notifications to actual toasts and 
 		],
 	});
 });
-test("keeps real in-app completion delivery when OS notification permission is denied", async ({
+test("keeps real in-app completion delivery when the native OS notification fails", async ({
 	page,
 	request,
 }) => {
-	const stream = await open(page, request, { permission: "denied" });
+	const stream = await open(page, request, { delivery: "fails" });
 	await control(request, {
 		action: "emit",
 		requestId: stream.id,
@@ -330,10 +365,20 @@ test("keeps real in-app completion delivery when OS notification permission is d
 			exact: true,
 		})
 	).toBeVisible();
-	expect(await native(page)).toEqual({
-		constructed: [],
-		permissionRequests: 0,
-	});
+	// The banner was attempted once and refused; the failure stays inside
+	// os-notify.ts (no page error, no retry) and the toast above still landed.
+	await expect
+		.poll(() => native(page))
+		.toEqual({
+			clickListeners: 1,
+			failed: [
+				{
+					title: "Import complete",
+					body: "Four threads imported; one was already present.",
+				},
+			],
+			shown: [],
+		});
 	expect((await state(request)).requests[0]?.sent).toEqual([
 		{
 			title: "Import complete",
@@ -352,7 +397,7 @@ test("reconnects after actual HTTP refusal and delivers a later event without a 
 	await expect(page.getByText("Thread imported", { exact: true })).toHaveCount(
 		0
 	);
-	expect((await native(page)).constructed).toEqual([]);
+	expect((await native(page)).shown).toEqual([]);
 	await control(request, {
 		action: "emit",
 		requestId: stream.id,
@@ -369,7 +414,7 @@ test("reconnects after actual HTTP refusal and delivers a later event without a 
 		page.getByText("Research thread is ready from codex.", { exact: true })
 	).toBeVisible();
 	await expect
-		.poll(async () => (await native(page)).constructed)
+		.poll(async () => (await native(page)).shown)
 		.toEqual([
 			{
 				title: "Thread imported",
@@ -472,7 +517,7 @@ for (const field of ["token", "userJwt"] as const) {
 			page.getByText(`Old ${field} private completion`, { exact: true })
 		).toHaveCount(0);
 		await expect
-			.poll(async () => (await native(page)).constructed)
+			.poll(async () => (await native(page)).shown)
 			.toEqual([
 				{
 					title: `Current ${field} completion`,

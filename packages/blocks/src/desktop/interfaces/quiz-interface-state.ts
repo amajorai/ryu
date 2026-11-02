@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAgentAct,
 	InterfaceSnapshot,
@@ -65,19 +66,21 @@ function clueWord(
 	headline?: string
 ): string {
 	if (state.blocking.has(thread.id)) {
-		return "Needs you";
+		return tr("Needs you");
 	}
 	if ((thread.unread ?? 0) > 0) {
-		return headline ? `Answer ready: ${headline}` : "Answer ready";
+		return headline
+			? tr("Answer ready: {headline}", { headline })
+			: tr("Answer ready");
 	}
 	if (thread.running) {
-		return "Working";
+		return tr("Working");
 	}
 	const stopped = state.stopped.get(thread.id);
 	if (stopped) {
 		return stopped;
 	}
-	return state.asked.has(thread.id) ? "Waiting on you" : "Done";
+	return state.asked.has(thread.id) ? tr("Waiting on you") : tr("Done");
 }
 
 /** World units kept round the plates when the act layer frames the set. */

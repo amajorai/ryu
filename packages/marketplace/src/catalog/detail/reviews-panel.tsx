@@ -318,7 +318,7 @@ function RatingSummary({
 				</Button>
 			) : null}
 			{onWrite === null ? (
-				<p className="max-w-48 text-right text-muted-foreground text-xs">
+				<p className="max-w-48 text-end text-muted-foreground text-xs">
 					Sign in to your Ryu account to write a review.
 				</p>
 			) : null}
@@ -351,7 +351,7 @@ function ReviewRow({ review }: { review: MarketplaceReview }) {
 					</Badge>
 				) : null}
 				{date ? (
-					<span className="ml-auto shrink-0 text-muted-foreground text-xs">
+					<span className="ms-auto shrink-0 text-muted-foreground text-xs">
 						{date}
 					</span>
 				) : null}
@@ -484,7 +484,7 @@ function WriteReviewForm({
 				</Button>
 				{existing ? (
 					<Button
-						className="ml-auto"
+						className="ms-auto"
 						disabled={busy}
 						onClick={remove}
 						size="sm"

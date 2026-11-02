@@ -6,14 +6,12 @@ import {
 	type PluginValue,
 	pluginValueSchema,
 } from "../src/lib/api/plugin-wire-values.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const openWidgetInputSchema = z.object({ idempotencyKey: z.string() });
 const followUpInputSchema = z.object({ prompt: z.string() });
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/extension-parity"
-);
+const proofDir = proofEvidencePath("extension-parity");
 test.afterEach(async ({ page }, info) => {
 	if (info.status !== info.expectedStatus) {
 		await mkdir(proofDir, { recursive: true });

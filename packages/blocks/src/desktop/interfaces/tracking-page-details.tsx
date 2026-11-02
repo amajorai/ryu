@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceEvent } from "@ryuhq/protocol/interfaces";
@@ -31,7 +32,7 @@ export function ShipmentDetails({ parcel }: { parcel: TrackingParcel }) {
 	const tl = useLiteralMessages();
 	const headingId = useId();
 	const { thread } = parcel;
-	const title = thread.title.trim() || "Untitled conversation";
+	const title = thread.title.trim() || tr("Untitled conversation");
 	return (
 		<section aria-labelledby={headingId} className="min-w-0">
 			<h2
@@ -47,7 +48,9 @@ export function ShipmentDetails({ parcel }: { parcel: TrackingParcel }) {
 							{parcel.agents.map((agent) => (
 								<li className="flex min-w-0 items-center gap-2" key={agent.id}>
 									<BoardAvatar agent={agent} name={agent.name} size={20} />
-									<span className="truncate">{agent.name}</span>
+									<span className="truncate" data-ryu-i18n="off">
+										{agent.name}
+									</span>
 									{agent.status === "working" ? (
 										<span className="text-muted-foreground text-xs">
 											On a run

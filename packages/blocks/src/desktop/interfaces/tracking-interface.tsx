@@ -293,7 +293,7 @@ export function TrackingInterface({
 				<div
 					className={cn(
 						"flex min-h-0 shrink-0 flex-col",
-						stacked ? "w-full" : cn(listWidth, "border-border border-r")
+						stacked ? "w-full" : cn(listWidth, "border-border border-e")
 					)}
 				>
 					<TrackingList

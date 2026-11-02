@@ -2,8 +2,10 @@ import {
 	estimateUsagePacing,
 	type UsagePacingEstimate,
 } from "@ryu/blocks/desktop/usage-pacing.ts";
+import { activeLocale } from "@ryu/i18n/core";
 import type { SubscriptionUsageAccount } from "@/src/hooks/useSubscriptionUsage.ts";
 import type { UsageWindow } from "@/src/lib/api/usage.ts";
+import { formatDurationSpan } from "@/src/lib/expiry.ts";
 
 export interface WindowProjection {
 	estimate: UsagePacingEstimate;
@@ -124,17 +126,38 @@ export function forecastQuotaPool(
 	};
 }
 
-/** "45m" / "3h 10m" / "2d 4h" until `at`, for pace projections. */
-export function formatTimeUntil(at: number, now = Date.now()): string {
+/**
+ * "45m" / "3h 10m" / "2d 4h" until `at`, for pace projections (in the active
+ * locale's own short units outside English).
+ */
+export function formatTimeUntil(
+	at: number,
+	now = Date.now(),
+	locale: string = activeLocale()
+): string {
 	const minutes = Math.max(1, Math.round((at - now) / 60_000));
 	if (minutes < 60) {
-		return `${minutes}m`;
+		return formatDurationSpan([[minutes, "minute"]], locale);
 	}
 	const hours = Math.floor(minutes / 60);
 	if (hours < 24) {
 		const rest = minutes % 60;
-		return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
+		return formatDurationSpan(
+			rest > 0
+				? [
+						[hours, "hour"],
+						[rest, "minute"],
+					]
+				: [[hours, "hour"]],
+			locale
+		);
 	}
 	const days = Math.floor(hours / 24);
-	return `${days}d ${hours % 24}h`;
+	return formatDurationSpan(
+		[
+			[days, "day"],
+			[hours % 24, "hour"],
+		],
+		locale
+	);
 }

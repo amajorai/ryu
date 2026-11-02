@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ActiveChip, ORG_ICON } from "./chrome/catalog-badges.tsx";
@@ -44,6 +45,7 @@ export default function SkillsCatalogSection({
 	 *  Store's Home shelves. */
 	initialSelectedId?: string;
 } = {}) {
+	const tl = useLiteralMessages();
 	const host = useCatalogHost();
 	const auditNode = host.useActiveNode();
 	// One resolver for the section (a host implementation reads live node state to
@@ -120,12 +122,12 @@ export default function SkillsCatalogSection({
 		return [
 			{
 				key: `org:${org}`,
-				label: `Org: ${org}`,
+				label: tl("Org: {org}", { org }),
 				icon: ORG_ICON,
 				onRemove: () => setOrg(""),
 			},
 		];
-	}, [org, setOrg]);
+	}, [org, setOrg, tl]);
 
 	// Per-card lifecycle without a per-id hook: the hook's install() acts on the
 	// SELECTED skill, so a card's Install selects its skill and defers the call
@@ -133,14 +135,32 @@ export default function SkillsCatalogSection({
 	// matches). Enable/disable are ID-based (setSkillEnabled), so they run inline.
 	const [pending, setPending] = useState<{ id: string } | null>(null);
 
+	//
+	// The install may ask first (adding a skill resets the prompt cache), and
+	// selecting the skill opens its detail as a modal in this same commit. Two
+	// modals opened together each hide the other from assistive technology, so
+	// the question would be unreachable; asking a frame later opens it over the
+	// detail, as the detail's own Add does.
+	const installFrame = useRef<number | null>(null);
+	useEffect(
+		() => () => {
+			if (installFrame.current !== null) {
+				cancelAnimationFrame(installFrame.current);
+			}
+		},
+		[]
+	);
 	useEffect(() => {
 		if (!pending || selectedId !== pending.id) {
 			return;
 		}
-		install().catch(() => {
-			// Errors surface through the hook's error state in the detail panel.
-		});
 		setPending(null);
+		installFrame.current = requestAnimationFrame(() => {
+			installFrame.current = null;
+			install().catch(() => {
+				// Errors surface through the hook's error state in the detail panel.
+			});
+		});
 	}, [pending, selectedId, install]);
 
 	const cardInstall = (id: string) => {
@@ -153,7 +173,7 @@ export default function SkillsCatalogSection({
 			<StoreCatalogLayout
 				detail={
 					<div className="grid h-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(280px,36%)] overflow-hidden">
-						<div className="min-h-0 overflow-auto border-r">
+						<div className="min-h-0 overflow-auto border-e">
 							<SkillDetailPanel
 								auditScope={auditNode.url}
 								canAuthor={canAuthor}

@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -45,10 +46,10 @@ const BANNER_ICON = {
 	partial: CircleAlert,
 } as const;
 
-const clockFormat = new Intl.DateTimeFormat("en-US", {
+const CLOCK_FORMAT: Intl.DateTimeFormatOptions = {
 	hour: "numeric",
 	minute: "2-digit",
-});
+};
 
 function StatusBanner({ now, state }: { now: number; state: OverallState }) {
 	const Icon = BANNER_ICON[state];
@@ -69,7 +70,7 @@ function StatusBanner({ now, state }: { now: number; state: OverallState }) {
 			<p className="shrink-0 text-sm opacity-80 max-sm:hidden">
 				Updated{" "}
 				<time dateTime={new Date(now).toISOString()}>
-					{clockFormat.format(now)}
+					{dateFormatter(activeLocale(), CLOCK_FORMAT).format(now)}
 				</time>
 			</p>
 		</div>

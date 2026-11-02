@@ -88,7 +88,7 @@ export function MergedThreadPicker({
 				</DropdownMenuRadioGroup>
 				{threads.length > 0 ? <DropdownMenuSeparator /> : null}
 				<DropdownMenuItem onClick={onNewThread}>
-					<HugeiconsIcon className="mr-2 size-4" icon={Add01Icon} />
+					<HugeiconsIcon className="me-2 size-4" icon={Add01Icon} />
 					{NEW_THREAD_LABEL}
 				</DropdownMenuItem>
 			</DropdownMenuContent>

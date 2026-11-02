@@ -21,14 +21,28 @@
 //! secrets only. A match ends the loop with the same refusal, under any policy
 //! but `WarnAndContinue`, since there is no field to redact and no per-result
 //! fallback that could withhold a definition.
+//!
+//! When the request's firewall enables the LLM inspector (and the Inspector
+//! stage is in the pipeline), the inspector also judges each appended item,
+//! composed into the async hazard hook: tool results and fetched pages are
+//! where indirect prompt injection arrives. The loop cannot redact, so a flag
+//! under `Block` or `Sanitize` ends it with the same 403, and `Block` fails
+//! closed on a missing verdict exactly as the inbound stage does.
 use std::sync::Arc;
 
 use serde_json::Value;
 use tracing::warn;
 
-use super::{inference_governance, outbound_text, RequestContext};
+use super::{
+    auxiliary, firewall_policy_alert, inference_governance, outbound_text, stages::PipelineStage,
+    RequestContext,
+};
 use crate::{
-    config::FirewallPolicy, error::GatewayError, state::AppState, tools::ToolLoopFirewall,
+    config::{FirewallPolicy, InspectorConfig},
+    error::GatewayError,
+    firewall::inspector::{fail_closed, InspectorClient},
+    state::AppState,
+    tools::{HazardScreen, ToolLoopFirewall, ToolRoundPart},
 };
 
 /// The tool-loop firewall for one request: its resolved scanner plus the
@@ -47,8 +61,107 @@ pub(super) fn firewall(state: &Arc<AppState>, ctx: &RequestContext) -> ToolLoopF
             screen_definitions(&definitions_state, &definitions_ctx, definitions)
         })),
         standing: standing_check(state, ctx),
-        hazard: hazard_screen(state, ctx),
+        hazard: round_screen(hazard_screen(state, ctx), inspector_screen(state, ctx)),
     }
+}
+
+/// The async per-item screens of a round, in order: the hazard screener,
+/// then the LLM inspector. `None` when neither applies.
+fn round_screen(
+    hazard: Option<HazardScreen>,
+    inspector: Option<HazardScreen>,
+) -> Option<HazardScreen> {
+    let (hazard, inspector) = match (hazard, inspector) {
+        (Some(hazard), Some(inspector)) => (hazard, inspector),
+        (hazard, inspector) => return hazard.or(inspector),
+    };
+    Some(Arc::new(
+        move |appended: Value, part: ToolRoundPart, round: u8| {
+            let hazard = Arc::clone(&hazard);
+            let inspector = Arc::clone(&inspector);
+            Box::pin(async move {
+                hazard(appended.clone(), part, round).await?;
+                inspector(appended, part, round).await
+            })
+        },
+    ))
+}
+
+/// The LLM inspector over each appended item. `None` when the Inspector stage
+/// is not in the pipeline or the request's firewall does not enable it.
+fn inspector_screen(state: &Arc<AppState>, ctx: &RequestContext) -> Option<HazardScreen> {
+    if !state
+        .stage_order
+        .stages()
+        .contains(&PipelineStage::Inspector)
+    {
+        return None;
+    }
+    let cfg = state.resolved_scanner(ctx).config().inspector.clone();
+    if !cfg.enabled {
+        return None;
+    }
+    let state = Arc::clone(state);
+    let ctx = ctx.clone();
+    Some(Arc::new(
+        move |appended: Value, part: ToolRoundPart, _round: u8| {
+            let state = Arc::clone(&state);
+            let ctx = ctx.clone();
+            let cfg = cfg.clone();
+            Box::pin(async move { screen_inspector(&state, &ctx, &cfg, &appended, part).await })
+        },
+    ))
+}
+
+/// Judge one appended item with the inspector and apply its action. The
+/// whole item is read (the residual walk, or the raw item when that walk is
+/// over its limit); the inspector windows it.
+async fn screen_inspector(
+    state: &Arc<AppState>,
+    ctx: &RequestContext,
+    cfg: &InspectorConfig,
+    appended: &Value,
+    part: ToolRoundPart,
+) -> Result<(), GatewayError> {
+    let text = outbound_text::tool_loop_residual_text(appended)
+        .screened_text()
+        .unwrap_or_else(|| appended.to_string());
+    let inference = auxiliary::GovernedInference::new(Arc::clone(state), ctx.clone(), "inspector");
+    let verdict = fail_closed(
+        InspectorClient::assess(&text, cfg, &inference).await?,
+        &cfg.action,
+    );
+    if !verdict.flagged {
+        return Ok(());
+    }
+    if cfg.action == FirewallPolicy::WarnAndContinue {
+        warn!(
+            request_id = %ctx.request_id,
+            ?part,
+            categories = ?verdict.categories,
+            reason = %verdict.reason,
+            "tool loop: inspector flagged appended content (warn-and-continue)"
+        );
+        return Ok(());
+    }
+    warn!(
+        request_id = %ctx.request_id,
+        ?part,
+        categories = ?verdict.categories,
+        reason = %verdict.reason,
+        "tool loop: inspector flagged appended content; loop stopped"
+    );
+    state.metrics.inc_firewall_blocked();
+    super::audit::audit_inspector_block(state, ctx, &Value::Null, &verdict);
+    let scanner = state.resolved_scanner(ctx);
+    Err(GatewayError::FirewallBlocked(
+        format!(
+            "Tool-loop content blocked by inspector: {} [{}]",
+            verdict.reason,
+            verdict.categories.join(",")
+        ),
+        firewall_policy_alert(scanner.config(), ctx, "block"),
+    ))
 }
 
 /// The hazard screener over each appended item, as a tool round
@@ -57,10 +170,7 @@ pub(super) fn firewall(state: &Arc<AppState>, ctx: &RequestContext) -> ToolLoopF
 /// The model's turn is screened as `tool_args`, a tool result as
 /// `tool_result`, and round `n` is attempt `n + 1` (spec 00.5): a tool result
 /// flagged for the code the prompt was is its own event, not a duplicate.
-fn hazard_screen(
-    state: &Arc<AppState>,
-    ctx: &RequestContext,
-) -> Option<crate::tools::HazardScreen> {
+fn hazard_screen(state: &Arc<AppState>, ctx: &RequestContext) -> Option<HazardScreen> {
     state.screening.tier(state.custody)?;
     let state = Arc::clone(state);
     let ctx = ctx.clone();
@@ -156,3 +266,7 @@ fn screen_definitions(
     outbound_text::screen_residual_inbound(state, ctx, scanner.as_ref(), &residual)?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "inspector_stage_tests.rs"]
+mod inspector_stage_tests;

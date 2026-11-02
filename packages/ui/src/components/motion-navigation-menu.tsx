@@ -538,7 +538,7 @@ function MotionNavigationMenuTrigger({
 						y: isOpen ? 1 : 0,
 					}}
 					aria-hidden="true"
-					className="relative top-0 ml-1.5 inline-flex"
+					className="relative top-0 ms-1.5 inline-flex"
 					transition={{
 						type: "spring",
 						stiffness: 400,
@@ -589,7 +589,7 @@ function MotionNavigationMenuContent({
 				<div className="absolute top-full left-0 z-50 mt-1.5 overflow-hidden rounded-2xl border border-border/50 bg-muted/70 shadow-lg backdrop-blur-2xl backdrop-saturate-150">
 					<motion.div
 						animate="active"
-						className={cn("p-2 pr-2.5 text-popover-foreground", className)}
+						className={cn("p-2 pe-2.5 text-popover-foreground", className)}
 						custom={context.direction}
 						data-slot="navigation-menu-content"
 						exit="exit"
@@ -740,7 +740,7 @@ function MotionNavigationMenuViewport({
 						{activeContent && context?.activeValue && (
 							<motion.div
 								animate="active"
-								className={cn("p-2 pr-2.5", activeContent.className)}
+								className={cn("p-2 pe-2.5", activeContent.className)}
 								custom={context.direction}
 								data-slot="navigation-menu-content"
 								exit="exit"
@@ -774,7 +774,7 @@ function MotionNavigationMenuViewport({
 				    MotionNavigationMenuContentInner supplies that provider. Keeping the
 				    wrapper also keeps the measured box identical to the rendered one. */}
 				{activeContent && (
-					<div className={cn("p-2 pr-2.5", activeContent.className)}>
+					<div className={cn("p-2 pe-2.5", activeContent.className)}>
 						<MotionNavigationMenuContentInner
 							highlightClassName={activeContent.highlightClassName}
 							innerClassName={activeContent.innerClassName}

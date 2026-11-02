@@ -185,7 +185,7 @@ export function BudgetScopeSection({
 										{/* Only shown once raised: `silent` is every rule's default, so
 										    printing it on every row would be noise. */}
 										{rule.alert && rule.alert !== "silent"
-											? ` · ${tl("notifies {tier}", { tier: ALERT_TIER_LABELS[rule.alert] })}`
+											? ` · ${tl("notifies {tier}", { tier: tl(ALERT_TIER_LABELS[rule.alert]) })}`
 											: null}
 									</span>
 								</span>

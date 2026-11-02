@@ -127,10 +127,13 @@ export function TriStateBool({
 	onChange: (next: boolean | null) => void;
 	value: boolean | null | undefined;
 }) {
+	const tl = useLiteralMessages();
 	const items = [
 		{
 			value: "inherit",
-			label: inheritedLabel ? `Inherit (${inheritedLabel})` : "Inherit",
+			label: inheritedLabel
+				? tl("Inherit ({label})", { label: inheritedLabel })
+				: "Inherit",
 		},
 		{ value: "on", label: "On" },
 		...(addOnly ? [] : [{ value: "off", label: "Off" }]),

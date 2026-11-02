@@ -59,7 +59,7 @@ export function ProductSurfaceCards({ className }: { className?: string }) {
 						</h3>
 						<ArrowUpRight
 							aria-hidden="true"
-							className="size-4 text-muted-foreground"
+							className="size-4 text-muted-foreground rtl:-scale-x-100"
 						/>
 					</div>
 					<p className="mt-3 max-w-xs text-muted-foreground text-sm leading-relaxed">

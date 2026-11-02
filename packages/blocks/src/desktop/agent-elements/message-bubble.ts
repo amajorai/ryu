@@ -17,21 +17,21 @@ export function messageBubbleRadius(
 
 	if (align === "start") {
 		if (position === "first") {
-			return "rounded-2xl rounded-bl-md";
+			return "rounded-2xl rounded-es-md";
 		}
 		if (position === "last") {
-			return "rounded-2xl rounded-tl-md";
+			return "rounded-2xl rounded-ss-md";
 		}
-		return "rounded-2xl rounded-l-md";
+		return "rounded-2xl rounded-s-md";
 	}
 
 	if (position === "first") {
-		return "rounded-2xl rounded-br-md";
+		return "rounded-2xl rounded-ee-md";
 	}
 	if (position === "last") {
-		return "rounded-2xl rounded-tr-md";
+		return "rounded-2xl rounded-se-md";
 	}
-	return "rounded-2xl rounded-r-md";
+	return "rounded-2xl rounded-e-md";
 }
 
 export function messageGroupPositionFor(

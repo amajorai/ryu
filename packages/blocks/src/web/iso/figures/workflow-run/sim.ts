@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	APPROVAL,
 	CONDITION,
@@ -144,20 +145,44 @@ export function step(
 	}
 }
 
+/** A node's state, as the value text names it. */
+export type NodeStatus =
+	| "skipped"
+	| "completed"
+	| "awaiting-input"
+	| "running"
+	| "pending";
+
 /** A node's state, for the value text when the reader picks a node. */
-export function statusOf(sim: Sim, node: number): string {
+export function statusOf(sim: Sim, node: number): NodeStatus {
 	if (node === WEBHOOK && sim.skipped) {
 		return "skipped";
 	}
 	if (sim.completed[node]) {
-		return "completed, checkpoint saved";
+		return "completed";
 	}
 	const here = sim.at === node && sim.phase !== "roll";
 	if (here && sim.phase === "await") {
-		return "awaiting input";
+		return "awaiting-input";
 	}
 	if (here) {
 		return "running";
 	}
 	return "pending";
+}
+
+/** The spoken words for a node's state, in the reader's language. */
+export function statusLabel(status: NodeStatus, tl: LiteralMessage): string {
+	switch (status) {
+		case "skipped":
+			return tl("skipped");
+		case "completed":
+			return tl("completed, checkpoint saved");
+		case "awaiting-input":
+			return tl("awaiting input");
+		case "running":
+			return tl("running");
+		default:
+			return tl("pending");
+	}
 }

@@ -92,7 +92,7 @@ function AppTile({
 			aria-label={tl("Open {label}", { label: app.label })}
 			className={cn(
 				cn(
-					"group/app relative flex items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-left outline-hidden hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60 motion-reduce:hover:translate-y-0",
+					"group/app relative flex items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-start outline-hidden hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60 motion-reduce:hover:translate-y-0",
 					layoutStyles.authored1
 				),
 				styles.tile,
@@ -191,7 +191,7 @@ export function PinnedAppStage({
 							</ContextMenuItem>
 							<ContextMenuItem onClick={() => onOpen(app, true)}>
 								<HugeiconsIcon
-									className="mr-2 size-4"
+									className="me-2 size-4"
 									icon={ArrowUpRight01Icon}
 								/>
 								Open in new tab

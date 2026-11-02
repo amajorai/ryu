@@ -1,8 +1,9 @@
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_DIR = resolve(
-	process.env.RYU_E2E_PROOF_DIR ?? "../../docs/proof/ryu-os"
+	process.env.RYU_E2E_PROOF_DIR ?? proofEvidencePath("ryu-os")
 );
 const PROOF_SCREENSHOT = join(PROOF_DIR, "ryu-os-user-navigation-proof.png");
 const TRAY_SELECTOR = '.t-morph[data-open="true"] .t-morph-menu';

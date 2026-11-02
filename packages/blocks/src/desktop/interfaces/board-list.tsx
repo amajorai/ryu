@@ -8,7 +8,6 @@ import {
 	type InterfaceGroup,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronRight, MessageSquare, Pin, Plus } from "lucide-react";
@@ -20,7 +19,12 @@ import {
 	columnStartInput,
 } from "./board-column.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	compactAge,
+	fullTimestamp,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 /** Attribute the list's arrow-key navigation looks for. */
 export const BOARD_ROW_ATTRIBUTE = "data-board-row";
@@ -122,7 +126,7 @@ function BoardListRow({
 	return (
 		<li
 			className={cn(
-				"relative flex h-11 scroll-mt-9 items-center gap-3 border-border/50 border-b pr-4 pl-5 text-sm",
+				"relative flex h-11 scroll-mt-9 items-center gap-3 border-border/50 border-b ps-5 pe-4 text-sm",
 				"hover:bg-muted/50 has-[[data-board-row]:focus-visible]:bg-muted/60 has-[[data-board-row]:focus-visible]:ring-2 has-[[data-board-row]:focus-visible]:ring-ring has-[[data-board-row]:focus-visible]:ring-inset",
 				selected && "bg-accent/60 hover:bg-accent/60"
 			)}
@@ -132,9 +136,10 @@ function BoardListRow({
 			<button
 				aria-current={selected ? "true" : undefined}
 				aria-describedby={detailsId}
-				className="min-w-0 shrink truncate text-left font-medium text-foreground outline-none after:absolute after:inset-0 after:content-['']"
+				className="min-w-0 shrink truncate text-start font-medium text-foreground outline-none after:absolute after:inset-0 after:content-['']"
 				data-board-row=""
 				data-index={index}
+				data-ryu-i18n="off"
 				onClick={() => onOpen(thread.id)}
 				tabIndex={tabStop ? 0 : -1}
 				type="button"
@@ -149,14 +154,14 @@ function BoardListRow({
 				id={detailsId}
 			>
 				<span className="sr-only">
-					{THREAD_STATUS_LABELS[status]}
+					{threadStatusLabel(status)}
 					{names ? tl(", with {names}", { names }) : ""}
 					{thread.lastMessage ? ". " : ""}
 				</span>
 				{thread.lastMessage ? (
 					<>
 						{thread.lastMessageRole === "user" ? "You: " : ""}
-						{thread.lastMessage}
+						<span data-ryu-i18n="off">{thread.lastMessage}</span>
 					</>
 				) : null}
 			</span>
@@ -191,16 +196,18 @@ function BoardListRow({
 				</span>
 				<span className="@min-[520px]:inline-flex hidden w-9 shrink-0 items-center justify-end gap-1 tabular-nums">
 					<MessageSquare aria-hidden="true" className="size-3.5 shrink-0" />
-					{thread.messageCount}
+					<span aria-hidden="true">{thread.messageCount}</span>
 					<span className="sr-only">
-						{thread.messageCount === 1 ? " message" : " messages"}
+						{tl("{count, plural, one {# message} other {# messages}}", {
+							count: thread.messageCount,
+						})}
 					</span>
 				</span>
-				<span className="w-8 text-right tabular-nums">
+				<span className="w-8 text-end tabular-nums">
 					{age ? (
 						<time
 							dateTime={thread.updatedAt}
-							title={new Date(thread.updatedAt).toLocaleString()}
+							title={fullTimestamp(thread.updatedAt)}
 						>
 							<span className="sr-only">Updated </span>
 							{age}
@@ -259,19 +266,19 @@ function BoardListSection({
 	const rowsId = `board-section-${column.id}`;
 	return (
 		<section aria-label={column.label}>
-			<header className="group/section sticky top-0 z-10 flex h-9 items-center gap-1 border-border/60 border-b bg-background bg-linear-to-b from-muted/50 to-muted/50 pr-3 pl-1.5">
+			<header className="group/section sticky top-0 z-10 flex h-9 items-center gap-1 border-border/60 border-b bg-background bg-linear-to-b from-muted/50 to-muted/50 ps-1.5 pe-3">
 				<button
 					aria-controls={rowsId}
 					aria-expanded={!collapsed}
-					className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-0.5 text-left outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring"
+					className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-0.5 text-start outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring"
 					onClick={() => onToggle(column.id)}
 					type="button"
 				>
 					<ChevronRight
 						aria-hidden="true"
 						className={cn(
-							"size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
-							!collapsed && "rotate-90"
+							"size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none rtl:-scale-x-100",
+							!collapsed && "rotate-90 rtl:-rotate-90"
 						)}
 					/>
 					<BoardGroupMark agent={agent} column={column} size="sm" />
@@ -279,9 +286,11 @@ function BoardListSection({
 						{column.label}
 					</h2>
 					<span className="text-muted-foreground text-sm tabular-nums">
-						{threads.length}
+						<span aria-hidden="true">{threads.length}</span>
 						<span className="sr-only">
-							{threads.length === 1 ? " thread" : " threads"}
+							{tl("{count, plural, one {# thread} other {# threads}}", {
+								count: threads.length,
+							})}
 						</span>
 					</span>
 				</button>
@@ -407,7 +416,7 @@ export function BoardListSkeleton() {
 					{Array.from({ length: rows }, (_, row) => `${id}-row-${row}`).map(
 						(rowId) => (
 							<div
-								className="flex h-11 items-center gap-3 border-border/50 border-b pr-4 pl-5"
+								className="flex h-11 items-center gap-3 border-border/50 border-b ps-5 pe-4"
 								key={rowId}
 							>
 								<Skeleton className="size-2 rounded-full" />

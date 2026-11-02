@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { DangerZoneProofState } from "./harness/desktop-danger-zone-proof.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare global {
 	interface Window {
@@ -13,10 +14,7 @@ declare global {
 const evidence = (name: string) =>
 	path.resolve(
 		process.env.RYU_PROOF_EVIDENCE_DIR ??
-			path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-			),
+			proofEvidencePath("test-coverage-sweep-20260924/evidence"),
 		name
 	);
 

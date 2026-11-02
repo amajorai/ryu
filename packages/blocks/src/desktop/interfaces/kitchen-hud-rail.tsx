@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -11,6 +12,12 @@ import {
 	useState,
 } from "react";
 import { GAME_PLATE, GameIconButton } from "./game-hud.tsx";
+import {
+	inlineArrowStep,
+	logicalScroll,
+	logicalSpan,
+	scrollInlineBy,
+} from "./inline-direction.ts";
 import { type HudDensity, TICKET_HEIGHT } from "./kitchen-hud-layout.ts";
 import { TicketCard } from "./kitchen-hud-ticket.tsx";
 import type {
@@ -21,7 +28,10 @@ import type {
 import type { KitchenPalette } from "./kitchen-palette.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
-/** How many tickets sit past each edge of the rail's visible area. */
+/**
+ * How many tickets sit past each edge of the rail's visible area, measured
+ * along the reading direction (`before` is the inline start).
+ */
 function useRailOverflow(
 	list: RefObject<HTMLOListElement | null>,
 	count: number
@@ -34,20 +44,25 @@ function useRailOverflow(
 			return;
 		}
 		const measure = () => {
-			const left = element.scrollLeft;
-			const right = left + element.clientWidth;
+			const { sign } = logicalScroll(element);
+			const bounds = element.getBoundingClientRect();
+			const visible = element.clientWidth;
 			let before = 0;
 			let after = 0;
 			for (const child of element.children) {
 				if (!(child instanceof HTMLElement)) {
 					continue;
 				}
-				const start = child.offsetLeft - element.offsetLeft;
-				const end = start + child.offsetWidth;
+				const { end, start } = logicalSpan(
+					child.getBoundingClientRect(),
+					bounds,
+					sign
+				);
+				const third = (end - start) / 3;
 				// A ticket counts as hidden once most of it is out of view.
-				if (end - child.offsetWidth / 3 > right) {
+				if (end - third > visible) {
 					after += 1;
-				} else if (start + child.offsetWidth / 3 < left) {
+				} else if (start + third < 0) {
 					before += 1;
 				}
 			}
@@ -180,20 +195,21 @@ export function OrderRail({
 		if (!element) {
 			return;
 		}
-		element.scrollBy({
-			behavior: reduced ? "auto" : "smooth",
-			// A page is every whole ticket on screen, so it lands on a start.
-			left: direction * (element.clientWidth - RAIL_PADDING * 2 + TICKET_GAP),
-		});
+		// A page is every whole ticket on screen, so it lands on a start.
+		scrollInlineBy(
+			element,
+			direction * (element.clientWidth - RAIL_PADDING * 2 + TICKET_GAP),
+			reduced ? "auto" : "smooth"
+		);
 	};
 	const onFocusMove = (event: KeyboardEvent<HTMLButtonElement>) => {
 		const keys: Record<string, number> = {
-			ArrowLeft: -1,
-			ArrowRight: 1,
 			End: Number.POSITIVE_INFINITY,
 			Home: Number.NEGATIVE_INFINITY,
 		};
-		const step = keys[event.key];
+		// Left and right follow the rail's reading direction.
+		const arrow = inlineArrowStep(event.key, event.currentTarget);
+		const step = arrow === 0 ? keys[event.key] : arrow;
 		if (step === undefined || !list.current) {
 			return;
 		}
@@ -233,7 +249,7 @@ export function OrderRail({
 					>
 						<ChevronLeft
 							aria-hidden="true"
-							className="size-5"
+							className={cn("size-5", DIRECTIONAL_ICON_CLASS)}
 							strokeWidth={2.5}
 						/>
 					</GameIconButton>
@@ -307,7 +323,7 @@ export function OrderRail({
 					>
 						<ChevronRight
 							aria-hidden="true"
-							className="size-5"
+							className={cn("size-5", DIRECTIONAL_ICON_CLASS)}
 							strokeWidth={2.5}
 						/>
 					</GameIconButton>

@@ -83,7 +83,7 @@ export function Composer({ placeholder }: { placeholder: string }) {
 // Window frame, title bar and pane height of the demo window.
 export const DEMO_FRAME_CLASS =
 	"overflow-hidden rounded-2xl border border-border bg-background shadow-2xl";
-export const DEMO_PANE_CLASS = "h-[660px] text-left";
+export const DEMO_PANE_CLASS = "h-[660px] text-start";
 
 export function DemoTitleBar({ title }: { title: string }) {
 	return (
@@ -91,7 +91,7 @@ export function DemoTitleBar({ title }: { title: string }) {
 			<span className="size-2.5 rounded-full bg-foreground/15" />
 			<span className="size-2.5 rounded-full bg-foreground/15" />
 			<span className="size-2.5 rounded-full bg-foreground/15" />
-			<span className="ml-3 truncate font-medium text-muted-foreground text-xs">
+			<span className="ms-3 truncate font-medium text-muted-foreground text-xs">
 				{title}
 			</span>
 		</div>

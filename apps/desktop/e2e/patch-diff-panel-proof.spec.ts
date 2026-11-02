@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { InvokeArgs } from "@tauri-apps/api/core";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const COMMIT_SHA = "abcdef012345678901234567890123456789abcd";
 const LOG_COMMAND = "git log -n 50 --pretty=format:%H%x09%s";
@@ -59,9 +60,8 @@ test("diff source controls render the selected Git result and patch preferences"
 	await expect(
 		page.getByText("No changes for this selection.", { exact: true })
 	).toHaveCount(0);
-	const evidenceDir = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+	const evidenceDir = proofEvidencePath(
+		"test-coverage-sweep-20260924/evidence"
 	);
 	await mkdir(evidenceDir, { recursive: true });
 	await page.screenshot({
@@ -174,9 +174,8 @@ test("diff source controls render the selected Git result and patch preferences"
 		command: "shell_execute",
 	});
 
-	const evidencePath = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-patch-diff-sources.png"
+	const evidencePath = proofEvidencePath(
+		"test-coverage-sweep-20260924/evidence/desktop-patch-diff-sources.png"
 	);
 	await mkdir(path.dirname(evidencePath), { recursive: true });
 	await page.screenshot({

@@ -2,6 +2,7 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import type { BrowserAnnotationSpeechRecognition } from "../src/components/panels/BrowserAnnotationSurface.tsx";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface AnnotationSpeechFixtureState {
 	current: BrowserAnnotationSpeechRecognition | null;
@@ -15,9 +16,8 @@ declare global {
 	}
 }
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-capture-annotations/annotations"
+const proofDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-capture-annotations/annotations"
 );
 const api = "/api/ext/@ryu/browser/tabs/browser-proof-start";
 interface Note {

@@ -120,7 +120,7 @@ export function RelationNode({ data, selected }: NodeProps<FlowRelationNode>) {
 			</div>
 			{usage === null ? null : (
 				<Badge
-					className="absolute right-[-4px] bottom-[-2px] shrink-0"
+					className="absolute end-[-4px] bottom-[-2px] shrink-0"
 					typography="code-micro"
 					variant="secondary"
 				>

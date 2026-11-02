@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import type { JoinAck } from "@ryuhq/core-client/realtime.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -142,18 +143,22 @@ export function useChatPresence({
 	// here. Empty when alone, so nothing renders in the common single-user case.
 	const presenceLabel = useMemo(() => {
 		const members = Object.values(remotePresence);
-		const typingNames = members
+		const typing = members
 			.filter((m) => m.typing)
-			.map((m) => m.name?.trim() || "Someone");
-		if (typingNames.length > 0) {
-			const verb = typingNames.length === 1 ? "is" : "are";
-			return `${typingNames.join(", ")} ${verb} typing…`;
+			.map((m) => m.name?.trim() || tl("Someone"));
+		if (typing.length > 0) {
+			return tl(
+				"{count, plural, one {{names} is typing…} other {{names} are typing…}}",
+				{ count: typing.length, names: typing.join(", ") }
+			);
 		}
-		const presentNames = members.map((m) => m.name?.trim() || "Someone");
-		if (presentNames.length > 0) {
-			return presentNames.length === 1
-				? `${presentNames[0]} is here`
-				: `${presentNames.length} others here`;
+		const present = members.map((m) => m.name?.trim() || tl("Someone"));
+		if (present.length > 0) {
+			return present.length === 1
+				? tl("{name} is here", { name: present[0] ?? "" })
+				: tl("{count, plural, one {# other here} other {# others here}}", {
+						count: present.length,
+					});
 		}
 		return null;
 	}, [remotePresence]);

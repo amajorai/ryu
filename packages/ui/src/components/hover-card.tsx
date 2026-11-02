@@ -29,7 +29,7 @@ function mergeChatNavigationTriggerClasses(
 	className: PreviewCardPrimitive.Trigger.Props["className"]
 ): PreviewCardPrimitive.Trigger.Props["className"] {
 	const recipe =
-		"group/toc-item relative flex h-6 cursor-pointer items-center gap-2 py-1 text-left";
+		"group/toc-item relative flex h-6 cursor-pointer items-center gap-2 py-1 text-start";
 	if (isNativeFunction(className)) {
 		return (state) => {
 			const custom = className(state);

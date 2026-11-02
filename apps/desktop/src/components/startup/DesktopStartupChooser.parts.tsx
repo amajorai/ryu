@@ -4,6 +4,7 @@ import {
 	ShuffleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Popover,
 	PopoverContent,
@@ -213,7 +214,7 @@ export function ContinueButton({
 	return (
 		<button
 			className={cn(
-				"flex h-10 min-w-56 items-center justify-between gap-3 rounded-full pr-1 pl-5 font-medium text-sm text-white disabled:opacity-50",
+				"flex h-10 min-w-56 items-center justify-between gap-3 rounded-full ps-5 pe-1 font-medium text-sm text-white disabled:opacity-50",
 				GLASS,
 				GLASS_HOVER
 			)}
@@ -226,7 +227,7 @@ export function ContinueButton({
 				{busy ? (
 					<Spinner className="size-4" />
 				) : (
-					<HugeiconsIcon
+					<DirectionalIcon
 						aria-hidden="true"
 						className="size-4"
 						icon={ArrowRight02Icon}

@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { NodeSelectorProofSnapshot } from "./harness/node-selector-proof.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface NodeSelectorProofWindow extends Window {
 	__NODE_SELECTOR_PROOF__: {
@@ -14,9 +15,8 @@ interface NodeSelectorProofWindow extends Window {
 	};
 }
 
-const evidenceDirectory = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const evidenceDirectory = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 async function openSelector(

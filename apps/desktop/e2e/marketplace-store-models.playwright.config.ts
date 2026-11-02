@@ -8,6 +8,9 @@ export default defineConfig({
 	// Pays the cold Vite compile of the Store story once, outside every test.
 	globalSetup: "./harness/marketplace-store-warmup.global-setup.ts",
 	testMatch: /marketplace-store-models\.spec\.ts/,
+	// The spec is split across files under the token limit; one worker keeps
+	// them in the original order against the shared harness state.
+	workers: 1,
 	fullyParallel: false,
 	retries: 0,
 	reporter: "list",

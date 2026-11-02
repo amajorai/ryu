@@ -49,7 +49,7 @@ export function ForumHeader({
 		<header className="shrink-0 border-border border-b bg-background">
 			<div className={cn(FORUM_WRAP, "flex h-14 items-center gap-3")}>
 				<button
-					className="-ml-1.5 flex h-9 min-w-0 shrink-0 items-center gap-2 rounded-md px-1.5 outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
+					className="-ms-1.5 flex h-9 min-w-0 shrink-0 items-center gap-2 rounded-md px-1.5 outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
 					onClick={onHome}
 					type="button"
 				>
@@ -72,12 +72,12 @@ export function ForumHeader({
 					</label>
 					<Search
 						aria-hidden="true"
-						className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+						className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 						strokeWidth={2}
 					/>
 					<input
 						autoComplete="off"
-						className="h-9 w-full appearance-none rounded-full border border-transparent bg-input/50 pr-10 pl-9 text-foreground text-sm outline-none transition-[color,box-shadow,background-color] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
+						className="h-9 w-full appearance-none rounded-full border border-transparent bg-input/50 ps-9 pe-10 text-foreground text-sm outline-none transition-[color,box-shadow,background-color] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
 						id={searchId}
 						onChange={(event) => onSearch(event.target.value)}
 						onKeyDown={(event) => {
@@ -101,7 +101,7 @@ export function ForumHeader({
 							aria-label="Clear search"
 							className={cn(
 								ICON_BUTTON,
-								"absolute top-1/2 right-1 size-7 -translate-y-1/2 rounded-full"
+								"absolute end-1 top-1/2 size-7 -translate-y-1/2 rounded-full"
 							)}
 							onClick={() => onSearch("")}
 							type="button"
@@ -109,7 +109,7 @@ export function ForumHeader({
 							<X aria-hidden="true" className="size-3.5" strokeWidth={2} />
 						</button>
 					) : (
-						<Kbd className="pointer-events-none absolute top-1/2 right-2 @min-[720px]:inline-flex hidden -translate-y-1/2">
+						<Kbd className="pointer-events-none absolute end-2 top-1/2 @min-[720px]:inline-flex hidden -translate-y-1/2">
 							/
 						</Kbd>
 					)}

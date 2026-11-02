@@ -101,7 +101,7 @@ function PlanSubmenu({
 				<DropdownMenuItem disabled>
 					<HugeiconsIcon className="size-4" icon={CreditCardIcon} />
 					<span className="flex-1">{planRowLabel}</span>
-					<span className="text-right font-normal text-muted-foreground text-xs">
+					<span className="text-end font-normal text-muted-foreground text-xs">
 						{plan.currentPlanLabel}
 						{plan.trialCountdown ? (
 							<span className="block tabular-nums">{plan.trialCountdown}</span>

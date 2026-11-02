@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "Agent-Widgets sind auf diesem Knoten nicht verfügbar: Zum Aktualisieren sind delegierte Ausführungsrechte des Nutzers nötig, über die Aktualisierungsjobs nicht verfügen. Stattdessen eine http-, composio- oder statische Quelle verwenden.",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "Monitor-Widgets sind noch nicht verfügbar: Keine Host-Fähigkeit erlaubt einer App, Monitor-Ergebnisse zu lesen. Stattdessen eine http-, composio- oder statische Quelle verwenden.",
+  "The Composio action failed: {error}": "Die Composio-Aktion ist fehlgeschlagen: {error}",
+  "The Composio action returned HTTP {status}.": "Die Composio-Aktion hat HTTP {status} zurückgegeben.",
+  "The web source redirected, and redirects are not allowed.": "Die Webquelle hat umgeleitet, Umleitungen sind jedoch nicht erlaubt.",
+  "The web source returned HTTP {status}.": "Die Webquelle hat HTTP {status} zurückgegeben.",
+  "The web source sent a reply Ryu could not read: {error}": "Die Webquelle hat eine Antwort gesendet, die Ryu nicht lesen konnte: {error}",
+  "The widget's agent run failed: {error}": "Der Agent-Lauf des Widgets ist fehlgeschlagen: {error}",
+  "Widget “{title}” broke": "Widget „{title}“ ist ausgefallen",
+  "Widget “{title}” recovered": "Widget „{title}“ funktioniert wieder",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Workflow-Widgets sind noch nicht verfügbar: Keine Host-Fähigkeit erlaubt einer App, einen gespeicherten Workflow auszuführen. Stattdessen eine http-, composio- oder statische Quelle verwenden.",
+  "dashboard not found": "Dashboard nicht gefunden",
+  "kind is required": "Art ist erforderlich",
+  "name is required": "Name ist erforderlich",
+  "not found": "nicht gefunden"
+}

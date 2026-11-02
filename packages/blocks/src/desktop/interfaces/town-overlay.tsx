@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -12,9 +13,8 @@ import type { LifeBubble } from "./game3d-life.ts";
 import { LifeBubbleTag } from "./game3d-life.tsx";
 import { ActStatus } from "./interface-ask-card.tsx";
 import {
-	BUILDING_NAMES,
 	buildingLabel,
-	plural,
+	buildingName,
 	type Town,
 	type TownBuilding,
 } from "./town-model.ts";
@@ -146,7 +146,7 @@ export function TownOverlay({
 							onClick={() => onDistrict(district.id)}
 							type="button"
 						>
-							{district.name}
+							<span data-ryu-i18n="off">{district.name}</span>
 							{districtCounts ? (
 								<span className="grid h-6 min-w-6 place-items-center rounded-md bg-(--gk-plate-sunk) px-1.5 text-(--gk-ink-muted) text-[14px] tabular-nums">
 									{district.threads.length}
@@ -246,7 +246,7 @@ export function TownOverlay({
 						key={building.agent.id}
 					>
 						{bubble ? <LifeBubbleTag bubble={bubble} /> : null}
-						{building.agent.name}
+						<span data-ryu-i18n="off">{building.agent.name}</span>
 					</span>
 				);
 			})}
@@ -338,9 +338,14 @@ export function TownDirectory({
 					key={district.id}
 				>
 					<h2 className="flex items-baseline gap-2 px-2 font-semibold text-foreground text-sm">
-						{district.name}
+						<span data-ryu-i18n="off">{district.name}</span>
 						<span className="font-normal text-muted-foreground text-xs tabular-nums">
-							{plural(district.threads.length, "conversation")}
+							{tr(
+								"{count, plural, one {# conversation} other {# conversations}}",
+								{
+									count: district.threads.length,
+								}
+							)}
 						</span>
 					</h2>
 					<ul className="flex flex-col">
@@ -380,12 +385,18 @@ export function TownDirectory({
 											size={28}
 										/>
 										<span className="flex min-w-0 flex-1 flex-col">
-											<span className="truncate font-medium text-foreground text-sm">
+											<span
+												className="truncate font-medium text-foreground text-sm"
+												data-ryu-i18n="off"
+											>
 												{building.agent.name}
 											</span>
 											<span className="truncate text-muted-foreground text-xs">
-												{BUILDING_NAMES[building.kind]} ·{" "}
-												{plural(building.threads.length, "conversation")}
+												{buildingName(building.kind)} ·{" "}
+												{tr(
+													"{count, plural, one {# conversation} other {# conversations}}",
+													{ count: building.threads.length }
+												)}
 											</span>
 										</span>
 										{act ? null : <BuildingState building={building} />}

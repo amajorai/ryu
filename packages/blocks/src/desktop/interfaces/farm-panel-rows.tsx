@@ -1,15 +1,15 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { type CSSProperties, createContext, useContext } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
 import {
 	cropTitle,
 	type FarmCrop,
 	type FarmPlot,
-	FRUIT_NAMES,
+	fruitName,
 } from "./farm-model.ts";
 import { PlantGlyph } from "./farm-plants.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * A crop in a list. In the barn its section already names the status, so
@@ -28,11 +28,17 @@ export function CropRow({
 }) {
 	// With acts a crop row carries no legacy status or last-update age.
 	const actMode = useContext(FarmActMode);
-	let detail = `${THREAD_STATUS_LABELS[crop.status]} · ${FRUIT_NAMES[crop.fruit]}`;
+	let detail = tr("{status} · {fruit}", {
+		fruit: fruitName(crop.fruit),
+		status: threadStatusLabel(crop.status),
+	});
 	if (plotName) {
-		detail = `${FRUIT_NAMES[crop.fruit]} · ${plotName}`;
+		detail = tr("{fruit} · {plotName}", {
+			fruit: fruitName(crop.fruit),
+			plotName,
+		});
 	} else if (actMode) {
-		detail = FRUIT_NAMES[crop.fruit];
+		detail = fruitName(crop.fruit);
 	}
 	return (
 		<li>
@@ -48,7 +54,10 @@ export function CropRow({
 			>
 				<PlantGlyph className="size-8" fruit={crop.fruit} stage={crop.stage} />
 				<span className="flex min-w-0 flex-col gap-0.5">
-					<span className="truncate font-medium text-foreground text-sm">
+					<span
+						className="truncate font-medium text-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{cropTitle(crop.thread)}
 					</span>
 					<span className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
@@ -104,18 +113,14 @@ export function Ledger({
 				</div>
 				<div className="flex min-w-0 flex-col gap-1 py-2.5 pl-3">
 					<dt className={label}>Crop</dt>
-					<dd className="truncate text-foreground">
-						{FRUIT_NAMES[crop.fruit]}
-					</dd>
+					<dd className="truncate text-foreground">{fruitName(crop.fruit)}</dd>
 				</div>
 				{actMode ? null : (
 					<div className="flex min-w-0 flex-col gap-1 py-2.5 pl-3">
 						<dt className={label}>Status</dt>
 						<dd className="flex min-w-0 items-center gap-1.5 text-foreground">
 							<BoardStatusDot status={crop.status} />
-							<span className="truncate">
-								{THREAD_STATUS_LABELS[crop.status]}
-							</span>
+							<span className="truncate">{threadStatusLabel(crop.status)}</span>
 						</dd>
 					</div>
 				)}

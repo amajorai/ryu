@@ -1,3 +1,4 @@
+import { activeLocale, numberFormatter } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
@@ -38,7 +39,7 @@ export function SheetSummaryBar({
 				<>
 					<span className="text-muted-foreground">Sum</span>
 					<span className="text-foreground tabular-nums">
-						{totals.messages.toLocaleString()}
+						{numberFormatter(activeLocale()).format(totals.messages)}
 					</span>
 				</>
 			);
@@ -64,7 +65,7 @@ export function SheetSummaryBar({
 		>
 			<p
 				aria-live="polite"
-				className="sticky left-0 z-10 flex shrink-0 items-center truncate bg-background text-foreground/80 tabular-nums"
+				className="sticky start-0 z-10 flex shrink-0 items-center truncate bg-background text-foreground/80 tabular-nums"
 				style={{
 					paddingInlineStart: SHEET_GUTTER_WIDTH + 10,
 					width: SHEET_GUTTER_WIDTH + widths.title,

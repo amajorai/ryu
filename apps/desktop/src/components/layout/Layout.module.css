@@ -2,8 +2,10 @@
 	opacity: var(--desktop-inline1-opacity);
 }
 
+/* Logical, like the shared <Sidebar>: the docked sidebar sits at the inline
+   start (the physical right under RTL), so its edge handle must follow it. */
 .inline2 {
-	left: var(--desktop-inline2-left);
+	inset-inline-start: var(--desktop-inline2-inset-Start);
 	touch-action: none;
 }
 
@@ -16,7 +18,11 @@
 	width: var(--desktop-inline4-width);
 	pointer-events: var(--desktop-inline4-pointer-Events);
 	opacity: var(--desktop-inline4-opacity);
-	transform: var(--desktop-inline4-transform);
+	/* Hidden, the peek sits one panel width (plus its gutter) past the inline
+	   start edge; the sign is -1 in LTR and +1 in RTL (set by the peek). */
+	transform: translateX(
+		calc(var(--desktop-inline4-offset) * var(--desktop-inline4-sign, -1))
+	);
 	transition:
 		transform 280ms cubic-bezier(0.34, 1.2, 0.64, 1),
 		opacity 240ms ease-out;
@@ -30,6 +36,8 @@
 	pointer-events: auto;
 }
 
+/* Physical on purpose: the Ask Ryu rail (AssistantPanel) is pinned to the
+   window's physical right in both directions, so the reserve must match it. */
 #assistantReserve {
 	padding-right: var(--desktop-inline7-padding-Right);
 }

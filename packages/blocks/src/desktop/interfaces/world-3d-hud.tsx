@@ -58,7 +58,7 @@ export function trackerLabel(goal: TrackerGoal, tl: LiteralMessage): string {
 		return tl("Go to {agentName}: {detail}", { agentName, detail });
 	}
 	// An ask's tracker opens the ask: its name says the ask and the wait.
-	if (title.startsWith(`${agentName} asks:`)) {
+	if (goal.askId) {
 		const wait = goal.suffix?.replace(/^·\s*/, "");
 		return wait
 			? tl("Answer {agentName}: {title}, {wait}", { agentName, title, wait })

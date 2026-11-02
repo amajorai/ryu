@@ -1,12 +1,12 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import type { KeyboardEvent } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type RecordsRow,
 	recordsBoard,
 	recordsFullTime,
-	recordsPlural,
 	recordsRelativeTime,
 } from "./records-model.ts";
 import { RecordsFaces, RecordsMark } from "./records-parts.tsx";
@@ -33,7 +33,7 @@ function BoardCard({
 	return (
 		<li>
 			<button
-				className="flex w-full flex-col gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-left text-[13px] shadow-xs outline-none transition-colors hover:border-foreground/20 focus-visible:ring-2 focus-visible:ring-ring"
+				className="flex w-full flex-col gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-start text-[13px] shadow-xs outline-none transition-colors hover:border-foreground/20 focus-visible:ring-2 focus-visible:ring-ring"
 				onClick={onOpen}
 				onFocus={onFocus}
 				onKeyDown={onKeyDown}
@@ -43,7 +43,10 @@ function BoardCard({
 			>
 				<span className="flex min-w-0 items-center gap-2">
 					<RecordsMark agent={row.agent} name={row.name} size={20} />
-					<span className="truncate font-medium text-foreground">
+					<span
+						className="truncate font-medium text-foreground"
+						data-ryu-i18n="off"
+					>
 						{row.name}
 					</span>
 				</span>
@@ -52,7 +55,9 @@ function BoardCard({
 						<RecordsFaces agents={row.members} limit={3} />
 					) : null}
 					<span className="truncate">
-						{recordsPlural(row.threads.length, "thread")}
+						{tr("{count, plural, one {# thread} other {# threads}}", {
+							count: row.threads.length,
+						})}
 						{row.needsYou > 0 ? (
 							<>
 								{" · "}
@@ -105,7 +110,7 @@ export function RecordsBoard({
 	return (
 		<div className="flex min-h-full gap-2 p-4" data-testid="records-board">
 			{columns.map((column) => {
-				const label = THREAD_STATUS_LABELS[column.status];
+				const label = threadStatusLabel(column.status);
 				return (
 					<section
 						aria-label={`${label}, ${column.rows.length}`}

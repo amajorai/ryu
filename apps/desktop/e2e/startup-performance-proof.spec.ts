@@ -1,12 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
 // the tracked proof ledger; without it the committed evidence is refreshed.
 const proofDir =
-	process.env.RYU_PROOF_EVIDENCE_DIR ??
-	path.resolve(import.meta.dirname, "../../../docs/proof/performance-sweep");
+	process.env.RYU_PROOF_EVIDENCE_DIR ?? proofEvidencePath("performance-sweep");
 test.setTimeout(120_000);
 
 test("settings implementations stay deferred, open from actions, and reopen normally", async ({

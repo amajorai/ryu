@@ -8,6 +8,7 @@ import {
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -260,7 +261,7 @@ export function useCommandSearchSections() {
 					() => openTab(`/channels/${channel.id}`, { title: channel.name }),
 					{
 						icon: SECTION_ICONS.channels,
-						subtitle: CHANNEL_LABELS[channel.channelType],
+						subtitle: tl(CHANNEL_LABELS[channel.channelType]),
 						timestamp: toTimestamp(channel.updatedAt ?? channel.createdAt),
 					}
 				)
@@ -316,7 +317,13 @@ export function useCommandSearchSections() {
 						),
 					{
 						icon: SECTION_ICONS.identities,
-						subtitle: `${formatCount(profile.connections.length) ?? "—"} ${profile.connections.length === 1 ? "connection" : "connections"}`,
+						subtitle: tl(
+							"{count, plural, one {{shown} connection} other {{shown} connections}}",
+							{
+								count: profile.connections.length,
+								shown: formatCount(profile.connections.length) ?? "—",
+							}
+						),
 					}
 				)
 			),
@@ -383,7 +390,9 @@ export function useCommandSearchSections() {
 							icon: DeliverySecure01Icon,
 							subtitle:
 								space.description ??
-								`${space.documentCount} ${space.documentCount === 1 ? "doc" : "docs"}`,
+								tl("{count, plural, one {# doc} other {# docs}}", {
+									count: space.documentCount,
+								}),
 							timestamp: toTimestamp(space.updatedAt || space.createdAt),
 						}
 					)

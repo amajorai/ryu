@@ -109,7 +109,7 @@ export function ModelSearchHeader({
 		<div className="flex items-center gap-3 border-border border-b px-4 py-3">
 			<div className="relative max-w-sm flex-1">
 				<HugeiconsIcon
-					className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+					className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 					icon={Search01Icon}
 				/>
 				<Input
@@ -148,7 +148,7 @@ export function ModelListRow({
 }) {
 	return (
 		<button
-			className={`flex w-full flex-col gap-1 border-border border-b px-4 py-3 text-left transition-colors ${
+			className={`flex w-full flex-col gap-1 border-border border-b px-4 py-3 text-start transition-colors ${
 				selected ? "bg-muted" : "hover:bg-accent/50"
 			}`}
 			onClick={onSelect}
@@ -234,14 +234,14 @@ export function QuantFileRow({
 			<span className="font-mono">{file.quant}</span>
 			<span className="text-muted-foreground">{file.size}</span>
 			<ModelFitIndicator
-				className="ml-2"
+				className="ms-2"
 				fit={file.fit}
 				label={file.fitLabel}
 			/>
 			{isSlowFit(file.fit) && file.state !== "installed" && (
 				<span className="text-status-warning text-xs">{SLOW_FIT_WARNING}</span>
 			)}
-			<div className="ml-auto">{action}</div>
+			<div className="ms-auto">{action}</div>
 		</div>
 	);
 }

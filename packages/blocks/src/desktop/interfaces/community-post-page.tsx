@@ -83,7 +83,7 @@ export function PostPage({
 							>
 								<ArrowLeft
 									aria-hidden="true"
-									className="size-4"
+									className="size-4 rtl:-scale-x-100"
 									strokeWidth={2}
 								/>
 							</button>

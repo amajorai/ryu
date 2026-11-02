@@ -14,7 +14,8 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { accountBackendTarget } from "../../core/authBackend.ts";
 import { useCore } from "../../core/CoreContext.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { formatCliDateTime } from "../../i18n/format.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 
 const SESSION_WINDOW = 8;
 
@@ -87,13 +88,10 @@ function deviceName(userAgent: string | null): string {
 }
 
 function formatCreatedAt(value: string | null): string {
-	if (!value) {
-		return "created date unavailable";
-	}
-	const timestamp = Date.parse(value);
-	return Number.isFinite(timestamp)
-		? `Created ${new Date(timestamp).toLocaleString()}`
-		: "created date unavailable";
+	const created = value ? formatCliDateTime(value) : null;
+	return created
+		? tf("Created {date}", { date: created })
+		: tr("created date unavailable");
 }
 
 async function listSessions(

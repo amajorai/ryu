@@ -2,6 +2,7 @@ import {
 	AudioWave01Icon,
 	UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useMemo } from "react";
 import { SECTION_ICONS } from "@/src/components/layout/sidebar-sections.ts";
@@ -27,6 +28,7 @@ export function useLibraryPeopleItems({
 	openTab: LibraryTabsValue["openTab"];
 	openTeam: (id: string | null) => void;
 }) {
+	const tl = useLiteralMessages();
 	const {
 		teams,
 		create: createTeam,
@@ -62,7 +64,10 @@ export function useLibraryPeopleItems({
 				name: t.name,
 				subtitle:
 					t.description ??
-					`${formatCount(t.members.length) ?? "—"} ${t.members.length === 1 ? "member" : "members"}`,
+					tl("{count, plural, one {{shown} member} other {{shown} members}}", {
+						count: t.members.length,
+						shown: formatCount(t.members.length) ?? "—",
+					}),
 				badge: null,
 				icon: UserMultiple02Icon,
 				updatedAt: normalizeTimestamp(t.updatedAt ?? t.createdAt),
@@ -76,7 +81,7 @@ export function useLibraryPeopleItems({
 					return Promise.resolve(removeTeam(t.id)).then(mutationResult);
 				},
 			})),
-		[teams, openTeam, removeTeam]
+		[teams, openTeam, removeTeam, tl]
 	);
 
 	const meetingItems = useMemo<LibraryItem[]>(
@@ -110,8 +115,8 @@ export function useLibraryPeopleItems({
 				type: "channel",
 				id: c.id,
 				name: c.name,
-				subtitle: CHANNEL_LABELS[c.channelType],
-				badge: c.enabled ? null : "Disabled",
+				subtitle: tl(CHANNEL_LABELS[c.channelType]),
+				badge: c.enabled ? null : tl("Disabled"),
 				status: c.enabled
 					? channelStatusKind(channelLiveStates.get(c.id))
 					: null,
@@ -129,7 +134,7 @@ export function useLibraryPeopleItems({
 					return Promise.resolve(removeChannel(c.id)).then(mutationResult);
 				},
 			})),
-		[channelLiveStates, channels, openTab, updateChannel, removeChannel]
+		[channelLiveStates, channels, openTab, updateChannel, removeChannel, tl]
 	);
 
 	const identityItems = useMemo<LibraryItem[]>(
@@ -147,10 +152,16 @@ export function useLibraryPeopleItems({
 					type: "identity" as const,
 					id: p.profile_id,
 					name: p.profile_id,
-					subtitle: `${formatCount(count) ?? "—"} ${count === 1 ? "connection" : "connections"}`,
+					subtitle: tl(
+						"{count, plural, one {{shown} connection} other {{shown} connections}}",
+						{ count, shown: formatCount(count) ?? "—" }
+					),
 					badge:
 						count > 0
-							? `${formatCount(authenticated) ?? "—"}/${formatCount(count) ?? "—"} signed in`
+							? tl("{authenticated}/{count} signed in", {
+									authenticated: formatCount(authenticated) ?? "—",
+									count: formatCount(count) ?? "—",
+								})
 							: null,
 					icon: SECTION_ICONS.identities,
 					updatedAt: normalizeTimestamp(latest),
@@ -175,7 +186,7 @@ export function useLibraryPeopleItems({
 					},
 				};
 			}),
-		[profiles, openTab, removeIdentity]
+		[profiles, openTab, removeIdentity, tl]
 	);
 
 	return {

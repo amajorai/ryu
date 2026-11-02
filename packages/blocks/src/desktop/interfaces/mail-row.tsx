@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -38,11 +38,11 @@ function StarMark({ starred }: { starred: boolean }) {
 	);
 }
 
-function spokenRow(row: MailRowModel): string {
+function spokenRow(row: MailRowModel, tl: LiteralMessage): string {
 	return [
-		row.unread ? "Unread" : "",
-		row.thread.pinned ? "Starred" : "",
-		`From ${row.senders}`,
+		row.unread ? tl("Unread") : "",
+		row.thread.pinned ? tl("Starred") : "",
+		tl("From {senders}", { senders: row.senders }),
 		row.subject,
 		row.status?.label ?? "",
 		row.labels.map((label) => label.name).join(", "),
@@ -122,13 +122,13 @@ export function MailRow({
 			{cursor && cursorMarked ? (
 				<span
 					aria-hidden="true"
-					className="absolute inset-y-0 left-0 w-0.5 bg-primary"
+					className="absolute inset-y-0 start-0 w-0.5 bg-primary"
 					data-cursor=""
 				/>
 			) : null}
 			<span
 				className={cn(
-					"flex shrink-0 items-center gap-3 pr-3 pl-4",
+					"flex shrink-0 items-center gap-3 ps-4 pe-3",
 					density === "line" ? "h-full" : "h-5"
 				)}
 			>
@@ -145,12 +145,12 @@ export function MailRow({
 			</span>
 			<button
 				aria-current={open ? "true" : undefined}
-				aria-label={spokenRow(row)}
+				aria-label={spokenRow(row, tl)}
 				className={cn(
-					"flex min-w-0 flex-1 cursor-default text-left text-sm outline-none",
+					"flex min-w-0 flex-1 cursor-default text-start text-sm outline-none",
 					density === "line"
-						? "h-full items-center gap-3 pr-4"
-						: "flex-col gap-0.5 pr-4"
+						? "h-full items-center gap-3 pe-4"
+						: "flex-col gap-0.5 pe-4"
 				)}
 				data-mail-row={thread.id}
 				onClick={() => onOpen(thread.id)}
@@ -168,9 +168,9 @@ export function MailRow({
 								strong
 							)}
 						>
-							{row.senders}
+							<span data-ryu-i18n="off">{row.senders}</span>
 							{thread.messageCount > 1 ? (
-								<span className="ml-1 font-normal text-muted-foreground text-xs">
+								<span className="ms-1 font-normal text-muted-foreground text-xs">
 									{thread.messageCount}
 								</span>
 							) : null}
@@ -178,10 +178,16 @@ export function MailRow({
 						<span className="flex min-w-0 flex-1 items-center gap-1.5">
 							{chips}
 							<span className="min-w-0 flex-1 truncate">
-								<span className={cn("text-foreground", strong)}>
+								<span
+									className={cn("text-foreground", strong)}
+									data-ryu-i18n="off"
+								>
 									{row.subject}
 								</span>
-								<span className="text-muted-foreground"> - {row.snippet}</span>
+								<span className="text-muted-foreground">
+									{" - "}
+									<span data-ryu-i18n="off">{row.snippet}</span>
+								</span>
 							</span>
 						</span>
 						{date}
@@ -195,9 +201,9 @@ export function MailRow({
 									strong
 								)}
 							>
-								{row.senders}
+								<span data-ryu-i18n="off">{row.senders}</span>
 								{thread.messageCount > 1 ? (
-									<span className="ml-1 font-normal text-muted-foreground text-xs">
+									<span className="ms-1 font-normal text-muted-foreground text-xs">
 										{thread.messageCount}
 									</span>
 								) : null}
@@ -211,11 +217,15 @@ export function MailRow({
 									"min-w-0 flex-1 truncate text-foreground",
 									strong
 								)}
+								data-ryu-i18n="off"
 							>
 								{row.subject}
 							</span>
 						</span>
-						<span className="w-full min-w-0 truncate text-muted-foreground">
+						<span
+							className="w-full min-w-0 truncate text-muted-foreground"
+							data-ryu-i18n="off"
+						>
 							{row.snippet}
 						</span>
 					</>

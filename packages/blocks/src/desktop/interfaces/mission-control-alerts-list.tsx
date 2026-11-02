@@ -75,7 +75,7 @@ export function WholeRowList({
 			</div>
 			{clipped ? (
 				<button
-					className="mx-1 flex shrink-0 items-center gap-1.5 rounded-md px-2 text-left text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+					className="mx-1 flex shrink-0 items-center gap-1.5 rounded-md px-2 text-start text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 					onClick={page}
 					style={{ height: MORE_ROW_PX }}
 					type="button"

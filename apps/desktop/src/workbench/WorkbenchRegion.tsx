@@ -186,8 +186,8 @@ export function WorkbenchRegion({
 			aria-label={label}
 			className={cn(
 				"relative min-h-0 min-w-0 overflow-hidden border-border bg-background",
-				region === "left" && "border-r",
-				region === "right" && "border-l",
+				region === "left" && "border-e",
+				region === "right" && "border-s",
 				region === "bottom" && "border-t",
 				className
 			)}

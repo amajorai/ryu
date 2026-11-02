@@ -1,3 +1,5 @@
+import { activeLocale, numberFormatter } from "@ryu/i18n/lite";
+
 /** Native numeric formatting rejects non-numbers without coercing them. The ticker
  * owns String presentation for those operands, including legacy stored counts. */
 /** Native conversion reads these method slots lazily, and permits malformed slots
@@ -20,94 +22,117 @@ export type CountFormattingInput =
 
 const MILLION = 1_000_000;
 
-const INTEGER_FORMATTER = new Intl.NumberFormat("en-US", {
-	maximumFractionDigits: 0,
-});
+/**
+ * The tag every English locale formats with. English output is the product's
+ * display policy (`1,234`, `1.2m`, `$1.2m`) and stays byte-identical whatever
+ * the English variant, so `en-GB` does not start printing `US$`.
+ */
+const ENGLISH_FORMAT_LOCALE = "en-US";
 
-const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
-	maximumFractionDigits: 3,
-});
-
-const MILLION_FORMATTER = new Intl.NumberFormat("en-US", {
+const INTEGER_OPTIONS: Intl.NumberFormatOptions = { maximumFractionDigits: 0 };
+const NUMBER_OPTIONS: Intl.NumberFormatOptions = { maximumFractionDigits: 3 };
+const MILLION_OPTIONS: Intl.NumberFormatOptions = { maximumFractionDigits: 1 };
+const COMPACT_OPTIONS: Intl.NumberFormatOptions = {
+	compactDisplay: "short",
 	maximumFractionDigits: 1,
-});
+	minimumFractionDigits: 0,
+	notation: "compact",
+};
 
 function isFiniteNumber(value: CountFormattingInput): value is number {
 	return value !== null && value !== undefined && Number.isFinite(value);
 }
 
+/** English (or no usable tag) formats with the fixed English policy. */
+function isEnglish(locale: string | null | undefined): boolean {
+	return !locale || /^en(?:-|$)/iu.test(locale);
+}
+
+function formatLocale(locale: string | null | undefined): string {
+	return isEnglish(locale) ? ENGLISH_FORMAT_LOCALE : (locale as string);
+}
+
 /**
  * Format a count without hiding the thousands digit-by-digit.
  *
- * Counts below one million use comma separators (`1,234`); million-scale
- * counts use a compact, lowercase suffix (`1.2m`). This is the display policy
- * shared by the website and desktop app.
+ * Counts below one million use the locale's grouping (`1,234`, `1.234`);
+ * million-scale counts are compact. English keeps its lowercase suffix
+ * (`1.2m`), the display policy shared by the website and desktop app; other
+ * locales use their own compact form (`1,2 Mio.`, `123万`). `locale` defaults
+ * to the language the UI is showing.
  */
-export function formatCount(value: CountFormattingInput): string | null {
+export function formatCount(
+	value: CountFormattingInput,
+	locale: string = activeLocale()
+): string | null {
 	if (!isFiniteNumber(value)) {
 		return null;
 	}
+	const english = isEnglish(locale);
+	const tag = formatLocale(locale);
 
 	if (Math.abs(value) >= MILLION) {
-		return `${MILLION_FORMATTER.format(value / MILLION)}m`;
+		return english
+			? `${numberFormatter(tag, MILLION_OPTIONS).format(value / MILLION)}m`
+			: numberFormatter(tag, COMPACT_OPTIONS).format(value);
 	}
 
-	return Number.isInteger(value)
-		? INTEGER_FORMATTER.format(value)
-		: NUMBER_FORMATTER.format(value);
+	return numberFormatter(
+		tag,
+		Number.isInteger(value) ? INTEGER_OPTIONS : NUMBER_OPTIONS
+	).format(value);
 }
 
 /** Format a required numeric readout, returning an em dash for bad input. */
-export function formatNumber(value: number | null | undefined): string {
-	return formatCount(value) ?? "—";
-}
-
-function formatCurrencyParts(
-	value: number,
-	currency: string,
-	options: Intl.NumberFormatOptions
+export function formatNumber(
+	value: number | null | undefined,
+	locale: string = activeLocale()
 ): string {
-	const formatter = new Intl.NumberFormat("en-US", {
-		currency: currency.toUpperCase(),
-		style: "currency",
-		...options,
-	});
-	return formatter.format(value);
+	return formatCount(value, locale) ?? "—";
 }
 
 /**
  * Format a currency amount in its display unit.
  *
- * Normal amounts keep currency decimals and comma separators. Values at or
- * above one million use a lowercase compact suffix (`$1.2m`) so a large
- * balance does not overwhelm a card or table row.
+ * Normal amounts keep currency decimals and the locale's separators. Values at
+ * or above one million are compact so a large balance does not overwhelm a card
+ * or table row: English keeps its lowercase suffix (`$1.2m`), other locales use
+ * their own compact currency form. `locale` defaults to the UI's language.
  */
 export function formatCurrency(
 	value: number | null | undefined,
 	currency = "USD",
-	options: Intl.NumberFormatOptions = {}
+	options: Intl.NumberFormatOptions = {},
+	locale: string = activeLocale()
 ): string {
 	if (!isFiniteNumber(value)) {
 		return "—";
 	}
+	const tag = formatLocale(locale);
+	const code = currency.toUpperCase();
 
 	if (Math.abs(value) >= MILLION) {
-		const parts = new Intl.NumberFormat("en-US", {
-			compactDisplay: "short",
-			currency: currency.toUpperCase(),
-			maximumFractionDigits: 1,
-			minimumFractionDigits: 0,
-			notation: "compact",
+		const formatter = numberFormatter(tag, {
+			...COMPACT_OPTIONS,
+			currency: code,
 			style: "currency",
-		}).formatToParts(value);
-		return parts
+		});
+		if (!isEnglish(locale)) {
+			return formatter.format(value);
+		}
+		return formatter
+			.formatToParts(value)
 			.map((part) =>
 				part.type === "compact" ? part.value.toLowerCase() : part.value
 			)
 			.join("");
 	}
 
-	return formatCurrencyParts(value, currency, options);
+	return numberFormatter(tag, {
+		currency: code,
+		style: "currency",
+		...options,
+	}).format(value);
 }
 
 /** Format integer minor currency units such as cents. */
@@ -117,12 +142,14 @@ export function formatMinorCurrency(
 	options: Intl.NumberFormatOptions = {
 		maximumFractionDigits: 2,
 		minimumFractionDigits: 2,
-	}
+	},
+	locale: string = activeLocale()
 ): string {
 	return formatCurrency(
 		isFiniteNumber(minor) ? minor / 100 : null,
 		currency,
-		options
+		options,
+		locale
 	);
 }
 
@@ -130,7 +157,8 @@ export function formatMinorCurrency(
 export function formatMicroUsd(
 	microUsd: number | null | undefined,
 	currency = "USD",
-	maximumFractionDigits = 4
+	maximumFractionDigits = 4,
+	locale: string = activeLocale()
 ): string {
 	return formatCurrency(
 		isFiniteNumber(microUsd) ? microUsd / MILLION : null,
@@ -138,6 +166,7 @@ export function formatMicroUsd(
 		{
 			maximumFractionDigits,
 			minimumFractionDigits: 2,
-		}
+		},
+		locale
 	);
 }

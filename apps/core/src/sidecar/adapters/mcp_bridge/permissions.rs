@@ -108,22 +108,20 @@ pub(super) async fn require_agent_builder_configure_permission(
     }
 }
 
-/// Whether `gate_id` changes Gateway or routing settings. Those are approved one
-/// call at a time: "Allow for this chat" covers every later call to the tool
-/// whatever its arguments, so one approved budget edit would let a later,
-/// injected edit of a different section run without asking.
-pub(super) fn is_gateway_settings_change(gate_id: &str) -> bool {
-    crate::self_api::is_mutating(gate_id)
-        && crate::self_api::route_for(gate_id).is_some_and(|route| {
-            route.path_template.starts_with("/api/gateway/")
-                || route.path_template.starts_with("/api/routing/")
-        })
+/// Whether `gate_id` changes settings that are approved one call at a time:
+/// Gateway or routing configuration, preferences (approval mode, the command
+/// scan, trusted workspaces) and workspace trust. "Allow for this chat" covers
+/// every later call to the tool whatever its arguments, so one approved edit
+/// would let a later, injected edit run without asking. See
+/// [`crate::approvals::chat_grants::requires_per_call_consent`].
+pub(super) fn requires_per_call_consent(gate_id: &str) -> bool {
+    crate::approvals::chat_grants::requires_per_call_consent(gate_id)
 }
 
 /// The in-chat permission card's choices for `gate_id`: no "Allow for this
-/// chat" for a Gateway or routing change (see [`is_gateway_settings_change`]).
+/// chat" for a per-call change (see [`requires_per_call_consent`]).
 pub(super) fn consent_options(gate_id: &str) -> Value {
-    if is_gateway_settings_change(gate_id) {
+    if requires_per_call_consent(gate_id) {
         return json!([
             { "optionId": "allow_once", "name": "Allow once", "kind": "allow_once" },
             { "optionId": "reject_once", "name": "Deny", "kind": "reject_once" }
@@ -155,4 +153,25 @@ pub(super) fn in_chat_consent_title(tool_id: &str, args: &Value) -> String {
         };
     }
     format!("run {tool_id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn offers_allow_for_this_chat(gate_id: &str) -> bool {
+        consent_options(gate_id)
+            .as_array()
+            .expect("consent options are a list")
+            .iter()
+            .any(|option| option["optionId"] == "allow_session")
+    }
+
+    #[test]
+    fn policy_and_gateway_changes_are_offered_allow_once_only() {
+        assert!(!offers_allow_for_this_chat("ryu_api.put_api_preferences_key"));
+        assert!(offers_allow_for_this_chat(
+            "ryu_api.put_api_models_id_launch_config"
+        ));
+    }
 }

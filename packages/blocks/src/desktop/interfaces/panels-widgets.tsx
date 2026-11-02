@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -10,10 +11,10 @@ import { type ReactNode, useId } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import { agentById, compactAge } from "./interface-renderer.ts";
+import { ActivityLine } from "./panels-activity-line.tsx";
 import {
 	activityItems,
 	buildAgentRows,
-	type PanelsActivity,
 	type PanelsAgentRow,
 	type PanelsHeaderAction,
 	type PanelsTarget,
@@ -75,7 +76,7 @@ function Panel({
 				{action ? (
 					<button
 						aria-label={action.label}
-						className="-mr-1.5 h-7 min-w-0 max-w-[60%] shrink truncate rounded-md px-1.5 font-medium text-muted-foreground text-xs outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						className="-me-1.5 h-7 min-w-0 max-w-[60%] shrink truncate rounded-md px-1.5 font-medium text-muted-foreground text-xs outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 						data-testid="panels-panel-action"
 						onClick={() => onTarget(action.target)}
 						title={action.label}
@@ -98,7 +99,7 @@ function PanelEmpty({ children }: { children: ReactNode }) {
 
 /** Rows bleed 8px past the hairlines so the hover fill has room around text. */
 const ROW_CLASS =
-	"-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+	"-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-2.5 text-start outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 const LIST_CLASS = "flex flex-col divide-y divide-border";
 
@@ -138,17 +139,26 @@ export function WorkingPanel({ action, now, onTarget, snapshot }: PanelProps) {
 									/>
 									<span className="flex min-w-0 flex-1 flex-col gap-1">
 										<span className="flex h-6 items-center gap-3">
-											<span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
+											<span
+												className="min-w-0 flex-1 truncate font-medium text-foreground text-sm"
+												data-ryu-i18n="off"
+											>
 												{thread.title}
 											</span>
 											{lead ? (
-												<span className="shrink-0 text-muted-foreground text-xs">
+												<span
+													className="shrink-0 text-muted-foreground text-xs"
+													data-ryu-i18n="off"
+												>
 													{lead.name}
 												</span>
 											) : null}
 										</span>
 										<span className="flex items-center gap-3">
-											<span className="min-w-0 flex-1 truncate text-muted-foreground text-sm">
+											<span
+												className="min-w-0 flex-1 truncate text-muted-foreground text-sm"
+												data-ryu-i18n="off"
+											>
 												{threadExcerpt(thread)}
 											</span>
 											<span className="flex shrink-0 items-center gap-2 text-muted-foreground text-xs tabular-nums">
@@ -201,7 +211,10 @@ export function UpcomingPanel({ action, now, onTarget, snapshot }: PanelProps) {
 										{event.title}
 										{event.count && event.count > 1 ? (
 											<span className="text-muted-foreground">
-												{tl(" · {count} runs", { count: String(event.count) })}
+												{" · "}
+												{tl("{count, plural, one {# run} other {# runs}}", {
+													count: event.count,
+												})}
 											</span>
 										) : null}
 									</span>
@@ -254,7 +267,7 @@ function AgentState({ now, row }: { now: number; row: PanelsAgentRow }) {
 	return (
 		<span className="flex w-14 shrink-0 items-center justify-end gap-2 text-muted-foreground text-xs tabular-nums">
 			{marked && row.status ? <BoardStatusDot status={row.status} /> : null}
-			<span className="w-7 text-right">
+			<span className="w-7 text-end">
 				{row.thread ? compactAge(row.thread.updatedAt, now) : "New"}
 			</span>
 		</span>
@@ -262,11 +275,21 @@ function AgentState({ now, row }: { now: number; row: PanelsAgentRow }) {
 }
 
 const AGENT_STATE_NAMES: Record<ThreadStatus, string> = {
-	attention: "needs a retry",
-	quiet: "idle",
-	waiting: "idle",
-	working: "working",
-	"your-turn": "waiting on you",
+	get attention() {
+		return tr("needs a retry");
+	},
+	get quiet() {
+		return tr("idle");
+	},
+	get waiting() {
+		return tr("idle");
+	},
+	get working() {
+		return tr("working");
+	},
+	get "your-turn"() {
+		return tr("waiting on you");
+	},
 };
 
 export function AgentsPanel({ action, now, onTarget, snapshot }: PanelProps) {
@@ -300,7 +323,10 @@ export function AgentsPanel({ action, now, onTarget, snapshot }: PanelProps) {
 									name={row.agent.name}
 									size={24}
 								/>
-								<span className="w-16 shrink-0 truncate font-medium text-foreground text-sm">
+								<span
+									className="w-16 shrink-0 truncate font-medium text-foreground text-sm"
+									data-ryu-i18n="off"
+								>
 									{row.agent.name}
 								</span>
 								<span className="min-w-0 flex-1 truncate text-muted-foreground text-sm">
@@ -311,34 +337,13 @@ export function AgentsPanel({ action, now, onTarget, snapshot }: PanelProps) {
 						</li>
 					))}
 					{hidden > 0 ? (
-						<li className="py-2.5 pl-9 text-muted-foreground text-sm">
+						<li className="py-2.5 ps-9 text-muted-foreground text-sm">
 							{tl("{hidden} more", { hidden: String(hidden) })}
 						</li>
 					) : null}
 				</ul>
 			)}
 		</Panel>
-	);
-}
-
-function ActivityLine({ item }: { item: PanelsActivity }) {
-	const isRun = item.kind === "finished" || item.kind === "failed";
-	return (
-		<span className="min-w-0 flex-1 truncate text-sm">
-			<span className="font-medium text-foreground">{item.actor}</span>{" "}
-			<span
-				className={cn(
-					item.kind === "failed" ? "text-destructive" : "text-foreground/80"
-				)}
-			>
-				{item.verb}
-			</span>
-			{item.context ? (
-				<span className="text-muted-foreground">
-					{isRun ? ` · ${item.context}` : ` in ${item.context}`}
-				</span>
-			) : null}
-		</span>
 	);
 }
 
@@ -364,7 +369,7 @@ export function ActivityPanel({ action, now, onTarget, snapshot }: PanelProps) {
 									size={24}
 								/>
 								<ActivityLine item={item} />
-								<span className="w-8 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
+								<span className="w-8 shrink-0 text-end text-muted-foreground text-xs tabular-nums">
 									{compactAge(item.at, now)}
 								</span>
 							</>

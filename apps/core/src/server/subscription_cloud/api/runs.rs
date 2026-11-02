@@ -67,26 +67,12 @@ async fn post_result_once(
                 account_label(&record.owner, provider, record.account())
             )
         });
-    let body = record
-        .summary
-        .clone()
-        .or_else(|| record.last_error.clone())
-        .unwrap_or_else(|| format!("The task {}.", record.status));
-    let text = format!("{tag}: {body}");
+    let event = super::super::chat_event::plan_result_event(record, &tag);
     // Only the node owner reads a plan run (§0.3), so the message carries the tenancy
     // the start message did: the owner's own, signed in or not.
     let tenancy = crate::server::caller_tenancy(&auth.caller);
-    if state
-        .conversations
-        .append_message_as(
-            &record.conversation_id,
-            "assistant",
-            &text,
-            None,
-            None,
-            None,
-            tenancy,
-        )
+    if event
+        .append(&state.conversations, &record.conversation_id, None, tenancy)
         .await
         .is_ok()
     {

@@ -58,8 +58,13 @@ function useI18nValue(context: I18nContextValue | null) {
 				? {
 						availablePacks: runtime.availablePacks,
 						direction: runtime.direction,
+						formatCompactAge: runtime.formatCompactAge.bind(runtime),
 						formatDate: runtime.formatDate.bind(runtime),
+						/** Regional tag for dates and numbers (`pt-PT`); never a catalog key. */
+						formatLocale: runtime.formatLocale,
 						formatNumber: runtime.formatNumber.bind(runtime),
+						formatRelativeTime: runtime.formatRelativeTime.bind(runtime),
+						formatUnit: runtime.formatUnit.bind(runtime),
 						getSnapshot: hostMethods.getSnapshot,
 						hasOverlayMessage: (id: string) =>
 							runtime.overlayMessage(id) !== undefined,

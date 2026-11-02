@@ -78,7 +78,7 @@ export function PolicyPalette({
 						<button
 							aria-label={tl("Assign {label}", { label: policy.label })}
 							className={cn(
-								"flex w-full cursor-grab items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-left text-xs",
+								"flex w-full cursor-grab items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-start text-xs",
 								"outline-none hover:border-ring/60 focus-visible:ring-3 focus-visible:ring-ring active:cursor-grabbing"
 							)}
 							data-canvas-policy={policy.id}
@@ -206,7 +206,12 @@ function AssignForm({
 		try {
 			const done = await assignment.assign(policy.id, target);
 			if (done) {
-				onAssigned(`Assigned ${policy.label} to ${target.label}.`);
+				onAssigned(
+					tl("Assigned {label} to {target}.", {
+						label: policy.label,
+						target: target.label,
+					})
+				);
 				onClose();
 			}
 		} catch (assignError) {

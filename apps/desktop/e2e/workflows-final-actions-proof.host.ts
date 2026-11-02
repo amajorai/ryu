@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-
+import path from "node:path";
 import { z } from "zod";
 import type { ProofJsonRecord } from "./fixture-json.ts";
 import {
@@ -8,6 +8,7 @@ import {
 	parseWorkflowFixtureSave,
 	type TriggerFixtureState,
 } from "./workflow-fixture-contract.ts";
+import { workflowsProofBuildDir } from "./workflows-proof-build.ts";
 
 interface FixtureState
 	extends Pick<
@@ -20,7 +21,7 @@ interface FixtureState
 const runInputSchema = z.record(z.string(), z.string());
 
 const appHtml = await readFile(
-	"/tmp/ryu-workflows-final-actions-build/index.html",
+	path.join(workflowsProofBuildDir("final-actions"), "index.html"),
 	"utf8"
 );
 const bridgeScript = `<script>

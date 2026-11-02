@@ -228,7 +228,7 @@ export function TeamDialog({
 										{candidates.map((agent) => (
 											<li key={agent.id}>
 												<button
-													className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-muted"
+													className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start transition-colors hover:bg-muted"
 													onClick={() => addMember(agent.id)}
 													type="button"
 												>

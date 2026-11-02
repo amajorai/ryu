@@ -13,6 +13,7 @@ import {
 	type RefObject,
 	useRef,
 } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { QA_TABS, type QaTab } from "./qa-model.ts";
 import { QA_ICON_BUTTON } from "./qa-parts.tsx";
 
@@ -72,7 +73,7 @@ export function QaTopBar({
 							{query ? (
 								<button
 									aria-label="Clear search"
-									className={cn(QA_ICON_BUTTON, "-mr-1 size-6 rounded-full")}
+									className={cn(QA_ICON_BUTTON, "-me-1 size-6 rounded-full")}
 									onClick={() => {
 										onQueryChange("");
 										searchRef.current?.focus();
@@ -113,9 +114,11 @@ export function QaTabs({ counts, idFor, onSelect, panelId, tab }: QaTabsProps) {
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		const index = QA_TABS.findIndex((entry) => entry.id === tab);
 		let next = -1;
-		if (event.key === "ArrowRight") {
+		// Left and right follow the segment row's reading direction.
+		const key = logicalArrowKey(event.key, event.currentTarget);
+		if (key === "ArrowRight") {
 			next = (index + 1) % QA_TABS.length;
-		} else if (event.key === "ArrowLeft") {
+		} else if (key === "ArrowLeft") {
 			next = (index - 1 + QA_TABS.length) % QA_TABS.length;
 		} else if (event.key === "Home") {
 			next = 0;

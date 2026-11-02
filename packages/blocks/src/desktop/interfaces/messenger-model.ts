@@ -7,6 +7,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { fullTimestamp as interfaceTimestamp } from "./interface-renderer.ts";
 
 /** Key of the synthetic row that holds threads nobody is assigned to. */
 export const UNASSIGNED_KEY = "other:unassigned";
@@ -306,14 +307,7 @@ export function canStartWith(entry: MessengerEntry): boolean {
 
 /** Full, locale-formatted timestamp for tooltips and `<time>` titles. */
 export function fullTimestamp(iso: string): string {
-	const parsed = Date.parse(iso);
-	if (Number.isNaN(parsed)) {
-		return "";
-	}
-	return new Date(parsed).toLocaleString(undefined, {
-		dateStyle: "medium",
-		timeStyle: "short",
-	});
+	return interfaceTimestamp(iso);
 }
 
 /**

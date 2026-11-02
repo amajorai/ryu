@@ -1,7 +1,7 @@
-import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import type { VerticalTabSnapshot } from "./harness/vertical-tab-row-proof.tsx";
 import type { VerticalTabProofState } from "./harness/vertical-tab-row-tauri.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Shared by the vertical-tab-row proof specs (vertical-tab-row-proof.spec.ts
 // and vertical-tab-row-proof.splits.spec.ts).
@@ -13,12 +13,7 @@ declare const window: VerticalTabWindow;
 export type TabSnapshot = VerticalTabSnapshot["tabs"][number];
 
 export const evidence = (name: string) =>
-	path.resolve(
-		import.meta.dirname,
-		"../../..",
-		"docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 export const rowByTitle = (page: Page, title: string, occurrence = 0) =>
 	page

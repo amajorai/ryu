@@ -10,6 +10,7 @@ import {
 } from "@ryu/ui/components/toggle-group.tsx";
 import { IMAGE_RESIZE_PRESETS } from "@/src/lib/api/image-resize.ts";
 import type { ImageResizeRequest } from "@/src/lib/api/images.ts";
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
 import type { ImageEditorController } from "./ImageEditorDialog-interactions.ts";
 import { IMAGE_RESIZE_PRESET_ICONS } from "./ImageEditorDialog-types.ts";
 
@@ -110,8 +111,8 @@ export function ImageEditorResizePanel({
 								{preset.label}
 							</span>
 							<span className="text-muted-foreground text-xs tabular-nums leading-4">
-								{aspectLabel} · {target.width.toLocaleString()} ×{" "}
-								{target.height.toLocaleString()} px
+								{aspectLabel} · {formatLocalNumber(target.width)} ×{" "}
+								{formatLocalNumber(target.height)} px
 							</span>
 						</ToggleGroupItem>
 					)

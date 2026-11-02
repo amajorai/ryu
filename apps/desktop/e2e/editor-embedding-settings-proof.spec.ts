@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface ReindexStatusWire {
 	current_dims: number;
@@ -47,10 +48,7 @@ interface EditorEmbeddingWindow extends Window {
 // the tracked proof ledger; without it the committed evidence is refreshed.
 const EVIDENCE_DIR =
 	process.env.RYU_PROOF_EVIDENCE_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 const NODE_TOKEN = "editor-embedding-proof-node-token";
 const USER_JWT = "editor-embedding-proof-user-jwt";
 const NODE_GATEWAY_BASE = "http://127.0.0.1:7974/v1";

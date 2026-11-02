@@ -306,7 +306,7 @@ export function RidesInterface({
 		port.startThread({ agentId: driver.agent.id, prompt: text });
 		setPrompt("");
 		setTab("now");
-		setAnnouncement(`Booked ${driver.agent.name}.`);
+		setAnnouncement(tl("Booked {name}.", { name: driver.agent.name }));
 	};
 
 	const pickDriver = (agentId: string) => {

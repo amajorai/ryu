@@ -1,3 +1,5 @@
+import { translate as tr } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -298,24 +300,33 @@ export function tankSummary(snapshot: InterfaceSnapshot): TankSummary {
 	return summary;
 }
 
-export function plural(count: number, noun: string, many = `${noun}s`): string {
-	return `${count} ${count === 1 ? noun : many}`;
-}
-
 /** How a creature reads to a screen reader. */
-export function creatureDescription(creature: Creature): string {
+export function creatureDescription(
+	creature: Creature,
+	tl: LiteralMessage = tr
+): string {
 	const parts = [
-		creature.name,
-		CREATURE_LABELS[creature.kind].toLowerCase(),
-		creature.working ? "working" : "idle",
-		plural(creature.threadCount, "thread"),
+		tl(
+			"{name}, {kind, select, angelfish {angelfish} fish {reef fish} jellyfish {jellyfish} manta {manta ray} other {sea turtle}}, {working, select, yes {working} other {idle}}, {threads, plural, one {# thread} other {# threads}}",
+			{
+				kind: creature.kind,
+				name: creature.name,
+				threads: creature.threadCount,
+				working: creature.working ? "yes" : "no",
+			}
+		),
 	];
 	if (creature.counts.attention > 0) {
-		const count = creature.counts.attention;
-		parts.push(`${count} need${count === 1 ? "s" : ""} attention`);
+		parts.push(
+			tl("{count, plural, one {# needs attention} other {# need attention}}", {
+				count: creature.counts.attention,
+			})
+		);
 	}
 	if (creature.counts["your-turn"] > 0) {
-		parts.push(`${creature.counts["your-turn"]} waiting on you`);
+		parts.push(
+			tl("{count} waiting on you", { count: creature.counts["your-turn"] })
+		);
 	}
 	return parts.join(", ");
 }

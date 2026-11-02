@@ -97,6 +97,7 @@ impl AgentAdapter for AcpAdapter {
                         });
                     }
                     AcpEvent::Error(failure) => {
+                        let i18n = failure.i18n_wire();
                         chunks.push(ChatChunk {
                             delta: Some(failure.message),
                             done: false,
@@ -104,6 +105,7 @@ impl AgentAdapter for AcpAdapter {
                                 "error": true,
                                 "errorCode": failure.code,
                                 "errorTitle": failure.title,
+                                "errorI18n": i18n,
                             })),
                         });
                     }

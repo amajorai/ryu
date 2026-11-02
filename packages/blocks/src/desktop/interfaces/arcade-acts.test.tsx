@@ -23,6 +23,7 @@ const {
 	ARCADE_STATION_LAYOUT_MID,
 	ARCADE_STATION_LAYOUT_MID_NARROW,
 	cabinetWords,
+	insertCoinLines,
 	insertCoinText,
 	stationLayoutFor,
 } = await import("./arcade-acts.tsx");
@@ -405,6 +406,26 @@ describe("arcade words", () => {
 			marquee: "INSERT COIN · 15:10",
 			tone: "limit",
 		});
+	});
+
+	test("the INSERT COIN sign takes its reset time as a second line", () => {
+		const fa = named("Fa");
+		expect(insertCoinLines(fa, FIXTURE_NOW, FIXTURE_CLOCK)).toEqual({
+			head: "INSERT COIN",
+			time: "15:10",
+		});
+		const [focus] = fa.blockers;
+		if (focus) {
+			const estimated = {
+				...fa,
+				blockers: [{ ...focus, clearsAt: null, source: "estimate" as const }],
+				timer: null,
+			};
+			expect(insertCoinLines(estimated, FIXTURE_NOW, FIXTURE_CLOCK)).toEqual({
+				head: "Likely INSERT COIN",
+				time: null,
+			});
+		}
 	});
 
 	test("a failure tilts with its reason; an interruption only pauses", () => {

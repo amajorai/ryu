@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -39,9 +40,13 @@ export interface PanelsAction {
 	/** Emphasised object of the sentence, usually the thread title. */
 	subject: string | null;
 	target: PanelsTarget;
+	/** What an ask is about: the agent's role, lower-cased. */
+	topic: string | null;
 	/** RFC 3339 time the suggestion is about, for an age stamp. */
 	updatedAt: string | null;
 	verb: string;
+	/** Who the sentence names: the counterpart agent, or the agent to ask. */
+	who: string | null;
 }
 
 const ACTION_LIMIT = 4;
@@ -58,10 +63,6 @@ const ACTION_QUOTA: [ThreadStatus, number][] = [
 ];
 const WAITING_QUOTA = 1;
 
-function possessive(name: string): string {
-	return name.endsWith("s") ? `${name}'` : `${name}'s`;
-}
-
 function threadAction(
 	snapshot: InterfaceSnapshot,
 	thread: InterfaceThread,
@@ -69,28 +70,18 @@ function threadAction(
 ): PanelsAction | null {
 	const who = threadCounterpart(snapshot, thread);
 	const lead = threadAgents(snapshot, thread)[0];
-	let verb: string;
-	let rest: string;
 	let kind: PanelsActionKind;
 	if (status === "attention") {
 		kind = "retry";
-		verb = "Retry";
-		rest = who ? `${possessive(who)} failed run on` : "the failed run on";
 	} else if (status === "your-turn") {
 		kind = "reply";
-		verb = "Reply";
-		rest = who ? `to ${who} about` : "about";
-	} else if (status === "waiting") {
-		if (!who) {
-			return null;
-		}
+	} else if (status === "waiting" && who) {
 		kind = "follow-up";
-		verb = "Follow up";
-		rest = `with ${who} on`;
 	} else {
 		return null;
 	}
 	const subject = trimSentence(thread.title);
+	const words = actionWords(kind, who, subject, null);
 	return {
 		agentId: lead?.id ?? null,
 		detail: thread.lastMessage
@@ -98,31 +89,80 @@ function threadAction(
 			: null,
 		id: `thread:${thread.id}`,
 		kind,
-		rest,
-		sentence: `${verb} ${rest} ${subject}`,
+		rest: words.rest,
+		sentence: words.sentence,
 		status,
 		subject,
 		target: { kind: "open", threadId: thread.id },
+		topic: null,
 		updatedAt: thread.updatedAt,
-		verb,
+		verb: words.verb,
+		who,
 	};
 }
 
+/** An action's verb, the words after it, and the whole sentence, in the UI language. */
+function actionWords(
+	kind: PanelsActionKind,
+	who: string | null,
+	subject: string,
+	topic: string | null
+): { rest: string; sentence: string; verb: string } {
+	const values = { subject, topic: topic ?? "", who: who ?? "" };
+	switch (kind) {
+		case "retry":
+			return {
+				rest: who
+					? tr("{who}'s failed run on", values)
+					: tr("the failed run on"),
+				sentence: who
+					? tr("Retry {who}'s failed run on {subject}", values)
+					: tr("Retry the failed run on {subject}", values),
+				verb: tr("Retry"),
+			};
+		case "reply":
+			return {
+				rest: who ? tr("to {who} about", values) : tr("about"),
+				sentence: who
+					? tr("Reply to {who} about {subject}", values)
+					: tr("Reply about {subject}", values),
+				verb: tr("Reply"),
+			};
+		case "follow-up":
+			return {
+				rest: tr("with {who} on", values),
+				sentence: tr("Follow up with {who} on {subject}", values),
+				verb: tr("Follow up"),
+			};
+		default:
+			return {
+				rest: topic ? tr("{who} about {topic}", values) : (who ?? ""),
+				sentence: topic
+					? tr("Ask {who} about {topic}", values)
+					: tr("Ask {who}", values),
+				verb: tr("Ask"),
+			};
+	}
+}
+
 function askAction(agent: InterfaceAgent): PanelsAction {
-	const topic = trimSentence(agent.description);
-	const rest = topic ? `${agent.name} about ${lowerFirst(topic)}` : agent.name;
+	const description = trimSentence(agent.description);
+	const topic = description ? lowerFirst(description) : null;
+	const words = actionWords("ask", agent.name, "", topic);
 	return {
 		agentId: agent.id,
 		detail: null,
 		id: `agent:${agent.id}`,
 		kind: "ask",
-		rest,
-		sentence: `Ask ${rest}`,
+		rest: words.rest,
+		sentence: words.sentence,
 		status: null,
 		subject: null,
 		target: { agentId: agent.id, kind: "start" },
+		topic,
 		updatedAt: null,
-		verb: "Ask",
+		verb: words.verb,
+		who: agent.name,
 	};
 }
 

@@ -1,21 +1,21 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type InterfaceAgent,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronRight, Plus, Sparkles, X } from "lucide-react";
-import { type ReactNode, type RefObject, useEffect, useRef } from "react";
+import type { ReactNode, RefObject } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import { PersonaAvatar } from "./persona-avatar.tsx";
+import { useEscapeToClose } from "./persona-chat-escape.ts";
 import { PersonaComposer } from "./persona-composer.tsx";
 import {
 	clockTime,
-	countLabel,
 	dayLabel,
 	fullTime,
 	type PersonaIdea,
@@ -61,17 +61,17 @@ function SideChatStrip({
 			<div className={cn(PERSONA_COLUMN, "flex items-center gap-1 pb-2")}>
 				<nav
 					aria-label={tl("Chats with {name}", { name: agent.name })}
-					className="-ml-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1 pr-6 pl-1 [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none]"
+					className="-ms-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1 ps-1 pe-6 [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] rtl:[mask-image:linear-gradient(to_left,black_calc(100%-1.5rem),transparent)]"
 				>
 					{main ? (
 						<button
 							aria-current={activeThreadId === main.id ? "true" : undefined}
 							aria-label={tl("Main chat: {title}", {
-								title: main.title || "Untitled",
+								title: main.title || tr("Untitled"),
 							})}
 							className={cn(
 								CHIP,
-								"pl-1.5",
+								"ps-1.5",
 								chipState(activeThreadId === main.id)
 							)}
 							onClick={() => onOpen(main.id)}
@@ -88,7 +88,7 @@ function SideChatStrip({
 						/>
 					) : null}
 					{sides.length > 0 ? (
-						<span className="@max-[639px]:hidden shrink-0 pr-1 text-muted-foreground text-xs">
+						<span className="@max-[639px]:hidden shrink-0 pe-1 text-muted-foreground text-xs">
 							Side chats
 						</span>
 					) : null}
@@ -98,7 +98,7 @@ function SideChatStrip({
 						return (
 							<button
 								aria-current={selected ? "true" : undefined}
-								aria-label={`${thread.title || "Untitled"}, ${THREAD_STATUS_LABELS[status]}`}
+								aria-label={`${thread.title || tr("Untitled")}, ${threadStatusLabel(status)}`}
 								className={cn(CHIP, chipState(selected))}
 								key={thread.id}
 								onClick={() => onOpen(thread.id)}
@@ -107,7 +107,7 @@ function SideChatStrip({
 							>
 								<BoardStatusDot status={status} />
 								<span className="max-w-52 truncate">
-									{thread.title || "Untitled"}
+									{thread.title || tr("Untitled")}
 								</span>
 							</button>
 						);
@@ -205,7 +205,10 @@ function MainPreview({
 							onClick={() => onOpen(main.id)}
 							type="button"
 						>
-							{countLabel(earlier, "earlier message")}
+							{tr(
+								"{count, plural, one {# earlier message} other {# earlier messages}}",
+								{ count: earlier }
+							)}
 						</button>
 					) : null}
 					<DayMarker iso={main.updatedAt} />
@@ -221,13 +224,16 @@ function MainPreview({
 								className={cn(
 									"flex flex-col gap-1 rounded-2xl px-3.5 py-2 text-sm leading-6",
 									fromUser
-										? "rounded-br-md bg-primary text-primary-foreground"
-										: "rounded-bl-md bg-muted text-foreground"
+										? "rounded-ee-md bg-primary text-primary-foreground"
+										: "rounded-es-md bg-muted text-foreground"
 								)}
 							>
 								{/* Main threads read like a feed: a long reply is clamped
 								    here and opens in full in the real thread. */}
-								<span className="line-clamp-6 whitespace-pre-line">
+								<span
+									className="line-clamp-6 whitespace-pre-line"
+									data-ryu-i18n="off"
+								>
 									{main.lastMessage}
 								</span>
 								{main.lastMessage.length > LONG_PREVIEW_CHARS ? (
@@ -264,7 +270,7 @@ function MainPreview({
 						</p>
 					)}
 					{main.running ? (
-						<p className="flex items-center gap-2 self-start pl-10 text-muted-foreground text-xs">
+						<p className="flex items-center gap-2 self-start ps-10 text-muted-foreground text-xs">
 							<BoardStatusDot status="working" />
 							{tl("{name} is working · updated {age}", { age, name })}
 						</p>
@@ -276,7 +282,7 @@ function MainPreview({
 					{suggestions.length > 0 ? (
 						<ul
 							aria-label="Suggestions"
-							className="flex gap-2 overflow-x-auto pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none]"
+							className="flex gap-2 overflow-x-auto pe-6 [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] rtl:[mask-image:linear-gradient(to_left,black_calc(100%-1.5rem),transparent)]"
 						>
 							{suggestions.slice(0, 3).map((idea) => (
 								<li className="min-w-0 shrink-0" key={idea.id}>
@@ -290,14 +296,16 @@ function MainPreview({
 											aria-hidden="true"
 											className="size-3.5 shrink-0 text-muted-foreground"
 										/>
-										<span className="truncate">{idea.prompt}</span>
+										<span className="truncate" data-ryu-i18n="off">
+											{idea.prompt}
+										</span>
 									</button>
 								</li>
 							))}
 						</ul>
 					) : null}
 					<button
-						className="group/open flex h-10 w-full items-center gap-3 rounded-[20px] border border-border bg-background pr-3 pl-4 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+						className="group/open flex h-10 w-full items-center gap-3 rounded-[20px] border border-border bg-background ps-4 pe-3 text-start text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={() => onOpen(main.id)}
 						type="button"
 					>
@@ -306,36 +314,13 @@ function MainPreview({
 						</span>
 						<ChevronRight
 							aria-hidden="true"
-							className="size-4 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover/open:translate-x-0.5"
+							className="size-4 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover/open:translate-x-0.5 rtl:-scale-x-100 rtl:motion-safe:group-hover/open:-translate-x-0.5"
 						/>
 					</button>
 				</div>
 			</div>
 		</div>
 	);
-}
-
-/**
- * Escape anywhere in the open chat (strip or frame) closes it back to the
- * preview, unless something inside (a menu, the host composer) used it.
- */
-function useEscapeToClose(onClose: (() => void) | null) {
-	const ref = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		const element = ref.current;
-		if (!(element && onClose)) {
-			return;
-		}
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape" && !event.defaultPrevented) {
-				event.preventDefault();
-				onClose();
-			}
-		};
-		element.addEventListener("keydown", onKeyDown);
-		return () => element.removeEventListener("keydown", onKeyDown);
-	}, [onClose]);
-	return ref;
 }
 
 /** Starting a conversation: the first one with this persona, or a side chat.

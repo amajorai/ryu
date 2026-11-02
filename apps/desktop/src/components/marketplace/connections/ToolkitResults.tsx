@@ -8,6 +8,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -178,7 +179,7 @@ export function ToolkitCard({
 		}
 		await openExternal(result.redirectUrl);
 		sileo.success({
-			title: `Connecting ${toolkit.name}…`,
+			title: tl("Connecting {name}…", { name: toolkit.name }),
 			description:
 				"Authorize in your browser. The connection turns active here when you return.",
 		});
@@ -217,9 +218,9 @@ export function ToolkitCard({
 					size="sm"
 					variant="ghost"
 				>
-					<HugeiconsIcon
-						className={`mr-1 size-3.5 transition-transform ${
-							expanded ? "rotate-90" : ""
+					<DirectionalIcon
+						className={`me-1 size-3.5 transition-transform ${
+							expanded ? "rotate-90 rtl:-rotate-90" : ""
 						}`}
 						icon={ArrowRight01Icon}
 					/>
@@ -234,7 +235,7 @@ export function ToolkitCard({
 					variant={isConnected ? "outline" : "default"}
 				>
 					{!initiate.isPending && (
-						<HugeiconsIcon className="mr-1.5 size-3.5" icon={Link01Icon} />
+						<HugeiconsIcon className="me-1.5 size-3.5" icon={Link01Icon} />
 					)}
 					{isConnected ? "Reconnect" : "Connect"}
 				</Button>

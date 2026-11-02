@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowLeft } from "lucide-react";
 import { AnimatePresence } from "motion/react";
@@ -48,7 +49,7 @@ export function MomentsFlowView({
 	const modules = flow?.modules ?? [];
 	const item = modules[focusIndex];
 	const [composeOnOpen, setComposeOnOpen] = useState(false);
-	const title = flow?.name ?? "New thread";
+	const title = flow?.name ?? tr("New thread");
 	const count = modules.length;
 	return (
 		<div
@@ -60,7 +61,7 @@ export function MomentsFlowView({
 				<button
 					aria-keyshortcuts="Escape"
 					className={cn(
-						"-ml-2 inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground text-xs transition-colors hover:bg-card/50 hover:text-foreground",
+						"-ms-2 inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground text-xs transition-colors hover:bg-card/50 hover:text-foreground",
 						MOMENTS_FOCUS
 					)}
 					onClick={onBack}
@@ -69,7 +70,7 @@ export function MomentsFlowView({
 				>
 					<ArrowLeft
 						aria-hidden="true"
-						className="size-3.5"
+						className="size-3.5 rtl:-scale-x-100"
 						strokeWidth={1.5}
 					/>
 					All flows

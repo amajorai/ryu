@@ -14,6 +14,7 @@ pub mod env_scrub;
 pub mod event_subscribers;
 pub mod ext_proxy;
 pub mod external_runtime;
+pub(crate) mod extract_guard;
 pub mod gateway;
 pub mod gateway_policy;
 pub mod gen_ai_spans;
@@ -58,8 +59,10 @@ pub use manager::SidecarManager;
 /// over loopback: Tailcat's forwarding listener, a Cloudflare Quick Tunnel
 /// (whichever consumer started it: the VPN layer or webhook ingress, since a
 /// Quick Tunnel exposes every Core path either way), OpenTunnel, a plugin
-/// `network.tunnel` adapter, or Core's userspace `tailscaled` (Tailscale/Headscale),
-/// which re-originates every tailnet peer as `127.0.0.1`. While true, a loopback
+/// `network.tunnel` adapter, a configured own-relay ingress (the operator's own
+/// public reverse proxy, which may sit on this host), or Core's userspace
+/// `tailscaled` (Tailscale/Headscale), which re-originates every tailnet peer as
+/// `127.0.0.1`. While true, a loopback
 /// peer is NOT proof of a local caller. Every loopback-trust decision reads this
 /// one predicate so a new tunnel backend cannot be forgotten at one call site.
 pub(crate) fn forwarding_tunnel_active() -> bool {
@@ -72,6 +75,7 @@ pub(crate) fn forwarding_tunnel_active() -> bool {
     }
     tailcat::proxy_is_active()
         || ryu_webhook_ingress::CloudflaredSource::forwarding_active()
+        || ryu_webhook_ingress::OwnRelaySource::forwarding_active()
         || opentunnel::forwarding_active()
         || plugin_tunnel::forwarding_active()
         || tailscale::daemon_active()

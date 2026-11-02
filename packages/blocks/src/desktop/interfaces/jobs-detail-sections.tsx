@@ -3,10 +3,11 @@ import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
 import {
-	JOB_STATUS_LABELS,
 	type JobRow,
 	jobAge,
+	jobAgePhrase,
 	jobFullTime,
+	jobStatusLabel,
 	jobTimeline,
 } from "./jobs-model.ts";
 import {
@@ -35,7 +36,7 @@ export function JobTimeline({ now, row }: { now: number; row: JobRow }) {
 						{last ? null : (
 							<span
 								aria-hidden="true"
-								className="absolute top-3.5 bottom-0 left-[3px] w-px bg-border"
+								className="absolute start-[3px] top-3.5 bottom-0 w-px bg-border"
 							/>
 						)}
 						<span
@@ -100,7 +101,10 @@ export function JobDeliverable({ row }: { row: JobRow }) {
 		deliverable.from === "you" ? "You" : (row.freelancer?.name ?? "Freelancer");
 	return (
 		<figure className="flex flex-col gap-1" data-testid="jobs-deliverable">
-			<blockquote className="whitespace-pre-line text-foreground text-sm leading-5">
+			<blockquote
+				className="whitespace-pre-line text-foreground text-sm leading-5"
+				data-ryu-i18n="off"
+			>
 				{deliverable.text}
 			</blockquote>
 			<figcaption className="text-[13px] text-muted-foreground leading-[18px]">
@@ -133,7 +137,7 @@ export function JobMeta({ now, row }: { now: number; row: JobRow }) {
 				title={jobFullTime(row.thread.updatedAt)}
 			>
 				{tl("Updated {age}", {
-					age: jobAge(row.thread.updatedAt, now).toLowerCase(),
+					age: jobAgePhrase(row.thread.updatedAt, now),
 				})}
 			</time>
 		</div>
@@ -145,7 +149,10 @@ export function CompanyLine({ row }: { row: JobRow }) {
 		<div className="flex min-w-0 items-center gap-2">
 			<CompanyLogo company={row.company} size={32} />
 			<div className="flex min-w-0 flex-col">
-				<span className="truncate font-medium text-foreground text-sm leading-5">
+				<span
+					className="truncate font-medium text-foreground text-sm leading-5"
+					data-ryu-i18n="off"
+				>
 					{row.company.name}
 				</span>
 				<span className="text-[13px] text-muted-foreground leading-[18px]">
@@ -169,13 +176,16 @@ export function FreelancerLink({
 	return (
 		<button
 			aria-label={tl("View {name}'s profile", { name: agent.name })}
-			className="-mx-2 flex min-w-0 items-center gap-3 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+			className="-mx-2 flex min-w-0 items-center gap-3 rounded-md px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 			onClick={() => onView(agent.id)}
 			type="button"
 		>
 			<FreelancerAvatar agent={agent} size={40} />
 			<span className="flex min-w-0 flex-col">
-				<span className="truncate font-medium text-foreground text-sm leading-5">
+				<span
+					className="truncate font-medium text-foreground text-sm leading-5"
+					data-ryu-i18n="off"
+				>
 					{agent.name}
 				</span>
 				<span
@@ -262,7 +272,7 @@ export function JobFacts({
 		{ label: "Company", value: row.company.name },
 		...(compact
 			? []
-			: [{ label: "Status", value: JOB_STATUS_LABELS[row.status] }]),
+			: [{ label: "Status", value: jobStatusLabel(row.status) }]),
 		{ label: "Messages", value: String(row.thread.messageCount) },
 		{
 			label: "Last update",
@@ -314,13 +324,16 @@ export function RelatedJobs({
 			{rows.map((related) => (
 				<li key={related.thread.id}>
 					<button
-						className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+						className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={() => onPreview(related.thread.id)}
 						type="button"
 					>
 						<CompanyLogo company={related.company} size={32} />
 						<span className="flex min-w-0 flex-1 flex-col">
-							<span className="truncate font-medium text-foreground text-sm leading-5">
+							<span
+								className="truncate font-medium text-foreground text-sm leading-5"
+								data-ryu-i18n="off"
+							>
 								{related.title}
 							</span>
 							<span className="truncate text-[13px] text-muted-foreground leading-[18px]">

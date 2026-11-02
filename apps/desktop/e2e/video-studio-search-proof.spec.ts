@@ -2,11 +2,9 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { ProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidenceDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const evidenceDir = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 interface StudioRequest {
 	body?: unknown;

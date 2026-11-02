@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
@@ -9,10 +10,10 @@ const desktopRoot = path.resolve(harnessDir, "../..");
 export default defineConfig({
 	plugins: [react()],
 	base: "./",
-	cacheDir: path.resolve(
-		harnessDir,
-		"node_modules/.vite-settings-dialog-shell-proof"
-	),
+	// Keep the dependency cache out of the checkout's node_modules.
+	cacheDir:
+		process.env.RYU_SETTINGS_DIALOG_SHELL_VITE_CACHE ??
+		path.join(tmpdir(), "ryu-settings-dialog-shell-proof-vite"),
 	css: {
 		postcss: {
 			plugins: [tailwindcss()],

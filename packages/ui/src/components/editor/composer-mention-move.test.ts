@@ -71,4 +71,51 @@ describe("moveMention", () => {
 			{ text: "" },
 		]);
 	});
+
+	// Markdown deserializes `@image-1 @image-2` without the empty texts Slate
+	// keeps around inline voids, so the drop point lands on the gap between them.
+	const attachment = (value: string): TMentionElement => ({
+		children: [{ text: "" }],
+		key: `attachment:${value}`,
+		type: "mention",
+		value,
+	});
+
+	test("moves (never copies) a chip on a line Markdown left unnormalized", () => {
+		const { children, placed } = move(
+			[attachment("@image-1"), { text: " " }, attachment("@image-2")],
+			[0, 0],
+			{ offset: 1, path: [0, 1] }
+		);
+		expect(children).toEqual([
+			{ text: "" },
+			attachment("@image-1"),
+			{ text: " " },
+			attachment("@image-2"),
+			{ text: "" },
+		]);
+		expect(placed).toEqual([0, 1]);
+	});
+
+	test("drags @image-1 past @image-2 on a normalized line", () => {
+		const { children, placed } = move(
+			[
+				{ text: "" },
+				attachment("@image-1"),
+				{ text: " " },
+				attachment("@image-2"),
+				{ text: "" },
+			],
+			[0, 1],
+			{ offset: 0, path: [0, 4] }
+		);
+		expect(children).toEqual([
+			{ text: "" },
+			attachment("@image-2"),
+			{ text: " " },
+			attachment("@image-1"),
+			{ text: "" },
+		]);
+		expect(placed).toEqual([0, 3]);
+	});
 });

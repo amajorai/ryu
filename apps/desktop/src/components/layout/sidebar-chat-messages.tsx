@@ -114,7 +114,7 @@ export function SidebarChatMessages({
 	}
 	if (entries.length === 0) {
 		return (
-			<p className="py-1 pl-8 text-muted-foreground text-xs">No messages yet</p>
+			<p className="py-1 ps-8 text-muted-foreground text-xs">No messages yet</p>
 		);
 	}
 	return (
@@ -128,7 +128,7 @@ export function SidebarChatMessages({
 							delay={0}
 							onClick={() => onJump(entry.id, entry.title)}
 							render={
-								<button className="w-full rounded-lg pr-2 pl-8 hover:bg-sidebar-accent/60" />
+								<button className="w-full rounded-lg ps-8 pe-2 hover:bg-sidebar-accent/60" />
 							}
 							type="button"
 						>
@@ -225,10 +225,10 @@ export function ChatRowSubAccordion({
 	count?: number;
 }) {
 	return (
-		<div className="pl-4">
+		<div className="ps-4">
 			<button
 				aria-expanded={expanded}
-				className="flex h-7 w-full items-center gap-1.5 rounded-lg px-2 text-left text-muted-foreground text-xs transition-colors duration-150 hover:bg-sidebar-accent/60 hover:text-foreground hover:duration-0"
+				className="flex h-7 w-full items-center gap-1.5 rounded-lg px-2 text-start text-muted-foreground text-xs transition-colors duration-150 hover:bg-sidebar-accent/60 hover:text-foreground hover:duration-0"
 				onClick={(e) => {
 					e.stopPropagation();
 					onToggle();
@@ -236,7 +236,7 @@ export function ChatRowSubAccordion({
 				type="button"
 			>
 				<HugeiconsIcon
-					className={`size-3 transition-transform ${expanded ? "" : "-rotate-90"}`}
+					className={`size-3 transition-transform ${expanded ? "" : "-rotate-90 rtl:rotate-90"}`}
 					icon={ArrowDown01Icon}
 				/>
 				<span className="font-medium">{label}</span>

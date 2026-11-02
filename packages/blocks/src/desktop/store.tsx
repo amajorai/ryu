@@ -18,7 +18,12 @@
 
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLocalizedString, useOptionalI18n } from "@ryu/i18n/react";
+import {
+	useLiteralMessages,
+	useLocalizedString,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -209,6 +214,7 @@ export function StoreComingSoon({
 	onBrowse?: () => void;
 }) {
 	const i18n = useOptionalI18n();
+	const tl = useLiteralMessages();
 	return (
 		<Empty className="h-full">
 			<EmptyHeader>
@@ -225,10 +231,10 @@ export function StoreComingSoon({
 				<EmptyDescription>
 					{i18n?.t(
 						"marketplace.coming-soon-description",
-						{ label: label.toLowerCase() },
-						`Browsing and installing ${label.toLowerCase()} from the Store is on the way.`
+						{ label: sentenceLabel(tl, label) },
+						`Browsing and installing ${sentenceLabel(tl, label)} from the Store is on the way.`
 					) ??
-						`Browsing and installing ${label.toLowerCase()} from the Store is on the way.`}
+						`Browsing and installing ${sentenceLabel(tl, label)} from the Store is on the way.`}
 				</EmptyDescription>
 			</EmptyHeader>
 			{onBrowse ? (

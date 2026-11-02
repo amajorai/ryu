@@ -1,8 +1,14 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	type RichLiteralMessage,
+	type RichTags,
+	useLiteralMessages,
+	useRichLiteralMessages,
+} from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { motion } from "motion/react";
+import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { agentById, compactAge } from "./interface-renderer.ts";
 import {
@@ -27,6 +33,55 @@ import {
 } from "./panels-widgets.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
 
+/** The card's sentence, with its verb and subject as rich tags. */
+function actionSentence(
+	action: PanelsAction,
+	tlRich: RichLiteralMessage,
+	tags: RichTags
+): ReactNode {
+	const values = {
+		subject: action.subject ?? "",
+		topic: action.topic ?? "",
+		who: action.who ?? "",
+	};
+	switch (action.kind) {
+		case "retry":
+			return action.who
+				? tlRich(
+						"<verb>Retry</verb> {who}'s failed run on <subject>{subject}</subject>",
+						values,
+						tags
+					)
+				: tlRich(
+						"<verb>Retry</verb> the failed run on <subject>{subject}</subject>",
+						values,
+						tags
+					);
+		case "reply":
+			return action.who
+				? tlRich(
+						"<verb>Reply</verb> to {who} about <subject>{subject}</subject>",
+						values,
+						tags
+					)
+				: tlRich(
+						"<verb>Reply</verb> about <subject>{subject}</subject>",
+						values,
+						tags
+					);
+		case "follow-up":
+			return tlRich(
+				"<verb>Follow up</verb> with {who} on <subject>{subject}</subject>",
+				values,
+				tags
+			);
+		default:
+			return action.topic
+				? tlRich("<verb>Ask</verb> {who} about {topic}", values, tags)
+				: tlRich("<verb>Ask</verb> {who}", values, tags);
+	}
+}
+
 /**
  * One suggestion card on the sky. The sentence reads as plain text, but its
  * verb is the real button (with the whole sentence as its accessible name),
@@ -43,6 +98,7 @@ function ActionCard({
 	onTarget: (target: PanelsTarget) => void;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const agent = agentById(snapshot, action.agentId);
 	const age = action.updatedAt ? compactAge(action.updatedAt, now) : null;
 	return (
@@ -70,28 +126,32 @@ function ActionCard({
 				) : null}
 			</div>
 			<div className="flex flex-col gap-2">
-				<p className="line-clamp-3 text-base text-foreground/70 leading-snug">
-					<button
-						aria-label={action.sentence}
-						className="rounded-sm font-semibold text-foreground underline decoration-foreground/0 underline-offset-4 outline-none transition-colors after:absolute after:inset-0 after:rounded-lg focus-visible:decoration-foreground/40 group-hover/card:decoration-foreground/40"
-						data-testid="panels-action-verb"
-						onClick={() => onTarget(action.target)}
-						type="button"
-					>
-						{action.verb}
-					</button>{" "}
-					{action.rest}
-					{action.subject ? (
-						<>
-							{" "}
-							<span className="font-medium text-foreground">
-								{action.subject}
-							</span>
-						</>
-					) : null}
+				<p
+					className="line-clamp-3 text-base text-foreground/70 leading-snug"
+					data-ryu-i18n="off"
+				>
+					{actionSentence(action, tlRich, {
+						subject: (children) => (
+							<span className="font-medium text-foreground">{children}</span>
+						),
+						verb: (children) => (
+							<button
+								aria-label={action.sentence}
+								className="rounded-sm font-semibold text-foreground underline decoration-foreground/0 underline-offset-4 outline-none transition-colors after:absolute after:inset-0 after:rounded-lg focus-visible:decoration-foreground/40 group-hover/card:decoration-foreground/40"
+								data-testid="panels-action-verb"
+								onClick={() => onTarget(action.target)}
+								type="button"
+							>
+								{children}
+							</button>
+						),
+					})}
 				</p>
 				{action.detail ? (
-					<p className="line-clamp-2 text-muted-foreground text-sm">
+					<p
+						className="line-clamp-2 text-muted-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{action.detail}
 					</p>
 				) : null}

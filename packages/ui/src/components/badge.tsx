@@ -34,7 +34,7 @@ const badgeVariants = cva(
 				"download-label": "type-compact h-4 px-1.5 leading-none",
 			},
 			spacing: { default: "", relaxed: "gap-1.5" },
-			trailingAction: { true: "pr-1" },
+			trailingAction: { true: "pe-1" },
 			motion: { default: "", pulse: "animate-pulse" },
 			variant: {
 				default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",

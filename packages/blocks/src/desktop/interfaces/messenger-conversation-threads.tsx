@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
@@ -8,12 +9,15 @@ import {
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronDown, CircleAlert, Users } from "lucide-react";
-import { compactAge } from "./interface-renderer.ts";
+import {
+	compactAge,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import { fullTimestamp, type MessengerEntry } from "./messenger-model.ts";
 
 /** Pills shown inline before the rest move into a "More" menu. */
@@ -27,17 +31,21 @@ const STATUS_DOT: Record<ThreadStatus, string> = {
 	"your-turn": "bg-primary",
 };
 
+function threadTitle(thread: InterfaceThread): string {
+	return thread.title || tr("Untitled");
+}
+
 function threadLabel(thread: InterfaceThread, isGroup: boolean): string {
-	const status = THREAD_STATUS_LABELS[threadStatus(thread)];
-	const prefix = isGroup ? "Group conversation, " : "";
-	const age = compactAge(thread.updatedAt);
-	let updated = "";
-	if (age === "now") {
-		updated = ", updated just now";
-	} else if (age) {
-		updated = `, updated ${age} ago`;
-	}
-	return `${prefix}${thread.title || "Untitled"}, ${status}${updated}`;
+	const status = threadStatusLabel(threadStatus(thread));
+	const age = relativeAge(thread.updatedAt);
+	const label = age
+		? tr("{title}, {status}, updated {age}", {
+				age,
+				status,
+				title: threadTitle(thread),
+			})
+		: tr("{title}, {status}", { status, title: threadTitle(thread) });
+	return isGroup ? tr("Group conversation, {label}", { label }) : label;
 }
 
 function isGroupThread(entry: MessengerEntry, thread: InterfaceThread) {
@@ -69,7 +77,11 @@ function ThreadPill({
 						: "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
 				)}
 				onClick={() => onOpen(thread.id)}
-				title={`${thread.title || "Untitled"} · ${THREAD_STATUS_LABELS[status]} · ${fullTimestamp(thread.updatedAt)}`}
+				title={tr("{title} · {status} · {time}", {
+					status: threadStatusLabel(status),
+					time: fullTimestamp(thread.updatedAt),
+					title: threadTitle(thread),
+				})}
 				type="button"
 			>
 				<span
@@ -79,7 +91,9 @@ function ThreadPill({
 				{isGroup ? (
 					<Users aria-hidden="true" className="size-3.5 shrink-0" />
 				) : null}
-				<span className="truncate">{thread.title || "Untitled"}</span>
+				<span className="truncate" data-ryu-i18n="off">
+					{threadTitle(thread)}
+				</span>
 				<span
 					aria-hidden="true"
 					className="shrink-0 font-normal text-muted-foreground tabular-nums"
@@ -138,8 +152,8 @@ function MoreThreads({
 										STATUS_DOT[status]
 									)}
 								/>
-								<span className="min-w-0 flex-1 truncate">
-									{thread.title || "Untitled"}
+								<span className="min-w-0 flex-1 truncate" data-ryu-i18n="off">
+									{threadTitle(thread)}
 								</span>
 								<span
 									aria-hidden="true"

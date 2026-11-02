@@ -34,7 +34,7 @@ export function SecretRow({
 		<div className="flex items-center justify-between gap-4 p-4">
 			<button
 				aria-label={tl("Open {name}", { name: secret.name })}
-				className="min-w-0 flex-1 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+				className="min-w-0 flex-1 rounded-lg text-start outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 				onClick={onOpen}
 				type="button"
 			>

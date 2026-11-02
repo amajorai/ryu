@@ -1,4 +1,5 @@
 import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
@@ -18,6 +19,7 @@ import {
 	connectionDisplayName,
 	connectionSurfaceMeta,
 } from "@/src/lib/connection-surface.ts";
+import { presenceAgo } from "@/src/lib/time.ts";
 import { RowTitle } from "./ConnectionsTab-row-title.tsx";
 import {
 	SettingsCard,
@@ -26,17 +28,6 @@ import {
 	SettingsSection,
 } from "./shared/settings-items.tsx";
 
-function relativeLastSeen(lastSeen: number): string {
-	const seconds = Math.max(0, Math.floor(Date.now() / 1000) - lastSeen);
-	if (seconds < 10) {
-		return "Active now";
-	}
-	if (seconds < 60) {
-		return `Active ${seconds}s ago`;
-	}
-	return `Active ${Math.floor(seconds / 60)}m ago`;
-}
-
 function ConnectedDeviceRow({
 	client,
 	self,
@@ -44,14 +35,18 @@ function ConnectedDeviceRow({
 	client: ConnectedClient;
 	self: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const surface = connectionSurfaceMeta(client.surface);
+	const lastSeen = tl("Active {when}", {
+		when: presenceAgo(client.lastSeen * 1000),
+	});
 	return (
 		<SettingsItem
 			actions={self ? <Badge variant="secondary">This device</Badge> : null}
 			key={client.clientId}
 			title={
 				<RowTitle
-					detail={`${surface.label} · ${relativeLastSeen(client.lastSeen)}`}
+					detail={`${tl(surface.label)} · ${lastSeen}`}
 					leading={<SettingsIconTile icon={surface.icon} tint="blue" />}
 					name={connectionDisplayName(client)}
 				/>

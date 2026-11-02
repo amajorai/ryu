@@ -8,7 +8,7 @@
 
 import { useSidebar } from "@ryu/ui/components/sidebar.tsx";
 import { useIsCompact } from "@ryu/ui/hooks/use-mobile.ts";
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import {
@@ -41,7 +41,10 @@ export function useCompactRail(navigationShown: boolean): boolean {
 
 	const previousNarrow = useRef<boolean | null>(null);
 	const foldedForWidth = useRef(false);
-	useEffect(() => {
+	// A layout effect, so the fold commits with the width change that caused it:
+	// a passive effect let one frame paint the docked sidebar beside a pane the
+	// workbench had already turned into an overlay sheet.
+	useLayoutEffect(() => {
 		const wasNarrow = previousNarrow.current;
 		previousNarrow.current = narrow;
 		// React to width transitions (and the first render) only. An `open`

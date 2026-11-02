@@ -410,13 +410,16 @@ export function LiveInterface({
 				{chatAvailable && chatHidden && !narrow ? (
 					<Button
 						aria-label="Expand chat"
-						className="absolute top-2 right-2 z-10 bg-background/85 text-muted-foreground hover:text-foreground"
+						className="absolute end-2 top-2 z-10 bg-background/85 text-muted-foreground hover:text-foreground"
 						onClick={() => setChatChoice(false)}
 						size="icon-sm"
 						type="button"
 						variant="ghost"
 					>
-						<ArrowLeftToLine aria-hidden="true" className="size-4" />
+						<ArrowLeftToLine
+							aria-hidden="true"
+							className="size-4 rtl:-scale-x-100"
+						/>
 					</Button>
 				) : null}
 			</div>

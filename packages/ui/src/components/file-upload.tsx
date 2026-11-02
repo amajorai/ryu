@@ -29,6 +29,8 @@ import {
 	Upload04Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
@@ -68,19 +70,12 @@ export interface FileUploadItem {
 /** Byte counts as a person reads them. Binary units, one decimal only where it
  *  carries information. */
 function formatSize(bytes: number): string {
-	if (!Number.isFinite(bytes) || bytes <= 0) {
-		return "0 B";
-	}
-	const units = ["B", "KB", "MB", "GB"];
-	let value = bytes;
-	let unit = 0;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit += 1;
-	}
-	const rounded =
-		value >= 10 || Number.isInteger(value) ? Math.round(value) : value;
-	return `${Number(rounded.toFixed(1))} ${units[unit]}`;
+	const count = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+	return formatByteSize(count, activeLocale(), {
+		fractionDigits: (value) => (value >= 10 || Number.isInteger(value) ? 0 : 1),
+		maxUnit: "gigabyte",
+		trimZeros: true,
+	});
 }
 
 function StatusIcon({ status }: { status: FileUploadStatus }) {

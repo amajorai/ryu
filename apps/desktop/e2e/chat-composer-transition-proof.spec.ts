@@ -33,25 +33,38 @@ async function collectTransitionEvidence(
 				const samples: TransitionEvidence["samples"] = [];
 				const initialNode = composer;
 				const startedAt = performance.now();
+				// The 800 ms window starts at the state handoff, not at the click: on
+				// a loaded host the send can take longer than the window to land, and
+				// idle frames before it would otherwise dilute the motion evidence.
+				let activatedAt: number | null = null;
 
 				const collect = (now: number) => {
 					const top = composer.getBoundingClientRect().top;
-					samples.push({
-						state: root.getAttribute("data-chat-state"),
-						time: now - startedAt,
-						top,
-					});
-					if (now - startedAt < 800) {
+					const state = root.getAttribute("data-chat-state");
+					samples.push({ state, time: now - startedAt, top });
+					if (state === "active") {
+						activatedAt ??= now;
+					}
+					const settling =
+						activatedAt === null
+							? now - startedAt < 10_000
+							: now - activatedAt < 800;
+					if (settling) {
 						requestAnimationFrame(collect);
 						return;
 					}
 
 					const finalTop = samples.at(-1)?.top ?? initialTop;
+					// Deltas from the last pre-handoff frame through the window.
+					const firstActive = samples.findIndex(
+						(sample) => sample.state === "active"
+					);
+					const motion = samples.slice(Math.max(0, firstActive - 1));
 					resolve({
 						finalTop,
-						frameDeltas: samples
+						frameDeltas: motion
 							.slice(1)
-							.map((sample, index) => sample.top - samples[index]!.top),
+							.map((sample, index) => sample.top - motion[index]!.top),
 						initialTop,
 						samples,
 						sameComposerNode:
@@ -93,7 +106,14 @@ test("the first send morphs the centered composer into the active chat dock", as
 	const activeSamples = evidence.samples.filter(
 		(sample) => sample.state === "active"
 	);
-	const downwardFrames = evidence.frameDeltas.filter((delta) => delta > 0);
+	// Frames in which the composer actually moved. How many settled frames
+	// follow the spring depends on the host's frame rate, so the direction check
+	// is made over the moving frames, not the whole sampling window.
+	// Sub-pixel settling jitter is not motion.
+	const movingFrames = evidence.frameDeltas.filter(
+		(delta) => Math.abs(delta) >= 0.5
+	);
+	const downwardFrames = movingFrames.filter((delta) => delta > 0);
 	const largestFrameDelta = Math.max(
 		...evidence.frameDeltas.map((delta) => Math.abs(delta))
 	);
@@ -110,6 +130,7 @@ test("the first send morphs the centered composer into the active chat dock", as
 				evidence,
 				largestFrameDelta,
 				downwardFrameCount: downwardFrames.length,
+				movingFrameCount: movingFrames.length,
 			},
 			null,
 			2
@@ -121,8 +142,9 @@ test("the first send morphs the centered composer into the active chat dock", as
 	// A layout handoff produces several measured frames and keeps moving in the
 	// intended direction for most of them; a DOM replacement has one jump.
 	expect(activeSamples.length).toBeGreaterThan(10);
+	expect(movingFrames.length).toBeGreaterThan(2);
 	expect(downwardFrames.length).toBeGreaterThanOrEqual(
-		Math.max(1, Math.floor(evidence.frameDeltas.length / 2) - 1)
+		Math.ceil(movingFrames.length / 2)
 	);
 	expect(largestFrameDelta).toBeLessThan(totalTravel * 0.65);
 	// The same DOM slot survives the state change, which is the structural part of

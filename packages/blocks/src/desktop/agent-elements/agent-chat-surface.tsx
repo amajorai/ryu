@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { AvatarConversationProvider } from "@ryu/ui/components/avatar-conversation.tsx";
 import { useMemo } from "react";
 import type { getAgentChatNodes } from "./agent-chat-nodes.tsx";
@@ -27,12 +28,16 @@ export function useAgentChatSurface({
 		() => (density ? { density } : undefined),
 		[density]
 	);
-	const resolvedActivity = describeConversationActivity({
-		status,
-		error,
-		pendingQuestion: Boolean(visiblePendingQuestion),
-		messages,
-	});
+	const tl = useLiteralMessages();
+	const resolvedActivity = describeConversationActivity(
+		{
+			status,
+			error,
+			pendingQuestion: Boolean(visiblePendingQuestion),
+			messages,
+		},
+		tl
+	);
 	// Keyed on the primitives so header consumers re-render when the activity
 	// changes, not on every streamed chunk.
 	const activity = useMemo(

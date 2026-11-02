@@ -50,6 +50,7 @@ import {
 	widgetBootstrapSrcdoc,
 } from "@ryu/app-host/widget-bootstrap";
 import { useWidgetStateStore } from "@ryu/app-host/widget-state-store";
+import { preferredOfficialLocale, systemLocales } from "@ryu/i18n/core";
 import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo";
@@ -69,6 +70,16 @@ import { useChatDisplayPrefs } from "./chat-display-prefs.tsx";
 import { useWidgetHost } from "./widget-host-context.tsx";
 
 const WIDGET_TOAST_RENDERER = createSileoToastRenderer(toast);
+
+/**
+ * The widget's locale outside an i18n provider: the first of the system's
+ * preferred languages Ryu can show, else the first preference (so dates and
+ * numbers still follow it), else English.
+ */
+function widgetSystemLocale(): string {
+	const preferred = systemLocales();
+	return preferredOfficialLocale(preferred) ?? preferred[0] ?? "en";
+}
 
 export function AppWidget({
 	part,
@@ -172,11 +183,7 @@ export function AppWidget({
 			stateStore.get(data.toolCallId) ?? data.initialWidgetState ?? null;
 		initialGlobalsRef.current = {
 			displayMode: data.displayMode ?? "inline",
-			locale:
-				i18n?.locale ??
-				(globalThis.navigator === undefined
-					? "en"
-					: navigator.language || "en"),
+			locale: i18n?.locale ?? widgetSystemLocale(),
 			maxHeight: data.maxHeight ?? null,
 			friendly,
 			safeArea: { bottom: 0, left: 0, right: 0, top: 0 },

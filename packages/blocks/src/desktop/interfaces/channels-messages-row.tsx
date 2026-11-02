@@ -123,7 +123,10 @@ export function MessageRow({
 				<div className="min-w-0 flex-1">
 					{compact ? null : (
 						<p className="flex min-w-0 items-baseline gap-1.5">
-							<span className="truncate font-bold text-foreground text-sm leading-6">
+							<span
+								className="truncate font-bold text-foreground text-sm leading-6"
+								data-ryu-i18n="off"
+							>
 								{author.name}
 							</span>
 							{showAppTag ? (
@@ -139,11 +142,17 @@ export function MessageRow({
 							</time>
 						</p>
 					)}
-					<p className="max-w-[720px] whitespace-pre-wrap break-words font-semibold text-foreground text-sm leading-6">
+					<p
+						className="max-w-[720px] whitespace-pre-wrap break-words font-semibold text-foreground text-sm leading-6"
+						data-ryu-i18n="off"
+					>
 						<Highlighted needle={highlight} text={title} />
 					</p>
 					{body ? (
-						<p className="line-clamp-2 max-w-[720px] whitespace-pre-wrap break-words text-foreground text-sm leading-6">
+						<p
+							className="line-clamp-2 max-w-[720px] whitespace-pre-wrap break-words text-foreground text-sm leading-6"
+							data-ryu-i18n="off"
+						>
 							<Highlighted needle={highlight} text={body} />
 						</p>
 					) : null}
@@ -164,7 +173,7 @@ export function MessageRow({
 			</div>
 			<div
 				className={cn(
-					"absolute right-5 z-20 flex rounded-lg border border-border bg-popover p-0.5 text-popover-foreground opacity-0 shadow-sm transition-opacity duration-100 motion-reduce:transition-none",
+					"absolute end-5 z-20 flex rounded-lg border border-border bg-popover p-0.5 text-popover-foreground opacity-0 shadow-sm transition-opacity duration-100 motion-reduce:transition-none",
 					"group-hover:opacity-100 group-has-[:focus-visible]:opacity-100",
 					// Under a day divider the toolbar would sit on the rule.
 					afterDivider ? "top-1" : "-top-4"
@@ -276,12 +285,15 @@ function ThreadBar({
 	workerName?: string;
 }) {
 	const tl = useLiteralMessages();
-	const stoppedLabel = stopped === "failed" ? "Run failed" : "Run interrupted";
-	const repliesLabel = replies === 1 ? "1 reply" : `${replies} replies`;
+	const stoppedLabel =
+		stopped === "failed" ? tl("Run failed") : tl("Run interrupted");
+	const repliesLabel = tl("{count, plural, one {# reply} other {# replies}}", {
+		count: replies,
+	});
 	const last = lastReplyPhrase(updatedAt, tl, now);
 	const workingLabel = workerName
 		? tl("{workerName} is working…", { workerName })
-		: "Working…";
+		: tl("Working…");
 	let summary =
 		replies > 0
 			? tl("{repliesLabel}, last reply {last}", { last, repliesLabel })
@@ -289,13 +301,16 @@ function ThreadBar({
 	if (stopped) {
 		summary =
 			replies > 0
-				? `${repliesLabel}, ${stoppedLabel.toLowerCase()}`
+				? tl(
+						"{count, plural, one {# reply} other {# replies}}, {stopped, select, failed {run failed} other {run interrupted}}",
+						{ count: replies, stopped }
+					)
 				: stoppedLabel;
 	}
 	return (
 		<button
-			aria-label={`${summary}: ${title}`}
-			className="group/bar mt-1 -ml-1 flex w-full max-w-[728px] items-center gap-2 rounded-md p-1 text-left outline-hidden transition-colors hover:bg-background hover:ring-1 hover:ring-border focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
+			aria-label={tl("{summary}: {title}", { summary, title })}
+			className="group/bar -ms-1 mt-1 flex w-full max-w-[728px] items-center gap-2 rounded-md p-1 text-start outline-hidden transition-colors hover:bg-background hover:ring-1 hover:ring-border focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
 			data-message-action=""
 			onClick={onOpen}
 			type="button"
@@ -343,9 +358,9 @@ function ThreadBar({
 					{tl("Last reply {last}", { last })}
 				</span>
 			) : null}
-			<span className="ml-auto hidden shrink-0 items-center gap-0.5 whitespace-nowrap pr-1 text-foreground/70 text-xs group-hover/bar:flex group-focus-visible/bar:flex">
+			<span className="ms-auto hidden shrink-0 items-center gap-0.5 whitespace-nowrap pe-1 text-foreground/70 text-xs group-hover/bar:flex group-focus-visible/bar:flex">
 				View thread
-				<ChevronRight aria-hidden="true" className="size-4" />
+				<ChevronRight aria-hidden="true" className="size-4 rtl:-scale-x-100" />
 			</span>
 		</button>
 	);

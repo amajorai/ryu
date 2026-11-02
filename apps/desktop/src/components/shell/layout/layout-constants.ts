@@ -31,11 +31,12 @@ export type OpenTab = ReturnType<typeof useTabsContext>["openTab"];
 
 export interface LayoutCssVariables extends LayoutCSSProperties {
 	"--desktop-inline1-opacity"?: string | number;
-	"--desktop-inline2-left"?: string | number;
+	"--desktop-inline2-inset-Start"?: string | number;
 	"--desktop-inline3-width"?: string | number;
+	"--desktop-inline4-offset"?: string | number;
 	"--desktop-inline4-opacity"?: string | number;
 	"--desktop-inline4-pointer-Events"?: string | number;
-	"--desktop-inline4-transform"?: string | number;
+	"--desktop-inline4-sign"?: string | number;
 	"--desktop-inline4-width"?: string | number;
 	"--desktop-inline7-padding-Right"?: string | number;
 }

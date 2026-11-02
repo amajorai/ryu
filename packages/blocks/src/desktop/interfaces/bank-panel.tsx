@@ -4,7 +4,6 @@ import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAccountTransaction,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft, Check, Copy, MessageSquare, X } from "lucide-react";
@@ -19,10 +18,11 @@ import {
 	fullDateTime,
 } from "./bank-model.ts";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 const PANEL_CLASS =
-	"absolute inset-y-0 right-0 z-30 flex min-h-0 w-full flex-col border-border bg-background xl:static xl:shrink-0 xl:border-l xl:shadow-none";
+	"absolute inset-y-0 end-0 z-30 flex min-h-0 w-full flex-col border-border bg-background xl:static xl:shrink-0 xl:border-s xl:shadow-none";
 const PANEL_TRANSITION = { duration: 0.2, ease: [0.22, 1, 0.36, 1] } as const;
 
 function CloseButton({
@@ -164,7 +164,7 @@ export function BankTransactionPanel({
 			aria-label={tl("Transaction: {label}", { label })}
 			className={cn(
 				PANEL_CLASS,
-				"sm:w-[26rem] sm:border-l sm:shadow-xl xl:w-[clamp(22rem,30vw,28rem)]"
+				"sm:w-[26rem] sm:border-s sm:shadow-xl xl:w-[clamp(22rem,30vw,28rem)]"
 			)}
 			data-testid="bank-transaction-panel"
 			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
@@ -235,7 +235,7 @@ export function BankTransactionPanel({
 							<dt className="shrink-0 text-muted-foreground text-sm">
 								{row.label}
 							</dt>
-							<dd className="min-w-0 truncate text-right text-foreground text-sm tabular-nums">
+							<dd className="min-w-0 truncate text-end text-foreground text-sm tabular-nums">
 								{row.value}
 							</dd>
 						</div>
@@ -291,12 +291,13 @@ export function BankThreadPanel({
 						type="button"
 						variant="ghost"
 					>
-						<ArrowLeft aria-hidden="true" />
+						<ArrowLeft aria-hidden="true" className="rtl:-scale-x-100" />
 					</Button>
 				) : null}
 				<div className="flex min-w-0 flex-1 flex-col">
 					<h2
 						className="truncate font-medium text-foreground text-sm leading-tight outline-none"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>
@@ -317,7 +318,7 @@ export function BankThreadPanel({
 									)}
 								>
 									<BoardStatusDot className="size-1.5" status={status} />
-									{THREAD_STATUS_LABELS[status]}
+									{threadStatusLabel(status)}
 								</span>
 							</>
 						) : null}

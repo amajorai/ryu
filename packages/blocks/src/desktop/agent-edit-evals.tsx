@@ -166,17 +166,13 @@ export function AgentEvalsView({
 
 					{cases.length > 0 ? (
 						<div className="overflow-hidden rounded-lg border">
-							<table className="w-full text-left text-xs">
+							<table className="w-full text-start text-xs">
 								<thead className="bg-muted/50 text-muted-foreground">
 									<tr>
 										<th className="px-2 py-1.5 font-medium">Prompt</th>
 										<th className="px-2 py-1.5 font-medium">Response</th>
-										<th className="px-2 py-1.5 text-right font-medium">
-											Match
-										</th>
-										<th className="px-2 py-1.5 text-right font-medium">
-											Score
-										</th>
+										<th className="px-2 py-1.5 text-end font-medium">Match</th>
+										<th className="px-2 py-1.5 text-end font-medium">Score</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -197,11 +193,11 @@ export function AgentEvalsView({
 											>
 												{c.responseText}
 											</td>
-											<td className="px-2 py-1.5 text-right tabular-nums">
+											<td className="px-2 py-1.5 text-end tabular-nums">
 												{c.matchLabel ?? "—"}
 											</td>
 											<td
-												className={`px-2 py-1.5 text-right font-medium tabular-nums ${c.scoreTone ?? ""}`}
+												className={`px-2 py-1.5 text-end font-medium tabular-nums ${c.scoreTone ?? ""}`}
 											>
 												{c.scoreLabel}
 											</td>
@@ -214,17 +210,17 @@ export function AgentEvalsView({
 
 					{evaluatorRows.length > 0 ? (
 						<div className="overflow-hidden rounded-lg border">
-							<table className="w-full text-left text-xs">
+							<table className="w-full text-start text-xs">
 								<thead className="bg-muted/50 text-muted-foreground">
 									<tr>
 										<th className="px-2 py-1.5 font-medium">Evaluator</th>
-										<th className="px-2 py-1.5 text-right font-medium">
+										<th className="px-2 py-1.5 text-end font-medium">
 											Mean score
 										</th>
-										<th className="px-2 py-1.5 text-right font-medium">
+										<th className="px-2 py-1.5 text-end font-medium">
 											Pass rate
 										</th>
-										<th className="px-2 py-1.5 text-right font-medium">
+										<th className="px-2 py-1.5 text-end font-medium">
 											Executed
 										</th>
 									</tr>
@@ -237,7 +233,7 @@ export function AgentEvalsView({
 												{r.didExecute === false ? (
 													<Badge
 														appearance="agent-count"
-														className="ml-1.5"
+														className="ms-1.5"
 														variant="outline"
 													>
 														not run
@@ -245,14 +241,14 @@ export function AgentEvalsView({
 												) : null}
 											</td>
 											<td
-												className={`px-2 py-1.5 text-right font-medium tabular-nums ${r.tone ?? ""}`}
+												className={`px-2 py-1.5 text-end font-medium tabular-nums ${r.tone ?? ""}`}
 											>
 												{r.meanScore}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
+											<td className="px-2 py-1.5 text-end text-muted-foreground tabular-nums">
 												{r.passRate}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
+											<td className="px-2 py-1.5 text-end text-muted-foreground tabular-nums">
 												{r.executed}
 											</td>
 										</tr>
@@ -294,20 +290,16 @@ export function AgentEvalsView({
 
 					{historyEntries.length > 0 ? (
 						<div className="overflow-auto rounded-lg border">
-							<table className="w-full text-left text-xs">
+							<table className="w-full text-start text-xs">
 								<thead className="bg-muted/50 text-muted-foreground">
 									<tr>
 										<th className="px-2 py-1.5 font-medium">Time</th>
 										<th className="px-2 py-1.5 font-medium">Model</th>
-										<th className="px-2 py-1.5 text-right font-medium">
-											Tokens
-										</th>
-										<th className="px-2 py-1.5 text-right font-medium">
+										<th className="px-2 py-1.5 text-end font-medium">Tokens</th>
+										<th className="px-2 py-1.5 text-end font-medium">
 											Latency
 										</th>
-										<th className="px-2 py-1.5 text-right font-medium">
-											Score
-										</th>
+										<th className="px-2 py-1.5 text-end font-medium">Score</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -322,13 +314,13 @@ export function AgentEvalsView({
 												) : null}
 												{e.model}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
+											<td className="px-2 py-1.5 text-end text-muted-foreground tabular-nums">
 												{formatCount(e.tokens) ?? "—"}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
+											<td className="px-2 py-1.5 text-end text-muted-foreground tabular-nums">
 												{e.latencyLabel}
 											</td>
-											<td className="px-2 py-1.5 text-right tabular-nums">
+											<td className="px-2 py-1.5 text-end tabular-nums">
 												{e.scoreLabel}
 											</td>
 										</tr>

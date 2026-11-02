@@ -1,16 +1,20 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	compactAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import type { KnowledgeNode } from "./knowledge-model.ts";
 import {
 	agentColor,
@@ -122,11 +126,11 @@ export function ThreadRow({
 			<li>
 				<button
 					aria-label={tl("Open {title}, {status}, {note}", {
-						note: note.toLowerCase(),
-						status: THREAD_STATUS_LABELS[status],
+						note: sentenceLabel(tl, note),
+						status: threadStatusLabel(status, tl),
 						title: thread.title,
 					})}
-					className="group flex w-full items-start gap-2.5 px-4 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+					className="group flex w-full items-start gap-2.5 px-4 py-2 text-start outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 					onClick={() => onOpen(thread.id)}
 					type="button"
 				>
@@ -134,7 +138,10 @@ export function ThreadRow({
 						<KnowledgeStatusDot palette={palette} status={status} />
 					</span>
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate text-foreground text-sm leading-5">
+						<span
+							className="truncate text-foreground text-sm leading-5"
+							data-ryu-i18n="off"
+						>
 							{thread.title}
 						</span>
 						<span className="text-muted-foreground text-xs leading-4">
@@ -155,17 +162,20 @@ export function ThreadRow({
 		<li>
 			<button
 				aria-label={tl("Open {title}, {status}", {
-					status: THREAD_STATUS_LABELS[status],
+					status: threadStatusLabel(status, tl),
 					title: thread.title,
 				})}
-				className="group flex h-9 w-full items-center gap-2.5 px-4 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+				className="group flex h-9 w-full items-center gap-2.5 px-4 text-start outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 				onClick={() => onOpen(thread.id)}
 				type="button"
 			>
 				<span className="flex size-5 shrink-0 items-center justify-center">
 					<KnowledgeStatusDot palette={palette} status={status} />
 				</span>
-				<span className="min-w-0 flex-1 truncate text-foreground text-sm">
+				<span
+					className="min-w-0 flex-1 truncate text-foreground text-sm"
+					data-ryu-i18n="off"
+				>
 					{thread.title}
 				</span>
 				<time
@@ -211,7 +221,7 @@ export function PanelFrame({
 			animate={{ opacity: 1, transform: "translateX(0px)" }}
 			aria-label={label}
 			className={cn(
-				"absolute @min-[900px]/knowledge:relative inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-border bg-background @min-[900px]/knowledge:shadow-none shadow-lg sm:w-[360px] sm:border-l",
+				"absolute @min-[900px]/knowledge:relative inset-y-0 end-0 z-30 flex w-full min-w-0 flex-col border-border bg-background @min-[900px]/knowledge:shadow-none shadow-lg sm:w-[360px] sm:border-s",
 				wide && "@min-[1200px]/knowledge:w-[480px] sm:w-[440px]"
 			)}
 			data-testid={testId}

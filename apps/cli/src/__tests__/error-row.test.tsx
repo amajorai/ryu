@@ -63,3 +63,28 @@ test("older failed turns drop the hint, and ASCII terminals get no arrows", asyn
 	expect(asciiFrame).toContain("up edit & resend - /model switch");
 	expect(asciiFrame).not.toContain("↑");
 });
+
+test("a persisted Core error renders from its i18n messages, not the stored English", async () => {
+	const parts: ChatPart[] = [
+		{
+			type: "error",
+			title: "Request failed",
+			message: "stored English body",
+			i18n: {
+				title: { message: "Request failed" },
+				body: [{ message: "Rendered from {source}", args: { source: "Core" } }],
+				join: "sentences",
+			},
+		},
+	];
+	setup = await testRender(
+		<ThemeProvider reducedMotion theme={ryuLightTheme}>
+			<TranscriptParts parts={parts} />
+		</ThemeProvider>,
+		{ width: 80, height: 6 }
+	);
+	await setup.renderOnce();
+	const frame = setup.captureCharFrame();
+	expect(frame).toContain("Error: Rendered from Core");
+	expect(frame).not.toContain("stored English body");
+});

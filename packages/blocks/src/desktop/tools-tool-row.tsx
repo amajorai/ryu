@@ -115,7 +115,7 @@ export function ToolRow({
 					{tool.name}
 					<Badge variant="secondary">{tool.server}</Badge>
 					<HugeiconsIcon
-						className={`ml-auto size-4 opacity-70 transition-transform ${
+						className={`ms-auto size-4 opacity-70 transition-transform ${
 							open ? "rotate-180" : ""
 						}`}
 						icon={ArrowDown01Icon}

@@ -23,6 +23,7 @@ import {
 	shell,
 } from "electron";
 import { z } from "zod";
+import { attachDialogLabels } from "../../shared/attach-dialog.ts";
 import { IPC, type IslandAttachment } from "../../shared/ipc.ts";
 
 /** Only these schemes may be handed to the OS; everything else is ignored. */
@@ -75,13 +76,19 @@ export function registerSystemIpc(getWindow: () => BrowserWindow | null): void {
 
 	ipcMain.handle(
 		IPC.system.attachFiles,
-		async (): Promise<IslandAttachment[]> => {
+		async (_event, rawLabels: unknown): Promise<IslandAttachment[]> => {
 			const win = getWindow();
+			// The renderer sends this copy translated (main has no translator);
+			// missing or malformed labels fall back to English.
+			const labels = attachDialogLabels(rawLabels);
 			const options: OpenDialogOptions = {
 				properties: ["openFile", "multiSelections"],
-				title: "Attach images",
+				title: labels.title,
 				filters: [
-					{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
+					{
+						name: labels.filterName,
+						extensions: ["png", "jpg", "jpeg", "gif", "webp"],
+					},
 				],
 			};
 			// Parent to the island window when present so the picker is modal-attached;

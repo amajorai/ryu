@@ -93,7 +93,10 @@ export function BankSignedOut({
 										size={28}
 									/>
 									<span className="flex min-w-0 flex-col gap-0.5">
-										<span className="truncate font-medium text-foreground text-sm">
+										<span
+											className="truncate font-medium text-foreground text-sm"
+											data-ryu-i18n="off"
+										>
 											{row.agent.name}
 										</span>
 										<span className="truncate text-muted-foreground text-xs">
@@ -117,7 +120,7 @@ export function BankSignedOut({
 								</>
 							);
 							const rowClass =
-								"grid w-full grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg px-3 py-2.5 text-left";
+								"grid w-full grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg px-3 py-2.5 text-start";
 							return (
 								<li key={row.agent.id}>
 									{latest ? (

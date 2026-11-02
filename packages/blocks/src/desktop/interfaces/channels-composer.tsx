@@ -129,7 +129,7 @@ export function ChannelsComposer({
 			/>
 			{/* The toolbar row is always there, so the field never changes
 			    height or moves the send button from channel to channel. */}
-			<div className="flex min-h-11 items-center gap-2 py-1.5 pr-1.5 pl-2">
+			<div className="flex min-h-11 items-center gap-2 py-1.5 ps-2 pe-1.5">
 				{hasPicker && agents ? (
 					<RecipientPicker
 						agentId={agentId}

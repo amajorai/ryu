@@ -12,8 +12,9 @@
 //! Check-name mapping: the requested guardrail names are mapped to the
 //! scanner's categories before scanning, so a desktop-facing label like
 //! `jailbreak` is honoured (it maps to the firewall's prompt-injection patterns)
-//! rather than silently passing. `moderation` has no pattern set in the firewall
-//! today, so it is accepted but not enforced (a documented no-op).
+//! rather than silently passing. A name that maps to no detector is rejected
+//! with 400 `unknown_guardrail_check` instead of being skipped, so a misspelled
+//! workflow guardrail fails closed rather than allowing every input.
 
 use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
@@ -26,8 +27,8 @@ pub struct FirewallCheckRequest {
     /// The text to scan.
     #[serde(default)]
     pub text: String,
-    /// Guardrails to enforce (e.g. `["pii", "jailbreak"]`). Unknown/unenforced
-    /// names (such as `moderation`) are ignored.
+    /// Guardrails to enforce (e.g. `["pii", "jailbreak"]`). Names are trimmed
+    /// and case-insensitive; any unknown name rejects the request with 400.
     #[serde(default)]
     pub checks: Vec<String>,
 }
@@ -44,12 +45,13 @@ pub struct FirewallCheckResponse {
 
 /// Map caller-facing guardrail names to the categories the firewall scanner
 /// understands (`pii`, `secret(s)`, `prompt_injection`/`injection`). `jailbreak`
-/// is a friendlier alias for the injection patterns. `moderation` has no backing
-/// pattern set today, so it maps to nothing (accepted but not enforced).
-fn map_checks(checks: &[String]) -> Vec<String> {
+/// is a friendlier alias for the injection patterns. `Err` carries every name
+/// that maps to no detector, so the caller can refuse instead of allowing.
+fn map_checks(checks: &[String]) -> Result<Vec<String>, Vec<String>> {
     let mut mapped: Vec<String> = Vec::new();
+    let mut unknown: Vec<String> = Vec::new();
     for c in checks {
-        match c.to_ascii_lowercase().as_str() {
+        match c.trim().to_ascii_lowercase().as_str() {
             "pii" => mapped.push("pii".to_string()),
             "secret" | "secrets" => mapped.push("secret".to_string()),
             "jailbreak" | "injection" | "prompt_injection" => {
@@ -62,12 +64,15 @@ fn map_checks(checks: &[String]) -> Vec<String> {
             "moderation" | "toxicity" => mapped.push("toxicity".to_string()),
             "bias" | "bias_fairness" => mapped.push("bias".to_string()),
             "code_injection" => mapped.push("code_injection".to_string()),
-            // Any unknown name has no backing pattern set; not enforced rather
-            // than faked.
-            _ => {}
+            // A name with no backing detector must not read as "allowed".
+            _ => unknown.push(c.trim().to_string()),
         }
     }
-    mapped
+    if unknown.is_empty() {
+        Ok(mapped)
+    } else {
+        Err(unknown)
+    }
 }
 
 /// POST /v1/firewall/check — scan `text` for the requested guardrails.
@@ -84,9 +89,11 @@ pub async fn firewall_check(
         .and_then(|value| value.to_str().ok());
     let ctx = crate::pipeline::authenticate(&state, crate::pipeline::AuthInputs::with_key(raw_key))
         .await?;
-    let mapped = map_checks(&req.checks);
+    let mapped = map_checks(&req.checks).map_err(|unknown| {
+        GatewayError::BadRequest(format!("unknown_guardrail_check: {}", unknown.join(", ")))
+    })?;
 
-    // No enforceable guardrails requested → allow (e.g. only `moderation`).
+    // Every known name maps to a detector, so this is only an empty request.
     if mapped.is_empty() {
         return Ok(Json(FirewallCheckResponse {
             allowed: true,
@@ -373,37 +380,42 @@ mod tests {
             .is_some_and(|reason| reason.contains("acme_internal_id")));
     }
 
+    fn names(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
     #[test]
     fn maps_jailbreak_to_injection() {
         assert_eq!(
-            map_checks(&["jailbreak".to_string()]),
-            vec!["prompt_injection".to_string()]
+            map_checks(&names(&["jailbreak"])),
+            Ok(names(&["prompt_injection"]))
         );
     }
 
     #[test]
     fn maps_pii_and_secrets_straight_through() {
-        assert_eq!(map_checks(&["pii".to_string()]), vec!["pii".to_string()]);
-        assert_eq!(
-            map_checks(&["secrets".to_string()]),
-            vec!["secret".to_string()]
-        );
+        assert_eq!(map_checks(&names(&["pii"])), Ok(names(&["pii"])));
+        assert_eq!(map_checks(&names(&["secrets"])), Ok(names(&["secret"])));
+        assert_eq!(map_checks(&names(&[" PII "])), Ok(names(&["pii"])));
     }
 
     #[test]
     fn moderation_and_toxicity_map_to_toxicity() {
         assert_eq!(
-            map_checks(&["moderation".to_string()]),
-            vec!["toxicity".to_string()]
+            map_checks(&names(&["moderation"])),
+            Ok(names(&["toxicity"]))
         );
-        assert_eq!(
-            map_checks(&["toxicity".to_string()]),
-            vec!["toxicity".to_string()]
-        );
+        assert_eq!(map_checks(&names(&["toxicity"])), Ok(names(&["toxicity"])));
     }
 
+    /// An unknown name used to map to nothing and read as `allowed: true`.
     #[test]
-    fn unknown_maps_to_nothing() {
-        assert!(map_checks(&["bogus".to_string()]).is_empty());
+    fn unknown_names_are_refused() {
+        assert_eq!(map_checks(&names(&["bogus"])), Err(names(&["bogus"])));
+        assert_eq!(map_checks(&names(&["pii", "nsfw"])), Err(names(&["nsfw"])));
     }
 }
+
+#[cfg(test)]
+#[path = "firewall_check_unknown_tests.rs"]
+mod unknown_check_tests;

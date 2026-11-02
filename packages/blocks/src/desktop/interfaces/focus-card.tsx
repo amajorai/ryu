@@ -12,10 +12,7 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useId } from "react";
@@ -27,6 +24,7 @@ import {
 	focusAuthor,
 	focusReason,
 } from "./focus-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -101,14 +99,16 @@ function FocusCardBody({
 	const reason = focusReason(item, tl);
 	const author = focusAuthor(item);
 	const age = focusAge(thread.updatedAt, now);
-	const counts = `${thread.messageCount} ${thread.messageCount === 1 ? "message" : "messages"}`;
+	const counts = tl("{count, plural, one {# message} other {# messages}}", {
+		count: thread.messageCount,
+	});
 	return (
 		<div className="flex flex-col">
 			<p className="flex min-w-0 items-center gap-2 text-sm">
 				<span className="inline-flex h-7 shrink-0 items-center gap-2 rounded-full border border-border bg-background px-3">
 					<BoardStatusDot status={item.status} />
 					<span className={cn("font-medium", STATUS_TEXT[item.status])}>
-						{THREAD_STATUS_LABELS[item.status]}
+						{threadStatusLabel(item.status)}
 					</span>
 				</span>
 				{reason ? (
@@ -120,6 +120,7 @@ function FocusCardBody({
 			</p>
 			<h2
 				className="mt-5 text-balance font-semibold @min-[640px]:text-4xl text-3xl text-foreground leading-tight tracking-tight"
+				data-ryu-i18n="off"
 				id={titleId}
 			>
 				{thread.title}
@@ -164,7 +165,11 @@ function FocusCardBody({
 						thread.lastMessage ? "text-foreground" : "text-muted-foreground"
 					)}
 				>
-					{thread.lastMessage ?? "No messages yet"}
+					{thread.lastMessage ? (
+						<span data-ryu-i18n="off">{thread.lastMessage}</span>
+					) : (
+						tl("No messages yet")
+					)}
 				</blockquote>
 			</figure>
 		</div>
@@ -219,7 +224,7 @@ function StepButton({
 function UpNext({ item, onNext }: { item: FocusItem; onNext: () => void }) {
 	return (
 		<button
-			className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-border border-dashed px-4 py-3 text-left text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+			className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-border border-dashed px-4 py-3 text-start text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
 			onClick={onNext}
 			type="button"
 		>
@@ -227,7 +232,10 @@ function UpNext({ item, onNext }: { item: FocusItem; onNext: () => void }) {
 				Up next
 			</span>
 			<BoardStatusDot status={item.status} />
-			<span className="min-w-0 flex-1 truncate font-medium text-foreground">
+			<span
+				className="min-w-0 flex-1 truncate font-medium text-foreground"
+				data-ryu-i18n="off"
+			>
 				{item.thread.title}
 			</span>
 			<span className="shrink-0 text-muted-foreground max-sm:hidden">
@@ -235,7 +243,7 @@ function UpNext({ item, onNext }: { item: FocusItem; onNext: () => void }) {
 			</span>
 			<ChevronRight
 				aria-hidden="true"
-				className="size-4 shrink-0 text-muted-foreground"
+				className="size-4 shrink-0 text-muted-foreground rtl:-scale-x-100"
 			/>
 		</button>
 	);

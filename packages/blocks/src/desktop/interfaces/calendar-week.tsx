@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
 import { motion } from "motion/react";
@@ -57,6 +58,7 @@ export function CalendarWeekGrid({
 	onSelectDay: (key: string) => void;
 	todayKey: string;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const scrollerRef = useRef<HTMLDivElement>(null);
 	const view = useVisibleMinutes(scrollerRef);
@@ -150,10 +152,17 @@ export function CalendarWeekGrid({
 						<button
 							{...{ [CALENDAR_DAY_ATTRIBUTE]: column.key }}
 							aria-current={isToday ? "date" : undefined}
-							aria-label={`${longDay(column.date)}${isToday ? ", today" : ""}, ${column.total} ${column.total === 1 ? "item" : "items"}`}
+							aria-label={tl(
+								"{day}{today, select, yes {, today} other {}}, {count, plural, one {# item} other {# items}}",
+								{
+									count: column.total,
+									day: longDay(column.date),
+									today: isToday ? "yes" : "no",
+								}
+							)}
 							aria-pressed={focused}
 							className={cn(
-								"group/day flex min-w-0 flex-col items-center gap-1 border-border border-l pt-2 pb-1.5 outline-none transition-colors",
+								"group/day flex min-w-0 flex-col items-center gap-1 border-border border-s pt-2 pb-1.5 outline-none transition-colors",
 								"hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 							)}
 							data-day-key={column.key}
@@ -202,7 +211,7 @@ export function CalendarWeekGrid({
 				</div>
 				{columns.map((column) => (
 					<div
-						className="@container flex min-h-6 min-w-0 flex-col gap-px border-border border-b border-l px-1 py-0.5"
+						className="@container flex min-h-6 min-w-0 flex-col gap-px border-border border-s border-b px-1 py-0.5"
 						key={column.key}
 					>
 						{column.allDay.map((item) => (
@@ -269,7 +278,7 @@ export function CalendarWeekGrid({
 					{columns.map((column) => (
 						<section
 							aria-label={longDay(column.date)}
-							className="relative border-border border-l"
+							className="relative border-border border-s"
 							key={column.key}
 						>
 							{HOURS.slice(1).map((hour) => (

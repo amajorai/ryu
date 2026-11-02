@@ -17,6 +17,11 @@ interface Scope {
 	backendUrl: string;
 	conversationIds: readonly string[];
 	coreUrl: string;
+	/** Scenario-owned contracts that replace or extend the idle ones by route. */
+	overrides?: {
+		backend?: ReadonlyMap<string, BackgroundContract>;
+		core?: ReadonlyMap<string, BackgroundContract>;
+	};
 	ownerId: string;
 }
 export function createChatControlBackground(
@@ -33,6 +38,12 @@ export function createChatControlBackground(
 		for (const [path, dto] of contracts.backend) {
 			backend.set(path, dto);
 		}
+	}
+	for (const [route, dto] of scope.overrides?.core ?? []) {
+		core.set(route, dto);
+	}
+	for (const [route, dto] of scope.overrides?.backend ?? []) {
+		backend.set(route, dto);
 	}
 	const preferenceKeys = new Set([
 		"support-access-local-enabled",

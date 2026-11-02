@@ -47,8 +47,12 @@ export type ChatPart =
 			endedAt?: number;
 	  }
 	| { type: "todo"; todos: ChatTodo[] }
-	/** A failed turn's reason. Display-only: never sent back as model history. */
-	| { type: "error"; message: string };
+	/**
+	 * A failed turn's reason. Display-only: never sent back as model history.
+	 * Core's persisted part also keeps its English `title` and `i18n`, the Core
+	 * messages the CLI renders in its locale (see coreErrorText.ts).
+	 */
+	| { type: "error"; message: string; title?: string; i18n?: unknown };
 
 export const asRecord = (
 	value: Parameters<typeof chatToolArgumentsSchema.safeParse>[0]
@@ -70,7 +74,12 @@ export const chatPartSchema = z.discriminatedUnion("type", [
 		endedAt: partTimestampSchema,
 	}),
 	z.looseObject({ type: z.literal("todo"), todos: z.array(chatTodoSchema) }),
-	z.looseObject({ type: z.literal("error"), message: z.string() }),
+	z.looseObject({
+		type: z.literal("error"),
+		message: z.string(),
+		title: z.string().optional().catch(undefined),
+		i18n: z.unknown().optional(),
+	}),
 	z.looseObject({
 		type: z.literal("tool"),
 		toolCallId: z.string().optional(),

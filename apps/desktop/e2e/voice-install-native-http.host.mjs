@@ -1,11 +1,19 @@
 import fs from "node:fs";
 import http from "node:http";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const apiPort = 5866;
 const uiOrigin = "http://127.0.0.1:5291";
 const dataRoot = process.env.RYU_VOICE_OUTCOMES_DATA_ROOT;
-if (!(dataRoot && path.isAbsolute(dataRoot) && dataRoot.startsWith("/tmp/"))) {
+// The data root must be a temporary directory: under /tmp or the OS temp dir
+// (TMPDIR), which is where the Playwright config creates its default.
+const temporaryRoots = ["/tmp", tmpdir()].map(
+	(root) => `${path.resolve(root)}/`
+);
+const isTemporary = (candidate) =>
+	temporaryRoots.some((root) => path.resolve(candidate).startsWith(root));
+if (!(dataRoot && path.isAbsolute(dataRoot) && isTemporary(dataRoot))) {
 	throw new Error("Explicit owned temporary data root required");
 }
 fs.mkdirSync(dataRoot, { recursive: true });

@@ -98,7 +98,7 @@ function PinnedAgentTile({
 			aria-label={tl("Open {name}", { name: agent.name })}
 			className={cn(
 				cn(
-					"group/pinned relative flex cursor-pointer items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-left outline-hidden focus-within:border-sidebar-border/70 focus-within:bg-sidebar-accent/60 hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60 motion-reduce:hover:translate-y-0",
+					"group/pinned relative flex cursor-pointer items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-start outline-hidden focus-within:border-sidebar-border/70 focus-within:bg-sidebar-accent/60 hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60 motion-reduce:hover:translate-y-0",
 					layoutStyles.authored1
 				),
 				styles.tile,
@@ -136,8 +136,8 @@ function PinnedAgentTile({
 			</div>
 			<div
 				className={cn(
-					"absolute top-1 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/pinned:opacity-100 group-hover/pinned:opacity-100",
-					layout === "grid" && "top-0.5 right-0.5"
+					"absolute end-1 top-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/pinned:opacity-100 group-hover/pinned:opacity-100",
+					layout === "grid" && "end-0.5 top-0.5"
 				)}
 			>
 				<button

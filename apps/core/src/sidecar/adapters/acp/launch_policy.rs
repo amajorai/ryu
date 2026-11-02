@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{messages as m, Message};
 
 /// The program a stdio launches and its arguments, looking through Ryu's
 /// sandbox runner.
@@ -201,13 +202,20 @@ fn tokens_download_code(tokens: &[String], depth: usize) -> bool {
 fn package_runner_refusal(stdio: &McpServerStdio) -> String {
     let (program, _) = launched_program(stdio);
     let runner = program.rsplit(['/', '\\']).next().unwrap_or(program);
-    format!(
-        "Ryu did not start this agent: its launch (`{runner}`) goes through a package runner, \
-         which downloads code when it starts, so Ryu cannot cut its network access in a folder you have not trusted. \
-         Ryu installs npm agents in the background so they can start sandboxed; send your \
-         message again once that finishes. Otherwise, trust this folder if you trust its code, or open the chat in a \
-         trusted folder."
-    )
+    package_runner_refusal_message(runner).render("en")
+}
+
+fn package_runner_refusal_message(runner: &str) -> Message {
+    Message::new(m::ACP_PACKAGE_RUNNER_REFUSED_MESSAGE).text("runner", runner)
+}
+
+/// The Core message behind a refusal [`package_runner_refusal`] wrote, so the
+/// failed-turn card can render it per locale; `None` for any other text.
+fn package_runner_refusal_text(refusal: &str) -> Option<Message> {
+    let (_, rest) = refusal.split_once(" (")?;
+    let (runner, _) = rest.split_once(") ")?;
+    let message = package_runner_refusal_message(runner);
+    (message.render("en") == refusal).then_some(message)
 }
 
 /// The TCP port of a loopback URL (`http://127.0.0.1:7981`), if it is one.
@@ -233,9 +241,10 @@ pub(super) fn untrusted_launch_refusal(stdio: &McpServerStdio) -> Option<String>
 
 /// The failed-turn frame for an untrusted-folder launch Ryu refused.
 pub(super) fn untrusted_launch_failure(refusal: &str) -> AcpFailure {
-    AcpFailure {
-        code: "workspace_untrusted_launch".to_owned(),
-        title: "Agent not started in an untrusted folder".to_owned(),
-        message: refusal.to_owned(),
+    let code = "workspace_untrusted_launch";
+    let title = m::ACP_UNTRUSTED_FOLDER_TITLE_MESSAGE;
+    match package_runner_refusal_text(refusal) {
+        Some(message) => AcpFailure::localized(code, title, vec![message]),
+        None => AcpFailure::relayed(code, title, refusal),
     }
 }

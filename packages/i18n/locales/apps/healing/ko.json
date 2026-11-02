@@ -1,0 +1,7 @@
+{
+  "A failed run was diagnosed": "실패한 실행이 진단되었습니다",
+  "Auto-fix attempts used: {count}. Review it manually.": "사용한 자동 수정 시도: {count}회. 직접 검토하세요.",
+  "Auto-fix gave up": "자동 수정 포기",
+  "Fix waiting in your inbox: {diagnosis}": "받은편지함에서 수정 사항이 기다리고 있습니다: {diagnosis}",
+  "heal engine unavailable": "복구 엔진을 사용할 수 없습니다"
+}

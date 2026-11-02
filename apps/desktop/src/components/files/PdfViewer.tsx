@@ -7,6 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import { useEffect, useRef, useState } from "react";
@@ -128,7 +129,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					size="icon-sm"
 					variant="ghost"
 				>
-					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+					<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 				</Button>
 				<Input
 					aria-label="Page number"
@@ -146,7 +147,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					type="number"
 					value={pageNumber}
 				/>
-				<span className="mr-3 text-muted-foreground text-sm">
+				<span className="me-3 text-muted-foreground text-sm">
 					/ {document?.numPages ?? "—"}
 				</span>
 				<Button
@@ -160,7 +161,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					size="icon-sm"
 					variant="ghost"
 				>
-					<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
+					<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
 				</Button>
 				<div className="mx-2 h-5 w-px bg-border" />
 				<Button

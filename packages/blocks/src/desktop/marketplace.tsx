@@ -45,10 +45,10 @@ export function MarketplaceHeader({
 	return (
 		<div className="flex shrink-0 items-center gap-1 border-b px-4 py-3">
 			<HugeiconsIcon
-				className="mr-2 size-5 text-muted-foreground"
+				className="me-2 size-5 text-muted-foreground"
 				icon={Store01Icon}
 			/>
-			<h1 className="mr-4 font-semibold text-sm">
+			<h1 className="me-4 font-semibold text-sm">
 				{i18n?.t("common.marketplace") ?? "Marketplace"}
 			</h1>
 			{tabs.map((t) => (

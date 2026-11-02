@@ -120,19 +120,19 @@ export function MessengerAvatar({
 				<Face
 					agent={second}
 					className={cn(
-						"absolute top-0 right-0 ring-2",
+						"absolute end-0 top-0 ring-2",
 						GROUP_FACE[size],
 						ringClassName
 					)}
 					// The front face covers the lower left; centre the initials
 					// in what stays visible.
-					monogramClassName="pb-[20%] pl-[20%]"
+					monogramClassName="pb-[20%] ps-[20%]"
 					name={second?.name ?? entry.name}
 				/>
 				<Face
 					agent={first}
 					className={cn(
-						"absolute bottom-0 left-0 ring-2",
+						"absolute start-0 bottom-0 ring-2",
 						GROUP_FACE[size],
 						ringClassName
 					)}

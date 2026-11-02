@@ -1,7 +1,7 @@
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { motion } from "motion/react";
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	CATEGORY_KIND_LABELS,
 	type QuizBoard,
@@ -22,6 +22,16 @@ import {
 	TILE_FACE,
 } from "./quiz-palette.ts";
 
+export {
+	focusTile,
+	QuizBoardSkeleton,
+	revealTile,
+} from "./quiz-board-skeleton.tsx";
+
+import { tileLabel } from "./quiz-board-label.ts";
+
+export { tileLabel } from "./quiz-board-label.ts";
+
 export const TILE_ATTRIBUTE = "data-quiz-tile";
 
 /** Shared-layout id that lets a tile grow into its clue card. */
@@ -40,9 +50,9 @@ const VALUE_TYPE =
 	"text-[clamp(1.75rem,min(5cqw,9.5cqh),4.75rem)] @max-[32rem]/board:text-[clamp(1.75rem,10cqw,2.5rem)]";
 const CATEGORY_TYPE =
 	"text-[clamp(0.875rem,min(1.75cqw,3.8cqh),1.625rem)] @max-[32rem]/board:text-[clamp(0.8125rem,3.8cqw,1rem)]";
-const HEAD_SIZE =
+export const HEAD_SIZE =
 	"h-[clamp(3.5rem,min(6.5cqw,14cqh),6rem)] @max-[32rem]/board:h-16";
-const CELL_SIZE =
+export const CELL_SIZE =
 	"min-h-10 flex-1 basis-0 @max-[32rem]/board:h-18 @max-[32rem]/board:flex-none";
 /** What a tile's caption says, for the states that ask for a look. */
 const STATUS_CAPTION: Partial<Record<QuizTile["status"], string>> = {
@@ -295,24 +305,6 @@ export interface TileHandlers {
 	onPick: (threadId: string) => void;
 }
 
-/** A tile's accessible name, by whether it is open, revealed or answering. */
-export function tileLabel(
-	tile: QuizTile,
-	state: "answering" | "open" | "revealed",
-	clueFirst = false
-): string {
-	const title = threadTitle(tile.thread);
-	const status = tile.statusWord ?? THREAD_STATUS_LABELS[tile.status];
-	if (clueFirst) {
-		const clue = state === "open" ? `${tile.value} clue` : `Clue ${state}`;
-		return `${clue}, ${tile.categoryName}: ${title}. ${status}.`;
-	}
-	if (state === "open") {
-		return `${tile.categoryName} for ${tile.value}: ${title}. ${status}.`;
-	}
-	return `${tile.categoryName}, ${state}: ${title}. ${status}.`;
-}
-
 function tileState(
 	inPlay: boolean,
 	revealed: boolean
@@ -363,7 +355,7 @@ function BoardTile({
 		edge = PLAYED_BEVEL;
 	}
 	const tone = pressed ? "bg-(--quiz-played)" : "bg-(--quiz-board)";
-	const title = `${threadTitle(tile.thread)} \u00b7 ${tile.statusWord ?? THREAD_STATUS_LABELS[tile.status]}`;
+	const title = `${threadTitle(tile.thread)} \u00b7 ${tile.statusWord ?? threadStatusLabel(tile.status)}`;
 	return (
 		<li className={cn("flex", CELL_SIZE)}>
 			<motion.button
@@ -496,57 +488,4 @@ export function QuizBoardCells({
 			tabStopId={tabStopId}
 		/>
 	));
-}
-
-const SKELETON_COLUMNS = ["c0", "c1", "c2", "c3", "c4", "c5"];
-const SKELETON_ROWS = ["r0", "r1", "r2", "r3", "r4"];
-
-/** The board while the first snapshot loads: unlit cells, a soft pulse. */
-export function QuizBoardSkeleton() {
-	return SKELETON_COLUMNS.map((column) => (
-		<div className="flex min-h-0 min-w-0 flex-col gap-1.5" key={column}>
-			<div
-				className={cn(
-					"mb-1.5 flex shrink-0 items-center justify-center rounded-[3px]",
-					HEAD_SIZE
-				)}
-				style={{ backgroundImage: TILE_FACE, boxShadow: TILE_BEVEL }}
-			>
-				<span className="h-2.5 w-3/5 rounded-full bg-(--quiz-lamp-off) motion-safe:animate-pulse" />
-			</div>
-			{SKELETON_ROWS.map((row) => (
-				<div
-					className={cn(
-						"flex items-center justify-center rounded-[3px]",
-						CELL_SIZE
-					)}
-					key={row}
-					style={{ backgroundImage: TILE_FACE, boxShadow: TILE_BEVEL }}
-				>
-					<span className="h-5 w-1/3 rounded-sm bg-(--quiz-lamp-off) motion-safe:animate-pulse" />
-				</div>
-			))}
-		</div>
-	));
-}
-
-/** Scroll a tile into view (the folded board scrolls) without moving focus. */
-export function revealTile(container: HTMLElement | null, threadId: string) {
-	container
-		?.querySelector<HTMLElement>(
-			`[${TILE_ATTRIBUTE}][data-thread-id="${CSS.escape(threadId)}"]`
-		)
-		?.scrollIntoView({ block: "nearest" });
-}
-
-/** Focus a tile by thread id inside the board (used for arrow keys and returns). */
-export function focusTile(
-	container: HTMLElement | null,
-	threadId: string
-): boolean {
-	const tile = container?.querySelector<HTMLElement>(
-		`[${TILE_ATTRIBUTE}][data-thread-id="${CSS.escape(threadId)}"]`
-	);
-	tile?.focus();
-	return Boolean(tile);
 }

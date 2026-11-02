@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -53,10 +54,6 @@ function metaLine(...parts: string[]): string {
 	return parts.filter(Boolean).join(" · ");
 }
 
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
 export function HubWaitingCard({
 	cardRef,
 	index,
@@ -73,8 +70,13 @@ export function HubWaitingCard({
 			footer={footer}
 			headline={
 				threads.length > 0
-					? plural(threads.length, "conversation", "conversations")
-					: "You're all caught up"
+					? tl(
+							"{count, plural, one {# conversation} other {# conversations}}",
+							{
+								count: threads.length,
+							}
+						)
+					: tl("You're all caught up")
 			}
 			id="waiting"
 			index={index}
@@ -106,7 +108,10 @@ export function HubWaitingCard({
 							>
 								{thread.lastMessage ? (
 									// The preview needs room: short screens keep the rows.
-									<span className="mt-1.5 hidden text-foreground text-sm leading-5 [@container_hub-cards_(min-height:46rem)]:line-clamp-1">
+									<span
+										className="mt-1.5 hidden text-foreground text-sm leading-5 [@container_hub-cards_(min-height:46rem)]:line-clamp-1"
+										data-ryu-i18n="off"
+									>
 										{thread.lastMessage}
 									</span>
 								) : null}
@@ -121,9 +126,12 @@ export function HubWaitingCard({
 
 function workingHeadline(agents: InterfaceAgent[]): string {
 	if (agents.length === 0) {
-		return "Nothing running";
+		return tr("Nothing running");
 	}
-	return `${hubNameList(agents)} ${agents.length === 1 ? "is" : "are"} working`;
+	return tr(
+		"{count, plural, one {{names} is working} other {{names} are working}}",
+		{ count: agents.length, names: hubNameList(agents) }
+	);
 }
 
 export function HubWorkingCard({
@@ -171,7 +179,9 @@ export function HubWorkingCard({
 										<span className="truncate">
 											{metaLine(
 												hubAgentNames(agents),
-												`Updated ${hubAgo(thread.updatedAt, now)}`
+												tl("Updated {age}", {
+													age: hubAgo(thread.updatedAt, now),
+												})
 											)}
 										</span>
 									</>
@@ -181,7 +191,10 @@ export function HubWorkingCard({
 							>
 								<HubLiveTrack />
 								{thread.lastMessage ? (
-									<span className="mt-3 line-clamp-1 text-foreground text-sm leading-5 [@container_hub-cards_(min-height:46rem)]:line-clamp-2">
+									<span
+										className="mt-3 line-clamp-1 text-foreground text-sm leading-5 [@container_hub-cards_(min-height:46rem)]:line-clamp-2"
+										data-ryu-i18n="off"
+									>
 										{thread.lastMessage}
 									</span>
 								) : null}
@@ -212,7 +225,7 @@ function HubLiveTrack() {
 			) : (
 				<motion.span
 					animate={{ x: ["-100%", "300%"] }}
-					className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-success"
+					className="absolute inset-y-0 start-0 w-1/3 rounded-full bg-success"
 					initial={{ x: "-100%" }}
 					transition={{
 						duration: 1.8,
@@ -229,9 +242,12 @@ function HubLiveTrack() {
 function attentionHeadline(threads: number, runs: number): string {
 	const total = threads + runs;
 	if (total === 0) {
-		return "Everything finished";
+		return tr("Everything finished");
 	}
-	return `${plural(total, "run", "runs")} did not finish`;
+	return tr(
+		"{count, plural, one {# run did not finish} other {# runs did not finish}}",
+		{ count: total }
+	);
 }
 
 type AttentionItem =
@@ -380,7 +396,7 @@ function FailedRunRow({
 					<BoardStatusDot status="attention" />
 					<span className="min-w-0 truncate">
 						<span className="font-medium text-foreground">Failed</span>
-						{` · ${metaLine(agent?.name ?? "Workflow", hubAgo(run.start, now))}`}
+						{` · ${metaLine(agent?.name ?? tr("Workflow"), hubAgo(run.start, now))}`}
 					</span>
 				</>
 			}
@@ -411,9 +427,7 @@ export function HubUpcomingCard({
 			cardRef={cardRef}
 			footer={footer}
 			headline={
-				next
-					? hubNextRunHeadline(hubRunWhen(next.start, now))
-					: "Nothing scheduled"
+				next ? hubNextRunHeadline(next.start, now) : "Nothing scheduled"
 			}
 			id="upcoming"
 			index={index}
@@ -428,12 +442,17 @@ export function HubUpcomingCard({
 							(candidate) => candidate.id === event.agentId
 						);
 						const count =
-							event.count && event.count > 1 ? `${event.count} today` : "";
+							event.count && event.count > 1
+								? tr("{count} today", { count: event.count })
+								: "";
 						return (
 							<li className="flex items-start gap-4 py-3" key={event.id}>
 								{agent ? <HubAvatar agent={agent} /> : <HubWorkflowDisc />}
 								<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-									<span className="truncate font-medium text-[17px] text-foreground leading-6">
+									<span
+										className="truncate font-medium text-[17px] text-foreground leading-6"
+										data-ryu-i18n="off"
+									>
 										{event.title}
 									</span>
 									<span className="flex min-w-0 whitespace-nowrap text-muted-foreground text-sm leading-5">
@@ -441,7 +460,7 @@ export function HubUpcomingCard({
 											{hubRunWhen(event.start, now)}
 										</span>
 										<span className="min-w-0 truncate">
-											{`${SEPARATOR}${agent?.name ?? "Workflow"}`}
+											{`${SEPARATOR}${agent?.name ?? tr("Workflow")}`}
 										</span>
 										{/* Cadence and count drop out whole on a narrow card. */}
 										{event.label ? (

@@ -7,10 +7,10 @@ import {
 	integrationsMcpConnectSchema,
 	integrationsProofJsonSchema,
 } from "./marketplace-store-integrations-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/marketplace-assets/store-integrations-connections"
+const proofDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/marketplace-assets/store-integrations-connections"
 );
 const apiOrigin =
 	process.env.RYU_STORE_TEST_API_ORIGIN ?? "http://127.0.0.1:5493";

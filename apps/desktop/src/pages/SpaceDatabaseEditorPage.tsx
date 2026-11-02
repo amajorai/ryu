@@ -257,7 +257,7 @@ export default function SpaceDatabaseEditorPage({
 					{statusLabel}
 				</span>
 				<Button
-					className="ml-auto"
+					className="ms-auto"
 					onClick={() => {
 						setQueryError(null);
 						setQueryOpen(true);
@@ -373,7 +373,7 @@ export default function SpaceDatabaseEditorPage({
 										})}
 							</p>
 							<div className="max-h-72 overflow-auto rounded-xl border border-border">
-								<table className="w-full text-left text-sm">
+								<table className="w-full text-start text-sm">
 									<thead className="sticky top-0 bg-muted">
 										<tr>
 											{queryResult.columns.map((column, index) => (

@@ -130,9 +130,9 @@ export function createConsoleAccessCoreFixture() {
 	}[] = [];
 	const fallbackPaths = new Set<string>();
 	let role: "member" | "owner" = "member";
-	let failOrganizations = false;
-	let holdOrganizations: Promise<void> | null = null;
-	let releaseOrganizations: (() => void) | null = null;
+	let failPermissions = false;
+	let holdPermissions: Promise<void> | null = null;
+	let releasePermissions: (() => void) | null = null;
 	const handle = async (request: Request): Promise<ConsoleRouteOutcome> => {
 		const url = new URL(request.url);
 		const authorization = request.headers.get("authorization") ?? undefined;
@@ -195,20 +195,29 @@ export function createConsoleAccessCoreFixture() {
 					: "console-proof-owner-jwt",
 			});
 		}
+		// useConsoleAccess gates Console on this read (gateway.configure), so the
+		// held and failing cases act on it rather than the organizations list.
 		if (
 			method === "GET" &&
 			url.pathname === "/api/control-plane/me/permissions" &&
 			["org-a", "org-b"].includes(url.searchParams.get("orgId") ?? "") &&
 			[...url.searchParams].length === 1
 		) {
-			return respond({
-				permissions:
-					!memberAccount &&
-					role === "owner" &&
-					url.searchParams.get("orgId") === "org-a"
-						? ["gateway.configure"]
-						: [],
-			});
+			const failed = failPermissions;
+			await holdPermissions;
+			return respond(
+				failed
+					? { error: "Permission read unavailable" }
+					: {
+							permissions:
+								!memberAccount &&
+								role === "owner" &&
+								url.searchParams.get("orgId") === "org-a"
+									? ["gateway.configure"]
+									: [],
+						},
+				failed ? 503 : 200
+			);
 		}
 		if (
 			method === "POST" &&
@@ -316,29 +325,17 @@ export function createConsoleAccessCoreFixture() {
 		}
 		if (url.pathname === "/api/control-plane/orgs") {
 			const responseRole = memberAccount ? "member" : role;
-			const failed = failOrganizations;
-			await holdOrganizations;
-			return respond(
-				failed
-					? { error: "Organization access unavailable" }
-					: {
-							organizations: [
-								{
-									id: "org-a",
-									name: "Organization A",
-									slug: "a",
-									role: responseRole,
-								},
-								{
-									id: "org-b",
-									name: "Organization B",
-									slug: "b",
-									role: "member",
-								},
-							],
-						},
-				failed ? 503 : 200
-			);
+			return respond({
+				organizations: [
+					{
+						id: "org-a",
+						name: "Organization A",
+						slug: "a",
+						role: responseRole,
+					},
+					{ id: "org-b", name: "Organization B", slug: "b", role: "member" },
+				],
+			});
 		}
 		if (url.pathname === "/api/control-plane/nodes") {
 			return respond({
@@ -356,6 +353,9 @@ export function createConsoleAccessCoreFixture() {
 		}
 		if (url.pathname === "/api/billing/subscription-status") {
 			return respond({
+				// The OS rollout flag keeps the product switcher mounted for a member
+				// (Bot and OS), so the proof can open it and see Console withheld.
+				features: { "ui.interface_os": true },
 				entitlement: {
 					desktopAccess: true,
 					managedInference: true,
@@ -396,6 +396,42 @@ export function createConsoleAccessCoreFixture() {
 				version: 1,
 				canConfigure: false,
 			});
+		}
+		// packages/auth mfa-enrollment-plugin status for an account outside the
+		// second-factor mandate.
+		if (
+			url.origin === "http://127.0.0.1:5497" &&
+			method === "GET" &&
+			!url.search &&
+			url.pathname === "/api/auth/mfa-enrollment/status" &&
+			["Bearer console-owner-token", "Bearer console-member-token"].includes(
+				authorization ?? ""
+			)
+		) {
+			return respond({
+				code: null,
+				enforced: false,
+				passkeyCount: 0,
+				required: false,
+				sessionFactorRequired: false,
+				twoFactorEnabled: false,
+			});
+		}
+		// session_box.rs not_found: a new conversation has no session Box yet.
+		if (
+			method === "GET" &&
+			!url.search &&
+			/^\/api\/session-boxes\/conv-\d+$/.test(url.pathname)
+		) {
+			return respond(
+				{
+					error: {
+						code: "session_box_not_found",
+						message: "This conversation has no session Box.",
+					},
+				},
+				404
+			);
 		}
 		if (url.pathname === "/api/waitlist/me") {
 			return respond({ status: "approved" });
@@ -529,17 +565,17 @@ export function createConsoleAccessCoreFixture() {
 			role = next;
 		},
 		setFailure: (failed: boolean) => {
-			failOrganizations = failed;
+			failPermissions = failed;
 		},
 		hold: () => {
-			holdOrganizations = new Promise<void>((resolve) => {
-				releaseOrganizations = resolve;
+			holdPermissions = new Promise<void>((resolve) => {
+				releasePermissions = resolve;
 			});
 		},
 		release: () => {
-			holdOrganizations = null;
-			releaseOrganizations?.();
-			releaseOrganizations = null;
+			holdPermissions = null;
+			releasePermissions?.();
+			releasePermissions = null;
 		},
 		snapshot: () => ({ calls: [...calls], fallbackPaths: [...fallbackPaths] }),
 	};

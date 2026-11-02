@@ -5,6 +5,7 @@ import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { z } from "zod";
 import { type ProofJsonRecord, parseProofJsonRecord } from "./fixture-json.ts";
 import { GATEWAY_CONFIG_REQUIRED_SECTIONS } from "./harness/gateway-proof-contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export const STORY_URL = "/agent-smart-route-override-proof.html";
 export const AGENT_ID = "agent-smart-route-fixture";
@@ -12,9 +13,8 @@ export const OTHER_AGENT_ID = "agent-smart-route-sibling";
 export const GATEWAY_CONFIG_PATH = "/api/gateway/config";
 export const LEGACY_PREFERENCE_PATH = "/api/preferences/agent-smart-route";
 export const CLASSIFY_MODEL_ID = "gemma-3-270m-it-qat-Q4_0";
-export const EVIDENCE_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+export const EVIDENCE_DIR = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 export interface ApiCall {

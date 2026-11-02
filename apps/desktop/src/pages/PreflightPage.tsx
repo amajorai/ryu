@@ -288,7 +288,7 @@ export function PreflightPage({
 											label="Restart"
 											onRun={async () => {
 												await restartSidecar(target.url, target.token, sc.name);
-												toast.info(`Restarting ${sc.name}…`);
+												toast.info(tl("Restarting {name}…", { name: sc.name }));
 												await refresh();
 											}}
 										/>
@@ -298,7 +298,7 @@ export function PreflightPage({
 											label="Start"
 											onRun={async () => {
 												await startSidecar(target.url, target.token, sc.name);
-												toast.info(`Starting ${sc.name}…`);
+												toast.info(tl("Starting {name}…", { name: sc.name }));
 												await refresh();
 											}}
 										/>

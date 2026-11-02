@@ -127,7 +127,7 @@ test("loadMeetings shows date, participants and status", async () => {
 		{
 			id: "mt1",
 			title: "Weekly sync",
-			subtitle: "2026-09-02 · 2 participants · Zoom",
+			subtitle: "Sep 2, 2026 · 2 participants · Zoom",
 			badge: "done",
 		},
 	]);

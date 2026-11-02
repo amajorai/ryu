@@ -1,8 +1,9 @@
 // packages/services/src/managed-agents/routes.ts
 //
 // Ryu Managed Agents: routes whose writes the server deduplicates by `Idempotency-Key`.
-// Verified against the seven `idempotencyOf(c, "<METHOD> <path>", body)` call
-// sites in packages/api/src/routers/managed-agents.ts (the "Key" rows of the
+// Verified against the seven `managedAgentsIdempotency(c, "<METHOD> <path>", body)`
+// call sites in the route modules of packages/api/src/routers/managed-agents.ts
+// (managed-agents-{agent,credential,session}-routes.ts; the "Key" rows of the
 // public endpoint table); test/conformance/managed-agents.test.ts re-reads
 // them. The key is optional everywhere: without one a retried write can run
 // twice, so the SDK adds one automatically. The server grammar is

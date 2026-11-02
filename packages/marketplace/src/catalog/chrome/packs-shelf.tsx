@@ -23,6 +23,7 @@ import {
 } from "@ryu/blocks/desktop/store-error-details.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -130,7 +131,7 @@ function PacksShelfBody({
 							size="sm"
 							variant="ghost"
 						>
-							<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+							<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 							Packs
 						</Button>
 						<div className="min-w-0">
@@ -231,7 +232,7 @@ function PacksShelfBody({
 					aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Home End"
 					aria-label="Agent pack card stack"
 					className={cn(
-						"flex items-end justify-center overflow-x-auto py-5 pr-10 pl-10",
+						"flex items-end justify-center overflow-x-auto px-10 py-5",
 						"[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 					)}
 					onPointerLeave={() => setHoveredIndex(null)}
@@ -247,7 +248,7 @@ function PacksShelfBody({
 								className={cn(
 									"w-44 shrink-0 origin-bottom transition-transform duration-300 ease-out motion-reduce:transition-none",
 									visualStyles.stack,
-									index > 0 && "-ml-10"
+									index > 0 && "-ms-10"
 								)}
 								installable={canInstall}
 								installing={installing === pack.id}

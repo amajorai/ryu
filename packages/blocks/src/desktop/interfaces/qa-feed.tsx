@@ -35,8 +35,9 @@ export function QaQuestionRow({
 			<div className="flex min-w-0 flex-1 flex-col">
 				<h3 className="min-w-0 text-base leading-6">
 					<button
-						className="rounded-sm text-left font-medium text-primary outline-none transition-colors duration-100 after:absolute after:inset-0 hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring/50"
+						className="rounded-sm text-start font-medium text-primary outline-none transition-colors duration-100 after:absolute after:inset-0 hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring/50"
 						data-row-link=""
+						data-ryu-i18n="off"
 						onClick={() => onOpen(thread.id)}
 						ref={(element) => registerRow(thread.id, element)}
 						type="button"
@@ -53,6 +54,7 @@ export function QaQuestionRow({
 							"mt-1 line-clamp-2 text-foreground/80 text-sm leading-6",
 							question.byline === "asked" && "text-muted-foreground"
 						)}
+						data-ryu-i18n="off"
 					>
 						{excerpt}
 					</p>

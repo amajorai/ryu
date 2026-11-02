@@ -1,5 +1,6 @@
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -12,6 +13,11 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Item, ItemContent, ItemTitle } from "@ryu/ui/components/item.tsx";
 import { parseRyuDeepLink } from "@ryuhq/protocol/deep-link";
 import { useState } from "react";
+import {
+	invalidNodeNameSentence,
+	isValidNodeName,
+	nodeCommandErrorMessage,
+} from "@/src/lib/node-command-error.ts";
 import { invokeWhenReady } from "@/src/lib/tauri-ready.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
@@ -43,6 +49,7 @@ export function AddNodeDialog({
 	open: boolean;
 	onClose: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const addNode = useNodeStore((s) => s.addNode);
 	const nodes = useNodeStore((s) => s.nodes);
 	const [name, setName] = useState("");
@@ -50,6 +57,9 @@ export function AddNodeDialog({
 	const [token, setToken] = useState("");
 	const [link, setLink] = useState("");
 	const [error, setError] = useState<string | null>(null);
+	// A coded native rejection is already one translated sentence, so it skips
+	// `addErrorSentence`.
+	const [errorIsSentence, setErrorIsSentence] = useState(false);
 	// LAN discovery, folded in from the node dropdown: sweep the local /24 for
 	// reachable Core nodes and add one in a click — right where you'd otherwise
 	// type its address by hand.
@@ -78,8 +88,18 @@ export function AddNodeDialog({
 		setError(null);
 	};
 
+	const showSentence = (sentence: string) => {
+		setError(sentence);
+		setErrorIsSentence(true);
+	};
+
 	const handleAdd = async () => {
 		setError(null);
+		setErrorIsSentence(false);
+		if (!isValidNodeName(name.trim())) {
+			showSentence(invalidNodeNameSentence(tl));
+			return;
+		}
 		try {
 			await addNode(name.trim(), url.trim(), token.trim() || undefined);
 			setName("");
@@ -88,7 +108,12 @@ export function AddNodeDialog({
 			setLink("");
 			onClose();
 		} catch (e) {
-			setError(String(e));
+			const coded = nodeCommandErrorMessage(e, tl);
+			if (coded) {
+				showSentence(coded);
+			} else {
+				setError(String(e));
+			}
 		}
 	};
 
@@ -173,7 +198,9 @@ export function AddNodeDialog({
 					/>
 					{error && (
 						<p className="text-sm text-status-destructive" title={error}>
-							{error === LINK_ERROR ? error : addErrorSentence(error)}
+							{error === LINK_ERROR || errorIsSentence
+								? error
+								: addErrorSentence(error)}
 						</p>
 					)}
 					<div className="flex flex-col gap-1">

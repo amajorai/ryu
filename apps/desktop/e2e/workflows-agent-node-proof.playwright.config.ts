@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { workflowsProofBuildCommand } from "./workflows-proof-build.ts";
 
 const baseURL = "http://127.0.0.1:5279/";
 
@@ -16,8 +17,10 @@ export default defineConfig({
 		...devices["Desktop Chrome"],
 	},
 	webServer: {
-		command:
-			"bunx vite build --config ../../apps-store/workflows/ui/vite.config.ts --outDir /tmp/ryu-workflows-agent-coverage-build && bun e2e/workflows-agent-node-proof.host.ts",
+		command: workflowsProofBuildCommand(
+			"agent-coverage",
+			"workflows-agent-node-proof.host.ts"
+		),
 		cwd: path.resolve(import.meta.dirname, ".."),
 		url: `${baseURL}__ready`,
 		reuseExistingServer: false,

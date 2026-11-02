@@ -4,14 +4,17 @@ import {
 	type InterfaceAgent,
 	type InterfaceGroup,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { Folder, MessageSquare, Pin, Users } from "lucide-react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import {
+	compactAge,
+	fullTimestamp,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 /** Attribute the board's arrow-key navigation looks for. */
 export const BOARD_CARD_ATTRIBUTE = "data-board-card";
@@ -101,10 +104,11 @@ export function BoardCard({
 	tabStop: boolean;
 	thread: InterfaceThread;
 }) {
+	const tl = useLiteralMessages();
 	const status = threadStatus(thread);
 	const failed = status === "attention";
 	const age = compactAge(thread.updatedAt, now);
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tl("Untitled thread");
 	const excerptId = `board-card-excerpt-${thread.id}`;
 	return (
 		<article
@@ -128,15 +132,16 @@ export function BoardCard({
 					) : null}
 					<h3 className="min-w-0 font-medium text-foreground text-sm leading-5">
 						{showStatus ? (
-							<span className="sr-only">{THREAD_STATUS_LABELS[status]}: </span>
+							<span className="sr-only">{threadStatusLabel(status)}: </span>
 						) : null}
 						<button
 							aria-current={selected ? "true" : undefined}
 							aria-describedby={excerptId}
-							className="line-clamp-2 text-left outline-none after:absolute after:inset-0 after:rounded-lg after:content-['']"
+							className="line-clamp-2 text-start outline-none after:absolute after:inset-0 after:rounded-lg after:content-['']"
 							data-board-card=""
 							data-column={columnIndex}
 							data-row={rowIndex}
+							data-ryu-i18n="off"
 							onClick={() => onOpen(thread.id)}
 							tabIndex={tabStop ? 0 : -1}
 							type="button"
@@ -152,7 +157,7 @@ export function BoardCard({
 					{thread.lastMessage ? (
 						<>
 							{thread.lastMessageRole === "user" ? "You: " : null}
-							{thread.lastMessage}
+							<span data-ryu-i18n="off">{thread.lastMessage}</span>
 						</>
 					) : (
 						"No messages yet"
@@ -167,7 +172,7 @@ export function BoardCard({
 					</span>
 				) : null}
 				{group ? <BoardGroupName group={group} /> : null}
-				<span className="ml-auto flex shrink-0 items-center gap-3 tabular-nums">
+				<span className="ms-auto flex shrink-0 items-center gap-3 tabular-nums">
 					{thread.pinned ? (
 						<span className="inline-flex items-center">
 							<Pin aria-hidden="true" className={cn(META_ICON, "rotate-45")} />
@@ -176,16 +181,18 @@ export function BoardCard({
 					) : null}
 					<span className="inline-flex items-center gap-1">
 						<MessageSquare aria-hidden="true" className={META_ICON} />
-						{thread.messageCount}
+						<span aria-hidden="true">{thread.messageCount}</span>
 						<span className="sr-only">
-							{thread.messageCount === 1 ? " message" : " messages"}
+							{tl("{count, plural, one {# message} other {# messages}}", {
+								count: thread.messageCount,
+							})}
 						</span>
 					</span>
 					{age ? (
 						<time
-							className="min-w-6 text-right"
+							className="min-w-6 text-end"
 							dateTime={thread.updatedAt}
-							title={new Date(thread.updatedAt).toLocaleString()}
+							title={fullTimestamp(thread.updatedAt)}
 						>
 							<span className="sr-only">Updated </span>
 							{age}
@@ -238,7 +245,7 @@ export function BoardStatusText({ status }: { status: ThreadStatus }) {
 			)}
 		>
 			<BoardStatusDot pulse={false} status={status} />
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }

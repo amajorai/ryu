@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 // Pin the CLI's language before any module computes it: `CLI_LOCALE` is read once
-// at import time from RYU_LOCALE > LC_ALL > LC_MESSAGES > LANG, so a developer's
-// German or Japanese shell must not change the English copy tests assert on.
+// at import time from RYU_LOCALE > LANGUAGE > LC_ALL/LC_MESSAGES/LANG > the OS
+// locale, so a developer's German or Japanese shell must not change the English
+// copy tests assert on.
 // Static imports are hoisted above this assignment, so CLI modules load below.
 process.env.RYU_LOCALE = "en";
 const { productModePreferencePath } = await import("../core/productMode.ts");

@@ -18,7 +18,7 @@ import type {
 	RyuCompanionI18n,
 	RyuCompanionWindowApi,
 } from "@ryu/app-host/companion-contracts";
-import type { MessageOverlays } from "@ryu/i18n/core";
+import { type MessageOverlays, systemLocales } from "@ryu/i18n/core";
 import {
 	I18nProvider,
 	useI18n,
@@ -163,12 +163,16 @@ export function RyuAppShell({
 	// subscription that makes every app repaint when Desktop changes its display
 	// zone or locale through the host bridge.
 	useTimezoneRevision();
+	// Standalone (no host bridge, no explicit locale), the shell starts in the
+	// first of the system's preferred languages Ryu can show and follows later
+	// changes; inside Desktop the host bridge drives the language instead.
+	const followSystemLocale =
+		(initialLocale === undefined || initialLocale === null) &&
+		companionI18nBridge() === null;
 	return (
 		<I18nProvider
-			initialLocale={
-				initialLocale ??
-				(globalThis.navigator === undefined ? null : navigator.language)
-			}
+			followSystemLocale={followSystemLocale}
+			initialLocale={initialLocale ?? systemLocales()}
 			{...(messageOverlays ? { overlays: messageOverlays } : {})}
 		>
 			<CompanionI18nSync>

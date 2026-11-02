@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Locator, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 async function waitForModelResult(
 	status: Locator,
@@ -99,9 +100,8 @@ test("runs both browser-local image models without sending image data out", asyn
 		)
 	).toBe(true);
 
-	const proofPath = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/image-editing/image-editor-live-models.png"
+	const proofPath = proofEvidencePath(
+		"image-editing/image-editor-live-models.png"
 	);
 	await mkdir(path.dirname(proofPath), { recursive: true });
 	await page.screenshot({ path: proofPath, fullPage: false });

@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	ChevronRight,
@@ -120,17 +121,17 @@ export function SitesMockup({ compact = false }: { compact?: boolean }) {
 
 export function DashboardsMockup() {
 	const metrics = [
-		["Open runs", "12", "↑ 18%"],
-		["Needs review", "04", "today"],
-		["Healthy sources", "96%", "live"],
-		["Credits used", "38%", "this week"],
+		[tl("Open runs"), "12", "↑ 18%"],
+		[tl("Needs review"), "04", tl("today")],
+		[tl("Healthy sources"), "96%", tl("live")],
+		[tl("Credits used"), "38%", tl("this week")],
 	] as const;
 	return (
 		<MockupWindow label="Dashboards / home">
 			<div className="grid min-h-[18rem] grid-cols-1 bg-background sm:grid-cols-[6.5rem_1fr]">
 				<MockupSidebar
-					active="Home"
-					items={["Home", "Boards", "Widgets", "Monitors"]}
+					active={tl("Home")}
+					items={[tl("Home"), tl("Boards"), tl("Widgets"), tl("Monitors")]}
 				/>
 				<div className="min-w-0 p-3 sm:p-4">
 					<div className="flex items-center justify-between gap-2">
@@ -195,13 +196,13 @@ export function DashboardsMockup() {
 						<div className="rounded-lg border border-border bg-card p-2.5">
 							<div className="flex items-center justify-between">
 								<span className="type-micro font-medium">Recent activity</span>
-								<ChevronRight className="size-3 text-muted-foreground" />
+								<ChevronRight className="size-3 text-muted-foreground rtl:-scale-x-100" />
 							</div>
 							<div className="mt-2 space-y-2">
 								{[
-									"Monitor recovered",
-									"Quest completed",
-									"Meeting starts soon",
+									tl("Monitor recovered"),
+									tl("Quest completed"),
+									tl("Meeting starts soon"),
 								].map((item, index) => (
 									<div className="flex items-center gap-2" key={item}>
 										<span
@@ -242,11 +243,11 @@ export function VideoStudioMockup() {
 								<span className="mt-2 h-1 w-16 rounded-full bg-primary" />
 							</div>
 							<div className="absolute top-1/2 left-1/2 flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-background/80">
-								<Play className="ml-0.5 size-3 fill-foreground" />
+								<Play className="ms-0.5 size-3 fill-foreground" />
 							</div>
 						</div>
 					</div>
-					<div className="border-border border-l bg-muted/15 p-2.5">
+					<div className="border-border border-s bg-muted/15 p-2.5">
 						<div className="mb-3 flex items-center justify-between">
 							<span className="type-micro font-medium">Inspector</span>
 							<Layers className="size-3 text-muted-foreground" />
@@ -283,30 +284,30 @@ export function VideoStudioMockup() {
 					</div>
 					<div className="space-y-1.5">
 						<div className="flex items-center gap-2">
-							<span className="type-miniature w-8 shrink-0 font-mono text-muted-foreground">
-								VIDEO
+							<span className="type-miniature min-w-8 shrink-0 font-mono text-muted-foreground uppercase">
+								{tl("Video")}
 							</span>
 							<div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-foreground/[0.06]">
-								<span className="absolute inset-y-0 left-[4%] w-[31%] rounded-sm bg-primary/40" />
-								<span className="absolute inset-y-0 left-[39%] w-[19%] rounded-sm bg-foreground/20" />
-								<span className="absolute inset-y-0 left-[61%] w-[28%] rounded-sm bg-primary/25" />
+								<span className="absolute inset-y-0 start-[4%] w-[31%] rounded-sm bg-primary/40" />
+								<span className="absolute inset-y-0 start-[39%] w-[19%] rounded-sm bg-foreground/20" />
+								<span className="absolute inset-y-0 start-[61%] w-[28%] rounded-sm bg-primary/25" />
 							</div>
 						</div>
 						<div className="flex items-center gap-2">
-							<span className="type-miniature w-8 shrink-0 font-mono text-muted-foreground">
-								VOICE
+							<span className="type-miniature min-w-8 shrink-0 font-mono text-muted-foreground uppercase">
+								{tl("Voice")}
 							</span>
 							<div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-foreground/[0.06]">
-								<span className="absolute inset-y-0 left-[7%] w-[58%] rounded-sm bg-success/35" />
+								<span className="absolute inset-y-0 start-[7%] w-[58%] rounded-sm bg-success/35" />
 							</div>
 						</div>
 						<div className="flex items-center gap-2">
-							<span className="type-miniature w-8 shrink-0 font-mono text-muted-foreground">
-								TEXT
+							<span className="type-miniature min-w-8 shrink-0 font-mono text-muted-foreground uppercase">
+								{tl("Text")}
 							</span>
 							<div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-foreground/[0.06]">
-								<span className="absolute inset-y-0 left-[39%] w-[20%] rounded-sm bg-foreground/20" />
-								<span className="absolute inset-y-0 left-[70%] w-[19%] rounded-sm bg-primary/25" />
+								<span className="absolute inset-y-0 start-[39%] w-[20%] rounded-sm bg-foreground/20" />
+								<span className="absolute inset-y-0 start-[70%] w-[19%] rounded-sm bg-primary/25" />
 							</div>
 						</div>
 					</div>
@@ -320,7 +321,7 @@ export function SlidesMockup() {
 	return (
 		<MockupWindow label="Slides / launch-story">
 			<div className="grid min-h-[18rem] grid-cols-[5.5rem_1fr] bg-background">
-				<div className="border-border border-r bg-muted/20 p-2">
+				<div className="border-border border-e bg-muted/20 p-2">
 					<div className="mb-2 flex items-center justify-between">
 						<span className="type-tiny font-medium">Frames</span>
 						<Plus className="size-3 text-muted-foreground" />
@@ -340,7 +341,7 @@ export function SlidesMockup() {
 									<span className="type-miniature font-mono text-muted-foreground">
 										{number}
 									</span>
-									<span className="ml-auto h-1 w-4 rounded-full bg-foreground/20" />
+									<span className="ms-auto h-1 w-4 rounded-full bg-foreground/20" />
 								</div>
 							</div>
 						))}
@@ -369,7 +370,7 @@ export function SlidesMockup() {
 									01 / 04
 								</span>
 							</div>
-							<div className="absolute right-4 bottom-4 left-4 sm:right-5 sm:bottom-5 sm:left-5">
+							<div className="absolute start-4 end-4 bottom-4 sm:start-5 sm:end-5 sm:bottom-5">
 								<p className="max-w-[11rem] font-heading font-medium text-base leading-none sm:text-xl">
 									A clearer way to start.
 								</p>

@@ -87,7 +87,7 @@ function ProviderCardContent(props: ProviderCardProps) {
 				    manages aria-expanded + keyboard on the trigger button. */}
 				<CollapsibleTrigger
 					appearance="provider-group"
-					className="flex min-h-12 w-full items-center justify-between px-0 py-3 text-left hover:bg-transparent"
+					className="flex min-h-12 w-full items-center justify-between px-0 py-3 text-start hover:bg-transparent"
 				>
 					<div className="flex min-w-0 items-center gap-3">
 						{/* Resolve the brand mark on id+label ONLY — never `provider.api`.

@@ -3,7 +3,7 @@
 // host.storage / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -48,6 +48,12 @@
 // didn't" marker AND the streak marker the count below scans for.
 const MARKER = "[auto-continue]";
 const MAX_CONSECUTIVE = 3;
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const convId = ctx.conversation_id;
 if (!convId) {
@@ -67,12 +73,12 @@ if (typed.indexOf("/plan-continue") === 0) {
 		await host.storage.set(convId, { auto: "off" });
 		return {
 			kind: "note",
-			text: "Auto-continue is off for this chat. Turn it back on with '/plan-continue on'.",
+			text: await host.t("Auto-continue is off for this chat. Turn it back on with '/plan-continue on'."),
 		};
 	}
 	if (arg === "on" || arg === "start") {
 		await host.storage.delete(convId);
-		return { kind: "note", text: "Auto-continue is on for this chat." };
+		return { kind: "note", text: await host.t("Auto-continue is on for this chat.") };
 	}
 }
 
@@ -108,10 +114,10 @@ for (let i = ctx.transcript.length - 1; i >= 0; i--) {
 if (consecutive >= MAX_CONSECUTIVE) {
 	return {
 		kind: "note",
-		text:
-			"Auto-continue stopped after " +
-			MAX_CONSECUTIVE +
-			" nudges. Plan mode is still on — send a message to keep going.",
+		text: await host.t(
+			"Auto-continue stopped after {count} nudges. Plan mode is still on — send a message to keep going.",
+			{ count: MAX_CONSECUTIVE }
+		),
 	};
 }
 
@@ -136,7 +142,7 @@ if (stalled) {
 	}
 	return {
 		kind: "note",
-		text: "Auto-continue stopped: the last two replies were identical, so the plan is not moving.",
+		text: await host.t("Auto-continue stopped: the last two replies were identical, so the plan is not moving."),
 	};
 }
 

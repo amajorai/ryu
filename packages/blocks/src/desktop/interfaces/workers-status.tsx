@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	WORKER_STATE_LABELS,
@@ -43,7 +44,7 @@ export function StatusLight({
 export function deskLabel(worker: WorkerView): string {
 	const parts = [worker.name, WORKER_STATE_LABELS[worker.state]];
 	if (worker.current) {
-		parts.push(`working on ${worker.current.title.trim() || "Untitled"}`);
+		parts.push(`working on ${worker.current.title.trim() || tr("Untitled")}`);
 	} else {
 		parts.push("no tasks yet");
 	}
@@ -52,5 +53,5 @@ export function deskLabel(worker: WorkerView): string {
 
 /** A conversation's title for a screen, with a fallback for blank ones. */
 export function screenTitle(worker: WorkerView): string {
-	return worker.current?.title.trim() || "Untitled";
+	return worker.current?.title.trim() || tr("Untitled");
 }

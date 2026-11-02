@@ -213,7 +213,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 						value={query}
 					/>
 				</label>
-				<div className="type-caption ml-auto flex items-center gap-1.5 text-muted-foreground">
+				<div className="type-caption ms-auto flex items-center gap-1.5 text-muted-foreground">
 					<span className="rounded-full bg-muted/35 px-2 py-1">
 						{tl("{count} commits", { count: String(commits.length) })}
 					</span>
@@ -229,7 +229,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 			</div>
 
 			<div className="flex min-h-0 flex-1">
-				<aside className="flex w-52 shrink-0 flex-col border-border/60 border-r bg-sidebar/35">
+				<aside className="flex w-52 shrink-0 flex-col border-border/60 border-e bg-sidebar/35">
 					<div className="flex items-center justify-between px-3 py-2.5">
 						<span className="font-medium text-muted-foreground text-xs uppercase tracking-widest">
 							Refs
@@ -280,7 +280,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 					)}
 				</main>
 
-				<aside className="hidden w-72 shrink-0 border-border/60 border-l bg-sidebar/25 xl:flex xl:flex-col">
+				<aside className="hidden w-72 shrink-0 border-border/60 border-s bg-sidebar/25 xl:flex xl:flex-col">
 					<CommitDetails
 						changedFiles={changedFiles}
 						commit={selectedCommit}
@@ -288,7 +288,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 						folder={folder}
 						onOpenChanges={() =>
 							openTab(`/project/diff/${encodeURIComponent(folder)}`, {
-								title: `Changes · ${folderLabel}`,
+								title: tl("Changes · {folderLabel}", { folderLabel }),
 							})
 						}
 					/>

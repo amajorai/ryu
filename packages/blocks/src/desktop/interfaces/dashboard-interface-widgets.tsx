@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
@@ -7,7 +8,6 @@ import { AgentList, ThreadList, UpcomingList } from "./dashboard-lists.tsx";
 import {
 	type DashboardView,
 	DEFAULT_LAYOUT,
-	plural,
 	type WidgetId,
 	widgetSpec,
 } from "./dashboard-model.ts";
@@ -37,7 +37,7 @@ export interface WidgetContext {
 }
 
 function threadsWord(count: number): string {
-	return count === 1 ? "thread" : "threads";
+	return tr("{count, plural, one {thread} other {threads}}", { count });
 }
 
 /** Each tile: one figure and the noun it counts. */
@@ -45,22 +45,29 @@ function statContent(id: WidgetId, view: DashboardView): WidgetContent {
 	const { stats } = view;
 	const tiles: Record<string, { context: string; value: number }> = {
 		"stat-agents": {
-			context: `of ${plural(stats.agents, "agent")}`,
+			context: tr("of {count, plural, one {# agent} other {# agents}}", {
+				count: stats.agents,
+			}),
 			value: stats.agentsWorking,
 		},
 		"stat-attention": {
 			context:
 				stats.failedRuns > 0
-					? `${plural(stats.attention, "thread")}, ${plural(stats.failedRuns, "run")}`
+					? tr(
+							"{threads, plural, one {# thread} other {# threads}}, {runs, plural, one {# run} other {# runs}}",
+							{ runs: stats.failedRuns, threads: stats.attention }
+						)
 					: threadsWord(stats.attention),
 			value: stats.attention + stats.failedRuns,
 		},
 		"stat-scheduled": {
-			context: view.upcoming ? "scheduled runs" : "no schedules",
+			context: view.upcoming ? tr("scheduled runs") : tr("no schedules"),
 			value: stats.scheduled24h,
 		},
 		"stat-updated": {
-			context: `of ${plural(stats.threads, "thread")}`,
+			context: tr("of {count, plural, one {# thread} other {# threads}}", {
+				count: stats.threads,
+			}),
 			value: stats.updated24h,
 		},
 		"stat-working": {
@@ -154,7 +161,10 @@ export function widgetContent(
 				),
 				meta:
 					view.stats.agents > 0
-						? `${view.stats.agentsWorking} of ${view.stats.agents} working`
+						? tr("{working} of {total} working", {
+								total: view.stats.agents,
+								working: view.stats.agentsWorking,
+							})
 						: undefined,
 			};
 		case "activity":
@@ -166,7 +176,10 @@ export function widgetContent(
 						snapshot={snapshot}
 					/>
 				),
-				meta: `${plural(view.activity.total, "thread")} · last 24h`,
+				meta: tr(
+					"{count, plural, one {# thread} other {# threads}} · last 24h",
+					{ count: view.activity.total }
+				),
 			};
 		case "upcoming":
 			return {

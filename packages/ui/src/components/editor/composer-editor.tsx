@@ -207,11 +207,22 @@ export function mentionMarkdown(
 	return output;
 }
 
+// A workspace file mention stays plain text in the editor (`@<path>`), so
+// Markdown serialization escapes its `<` (and any punctuation in the path) as
+// if it might open HTML. The draft must keep the mention verbatim.
+const PATH_MENTION_ESCAPED_RE = /@\\<((?:\\[!-/:-@[-`{-~]|[^>\n\\])+)>/g;
+const MARKDOWN_ESCAPE_RE = /\\([!-/:-@[-`{-~])/g;
+
 export function serializeComposerMarkdown(markdown: string): string {
-	return markdown.replace(MENTION_LINK_RE, (_match, displayText: string) => {
-		const clean = displayText.replaceAll("**", "");
-		return clean.startsWith("@") ? clean : `@${clean}`;
-	});
+	return markdown
+		.replace(MENTION_LINK_RE, (_match, displayText: string) => {
+			const clean = displayText.replaceAll("**", "");
+			return clean.startsWith("@") ? clean : `@${clean}`;
+		})
+		.replace(
+			PATH_MENTION_ESCAPED_RE,
+			(_match, path: string) => `@<${path.replace(MARKDOWN_ESCAPE_RE, "$1")}>`
+		);
 }
 
 export function ComposerEditor({
@@ -229,8 +240,12 @@ export function ComposerEditor({
 		() => ({ items: mentionItems, renderer: mentionRenderer }),
 		[mentionItems, mentionRenderer]
 	);
+	// Markdown deserializes an inline void without the empty text Slate keeps on
+	// either side of it; normalizing gives a chip at a line edge a caret and
+	// drop target past it.
 	const editor = usePlateEditor({
 		plugins: ComposerEditorKit,
+		shouldNormalizeEditor: true,
 		value: (ed) =>
 			ed
 				.getApi(MarkdownPlugin)
@@ -311,6 +326,7 @@ export function ComposerEditor({
 				)
 			);
 		setValue(editor, next);
+		editor.tf.normalize({ force: true });
 		lastMarkdownRef.current = markdown;
 	}, [editor, markdown, mentionItems]);
 

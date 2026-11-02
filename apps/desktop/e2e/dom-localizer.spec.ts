@@ -1,6 +1,6 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type {} from "./harness/dom-localizer-proof.tsx";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("localized mutations avoid translating stable siblings and retain language behavior", async ({
 	page,
@@ -55,9 +55,8 @@ test("localized mutations avoid translating stable siblings and retain language 
 	);
 	expect(await page.evaluate(() => window.localizerProof.calls())).toBe(0);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			`../../../docs/proof/performance-sweep/dom-localizer-${browserName}-completed.png`
+		path: proofEvidencePath(
+			`performance-sweep/dom-localizer-${browserName}-completed.png`
 		),
 		animations: "disabled",
 	});

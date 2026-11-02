@@ -1,38 +1,8 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-
-interface WorkspaceProofSnapshot {
-	assignmentWriteResults: Array<"failed" | "saved">;
-	requests: Array<{
-		body: unknown;
-		headers: Record<string, string>;
-		method: string;
-		path: string;
-	}>;
-	server: {
-		activeOrganizationId: string;
-		activeTeamId: string | null;
-		assignments: Record<string, string[]>;
-		members: Array<{ role: string; userId: string }>;
-		organizations: Array<{ id: string; name: string; role: string }>;
-		roles: Array<{
-			builtin: boolean;
-			key: string;
-			name: string;
-			permissions: string[];
-		}>;
-	};
-	stepUpScopes: string[];
-}
-
-declare global {
-	interface Window {
-		__GATEWAY_WORKSPACE_EXTERNAL_URLS__?: string[];
-		__GATEWAY_WORKSPACE_PROOF__?: {
-			snapshot: () => WorkspaceProofSnapshot;
-		};
-	}
-}
+// The harness owns the proof's window globals and their snapshot type.
+import type { WorkspaceProofSnapshot } from "./harness/gateway-workspace-members-proof.mock.tsx";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 function evidencePath(name: string): string {
 	// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
@@ -41,13 +11,12 @@ function evidencePath(name: string): string {
 	if (override) {
 		return path.join(override, `${name}.png`);
 	}
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
-async function readProof(page: import("@playwright/test").Page) {
+async function readProof(
+	page: import("@playwright/test").Page
+): Promise<WorkspaceProofSnapshot> {
 	return page.evaluate(() => {
 		const proof = window.__GATEWAY_WORKSPACE_PROOF__;
 		if (!proof) {

@@ -1,6 +1,5 @@
 import { I18nProvider } from "@ryu/i18n/react";
 import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
-import { QueryClientProvider } from "@tanstack/react-query";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,13 +15,14 @@ import {
 	PanelToggleButtons,
 	WorkspacePanels,
 } from "../../src/components/panels/WorkspacePanels.tsx";
-import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
-import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import {
 	CurrentTabIdProvider,
-	TabsProvider,
 	useTabsContext,
 } from "../../src/contexts/TabsContext.tsx";
+import {
+	sealedLocalSlot,
+	sealedLocalStorage,
+} from "../../src/lib/content-seal.ts";
 import { queryClient } from "../../src/lib/query-client.ts";
 import { ENTITY_ACTIVATION_EVENT } from "../../src/lib/window-routing.ts";
 import { useDockPanelRequestStore } from "../../src/store/useDockPanelRequestStore.ts";
@@ -30,10 +30,21 @@ import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import { useProjectDockStore } from "../../src/store/useProjectDockStore.ts";
 import { useWorkspaceStore } from "../../src/store/useWorkspaceStore.ts";
 import { createChatPageNativeDependencies } from "./chat-page-native-http-dependencies.ts";
+import {
+	prepareShellProof,
+	ShellProofProviders,
+} from "./shell-proof-providers.tsx";
 import "../../src/index.css";
 
 localStorage.setItem("ryu_startup_behavior", "restore");
-if (!localStorage.getItem("ryu_session_tabs")) {
+// Seed once: after the first load the session lives sealed (content-seal.ts),
+// and a plaintext seed would be folded over it on reload.
+if (
+	!(
+		localStorage.getItem("ryu_session_tabs") ||
+		localStorage.getItem(sealedLocalSlot("ryu_session_tabs"))
+	)
+) {
 	localStorage.setItem(
 		"ryu_session_tabs",
 		JSON.stringify({
@@ -217,10 +228,15 @@ mockIPC((command, args) => {
 	if (command === "plugin:event|listen") {
 		requireNativeFields(command, payload, ["event", "target", "handler"]);
 		if (
-			// Shipping subscriptions: node roster changes and the TabsContext
-			// window-routing entity activation (`ENTITY_ACTIVATION_EVENT`).
-			(payload.event !== "nodes-changed" &&
-				payload.event !== ENTITY_ACTIVATION_EVENT) ||
+			// Shipping subscriptions: node roster changes, the TabsContext
+			// window-routing entity activation (`ENTITY_ACTIVATION_EVENT`), and the
+			// sealed auth vault's slot-change event, which auth-client.ts (loaded by
+			// EntitlementProvider's billing client) subscribes to.
+			!(
+				payload.event === "nodes-changed" ||
+				payload.event === ENTITY_ACTIVATION_EVENT ||
+				payload.event === "desktop-secret-changed"
+			) ||
 			payload.target === null ||
 			typeof payload.target !== "object" ||
 			Array.isArray(payload.target) ||
@@ -488,7 +504,8 @@ function Surface() {
 			unexpectedNativeCommands,
 			tabs: tabs.tabs,
 			projects: useProjectDockStore.getState().byFolder,
-			storage: localStorage.getItem("ryu_session_tabs"),
+			// Sealed by content-seal.ts: read it the way a restart restores it.
+			storage: sealedLocalStorage.getItem("ryu_session_tabs"),
 		}),
 		failAction: () => {
 			failAction = true;
@@ -545,20 +562,15 @@ function Surface() {
 	);
 }
 
+await prepareShellProof();
 createRoot(document.getElementById("root")!).render(
 	<I18nProvider>
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<AppSurfaceProvider surface="desktop">
-					<TooltipProvider>
-						<EntitlementProvider>
-							<TabsProvider>
-								<Surface />
-							</TabsProvider>
-						</EntitlementProvider>
-					</TooltipProvider>
-				</AppSurfaceProvider>
-			</MemoryRouter>
-		</QueryClientProvider>
+		<MemoryRouter>
+			<TooltipProvider>
+				<ShellProofProviders entitlement queryClient={queryClient} tabs>
+					<Surface />
+				</ShellProofProviders>
+			</TooltipProvider>
+		</MemoryRouter>
 	</I18nProvider>
 );

@@ -1,7 +1,8 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { motion } from "motion/react";
 import { type ReactNode, type RefObject, useId } from "react";
 import { NewspaperArticleMasthead } from "./newspaper-masthead.tsx";
-import { countLabel, type NewspaperStory } from "./newspaper-model.ts";
+import { messageCount, type NewspaperStory } from "./newspaper-model.ts";
 import {
 	BoxHead,
 	StoryByline,
@@ -67,13 +68,13 @@ export function NewspaperArticle({
 							tabIndex={-1}
 						>
 							<span className="font-semibold font-serif">
-								{story?.thread.title ?? "New story"}
+								{story?.thread.title ?? tr("New story")}
 							</span>
 						</h1>
 						{story ? (
 							<StoryByline
 								className="mt-4"
-								detail={countLabel(story.thread.messageCount, "message")}
+								detail={messageCount(story.thread.messageCount)}
 								now={now}
 								story={story}
 							/>
@@ -94,7 +95,7 @@ export function NewspaperArticle({
 				{rail.length > 0 ? (
 					<aside
 						aria-labelledby={railId}
-						className="w-72 shrink-0 overflow-y-auto border-border border-l px-6 pt-8 pb-8 max-xl:hidden"
+						className="w-72 shrink-0 overflow-y-auto border-border border-s px-6 pt-8 pb-8 max-xl:hidden"
 					>
 						<BoxHead id={railId}>More in today’s paper</BoxHead>
 						<ul>

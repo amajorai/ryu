@@ -33,6 +33,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@ryu/ui/components/collapsible.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Tooltip,
 	TooltipContent,
@@ -196,7 +197,7 @@ function ProseBlock({
 	return (
 		<div
 			className={cn(
-				"border-l-2 pl-2.5",
+				"border-s-2 ps-2.5",
 				accent ? "border-primary/40" : "border-border"
 			)}
 		>
@@ -262,10 +263,10 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 						className="mt-2 flex items-center"
 						render={<button type="button" />}
 					>
-						<HugeiconsIcon
+						<DirectionalIcon
 							className={cn(
 								"size-3.5 transition-transform",
-								open && "rotate-90"
+								open && "rotate-90 rtl:-rotate-90"
 							)}
 							icon={ArrowRight01Icon}
 						/>
@@ -314,7 +315,7 @@ function TodoSection({ todos }: { todos: MissionTodo[] }) {
 					icon={SparklesIcon}
 				/>
 				<span className="font-medium text-xs">Still to do</span>
-				<Badge className="ml-auto" size="compact" variant="secondary">
+				<Badge className="ms-auto" size="compact" variant="secondary">
 					{todos.length}
 				</Badge>
 			</div>

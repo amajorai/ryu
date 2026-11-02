@@ -5,8 +5,8 @@
 // enforces nothing.
 
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@ryu/ui/components/badge";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -42,7 +42,7 @@ export function PolicyList({
 			{policies.map((policy) => (
 				<SettingsItem
 					actions={
-						<HugeiconsIcon
+						<DirectionalIcon
 							className="size-4 text-muted-foreground/70"
 							icon={ArrowRight01Icon}
 						/>
@@ -51,7 +51,7 @@ export function PolicyList({
 					key={policy.id}
 					title={
 						<button
-							className="flex w-full min-w-0 flex-col items-start gap-0.5 text-left"
+							className="flex w-full min-w-0 flex-col items-start gap-0.5 text-start"
 							data-policy-return={`policy:${policy.id}`}
 							onClick={() => onOpen(policy.id)}
 							type="button"

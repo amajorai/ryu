@@ -36,6 +36,19 @@ interface UsageFillStyle extends CSSProperties {
 	"--usage-fill": string;
 }
 
+/** "5h: 88% left" or "5h: 61% used", one whole sentence per mode. */
+function usageLine(
+	tl: ReturnType<typeof useLiteralMessages>,
+	mode: UsageBarMode,
+	label: string,
+	shown: number
+): string {
+	const values = { label, percent: Math.round(shown) };
+	return mode === "remaining"
+		? tl("{label}: {percent}% left", values)
+		: tl("{label}: {percent}% used", values);
+}
+
 /**
  * A meter's per-credit expiry timeline: every item soonest-first with its exact
  * moment, its countdown, and an urgency dot. Shared by the chip's own tooltip and
@@ -84,15 +97,14 @@ export function WindowTooltipRow({
 	const pace = paceStatus(usageWindow, tl);
 	return (
 		<span className="font-medium">
-			{usageWindow.label}: {Math.round(shown)}%{" "}
-			{mode === "remaining" ? "left" : "used"}
+			{usageLine(tl, mode, usageWindow.label, shown)}
 			{reset ? (
-				<span className="ml-1 font-normal text-muted-foreground">
+				<span className="ms-1 font-normal text-muted-foreground">
 					· {reset}
 				</span>
 			) : null}
 			{pace ? (
-				<span className="ml-1 font-normal text-muted-foreground">· {pace}</span>
+				<span className="ms-1 font-normal text-muted-foreground">· {pace}</span>
 			) : null}
 		</span>
 	);
@@ -261,14 +273,13 @@ export function CompactUsageMeter({
 	barStyle: UsageBarStyle;
 }) {
 	const tl = useLiteralMessages();
-	const noun = mode === "remaining" ? "left" : "used";
 	const isRing = barStyle === "ring";
 	// Screen-reader summary: "Usage — 5h: 88% left, 7d: 61% left".
 	const label = windows
 		.map((w) => {
 			const used = Math.max(0, Math.min(100, w.usedPercent));
 			const shown = mode === "remaining" ? 100 - used : used;
-			return `${shortLabel(w)}: ${Math.round(shown)}% ${noun}`;
+			return usageLine(tl, mode, shortLabel(w), shown);
 		})
 		.join(", ");
 	// The pill is decorative — every number lives in the tooltip below, which
@@ -366,7 +377,6 @@ export function UsageWindowMeter({
 	// What the user chose to read off the meter: percent used, or percent left.
 	const shown = mode === "remaining" ? 100 - used : used;
 	const fillStyle: UsageFillStyle = { "--usage-fill": `${shown}%` };
-	const noun = mode === "remaining" ? "left" : "used";
 	// Color always reflects danger (high usage → red), regardless of which
 	// number is displayed; the bar fill matches the displayed number.
 	const reset = formatReset(usageWindow.resetsAt);
@@ -391,7 +401,7 @@ export function UsageWindowMeter({
 			<TooltipTrigger
 				render={
 					<span
-						aria-label={`${usageWindow.label}: ${Math.round(shown)}% ${noun}`}
+						aria-label={usageLine(tl, mode, usageWindow.label, shown)}
 						className="flex shrink-0 items-center gap-1 text-muted-foreground/70"
 					/>
 				}
@@ -416,7 +426,7 @@ export function UsageWindowMeter({
 			<TooltipContent>
 				<div className="flex flex-col gap-0.5 text-xs">
 					<span className="font-medium">
-						{usageWindow.label}: {Math.round(shown)}% {noun}
+						{usageLine(tl, mode, usageWindow.label, shown)}
 					</span>
 					{reset ? (
 						<span className="text-muted-foreground">{reset}</span>

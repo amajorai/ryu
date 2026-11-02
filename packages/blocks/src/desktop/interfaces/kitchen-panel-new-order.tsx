@@ -117,7 +117,7 @@ function LineRow({
 			<button
 				aria-pressed={selected}
 				className={cn(
-					"flex w-full items-center gap-3 rounded-md px-2 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50",
+					"flex w-full items-center gap-3 rounded-md px-2 py-2 text-start outline-none transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50",
 					selected && "bg-accent shadow-[inset_2px_0_0_var(--ring)]"
 				)}
 				onClick={() => onPick(station.agent.id)}
@@ -125,7 +125,10 @@ function LineRow({
 			>
 				<ChefAvatar agentId={station.agent.id} size={24} />
 				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate font-medium text-foreground text-sm leading-5">
+					<span
+						className="truncate font-medium text-foreground text-sm leading-5"
+						data-ryu-i18n="off"
+					>
 						{station.agent.name}
 					</span>
 					<span className="truncate text-[13px] text-muted-foreground leading-5">

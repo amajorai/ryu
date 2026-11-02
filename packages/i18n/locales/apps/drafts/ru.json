@@ -1,0 +1,11 @@
+{
+  "Sending at a set time": "Отправка в заданное время",
+  "Sending at {when}": "Отправка в {when}",
+  "Waiting for agents to start, then finish": "Ожидание запуска и завершения агентов",
+  "Waiting for every agent to finish": "Ожидание завершения всех агентов",
+  "Waiting for fewer than {limit} runs": "Ожидание, пока запусков станет меньше {limit}",
+  "Waiting for nothing to be running": "Ожидание, пока ничего не будет выполняться",
+  "Waiting for {agentId} to drop under {belowPercent}% used": "Ожидание снижения использования {agentId} ниже {belowPercent}%",
+  "draft is already being sent": "черновик уже отправляется",
+  "no such draft": "такого черновика нет"
+}

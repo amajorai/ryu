@@ -1,10 +1,16 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { expect, type Page, test } from "@playwright/test";
-import { installCanvasIdleNetwork } from "./canvas-idle-network.ts";
+import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+	installCanvasIdleNetwork,
+	LAUNCHPAD_DRAFT,
+	LAUNCHPAD_SEND_TIME,
+} from "./canvas-idle-network.ts";
 import type { UnexpectedChatProofRequest } from "./harness/chat-page-proof-http.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidence =
-	"../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-shell-flows/canvas";
+const evidence = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-shell-flows/canvas"
+);
 const pageErrorsByPage = new WeakMap<Page, string[]>();
 const fallbackCallsByPage = new WeakMap<Page, UnexpectedChatProofRequest[]>();
 const backgroundByPage = new WeakMap<Page, () => unknown>();
@@ -84,11 +90,47 @@ async function setup(page: Page, empty = false) {
 		await expect(page.locator(".react-flow__node-tab")).toHaveCount(2);
 	}
 }
+/** `ryu_session_tabs` through the app's sealed reader: content-seal.ts stores it
+ *  sealed, so the plaintext key only ever held the seed. */
+async function sealedSession(
+	page: Page
+): Promise<{ tabs: Array<{ path: string }> }> {
+	const raw = await page.evaluate(() =>
+		Reflect.apply(Reflect.get(window, "__readSealedLocalStorage"), window, [
+			"ryu_session_tabs",
+		])
+	);
+	return JSON.parse(typeof raw === "string" ? raw : '{"tabs":[]}');
+}
 async function stored(page: Page) {
 	return page.evaluate(
 		(key) => JSON.parse(localStorage.getItem(key) ?? "null"),
 		canvasKey
 	);
+}
+/** The element's computed transform as numbers. Chrome serializes a computed
+ *  matrix to six significant digits, so a stored float such as 104.41025641
+ *  reads back as 104.41; compare with closeTo, not the raw string. */
+function computedMatrix(locator: Locator) {
+	return locator.evaluate((element) =>
+		(
+			getComputedStyle(element).transform.match(
+				/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/g
+			) ?? []
+		).map(Number)
+	);
+}
+/** translate (< 1000 px) to 0.005 px and scale to 0.00005: both looser than the
+ *  six-significant-digit serialization error, far tighter than a pixel. */
+function expectedMatrix(zoom: number, x: number, y: number) {
+	return [
+		expect.closeTo(zoom, 4),
+		0,
+		0,
+		expect.closeTo(zoom, 4),
+		expect.closeTo(x, 2),
+		expect.closeTo(y, 2),
+	];
 }
 async function dragNode(page: Page) {
 	const header = page.locator("[data-tab-view-header]").first();
@@ -113,9 +155,9 @@ test("actual Layout canvas focus, native-keyboard button activation, new chat an
 		.focus();
 	await page.keyboard.press("Enter");
 	await expect(
-		page.locator('[data-tab-view-card][data-focused="true"]')
+		page.locator('[data-tab-view-pane][data-focused="true"]')
 	).toHaveAttribute(
-		"data-tab-view-card",
+		"data-tab-view-pane",
 		(await headers.nth(1).getAttribute("data-tab-view-header")) ?? ""
 	);
 	await page.getByRole("button", { name: "New chat tab", exact: true }).click();
@@ -126,11 +168,7 @@ test("actual Layout canvas focus, native-keyboard button activation, new chat an
 	await expect(page.locator(".react-flow__node-tab")).toHaveCount(2);
 	await expect
 		.poll(() =>
-			page.evaluate(() =>
-				JSON.parse(localStorage.getItem("ryu_session_tabs") ?? "{}").tabs.map(
-					(tab: { path: string }) => tab.path
-				)
-			)
+			sealedSession(page).then((session) => session.tabs.map((tab) => tab.path))
 		)
 		.toEqual(["/channels", "/chat"]);
 	await mkdir(evidence, { recursive: true });
@@ -153,29 +191,30 @@ test("drag flushes on responsive unmount and same-window readback restores geome
 	expect(snapshot.tabs[id ?? ""].y).toBeGreaterThan(64);
 	await page.setViewportSize({ width: 1180, height: 820 });
 	await expect(page.getByTestId("infinite-tabs-canvas")).toBeVisible();
-	await expect(
-		page.locator(`.react-flow__node[data-id="tab:${id}"]`)
-	).toHaveCSS(
-		"transform",
-		`matrix(1, 0, 0, 1, ${snapshot.tabs[id ?? ""].x}, ${snapshot.tabs[id ?? ""].y})`
-	);
+	await expect
+		.poll(() =>
+			computedMatrix(page.locator(`.react-flow__node[data-id="tab:${id}"]`))
+		)
+		.toEqual(
+			expectedMatrix(1, snapshot.tabs[id ?? ""].x, snapshot.tabs[id ?? ""].y)
+		);
 });
 
 test("saved pan and zoom survive reload instead of automatic fit and Fit all remains explicit", async ({
 	page,
 }) => {
 	await setup(page);
-	await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+	// React Flow's Controls label (title-cased by @xyflow/react).
+	await page.getByRole("button", { name: "Zoom Out", exact: true }).click();
 	await expect
 		.poll(async () => (await stored(page))?.viewport.zoom)
 		.toBeLessThan(1);
 	const saved = (await stored(page)).viewport;
 	await page.reload();
 	await expect(page.getByTestId("infinite-tabs-canvas")).toBeVisible();
-	await expect(page.locator(".react-flow__viewport")).toHaveCSS(
-		"transform",
-		`matrix(${saved.zoom}, 0, 0, ${saved.zoom}, ${saved.x}, ${saved.y})`
-	);
+	await expect
+		.poll(() => computedMatrix(page.locator(".react-flow__viewport")))
+		.toEqual(expectedMatrix(saved.zoom, saved.x, saved.y));
 	await page.getByRole("button", { name: "Fit all", exact: true }).click();
 	await expect
 		.poll(async () => (await stored(page)).viewport)
@@ -198,23 +237,18 @@ test("malformed stored layout recovers and the real empty Layout branch exposes 
 	await expect(page.getByTestId("infinite-tabs-canvas")).toHaveCount(0);
 	const composer = page.getByPlaceholder("What do you want to do?");
 	await expect(composer).toBeVisible();
-	await composer.fill("Launchpad draft persists into a new chat");
+	await composer.fill(LAUNCHPAD_DRAFT);
 	await expect(
 		page.getByRole("button", { name: "Send", exact: true })
 	).toBeEnabled();
 	await page.screenshot({
 		path: `${evidence}/launchpad-composer-completed.png`,
 	});
+	await page.clock.setFixedTime(LAUNCHPAD_SEND_TIME);
 	await page.getByRole("button", { name: "Send", exact: true }).click();
 	await expect(page.getByTestId("infinite-tabs-canvas")).toBeVisible();
 	await expect(page.locator(".react-flow__node-tab")).toHaveCount(1);
 	await expect
-		.poll(() =>
-			page.evaluate(
-				() =>
-					JSON.parse(localStorage.getItem("ryu_session_tabs") ?? "{}").tabs[0]
-						.path
-			)
-		)
+		.poll(() => sealedSession(page).then((session) => session.tabs[0]?.path))
 		.toBe("/chat");
 });

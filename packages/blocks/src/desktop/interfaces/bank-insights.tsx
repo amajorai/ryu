@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, numberFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ToggleGroup,
@@ -28,11 +29,13 @@ import {
 const RANKED_ROWS = 4;
 
 const PERIODS: BankPeriod[] = ["this-month", "last-month"];
-const MONTH_NAME = new Intl.DateTimeFormat(undefined, { month: "long" });
-const PERCENT = new Intl.NumberFormat(undefined, {
-	maximumFractionDigits: 0,
-	style: "percent",
-});
+const MONTH_NAME = (locale: string = activeLocale()) =>
+	dateFormatter(locale, { month: "long" });
+const PERCENT = (locale: string = activeLocale()) =>
+	numberFormatter(locale, {
+		maximumFractionDigits: 0,
+		style: "percent",
+	});
 
 function isPeriod(value: unknown): value is BankPeriod {
 	return value === "this-month" || value === "last-month";
@@ -81,8 +84,8 @@ function ShareRow({
 					<span className="font-medium text-foreground text-sm tabular-nums">
 						{formatMoney(share.spent, currency)}
 					</span>
-					<span className="w-9 text-right text-muted-foreground text-xs tabular-nums">
-						{PERCENT.format(share.share)}
+					<span className="w-9 text-end text-muted-foreground text-xs tabular-nums">
+						{PERCENT().format(share.share)}
 					</span>
 				</span>
 			</span>
@@ -111,7 +114,7 @@ function ShareRow({
 						amount: formatMoney(share.spent, currency),
 						label: share.label,
 					})}
-					className="group/share -mx-3 flex w-[calc(100%+1.5rem)] flex-col gap-2 rounded-lg px-3 py-2.5 text-left outline-none transition-colors duration-100 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+					className="group/share -mx-3 flex w-[calc(100%+1.5rem)] flex-col gap-2 rounded-lg px-3 py-2.5 text-start outline-none transition-colors duration-100 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
 					data-thread-id={threadId}
 					onClick={() => onOpen(threadId)}
 					type="button"
@@ -203,14 +206,20 @@ function Comparison({
 	const lastMonth = new Date(now);
 	lastMonth.setDate(1);
 	lastMonth.setMonth(lastMonth.getMonth() - 1);
-	const lastMonthName = MONTH_NAME.format(lastMonth);
+	const lastMonthName = MONTH_NAME().format(lastMonth);
 	const comparable = month.hasFullPrevious;
 	// History that only starts this month leaves nothing of last month.
 	const startsThisMonth =
 		month.historyStart !== null &&
 		month.historyStart >=
 			new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 1).getTime();
-	let previousLabel = `${lastMonthName} 1–${month.dayOfMonth}`;
+	let previousLabel = dateFormatter(activeLocale(), {
+		day: "numeric",
+		month: "long",
+	}).formatRange(
+		lastMonth,
+		new Date(lastMonth.getFullYear(), lastMonth.getMonth(), month.dayOfMonth)
+	);
 	if (!comparable) {
 		if (month.historyStart === null) {
 			previousLabel = lastMonthName;
@@ -227,13 +236,13 @@ function Comparison({
 	if (comparable) {
 		const difference = month.current - month.previousToDate;
 		if (difference === 0) {
-			note = "Level with this time last month";
+			note = tl("Level with this time last month");
 		} else if (month.previousToDate === 0) {
 			note = tl("{amount} more than this time last month", {
 				amount: formatMoney(difference, currency),
 			});
 		} else {
-			const change = PERCENT.format(
+			const change = PERCENT().format(
 				Math.abs(difference) / month.previousToDate
 			);
 			note = tl(
@@ -247,7 +256,7 @@ function Comparison({
 			total: formatMoney(month.previous, currency),
 		});
 	} else if (month.historyStart === null) {
-		note = "No spend history yet";
+		note = tl("No spend history yet");
 	} else if (startsThisMonth) {
 		note = tl("Your history starts {startDay}", {
 			startDay: shortDay(new Date(month.historyStart)),
@@ -329,7 +338,10 @@ export function BankInsights({
 		() => spendByConversation(snapshot, transactions, period, now),
 		[snapshot, transactions, period, now]
 	);
-	const periodName = BANK_PERIOD_LABELS[period].toLowerCase();
+	const lastMonth = period === "last-month";
+	const noSpend = lastMonth
+		? tl("No spend last month.")
+		: tl("No spend this month.");
 
 	return (
 		<div className="flex flex-col gap-12" data-testid="bank-insights">
@@ -364,20 +376,24 @@ export function BankInsights({
 				<div className="grid gap-x-16 gap-y-10 md:grid-cols-2">
 					<ShareList
 						currency={account.currency}
-						empty={tl("No spend {periodName}.", { periodName })}
+						empty={noSpend}
 						shares={byAgent}
 						title="By agent"
 					/>
 					<ShareList
 						currency={account.currency}
-						empty={tl("No spend {periodName}.", { periodName })}
+						empty={noSpend}
 						shares={byModel}
 						title="By model"
 					/>
 				</div>
 				<ShareList
 					currency={account.currency}
-					empty={tl("No conversation spend {periodName}.", { periodName })}
+					empty={
+						lastMonth
+							? tl("No conversation spend last month.")
+							: tl("No conversation spend this month.")
+					}
 					onOpen={onOpenThread}
 					shares={byConversation}
 					title="By conversation"

@@ -273,8 +273,9 @@ test("refused real git listing exposes Retry and never turns failure into an emp
 }) => {
 	await control(page, "refuse_list_once");
 	await page.goto(URL);
+	// The refusal is coded; the alert words it, never the raw native text.
 	await expect(files(page).getByRole("alert")).toHaveText(
-		"Fixture project listing refused"
+		"Ryu couldn't list the files in this project."
 	);
 	await expect(files(page).getByText(/No files found/)).toHaveCount(0);
 	await files(page).getByRole("button", { name: "Retry file listing" }).click();
@@ -445,7 +446,11 @@ test("real exclusive native collision keeps original and destination bytes, rest
 	await page
 		.getByText("Couldn't move that workspace item", { exact: true })
 		.hover();
-	await expect(page.getByText(/Workspace move refused/)).toBeVisible();
+	await expect(
+		page.getByText("An item with that name already exists here.", {
+			exact: true,
+		})
+	).toBeVisible();
 	await nativeMoveSettled(page, 1);
 	await expand(page);
 	await expect(row(page, "src/alpha.ts")).toBeVisible();
@@ -704,7 +709,10 @@ test("multi-file drag preserves the successful move and refuses an occupied dest
 	await expect(error).toBeVisible();
 	await error.hover();
 	await expect(
-		page.getByText(/src\/alpha\.ts:.*Workspace move refused/)
+		page.getByText(
+			"src/alpha.ts: An item with that name already exists here.",
+			{ exact: true }
+		)
 	).toBeVisible();
 	const expected = {
 		"src/alpha.ts": INITIAL["src/alpha.ts"],

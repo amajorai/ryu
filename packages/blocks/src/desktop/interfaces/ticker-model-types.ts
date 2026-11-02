@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAgent,
 	InterfaceThread,
@@ -105,21 +106,39 @@ export const TICKER_RANGES = [7, 14, 30] as const;
 export type TickerRange = (typeof TICKER_RANGES)[number];
 export const DEFAULT_TICKER_RANGE: TickerRange = 14;
 export const TICKER_RANGE_LABELS: Record<TickerRange, string> = {
-	7: "1W",
-	14: "2W",
-	30: "1M",
+	get 7() {
+		return tr("1W");
+	},
+	get 14() {
+		return tr("2W");
+	},
+	get 30() {
+		return tr("1M");
+	},
 };
 /** Spoken names of the ranges, for the range buttons and column headers. */
 export const TICKER_RANGE_NAMES: Record<TickerRange, string> = {
-	7: "1 week",
-	14: "2 weeks",
-	30: "1 month",
+	get 7() {
+		return tr("1 week");
+	},
+	get 14() {
+		return tr("2 weeks");
+	},
+	get 30() {
+		return tr("1 month");
+	},
 };
 /** Printed period of each range, under the hero price. */
 export const TICKER_RANGE_PERIODS: Record<TickerRange, string> = {
-	7: "Past week",
-	14: "Past 2 weeks",
-	30: "Past month",
+	get 7() {
+		return tr("Past week");
+	},
+	get 14() {
+		return tr("Past 2 weeks");
+	},
+	get 30() {
+		return tr("Past month");
+	},
 };
 
 export const SPARK_DAYS = 7;

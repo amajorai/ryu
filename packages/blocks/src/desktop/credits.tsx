@@ -95,7 +95,7 @@ export function CreditsView({
 	const pendingMicroUsd =
 		pendingDollars === null ? null : Math.round(pendingDollars * 1_000_000);
 	const pendingAmountLabel =
-		pendingDollars === null ? "—" : `$${pendingDollars.toFixed(2)}`;
+		pendingMicroUsd === null ? "—" : formatMicroUsd(pendingMicroUsd, currency);
 	const currentBalance = wallet
 		? formatMicroUsd(wallet.balanceMicroUsd, currency)
 		: "—";

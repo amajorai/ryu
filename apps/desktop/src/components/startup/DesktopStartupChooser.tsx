@@ -5,6 +5,8 @@ import {
 	PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { useShallow } from "zustand/react/shallow";
 import "./DesktopStartupChooser.css";
 import { useLiteralMessages } from "@ryu/i18n/react";
@@ -64,6 +66,8 @@ import {
 	TEXT_SHADOW,
 	WallpaperButton,
 } from "./DesktopStartupChooser.parts.tsx";
+import { saveStartupChoices } from "./save-startup-choices.ts";
+import { tileDelta } from "./startup-tile-keys.ts";
 
 export function DesktopStartupChooser() {
 	const { nodes, defaultNode, setDefault } = useNodeStore(
@@ -75,6 +79,7 @@ export function DesktopStartupChooser() {
 	);
 	const { wallpaper } = useWallpaper();
 	const tl = useLiteralMessages();
+	const direction = useDirection();
 	const preferences = readStartupSelectionPreferences();
 	const initialAccounts = listAccounts();
 	const steps = startupSelectionSteps({
@@ -183,16 +188,31 @@ export function DesktopStartupChooser() {
 		}
 		setBusy(true);
 		try {
-			if (selectedAccountId && selectedAccountId !== getActiveUserId()) {
-				await switchAccount(selectedAccountId);
-			}
-			await setDefault(selectedNode.name);
-			if (accountStepEnabled) {
-				setStartupDefaultAccountId(rememberAccount ? selectedAccountId : null);
-			}
-			if (nodeStepEnabled) {
-				setStartupDefaultNodeName(rememberNode ? selectedNode.name : null);
-			}
+			await saveStartupChoices(
+				{
+					accountToActivate:
+						selectedAccountId && selectedAccountId !== getActiveUserId()
+							? selectedAccountId
+							: null,
+					defaultAccountId: accountStepEnabled
+						? rememberAccount
+							? selectedAccountId
+							: null
+						: undefined,
+					defaultNodeName: nodeStepEnabled
+						? rememberNode
+							? selectedNode.name
+							: null
+						: undefined,
+					nodeName: selectedNode.name,
+				},
+				{
+					saveDefaultNode: setDefault,
+					setStartupDefaultAccountId,
+					setStartupDefaultNodeName,
+					switchAccount,
+				}
+			);
 			window.location.reload();
 		} catch (error) {
 			setBusy(false);
@@ -220,8 +240,7 @@ export function DesktopStartupChooser() {
 		) {
 			return;
 		}
-		const delta =
-			event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+		const delta = tileDelta(event.key, direction);
 		if (delta !== 0) {
 			event.preventDefault();
 			if (step === "account") {
@@ -435,7 +454,7 @@ export function DesktopStartupChooser() {
 									title="Back"
 									type="button"
 								>
-									<HugeiconsIcon icon={ArrowLeft01Icon} size={16} />
+									<DirectionalIcon icon={ArrowLeft01Icon} size={16} />
 								</button>
 							) : null}
 							<ContinueButton

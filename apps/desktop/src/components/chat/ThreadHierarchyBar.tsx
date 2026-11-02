@@ -239,7 +239,7 @@ export function ThreadHierarchyBar({
 								) : null}
 								{sessions.map((session) => (
 									<Item
-										className="h-8 justify-between gap-2 rounded-lg px-2 py-0 text-left text-sm transition-colors duration-150 hover:bg-muted hover:duration-0"
+										className="h-8 justify-between gap-2 rounded-lg px-2 py-0 text-start text-sm transition-colors duration-150 hover:bg-muted hover:duration-0"
 										key={session.id}
 										onClick={() =>
 											onOpenConversation(session.id, session.title ?? undefined)

@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "इस नोड पर एजेंट विजेट उपलब्ध नहीं हैं: इन्हें रीफ़्रेश करने के लिए प्रत्यायोजित उपयोगकर्ता निष्पादन अधिकार चाहिए, जो रीफ़्रेश जॉब के पास नहीं होता। इसके बजाय http, composio या स्थिर स्रोत का उपयोग करें।",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "मॉनिटर विजेट अभी उपलब्ध नहीं हैं: कोई होस्ट क्षमता किसी ऐप को मॉनिटर परिणाम पढ़ने नहीं देती। इसके बजाय http, composio या स्थिर स्रोत का उपयोग करें।",
+  "The Composio action failed: {error}": "Composio कार्रवाई विफल रही: {error}",
+  "The Composio action returned HTTP {status}.": "Composio कार्रवाई ने HTTP {status} लौटाया।",
+  "The web source redirected, and redirects are not allowed.": "वेब स्रोत ने रीडायरेक्ट किया, और रीडायरेक्ट की अनुमति नहीं है।",
+  "The web source returned HTTP {status}.": "वेब स्रोत ने HTTP {status} लौटाया।",
+  "The web source sent a reply Ryu could not read: {error}": "वेब स्रोत ने ऐसा जवाब भेजा जिसे Ryu पढ़ नहीं सका: {error}",
+  "The widget's agent run failed: {error}": "विजेट का एजेंट रन विफल रहा: {error}",
+  "Widget “{title}” broke": "विजेट “{title}” खराब हो गया",
+  "Widget “{title}” recovered": "विजेट “{title}” फिर से काम कर रहा है",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "वर्कफ़्लो विजेट अभी उपलब्ध नहीं हैं: कोई होस्ट क्षमता किसी ऐप को सहेजा गया वर्कफ़्लो चलाने नहीं देती। इसके बजाय http, composio या स्थिर स्रोत का उपयोग करें।",
+  "dashboard not found": "डैशबोर्ड नहीं मिला",
+  "kind is required": "प्रकार आवश्यक है",
+  "name is required": "नाम आवश्यक है",
+  "not found": "नहीं मिला"
+}

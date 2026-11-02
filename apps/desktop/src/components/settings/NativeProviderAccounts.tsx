@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import type {
@@ -10,7 +11,7 @@ import {
 	removeAgentAccount,
 	switchAgentAccount,
 } from "@/src/lib/api/agents.ts";
-import { ApiError, type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
+import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
 	cancelNativeAccountLogin,
 	createNativeAccount,
@@ -20,14 +21,11 @@ import {
 	nativeAccountLoginProgress,
 	startNativeAccountLogin,
 } from "@/src/lib/api/native-accounts.ts";
-
-function message<TError>(error: TError) {
-	return error instanceof ApiError
-		? (error.serverMessage ?? error.message)
-		: error instanceof Error
-			? error.message
-			: "Could not update the account.";
-}
+import {
+	nativeAccountErrorText,
+	nativeAccountsUnsupported,
+	nativeOperationErrorText,
+} from "./NativeProviderAccounts-error-text.ts";
 
 export function NativeProviderAccounts({ agentId }: { agentId: string }) {
 	const node = useActiveNode();
@@ -46,9 +44,11 @@ export function NativeProviderAccountsPanel({
 	agentId: string;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const [accounts, setAccounts] = useState<NativeAccount[] | null>(null);
 	const [unsupported, setUnsupported] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	// The failed request itself; its text is rendered in the current locale.
+	const [error, setError] = useState<{ cause: unknown } | null>(null);
 	const [label, setLabel] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [operation, setOperation] = useState<NativeLoginOperation | null>(null);
@@ -79,17 +79,10 @@ export function NativeProviderAccountsPanel({
 				if (scope.current !== generation) {
 					return;
 				}
-				if (
-					cause instanceof ApiError &&
-					([404, 405].includes(cause.status) ||
-						(cause.status === 400 &&
-							(cause.serverMessage === "Not a native ACP agent" ||
-								cause.serverMessage ===
-									"This agent does not support native account custody")))
-				) {
+				if (nativeAccountsUnsupported(cause)) {
 					setUnsupported(true);
 				} else {
-					setError(message(cause));
+					setError({ cause });
 				}
 			});
 		return () => {
@@ -133,7 +126,7 @@ export function NativeProviderAccountsPanel({
 				}
 			} catch (cause) {
 				if (!stopped) {
-					setError(message(cause));
+					setError({ cause });
 					timer = setTimeout(poll, 3000);
 				}
 			}
@@ -157,7 +150,7 @@ export function NativeProviderAccountsPanel({
 			}
 		} catch (cause) {
 			if (scope.current === generation) {
-				setError(message(cause));
+				setError({ cause });
 			}
 		} finally {
 			if (scope.current === generation) {
@@ -189,7 +182,11 @@ export function NativeProviderAccountsPanel({
 			</div>
 			{error ? (
 				<p className="text-sm text-status-destructive" role="alert">
-					{error}
+					{nativeAccountErrorText(
+						error.cause,
+						tl,
+						tl("Could not update the account.")
+					)}
 				</p>
 			) : null}
 			{accounts === null ? (
@@ -367,7 +364,8 @@ export function NativeProviderAccountsPanel({
 								until verification finishes.
 							</p>
 							<pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
-								{operation.instructions || "Starting provider sign-in…"}
+								{/* The localizer skips pre, so the fallback is a literal tl(). */}
+								{operation.instructions || tl("Starting provider sign-in…")}
 							</pre>
 							<Button
 								disabled={busy}
@@ -389,7 +387,7 @@ export function NativeProviderAccountsPanel({
 					) : null}
 					{operation.error ? (
 						<p className="text-sm text-status-destructive" role="alert">
-							{operation.error}
+							{nativeOperationErrorText(operation, tl)}
 						</p>
 					) : null}
 				</div>

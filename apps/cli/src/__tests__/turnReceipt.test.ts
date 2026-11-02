@@ -134,3 +134,36 @@ test("a Core usage meter's session cost is a snapshot, not a per-turn sum", () =
 		)
 	).toBe("12.3K · $0.42");
 });
+
+test("numbers follow the requested locale", () => {
+	expect(formatTokenCount(12_300, "en")).toBe("12.3K");
+	expect(formatTokenCount(2_500_000, "de")).toBe("2,5 Mio.");
+	expect(formatTokenCount(2_500_000, "ja")).toBe("250万");
+	expect(formatDuration(12_400, "de")).toContain("12,4");
+	expect(formatDuration(120_000, "en")).toBe("2m");
+	expect(formatCost(0.42, undefined, "de")).toBe("0,42 $");
+	expect(formatCost(1.5, "EUR", "de")).toBe("1,50 EUR");
+	expect(formatCost(0.42, "USD", "ja")).toBe("$0.42");
+	expect(
+		formatSessionMeter(
+			{ contextTotal: 150_000, contextUsed: 12_300, tokens: 12_300 },
+			"de"
+		)
+	).toBe("12.300 (8 %)");
+	expect(
+		turnReceiptParts({
+			elapsedMs: 4200,
+			locale: "de",
+			usage: { source: "ryu-usage", totalTokens: 1200, tokensPerSecond: 3.5 },
+		}).stats
+	).toBe(`${formatDuration(4200, "de")} · 1200 tok · 3,5 tok/s`);
+});
+
+test("Arabic and regional English keep a readable receipt", () => {
+	expect(formatTokenCount(12_300, "ar")).toMatch(/^12\.3\s+ألف$/u);
+	expect(formatDuration(12_400, "ar")).toContain("12.4");
+	// USD stays "$" in English variants that would otherwise print "US$"/"USD".
+	expect(formatCost(0.42, undefined, "en-GB")).toBe("$0.42");
+	expect(formatCost(0.42, undefined, "en-AU")).toBe("$0.42");
+	expect(formatCost(1234.5, undefined, "en")).toBe("$1,234.50");
+});

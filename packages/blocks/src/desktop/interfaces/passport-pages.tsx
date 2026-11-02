@@ -46,9 +46,11 @@ export function VisaPage({
 }) {
 	const tl = useLiteralMessages();
 	const country = countries.find((item) => item.id === page.countryId) ?? null;
-	const header = country
-		? `Visas · ${country.code}${page.first ? "" : " (cont.)"}`
-		: `Visas · ${UNASSIGNED_CODE}`;
+	const code = country?.code ?? UNASSIGNED_CODE;
+	const header =
+		country && !page.first
+			? tl("Visas · {code} (cont.)", { code })
+			: tl("Visas · {code}", { code });
 	const shape = (country?.style ?? UNASSIGNED_STYLE).shape;
 	const placements = placeStamps(
 		page.stamps,

@@ -1,15 +1,11 @@
 "use client";
 
 import {
-	ArrowDownIcon,
-	ArrowLeftIcon,
-	ArrowRightIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
 	useDisplayCalendarText,
 	useDisplayToday,
 } from "@ryu/ui/components/calendar.tsx";
+import { CalendarChevron } from "@ryu/ui/components/calendar-chevron.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import {
 	Button,
 	buttonVariants,
@@ -48,14 +44,17 @@ function Calendar({
 	});
 	// Today in the display time zone, not the computer's, as the shared Calendar.
 	const displayToday = useDisplayToday();
+	// DayPicker reads its own `dir` for ArrowLeft/ArrowRight and the month
+	// chevrons; the reading direction comes from the surrounding provider unless
+	// the caller names one.
+	const contextDirection = useDirection();
+	const dir = props.dir ?? contextDirection;
 
 	return (
 		<DayPicker
 			captionLayout={captionLayout}
 			className={cn(
 				"group/calendar bg-background in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent p-3 [--cell-radius:var(--radius-4xl)] [--cell-size:--spacing(8)]",
-				String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
-				String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
 				className
 			)}
 			classNames={{
@@ -158,38 +157,13 @@ function Calendar({
 						/>
 					);
 				},
-				Chevron: ({ className, orientation, ...props }) => {
-					if (orientation === "left") {
-						return (
-							<HugeiconsIcon
-								className={cn("size-4", className)}
-								icon={ArrowLeftIcon}
-								strokeWidth={2}
-								{...props}
-							/>
-						);
-					}
-
-					if (orientation === "right") {
-						return (
-							<HugeiconsIcon
-								className={cn("size-4", className)}
-								icon={ArrowRightIcon}
-								strokeWidth={2}
-								{...props}
-							/>
-						);
-					}
-
-					return (
-						<HugeiconsIcon
-							className={cn("size-4", className)}
-							icon={ArrowDownIcon}
-							strokeWidth={2}
-							{...props}
-						/>
-					);
-				},
+				Chevron: (chevronProps) => (
+					<CalendarChevron
+						dir={dir}
+						navLayout={props.navLayout}
+						{...chevronProps}
+					/>
+				),
 				DayButton: ({ ...props }) => (
 					<CalendarDayButton locale={locale} {...props} />
 				),
@@ -204,6 +178,7 @@ function Calendar({
 				},
 				...components,
 			}}
+			dir={dir}
 			formatters={{
 				formatMonthDropdown: (date) =>
 					date.toLocaleString(locale?.code, { month: "short" }),

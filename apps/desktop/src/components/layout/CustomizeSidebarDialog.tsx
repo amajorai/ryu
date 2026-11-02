@@ -145,7 +145,7 @@ function ReorderableRow({
 				/>
 			)}
 			<button
-				className="flex min-w-0 flex-1 cursor-grab items-center gap-2 text-left active:cursor-grabbing"
+				className="flex min-w-0 flex-1 cursor-grab items-center gap-2 text-start active:cursor-grabbing"
 				draggable
 				onDragEnd={() => dnd.onDragEnd()}
 				onDragStart={(e) => {

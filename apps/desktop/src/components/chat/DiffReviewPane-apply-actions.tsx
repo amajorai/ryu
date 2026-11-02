@@ -123,7 +123,7 @@ export function DiffReviewApplyActions({
 						Merge conflict — worktree cleaned up safely
 					</div>
 					{applyState.conflictedFiles.length > 0 && (
-						<ul className="ml-4 list-disc font-mono text-muted-foreground">
+						<ul className="ms-4 list-disc font-mono text-muted-foreground">
 							{applyState.conflictedFiles.map((f: string) => (
 								<li key={f}>{f}</li>
 							))}
@@ -142,7 +142,7 @@ export function DiffReviewApplyActions({
 					{applyState.message}
 					{!applied && (
 						<button
-							className="ml-1 underline underline-offset-2"
+							className="ms-1 underline underline-offset-2"
 							onClick={() => setApplyState({ status: "idle" })}
 							type="button"
 						>

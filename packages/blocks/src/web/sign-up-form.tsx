@@ -5,6 +5,7 @@ import {
 	AgeEligibilityDeniedError,
 	meetsMinimumAccountAge,
 } from "@ryu/auth/lib/age-eligibility";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Checkbox } from "@ryu/ui/components/checkbox";
 import {
@@ -76,6 +77,7 @@ export default function SignUpForm({
 	passwordError,
 	captcha,
 }: SignUpFormProps) {
+	const tlRich = useRichLiteralMessages();
 	const [dateOfBirth, setDateOfBirth] = useState("");
 	const [ageChecked, setAgeChecked] = useState(false);
 	const [checkingAge, setCheckingAge] = useState(false);
@@ -207,24 +209,32 @@ export default function SignUpForm({
 								htmlFor="accept-terms"
 							>
 								<span>
-									I agree to the{" "}
-									<a
-										className="underline"
-										href={docsHref("/docs/legal/terms")}
-										rel="noopener"
-										target="_blank"
-									>
-										Terms of Service
-									</a>{" "}
-									and{" "}
-									<a
-										className="underline"
-										href={docsHref("/docs/legal/privacy")}
-										rel="noopener"
-										target="_blank"
-									>
-										Privacy Policy
-									</a>
+									{tlRich(
+										"I agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>",
+										{},
+										{
+											privacy: (chunks) => (
+												<a
+													className="underline"
+													href={docsHref("/docs/legal/privacy")}
+													rel="noopener"
+													target="_blank"
+												>
+													{chunks}
+												</a>
+											),
+											terms: (chunks) => (
+												<a
+													className="underline"
+													href={docsHref("/docs/legal/terms")}
+													rel="noopener"
+													target="_blank"
+												>
+													{chunks}
+												</a>
+											),
+										}
+									)}
 								</span>
 							</FieldLabel>
 						</Field>
@@ -388,15 +398,22 @@ export default function SignUpForm({
 				</div>
 
 				<p className="text-center text-muted-foreground text-sm">
-					You accepted our{" "}
-					<a className="underline" href={docsHref("/docs/legal/terms")}>
-						Terms
-					</a>{" "}
-					and{" "}
-					<a className="underline" href={docsHref("/docs/legal/privacy")}>
-						Privacy Policy
-					</a>{" "}
-					in the previous step.
+					{tlRich(
+						"You accepted our <terms>Terms</terms> and <privacy>Privacy Policy</privacy> in the previous step.",
+						{},
+						{
+							privacy: (chunks) => (
+								<a className="underline" href={docsHref("/docs/legal/privacy")}>
+									{chunks}
+								</a>
+							),
+							terms: (chunks) => (
+								<a className="underline" href={docsHref("/docs/legal/terms")}>
+									{chunks}
+								</a>
+							),
+						}
+					)}
 				</p>
 			</StaggerReveal>
 		</div>

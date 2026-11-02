@@ -6,6 +6,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { formatTime } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
@@ -31,7 +32,7 @@ function HistoryRow({
 	return (
 		<button
 			className={cn(
-				"group flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors duration-150",
+				"group flex h-10 w-full items-center gap-2 rounded-lg px-2 text-start transition-colors duration-150",
 				"hover:bg-muted hover:duration-0"
 			)}
 			onClick={() => onOpen(entry.id)}
@@ -68,7 +69,7 @@ function HistoryRow({
 					{status.label}
 				</Badge>
 			) : null}
-			<HugeiconsIcon
+			<DirectionalIcon
 				className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
 				icon={ArrowRight01Icon}
 			/>
@@ -112,7 +113,7 @@ export function CompactHistoryRow({
 	return (
 		<button
 			aria-label={tl("Open {title}", { title: entry.title })}
-			className="group flex w-full items-start gap-3 border-border border-b px-1 py-3 text-left transition-colors duration-150 last:border-b-0 hover:bg-muted hover:duration-0"
+			className="group flex w-full items-start gap-3 border-border border-b px-1 py-3 text-start transition-colors duration-150 last:border-b-0 hover:bg-muted hover:duration-0"
 			onClick={() => onOpen(entry.id)}
 			type="button"
 		>

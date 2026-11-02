@@ -100,7 +100,7 @@ function SearchResultRow({ result }: { result: AgentSearchResult }) {
 		</>
 	);
 	const className = cn(
-		"flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors",
+		"flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-start outline-none transition-colors",
 		safeUrl && "focus-visible:ring-2 focus-visible:ring-ring"
 	);
 
@@ -143,7 +143,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
 				<span className="min-w-0 truncate">{item.query}</span>
 			</div>
 			{item.results?.length ? (
-				<div className="space-y-0.5 pl-4">
+				<div className="space-y-0.5 ps-4">
 					<AnimatePresence initial mode="popLayout">
 						{item.results.map((result) => (
 							<motion.div
@@ -164,7 +164,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
 				{item.moreCount ? (
 					<motion.div
 						animate={visible}
-						className="px-1.5 py-1 pl-8 text-muted-foreground/55"
+						className="px-1.5 py-1 ps-8 text-muted-foreground/55"
 						exit={exit}
 						initial={enter}
 						key="more-results"

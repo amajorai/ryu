@@ -8,6 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLocalizedString } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
@@ -96,7 +97,7 @@ function BreadcrumbSeparator({
 			role="presentation"
 			{...props}
 		>
-			{children ?? <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />}
+			{children ?? <DirectionalIcon icon={ArrowRight01Icon} strokeWidth={2} />}
 		</li>
 	);
 }

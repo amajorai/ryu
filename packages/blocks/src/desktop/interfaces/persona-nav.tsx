@@ -10,6 +10,7 @@ import {
 	Target,
 } from "lucide-react";
 import type { KeyboardEvent } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { PersonaAvatar } from "./persona-avatar.tsx";
 import {
 	PERSONA_TAB_LABELS,
@@ -48,9 +49,16 @@ function onTabKeyDown(
 ) {
 	const index = PERSONA_TABS.indexOf(tab);
 	let next: number | null = null;
-	if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+	// The bottom tab bar is a row, so left and right follow its reading
+	// direction; the vertical rail keeps them as plain aliases of down and up.
+	const vertical =
+		event.currentTarget.closest("[aria-orientation='vertical']") !== null;
+	const key = vertical
+		? event.key
+		: logicalArrowKey(event.key, event.currentTarget);
+	if (key === "ArrowDown" || key === "ArrowRight") {
 		next = (index + 1) % PERSONA_TABS.length;
-	} else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+	} else if (key === "ArrowUp" || key === "ArrowLeft") {
 		next = (index - 1 + PERSONA_TABS.length) % PERSONA_TABS.length;
 	} else if (event.key === "Home") {
 		next = 0;
@@ -120,7 +128,7 @@ export function PersonaRail({
 	return (
 		<nav
 			aria-label="Persona"
-			className="@min-[640px]:flex hidden @min-[1024px]:w-60 w-16 shrink-0 flex-col gap-6 overflow-y-auto border-sidebar-border border-r bg-sidebar px-3 py-4 text-sidebar-foreground"
+			className="@min-[640px]:flex hidden @min-[1024px]:w-60 w-16 shrink-0 flex-col gap-6 overflow-y-auto border-sidebar-border border-e bg-sidebar px-3 py-4 text-sidebar-foreground"
 		>
 			<div
 				aria-orientation="vertical"
@@ -162,13 +170,13 @@ export function PersonaRail({
 									<span
 										aria-hidden="true"
 										className={cn(
-											"absolute -top-0.5 -right-0.5 @min-[1024px]:hidden size-2 rounded-full bg-primary ring-2",
+											"absolute -end-0.5 -top-0.5 @min-[1024px]:hidden size-2 rounded-full bg-primary ring-2",
 											selected ? "ring-sidebar-accent" : "ring-sidebar"
 										)}
 									/>
 								) : null}
 							</span>
-							<span className="@min-[1024px]:inline hidden flex-1 text-left">
+							<span className="@min-[1024px]:inline hidden flex-1 text-start">
 								{PERSONA_TAB_LABELS[item]}
 							</span>
 							{count > 0 ? (
@@ -204,9 +212,16 @@ export function PersonaRail({
 								<li key={agent.id}>
 									<button
 										aria-current={selected ? "true" : undefined}
-										aria-label={`${agent.name}${agent.status === "working" ? ", working" : ""}. ${headline}`}
+										aria-label={tl(
+											"{name}{working, select, true {, working} other {}}. {headline}",
+											{
+												headline,
+												name: agent.name,
+												working: agent.status === "working" ? "true" : "false",
+											}
+										)}
 										className={cn(
-											"flex w-full items-center @min-[1024px]:justify-start justify-center gap-3 rounded-lg @min-[1024px]:px-2 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+											"flex w-full items-center @min-[1024px]:justify-start justify-center gap-3 rounded-lg @min-[1024px]:px-2 py-2 text-start outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
 											selected
 												? "bg-sidebar-accent text-sidebar-accent-foreground"
 												: "hover:bg-sidebar-accent/60"
@@ -223,7 +238,10 @@ export function PersonaRail({
 										/>
 										<span className="@min-[1024px]:flex hidden min-w-0 flex-1 flex-col">
 											<span className="flex items-baseline gap-2">
-												<span className="truncate font-semibold text-sm">
+												<span
+													className="truncate font-semibold text-sm"
+													data-ryu-i18n="off"
+												>
 													{agent.name}
 												</span>
 												{agent.status === "working" ? (
@@ -305,7 +323,7 @@ export function PersonaTabBar({
 								{count > 0 ? (
 									<span
 										aria-hidden="true"
-										className="absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] text-primary-foreground tabular-nums ring-2 ring-background"
+										className="absolute -end-2 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] text-primary-foreground tabular-nums ring-2 ring-background"
 									>
 										{count}
 									</span>

@@ -190,7 +190,7 @@ export function InstalledAppDetail({
 					    as a bug, not as a policy. The "Required" hero chip carries the
 					    explanation instead. */}
 					{isInstalled && !app.mandatory ? (
-						<label className="ml-auto flex shrink-0 items-center gap-2 text-sm">
+						<label className="ms-auto flex shrink-0 items-center gap-2 text-sm">
 							{/* Safe Mode is a READ mask — `enabled` is still the user's own
 							    choice, and the switch stays where they left it. What the
 							    label has to say is that the app is not actually loaded this

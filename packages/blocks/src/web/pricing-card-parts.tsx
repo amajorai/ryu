@@ -2,7 +2,12 @@
 
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
+import {
+	useLiteralMessages,
+	useOptionalI18n,
+	useRichLiteralMessages,
+} from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Card, CardDescription } from "@ryu/ui/components/card";
 import { NumberTicker } from "@ryu/ui/components/number-ticker";
@@ -20,13 +25,13 @@ import {
 	usePlanCtaShape,
 	usePricingCtaVariant,
 } from "./pricing-appearance.tsx";
+import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
 import motionStyles from "./pricing-motion.module.css";
 import { usePauseMotionOffscreen } from "./pricing-motion.ts";
 import {
 	annualTotalPrice,
 	type CloudHostingTier,
 	type CurrentPricingPlan,
-	depositFeeLine,
 	effectiveMonthlyPrice,
 	type PricingPlanSlug,
 } from "./pricing-plan-prices.ts";
@@ -58,9 +63,9 @@ export function PriceBlock({
 	totalMonthly?: boolean;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const annualTotal = annualTotalPrice(monthly);
 	const perMonth = effectiveMonthlyPrice(monthly, isYearly);
-	const seat = perSeat ? "/seat" : "";
 	// Only more than one seat has a total worth spelling out; at one seat the
 	// total IS the headline.
 	const showSeatTotal = !totalMonthly && seats > 1;
@@ -75,41 +80,79 @@ export function PriceBlock({
 				<NumberTicker prefix="$" value={Math.round(value)} />
 			</span>
 		);
+	// Each line is one whole message; its <amount> tag renders the animated
+	// ticker in place of the {price} text, wherever the language puts it.
+	const amountTag = (value: number, headline = false) => ({
+		amount: () => priceAmount(value, headline),
+	});
+	const price = (value: number) => ({
+		price: `$${Math.round(value)}`,
+		seats,
+	});
+	const suffix = (content: ReactNode) => (
+		<span className="ms-1 text-muted-foreground">{content}</span>
+	);
+	const annualValue = showSeatTotal ? seatAnnualTotal : annualTotal;
+	let annualLine: ReactNode;
+	if (showSeatTotal) {
+		annualLine = tlRich(
+			"{seats, plural, one {Billed <amount>{price}</amount> per year for # seat} other {Billed <amount>{price}</amount> per year for # seats}}",
+			price(annualValue),
+			amountTag(annualValue)
+		);
+	} else if (perSeat) {
+		annualLine = tlRich(
+			"Billed <amount>{price}</amount> per seat per year, two months free",
+			price(annualValue),
+			amountTag(annualValue)
+		);
+	} else {
+		annualLine = tlRich(
+			"Billed <amount>{price}</amount> per year, two months free",
+			price(annualValue),
+			amountTag(annualValue)
+		);
+	}
+	const headlineTags = { ...amountTag(perMonth, true), suffix };
 	return (
 		<>
 			<div className="mb-1 flex items-baseline">
-				{priceAmount(perMonth, true)}
-				<span className="ml-1 text-muted-foreground">{`${seat}/mo`}</span>
+				{perSeat
+					? tlRich(
+							"<amount>{price}</amount><suffix>/seat/mo</suffix>",
+							price(perMonth),
+							headlineTags
+						)
+					: tlRich(
+							"<amount>{price}</amount><suffix>/mo</suffix>",
+							price(perMonth),
+							headlineTags
+						)}
 			</div>
 			{/* The seat total and the annual total spin like the headline rather
 			    than snapping. They move for the SAME reasons it does — the yearly
 			    toggle and the seat stepper — so a static number beside a spinning
 			    one reads as the static one having failed to update. */}
 			{showSeatTotal ? (
-				<p className="mb-1 flex items-baseline font-medium text-sm">
-					{priceAmount(seatTotal)}
-					<span className="ml-1">/mo for {seats} seats</span>
+				<p className="mb-1 flex items-baseline gap-1 font-medium text-sm">
+					{tlRich(
+						"{seats, plural, one {<amount>{price}</amount>/mo for # seat} other {<amount>{price}</amount>/mo for # seats}}",
+						price(seatTotal),
+						amountTag(seatTotal)
+					)}
 				</p>
 			) : null}
 			{isYearly ? (
 				<p
-					className={`mb-6 flex items-baseline text-muted-foreground ${helperText}`}
+					className={`mb-6 flex items-baseline gap-1 text-muted-foreground ${helperText}`}
 				>
-					<span className="mr-1">Billed</span>
-					{priceAmount(showSeatTotal ? seatAnnualTotal : annualTotal)}
-					<span className="ml-1">
-						{showSeatTotal
-							? tl("per year for {seats} seats", { seats: String(seats) })
-							: seat
-								? "per seat per year, two months free"
-								: "per year, two months free"}
-					</span>
+					{annualLine}
 				</p>
 			) : (
 				<p className={`mb-6 text-muted-foreground ${helperText}`}>
 					{perSeat
-						? "Billed monthly per seat, cancel anytime"
-						: "Billed monthly, cancel anytime"}
+						? tl("Billed monthly per seat, cancel anytime")
+						: tl("Billed monthly, cancel anytime")}
 				</p>
 			)}
 		</>
@@ -246,6 +289,8 @@ export function PlanCta({
 	const ctaShape = usePlanCtaShape();
 	const helperText = useHelperTextSize();
 	const isPublic = useIsPublicPricing();
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	if (soldOut && !isCurrent) {
 		return (
 			<div className="flex w-full flex-col gap-2">
@@ -269,8 +314,17 @@ export function PlanCta({
 			? annualTotalPrice(recurring.monthly)
 			: recurring.monthly
 		: 0;
+	const price = `US$${formatNumberValue(locale, amount, { maximumFractionDigits: 2 })}`;
 	const terms = recurring
-		? `Renews automatically at US$${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })} every ${recurring.isYearly ? "year" : "month"}, plus applicable taxes, until canceled.`
+		? recurring.isYearly
+			? tl(
+					"Renews automatically at {price} every year, plus applicable taxes, until canceled.",
+					{ price }
+				)
+			: tl(
+					"Renews automatically at {price} every month, plus applicable taxes, until canceled.",
+					{ price }
+				)
 		: null;
 	const button = (canContinue: boolean) => (
 		<Button
@@ -297,7 +351,11 @@ export function PlanCta({
 	);
 }
 
-/** Keeps inherited entitlements visually separate from a plan's own features. */
+/**
+ * Keeps inherited entitlements visually separate from a plan's own features.
+ * `plan` is the English catalog name ("Teams", "Business"); it is translated
+ * before it fills the sentence so it matches the translated card titles.
+ */
 export function IncludedPlanBanner({ plan }: { plan: string }) {
 	const tl = useLiteralMessages();
 	return (
@@ -305,9 +363,9 @@ export function IncludedPlanBanner({ plan }: { plan: string }) {
 			<p className="flex items-center gap-2 text-foreground text-sm">
 				<ArrowLeft
 					aria-hidden="true"
-					className="size-4 shrink-0 text-foreground"
+					className="size-4 shrink-0 text-foreground rtl:-scale-x-100"
 				/>
-				<span>{tl("Everything in {plan}, plus", { plan })}</span>
+				<span>{tl("Everything in {plan}, plus", { plan: tl(plan) })}</span>
 			</p>
 		</div>
 	);
@@ -326,7 +384,7 @@ export function ProductAccessFeature({
 		<li className="flex items-start" data-product-access-feature>
 			<HugeiconsIcon
 				aria-hidden="true"
-				className="mt-0.5 mr-2 size-4 shrink-0 text-primary"
+				className="me-2 mt-0.5 size-4 shrink-0 text-primary"
 				icon={Tick02Icon}
 				strokeWidth={2}
 			/>
@@ -365,8 +423,10 @@ export function PlanDescription({ children }: { children: ReactNode }) {
 }
 
 /** The marketplace deposit-fee row; a quiet footnote on the public page. */
-export function DepositFeeFeature({ fee }: { fee: string }) {
+export function DepositFeeFeature({ tier }: { tier: "pro" | "team" }) {
 	const isPublic = useIsPublicPricing();
+	const tl = useLiteralMessages();
+	const fees = depositFeeAmounts(useOptionalI18n()?.locale);
 	return (
 		<li
 			className={cn(
@@ -374,8 +434,14 @@ export function DepositFeeFeature({ fee }: { fee: string }) {
 				isPublic && "text-muted-foreground text-xs"
 			)}
 		>
-			<Coins className="mr-2 size-4" />
-			<span>{depositFeeLine(fee)}</span>
+			<Coins className="me-2 size-4" />
+			<span>
+				{tl("{rate} deposit fee ({minimum} minimum, Ryu keeps at most {cap})", {
+					cap: fees.depositFeeCap,
+					minimum: fees.depositFeeMinimum,
+					rate: tier === "pro" ? fees.proDepositFee : fees.teamDepositFee,
+				})}
+			</span>
 		</li>
 	);
 }

@@ -173,3 +173,11 @@ test("a dated timestamp is still an instant shown in the reader's zone", () => {
 		]);
 	}
 });
+
+test("a publication date follows the reader's UI language", async () => {
+	const { formatPublicationDate } = await import("./publication-date.ts");
+	expect(formatPublicationDate("2026-03-15", "long", "de")).toBe(
+		"15. März 2026"
+	);
+	expect(formatPublicationDate("2026-03-15", "short")).toBe("Mar 15, 2026");
+});

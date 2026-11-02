@@ -109,7 +109,7 @@ describe("LicensesTab — populated rows", () => {
 	test("a row renders the item name, kind, and localized price", () => {
 		const html = render({ licenses: [makeLicense()] });
 		expect(html).toContain("Thing");
-		expect(html).toContain("plugin");
+		expect(html).toContain(">Plugin<");
 		expect(html).toContain("19.99");
 		expect(html).toContain("v1.2.3");
 	});
@@ -123,15 +123,23 @@ describe("LicensesTab — populated rows", () => {
 
 	test("an active license shows no status badge", () => {
 		const html = render({ licenses: [makeLicense({ status: "active" })] });
-		expect(html).not.toContain("refunded");
-		expect(html).not.toContain("disputed");
+		expect(html).not.toContain("Refunded");
+		expect(html).not.toContain("Disputed");
 	});
 
 	test("a refunded license surfaces the status badge", () => {
 		const html = render({
 			licenses: [makeLicense({ id: "lic_r", status: "refunded" })],
 		});
-		expect(html).toContain("refunded");
+		expect(html).toContain(">Refunded<");
+	});
+
+	test("kind badges read as words, not wire enums", () => {
+		const html = render({
+			licenses: [makeLicense({ id: "lic_k", itemKind: "stack_template" })],
+		});
+		expect(html).toContain(">Stack Template<");
+		expect(html).not.toContain("stack_template");
 	});
 
 	test("a subscription set to end says its renewal is off", () => {
@@ -152,7 +160,7 @@ describe("LicensesTab — populated rows", () => {
 		const html = render({
 			licenses: [makeLicense({ id: "lic_d", status: "disputed" })],
 		});
-		expect(html).toContain("disputed");
+		expect(html).toContain(">Disputed<");
 	});
 
 	test("the price honors the license currency", () => {

@@ -131,6 +131,10 @@ export function NavUser(props: NavUserProps) {
 	} = useOrgBillingStatus();
 	const { handleSignOut } = useAuthContext();
 	const isAuthenticated = useAppStore((s) => s.isAuthenticated);
+	// Lifetime is an individual plan: hidden (and refused by the billing router)
+	// while the `billing.individual_plans` rollout is off. Read with the other
+	// hooks, before the signed-out and loading early returns below.
+	const individualPlansEnabled = useFeatureFlag(INDIVIDUAL_PLANS_FLAG);
 	const oidcUser = useAppStore((s) => s.oidcUser);
 	const userMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
 	const sessionUser = session?.user;
@@ -209,9 +213,6 @@ export function NavUser(props: NavUserProps) {
 	// Free during beta (trial rollout off): no upgrade or Lifetime pitch in the
 	// menu. Payers resolve as "subscription"/"license" and keep theirs.
 	const showUpsell = verdict?.reason !== "beta";
-	// Lifetime is an individual plan: hidden (and refused by the billing router)
-	// while the `billing.individual_plans` rollout is off.
-	const individualPlansEnabled = useFeatureFlag(INDIVIDUAL_PLANS_FLAG);
 	const creditsLeft = (() => {
 		if (wallet) {
 			return formatMicroUsd(wallet.balanceMicroUsd, wallet.currency);
@@ -345,8 +346,8 @@ export function NavUser(props: NavUserProps) {
 									<AgentAvailabilityDot
 										className={
 											isMenubar
-												? "absolute -right-0.5 -bottom-0.5 size-2 border border-transparent"
-												: "absolute -right-px -bottom-px size-1.5 ring-2 ring-sidebar"
+												? "absolute -end-0.5 -bottom-0.5 size-2 border border-transparent"
+												: "absolute -end-px -bottom-px size-1.5 ring-2 ring-sidebar"
 										}
 										status={availability.status}
 									/>
@@ -378,7 +379,7 @@ export function NavUser(props: NavUserProps) {
 				className={
 					isMenubar
 						? "flex items-center gap-1 max-[360px]:gap-0.5"
-						: "ml-auto flex shrink-0 items-center gap-1"
+						: "ms-auto flex shrink-0 items-center gap-1"
 				}
 			>
 				{showDownloads && (isMenubar || downloadsActive) && (

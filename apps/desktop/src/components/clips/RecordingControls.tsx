@@ -401,7 +401,11 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 				const active = sources[key];
 				return (
 					<Button
-						aria-label={`${active ? "Disable" : "Enable"} ${label}`}
+						aria-label={
+							active
+								? tl("Disable {label}", { label })
+								: tl("Enable {label}", { label })
+						}
 						aria-pressed={active}
 						className="size-7"
 						disabled={isStarting}

@@ -1,14 +1,14 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { MessageSquareDashed } from "lucide-react";
 import { BoardAvatar, type BoardAvatarSize } from "./board-avatar.tsx";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import { fullDateTime } from "./timeline-model.ts";
 
 const AVATAR_SIZE: Record<BoardAvatarSize, string> = {
@@ -21,7 +21,7 @@ const AVATAR_SIZE: Record<BoardAvatarSize, string> = {
 export const TIMELINE_EVENT_ATTRIBUTE = "data-timeline-event";
 
 export function threadTitle(thread: InterfaceThread | undefined): string {
-	return thread?.title.trim() || "Untitled thread";
+	return thread?.title.trim() || tr("Untitled thread");
 }
 
 /** The agents on a thread that the snapshot knows about, lead first. */
@@ -55,7 +55,7 @@ export function threadGroupName(
 export function agentSummary(agents: readonly InterfaceAgent[]): string {
 	const [lead, second] = agents;
 	if (!lead) {
-		return "No agent";
+		return tr("No agent");
 	}
 	if (!second) {
 		return lead.name;
@@ -72,7 +72,7 @@ export function threadAccessibleName(
 	return [
 		threadTitle(thread),
 		agentSummary(threadAgents(snapshot, thread)),
-		THREAD_STATUS_LABELS[threadStatus(thread)],
+		threadStatusLabel(threadStatus(thread)),
 		fullDateTime(thread.updatedAt),
 	]
 		.filter(Boolean)

@@ -27,11 +27,12 @@
  * walking the stages in order), never traffic, counts or rates from a real deployment.
  */
 
+import { formatNumberValue } from "@ryu/i18n/format-intl";
 import type { LiteralMessage } from "@ryu/i18n/react";
 
 export interface Stage {
 	/** One plain sentence, for the slider's value text. */
-	does: string;
+	does: (tl: LiteralMessage, locale?: string) => string;
 	/** Stable id, as `PipelineStage::as_str` spells it. */
 	id: string;
 	/** Pinned stages can never be moved; the rest can be reordered or switched off. */
@@ -44,48 +45,71 @@ export const BURST_PER_SECOND = 10;
 export const BLOCK_STATUS = 403;
 export const LIMIT_STATUS = 429;
 
-const grouped = (value: number) => value.toLocaleString("en-US");
-
 export const STAGES: readonly Stage[] = [
 	{
 		id: "rate-limit",
 		pinned: true,
-		does: `Pinned first. Each key gets ${REQUESTS_PER_MINUTE} requests and ${grouped(TOKENS_PER_MINUTE)} tokens a minute by default, and bursts above ${BURST_PER_SECOND} requests a second trip it; an over-limit request gets a ${LIMIT_STATUS}.`,
+		does: (tl, locale) =>
+			tl(
+				"Pinned first. Each key gets {requestsPerMinute} requests and {tokensPerMinute} tokens a minute by default, and bursts above {burstPerSecond} requests a second trip it; an over-limit request gets a {limitStatus}.",
+				{
+					burstPerSecond: BURST_PER_SECOND,
+					limitStatus: LIMIT_STATUS,
+					requestsPerMinute: REQUESTS_PER_MINUTE,
+					tokensPerMinute: formatNumberValue(locale, TOKENS_PER_MINUTE),
+				}
+			),
 	},
 	{
 		id: "firewall",
 		pinned: true,
-		does: `Pinned and always on. Scans for prompt injection, secrets and personal data; blocks with ${BLOCK_STATUS} by default, or warns or redacts instead.`,
+		does: (tl) =>
+			tl(
+				"Pinned and always on. Scans for prompt injection, secrets and personal data; blocks with {blockStatus} by default, or warns or redacts instead.",
+				{ blockStatus: BLOCK_STATUS }
+			),
 	},
 	{
 		id: "inspector",
 		pinned: false,
-		does: "Swappable. An optional model check of the request; if the check itself fails, the request goes on.",
+		does: (tl) =>
+			tl(
+				"Swappable. An optional model check of the request; if the check itself fails, the request goes on."
+			),
 	},
 	{
 		id: "inline-input",
 		pinned: false,
-		does: "Swappable. Runs the evaluator guardrails attached to request input.",
+		does: (tl) =>
+			tl("Swappable. Runs the evaluator guardrails attached to request input."),
 	},
 	{
 		id: "policy",
 		pinned: false,
-		does: "Swappable. Enforces the organisation's approved models and locked guardrails.",
+		does: (tl) =>
+			tl(
+				"Swappable. Enforces the organisation's approved models and locked guardrails."
+			),
 	},
 	{
 		id: "companion-dlp",
 		pinned: false,
-		does: "Swappable. Redacts personal data and secrets from screen-captured text before it leaves.",
+		does: (tl) =>
+			tl(
+				"Swappable. Redacts personal data and secrets from screen-captured text before it leaves."
+			),
 	},
 	{
 		id: "route",
 		pinned: true,
-		does: "Pinned. Chooses the provider and model the call goes to.",
+		does: (tl) =>
+			tl("Pinned. Chooses the provider and model the call goes to."),
 	},
 	{
 		id: "audit",
 		pinned: true,
-		does: "Pinned last. Records the call once the provider has answered.",
+		does: (tl) =>
+			tl("Pinned last. Records the call once the provider has answered."),
 	},
 ];
 
@@ -99,9 +123,18 @@ export function stageAt(index: number): Stage {
 	return stage;
 }
 
-export function spokenOf(index: number) {
+export function spokenOf(
+	index: number,
+	tl: LiteralMessage,
+	locale?: string
+): string {
 	const stage = stageAt(index);
-	return `Stage ${index + 1} of ${STAGE_COUNT}, ${stage.id}. ${stage.does}`;
+	return tl("Stage {position} of {stageCount}, {stageId}. {does}", {
+		does: stage.does(tl, locale),
+		position: index + 1,
+		stageCount: STAGE_COUNT,
+		stageId: stage.id,
+	});
 }
 
 /** Read to assistive tech in place of a caption; nothing here is drawn as text. */

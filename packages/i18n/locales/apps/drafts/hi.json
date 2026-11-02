@@ -1,0 +1,11 @@
+{
+  "Sending at a set time": "निर्धारित समय पर भेजा जा रहा है",
+  "Sending at {when}": "{when} पर भेजा जाएगा",
+  "Waiting for agents to start, then finish": "एजेंट के शुरू होने और फिर पूरा होने की प्रतीक्षा की जा रही है",
+  "Waiting for every agent to finish": "सभी एजेंटों के पूरा होने की प्रतीक्षा की जा रही है",
+  "Waiting for fewer than {limit} runs": "{limit} से कम रन होने की प्रतीक्षा की जा रही है",
+  "Waiting for nothing to be running": "कुछ भी न चलने की प्रतीक्षा की जा रही है",
+  "Waiting for {agentId} to drop under {belowPercent}% used": "{agentId} का उपयोग {belowPercent}% से नीचे आने की प्रतीक्षा की जा रही है",
+  "draft is already being sent": "ड्राफ़्ट पहले से भेजा जा रहा है",
+  "no such draft": "ऐसा कोई ड्राफ़्ट नहीं है"
+}

@@ -16,11 +16,11 @@ import {
 	parseNodeSetupFixture,
 	parseOnboardingFixtureState,
 } from "./onboarding-fixture-contract.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export const PROOF_URL = "/onboarding-setup-page-proof.html";
-export const EVIDENCE = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
+export const EVIDENCE = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
 );
 export const TOOLKITS = ["gmail", "notion", "slack", "github", "linear"].map(
 	(slug) => ({ slug, name: slug[0].toUpperCase() + slug.slice(1), logo: null })
@@ -187,9 +187,13 @@ export async function fixture(
 				status = 503;
 				result = { error: "Task fixture unavailable" };
 			} else {
+				// Core's quest shape: the client validates status and timestamps.
 				const quest = {
 					...body,
 					id: "quest-proof",
+					status: "open",
+					created_at: "2026-01-01T00:00:00Z",
+					updated_at: "2026-01-01T00:00:00Z",
 				};
 				state.quests.push(quest);
 				result = { quest };
@@ -213,9 +217,18 @@ export async function fixture(
 				syncComplete: true,
 			};
 		} else if (url.pathname === "/api/billing/subscription-status") {
+			// The full entitlement the billing contract validates; a partial one
+			// fails the subscription-status schema and reads as unpaid.
 			result = {
 				entitlement: options.paid
-					? { managedInference: true, paywalled: false }
+					? {
+							desktopAccess: true,
+							managedInference: true,
+							marketplaceApps: true,
+							monthlyCreditPoolMicroUsd: 0,
+							plan: "pro",
+							seats: 1,
+						}
 					: null,
 			};
 		} else if (url.pathname === "/api/auth/get-session") {
@@ -377,13 +390,19 @@ export async function fixture(
 			parseOnboardingFixtureState(await readFile(statePath, "utf8")),
 		close: async () => {
 			closing = true;
+			// Release a held write and drop the server's connections first: a
+			// handler still forwarding to the fixture then settles (its errors
+			// are ignored while closing) instead of holding the route open.
+			releaseLocalWrite();
+			server.closeAllConnections();
 			if (!page.isClosed()) {
 				await page
 					.goto("about:blank", { waitUntil: "commit" })
 					.catch(() => undefined);
-				await page.unrouteAll({ behavior: "wait" }).catch(() => undefined);
+				await page
+					.unrouteAll({ behavior: "ignoreErrors" })
+					.catch(() => undefined);
 			}
-			releaseLocalWrite();
 			server.closeAllConnections();
 			await new Promise<void>((resolve, reject) =>
 				server.close((error) => (error ? reject(error) : resolve()))
@@ -408,17 +427,4 @@ export async function chooseOrg(page: Page) {
 	await expect(page.getByRole("button", { name: /Team proof/ })).toBeVisible();
 	await page.getByRole("button", { name: /Team proof/ }).click();
 	await page.getByRole("button", { name: "Continue", exact: true }).click();
-}
-export async function toProfile(page: Page) {
-	await localDefault(page);
-	await chooseOrg(page);
-	await expect(
-		page.getByRole("heading", { name: "Connect your accounts" })
-	).toBeVisible();
-	await page.getByRole("button", { name: "Continue", exact: true }).click();
-	await page.getByRole("button", { name: "Save default", exact: true }).click();
-	await page.getByRole("button", { name: "Continue", exact: true }).click();
-	await expect(
-		page.getByRole("button", { name: "Build my profile" })
-	).toBeVisible();
 }

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	askBubble,
@@ -463,6 +464,26 @@ export function stackChips(threadCount: number): number {
 	return Math.min(MAX_STACK_CHIPS, Math.max(0, threadCount));
 }
 
-export function plural(count: number, one: string, many = `${one}s`): string {
-	return `${count} ${count === 1 ? one : many}`;
+/** What the table counts in its labels. */
+export type TableNoun = "agent" | "card" | "item" | "thread";
+
+/**
+ * "3 threads", "1 card": a count of one of the table's nouns, as a whole
+ * ICU message in the UI language.
+ */
+export function tableCount(
+	count: number,
+	noun: TableNoun,
+	tl: LiteralMessage = tr
+): string {
+	switch (noun) {
+		case "agent":
+			return tl("{count, plural, one {# agent} other {# agents}}", { count });
+		case "card":
+			return tl("{count, plural, one {# card} other {# cards}}", { count });
+		case "item":
+			return tl("{count, plural, one {# item} other {# items}}", { count });
+		default:
+			return tl("{count, plural, one {# thread} other {# threads}}", { count });
+	}
 }

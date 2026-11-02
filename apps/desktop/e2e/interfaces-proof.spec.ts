@@ -13,15 +13,17 @@
 //   • Channels — teams/projects are #channels, every agent has a DM, running
 //     work is marked, picking a thread opens the host view in the thread pane
 //     via the port, and switching channel closes it (as Slack does);
-//   • Feed — every thread is a post (pinned first), the Working tab and search
-//     narrow the timeline, and opening a post shows the host view as replies;
+//   • Feed — every thread is a post (pinned first), the Needs you tab, the
+//     Working view and search narrow the timeline, and opening a post shows
+//     the host view as replies;
 //   • World 2D — every agent stands on the map as a "Talk to" target; walking
-//     up with ArrowUp and pressing E opens that agent's dialogue box, M and
-//     the hotbar's map slot toggle the village map, a hotbar slot visits an
-//     agent, and its reply box starts a thread through the port;
+//     up to one with the arrow keys and pressing E opens that agent's
+//     dialogue box, M toggles the village map and the hotbar's map slot opens
+//     it, a hotbar slot visits an agent, and its reply box starts a thread
+//     through the port;
 //   • World 3D — the react-three-fiber canvas renders under headless WebGL
 //     (SwiftShader) with the same agents and the same walk-and-talk controls,
-//     and the dialogue's "Say something…" composer starts a thread through
+//     and the dialogue's "New conversation" composer starts a thread through
 //     the port.
 //
 // Screenshots land in `docs/proof/interfaces/<name>-spec.png`. The unsuffixed
@@ -30,16 +32,20 @@
 
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import {
+	promptedName,
+	walkTo2dAgent,
+	walkUpToNearestAgent,
+} from "./interfaces-proof-world.helpers.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Cold Vite compiles the blocks, ui and three.js module graphs on first load.
 test.describe.configure({ timeout: 120_000 });
 
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/interfaces"
-);
+const PROOF_DIR = proofEvidencePath("interfaces");
 const AGENT_NAMES = ["Atlas", "Brook", "Cipher", "Delta", "Echo", "Forge"];
-const MAX_STEPS_TO_AGENT = 8;
+// Threads waiting on the user: an ask, a failed run or a reply to read.
+const NEEDS_YOU_POSTS = 6;
 
 const pageErrors = new WeakMap<Page, string[]>();
 
@@ -61,24 +67,6 @@ function storyUrl(params: Record<string, string>): string {
 
 async function shot(page: Page, name: string): Promise<void> {
 	await page.screenshot({ path: path.join(PROOF_DIR, `${name}-spec.png`) });
-}
-
-/**
- * Walk the player north from spawn until an agent is within reach, then
- * return the name the world offers to talk to. Spawn sits on the plaza below
- * the middle column, so the first agent reached is the one directly above.
- */
-async function walkUpToNearestAgent(page: Page): Promise<string> {
-	const status = page.getByRole("status").filter({ hasText: "Talk to" });
-	for (let step = 0; step < MAX_STEPS_TO_AGENT; step += 1) {
-		if ((await status.count()) > 0) {
-			break;
-		}
-		await page.keyboard.press("ArrowUp");
-	}
-	await expect(status).toBeVisible();
-	const text = (await status.textContent()) ?? "";
-	return text.replace(/^.*Talk to\s+/, "").trim();
 }
 
 test("Channels: teams and projects are channels, agents are DMs", async ({
@@ -108,11 +96,13 @@ test("Channels: teams and projects are channels, agents are DMs", async ({
 		).toBeVisible();
 	}
 	// Forge's hero rebuild and Delta's rollout are live runs.
+	// Live work rides in the row's name as ", 1 working" (4f7563c79d; one
+	// translated sentence since 2c940ae07d).
 	await expect(
-		rail.getByRole("button", { name: /^website-redesign Working/ })
+		rail.getByRole("button", { name: "website-redesign , 1 working" })
 	).toBeVisible();
 	await expect(
-		rail.getByRole("button", { name: /Delta.*Working/ })
+		rail.getByRole("button", { name: "Delta , 1 working" })
 	).toBeVisible();
 
 	// The most recently active channel is selected, with a composer and no
@@ -120,17 +110,21 @@ test("Channels: teams and projects are channels, agents are DMs", async ({
 	// accessible names carry the bare handle.
 	await expect(surface).toContainText("Welcome to #website-redesign");
 	await expect(
-		surface.getByRole("heading", { name: "website-redesign" })
+		surface.getByRole("heading", { name: "website-redesign", exact: true })
 	).toBeVisible();
 	await expect(
 		surface.getByRole("textbox", { name: "Message website-redesign" })
 	).toBeVisible();
 
-	const threads = surface.getByRole("toolbar", {
+	// The channel's threads are a feed of messages since 4f7563c79d; a
+	// message's reply count opens its thread.
+	const threads = surface.getByRole("feed", {
 		name: "Threads in this channel",
 	});
 	await threads
-		.getByRole("button", { name: /Rebuild the landing hero/ })
+		.getByRole("button", {
+			name: /^\d+ repl(y|ies),.*: Rebuild the landing hero$/,
+		})
 		.click();
 	await expect(page.getByTestId("port-log")).toContainText(
 		"openThread(thread-hero)"
@@ -148,9 +142,12 @@ test("Channels: teams and projects are channels, agents are DMs", async ({
 	await expect(page.getByTestId("port-log")).toContainText("closeThread()");
 	await expect(pane).toBeHidden();
 	await expect(
-		surface.getByRole("heading", { name: "launch-crew" })
+		surface.getByRole("heading", { name: "launch-crew", exact: true })
 	).toBeVisible();
-	await threads.getByRole("button", { name: /Launch week plan/ }).click();
+	await threads
+		.getByRole("article", { name: /Launch week plan/ })
+		.getByRole("button", { name: "Reply in thread" })
+		.click();
 	await expect(page.getByTestId("port-log")).toContainText(
 		"openThread(thread-launch-plan)"
 	);
@@ -166,7 +163,7 @@ test("Channels: teams and projects are channels, agents are DMs", async ({
 	await expect(dmToggle).toHaveAttribute("aria-expanded", "false");
 	await expect(rail.getByRole("button", { name: /\bAtlas\b/ })).toBeHidden();
 	await expect(
-		rail.getByRole("button", { name: /Delta.*Working/ })
+		rail.getByRole("button", { name: "Delta , 1 working" })
 	).toBeVisible();
 	await dmToggle.click();
 	await expect(rail.getByRole("button", { name: /\bAtlas\b/ })).toBeVisible();
@@ -189,11 +186,24 @@ test("Feed: every thread is a post and its conversation is the replies", async (
 	await expect(posts.nth(1)).toContainText("@forge");
 	await expect(feed.getByRole("textbox", { name: "New post" })).toBeVisible();
 
-	// The Working tab keeps only live runs: Forge's hero and Delta's rollout.
+	// The timeline's tabs are For you / Needs you since 4f7563c79d; the
+	// Working view moved to the side nav, where it keeps only live runs:
+	// Forge's hero and Delta's rollout.
 	const timelineTabs = feed.getByRole("tablist", { name: "Timeline" });
-	await timelineTabs.getByRole("tab", { name: "Working" }).click();
-	await expect(posts).toHaveCount(2);
+	await timelineTabs.getByRole("tab", { name: "Needs you" }).click();
+	await expect(
+		timelineTabs.getByRole("tab", { name: "Needs you" })
+	).toHaveAttribute("aria-selected", "true");
+	await expect(posts).toHaveCount(NEEDS_YOU_POSTS);
 	await timelineTabs.getByRole("tab", { name: "For you" }).click();
+	await expect(posts).toHaveCount(10);
+	const views = page.getByRole("navigation", { name: "Feed views" });
+	await views.getByRole("button", { name: "Working, 2 running" }).click();
+	await expect(feed.getByRole("heading", { name: "Working" })).toBeVisible();
+	await expect(posts).toHaveCount(2);
+	await expect(posts.nth(0)).toContainText("Rebuild the landing hero");
+	await expect(posts.nth(1)).toContainText("Roll out gateway 2.4");
+	await views.getByRole("button", { name: "Home" }).click();
 	await expect(posts).toHaveCount(10);
 
 	// The sidebar search live-filters the timeline.
@@ -265,11 +275,12 @@ test("World 2D: walk up to an agent and press E to talk", async ({ page }) => {
 	}
 	await expect(page.getByRole("img", { name: "You" })).toBeVisible();
 
+	// The player now starts among the cottages, where fences, lamps and
+	// furniture stand between it and most doorsteps, so walk to Echo from its
+	// position on the map instead of a fixed run of ArrowUp presses.
 	await world.focus();
-	const nearest = await walkUpToNearestAgent(page);
-	// Placement is stable by name: six agents sit in a 3x2 grid, so the one
-	// straight above the spawn plaza is the fifth by name.
-	expect(nearest).toBe("Echo");
+	await walkTo2dAgent(page, "Echo");
+	expect(await promptedName(page)).toBe("Echo");
 
 	await page.keyboard.press("e");
 	const panel = page.getByRole("complementary", { name: "Talking to Echo" });
@@ -307,7 +318,13 @@ test("World 2D: walk up to an agent and press E to talk", async ({ page }) => {
 	await world.focus();
 	await page.keyboard.press("m");
 	await expect(villageMap).toBeVisible();
+	await page.keyboard.press("m");
+	await expect(villageMap).toBeHidden();
+	// The open map is a framed card over a scrim (4f7563c79d), so the hotbar
+	// slot under it opens it and the card's own close button dismisses it.
 	await page.getByRole("button", { name: "Village map" }).click();
+	await expect(villageMap).toBeVisible();
+	await page.getByRole("button", { name: "Close map" }).click();
 	await expect(villageMap).toBeHidden();
 
 	// A hotbar slot visits an agent directly, and the reply box starts a
@@ -398,13 +415,14 @@ test("World 3D: the WebGL scene renders the same world", async ({ page }) => {
 	await page.waitForTimeout(500);
 	await shot(page, "world-3d");
 
-	// "Say something…" opens the composer in the dialogue band; submitting it
-	// starts a conversation with Echo through the port.
-	await panel.getByRole("button", { name: "Say something…" }).click();
+	// "New conversation" (was "Say something…", ec6fac15e2) opens the
+	// composer in the dialogue band; sending it starts a conversation with
+	// Echo through the port.
+	await panel.getByRole("button", { name: "New conversation" }).click();
 	await panel
 		.getByRole("textbox", { name: "Say something to Echo" })
 		.fill("Announce the 2.4 release");
-	await panel.getByRole("button", { name: "Say", exact: true }).click();
+	await panel.getByRole("button", { name: "Send", exact: true }).click();
 	await expect(page.getByTestId("port-log")).toContainText(
 		'startThread({"agentId":"agent-echo","prompt":"Announce the 2.4 release"})'
 	);

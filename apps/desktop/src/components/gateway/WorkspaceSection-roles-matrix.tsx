@@ -139,7 +139,7 @@ export function RolesMatrix({
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead className="sticky left-0" presentation="permission">
+							<TableHead className="sticky start-0" presentation="permission">
 								Permission
 							</TableHead>
 							{roles.map((role) => (
@@ -210,7 +210,7 @@ export function RolesMatrix({
 					<TableBody>
 						{PERMISSIONS.map((perm) => (
 							<TableRow key={perm}>
-								<TableCell className="sticky left-0" presentation="permission">
+								<TableCell className="sticky start-0" presentation="permission">
 									{perm}
 								</TableCell>
 								{roles.map((role) => (

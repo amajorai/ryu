@@ -5,13 +5,27 @@
 // lends the assistant a surface whose instructions point it at Core's
 // `shadow.*` tools for anything the rollup does not answer.
 
+import { translate as tl } from "@ryu/i18n/core";
 import type { WeeklyReview } from "@/src/lib/api/shadow.ts";
 
-export const WEEKLY_REVIEW_PROMPTS = [
-	"What did I spend the most time on today?",
-	"When was I most distracted?",
-	"Summarize what I worked on this morning.",
-];
+/**
+ * A stable array whose entries translate each time they are read, so the
+ * page (which re-renders on a language change) always passes the chips in
+ * the current UI language. Chips are sent as the user's own prompt.
+ */
+function translatedOnRead(sources: readonly (() => string)[]): string[] {
+	const entries: string[] = [];
+	for (const [index, source] of sources.entries()) {
+		Object.defineProperty(entries, index, { enumerable: true, get: source });
+	}
+	return entries;
+}
+
+export const WEEKLY_REVIEW_PROMPTS = translatedOnRead([
+	() => tl("What did I spend the most time on today?"),
+	() => tl("When was I most distracted?"),
+	() => tl("Summarize what I worked on this morning."),
+]);
 
 export const WEEKLY_REVIEW_TOOLS = [
 	"shadow.timeline",

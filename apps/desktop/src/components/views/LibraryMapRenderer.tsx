@@ -6,6 +6,10 @@
 import { Location01Icon } from "@hugeicons/core-free-icons";
 import type { SourceItem } from "@ryu/app-host/views";
 import { LibraryEmpty } from "@ryu/blocks/desktop/library.tsx";
+import {
+	useMaplibreLabelLanguage,
+	useMaplibreLocale,
+} from "@ryu/blocks/desktop/maplibre-labels.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -73,6 +77,9 @@ export default function LibraryMapRenderer({
 	const mapRef = useRef<maplibregl.Map | null>(null);
 	const markersRef = useRef<maplibregl.Marker[]>([]);
 	const onOpenRef = useRef(onOpen);
+	const maplibreLocale = useMaplibreLocale();
+	const localeRef = useRef(maplibreLocale);
+	localeRef.current = maplibreLocale;
 	onOpenRef.current = onOpen;
 	const hasPoints = plotted.length > 0;
 
@@ -88,6 +95,7 @@ export default function LibraryMapRenderer({
 			center: [0, 20],
 			zoom: 1.2,
 			attributionControl: { compact: true },
+			locale: localeRef.current,
 		});
 		map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
 		mapRef.current = map;
@@ -100,6 +108,7 @@ export default function LibraryMapRenderer({
 			mapRef.current = null;
 		};
 	}, [hasPoints]);
+	useMaplibreLabelLanguage(mapRef);
 
 	// Reconcile markers and fit the camera whenever the plotted rows change.
 	useEffect(() => {

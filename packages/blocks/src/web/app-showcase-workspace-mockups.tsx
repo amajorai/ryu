@@ -1,3 +1,6 @@
+"use client";
+
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	ChevronRight,
@@ -21,6 +24,7 @@ import {
 } from "./app-showcase-primitives.tsx";
 
 export function SpacesMockup() {
+	const tl = useLiteralMessages();
 	return (
 		<MockupWindow label="Spaces / product-notes">
 			<div className="grid min-h-[18rem] grid-cols-1 bg-background sm:grid-cols-[6.5rem_1fr]">
@@ -39,22 +43,22 @@ export function SpacesMockup() {
 							</p>
 						</div>
 						<MiniButton>
-							<Plus className="mr-1 size-2.5" />
+							<Plus className="me-1 size-2.5" />
 							New doc
 						</MiniButton>
 					</div>
 					<div className="relative mt-3">
-						<Search className="absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground" />
-						<div className="type-tiny rounded border border-border bg-muted/20 py-1.5 pr-2 pl-7 font-mono text-muted-foreground">
+						<Search className="absolute start-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+						<div className="type-tiny rounded border border-border bg-muted/20 py-1.5 ps-7 pe-2 font-mono text-muted-foreground">
 							Search this Space…
 						</div>
 					</div>
 					<div className="mt-3 grid gap-3 sm:grid-cols-[0.85fr_1.15fr]">
 						<div className="space-y-1.5">
 							{[
-								["launch-brief.md", "updated 2m"],
-								["research-notes.md", "updated 1h"],
-								["voice-and-tone.md", "updated yesterday"],
+								["launch-brief.md", tl("updated 2m")],
+								["research-notes.md", tl("updated 1h")],
+								["voice-and-tone.md", tl("updated yesterday")],
 							].map(([name, note], index) => (
 								<div
 									className={cn(
@@ -137,7 +141,7 @@ export function CalendarMockup() {
 							<MiniPill active>Month</MiniPill>
 							<MiniPill>Agenda</MiniPill>
 							<MiniButton>
-								<Plus className="mr-1 size-2.5" />
+								<Plus className="me-1 size-2.5" />
 								New
 							</MiniButton>
 						</div>
@@ -158,7 +162,7 @@ export function CalendarMockup() {
 								const event = events.get(day);
 								return (
 									<div
-										className="min-h-[2.35rem] border-border border-r border-b p-1.5 last:border-r-0"
+										className="min-h-[2.35rem] border-border border-e border-b p-1.5 last:border-e-0"
 										key={`day-${index}`}
 									>
 										<span
@@ -226,7 +230,7 @@ function CanvasNode({
 					{icon}
 				</span>
 				<span className="type-tiny font-medium">{label}</span>
-				<Circle className="ml-auto size-2.5 text-success" />
+				<Circle className="ms-auto size-2.5 text-success" />
 			</div>
 			<div className="mt-2">{children}</div>
 		</div>
@@ -297,38 +301,38 @@ export function CanvasMockup() {
 						</div>
 					</div>
 					<CanvasNode
-						className="top-[3.35rem] left-3"
+						className="start-3 top-[3.35rem]"
 						icon={<ImageIcon className="size-2.5" />}
 						label="Source image"
 					>
 						<div className="h-6 rounded bg-muted/60" />
 					</CanvasNode>
 					<CanvasNode
-						className="top-[3.35rem] left-[46%]"
+						className="start-[46%] top-[3.35rem]"
 						icon={<Sparkles className="size-2.5" />}
 						label="Compose"
 					>
 						<MiniLines count={2} widths={["w-full", "w-2/3"]} />
 					</CanvasNode>
 					<CanvasNode
-						className="top-[9.1rem] left-[46%]"
+						className="start-[46%] top-[9.1rem]"
 						icon={<Play className="size-2.5" />}
 						label="Motion"
 					>
 						<div className="h-3 rounded bg-primary/15" />
 					</CanvasNode>
 					<CanvasNode
-						className="top-[6.45rem] right-2"
+						className="end-2 top-[6.45rem]"
 						icon={<Layers className="size-2.5" />}
 						label="Output"
 					>
 						<div className="h-7 rounded bg-foreground/[0.06]" />
 					</CanvasNode>
 				</div>
-				<div className="border-border border-l bg-muted/20 p-2.5">
+				<div className="border-border border-s bg-muted/20 p-2.5">
 					<div className="mb-3 flex items-center justify-between">
 						<span className="type-micro font-medium">Node details</span>
-						<ChevronRight className="size-3 text-muted-foreground" />
+						<ChevronRight className="size-3 text-muted-foreground rtl:-scale-x-100" />
 					</div>
 					<p className="type-tiny text-muted-foreground">Selected</p>
 					<p className="type-micro mt-1 font-mono">compose-02</p>

@@ -38,6 +38,10 @@ use super::context_window::{estimate_tokens, estimate_ui_message_parts};
 use super::UiMessage;
 use crate::sidecar::mcp::RegistryTool;
 
+mod segment;
+use segment::label_key;
+pub use segment::{ContextSegment, SegmentDetail};
+
 /// How many conversations keep a remembered breakdown. This is a display cache
 /// for the panel, not state anything depends on, so a small bound with
 /// oldest-first eviction is enough — a conversation evicted here simply shows no
@@ -54,24 +58,6 @@ pub enum ContextPlane {
     Acp,
     /// Core assembles the whole request.
     Openai,
-}
-
-/// One category of the context window. `kind` is a STABLE id the desktop maps
-/// to a palette colour and an icon — renaming one changes the UI, so treat it
-/// as API.
-#[derive(Debug, Clone, Serialize)]
-pub struct ContextSegment {
-    /// Free-form sub-label ("24 tools across 5 servers"), shown under the row.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-    /// Stable category id: `system` | `instructions` | `skills` | `memory` |
-    /// `recall` | `persona` | `compact` | `tools` | `messages` | `documents` |
-    /// `images` | `output`.
-    pub kind: &'static str,
-    /// Human-readable row label.
-    pub label: String,
-    /// Estimated tokens this category occupies.
-    pub tokens: usize,
 }
 
 /// The assembled breakdown for one turn.
@@ -128,7 +114,7 @@ impl BreakdownBuilder {
         kind: &'static str,
         label: impl Into<String>,
         tokens: usize,
-        detail: Option<String>,
+        detail: Option<SegmentDetail>,
     ) {
         if tokens == 0 {
             return;
@@ -136,14 +122,22 @@ impl BreakdownBuilder {
         if let Some(existing) = self.segments.iter_mut().find(|s| s.kind == kind) {
             existing.tokens += tokens;
             if existing.detail.is_none() {
-                existing.detail = detail;
+                if let Some(detail) = detail {
+                    existing.counts = detail.counts();
+                    existing.detail = Some(detail.english());
+                    existing.detail_key = Some(detail.key());
+                }
             }
             return;
         }
+        let label = label.into();
         self.segments.push(ContextSegment {
-            detail,
+            counts: detail.and_then(SegmentDetail::counts),
+            detail: detail.map(SegmentDetail::english),
+            detail_key: detail.map(SegmentDetail::key),
             kind,
-            label: label.into(),
+            label_key: label_key(&label),
+            label,
             tokens,
         });
     }
@@ -176,14 +170,14 @@ impl BreakdownBuilder {
             "messages",
             label,
             text,
-            Some(plural(messages.len(), "message", "messages")),
+            Some(SegmentDetail::Messages(messages.len())),
         );
         self.add("documents", "Attached documents", documents);
         self.add_detailed(
             "images",
             "Images",
             images,
-            (image_count > 0).then(|| plural(image_count, "image", "images")),
+            (image_count > 0).then_some(SegmentDetail::Images(image_count)),
         );
     }
 
@@ -202,11 +196,10 @@ impl BreakdownBuilder {
             "tools",
             "Tool definitions",
             tokens,
-            Some(format!(
-                "{} across {}",
-                plural(tools.len(), "tool", "tools"),
-                plural(servers.len(), "server", "servers")
-            )),
+            Some(SegmentDetail::Tools {
+                servers: servers.len(),
+                tools: tools.len(),
+            }),
         );
     }
 
@@ -294,111 +287,5 @@ pub fn remembered(conversation_id: &str) -> Option<ContextBreakdown> {
     guard.0.get(conversation_id).cloned()
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
-    if n == 1 {
-        format!("1 {one}")
-    } else {
-        format!("{n} {many}")
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn tool(id: &str, description: &str) -> RegistryTool {
-        let mut t = RegistryTool::candidate(id, "srv", id);
-        t.description = Some(description.to_owned());
-        t.input_schema = Some(json!({"type": "object", "properties": {}}));
-        t
-    }
-
-    #[test]
-    fn empty_builder_emits_nothing() {
-        assert!(BreakdownBuilder::new().finish(ContextPlane::Acp).is_none());
-    }
-
-    #[test]
-    fn zero_token_layers_are_dropped() {
-        let mut b = BreakdownBuilder::new();
-        b.add_text("skills", "Skills", None);
-        b.add_text("persona", "Persona", Some(""));
-        b.add_text("memory", "Memory", Some("remembered fact"));
-        let out = b.finish(ContextPlane::Openai).expect("one non-empty layer");
-        assert_eq!(out.segments.len(), 1);
-        assert_eq!(out.segments[0].kind, "memory");
-    }
-
-    #[test]
-    fn segments_sort_largest_first_and_sum_to_attributed() {
-        let mut b = BreakdownBuilder::new();
-        b.add("persona", "Persona", 10);
-        b.add("skills", "Skills", 900);
-        b.add("memory", "Memory", 100);
-        let out = b.finish(ContextPlane::Openai).expect("segments");
-        let kinds: Vec<_> = out.segments.iter().map(|s| s.kind).collect();
-        assert_eq!(kinds, vec!["skills", "memory", "persona"]);
-        assert_eq!(out.attributed, 1010);
-    }
-
-    #[test]
-    fn tool_definitions_are_costed_and_servers_counted() {
-        let mut b = BreakdownBuilder::new();
-        let mut second = tool("b", "does another thing");
-        second.server = "other".to_owned();
-        b.add_tools(&[tool("a", "does a thing"), second]);
-        let out = b.finish(ContextPlane::Acp).expect("tool segment");
-        assert_eq!(out.segments[0].kind, "tools");
-        assert!(out.segments[0].tokens > 0);
-        assert_eq!(
-            out.segments[0].detail.as_deref(),
-            Some("2 tools across 2 servers")
-        );
-    }
-
-    #[test]
-    fn no_tools_adds_no_segment() {
-        let mut b = BreakdownBuilder::new();
-        b.add_tools(&[]);
-        assert!(b.finish(ContextPlane::Acp).is_none());
-    }
-
-    #[test]
-    fn plane_and_window_ride_along() {
-        let mut b = BreakdownBuilder::new();
-        b.set_window(8192);
-        b.set_reserve_output(1024);
-        b.add("skills", "Skills", 42);
-        let out = b.finish(ContextPlane::Acp).expect("segments");
-        assert_eq!(out.window, 8192);
-        assert_eq!(out.reserve_output, 1024);
-        assert_eq!(out.plane, ContextPlane::Acp);
-        assert_eq!(
-            serde_json::to_value(out.plane).unwrap(),
-            serde_json::json!("acp")
-        );
-    }
-
-    #[test]
-    fn remembering_replaces_and_evicts_oldest() {
-        let mk = |tokens: usize| {
-            let mut b = BreakdownBuilder::new();
-            b.add("skills", "Skills", tokens);
-            b.finish(ContextPlane::Acp).expect("segments")
-        };
-        // Unique ids so this test cannot collide with a sibling test's writes
-        // into the process-global store.
-        let id = |i: usize| format!("evict-conv-{i}");
-
-        record(&id(0), mk(1));
-        record(&id(0), mk(2));
-        assert_eq!(remembered(&id(0)).expect("kept").attributed, 2);
-
-        for i in 1..=MAX_REMEMBERED {
-            record(&id(i), mk(3));
-        }
-        assert!(remembered(&id(0)).is_none(), "oldest evicted");
-        assert!(remembered(&id(MAX_REMEMBERED)).is_some(), "newest kept");
-    }
-}
+mod tests;

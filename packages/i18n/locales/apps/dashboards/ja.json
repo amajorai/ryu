@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "このノードではエージェントウィジェットを利用できません。更新には委任されたユーザー実行権限が必要ですが、更新ジョブにはその権限がありません。代わりに http、composio、または静的ソースを使用してください。",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "モニターウィジェットはまだ利用できません。アプリがモニター結果を読み取れるホスト機能がありません。代わりに http、composio、または静的ソースを使用してください。",
+  "The Composio action failed: {error}": "Composio アクションが失敗しました: {error}",
+  "The Composio action returned HTTP {status}.": "Composio アクションが HTTP {status} を返しました。",
+  "The web source redirected, and redirects are not allowed.": "Web ソースがリダイレクトしましたが、リダイレクトは許可されていません。",
+  "The web source returned HTTP {status}.": "Web ソースが HTTP {status} を返しました。",
+  "The web source sent a reply Ryu could not read: {error}": "Web ソースから Ryu が読み取れない応答が返されました: {error}",
+  "The widget's agent run failed: {error}": "ウィジェットのエージェント実行が失敗しました: {error}",
+  "Widget “{title}” broke": "ウィジェット「{title}」が停止しました",
+  "Widget “{title}” recovered": "ウィジェット「{title}」が復旧しました",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "ワークフローウィジェットはまだ利用できません。アプリが保存済みワークフローを実行できるホスト機能がありません。代わりに http、composio、または静的ソースを使用してください。",
+  "dashboard not found": "ダッシュボードが見つかりません",
+  "kind is required": "種類は必須です",
+  "name is required": "名前は必須です",
+  "not found": "見つかりません"
+}

@@ -1,7 +1,7 @@
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	CurrentTabIdProvider,
 	IsActiveTabProvider,
@@ -36,7 +36,7 @@ export function InterfacePageOverlay({
 					type="button"
 					variant="ghost"
 				>
-					<HugeiconsIcon
+					<DirectionalIcon
 						aria-hidden="true"
 						data-icon="inline-start"
 						icon={ArrowLeft01Icon}

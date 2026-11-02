@@ -8,25 +8,20 @@
 // too.
 
 import {
-	Alert01Icon,
 	AlertCircleIcon,
 	ArrowDown01Icon,
 	ArrowRight01Icon,
-	CircleArrowUp01Icon,
 	CircleIcon,
-	Download01Icon,
 	Loading01Icon,
-	MinusSignIcon,
-	PlayIcon,
 	Refresh01Icon,
-	RotateClockwiseIcon,
 	ServerStack01Icon,
-	Square01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Card, CardContent } from "@ryu/ui/components/card";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -36,6 +31,7 @@ import {
 	EmptyTitle,
 } from "@ryu/ui/components/empty";
 import type { ReactNode } from "react";
+import { FleetSidecarRow } from "./fleet-sidecar-row.tsx";
 
 /** A managed sidecar on a node, as the view needs it. */
 export interface FleetServiceRow {
@@ -129,235 +125,6 @@ function NodeStatusCell({
 		);
 	}
 	return <Badge variant="secondary">Unknown</Badge>;
-}
-
-function StatusDot({
-	installing,
-	installed,
-	running,
-}: {
-	installing: boolean;
-	installed: boolean;
-	running: boolean;
-}) {
-	if (installing) {
-		return (
-			<HugeiconsIcon
-				className="h-3.5 w-3.5 animate-spin text-muted-foreground"
-				icon={Loading01Icon}
-			/>
-		);
-	}
-	if (!installed) {
-		return (
-			<HugeiconsIcon
-				className="h-3.5 w-3.5 text-muted-foreground/50"
-				icon={MinusSignIcon}
-			/>
-		);
-	}
-	if (running) {
-		return (
-			<HugeiconsIcon
-				className="h-3 w-3 fill-success text-status-success"
-				icon={CircleIcon}
-			/>
-		);
-	}
-	return (
-		<HugeiconsIcon
-			className="h-3 w-3 text-muted-foreground"
-			icon={CircleIcon}
-		/>
-	);
-}
-
-function SidecarActions({
-	entry,
-	onInstall,
-	onStart,
-	onStop,
-	onRestart,
-}: {
-	entry: FleetServiceRow;
-	onInstall?: () => void;
-	onStart?: () => void;
-	onStop?: () => void;
-	onRestart?: () => void;
-}) {
-	const pending = entry.pending ?? null;
-	const isInstalled = entry.installState === "installed";
-	const isInstalling =
-		entry.installState === "installing" || pending === "install";
-	const isFailed = entry.installState === "failed";
-	const hasUpdate =
-		isInstalled &&
-		entry.latestVersion != null &&
-		entry.installedVersion != null &&
-		entry.latestVersion !== entry.installedVersion &&
-		!entry.deprecated;
-
-	if (isInstalling) {
-		return (
-			<span className="flex items-center gap-1 text-muted-foreground text-xs">
-				<HugeiconsIcon className="h-3 w-3 animate-spin" icon={Loading01Icon} />
-				Installing…
-			</span>
-		);
-	}
-	if (isFailed) {
-		return (
-			<Button
-				appearance="service-retry"
-				disabled={pending !== null}
-				onClick={onInstall}
-				size="sm"
-				variant="ghost"
-			>
-				<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={AlertCircleIcon} />
-				Retry
-			</Button>
-		);
-	}
-	if (!(isInstalled || entry.deprecated)) {
-		return (
-			<Button
-				appearance="service-action"
-				disabled={pending !== null}
-				onClick={onInstall}
-				size="sm"
-				variant="ghost"
-			>
-				<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={Download01Icon} />
-				Install
-			</Button>
-		);
-	}
-	if (!isInstalled) {
-		return null;
-	}
-	return (
-		<>
-			{hasUpdate ? (
-				<Button
-					appearance="service-update"
-					disabled={pending !== null}
-					onClick={onInstall}
-					size="sm"
-					variant="ghost"
-				>
-					<HugeiconsIcon
-						className="mr-1 h-3.5 w-3.5"
-						icon={CircleArrowUp01Icon}
-					/>
-					Update
-				</Button>
-			) : null}
-			{entry.running ? (
-				<>
-					<Button
-						appearance="service-action"
-						disabled={pending !== null}
-						onClick={onStop}
-						size="sm"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={Square01Icon} />
-						Stop
-					</Button>
-					<Button
-						appearance="service-action"
-						disabled={pending !== null}
-						onClick={onRestart}
-						size="sm"
-						variant="ghost"
-					>
-						<HugeiconsIcon
-							className="mr-1 h-3.5 w-3.5"
-							icon={RotateClockwiseIcon}
-						/>
-						Restart
-					</Button>
-				</>
-			) : (
-				<Button
-					appearance="service-action"
-					disabled={pending !== null}
-					onClick={onStart}
-					size="sm"
-					variant="ghost"
-				>
-					<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={PlayIcon} />
-					Start
-				</Button>
-			)}
-		</>
-	);
-}
-
-function FleetSidecarRow({
-	entry,
-	onInstall,
-	onStart,
-	onStop,
-	onRestart,
-}: {
-	entry: FleetServiceRow;
-	onInstall?: () => void;
-	onStart?: () => void;
-	onStop?: () => void;
-	onRestart?: () => void;
-}) {
-	const isInstalled = entry.installState === "installed";
-	const isInstalling =
-		entry.installState === "installing" || entry.pending === "install";
-
-	return (
-		<div className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40">
-			<div className="flex w-4 flex-shrink-0 items-center justify-center">
-				<StatusDot
-					installed={isInstalled}
-					installing={isInstalling}
-					running={entry.running}
-				/>
-			</div>
-
-			<div className="min-w-0 flex-1">
-				<div className="flex items-center gap-2">
-					<span
-						className={`truncate font-medium text-sm ${isInstalled ? "" : "text-muted-foreground"}`}
-						title={entry.displayName}
-					>
-						{entry.displayName}
-					</span>
-					{entry.deprecated ? (
-						<span className="flex items-center gap-1 font-medium text-status-warning text-xs">
-							<HugeiconsIcon className="h-3 w-3" icon={Alert01Icon} />
-							Deprecated
-						</span>
-					) : null}
-				</div>
-				{entry.description ? (
-					<p
-						className="truncate text-muted-foreground text-xs"
-						title={entry.description}
-					>
-						{entry.description}
-					</p>
-				) : null}
-			</div>
-
-			<div className="flex flex-shrink-0 items-center gap-1.5">
-				<SidecarActions
-					entry={entry}
-					onInstall={onInstall}
-					onRestart={onRestart}
-					onStart={onStart}
-					onStop={onStop}
-				/>
-			</div>
-		</div>
-	);
 }
 
 function ServiceSection({
@@ -466,7 +233,11 @@ export function FleetView({
 				<div className="flex items-center gap-3">
 					{!healthLoading && lastRefreshedLabel ? (
 						<span className="text-muted-foreground text-xs">
-							{onlineCount}/{totalCount} online · updated {lastRefreshedLabel}
+							{tl("{online}/{total} online · updated {updated}", {
+								online: onlineCount,
+								total: totalCount,
+								updated: lastRefreshedLabel,
+							})}
 						</span>
 					) : null}
 					<Button
@@ -535,7 +306,7 @@ export function FleetView({
 							<Card key={node.name}>
 								<CardContent inset="none">
 									<button
-										className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/40"
+										className="flex w-full items-center justify-between gap-4 px-4 py-4 text-start transition-colors hover:bg-muted/40"
 										onClick={() => onToggleExpand?.(node.name, node.online)}
 										type="button"
 									>
@@ -558,7 +329,7 @@ export function FleetView({
 													icon={ArrowDown01Icon}
 												/>
 											) : (
-												<HugeiconsIcon
+												<DirectionalIcon
 													className="size-4 text-muted-foreground"
 													icon={ArrowRight01Icon}
 												/>

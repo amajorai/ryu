@@ -136,7 +136,7 @@ export default function SidebarLibrarySection({
 							<span className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
 								<SecondaryActionButton
 									action={item.secondaryAction}
-									className="absolute -top-2 -right-2 z-10"
+									className="absolute -end-2 -top-2 z-10"
 								/>
 							</span>
 						) : null}
@@ -165,7 +165,7 @@ export default function SidebarLibrarySection({
 							<span className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
 								<SecondaryActionButton
 									action={item.secondaryAction}
-									className="absolute top-2 right-10"
+									className="absolute end-10 top-2"
 								/>
 							</span>
 						) : null}

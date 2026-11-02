@@ -418,7 +418,7 @@ export function ComposerQuotePreview({
 	return (
 		<div
 			className={cn(
-				"mx-2 mt-2 flex items-start gap-2 rounded-lg border-border border-l-2 bg-muted py-1.5 pr-1.5 pl-2",
+				"mx-2 mt-2 flex items-start gap-2 rounded-lg border-border border-s-2 bg-muted py-1.5 ps-2 pe-1.5",
 				className
 			)}
 			data-slot="composer-quote-preview"
@@ -458,7 +458,7 @@ export function QuoteBlock({ text, className }: QuoteBlockProps) {
 	return (
 		<p
 			className={cn(
-				"type-detail mb-1.5 line-clamp-4 whitespace-pre-wrap border-border border-l-2 pl-2 text-muted-foreground leading-snug",
+				"type-detail mb-1.5 line-clamp-4 whitespace-pre-wrap border-border border-s-2 ps-2 text-muted-foreground leading-snug",
 				className
 			)}
 		>

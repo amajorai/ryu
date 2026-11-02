@@ -1,19 +1,29 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type Alert, streamMonitorAlerts } from "@/src/lib/api/monitors.ts";
+import { localizeNativeCopy } from "@/src/lib/native-copy.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
 import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
-/** Raise an OS notification (no-op when the user turned them off). */
+/**
+ * Raise an OS notification (no-op when the user turned them off). The alert's
+ * English title is localized on its own, before the monitor name is joined
+ * on, since a native banner never passes through the DOM localizer and the
+ * joined text would match no catalog sentence.
+ */
 function osNotify(alert: Alert, isCurrent: () => boolean): void {
 	if (!isCurrent()) {
 		return;
 	}
 	showOsNotification({
-		title: `${alert.monitor_name}: ${alert.title}`,
+		title: tl("{monitor}: {title}", {
+			monitor: alert.monitor_name,
+			title: localizeNativeCopy(alert.title),
+		}),
 		body: alert.message,
 		tag: `monitor-${alert.monitor_id}`,
 	}).catch(() => undefined);

@@ -22,11 +22,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Locator, test } from "@playwright/test";
+import { appsDocsProofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/agent-banner-story.html";
-const MARKETPLACE_PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../docs/proof/marketplace-wallpaper-banners"
+const MARKETPLACE_PROOF_DIR = appsDocsProofEvidencePath(
+	"marketplace-wallpaper-banners"
 );
 
 /** The shared static painter (`animatedGradientCss`) always emits two radial

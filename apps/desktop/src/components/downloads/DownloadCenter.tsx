@@ -17,6 +17,8 @@
 // matching the Inbox tray so the two footer popovers read as one.
 
 import { Download01Icon } from "@hugeicons/core-free-icons";
+import { activeLocale, numberFormatter } from "@ryu/i18n/core";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -46,6 +48,11 @@ import {
 import { AvailableUpdates } from "./AvailableUpdates.tsx";
 import { DownloadRow, formatBytes } from "./DownloadRow.tsx";
 
+const PERCENT: Intl.NumberFormatOptions = {
+	maximumFractionDigits: 0,
+	style: "percent",
+};
+
 /**
  * The app-wide download control: a compact icon button (sidebar footer, beside
  * Settings) with a badge for active/failed downloads. Click to open a panel with
@@ -71,6 +78,7 @@ export function DownloadCenter({
 	const [friendly] = useFriendlyMode();
 	const openTab = useTabSelector((state) => state.openTab);
 	const [open, setOpen] = useState(false);
+	const tl = useLiteralMessages();
 
 	const {
 		clearFinished,
@@ -97,27 +105,34 @@ export function DownloadCenter({
 	// It surfaces the count that most needs attention, so a plain "3 newer
 	// versions" still shows when nothing is downloading.
 	let badgeCount = updates.length;
-	let badgeLabel = "updates available";
+	let badgeLabel = tl("updates available");
 	if (aggregate.inFlight > 0) {
 		badgeCount = aggregate.inFlight;
-		badgeLabel = "downloads in progress";
+		badgeLabel = tl("downloads in progress");
 	} else if (aggregate.failed > 0) {
 		badgeCount = aggregate.failed;
-		badgeLabel = "failed downloads";
+		badgeLabel = tl("failed downloads");
 	}
 	const badgeFailed = aggregate.inFlight === 0 && aggregate.failed > 0;
 
 	let status: string | undefined;
 	if (aggregate.inFlight > 0) {
 		status = trayMeta(
-			`${aggregate.inFlight} downloading`,
-			aggregate.percent === null ? null : `${Math.round(aggregate.percent)}%`,
+			tl("{count} downloading", { count: aggregate.inFlight }),
+			aggregate.percent === null
+				? null
+				: numberFormatter(activeLocale(), PERCENT).format(
+						aggregate.percent / 100
+					),
 			speedBps > 0 ? `${formatBytes(speedBps)}/s` : null
 		);
 	} else if (aggregate.failed > 0) {
-		status = `${aggregate.failed} failed`;
+		status = tl("{count} failed", { count: aggregate.failed });
 	} else if (updates.length > 0) {
-		status = `${updates.length} update${updates.length === 1 ? "" : "s"} available`;
+		status = tl(
+			"{count, plural, one {# update available} other {# updates available}}",
+			{ count: updates.length }
+		);
 	}
 
 	const openFullPage = () => {

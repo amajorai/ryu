@@ -2,19 +2,20 @@ import { expect, test } from "@playwright/test";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { z } from "zod";
 import { type ProofJsonValue, parseProofJson } from "./fixture-json.ts";
+import { appsDocsProofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/profile-tab-settings-proof.html";
 const PROFILE_NAME_PATH = "/api/profile/name";
 const SESSION_PATH = "/api/auth/get-session";
 const PERSONALIZATION_PATH = "/api/preferences/user-personalization";
 // RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
-// the tracked proof ledger; without it the committed evidence is refreshed.
+// the tracked proof ledger; without it the committed evidence under
+// apps/docs/proof is refreshed.
 const PERSONALIZATION_SCREENSHOT = process.env.RYU_PROOF_EVIDENCE_DIR
 	? `${process.env.RYU_PROOF_EVIDENCE_DIR}/desktop-profile-tab-personalization.png`
-	: new URL(
-			"../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-profile-tab-personalization.png",
-			import.meta.url
-		).pathname;
+	: appsDocsProofEvidencePath(
+			"test-coverage-sweep-20260924/evidence/desktop-profile-tab-personalization.png"
+		);
 
 interface Personalization {
 	aboutOrganization: string;

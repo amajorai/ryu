@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // `fetchGatewayConfig` validates the whole served document, and a Gateway
 // always serves `auth` and `providers`; a bare `{ acp }` body is rejected as an
@@ -95,10 +95,7 @@ test("keep-awake reads are serialized, scoped and native recovery checks are pre
 		page.getByRole("combobox", { name: "Maximum parallel ACP agents" })
 	).toContainText(/auto/i);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/keep-awake-completed.png"
-		),
+		path: proofEvidencePath("performance-sweep/keep-awake-completed.png"),
 		fullPage: true,
 		animations: "disabled",
 	});

@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
@@ -21,7 +21,7 @@ export const SELECTION_PREVIEW_MAX = 120;
 
 export interface GhostActionDef {
 	/** Short description shown in the confirmation panel. */
-	description: (target?: string) => string;
+	description: (tl: LiteralMessage, target?: string) => string;
 	kind: GhostActionKind;
 	label: string;
 	/** When true, a target input is shown before confirmation. */
@@ -36,20 +36,26 @@ export const GHOST_ACTIONS: GhostActionDef[] = [
 		label: "Focus App",
 		needsTarget: true,
 		targetPlaceholder: "App name (e.g. Finder)",
-		description: (t) => `Bring "${t ?? "app"}" to the foreground.`,
+		description: (tl, t) =>
+			t
+				? tl('Bring "{target}" to the foreground.', { target: t })
+				: tl('Bring "app" to the foreground.'),
 	},
 	{
 		kind: "click",
 		label: "Click Element",
 		needsTarget: true,
 		targetPlaceholder: "Element text or name",
-		description: (t) => `Click the element matching "${t ?? "element"}".`,
+		description: (tl, t) =>
+			t
+				? tl('Click the element matching "{target}".', { target: t })
+				: tl('Click the element matching "element".'),
 	},
 	{
 		kind: "screenshot",
 		label: "Screenshot",
 		needsTarget: false,
-		description: () => "Take a screenshot of the current screen.",
+		description: (tl) => tl("Take a screenshot of the current screen."),
 	},
 ];
 
@@ -193,6 +199,7 @@ export function GhostActionPanel({
 							"{description} This action will run on your desktop. Continue?",
 							{
 								description: staged.description(
+									tl,
 									staged.needsTarget
 										? targetText.trim() || undefined
 										: undefined

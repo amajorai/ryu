@@ -269,7 +269,7 @@ export function SellTab({
 	const showMembership = Boolean(useMembershipReport && membership.authed);
 	const refreshButton = (
 		<Button onClick={() => refresh()} size="sm" variant="ghost">
-			<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
+			<HugeiconsIcon className="me-2 size-3.5" icon={Refresh01Icon} />
 			Refresh
 		</Button>
 	);
@@ -428,7 +428,7 @@ export function SellTab({
 					<div className="mt-5">
 						<Button loading={onboarding} onClick={handleOnboard}>
 							{!onboarding && (
-								<HugeiconsIcon className="mr-2 size-4" icon={Download01Icon} />
+								<HugeiconsIcon className="me-2 size-4" icon={Download01Icon} />
 							)}
 							{payoutButtonLabel(payoutsEnabled, onboardingStatus)}
 						</Button>

@@ -8,12 +8,9 @@ import {
 	ditherAvatarSeed,
 } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceAgent, ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { FileText } from "lucide-react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * An agent's picture, or Ryu's dither tile seeded by id. Notion's page and
@@ -151,7 +148,7 @@ export function NotebookStatusPill({ status }: { status: ThreadStatus }) {
 			)}
 		>
 			<NotebookStatusMark status={status} />
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }

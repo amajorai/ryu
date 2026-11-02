@@ -16,6 +16,7 @@ export {
 	jobRow,
 	jobRows,
 	jobStatus,
+	jobStatusLabel,
 	jobTitle,
 	PERSONAL_COMPANY_ID,
 } from "./jobs-model-core.ts";
@@ -37,6 +38,7 @@ export {
 	type JobSort,
 	type JobUpdatedWithin,
 	jobFacetCounts,
+	jobSortLabel,
 	jobUpdatedPhrase,
 	sortJobs,
 	toggleValue,
@@ -69,8 +71,8 @@ export {
 	companyTone,
 	cursorStep,
 	jobAge,
+	jobAgePhrase,
 	jobFullTime,
 	jobStartInput,
-	pluralize,
 	stepIndex,
 } from "./jobs-model-time.ts";

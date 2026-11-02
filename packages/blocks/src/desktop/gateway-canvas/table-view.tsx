@@ -19,7 +19,7 @@ import {
 } from "./model.ts";
 import { useNodeCounters } from "./nodes.tsx";
 
-const CELL = "px-3 py-2 text-left align-middle";
+const CELL = "px-3 py-2 text-start align-middle";
 const HEAD = cn(CELL, "font-medium text-muted-foreground text-xs");
 
 const NOT_COUNTED = "Not counted";
@@ -78,7 +78,7 @@ function NodeRow({
 			<td className={cn(CELL, "text-muted-foreground")}>
 				{node.health ? HEALTH_LABELS[node.health] : "Unknown"}
 			</td>
-			<td className={cn(CELL, "text-right")}>
+			<td className={cn(CELL, "text-end")}>
 				<Button
 					aria-expanded={selected}
 					aria-label={tl("Open {label}", { label: node.label })}
@@ -168,7 +168,7 @@ export function CanvasTableView({
 							<th className={HEAD} scope="col">
 								Health
 							</th>
-							<th className={cn(HEAD, "text-right")} scope="col">
+							<th className={cn(HEAD, "text-end")} scope="col">
 								<span className="sr-only">Settings</span>
 							</th>
 						</tr>

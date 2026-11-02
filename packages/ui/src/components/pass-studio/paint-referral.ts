@@ -13,6 +13,7 @@
  * order; they never derive a figure the page did not have.
  */
 
+import { numberFormatter } from "@ryu/i18n/lite";
 import {
 	WRAPPED_FIT_STEP_PX,
 	WRAPPED_META_PX,
@@ -22,6 +23,11 @@ import {
 	WRAPPED_SUB_MAX_PX,
 	WRAPPED_SUB_MIN_PX,
 } from "../wrapped-pass.tsx";
+import {
+	activePassTranslate,
+	type PassTranslate,
+	passLocale,
+} from "./labels.ts";
 import {
 	BLOCK_GAP_PX,
 	ellipsize,
@@ -36,6 +42,7 @@ import {
 	passFaceBox,
 	setTracking,
 } from "./paint.ts";
+import { passInline, withPassDirection } from "./paint-direction.ts";
 
 /** `gap-3` between the grid's columns and rows, at the app's 16px root. */
 const STAT_GAP_PX = 12;
@@ -45,7 +52,6 @@ const HEADLINE_TRACKING_EM = -0.025;
 const MAX_STATS = 4;
 const STATS_PER_ROW = 2;
 const DEFAULT_SEED = "ryu";
-const BACK_CAPTION = "Scan to join Ryu";
 
 export interface ReferralFaceStat {
 	label: string;
@@ -67,12 +73,18 @@ export interface ReferralFaceContent {
 	stats: readonly ReferralFaceStat[];
 }
 
-/** Whole agent hours, as the milestone card on the page prints them. */
-export function formatPassHours(hours: number): string {
-	if (!Number.isFinite(hours) || hours < 0) {
-		return "0h";
-	}
-	return `${Math.floor(hours).toLocaleString()}h`;
+/** Whole agent hours ("1,234h"), as the milestone card on the page prints them. */
+export function formatPassHours(
+	hours: number,
+	locale: string = passLocale()
+): string {
+	const whole = Number.isFinite(hours) && hours >= 0 ? Math.floor(hours) : 0;
+	return numberFormatter(locale, {
+		maximumFractionDigits: 0,
+		style: "unit",
+		unit: "hour",
+		unitDisplay: "narrow",
+	}).format(whole);
 }
 
 /** The stats the grid draws: at most four, blank labels and values dropped. */
@@ -112,21 +124,27 @@ export function seatsLeft(seats: number, seatsClaimed: number): number {
  * same split the waitlist pass keeps.
  */
 export function milestoneCardContent(
-	facts: MilestoneCardFacts
+	facts: MilestoneCardFacts,
+	tl: PassTranslate = activePassTranslate
 ): ReferralFaceContent {
 	const left = seatsLeft(facts.seats, facts.seatsClaimed);
 	const claimed = facts.seats - left;
 	return {
-		headline: `${formatPassHours(facts.thresholdHours)} milestone`,
+		headline: tl("{hours} milestone", {
+			hours: formatPassHours(facts.thresholdHours),
+		}),
 		inviteUrl: facts.inviteUrl,
-		kicker: "MILESTONE PASS",
-		meta: `One code for ${facts.seats} ${facts.seats === 1 ? "person" : "people"}`,
+		kicker: tl("Milestone pass").toUpperCase(),
+		meta: tl(
+			"{seats, plural, one {One code for # person} other {One code for # people}}",
+			{ seats: facts.seats }
+		),
 		seed: facts.inviteUrl,
 		stats: [
-			{ label: "Agent time", value: formatPassHours(facts.hours) },
-			{ label: "Seats", value: String(facts.seats) },
-			{ label: "Seats left", value: String(left) },
-			{ label: "Joined", value: String(claimed) },
+			{ label: tl("Agent time"), value: formatPassHours(facts.hours) },
+			{ label: tl("Seats"), value: String(facts.seats) },
+			{ label: tl("Seats left"), value: String(left) },
+			{ label: tl("Joined"), value: String(claimed) },
 		],
 	};
 }
@@ -146,21 +164,26 @@ export interface QuestCardFacts {
 }
 
 /** A battle-pass tier (a quest at or past its target), as card content. */
-export function questCardContent(facts: QuestCardFacts): ReferralFaceContent {
+export function questCardContent(
+	facts: QuestCardFacts,
+	tl: PassTranslate = activePassTranslate
+): ReferralFaceContent {
 	const reached = Math.min(Math.max(0, facts.progress), facts.target);
 	const stats: ReferralFaceStat[] = [
-		{ label: "Progress", value: `${reached}/${facts.target}` },
-		{ label: "Reward", value: facts.rewardLabel },
+		{ label: tl("Progress"), value: `${reached}/${facts.target}` },
+		{ label: tl("Reward"), value: facts.rewardLabel },
 	];
 	if (facts.pointsBalance) {
-		stats.push({ label: "Points balance", value: facts.pointsBalance });
+		stats.push({ label: tl("Points balance"), value: facts.pointsBalance });
 	}
 	const cadence = facts.cadenceLabel?.trim();
 	return {
 		headline: facts.title,
 		inviteUrl: facts.inviteUrl,
-		kicker: "BATTLE PASS",
-		meta: cadence ? `${cadence} · tier unlocked` : "Tier unlocked",
+		kicker: tl("Battle pass").toUpperCase(),
+		meta: cadence
+			? tl("{cadence} · tier unlocked", { cadence })
+			: tl("Tier unlocked"),
 		seed: facts.inviteUrl ?? facts.title,
 		stats,
 	};
@@ -168,17 +191,20 @@ export function questCardContent(facts: QuestCardFacts): ReferralFaceContent {
 
 /** The referral card, as a painter. Memoise it: it is half the scene's identity. */
 export function referralFacePainter(
-	content: ReferralFaceContent
+	content: ReferralFaceContent,
+	tl: PassTranslate = activePassTranslate
 ): PassFacePainter {
 	return {
 		back: (ctx, env) =>
 			paintBackQr(ctx, {
-				caption: BACK_CAPTION,
-				env,
+				caption: tl("Scan to join Ryu"),
+				env: withPassDirection(ctx, env, tl),
+				tl,
 				seed: referralCardSeed(content),
 				value: content.inviteUrl,
 			}),
-		front: (ctx, env) => paintReferralFront(ctx, content, env),
+		front: (ctx, env) =>
+			paintReferralFront(ctx, content, withPassDirection(ctx, env, tl)),
 	};
 }
 
@@ -189,6 +215,7 @@ function paintReferralFront(
 ): void {
 	const { family, palette, scale } = env;
 	const { available, bottom, left } = passFaceBox(scale);
+	const inline = passInline(env);
 
 	paintPassHeader(ctx, env, content.kicker);
 
@@ -220,7 +247,7 @@ function paintReferralFront(
 	}
 	let cursor = top - BLOCK_GAP_PX * scale;
 
-	ctx.textAlign = "left";
+	ctx.textAlign = inline.start;
 	ctx.textBaseline = "alphabetic";
 	const meta = content.meta?.trim();
 	if (meta) {
@@ -237,7 +264,7 @@ function paintReferralFront(
 		ctx.font = font(family, 400, metaSize, scale);
 		setTracking(ctx, 0);
 		ctx.fillStyle = palette.mutedForeground;
-		ctx.fillText(ellipsize(ctx, meta, available), left, cursor);
+		ctx.fillText(ellipsize(ctx, meta, available), inline.x(left), cursor);
 		cursor -= metaSize * scale + HERO_GAP_PX * scale;
 	}
 
@@ -256,6 +283,6 @@ function paintReferralFront(
 	ctx.font = font(family, 500, headlineSize, scale);
 	setTracking(ctx, headlineSize * HEADLINE_TRACKING_EM * scale);
 	ctx.fillStyle = palette.cardForeground;
-	ctx.fillText(ellipsize(ctx, headline, available), left, cursor);
+	ctx.fillText(ellipsize(ctx, headline, available), inline.x(left), cursor);
 	setTracking(ctx, 0);
 }

@@ -187,7 +187,10 @@ function ProductExploreLink({ card }: { card: ProductCardData }) {
 				)}
 			>
 				Explore
-				<ArrowUpRight aria-hidden="true" className="size-3.5" />
+				<ArrowUpRight
+					aria-hidden="true"
+					className="size-3.5 rtl:-scale-x-100"
+				/>
 			</span>
 		</Link>
 	);

@@ -4,7 +4,6 @@ import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
@@ -18,6 +17,7 @@ import {
 	threadGroupName,
 	threadTitle,
 } from "./calendar-parts.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /** The thread's status in words, with the calendar's own mark. */
@@ -31,7 +31,7 @@ function StatusLabel({ status }: { status: ThreadStatus }) {
 			)}
 		>
 			<CalendarStatusDot status={status} />
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }
@@ -68,12 +68,12 @@ export function CalendarThreadPanel({
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={tl("Thread: {title}", { title })}
 			className={cn(
-				"relative flex min-h-0 w-[clamp(360px,36%,560px)] shrink-0 flex-col border-border border-l bg-background",
+				"relative flex min-h-0 w-[clamp(360px,36%,560px)] shrink-0 flex-col border-border border-s bg-background",
 				// Below 1100px the panel slides over the calendar instead of
 				// squeezing it, so the grid keeps its titles; a phone gets the
 				// whole width.
 				"max-[1100px]:absolute max-[1100px]:inset-y-0 max-[1100px]:end-0 max-[1100px]:z-30 max-[1100px]:w-[min(26rem,100%)] max-[1100px]:shadow-xl",
-				"max-md:w-full max-md:border-l-0 max-md:shadow-none"
+				"max-md:w-full max-md:border-s-0 max-md:shadow-none"
 			)}
 			data-calendar-panel=""
 			data-testid="calendar-thread-panel"
@@ -83,7 +83,10 @@ export function CalendarThreadPanel({
 		>
 			<header className="flex h-14 shrink-0 items-center gap-1 border-border border-b ps-4 pe-3">
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5 pe-2">
-					<h2 className="truncate font-heading font-semibold text-foreground text-sm leading-tight">
+					<h2
+						className="truncate font-heading font-semibold text-foreground text-sm leading-tight"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</h2>
 					{thread ? (

@@ -37,11 +37,18 @@ function TapeEntry({
 			</span>
 			<Lamp size="sm" state={MARK_LAMP[item.mark]} />
 			{agent ? (
-				<span className="font-medium text-foreground">{agent.name}</span>
+				<span className="font-medium text-foreground" data-ryu-i18n="off">
+					{agent.name}
+				</span>
 			) : null}
-			<span className="text-foreground">{item.title}</span>
+			<span className="text-foreground" data-ryu-i18n="off">
+				{item.title}
+			</span>
 			{item.detail ? (
-				<span className="max-w-[28ch] truncate text-muted-foreground">
+				<span
+					className="max-w-[28ch] truncate text-muted-foreground"
+					data-ryu-i18n="off"
+				>
 					{item.detail}
 				</span>
 			) : null}
@@ -99,7 +106,7 @@ export function EventTape({
 		>
 			<span
 				className={cn(
-					"flex h-full shrink-0 items-center gap-2 border-border border-r px-3",
+					"flex h-full shrink-0 items-center gap-2 border-border border-e px-3",
 					SUBTLE_LABEL
 				)}
 			>

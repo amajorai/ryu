@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DialogFooter } from "@ryu/ui/components/dialog.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { formatPrivatePackageShareCode } from "@/src/lib/api/marketplace.ts";
@@ -62,7 +63,7 @@ export function PrivatePackageEntryForm({
 					{loading ? <Spinner className="size-4" /> : null}
 					{tl("Preview package")}
 					{loading ? null : (
-						<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
+						<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
 					)}
 				</Button>
 			</DialogFooter>

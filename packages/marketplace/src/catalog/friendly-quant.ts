@@ -3,6 +3,8 @@
 // GGUF quant compression tiers and variant ranking. Split out of friendly.ts, which re-exports
 // everything here so `@ryu/marketplace/catalog/friendly` stays the import path.
 
+import { translate as tl } from "@ryu/i18n/lite";
+
 // ---------------------------------------------------------------------------
 // Model-catalog display helpers (moved from apps/desktop with the Models
 // section). Pure, framework-free — used by the shared Models catalog section.
@@ -95,12 +97,12 @@ export function friendlyQuant(quant: string | null): QuantInfo {
 		};
 	}
 	const q = quant.toUpperCase();
-	const raw = `Exact format: ${quant}`;
+	const raw = tl("Exact format: {quant}", { quant });
 	for (const tier of QUANT_TIERS) {
 		if (tier.test.test(q)) {
 			return {
 				label: tier.label,
-				tooltip: `${tier.blurb} ${raw}`,
+				tooltip: `${tl(tier.blurb)} ${raw}`,
 				quality: tier.quality,
 			};
 		}

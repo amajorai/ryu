@@ -132,7 +132,7 @@ export function BuiltInAppDetail({
 						</Button>
 					) : null}
 					{actionError ? (
-						<span className="ml-auto text-sm text-status-destructive">
+						<span className="ms-auto text-sm text-status-destructive">
 							{actionError}
 						</span>
 					) : null}

@@ -176,13 +176,17 @@ export function AgentEditView({
 			? "all Core tools"
 			: toolAllowlist.includes(NO_AGENT_CAPABILITIES)
 				? "none"
-				: `${toolAllowlist.length} grant${toolAllowlist.length === 1 ? "" : "s"}`;
+				: tf("{count, plural, one {# grant} other {# grants}}", {
+						count: toolAllowlist.length,
+					});
 	const skillSummary =
 		skillAllowlist.length === 0
 			? "all enabled skills"
 			: skillAllowlist.includes(NO_AGENT_CAPABILITIES)
 				? "none"
-				: `${skillAllowlist.length} skill${skillAllowlist.length === 1 ? "" : "s"}`;
+				: tf("{count, plural, one {# skill} other {# skills}}", {
+						count: skillAllowlist.length,
+					});
 	const toolPickerNotice =
 		toolAllowlist.length === 0 || toolAllowlist.includes("*")
 			? "Changing this Core-wide grant narrows access to the listed MCP tools."

@@ -20,6 +20,7 @@
 // React binding: `useTimezoneRevision` (re-exported below, also available from
 // @/src/hooks/useTimezone.ts alongside the `useTimezone` setter pair).
 
+import { translate as tl } from "@ryu/i18n/core";
 import { SYSTEM_TIMEZONE, systemTimeZone } from "@ryu/ui/lib/timezone.ts";
 
 export * from "@ryu/ui/lib/timezone.ts";
@@ -121,7 +122,9 @@ function buildTimezoneOptions(at: number): TimezoneOption[] {
 	return [
 		{
 			value: SYSTEM_TIMEZONE,
-			label: `System (${systemTimeZone().replace(/_/g, " ")})`,
+			label: tl("System ({zone})", {
+				zone: systemTimeZone().replace(/_/g, " "),
+			}),
 			offsetMinutes: Number.NEGATIVE_INFINITY,
 		},
 		...zones,

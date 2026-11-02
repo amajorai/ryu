@@ -753,8 +753,8 @@ test("Restore backup confirms the chosen archive and the key warning, restores n
 	expect(errorToast.mock.calls[0]?.[0]).toMatchObject({
 		title: "Restore failed",
 	});
-	expect(String(errorToast.mock.calls[0]?.[0]?.description)).toContain(
-		"archive checksum mismatch"
+	expect(String(errorToast.mock.calls[0]?.[0]?.description)).toBe(
+		"Ryu couldn't restore that backup."
 	);
 	expect(text()).not.toContain("Restoring…");
 	for (const name of nodeActions) {
@@ -809,8 +809,9 @@ test("Copy data and restart with a remote node selected checks the folder on tha
 	expect(errorToast.mock.calls[0]?.[0]).toMatchObject({
 		title: "Relocation failed",
 	});
-	expect(String(errorToast.mock.calls[0]?.[0]?.description)).toContain(
-		"refusing to copy a live database"
+	// An uncoded rejection never reaches the toast; the localized fallback does.
+	expect(String(errorToast.mock.calls[0]?.[0]?.description)).toBe(
+		"Ryu couldn't copy the data folder. Your current data folder is still in use."
 	);
 	expect(text()).not.toContain("Copying…");
 	// The checked folder stays picked, so the copy can be retried as is.

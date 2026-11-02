@@ -1,35 +1,48 @@
+import {
+	activeLocale,
+	formatRelativeTime,
+	isEnglishLocale,
+	numberFormatter,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import type { InterfaceAgent, ThreadStatus } from "@ryuhq/protocol/interfaces";
 import type { Community, CommunityPost } from "./community-model.ts";
+import { fullTimestamp, threadStatusLabel } from "./interface-renderer.ts";
 
-const AGE_STEPS: readonly [number, string, string][] = [
-	[60, "min.", "min."],
-	[24, "hr.", "hr."],
-	[30, "day", "days"],
-	[12, "mo.", "mo."],
-	[Number.POSITIVE_INFINITY, "yr.", "yr."],
-];
-
-/** Reddit's relative time: "just now", "5 min. ago", "2 days ago". */
-export function redditAge(iso: string, now: number): string {
+/**
+ * Reddit's relative time in the UI locale: "just now", "5 min. ago",
+ * "2 days ago" in English; "vor 5 Min." in German.
+ */
+export function redditAge(
+	iso: string,
+	now: number,
+	locale: string = activeLocale()
+): string {
 	const time = Date.parse(iso);
 	if (Number.isNaN(time)) {
 		return "";
 	}
-	let value = Math.floor(Math.max(0, now - time) / 60_000);
-	if (value < 1) {
-		return "just now";
+	if (now - time < 60_000) {
+		return tr("just now");
 	}
-	for (const [size, one, many] of AGE_STEPS) {
-		if (value < size) {
-			return `${value} ${value === 1 ? one : many} ago`;
-		}
-		value = Math.floor(value / size);
-	}
-	return "";
+	return formatRelativeTime(locale, time, {
+		now,
+		numeric: "always",
+		style: "short",
+	});
 }
 
-/** Reddit's short counts: 999, 1k, 1.2k, 12k. */
-export function shortCount(value: number): string {
+/** Reddit's short counts: 999, 1k, 1.2k, 12k (the locale's compact form elsewhere). */
+export function shortCount(
+	value: number,
+	locale: string = activeLocale()
+): string {
+	if (!isEnglishLocale(locale)) {
+		return numberFormatter(locale, {
+			maximumFractionDigits: 1,
+			notation: "compact",
+		}).format(value);
+	}
 	if (Math.abs(value) < 1000) {
 		return String(value);
 	}
@@ -41,8 +54,11 @@ export function shortCount(value: number): string {
 	return `${rounded}k`;
 }
 
-export function plural(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
+/** "3 threads": a community's thread count, as an ICU message. */
+export function threadCountLabel(count: number): string {
+	return tr("{count, plural, one {# thread} other {# threads}}", {
+		count,
+	});
 }
 
 /** The short flair a post carries for its status. */
@@ -57,9 +73,11 @@ export const STATUS_FLAIR: Record<ThreadStatus, string> = {
 /** A post's flair text: interrupted runs say so instead of "failed". */
 export function flairLabel(post: CommunityPost): string {
 	if (post.status === "attention" && post.thread.runState === "interrupted") {
-		return "Interrupted";
+		return tr("Interrupted");
 	}
-	return STATUS_FLAIR[post.status];
+	return post.status === "attention"
+		? tr("Run failed")
+		: threadStatusLabel(post.status);
 }
 
 /** `r/WebsiteRedesign`, `u/you`. */
@@ -76,16 +94,7 @@ export function posterLabel(agent: InterfaceAgent | null): string {
 	return `u/${handle || "agent"}`;
 }
 
-const ABSOLUTE = new Intl.DateTimeFormat("en", {
-	day: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-	month: "short",
-	year: "numeric",
-});
-
-/** A full timestamp for `title` attributes. */
+/** A full timestamp for `title` attributes, in the UI locale. */
 export function absoluteTime(iso: string): string {
-	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : ABSOLUTE.format(time);
+	return fullTimestamp(iso);
 }

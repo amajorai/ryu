@@ -370,7 +370,7 @@ export function MemoryTab() {
 						actions={
 							<Input
 								aria-label="Snippets recalled per reply"
-								className="h-8 w-20 text-right"
+								className="h-8 w-20 text-end"
 								// Nothing is recalled at all while the switch above is off, so
 								// this limit would be a number that cannot take effect.
 								disabled={!autoRecall}

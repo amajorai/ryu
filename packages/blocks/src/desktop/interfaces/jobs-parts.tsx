@@ -167,10 +167,10 @@ export function FreelancerChip({
 		<span className={cn("flex min-w-0 items-center gap-2", className)}>
 			<BoardAvatar agent={agent} name={agent.name} size={size} />
 			<span className="truncate text-foreground text-sm">
-				{agent.name}
+				<span data-ryu-i18n="off">{agent.name}</span>
 				{extra > 0 ? (
 					<span className="text-muted-foreground">
-						{` ${tl("and {extra} more", { extra: String(extra) })}`}
+						{` ${tl("and {extra} more", { extra })}`}
 					</span>
 				) : null}
 			</span>
@@ -243,7 +243,7 @@ export function FreelancerAvatar({
 			{agent.status === "working" ? (
 				<span
 					className={cn(
-						"absolute right-0 bottom-0 rounded-full bg-success",
+						"absolute end-0 bottom-0 rounded-full bg-success",
 						PRESENCE_SIZE[size],
 						surface
 					)}

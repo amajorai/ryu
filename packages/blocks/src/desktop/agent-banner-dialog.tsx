@@ -216,7 +216,7 @@ export function AgentBannerDialog({
 										<button
 											aria-pressed={active}
 											className={cn(
-												"flex flex-col gap-1 rounded-lg p-1 text-left transition-colors",
+												"flex flex-col gap-1 rounded-lg p-1 text-start transition-colors",
 												active ? "bg-accent" : "hover:bg-accent/50"
 											)}
 											data-testid="banner-style-tile"

@@ -147,7 +147,7 @@ export function SubscriptionCostBreakdown({
 					/>
 					<SettingsItem
 						actions={
-							<div className="text-right">
+							<div className="text-end">
 								<div
 									className="font-medium text-sm tabular-nums"
 									data-testid="subscription-cost-total"
@@ -214,7 +214,7 @@ export function SubscriptionCostBreakdown({
 									<SettingsGroup>
 										<SettingsItem
 											actions={
-												<div className="text-right">
+												<div className="text-end">
 													<div className="text-muted-foreground text-xs">
 														{partial
 															? tl("API equivalent · partial")

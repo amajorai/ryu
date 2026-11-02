@@ -114,6 +114,7 @@ export function FarmList({
 													GAME_FOCUS,
 													"gk-display rounded-lg px-2 py-1 text-[15px] hover:bg-(--gk-plate-sunk)"
 												)}
+												data-ryu-i18n="off"
 												data-testid="farm-plot"
 												onClick={() => onOpenPlot(emptyFarm ? null : plot.id)}
 												type="button"
@@ -178,7 +179,10 @@ export function FarmList({
 																stage={crop.stage}
 															/>
 															<span className="flex flex-col">
-																<span className="font-semibold">
+																<span
+																	className="font-semibold"
+																	data-ryu-i18n="off"
+																>
 																	{cropTitle(crop.thread)}
 																</span>
 																<span className="text-(--gk-ink-muted)">

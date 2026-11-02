@@ -32,7 +32,7 @@ function ModuleRow({
 			<button
 				aria-current={active ? "true" : undefined}
 				className={cn(
-					"flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm transition-colors",
+					"flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-start text-sm transition-colors",
 					MOMENTS_FOCUS,
 					active
 						? "bg-card text-foreground shadow-foreground/5 shadow-sm"
@@ -44,9 +44,14 @@ function ModuleRow({
 				type="button"
 			>
 				<MomentsGlyph agent={item.lead} />
-				<span className="min-w-0 flex-1 truncate">{item.thread.title}</span>
+				<span className="min-w-0 flex-1 truncate" data-ryu-i18n="off">
+					{item.thread.title}
+				</span>
 				{showAgent && item.lead ? (
-					<span className="shrink-0 text-muted-foreground text-xs">
+					<span
+						className="shrink-0 text-muted-foreground text-xs"
+						data-ryu-i18n="off"
+					>
 						{item.lead.name}
 					</span>
 				) : null}
@@ -149,7 +154,9 @@ export function ModuleStrip({
 						{flagged(item) ? (
 							<BoardStatusDot className="size-1.5" status={item.status} />
 						) : null}
-						<span className="truncate">{item.thread.title}</span>
+						<span className="truncate" data-ryu-i18n="off">
+							{item.thread.title}
+						</span>
 					</button>
 				);
 			})}

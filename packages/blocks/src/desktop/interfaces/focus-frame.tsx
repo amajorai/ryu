@@ -115,7 +115,7 @@ export function FocusFrame({
 						type="button"
 						variant="ghost-muted"
 					>
-						<ArrowLeft aria-hidden="true" />
+						<ArrowLeft aria-hidden="true" className="rtl:-scale-x-100" />
 						<span className="max-sm:sr-only">Back to queue</span>
 					</Button>
 					<div className="flex min-w-0 flex-1 items-center gap-2">

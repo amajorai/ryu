@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -33,7 +34,9 @@ function ThreadSubline({
 	const status = thread ? threadStatus(thread) : null;
 	return (
 		<p className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs leading-4">
-			<span className="min-w-0 truncate">{agent.name}</span>
+			<span className="min-w-0 truncate" data-ryu-i18n="off">
+				{agent.name}
+			</span>
 			{status && status !== "quiet" && !acted ? (
 				<>
 					<span aria-hidden="true">·</span>
@@ -90,7 +93,7 @@ export function ThreadPanel({
 				</Button>
 				<div className="flex min-w-0 flex-1 flex-col">
 					<h2 className="truncate font-semibold text-foreground text-sm leading-5">
-						{thread ? thread.title || "Untitled" : agent.name}
+						{thread ? thread.title || tr("Untitled") : agent.name}
 					</h2>
 					<ThreadSubline acted={acted} agent={agent} thread={thread} />
 				</div>

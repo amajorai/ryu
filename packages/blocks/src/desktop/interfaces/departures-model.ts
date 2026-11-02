@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceEvent,
 	type InterfaceSnapshot,
@@ -18,14 +19,20 @@ import {
 	typicalFlightMs,
 } from "./departures-model-format.ts";
 import {
+	eventRemark,
+	pastEventRemark,
+	plain,
+	strong,
+} from "./departures-model-remarks.ts";
+import {
 	AT_GATE_WINDOW_MS,
 	type BoardSection,
 	DEPARTURES_BOARDS,
 	type DeparturesBoard,
 	type DeparturesBoards,
-	FLIGHT_STATUS_LABELS,
 	type Flight,
 	type FlightStatus,
+	flightStatusLabel,
 	LANDED_WINDOW_MS,
 	type RemarkPart,
 } from "./departures-model-types.ts";
@@ -74,6 +81,7 @@ export {
 	type Flight,
 	type FlightLamp,
 	type FlightStatus,
+	flightStatusLabel,
 	LANDED_WINDOW_MS,
 	type RemarkPart,
 	STATUS_FLAP_LENGTH,
@@ -90,7 +98,9 @@ interface FlightContext {
 }
 
 function agentName(snapshot: InterfaceSnapshot, agentId: string): string {
-	return snapshot.agents.find((agent) => agent.id === agentId)?.name ?? "Agent";
+	return (
+		snapshot.agents.find((agent) => agent.id === agentId)?.name ?? tr("Agent")
+	);
 }
 
 function gateLabelFor(
@@ -142,15 +152,14 @@ function daySection(time: number, now: number): BoardSection {
 	return { key, label: day === date ? date : `${day} · ${date}` };
 }
 
-const plain = (text: string): RemarkPart => ({ emphasis: false, text });
-const strong = (text: string): RemarkPart => ({ emphasis: true, text });
-
 function inFlightRemark(
 	context: FlightContext,
 	time: number,
 	etaAt: number | null
 ): RemarkPart[] {
-	const airborne = plain(`Airborne ${flightDuration(context.now - time)}`);
+	const airborne = plain(
+		tr("Airborne {duration}", { duration: flightDuration(context.now - time) })
+	);
 	if (etaAt === null) {
 		return [airborne];
 	}
@@ -159,7 +168,7 @@ function inFlightRemark(
 	if (etaAt < context.now) {
 		return [strong("Longer than usual"), airborne];
 	}
-	return [strong(`ETA ${boardTime(etaAt)} est.`), airborne];
+	return [strong(tr("ETA {time} est.", { time: boardTime(etaAt) })), airborne];
 }
 
 function threadStatusFor(thread: InterfaceThread, now: number): FlightStatus {
@@ -182,10 +191,15 @@ function threadStatusFor(thread: InterfaceThread, now: number): FlightStatus {
 /** A finished trip still says what is on board, so Remarks never reads blank. */
 function arrivedRemark(thread: InterfaceThread): RemarkPart[] {
 	if (thread.messageCount === 0) {
-		return [plain("No messages")];
+		return [plain(tr("No messages"))];
 	}
-	const count = thread.messageCount;
-	return [plain(`${count} ${count === 1 ? "message" : "messages"}`)];
+	return [
+		plain(
+			tr("{count, plural, one {# message} other {# messages}}", {
+				count: thread.messageCount,
+			})
+		),
+	];
 }
 
 function threadRemark(
@@ -202,10 +216,16 @@ function threadRemark(
 			return inFlightRemark(context, time, etaAt);
 		case "boarding": {
 			if (thread.agentIds.length === 0) {
-				return [strong("No gate assigned"), plain(`Since ${shortDate(time)}`)];
+				return [
+					strong("No gate assigned"),
+					plain(tr("Since {date}", { date: shortDate(time) })),
+				];
 			}
 			return isHeld(status, time, now)
-				? [strong(`Held ${waited}`), plain(`Since ${shortDate(time)}`)]
+				? [
+						strong(tr("Held {waited}", { waited })),
+						plain(tr("Since {date}", { date: shortDate(time) })),
+					]
 				: [strong("Waiting for gate"), plain(waited)];
 		}
 		case "delayed":
@@ -266,37 +286,8 @@ function threadFlight(context: FlightContext, thread: InterfaceThread): Flight {
 		...terminalFor(snapshot, thread),
 		threadId: thread.id,
 		time,
-		title: thread.title.trim() || "Untitled conversation",
+		title: thread.title.trim() || tr("Untitled conversation"),
 	};
-}
-
-function eventRemark(event: InterfaceEvent): RemarkPart[] {
-	const parts: RemarkPart[] = [];
-	const label = event.label?.trim();
-	if (label) {
-		parts.push(plain(label));
-	}
-	if (event.count && event.count > 1) {
-		parts.push(plain(`${event.count} runs that day`));
-	}
-	return parts;
-}
-
-/** A past run's remark: a failure is the news; a success says how long it took. */
-function pastEventRemark(event: InterfaceEvent): RemarkPart[] {
-	if (event.outcome === "failure") {
-		return [strong("Run failed")];
-	}
-	const start = parseTime(event.start);
-	const end = parseTime(event.end);
-	const parts = [plain("Done")];
-	if (start !== null && end !== null && end > start) {
-		parts.push(plain(`Ran ${flightDuration(end - start)}`));
-	}
-	if (event.count && event.count > 1) {
-		parts.push(plain(`${event.count} runs that day`));
-	}
-	return parts;
 }
 
 function eventFlight(context: FlightContext, event: InterfaceEvent): Flight {
@@ -465,17 +456,22 @@ export function nextRowIndex(
 
 /** The spoken summary of a row, read instead of its tiles. */
 export function flightAccessibleName(flight: Flight): string {
-	const day =
-		flight.section.key === "today" ? "" : `${boardDate(flight.time)} `;
 	const parts = [
-		`${flight.flightNumber} to ${flight.title}`,
-		`${FLIGHT_STATUS_LABELS[flight.status]} ${day}${boardTime(flight.time)}`,
+		tr("{flight} to {title}", {
+			flight: flight.flightNumber,
+			title: flight.title,
+		}),
+		tr("{status} {day}{time}", {
+			day: flight.section.key === "today" ? "" : `${boardDate(flight.time)} `,
+			status: flightStatusLabel(flight.status),
+			time: boardTime(flight.time),
+		}),
 	];
 	if (flight.gateLabel) {
-		parts.push(`gate ${flight.gateLabel}`);
+		parts.push(tr("gate {gate}", { gate: flight.gateLabel }));
 	}
 	if (flight.terminal) {
-		parts.push(`terminal ${flight.terminal}`);
+		parts.push(tr("terminal {terminal}", { terminal: flight.terminal }));
 	}
 	if (flight.remark) {
 		parts.push(flight.remark);

@@ -1,4 +1,5 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, isEnglishLocale } from "@ryu/i18n/core";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	ToolResult,
 	ToolResultOutput,
@@ -91,7 +92,13 @@ const COMPLETED_VERBS = new Map(
 	})
 );
 
-function getActiveTitle(info: McpToolInfo): string {
+// The verb tables re-inflect an English tool name ("List issues" -> "Listed
+// issues"). Other locales show the server's name unchanged rather than a
+// half-English phrase.
+function getActiveTitle(info: McpToolInfo, english: boolean): string {
+	if (!english) {
+		return info.displayName;
+	}
 	const words = info.displayName.split(" ");
 	const verb = words[0];
 	if (!verb) {
@@ -105,7 +112,10 @@ function getActiveTitle(info: McpToolInfo): string {
 	return info.displayName;
 }
 
-function getCompletedTitle(info: McpToolInfo): string {
+function getCompletedTitle(info: McpToolInfo, english: boolean): string {
+	if (!english) {
+		return info.displayName;
+	}
 	const words = info.displayName.split(" ");
 	const verb = words[0];
 	if (!verb) {
@@ -178,16 +188,18 @@ export const McpTool = memo(function McpTool({
 	const { isPending, isInterrupted } = getToolStatus(part, chatStatus);
 	const { expandCodeBlocks } = useChatDisplayPrefs();
 	const tl = useLiteralMessages();
+	const english = isEnglishLocale(useOptionalI18n()?.locale ?? activeLocale());
 
+	const preparing = tl("Preparing {tool}", { tool: mcpInfo.displayName });
 	const title = useMemo(() => {
 		if (part.state === "input-streaming") {
-			return `Preparing ${mcpInfo.displayName}`;
+			return preparing;
 		}
 		if (isPending) {
-			return getActiveTitle(mcpInfo);
+			return getActiveTitle(mcpInfo, english);
 		}
-		return getCompletedTitle(mcpInfo);
-	}, [part.state, isPending, mcpInfo]);
+		return getCompletedTitle(mcpInfo, english);
+	}, [part.state, isPending, mcpInfo, english, preparing]);
 
 	const subtitle = useMemo(() => {
 		if (part.state === "input-streaming") {

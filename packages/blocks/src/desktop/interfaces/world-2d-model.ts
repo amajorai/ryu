@@ -1,13 +1,14 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 	type ThreadStatus,
 	threadStatus,
 	type WorldLayout,
 	type WorldPoint,
 } from "@ryuhq/protocol/interfaces";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { tileKey, type VillageLayout } from "./world-village.ts";
 
 /**
@@ -82,7 +83,7 @@ export function villagerStatuses(
 
 /** What a villager's status reads as in the talk panel ("Your turn"). */
 export function villagerStatusLabel(status: VillagerStatus): string {
-	return status === "idle" ? "Idle" : THREAD_STATUS_LABELS[status];
+	return status === "idle" ? tr("Idle") : threadStatusLabel(status);
 }
 
 /**

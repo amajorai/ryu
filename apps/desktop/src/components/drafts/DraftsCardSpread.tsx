@@ -23,6 +23,7 @@ import {
 	cardHop,
 	cardStagger,
 } from "@ryu/blocks/desktop/interfaces/card-motion.ts";
+import { translate as tl } from "@ryu/i18n/core";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -95,15 +96,25 @@ function statusLine({
 	status: { message: string } | null;
 }): string {
 	if (flying > 0) {
-		return flying === 1 ? "Sending 1 draft…" : `Sending ${flying} drafts…`;
+		return tl(
+			"{count, plural, one {Sending # draft…} other {Sending # drafts…}}",
+			{ count: flying }
+		);
 	}
 	if (status) {
 		return status.message;
 	}
 	if (dealable > MAX_HAND) {
-		return `Dealt the ${MAX_HAND} newest of ${dealable} drafts. ${pile} on the pile`;
+		return tl(
+			"Dealt the {maxHand} newest of {dealable} drafts. {pile} on the pile",
+			{
+				maxHand: MAX_HAND,
+				dealable: String(dealable),
+				pile: String(pile),
+			}
+		);
 	}
-	return `${pile} on the pile`;
+	return tl("{pile} on the pile", { pile: String(pile) });
 }
 
 function wait(ms: number): Promise<void> {
@@ -426,7 +437,7 @@ function CardTable({
 					size="sm"
 					variant="mono"
 				>
-					<HugeiconsIcon className="mr-1 size-4" icon={SentIcon} />
+					<HugeiconsIcon className="me-1 size-4" icon={SentIcon} />
 					{pileCards.length > 1
 						? tl("Send {draftCount}", { draftCount: String(pileCards.length) })
 						: "Send"}

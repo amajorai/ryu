@@ -1,5 +1,6 @@
 "use client";
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { AwardBadge } from "@ryu/ui/components/award-badge";
 import { buttonVariants } from "@ryu/ui/components/button";
 import { ChromaticTextReveal } from "@ryu/ui/components/motion/chromatic-text-reveal";
@@ -11,6 +12,8 @@ import { DEMO_HREF } from "./data/resources.tsx";
 import HeroDesktopDemo from "./hero-desktop-demo.tsx";
 
 const DECOSMIC_HREF = "https://decosmic.com";
+const CREDIT_LINK_CLASS =
+	"inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 transition-colors hover:text-foreground/80 hover:underline";
 const AMAJOR_HREF = "https://amajor.ai";
 /** Placeholder — swap for the real Product Hunt post URL before flipping the flag. */
 const PRODUCT_HUNT_HREF = "https://www.producthunt.com/products/ryu";
@@ -61,6 +64,7 @@ const HERO_TITLE_LAST_WORD =
 const HERO_SWEEP_DELAY_S = 0.3;
 
 export default function Hero() {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<div
 			className="flex flex-col items-center gap-8 overflow-x-clip pt-14 pb-0 md:pt-20"
@@ -83,36 +87,46 @@ export default function Hero() {
 							)}
 
 							<p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-muted-foreground text-xs tracking-tight md:text-sm">
-								From the team behind{" "}
-								<a
-									className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 transition-colors hover:text-foreground/80 hover:underline"
-									href={DECOSMIC_HREF}
-									rel="noopener noreferrer"
-									target="_blank"
-								>
-									<span className="inline-flex size-4 shrink-0 items-center justify-center rounded-(--radius-artwork-compact) bg-info text-white">
-										<Library
-											aria-hidden="true"
-											className="size-2.5"
-											strokeWidth={2.25}
-										/>
-									</span>
-									Decosmic
-								</a>
-								<span aria-hidden="true">&</span>
-								<a
-									className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 transition-colors hover:text-foreground/80 hover:underline"
-									href={AMAJOR_HREF}
-									rel="noopener noreferrer"
-									target="_blank"
-								>
-									<img
-										alt=""
-										className="size-4 shrink-0 rounded-(--radius-artwork-compact) object-cover"
-										src="/logos/amajor.png"
-									/>
-									A Major
-								</a>
+								{tlRich(
+									// The flex gap spaces the parts, so no spaces between the tags.
+									"From the team behind <decosmic>Decosmic</decosmic><and>&</and><amajor>A Major</amajor>",
+									{},
+									{
+										amajor: (chunks) => (
+											<a
+												className={CREDIT_LINK_CLASS}
+												href={AMAJOR_HREF}
+												rel="noopener noreferrer"
+												target="_blank"
+											>
+												<img
+													alt=""
+													className="size-4 shrink-0 rounded-(--radius-artwork-compact) object-cover"
+													src="/logos/amajor.png"
+												/>
+												{chunks}
+											</a>
+										),
+										and: (chunks) => <span aria-hidden="true">{chunks}</span>,
+										decosmic: (chunks) => (
+											<a
+												className={CREDIT_LINK_CLASS}
+												href={DECOSMIC_HREF}
+												rel="noopener noreferrer"
+												target="_blank"
+											>
+												<span className="inline-flex size-4 shrink-0 items-center justify-center rounded-(--radius-artwork-compact) bg-info text-white">
+													<Library
+														aria-hidden="true"
+														className="size-2.5"
+														strokeWidth={2.25}
+													/>
+												</span>
+												{chunks}
+											</a>
+										),
+									}
+								)}
 							</p>
 
 							<div className="max-w-2xl whitespace-pre-line">

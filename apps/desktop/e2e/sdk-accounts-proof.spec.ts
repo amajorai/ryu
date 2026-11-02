@@ -1,9 +1,9 @@
-import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import {
 	type PluginDocument,
 	pluginDocumentSchema,
 } from "../src/lib/api/plugin-wire-values.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Replacing a credential needs the spending-limit acknowledgement
 // (SpendLimitConfirm, already gating at 07d403e33, before Ryu Quiet): the
@@ -108,10 +108,7 @@ test("provider source permissions, targeted replacement and endpoint context", a
 	await page.getByLabel("Vertex AI project").fill("");
 	await page.getByLabel("Vertex AI location").fill("global");
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/sdk-accounts/desktop.png"
-		),
+		path: proofEvidencePath("sdk-accounts/desktop.png"),
 		fullPage: true,
 	});
 });

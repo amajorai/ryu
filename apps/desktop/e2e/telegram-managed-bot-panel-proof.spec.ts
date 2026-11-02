@@ -7,6 +7,7 @@ declare const window: Window & {
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const FIXTURE_SETUP = "/__fixture/telegram-managed-bot/setup";
 const FIXTURE_SNAPSHOT = "/__fixture/telegram-managed-bot/snapshot";
@@ -15,9 +16,8 @@ const PAIRING_DEEP_LINK =
 	"https://t.me/ryu_managed_fixture_bot?start=mb_telegram-nonce-1";
 const UNSUPPORTED_MESSAGE =
 	"This node can't create Telegram bots for you yet — the hosted bot service hasn't been switched on.";
-const EVIDENCE_DIR = path.resolve(
-	process.cwd(),
-	"../../docs/proof/test-coverage-sweep-20260924/evidence/telegram-managed-bot"
+const EVIDENCE_DIR = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence/telegram-managed-bot"
 );
 
 interface ManagedBotRequestRecord {

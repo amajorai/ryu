@@ -253,7 +253,9 @@ export function WikiInterface({
 	const activeThread = wikiThread(snapshot, activeThreadId);
 	let heading: string;
 	if (chatOpen) {
-		heading = `Talk:${activeThread ? wikiThreadTitle(activeThread) : "New thread"}`;
+		heading = tl("Talk:{title}", {
+			title: activeThread ? wikiThreadTitle(activeThread) : tl("New thread"),
+		});
 	} else {
 		heading = wikiPageHeading(snapshot, route, shownTab, tl);
 	}

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { coreProofStateSchema } from "./core-live-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("installed apps render from live isolated Core lists and contributions", async ({
 	page,
@@ -85,10 +86,7 @@ test("installed apps render from live isolated Core lists and contributions", as
 	).toBeVisible();
 	await page.getByRole("tab", { name: "Dependencies", exact: true }).click();
 	expect(errors).toEqual([]);
-	const folder = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep"
-	);
+	const folder = proofEvidencePath("performance-sweep");
 	await mkdir(folder, { recursive: true });
 	await page.screenshot({
 		path: path.join(folder, "core-live-apps-completed.png"),

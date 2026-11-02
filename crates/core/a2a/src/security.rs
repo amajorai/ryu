@@ -128,12 +128,35 @@ fn ipv4_is_public(address: Ipv4Addr) -> bool {
         || (a == 169 && b == 254 && c == 169 && d == 254))
 }
 
+/// IPv4 address carried inside an IPv6 address that a host or gateway may
+/// translate back to IPv4: mapped (`::ffff:0:0/96`), translated
+/// (`::ffff:0:0:0/96`), well-known NAT64 (`64:ff9b::/96`) and the deprecated
+/// compatible form (`::/96`). Mirrors `ryu_egress`'s screen so the two guards
+/// cannot disagree about which destinations are public.
+fn embedded_ipv4(address: Ipv6Addr) -> Option<Ipv4Addr> {
+    let words = address.segments();
+    let zeroes = |start: usize, end: usize| words[start..end].iter().all(|word| *word == 0);
+    let mapped = zeroes(0, 5) && words[5] == 0xffff;
+    let translated = zeroes(0, 4) && words[4] == 0xffff && words[5] == 0;
+    let nat64 = words[0] == 0x0064 && words[1] == 0xff9b && zeroes(2, 6);
+    let compatible = zeroes(0, 6);
+    if !(mapped || translated || nat64 || compatible) {
+        return None;
+    }
+    let octets = address.octets();
+    Some(Ipv4Addr::new(
+        octets[12], octets[13], octets[14], octets[15],
+    ))
+}
+
 fn ipv6_is_public(address: Ipv6Addr) -> bool {
-    if let Some(mapped) = address.to_ipv4_mapped() {
-        return ipv4_is_public(mapped);
+    if let Some(embedded) = embedded_ipv4(address) {
+        return ipv4_is_public(embedded);
     }
     let segments = address.segments();
     !(address.is_loopback()
+        // Local-use NAT64 prefix (RFC 8215) translates to operator-chosen IPv4.
+        || (segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2] == 0x0001)
         || address.is_unspecified()
         || address.is_multicast()
         || (segments[0] & 0xfe00) == 0xfc00
@@ -244,6 +267,34 @@ mod tests {
             policy
         )
         .is_ok());
+    }
+
+    #[test]
+    fn blocks_ipv6_forms_that_embed_non_public_ipv4() {
+        let policy = EndpointPolicy::default();
+        for url in [
+            "https://[64:ff9b::a00:5]/hook",
+            "https://[64:ff9b::a9fe:a9fe]/",
+            "https://[64:ff9b:1::808:808]/",
+            "https://[::a00:1]/",
+            "https://[::ffff:0:a00:1]/",
+            "https://[::ffff:7f00:1]/",
+        ] {
+            assert_eq!(
+                validate_endpoint(url, policy),
+                Err(EndpointError::NonPublicAddress),
+                "{url} must be rejected"
+            );
+        }
+        for address in ["64:ff9b::7f00:1", "::a00:1", "::ffff:0:a9fe:a9fe"] {
+            assert_eq!(
+                validate_resolved_addresses(&[address.parse().expect("valid IPv6")], policy),
+                Err(EndpointError::NonPublicAddress),
+                "{address} must be rejected"
+            );
+        }
+        assert!(validate_endpoint("https://[64:ff9b::808:808]/", policy).is_ok());
+        assert!(validate_endpoint("https://[2606:4700::1111]/", policy).is_ok());
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import { activeLocale, isEnglishLocale, translate as tl } from "@ryu/i18n/core";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -81,7 +82,7 @@ const MODALITY_PROVIDER_LABELS = new Map<string, string>(
 
 export function modalityProviderLabel(id: string): string {
 	if (id.startsWith("pool:")) {
-		return `Pool · ${id.slice(5)}`;
+		return tl("Pool · {pool}", { pool: id.slice(5) });
 	}
 	return MODALITY_PROVIDER_LABELS.get(id) ?? id;
 }
@@ -176,7 +177,12 @@ export function ModalityMappingDialog({
 		}
 	};
 
-	const label = MODALITY_COPY[modality].label;
+	const label = tl(MODALITY_COPY[modality].label);
+	// English reads the modality mid-sentence in lower case; other languages
+	// keep the translated label as written (German nouns stay capitalised).
+	const inlineLabel = isEnglishLocale(activeLocale())
+		? label.toLowerCase()
+		: label;
 
 	return (
 		<Dialog onOpenChange={handleOpenChange} open={open}>
@@ -187,7 +193,7 @@ export function ModalityMappingDialog({
 					<DialogDescription>
 						{tl(
 							"Send {label} requests to a specific provider. Checked before the model map; clear the row to fall back to the default provider.",
-							{ label: label.toLowerCase() }
+							{ label: inlineLabel }
 						)}
 					</DialogDescription>
 				</DialogHeader>

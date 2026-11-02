@@ -34,6 +34,7 @@ import {
 	TIER_WARP_OPACITY,
 	tierWarpColors,
 } from "../tier-pass.tsx";
+import { activePassTranslate, type PassTranslate } from "./labels.ts";
 import {
 	BLOCK_GAP_PX,
 	fitFontSize,
@@ -47,6 +48,7 @@ import {
 	setTracking,
 	wrapLines,
 } from "./paint.ts";
+import { passInline, withPassDirection } from "./paint-direction.ts";
 import { BACKDROP_WASH_ALPHA, type PassBackdropSpec } from "./scene.ts";
 
 /** `tracking-tight` on the tier label, as `TierPass` sets it. */
@@ -75,19 +77,25 @@ export interface TierFaceContent {
  * the same order and for the same reason: the footer is measured first because
  * the hero above it is bottom-aligned against whatever the footer leaves.
  */
-export function tierFacePainter(content: TierFaceContent): PassFacePainter {
+export function tierFacePainter(
+	content: TierFaceContent,
+	tl: PassTranslate = activePassTranslate
+): PassFacePainter {
 	return {
-		front: (ctx, env) => paintTierFront(ctx, content, env),
+		front: (ctx, env) =>
+			paintTierFront(ctx, content, withPassDirection(ctx, env, tl), tl),
 	};
 }
 
 function paintTierFront(
 	ctx: CanvasRenderingContext2D,
 	content: TierFaceContent,
-	env: PassFaceEnv
+	env: PassFaceEnv,
+	tl: PassTranslate
 ): void {
 	const { family, palette, scale } = env;
 	const { available, bottom, left } = passFaceBox(scale);
+	const inline = passInline(env);
 	const label = planTierLabel(content.plan);
 
 	// The lockup alone. No date opposite it, unlike the waitlist face: on this
@@ -111,16 +119,20 @@ function paintTierFront(
 			valuePx: TIER_STAT_VALUE_PX,
 			x,
 		});
-	const statTop = stat("Plan", label, left);
+	const statTop = stat(tl("Plan"), label, left);
 	// Always drawn, em-dash and all. An absent second column would let the grid
 	// re-read as a single left-aligned fact, which is a different card.
-	stat("Member since", content.since?.trim() || NO_DATE, left + column + gap);
+	stat(
+		tl("Member since"),
+		content.since?.trim() || NO_DATE,
+		left + column + gap
+	);
 	const heroFloor = statTop - BLOCK_GAP_PX * scale;
 
 	// Hero, built upward from that floor: the holder's name, then the tier label
 	// above it. The label is the subject of this card — a tier is what the card
 	// certifies — and the name is who it certifies it for.
-	ctx.textAlign = "left";
+	ctx.textAlign = inline.start;
 	let cursor = heroFloor;
 	const name = content.holder?.trim() ?? "";
 	if (name) {
@@ -137,7 +149,7 @@ function paintTierFront(
 		ctx.font = font(family, 400, size, scale);
 		setTracking(ctx, 0);
 		ctx.fillStyle = palette.mutedForeground;
-		ctx.fillText(name, left, cursor);
+		ctx.fillText(name, inline.x(left), cursor);
 		cursor -= size * scale + HERO_GAP_PX * scale;
 	}
 
@@ -160,7 +172,7 @@ function paintTierFront(
 	const lines = wrapped ? wrapLines(ctx, label, available) : [label];
 	const lineHeight = labelSize * HERO_LINE_HEIGHT * scale;
 	for (let i = lines.length - 1; i >= 0; i--) {
-		ctx.fillText(lines[i] ?? "", left, cursor);
+		ctx.fillText(lines[i] ?? "", inline.x(left), cursor);
 		cursor -= lineHeight;
 	}
 	setTracking(ctx, 0);

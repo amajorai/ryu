@@ -1,3 +1,4 @@
+import { passwordIssueText } from "@ryu/blocks/web/password-policy-copy.ts";
 import { settingsApi } from "@ryu/settings";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -11,7 +12,7 @@ import {
 } from "@ryu/ui/components/dialog.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
-import { passwordValidationMessage } from "@ryuhq/protocol/password-policy";
+import { passwordValidationIssue } from "@ryuhq/protocol/password-policy";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { sileo } from "sileo";
@@ -38,9 +39,9 @@ export function PasswordChangeDialog({
 			return;
 		}
 		// The rules sign-up and the set-password route hold a password to.
-		const reason = passwordValidationMessage(newPassword);
-		if (reason) {
-			sileo.error({ title: reason });
+		const issue = passwordValidationIssue(newPassword);
+		if (issue) {
+			sileo.error({ title: passwordIssueText(issue) });
 			return;
 		}
 		setIsSubmitting(true);

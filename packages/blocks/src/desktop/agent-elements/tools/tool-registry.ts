@@ -1,3 +1,4 @@
+import { translate } from "@ryu/i18n/core";
 import {
 	isNativeNumber,
 	isNativeText,
@@ -16,6 +17,9 @@ import {
 	Terminal,
 	XCircle,
 } from "./tool-registry-icons.tsx";
+
+// Registry callbacks run outside React; the active runtime translates.
+const tl = translate;
 
 export type ToolVariant = "simple" | "collapsible";
 
@@ -127,10 +131,10 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			const subagentType = part.input?.subagent_type || "Agent";
+			const subagentType = part.input?.subagent_type || tl("Agent");
 			return isPending
-				? `Running ${subagentType}`
-				: `${subagentType} completed`;
+				? tl("Running {agent}", { agent: subagentType })
+				: tl("{agent} completed", { agent: subagentType });
 		},
 		subtitle: (part) => {
 			const desc = part.input?.description || "";
@@ -144,10 +148,10 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			const subagentType = part.input?.subagent_type || "Agent";
+			const subagentType = part.input?.subagent_type || tl("Agent");
 			return isPending
-				? `Running ${subagentType}`
-				: `${subagentType} completed`;
+				? tl("Running {agent}", { agent: subagentType })
+				: tl("{agent} completed", { agent: subagentType });
 		},
 		subtitle: (part) => {
 			const desc = part.input?.description || "";
@@ -157,7 +161,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 	},
 	"tool-Skill": {
 		icon: Sparkles,
-		title: () => "Skill",
+		title: () => tl("Skill"),
 		subtitle: (part) => part.input?.skill || "",
 		variant: "simple",
 	},
@@ -167,17 +171,24 @@ export const toolRegistry: ToolMetadataRegistry = {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
 			if (isPending) {
-				return "Grepping";
+				return tl("Grepping");
 			}
 			const numFiles =
 				part.output?.numFiles || part.output?.output?.numFiles || 0;
-			return numFiles > 0 ? `Grepped ${numFiles} files` : "No matches";
+			return numFiles > 0
+				? tl("Grepped {count, plural, one {# file} other {# files}}", {
+						count: numFiles,
+					})
+				: tl("No matches");
 		},
 		subtitle: (part) => {
 			const pattern = part.input?.pattern || "";
 			const path = part.input?.path || "";
 			if (path) {
-				const combined = `${pattern} in ${getDisplayPath(path)}`;
+				const combined = tl("{pattern} in {path}", {
+					path: getDisplayPath(path),
+					pattern,
+				});
 				return combined.length > 40 ? `${combined.slice(0, 37)}…` : combined;
 			}
 			return pattern.length > 40 ? `${pattern.slice(0, 37)}…` : pattern;
@@ -190,11 +201,15 @@ export const toolRegistry: ToolMetadataRegistry = {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
 			if (isPending) {
-				return "Exploring files";
+				return tl("Exploring files");
 			}
 			const numFiles =
 				part.output?.numFiles || part.output?.output?.numFiles || 0;
-			return numFiles > 0 ? `Found ${numFiles} files` : "No files found";
+			return numFiles > 0
+				? tl("Found {count, plural, one {# file} other {# files}}", {
+						count: numFiles,
+					})
+				: tl("No files found");
 		},
 		subtitle: (part) => {
 			const pattern = part.input?.pattern || "";
@@ -207,7 +222,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Reading" : "Read";
+			return isPending ? tl("Reading") : tl("Read");
 		},
 		subtitle: (part) => {
 			const filePath =
@@ -225,9 +240,9 @@ export const toolRegistry: ToolMetadataRegistry = {
 			const filePath =
 				part.input?.file_path || part.output?.path || part.result?.path || "";
 			if (!filePath) {
-				return "Edit";
+				return tl("Edit");
 			}
-			return getDisplayPath(filePath).split("/").pop() || "Edit";
+			return getDisplayPath(filePath).split("/").pop() || tl("Edit");
 		},
 		subtitle: (part) => {
 			const isPending =
@@ -253,7 +268,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 	},
 	"tool-Write": {
 		icon: Pencil,
-		title: () => "Write",
+		title: () => tl("Write"),
 		subtitle: (part) => {
 			const filePath =
 				part.input?.file_path || part.output?.path || part.result?.path || "";
@@ -269,7 +284,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Running command" : "Ran command";
+			return isPending ? tl("Running command") : tl("Ran command");
 		},
 		subtitle: (part) => {
 			const command = part.input?.command || "";
@@ -292,7 +307,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Fetching" : "Fetched";
+			return isPending ? tl("Fetching") : tl("Fetched");
 		},
 		subtitle: (part) => {
 			const url = part.input?.url || "";
@@ -309,7 +324,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Searching web" : "Searched web";
+			return isPending ? tl("Searching web") : tl("Searched web");
 		},
 		subtitle: (part) => {
 			const query = part.input?.query || "";
@@ -324,16 +339,18 @@ export const toolRegistry: ToolMetadataRegistry = {
 				part.state !== "output-available" && part.state !== "output-error";
 			const action = part.input?.action || "update";
 			if (isPending) {
-				return action === "add" ? "Adding todo" : "Updating todos";
+				return action === "add" ? tl("Adding todo") : tl("Updating todos");
 			}
-			return action === "add" ? "Added todo" : "Updated todos";
+			return action === "add" ? tl("Added todo") : tl("Updated todos");
 		},
 		subtitle: (part) => {
 			const todos = part.input?.todos || [];
 			if (todos.length === 0) {
 				return "";
 			}
-			return `${todos.length} ${todos.length === 1 ? "item" : "items"}`;
+			return tl("{count, plural, one {# item} other {# items}}", {
+				count: todos.length,
+			});
 		},
 		variant: "simple",
 	},
@@ -345,24 +362,24 @@ export const toolRegistry: ToolMetadataRegistry = {
 			const action = part.input?.action || "create";
 			if (isPending) {
 				if (action === "create") {
-					return "Creating plan";
+					return tl("Creating plan");
 				}
 				if (action === "approve") {
-					return "Approving plan";
+					return tl("Approving plan");
 				}
-				return "Updating plan";
+				return tl("Updating plan");
 			}
 			const status = part.input?.plan?.status;
 			if (status === "awaiting_approval") {
-				return "Plan ready for review";
+				return tl("Plan ready for review");
 			}
 			if (status === "approved") {
-				return "Plan approved";
+				return tl("Plan approved");
 			}
 			if (status === "completed") {
-				return "Plan completed";
+				return tl("Plan completed");
 			}
-			return action === "create" ? "Created plan" : "Updated plan";
+			return action === "create" ? tl("Created plan") : tl("Updated plan");
 		},
 		variant: "simple",
 	},
@@ -371,7 +388,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Finishing plan" : "Plan complete";
+			return isPending ? tl("Finishing plan") : tl("Plan complete");
 		},
 		variant: "simple",
 	},
@@ -380,7 +397,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Editing notebook" : "Edited notebook";
+			return isPending ? tl("Editing notebook") : tl("Edited notebook");
 		},
 		subtitle: (part) => {
 			const filePath = part.input?.file_path || "";
@@ -396,7 +413,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Getting output" : "Command output";
+			return isPending ? tl("Getting output") : tl("Command output");
 		},
 		subtitle: (part) => {
 			const output = part.output;
@@ -423,11 +440,11 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Stopping shell" : "Shell stopped";
+			return isPending ? tl("Stopping shell") : tl("Shell stopped");
 		},
 		subtitle: (part) => {
 			const pid = part.input?.pid;
-			return isNativeNumber(pid) ? `pid ${pid}` : "";
+			return isNativeNumber(pid) ? tl("pid {pid}", { pid: String(pid) }) : "";
 		},
 		variant: "simple",
 	},
@@ -436,7 +453,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Cloning repo" : "Repo cloned";
+			return isPending ? tl("Cloning repo") : tl("Repo cloned");
 		},
 		subtitle: (part) => part.input?.repo ?? "",
 		variant: "simple",
@@ -446,7 +463,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Thinking…" : "Thought";
+			return isPending ? tl("Thinking…") : tl("Thought");
 		},
 		// Size hint for compact/nested Thinking rows (the full ThinkingTool card
 		// renders its own richer duration + size badges). Reasoning-token count
@@ -459,7 +476,9 @@ export const toolRegistry: ToolMetadataRegistry = {
 			const words = trimmed
 				.split(THINKING_WORD_SPLIT_RE)
 				.filter(Boolean).length;
-			return words > 0 ? `${words} words` : "";
+			return words > 0
+				? tl("{count, plural, one {# word} other {# words}}", { count: words })
+				: "";
 		},
 		variant: "collapsible",
 	},

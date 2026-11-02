@@ -1,6 +1,8 @@
 "use client";
 
 import { cn } from "@ryu/ui/lib/utils";
+import { copyMarker as t } from "./copy-marker.ts";
+import { LiteralText } from "./literal-text.tsx";
 import { MinimalCard, Node, WindowFrame } from "./mockups.tsx";
 import { WindowDots } from "./visuals-primitives.tsx";
 
@@ -13,15 +15,15 @@ export function OsVisual() {
 	return (
 		<WindowFrame title="OS">
 			<div aria-hidden="true" className="relative h-36 sm:h-44">
-				<span className="absolute top-2 left-0 flex h-24 w-3/5 flex-col overflow-hidden rounded-lg border border-border bg-muted/50 sm:h-28">
+				<span className="absolute start-0 top-2 flex h-24 w-3/5 flex-col overflow-hidden rounded-lg border border-border bg-muted/50 sm:h-28">
 					<WindowDots />
 				</span>
-				<span className="absolute top-8 right-0 flex h-24 w-1/2 flex-col overflow-hidden rounded-lg border border-foreground/30 bg-background sm:top-10 sm:h-28">
+				<span className="absolute end-0 top-8 flex h-24 w-1/2 flex-col overflow-hidden rounded-lg border border-foreground/30 bg-background sm:top-10 sm:h-28">
 					<WindowDots />
 					<span className="flex flex-1 flex-col justify-center gap-1.5 px-3 pb-2">
-						<span className="ml-auto block h-3 w-2/5 rounded-full rounded-tr-sm bg-foreground/80" />
-						<span className="block h-3 w-3/5 rounded-full rounded-tl-sm border border-border bg-foreground/5" />
-						<span className="ml-auto block h-3 w-1/3 rounded-full rounded-tr-sm bg-foreground/80" />
+						<span className="ms-auto block h-3 w-2/5 rounded-full rounded-se-sm bg-foreground/80" />
+						<span className="block h-3 w-3/5 rounded-full rounded-ss-sm border border-border bg-foreground/5" />
+						<span className="ms-auto block h-3 w-1/3 rounded-full rounded-se-sm bg-foreground/80" />
 					</span>
 				</span>
 			</div>
@@ -50,7 +52,7 @@ export function OsVisual() {
 
 /** Ryu Connect: one API between your app and hosted MCP servers, Skills, and tools. */
 export function ConnectVisual() {
-	const kinds = ["MCP servers", "Skills", "Tools"];
+	const kinds = [t("MCP servers"), t("Skills"), t("Tools")];
 	return (
 		<div className="flex w-full flex-col items-center px-1 py-6">
 			<Node className="w-44 py-2.5 text-sm">Your app</Node>
@@ -68,7 +70,7 @@ export function ConnectVisual() {
 					<div className="flex flex-col items-center" key={kind}>
 						<span aria-hidden="true" className="h-5 w-px bg-foreground/30" />
 						<Node className="w-full whitespace-nowrap py-2.5 text-sm">
-							{kind}
+							<LiteralText text={kind} />
 						</Node>
 					</div>
 				))}
@@ -107,7 +109,7 @@ function BoxWindow({ forked = false }: { forked?: boolean }) {
 				<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
 			</span>
 			{forked ? (
-				<span className="absolute top-1 right-2 rounded-md border border-border px-1.5 py-0.5 text-muted-foreground text-xs">
+				<span className="absolute end-2 top-1 rounded-md border border-border px-1.5 py-0.5 text-muted-foreground text-xs">
 					Fork
 				</span>
 			) : null}
@@ -146,7 +148,7 @@ export function NotifyVisual() {
 
 /** Standalone Ryu Sites: a saved version passes its deploy scan and goes live. */
 export function SitesVisual() {
-	const rows = ["Saved", "Secret scan", "Live"];
+	const rows = [t("Saved"), t("Secret scan"), t("Live")];
 	return (
 		<MinimalCard>
 			<div className="flex min-h-48 flex-col justify-center space-y-2">
@@ -165,7 +167,9 @@ export function SitesVisual() {
 								i === rows.length - 1 ? "bg-foreground" : "bg-foreground/40"
 							)}
 						/>
-						<span className="text-foreground/80 text-sm">{label}</span>
+						<span className="text-foreground/80 text-sm">
+							<LiteralText text={label} />
+						</span>
 					</div>
 				))}
 			</div>
@@ -205,7 +209,7 @@ export function MailVisual() {
 							<span className="text-foreground/80 text-sm">{flow.label}</span>
 							<span
 								aria-hidden="true"
-								className="ml-auto block h-1.5 w-1/3 rounded-full bg-foreground/10"
+								className="ms-auto block h-1.5 w-1/3 rounded-full bg-foreground/10"
 							/>
 						</div>
 					))}
@@ -278,7 +282,7 @@ export function MessagingVisual() {
  * because no Hire run, estimate, or charge exists yet.
  */
 export function HireVisual() {
-	const hires = ["Policy analyst", "Release reviewer", "Inbox triage"];
+	const hires = [t("Policy analyst"), t("Release reviewer"), t("Inbox triage")];
 	return (
 		<MinimalCard>
 			<div className="space-y-2">
@@ -290,7 +294,7 @@ export function HireVisual() {
 						)}
 						key={name}
 					>
-						{name}
+						<LiteralText text={name} />
 					</div>
 				))}
 			</div>
@@ -336,10 +340,10 @@ export function BotHeroVisual() {
 					))}
 				</div>
 				<div className="flex flex-col gap-3 p-4">
-					<div className="ml-auto w-2/5 rounded-2xl rounded-tr-sm bg-foreground px-3 py-3">
+					<div className="ms-auto w-2/5 rounded-2xl rounded-se-sm bg-foreground px-3 py-3">
 						<span className="block h-1.5 w-full rounded-full bg-background/40" />
 					</div>
-					<div className="w-4/5 space-y-2 rounded-2xl rounded-tl-sm bg-muted px-3 py-3">
+					<div className="w-4/5 space-y-2 rounded-2xl rounded-ss-sm bg-muted px-3 py-3">
 						<span className="block h-1.5 w-full rounded-full bg-foreground/15" />
 						<span className="block h-1.5 w-5/6 rounded-full bg-foreground/10" />
 						<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
@@ -347,7 +351,7 @@ export function BotHeroVisual() {
 					<span className="h-6 w-16 rounded-full border border-border" />
 					<div className="mt-auto flex items-center gap-2 rounded-full border border-border px-3 py-2">
 						<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
-						<span className="ml-auto size-5 rounded-full bg-foreground/80" />
+						<span className="ms-auto size-5 rounded-full bg-foreground/80" />
 					</div>
 				</div>
 			</div>

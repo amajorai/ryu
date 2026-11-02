@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
@@ -52,7 +53,7 @@ export const startThread = (
 								kind: "fill" as const,
 								value: `${suggestion} ${message}`,
 							},
-							label: `Use ${suggestion}`,
+							label: tr("Use {suggestion}", { suggestion }),
 							text: suggestion,
 							tone: "primary" as const,
 						},

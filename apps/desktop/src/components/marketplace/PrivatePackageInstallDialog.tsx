@@ -37,7 +37,7 @@ export default function PrivatePackageInstallDialog({
 				open={open}
 			>
 				<DialogContent appearance="package-install">
-					<DialogHeader className="text-left" purpose="package-install">
+					<DialogHeader className="text-start" purpose="package-install">
 						<DialogTitle>Install a private package</DialogTitle>
 						<DialogDescription>
 							Enter your publisher's code. You'll review what it needs first.

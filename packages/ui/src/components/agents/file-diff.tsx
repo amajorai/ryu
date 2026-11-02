@@ -202,7 +202,7 @@ export function FileDiff({
 			<button
 				aria-controls={contentId}
 				aria-expanded={currentOpen}
-				className="group flex min-h-9 w-full items-center gap-2 rounded-lg py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+				className="group flex min-h-9 w-full items-center gap-2 rounded-lg py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 				id={triggerId}
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
@@ -254,7 +254,7 @@ export function FileDiff({
 				open={currentOpen}
 				role="region"
 			>
-				<div className="pt-1.5 pl-6">
+				<div className="ps-6 pt-1.5">
 					<div className="overflow-hidden rounded-xl bg-muted">
 						<div
 							aria-live="polite"
@@ -262,10 +262,13 @@ export function FileDiff({
 								" "
 							)}
 							data-slot="file-diff-viewport"
+							dir="ltr"
 							ref={viewportRef}
 							style={inline1Style}
 						>
-							<div className="font-mono text-xs leading-5">
+							{/* The diff viewport is pinned dir="ltr", so the line-number
+							    gutters below stay physical (right-aligned against the code). */}
+							<div className="text-start font-mono text-xs leading-5">
 								<span className="sr-only">File changes</span>
 								{lines.map((line, index) => {
 									const type = line.type ?? "context";

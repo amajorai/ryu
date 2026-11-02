@@ -34,6 +34,8 @@ import {
 	type ScanResult,
 	scanImportFolder,
 } from "@/src/lib/api/import.ts";
+import { scanWarnings } from "@/src/lib/import-scan-text.ts";
+import { formatLocalList } from "@/src/lib/locale-format.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 
 interface MigrationTotals {
@@ -66,6 +68,7 @@ function SourceRow({
 	const present = scan.items.length - pending.length;
 	const checkboxId = `migrate-${scan.root}`;
 	const logo = migrationSourceLogo(scan.source);
+	const warnings = scanWarnings(scan, tl);
 	return (
 		<div className="flex flex-col gap-2 border-border border-b py-3 last:border-b-0">
 			<div className="flex items-start gap-3">
@@ -100,19 +103,19 @@ function SourceRow({
 					</span>
 				</label>
 			</div>
-			{scan.warnings.length > 0 ? (
-				<details className="pl-7 text-detail">
+			{warnings.length > 0 ? (
+				<details className="ps-7 text-detail">
 					<summary className="cursor-pointer text-status-warning">
 						{tl(
 							"{warningCount, plural, one {{warningCountLabel} thing} other {{warningCountLabel} things}} to set up again",
 							{
-								warningCount: scan.warnings.length,
-								warningCountLabel: String(scan.warnings.length),
+								warningCount: warnings.length,
+								warningCountLabel: String(warnings.length),
 							}
 						)}
 					</summary>
-					<ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
-						{scan.warnings.map((warning) => (
+					<ul className="mt-1 list-disc space-y-1 ps-4 text-muted-foreground">
+						{warnings.map((warning) => (
 							<li key={warning}>{warning}</li>
 						))}
 					</ul>
@@ -248,10 +251,10 @@ export function MigrationSetup({
 
 	const busy = detecting || scanning || importing;
 	const folderSources = MIGRATION_SOURCES.filter((source) => !source.homes);
-	const otherSources = new Intl.ListFormat("en", {
-		style: "long",
-		type: "disjunction",
-	}).format(folderSources.map((source) => source.label));
+	const otherSources = formatLocalList(
+		folderSources.map((source) => source.label),
+		"disjunction"
+	);
 
 	return (
 		<div className="flex flex-col gap-4">

@@ -247,3 +247,27 @@ test("each homepage card group is an uneven bento that fills the wide grid", () 
 		["single", "xl:col-span-5", ""],
 	]);
 });
+
+test("the hero fills exactly the first viewport and the partner strip follows it", () => {
+	const html = renderToStaticMarkup(<RealmsHero />);
+	const viewport = html.match(
+		/<div class="([^"]*)" data-testid="hero-viewport"/
+	)?.[1];
+	// The small viewport height (URL bar shown) never jumps on mobile scroll;
+	// the landing header floats over the hero, so only the announcement bar's
+	// full height is subtracted (0 with no bar), and no pixel cap leaves the
+	// partner strip peeking in on a tall screen.
+	expect(viewport?.split(" ")).toContain(
+		"min-h-[calc(100svh-var(--site-announcement-height,0px))]"
+	);
+	expect(viewport).not.toMatch(/min\(/);
+	expect(viewport).toContain("justify-center");
+	// The partner strip sits after the hero section, not inside its 100svh.
+	const surfaceEnd = html.indexOf(
+		"</section>",
+		html.indexOf('data-testid="hero-surface"')
+	);
+	expect(html.indexOf('data-testid="backed-by-carousel"')).toBeGreaterThan(
+		surfaceEnd
+	);
+});

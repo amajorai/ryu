@@ -3,10 +3,10 @@ import path from "node:path";
 import { expect, type TestInfo, test } from "@playwright/test";
 import { z } from "zod";
 import type { ProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const EVIDENCE = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
+const EVIDENCE = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
 );
 const PROJECT_TOKEN = "first-project-integration-node-token";
 

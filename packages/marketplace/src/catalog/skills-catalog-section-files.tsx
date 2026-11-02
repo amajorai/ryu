@@ -1,4 +1,5 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
+import { usePierreShadowLocalizer } from "@ryu/blocks/desktop/agent-elements/use-pierre-shadow-localizer.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ResizableHandle,
@@ -34,25 +35,25 @@ export function SkillFilesPanel({
 	}, [files]);
 
 	if (!selectedId) {
-		return <div className="border-l" />;
+		return <div className="border-s" />;
 	}
 	if (loading && !detail) {
 		return (
-			<div className="flex h-full items-center justify-center border-l text-muted-foreground">
+			<div className="flex h-full items-center justify-center border-s text-muted-foreground">
 				<Spinner className="size-5" />
 			</div>
 		);
 	}
 	if (files.length === 0) {
 		return (
-			<div className="flex h-full items-center justify-center border-l text-muted-foreground text-sm">
+			<div className="flex h-full items-center justify-center border-s text-muted-foreground text-sm">
 				No bundled files.
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex min-h-0 flex-col border-l">
+		<div className="flex min-h-0 flex-col border-s">
 			<div className="border-b px-3 py-2">
 				<h3 className="font-medium text-sm">
 					{tl("Files ({count})", { count: formatCount(files.length) ?? "—" })}
@@ -76,7 +77,7 @@ export function SkillFilesPanel({
 									const active = file.path === selectedFile?.path;
 									return (
 										<button
-											className={`truncate rounded-lg px-2 py-1.5 text-left font-mono text-xs transition-colors ${
+											className={`truncate rounded-lg px-2 py-1.5 text-start font-mono text-xs transition-colors ${
 												active
 													? "bg-accent text-foreground"
 													: "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -128,8 +129,15 @@ function SkillFileTree({
 		paths,
 		search: true,
 	});
+	// The tree draws its search field and row action labels in a shadow root
+	// the document's DOM localizer never enters.
+	const localizeTreeCopy = usePierreShadowLocalizer();
 
-	return <FileTree className="h-full w-full" model={model} />;
+	return (
+		<div className="h-full w-full" ref={localizeTreeCopy}>
+			<FileTree className="h-full w-full" model={model} />
+		</div>
+	);
 }
 
 function SkillFileContent({
@@ -141,6 +149,7 @@ function SkillFileContent({
 	readme: string | null;
 	Markdown: ComponentType<CatalogMarkdownProps>;
 }) {
+	const tl = useLiteralMessages();
 	if (!file) {
 		return (
 			<div className="flex h-full items-center justify-center text-muted-foreground text-sm">
@@ -162,11 +171,12 @@ function SkillFileContent({
 			</div>
 			{hasContent && isMarkdownFile(file.path) ? (
 				<div className="scroll-fade prose prose-sm dark:prose-invert min-h-0 max-w-none flex-1 overflow-auto p-3 text-sm">
-					<Markdown className="[&_ol]:pl-10 [&_ul]:pl-9" content={content} />
+					<Markdown className="[&_ol]:ps-10 [&_ul]:ps-9" content={content} />
 				</div>
 			) : (
 				<pre className="scroll-fade min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-xs leading-relaxed">
-					{content || "This file is empty."}
+					{/* The localizer skips pre, so the empty state is a literal tl(). */}
+					{content || tl("This file is empty.")}
 				</pre>
 			)}
 		</div>

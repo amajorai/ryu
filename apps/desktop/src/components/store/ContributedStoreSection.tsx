@@ -55,6 +55,11 @@ import type { PluginStoreTab } from "@/src/lib/api/plugins.ts";
 import { AppOffState } from "./ContributedStoreSection-app-off-state.tsx";
 import { CatalogList } from "./ContributedStoreSection-catalog-list.tsx";
 import { DetailPanel } from "./ContributedStoreSection-detail-panel.tsx";
+import {
+	localizeStoreItem,
+	localizeStoreSpec,
+	localizeStoreTab,
+} from "./ContributedStoreSection-localize.ts";
 import { resultValues } from "./ContributedStoreSection-result-values.ts";
 import { TabIcon } from "./ContributedStoreSection-tab-icon.tsx";
 
@@ -84,7 +89,13 @@ export default function ContributedStoreSection({
 	const node = useActiveNode();
 	const queryClient = useQueryClient();
 	const openTab = useTabSelector((state) => state.openTab);
-	const spec = useMemo(() => pluginStoreSpec(tab), [tab]);
+	// Display copy in the active locale. Requests, query keys and templating
+	// keep reading the tab as served.
+	const spec = useMemo(
+		() => localizeStoreSpec(tl, pluginStoreSpec(tab)),
+		[tab, tl]
+	);
+	const shownTab = useMemo(() => localizeStoreTab(tl, tab), [tab, tl]);
 	const catalog = useContributedStoreCatalog(tab, tab.app_enabled);
 
 	const groups = useMemo(() => {
@@ -92,11 +103,11 @@ export default function ContributedStoreSection({
 			return [];
 		}
 		const q = debouncedQuery.trim().toLowerCase();
-		const rows = (catalog.data?.items ?? []).filter(
-			(item) => !q || storeItemHaystack(spec, item).includes(q)
-		);
+		const rows = (catalog.data?.items ?? [])
+			.map((item) => localizeStoreItem(tl, item))
+			.filter((item) => !q || storeItemHaystack(spec, item).includes(q));
 		return groupStoreItems(spec, rows);
-	}, [spec, catalog.data, debouncedQuery]);
+	}, [spec, catalog.data, debouncedQuery, tl]);
 
 	const selected = useMemo(() => {
 		for (const group of groups) {
@@ -179,7 +190,7 @@ export default function ContributedStoreSection({
 				}
 				const payload: unknown = await resp.json().catch(() => ({}));
 				setInstalledIds((prev) => new Set(prev).add(item.id));
-				toast.success(install.successMessage ?? "Added", {
+				toast.success(install.successMessage ?? tl("Added"), {
 					description: tl("{title} is ready.", { title: item.title }),
 				});
 				await queryClient.invalidateQueries({
@@ -229,7 +240,7 @@ export default function ContributedStoreSection({
 								queryKey: ["plugin-contributions"],
 							});
 						}}
-						tab={tab}
+						tab={shownTab}
 					/>
 				}
 			</>
@@ -245,7 +256,7 @@ export default function ContributedStoreSection({
 					<EmptyMedia variant="icon">
 						<TabIcon icon={tab.icon} />
 					</EmptyMedia>
-					<EmptyTitle>{tab.title}</EmptyTitle>
+					<EmptyTitle>{shownTab.title}</EmptyTitle>
 					<EmptyDescription>
 						This tab declares no catalog to browse.
 					</EmptyDescription>
@@ -283,15 +294,15 @@ export default function ContributedStoreSection({
 							}}
 							runAction={(action, item) => {
 								runAction(action, item).catch((e) => {
-									toast.error(`${action.label} failed`, {
+									toast.error(tl("{label} failed", { label: action.label }), {
 										description: e instanceof Error ? e.message : String(e),
 									});
 								});
 							}}
-							tab={tab}
+							tab={shownTab}
 						/>
 					}
-					detailTitle={selected?.title ?? tab.title}
+					detailTitle={selected?.title ?? shownTab.title}
 					hasSelection={selected != null}
 					list={
 						<CatalogList
@@ -310,7 +321,7 @@ export default function ContributedStoreSection({
 							pendingId={pendingId}
 							selectedId={selectedId}
 							spec={spec}
-							tab={tab}
+							tab={shownTab}
 							total={total}
 						/>
 					}
@@ -318,7 +329,9 @@ export default function ContributedStoreSection({
 					search={{
 						value: query,
 						onChange: setQuery,
-						placeholder: spec.searchPlaceholder ?? `Search ${tab.title}…`,
+						placeholder:
+							spec.searchPlaceholder ??
+							tl("Search {title}…", { title: shownTab.title }),
 					}}
 				/>
 			}

@@ -1,5 +1,5 @@
 import { EngineFootnote } from "@ryu/blocks/desktop/store-engines.tsx";
-import { useRichLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { ListingSection } from "@ryu/marketplace/catalog/detail/listing-detail-shell";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -20,6 +20,7 @@ import { useLlamacppAcceleration } from "@/src/hooks/useLlamacppAcceleration.ts"
 export function EngineAccelerationSection() {
 	const { acceleration, loading, switching, error, select } =
 		useLlamacppAcceleration();
+	const tl = useLiteralMessages();
 	const tlRich = useRichLiteralMessages();
 
 	if (loading && !acceleration) {
@@ -35,9 +36,24 @@ export function EngineAccelerationSection() {
 
 	const { selected, resolvedLabel, hasGpu, gpuName, vram, options } =
 		acceleration;
-	const hardware = hasGpu
-		? `Graphics card detected${gpuName ? `: ${gpuName}` : ""}${vram ? ` (${vram})` : ""}.`
-		: "No usable graphics card detected on this device.";
+	const hardware = (() => {
+		if (!hasGpu) {
+			return "No usable graphics card detected on this device.";
+		}
+		if (gpuName && vram) {
+			return tl("Graphics card detected: {gpuName} ({vram}).", {
+				gpuName,
+				vram,
+			});
+		}
+		if (gpuName) {
+			return tl("Graphics card detected: {gpuName}.", { gpuName });
+		}
+		if (vram) {
+			return tl("Graphics card detected ({vram}).", { vram });
+		}
+		return tl("Graphics card detected.");
+	})();
 
 	return (
 		<ListingSection title="Speed">

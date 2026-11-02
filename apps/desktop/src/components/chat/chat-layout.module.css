@@ -1,8 +1,5 @@
-.folderRow {
-	padding-left: var(--folder-indent);
-}
 .folderNote {
-	padding-left: var(--folder-indent);
+	padding-inline-start: var(--folder-indent);
 }
 .artifactFrame {
 	transition-property: height;

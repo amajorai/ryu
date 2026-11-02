@@ -428,13 +428,15 @@ fn seed_overrides() -> [SeedSpec; 45] {
             // `approved_grants` (`vault:fill`). Without this row a pre-installed
             // browser is enabled with no grants and every fill 403s;
             // `backfill_declared_grants` carries it onto records that predate the
-            // row. The set mirrors the manifest exactly; `vault:fill` is approved
-            // only for this app (a Gateway owner-exclusive grant), the other two
-            // are on the reviewed allowlist.
+            // row. The set mirrors the manifest exactly; `vault:fill` and
+            // `security-key:relay` (the `securityKey.request` relay to the owner's
+            // desktop key) are approved only for this app (Gateway owner-exclusive
+            // grants), the other two are on the reviewed allowlist.
             grants: &[
                 "browser:control",
                 "tool:http-egress:127.0.0.1",
                 "vault:fill",
+                "security-key:relay",
             ],
             ui_code: None,
         },

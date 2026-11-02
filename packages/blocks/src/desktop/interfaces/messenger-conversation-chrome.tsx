@@ -8,12 +8,12 @@ export function BackButton({ onBack }: { onBack: () => void }) {
 	return (
 		<Button
 			aria-label="Back to messages"
-			className="-ml-1 @min-[900px]:hidden text-primary hover:text-primary"
+			className="-ms-1 @min-[900px]:hidden text-primary hover:text-primary"
 			onClick={onBack}
 			size="icon-sm"
 			variant="ghost"
 		>
-			<ChevronLeft aria-hidden="true" className="size-5" />
+			<ChevronLeft aria-hidden="true" className="size-5 rtl:-scale-x-100" />
 		</Button>
 	);
 }

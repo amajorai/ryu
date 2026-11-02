@@ -6,15 +6,13 @@ import type {
 	DbView,
 	DbViewKind,
 } from "../src/lib/realtime/yjs-database.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/view-bar-interactions-proof.html";
 const SPACE_ID = "view-bar-proof-space";
 const DOCUMENT_ID = "view-bar-proof-database";
 const DOCUMENT_PATH = `/api/spaces/${SPACE_ID}/documents/${DOCUMENT_ID}`;
-const EVIDENCE_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 interface CapturedCall {
 	body: unknown;

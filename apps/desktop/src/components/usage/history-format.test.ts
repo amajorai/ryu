@@ -28,3 +28,12 @@ test("distinguishes unknown counters, explicit zero and partial known sums", () 
 		detail: "Not reported",
 	});
 });
+
+test("formats token counts in the UI language", () => {
+	expect(formatHistoryTokens(6_979_600_123, true, "ja")).toBe("69.8億");
+	expect(formatHistoryTokens(6_979_600_123, false, "de")).toBe("6.979.600.123");
+	expect(historyCounterDisplay(2_500_000, 0, 2, "de")).toEqual({
+		value: "2,5\u00a0Mio.",
+		detail: "2.500.000",
+	});
+});

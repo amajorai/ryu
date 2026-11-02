@@ -2,7 +2,7 @@
 
 import type { TFootnoteElement } from "@platejs/footnote";
 import { FootnoteReferencePlugin } from "@platejs/footnote/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import {
 	Command,
@@ -61,10 +61,11 @@ const getNavigationAttributes = (
 const getReferenceContextLabel = (
 	editor: PlateEditor,
 	path: Path,
-	index: number
+	index: number,
+	tl: LiteralMessage
 ) => {
 	const parentEntry = editor.api.parent(path);
-	const fallback = `Reference ${index + 1}`;
+	const fallback = tl("Reference {number}", { number: index + 1 });
 
 	if (!parentEntry) {
 		return fallback;
@@ -236,7 +237,7 @@ export function FootnoteDefinitionElement(
 						.references({ identifier })
 						.map((entry: any, index: number) => ({
 							index,
-							label: getReferenceContextLabel(editor, entry[1], index),
+							label: getReferenceContextLabel(editor, entry[1], index, tl),
 						}))
 				: [];
 
@@ -248,7 +249,7 @@ export function FootnoteDefinitionElement(
 			path,
 			referenceItems,
 		};
-	}, [identifier, path]);
+	}, [identifier, path, tl]);
 	const navigationHighlight = useNavigationHighlight(definitionState?.path);
 	const isDuplicateDefinition = !!definitionState?.isDuplicateDefinition;
 	const duplicateReplacementIdentifier =

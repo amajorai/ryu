@@ -165,7 +165,7 @@ export function CanvasInterface({
 				{/* The chrome comes first in tab order (header, then the tools), and
 				    floats above the world. */}
 				<div className="pointer-events-none absolute inset-0 z-10">
-					<div className="absolute top-3 left-3 max-w-[calc(100%-1.5rem)]">
+					<div className="absolute start-3 top-3 max-w-[calc(100%-1.5rem)]">
 						<CanvasHeader
 							arrange={arrange}
 							loading={loading}
@@ -231,7 +231,7 @@ export function CanvasInterface({
 						/>
 					) : null}
 					{!(loading || empty) && minimapShown ? (
-						<div className="absolute right-4 bottom-4">
+						<div className="absolute end-4 bottom-4">
 							<CanvasMinimap
 								cards={minimapCards}
 								content={content}

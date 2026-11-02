@@ -1,7 +1,7 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { Plus } from "lucide-react";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
 import type { PathStop, PathTone } from "./path-model.ts";
 import {
 	Callout,
@@ -32,8 +32,23 @@ export {
 	pathAddKey,
 } from "./path-stop-row.tsx";
 
+/** A stop button's accessible name: "Continue: Title. Meta, 5m ago." */
+function stopLabel(parts: {
+	action: string;
+	age: string;
+	meta: string;
+	title: string;
+}): string {
+	const sentence = parts.age
+		? tr("{title}. {meta}, {age}.", parts)
+		: tr("{title}. {meta}.", parts);
+	return parts.action
+		? tr("{action}: {sentence}", { action: parts.action, sentence })
+		: sentence;
+}
+
 function leadName(stop: PathStop): string {
-	return stop.agents[0]?.name ?? "No agent";
+	return stop.agents[0]?.name ?? tr("No agent");
 }
 
 /** The meta line under a stop's title, in the user's terms. */
@@ -41,22 +56,24 @@ export function stopMeta(stop: PathStop): string {
 	switch (stop.state) {
 		case "attention":
 			return stop.thread.runState === "interrupted"
-				? "Run stopped"
-				: "Run failed";
+				? tr("Run stopped")
+				: tr("Run failed");
 		case "current":
 			return stop.status === "attention"
-				? "Run failed · needs you"
-				: `Your turn · ${leadName(stop)} replied`;
+				? tr("Run failed · needs you")
+				: tr("Your turn · {name} replied", { name: leadName(stop) });
 		case "done":
-			return "Done";
+			return tr("Done");
 		case "reply":
-			return `Your turn · ${leadName(stop)} replied`;
+			return tr("Your turn · {name} replied", { name: leadName(stop) });
 		case "working":
-			return `${leadName(stop)} is working`;
+			return tr("{name} is working", { name: leadName(stop) });
 		case "waiting":
-			return stop.agents[0] ? `Waiting on ${leadName(stop)}` : "No agent yet";
+			return stop.agents[0]
+				? tr("Waiting on {name}", { name: leadName(stop) })
+				: tr("No agent yet");
 		default:
-			return THREAD_STATUS_LABELS[stop.status];
+			return threadStatusLabel(stop.status);
 	}
 }
 
@@ -74,13 +91,13 @@ export function stopMetaTone(state: PathStop["state"]): string | undefined {
  */
 export function stopAction(stop: PathStop): string {
 	if (stop.status === "attention") {
-		return "Review";
+		return tr("Review");
 	}
-	return stop.status === "quiet" ? "Start" : "Continue";
+	return stop.status === "quiet" ? tr("Start") : tr("Continue");
 }
 
 export function stopTitle(stop: PathStop): string {
-	return stop.thread.title.trim() || "Untitled thread";
+	return stop.thread.title.trim() || tr("Untitled thread");
 }
 
 export function PathStopItem({
@@ -105,7 +122,7 @@ export function PathStopItem({
 }) {
 	const title = stopTitle(stop);
 	const meta = stopMeta(stop);
-	const age = compactAge(stop.thread.updatedAt, now);
+	const age = relativeAge(stop.thread.updatedAt, now);
 	const current = stop.state === "current";
 	const ringed = current || stop.state === "working";
 	const action = stopAction(stop);
@@ -138,7 +155,12 @@ export function PathStopItem({
 			) : null}
 			<button
 				aria-current={selected ? "true" : undefined}
-				aria-label={`${current ? `${action}: ` : ""}${title}. ${meta}${age ? `, ${age === "now" ? "just now" : `${age} ago`}` : ""}.`}
+				aria-label={stopLabel({
+					action: current ? action : "",
+					age,
+					meta,
+					title,
+				})}
 				className={PRESS_BUTTON}
 				data-thread-id={stop.thread.id}
 				onClick={() => onOpen(stop.thread.id)}
@@ -199,16 +221,16 @@ export function PathAddItem({
 			>
 				<span
 					aria-hidden="true"
-					className="absolute top-2 left-2 flex size-12 items-center justify-center rounded-full border-(--gk-edge)/45 border-[3px] border-dashed bg-(--gk-plate) text-(--gk-ink-muted) transition-colors duration-100 group-hover/stop:border-primary group-hover/stop:text-primary group-focus-visible/stop:ring-[3px] group-focus-visible/stop:ring-ring group-focus-visible/stop:ring-offset-(--gk-plate) group-focus-visible/stop:ring-offset-4 group-active/stop:bg-primary/10"
+					className="absolute start-2 top-2 flex size-12 items-center justify-center rounded-full border-(--gk-edge)/45 border-[3px] border-dashed bg-(--gk-plate) text-(--gk-ink-muted) transition-colors duration-100 group-hover/stop:border-primary group-hover/stop:text-primary group-focus-visible/stop:ring-[3px] group-focus-visible/stop:ring-ring group-focus-visible/stop:ring-offset-(--gk-plate) group-focus-visible/stop:ring-offset-4 group-active/stop:bg-primary/10"
 				>
 					<Plus className="size-6" strokeWidth={3} />
 				</span>
 				<StopLabel
-					className={cn("@max-[519px]/col:ml-3", swing > 0 ? "mr-3" : "ml-3")}
+					className={cn("@max-[519px]/col:ms-3", swing > 0 ? "me-3" : "ms-3")}
 					interactive
 					meta={meta}
 					swing={swing}
-					title="New thread"
+					title={tr("New thread")}
 					titleClassName="text-(--gk-ink-muted) group-hover/stop:text-(--gk-ink)"
 				/>
 			</button>

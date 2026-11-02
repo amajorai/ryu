@@ -20,8 +20,12 @@
 // comes straight from `startOfTodayMs` so a transcript can never disagree with
 // the sidebar's buckets about where a day starts.
 
+import { translate } from "@ryu/i18n/core";
 import { formatDate, startOfTodayMs } from "@ryu/ui/lib/timezone.ts";
 import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
+
+// Model code has no `useLiteralMessages()`; the active runtime translates.
+const tl = translate;
 
 /** The one field of a message this module reads, when it is there at all. */
 export interface DatedMessage {
@@ -179,10 +183,10 @@ export function dayLabel(dayKey: string, startOfToday: number): string {
 		return "";
 	}
 	if (dayStart >= startOfToday) {
-		return "Today";
+		return tl("Today");
 	}
 	if (dayStart >= dayStartDaysBefore(startOfToday, 1)) {
-		return "Yesterday";
+		return tl("Yesterday");
 	}
 	if (dayStart >= dayStartDaysBefore(startOfToday, WEEKDAY_WINDOW_DAYS)) {
 		return formatDate(dayStart, { weekday: "long" });

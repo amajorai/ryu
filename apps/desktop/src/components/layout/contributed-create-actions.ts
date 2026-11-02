@@ -37,6 +37,7 @@ import {
 	renderContributionActionHttp,
 	renderTemplate,
 } from "@ryu/app-host/views";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useMemo, useState } from "react";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -65,6 +66,7 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 	const { create_actions, sidebar_sections } = usePluginContributions();
 	const node = useActiveNode();
 	const { openTab } = useTabsContext();
+	const tl = useLiteralMessages();
 	const [pendingSection, setPendingSection] = useState<string | null>(null);
 
 	// Seam 1: a standalone create row. `target` navigates; `capability` dispatches
@@ -99,7 +101,7 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 			const http = create && "http" in create ? create.http : undefined;
 			if (create && "target" in create && isNativeText(create.target)) {
 				openTab(create.target, {
-					title: create.label ?? `New ${section.title}`,
+					title: create.label ?? tl("New {title}", { title: section.title }),
 				});
 				return;
 			}
@@ -155,7 +157,7 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 				);
 			}
 		},
-		[node, openTab, pendingSection]
+		[node, openTab, pendingSection, tl]
 	);
 
 	// Standalone rows first, then the section-scoped ones. Both families sort by
@@ -215,12 +217,13 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 			.map((section) => ({
 				id: `contrib:${section.plugin}:${section.id}`,
 				label:
-					pluginSidebarSpec(section)?.create?.label ?? `New ${section.title}`,
+					pluginSidebarSpec(section)?.create?.label ??
+					tl("New {title}", { title: section.title }),
 				onSelect: () => {
 					void run(section);
 				},
 			}));
-	}, [sidebar_sections, run]);
+	}, [sidebar_sections, run, tl]);
 
 	return useMemo(
 		() => [...standaloneRows, ...sectionRows],

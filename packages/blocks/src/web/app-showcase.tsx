@@ -85,7 +85,7 @@ export function AppShowcaseCard({ app }: { app: AppShowcase }) {
 				</div>
 				<ArrowUpRight
 					aria-hidden="true"
-					className="mt-1 size-5 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
+					className="mt-1 size-5 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5 rtl:-scale-x-100 motion-safe:group-hover:rtl:-translate-x-0.5"
 				/>
 			</div>
 		</Link>
@@ -199,7 +199,7 @@ function RelatedAppLink({ app }: { app: AppShowcase }) {
 			</span>
 			<ArrowUpRight
 				aria-hidden="true"
-				className="size-4 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
+				className="size-4 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5 rtl:-scale-x-100 motion-safe:group-hover:rtl:-translate-x-0.5"
 			/>
 		</Link>
 	);
@@ -225,7 +225,7 @@ export function AppShowcaseDetail({
 					className="inline-flex items-center gap-2 text-muted-foreground text-sm hover:text-foreground"
 					href="/products/apps"
 				>
-					<ArrowLeft aria-hidden="true" className="size-4" />
+					<ArrowLeft aria-hidden="true" className="size-4 rtl:-scale-x-100" />
 					All Ryu Apps
 				</Link>
 				<div className="mt-10 grid items-center gap-12 lg:grid-cols-[0.78fr_1.22fr] lg:gap-16">

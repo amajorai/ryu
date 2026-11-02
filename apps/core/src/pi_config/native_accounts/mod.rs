@@ -46,7 +46,7 @@ pub fn for_spawn(spawn_cmd: &str) -> Result<Option<NativeAccounts>> {
         .map_err(|_| anyhow!("Native account manager unavailable"))?;
     if let Some(existing) = manager.as_ref() {
         if existing.cli != stdio.command {
-            bail!("Native Kiro executable changed; restart Core to reconnect custody");
+            return Err(NativeAccountError::ExecutableChanged.into());
         }
         return Ok(Some(existing.clone()));
     }
@@ -168,10 +168,12 @@ pub struct NativeAccounts {
 }
 
 mod custody_fs;
+mod errors;
 mod identity;
 mod lifecycle;
 mod registry;
 
+pub use errors::NativeAccountError;
 pub use identity::parse_identity;
 
 #[cfg(test)]

@@ -30,6 +30,11 @@ export interface FeatureListConfig {
 	 * top-level array is the fallback. */
 	containerKeys?: string[];
 	idKeys: string[];
+	/**
+	 * Rewrites one object row before its fields are picked, e.g. to put a row's
+	 * Core-message title into the CLI's locale.
+	 */
+	localizeRecord?: (record: FeatureRecord) => FeatureRecord;
 	/** Core path, e.g. "/api/teams" or "/api/models/catalog?limit=30". */
 	path: string;
 	subtitleKeys?: string[];
@@ -40,7 +45,7 @@ export interface FeatureListConfig {
 const featurePayloadSchema = z.json();
 type FeaturePayload = z.infer<typeof featurePayloadSchema>;
 const featureRecordSchema = z.record(z.string(), featurePayloadSchema);
-type FeatureRecord = z.infer<typeof featureRecordSchema>;
+export type FeatureRecord = z.infer<typeof featureRecordSchema>;
 const featureArraySchema = z.array(featurePayloadSchema);
 const displayFieldSchema = z.union([
 	z.string().min(1),
@@ -102,15 +107,16 @@ export async function fetchFeatureList(
 		if (!record.success) {
 			return { id: "", title: "—" };
 		}
-		const title = pickField(record.data, config.titleKeys) || "—";
+		const row = config.localizeRecord?.(record.data) ?? record.data;
+		const title = pickField(row, config.titleKeys) || "—";
 		return {
 			title,
-			id: pickField(record.data, config.idKeys),
+			id: pickField(row, config.idKeys),
 			subtitle: config.subtitleKeys
-				? pickField(record.data, config.subtitleKeys) || undefined
+				? pickField(row, config.subtitleKeys) || undefined
 				: undefined,
 			badge: config.badgeKeys
-				? pickField(record.data, config.badgeKeys) || undefined
+				? pickField(row, config.badgeKeys) || undefined
 				: undefined,
 		};
 	});

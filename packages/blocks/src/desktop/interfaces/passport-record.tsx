@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -14,18 +15,17 @@ import {
 } from "react";
 import { GameSheet } from "./game-shell.tsx";
 import {
-	MARKING_LABELS,
+	markingName,
 	type PassportCountry,
 	type PassportStamp,
-	plural,
 	recordNumber,
 	type StampMarking,
 	stampDate,
 	stampDayMonth,
 	stampTime,
 	UNASSIGNED_CODE,
-	UNASSIGNED_LABEL,
 	UNASSIGNED_STYLE,
+	unassignedLabel,
 } from "./passport-model.ts";
 import { CountryEmblem } from "./passport-stamp.tsx";
 
@@ -43,11 +43,6 @@ export const MARKING_TONE: Record<StampMarking, string> = {
 	exited: "text-muted-foreground",
 	processing: "text-foreground",
 };
-
-/** "ARRIVED – AWAITING ENTRY" as "Arrived – awaiting entry". */
-function sentenceCase(label: string): string {
-	return `${label.slice(0, 1)}${label.slice(1).toLowerCase()}`;
-}
 
 function RecordField({
 	children,
@@ -70,7 +65,7 @@ function CountryValue({ country }: { country: PassportCountry | null }) {
 	return (
 		<>
 			<span className="truncate">
-				{country ? country.agent.name : UNASSIGNED_LABEL}
+				{country ? country.agent.name : unassignedLabel()}
 			</span>
 			<span className="font-mono font-normal text-[13px] text-muted-foreground">
 				{country ? country.code : UNASSIGNED_CODE}
@@ -101,7 +96,7 @@ export function ImmigrationRecord({
 	const number = stamp
 		? recordNumber(country?.code ?? UNASSIGNED_CODE, stamp.thread.id)
 		: null;
-	const title = stamp?.thread.title || "New entry";
+	const title = stamp?.thread.title || tr("New entry");
 	return (
 		<GameSheet
 			closeLabel="Close record"
@@ -132,7 +127,7 @@ export function ImmigrationRecord({
 				<RecordField label="Marking">
 					{stamp ? (
 						<span className={cn("truncate", MARKING_TONE[stamp.marking])}>
-							{sentenceCase(MARKING_LABELS[stamp.marking])}
+							{markingName(stamp.marking)}
 						</span>
 					) : (
 						<span className="text-muted-foreground">Pending</span>
@@ -187,7 +182,9 @@ function PreviousEntries({
 									shownCount: String(PREVIOUS_ENTRIES),
 									totalCount: String(country.stamps.length),
 								})
-							: plural(country.stamps.length, "entry", "entries")}
+							: tl("{count, plural, one {# entry} other {# entries}}", {
+									count: country.stamps.length,
+								})}
 					</p>
 				) : null}
 			</div>
@@ -202,7 +199,7 @@ function PreviousEntries({
 							>
 								<span className="flex w-full min-w-0 items-baseline gap-3">
 									<span className="min-w-0 flex-1 truncate text-foreground text-sm leading-5">
-										{stamp.thread.title || "Untitled conversation"}
+										{stamp.thread.title || tr("Untitled conversation")}
 									</span>
 									<span className="shrink-0 font-mono text-[13px] text-muted-foreground tabular-nums leading-4">
 										{stampDayMonth(stamp.latestAt)}
@@ -215,7 +212,7 @@ function PreviousEntries({
 										"font-normal"
 									)}
 								>
-									{sentenceCase(MARKING_LABELS[stamp.marking])}
+									{markingName(stamp.marking)}
 								</span>
 							</button>
 						</li>
@@ -302,7 +299,9 @@ export function VisaApplication({
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 px-4 pt-3 pb-3">
 					<RecordField label="Country">
-						<span className="truncate">{country.agent.name}</span>
+						<span className="truncate" data-ryu-i18n="off">
+							{country.agent.name}
+						</span>
 					</RecordField>
 					<RecordField label="Code">
 						<span className={MONO_VALUE}>{country.code}</span>

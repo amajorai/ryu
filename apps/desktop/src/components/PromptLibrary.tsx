@@ -268,7 +268,7 @@ export function PromptLibrary({
 							<div className="relative">
 								<HugeiconsIcon
 									aria-hidden="true"
-									className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+									className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 									icon={Search01Icon}
 								/>
 								<Input
@@ -350,7 +350,7 @@ export function PromptLibrary({
 												{selected.description}
 											</span>
 										) : null}
-										<div className="ml-auto flex items-center gap-2">
+										<div className="ms-auto flex items-center gap-2">
 											<Label htmlFor="prompt-library-version" size="compact">
 												Version
 											</Label>

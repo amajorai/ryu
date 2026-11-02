@@ -211,7 +211,7 @@ export function TicketsTable({
 			<thead className={showHead ? undefined : "sr-only"}>
 				<tr className="h-9">
 					<th
-						className="sticky top-0 z-10 border-border border-b bg-background ps-4 pe-0 text-left font-normal"
+						className="sticky top-0 z-10 border-border border-b bg-background ps-4 pe-0 text-start font-normal"
 						scope="col"
 					>
 						<Checkbox
@@ -226,7 +226,7 @@ export function TicketsTable({
 					{columns.map((column) => (
 						<th
 							aria-sort={ariaSort(column, sort)}
-							className="sticky top-0 z-10 border-border border-b bg-background px-3 text-left font-medium text-muted-foreground text-xs"
+							className="sticky top-0 z-10 border-border border-b bg-background px-3 text-start font-medium text-muted-foreground text-xs"
 							key={column.id}
 							scope="col"
 						>
@@ -245,7 +245,7 @@ export function TicketsTable({
 						{section.label ? (
 							<tr className="h-9">
 								<th
-									className="border-border border-b bg-muted/40 px-4 text-left font-semibold text-foreground text-xs"
+									className="border-border border-b bg-muted/40 px-4 text-start font-semibold text-foreground text-xs"
 									colSpan={span}
 									scope="colgroup"
 								>

@@ -58,7 +58,7 @@ function MemoryCitationsMenuItem({
 			>
 				<div className="min-w-0">
 					<p className="font-medium text-foreground">Memories cited</p>
-					<ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
+					<ul className="mt-1 list-disc space-y-1 ps-4 text-muted-foreground">
 						{citations.map((citation) => (
 							<li key={citation.id}>{citation.content}</li>
 						))}
@@ -236,7 +236,7 @@ export function MessageOverflowMenu({
 											{active ? (
 												<HugeiconsIcon
 													aria-hidden="true"
-													className="ml-auto size-3.5"
+													className="ms-auto size-3.5"
 													icon={Tick02Icon}
 												/>
 											) : null}

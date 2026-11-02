@@ -1,5 +1,6 @@
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import {
@@ -20,6 +21,12 @@ import {
 import { useFileTreeThemeStyles } from "@/src/hooks/useFileTreeThemeStyles.ts";
 import type { PluginFileHandler } from "@/src/lib/api/plugins.ts";
 import type { FileAnnotationNote } from "@/src/lib/file-annotations.ts";
+import {
+	fsCommandErrorMessage,
+	fsCommandErrorText,
+	logFsCommandError,
+	workspaceItemOpenErrorToast,
+} from "@/src/lib/fs-command-error.ts";
 import { useFileTreeSearchStore } from "@/src/store/useFileTreeSearchStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import { PluginFilePanel } from "../PluginFilePanel.tsx";
@@ -36,6 +43,7 @@ export function FileTreePanel({
 	folder?: string | null;
 }) {
 	const { canUseNativeShell } = useAppSurface();
+	const tl = useLiteralMessages();
 	const [paths, setPaths] = useState<readonly string[]>([]);
 	const scopeRef = useRef({ folder, native: canUseNativeShell });
 	const pendingMoveRef = useRef<typeof scopeRef.current | null>(null);
@@ -92,10 +100,15 @@ export function FileTreePanel({
 							destinationPath,
 						});
 					} catch (error) {
-						const message =
-							error instanceof Error ? error.message : String(error);
+						const reason = fsCommandErrorText(
+							error,
+							tl,
+							tl("Ryu couldn't move that item.")
+						);
 						refused.push(
-							items.length === 1 ? message : `${sourcePath}: ${message}`
+							items.length === 1
+								? reason
+								: tl("{path}: {reason}", { path: sourcePath, reason })
 						);
 					}
 				}
@@ -120,7 +133,7 @@ export function FileTreePanel({
 				}
 			}
 		},
-		[operationScope, canMoveItem]
+		[operationScope, canMoveItem, tl]
 	);
 	const moveItem = useCallback(
 		(sourcePath: string, destinationPath: string) =>
@@ -128,7 +141,10 @@ export function FileTreePanel({
 		[moveItems]
 	);
 	const [loading, setLoading] = useState(false);
-	const [listingError, setListingError] = useState<string | null>(null);
+	// The raw rejection, worded at render so the sentence follows the locale.
+	const [listingError, setListingError] = useState<{ error: unknown } | null>(
+		null
+	);
 	const [listingAttempt, setListingAttempt] = useState(0);
 	const [pluginFile, setPluginFile] = useState<{
 		path: string;
@@ -166,9 +182,8 @@ export function FileTreePanel({
 			.catch((error) => {
 				if (!cancelled) {
 					setPaths([]);
-					setListingError(
-						error instanceof Error ? error.message : String(error)
-					);
+					logFsCommandError(error);
+					setListingError({ error });
 				}
 			})
 			.finally(() => {
@@ -194,27 +209,6 @@ export function FileTreePanel({
 		[prefs, searchEnabled, canUseNativeShell]
 	);
 	const themeStyles = useFileTreeThemeStyles(prefs);
-	const treeThemeHost = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		const host = treeThemeHost.current;
-		if (!(host && themeStyles)) {
-			return;
-		}
-		const keys: string[] = [];
-		for (const [key, value] of Object.entries(themeStyles)) {
-			if (value === undefined || value === null) {
-				continue;
-			}
-			const property = key === "colorScheme" ? "color-scheme" : key;
-			host.style.setProperty(property, String(value));
-			keys.push(property);
-		}
-		return () => {
-			for (const key of keys) {
-				host.style.removeProperty(key);
-			}
-		};
-	}, [themeStyles]);
 	const availableEditorIds = useAvailableEditorIds(canUseNativeShell);
 	const availableEditors = useMemo(
 		() =>
@@ -263,7 +257,11 @@ export function FileTreePanel({
 		return (
 			<div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center text-xs">
 				<p className="text-muted-foreground" role="alert">
-					{listingError}
+					{fsCommandErrorMessage(
+						listingError.error,
+						tl,
+						tl("Ryu couldn't list the files in this project.")
+					)}
 				</p>
 				<Button
 					onClick={() => setListingAttempt((attempt) => attempt + 1)}
@@ -299,11 +297,10 @@ export function FileTreePanel({
 			editor,
 			path: viewerPath,
 			root: folder,
-		}).catch((error: unknown) =>
-			toast.error("Couldn't open that workspace item", {
-				description: error instanceof Error ? error.message : String(error),
-			})
-		);
+		}).catch((error: unknown) => {
+			const { title, description } = workspaceItemOpenErrorToast(error, tl);
+			toast.error(title, { description });
+		});
 	};
 
 	return (
@@ -384,13 +381,12 @@ export function FileTreePanel({
 			    constructor-time OPTIONS (not the whole prefs blob) so display options
 			    take effect — theme is applied as host CSS variables instead, and
 			    keying on it would throw away expansion/scroll state on every switch.
-			    The tree's shadow `:host` declares `color-scheme: light dark`, which
-			    would follow the OS; pin it to the app's light/dark mode instead (an
-			    explicit value: the CSS minifier rewrites `inherit` to `normal`). */}
+			    The theme styles (including the app's color scheme, which the
+			    tree's shadow `:host` would otherwise take from the OS) go on the
+			    tree host itself. */}
 			<div
-				className="min-h-0 flex-1 overflow-hidden p-1 [&_file-tree-container]:[color-scheme:light] dark:[&_file-tree-container]:[color-scheme:dark]"
+				className="min-h-0 flex-1 overflow-hidden p-1"
 				inert={viewerPath !== null}
-				ref={treeThemeHost}
 			>
 				<FileTreeView
 					availableEditors={availableEditors}
@@ -404,6 +400,7 @@ export function FileTreePanel({
 					options={options}
 					paths={paths}
 					searchRequest={searchRequest}
+					style={themeStyles}
 				/>
 			</div>
 		</div>

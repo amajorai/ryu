@@ -1,19 +1,19 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { Plus } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import {
-	MARKING_LABELS,
+	markingName,
 	type Passport,
 	type PassportCountry,
 	type PassportStamp,
-	plural,
 	type StampMarking,
 	stampDate,
 	UNASSIGNED_CODE,
-	UNASSIGNED_LABEL,
 	UNASSIGNED_STYLE,
+	unassignedLabel,
 } from "./passport-model.ts";
 import { CountryEmblem } from "./passport-stamp.tsx";
 
@@ -54,11 +54,6 @@ const MARKING_SHORT: Record<StampMarking, string> = {
 	processing: "Processing",
 };
 
-/** "ARRIVED – AWAITING ENTRY" as "Arrived – awaiting entry". */
-export function sentenceCase(label: string): string {
-	return `${label.slice(0, 1)}${label.slice(1).toLowerCase()}`;
-}
-
 function StampRow({
 	active,
 	onOpen,
@@ -81,7 +76,7 @@ function StampRow({
 					onClick={() => onOpen(stamp.thread.id)}
 					type="button"
 				>
-					{stamp.thread.title || "Untitled conversation"}
+					{stamp.thread.title || tr("Untitled conversation")}
 				</button>
 			</th>
 			<td className={cn(CELL, "whitespace-nowrap text-sm")}>
@@ -94,9 +89,7 @@ function StampRow({
 						)}
 					/>
 					<span className={cn("truncate", MARKING_TEXT[stamp.marking])}>
-						<span className="max-sm:hidden">
-							{sentenceCase(MARKING_LABELS[stamp.marking])}
-						</span>
+						<span className="max-sm:hidden">{markingName(stamp.marking)}</span>
 						<span className="sm:hidden">{MARKING_SHORT[stamp.marking]}</span>
 					</span>
 				</span>
@@ -138,10 +131,11 @@ function GroupHeading({
 					{emblem}
 					<span className="flex min-w-0 items-baseline gap-2">
 						<span className="truncate font-medium text-foreground text-sm">
-							{name}
+							<span data-ryu-i18n="off">{name}</span>
 						</span>
 						<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-							{code} · {plural(count, "stamp", "stamps")}
+							{code} ·{" "}
+							{tr("{count, plural, one {# stamp} other {# stamps}}", { count })}
 						</span>
 					</span>
 					{action ? <span className="ms-auto shrink-0">{action}</span> : null}
@@ -305,7 +299,7 @@ export function TravelMap({
 									/>
 								}
 								headingId={unassignedId}
-								name={UNASSIGNED_LABEL}
+								name={unassignedLabel()}
 							/>
 							{[...passport.unassigned].reverse().map((stamp) => (
 								<StampRow

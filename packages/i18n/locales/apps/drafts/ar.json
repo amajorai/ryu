@@ -1,0 +1,11 @@
+{
+  "Sending at a set time": "الإرسال في وقت محدد",
+  "Sending at {when}": "الإرسال في {when}",
+  "Waiting for agents to start, then finish": "في انتظار بدء الوكلاء ثم انتهائهم",
+  "Waiting for every agent to finish": "في انتظار انتهاء جميع الوكلاء",
+  "Waiting for fewer than {limit} runs": "في انتظار أن يقل عدد التشغيلات عن {limit}",
+  "Waiting for nothing to be running": "في انتظار ألا يكون هناك شيء قيد التشغيل",
+  "Waiting for {agentId} to drop under {belowPercent}% used": "في انتظار انخفاض استخدام {agentId} إلى أقل من {belowPercent}%",
+  "draft is already being sent": "المسودة قيد الإرسال بالفعل",
+  "no such draft": "لا توجد مسودة كهذه"
+}

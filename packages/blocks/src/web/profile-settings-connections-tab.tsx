@@ -110,7 +110,7 @@ export function ConnectionsTabPanel({
 									</>
 								}
 							>
-								<RowHint className="truncate pl-9">
+								<RowHint className="truncate ps-9">
 									{account ? "Connected" : provider.description}
 								</RowHint>
 							</SettingsItem>

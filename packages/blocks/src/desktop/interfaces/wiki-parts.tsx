@@ -66,6 +66,12 @@ export function routeHref(route: WikiRoute): string {
 export const LINK =
 	"rounded-[2px] text-primary decoration-1 underline-offset-2 outline-none hover:underline focus-visible:underline focus-visible:ring-2 focus-visible:ring-ring";
 
+const ENTITY_ROUTES: ReadonlySet<WikiRoute["kind"]> = new Set([
+	"agent",
+	"group",
+	"thread",
+]);
+
 /** An internal wiki link: a real anchor that navigates inside the wiki. */
 export function WikiLink({
 	bold,
@@ -96,6 +102,9 @@ export function WikiLink({
 				current && "text-foreground",
 				className
 			)}
+			// Agent, group and thread links carry their user-authored names,
+			// which the DOM localizer must not rewrite.
+			data-ryu-i18n={ENTITY_ROUTES.has(route.kind) ? "off" : undefined}
 			href={routeHref(route)}
 			onClick={onClick}
 		>

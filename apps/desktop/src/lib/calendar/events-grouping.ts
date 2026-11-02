@@ -76,7 +76,11 @@ export function buildRunStatusTimelineEntries(
 
 		const entry: RunStatusTimelineEntry = {
 			id: event.id,
-			label: `${event.jobName} · ${event.kind === "past" ? "Completed" : "Scheduled"} · ${runLabel}`,
+			label: tl("{jobName} · {status} · {runLabel}", {
+				jobName: event.jobName,
+				runLabel,
+				status: event.kind === "past" ? tl("Completed") : tl("Scheduled"),
+			}),
 			startAt,
 			status,
 		};

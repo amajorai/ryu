@@ -12,7 +12,34 @@
 // provider's page in the browser. See docs/subscription-cloud-sessions.md.
 
 import { ApiError, type ApiTarget, request } from "./client.ts";
+import {
+	bool,
+	invalid,
+	num,
+	oneOf,
+	optNum,
+	optStr,
+	PLAN_PROVIDERS,
+	type PlanProvider,
+	providerLink,
+	record,
+	str,
+} from "./cloud-task-wire.ts";
 import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
+
+export {
+	addPlanAccount,
+	clearPlanAccountCooldown,
+	fetchPlanAccounts,
+	fetchPlanSessions,
+	type PlanAccountView,
+	type PlanSession,
+	parseAccounts,
+	parseSessions,
+	removePlanAccount,
+	signInPlanAccount,
+} from "./cloud-task-plan-accounts.ts";
+export { PLAN_PROVIDERS, type PlanProvider } from "./cloud-task-wire.ts";
 
 export type CloudTaskBackendId =
 	| "ryu-box"
@@ -77,10 +104,6 @@ export interface CloudTaskEnvironmentLink {
 	codexEnvironmentId?: string;
 }
 
-export type PlanProvider = "anthropic" | "openai";
-
-export const PLAN_PROVIDERS: readonly PlanProvider[] = ["anthropic", "openai"];
-
 /** The CLI's own default sign-in on the node, which Ryu cannot remove. */
 export const DEFAULT_ACCOUNT_ID = "default";
 
@@ -108,34 +131,6 @@ export interface CloudTaskRoutingSettings {
 	environments: Record<string, CloudTaskEnvironmentLink>;
 }
 
-/** A plan account: the CLI's own sign-in, or a linked account with its own folder. */
-export interface PlanAccountView {
-	builtin: boolean;
-	cooldownSecondsRemaining: number | null;
-	createdAt: number | null;
-	id: string;
-	installed: boolean;
-	isDefault: boolean;
-	label: string;
-	provider: PlanProvider;
-	signIn: CloudTaskSignIn | null;
-	/** "Claude · work". */
-	tag: string;
-}
-
-/** A session in the combined list across accounts. */
-export interface PlanSession {
-	accountId: string;
-	conversationId: string | null;
-	externalId: string | null;
-	provider: PlanProvider;
-	status: string | null;
-	tag: string;
-	title: string | null;
-	updatedAt: number | null;
-	url: string | null;
-}
-
 export interface CloudTaskBackendsView {
 	backends: CloudTaskBackendView[];
 	/** Whether this caller is the node owner (only they may use its plans). */
@@ -150,6 +145,9 @@ export interface CloudTaskNotice {
 	accountId: string | null;
 	backend: CloudTaskBackendId;
 	code: string;
+	/** The sentence as a Core message (`{ message, args }`); null from an older Core. */
+	i18n: unknown;
+	/** The English sentence. */
 	message: string;
 }
 
@@ -183,56 +181,8 @@ export interface SubscriptionRunDiff {
 	truncated: boolean;
 }
 
-function invalid(): never {
-	throw new Error("Invalid cloud task backend response");
-}
-
-function record(value: unknown): Record<string, unknown> {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		invalid();
-	}
-	// SAFETY: a non-null, non-array object; every field is read as unknown and checked below.
-	return value as Record<string, unknown>;
-}
-
-function str(value: unknown): string {
-	return typeof value === "string" ? value : invalid();
-}
-
-function optStr(value: unknown): string | null {
-	return value === null || value === undefined ? null : str(value);
-}
-
-function num(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value)
-		? value
-		: invalid();
-}
-
-function optNum(value: unknown): number | null {
-	return value === null || value === undefined ? null : num(value);
-}
-
-function bool(value: unknown): boolean {
-	return typeof value === "boolean" ? value : invalid();
-}
-
-function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
-	const found = allowed.find((candidate) => candidate === value);
-	return found ?? invalid();
-}
-
 export function parseBackendId(value: unknown): CloudTaskBackendId {
 	return oneOf(value, CLOUD_TASK_BACKEND_IDS);
-}
-
-/** HTTPS links to the two provider sites only; anything else is dropped. */
-const PROVIDER_LINK =
-	/^https:\/\/(claude\.ai\/code|chatgpt\.com\/codex)\/[A-Za-z0-9_\-/?=&.]+$/;
-
-function providerLink(value: unknown): string | null {
-	const link = optStr(value);
-	return link && PROVIDER_LINK.test(link) ? link : null;
 }
 
 function parseFeatures(value: unknown): CloudTaskBackendFeatures {
@@ -308,56 +258,6 @@ export function parseRoutingSettings(value: unknown): CloudTaskRoutingSettings {
 	};
 }
 
-export function parseAccounts(value: unknown): PlanAccountView[] {
-	const list = record(value).accounts;
-	if (!Array.isArray(list)) {
-		invalid();
-	}
-	return list.map((entry) => {
-		const raw = record(entry);
-		return {
-			builtin: bool(raw.builtin),
-			cooldownSecondsRemaining: optNum(raw.cooldownSecondsRemaining),
-			createdAt: optNum(raw.createdAt),
-			id: str(raw.id),
-			installed: bool(raw.installed),
-			isDefault: bool(raw.isDefault),
-			label: str(raw.label),
-			provider: oneOf(raw.provider, PLAN_PROVIDERS),
-			signIn:
-				raw.signIn === null || raw.signIn === undefined
-					? null
-					: oneOf(raw.signIn, [
-							"subscription",
-							"other_method",
-							"signed_out",
-						] as const),
-			tag: str(raw.tag),
-		};
-	});
-}
-
-export function parseSessions(value: unknown): PlanSession[] {
-	const list = record(value).sessions;
-	if (!Array.isArray(list)) {
-		invalid();
-	}
-	return list.map((entry) => {
-		const raw = record(entry);
-		return {
-			accountId: str(raw.accountId),
-			conversationId: optStr(raw.conversationId),
-			externalId: optStr(raw.externalId),
-			provider: oneOf(raw.provider, PLAN_PROVIDERS),
-			status: optStr(raw.status),
-			tag: str(raw.tag),
-			title: optStr(raw.title),
-			updatedAt: optNum(raw.updatedAt),
-			url: providerLink(raw.url),
-		};
-	});
-}
-
 export function parseBackendsView(value: unknown): CloudTaskBackendsView {
 	const raw = record(value);
 	const backends = Array.isArray(raw.backends) ? raw.backends : invalid();
@@ -401,6 +301,7 @@ export function parseNotices(value: unknown): CloudTaskNotice[] {
 					accountId: optStr(notice.accountId),
 					backend: parseBackendId(notice.backend),
 					code: str(notice.code),
+					i18n: notice.i18n ?? null,
 					message: str(notice.message),
 				};
 			})
@@ -550,98 +451,4 @@ export async function fetchSubscriptionRunDiff(
 		gatewayJsonValueSchema
 	);
 	return parseSubscriptionRunDiff(raw);
-}
-
-const ACCOUNTS = `${BASE}/accounts`;
-
-const accountPath = (provider: PlanProvider, id: string, suffix = "") =>
-	`${ACCOUNTS}/${provider}/${encodeURIComponent(id)}${suffix}`;
-
-/** The owner's plan accounts. Null on an older Core without the route. */
-export async function fetchPlanAccounts(
-	target: ApiTarget,
-	signal?: AbortSignal
-): Promise<PlanAccountView[] | null> {
-	try {
-		const raw = await request<unknown>(
-			target,
-			ACCOUNTS,
-			{ signal },
-			gatewayJsonValueSchema
-		);
-		return parseAccounts(raw);
-	} catch (error) {
-		if (error instanceof ApiError && error.status === 404) {
-			return null;
-		}
-		throw error;
-	}
-}
-
-/** Link another account: Core makes its folder and starts the CLI's own sign-in. */
-export async function addPlanAccount(
-	target: ApiTarget,
-	provider: PlanProvider,
-	label: string
-): Promise<void> {
-	await request<unknown>(
-		target,
-		ACCOUNTS,
-		{ method: "POST", body: { provider, label } },
-		gatewayJsonValueSchema
-	);
-}
-
-export async function signInPlanAccount(
-	target: ApiTarget,
-	provider: PlanProvider,
-	id: string
-): Promise<void> {
-	await request<unknown>(
-		target,
-		accountPath(provider, id, "/sign-in"),
-		{ method: "POST" },
-		gatewayJsonValueSchema
-	);
-}
-
-/** Unlink an account. Deletes its folder and the CLI's sign-in in it. */
-export async function removePlanAccount(
-	target: ApiTarget,
-	provider: PlanProvider,
-	id: string
-): Promise<void> {
-	await request<unknown>(
-		target,
-		accountPath(provider, id),
-		{ method: "DELETE", body: { confirm: true } },
-		gatewayJsonValueSchema
-	);
-}
-
-export async function clearPlanAccountCooldown(
-	target: ApiTarget,
-	provider: PlanProvider,
-	id: string
-): Promise<void> {
-	await request<unknown>(
-		target,
-		accountPath(provider, id, "/cooldown"),
-		{ method: "DELETE" },
-		gatewayJsonValueSchema
-	);
-}
-
-/** Every plan session across the owner's accounts, tagged by account. */
-export async function fetchPlanSessions(
-	target: ApiTarget,
-	signal?: AbortSignal
-): Promise<PlanSession[]> {
-	const raw = await request<unknown>(
-		target,
-		`${BASE}/sessions`,
-		{ signal },
-		gatewayJsonValueSchema
-	);
-	return parseSessions(raw);
 }

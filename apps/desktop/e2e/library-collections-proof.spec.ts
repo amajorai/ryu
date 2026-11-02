@@ -7,6 +7,7 @@ type NativeTabOptions = Parameters<
 
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedRequest {
 	body: unknown;
@@ -48,10 +49,7 @@ const TEAM_ID = "library-collections-team";
 const TEAM_NAME = "Release Review Group";
 const RENAMED_TEAM = "Platform Readiness Group";
 const TEAM_DESCRIPTION = "Reviews release changes";
-const EVIDENCE_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 async function openLibrary(page: Page): Promise<void> {
 	const browserErrors: string[] = [];
@@ -145,11 +143,10 @@ async function openTeamMenu(page: Page, name: string): Promise<void> {
 async function slideDelete(page: Page, label: string): Promise<void> {
 	const slider = page.getByRole("slider", { name: label });
 	await slider.focus();
-	// CutToConfirm is a vertical blade: ArrowDown advances one of its five steps
-	// and ArrowRight is deliberately unbound (KEY_DELTAS in
-	// packages/ui/src/components/cut-to-confirm-config.ts).
+	// DestructiveConfirmDialog is a SlideCommit since a9565fe080 (#941):
+	// five ArrowRight presses (keyboardSteps={5}) commit it.
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowDown");
+		await slider.press("ArrowRight");
 	}
 }
 

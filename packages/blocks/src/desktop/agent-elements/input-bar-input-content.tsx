@@ -154,7 +154,7 @@ export function ComposerInputContent({
 						data-slot="composer-placeholder-suggestion"
 					>
 						{ghostSuggestion}
-						<span className="ml-2 rounded-lg border border-border px-1.5 py-0.5 text-xs">
+						<span className="ms-2 rounded-lg border border-border px-1.5 py-0.5 text-xs">
 							Tab
 						</span>
 					</div>
@@ -164,7 +164,7 @@ export function ComposerInputContent({
 						{composerSuggestions.map((item, index) => (
 							<button
 								className={cn(
-									"block h-8 w-full rounded-lg px-2 text-left text-sm",
+									"block h-8 w-full rounded-lg px-2 text-start text-sm",
 									index === suggestionIndex && "bg-accent"
 								)}
 								key={item.id}
@@ -248,7 +248,7 @@ export function ComposerEditorSlot({
 				isCompactSingleRow
 					? "flex min-h-8 min-w-0 flex-1 items-center"
 					: isExpanded
-						? "min-h-[320px] pt-4 pr-14 pb-3 pl-5"
+						? "min-h-[320px] ps-5 pe-14 pt-4 pb-3"
 						: "flex min-h-16 flex-col justify-center px-3 py-2"
 			)}
 		>

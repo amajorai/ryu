@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -15,12 +16,16 @@ import {
 } from "./wiki-model-articles.ts";
 import {
 	agentLink,
+	countWord,
+	escapeValues,
 	groupLink,
 	joinSegments,
-	plural,
+	richSegments,
+	segmentsText,
 	text,
 	threadLink,
 	type WikiSegment,
+	wikiCount,
 	wikiDate,
 } from "./wiki-model-prose.ts";
 import {
@@ -67,20 +72,46 @@ export function newsItem(
 ): WikiSegment[] {
 	const lead = wikiAgent(snapshot, thread.agentIds[0]);
 	const title = threadLink(thread, true);
-	const who = lead ? agentLink(lead) : text("An agent");
+	const who = lead ? agentLink(lead) : text(tr("An agent"));
+	const values = escapeValues({ title: title.text, who: who.text });
+	const tags = { title: () => [title], who: () => [who] };
 	switch (threadStatus(thread)) {
 		case "working":
-			return [who, text(" is working on "), title, text(".")];
+			return richSegments(
+				tr("<who>{who}</who> is working on <title>{title}</title>.", values),
+				tags
+			);
 		case "attention":
-			return [text("A run stopped in "), title, text(" and needs attention.")];
+			return richSegments(
+				tr(
+					"A run stopped in <title>{title}</title> and needs attention.",
+					values
+				),
+				tags
+			);
 		case "your-turn":
-			return [who, text(" replied in "), title, text(".")];
+			return richSegments(
+				tr("<who>{who}</who> replied in <title>{title}</title>.", values),
+				tags
+			);
 		case "waiting":
 			return lead
-				? [text("You asked "), who, text(" a follow-up in "), title, text(".")]
-				: [text("You posted in "), title, text(".")];
+				? richSegments(
+						tr(
+							"You asked <who>{who}</who> a follow-up in <title>{title}</title>.",
+							values
+						),
+						tags
+					)
+				: richSegments(
+						tr("You posted in <title>{title}</title>.", values),
+						tags
+					);
 		default:
-			return [title, text(" was opened.")];
+			return richSegments(
+				tr("<title>{title}</title> was opened.", values),
+				tags
+			);
 	}
 }
 
@@ -95,48 +126,76 @@ export function didYouKnow(snapshot: InterfaceSnapshot): WikiSegment[][] {
 				snapshot.threads.filter((thread) => thread.agentIds.includes(agent.id))
 					.length === featured.threads.length
 		);
-		facts.push([
-			text("... that "),
-			agentLink(featured.agent),
-			text(
-				` has taken part in ${plural(featured.threads.length, "thread")}, ${tied ? "tied for the most of any agent" : "more than any other agent"}?`
-			),
-		]);
+		const agent = agentLink(featured.agent);
+		facts.push(
+			richSegments(
+				tr(
+					"{tied, select, yes {... that <agent>{agent}</agent> has taken part in {threads}, tied for the most of any agent?} other {... that <agent>{agent}</agent> has taken part in {threads}, more than any other agent?}}",
+					escapeValues({
+						agent: agent.text,
+						threads: wikiCount(featured.threads.length, "thread"),
+						tied: tied ? "yes" : "no",
+					})
+				),
+				{ agent: () => [agent] }
+			)
+		);
 	}
 	const longest = [...snapshot.threads].sort(
 		(a, b) => b.messageCount - a.messageCount || byRecency(a, b)
 	)[0];
 	if (longest && longest.messageCount > 1) {
-		facts.push([
-			text("... that the longest thread, "),
-			threadLink(longest),
-			text(`, runs to ${plural(longest.messageCount, "message")}?`),
-		]);
+		const thread = threadLink(longest);
+		facts.push(
+			richSegments(
+				tr(
+					"... that the longest thread, <thread>{thread}</thread>, runs to {messages}?",
+					escapeValues({
+						messages: wikiCount(longest.messageCount, "message"),
+						thread: thread.text,
+					})
+				),
+				{ thread: () => [thread] }
+			)
+		);
 	}
 	const largest = [...snapshot.groups].sort(
 		(a, b) => b.memberAgentIds.length - a.memberAgentIds.length || byName(a, b)
 	)[0];
 	if (largest && largest.memberAgentIds.length > 0) {
-		facts.push([
-			text("... that the "),
-			groupLink(largest),
-			text(
-				` ${largest.kind} has ${plural(largest.memberAgentIds.length, "member")}?`
-			),
-		]);
+		const group = groupLink(largest);
+		facts.push(
+			richSegments(
+				tr(
+					"{kind, select, team {... that the <group>{group}</group> team has {members}?} other {... that the <group>{group}</group> project has {members}?}}",
+					escapeValues({
+						group: group.text,
+						kind: largest.kind,
+						members: wikiCount(largest.memberAgentIds.length, "member"),
+					})
+				),
+				{ group: () => [group] }
+			)
+		);
 	}
 	const counts = statusCounts(snapshot.threads);
 	if (counts.working > 0) {
 		facts.push([
 			text(
-				`... that ${plural(counts.working, "run")} ${counts.working === 1 ? "is" : "are"} live right now?`
+				tr(
+					"{count, plural, one {... that {n} run is live right now?} other {... that {n} runs are live right now?}}",
+					{ count: counts.working, n: countWord(counts.working) }
+				)
 			),
 		]);
 	}
 	if (counts.attention > 0) {
 		facts.push([
 			text(
-				`... that ${plural(counts.attention, "thread")} ${counts.attention === 1 ? "needs" : "need"} attention after a stopped run?`
+				tr(
+					"{count, plural, one {... that {n} thread needs attention after a stopped run?} other {... that {n} threads need attention after a stopped run?}}",
+					{ count: counts.attention, n: countWord(counts.attention) }
+				)
 			),
 		]);
 	}
@@ -145,13 +204,19 @@ export function didYouKnow(snapshot: InterfaceSnapshot): WikiSegment[][] {
 			!snapshot.threads.some((thread) => thread.agentIds.includes(agent.id))
 	);
 	if (idle.length > 0 && idle.length < snapshot.agents.length) {
-		facts.push([
-			text("... that "),
-			...joinSegments(idle.slice(0, 3).map(agentLink)),
-			text(
-				` ${idle.length === 1 ? "has" : "have"} not taken part in a thread yet?`
-			),
-		]);
+		const agents = joinSegments(idle.slice(0, 3).map(agentLink));
+		facts.push(
+			richSegments(
+				tr(
+					"{count, plural, one {... that <agents>{agents}</agents> has not taken part in a thread yet?} other {... that <agents>{agents}</agents> have not taken part in a thread yet?}}",
+					escapeValues({
+						agents: segmentsText(agents),
+						count: Math.min(idle.length, 3),
+					})
+				),
+				{ agents: () => agents }
+			)
+		);
 	}
 	return facts;
 }
@@ -221,7 +286,7 @@ export function wikiEntries(
 			thread.agentIds.includes(agent.id)
 		);
 		entries.push({
-			description: agent.description.trim() || "Agent",
+			description: agent.description.trim() || tr("Agent"),
 			id: agent.id,
 			kind: "agent",
 			route: { id: agent.id, kind: "agent" },
@@ -235,9 +300,14 @@ export function wikiEntries(
 				? thread.teamId === group.id
 				: thread.projectId === group.id
 		);
-		const noun = group.kind === "team" ? "Team" : "Project";
 		entries.push({
-			description: `${noun} of ${plural(group.memberAgentIds.length, "agent")}`,
+			description: tr(
+				"{kind, select, team {Team of {agents}} other {Project of {agents}}}",
+				{
+					agents: wikiCount(group.memberAgentIds.length, "agent"),
+					kind: group.kind,
+				}
+			),
 			id: group.id,
 			kind: group.kind,
 			route: { id: group.id, kind: "group" },

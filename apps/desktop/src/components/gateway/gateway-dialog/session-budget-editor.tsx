@@ -180,7 +180,7 @@ export function SessionBudgetEditor({
 									).map(([val, label]) => (
 										<SelectItem key={val} value={val}>
 											<span className="font-medium">{label}</span>
-											<span className="ml-1 text-muted-foreground text-xs">
+											<span className="ms-1 text-muted-foreground text-xs">
 												— {ACTION_DESCRIPTIONS[val]}
 											</span>
 										</SelectItem>

@@ -43,17 +43,26 @@ export interface MindmapCanvasProps {
 	treeRef: Ref<HTMLDivElement>;
 }
 
-function foldLabel(node: MindmapNode, collapsed: boolean): string | null {
+function foldLabel(
+	node: MindmapNode,
+	collapsed: boolean,
+	tl: LiteralMessage
+): string | null {
 	if (node.childIds.length === 0 || node.kind === "root") {
 		return null;
 	}
-	const what =
-		node.threadCount > 0
-			? `${node.threadCount} thread${node.threadCount === 1 ? "" : "s"}`
-			: `${node.childIds.length} item${node.childIds.length === 1 ? "" : "s"}`;
-	return collapsed
-		? `Expand ${node.label} (${what})`
-		: `Collapse ${node.label}`;
+	if (!collapsed) {
+		return tl("Collapse {label}", { label: node.label });
+	}
+	return node.threadCount > 0
+		? tl(
+				"{count, plural, one {Expand {label} (# thread)} other {Expand {label} (# threads)}}",
+				{ count: node.threadCount, label: node.label }
+			)
+		: tl(
+				"{count, plural, one {Expand {label} (# item)} other {Expand {label} (# items)}}",
+				{ count: node.childIds.length, label: node.label }
+			);
 }
 
 function startLabel(node: MindmapNode, tl: LiteralMessage): string {
@@ -303,7 +312,7 @@ export function MindmapCanvas({
 							<MindmapHandles
 								animate={animate}
 								collapsed={isCollapsed && node.childIds.length > 0}
-								foldLabel={foldLabel(node, isCollapsed)}
+								foldLabel={foldLabel(node, isCollapsed, tl)}
 								key={id}
 								node={node}
 								onHover={events.onHover}

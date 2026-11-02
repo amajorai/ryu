@@ -169,6 +169,11 @@ pub(super) async fn apply_caller_policy(
             return;
         };
         (token.to_owned(), base)
+    } else if forwarded && ctx.resolved_policy.is_some() {
+        // A hosted Box key already carries its org's policy with the Box
+        // member's layer applied by the control plane. The fleet's own key
+        // and snapshot belong to another org and must never replace it.
+        return;
     } else if forwarded {
         let Some(token) = cache.static_key() else {
             return;
@@ -194,6 +199,34 @@ pub(super) fn parse_agent_provider_access(raw: &str) -> std::collections::HashSe
         .filter(|id| ryu_gw_credentials::is_provider_access_id(id))
         .map(str::to_owned)
         .collect()
+}
+
+/// Verify a `gws1` scoped inference key under the `local-core` forwarder key.
+/// The request may name only the agent, user and session the scope was issued
+/// for.
+pub(super) fn verify_scoped_inference(
+    api_keys: &[ApiKeyConfig],
+    key: &str,
+    agent_id: Option<&str>,
+    user_id: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<ryu_gw_credentials::InferenceScope, GatewayError> {
+    let scope = api_keys
+        .iter()
+        .filter(|entry| entry.name == "local-core" && entry.trusted_forwarder)
+        .find_map(|entry| ryu_gw_credentials::InferenceScope::verify(key, &entry.key).ok())
+        .ok_or_else(|| {
+            GatewayError::Unauthorized("Invalid scoped inference credential".to_owned())
+        })?;
+    if agent_id.is_some_and(|id| id != scope.agent_id)
+        || user_id.is_some_and(|id| Some(id) != scope.user_id.as_deref())
+        || session_id.is_some_and(|id| Some(id) != scope.session_id.as_deref())
+    {
+        return Err(GatewayError::Unauthorized(
+            "Inference identity does not match the issued scope".to_owned(),
+        ));
+    }
+    Ok(scope)
 }
 
 /// Combine a header-supplied provider access with a signed scope's list. Either

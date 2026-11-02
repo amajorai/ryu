@@ -190,7 +190,8 @@ export function ChatsSection({
 							overflow={{
 								getSearchText: chatSearchText,
 								items: groupPaged.items,
-								label: `${label.toLowerCase()} chats`,
+								label:
+									group === "private" ? tl("private chats") : tl("team chats"),
 								renderList: (list) => (
 									<ChatRowList conversations={list} handlers={handlers} />
 								),

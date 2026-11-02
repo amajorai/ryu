@@ -115,9 +115,14 @@ function emit(channel: string, getWindow: () => BrowserWindow | null): void {
  * Listeners attach unconditionally (harmless in dev), but every trigger is
  * guarded by `app.isPackaged`: an unpackaged app has no update feed and
  * `checkForUpdates*` throws ("feed not provided"). The shared `auto-updates`
- * pref decides behaviour: enabled → `checkForUpdatesAndNotify()` (auto-download)
+ * pref decides behaviour: enabled → `autoDownload = true` plus `checkForUpdates()`
  * followed by a silent install; disabled → `autoDownload = false` plus
  * `checkForUpdates()` to merely surface availability without downloading.
+ *
+ * Never call `checkForUpdatesAndNotify()`: it posts electron-updater's built-in
+ * English OS notification ("A new update is ready to install"), which the
+ * main process cannot localize and which is redundant because Island installs
+ * and relaunches silently.
  */
 export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
 	autoUpdater.on("update-available", (info: { version?: string }) => {
@@ -136,8 +141,8 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
 		};
 		emit(IPC.update.downloaded, getWindow);
 
-		// `checkForUpdatesAndNotify()` downloads but does not install. Complete the
-		// automatic path here, after the signed update is ready. Read the shared
+		// `checkForUpdates()` with `autoDownload` downloads but does not install.
+		// Complete the automatic path here, after the signed update is ready. Read the shared
 		// preference again so a user who turns automatic updates off while a download
 		// is in flight keeps control of the restart.
 		void getAutoUpdateEnabled()
@@ -156,11 +161,7 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
 
 	getAutoUpdateEnabled()
 		.then((enabled) => {
-			if (enabled) {
-				autoUpdater.autoDownload = true;
-				return autoUpdater.checkForUpdatesAndNotify();
-			}
-			autoUpdater.autoDownload = false;
+			autoUpdater.autoDownload = enabled;
 			return autoUpdater.checkForUpdates();
 		})
 		.catch(() => {

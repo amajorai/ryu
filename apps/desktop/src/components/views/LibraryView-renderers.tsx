@@ -38,7 +38,7 @@ function RowButton({
 	return (
 		<button
 			className={cn(
-				"w-full rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+				"w-full rounded-lg text-start outline-none focus-visible:ring-2 focus-visible:ring-ring",
 				className
 			)}
 			onClick={onClick}
@@ -95,7 +95,7 @@ export function ListRenderer({
 					)}
 					<RowCopy item={row.item} />
 					{row.item.accessory ? (
-						<span className="ml-auto shrink-0 text-muted-foreground/70 text-xs">
+						<span className="ms-auto shrink-0 text-muted-foreground/70 text-xs">
 							{row.item.accessory}
 						</span>
 					) : null}
@@ -124,7 +124,7 @@ export function TableRenderer({
 						<TableRow key={row.item.id} onClick={() => onOpen(row)}>
 							<TableCell presentation="row-header">
 								<button
-									className="rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+									className="rounded-lg text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
 									onClick={(event) => {
 										event.stopPropagation();
 										onOpen(row);
@@ -232,7 +232,7 @@ export function TimelineRenderer({
 	return (
 		<div
 			aria-label="Library timeline"
-			className="relative ml-3 border-l pl-5"
+			className="relative ms-3 border-s ps-5"
 			role="list"
 		>
 			{rows.map((row) => (
@@ -243,7 +243,7 @@ export function TimelineRenderer({
 				>
 					<span
 						aria-hidden="true"
-						className="absolute top-4 -left-[1.65rem] size-2 rounded-full bg-primary"
+						className="absolute -start-[1.65rem] top-4 size-2 rounded-full bg-primary"
 					/>
 					<RowCopy item={row.item} />
 				</RowButton>

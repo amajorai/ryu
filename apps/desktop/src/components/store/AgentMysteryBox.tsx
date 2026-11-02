@@ -32,6 +32,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -358,7 +359,7 @@ export function AgentMysteryBox({
 						<>
 							<Button onClick={nextBox} variant="ghost">
 								Skip
-								<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
+								<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
 							</Button>
 							<Button onClick={() => onViewDetails(prize)} variant="ghost">
 								View details

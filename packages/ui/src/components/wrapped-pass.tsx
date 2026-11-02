@@ -4,10 +4,15 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { memberPassName } from "@ryu/ui/lib/pass-share.ts";
 import { USAGE_STREAK_HINT } from "@ryu/ui/lib/usage-streak.ts";
+import { useFormatLocale } from "../hooks/use-format-locale.ts";
 
 import { EntityAvatar } from "./entity-avatar.tsx";
 import { Logo } from "./logo.tsx";
 import { PassCardShell, type PassEdge } from "./pass-card-shell.tsx";
+import {
+	formatPassDays,
+	formatPassDecimalHours,
+} from "./pass-studio/labels.ts";
 import { AutoFitText, FIT_STEP_PX } from "./waitlist-pass.tsx";
 
 /**
@@ -126,6 +131,7 @@ export function WrappedPass({
 	still = false,
 }: WrappedPassProps) {
 	const tl = useLiteralMessages();
+	const formatLocale = useFormatLocale();
 	// Seeded off the NAME so the card is the member's own colour and two people
 	// never hold the same one. Falls back to a stable literal rather than a fresh
 	// value per render, which would rehash the backdrop on every paint for nothing.
@@ -203,15 +209,18 @@ export function WrappedPass({
 				    hidden, exactly as the referral pass prints "0 joined": it is
 				    the honest starting state. */}
 				<div className="grid grid-cols-2 gap-3">
-					<WrappedStat label="Tokens" value={formatCount(totalTokens) ?? "—"} />
+					<WrappedStat
+						label="Tokens"
+						value={formatCount(totalTokens, formatLocale) ?? "—"}
+					/>
 					<WrappedStat
 						label="Agent hours"
-						value={`${agentHours.toFixed(1)}h`}
+						value={formatPassDecimalHours(agentHours, formatLocale)}
 					/>
 					<WrappedStat
 						hint={USAGE_STREAK_HINT}
 						label="Best streak"
-						value={`${streakLongest}d`}
+						value={formatPassDays(streakLongest, formatLocale)}
 					/>
 					<WrappedStat label="Top model" value={topModel?.trim() || "Ryu"} />
 				</div>

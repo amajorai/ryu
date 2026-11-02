@@ -1,8 +1,9 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { Pin } from "lucide-react";
 import type { ReactNode } from "react";
-import { type ForumTopic, fullDate, plural } from "./forum-model.ts";
+import { type ForumTopic, fullDate } from "./forum-model.ts";
 import {
 	CategoryBadge,
 	PosterList,
@@ -52,6 +53,7 @@ function TopicRow({
 	tabStop: boolean;
 	topic: ForumTopic;
 }) {
+	const tl = useLiteralMessages();
 	const { thread } = topic;
 	const unread = topic.status === "your-turn";
 	return (
@@ -64,7 +66,7 @@ function TopicRow({
 			data-thread-id={thread.id}
 			ref={(element) => rowRef(thread.id, element)}
 		>
-			<td className="py-3 pr-2 pl-3 align-middle">
+			<td className="py-3 ps-3 pe-2 align-middle">
 				<div className="flex min-w-0 items-center gap-2">
 					{thread.pinned ? (
 						<Pin
@@ -76,7 +78,7 @@ function TopicRow({
 					) : null}
 					<button
 						className={cn(
-							"min-w-0 truncate rounded-sm text-left text-[15px] leading-5 outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-ring/50 in-data-selected:focus-visible:after:ring-0 focus-visible:after:ring-inset",
+							"min-w-0 truncate rounded-sm text-start text-[15px] leading-5 outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-ring/50 in-data-selected:focus-visible:after:ring-0 focus-visible:after:ring-inset",
 							unread
 								? "font-semibold text-foreground"
 								: "font-medium text-foreground"
@@ -97,11 +99,16 @@ function TopicRow({
 					/>
 					<TopicStatusNote topic={topic} />
 					<span className="@min-[720px]:hidden text-muted-foreground text-xs tabular-nums leading-4">
-						{plural(topic.replies, "reply", "replies")}
+						{tl("{count, plural, one {# reply} other {# replies}}", {
+							count: topic.replies,
+						})}
 					</span>
 				</div>
 				{thread.pinned && thread.lastMessage ? (
-					<p className="mt-1.5 line-clamp-2 max-w-[60ch] text-muted-foreground text-sm leading-5">
+					<p
+						className="mt-1.5 line-clamp-2 max-w-[60ch] text-muted-foreground text-sm leading-5"
+						data-ryu-i18n="off"
+					>
 						{thread.lastMessage}
 					</p>
 				) : null}
@@ -111,7 +118,7 @@ function TopicRow({
 			</td>
 			<td className={cn(COL_REPLIES, NUM_CELL)}>{topic.replies}</td>
 			<td className={cn(COL_VIEWS, NUM_CELL)}>{topic.views}</td>
-			<td className={cn(NUM_CELL, "pr-3")}>
+			<td className={cn(NUM_CELL, "pe-3")}>
 				<time dateTime={thread.updatedAt} title={fullDate(thread.updatedAt)}>
 					{compactAge(thread.updatedAt, now)}
 				</time>
@@ -148,7 +155,7 @@ export function TopicTable({
 				</colgroup>
 				<thead>
 					<tr className="border-border border-b">
-						<th className={cn(HEAD_CELL, "pl-3 text-left")} scope="col">
+						<th className={cn(HEAD_CELL, "ps-3 text-start")} scope="col">
 							Topic
 						</th>
 						<th className={cn(HEAD_CELL, COL_POSTERS)} scope="col">
@@ -160,7 +167,7 @@ export function TopicTable({
 						<th className={cn(HEAD_CELL, COL_VIEWS)} scope="col">
 							Views
 						</th>
-						<th className={cn(HEAD_CELL, "pr-3")} scope="col">
+						<th className={cn(HEAD_CELL, "pe-3")} scope="col">
 							Activity
 						</th>
 					</tr>

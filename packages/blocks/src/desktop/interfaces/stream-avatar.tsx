@@ -54,15 +54,15 @@ const CLUSTER: Record<
 	1 | 2 | 3,
 	{ left: string; size: StreamAvatarSize; top: string }[]
 > = {
-	1: [{ left: "left-2", size: 20, top: "top-2" }],
+	1: [{ left: "start-2", size: 20, top: "top-2" }],
 	2: [
-		{ left: "left-0.5", size: 20, top: "top-2" },
-		{ left: "left-3.5", size: 20, top: "top-2" },
+		{ left: "start-0.5", size: 20, top: "top-2" },
+		{ left: "start-3.5", size: 20, top: "top-2" },
 	],
 	3: [
-		{ left: "left-0", size: 18, top: "top-1" },
-		{ left: "left-5", size: 14, top: "top-0" },
-		{ left: "left-4.5", size: 12, top: "top-5.5" },
+		{ left: "start-0", size: 18, top: "top-1" },
+		{ left: "start-5", size: 14, top: "top-0" },
+		{ left: "start-4.5", size: 12, top: "top-5.5" },
 	],
 };
 

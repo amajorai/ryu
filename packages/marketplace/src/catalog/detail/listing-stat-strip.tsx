@@ -68,7 +68,7 @@ export function ListingStatStrip({ items }: { items: ListingStat[] }) {
 						</>
 					);
 					const className =
-						"flex min-w-[7.5rem] flex-1 flex-col items-start gap-0.5 overflow-hidden text-left";
+						"flex min-w-[7.5rem] flex-1 flex-col items-start gap-0.5 overflow-hidden text-start";
 					return stat.onClick ? (
 						<button
 							className={cn(

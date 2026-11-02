@@ -46,6 +46,9 @@ pub struct MockHost {
     pub merged: Option<Value>,
     /// Count of `reload_skills` calls — the tell that a skill was activated.
     pub reloaded: AtomicUsize,
+    /// Every `(system, user)` prompt pair `run_side_model` received, in order
+    /// (shared, so a test can inspect what the judge or synthesizer was sent).
+    pub side_inputs: std::sync::Arc<Mutex<Vec<(String, String)>>>,
     pub default_prm: String,
     pub default_synth: String,
 }
@@ -67,6 +70,7 @@ impl MockHost {
             dispatched: std::sync::Arc::new(Mutex::new(None)),
             merged: None,
             reloaded: AtomicUsize::new(0),
+            side_inputs: std::sync::Arc::new(Mutex::new(Vec::new())),
             default_prm: "default-prm-model".to_string(),
             default_synth: "default-synth-model".to_string(),
         }
@@ -174,8 +178,11 @@ impl LearningHost for MockHost {
         _model: &str,
         _effort: &str,
         system: &str,
-        _user: &str,
+        user: &str,
     ) -> Result<String, String> {
+        if let Ok(mut inputs) = self.side_inputs.lock() {
+            inputs.push((system.to_string(), user.to_string()));
+        }
         if self.side_err {
             return Err("side model unavailable".to_string());
         }

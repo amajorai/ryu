@@ -42,7 +42,7 @@ function ContextSection({
 					aria-controls={contentId}
 					aria-expanded={open}
 					className={cn(
-						"flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg text-left text-sm outline-none",
+						"flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg text-start text-sm outline-none",
 						"focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					)}
 					disabled={item.disabled}

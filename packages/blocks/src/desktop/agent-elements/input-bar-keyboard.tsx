@@ -316,7 +316,7 @@ export function useInputBarKeyboard({
 					<span className="font-medium text-primary" key={`${index}-${token}`}>
 						<HugeiconsIcon
 							aria-hidden="true"
-							className="mr-1 inline-flex size-3.5 align-[-2px]"
+							className="me-1 inline-flex size-3.5 align-[-2px]"
 							icon={Globe02Icon}
 						/>
 						{token}

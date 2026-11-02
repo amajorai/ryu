@@ -13,6 +13,7 @@ import {
 	buildGlanceFlow,
 	GLANCE_AGENT_STATE_LABELS,
 	type GlanceFlowBlob,
+	glanceAgentStateLabel,
 	glanceThreadTitle,
 	glanceWorkingLine,
 } from "./glance-model.ts";
@@ -130,11 +131,11 @@ export function GlanceFlowFace({
 										<button
 											aria-label={tl("Open {title}, {name}, {state}", {
 												name: agent.name,
-												state: GLANCE_AGENT_STATE_LABELS[state],
+												state: glanceAgentStateLabel(state),
 												title: glanceThreadTitle(thread),
 											})}
 											className={cn(
-												"corner-squircle -mx-[2.4cqw] grid w-[calc(100%+4.8cqw)] min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-x-[1.8cqw] rounded-[2.4cqw] px-[2.4cqw] py-[1.2cqw] text-left outline-none transition-colors hover:bg-foreground/[0.06] focus-visible:ring-2 focus-visible:ring-ring",
+												"corner-squircle -mx-[2.4cqw] grid w-[calc(100%+4.8cqw)] min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-x-[1.8cqw] rounded-[2.4cqw] px-[2.4cqw] py-[1.2cqw] text-start outline-none transition-colors hover:bg-foreground/[0.06] focus-visible:ring-2 focus-visible:ring-ring",
 												GLANCE_TYPE.body
 											)}
 											onClick={() => onOpenThread(thread.id)}
@@ -144,7 +145,10 @@ export function GlanceFlowFace({
 												className="-translate-y-[0.15em]"
 												state={state}
 											/>
-											<span className="font-semibold text-foreground">
+											<span
+												className="font-semibold text-foreground"
+												data-ryu-i18n="off"
+											>
 												{agent.name}
 											</span>
 											<span className="truncate text-foreground/75">
@@ -154,7 +158,9 @@ export function GlanceFlowFace({
 														{" · "}
 													</span>
 												) : null}
-												{glanceThreadTitle(thread)}
+												<span data-ryu-i18n="off">
+													{glanceThreadTitle(thread)}
+												</span>
 											</span>
 										</button>
 									</li>

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -30,7 +31,7 @@ import {
 export const LIVE_TILE_ATTRIBUTE = "data-live-tile";
 
 /**
- * The reference's thumbnail hover: the frame lifts up and to the right and
+ * The reference's thumbnail hover: the frame lifts up and toward the inline end and
  * the accent shows beneath it as an extruded edge. Keyboard focus does the
  * same; reduced motion keeps the frame still and only shows the edge.
  */
@@ -43,13 +44,13 @@ function Extrude({ children }: { children: ReactNode }) {
 			/>
 			<span
 				aria-hidden="true"
-				className="absolute -top-1.5 left-0 size-1.5 origin-bottom-left scale-0 bg-primary transition-transform duration-100 ease-out [clip-path:polygon(0_100%,100%_0,100%_100%)] group-hover/thumb:scale-100 group-has-focus-visible/thumb:scale-100 motion-reduce:hidden"
+				className="absolute start-0 -top-1.5 size-1.5 origin-bottom-left scale-0 bg-primary transition-transform duration-100 ease-out [clip-path:polygon(0_100%,100%_0,100%_100%)] group-hover/thumb:scale-100 group-has-focus-visible/thumb:scale-100 motion-reduce:hidden rtl:origin-bottom-right rtl:[clip-path:polygon(100%_100%,0_0,0_100%)]"
 			/>
 			<span
 				aria-hidden="true"
-				className="absolute -right-1.5 bottom-0 size-1.5 origin-top-left scale-0 bg-primary transition-transform duration-100 ease-out [clip-path:polygon(0_0,100%_0,0_100%)] group-hover/thumb:scale-100 group-has-focus-visible/thumb:scale-100 motion-reduce:hidden"
+				className="absolute -end-1.5 bottom-0 size-1.5 origin-top-left scale-0 bg-primary transition-transform duration-100 ease-out [clip-path:polygon(0_0,100%_0,0_100%)] group-hover/thumb:scale-100 group-has-focus-visible/thumb:scale-100 motion-reduce:hidden rtl:origin-top-right rtl:[clip-path:polygon(100%_0,0_0,100%_100%)]"
 			/>
-			<div className="motion-reduce:group-hover/thumb:translate-0 motion-reduce:group-has-focus-visible/thumb:translate-0 relative transition-transform duration-100 ease-out group-hover/thumb:translate-x-1.5 group-hover/thumb:-translate-y-1.5 group-has-focus-visible/thumb:translate-x-1.5 group-has-focus-visible/thumb:-translate-y-1.5 motion-reduce:transition-none">
+			<div className="motion-reduce:group-hover/thumb:translate-0 motion-reduce:group-has-focus-visible/thumb:translate-0 rtl:motion-reduce:group-hover/thumb:translate-0 rtl:motion-reduce:group-has-focus-visible/thumb:translate-0 relative transition-transform duration-100 ease-out group-hover/thumb:translate-x-1.5 group-hover/thumb:-translate-y-1.5 group-has-focus-visible/thumb:translate-x-1.5 group-has-focus-visible/thumb:-translate-y-1.5 motion-reduce:transition-none rtl:group-has-focus-visible/thumb:-translate-x-1.5 rtl:group-hover/thumb:-translate-x-1.5">
 				{children}
 			</div>
 		</div>
@@ -109,17 +110,17 @@ export const LiveTile = memo(function LiveTileImpl({
 					{...{ [LIVE_TILE_ATTRIBUTE]: tileId }}
 				>
 					<LiveScreen agent={agent} dim={!thread} spec={spec}>
-						<span className="absolute top-2 left-2 flex gap-1">
+						<span className="absolute start-2 top-2 flex gap-1">
 							{live ? <LiveBadge /> : null}
 							{thread ? null : <LiveChip>Offline</LiveChip>}
 							{current && !live ? <LiveChip>Now playing</LiveChip> : null}
 						</span>
 						{thread && live ? (
 							<>
-								<LiveChip className="absolute bottom-2 left-2">
+								<LiveChip className="absolute start-2 bottom-2">
 									<LiveUptime since={thread.updatedAt} />
 								</LiveChip>
-								<LiveChip className="absolute right-2 bottom-2 gap-1">
+								<LiveChip className="absolute end-2 bottom-2 gap-1">
 									<Users aria-hidden="true" className="size-3.5" />
 									{liveParticipants(thread)}
 								</LiveChip>
@@ -127,10 +128,10 @@ export const LiveTile = memo(function LiveTileImpl({
 						) : null}
 						{thread && !live ? (
 							<>
-								<LiveChip className="absolute bottom-2 left-2">
+								<LiveChip className="absolute start-2 bottom-2">
 									{liveMessages(thread.messageCount)}
 								</LiveChip>
-								<LiveChip className="absolute right-2 bottom-2">
+								<LiveChip className="absolute end-2 bottom-2">
 									{liveAgo(thread.updatedAt, now)}
 								</LiveChip>
 							</>
@@ -142,7 +143,8 @@ export const LiveTile = memo(function LiveTileImpl({
 				{showChannel && agent ? <LiveAvatar agent={agent} size={40} /> : null}
 				<div className="flex min-w-0 flex-1 flex-col">
 					<button
-						className="truncate text-left font-semibold text-foreground text-sm leading-5 hover:text-primary"
+						className="truncate text-start font-semibold text-foreground text-sm leading-5 hover:text-primary"
+						data-ryu-i18n="off"
 						onClick={onActivate}
 						tabIndex={-1}
 						title={title}
@@ -157,7 +159,8 @@ export const LiveTile = memo(function LiveTileImpl({
 					) : null}
 					{category && onCategory ? (
 						<button
-							className="w-fit max-w-full truncate rounded-sm text-left text-muted-foreground text-sm leading-5 outline-none hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+							className="w-fit max-w-full truncate rounded-sm text-start text-muted-foreground text-sm leading-5 outline-none hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+							data-ryu-i18n="off"
 							onClick={() => onCategory(category.id)}
 							type="button"
 						>
@@ -165,7 +168,10 @@ export const LiveTile = memo(function LiveTileImpl({
 						</button>
 					) : null}
 					{category && !onCategory ? (
-						<p className="truncate text-muted-foreground text-sm leading-5">
+						<p
+							className="truncate text-muted-foreground text-sm leading-5"
+							data-ryu-i18n="off"
+						>
 							{category.name}
 						</p>
 					) : null}
@@ -196,14 +202,17 @@ export const LiveBoxArt = memo(function LiveBoxArtImpl({
 			className="@container relative block aspect-[3/4] w-full overflow-hidden"
 			style={{ background: colors.ground, color: colors.text }}
 		>
-			<span className="absolute inset-0 flex flex-col p-[9cqw] text-left">
+			<span className="absolute inset-0 flex flex-col p-[9cqw] text-start">
 				<span
 					className="font-semibold text-[clamp(10px,6cqw,14px)] uppercase tracking-[0.16em]"
 					style={{ color: colors.accent }}
 				>
 					{category.kind === "team" ? "Team" : "Project"}
 				</span>
-				<span className="mt-auto line-clamp-4 text-balance font-bold text-[16cqw] leading-[0.98] tracking-tight">
+				<span
+					className="mt-auto line-clamp-4 text-balance font-bold text-[16cqw] leading-[0.98] tracking-tight"
+					data-ryu-i18n="off"
+				>
 					{category.name}
 				</span>
 				<span
@@ -226,8 +235,10 @@ export function LiveCategoryTile({
 	const { category } = entry;
 	const meta =
 		entry.liveCount > 0
-			? `${entry.liveCount.toString()} live`
-			: `${entry.threads.length.toString()} ${entry.threads.length === 1 ? "video" : "videos"}`;
+			? tr("{count} live", { count: entry.liveCount })
+			: tr("{count, plural, one {# video} other {# videos}}", {
+					count: entry.threads.length,
+				});
 	return (
 		<article className="flex min-w-0 flex-col gap-2">
 			<Extrude>
@@ -243,7 +254,8 @@ export function LiveCategoryTile({
 			</Extrude>
 			<div className="flex min-w-0 flex-col">
 				<button
-					className="truncate text-left font-semibold text-foreground text-sm leading-5 hover:text-primary"
+					className="truncate text-start font-semibold text-foreground text-sm leading-5 hover:text-primary"
+					data-ryu-i18n="off"
 					onClick={() => onSelect(category.id)}
 					tabIndex={-1}
 					type="button"

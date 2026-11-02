@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare global {
 	interface Window {
@@ -68,10 +69,7 @@ for (const reveal of [false, true, "clone"]) {
 				/will-change.*transform/i.test(reason)
 			)
 		).length;
-		const directory = path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep"
-		);
+		const directory = proofEvidencePath("performance-sweep");
 		await writeFile(
 			path.join(directory, `${prefix}-layers-current.json`),
 			`${JSON.stringify({ scope: "Chromium compositor tree for 200 actual shared Buttons with fitting labels", labels: 200, reveal, layers: layers.length, idleTransformHintLayers }, null, 2)}\n`

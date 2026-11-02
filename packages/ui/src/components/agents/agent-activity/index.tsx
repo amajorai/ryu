@@ -9,6 +9,7 @@ interface Inline1Style extends CSSProperties {
 	"--index-1-height"?: CSSProperties["height"];
 }
 
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
 import { ThinkingShimmer } from "@ryu/ui/components/agents/loading-states/thinking-shimmer.tsx";
 import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
@@ -115,6 +116,7 @@ function ActivityIcon({ type }: { type: AgentActivityContentType }) {
 }
 
 function getSummary(
+	tl: LiteralMessage,
 	type: AgentActivityContentType,
 	items: AgentActivityItem[],
 	duration: number
@@ -131,7 +133,9 @@ function getSummary(
 		return "Searched the web";
 	}
 	if (type === "tool") {
-		return `Ran ${items.length} ${items.length === 1 ? "tool" : "tools"}`;
+		return tl("Ran {count, plural, one {# tool} other {# tools}}", {
+			count: items.length,
+		});
 	}
 	if (type === "trace") {
 		const messages = items.filter(
@@ -140,9 +144,14 @@ function getSummary(
 				(item.kind === "thinking" || item.kind === "message")
 		).length;
 		const tools = items.length - messages;
-		return `${tools} ${tools === 1 ? "tool call" : "tool calls"}, ${messages} ${messages === 1 ? "message" : "messages"}`;
+		return tl(
+			"{tools, plural, one {# tool call} other {# tool calls}}, {messages, plural, one {# message} other {# messages}}",
+			{ messages, tools }
+		);
 	}
-	return `Completed ${items.length} ${items.length === 1 ? "step" : "steps"}`;
+	return tl("Completed {count, plural, one {# step} other {# steps}}", {
+		count: items.length,
+	});
 }
 
 export function AgentActivity({
@@ -161,6 +170,7 @@ export function AgentActivity({
 	contentClassName,
 }: AgentActivityProps) {
 	const reduce = useReducedMotion() ?? false;
+	const tl = useLiteralMessages();
 	const baseId = useId();
 	const triggerId = `${baseId}-trigger`;
 	const contentId = `${baseId}-content`;
@@ -218,7 +228,8 @@ export function AgentActivity({
 	};
 
 	const liveLabel = activeLabel ?? getActiveLabel(contentType);
-	const completedSummary = summary ?? getSummary(contentType, items, duration);
+	const completedSummary =
+		summary ?? getSummary(tl, contentType, items, duration);
 	const inline1Style: Inline1Style = {
 		"--index-1-height":
 			viewportHeight === undefined ? undefined : `${viewportHeight}px`,
@@ -243,7 +254,7 @@ export function AgentActivity({
 				<button
 					aria-controls={contentId}
 					aria-expanded={expanded}
-					className="group flex h-7 min-w-0 items-center gap-1.5 rounded-md text-left font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+					className="group flex h-7 min-w-0 items-center gap-1.5 rounded-md text-start font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 					id={triggerId}
 					onClick={toggle}
 					type="button"
@@ -273,7 +284,7 @@ export function AgentActivity({
 						css.inline1,
 						capped && (working ? css.workingMask : css.completedMask),
 						cn(
-							"scrollbar-hide pr-1",
+							"scrollbar-hide pe-1",
 							capped && expanded && !working
 								? "scroll-fade overflow-y-auto"
 								: "overflow-y-hidden"

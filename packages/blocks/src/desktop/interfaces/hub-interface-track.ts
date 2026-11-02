@@ -6,6 +6,7 @@ import {
 	useState,
 } from "react";
 import { isHubTypingTarget, stepHubCard } from "./hub-model.ts";
+import { logicalScroll, logicalSpan } from "./inline-direction.ts";
 
 /** Mouse travel before a press on the cards becomes a drag. */
 const DRAG_PX = 6;
@@ -17,12 +18,38 @@ const SCROLL_SETTLE_MS = 2000;
 /** When a smooth scroll that has not arrived is finished without animation. */
 const SCROLL_ASSERT_MS = 900;
 
-/** Mark which ends of the row have cards cut off, for the edge fades. */
+/**
+ * Mark which physical sides of the row have cards cut off, for the edge fades
+ * (the masks are physical; under `dir="rtl"` the inline start is the right).
+ */
 function markTrackEdges(track: HTMLElement) {
-	const start = track.scrollLeft > 1;
-	const end = track.scrollLeft + track.clientWidth < track.scrollWidth - 1;
-	track.dataset.edgeStart = String(start);
-	track.dataset.edgeEnd = String(end);
+	const { max, position, sign } = logicalScroll(track);
+	const start = position > 1;
+	const end = position < max - 1;
+	track.dataset.edgeLeft = String(sign === 1 ? start : end);
+	track.dataset.edgeRight = String(sign === 1 ? end : start);
+}
+
+/** The track's inline-start padding: the gutter a resting card sits behind. */
+function trackGutter(track: HTMLElement): number {
+	const style = getComputedStyle(track);
+	return (
+		Number.parseFloat(style.paddingInlineStart) ||
+		Number.parseFloat(style.paddingLeft) ||
+		0
+	);
+}
+
+/**
+ * Where `card` starts along the track's inline axis, in px from the visible
+ * inline start edge (negative once scrolled past).
+ */
+function cardInlineStart(track: HTMLElement, card: HTMLElement) {
+	return logicalSpan(
+		card.getBoundingClientRect(),
+		track.getBoundingClientRect(),
+		logicalScroll(track).sign
+	);
 }
 
 interface HubTrackOptions {
@@ -61,12 +88,15 @@ export function useHubTrack({
 		if (!(track && card)) {
 			return;
 		}
-		const gutter = Number.parseFloat(getComputedStyle(track).paddingLeft) || 0;
-		const maxLeft = Math.max(0, track.scrollWidth - track.clientWidth);
-		const left = Math.min(maxLeft, Math.max(0, card.offsetLeft - gutter));
+		const gutter = trackGutter(track);
+		const scroll = logicalScroll(track);
+		const offset =
+			cardInlineStart(track, card).start + scroll.position - gutter;
+		const left = Math.min(scroll.max, Math.max(0, offset));
+		// `left` is logical: px from the inline start, whatever the direction.
 		const target = { left, until: Date.now() + SCROLL_SETTLE_MS };
 		scrollTargetRef.current = target;
-		track.scrollTo?.({ behavior: reduceMotion ? "auto" : "smooth", left });
+		scroll.scrollToLogical(left, reduceMotion ? "auto" : "smooth");
 		// A smooth scroll can be cut short (a retarget mid-flight, a busy main
 		// thread); if this one has not landed by now, put the row there.
 		window.setTimeout(() => {
@@ -78,10 +108,11 @@ export function useHubTrack({
 
 	const settleTrack = (track: HTMLElement) => {
 		const target = scrollTargetRef.current;
-		if (!target || Math.abs(track.scrollLeft - target.left) <= 2) {
+		const scroll = logicalScroll(track);
+		if (!target || Math.abs(scroll.position - target.left) <= 2) {
 			return;
 		}
-		track.scrollTo?.({ behavior: "auto", left: target.left });
+		scroll.scrollToLogical(target.left, "auto");
 	};
 
 	const goTo = (index: number, focus = true) => {
@@ -126,22 +157,24 @@ export function useHubTrack({
 		}
 		// A row moving to a chosen card keeps that card active until it lands.
 		const target = scrollTargetRef.current;
+		const scroll = logicalScroll(track);
 		if (target) {
-			const landed = Math.abs(track.scrollLeft - target.left) <= 2;
+			const landed = Math.abs(scroll.position - target.left) <= 2;
 			if (landed || Date.now() > target.until) {
 				scrollTargetRef.current = null;
 			}
 			return;
 		}
 		const current = activeRef.current;
-		const gutter = Number.parseFloat(getComputedStyle(track).paddingLeft) || 0;
-		const atEnd = track.scrollLeft >= track.scrollWidth - track.clientWidth - 4;
-		const viewRight = track.scrollLeft + track.clientWidth;
-		const fullyVisible = (card: HTMLElement | null | undefined) =>
-			card !== null &&
-			card !== undefined &&
-			card.offsetLeft >= track.scrollLeft &&
-			card.offsetLeft + card.offsetWidth <= viewRight + 1;
+		const gutter = trackGutter(track);
+		const atEnd = scroll.position >= scroll.max - 4;
+		const fullyVisible = (card: HTMLElement | null | undefined) => {
+			if (!card) {
+				return false;
+			}
+			const span = cardInlineStart(track, card);
+			return span.start >= -1 && span.end <= track.clientWidth + 1;
+		};
 		if (atEnd && fullyVisible(cardRefs.current[current])) {
 			return;
 		}
@@ -151,7 +184,7 @@ export function useHubTrack({
 			if (!card) {
 				continue;
 			}
-			const gap = Math.abs(card.offsetLeft - gutter - track.scrollLeft);
+			const gap = Math.abs(cardInlineStart(track, card).start - gutter);
 			if (gap < distance) {
 				distance = gap;
 				nearest = index;
@@ -234,7 +267,9 @@ export function useHubTrack({
 		}
 		suppressClickRef.current = true;
 		track.style.scrollSnapType = "";
-		const moved = track.scrollLeft - drag.scrollLeft;
+		// Physical travel, turned into steps toward the inline end.
+		const moved =
+			(track.scrollLeft - drag.scrollLeft) * logicalScroll(track).sign;
 		const from = activeRef.current;
 		const width = cardRefs.current[from]?.offsetWidth ?? 1;
 		const steps = Math.round(moved / width) || Math.sign(moved);

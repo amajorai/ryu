@@ -3,5 +3,11 @@
   "compilerOptions": {
     "baseUrl": "../.."
   },
-  "include": ["*.ts", "*.tsx", "../calendar-companion-proof.spec.ts"]
+  "include": [
+    "*.ts",
+    "*.tsx",
+    "../calendar-companion-proof.spec.ts",
+    "../calendar-companion-proof.helpers.ts",
+    "../part2-calendar-companion-proof.spec.ts"
+  ]
 }

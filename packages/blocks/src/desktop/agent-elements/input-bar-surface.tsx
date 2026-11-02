@@ -112,7 +112,7 @@ export function ComposerSurface({
 			{expanded && (
 				<Button
 					aria-label="Collapse composer"
-					className="absolute top-2 right-2 z-10"
+					className="absolute end-2 top-2 z-10"
 					onClick={(event) => {
 						event.stopPropagation();
 						setIsExpanded(false);

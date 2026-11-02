@@ -7,9 +7,11 @@ import {
 	Target01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import { localizeApproval } from "@ryuhq/core-client/approval-text";
 import type { GoalState } from "@ryuhq/core-client/goals.ts";
 import type { ApprovalRequest } from "@/src/lib/api/approvals.ts";
 import type { Conversation } from "@/types/chat.ts";
@@ -33,7 +35,7 @@ export function GoalRow({
 	return (
 		<div className="group/goal flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-muted hover:duration-0">
 			<button
-				className="flex min-w-0 flex-1 items-start gap-2 text-left"
+				className="flex min-w-0 flex-1 items-start gap-2 text-start"
 				onClick={onOpen}
 				type="button"
 			>
@@ -94,6 +96,9 @@ export function ApprovalRow({
 	onApprove: () => void;
 	onReject: () => void;
 }) {
+	const tl = useLiteralMessages();
+	// Core sends the card wording as messages; render them in this locale.
+	const text = localizeApproval(approval, tl);
 	return (
 		<div className="border-border border-b px-2 py-2 last:border-b-0">
 			<div className="flex items-start gap-2">
@@ -102,11 +107,9 @@ export function ApprovalRow({
 					icon={Shield01Icon}
 				/>
 				<div className="min-w-0 flex-1">
-					<p className="line-clamp-2 font-medium text-sm">{approval.title}</p>
+					<p className="line-clamp-2 font-medium text-sm">{text.title}</p>
 					<p className="mt-0.5 line-clamp-2 text-detail text-muted-foreground">
-						{approval.summary ||
-							approval.question ||
-							statusLabel(approval.status)}
+						{text.summary || text.question || statusLabel(approval.status)}
 					</p>
 				</div>
 			</div>

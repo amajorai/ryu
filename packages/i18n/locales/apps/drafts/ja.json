@@ -1,0 +1,11 @@
+{
+  "Sending at a set time": "指定時刻に送信",
+  "Sending at {when}": "{when} に送信",
+  "Waiting for agents to start, then finish": "エージェントの開始と完了を待っています",
+  "Waiting for every agent to finish": "すべてのエージェントの完了を待機しています",
+  "Waiting for fewer than {limit} runs": "実行数が {limit} 未満になるのを待機しています",
+  "Waiting for nothing to be running": "実行中の処理がなくなるのを待機しています",
+  "Waiting for {agentId} to drop under {belowPercent}% used": "{agentId} の使用率が {belowPercent}% を下回るのを待機しています",
+  "draft is already being sent": "下書きはすでに送信中です",
+  "no such draft": "該当する下書きがありません"
+}

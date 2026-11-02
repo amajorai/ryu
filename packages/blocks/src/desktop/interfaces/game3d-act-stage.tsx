@@ -1,4 +1,5 @@
 import { Html } from "@react-three/drei";
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	ClockOptions,
@@ -167,7 +168,7 @@ export function limitWords(
 	}
 	const until = act.timer?.until ?? null;
 	const text = limitText(act, until ? clockLabel(until, nowMs, clock) : null);
-	return limitIsLikely(act) ? `Likely ${text}` : text;
+	return limitIsLikely(act) ? tr("Likely {text}", { text }) : text;
 }
 
 /**
@@ -209,8 +210,8 @@ export function stationLines(
 		cue = "stalled?";
 	} else if (act.longerThanUsual) {
 		cue = act.elapsed
-			? `Longer than usual · ${act.elapsed}`
-			: "Longer than usual";
+			? tr("Longer than usual · {elapsed}", { elapsed: act.elapsed })
+			: tr("Longer than usual");
 	}
 	add("cue", "text", cue);
 	return lines;

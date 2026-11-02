@@ -38,6 +38,10 @@ export function VersionSnapshotRow({
 	tag: string;
 	fetchVersionDetail: (tag: string) => Promise<VersionSnapshot | null>;
 }) {
+	const tl = useLiteralMessages();
+	// Stability and surface labels fall back to free-form registry values; only a
+	// brace-free label is safe to look up as a message without ICU rewriting it.
+	const tlLabel = (label: string) => (/[{}]/.test(label) ? label : tl(label));
 	const [state, setState] = useState<
 		| { status: "idle" }
 		| { status: "loading" }
@@ -85,17 +89,27 @@ export function VersionSnapshotRow({
 	const { snapshot } = state;
 	const facts = [
 		snapshot.description ? `“${snapshot.description}”` : null,
-		`Stability: ${versionStabilityLabel(
-			snapshot.stability,
-			snapshot.stabilityKnown === true,
-			false
-		)}`,
-		snapshot.license ? `Licence: ${snapshot.license}` : null,
-		snapshot.engines?.ryu ? `Requires Ryu ${snapshot.engines.ryu}` : null,
+		tl("Stability: {stability}", {
+			stability: tlLabel(
+				versionStabilityLabel(
+					snapshot.stability,
+					snapshot.stabilityKnown === true,
+					false
+				)
+			),
+		}),
+		snapshot.license
+			? tl("Licence: {license}", { license: snapshot.license })
+			: null,
+		snapshot.engines?.ryu
+			? tl("Requires Ryu {ryu}", { ryu: snapshot.engines.ryu })
+			: null,
 		snapshot.surfaceSupport?.length
-			? `Support: ${snapshot.surfaceSupport
-					.map((surface) => surfaceLabel(surface.surface))
-					.join(", ")}`
+			? tl("Support: {surfaces}", {
+					surfaces: snapshot.surfaceSupport
+						.map((surface) => tlLabel(surfaceLabel(surface.surface)))
+						.join(", "),
+				})
 			: null,
 		snapshot.readme
 			? `README: ${Math.round(snapshot.readme.length / 100) / 10}k chars`
@@ -182,7 +196,7 @@ export function HistoricalVersionInstallAction({
 		<div className="flex flex-col items-end gap-1">
 			{button}
 			{error ? (
-				<p className="max-w-56 text-right text-status-destructive text-xs">
+				<p className="max-w-56 text-end text-status-destructive text-xs">
 					{error}
 				</p>
 			) : null}
@@ -251,7 +265,7 @@ export function VersionsPanel({
 							{version.tagOnly ? (
 								<Badge variant="outline">Tag only</Badge>
 							) : null}
-							<span className="ml-auto flex items-center gap-3 text-muted-foreground text-xs">
+							<span className="ms-auto flex items-center gap-3 text-muted-foreground text-xs">
 								{isNativeNumber(version.downloads) && version.downloads > 0 ? (
 									<span>
 										{tl("{count} downloads", {

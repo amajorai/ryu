@@ -56,7 +56,7 @@ export function ObservabilityExplorerSection({
 				<div className="flex flex-col gap-2 sm:flex-row">
 					<div className="relative min-w-0 flex-1">
 						<HugeiconsIcon
-							className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+							className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
 							icon={Search01Icon}
 						/>
 						<Input
@@ -116,9 +116,9 @@ export function ObservabilityExplorerSection({
 					<div data-testid="observability-events">
 						<div className="grid h-8 grid-cols-[minmax(0,1fr)_4rem_4rem_4rem] items-center gap-3 border-border border-b px-2 text-muted-foreground text-xs">
 							<span>Event</span>
-							<span className="text-right">Latency</span>
-							<span className="text-right">Quality</span>
-							<span className="text-right">Cost</span>
+							<span className="text-end">Latency</span>
+							<span className="text-end">Quality</span>
+							<span className="text-end">Cost</span>
 						</div>
 						{visibleEntries.map((entry) => {
 							const active = selectedId === entry.id;
@@ -127,7 +127,7 @@ export function ObservabilityExplorerSection({
 								<button
 									aria-pressed={active}
 									className={cn(
-										"grid h-10 w-full grid-cols-[minmax(0,1fr)_4rem_4rem_4rem] items-center gap-3 rounded-lg px-2 text-left text-sm transition-colors duration-150 hover:duration-0",
+										"grid h-10 w-full grid-cols-[minmax(0,1fr)_4rem_4rem_4rem] items-center gap-3 rounded-lg px-2 text-start text-sm transition-colors duration-150 hover:duration-0",
 										observabilityStyles.foreground,
 										"hover:bg-muted",
 										active && "bg-accent"
@@ -169,13 +169,13 @@ export function ObservabilityExplorerSection({
 											{formatTime(entry.timestamp)}
 										</span>
 									</span>
-									<span className="whitespace-nowrap text-right text-muted-foreground tabular-nums">
+									<span className="whitespace-nowrap text-end text-muted-foreground tabular-nums">
 										{entry.latency_ms === null ? "—" : `${entry.latency_ms}ms`}
 									</span>
-									<span className="text-right tabular-nums">
+									<span className="text-end tabular-nums">
 										{formatScore(entry.eval_score)}
 									</span>
-									<span className="whitespace-nowrap text-right text-muted-foreground tabular-nums">
+									<span className="whitespace-nowrap text-end text-muted-foreground tabular-nums">
 										{formatCost(entry.cost_micro_usd ?? 0)}
 									</span>
 								</button>

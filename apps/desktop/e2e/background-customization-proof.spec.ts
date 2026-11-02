@@ -1,6 +1,6 @@
-import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 /** The payload Playwright's file chooser accepts (not exported by name). */
 interface FilePayload {
@@ -14,12 +14,7 @@ const STORY_URL = "/background-customization-proof.html";
 // space instead of rewriting the tracked sweep evidence.
 const EVIDENCE_DIR = process.env.RYU_PROOF_OUTPUT_ROOT
 	? `${process.env.RYU_PROOF_OUTPUT_ROOT.replace(/\/+$/, "")}/`
-	: fileURLToPath(
-			new URL(
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/",
-				import.meta.url
-			)
-		);
+	: `${proofEvidencePath("test-coverage-sweep-20260924/evidence")}/`;
 
 const PIXEL_PNG = Buffer.from(
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",

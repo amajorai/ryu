@@ -115,7 +115,7 @@ export function ChapterComposer({
 					</NativeSelect>
 				) : null}
 				<p
-					className="mr-auto @2xl/library:block hidden text-muted-foreground text-xs"
+					className="me-auto @2xl/library:block hidden text-muted-foreground text-xs"
 					id={hintId}
 				>
 					Enter to send, Shift+Enter for a new line

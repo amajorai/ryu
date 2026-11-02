@@ -28,7 +28,7 @@ export function FeedMobileNav({
 			{showPostButton ? (
 				<Button
 					aria-label="Post a new task"
-					className="absolute right-4 bottom-[69px] z-30 @max-[700px]:flex hidden size-14 rounded-full p-0 shadow-md"
+					className="absolute end-4 bottom-[69px] z-30 @max-[700px]:flex hidden size-14 rounded-full p-0 shadow-md"
 					onClick={onPost}
 					type="button"
 				>
@@ -72,7 +72,7 @@ export function FeedMobileNav({
 								{badge ? (
 									<Badge
 										aria-hidden="true"
-										className="absolute top-0.5 right-0.5 h-[18px] min-w-[18px] px-1 font-semibold text-[11px] ring-2 ring-background"
+										className="absolute end-0.5 top-0.5 h-[18px] min-w-[18px] px-1 font-semibold text-[11px] ring-2 ring-background"
 										radius="pill"
 										typography="tabular"
 									>

@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -18,6 +18,7 @@ import {
 } from "@ryuhq/protocol/interfaces";
 import { CircleDot, FolderKanban, ListFilter, User, X } from "lucide-react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 export type BoardFilterField = keyof BoardFilter;
 
@@ -34,19 +35,16 @@ export function toggleBoardFilter(
 	return { ...filter, [field]: next };
 }
 
-const FIELD_LABEL: Record<BoardFilterField, string> = {
-	agentIds: "Agent",
-	groupIds: "Team or project",
-	statuses: "Status",
-};
-
 function valueLabel(
 	snapshot: InterfaceSnapshot,
 	field: BoardFilterField,
-	value: string
+	value: string,
+	tl: LiteralMessage
 ): string {
 	if (field === "statuses") {
-		return THREAD_STATUS_LABELS[value as ThreadStatus] ?? value;
+		return value in THREAD_STATUS_LABELS
+			? threadStatusLabel(value as ThreadStatus, tl)
+			: value;
 	}
 	if (field === "agentIds") {
 		return snapshot.agents.find((agent) => agent.id === value)?.name ?? value;
@@ -110,7 +108,7 @@ export function BoardFilterMenu({
 								onCheckedChange={() => onToggle("statuses", status)}
 							>
 								<BoardStatusDot pulse={false} status={status} />
-								{THREAD_STATUS_LABELS[status]}
+								{threadStatusLabel(status)}
 							</DropdownMenuCheckboxItem>
 						))}
 					</DropdownMenuSubContent>
@@ -197,25 +195,32 @@ export function BoardFilterBar({
 		>
 			{fields.map((field) => {
 				const values = filter[field].map((value) =>
-					valueLabel(snapshot, field, value)
+					valueLabel(snapshot, field, value, tl)
 				);
-				const verb = values.length === 1 ? "is" : "is any of";
+
 				return (
 					<span
 						className="inline-flex h-7 max-w-full items-center overflow-hidden rounded-md border border-border bg-background text-xs"
 						key={field}
 					>
 						<span className="px-2 text-muted-foreground">
-							{FIELD_LABEL[field]} {verb}
+							{tl(
+								"{field, select, agentIds {Agent} groupIds {Team or project} other {Status}} {count, plural, one {is} other {is any of}}",
+								{ count: values.length, field }
+							)}
 						</span>
-						<span className="truncate border-border border-l px-2 font-medium text-foreground">
+						<span
+							className="truncate border-border border-s px-2 font-medium text-foreground"
+							data-ryu-i18n="off"
+						>
 							{values.join(", ")}
 						</span>
 						<button
-							aria-label={tl("Remove {field} filter", {
-								field: FIELD_LABEL[field].toLowerCase(),
-							})}
-							className="flex h-full items-center border-border border-l px-1.5 text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+							aria-label={tl(
+								"{field, select, agentIds {Remove agent filter} groupIds {Remove team or project filter} other {Remove status filter}}",
+								{ field }
+							)}
+							className="flex h-full items-center border-border border-s px-1.5 text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 							onClick={() => onRemoveField(field)}
 							type="button"
 						>

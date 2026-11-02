@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -41,13 +42,17 @@ export function TrackingSend({
 				<header className="flex flex-col gap-1">
 					{onCancel ? (
 						<Button
-							className="mb-3 -ml-2 self-start"
+							className="-ms-2 mb-3 self-start"
 							onClick={onCancel}
 							size="sm"
 							type="button"
 							variant="ghost-muted"
 						>
-							<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+							<ArrowLeft
+								aria-hidden="true"
+								className="rtl:-scale-x-100"
+								data-icon="inline-start"
+							/>
 							Back to tracking
 						</Button>
 					) : null}
@@ -104,7 +109,10 @@ export function TrackingSend({
 											<BoardAvatar agent={agent} name={agent.name} size={28} />
 											<span className="flex min-w-0 flex-1 flex-col">
 												<span className="flex items-baseline gap-2">
-													<span className="truncate font-medium text-foreground text-sm leading-5">
+													<span
+														className="truncate font-medium text-foreground text-sm leading-5"
+														data-ryu-i18n="off"
+													>
 														{agent.name}
 													</span>
 													{agent.status === "working" ? (
@@ -114,7 +122,7 @@ export function TrackingSend({
 													) : null}
 												</span>
 												<span className="truncate text-muted-foreground text-xs leading-4">
-													{agent.description || "No description"}
+													{agent.description || tr("No description")}
 												</span>
 											</span>
 											{checked ? (

@@ -145,7 +145,7 @@ export function AppSecondaryActions({
 					</Badge>
 				) : null}
 				{status ? (
-					<span className="ml-auto flex shrink-0 items-center gap-2">
+					<span className="ms-auto flex shrink-0 items-center gap-2">
 						{status}
 					</span>
 				) : null}

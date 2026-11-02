@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
@@ -49,7 +50,7 @@ function DayHeading({
 			</h2>
 			{count === undefined ? null : (
 				<span className="shrink-0 pt-1.5 text-muted-foreground text-sm tabular-nums">
-					{count} {count === 1 ? "flow" : "flows"}
+					{tr("{count, plural, one {# flow} other {# flows}}", { count })}
 				</span>
 			)}
 			<span
@@ -66,13 +67,19 @@ function MiniModule({ item }: { item: MomentsModule }) {
 		<span className="flex size-full flex-col overflow-hidden rounded-lg bg-card p-3 text-card-foreground">
 			<span className="flex h-4 items-center gap-1.5 text-card-foreground/70 text-xs leading-4">
 				<BoardStatusDot className="size-1.5" status={item.status} />
-				<span className="truncate">{item.lead?.name ?? "No agent"}</span>
+				<span className="truncate">{item.lead?.name ?? tr("No agent")}</span>
 			</span>
-			<span className="mt-2 line-clamp-2 font-medium text-[13px] leading-[18px]">
+			<span
+				className="mt-2 line-clamp-2 font-medium text-[13px] leading-[18px]"
+				data-ryu-i18n="off"
+			>
 				{item.thread.title}
 			</span>
 			{item.thread.lastMessage ? (
-				<span className="mt-1 line-clamp-2 text-card-foreground/70 text-xs leading-4 max-sm:hidden">
+				<span
+					className="mt-1 line-clamp-2 text-card-foreground/70 text-xs leading-4 max-sm:hidden"
+					data-ryu-i18n="off"
+				>
 					{item.thread.lastMessage}
 				</span>
 			) : null}
@@ -109,7 +116,7 @@ function ModuleStack({ modules }: { modules: MomentsModule[] }) {
 	return (
 		<span
 			aria-hidden="true"
-			className="relative my-4 mr-4 ml-4 w-28 shrink-0 sm:my-5 sm:mr-5 sm:ml-8 sm:w-40"
+			className="relative my-4 ms-4 me-4 w-28 shrink-0 sm:my-5 sm:ms-8 sm:me-5 sm:w-40"
 		>
 			{backs >= 2 ? (
 				<span className={cn(SHEET, SHEET_DEPTH[2], "max-sm:hidden")} />
@@ -127,7 +134,7 @@ function ModuleRow({ modules }: { modules: MomentsModule[] }) {
 	return (
 		<span
 			aria-hidden="true"
-			className="my-5 mr-5 ml-8 flex shrink-0 gap-3 max-[1099px]:hidden"
+			className="my-5 ms-8 me-5 flex shrink-0 gap-3 max-[1099px]:hidden"
 		>
 			{modules.slice(0, STACK_LIMIT).map((item) => (
 				<span
@@ -178,7 +185,7 @@ function FlowCard({
 	return (
 		<button
 			className={cn(
-				"group relative flex w-full rounded-xl bg-card/50 text-left transition-colors duration-200 hover:bg-card/75 active:bg-card/90",
+				"group relative flex w-full rounded-xl bg-card/50 text-start transition-colors duration-200 hover:bg-card/75 active:bg-card/90",
 				featured
 					? "h-40 bg-card/70 shadow-foreground/5 shadow-sm sm:h-56"
 					: "h-36 sm:h-44",
@@ -208,7 +215,7 @@ function FlowCard({
 							: "font-medium text-base leading-6"
 					)}
 				>
-					{flow.name}
+					<span data-ryu-i18n="off">{flow.name}</span>
 				</span>
 				<span className="mt-1 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-muted-foreground leading-5">
 					{updated}

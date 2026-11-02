@@ -40,9 +40,15 @@ import {
 	type ImportOutcome,
 	runImport,
 	type ScanItem,
+	type ScanResult,
 	scanImportFolder,
 } from "@/src/lib/api/import.ts";
 import { listDirectory } from "@/src/lib/api/workspace.ts";
+import {
+	scanItemDetail,
+	scanItemTitle,
+	scanWarnings,
+} from "@/src/lib/import-scan-text.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import { NodeFolderBrowser } from "./NodeFolderBrowser.tsx";
 
@@ -74,7 +80,10 @@ export function ImportSetupDialog({
 	const [browseOpen, setBrowseOpen] = useState(false);
 	const [folder, setFolder] = useState<string | null>(null);
 	const [items, setItems] = useState<ScanItem[]>([]);
-	const [warnings, setWarnings] = useState<string[]>([]);
+	const [scanNotes, setScanNotes] = useState<
+		Pick<ScanResult, "warningNotices" | "warnings">
+	>({ warnings: [] });
+	const warnings = scanWarnings(scanNotes, tl);
 	const [scanning, setScanning] = useState(false);
 	const [importing, setImporting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -90,7 +99,7 @@ export function ImportSetupDialog({
 		}
 		setFolder(null);
 		setItems([]);
-		setWarnings([]);
+		setScanNotes({ warnings: [] });
 		setError(null);
 		setSelected(new Set());
 		setOutcomes(null);
@@ -117,7 +126,7 @@ export function ImportSetupDialog({
 				const result = await scanImportFolder(target, path);
 				setFolder(result.root);
 				setItems(result.items);
-				setWarnings(result.warnings);
+				setScanNotes(result);
 			} catch (e) {
 				setError(e instanceof Error ? e.message : "Failed to scan folder");
 				setItems([]);
@@ -308,7 +317,7 @@ export function ImportSetupDialog({
 						{items.length > 0 && (
 							<div className="flex items-center justify-between px-1">
 								<button
-									className="flex items-center gap-2.5 rounded-lg py-1 text-left text-muted-foreground text-xs transition-colors hover:text-foreground"
+									className="flex items-center gap-2.5 rounded-lg py-1 text-start text-muted-foreground text-xs transition-colors hover:text-foreground"
 									disabled={importing}
 									onClick={toggleAll}
 									type="button"
@@ -337,7 +346,7 @@ export function ImportSetupDialog({
 							</Empty>
 						) : (
 							<ScrollArea className="h-72 min-w-0">
-								<div className="flex flex-col gap-3 pr-2">
+								<div className="flex flex-col gap-3 pe-2">
 									{groups.map((group) => (
 										<section key={group.kind}>
 											<div className="flex items-center justify-between px-1 pb-1">
@@ -362,7 +371,7 @@ export function ImportSetupDialog({
 													<li key={item.id}>
 														<button
 															aria-pressed={selected.has(item.id)}
-															className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted disabled:opacity-50"
+															className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start transition-colors hover:bg-muted disabled:opacity-50"
 															disabled={importing}
 															onClick={() => toggleItem(item.id)}
 															type="button"
@@ -375,16 +384,16 @@ export function ImportSetupDialog({
 															<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 																<span
 																	className="truncate font-medium text-foreground text-sm"
-																	title={item.title}
+																	title={scanItemTitle(item, tl)}
 																>
-																	{item.title}
+																	{scanItemTitle(item, tl)}
 																</span>
 																{item.detail && (
 																	<span
 																		className="truncate text-muted-foreground text-xs"
-																		title={item.detail}
+																		title={scanItemDetail(item, tl)}
 																	>
-																		{item.detail}
+																		{scanItemDetail(item, tl)}
 																	</span>
 																)}
 															</span>

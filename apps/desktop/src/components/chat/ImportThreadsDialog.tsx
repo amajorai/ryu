@@ -315,7 +315,7 @@ export function ImportThreadsDialog({
 				{!loading && supported && threads.length > 0 && (
 					<div className="flex items-center justify-between px-1">
 						<button
-							className="flex items-center gap-2.5 rounded-lg py-1 text-left text-muted-foreground text-xs transition-colors hover:text-foreground"
+							className="flex items-center gap-2.5 rounded-lg py-1 text-start text-muted-foreground text-xs transition-colors hover:text-foreground"
 							disabled={importing}
 							onClick={toggleAll}
 							type="button"
@@ -349,12 +349,12 @@ export function ImportThreadsDialog({
 								</EmptyDescription>
 							</Empty>
 						) : (
-							<ul className="flex flex-col gap-0.5 pr-2">
+							<ul className="flex flex-col gap-0.5 pe-2">
 								{threads.map((thread) => (
 									<li key={thread.id}>
 										<button
 											aria-pressed={selected.has(thread.id)}
-											className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted disabled:opacity-50"
+											className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start transition-colors hover:bg-muted disabled:opacity-50"
 											disabled={importing}
 											onClick={() => toggleThread(thread.id)}
 											type="button"

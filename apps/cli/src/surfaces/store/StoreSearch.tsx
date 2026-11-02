@@ -186,7 +186,10 @@ export function StoreSearch({ active, query, onOpen }: StoreSearchProps) {
 			))}
 			{results.length > visible.length ? (
 				<text fg={theme.colors.mutedForeground}>
-					{`${index + 1}/${results.length} · enter opens the realm`}
+					{tf("{position}/{total} · enter opens the realm", {
+						position: index + 1,
+						total: results.length,
+					})}
 				</text>
 			) : null}
 		</box>

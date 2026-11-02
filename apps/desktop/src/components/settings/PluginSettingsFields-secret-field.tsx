@@ -1,7 +1,7 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { formatDistanceToNow } from "date-fns";
 import { useEffect, useRef, useState } from "react";
 import {
 	clearPluginSecret,
@@ -12,6 +12,7 @@ import {
 	secretUpdatedAtMillis,
 	setPluginSecret,
 } from "@/src/lib/api/plugin-secrets.ts";
+import { relativeTimeAgo } from "@/src/lib/time.ts";
 import type { FieldControlProps } from "./PluginSettingsFields-save-field.ts";
 import { SettingsItem } from "./shared/settings-items.tsx";
 
@@ -38,7 +39,7 @@ function secretStatusLabel(state: PluginSecretState | null): string {
 		return "Set";
 	}
 	const writtenAt = new Date(secretUpdatedAtMillis(state.updated_at));
-	return `Set · ${formatDistanceToNow(writtenAt, { addSuffix: true })}`;
+	return tl("Set · {when}", { when: relativeTimeAgo(writtenAt) });
 }
 
 /**

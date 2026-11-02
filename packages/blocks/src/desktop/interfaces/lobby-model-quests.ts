@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceGroup,
@@ -73,12 +74,15 @@ function agentNames(
 		.map((id) => snapshot.agents.find((agent) => agent.id === id)?.name)
 		.filter((name): name is string => Boolean(name));
 	if (names.length === 0) {
-		return "No agent";
+		return tr("No agent");
 	}
 	if (names.length === 1) {
 		return names[0] ?? "";
 	}
-	return `${names[0]} and ${names.length - 1} more`;
+	return tr("{name} and {count} more", {
+		count: names.length - 1,
+		name: names[0] ?? "",
+	});
 }
 
 function dailyDetail(
@@ -183,13 +187,17 @@ export function weeklyQuests(snapshot: InterfaceSnapshot): LobbyQuest[] {
 			);
 			const target = open ?? threads[0];
 			const complete = threads.length > 0 && finished === threads.length;
-			const kindLabel = group.kind === "project" ? "Project" : "Team";
-			const memberCount = group.memberAgentIds.length;
-			const detail = `${kindLabel} · ${memberCount} ${memberCount === 1 ? "agent" : "agents"}`;
+			const detail = tr(
+				"{kind, select, project {Project} other {Team}} · {count, plural, one {# agent} other {# agents}}",
+				{ count: group.memberAgentIds.length, kind: group.kind }
+			);
 			const metric =
 				threads.length === 0
-					? "No threads yet"
-					: `${finished} / ${threads.length} ${threads.length === 1 ? "thread" : "threads"} finished`;
+					? tr("No threads yet")
+					: tr(
+							"{finished} / {count, plural, one {# thread} other {# threads}} finished",
+							{ count: threads.length, finished }
+						);
 			return {
 				action: target
 					? { kind: "open", threadId: target.id }
@@ -253,7 +261,10 @@ export function milestoneQuests(
 				groupId: null,
 				id: `milestone-${member.agent.id}`,
 				kind: "milestone",
-				metric: `${Math.min(member.messages, goal)} / ${goal} messages`,
+				metric: tl("{count} / {goal} messages", {
+					count: Math.min(member.messages, goal),
+					goal,
+				}),
 				progress: Math.min(member.messages, goal),
 				title: tl("Talk shop with {name}", { name: member.agent.name }),
 				updatedAt: member.lastActive,
@@ -347,16 +358,21 @@ export function actDailyQuests(
 		complete: asks.waiting === 0 && asks.answered > 0,
 		detail:
 			asks.waiting > 0
-				? `${asks.waiting} ${asks.waiting === 1 ? "ask needs" : "asks need"} you`
-				: "Nothing needs you",
+				? tl("{count, plural, one {# ask needs you} other {# asks need you}}", {
+						count: asks.waiting,
+					})
+				: tl("Nothing needs you"),
 		goal: Math.max(1, asks.answered + asks.waiting),
 		groupId: null,
 		id: "daily-asks",
 		kind: "daily",
 		metric:
 			asks.answered + asks.waiting > 0
-				? `${asks.answered} / ${asks.answered + asks.waiting} answered`
-				: "Nothing waiting",
+				? tr("{answered} / {total} answered", {
+						answered: asks.answered,
+						total: asks.answered + asks.waiting,
+					})
+				: tr("Nothing waiting"),
 		progress: asks.answered,
 		title: "Answer what needs you",
 		updatedAt: null,

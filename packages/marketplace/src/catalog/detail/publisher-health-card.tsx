@@ -4,7 +4,12 @@ import {
 	InformationCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Card,
@@ -19,7 +24,71 @@ import {
 	calculatePublisherHealth,
 	type PublisherHealthInput,
 	type PublisherHealthSignal,
+	type PublisherHealthSignalId,
+	type PublisherHealthValue,
 } from "./publisher-health.ts";
+
+function signalLabel(tl: LiteralMessage, id: PublisherHealthSignalId): string {
+	switch (id) {
+		case "identity":
+			return tl("Publisher identity");
+		case "signature":
+			return tl("Release signature");
+		case "review":
+			return tl("Ryu code review");
+		case "integrity":
+			return tl("Package integrity");
+		case "capabilities":
+			return tl("Declared capabilities");
+		default:
+			return tl("Community ratings");
+	}
+}
+
+/** The verdict in the UI language, with counts and the rating average
+ *  formatted for the locale (a decimal comma in `de`). */
+function signalValue(
+	tl: LiteralMessage,
+	locale: string,
+	value: PublisherHealthValue
+): string {
+	switch (value.id) {
+		case "staff-verified":
+			return tl("Ryu staff verified");
+		case "identity-verified":
+			return tl("Stripe identity verified");
+		case "not-verified":
+			return tl("Not verified");
+		case "signature-verified":
+			return tl("Verified");
+		case "signature-invalid":
+			return tl("Invalid");
+		case "unsigned":
+			return tl("Unsigned");
+		case "not-reported":
+			return tl("Not reported");
+		case "reviewed":
+			return tl("Reviewed");
+		case "not-reviewed":
+			return tl("Not reviewed");
+		case "checksum-recorded":
+			return tl("SHA-256 recorded");
+		case "checksum-missing":
+			return tl("Checksum not reported");
+		case "capabilities":
+			return tl("{count, plural, one {# requested} other {# requested}}", {
+				count: value.count,
+			});
+		default:
+			return tl("{average} / 5 ({count})", {
+				average: formatNumberValue(locale, value.average, {
+					maximumFractionDigits: 1,
+					minimumFractionDigits: 1,
+				}),
+				count: formatNumberValue(locale, value.count),
+			});
+	}
+}
 
 function signalIcon(signal: PublisherHealthSignal) {
 	if (signal.status === "good") {
@@ -38,6 +107,7 @@ export function PublisherHealthCard({
 	...input
 }: PublisherHealthInput & { className?: string }) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale ?? "en";
 	const health = calculatePublisherHealth(input);
 	const progressStyle: HealthProgressStyle = {
 		"--marketplace-width": `${health.score}%`,
@@ -85,7 +155,7 @@ export function PublisherHealthCard({
 			</CardHeader>
 			<CardContent layout="signal-grid" topSpacing="flush">
 				{health.signals.map((signal) => (
-					<div className="flex items-center gap-2 text-xs" key={signal.label}>
+					<div className="flex items-center gap-2 text-xs" key={signal.id}>
 						<HugeiconsIcon
 							className={cn(
 								"size-3.5",
@@ -97,8 +167,12 @@ export function PublisherHealthCard({
 							)}
 							icon={signalIcon(signal)}
 						/>
-						<span className="text-muted-foreground">{signal.label}</span>
-						<span className="ml-auto text-right">{signal.value}</span>
+						<span className="text-muted-foreground">
+							{signalLabel(tl, signal.id)}
+						</span>
+						<span className="ms-auto text-end">
+							{signalValue(tl, locale, signal.value)}
+						</span>
 					</div>
 				))}
 			</CardContent>

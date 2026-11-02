@@ -104,7 +104,7 @@ function LiveCaptions({
 						<span className="min-h-[1.45em] text-foreground">
 							{shown}
 							{typing ? (
-								<span className="ml-0.5 inline-block h-[1em] w-[0.5ch] translate-y-[0.15em] bg-foreground/70 motion-safe:animate-pulse" />
+								<span className="ms-0.5 inline-block h-[1em] w-[0.5ch] translate-y-[0.15em] bg-foreground/70 motion-safe:animate-pulse" />
 							) : null}
 						</span>
 					</span>
@@ -160,7 +160,7 @@ export function LivePlayer({
 				spec={spec}
 				style={{ maxWidth }}
 			>
-				<span className="absolute top-3 left-3 flex items-center gap-2">
+				<span className="absolute start-3 top-3 flex items-center gap-2">
 					{streaming ? <LiveBadge /> : <LiveChip>Offline</LiveChip>}
 				</span>
 				{thread && message ? (
@@ -191,7 +191,7 @@ export function LivePlayer({
 				{streaming && message ? (
 					<span
 						className={cn(
-							"absolute bottom-3 left-3 flex opacity-0 transition-opacity group-focus-within/player:opacity-100 group-hover/player:opacity-100",
+							"absolute start-3 bottom-3 flex opacity-0 transition-opacity group-focus-within/player:opacity-100 group-hover/player:opacity-100",
 							paused && "opacity-100"
 						)}
 					>

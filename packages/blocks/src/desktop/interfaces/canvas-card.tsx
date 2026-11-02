@@ -1,5 +1,5 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { CircleAlert, MessageSquare, Pin } from "lucide-react";
 import { type FocusEvent, type MouseEvent, memo } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
@@ -9,7 +9,11 @@ import {
 	CARD_WIDTH,
 	type CanvasCardModel,
 } from "./canvas-model.ts";
-import { compactAge } from "./interface-renderer.ts";
+import {
+	compactAge,
+	formatNameList,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 /**
  * Stickies are neutral cards on the frame's flat fill, as FigJam draws them
@@ -45,16 +49,23 @@ const TEXT_BODY = "text-foreground/80";
 const TEXT_META = "text-foreground/65";
 
 function cardLabel(card: CanvasCardModel, open: boolean): string {
-	const title = card.thread.title.trim() || "Untitled thread";
-	const who = card.agents.map((agent) => agent.name).join(", ");
-	return [
+	const title = card.thread.title.trim() || tr("Untitled thread");
+	const who = formatNameList(card.agents.map((agent) => agent.name));
+	const values = {
+		open: open ? "yes" : "no",
+		status: threadStatusLabel(card.status),
 		title,
-		THREAD_STATUS_LABELS[card.status],
-		who ? `with ${who}` : "no agent",
-		open ? "open" : null,
-	]
-		.filter(Boolean)
-		.join(", ");
+		who,
+	};
+	return who
+		? tr(
+				"{title}, {status}, with {who}{open, select, yes {, open} other {}}",
+				values
+			)
+		: tr(
+				"{title}, {status}, no agent{open, select, yes {, open} other {}}",
+				values
+			);
 }
 
 /**
@@ -114,7 +125,10 @@ function TopLabel({
 	}
 	if (showGroup) {
 		return card.group ? (
-			<span className={cn("min-w-0 truncate font-medium", TEXT_BODY)}>
+			<span
+				className={cn("min-w-0 truncate font-medium", TEXT_BODY)}
+				data-ryu-i18n="off"
+			>
 				{card.group.name}
 			</span>
 		) : null;
@@ -123,7 +137,7 @@ function TopLabel({
 		<span className="flex min-w-0 items-center gap-1.5">
 			<BoardStatusDot status={status} />
 			<span className="truncate font-medium text-foreground/80">
-				{THREAD_STATUS_LABELS[status]}
+				{threadStatusLabel(status)}
 			</span>
 		</span>
 	);
@@ -164,7 +178,10 @@ function FullFace({
 					{age}
 				</span>
 			</span>
-			<span className="relative mt-2 truncate font-semibold text-foreground text-sm leading-5 tracking-[-0.006em]">
+			<span
+				className="relative mt-2 truncate font-semibold text-foreground text-sm leading-5 tracking-[-0.006em]"
+				data-ryu-i18n="off"
+			>
 				{title}
 			</span>
 			{preview ? (
@@ -177,7 +194,7 @@ function FullFace({
 					{thread.lastMessageRole === "user" ? (
 						<span className="font-medium text-foreground">You: </span>
 					) : null}
-					{preview}
+					<span data-ryu-i18n="off">{preview}</span>
 				</span>
 			) : (
 				<span
@@ -268,6 +285,7 @@ function CompactFace({
 					"line-clamp-3",
 					tiny ? "leading-[1.1]" : "leading-[1.15]"
 				)}
+				data-ryu-i18n="off"
 				style={COMPACT_TITLE}
 			>
 				{title}
@@ -345,14 +363,14 @@ export const CanvasCard = memo(function CanvasCardImpl({
 	z,
 }: CanvasCardProps) {
 	const { thread, status } = card;
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tr("Untitled thread");
 	const preview = thread.lastMessage?.trim();
 	const age = compactAge(thread.updatedAt, now);
 	return (
 		<button
 			aria-label={cardLabel(card, open)}
 			className={cn(
-				"group/card absolute top-0 left-0 cursor-default touch-none select-none text-left outline-none",
+				"group/card absolute top-0 left-0 cursor-default touch-none select-none text-start outline-none",
 				gliding &&
 					"motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.2,0,0,1)]",
 				dragging && "cursor-grabbing"

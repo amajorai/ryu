@@ -85,8 +85,10 @@ export function ObservabilitySecuritySection({
 						>
 							<div className="flex flex-wrap items-center gap-2 text-sm">
 								<span className="tabular-nums">
-									{securityResult.summary.protected}/
-									{securityResult.summary.total} protected
+									{tl("{protected}/{total} protected", {
+										protected: securityResult.summary.protected,
+										total: securityResult.summary.total,
+									})}
 								</span>
 								{securityResult.summary.needs_attention > 0 ? (
 									<Badge variant="destructive">

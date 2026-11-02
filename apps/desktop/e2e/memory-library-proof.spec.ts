@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedRequest {
 	auth: string | null;
@@ -38,10 +39,7 @@ interface MemoryLibraryWindow extends Window {
 
 const evidenceDir =
 	process.env.RYU_MEMORY_LIBRARY_PROOF_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 const evidence = (name: string) => {
 	mkdirSync(evidenceDir, { recursive: true });
 	return path.resolve(evidenceDir, name);

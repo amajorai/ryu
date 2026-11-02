@@ -86,13 +86,21 @@ export function RealmsHeroSurface() {
 				{idle ? (
 					<Suspense fallback={null}>
 						<SeasonalPicker
-							className="absolute right-4 bottom-4 z-[3]"
+							className="absolute end-4 bottom-4 z-[3]"
 							season={season}
 						/>
 					</Suspense>
 				) : null}
+				{/* Exactly the first viewport: the landing header floats over the
+				    hero (fixed, not in flow), so only the announcement bar above it
+				    is subtracted; the web app publishes that bar's full height as
+				    --site-announcement-height (0 with no bar), and the partner strip
+				    starts below the fold. `svh` is the viewport with the mobile URL
+				    bar shown, so the height never jumps as the bar collapses.
+				    Content taller than a short landscape viewport sets its own
+				    height instead (min, not fixed). */}
 				<div
-					className="relative z-[2] mx-auto flex min-h-[min(740px,calc(100svh-4rem))] max-w-[96rem] flex-col items-center justify-center gap-9 overflow-hidden px-6 py-20 text-center"
+					className="relative z-[2] mx-auto flex min-h-[calc(100svh-var(--site-announcement-height,0px))] max-w-[96rem] flex-col items-center justify-center gap-9 overflow-hidden px-6 py-20 text-center"
 					data-testid="hero-viewport"
 				>
 					<h1

@@ -450,6 +450,7 @@ describe("notebook model", () => {
 		expect(notebookEditedLabel(ago(0), BASE)).toBe("Just now");
 		expect(notebookEditedLabel(ago(1), BASE)).toBe("1 minute ago");
 		expect(notebookEditedLabel(ago(42), BASE)).toBe("42 minutes ago");
+		expect(notebookEditedLabel(ago(42), BASE, "de")).toBe("vor 42 Minuten");
 		expect(notebookEditedLabel(ago(180), BASE)).toBe("3 hours ago");
 		expect(notebookEditedLabel(ago(60 * 30), BASE)).toBe("Yesterday");
 		expect(notebookEditedLabel(ago(60 * 24 * 3), BASE)).toBe("3 days ago");

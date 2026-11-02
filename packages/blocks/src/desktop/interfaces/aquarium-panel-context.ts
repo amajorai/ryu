@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -30,7 +31,7 @@ export const STATUS_TONE: Record<ThreadStatus, string> = {
 
 export function threadTitle(thread: InterfaceThread | undefined): string {
 	if (!thread) {
-		return "New thread";
+		return tr("New thread");
 	}
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }

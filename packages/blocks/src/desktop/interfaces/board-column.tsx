@@ -120,7 +120,7 @@ export function BoardGroupMark({
 			{agent.status === "working" ? (
 				<span
 					aria-hidden="true"
-					className="absolute -right-0.5 -bottom-0.5 flex size-3 items-center justify-center rounded-full bg-muted"
+					className="absolute -end-0.5 -bottom-0.5 flex size-3 items-center justify-center rounded-full bg-muted"
 				>
 					<BoardStatusDot className="size-2" pulse={false} status="working" />
 				</span>
@@ -217,7 +217,7 @@ export function BoardColumnView({
 			className={cn(LANE, compact ? LANE_WIDTH_COMPACT : LANE_WIDTH)}
 			data-board-lane=""
 		>
-			<header className="flex h-11 shrink-0 items-center gap-2 pr-2 pl-5">
+			<header className="flex h-11 shrink-0 items-center gap-2 ps-5 pe-2">
 				<BoardGroupMark agent={agent} column={column} />
 				<h2
 					className="min-w-0 truncate font-semibold text-foreground text-sm"
@@ -226,7 +226,9 @@ export function BoardColumnView({
 				>
 					{column.label}
 					<span className="sr-only">
-						, {threads.length} {threads.length === 1 ? "thread" : "threads"}
+						{tl(", {count, plural, one {# thread} other {# threads}}", {
+							count: threads.length,
+						})}
 					</span>
 				</h2>
 				<span
@@ -310,7 +312,7 @@ export function BoardColumnsSkeleton({ compact }: { compact: boolean }) {
 					className={cn(LANE, compact ? LANE_WIDTH_COMPACT : LANE_WIDTH)}
 					key={lane}
 				>
-					<div className="flex h-11 items-center gap-2 pr-2 pl-5">
+					<div className="flex h-11 items-center gap-2 ps-5 pe-2">
 						<Skeleton className="size-2.5 rounded-full" />
 						<Skeleton className="h-3.5 w-24" />
 					</div>

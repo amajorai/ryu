@@ -1,3 +1,5 @@
+import { translate as tl } from "@ryu/i18n/core";
+
 export interface SidebarConversationPreviewInput {
 	lastMessage?: string;
 	lastMessageRole?: string;
@@ -24,7 +26,9 @@ export function buildSidebarConversationPreviewStates({
 
 	if (trimmedMessage) {
 		states.push(
-			lastMessageRole === "user" ? `You: ${trimmedMessage}` : trimmedMessage
+			lastMessageRole === "user"
+				? tl("You: {message}", { message: trimmedMessage })
+				: trimmedMessage
 		);
 	}
 
@@ -33,7 +37,7 @@ export function buildSidebarConversationPreviewStates({
 	}
 
 	if (states.length === 0) {
-		states.push("No messages yet");
+		states.push(tl("No messages yet"));
 	}
 
 	return states;

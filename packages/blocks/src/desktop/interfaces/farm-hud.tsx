@@ -8,7 +8,7 @@ import {
 	Tractor,
 	Warehouse,
 } from "lucide-react";
-import { type FarmTotals, plural, STAGE_HINTS } from "./farm-model.ts";
+import { type FarmTotals, STAGE_HINTS } from "./farm-model.ts";
 import { PlantGlyph } from "./farm-plants.tsx";
 import {
 	GAME_FOCUS,
@@ -45,11 +45,15 @@ export function FarmTitle({
 	empty: boolean;
 	totals: FarmTotals;
 }) {
-	let status = `Day ${day}`;
+	const tl = useLiteralMessages();
+	let status = tl("Day {day}", { day });
 	if (empty) {
-		status = "No plots yet. Add an agent, or plant a seed.";
+		status = tl("No plots yet. Add an agent, or plant a seed.");
 	} else if (totals.ripe > 0) {
-		status = `Day ${day} · ${plural(totals.ripe, "crop")} ready to harvest`;
+		status = tl(
+			"Day {day} · {count, plural, one {# crop} other {# crops}} ready to harvest",
+			{ count: totals.ripe, day }
+		);
 	}
 	if (empty && actStatus !== undefined) {
 		// An empty farm with an ask at the gate: the summary, and how to start.
@@ -181,6 +185,10 @@ export function FarmCounters({
 	showCoins?: boolean;
 	totals: FarmTotals;
 }) {
+	const tl = useLiteralMessages();
+	const coins = tl("{count, plural, one {coin} other {coins}}", {
+		count: totals.coins,
+	});
 	if (actTotals) {
 		return (
 			<GameCounters label="Farm counters">
@@ -211,7 +219,7 @@ export function FarmCounters({
 					<GameCounter
 						compact={compact}
 						icon={<Coins strokeWidth={2.5} />}
-						label={totals.coins === 1 ? "coin" : "coins"}
+						label={coins}
 						tone="gold"
 						value={totals.coins}
 					/>
@@ -248,7 +256,7 @@ export function FarmCounters({
 				<GameCounter
 					compact={compact}
 					icon={<Coins strokeWidth={2.5} />}
-					label={totals.coins === 1 ? "coin" : "coins"}
+					label={coins}
 					tone="gold"
 					value={totals.coins}
 				/>

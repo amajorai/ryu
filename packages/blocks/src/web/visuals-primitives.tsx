@@ -1,12 +1,16 @@
+import { LiteralText } from "./literal-text.tsx";
+
 // Small pieces shared by the per-product hero visuals (./visuals.tsx and its
 // ./visuals-desktop.tsx and ./visuals-services.tsx siblings).
 
 export function Slot({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
-			<span className="text-foreground/80 text-xs">{label}</span>
+			<span className="text-foreground/80 text-xs">
+				<LiteralText text={label} />
+			</span>
 			<span className="shrink-0 text-foreground/80 text-xs md:text-sm">
-				{value}
+				<LiteralText text={value} />
 			</span>
 		</div>
 	);

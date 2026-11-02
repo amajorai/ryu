@@ -53,11 +53,16 @@ export function useQuestEvents(): void {
 		};
 
 		const onEvent = (event: QuestEvent) => {
+			// OS banners never reach the DOM localizer, and `localizeNativeCopy`
+			// matches whole literals only, so every interpolated string is
+			// translated here before it leaves the webview.
+			const tl = tlRef.current;
+			const title = event.type === "deleted" ? "" : event.quest.title;
+			const isCurrent = () =>
+				currentAuthority.current === authority && !controller.signal.aborted;
 			if (event.type === "suggested") {
 				toast.info({
-					title: tlRef.current("Looks done: {title}", {
-						title: event.quest.title,
-					}),
+					title: tl("Looks done: {title}", { title }),
 					description: event.reason,
 				});
 				playSound("quest-suggest", {
@@ -65,28 +70,27 @@ export function useQuestEvents(): void {
 					source: "stream",
 				});
 				osNotify(
-					`Finished "${event.quest.title}"?`,
+					tl("Finished “{title}”?", { title }),
 					event.reason,
 					`quest-${event.quest.id}`,
-					() =>
-						currentAuthority.current === authority && !controller.signal.aborted
+					isCurrent
 				);
 			} else if (event.type === "completed" && event.auto) {
 				toast.success({
-					title: `Auto-completed: ${event.quest.title}`,
+					title: tl("Auto-completed: {title}", { title }),
 					description:
-						event.quest.suggestion?.reason ?? "Detected from your activity.",
+						event.quest.suggestion?.reason ??
+						tl("Detected from your activity."),
 				});
 				playSound("quest-complete", {
 					key: `quest:${event.quest.id}`,
 					source: "stream",
 				});
 				osNotify(
-					`Done: ${event.quest.title}`,
-					"Ryu detected this task as finished.",
+					tl("Done: {title}", { title }),
+					tl("Ryu detected this task as finished."),
 					`quest-${event.quest.id}`,
-					() =>
-						currentAuthority.current === authority && !controller.signal.aborted
+					isCurrent
 				);
 			} else if (event.type === "completed") {
 				// A manual completion (Inbox accept, the quests app) has no toast,

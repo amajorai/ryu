@@ -3,13 +3,20 @@
 // host.sideModel / host.getPreference / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
 // The translation is returned as a `note`, so the reply the model wrote stays in
 // the transcript untouched (what the next turn sees) and the translation is shown
 // beside it, the way Telegram keeps the original message under a translation.
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const FLAG = "io.ryu.auto-translate";
 const MAX_CHARS = 12000;
@@ -90,9 +97,12 @@ if (
 	return { kind: "none" };
 }
 
-const header = `Translated from ${languageName(parsed.source)} to ${languageName(target)}:`;
+const header = await host.t("Translated from {source} to {target}:", {
+	source: languageName(parsed.source),
+	target: languageName(target),
+});
 const footer = truncated
-	? `\n\n(Only the first ${MAX_CHARS} characters were translated.)`
+	? "\n\n" + (await host.t("(Only the first {limit} characters were translated.)", { limit: MAX_CHARS }))
 	: "";
 return { kind: "note", text: `${header}\n\n${parsed.translation}${footer}` };
 

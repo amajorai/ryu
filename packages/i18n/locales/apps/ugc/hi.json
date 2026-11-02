@@ -1,0 +1,11 @@
+{
+  "New submission to review": "समीक्षा के लिए नया सबमिशन",
+  "Ryu's managed Composio provider is not configured for this node — record metrics manually": "इस नोड के लिए Ryu का प्रबंधित Composio प्रदाता कॉन्फ़िगर नहीं है — मेट्रिक्स मैन्युअल रूप से दर्ज करें",
+  "Submitted by {creator} on {platform}": "{creator} द्वारा {platform} पर सबमिट किया गया",
+  "approve this payout before marking it paid": "इस पेआउट को भुगतान किया गया चिह्नित करने से पहले स्वीकृत करें",
+  "curated action '{slug}' is not a safe action slug": "चुनी गई कार्रवाई '{slug}' सुरक्षित कार्रवाई स्लग नहीं है",
+  "no Composio metric source is curated for platform '{platform}' — record metrics manually": "प्लेटफ़ॉर्म '{platform}' के लिए कोई चुना हुआ Composio मेट्रिक स्रोत नहीं है — मेट्रिक्स मैन्युअल रूप से दर्ज करें",
+  "this payout has already been paid": "यह भुगतान पहले ही किया जा चुका है",
+  "this post has already been submitted to this campaign": "यह पोस्ट पहले ही इस कैंपेन में सबमिट की जा चुकी है",
+  "this submission's payout is already paid; deleting it would corrupt the campaign's spend": "इस सबमिशन का भुगतान पहले ही हो चुका है; इसे हटाने से कैंपेन का खर्च बिगड़ जाएगा"
+}

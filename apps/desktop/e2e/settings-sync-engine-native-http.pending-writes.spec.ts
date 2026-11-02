@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
 import {
 	action,
+	activeToken,
 	held,
 	local,
 	pullCount,
 	read,
 	registerNativeHttpLedgerHooks,
+	sealedActiveToken,
 	seed,
 	settled,
 	shortcutKey,
@@ -273,7 +275,11 @@ test("a recovered ordinary draft uploads while forged journal keys cannot export
 	]);
 	expect(receipt.state.accounts.B.entries).toEqual([]);
 	expect(receipt.calls.filter((c) => c.method === "PUT")).toEqual([]);
-	expect(await local(page, "ryu_session_token")).toBe("account-A");
+	// A synced credential key is never imported: the vault keeps A, and the
+	// purged plaintext token is not written back.
+	expect(await activeToken(page)).toBe("account-A");
+	expect(await sealedActiveToken(page)).toBe("account-A");
+	expect(await local(page, "ryu_session_token")).toBeNull();
 	expect(await local(page, "ryu_workspace_path")).toBe("/owned/private");
 	expect(await local(page, "ryu:node-config")).toBe("owned-node");
 	expect(await local(page, key)).toBe("Inter");

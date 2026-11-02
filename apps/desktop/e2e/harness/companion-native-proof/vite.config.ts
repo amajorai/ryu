@@ -12,12 +12,12 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { z } from "zod";
 import type { ProofJsonRecord } from "../../fixture-json.ts";
+import { proofEvidencePath } from "../../proof-evidence-path.ts";
 
 const root = import.meta.dirname;
 const desktop = path.resolve(root, "../../..");
-const proof = path.resolve(
-	desktop,
-	"../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-companion-page/native"
+const proof = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/coordinator-companion-page/native"
 );
 const token = "Bearer companion-native-proof-token";
 interface CompanionCaptureControlState {

@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card.tsx";
 import { TextInput } from "@/components/ui/text-input.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { formatCliNumber } from "../../i18n/format.ts";
 import { tf } from "../../i18n/translate.ts";
 import { MemoryAdvancedPanel } from "./memory-advanced.tsx";
 import { MemoryLibraryPanel } from "./memory-library.tsx";
@@ -230,8 +231,8 @@ export function MemoryPanel({
 						tf(
 							"Enter Off, Auto, or a whole-number context budget from {min} to {max}.",
 							{
-								min: BUDGET_MIN.toLocaleString(),
-								max: BUDGET_MAX.toLocaleString(),
+								min: formatCliNumber(BUDGET_MIN),
+								max: formatCliNumber(BUDGET_MAX),
 							}
 						)
 					);

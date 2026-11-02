@@ -307,8 +307,10 @@ export function OTPInput({
 					{label}
 				</label>
 			) : null}
+			{/* Codes are LTR in every locale; labels and messages keep the inherited direction. */}
 			<fieldset
 				className="relative m-0 inline-flex w-max border-0 p-0"
+				dir="ltr"
 				onMouseDown={(e) => {
 					if (disabled || readOnly) {
 						return;
@@ -356,6 +358,7 @@ export function OTPInput({
 						"flex items-center",
 						size === "compact" ? "gap-1" : "gap-(--otp-gap)"
 					)}
+					dir="ltr"
 					ref={slotsRef}
 					style={size === "compact" ? undefined : slotRowStyle}
 				>

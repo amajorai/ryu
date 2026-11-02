@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { ProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedCall {
 	args?: ProofJsonRecord;
@@ -32,10 +33,7 @@ function evidencePath(name: string): string {
 	if (override) {
 		return path.join(override, `${name}.png`);
 	}
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 async function openEvals(page: import("@playwright/test").Page): Promise<void> {

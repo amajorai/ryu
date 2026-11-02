@@ -1,8 +1,8 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import type { RefObject } from "react";
 import { GAME_PLATE } from "./game-hud.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type Moon,
 	type Planet,
@@ -235,7 +235,7 @@ function PlanetPlate({
 				tabIndex={-1}
 				type="button"
 			>
-				{planet.name}
+				<span data-ryu-i18n="off">{planet.name}</span>
 				{teamIndex === null ? null : (
 					<TeamMark color={teamColor(palette, teamIndex)} />
 				)}
@@ -282,7 +282,7 @@ function MoonTarget({
 }) {
 	const key = moonKey(bodyId, moon.threadId);
 	const tl = useLiteralMessages();
-	const label = THREAD_STATUS_LABELS[moon.status];
+	const label = threadStatusLabel(moon.status);
 	return (
 		<div
 			className={WRAPPER}
@@ -319,7 +319,9 @@ function MoonTarget({
 					}}
 				>
 					<PlanetsStatusDot className="size-1.5" status={moon.status} />
-					<span className="max-w-48 truncate font-medium">{moon.title}</span>
+					<span className="max-w-48 truncate font-medium" data-ryu-i18n="off">
+						{moon.title}
+					</span>
 					<span className={cn("font-medium", LABEL_TONE[moon.status])}>
 						{label}
 					</span>

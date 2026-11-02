@@ -46,6 +46,11 @@ export interface WorkspaceProof {
 	stepUpScopes: string[];
 }
 
+/** What the specs read back; they import this type, which also brings in the global below. */
+export type WorkspaceProofSnapshot = ReturnType<WorkspaceProof["snapshot"]>;
+
+// The one declaration of the proof's window globals: both workspace specs
+// read them through this module rather than redeclaring them (TS2717).
 declare global {
 	interface Window {
 		__GATEWAY_WORKSPACE_EXTERNAL_URLS__?: string[];

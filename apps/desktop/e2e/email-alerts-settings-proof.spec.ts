@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { PluginDocument } from "../src/lib/api/plugin-wire-values.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedRequest {
 	authorization: string | null;
@@ -58,10 +59,7 @@ function evidencePath(name: string): string {
 	if (process.env.RYU_PROOF_OUTPUT_ROOT) {
 		return path.resolve(process.env.RYU_PROOF_OUTPUT_ROOT, `${name}.png`);
 	}
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 async function openProof(

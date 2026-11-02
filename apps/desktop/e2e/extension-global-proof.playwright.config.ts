@@ -1,11 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 export default defineConfig({
 	testDir: ".",
 	testMatch: /extension-global-proof\.spec\.ts$/,
 	timeout: 180_000,
 	expect: { timeout: 45_000 },
 	reporter: "line",
-	outputDir: "../../../docs/proof/extension-parity/global-browser",
+	outputDir: proofEvidencePath("extension-parity/global-browser"),
 	use: {
 		...devices["Desktop Chrome"],
 		baseURL: "http://127.0.0.1:5234",

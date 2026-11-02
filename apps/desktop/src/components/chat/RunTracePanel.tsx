@@ -38,6 +38,7 @@ import {
 	type TraceNode,
 	usageTotals,
 } from "@/src/lib/api/runs.ts";
+import { formatDuration, formatTokens } from "./RunTracePanel-format.ts";
 
 interface RunTracePanelProps {
 	runId: string;
@@ -114,19 +115,7 @@ function kindStyle(node: TraceNode): KindStyle {
 	return KIND_STYLES[kind] ?? FALLBACK_STYLE;
 }
 
-export function formatDuration(ms: number | null): string {
-	if (ms === null) {
-		return "in flight";
-	}
-	if (ms < 1000) {
-		return `${Math.max(0, Math.round(ms))}ms`;
-	}
-	return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)}s`;
-}
-
-function formatTokens(count: number): string {
-	return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
-}
+export { formatDuration } from "./RunTracePanel-format.ts";
 
 /** Bar geometry as percentages of the run's total duration. */
 export function barGeometry(
@@ -259,7 +248,7 @@ function WaterfallRow({
 		>
 			<div
 				className="flex min-w-0 items-center gap-1"
-				style={{ paddingLeft: `${node.depth * 12}px` }}
+				style={{ paddingInlineStart: `${node.depth * 12}px` }}
 			>
 				{hasChildren ? (
 					<Button
@@ -273,7 +262,7 @@ function WaterfallRow({
 						<HugeiconsIcon
 							className={cn(
 								"size-3.5 transition-transform duration-(--duration-base) ease-move",
-								collapsed && "-rotate-90"
+								collapsed && "-rotate-90 rtl:rotate-90"
 							)}
 							icon={ArrowDown01Icon}
 						/>
@@ -283,7 +272,7 @@ function WaterfallRow({
 				)}
 				<button
 					aria-pressed={selected}
-					className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+					className="flex min-w-0 flex-1 items-center gap-1.5 text-start"
 					onClick={onSelect}
 					type="button"
 				>
@@ -312,10 +301,10 @@ function WaterfallRow({
 						style={{ left: `${left}%`, width: `${width}%` }}
 					/>
 				</div>
-				<span className="w-14 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
+				<span className="w-14 shrink-0 text-end text-muted-foreground text-xs tabular-nums">
 					{formatDuration(node.durationMs)}
 				</span>
-				<span className="w-12 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
+				<span className="w-12 shrink-0 text-end text-muted-foreground text-xs tabular-nums">
 					{tokens > 0 ? formatTokens(tokens) : ""}
 				</span>
 			</div>
@@ -390,7 +379,7 @@ export function RunTracePanel({ runId, target }: RunTracePanelProps) {
 		<div className="text-foreground">
 			<button
 				aria-expanded={expanded}
-				className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors duration-150 hover:bg-muted hover:duration-0"
+				className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-xs transition-colors duration-150 hover:bg-muted hover:duration-0"
 				onClick={() => {
 					if (!expanded) {
 						load();
@@ -402,19 +391,19 @@ export function RunTracePanel({ runId, target }: RunTracePanelProps) {
 				<HugeiconsIcon
 					className={cn(
 						"size-3.5 shrink-0 text-muted-foreground transition-transform duration-(--duration-base) ease-move",
-						!expanded && "-rotate-90"
+						!expanded && "-rotate-90 rtl:rotate-90"
 					)}
 					icon={ArrowDown01Icon}
 				/>
 				<span className="font-medium text-foreground">Run trace</span>
 				{loading && (
 					<HugeiconsIcon
-						className="ml-1 size-3.5 shrink-0 animate-spin text-muted-foreground"
+						className="ms-1 size-3.5 shrink-0 animate-spin text-muted-foreground"
 						icon={Loading01Icon}
 					/>
 				)}
 				{!loading && spanCount > 0 && (
-					<span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
+					<span className="ms-auto shrink-0 text-muted-foreground tabular-nums">
 						{errorCount > 0
 							? tl(
 									"{spanCount, plural, one {{spanLabel} span} other {{spanLabel} spans}} · {errorCount} failed",

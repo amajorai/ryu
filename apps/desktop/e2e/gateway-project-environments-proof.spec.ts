@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const projectPath = "/Users/proof/projects/ryu-app";
 // RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
@@ -10,7 +11,7 @@ function evidencePath(ledgerPath: string): string {
 	if (override) {
 		return path.join(override, path.basename(ledgerPath));
 	}
-	return path.resolve(import.meta.dirname, "../../..", ledgerPath);
+	return proofEvidencePath(ledgerPath);
 }
 const environmentsKey = "ryu_workspace_environments_v1";
 
@@ -167,7 +168,7 @@ test("Gateway Add project browses the selected node, cancels without writes and 
 	await page.screenshot({
 		fullPage: true,
 		path: evidencePath(
-			"docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/environment-project-added.png"
+			"test-coverage-sweep-20260924/parallel/desktop-gateway/environment-project-added.png"
 		),
 	});
 });
@@ -203,7 +204,7 @@ test("saves the project environment contract and reloads the active profile", as
 	await page.screenshot({
 		fullPage: true,
 		path: evidencePath(
-			"docs/proof/test-coverage-sweep-20260924/evidence/gateway-project-environments-saved.png"
+			"test-coverage-sweep-20260924/evidence/gateway-project-environments-saved.png"
 		),
 	});
 	await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -377,7 +378,7 @@ test("keeps a denied save editable and retries successfully after access returns
 	await page.screenshot({
 		fullPage: true,
 		path: evidencePath(
-			"docs/proof/test-coverage-sweep-20260924/evidence/gateway-project-environments-access-denied.png"
+			"test-coverage-sweep-20260924/evidence/gateway-project-environments-access-denied.png"
 		),
 	});
 	const failedProof = await readProofState(page);

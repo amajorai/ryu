@@ -4,7 +4,7 @@ import {
 	type FarmCrop,
 	type FarmPlot,
 	FRUIT_NAMES,
-	STAGE_NAMES,
+	STAGE_WORDS,
 } from "./farm-model.ts";
 
 /** The accessible name of a plant: what it is, whose it is, where it stands. */
@@ -16,7 +16,7 @@ export function cropLabel(
 	const values = {
 		fruit: FRUIT_NAMES[crop.fruit],
 		plotName,
-		stage: STAGE_NAMES[crop.stage].toLowerCase(),
+		stage: STAGE_WORDS[crop.stage],
 		title: cropTitle(crop.thread),
 	};
 	return crop.stage === "ripe"

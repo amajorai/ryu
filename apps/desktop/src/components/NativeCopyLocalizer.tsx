@@ -1,6 +1,12 @@
+import { formatMessage, messageIdForLiteral } from "@ryu/i18n/core";
 import { useOptionalI18n } from "@ryu/i18n/react";
 import { useEffect } from "react";
-import { registerNativeCopyTranslator } from "@/src/lib/native-copy.ts";
+import {
+	buildNativeShellCopy,
+	type NativeShellTranslate,
+	pushNativeShellCopy,
+	registerNativeCopyTranslator,
+} from "@/src/lib/native-copy.ts";
 import { createNativeCopyTranslator } from "@/src/lib/native-copy-translator.ts";
 
 /**
@@ -8,6 +14,10 @@ import { createNativeCopyTranslator } from "@/src/lib/native-copy-translator.ts"
  * bot vocabulary. The i18n value changes identity on every locale or pack
  * change, so the translator is re-registered then. Only known first-party
  * literals are translated or swapped; runtime text passes through unchanged.
+ *
+ * It also hands the Tauri shell its tray labels, quit and update
+ * confirmations and macOS app menu in the same language. Until that first
+ * hand-off the shell shows English.
  */
 export function NativeCopyLocalizer({
 	botTerminology,
@@ -23,5 +33,19 @@ export function NativeCopyLocalizer({
 			createNativeCopyTranslator(i18n, botTerminology)
 		);
 	}, [botTerminology, i18n]);
+	useEffect(() => {
+		if (!i18n) {
+			return;
+		}
+		// `tl()` semantics: the catalog sentence, else the English source
+		// formatted with its values. Unchanged copy is never sent twice.
+		const tl: NativeShellTranslate = (source, values = {}) => {
+			const translated = i18n.t(messageIdForLiteral(source), values, source);
+			return translated === source
+				? formatMessage(source, values, i18n.locale)
+				: translated;
+		};
+		void pushNativeShellCopy(buildNativeShellCopy(tl, i18n.locale));
+	}, [i18n]);
 	return null;
 }

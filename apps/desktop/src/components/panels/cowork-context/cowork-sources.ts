@@ -9,6 +9,7 @@ import {
 	SourceCodeIcon,
 } from "@hugeicons/core-free-icons";
 import { extractCitations } from "@ryu/blocks/desktop/agent-elements/utils/citations.ts";
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	firstString,
 	PATH_KEYS,
@@ -86,7 +87,11 @@ function attachmentItem<TValue>(
 	const isImage = resolvedMediaType?.startsWith("image/") ?? false;
 	return {
 		id,
-		label: filename ?? `${isImage ? "Image" : "Attachment"} ${fallbackNumber}`,
+		label:
+			filename ??
+			(isImage
+				? tl("Image {number}", { number: fallbackNumber })
+				: tl("Attachment {number}", { number: fallbackNumber })),
 		detail: resolvedMediaType,
 		filePath: filename,
 		icon: isImage ? Image02Icon : File01Icon,

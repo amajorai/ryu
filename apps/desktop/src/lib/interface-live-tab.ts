@@ -10,6 +10,7 @@ import {
 	type FailoverVerdict,
 	getFailoverVerdict,
 } from "@ryu/blocks/desktop/agent-elements/utils/live-message-flags.ts";
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	type InterfaceActivity,
 	type InterfaceActivityKind,
@@ -187,8 +188,8 @@ export function permissionAsk(
 		subject: kind,
 		target: typeof path === "string" && path ? clamp(basename(path), 40) : null,
 		text: named.trim()
-			? clamp(`Allow ${named.trim()}?`, 80)
-			: "Allow this tool to run?",
+			? clamp(tl("Allow {name}?", { name: named.trim() }), 80)
+			: tl("Allow this tool to run?"),
 		threadId: owner.threadId,
 	};
 	if (distinct) {

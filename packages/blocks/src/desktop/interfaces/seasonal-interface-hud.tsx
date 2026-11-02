@@ -276,7 +276,7 @@ export function SeasonalHud({
 							type="button"
 						>
 							<List aria-hidden="true" className="size-4" strokeWidth={2.5} />
-							{tl("All {doors}", { doors: copy.doors })}
+							{copy.all}
 							<span className="text-(--gk-ink-muted) tabular-nums">
 								{filledDoors.length}
 							</span>

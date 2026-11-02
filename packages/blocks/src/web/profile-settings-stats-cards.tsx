@@ -1,6 +1,7 @@
 "use client";
 
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Tooltip,
@@ -44,8 +45,8 @@ export function HeroStat({
 								render={
 									<button
 										aria-label={tl("About {label}: {hint}", {
-											label: label.toLowerCase(),
-											hint,
+											label: sentenceLabel(tl, label),
+											hint: tl(hint),
 										})}
 										className="shrink-0 rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 										type="button"

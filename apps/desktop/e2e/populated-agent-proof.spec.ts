@@ -6,6 +6,7 @@ import {
 	coreProofRosterSchema,
 	coreProofStateSchema,
 } from "./core-live-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("agent picker renders a live populated Core roster", async ({
 	page,
@@ -87,10 +88,7 @@ test("agent picker renders a live populated Core roster", async ({
 	).toContainText("Performance fixture 0249");
 	expect(agentReads).toBe(1);
 	expect(errors).toEqual([]);
-	const directory = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep"
-	);
+	const directory = proofEvidencePath("performance-sweep");
 	await page.screenshot({
 		path: path.join(directory, "populated-agent-picker-completed.png"),
 		fullPage: true,

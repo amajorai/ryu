@@ -5,4 +5,4 @@ export const COMPOSER_SELECT_POPOVER =
 	"w-auto min-w-[200px] max-w-[280px] rounded-3xl p-1 gap-0";
 
 export const COMPOSER_SELECT_ITEM =
-	"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-left text-sm font-medium";
+	"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-start text-sm font-medium";

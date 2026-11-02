@@ -25,6 +25,12 @@ import {
 	NAME_MIN_PX,
 } from "../waitlist-pass.tsx";
 import {
+	activePassTranslate,
+	formatPassDays,
+	formatPassDecimalHours,
+	type PassTranslate,
+} from "./labels.ts";
+import {
 	BLOCK_GAP_PX,
 	ellipsize,
 	fitFontSize,
@@ -39,6 +45,7 @@ import {
 	STAT_VALUE_PX,
 	setTracking,
 } from "./paint.ts";
+import { passInline, withPassDirection } from "./paint-direction.ts";
 
 /** `gap-3` between the grid's columns and rows, at the app's 16px root. */
 const STAT_GAP_PX = 12;
@@ -47,7 +54,6 @@ const NAME_TRACKING_EM = -0.025;
 /** The avatar disc: `size-14` with a `mb-3`, the waitlist face's own. */
 const AVATAR_PX = 56;
 const AVATAR_GAP_PX = 12;
-const DEFAULT_NAME = "A Ryu Developer";
 
 /** The usage totals a profile shows when its usage section is public. */
 export interface ProfileFaceUsage {
@@ -68,25 +74,36 @@ export interface ProfileFaceContent {
 }
 
 /** The name the card prints, and the seed its backdrop is hashed from. */
-export function profileDisplayName(name?: string | null): string {
-	return name?.trim() || DEFAULT_NAME;
+export function profileDisplayName(
+	name?: string | null,
+	tl: PassTranslate = activePassTranslate
+): string {
+	return name?.trim() || tl("A Ryu Developer");
 }
 
 /** The header's right-hand meta: the joined month, when there is one. */
-export function profileHeaderMeta(content: ProfileFaceContent): string | null {
+export function profileHeaderMeta(
+	content: ProfileFaceContent,
+	tl: PassTranslate = activePassTranslate
+): string | null {
 	const joined = content.joined?.trim();
-	return joined ? `Joined ${joined}` : null;
+	return joined ? tl("Joined {joined}", { joined }) : null;
 }
 
 /** "@handle · 12-day streak": the line under the name. */
-export function profileMetaLine(content: ProfileFaceContent): string | null {
+export function profileMetaLine(
+	content: ProfileFaceContent,
+	tl: PassTranslate = activePassTranslate
+): string | null {
 	const parts: string[] = [];
 	const handle = content.username?.trim();
 	if (handle) {
 		parts.push(`@${handle}`);
 	}
 	if (content.usage) {
-		parts.push(`${content.usage.streakCurrent}-day streak`);
+		parts.push(
+			tl("{days}-day streak", { days: String(content.usage.streakCurrent) })
+		);
 	}
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -96,43 +113,48 @@ export function profileMetaLine(content: ProfileFaceContent): string | null {
  * usage section is private.
  */
 export function profileStats(
-	content: ProfileFaceContent
+	content: ProfileFaceContent,
+	tl: PassTranslate = activePassTranslate
 ): readonly [string, string][] {
 	const usage = content.usage;
 	if (!usage) {
 		return [];
 	}
 	return [
-		["Tokens", formatCount(usage.totalTokens) ?? "—"],
-		["Requests", formatCount(usage.requestCount) ?? "—"],
-		["Agent hours", `${usage.agentHours.toFixed(1)}h`],
-		["Best streak", `${usage.streakLongest}d`],
+		[tl("Tokens"), formatCount(usage.totalTokens) ?? "—"],
+		[tl("Requests"), formatCount(usage.requestCount) ?? "—"],
+		[tl("Agent hours"), formatPassDecimalHours(usage.agentHours)],
+		[tl("Best streak"), formatPassDays(usage.streakLongest)],
 	];
 }
 
 /** The profile card, as a painter. Memoise it: it is half the scene's identity. */
 export function profileFacePainter(
-	content: ProfileFaceContent
+	content: ProfileFaceContent,
+	tl: PassTranslate = activePassTranslate
 ): PassFacePainter {
 	return {
-		front: (ctx, env) => paintProfileFront(ctx, content, env),
+		front: (ctx, env) =>
+			paintProfileFront(ctx, content, withPassDirection(ctx, env, tl), tl),
 	};
 }
 
 function paintProfileFront(
 	ctx: CanvasRenderingContext2D,
 	content: ProfileFaceContent,
-	env: PassFaceEnv
+	env: PassFaceEnv,
+	tl: PassTranslate
 ): void {
 	const { avatar, family, palette, scale } = env;
 	const { available, bottom, left } = passFaceBox(scale);
+	const inline = passInline(env);
 
-	paintPassHeader(ctx, env, profileHeaderMeta(content));
+	paintPassHeader(ctx, env, profileHeaderMeta(content, tl));
 
 	// The grid, bottom row first: the hero above is bottom-aligned against
 	// whatever the footer leaves, so the footer is measured before it.
 	let cursor = bottom;
-	const stats = profileStats(content);
+	const stats = profileStats(content, tl);
 	if (stats.length > 0) {
 		const gap = STAT_GAP_PX * scale;
 		const column = (available - gap) / 2;
@@ -160,9 +182,9 @@ function paintProfileFront(
 	}
 
 	// Hero, built upward: the meta line, the name, then the avatar.
-	ctx.textAlign = "left";
+	ctx.textAlign = inline.start;
 	ctx.textBaseline = "alphabetic";
-	const meta = profileMetaLine(content);
+	const meta = profileMetaLine(content, tl);
 	if (meta) {
 		const { size: metaSize } = fitFontSize(ctx, {
 			available,
@@ -177,11 +199,11 @@ function paintProfileFront(
 		ctx.font = font(family, 400, metaSize, scale);
 		setTracking(ctx, 0);
 		ctx.fillStyle = palette.mutedForeground;
-		ctx.fillText(ellipsize(ctx, meta, available), left, cursor);
+		ctx.fillText(ellipsize(ctx, meta, available), inline.x(left), cursor);
 		cursor -= metaSize * scale + HERO_GAP_PX * scale;
 	}
 
-	const name = profileDisplayName(content.name);
+	const name = profileDisplayName(content.name, tl);
 	const { size: nameSize } = fitFontSize(ctx, {
 		available,
 		family,
@@ -196,20 +218,21 @@ function paintProfileFront(
 	ctx.font = font(family, 500, nameSize, scale);
 	setTracking(ctx, nameSize * NAME_TRACKING_EM * scale);
 	ctx.fillStyle = palette.cardForeground;
-	ctx.fillText(ellipsize(ctx, name, available), left, cursor);
+	ctx.fillText(ellipsize(ctx, name, available), inline.x(left), cursor);
 	setTracking(ctx, 0);
 
 	if (avatar) {
 		const size = AVATAR_PX * scale;
 		const y = cursor - nameSize * scale - AVATAR_GAP_PX * scale - size;
+		const x = inline.box(left, size);
 		ctx.save();
 		ctx.beginPath();
-		ctx.arc(left + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+		ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
 		ctx.clip();
-		ctx.drawImage(avatar, left, y, size, size);
+		ctx.drawImage(avatar, x, y, size, size);
 		ctx.restore();
 		ctx.beginPath();
-		ctx.arc(left + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+		ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
 		ctx.strokeStyle = palette.border;
 		ctx.lineWidth = scale;
 		ctx.stroke();

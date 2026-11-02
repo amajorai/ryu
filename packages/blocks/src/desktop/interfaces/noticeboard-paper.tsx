@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import type { CSSProperties, ReactNode } from "react";
@@ -173,6 +174,7 @@ function Title({ children, lines }: { children: ReactNode; lines: 1 | 2 }) {
 				"font-semibold text-card-foreground text-sm leading-5",
 				lines === 1 ? "truncate" : "line-clamp-2"
 			)}
+			data-ryu-i18n="off"
 		>
 			{children}
 		</span>
@@ -189,7 +191,10 @@ function Message({ text }: { text: string | null }) {
 		);
 	}
 	return (
-		<span className="line-clamp-4 text-[13px] text-card-foreground/70 leading-5">
+		<span
+			className="line-clamp-4 text-[13px] text-card-foreground/70 leading-5"
+			data-ryu-i18n="off"
+		>
 			{text}
 		</span>
 	);
@@ -246,8 +251,11 @@ function Memo({ age, note }: { age: string; note: NoticeboardNote }) {
 					</span>
 					<Title lines={2}>{note.thread.title}</Title>
 				</span>
-				<span className="line-clamp-4 font-mono text-[12.5px] text-card-foreground/75 leading-5">
-					{note.thread.lastMessage ?? "No messages yet"}
+				<span
+					className="line-clamp-4 font-mono text-[12.5px] text-card-foreground/75 leading-5"
+					data-ryu-i18n="off"
+				>
+					{note.thread.lastMessage ?? tr("No messages yet")}
 				</span>
 				<NoteFooter age={age} note={note} />
 			</span>

@@ -111,12 +111,12 @@ function TransactionRow({
 			<button
 				aria-current={selected ? "true" : undefined}
 				className={cn(
-					"group/row relative flex w-full items-center @2xl:gap-x-4 gap-x-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors duration-100 hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+					"group/row relative flex w-full items-center @2xl:gap-x-4 gap-x-3 rounded-lg px-3 py-2.5 text-start outline-none transition-colors duration-100 hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
 					// Wide, the row splits on the same two tracks as the balance and
 					// chart above, so the conversation column starts under the chart.
 					"@[57.5rem]:grid @[57.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] @[57.5rem]:gap-x-16",
 					selected &&
-						"bg-muted before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary hover:bg-muted"
+						"bg-muted before:absolute before:inset-y-2 before:start-0 before:w-0.5 before:rounded-full before:bg-primary hover:bg-muted"
 				)}
 				data-transaction-id={transaction.id}
 				onClick={() => onSelect(transaction.id)}

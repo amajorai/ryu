@@ -1,4 +1,5 @@
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
@@ -335,7 +336,7 @@ export function ResourcePermissions({
 						size="sm"
 						variant="ghost"
 					>
-						{tl("Add {target}", { target: TARGET_LABEL[t].toLowerCase() })}
+						{tl("Add {target}", { target: sentenceLabel(tl, TARGET_LABEL[t]) })}
 					</Button>
 				))}
 				<div className="flex-1" />

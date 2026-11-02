@@ -18,6 +18,7 @@
 // That narrows (but cannot fully close) the window in which two clients could
 // both send the same feedback.
 
+import { translate as tl } from "@ryu/i18n/core";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
@@ -431,7 +432,7 @@ export function usePullRequestAutomation({
 			const flags = useConversationFlagsStore.getState();
 			if (plan.archive && !flags.archivedIds.has(conversation.id)) {
 				flags.toggleArchive(conversation.id);
-				toast.info(`Archived “${conversation.title}”`, {
+				toast.info(tl("Archived “{title}”", { title: conversation.title }), {
 					description: "Its pull requests were merged or closed.",
 				});
 			}

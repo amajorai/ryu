@@ -7,16 +7,14 @@ import {
 	decodeAutoRoutingWrite,
 } from "./agent-auto-routing-proof.contracts.ts";
 import type { NodeSelectorApiCall } from "./harness/node-selector-proof.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_URL = "/node-selector-proof.html";
 const PREF_PATH = "/api/preferences/agent-auto-routing";
 const PREF_STORAGE_KEY = "node-selector-proof-agent-auto-routing";
 const CLASSIFY_MODEL_ID = "gemma-3-270m-it-qat-Q4_0";
 const NODE_TOKEN = "local-node-selector-token";
-const EVIDENCE_DIR = path.resolve(
-	process.cwd(),
-	"../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 const DEFAULT_CONFIG: AgentAutoRoutingConfig = {
 	enabled: false,

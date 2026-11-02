@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // The device-permissions proof installs this frame-local API before mounting the
 // settings component; every scenario below loads that native fixture entry.
@@ -14,10 +15,7 @@ declare global {
 	}
 }
 
-const proof = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/os-permissions-20261002"
-);
+const proof = proofEvidencePath("os-permissions-20261002");
 test.beforeAll(async () => {
 	await mkdir(proof, { recursive: true });
 });

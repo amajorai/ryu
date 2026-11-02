@@ -47,6 +47,7 @@ import {
 	type PluginContextMenuItem,
 	pluginHostInvoke,
 } from "@/src/lib/api/plugins.ts";
+import { contributedRowFailedLabel } from "@/src/lib/contributed-row-feedback.ts";
 import { copyChatTranscript } from "@/src/lib/copy-chat-transcript.ts";
 import { useConversationFlagsStore } from "@/src/store/useConversationFlagsStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
@@ -206,7 +207,7 @@ function contributedRow(
 			toast.promise(run(), {
 				loading: feedback?.loading ?? item.label,
 				success: feedback?.success ?? item.label,
-				error: feedback?.error ?? `${item.label} failed`,
+				error: feedback?.error ?? contributedRowFailedLabel(item.label),
 			});
 		},
 	};

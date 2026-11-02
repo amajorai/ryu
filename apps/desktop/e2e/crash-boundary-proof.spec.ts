@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
 const RECOVER_ON_RELOAD_KEY = "crash-boundary-proof-recover-on-reload";
@@ -13,10 +14,7 @@ interface CrashBoundaryProofWindow extends Window {
 }
 
 function evidencePath(name: string): string {
-	return resolve(
-		root,
-		`docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 async function openTerminal(

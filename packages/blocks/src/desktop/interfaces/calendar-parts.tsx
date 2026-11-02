@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
@@ -10,7 +11,6 @@ import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
 	localDayKey,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
 import type { CSSProperties, ReactNode } from "react";
@@ -20,14 +20,18 @@ import {
 	compactTime,
 	displayWallDate,
 	longDay,
-	RUN_OUTCOME_LABELS,
 	type RunItem,
 	type RunOutcome,
 	runOutcome,
+	runOutcomeLabel,
 } from "./calendar-model.ts";
 import { ITEM_RADIUS_CLASS } from "./calendar-parts-classes.ts";
 import { aggregateCount, RunDetails } from "./calendar-parts-run-details.tsx";
-import { agentById } from "./interface-renderer.ts";
+import {
+	agentById,
+	formatNameList,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 export {
 	EYEBROW_CLASS,
@@ -115,7 +119,7 @@ export function BlockAccent({ item }: { item: CalendarItem }) {
 }
 
 export function threadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }
 
 export function threadAgents(
@@ -143,10 +147,13 @@ export function threadGroupName(
 	return snapshot.groups.find((group) => group.id === groupId)?.name ?? null;
 }
 
-const FULL_TIME = new Intl.DateTimeFormat(undefined, {
-	hour: "numeric",
-	minute: "2-digit",
-});
+/** "2:05 PM" in the UI locale. */
+function clockTime(date: Date): string {
+	return dateFormatter(activeLocale(), {
+		hour: "numeric",
+		minute: "2-digit",
+	}).format(date);
+}
 
 /** One sentence naming an item for assistive tech. */
 export function itemAccessibleName(
@@ -155,21 +162,21 @@ export function itemAccessibleName(
 	tl: LiteralMessage
 ): string {
 	if (item.kind === "thread") {
-		const agents = threadAgents(snapshot, item.thread)
-			.map((agent) => agent.name)
-			.join(", ");
-		return [
-			threadTitle(item.thread),
-			THREAD_STATUS_LABELS[item.status],
-			agents || "No agent",
-			`last active ${FULL_TIME.format(item.start)}`,
-		].join(", ");
+		const agents = formatNameList(
+			threadAgents(snapshot, item.thread).map((agent) => agent.name)
+		);
+		return tl("{title}, {status}, {agents}, last active {time}", {
+			agents: agents || tl("No agent"),
+			status: threadStatusLabel(item.status, tl),
+			time: clockTime(item.start),
+			title: threadTitle(item.thread),
+		});
 	}
-	return [
-		`Scheduled run: ${item.event.title}`,
-		RUN_OUTCOME_LABELS[runOutcome(item.event)],
-		runWhenPhrase(item, tl),
-	].join(", ");
+	return tl("Scheduled run: {title}, {outcome}, {when}", {
+		outcome: runOutcomeLabel(runOutcome(item.event), tl),
+		title: item.event.title,
+		when: runWhenPhrase(item, tl),
+	});
 }
 
 /**
@@ -179,19 +186,28 @@ export function itemAccessibleName(
 function runWhenPhrase(item: RunItem, tl: LiteralMessage): string {
 	const count = aggregateCount(item);
 	if (count === 0) {
-		return FULL_TIME.format(item.start);
+		return clockTime(item.start);
 	}
-	const values = { count: String(count), day: longDay(item.start) };
+	const values = { count, day: longDay(item.start) };
 	const today =
 		localDayKey(item.start) === localDayKey(displayWallDate(Date.now()));
 	if (item.event.kind === "upcoming") {
 		return today
-			? tl("{count} runs scheduled today", values)
-			: tl("{count} runs scheduled on {day}", values);
+			? tl(
+					"{count, plural, one {# run scheduled today} other {# runs scheduled today}}",
+					values
+				)
+			: tl(
+					"{count, plural, one {# run scheduled on {day}} other {# runs scheduled on {day}}}",
+					values
+				);
 	}
 	return today
-		? tl("{count} runs today", values)
-		: tl("{count} runs on {day}", values);
+		? tl("{count, plural, one {# run today} other {# runs today}}", values)
+		: tl(
+				"{count, plural, one {# run on {day}} other {# runs on {day}}}",
+				values
+			);
 }
 
 /**
@@ -268,7 +284,7 @@ export const ACTIVE_ITEM_CLASS =
 export function chipClassName(item: CalendarItem, active: boolean): string {
 	const aggregate = item.kind === "run" && (item.event.count ?? 0) > 1;
 	return cn(
-		"group/chip relative flex h-5 w-full min-w-0 shrink-0 items-center gap-1.5 px-1 text-left text-xs outline-none transition-colors",
+		"group/chip relative flex h-5 w-full min-w-0 shrink-0 items-center gap-1.5 px-1 text-start text-xs outline-none transition-colors",
 		ITEM_RADIUS_CLASS,
 		// A phone-width cell has no room for words: each item becomes its dot.
 		"@max-[6rem]:size-3.5 @max-[6rem]:justify-center @max-[6rem]:px-0",

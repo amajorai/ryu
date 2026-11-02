@@ -28,5 +28,59 @@
     "expected": "Safe local 127.0.0.1 and invalid card 4111 1111 1111 1112",
     "pii": 0,
     "secrets": 0
+  },
+  {
+    "input": "call \uff15\uff15\uff15-\uff11\uff12\uff13-\uff14\uff15\uff16\uff17",
+    "expected": "call [REDACTED:PHONE]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "card \uff14\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11",
+    "expected": "card [REDACTED:CARD]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "Email ava\uff20example.com",
+    "expected": "Email [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "SSN 123\u200b-45-6789",
+    "expected": "SSN [REDACTED:SSN]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "SSN \u0661\u0662\u0663-\u0664\u0665-\u0666\u0667\u0668\u0669",
+    "expected": "SSN [REDACTED:SSN]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "call 555\u2011123\u20114567",
+    "expected": "call [REDACTED:PHONE]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "\uff08\u30e1\u30e2\uff09\uff76\uff80\uff76\uff85 ava@example.com",
+    "expected": "\uff08\u30e1\u30e2\uff09\uff76\uff80\uff76\uff85 [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "mail jane.doe\u200b1@gmail.com",
+    "expected": "mail [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "key AKIAABCDEFGHIJKLMNOP\u200bQ \uff11",
+    "expected": "key [REDACTED:AWS_KEY]Q 1",
+    "pii": 0,
+    "secrets": 1
   }
 ]

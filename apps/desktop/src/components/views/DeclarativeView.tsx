@@ -127,7 +127,7 @@ export function DeclarativeView({
 									<TableHead
 										className={
 											col.align === "right"
-												? "text-right"
+												? "text-end"
 												: col.align === "center"
 													? "text-center"
 													: undefined

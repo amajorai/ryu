@@ -149,7 +149,7 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 			</div>
 			<Button
 				aria-label="Skip the introduction"
-				className="absolute right-6 bottom-6 h-10 px-4"
+				className="absolute end-6 bottom-6 h-10 px-4"
 				data-testid="onboarding-welcome-skip"
 				onClick={finish}
 				variant="ghost-muted"

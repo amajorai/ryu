@@ -41,6 +41,7 @@ import {
 	fetchUsageDaily,
 	wrappedUrl,
 } from "@/src/lib/api/profile.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 import { formatNumber } from "./StatsTab-format.ts";
 import { TeamSection } from "./StatsTab-team-section.tsx";
 import { UnlockCard } from "./StatsTab-unlock-card.tsx";
@@ -237,7 +238,9 @@ export function StatsTab() {
 								<>
 									<span>
 										{tl("Joined {date}", {
-											date: format(new Date(profile.joinedAt), "MMM d, yyyy"),
+											date: formatLocalDateTime(profile.joinedAt, {
+												dateStyle: "medium",
+											}),
 										})}
 									</span>
 									<span aria-hidden="true">·</span>

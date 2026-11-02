@@ -66,9 +66,15 @@ if (
 }
 
 try {
+	// `i18n` carries the English sources so Core writes the inbox row in the
+	// node's language and each device's push in the language it registered.
 	await host.notify({
 		title: "Delegated agents finished",
 		body: `All delegated agents finished (${agentId}).`,
+		i18n: {
+			title: { message: "Delegated agents finished" },
+			body: [{ message: "All delegated agents finished ({agent}).", args: { agent: agentId } }],
+		},
 	});
 } catch {
 	// Restore the prior state so an identical lifecycle delivery can retry once

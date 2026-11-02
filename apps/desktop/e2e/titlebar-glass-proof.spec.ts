@@ -216,14 +216,16 @@ test("Store, Library and Settings keep their first controls below the glass", as
 	page,
 }) => {
 	await page.goto("/titlebar-glass-proof.html");
-	for (const label of ["Customize", "Library", "Settings"]) {
+	// The harness restores the /store tab under its own title, "Store"; the
+	// marketplace surface is what the tab renders.
+	for (const label of ["Store", "Library", "Settings"]) {
 		await page
 			.locator("[data-tab-appearance][data-tauri-drag-region]")
 			.getByRole("button", { name: label, exact: true })
 			.click();
 		const frame = page.locator("[data-titlebar-page]:visible");
 		const content =
-			label === "Customize"
+			label === "Store"
 				? frame.locator('[data-slot="marketplace-surface"]')
 				: label === "Settings"
 					? frame.getByRole("heading", { name: "Settings", exact: true })

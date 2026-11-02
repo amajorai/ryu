@@ -1,16 +1,20 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { CalendarClock, Clock3, Inbox, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { type ReactNode, useState } from "react";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	compactAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import {
 	CARD_HEIGHT,
 	Gallery,
@@ -181,7 +185,10 @@ export function NotebookHome({
 											type="button"
 										>
 											<span className="flex min-w-0 flex-1 flex-col">
-												<span className="truncate font-medium text-sm">
+												<span
+													className="truncate font-medium text-sm"
+													data-ryu-i18n="off"
+												>
 													{notebookPageTitle(thread)}
 												</span>
 												<span className="flex items-center gap-1.5 text-muted-foreground text-xs">
@@ -194,7 +201,7 @@ export function NotebookHome({
 																"text-foreground/80"
 														)}
 													>
-														{THREAD_STATUS_LABELS[status]}
+														{threadStatusLabel(status)}
 														{lead ? ` · ${lead.name}` : ""}
 													</span>
 												</span>
@@ -228,19 +235,27 @@ export function NotebookHome({
 									>
 										<RunTime iso={event.start} now={now} />
 										<span className="flex min-w-0 flex-1 flex-col">
-											<span className="truncate font-medium text-sm">
+											<span
+												className="truncate font-medium text-sm"
+												data-ryu-i18n="off"
+											>
 												{event.title}
 											</span>
 											<span className="truncate text-muted-foreground text-xs">
 												{[
 													event.label,
 													event.count && event.count > 1
-														? `${event.count} runs`
+														? tl(
+																"{count, plural, one {# run} other {# runs}}",
+																{
+																	count: event.count,
+																}
+															)
 														: null,
 													agent?.name,
 												]
 													.filter(Boolean)
-													.join(" · ") || "Scheduled run"}
+													.join(" · ") || tr("Scheduled run")}
 											</span>
 										</span>
 									</li>

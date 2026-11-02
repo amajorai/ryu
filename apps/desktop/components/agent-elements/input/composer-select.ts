@@ -53,4 +53,4 @@ export const COMPOSER_SELECT_POPOVER =
 // Matches the standard dropdown menu item padding (px-1.5 py-1 / gap-1.5) so the
 // composer pickers read identical to every other dropdown in the app.
 export const COMPOSER_SELECT_ITEM =
-	"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-left text-sm font-medium";
+	"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-start text-sm font-medium";

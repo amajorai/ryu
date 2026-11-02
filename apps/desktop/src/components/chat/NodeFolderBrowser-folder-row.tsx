@@ -1,4 +1,5 @@
 "use client";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import layout from "./chat-layout.module.css";
 
 // One expandable folder row of NodeFolderBrowser (split out of
@@ -64,10 +65,10 @@ export function FolderRow({
 				value={node.path}
 			>
 				<span className="w-(--folder-indent) shrink-0" style={rowIndent} />
-				<HugeiconsIcon
+				<DirectionalIcon
 					className={cn(
 						"size-3.5 shrink-0 text-foreground/40 transition-transform",
-						isOpen && "rotate-90"
+						isOpen && "rotate-90 rtl:-rotate-90"
 					)}
 					icon={ArrowRight01Icon}
 				/>

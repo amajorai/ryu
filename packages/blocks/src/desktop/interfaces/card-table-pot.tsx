@@ -15,7 +15,7 @@ import type {
 } from "@ryuhq/protocol/interfaces";
 import { CalendarClock } from "lucide-react";
 import { useState } from "react";
-import { plural, untilLabel } from "./card-table-model.ts";
+import { tableCount, untilLabel } from "./card-table-model.ts";
 import { ChipPile } from "./card-table-pieces.tsx";
 import { ThreadRow } from "./card-table-rows.tsx";
 
@@ -105,9 +105,9 @@ export function TablePot({
 	const count = running.length;
 	// The open thread is a live run: the pot is in play.
 	const inPlay = running.some((thread) => thread.id === activeThreadId);
-	let label = "Pot: nothing running";
+	let label = tl("Pot: nothing running");
 	if (count > 0) {
-		const values = { threads: plural(count, "thread"), word };
+		const values = { threads: tableCount(count, "thread", tl), word };
 		label = inPlay
 			? tl("Pot: {threads} {word}, one open. Show them", values)
 			: tl("Pot: {threads} {word}. Show them", values);

@@ -1,6 +1,6 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, type Page } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Shared by gateway-dialog-shell-proof.spec.ts: the proof page URL, the
 // evidence ledger path and the snapshot/opening helpers.
@@ -11,9 +11,7 @@ export function evidencePath(ledgerPath: string): string {
 	const override = process.env.RYU_PROOF_EVIDENCE_DIR;
 	return override
 		? path.join(override, ledgerPath)
-		: fileURLToPath(
-				new URL(`../../../docs/proof/${ledgerPath}`, import.meta.url)
-			);
+		: proofEvidencePath(`${ledgerPath}`);
 }
 
 export const STORY_URL = "/gateway-dialog-shell-proof.html";

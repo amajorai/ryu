@@ -215,7 +215,7 @@ pub(super) async fn dispatch_acp_plane<F>(
             "skills",
             "Skills",
             context_window::estimate_tokens(header),
-            Some(format!("{} enabled", ids.len())),
+            Some(context_breakdown::SegmentDetail::Skills(ids.len())),
         );
     }
     let long_term_system = match skill_block {
@@ -249,7 +249,7 @@ pub(super) async fn dispatch_acp_plane<F>(
             .as_deref()
             .map(context_window::estimate_tokens)
             .unwrap_or(0),
-        Some("replayed turns".to_owned()),
+        Some(context_breakdown::SegmentDetail::ReplayedTurns),
     );
     // Only the LAST message: ACP forwards that one turn (the rest arrive
     // via `short_term`), so charging the whole array would double-count.

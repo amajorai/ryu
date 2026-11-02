@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, Manager, Runtime};
 
 use crate::quick_capture::gesture::Trigger;
+use crate::quick_capture::{NativeError, NativeErrorCode};
 
 #[cfg(target_os = "macos")]
 use crate::quick_capture::gesture::Modifier;
@@ -25,7 +26,7 @@ const CONFIG_FILE: &str = "clips-quick-attach.json";
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static LISTENING: OnceLock<Arc<AtomicBool>> = OnceLock::new();
-static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+static LAST_ERROR: Mutex<Option<NativeError>> = Mutex::new(None);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 struct Config {
@@ -51,7 +52,7 @@ pub struct Status {
     pub destination: Destination,
     pub listening: bool,
     pub input_monitoring: bool,
-    pub error: Option<String>,
+    pub error: Option<NativeError>,
 }
 
 fn listening_gate() -> Arc<AtomicBool> {
@@ -99,13 +100,13 @@ fn save_config_at(path: &std::path::Path, config: &Config) -> Result<(), String>
     Ok(())
 }
 
-fn set_error(error: Option<String>) {
+fn set_error(error: Option<NativeError>) {
     if let Ok(mut slot) = LAST_ERROR.lock() {
         *slot = error;
     }
 }
 
-fn last_error() -> Option<String> {
+fn last_error() -> Option<NativeError> {
     LAST_ERROR.lock().ok().and_then(|slot| slot.clone())
 }
 
@@ -123,7 +124,7 @@ pub fn init<R: Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn start<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+fn start<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), NativeError> {
     let listening = listening_gate();
     listening.store(true, Ordering::SeqCst);
     if STARTED.swap(true, Ordering::SeqCst) {
@@ -150,7 +151,7 @@ fn start<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     if let Err(error) = listener_result {
         STARTED.store(false, Ordering::SeqCst);
         listening.store(false, Ordering::SeqCst);
-        return Err(error);
+        return Err(NativeError::from_listener(error));
     }
 
     std::thread::Builder::new()
@@ -163,15 +164,15 @@ fn start<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
                 }
             }
         })
-        .map_err(|error| format!("couldn't start Clips quick attach worker: {error}"))?;
+        .map_err(|error| NativeError::with_detail(NativeErrorCode::WorkerFailed, error))?;
 
     set_error(None);
     Ok(())
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn start<R: Runtime>(_app: tauri::AppHandle<R>) -> Result<(), String> {
-    Err("Clips quick attach is supported on macOS and Windows only".into())
+fn start<R: Runtime>(_app: tauri::AppHandle<R>) -> Result<(), NativeError> {
+    Err(NativeError::new(NativeErrorCode::UnsupportedPlatform))
 }
 
 fn stop() {
@@ -206,7 +207,7 @@ pub fn clips_quick_attach_status() -> Status {
 pub fn clips_quick_attach_set_enabled<R: Runtime>(
     app: tauri::AppHandle<R>,
     enabled: bool,
-) -> Result<Status, String> {
+) -> Result<Status, NativeError> {
     let mut config = load_config();
     if enabled {
         start(app)?;
@@ -214,15 +215,15 @@ pub fn clips_quick_attach_set_enabled<R: Runtime>(
         stop();
     }
     config.enabled = enabled;
-    save_config(&config)?;
+    save_config(&config).map_err(NativeError::settings_save)?;
     Ok(clips_quick_attach_status())
 }
 
 #[tauri::command]
-pub fn clips_quick_attach_set_destination(destination: Destination) -> Result<Status, String> {
+pub fn clips_quick_attach_set_destination(destination: Destination) -> Result<Status, NativeError> {
     let mut config = load_config();
     config.destination = destination;
-    save_config(&config)?;
+    save_config(&config).map_err(NativeError::settings_save)?;
     Ok(clips_quick_attach_status())
 }
 

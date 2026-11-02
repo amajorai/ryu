@@ -4,10 +4,10 @@ import { Warehouse } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import {
+	cropCount,
 	cropTitle,
 	type FarmCrop,
 	type FarmPlot,
-	plural,
 } from "./farm-model.ts";
 import { BarnBody, PlotBody } from "./farm-panel-bodies.tsx";
 import { FarmActMode, Ledger } from "./farm-panel-rows.tsx";
@@ -68,7 +68,9 @@ function FarmPanelBody({
 	const tl = useLiteralMessages();
 	let label = "Barn";
 	if (view.kind === "thread") {
-		label = `Conversation: ${cropTitle(view.crop?.thread)}`;
+		label = tl("Conversation: {title}", {
+			title: cropTitle(view.crop?.thread),
+		});
 	} else if (view.kind === "plot") {
 		label = view.plot
 			? tl("{name}'s plot", { name: view.plot.name })
@@ -128,8 +130,14 @@ function FarmPanelBody({
 				sheetKey="plot"
 				subtitle={
 					view.plot
-						? `${plural(view.plot.crops.length, "crop")}${view.plot.agent?.status === "working" ? " · Working" : ""}`
-						: "Pick a plot, then describe the task"
+						? tl(
+								"{count, plural, one {# crop} other {# crops}}{working, select, yes { · Working} other {}}",
+								{
+									count: view.plot.crops.length,
+									working: view.plot.agent?.status === "working" ? "yes" : "no",
+								}
+							)
+						: tl("Pick a plot, then describe the task")
 				}
 				title={
 					view.plot
@@ -164,7 +172,7 @@ function FarmPanelBody({
 			onClose={onClose}
 			sheetKey="barn"
 			subtitle={tl("{crops} by status", {
-				crops: plural(crops.length, "crop"),
+				crops: cropCount(crops.length, tl),
 			})}
 			title="Barn"
 		>

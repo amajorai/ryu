@@ -140,7 +140,7 @@ export function SpaceWallpaperCover({
 				    keeps its trigger shown while the pointer is in the popup. */}
 				<div
 					className={cn(
-						"absolute top-3 right-3 flex items-center gap-1 transition-opacity duration-150 focus-within:opacity-100 group-hover/cover:opacity-100 group-hover/cover:duration-0 has-[[data-popup-open]]:opacity-100",
+						"absolute end-3 top-3 flex items-center gap-1 transition-opacity duration-150 focus-within:opacity-100 group-hover/cover:opacity-100 group-hover/cover:duration-0 has-[[data-popup-open]]:opacity-100",
 						wallpaper ? "opacity-0" : "opacity-100"
 					)}
 				>

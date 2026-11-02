@@ -33,9 +33,11 @@ import {
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { useFormatLocale } from "@ryu/ui/hooks/use-format-locale.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 import { useMarketplaceHost } from "./host.tsx";
+import { licenseStatusLabel, marketplaceKindLabel } from "./license-labels.ts";
 import { NoOrgState, SignedOutState } from "./states.tsx";
 import { formatPrice, type OwnedLicense } from "./types.ts";
 
@@ -99,7 +101,7 @@ export function LicensesTab({
 				className={className}
 				headerAction={
 					<Button onClick={() => refresh()} size="sm" variant="ghost">
-						<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
+						<HugeiconsIcon className="me-2 size-3.5" icon={Refresh01Icon} />
 						Refresh
 					</Button>
 				}
@@ -122,7 +124,7 @@ export function LicensesTab({
 			<div className="mb-6 flex items-center justify-between">
 				<h2 className="font-medium text-lg">My licenses</h2>
 				<Button onClick={() => refresh()} size="sm" variant="ghost">
-					<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
+					<HugeiconsIcon className="me-2 size-3.5" icon={Refresh01Icon} />
 					Refresh
 				</Button>
 			</div>
@@ -148,13 +150,20 @@ type ManageLicense = (licenseId: string) => Promise<void> | void;
 
 /** Kind, non-active status, and "Renewal off" badges beside a license name. */
 function LicenseBadges({ license }: { license: OwnedLicense }) {
+	const tl = useLiteralMessages();
 	const isActive = license.status === "active";
 	return (
 		<>
-			<Badge variant="outline">{license.itemKind}</Badge>
-			{isActive ? null : <Badge variant="destructive">{license.status}</Badge>}
+			<Badge variant="outline">
+				{marketplaceKindLabel(license.itemKind, tl)}
+			</Badge>
+			{isActive ? null : (
+				<Badge variant="destructive">
+					{licenseStatusLabel(license.status, tl)}
+				</Badge>
+			)}
 			{isActive && license.cancelAtPeriodEnd ? (
-				<Badge variant="secondary">Renewal off</Badge>
+				<Badge variant="secondary">{tl("Renewal off")}</Badge>
 			) : null}
 		</>
 	);
@@ -162,10 +171,11 @@ function LicenseBadges({ license }: { license: OwnedLicense }) {
 
 /** The `v1.2.3 · Jun 1, 2026` version and purchase-date line. */
 function LicenseMeta({ license }: { license: OwnedLicense }) {
+	const formatLocale = useFormatLocale();
 	return (
 		<p className="text-muted-foreground text-xs">
 			v{license.itemVersion} ·{" "}
-			{new Date(license.purchasedAt).toLocaleDateString(undefined, {
+			{new Date(license.purchasedAt).toLocaleDateString(formatLocale, {
 				year: "numeric",
 				month: "short",
 				day: "numeric",
@@ -283,7 +293,7 @@ function LicensesSettingsBody({
 			<LicensesSettingsNotice
 				action={
 					<Button onClick={onRetry} size="sm" variant="outline">
-						<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
+						<HugeiconsIcon className="me-2 size-3.5" icon={Refresh01Icon} />
 						Retry
 					</Button>
 				}
@@ -355,7 +365,7 @@ function LicensesBody({
 				</EmptyHeader>
 				<EmptyContent>
 					<Button onClick={onRetry} size="sm" variant="ghost">
-						<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
+						<HugeiconsIcon className="me-2 size-3.5" icon={Refresh01Icon} />
 						Retry
 					</Button>
 				</EmptyContent>

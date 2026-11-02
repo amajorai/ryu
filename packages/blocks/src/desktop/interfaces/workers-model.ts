@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceAgentAct,
@@ -27,20 +28,45 @@ export type WorkerState =
 	| "your-turn";
 
 export const WORKER_STATE_LABELS: Record<WorkerState, string> = {
-	attention: "Needs attention",
-	idle: "Idle",
-	paused: "Paused",
-	working: "Working",
-	"your-turn": "Waiting on you",
+	get attention() {
+		return tr("Needs attention");
+	},
+	get idle() {
+		return tr("Idle");
+	},
+	get paused() {
+		return tr("Paused");
+	},
+	get working() {
+		return tr("Working");
+	},
+	get "your-turn"() {
+		return tr("Waiting on you");
+	},
 };
+
+/** A worker light's name in the UI language. */
+export function workerStateLabel(state: WorkerState): string {
+	return WORKER_STATE_LABELS[state];
+}
 
 /** The same lights, in the act layer's words (the HUD legend with acts). */
 export const ACT_STATE_LABELS: Record<WorkerState, string> = {
-	attention: "Failed",
-	idle: "Idle",
-	paused: "Paused",
-	working: "Working",
-	"your-turn": "Asks you",
+	get attention() {
+		return tr("Failed");
+	},
+	get idle() {
+		return tr("Idle");
+	},
+	get paused() {
+		return tr("Paused");
+	},
+	get working() {
+		return tr("Working");
+	},
+	get "your-turn"() {
+		return tr("Asks you");
+	},
 };
 
 /**
@@ -232,10 +258,6 @@ export function workerIndexForThread(
 	);
 }
 
-export function plural(count: number, word: string): string {
-	return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
-
 /** Where a conversation lives and how long it is: "Website Redesign · 5 messages". */
 export function threadContext(
 	thread: InterfaceThread,
@@ -248,7 +270,11 @@ export function threadContext(
 			parts.push(name);
 		}
 	}
-	parts.push(plural(thread.messageCount, "message"));
+	parts.push(
+		tr("{count, plural, one {# message} other {# messages}}", {
+			count: thread.messageCount,
+		})
+	);
 	return parts.join(" · ");
 }
 

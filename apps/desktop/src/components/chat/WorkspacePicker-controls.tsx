@@ -81,7 +81,7 @@ export function ReadonlyPickerRow({
 			title={title}
 		>
 			<HugeiconsIcon className="size-3.5 shrink-0" icon={Folder03Icon} />
-			<span className="min-w-0 flex-1 truncate text-left">{label}</span>
+			<span className="min-w-0 flex-1 truncate text-start">{label}</span>
 		</div>
 	);
 }
@@ -160,7 +160,7 @@ export function PickerTrigger({
 			variant="ghost"
 		>
 			<HugeiconsIcon className="size-3.5 shrink-0" icon={icon} />
-			<ButtonLabel className="flex-1 text-left">{label}</ButtonLabel>
+			<ButtonLabel className="flex-1 text-start">{label}</ButtonLabel>
 			{trailing}
 		</Button>
 	);
@@ -234,7 +234,7 @@ export function PickerRow({
 				}
 			>
 				<HugeiconsIcon className="size-3.5 shrink-0" icon={icon} />
-				<ButtonLabel className="flex-1 text-left">{label}</ButtonLabel>
+				<ButtonLabel className="flex-1 text-start">{label}</ButtonLabel>
 				{trailing}
 			</DropdownMenuTrigger>
 			<DropdownMenuContent

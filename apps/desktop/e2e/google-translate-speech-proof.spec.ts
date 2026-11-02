@@ -12,6 +12,7 @@ import {
 	gatewaySpeechEditInputSchema,
 } from "../src/lib/api/speech-settings-contracts.ts";
 import { sdkAccountProviders } from "./harness/sdk-accounts-fixture.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const speechInputProofSchema = z.custom<
 	GatewaySpeechEditInput & PluginDocument
@@ -169,10 +170,7 @@ test("Google Translate opt-in persists independently of Edge and Google Cloud", 
 	await expect(
 		page.getByText("2 saved accounts · Supplied OAuth tokens and quota project")
 	).toBeVisible();
-	const proof = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/google-translate-speech"
-	);
+	const proof = proofEvidencePath("google-translate-speech");
 	await mkdir(proof, { recursive: true });
 	await toggle.scrollIntoViewIfNeeded();
 	await expect(failureAlerts(page)).toHaveCount(0);

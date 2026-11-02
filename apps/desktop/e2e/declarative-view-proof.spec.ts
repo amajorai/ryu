@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const plans = [
 	{
@@ -126,8 +126,8 @@ test("Blueprint contributed view retries source failures, confirms deletion and 
 	await expect(page.getByText("Ship safe assets")).toBeVisible();
 	await expect(page.getByText("approved", { exact: true })).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			"../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-declarative/blueprint-approved-readback.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/coordinator-declarative/blueprint-approved-readback.png"
 		),
 		fullPage: true,
 	});
@@ -231,8 +231,8 @@ test("Author form contributions preserve typed defaults, validation and exact HT
 		page.getByRole("button", { name: "Save", exact: true })
 	).toBeEnabled();
 	await page.screenshot({
-		path: path.resolve(
-			"../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-declarative/author-form-completed.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/coordinator-declarative/author-form-completed.png"
 		),
 		fullPage: true,
 	});

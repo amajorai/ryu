@@ -246,7 +246,7 @@ export function ProfileCardSection({
 					<AgentBannerWash banner={banner} />
 				)}
 				{isLocked ? null : (
-					<div className="absolute top-3 left-3 z-10">
+					<div className="absolute start-3 top-3 z-10">
 						<AgentBannerDialog
 							agent={bannerIdentity}
 							loading={bannerLoading}
@@ -261,7 +261,7 @@ export function ProfileCardSection({
 				)}
 				<AgentProfileBannerFade />
 				{badge ? (
-					<div className="absolute top-3 right-3 bottom-3 hidden w-32 sm:block">
+					<div className="absolute end-3 top-3 bottom-3 hidden w-32 sm:block">
 						<div className="relative h-full overflow-hidden rounded-lg border border-white/25 bg-background/12 shadow-2xl backdrop-blur">
 							<DitherLayer className="opacity-45" />
 							<div className="absolute inset-0">{badge}</div>

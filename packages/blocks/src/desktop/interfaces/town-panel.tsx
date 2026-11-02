@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -5,7 +6,6 @@ import {
 	type InterfaceAgentAct,
 	type InterfaceEvent,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
@@ -14,12 +14,16 @@ import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import { GameSheet } from "./game-shell.tsx";
 import { InterfaceComposer } from "./interface-composer.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import {
+	compactAge,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import { useNow } from "./town-hooks.ts";
 import {
-	BUILDING_NAMES,
+	buildingName,
+	buildingWord,
 	eventWhen,
-	plural,
 	spokenAge,
 	type TownBuilding,
 } from "./town-model.ts";
@@ -106,15 +110,17 @@ function BuildingStatus({ building }: { building: TownBuilding }) {
 	if (acts) {
 		return (
 			<p className="text-pretty font-medium text-foreground text-sm">
-				{act?.ariaLabel ?? "Quiet: nothing running or waiting"}
+				{act?.ariaLabel ?? tr("Quiet: nothing running or waiting")}
 			</p>
 		);
 	}
 	let status: ThreadStatus = "quiet";
-	let text = "Quiet: nothing running or waiting";
+	let text = tl("Quiet: nothing running or waiting");
 	if (building.alert) {
 		status = "attention";
-		text = `${plural(building.counts.attention, "run")} failed`;
+		text = tl("{count, plural, one {# run failed} other {# runs failed}}", {
+			count: building.counts.attention,
+		});
 	} else if (building.replied) {
 		status = "your-turn";
 		text = tl(
@@ -212,7 +218,10 @@ function BuildingCard({
 				</section>
 			}
 			headingRef={headingRef}
-			label={`${agent.name}'s ${BUILDING_NAMES[building.kind].toLowerCase()}`}
+			label={tl("{name}'s {building}", {
+				building: buildingWord(building.kind),
+				name: agent.name,
+			})}
 			leading={
 				<span className="grid size-10 place-items-center rounded-full border-(--gk-edge) border-2 bg-(--gk-plate-sunk)">
 					<BoardAvatar agent={agent} name={agent.name} size={28} />
@@ -220,7 +229,10 @@ function BuildingCard({
 			}
 			onClose={onClose}
 			sheetKey={`building:${agent.id}`}
-			subtitle={`${BUILDING_NAMES[building.kind]} · ${districtName}`}
+			subtitle={tl("{building} · {district}", {
+				building: buildingName(building.kind),
+				district: districtName,
+			})}
 			title={agent.name}
 		>
 			<ScrollArea className="min-h-0 flex-1">
@@ -228,7 +240,10 @@ function BuildingCard({
 					<div className="flex flex-col gap-2">
 						<BuildingStatus building={building} />
 						{agent.description ? (
-							<p className="text-pretty text-foreground/80 text-sm leading-5">
+							<p
+								className="text-pretty text-foreground/80 text-sm leading-5"
+								data-ryu-i18n="off"
+							>
 								{agent.description}
 							</p>
 						) : null}
@@ -239,7 +254,7 @@ function BuildingCard({
 						{actMode ? null : (
 							<Figure
 								label="Last active"
-								value={lastActive ? compactAge(lastActive, now) : "None"}
+								value={lastActive ? compactAge(lastActive, now) : tl("None")}
 							/>
 						)}
 					</dl>
@@ -299,14 +314,21 @@ function ThreadRow({
 				aria-label={
 					actMode
 						? thread.title
-						: `${thread.title}. ${THREAD_STATUS_LABELS[status]}, ${spokenAge(thread.updatedAt, now)}`
+						: tr("{title}. {status}, {age}", {
+								age: spokenAge(thread.updatedAt, now),
+								status: threadStatusLabel(status),
+								title: thread.title,
+							})
 				}
 				className="flex h-9 w-full items-center gap-2.5 rounded-md px-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
 				onClick={() => onOpen(thread.id)}
 				type="button"
 			>
 				{actMode ? null : <BoardStatusDot status={status} />}
-				<span className="min-w-0 flex-1 truncate text-foreground text-sm">
+				<span
+					className="min-w-0 flex-1 truncate text-foreground text-sm"
+					data-ryu-i18n="off"
+				>
 					{thread.title}
 				</span>
 				<span
@@ -321,7 +343,7 @@ function ThreadRow({
 							"text-muted-foreground"
 					)}
 				>
-					{THREAD_STATUS_LABELS[status]}
+					{threadStatusLabel(status)}
 				</span>
 				<span className="w-8 shrink-0 text-right text-[13px] text-muted-foreground tabular-nums">
 					{actMode ? null : compactAge(thread.updatedAt, now)}
@@ -344,14 +366,17 @@ function ScheduleRow({ event, now }: { event: InterfaceEvent; now: number }) {
 	return (
 		<li className="flex items-baseline gap-2.5 px-2 py-1.5 text-sm">
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span className="truncate text-foreground">
+				<span className="truncate text-foreground" data-ryu-i18n="off">
 					{event.title}
 					{event.count && event.count > 1 ? (
 						<span className="text-muted-foreground"> ×{event.count}</span>
 					) : null}
 				</span>
 				{event.label ? (
-					<span className="truncate text-[13px] text-muted-foreground">
+					<span
+						className="truncate text-[13px] text-muted-foreground"
+						data-ryu-i18n="off"
+					>
 						{event.label}
 					</span>
 				) : null}
@@ -391,21 +416,25 @@ function CouncilRecord({
 	const petition =
 		!actMode && (status === "attention" || status === "your-turn");
 	const record = [
-		petition ? "Petition" : "Council record",
+		petition ? tr("Petition") : tr("Council record"),
 		districtName ?? null,
 		thread && !actMode
-			? `filed ${compactAge(thread.updatedAt, now)} ago`
+			? tr("filed {age}", { age: relativeAge(thread.updatedAt, now) })
 			: null,
 	].filter(Boolean);
 	const backLabel = building
 		? tl("Back to {agentName}'s {buildingName}", {
 				agentName: building.agent.name,
-				buildingName: BUILDING_NAMES[building.kind].toLowerCase(),
+				buildingName: buildingWord(building.kind),
 			})
-		: "Back to the town";
+		: tr("Back to the town");
 	const meta = [
-		building ? `From ${building.agent.name}` : null,
-		thread ? plural(thread.messageCount, "message") : null,
+		building ? tr("From {name}", { name: building.agent.name }) : null,
+		thread
+			? tr("{count, plural, one {# message} other {# messages}}", {
+					count: thread.messageCount,
+				})
+			: null,
 	].filter(Boolean);
 	return (
 		<GameSheet
@@ -415,7 +444,7 @@ function CouncilRecord({
 			eyebrow={record.join(" · ")}
 			headingRef={headingRef}
 			label={tl("Council record: {threadTitle}", {
-				threadTitle: thread?.title ?? "Conversation",
+				threadTitle: thread?.title ?? tr("Conversation"),
 			})}
 			onBack={onBack}
 			onClose={onClose}
@@ -430,7 +459,7 @@ function CouncilRecord({
 								status === "attention" && "text-(--gk-bad)"
 							)}
 						>
-							{status ? THREAD_STATUS_LABELS[status] : "Starting"}
+							{status ? threadStatusLabel(status) : "Starting"}
 						</span>
 					)}
 					{meta.length > 0 ? (
@@ -441,7 +470,7 @@ function CouncilRecord({
 					) : null}
 				</>
 			}
-			title={thread?.title.trim() || "New conversation"}
+			title={thread?.title.trim() || tr("New conversation")}
 		>
 			<div className="min-h-0 flex-1">{threadView}</div>
 		</GameSheet>

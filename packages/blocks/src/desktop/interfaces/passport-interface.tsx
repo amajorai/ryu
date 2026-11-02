@@ -34,7 +34,6 @@ import {
 	countryPage,
 	findStamp,
 	openingPage,
-	plural,
 	singleSpreads,
 	spreadOfPage,
 	stampPage,
@@ -348,11 +347,14 @@ export function PassportInterface({
 			snapshot,
 			unowned,
 		});
-	const totals = `${plural(passport.totals.countries, "country", "countries")} · ${plural(passport.totals.stamps, "stamp", "stamps")} · ${plural(
-		passport.totals.travelDays,
-		"travel day",
-		"travel days"
-	)}`;
+	const totals = tl(
+		"{countries, plural, one {# country} other {# countries}} · {stamps, plural, one {# stamp} other {# stamps}} · {days, plural, one {# travel day} other {# travel days}}",
+		{
+			countries: passport.totals.countries,
+			days: passport.totals.travelDays,
+			stamps: passport.totals.stamps,
+		}
+	);
 	const summary = actsOn ? actSummaryLine(actTotalsNow) : totals;
 
 	// The desk's open pages: a spread on a wide stage, one page on a phone,

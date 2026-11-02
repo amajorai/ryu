@@ -14,6 +14,8 @@
     "e2e/app-updates-settings-coverage.spec.ts",
     "e2e/harness/app-updates-settings-proof.tsx",
     "e2e/app-update-transaction-proof.spec.ts",
+    "e2e/app-update-transaction-proof.helpers.ts",
+    "e2e/part2-app-update-transaction-proof.spec.ts",
     "e2e/harness/app-update-transaction-proof.tsx",
     "e2e/node-permissions-settings-proof.spec.ts",
     "e2e/harness/node-permissions-settings-proof.tsx",

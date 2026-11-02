@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type InterfaceThread, localDayKey } from "@ryuhq/protocol/interfaces";
 import {
 	formatClock,
@@ -199,11 +200,11 @@ export function seriesPeriod(
 		return TICKER_RANGE_PERIODS[range];
 	}
 	if (series.unit === "day") {
-		return `Since ${formatShortDay(first.date)}`;
+		return tr("Since {date}", { date: formatShortDay(first.date) });
 	}
 	return now - first.date > DAY_SPAN
-		? `Since ${formatWeekdayClock(first.date)}`
-		: `Since ${formatClock(first.date)}`;
+		? tr("Since {date}", { date: formatWeekdayClock(first.date) })
+		: tr("Since {date}", { date: formatClock(first.date) });
 }
 
 /** The price before the first day of a series: its "previous close". */

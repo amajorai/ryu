@@ -3,6 +3,7 @@ import {
 	Target01Icon,
 	WorkflowCircle06Icon,
 } from "@hugeicons/core-free-icons";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useMemo } from "react";
 import { SECTION_ICONS } from "@/src/components/layout/sidebar-sections.ts";
@@ -43,6 +44,7 @@ export function useLibraryWorkItems(openTab: LibraryTabsValue["openTab"]) {
 		deleteConversation,
 		renameConversation,
 	} = useChatHistoryContext();
+	const tl = useLiteralMessages();
 	const canDeleteAgents = useCanManagePermission("agent.delete");
 	const canDeleteSpaces = useCanManagePermission("space.delete");
 
@@ -100,7 +102,10 @@ export function useLibraryWorkItems(openTab: LibraryTabsValue["openTab"]) {
 				name: w.name,
 				subtitle:
 					w.description ??
-					`${formatCount(w.nodes.length) ?? "—"} ${w.nodes.length === 1 ? "node" : "nodes"}`,
+					tl("{count, plural, one {{shown} node} other {{shown} nodes}}", {
+						count: w.nodes.length,
+						shown: formatCount(w.nodes.length) ?? "—",
+					}),
 				badge: null,
 				icon: WorkflowCircle06Icon,
 				updatedAt: normalizeTimestamp(w.updatedAt ?? w.createdAt),
@@ -118,7 +123,7 @@ export function useLibraryWorkItems(openTab: LibraryTabsValue["openTab"]) {
 					return Promise.resolve(removeWorkflow(w.id)).then(mutationResult);
 				},
 			})),
-		[workflows, openTab, removeWorkflow]
+		[workflows, openTab, removeWorkflow, tl]
 	);
 
 	const chatItems = useMemo<LibraryItem[]>(
@@ -157,7 +162,9 @@ export function useLibraryWorkItems(openTab: LibraryTabsValue["openTab"]) {
 					name: s.name,
 					subtitle:
 						s.description ??
-						`${s.documentCount} ${s.documentCount === 1 ? "doc" : "docs"}`,
+						tl("{count, plural, one {# doc} other {# docs}}", {
+							count: s.documentCount,
+						}),
 					badge: null,
 					icon: DeliverySecure01Icon,
 					updatedAt: normalizeTimestamp(s.updatedAt ?? s.createdAt),
@@ -183,7 +190,7 @@ export function useLibraryWorkItems(openTab: LibraryTabsValue["openTab"]) {
 							? undefined
 							: "You don't have permission to delete Spaces.",
 				})),
-		[canDeleteSpaces, spaces, openTab, removeSpace]
+		[canDeleteSpaces, spaces, openTab, removeSpace, tl]
 	);
 
 	return {

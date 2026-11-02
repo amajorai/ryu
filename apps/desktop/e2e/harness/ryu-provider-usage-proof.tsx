@@ -1,16 +1,15 @@
 import { CommandItem } from "@ryu/ui/components/command.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
-import { z } from "zod";
 import { ProviderCommandDialog } from "../../components/agent-elements/input/provider-command-dialog.tsx";
 import { UsageBar } from "../../components/agent-elements/input/usage-bar.tsx";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import proofStyles from "./ryu-provider-usage-proof.module.css";
 import "../../src/index.css";
 
-const coreUrlSchema = z.string().optional();
-const coreUrl =
-	coreUrlSchema.parse(import.meta.env.VITE_CORE_URL) ?? window.location.origin;
+// The spec answers Core's usage reads on this origin (page.route), so the
+// proof needs no live Core.
+const coreUrl = window.location.origin;
 
 useNodeStore.setState({
 	localNodes: [{ name: "usage-proof", url: coreUrl, token: null }],

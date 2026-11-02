@@ -691,8 +691,9 @@ test("Run deep clean removes each chosen profile in order, offers no machine-wid
 	expect(errorToast.mock.calls[0]?.[0]).toMatchObject({
 		title: "Could not deep clean",
 	});
-	expect(String(errorToast.mock.calls[0]?.[0]?.description)).toContain(
-		"could not remove the dev data folder"
+	// The raw native text is logged, never shown; the localized fallback is.
+	expect(String(errorToast.mock.calls[0]?.[0]?.description)).toBe(
+		"Ryu couldn't finish the deep clean."
 	);
 	expect(reload).not.toHaveBeenCalled();
 	expect(nativeCalls("stop_ryu_core")).toEqual([]);

@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Separator } from "@ryu/ui/components/separator.tsx";
@@ -18,7 +19,7 @@ import {
 import type { InboxItem } from "./inbox-model.ts";
 import { InboxItemAvatar } from "./inbox-row.tsx";
 import { InboxStatusChip, inboxStatusLabel } from "./inbox-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, relativeAge } from "./interface-renderer.ts";
 
 /** Icon button with a tooltip that names its shortcut. */
 function HeaderAction({
@@ -78,8 +79,8 @@ export function InboxDetailHeader({
 	onPrevious: (() => void) | undefined;
 }) {
 	const title = item
-		? item.thread.title.trim() || "Untitled thread"
-		: "New conversation";
+		? item.thread.title.trim() || tr("Untitled thread")
+		: tr("New conversation");
 	const context = item
 		? headerContext(item)
 		: "Pick an agent and write the first message below";
@@ -92,11 +93,14 @@ export function InboxDetailHeader({
 				size="icon-sm"
 				variant="ghost-muted"
 			>
-				<ArrowLeft aria-hidden="true" />
+				<ArrowLeft aria-hidden="true" className="rtl:-scale-x-100" />
 			</Button>
 			{item ? <InboxItemAvatar item={item} size="sm" /> : null}
 			<div className="flex min-w-0 flex-1 flex-col">
-				<h3 className="truncate font-medium text-foreground text-sm">
+				<h3
+					className="truncate font-medium text-foreground text-sm"
+					data-ryu-i18n="off"
+				>
 					{title}
 				</h3>
 				<p className="truncate text-muted-foreground text-xs">{context}</p>
@@ -109,7 +113,7 @@ export function InboxDetailHeader({
 				/>
 			) : null}
 			{/* One zero-gap action cluster: prev, next, a hairline, close. */}
-			<div className="-mr-1 flex items-center">
+			<div className="-me-1 flex items-center">
 				{item ? (
 					<>
 						<HeaderAction
@@ -171,8 +175,10 @@ export function InboxDetail({
 	threadView: ReactNode;
 }) {
 	const label = item
-		? `Thread: ${item.thread.title.trim() || "Untitled thread"}`
-		: "New conversation";
+		? tr("Thread: {title}", {
+				title: item.thread.title.trim() || tr("Untitled thread"),
+			})
+		: tr("New conversation");
 	// Esc closes the thread from anywhere in the pane, unless the host's chat
 	// already used it (a menu, a popover) or the user is typing a reply.
 	const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -223,13 +229,13 @@ function fullDate(iso: string): string {
 	if (Number.isNaN(date.getTime())) {
 		return "";
 	}
-	return date.toLocaleString(undefined, {
+	return dateFormatter(activeLocale(), {
 		day: "numeric",
 		hour: "numeric",
 		minute: "2-digit",
 		month: "short",
 		weekday: "short",
-	});
+	}).format(date);
 }
 
 /** One label/value row in the preview's details list. */
@@ -284,13 +290,16 @@ function InboxPreview({
 }) {
 	const tl = useLiteralMessages();
 	const { thread } = item;
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tl("Untitled thread");
 	const status = inboxStatusLabel(item.status, item.unassigned);
 	const message = thread.lastMessage?.trim();
 	const age = compactAge(thread.updatedAt, now);
+	const ago = relativeAge(thread.updatedAt, now);
 	const updated = fullDate(thread.updatedAt);
 	const author = lastAuthor(item);
-	const messages = `${thread.messageCount} ${thread.messageCount === 1 ? "message" : "messages"}`;
+	const messages = tl("{count, plural, one {# message} other {# messages}}", {
+		count: thread.messageCount,
+	});
 	return (
 		<section
 			aria-label={tl("Preview: {title}", { title })}
@@ -305,7 +314,7 @@ function InboxPreview({
 					</p>
 					<p className="truncate text-muted-foreground text-xs">
 						{messages}
-						{age ? ` ${tl("· updated {age} ago", { age })}` : ""}
+						{ago ? ` ${tl("· updated {age}", { age: ago })}` : ""}
 					</p>
 				</div>
 				<InboxStatusChip
@@ -317,7 +326,10 @@ function InboxPreview({
 			<div className="min-h-0 flex-1 overflow-y-auto">
 				<div className="mx-auto flex w-full max-w-3xl flex-col gap-8 @min-[1100px]:px-10 px-6 py-8">
 					<div className="flex flex-col gap-3">
-						<h3 className="text-balance font-semibold text-2xl text-foreground leading-8 tracking-tight">
+						<h3
+							className="text-balance font-semibold text-2xl text-foreground leading-8 tracking-tight"
+							data-ryu-i18n="off"
+						>
 							{title}
 						</h3>
 						{item.groupName || thread.pinned ? (
@@ -361,7 +373,10 @@ function InboxPreview({
 									</time>
 								</div>
 							</header>
-							<p className="line-clamp-[12] whitespace-pre-line text-[15px] text-foreground leading-7">
+							<p
+								className="line-clamp-[12] whitespace-pre-line text-[15px] text-foreground leading-7"
+								data-ryu-i18n="off"
+							>
 								{message}
 							</p>
 						</article>

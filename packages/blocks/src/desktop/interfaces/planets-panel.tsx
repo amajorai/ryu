@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
@@ -10,9 +11,9 @@ import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
 import { InterfaceComposer } from "./interface-composer.tsx";
 import {
-	PLANET_KIND_LABELS,
 	type Planet,
 	type PlanetSystem,
+	planetKindLabel,
 	sectionThreads,
 } from "./planets-model.ts";
 import {
@@ -87,7 +88,7 @@ export function PlanetsPanel({
 	if (view.kind === "planet") {
 		label = view.planet.name;
 	} else if (view.kind === "thread") {
-		label = `Thread: ${threadTitle(view.thread)}`;
+		label = tr("Thread: {title}", { title: threadTitle(view.thread) });
 	}
 	return (
 		<motion.aside
@@ -207,6 +208,7 @@ function PlanetPane({
 				<div className="flex min-w-0 flex-1 flex-col gap-1 pt-0.5">
 					<h2
 						className={cn(HEADING, "text-base")}
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>
@@ -228,7 +230,7 @@ function PlanetPane({
 							</>
 						)}
 						<span aria-hidden="true">·</span>
-						<span className="truncate">{PLANET_KIND_LABELS[planet.kind]}</span>
+						<span className="truncate">{planetKindLabel(planet.kind)}</span>
 						<span aria-hidden="true">·</span>
 						<span className="shrink-0">
 							{tl("Orbit {orbit}", { orbit: String(planet.index + 1) })}
@@ -242,7 +244,10 @@ function PlanetPane({
 					{agent.description || teams.length > 0 ? (
 						<div className="flex flex-col gap-3">
 							{agent.description ? (
-								<p className="text-pretty text-muted-foreground text-sm leading-relaxed">
+								<p
+									className="text-pretty text-muted-foreground text-sm leading-relaxed"
+									data-ryu-i18n="off"
+								>
 									{agent.description}
 								</p>
 							) : null}
@@ -252,7 +257,7 @@ function PlanetPane({
 										<li key={team.id}>
 											<Badge variant="outline">
 												<TeamMark color={teamColor(palette, team.colorIndex)} />
-												{team.name}
+												<span data-ryu-i18n="off">{team.name}</span>
 											</Badge>
 										</li>
 									))}

@@ -91,7 +91,7 @@ export function GeneralTabStartupIntro() {
 			const selected = await open({
 				directory: true,
 				multiple: false,
-				title: "Choose projectless task folder",
+				title: tl("Choose projectless task folder"),
 			});
 			const path = z.string().safeParse(selected);
 			if (path.success) {

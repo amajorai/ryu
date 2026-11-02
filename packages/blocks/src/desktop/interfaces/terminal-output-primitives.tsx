@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { Fragment, type ReactNode } from "react";
@@ -100,7 +101,7 @@ export function ActionText({
 	return (
 		<button
 			aria-label={label}
-			className={cn(LINK_CLASS, "text-left", className)}
+			className={cn(LINK_CLASS, "text-start", className)}
 			onClick={() => onAction(action)}
 			type="button"
 		>
@@ -118,7 +119,7 @@ export function StatusGlyph({ status }: { status: ThreadStatus }) {
 		<span
 			aria-hidden="true"
 			className={cn(
-				"mr-[1ch] inline-block w-[1ch] text-center align-[0.05em] text-[13px] leading-none",
+				"me-[1ch] inline-block w-[1ch] text-center align-[0.05em] text-[13px] leading-none",
 				TONE_CLASS[STATUS_GLYPH_TONE[status]]
 			)}
 		>
@@ -165,6 +166,9 @@ export function HintLine({
 	);
 }
 
-export function plural(count: number, word: string) {
-	return `${count} ${count === 1 ? word : `${word}s`}`;
+/** "3 threads", "1 agent", in the UI language. */
+export function countOf(count: number, noun: "agent" | "thread"): string {
+	return noun === "agent"
+		? tr("{count, plural, one {# agent} other {# agents}}", { count })
+		: tr("{count, plural, one {# thread} other {# threads}}", { count });
 }

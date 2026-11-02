@@ -16,6 +16,13 @@
 //! that grant check any enabled app could put rows in another member's Inbox.
 //! `notify.fanout` (below) is a separate `grant: None` row that stays pinned to
 //! `@ryu/monitors`.
+//!
+//! Localizable text (additive): besides the English `title`/`body`, a caller may
+//! send `i18n`, the same `{ title, body, join }` message object `notify.fanout`
+//! takes as `alert.i18n` ([`crate::i18n::AlertText`]). Core then writes the inbox
+//! row and toast in the node's `ui-language` and each push in the locale its
+//! device registered with. A malformed `i18n` is ignored and the English text is
+//! delivered, so an older or newer producer never loses its notification.
 
 use axum::{
     extract::State,
@@ -49,6 +56,11 @@ pub struct DeliverBody {
     /// caller should name its target explicitly.
     #[serde(default)]
     pub target_user_id: Option<String>,
+    /// Optional localizable text: `{ title: { message, args }, body: [{ message,
+    /// args }], join: "lines" | "sentences" }`, an English ICU source plus named
+    /// arguments per message. `title`/`body` stay required as the English text.
+    #[serde(default)]
+    pub i18n: Option<serde_json::Value>,
 }
 
 /// `POST /api/host/capability/notify.deliver` — raise a user-targeted
@@ -69,7 +81,11 @@ pub(crate) async fn host_notify_deliver(
         Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
     };
 
-    match deliver_for_app(
+    let text = body
+        .i18n
+        .as_ref()
+        .and_then(crate::i18n::AlertText::from_wire);
+    match deliver_for_app_localized(
         &state.client,
         &plugin_id,
         &grants,
@@ -77,6 +93,7 @@ pub(crate) async fn host_notify_deliver(
         &body.title,
         body.body.as_deref().unwrap_or(""),
         body.level.as_deref(),
+        text.as_ref(),
     )
     .await
     {
@@ -113,7 +130,10 @@ fn may_target_recipient(
 /// stamping `source_app_id` with the caller. Shared by `notify.deliver` and the
 /// optional `notify` hint on `events.emit`, so the two seams deliver identically.
 /// `grants` is the caller's Gateway-approved grant set from `authenticate_sidecar`.
-pub(crate) async fn deliver_for_app(
+/// Optional localizable `text`, when present, replaces the English
+/// `title`/`body` on every channel, rendered per locale.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn deliver_for_app_localized(
     client: &reqwest::Client,
     plugin_id: &str,
     grants: &std::collections::HashSet<String>,
@@ -121,6 +141,7 @@ pub(crate) async fn deliver_for_app(
     title: &str,
     body: &str,
     level: Option<&str>,
+    text: Option<&crate::i18n::AlertText>,
 ) -> Result<(String, String), (StatusCode, String)> {
     let title = title.trim();
     if let Err(message) = validate_notify_input(title, body, target_user_id) {
@@ -184,12 +205,46 @@ pub(crate) async fn deliver_for_app(
         _ => "info",
     };
 
-    match crate::notify::deliver_app_notification(&store, plugin_id, &user_id, title, body, level)
-        .await
-    {
+    let delivered = match text {
+        Some(text) => {
+            crate::notify::deliver_localized_app_notification(
+                &store,
+                plugin_id,
+                &user_id,
+                text,
+                level,
+                clip_rendered,
+            )
+            .await
+        }
+        None => {
+            crate::notify::deliver_app_notification(&store, plugin_id, &user_id, title, body, level)
+                .await
+        }
+    };
+    match delivered {
         Ok(notification_id) => Ok((notification_id, user_id)),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
+}
+
+/// Bound a rendered title and body like the plain text (a translation may be
+/// longer than its English), cutting on a char boundary.
+fn clip_rendered(title: String, body: String) -> (String, String) {
+    fn clip(mut text: String, max: usize) -> String {
+        if text.len() > max {
+            let mut end = max;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+        }
+        text
+    }
+    (
+        clip(title, MAX_NOTIFY_TITLE_BYTES),
+        clip(body, MAX_NOTIFY_BODY_BYTES),
+    )
 }
 
 fn validate_notify_input(
@@ -311,10 +366,9 @@ pub(crate) async fn host_notify_fanout(
             "info"
         };
         if let Some(active) = crate::auth::load_accounts().active_user_id {
-            let _ = crate::notify::deliver_app_notification(
-                &store, &plugin_id, &active, &title, &message, level,
-            )
-            .await;
+            if let Err(e) = inbox_copy_of_alert(&store, &plugin_id, &active, alert, level).await {
+                tracing::warn!("notify.fanout: inbox copy failed: {e}");
+            }
         }
     } else {
         tracing::warn!("notify.fanout: notify store not ready; dropping alert fan-out");
@@ -326,6 +380,47 @@ pub(crate) async fn host_notify_fanout(
     }
 
     Json(json!({ "ok": true })).into_response()
+}
+
+/// The inbox copy of a fanned-out alert: the inbox row and the desktop toast,
+/// with no push. `notify_all` already pushed to every registered device (the
+/// active member's included, each in its own locale), so pushing here would
+/// reach that member's phone twice. With a well-formed `alert.i18n` the copy is
+/// written in the node's `ui-language`; otherwise it is the English text.
+async fn inbox_copy_of_alert(
+    store: &crate::notify::NotifyStore,
+    plugin_id: &str,
+    user_id: &str,
+    alert: &serde_json::Value,
+    level: &str,
+) -> Result<String, String> {
+    let node_locale = crate::i18n::locale::node_locale().await;
+    let (title, body) = alert_inbox_text(alert, node_locale);
+    let id = format!("ntf_{}", uuid::Uuid::new_v4().simple());
+    crate::notify::persist_and_toast(store, &id, user_id, &title, &body, level, Some(plugin_id))
+        .await?;
+    Ok(id)
+}
+
+/// The inbox title and body of a fired alert in `locale`: its `i18n` rendered
+/// (and clipped like `notify.deliver` text) when that parses, else its English
+/// `title`/`message`.
+fn alert_inbox_text(alert: &serde_json::Value, locale: &str) -> (String, String) {
+    if let Some(text) = alert
+        .get("i18n")
+        .and_then(crate::i18n::AlertText::from_wire)
+    {
+        let (title, body) = text.render(locale);
+        return clip_rendered(title, body);
+    }
+    let text = |key: &str| {
+        alert
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
+    (text("title"), text("message"))
 }
 
 /// Map a fired alert into an activity item, `uptime_down` → Warning.
@@ -362,78 +457,5 @@ fn epoch_secs(rfc3339: &str) -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn member(user_id: &str) -> crate::sidecar::control_plane::NotifyTargetUser {
-        crate::sidecar::control_plane::NotifyTargetUser {
-            user_id: user_id.to_owned(),
-            email: None,
-            image: None,
-            role: None,
-            name: None,
-        }
-    }
-
-    #[test]
-    fn a_fanned_out_alert_maps_onto_the_activity_feed_unchanged() {
-        let item = activity_item_from_alert(&serde_json::json!({
-            "title": "Site down",
-            "message": "HTTP 503",
-            "monitor_id": "m1",
-            "monitor_name": "Shop",
-            "kind": "uptime_down",
-            "created_at": "2026-10-10T12:00:00Z",
-        }));
-        assert_eq!(
-            (item.kind.as_str(), item.source.as_str()),
-            ("monitor_alert", "monitors")
-        );
-        assert_eq!(item.title, "Site down");
-        assert_eq!(item.body.as_deref(), Some("HTTP 503"));
-        assert_eq!(item.level, ryu_activity::ActivityLevel::Warning);
-        assert_eq!(item.metadata["monitor_name"], "Shop");
-        assert_eq!(item.metadata["alert_kind"], "uptime_down");
-        assert_eq!(item.created_at, 1_791_633_600);
-
-        let info = activity_item_from_alert(&serde_json::json!({ "kind": "price_drop" }));
-        assert_eq!(info.level, ryu_activity::ActivityLevel::Info);
-    }
-
-    #[test]
-    fn notification_membership_is_fail_closed() {
-        let members = vec![member("alice")];
-        assert!(target_is_org_member("alice", &members));
-        assert!(!target_is_org_member("bob", &members));
-        assert!(!target_is_org_member("alice", &[]));
-    }
-
-    #[test]
-    fn naming_another_member_requires_the_send_to_user_grant() {
-        let none = std::collections::HashSet::new();
-        let granted: std::collections::HashSet<String> =
-            [SEND_TO_USER_GRANT.to_owned()].into_iter().collect();
-        // No explicit target, or the node's own active user: always allowed.
-        assert!(may_target_recipient(&none, None, Some("alice")));
-        assert!(may_target_recipient(&none, Some("  "), Some("alice")));
-        assert!(may_target_recipient(&none, Some("alice"), Some("alice")));
-        // Any other member needs the reviewed grant.
-        assert!(!may_target_recipient(&none, Some("bob"), Some("alice")));
-        assert!(!may_target_recipient(&none, Some("bob"), None));
-        assert!(may_target_recipient(&granted, Some("bob"), Some("alice")));
-    }
-
-    #[test]
-    fn notification_input_has_bounded_fields() {
-        assert!(validate_notify_input("Title", "body", Some("alice")).is_ok());
-        assert!(validate_notify_input("   ", "body", None).is_err());
-        assert!(validate_notify_input(&"x".repeat(MAX_NOTIFY_TITLE_BYTES + 1), "", None).is_err());
-        assert!(
-            validate_notify_input("Title", &"x".repeat(MAX_NOTIFY_BODY_BYTES + 1), None).is_err()
-        );
-        assert!(
-            validate_notify_input("Title", "", Some(&"x".repeat(MAX_NOTIFY_TARGET_BYTES + 1)))
-                .is_err()
-        );
-    }
-}
+#[path = "app_notify_test.rs"]
+mod tests;

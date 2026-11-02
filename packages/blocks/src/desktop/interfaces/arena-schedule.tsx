@@ -1,4 +1,9 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { dateFormatter } from "@ryu/i18n/lite";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import type {
 	InterfaceEvent,
 	InterfaceSnapshot,
@@ -6,16 +11,18 @@ import type {
 import { arenaUpcomingRuns, untilLabel } from "./arena-model.ts";
 import { agentById } from "./interface-renderer.ts";
 
-const TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+const TIME_FORMAT: Intl.DateTimeFormatOptions = {
 	day: "numeric",
 	hour: "numeric",
 	minute: "2-digit",
 	month: "short",
 	weekday: "short",
-});
+};
 
-function runCount(event: InterfaceEvent): string {
-	return event.count && event.count > 1 ? `${event.count} runs` : "";
+function runCount(event: InterfaceEvent, tl: LiteralMessage): string {
+	return event.count && event.count > 1
+		? tl("{count, plural, one {# run} other {# runs}}", { count: event.count })
+		: "";
 }
 
 /**
@@ -30,6 +37,7 @@ export function ArenaSchedule({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const runs = arenaUpcomingRuns(snapshot.events, now);
 	if (runs.length === 0) {
 		return null;
@@ -52,7 +60,7 @@ export function ArenaSchedule({
 			<ul className="flex flex-col">
 				{runs.map((event) => {
 					const agent = agentById(snapshot, event.agentId);
-					const extra = [event.label, runCount(event)]
+					const extra = [event.label, runCount(event, tl)]
 						.filter(Boolean)
 						.join(" · ");
 					return (
@@ -63,20 +71,28 @@ export function ArenaSchedule({
 							<time
 								className="w-14 shrink-0 text-muted-foreground tabular-nums"
 								dateTime={event.start}
-								title={TIME_FORMAT.format(new Date(event.start))}
+								title={dateFormatter(locale, TIME_FORMAT).format(
+									new Date(event.start)
+								)}
 							>
 								{untilLabel(event.start, now, tl)}
 							</time>
 							<span className="min-w-0 truncate">
-								<span className="font-medium text-foreground">
+								<span
+									className="font-medium text-foreground"
+									data-ryu-i18n="off"
+								>
 									{event.title}
 								</span>
-								<span className="text-muted-foreground">
+								<span className="text-muted-foreground" data-ryu-i18n="off">
 									{agent ? ` · ${agent.name}` : ""}
 								</span>
 							</span>
 							{extra ? (
-								<span className="ms-auto shrink-0 text-[13px] text-muted-foreground leading-4 max-sm:hidden">
+								<span
+									className="ms-auto shrink-0 text-[13px] text-muted-foreground leading-4 max-sm:hidden"
+									data-ryu-i18n="off"
+								>
 									{extra}
 								</span>
 							) : null}

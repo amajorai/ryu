@@ -71,8 +71,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked --manifest-path apps/gateway/Cargo.toml \
  && cp /src/target/release/ryu-gateway /usr/local/bin/ryu-gateway
 
-# ---- runtime ------------------------------------------------------------------
-FROM debian:trixie-slim AS runtime
+# ---- runtime-base -------------------------------------------------------------
+# Everything except the binary, shared by `runtime` (default: compiled in
+# `builder`) and `prebuilt` (packages a binary CI already compiled).
+FROM debian:trixie-slim AS runtime-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -87,8 +89,6 @@ RUN groupadd --gid 10001 ryu \
     && useradd --uid 10001 --gid 10001 --home-dir /data \
       --no-create-home --shell /usr/sbin/nologin ryu \
     && install -d -o 10001 -g 10001 -m 0750 /data
-
-COPY --from=builder /usr/local/bin/ryu-gateway /usr/local/bin/ryu-gateway
 
 # Optional persistence for the audit SQLite store and a mounted gateway.toml.
 # Not required to boot; mount a volume here and set GATEWAY_CONFIG=/data/gateway.toml
@@ -107,3 +107,16 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
 # takes its listen address. Bind all interfaces so Dokploy's proxy can reach it.
 ENTRYPOINT ["ryu-gateway", "--bind=0.0.0.0:7981"]
 USER 10001:10001
+
+# ---- prebuilt -----------------------------------------------------------------
+# CI path (the public hub's .github/workflows/images.yml, which compiles the
+# gateway once for this image and the root Core image): packages the binary
+# staged in .docker-prebuilt/ so the prod host never compiles Rust.
+FROM runtime-base AS prebuilt
+COPY .docker-prebuilt/ryu-gateway /usr/local/bin/ryu-gateway
+
+# ---- runtime (default) ----------------------------------------------------------
+# Must stay the LAST stage so `docker build -f apps/gateway/Dockerfile .` still
+# compiles from source.
+FROM runtime-base AS runtime
+COPY --from=builder /usr/local/bin/ryu-gateway /usr/local/bin/ryu-gateway

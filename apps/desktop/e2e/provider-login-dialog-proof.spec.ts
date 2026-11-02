@@ -1,6 +1,6 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/provider-login-dialog-proof.html";
 // RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
@@ -10,12 +10,7 @@ function evidencePath(name: string): string {
 	if (override) {
 		return path.join(override, name);
 	}
-	return fileURLToPath(
-		new URL(
-			`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}`,
-			import.meta.url
-		)
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}`);
 }
 const AUTH_URL_SCREENSHOT_PATH = evidencePath(
 	"desktop-provider-login-auth-url.png"

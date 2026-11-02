@@ -24,7 +24,7 @@ export function PromptLibraryPromptList({
 				<li key={prompt.name}>
 					<button
 						aria-pressed={prompt.name === selectedName}
-						className="flex w-full flex-col gap-1 rounded-md border p-2 text-left hover:bg-muted/50 aria-pressed:border-primary"
+						className="flex w-full flex-col gap-1 rounded-md border p-2 text-start hover:bg-muted/50 aria-pressed:border-primary"
 						onClick={() => setSelectedName(prompt.name)}
 						type="button"
 					>

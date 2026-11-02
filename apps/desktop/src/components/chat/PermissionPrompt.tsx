@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ToolApproval,
 	type ToolApprovalChoice,
@@ -62,12 +62,14 @@ function formatParameterValue<TValue>(value: TValue): string {
 
 const ALLOW_KINDS = new Set(["allow_once", "allow_always"]);
 
-function approvalQuestion(title: string): string {
+function approvalQuestion(title: string, tl: LiteralMessage): string {
 	const action = title.trim().replace(/[?!.]+$/u, "");
-	const firstPersonAction = action
-		? `${action.slice(0, 1).toLowerCase()}${action.slice(1)}`
-		: "run this tool";
-	return `Can I ${firstPersonAction}?`;
+	if (!action) {
+		return tl("Can I run this tool?");
+	}
+	return tl("Can I {action}?", {
+		action: `${action.slice(0, 1).toLowerCase()}${action.slice(1)}`,
+	});
 }
 
 function toneForKind(kind: string): ToolApprovalChoice["tone"] {
@@ -145,7 +147,7 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 							})
 				}
 				parameters={parameters}
-				question={approvalQuestion(title)}
+				question={approvalQuestion(title, tl)}
 				status="pending"
 				title={
 					showTechnicalDetails

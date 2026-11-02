@@ -67,7 +67,7 @@ test("a Gateway that stores the field enables the security key switch", async ()
 	computerUse = { locked_use: false, security_key: false };
 	const container = await render();
 	expect(isDisabled(securityKeySwitch(container))).toBe(false);
-	expect(container.textContent).toContain("No current feature uses");
+	expect(container.textContent).toContain("Each request asks you first");
 });
 
 test("a Gateway that predates the field disables the switch and says why", async () => {

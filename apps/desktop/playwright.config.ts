@@ -6,7 +6,8 @@
 //
 // NOTE: headless Chromium cannot launch in the authoring sandbox; this config is
 // authored + typechecked here (`bunx playwright test --list` parses it) and RUN in
-// CI by the `plugin-runtime-cert` job (`.github/workflows/plugin-runtime-e2e.yml`).
+// CI by the `plugin-runtime-cert` job in the public hub's ci.yml
+// (`mirror/overlay/.github/workflows/ci.yml`).
 //
 // `testMatch` is `*.spec.ts` so the isolated-component browser specs
 // (`overflow-story.spec.ts`, `command-palette.spec.ts`) run alongside the

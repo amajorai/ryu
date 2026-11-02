@@ -421,7 +421,7 @@ export function GenerationSurface({
 				</div>
 
 				{showStatus || prompt ? (
-					<div className="mt-3 text-left">
+					<div className="mt-3 text-start">
 						{showStatus ? (
 							<div
 								aria-live="polite"

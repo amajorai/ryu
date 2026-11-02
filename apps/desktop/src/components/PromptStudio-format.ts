@@ -93,9 +93,3 @@ export function scoreTone(score: number): string {
 	}
 	return "text-status-destructive";
 }
-
-export function formatMicroUsd(value: number | null | undefined): string {
-	return value === null || value === undefined
-		? "unknown"
-		: `$${(value / 1_000_000).toFixed(4)}`;
-}

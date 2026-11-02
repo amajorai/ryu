@@ -1,7 +1,7 @@
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import {
@@ -133,7 +133,7 @@ export function NodePermissionsSettings() {
 			<div className="flex flex-col gap-4">
 				<Button
 					appearance="settings-back"
-					className="-ml-2 w-fit"
+					className="-ms-2 w-fit"
 					onClick={() => {
 						setSelected(null);
 						void refresh();
@@ -141,7 +141,7 @@ export function NodePermissionsSettings() {
 					size="sm"
 					variant="ghost-muted"
 				>
-					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+					<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 					All resources
 				</Button>
 				<ResourcePermissions

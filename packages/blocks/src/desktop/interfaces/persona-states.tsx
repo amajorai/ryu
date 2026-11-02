@@ -27,7 +27,7 @@ export function PersonaSkeleton() {
 			className="flex size-full min-h-0"
 			role="status"
 		>
-			<div className="@min-[640px]:flex hidden @min-[1024px]:w-60 w-16 shrink-0 flex-col gap-6 border-sidebar-border border-r bg-sidebar px-3 py-4">
+			<div className="@min-[640px]:flex hidden @min-[1024px]:w-60 w-16 shrink-0 flex-col gap-6 border-sidebar-border border-e bg-sidebar px-3 py-4">
 				<div className="flex flex-col gap-0.5">
 					{RAIL_ROWS.map((key) => (
 						<div className="flex h-9 items-center gap-3 px-2.5" key={key}>

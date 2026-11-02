@@ -220,7 +220,7 @@ export function GitPullRequestSummary({
 				</span>
 				{onFix && failed.length > 0 ? (
 					<button
-						className="ml-auto shrink-0 rounded-lg px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						className="ms-auto shrink-0 rounded-lg px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={(event) => {
 							event.preventDefault();
 							event.stopPropagation();
@@ -250,7 +250,7 @@ export function GitPullRequestSummary({
 							aria-label={tl("Fix merge conflicts in pull request #{number}", {
 								number: String(pullRequest.number),
 							})}
-							className="ml-auto shrink-0 rounded-lg px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							className="ms-auto shrink-0 rounded-lg px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={(event) => {
 								event.preventDefault();
 								event.stopPropagation();

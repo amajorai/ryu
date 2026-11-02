@@ -5,6 +5,9 @@ const PROOF_URL = "http://127.0.0.1:5184/";
 export default defineConfig({
 	testDir: ".",
 	testMatch: /git-actions-stateful-proof\.spec\.ts$/,
+	// The spec is split across files under the token limit; one worker keeps
+	// them in the original order against the shared harness state.
+	workers: 1,
 	fullyParallel: false,
 	reporter: "line",
 	use: {

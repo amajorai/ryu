@@ -18,8 +18,10 @@
 pub(crate) mod accounts;
 mod accounts_api;
 pub(crate) mod api;
+pub(crate) mod chat_event;
 pub(crate) mod cli;
 pub(crate) mod local_run;
+mod notices;
 mod redact;
 pub(crate) mod routing;
 pub(crate) mod store;
@@ -179,16 +181,6 @@ impl CloudTaskBackend {
             Self::RyuBox => "Ryu",
             Self::AnthropicSubscriptionCli | Self::AnthropicSubscriptionSdk => "Claude",
             Self::OpenaiSubscriptionCli | Self::OpenaiSubscriptionSdk => "ChatGPT",
-        }
-    }
-
-    pub(crate) fn setting_name(self) -> &'static str {
-        match self {
-            Self::RyuBox => "Box",
-            Self::AnthropicSubscriptionCli
-            | Self::AnthropicSubscriptionSdk
-            | Self::OpenaiSubscriptionSdk => "local checkout",
-            Self::OpenaiSubscriptionCli => "Codex environment ID",
         }
     }
 }

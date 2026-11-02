@@ -192,7 +192,7 @@ function PayoutsTable({
 					<TableHead size="compact">Creator</TableHead>
 					<TableHead size="compact">Reason</TableHead>
 					<TableHead size="compact">Status</TableHead>
-					<TableHead className="text-right" size="compact">
+					<TableHead className="text-end" size="compact">
 						Amount
 					</TableHead>
 					<TableHead size="compact">
@@ -221,13 +221,13 @@ function PayoutsTable({
 							/>
 						</TableCell>
 						<TableCell
-							className="text-right"
+							className="text-end"
 							presentation="monospace-numeric"
 							spacing="compact"
 						>
 							{formatCents(payout.amount_cents)}
 						</TableCell>
-						<TableCell className="text-right" spacing="compact">
+						<TableCell className="text-end" spacing="compact">
 							<PayoutRowAction onAct={onAct} payout={payout} />
 						</TableCell>
 					</TableRow>

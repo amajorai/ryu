@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { CSSProperties, ReactNode } from "react";
 import {
@@ -35,7 +36,9 @@ function linesFor(
 }
 
 function messages(count: number): string {
-	return `${count.toString()} ${count === 1 ? "message" : "messages"}`;
+	return tr("{count, plural, one {# message} other {# messages}}", {
+		count,
+	});
 }
 
 /** The latest message as a pull quote, attributed to the agent who said it. */
@@ -58,6 +61,7 @@ function QuoteCover({
 			</span>
 			<span
 				className={cn("mt-[3cqw] text-pretty font-serif leading-[1.38]", CLAMP)}
+				data-ryu-i18n="off"
 				style={{
 					...clamp(linesFor(ratio, "quote")),
 					fontSize: "clamp(13px, 7.4cqw, 22px)",
@@ -119,7 +123,13 @@ function StatusCover({
 				<span aria-hidden="true" style={{ color: colors.accent }}>
 					{"› "}
 				</span>
-				{cover.excerpt ?? (working ? "Starting…" : "The run stopped.")}
+				{cover.excerpt ? (
+					<span data-ryu-i18n="off">{cover.excerpt}</span>
+				) : working ? (
+					tr("Starting…")
+				) : (
+					tr("The run stopped.")
+				)}
 				{working ? (
 					<span
 						className="ms-[1cqw] inline-block h-[5.6cqw] w-[2.6cqw] translate-y-[0.8cqw] motion-safe:animate-pulse"
@@ -203,7 +213,9 @@ function StatCover({
 				className="mt-[3cqw] font-medium"
 				style={{ color: colors.muted, fontSize: "clamp(12px, 6.4cqw, 18px)" }}
 			>
-				{cover.count === 1 ? "message" : "messages"}
+				{tr("{count, plural, one {message} other {messages}}", {
+					count: cover.count,
+				})}
 			</span>
 		</>
 	);

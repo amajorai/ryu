@@ -183,7 +183,7 @@ export function MessengerInterface({
 		>
 			<div
 				className={cn(
-					"min-h-0 @min-[900px]:w-[340px] w-full shrink-0 @min-[900px]:border-sidebar-border @min-[900px]:border-r",
+					"min-h-0 @min-[900px]:w-[340px] w-full shrink-0 @min-[900px]:border-sidebar-border @min-[900px]:border-e",
 					detailOpen ? "@min-[900px]:block hidden" : "block"
 				)}
 			>

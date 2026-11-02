@@ -10,6 +10,7 @@ if (!GlobalRegistrator.isRegistered) {
 }
 
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import type { MessageValuesInput } from "@ryu/i18n/core";
 
 const delays: number[] = [];
 let stopAfterDelays = 2;
@@ -25,7 +26,14 @@ mock.module("@/src/lib/abortable-delay.ts", () => ({
 }));
 
 const { TOKEN_KEY } = await import("@/lib/auth-client.ts");
-const { runCreditAlertStream } = await import("./useCreditAlertEvents.ts");
+const { creditAlertTitle, runCreditAlertStream } = await import(
+	"./useCreditAlertEvents.ts"
+);
+const { formatMessage } = await import("@ryu/i18n/core");
+// The provider registers its runtime here; a test registers a stand-in.
+const { registerActiveI18nRuntime, unregisterActiveI18nRuntime } = await import(
+	"../../../../packages/i18n/src/active-locale.ts"
+);
 
 const realFetch = globalThis.fetch;
 let status = 200;
@@ -76,5 +84,53 @@ describe("runCreditAlertStream reconnect cadence", () => {
 		await runCreditAlertStream(controller.signal, () => undefined);
 		expect(connects).toBe(0);
 		expect(delays).toEqual([10_000]);
+	});
+});
+
+describe("creditAlertTitle", () => {
+	const event = {
+		balanceMicroUsd: 4_200_000,
+		createdAt: "2026-10-31T00:00:00Z",
+		level: "warning" as const,
+		thresholdMicroUsd: 5_000_000,
+		title: "Your Ryu credit balance is low ($4.20)",
+	};
+
+	it("keeps the English sentence and en-US amount in English", () => {
+		expect(creditAlertTitle(event, "en-US")).toBe(
+			"Your Ryu credit balance is low ($4.20)"
+		);
+	});
+
+	it("translates the sentence and formats the amount in the UI language", () => {
+		const german: Record<string, string> = {
+			"Your Ryu credit balance is low ({balance})":
+				"Ihr Ryu-Guthaben ist niedrig ({balance})",
+		};
+		const runtime = {
+			direction: "ltr" as const,
+			locale: "de",
+			translate: (
+				_id: string,
+				values: MessageValuesInput | undefined,
+				fallback?: string
+			) =>
+				formatMessage(german[fallback ?? ""] ?? fallback ?? "", values, "de"),
+		};
+		registerActiveI18nRuntime(runtime);
+		try {
+			const title = creditAlertTitle(event, "de");
+			expect(title.startsWith("Ihr Ryu-Guthaben ist niedrig (")).toBe(true);
+			expect(title).toContain("4,20");
+			expect(title).not.toContain("$4.20");
+		} finally {
+			unregisterActiveI18nRuntime(runtime);
+		}
+	});
+
+	it("falls back to the server title without a usable balance", () => {
+		expect(
+			creditAlertTitle({ ...event, balanceMicroUsd: Number.NaN }, "en")
+		).toBe(event.title);
 	});
 });

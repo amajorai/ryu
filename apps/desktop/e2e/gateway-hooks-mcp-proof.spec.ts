@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface ProofCall {
 	body: unknown;
@@ -32,11 +33,7 @@ const evidenceOverride = process.env.RYU_PROOF_EVIDENCE_DIR;
 const evidence = (name: string) =>
 	evidenceOverride
 		? path.join(evidenceOverride, name)
-		: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-				name
-			);
+		: proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 const state = (page: import("@playwright/test").Page) =>
 	page.evaluate(() => {

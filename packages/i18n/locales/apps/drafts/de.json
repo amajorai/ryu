@@ -1,0 +1,11 @@
+{
+  "Sending at a set time": "Senden zu einem festgelegten Zeitpunkt",
+  "Sending at {when}": "Senden um {when}",
+  "Waiting for agents to start, then finish": "Warten, bis Agents starten und abschließen",
+  "Waiting for every agent to finish": "Warten, bis alle Agenten fertig sind",
+  "Waiting for fewer than {limit} runs": "Warten auf weniger als {limit} Ausführungen",
+  "Waiting for nothing to be running": "Warten, bis nichts mehr läuft",
+  "Waiting for {agentId} to drop under {belowPercent}% used": "Warten, bis die Auslastung von {agentId} unter {belowPercent} % fällt",
+  "draft is already being sent": "Entwurf wird bereits gesendet",
+  "no such draft": "kein solcher Entwurf"
+}

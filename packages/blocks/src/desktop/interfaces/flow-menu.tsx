@@ -96,8 +96,8 @@ export function FlowStartCard({
 							<ArrowRight
 								aria-hidden="true"
 								className={cn(
-									"size-3.5 stroke-[1.75] transition-transform duration-150",
-									showAll && "-rotate-90"
+									"size-3.5 stroke-[1.75] transition-transform duration-150 rtl:-scale-x-100",
+									showAll && "-rotate-90 rtl:rotate-90"
 								)}
 							/>
 						</button>
@@ -144,7 +144,7 @@ export function FlowActionList({
 			>
 				{actions.map((action) => (
 					<button
-						className="group flex w-full items-center gap-3 px-3 py-2.5 text-left outline-none transition-colors first:rounded-t-[8px] last:rounded-b-[8px] hover:bg-muted/50 focus-visible:bg-muted/60"
+						className="group flex w-full items-center gap-3 px-3 py-2.5 text-start outline-none transition-colors first:rounded-t-[8px] last:rounded-b-[8px] hover:bg-muted/50 focus-visible:bg-muted/60"
 						data-flow-item=""
 						key={action.id}
 						onClick={() => onChoose(action)}
@@ -277,7 +277,7 @@ export function FlowMenu({
 						) : null}
 						{section.items.map((action) => (
 							<button
-								className="flex h-11 w-full shrink-0 items-center gap-2.5 rounded-md px-2 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted"
+								className="flex h-11 w-full shrink-0 items-center gap-2.5 rounded-md px-2 text-start outline-none transition-colors hover:bg-muted focus-visible:bg-muted"
 								data-flow-item=""
 								key={action.id}
 								onClick={() => onChoose(action)}
@@ -335,7 +335,7 @@ export function FlowConnectMenu({
 				{title}
 			</div>
 			<FlowMenu
-				className="-mt-px rounded-tl-none"
+				className="-mt-px rounded-ss-none"
 				labelledBy={labelId}
 				maxHeight={maxHeight}
 				onChoose={onChoose}

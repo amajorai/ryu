@@ -41,6 +41,7 @@ import {
 	normalizePromptPlaceholders,
 	renderPrompt,
 } from "./PromptStudio-format.ts";
+import { usePromptLoadGuard } from "./PromptStudio-load-guard.ts";
 import { PreviewPanel } from "./PromptStudio-preview-panel.tsx";
 import { PromptTestCases } from "./PromptStudio-test-cases.tsx";
 
@@ -90,6 +91,11 @@ export function PromptStudio({
 	// accumulate junk conversation rows across many preview runs.
 	const previewConvIdRef = useRef<string>(`preview-${crypto.randomUUID()}`);
 
+	const { applyLoadedPrompt, noteEditorValue } = usePromptLoadGuard(
+		agentId,
+		value,
+		onChange
+	);
 	const placeholders = useMemo(() => extractPlaceholders(value), [value]);
 	useEffect(() => {
 		if (lastEditorValueRef.current === value) {
@@ -174,10 +180,10 @@ export function PromptStudio({
 			{/* Header */}
 			<div className="flex items-center gap-2">
 				<span className="font-medium text-base">Prompt Studio</span>
-				<Badge className="ml-1" size="compact" variant="secondary">
+				<Badge className="ms-1" size="compact" variant="secondary">
 					v{version}
 				</Badge>
-				<div className="ml-auto flex items-center gap-2">
+				<div className="ms-auto flex items-center gap-2">
 					<PromptLibrary
 						currentPrompt={value}
 						locked={locked}
@@ -212,7 +218,7 @@ export function PromptStudio({
 				<Label htmlFor="prompt-studio-editor">
 					System prompt
 					{placeholders.length > 0 ? (
-						<span className="ml-2 font-normal text-muted-foreground text-xs">
+						<span className="ms-2 font-normal text-muted-foreground text-xs">
 							{tl(
 								"— {count, plural, one {# variable} other {# variables}} detected",
 								{ count: placeholders.length }
@@ -237,6 +243,7 @@ export function PromptStudio({
 							key={`${agentId ?? "new"}:${editorRevision}`}
 							onChangeMarkdown={(markdown) => {
 								const nextValue = normalizePromptPlaceholders(markdown);
+								noteEditorValue(nextValue);
 								lastEditorValueRef.current = nextValue;
 								onChange(nextValue);
 							}}
@@ -283,6 +290,7 @@ export function PromptStudio({
 				engine={engine}
 				locked={locked}
 				model={model}
+				onLoadedPrompt={applyLoadedPrompt}
 				onPromptChange={onChange}
 				promptDraft={value}
 				target={target}

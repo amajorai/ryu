@@ -44,6 +44,11 @@ import {
 
 export const STREET_NAME = "Market Street";
 
+/** The street's name in the UI language. */
+export function streetName(tl: LiteralMessage): string {
+	return tl("Market Street");
+}
+
 function streetStatus(totals: MarketTotals, tl: LiteralMessage): string {
 	if (totals.waitingOnYou > 0) {
 		return tl(
@@ -73,6 +78,7 @@ function Directory({
 	onEnter: (shopId: string) => void;
 	shops: MarketShop[];
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
@@ -104,13 +110,15 @@ function Directory({
 				sideOffset={8}
 			>
 				<DropdownMenuGroup>
-					<DropdownMenuLabel>{STREET_NAME}</DropdownMenuLabel>
+					<DropdownMenuLabel>{streetName(tl)}</DropdownMenuLabel>
 					{shops.map((shop) => (
 						<DropdownMenuItem key={shop.id} onClick={() => onEnter(shop.id)}>
 							<span className="flex min-w-0 flex-1 flex-col">
-								<span className="truncate text-sm">{shop.name}</span>
+								<span className="truncate text-sm" data-ryu-i18n="off">
+									{shop.name}
+								</span>
 								<span className="truncate text-[13px] text-muted-foreground">
-									{shopKindText(shop)} · {shopState(shop)}
+									{shopKindText(shop, tl)} · {shopState(shop, tl)}
 								</span>
 							</span>
 							{shop.waitingOnYou > 0 ? (
@@ -185,7 +193,7 @@ export function MarketStreetHud({
 						status
 					)
 				}
-				title={STREET_NAME}
+				title={streetName(tl)}
 			/>
 			{loading || empty ? null : (
 				<div className={acts ? "ms-auto shrink-0" : "ms-auto"}>
@@ -250,7 +258,9 @@ export function MarketStreetHud({
 						<GameCounter
 							compact={compact}
 							icon={<ReceiptText strokeWidth={2.5} />}
-							label={totals.orders === 1 ? "order" : "orders"}
+							label={tl("{count, plural, one {order} other {orders}}", {
+								count: totals.orders,
+							})}
 							tone="accent"
 							value={totals.orders}
 						/>

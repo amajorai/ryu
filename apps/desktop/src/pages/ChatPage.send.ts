@@ -11,6 +11,7 @@ import {
 	backendPromptFields,
 	useCloudTaskBackendChoices,
 } from "@/src/lib/cloud-task-backend-choice.ts";
+import { cloudTaskNoticeText } from "@/src/lib/cloud-task-notice-text.ts";
 import {
 	cloudTaskBlockReason,
 	managedCloudExecutor,
@@ -225,9 +226,10 @@ export function useChatSend({
 									parts: [
 										{
 											text: result.pendingApprovals
-												.map(
-													(approval) =>
-														`Safe approval needed: ${approval.reason}`
+												.map((approval) =>
+													tlRef.current("Safe approval needed: {reason}", {
+														reason: approval.reason,
+													})
 												)
 												.join("\n"),
 											type: "text",
@@ -354,7 +356,7 @@ export function useChatSend({
 						// A preferred plan was skipped (usage limit, signed out): say so,
 						// because the task now runs on a Ryu Box and uses Ryu credits.
 						for (const notice of accepted.notices) {
-							toast.info(notice.message);
+							toast.info(cloudTaskNoticeText(notice, tlRef.current));
 						}
 						return Promise.all([
 							queryClient.invalidateQueries({

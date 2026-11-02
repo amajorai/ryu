@@ -15,6 +15,7 @@ import {
 	FRAME_PADDING,
 	UNASSIGNED_FRAME_ID,
 } from "./canvas-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /**
@@ -54,8 +55,13 @@ export const CanvasFrame = memo(function CanvasFrameImpl({
 	// The count says what the frame visibly holds; stickies dragged out of it
 	// are counted apart, so a frame never claims a sticky it no longer shows.
 	const tl = useLiteralMessages();
+	// Status frames carry the protocol's English label; groups their own name.
+	const name = frame.status ? threadStatusLabel(frame.status, tl) : frame.label;
 	const count = Math.max(0, frame.threadIds.length - moved);
-	const label = `${frame.label}, ${count} ${count === 1 ? "thread" : "threads"}${moved > 0 ? `, ${moved} moved out` : ""}`;
+	const label = tl(
+		"{label}, {count, plural, one {# thread} other {# threads}}{moved, plural, =0 {} other {, # moved out}}",
+		{ count, label: name, moved }
+	);
 	const reduceMotion = useReducedMotion();
 	// A frame that appears or leaves while the stickies glide (switching the
 	// arrangement) fades on the same 500ms curve, so the new sections arrive
@@ -111,7 +117,9 @@ export const CanvasFrame = memo(function CanvasFrameImpl({
 					) : null}
 					<h3 className="min-w-0 truncate text-foreground">
 						{/* An inner span: the global heading rule caps h1-h6 at 500. */}
-						<span className="font-medium">{frame.label}</span>
+						<span className="font-medium" data-ryu-i18n="off">
+							{name}
+						</span>
 					</h3>
 					<span className="text-foreground/55 tabular-nums">{count}</span>
 					{moved > 0 ? (

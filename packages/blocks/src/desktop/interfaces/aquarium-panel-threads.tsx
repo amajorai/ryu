@@ -1,10 +1,9 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { useContext, useId } from "react";
@@ -21,7 +20,7 @@ import {
 } from "./aquarium-panel-context.ts";
 import { BoardStatusDot } from "./board-status.tsx";
 import { ActStatus } from "./interface-ask-card.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 
 export function AgentBody({
 	activeThreadId,
@@ -38,6 +37,7 @@ export function AgentBody({
 }) {
 	const { agent } = creature;
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const actLayer = useContext(AquariumPanelActs);
 	const act = actLayer?.acts.get(agent.id);
 	const sections = agentThreadSections(snapshot, agent.id);
@@ -50,7 +50,10 @@ export function AgentBody({
 	return (
 		<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 [scrollbar-width:thin]">
 			{agent.description ? (
-				<p className="text-pretty text-muted-foreground text-sm leading-relaxed">
+				<p
+					className="text-pretty text-muted-foreground text-sm leading-relaxed"
+					data-ryu-i18n="off"
+				>
 					{agent.description}
 				</p>
 			) : null}
@@ -71,36 +74,55 @@ export function AgentBody({
 				data-testid="aquarium-agent-counts"
 			>
 				<span>
-					<span className="font-semibold text-foreground">
-						{creature.threadCount}
-					</span>{" "}
-					{creature.threadCount === 1 ? "thread" : "threads"}
+					{tlRich(
+						"{count, plural, one {<b>#</b> thread} other {<b>#</b> threads}}",
+						{ count: creature.threadCount },
+						{
+							b: (chunks) => (
+								<span className="font-semibold text-foreground">{chunks}</span>
+							),
+						}
+					)}
 				</span>
 				<span aria-hidden="true">·</span>
 				<span>
-					<span
-						className={cn(
-							"font-semibold text-foreground",
-							creature.counts.attention > 0 && "text-status-destructive"
-						)}
-					>
-						{needsYou}
-					</span>{" "}
-					{needsYou === 1 ? "needs you" : "need you"}
+					{tlRich(
+						"{count, plural, one {<b>#</b> needs you} other {<b>#</b> need you}}",
+						{ count: needsYou },
+						{
+							b: (chunks) => (
+								<span
+									className={cn(
+										"font-semibold text-foreground",
+										creature.counts.attention > 0 && "text-status-destructive"
+									)}
+								>
+									{chunks}
+								</span>
+							),
+						}
+					)}
 				</span>
 				{act ? null : (
 					<>
 						<span aria-hidden="true">·</span>
 						<span>
-							<span
-								className={cn(
-									"font-semibold text-foreground",
-									creature.counts.working > 0 && "text-status-success"
-								)}
-							>
-								{creature.counts.working}
-							</span>{" "}
-							live
+							{tlRich(
+								"<b>{count}</b> live",
+								{ count: creature.counts.working },
+								{
+									b: (chunks) => (
+										<span
+											className={cn(
+												"font-semibold text-foreground",
+												creature.counts.working > 0 && "text-status-success"
+											)}
+										>
+											{chunks}
+										</span>
+									),
+								}
+							)}
 						</span>
 					</>
 				)}
@@ -167,7 +189,7 @@ function ThreadGroup({
 				id={headingId}
 			>
 				{actMode ? null : <BoardStatusDot status={section.status} />}
-				{actMode ? "Threads" : THREAD_STATUS_LABELS[section.status]}
+				{actMode ? "Threads" : threadStatusLabel(section.status)}
 				<span className="text-muted-foreground tabular-nums">
 					{section.threads.length}
 				</span>
@@ -232,7 +254,10 @@ function ThreadRow({
 			)}
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<span className="flex min-w-0 items-baseline gap-2">
-					<span className="truncate font-medium text-foreground text-sm group-hover:underline group-hover:decoration-border group-hover:underline-offset-2">
+					<span
+						className="truncate font-medium text-foreground text-sm group-hover:underline group-hover:decoration-border group-hover:underline-offset-2"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</span>
 					{thread.pinned ? (
@@ -244,7 +269,7 @@ function ThreadRow({
 				{thread.lastMessage ? (
 					<span className="line-clamp-2 text-muted-foreground text-xs leading-snug">
 						{thread.lastMessageRole === "user" ? "You: " : ""}
-						{thread.lastMessage}
+						<span data-ryu-i18n="off">{thread.lastMessage}</span>
 					</span>
 				) : null}
 				{others.length > 0 ? (

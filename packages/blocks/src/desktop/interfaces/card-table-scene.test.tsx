@@ -41,9 +41,8 @@ const { overlayBudget, stageAgents, youSpotSlots } = await import(
 	"./game3d-acts.ts"
 );
 const { askOwners } = await import("./interface-ask-card.tsx");
-const { CardActProps, cardOverlays, cardPaths } = await import(
-	"./card-table-acts.tsx"
-);
+const { cardOverlays, cardPaths } = await import("./card-table-acts.tsx");
+const { CardActProps } = await import("./card-table-acts-props.tsx");
 const { MAX_SEATS } = await import("./card-table-model.ts");
 const { roomSeats } = await import("./card-table-room.ts");
 

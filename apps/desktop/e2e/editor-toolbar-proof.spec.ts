@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/editor-toolbar-proof.html";
 
@@ -46,9 +47,8 @@ test("shows Spaces page tools in a compact rail and two-row expanded grid", asyn
 				).size
 		);
 	expect(categoryRows).toBe(2);
-	const proofPath = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/image-editing/spaces-page-editor-toolbar-proof.png"
+	const proofPath = proofEvidencePath(
+		"image-editing/spaces-page-editor-toolbar-proof.png"
 	);
 	await mkdir(path.dirname(proofPath), { recursive: true });
 	await page.screenshot({

@@ -74,17 +74,25 @@ export async function checkCore(
 			port !== null && (await host.probePort(hostOf(target.url), port));
 		if (occupied) {
 			state.fixes.push(
-				`Did not start Core: something else already listens on port ${port}.`
+				tf(
+					"Did not start Core: something else already listens on port {port}.",
+					{ port: String(port) }
+				)
 			);
 		} else if (options.dryRun) {
-			state.fixes.push(`Would start a local Core at ${shownUrl}.`);
+			state.fixes.push(
+				tf("Would start a local Core at {shownUrl}.", { shownUrl })
+			);
 		} else {
 			await host.startCore(target);
 			health = await probeCore(ctx, target, "/api/health", healthSchema);
 			state.fixes.push(
 				health.value
-					? `Started Core at ${shownUrl}.`
-					: `Tried to start Core at ${shownUrl}; it did not become healthy (see the log check below).`
+					? tf("Started Core at {shownUrl}.", { shownUrl })
+					: tf(
+							"Tried to start Core at {shownUrl}; it did not become healthy (see the log check below).",
+							{ shownUrl }
+						)
 			);
 		}
 	}
@@ -139,7 +147,10 @@ export async function checkCore(
 				"Something listens on port {port} but does not answer as Ryu Core ({message}).",
 				{ port: String(port), message: health.message }
 			),
-			fix: `Find what owns the port with \`${portOwnerHint(host, port ?? CORE_BASE_PORT)}\`. If it is a stuck ryu-core, stop it and start Core again.`,
+			fix: tf(
+				"Find what owns the port with `{hint}`. If it is a stuck ryu-core, stop it and start Core again.",
+				{ hint: portOwnerHint(host, port ?? CORE_BASE_PORT) }
+			),
 			searchTerms: "core port in use",
 			unit: "apps/core",
 		});
@@ -176,7 +187,10 @@ export async function checkCore(
 					message: health.message,
 				}),
 		fix: local
-			? `Start it with \`${host.commandName} troubleshoot --fix\`, by opening \`${host.commandName}\`, or by running \`ryu-core\`.`
+			? tf(
+					"Start it with `{commandName} troubleshoot --fix`, by opening `{commandName}`, or by running `ryu-core`.",
+					{ commandName: host.commandName }
+				)
 			: "Check the node is online and reachable from this machine (VPN, firewall, URL).",
 		searchTerms: local ? "core not starting" : "remote node unreachable",
 		unit: "apps/core",
@@ -213,7 +227,9 @@ export async function checkCoreDetails(
 				"CLI {VERSION} talks to Core {coreVersion}; mixed releases can disagree on APIs.",
 				{ VERSION, coreVersion }
 			),
-			fix: `Update the older one: ${installCommand(host)}`,
+			fix: tf("Update the older one: {command}", {
+				command: installCommand(host),
+			}),
 			searchTerms: "version mismatch cli core",
 			unit: "apps/cli",
 		});
@@ -235,7 +251,10 @@ export async function checkCoreDetails(
 			status: "warn",
 			title: "Core runtime",
 			detail: "Core is still installing its required runtime pieces.",
-			fix: `Wait a few minutes and re-run; \`${host.commandName} status\` shows progress.`,
+			fix: tf(
+				"Wait a few minutes and re-run; `{commandName} status` shows progress.",
+				{ commandName: host.commandName }
+			),
 			searchTerms: "required runtime not ready",
 			unit: "apps/core",
 		});
@@ -281,7 +300,10 @@ export async function checkCoreDetails(
 			detail: gatewayUp
 				? "Core reaches its Gateway."
 				: "Core cannot reach its Gateway; model routing, firewall, and budgets are down.",
-			fix: `Restart Core (it supervises the Gateway). If ryu-gateway is missing, re-run the installer: ${installCommand(host)}`,
+			fix: tf(
+				"Restart Core (it supervises the Gateway). If ryu-gateway is missing, re-run the installer: {command}",
+				{ command: installCommand(host) }
+			),
 			searchTerms: "gateway unreachable",
 			unit: "apps/gateway",
 		});
@@ -295,7 +317,10 @@ export async function checkCoreDetails(
 					"The active engine {active} is not running; local models will not answer.",
 					{ active: engine.active }
 				),
-				fix: `Start it with \`${host.commandName} start ${engine.active}\`.`,
+				fix: tf("Start it with `{commandName} start {active}`.", {
+					commandName: host.commandName,
+					active: engine.active,
+				}),
 				searchTerms: `${engine.active} engine not running`,
 				unit: "apps/core",
 			});
@@ -317,8 +342,16 @@ export async function checkCoreDetails(
 			id: "sidecars.binaries",
 			status: "fail",
 			title: "Sidecar binaries",
-			detail: `Missing: ${missing.map((m) => (m.expected_asset ? `${m.name} (${m.expected_asset})` : m.name)).join(", ")}.`,
-			fix: `Re-run the installer to restore them: ${installCommand(host)}`,
+			detail: tf("Missing: {list}.", {
+				list: missing
+					.map((m) =>
+						m.expected_asset ? `${m.name} (${m.expected_asset})` : m.name
+					)
+					.join(", "),
+			}),
+			fix: tf("Re-run the installer to restore them: {command}", {
+				command: installCommand(host),
+			}),
 			searchTerms: `${missing[0]?.name ?? "sidecar"} binary missing`,
 			unit: "apps/core",
 		});
@@ -352,7 +385,9 @@ export async function checkCoreDetails(
 							{ errors }
 						)
 					: "Plugin Doctor found no errors.",
-			fix: `See them with \`${host.commandName} plugin doctor\`.`,
+			fix: tf("See them with `{commandName} plugin doctor`.", {
+				commandName: host.commandName,
+			}),
 			searchTerms: "plugin doctor error",
 			unit: "apps/core",
 		});

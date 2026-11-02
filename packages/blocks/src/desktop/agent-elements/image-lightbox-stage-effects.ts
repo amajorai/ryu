@@ -14,12 +14,15 @@ export function useStageBodyLock(
 				: null;
 		const body = document.body;
 		const overflow = body.style.overflow;
-		const padding = body.style.paddingRight;
+		const padding = body.style.paddingInlineEnd;
+		// The viewport scrollbar sits at the inline end (left in right-to-left
+		// pages), so the padding that stands in for it does too.
 		const gap = window.innerWidth - document.documentElement.clientWidth;
-		const base = Number.parseFloat(getComputedStyle(body).paddingRight) || 0;
+		const base =
+			Number.parseFloat(getComputedStyle(body).paddingInlineEnd) || 0;
 		body.style.overflow = "hidden";
 		if (gap > 0) {
-			body.style.paddingRight = `${base + gap}px`;
+			body.style.paddingInlineEnd = `${base + gap}px`;
 		}
 		frame?.focus({ preventScroll: true });
 		let released = false;
@@ -29,7 +32,7 @@ export function useStageBodyLock(
 			}
 			released = true;
 			body.style.overflow = overflow;
-			body.style.paddingRight = padding;
+			body.style.paddingInlineEnd = padding;
 			if (previous?.isConnected) {
 				previous.focus({ preventScroll: true });
 			}
@@ -75,12 +78,17 @@ export function useStageKeyboard({
 				return;
 			}
 			if (!zoomed && hasMultipleImages) {
-				if (e.key === "ArrowLeft") {
+				// The arrow key toward the inline start goes back: ← in left-to-right
+				// layouts, → in right-to-left ones, matching the button positions.
+				const rtl = getComputedStyle(shell).direction === "rtl";
+				const previousKey = rtl ? "ArrowRight" : "ArrowLeft";
+				const nextKey = rtl ? "ArrowLeft" : "ArrowRight";
+				if (e.key === previousKey) {
 					e.preventDefault();
 					goToPrevious();
 					return;
 				}
-				if (e.key === "ArrowRight") {
+				if (e.key === nextKey) {
 					e.preventDefault();
 					goToNext();
 					return;

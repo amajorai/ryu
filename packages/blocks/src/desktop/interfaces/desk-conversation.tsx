@@ -155,7 +155,7 @@ export function DeskConversation({
 			{overlayOpen ? (
 				<motion.div
 					animate={{ opacity: 1, x: 0 }}
-					className="absolute top-14 right-0 bottom-0 z-20 flex max-w-full shadow-lg"
+					className="absolute end-0 top-14 bottom-0 z-20 flex max-w-full shadow-lg"
 					initial={reduceMotion ? false : { opacity: 0, x: 16 }}
 					onBlur={onOverlayBlur}
 					onFocus={() => {

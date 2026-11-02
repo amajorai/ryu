@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -8,7 +9,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { compactAge } from "./interface-renderer.ts";
+import { formatNameList, relativeAge } from "./interface-renderer.ts";
 
 /** One card in the Focus queue: a thread plus everything its card shows. */
 export interface FocusItem {
@@ -122,9 +123,9 @@ export function focusPosition(index: number, total: number): string {
 		return "Queue empty";
 	}
 	if (index >= total) {
-		return `All ${total} seen`;
+		return tr("All {total} seen", { total });
 	}
-	return `${index + 1} of ${total}`;
+	return tr("{position} of {total}", { position: index + 1, total });
 }
 
 /** The queue split into status runs, in order, for the segmented strip. */
@@ -150,24 +151,23 @@ export function focusRuns(queue: FocusItem[]): FocusRun[] {
 export function focusAgentLine(agents: InterfaceAgent[]): string {
 	const [first, second] = agents;
 	if (!first) {
-		return "No agent";
+		return tr("No agent");
 	}
 	if (agents.length === 1) {
 		return first.name;
 	}
 	if (agents.length === 2 && second) {
-		return `${first.name} and ${second.name}`;
+		return formatNameList([first.name, second.name]);
 	}
-	return `${first.name} +${agents.length - 1}`;
+	return tr("{name} +{count}", {
+		count: agents.length - 1,
+		name: first.name,
+	});
 }
 
-/** "18m ago", or "just now" for fresh activity. */
+/** "18m ago", or "now" for fresh activity, in the UI locale. */
 export function focusAge(iso: string, now: number = Date.now()): string {
-	const age = compactAge(iso, now);
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "just now" : `${age} ago`;
+	return relativeAge(iso, now);
 }
 
 /**
@@ -183,7 +183,9 @@ export function focusReason(item: FocusItem, tl: LiteralMessage): string {
 				? "Last run was interrupted"
 				: "Last run failed";
 		case "your-turn":
-			return `${lead ?? "The agent"} replied`;
+			return lead
+				? tr("{name} replied", { name: lead })
+				: tr("The agent replied");
 		case "working":
 			return lead
 				? tl("{agentName} is running", { agentName: lead })

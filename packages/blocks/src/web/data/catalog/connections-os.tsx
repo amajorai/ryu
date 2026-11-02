@@ -28,6 +28,7 @@ import {
 	EARLY_ACCESS,
 	RunTraceVisual,
 	readTheDocs,
+	catalogCopy as t,
 } from "./shared.tsx";
 
 /** Connections, CLI, SDK, Bot, Agent and OS, in catalogue order (see `../products.tsx`). */
@@ -80,13 +81,15 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		},
 		faq: [
 			{
-				q: "How is this different from MCP?",
-				a: "MCP is the protocol for tools. Connections add managed sign-in, so agents can act in your accounts.",
+				question: "How is this different from MCP?",
+				answer:
+					"MCP is the protocol for tools. Connections add managed sign-in, so agents can act in your accounts.",
 			},
 			// gateway.md N3, N4.
 			{
-				q: "Where are my credentials stored?",
-				a: "With Composio. Ryu keeps only its Composio API key, and agents call actions by name, never with tokens.",
+				question: "Where are my credentials stored?",
+				answer:
+					"With Composio. Ryu keeps only its Composio API key, and agents call actions by name, never with tokens.",
 			},
 		],
 		cta: {
@@ -141,12 +144,14 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		},
 		faq: [
 			{
-				q: "Is the CLI as capable as the desktop?",
-				a: "Yes for agent runs: it talks to the same Ryu Core as Desktop, with the same tools, memory, and rules.",
+				question: "Is the CLI as capable as the desktop?",
+				answer:
+					"Yes for agent runs: it talks to the same Ryu Core as Desktop, with the same tools, memory, and rules.",
 			},
 			{
-				q: "Does the CLI update itself?",
-				a: "Official builds can, when Automatic updates is on. It checks the download and switches on the next launch, never mid-session.",
+				question: "Does the CLI update itself?",
+				answer:
+					"Official builds can, when Automatic updates is on. It checks the download and switches on the next launch, never mid-session.",
 			},
 		],
 		cta: {
@@ -229,7 +234,7 @@ export const CONNECTIONS_TO_OS: Product[] = [
 					"Bot pauses before a task reaches an important app, person, or system, and waits for your approval.",
 				visual: (
 					<ApprovalCardVisual
-						action="Post the summary to #launch"
+						action={t("Post the summary to #launch")}
 						app="Slack"
 					/>
 				),
@@ -307,12 +312,14 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		},
 		faq: [
 			{
-				q: "Is Agent a separate runtime?",
-				a: "No. Agent is a mode of Ryu Desktop, on the same Core and Gateway.",
+				question: "Is Agent a separate runtime?",
+				answer:
+					"No. Agent is a mode of Ryu Desktop, on the same Core and Gateway.",
 			},
 			{
-				q: "Can I use my own model and server?",
-				a: "Yes. Agent can operate managed or self‑hosted nodes and can use local, Ryu-managed, or provider models according to your configuration.",
+				question: "Can I use my own model and server?",
+				answer:
+					"Yes. Agent can operate managed or self‑hosted nodes and can use local, Ryu-managed, or provider models according to your configuration.",
 			},
 		],
 		cta: {
@@ -369,12 +376,14 @@ export const CONNECTIONS_TO_OS: Product[] = [
 		},
 		faq: [
 			{
-				q: "Is OS a separate operating system?",
-				a: "No. OS is a workspace mode of Ryu Desktop. It is rolling out to early access users first.",
+				question: "Is OS a separate operating system?",
+				answer:
+					"No. OS is a workspace mode of Ryu Desktop. It is rolling out to early access users first.",
 			},
 			{
-				q: "What can I open in OS?",
-				a: "The dock holds App Launcher, Mission Control, Chat, Spaces, Tools, Skills, Apps, and Review.",
+				question: "What can I open in OS?",
+				answer:
+					"The dock holds App Launcher, Mission Control, Chat, Spaces, Tools, Skills, Apps, and Review.",
 			},
 		],
 		cta: {

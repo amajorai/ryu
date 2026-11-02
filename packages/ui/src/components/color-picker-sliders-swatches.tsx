@@ -1,6 +1,7 @@
 "use client";
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ComponentProps, useCallback, useMemo } from "react";
@@ -270,7 +271,7 @@ function ColorPickerSwatches({
 							return (
 								<Button
 									aria-label={tl("Select {group} {value}", {
-										group: label.toLowerCase(),
+										group: sentenceLabel(tl, label),
 										value: entry.value,
 									})}
 									aria-pressed={selected}

@@ -1,8 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
+// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
+// the tracked proof tree.
 const proof =
-	process.env.RYU_MERGE_PROOF_DIR ?? "../../docs/proof/merge-recovery-20261006";
+	process.env.RYU_MERGE_PROOF_DIR ??
+	process.env.RYU_PROOF_EVIDENCE_DIR ??
+	proofEvidencePath("merge-recovery-20261006");
 test("actual Desktop shell moves pages between panes, adds a pane chat, and restores placement", async ({
 	page,
 }) => {

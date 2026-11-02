@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useEffect, useRef } from "react";
 import { withTauri } from "@/src/lib/tauri-ready.ts";
 import { useAcpKeepAwake } from "../hooks/useAcpKeepAwake.ts";
@@ -6,7 +7,10 @@ import { useBuildProfile } from "../lib/build-profile.ts";
 import { isRyuStandaloneApp, STANDALONE_APP_NAME } from "../lib/product.ts";
 import { useProductMode } from "../lib/product-mode.ts";
 import { useReleaseChannel } from "../lib/release-channel.ts";
-import { resolveDesktopWindowTitle } from "../lib/window-title.ts";
+import {
+	resolveDesktopWindowTitle,
+	windowInterfaceLabel,
+} from "../lib/window-title.ts";
 import { HOSTED_STANDALONE_APP_ID } from "./window-identity.ts";
 
 /** Syncs the native window/taskbar label with the active product and release channel. */
@@ -14,6 +18,9 @@ function WindowTitleManager() {
 	if (HOSTED_STANDALONE_APP_ID) {
 		return null;
 	}
+	// Reactive: a language change (or a catalog that loads late) recomputes the
+	// title, which the DOM localizer never sees.
+	const tl = useLiteralMessages();
 	const { dev } = useBuildProfile();
 	const [channel] = useReleaseChannel();
 	const productMode = useProductMode();
@@ -23,10 +30,11 @@ function WindowTitleManager() {
 	const title = resolveDesktopWindowTitle({
 		channel,
 		dev,
-		interfaceLabel: activeInterface.label,
+		interfaceLabel: windowInterfaceLabel(activeInterface, tl),
 		mode: productMode,
 		standaloneApp,
 		standaloneAppName: STANDALONE_APP_NAME,
+		tl,
 	});
 	const latestTitle = useRef(title);
 	const titleRequest = useRef(0);

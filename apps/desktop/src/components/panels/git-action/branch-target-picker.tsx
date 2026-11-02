@@ -118,7 +118,7 @@ export function BranchTargetPicker({
 						className="size-4 shrink-0"
 						icon={GitBranchIcon}
 					/>
-					<ButtonLabel className="min-w-0 flex-1 text-left">
+					<ButtonLabel className="min-w-0 flex-1 text-start">
 						{branch}
 					</ButtonLabel>
 					<HugeiconsIcon

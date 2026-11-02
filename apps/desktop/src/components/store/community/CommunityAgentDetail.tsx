@@ -1,5 +1,7 @@
 import { Alert01Icon, Target01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale } from "@ryu/i18n/core";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ListingAsideCard,
@@ -28,6 +30,14 @@ import {
 	priceLabel,
 	verificationLabel,
 } from "./community-agent-parts.tsx";
+
+/** A 0-5 rating average with one decimal, in the UI language ("4.5", "4,5"). */
+function ratingAverageLabel(average: number): string {
+	return formatNumberValue(activeLocale(), average, {
+		maximumFractionDigits: 1,
+		minimumFractionDigits: 1,
+	});
+}
 
 /** One "the agent asked for this and did not get it" row. */
 export function RequiresRow({
@@ -134,7 +144,7 @@ export function CommunityAgentDetail({
 								label: "Reviews",
 								value:
 									card.ratingCount > 0
-										? `${card.ratingAverage.toFixed(1)} (${formatNumber(card.ratingCount)})`
+										? `${ratingAverageLabel(card.ratingAverage)} (${formatNumber(card.ratingCount)})`
 										: "None yet",
 							},
 						]}
@@ -174,9 +184,16 @@ export function CommunityAgentDetail({
 						{ label: "Publisher", value: card.author ?? "—" },
 						{
 							label: "Rating",
-							sub: card.ratingCount > 0 ? `${card.ratingCount} reviews` : "",
+							sub:
+								card.ratingCount > 0
+									? tl("{count, plural, one {# review} other {# reviews}}", {
+											count: card.ratingCount,
+										})
+									: "",
 							value:
-								card.ratingCount > 0 ? card.ratingAverage.toFixed(1) : "New",
+								card.ratingCount > 0
+									? ratingAverageLabel(card.ratingAverage)
+									: "New",
 						},
 						{ label: "Price", value: priceLabel(card) },
 						{ label: "Kind", value: "Agent Template" },

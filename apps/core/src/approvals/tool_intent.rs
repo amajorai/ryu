@@ -1,6 +1,6 @@
 //! Tool-specific wording for a gated tool call's approval card.
 //!
-//! The generic card ("An agent wants to run the tool `x`") is not decidable
+//! The generic card ("An agent wants to run the tool \"x\"") is not decidable
 //! for a call whose effect hides in its arguments. For the `agent_inbox`
 //! mutations the card names what actually happens: the exact permanent
 //! address a claim takes, and who a message goes to and what it says.
@@ -18,6 +18,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::text::{ApprovalText, Phrase, Summary};
+use crate::i18n::messages;
 use crate::sidecar::mcp::agent_inbox_alias::normalize_alias_request;
 
 /// How long the gate waits for the hosted alias check before it falls back to
@@ -33,15 +35,30 @@ const BODY_PREVIEW_CHARS: usize = 20_000;
 /// How many recipients the card lists before it summarizes the rest.
 const RECIPIENTS_SHOWN: usize = 10;
 
-/// The permanence statement every alias claim card carries.
+/// The permanence statement every alias claim card carries (English).
+#[cfg(test)]
 pub const ALIAS_PERMANENCE: &str = "Agent email addresses are permanent and never reissued.";
 
-/// Card wording that replaces the generic tool-call title, question and summary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Card wording that replaces the generic tool-call title, question and
+/// summary: the messages, plus their English rendering.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolIntent {
     pub title: String,
     pub question: String,
     pub summary: String,
+    pub text: ApprovalText,
+}
+
+impl From<ApprovalText> for ToolIntent {
+    fn from(text: ApprovalText) -> Self {
+        let (title, question, summary) = text.render("en");
+        Self {
+            title,
+            question: question.unwrap_or_default(),
+            summary,
+            text,
+        }
+    }
 }
 
 /// The `agent_inbox` action a canonical tool id names, if any.
@@ -84,27 +101,47 @@ fn address_list(arguments: &Value, key: &str) -> Vec<String> {
     }
 }
 
-fn join_recipients(addresses: &[String]) -> String {
+/// The recipient list: verbatim addresses, summarized past
+/// [`RECIPIENTS_SHOWN`].
+fn recipients_phrase(addresses: &[String]) -> Recipients {
     if addresses.len() <= RECIPIENTS_SHOWN {
-        return addresses.join(", ");
+        return Recipients::Listed(addresses.join(", "));
     }
-    let rest = addresses.len() - RECIPIENTS_SHOWN;
-    format!(
-        "{} and {rest} more",
-        addresses[..RECIPIENTS_SHOWN].join(", ")
+    Recipients::Summarized(
+        Phrase::new(messages::APPROVAL_MORE_RECIPIENTS_MESSAGE)
+            .text("shown", addresses[..RECIPIENTS_SHOWN].join(", "))
+            .count("rest", addresses.len() - RECIPIENTS_SHOWN),
     )
 }
 
-/// Truncate on a char boundary: the body is arbitrary model output.
-fn preview(text: &str) -> String {
-    let total = text.chars().count();
-    if total > BODY_PREVIEW_CHARS {
-        let head: String = text.chars().take(BODY_PREVIEW_CHARS).collect();
-        let hidden = total - BODY_PREVIEW_CHARS;
-        format!("{head}…\n\n[{hidden} more characters of the message are not shown here]")
-    } else {
-        text.to_owned()
+enum Recipients {
+    Listed(String),
+    Summarized(Phrase),
+}
+
+impl Recipients {
+    /// Set as the `recipients` argument of `phrase`.
+    fn fill(self, phrase: Phrase) -> Phrase {
+        match self {
+            Recipients::Listed(list) => phrase.text("recipients", list),
+            Recipients::Summarized(nested) => phrase.phrase("recipients", nested),
+        }
     }
+}
+
+/// The body as the card shows it: in full up to [`BODY_PREVIEW_CHARS`], then
+/// a note of how much is hidden. Truncated on a char boundary: the body is
+/// arbitrary model output.
+fn body_preview(summary: Summary, text: &str) -> Summary {
+    let total = text.chars().count();
+    if total <= BODY_PREVIEW_CHARS {
+        return summary.paragraph(text);
+    }
+    let head: String = text.chars().take(BODY_PREVIEW_CHARS).collect();
+    summary.paragraph(format!("{head}…")).raw("\n\n").phrase(
+        Phrase::new(messages::APPROVAL_BODY_HIDDEN_MESSAGE)
+            .count("hidden", total - BODY_PREVIEW_CHARS),
+    )
 }
 
 /// The base name a claim's default local part is derived from, as
@@ -134,90 +171,187 @@ fn claim_local_part(action: &str, arguments: &Value, agent_name: Option<&str>) -
     normalize_alias_request(explicit, base.unwrap_or_default()).ok()
 }
 
+/// The address a claim takes: resolved, or the folded local part on the
+/// organization's (unknown here) mail host.
+enum ClaimAddress {
+    Resolved(String),
+    LocalPart(String),
+}
+
+impl ClaimAddress {
+    fn fill(self, phrase: Phrase) -> Phrase {
+        match self {
+            ClaimAddress::Resolved(address) => phrase.text("address", address),
+            ClaimAddress::LocalPart(local) => phrase.phrase(
+                "address",
+                Phrase::new(messages::APPROVAL_UNRESOLVED_ADDRESS_MESSAGE).text("local", local),
+            ),
+        }
+    }
+}
+
 fn describe_claim(
     action: &str,
     arguments: &Value,
     agent_name: Option<&str>,
     resolved_address: Option<&str>,
 ) -> ToolIntent {
-    let owner = agent_name.map_or_else(|| "this agent".to_owned(), str::to_owned);
-    let address = resolved_address.map(str::to_owned).or_else(|| {
-        claim_local_part(action, arguments, agent_name)
-            .map(|local| format!("{local}@<your organization's agent mail host>"))
-    });
+    let permanence = Phrase::new(messages::APPROVAL_ALIAS_PERMANENCE_MESSAGE);
+    let address = resolved_address
+        .map(|address| ClaimAddress::Resolved(address.to_owned()))
+        .or_else(|| claim_local_part(action, arguments, agent_name).map(ClaimAddress::LocalPart));
     let Some(address) = address else {
-        return ToolIntent {
-            title: "Claim an email address".to_owned(),
-            question: format!("Claim an email address for {owner}?"),
-            summary: format!("{owner} wants to claim a hosted email address. {ALIAS_PERMANENCE}"),
+        let (question, summary) = match agent_name {
+            Some(owner) => (
+                Phrase::new(messages::APPROVAL_CLAIM_QUESTION_MESSAGE).text("owner", owner),
+                Phrase::new(messages::APPROVAL_CLAIM_SUMMARY_MESSAGE).text("owner", owner),
+            ),
+            None => (
+                Phrase::new(messages::APPROVAL_CLAIM_THIS_AGENT_QUESTION_MESSAGE),
+                Phrase::new(messages::APPROVAL_CLAIM_THIS_AGENT_SUMMARY_MESSAGE),
+            ),
         };
+        return ApprovalText::new(
+            Phrase::new(messages::APPROVAL_CLAIM_TITLE_MESSAGE),
+            Summary::default()
+                .phrase(summary)
+                .raw(" ")
+                .phrase(permanence)
+                .build(),
+        )
+        .with_question(question)
+        .into();
     };
-    let question = format!("Claim {address} for {owner}?");
-    ToolIntent {
-        title: format!("Claim email address: {address}"),
-        summary: format!("{question} {ALIAS_PERMANENCE}"),
-        question,
-    }
+    let question = match agent_name {
+        Some(owner) => {
+            Phrase::new(messages::APPROVAL_CLAIM_ADDRESS_QUESTION_MESSAGE).text("owner", owner)
+        }
+        None => Phrase::new(messages::APPROVAL_CLAIM_ADDRESS_THIS_AGENT_QUESTION_MESSAGE),
+    };
+    let title = Phrase::new(messages::APPROVAL_CLAIM_ADDRESS_TITLE_MESSAGE);
+    let (title, question) = match address {
+        ClaimAddress::Resolved(resolved) => (
+            title.text("address", resolved.clone()),
+            ClaimAddress::Resolved(resolved).fill(question),
+        ),
+        ClaimAddress::LocalPart(local) => (
+            ClaimAddress::LocalPart(local.clone()).fill(title),
+            ClaimAddress::LocalPart(local).fill(question),
+        ),
+    };
+    ApprovalText::new(
+        title,
+        Summary::default()
+            .phrase(question.clone())
+            .raw(" ")
+            .phrase(permanence)
+            .build(),
+    )
+    .with_question(question)
+    .into()
 }
 
 fn describe_send(arguments: &Value, agent_name: Option<&str>) -> ToolIntent {
-    let sender = agent_name.unwrap_or("An agent");
     let to = address_list(arguments, "to");
     let cc = address_list(arguments, "cc");
-    let subject = string_arg(arguments, "subject").unwrap_or("(no subject)");
-    let recipients = if to.is_empty() {
-        "(no recipients)".to_owned()
-    } else {
-        join_recipients(&to)
+    let subject = string_arg(arguments, "subject");
+    let sender = match agent_name {
+        Some(sender) => Phrase::new(messages::APPROVAL_SEND_SUMMARY_MESSAGE).text("sender", sender),
+        None => Phrase::new(messages::APPROVAL_SEND_ANONYMOUS_SUMMARY_MESSAGE),
     };
-    let mut summary = format!("{sender} wants to send an email.\nTo: {recipients}");
+    let mut summary = Summary::default().phrase(sender);
+    summary = summary.line(if to.is_empty() {
+        Phrase::new(messages::APPROVAL_SEND_NO_RECIPIENTS_MESSAGE)
+    } else {
+        recipients_phrase(&to).fill(Phrase::new(messages::APPROVAL_SEND_TO_MESSAGE))
+    });
     if !cc.is_empty() {
-        summary.push_str(&format!("\nCc: {}", join_recipients(&cc)));
+        summary = summary
+            .line(recipients_phrase(&cc).fill(Phrase::new(messages::APPROVAL_SEND_CC_MESSAGE)));
     }
     // Replies go to Reply-To, so the approver must see where they will land.
     let reply_to = address_list(arguments, "reply_to");
     if !reply_to.is_empty() {
-        summary.push_str(&format!("\nReply-To: {}", join_recipients(&reply_to)));
+        summary = summary.line(
+            recipients_phrase(&reply_to)
+                .fill(Phrase::new(messages::APPROVAL_SEND_REPLY_TO_MESSAGE)),
+        );
     }
-    summary.push_str(&format!("\nSubject: {subject}"));
+    summary = summary.line(match subject {
+        Some(subject) => {
+            Phrase::new(messages::APPROVAL_SEND_SUBJECT_MESSAGE).text("subject", subject)
+        }
+        None => Phrase::new(messages::APPROVAL_SEND_NO_SUBJECT_MESSAGE),
+    });
     if let Some(text) = string_arg(arguments, "text") {
-        summary.push_str(&format!("\n\n{}", preview(text)));
+        summary = body_preview(summary, text);
     }
-    ToolIntent {
-        title: format!("Send email: {subject}"),
-        question: format!("Send \"{subject}\" to {recipients}?"),
-        summary,
-    }
+    let title = match subject {
+        Some(subject) => {
+            Phrase::new(messages::APPROVAL_SEND_TITLE_MESSAGE).text("subject", subject)
+        }
+        None => Phrase::new(messages::APPROVAL_SEND_NO_SUBJECT_TITLE_MESSAGE),
+    };
+    let question = match (subject, to.is_empty()) {
+        (Some(subject), false) => recipients_phrase(&to)
+            .fill(Phrase::new(messages::APPROVAL_SEND_QUESTION_MESSAGE).text("subject", subject)),
+        (None, false) => recipients_phrase(&to).fill(Phrase::new(
+            messages::APPROVAL_SEND_NO_SUBJECT_QUESTION_MESSAGE,
+        )),
+        (Some(subject), true) => {
+            Phrase::new(messages::APPROVAL_SEND_NO_RECIPIENTS_QUESTION_MESSAGE)
+                .text("subject", subject)
+        }
+        (None, true) => Phrase::new(messages::APPROVAL_SEND_EMPTY_QUESTION_MESSAGE),
+    };
+    ApprovalText::new(title, summary.build())
+        .with_question(question)
+        .into()
 }
 
 fn describe_reply(arguments: &Value, agent_name: Option<&str>) -> ToolIntent {
-    let sender = agent_name.unwrap_or("An agent");
     let reply_all = arguments
         .get("reply_all")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let recipients = if reply_all {
-        "the sender and everyone else on the message"
-    } else {
-        "the sender of the message"
-    };
-    let mut summary = format!("{sender} wants to reply to {recipients}");
-    if let Some(message_id) = string_arg(arguments, "message_id") {
-        summary.push_str(&format!(" {message_id}"));
-    }
-    summary.push('.');
-    if let Some(text) = string_arg(arguments, "text") {
-        summary.push_str(&format!("\n\n{}", preview(text)));
-    }
-    ToolIntent {
-        title: if reply_all {
-            "Reply all to an email".to_owned()
+    let recipients = || {
+        Phrase::new(if reply_all {
+            messages::APPROVAL_REPLY_EVERYONE_MESSAGE
         } else {
-            "Reply to an email".to_owned()
-        },
-        question: format!("Send this reply to {recipients}?"),
-        summary,
+            messages::APPROVAL_REPLY_SENDER_MESSAGE
+        })
+    };
+    let message_id = string_arg(arguments, "message_id");
+    let opening = match (agent_name, message_id) {
+        (Some(sender), Some(id)) => {
+            Phrase::new(messages::APPROVAL_REPLY_TO_MESSAGE_SUMMARY_MESSAGE)
+                .text("sender", sender)
+                .text("message", id)
+        }
+        (None, Some(id)) => {
+            Phrase::new(messages::APPROVAL_REPLY_TO_MESSAGE_ANONYMOUS_SUMMARY_MESSAGE)
+                .text("message", id)
+        }
+        (Some(sender), None) => {
+            Phrase::new(messages::APPROVAL_REPLY_SUMMARY_MESSAGE).text("sender", sender)
+        }
+        (None, None) => Phrase::new(messages::APPROVAL_REPLY_ANONYMOUS_SUMMARY_MESSAGE),
+    };
+    let mut summary = Summary::default().phrase(opening.phrase("recipients", recipients()));
+    if let Some(text) = string_arg(arguments, "text") {
+        summary = body_preview(summary, text);
     }
+    let title = Phrase::new(if reply_all {
+        messages::APPROVAL_REPLY_ALL_TITLE_MESSAGE
+    } else {
+        messages::APPROVAL_REPLY_TITLE_MESSAGE
+    });
+    ApprovalText::new(title, summary.build())
+        .with_question(
+            Phrase::new(messages::APPROVAL_REPLY_QUESTION_MESSAGE)
+                .phrase("recipients", recipients()),
+        )
+        .into()
 }
 
 /// Card wording for a gated tool call, or `None` to keep the generic card.
@@ -315,238 +449,5 @@ pub async fn resolve(
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn claim_names_the_exact_resolved_address_and_permanence() {
-        let intent = describe(
-            "agent_inbox.claim_email_alias",
-            &json!({ "local_part": "Sales" }),
-            Some("Nova"),
-            Some("sales@acme.mail.example"),
-        )
-        .unwrap();
-        assert_eq!(intent.question, "Claim sales@acme.mail.example for Nova?");
-        assert_eq!(
-            intent.summary,
-            "Claim sales@acme.mail.example for Nova? Agent email addresses are permanent and never reissued."
-        );
-        assert_eq!(intent.title, "Claim email address: sales@acme.mail.example");
-    }
-
-    #[test]
-    fn claim_without_resolution_uses_the_folded_local_part() {
-        let intent = describe(
-            "agent_inbox.claim_email_alias",
-            &json!({ "local_part": "  Sales Team " }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            intent.question,
-            "Claim sales-team@<your organization's agent mail host> for Nova?"
-        );
-        assert!(intent.summary.ends_with(ALIAS_PERMANENCE));
-    }
-
-    #[test]
-    fn claim_defaults_to_display_name_then_agent_name() {
-        let by_display = describe(
-            "agent_inbox.claim_email_alias",
-            &json!({ "display_name": "Front Desk" }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert!(by_display.question.starts_with("Claim front-desk@"));
-        let by_agent = describe(
-            "agent_inbox.claim_email_alias",
-            &json!({}),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert!(by_agent.question.starts_with("Claim nova@"));
-    }
-
-    #[test]
-    fn deprecated_create_ignores_display_name_and_still_states_permanence() {
-        let intent = describe(
-            "agent_inbox.create",
-            &json!({ "display_name": "Front Desk" }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert!(
-            intent.question.starts_with("Claim nova@"),
-            "{}",
-            intent.question
-        );
-        assert!(intent.summary.contains(ALIAS_PERMANENCE));
-    }
-
-    #[test]
-    fn claim_with_nothing_to_name_still_states_permanence() {
-        let intent = describe("agent_inbox.claim_email_alias", &json!({}), None, None).unwrap();
-        assert_eq!(intent.question, "Claim an email address for this agent?");
-        assert!(intent.summary.contains(ALIAS_PERMANENCE));
-        let unusable = describe(
-            "agent_inbox.claim_email_alias",
-            &json!({ "local_part": "!!!" }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert_eq!(unusable.question, "Claim an email address for Nova?");
-    }
-
-    #[test]
-    fn send_lists_recipients_subject_and_a_bounded_body() {
-        // A short harmless opening cannot hide what follows it.
-        let ordinary = format!("Hi there.\n{}", "y".repeat(500));
-        let shown = describe(
-            "agent_inbox.send",
-            &json!({ "to": ["a@example.com"], "subject": "Hi", "text": ordinary }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert!(shown.summary.ends_with(&ordinary));
-
-        let body = "x".repeat(BODY_PREVIEW_CHARS + 50);
-        let intent = describe(
-            "agent_inbox.send",
-            &json!({
-                "to": ["a@example.com", "b@example.com"],
-                "cc": ["c@example.com"],
-                "subject": "Quarterly numbers",
-                "text": body,
-            }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            intent.question,
-            "Send \"Quarterly numbers\" to a@example.com, b@example.com?"
-        );
-        assert!(intent.summary.contains("To: a@example.com, b@example.com"));
-        assert!(intent.summary.contains("Cc: c@example.com"));
-        assert!(intent.summary.contains("Subject: Quarterly numbers"));
-        assert!(intent
-            .summary
-            .ends_with("[50 more characters of the message are not shown here]"));
-        assert!(!intent.summary.contains(&body));
-        assert_eq!(intent.title, "Send email: Quarterly numbers");
-    }
-
-    #[test]
-    fn send_shows_reply_to_so_replies_cannot_be_redirected_unseen() {
-        let intent = describe(
-            "agent_inbox.send",
-            &json!({
-                "to": ["buyer@example.com"],
-                "subject": "Your quote",
-                "text": "Attached.",
-                "reply_to": "attacker@evil.example",
-            }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert!(intent.summary.contains("Reply-To: attacker@evil.example"));
-        let without = describe(
-            "agent_inbox.send",
-            &json!({"to": ["buyer@example.com"], "subject": "Your quote"}),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert!(!without.summary.contains("Reply-To"));
-    }
-
-    #[test]
-    fn send_summarizes_long_recipient_lists() {
-        let to: Vec<String> = (0..RECIPIENTS_SHOWN + 3)
-            .map(|index| format!("r{index}@example.com"))
-            .collect();
-        let intent = describe(
-            "agent_inbox.send",
-            &json!({ "to": to, "subject": "Hi" }),
-            None,
-            None,
-        )
-        .unwrap();
-        assert!(
-            intent.question.contains("and 3 more"),
-            "{}",
-            intent.question
-        );
-        assert!(intent
-            .summary
-            .starts_with("An agent wants to send an email."));
-    }
-
-    #[test]
-    fn reply_names_who_receives_it() {
-        let intent = describe(
-            "agent_inbox.reply",
-            &json!({ "message_id": "msg_1", "text": "Thanks!", "reply_all": true }),
-            Some("Nova"),
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            intent.question,
-            "Send this reply to the sender and everyone else on the message?"
-        );
-        assert!(intent.summary.contains("msg_1"));
-        assert!(intent.summary.ends_with("Thanks!"));
-    }
-
-    #[test]
-    fn other_tools_keep_the_generic_card() {
-        assert_eq!(describe("agent_inbox.get", &json!({}), None, None), None);
-        assert_eq!(describe("gmail.send_email", &json!({}), None, None), None);
-        assert_eq!(describe("send", &json!({}), None, None), None);
-    }
-
-    #[test]
-    fn checked_address_accepts_only_a_successful_full_address() {
-        assert_eq!(
-            checked_address(&json!({ "ok": true, "address": "sales@acme.mail.example" })),
-            Some("sales@acme.mail.example".to_owned())
-        );
-        assert_eq!(
-            checked_address(&json!({ "ok": false, "address": "sales@acme.mail.example" })),
-            None
-        );
-        assert_eq!(
-            checked_address(&json!({ "ok": true, "address": "sales" })),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn resolve_without_a_cloud_node_falls_back_to_the_local_part() {
-        let intent = resolve(
-            "agent_inbox.claim_email_alias",
-            &json!({ "local_part": "sales" }),
-            Some("agent_without_node"),
-        )
-        .await
-        .unwrap();
-        assert!(
-            intent
-                .question
-                .starts_with("Claim sales@<your organization's agent mail host>"),
-            "{}",
-            intent.question
-        );
-    }
-}
+#[path = "tool_intent_tests.rs"]
+mod tests;

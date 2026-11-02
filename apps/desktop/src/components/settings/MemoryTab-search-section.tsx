@@ -1,6 +1,6 @@
 import { DatabaseIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -30,12 +30,16 @@ import {
 import { useMemoryOwner } from "./MemoryTab-owner.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
-function sourceLabel(chunk: ScoredChunk, spaces: SpaceSummary[]): string {
+function sourceLabel(
+	chunk: ScoredChunk,
+	spaces: SpaceSummary[],
+	tl: LiteralMessage
+): string {
 	if (chunk.source === "memory") {
-		return "Memory";
+		return tl("Memory");
 	}
 	const space = spaces.find((s) => s.id === chunk.spaceId);
-	return space ? `Space · ${space.name}` : "Space";
+	return space ? tl("Space · {name}", { name: space.name }) : tl("Space");
 }
 
 export function MemorySearchSection({ target }: { target: ApiTarget }) {
@@ -168,7 +172,7 @@ export function MemorySearchSection({ target }: { target: ApiTarget }) {
 							<li className="rounded-md bg-muted/40 p-3 text-sm" key={chunk.id}>
 								<div className="mb-1.5 flex items-center justify-between gap-2">
 									<Badge variant="secondary">
-										{sourceLabel(chunk, spaces)}
+										{sourceLabel(chunk, spaces, tl)}
 									</Badge>
 									<span className="font-mono text-muted-foreground text-xs">
 										{tl("score {score}", { score: chunk.score.toFixed(3) })}

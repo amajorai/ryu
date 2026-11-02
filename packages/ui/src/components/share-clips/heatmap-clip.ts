@@ -22,20 +22,18 @@
 
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { formatNumber } from "../../lib/number-format.ts";
-import { drawGhost, ellipsize } from "../pass-studio/paint.ts";
-import { fillRoundedRect, fontString } from "./heatmap-clip-canvas.ts";
 import type {
 	HeatmapClipCell,
 	HeatmapClipData,
 	HeatmapClipDay,
 	HeatmapClipLayout,
-	HeatmapClipPalette,
 	HeatmapClipSize,
 	HeatmapClipStat,
 	HeatmapClipTimeline,
 	HeatmapGridLayout,
 } from "./heatmap-clip-types.ts";
 
+export { drawHeatmapFrame } from "./heatmap-clip-draw.ts";
 export { HEATMAP_CLIP_PALETTES } from "./heatmap-clip-palettes.ts";
 export type {
 	HeatmapClipCell,
@@ -77,19 +75,13 @@ const STATS_END = 5.6;
 const FADE_OUT_START = 7.3;
 
 const MARGIN_PX = 80;
-const MARK_PX = 44;
-const WORDMARK_PX = 38;
-const META_PX = 26;
-const NAME_PX = 64;
-const SUBTITLE_PX = 30;
-const STAT_VALUE_PX = 60;
-const STAT_LABEL_PX = 26;
-const STAT_ROW_PX = 130;
-const FOOTER_PX = 26;
+export const STAT_ROW_PX = 130;
+export const FOOTER_PX = 26;
 const HEADER_BLOCK_PX = 260;
-const SECTION_GAP_PX = 56;
+export const SECTION_GAP_PX = 56;
 
-const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+export const clamp01 = (value: number): number =>
+	Math.min(1, Math.max(0, value));
 const easeOutCubic = (value: number): number => 1 - (1 - clamp01(value)) ** 3;
 const pad2 = (value: number): string => value.toString().padStart(2, "0");
 const toKey = (date: Date): string =>
@@ -195,16 +187,19 @@ export function heatmapGridLayout(box: {
 	return best as HeatmapGridLayout;
 }
 
-/** Top-left corner of a cell in device px. */
+/** Top-left corner of a cell in device px; mirrored inside the grid in RTL. */
 export function heatmapCellPosition(
 	grid: HeatmapGridLayout,
 	week: number,
-	weekday: number
+	weekday: number,
+	/** Weeks run right to left, as the live graph's flex row does under RTL. */
+	rtl = false
 ): { x: number; y: number } {
 	const band = Math.floor(week / grid.columns);
 	const column = week % grid.columns;
+	const slot = rtl ? grid.columns - 1 - column : column;
 	return {
-		x: grid.left + column * grid.pitch,
+		x: grid.left + slot * grid.pitch,
 		y: grid.top + (band * (DAYS_IN_WEEK + 1) + weekday) * grid.pitch,
 	};
 }
@@ -294,190 +289,40 @@ export function heatmapClipStats(
 	const longest = data.streakLongest ?? 0;
 	return [
 		{
-			label: "Total tokens",
+			label: tl("Total tokens"),
 			value: formatNumber(countUp(data.totalTokens, progress)),
 		},
 		{
-			label: "Active days",
+			label: tl("Active days"),
 			value: formatNumber(countUp(data.activeDays ?? 0, progress)),
 		},
 		{
 			label:
 				longest > 0
 					? tl("Day streak · best {longest}", { longest: String(longest) })
-					: "Day streak",
+					: tl("Day streak"),
 			value: formatNumber(countUp(data.streakCurrent, progress)),
 		},
-		{ label: "Level", value: formatNumber(countUp(data.level, progress)) },
+		{ label: tl("Level"), value: formatNumber(countUp(data.level, progress)) },
 	];
 }
 
 /** The footer line: peak day and favourite model, when there are any. */
-export function heatmapClipFooter(data: HeatmapClipData): string {
+export function heatmapClipFooter(
+	data: HeatmapClipData,
+	tl: LiteralMessage
+): string {
 	const parts: string[] = [];
 	if (data.peakDay && data.peakDay.tokens > 0) {
 		parts.push(
-			`Peak day ${data.peakDay.day} · ${formatNumber(data.peakDay.tokens)} tokens`
+			tl("Peak day {day} · {tokens} tokens", {
+				day: data.peakDay.day,
+				tokens: formatNumber(data.peakDay.tokens),
+			})
 		);
 	}
 	if (data.favoriteModel) {
-		parts.push(`Favourite model ${data.favoriteModel}`);
+		parts.push(tl("Favourite model {model}", { model: data.favoriteModel }));
 	}
 	return parts.join("   ·   ");
-}
-
-function drawHeader(
-	ctx: CanvasRenderingContext2D,
-	data: HeatmapClipData,
-	layout: HeatmapClipLayout,
-	size: HeatmapClipSize,
-	palette: HeatmapClipPalette,
-	family: string
-): void {
-	const { margin, unit } = layout;
-	// Ryu mark + wordmark, top left.
-	drawGhost(ctx, {
-		color: palette.foreground,
-		scale: unit,
-		size: MARK_PX,
-		x: margin / unit,
-		y: margin / unit,
-	});
-	const middle = margin + (MARK_PX * unit) / 2;
-	ctx.textBaseline = "middle";
-	ctx.textAlign = "left";
-	ctx.fillStyle = palette.foreground;
-	ctx.font = fontString(family, 600, WORDMARK_PX, unit);
-	ctx.fillText("Ryu", margin + (MARK_PX + 14) * unit, middle);
-	ctx.textAlign = "right";
-	ctx.fillStyle = palette.muted;
-	ctx.font = fontString(family, 400, META_PX, unit);
-	ctx.fillText("Last 12 months", size.width - margin, middle);
-
-	ctx.textBaseline = "alphabetic";
-	ctx.textAlign = "left";
-	const available = size.width - margin * 2;
-	const nameBaseline = margin + (MARK_PX + 40 + NAME_PX) * unit;
-	ctx.fillStyle = palette.foreground;
-	ctx.font = fontString(family, 600, NAME_PX, unit);
-	ctx.fillText(ellipsize(ctx, data.name, available), margin, nameBaseline);
-	ctx.fillStyle = palette.muted;
-	ctx.font = fontString(family, 400, SUBTITLE_PX, unit);
-	ctx.fillText(
-		"Daily activity on Ryu",
-		margin,
-		nameBaseline + (SUBTITLE_PX + 18) * unit
-	);
-}
-
-function drawGrid(
-	ctx: CanvasRenderingContext2D,
-	cells: readonly HeatmapClipCell[],
-	grid: HeatmapGridLayout,
-	palette: HeatmapClipPalette,
-	fill: number
-): void {
-	const total = cells.reduce((sum, cell) => sum + (cell.filler ? 0 : 1), 0);
-	const radius = grid.cell * 0.2;
-	for (const cell of cells) {
-		if (cell.filler) {
-			continue;
-		}
-		const { x, y } = heatmapCellPosition(grid, cell.week, cell.weekday);
-		ctx.fillStyle = palette.empty;
-		fillRoundedRect(ctx, x, y, grid.cell, radius);
-		if (cell.level === 0) {
-			continue;
-		}
-		const reveal = cellRevealProgress(cell.order, total, fill);
-		if (reveal <= 0) {
-			continue;
-		}
-		// Grows from the cell's centre as it lands.
-		const side = grid.cell * reveal;
-		const inset = (grid.cell - side) / 2;
-		ctx.fillStyle = palette.levels[cell.level - 1] ?? palette.levels[0];
-		fillRoundedRect(ctx, x + inset, y + inset, side, radius * reveal);
-	}
-}
-
-function drawStats(
-	ctx: CanvasRenderingContext2D,
-	data: HeatmapClipData,
-	layout: HeatmapClipLayout,
-	size: HeatmapClipSize,
-	palette: HeatmapClipPalette,
-	family: string,
-	progress: number,
-	tl: LiteralMessage
-): void {
-	const { margin, statsTop, unit } = layout;
-	const columnWidth = (size.width - margin * 2) / 2;
-	const stats = heatmapClipStats(data, progress, tl);
-	ctx.textAlign = "left";
-	ctx.textBaseline = "alphabetic";
-	// The block fades in over the first half of its count-up rather than sitting
-	// on screen as a row of zeros while the grid fills.
-	ctx.globalAlpha *= clamp01(progress * 2);
-	for (const [index, stat] of stats.entries()) {
-		const x = margin + (index % 2) * columnWidth;
-		const rowTop = statsTop + Math.floor(index / 2) * STAT_ROW_PX * unit;
-		const maxWidth = columnWidth - 24 * unit;
-		ctx.fillStyle = palette.foreground;
-		ctx.font = fontString(family, 600, STAT_VALUE_PX, unit);
-		ctx.fillText(
-			ellipsize(ctx, stat.value, maxWidth),
-			x,
-			rowTop + STAT_VALUE_PX * unit
-		);
-		ctx.fillStyle = palette.muted;
-		ctx.font = fontString(family, 400, STAT_LABEL_PX, unit);
-		ctx.fillText(
-			ellipsize(ctx, stat.label, maxWidth),
-			x,
-			rowTop + (STAT_VALUE_PX + STAT_LABEL_PX + 12) * unit
-		);
-	}
-	const footer = heatmapClipFooter(data);
-	if (footer) {
-		ctx.fillStyle = palette.muted;
-		ctx.font = fontString(family, 400, FOOTER_PX, unit);
-		ctx.fillText(
-			ellipsize(ctx, footer, size.width - margin * 2),
-			margin,
-			statsTop + (STAT_ROW_PX * 2 + SECTION_GAP_PX / 2 + FOOTER_PX) * unit
-		);
-	}
-}
-
-/**
- * Draw the frame at `time` seconds into a `size` canvas. Pure apart from the
- * canvas it is handed: same arguments, same pixels.
- */
-export function drawHeatmapFrame(
-	ctx: CanvasRenderingContext2D,
-	data: HeatmapClipData,
-	time: number,
-	size: HeatmapClipSize,
-	palette: HeatmapClipPalette,
-	options: {
-		cells?: readonly HeatmapClipCell[];
-		fontFamily?: string;
-		tl: LiteralMessage;
-	}
-): void {
-	const family = options.fontFamily ?? "system-ui, sans-serif";
-	const cells = options.cells ?? buildHeatmapCells(data.days, data.endDay);
-	const layout = layoutHeatmapClip(size);
-	const phase = heatmapClipTimeline(time);
-
-	ctx.save();
-	ctx.globalAlpha = 1;
-	ctx.fillStyle = palette.background;
-	ctx.fillRect(0, 0, size.width, size.height);
-	ctx.globalAlpha = phase.alpha;
-	drawHeader(ctx, data, layout, size, palette, family);
-	drawGrid(ctx, cells, layout.grid, palette, phase.fill);
-	drawStats(ctx, data, layout, size, palette, family, phase.stats, options.tl);
-	ctx.restore();
 }

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 /* eslint-disable react/no-unknown-property */
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
@@ -206,7 +207,7 @@ export function pathPaths(
 
 /** The path's words for a limit, under the milestone clock. */
 export const pathLimitText: LimitText = (_act, time) =>
-	time ? `Resting till ${time}` : "Resting";
+	time ? tr("Resting till {time}", { time }) : tr("Resting");
 
 /**
  * Where a stop's act props sit, from its stone: the plan's pips in a ring

@@ -1,5 +1,7 @@
 import { ArrowDataTransferHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale, translate } from "@ryu/i18n/lite";
+import { useOptionalI18n } from "@ryu/i18n/react";
 import {
 	type CitationItem,
 	CitationList,
@@ -32,6 +34,9 @@ import {
 	isTurnEndJsonRenderPart,
 } from "./turn-end-cards.ts";
 import type { CustomToolRendererProps } from "./types.ts";
+import { localizeCloudTaskParts } from "./utils/cloud-task-event-text.ts";
+import { localizeCoreError } from "./utils/core-error-text.ts";
+import { failoverMarkerText } from "./utils/failover-note-text.ts";
 import {
 	getAssistantFileMeta,
 	getAssistantVideoUrl,
@@ -44,10 +49,7 @@ import {
 	isTextPart,
 	nativeOptionalSdkText,
 } from "./utils/live-media-observations.ts";
-import {
-	getFailoverNote,
-	isWorkflowRunPart,
-} from "./utils/live-message-flags.ts";
+import { isWorkflowRunPart } from "./utils/live-message-flags.ts";
 import {
 	nativeCreatedAtLookup,
 	nativeMessageDate,
@@ -97,9 +99,18 @@ export function AssistantParts({
 }: AssistantPartsProps) {
 	const { expandCommands, expandFileEdits, groupToolUses, hideToolDetail } =
 		useChatDisplayPrefs();
+	// A cloud-task status message is re-rendered when the reader's locale changes.
+	const formatLocale = useOptionalI18n()?.formatLocale;
 	const parts = useMemo<RenderedSdkPart[]>(
-		() => normalizeAssistantToolParts(msg.parts ?? []),
-		[msg.parts]
+		() =>
+			normalizeAssistantToolParts(
+				localizeCloudTaskParts<RenderedSdkPart>(
+					msg.parts ?? [],
+					translate,
+					formatLocale ?? activeLocale()
+				)
+			),
+		[msg.parts, formatLocale]
 	);
 	const editedFiles = useMemo(() => deriveEditedFiles(parts), [parts]);
 	const createdAt = nativeCreatedAtLookup(msg)?.createdAt;
@@ -165,7 +176,7 @@ export function AssistantParts({
 			// The structured failover verdict, drawn as a Marker between the
 			// reply's prose. `stand` never reaches a client, so any verdict that
 			// arrives has something to say.
-			const failoverNote = getFailoverNote(part);
+			const failoverNote = failoverMarkerText(part, formatLocale);
 			if (failoverNote) {
 				pushPart(
 					<Marker key={`${msg.id}-failover-${i}`} spacing="turn">
@@ -351,12 +362,17 @@ export function AssistantParts({
 			}
 
 			if (isErrorPart(part)) {
+				const error = localizeCoreError({
+					i18n: part.i18n,
+					message: part.message,
+					title: nativeOptionalSdkText(part.title),
+				});
 				pushPart(
 					<ErrorMessage
 						key={`${msg.id}-error-${i}`}
-						message={part.message}
+						message={error.message}
 						onRetry={onRetryError}
-						title={nativeOptionalSdkText(part.title)}
+						title={error.title}
 					/>
 				);
 				i++;
@@ -446,6 +462,7 @@ export function AssistantParts({
 		mentionItems,
 		deferTurnEndCards,
 		editedFiles,
+		formatLocale,
 	]);
 
 	// Nothing to draw for this message — return null, not an empty div. Inside

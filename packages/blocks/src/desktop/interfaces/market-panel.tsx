@@ -1,22 +1,23 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
+import type {
+	InterfaceSnapshot,
+	ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { Store } from "lucide-react";
 import { type ReactNode, type Ref, useRef } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
 import { GameSheet } from "./game-shell.tsx";
 import { InterfaceComposer } from "./interface-composer.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type MarketOrder,
 	type MarketShop,
+	orderCount,
 	orderRecipients,
 	orderSections,
 	orderTitle,
-	plural,
 	shopKindText,
 	visitingFrom,
 } from "./market-model.ts";
@@ -69,9 +70,11 @@ function subtitleNeed(
 ): string {
 	if (acts) {
 		const count = acts.needYou(shop.id);
-		return count > 0 ? ` · ${count} need you` : "";
+		return count > 0 ? ` · ${tr("{count} need you", { count })}` : "";
 	}
-	return shop.waitingOnYou > 0 ? ` · ${shop.waitingOnYou} waiting on you` : "";
+	return shop.waitingOnYou > 0
+		? ` · ${tr("{count} waiting on you", { count: shop.waitingOnYou })}`
+		: "";
 }
 
 /** The shop's cork order board: every conversation as a slip, by need. */
@@ -124,7 +127,10 @@ function OrderBoard({
 			) : (
 				sections.map((section) => (
 					<section
-						aria-label={`${THREAD_STATUS_LABELS[section.status]}, ${plural(section.orders.length, "order")}`}
+						aria-label={tl("{status}, {orders}", {
+							orders: orderCount(section.orders.length, tl),
+							status: threadStatusLabel(section.status, tl),
+						})}
 						className="mt-5 first:mt-0"
 						key={section.status}
 					>
@@ -223,10 +229,10 @@ export function MarketPanel({
 	const composerRef = useRef<HTMLDivElement>(null);
 	if (view.kind === "thread") {
 		const { order, shop } = view;
-		const title = orderTitle(order?.thread);
+		const title = orderTitle(order?.thread, tl);
 		const eyebrow = order
 			? [slipNumber(order), shop?.name].filter(Boolean).join(" · ")
-			: (shop?.name ?? "Market Street");
+			: (shop?.name ?? tl("Market Street"));
 		return (
 			<GameSheet
 				backLabel={
@@ -246,7 +252,7 @@ export function MarketPanel({
 					order ? (
 						<>
 							<BoardStatusDot status={order.status} />
-							{THREAD_STATUS_LABELS[order.status]}
+							{threadStatusLabel(order.status, tl)}
 						</>
 					) : undefined
 				}
@@ -267,7 +273,7 @@ export function MarketPanel({
 			data-market-panel=""
 			data-testid="market-panel"
 			data-view="shop"
-			eyebrow={shopKindText(shop)}
+			eyebrow={shopKindText(shop, tl)}
 			footer={
 				<div data-market-composer="" ref={composerRef}>
 					<InterfaceComposer
@@ -304,7 +310,7 @@ export function MarketPanel({
 					/>
 					<span data-testid="market-open-sign">{sign}</span>
 					<span aria-hidden="true">·</span>
-					{plural(shop.orders.length, "order")}
+					{orderCount(shop.orders.length, tl)}
 					{subtitleNeed(shop, acts)}
 				</span>
 			}
@@ -346,7 +352,9 @@ export function MarketPanel({
 												working ? "bg-success" : "bg-muted-foreground/60"
 											)}
 										/>
-										<span className="font-medium">{agent.name}</span>
+										<span className="font-medium" data-ryu-i18n="off">
+											{agent.name}
+										</span>
 									</button>
 								</li>
 							);

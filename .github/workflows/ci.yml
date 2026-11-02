@@ -2,16 +2,26 @@ name: ci
 
 # Build / test + secret scan on push and PR.
 #
-# Scoped to the Rust unit that builds standalone today (gateway). The CLI is now
-# the Bun/TypeScript app under apps/cli, not a Cargo crate. Broader coverage
-# (core/ghost/shadow build, and a TypeScript workspace job) is pending the root-manifest
-# prune transform that lets the OSS subset `bun install` without the closed packages.
+# This is where the open-core and source-available surfaces are gated. GitHub
+# Actions is free on public repositories, so the expensive checks for code that
+# ships here (Core/Gateway Rust, the desktop/island/UI TypeScript, and the
+# desktop browser certificates) run in this repository rather than the private
+# monorepo, which only gates what it alone contains.
+#
+#   * rust             — fmt, clippy, workspace tests, and the cargo-deny scan for
+#                        Core, Gateway, and their capability crates.
+#   * js               — type-checks and unit tests for the mirrored workspaces.
+#   * plugin-runtime   — the extension sandbox security suite and its real-Chromium
+#                        certificate.
+#   * onboarding       — the desktop onboarding browser regressions.
+#   * secret-scan      — gitleaks over full history.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,28 +32,227 @@ concurrency:
 
 jobs:
   rust:
-    name: rust (${{ matrix.dir }})
+    name: fmt + clippy + test + license scan (Rust)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        dir: [gateway]
+    env:
+      RYU_PROFILE: dev
+      RYU_KEYCHAIN: off
+      RYU_DIR: /tmp/ryu-ci
+      RYU_MASTER_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      # Hosted runners have limited disk; incremental/debug artifacts make an
+      # otherwise passing workspace test fail with ENOSPC.
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+      RUST_MANIFESTS: |
+        apps/core/Cargo.toml
+        apps/gateway/Cargo.toml
+        crates/ghost/core/Cargo.toml
+        crates/ghost/shadow/Cargo.toml
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      # This tree ships no root Cargo manifest: the release and channel builds
+      # compile each binary from its own manifest into `<dir>/target`. Create a
+      # job-local virtual workspace so the capability crates' own tests run once
+      # over one shared target dir, like the monorepo's root workspace.
+      - name: Generate CI workspace
+        run: |
+          cat > Cargo.toml <<'TOML'
+          [workspace]
+          resolver = "2"
+          members = ["apps/core", "apps/gateway", "crates/core/*", "crates/gateway/*", "crates/ghost/*"]
+          TOML
+          # Seed the workspace lock from Core's so tests run against the pinned
+          # dependency versions instead of a fresh resolution.
+          cp apps/core/Cargo.lock Cargo.lock
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          components: clippy
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: apps/${{ matrix.dir }}
-      - name: Build
-        run: cargo build --manifest-path apps/${{ matrix.dir }}/Cargo.toml --all-targets
-      - name: Test
-        run: cargo test --manifest-path apps/${{ matrix.dir }}/Cargo.toml
-      - name: Clippy (advisory)
-        continue-on-error: true
-        run: cargo clippy --manifest-path apps/${{ matrix.dir }}/Cargo.toml --all-targets
+          # Cache registry downloads, not target artifacts. Restoring the
+          # workspace target fills the hosted runner before the full test pass.
+          cache-targets: false
+      # Core's prost-wkt-types build compiles protobufs → needs protoc; on Linux
+      # the dbus crate (keyring/secret-service) needs libdbus.
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Linux build deps
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libasound2-dev libdbus-1-dev
+      - name: Format check
+        run: |
+          while IFS= read -r manifest; do
+            [ -z "$manifest" ] && continue
+            cargo fmt --manifest-path "$manifest" --all --check
+          done <<< "$RUST_MANIFESTS"
+      - name: Clippy
+        run: |
+          while IFS= read -r manifest; do
+            [ -z "$manifest" ] && continue
+            cargo clippy --manifest-path "$manifest" --all-targets
+          done <<< "$RUST_MANIFESTS"
+      # Clippy's check artifacts are not reused by the test profile. Reclaim them
+      # before the workspace test instead of letting the runner hit ENOSPC.
+      - name: Reclaim clippy artifacts before tests
+        run: cargo clean
+      - name: Test every Rust workspace member
+        run: cargo test --workspace --no-fail-fast -- --test-threads=1
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-deny
+      - name: Dependency license + advisory scan
+        run: |
+          while IFS= read -r manifest; do
+            [ -z "$manifest" ] && continue
+            cargo deny --manifest-path "$manifest" check
+          done <<< "$RUST_MANIFESTS"
+
+  js:
+    name: Type-check + test (TS/JS)
+    runs-on: ubuntu-latest
+    env:
+      RYU_PROFILE: dev
+      RYU_KEYCHAIN: off
+      RYU_DIR: /tmp/ryu-ci-js
+      RYU_MASTER_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The changed-files lint diffs the PR merge commit against its base parent.
+          fetch-depth: 2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - name: Type-check mirrored workspaces
+        # apps/desktop's program (it resolves @ryu/ui and blocks source) needs
+        # more than Node's default ~2 GB heap. Hosted runners have 16 GB.
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: |
+          (cd packages/github-action && bun run check-types && bun run build && git diff --exit-code -- dist)
+          (cd packages/client && bun run check-types)
+          (cd packages/services && bun run check-types)
+          (cd packages/services-cli && bun run check-types)
+          (cd apps/cli && bun run check-types)
+          (cd apps/mcp && bun run check-types)
+          (cd packages/app-host && bun run check-types)
+          (cd packages/ui && bun run check-types)
+          (cd packages/settings && bun run check-types)
+          (cd packages/command && bun run check-types)
+          (cd packages/marketplace && bun run check-types)
+          (cd apps/island && bun run check-types)
+          (cd apps/desktop && bun run check-types)
+      # `tsc` accepts an Island whose emitted bundles cannot launch: Electron's Node
+      # cannot load a `.ts` workspace package, and a sandboxed preload's `require`
+      # serves only Electron's own modules. `bun run build` is `electron-vite build`
+      # followed by scripts/verify-built-bundles.mjs, which exits 1 on a runtime
+      # import the packaged app would not contain.
+      - name: Island build + bundle guard
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: (cd apps/island && bun run build)
+      - name: Lint changed files (Ultracite / Biome)
+        if: github.event_name == 'pull_request'
+        run: |
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR HEAD^1 HEAD)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No changed files to lint."
+            exit 0
+          fi
+          bun x ultracite check --files-ignore-unknown=true "${files[@]}"
+      # Core and Gateway Cargo tests are owned by the rust job above.
+      - name: Unit + integration tests (bun)
+        run: bun x turbo run test --filter='!core' --filter='!gateway' --force --output-logs=errors-only --concurrency=4
+      - name: Toolsmith harness tests
+        run: bun run test:toolsmith
+
+  plugin-runtime-wiring:
+    name: DOM wiring + host suite (bun, no browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      # The sandbox boundary's own suites (adversarial, rpc, handshake, app-bridge,
+      # bridge.integration, html-companion). This step is the substance of the gate.
+      - name: App-host security suite
+        run: cd packages/app-host && bun test
+      # happy-dom DOM WIRING test (NOT a security cert): sandbox attr, srcDoc-not-src,
+      # spoofed-source port refusal against the REAL <ExtensionHost>.
+      - name: ExtensionHost DOM wiring
+        run: cd apps/desktop && bun test e2e/wiring/
+
+  plugin-runtime-cert:
+    name: plugin-runtime-cert (real Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: cd apps/desktop && bunx playwright install --with-deps chromium
+      # Serves the harness (real ExtensionHost + real thirdPartyPluginSrcdoc) via the
+      # config's webServer, then runs the cert assertions in real Chromium.
+      - name: Run the security certificate
+        run: cd apps/desktop && bunx playwright test e2e/plugin-runtime.spec.ts
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: apps/desktop/playwright-report/
+          retention-days: 7
+
+  onboarding-browser:
+    name: Onboarding regression coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: .
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: Privacy target lifetime and concurrent callbacks
+        run: bun test src/components/onboarding/PrivacyStep.lifetime.test.tsx
+      - name: First project refusal and recovery
+        run: bun run test:e2e:first-project
+      - name: Persisted project onboarding journey
+        run: bun run test:e2e:onboarding-first-project
+      - name: Privacy loading and save recovery
+        run: bun run test:e2e:onboarding-privacy
+      - name: Retain browser results and product captures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: onboarding-browser-proof
+          path: |
+            apps/desktop/test-results/first-project-proof/
+            apps/desktop/test-results/onboarding-first-project-integration-proof/
+            apps/desktop/test-results/onboarding-privacy-step-proof/
+          retention-days: 7
 
   secret-scan:
     name: gitleaks

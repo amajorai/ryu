@@ -14,7 +14,6 @@ import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
@@ -22,7 +21,7 @@ import { motion } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useState } from "react";
 import type { GlanceAgentState } from "./glance-model.ts";
 import { glanceThreadTitle } from "./glance-model.ts";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /**
@@ -177,24 +176,27 @@ export function GlanceThreadSheet({
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={tl("Thread: {title}", { title })}
-			className="relative flex min-h-0 w-[clamp(22rem,38%,40rem)] shrink-0 flex-col border-border border-l bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-l-0"
+			className="relative flex min-h-0 w-[clamp(22rem,38%,40rem)] shrink-0 flex-col border-border border-s bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-s-0"
 			data-testid="glance-thread-sheet"
 			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 32 }}
 			initial={reduceMotion ? false : { opacity: 0, x: 32 }}
 			ref={sheetRef}
 			transition={{ duration: 0.32, ease: GLANCE_EASE }}
 		>
-			<header className="flex h-16 shrink-0 items-center gap-3 border-border border-b pr-3 pl-5">
+			<header className="flex h-16 shrink-0 items-center gap-3 border-border border-b ps-5 pe-3">
 				{lead ? <GlanceAvatar agent={lead} className="size-8" /> : null}
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<h2 className="truncate font-semibold text-[15px] text-foreground leading-5">
+					<h2
+						className="truncate font-semibold text-[15px] text-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</h2>
 					{thread && state ? (
 						<p className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground leading-4">
 							<GlanceMark className="size-1.5" state={state} />
 							<span className={cn("shrink-0", GLANCE_STATE_TEXT[state])}>
-								{THREAD_STATUS_LABELS[threadStatus(thread)]}
+								{threadStatusLabel(threadStatus(thread))}
 							</span>
 							{agents.length > 0 ? (
 								<span className="truncate">

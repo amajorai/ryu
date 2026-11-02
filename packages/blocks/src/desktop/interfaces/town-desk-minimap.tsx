@@ -215,6 +215,7 @@ export function Minimap({
 				<span
 					aria-hidden="true"
 					className="pointer-events-none absolute flex h-5 -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap rounded bg-background px-1.5 font-medium text-(--gk-ink) text-[13px] shadow-xs ring-1 ring-border"
+					data-ryu-i18n="off"
 					style={{ left: `${label.left * 100}%`, top: `${label.top * 100}%` }}
 				>
 					{highlighted.name}

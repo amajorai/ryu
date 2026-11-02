@@ -21,10 +21,12 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover";
+import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { formatTime, startOfTodayMs } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { memo, useMemo, useState } from "react";
 import { dayLabel } from "../date-groups.ts";
+import { formatList } from "../locale-format.ts";
 import type { AgentMessageContext, AgentMessageIdentity } from "../types.ts";
 import {
 	AgentMessageExchange,
@@ -116,7 +118,7 @@ function RecipientRow({
 				</span>
 				{count > 1 ? (
 					<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-						{count}
+						{formatNumber(count)}
 					</span>
 				) : null}
 			</button>
@@ -249,13 +251,25 @@ export const AgentMessagesMarker = memo(function AgentMessagesMarker({
 		);
 	}
 
-	const verb = sending ? "Messaging" : "Messaged";
+	const verb = sending ? tl("Messaging") : tl("Messaged");
 	const onlyPeer = peers.length === 1 ? peers[0] : undefined;
 	const countLabel =
-		onlyPeer && recipients[0] ? recipients[0].name : `${peers.length} agents`;
-	const summaryLabel = `${verb} ${recipients
-		.map((recipient) => recipient.name)
-		.join(", ")}${failedCount > 0 ? `, ${failedCount} not delivered` : ""}`;
+		onlyPeer && recipients[0]
+			? recipients[0].name
+			: tl("{count, plural, one {# agent} other {# agents}}", {
+					count: peers.length,
+				});
+	const names = formatList(recipients.map((recipient) => recipient.name));
+	const sentLabel = sending
+		? tl("Messaging {names}", { names })
+		: tl("Messaged {names}", { names });
+	const summaryLabel =
+		failedCount > 0
+			? tl("{sentLabel}, {count, plural, other {# not delivered}}", {
+					count: failedCount,
+					sentLabel,
+				})
+			: sentLabel;
 
 	const openConversation = (peer: string) => {
 		setRosterOpen(false);

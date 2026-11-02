@@ -159,7 +159,7 @@ export function AgentIdentityModePicker({
 							"relative flex cursor-pointer flex-col rounded-2xl border transition-colors has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/30",
 							hero
 								? "min-h-48 items-center gap-3 px-5 py-6 text-center"
-								: "items-start gap-2 p-4 text-left",
+								: "items-start gap-2 p-4 text-start",
 							isSelected
 								? "border-primary/60 bg-primary/5"
 								: "border-border/70 hover:bg-muted/40",
@@ -171,7 +171,7 @@ export function AgentIdentityModePicker({
 					>
 						<RadioGroupItem
 							aria-describedby={descriptionId}
-							className="absolute top-3 right-3"
+							className="absolute end-3 top-3"
 							id={id}
 							value={mode}
 						/>
@@ -188,7 +188,7 @@ export function AgentIdentityModePicker({
 							<HugeiconsIcon icon={option.icon} size={hero ? 28 : 22} />
 						</span>
 						<span
-							className={cn("font-medium", hero ? "text-base" : "pr-6 text-sm")}
+							className={cn("font-medium", hero ? "text-base" : "pe-6 text-sm")}
 						>
 							{option.title}
 						</span>

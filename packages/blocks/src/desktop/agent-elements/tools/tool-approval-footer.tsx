@@ -111,7 +111,7 @@ export const ToolApprovalFooter = memo(function ToolApprovalFooter({
 	}
 
 	return (
-		<div className="flex items-center justify-between gap-2 bg-muted py-1 pr-2 pl-2.5">
+		<div className="flex items-center justify-between gap-2 bg-muted py-1 ps-2.5 pe-2">
 			<span
 				className={cn(
 					"inline-flex items-center gap-1.5 font-medium text-xs",

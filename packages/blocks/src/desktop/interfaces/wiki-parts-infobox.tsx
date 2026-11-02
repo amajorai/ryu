@@ -23,7 +23,7 @@ export function Infobox({
 	return (
 		<aside
 			aria-label={tl("{caption} summary", { caption })}
-			className="@2xl/article:float-right mb-4 @2xl/article:ml-6 @2xl/article:w-72 w-full border border-border bg-muted/40 p-1 text-[13px] leading-5"
+			className="@2xl/article:float-right @2xl/article:ms-6 mb-4 @2xl/article:w-72 w-full border border-border bg-muted/40 p-1 text-[13px] leading-5"
 		>
 			<table className="w-full border-collapse">
 				<caption className="px-2 pt-1 pb-1 text-center font-semibold text-base leading-6">
@@ -81,7 +81,7 @@ export function InfoboxRow({
 }) {
 	return (
 		<tr className="align-top">
-			<th className="w-[38%] px-2 py-1 text-left font-semibold" scope="row">
+			<th className="w-[38%] px-2 py-1 text-start font-semibold" scope="row">
 				{label}
 			</th>
 			<td className="px-2 py-1">{children}</td>

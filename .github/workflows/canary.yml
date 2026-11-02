@@ -93,67 +93,14 @@ jobs:
           # which is already real content; set, they are merged into highlights.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_SESSION_ID: "ryu-${{ github.repository }}-${{ github.run_id }}"
-        run: |
-          set -e
-          # Notes must be GENERATED before the release references them — the
-          # rolling-build banner, no changelog (mirror history is just sync
-          # commits, and no publish step follows to fill one in).
-          # Banner + install block only; the changelog is appended below.
-          node scripts/release-notes.mjs --channel canary --repo "$GITHUB_REPOSITORY" --no-changelog > notes.md
-          # A rolling build has NO follow-up step that can fill in notes later —
-          # whatever is written here is what it ships with. The mirror commit
-          # bodies in range carry real summaries, so read them.
-          node scripts/rolling-notes.mjs --channel canary --repo "$GITHUB_REPOSITORY" >> notes.md
-          # The tag now CARRIES the version, so `release_version` reads it straight
-          # off the tag. The title keeps the same shape anyway: it is what a human
-          # reads, and it remains the fallback if a tag is ever hand-made.
-          # --prerelease is load-bearing: GitHub's `/releases/latest` excludes
-          # prereleases, which is what stops a stable node auto-updating onto a canary.
-          #
-          # "Re-run all jobs" keeps the run number, so on the same UTC day it
-          # computes this same tag and the first attempt's release already exists.
-          # Reuse it (the build jobs upload with --clobber) instead of failing here
-          # and never reaching the builds again.
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists (re-run of this run number); reusing it."
-          else
-            gh release create "$TAG" \
-              --prerelease \
-              --target "$GITHUB_SHA" \
-              --title "Canary $VERSION (${GITHUB_SHA:0:12})" \
-              --notes-file notes.md
-          fi
+        # Notes, create-or-reuse (a re-run keeps the run number and so the tag),
+        # prune to RETAIN by tag shape, and retire the old unversioned `canary`
+        # release. See .github/scripts/rolling-prerelease.sh.
+        run: bash .github/scripts/rolling-prerelease.sh canary
 
-          # Prune: keep the newest $RETAIN canary releases, delete the rest with
-          # their tags. Selection is by tag shape (`v<x.y.z>-canary.*`), so it can
-          # never touch stable, beta or nightly. `--exclude-drafts` keeps a
-          # half-published build from being counted as the newest.
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --exclude-drafts \
-            --json tagName,createdAt \
-            --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-canary\\."))]
-                  | sort_by(.createdAt) | reverse | .['"$RETAIN"':][] | .tagName' \
-            > stale.txt || true
-          while read -r old; do
-            [ -n "$old" ] || continue
-            echo "pruning old canary release $old"
-            gh release delete "$old" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          done < stale.txt
-
-          # The pre-2026-08-04 rolling `canary` release/tag is now obsolete: it is
-          # unversioned, so it can never win `pick_version_for_channel` against a
-          # versioned build, and leaving it up would show a permanently stale
-          # "Canary" entry at the top of the releases page. Remove it once.
-          gh release delete canary --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-
-  # Desktop installers. The source is source-available in this repo (see
-  # LICENSE-COMMERCIAL.md), so it builds HERE on free public runners instead of
-  # the private repo.
-  #
-  # Signing is OPTIONAL and secret-gated: with TAURI_SIGNING_PRIVATE_KEY set on
-  # this repo the artifacts are signed and the updater accepts them; without it
-  # the installers still build and are downloadable, they just carry no update
-  # signature. That keeps the release working before any decision is made about
-  # putting the signing key on a public repo.
+  # Desktop installers, built on free public runners (source-available here).
+  # Signing is OPTIONAL and secret-gated by TAURI_SIGNING_PRIVATE_KEY; see
+  # .github/scripts/README.md ("Desktop signing is optional").
   desktop:
     needs: prepare
     name: desktop (${{ matrix.platform }})
@@ -198,22 +145,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      # SECURITY (updater signing key scope): `bun install` is deliberately a
-      # separate step with NO signing key in env, so a malicious dependency
-      # postinstall script cannot read TAURI_SIGNING_PRIVATE_KEY. The key is
-      # introduced only on the tauri-action step below. RESIDUAL RISK: tauri-action
-      # runs the app's `beforeBuildCommand` (vite build), so build-time deps still
-      # execute with the key in env; the action offers no hook to pre-run that in a
-      # key-free step, so this residual cannot be closed at the workflow layer.
+      # SECURITY: `bun install` stays a separate step with NO signing key in env,
+      # so a dependency postinstall cannot read TAURI_SIGNING_PRIVATE_KEY. Residual
+      # risk in .github/scripts/README.md ("Signing-key scope during bun install").
       - run: bun install
-      # Stamp the release channel onto the bundle's OS-registered identity —
-      # `productName` becomes "Ryu (Nightly)" / "(Canary)" / "(Beta)" /
-      # "(Research Preview)", and the icon is re-tinted per channel. Derived from
-      # the version already stamped above, so there is no second place to keep in
-      # sync. Runs AFTER `bun install` because the icon expansion shells out to the
-      # Tauri CLI from node_modules, and BEFORE tauri-action because bundle names
-      # are read at bundle time. It never touches `version`, `mainBinaryName` or
-      # `identifier` — see the script header for why each is off-limits.
+      # Stamp the channel into productName and the icon. Must run AFTER `bun
+      # install` and BEFORE tauri-action; see .github/scripts/README.md
+      # ("Channel branding order").
       - name: Brand the bundle for its release channel
         shell: bash
         run: node scripts/release/channel-brand.mjs
@@ -240,59 +178,23 @@ jobs:
           # ("Resource not accessible by integration"). Build only; the installers
           # are collected and uploaded via the assets endpoint below.
           args: ${{ matrix.args }}
+      # Copy the bundles out, stamp the arch into the macOS updater bundle, and
+      # rename by the same artifact-name rule as a stable release. Shared with
+      # release.yml; see .github/scripts/collect-desktop-installers.sh.
       - name: Collect desktop installers
         shell: bash
         env:
           TAURI_ARGS: ${{ matrix.args }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist-desktop
-          find apps/desktop/src-tauri/target -type f \
-            \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \
-               -o -name "*.msi" -o -name "*-setup.exe" -o -name "*.app.tar.gz" \
-               -o -name "*.sig" \) \
-            -not -path "*deps*" -exec cp {} dist-desktop/ \; || true
-          # macOS names the updater bundle `<productName>.app.tar.gz` with NO arch
-          # in it, so the aarch64 and x86_64 legs upload the SAME filename and
-          # `--clobber` leaves only whichever finished last — one arch's updater
-          # bundle is lost every run, and the channel feed cannot address both.
-          # Stamp the arch in. (The .dmg/.exe/.AppImage names already carry arch
-          # or are single-arch.)
-          #
-          # Glob the productName rather than hardcoding "Ryu": channel-brand.mjs
-          # stamps the channel into productName before the bundle is built, so the
-          # file is e.g. `Ryu Canary.app.tar.gz`. A literal `Ryu.app.tar.gz`
-          # stopped matching the moment branding landed, silently reintroducing the
-          # exact collision this block exists to prevent.
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            case "$TAURI_ARGS" in
-              *aarch64-apple-darwin*) arch=aarch64 ;;
-              *) arch=x86_64 ;;
-            esac
-            shopt -s nullglob
-            for f in dist-desktop/*.app.tar.gz dist-desktop/*.app.tar.gz.sig; do
-              base="$(basename "$f")"
-              # Already stamped (defensive: never double-stamp on a re-run).
-              case "$base" in *-"$arch".app.tar.gz|*-"$arch".app.tar.gz.sig) continue ;; esac
-              mv "$f" "dist-desktop/${base/.app.tar.gz/-$arch.app.tar.gz}"
-            done
-            shopt -u nullglob
-          fi
-          # Same rename the release workflow does — see its copy for why. Kept in
-          # step across all three workflows so a channel build's artifacts are
-          # named by the same rule as a stable one.
-          node scripts/release/artifact-name.mjs --dir dist-desktop
-          ls -la dist-desktop || true
+        run: bash .github/scripts/collect-desktop-installers.sh
+      # gh release upload (assets endpoint), NOT softprops. Rolling builds stay
+      # lenient: a platform that produced no installer skips, not fails. See
+      # .github/scripts/upload-release-assets.sh.
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          files=(dist-desktop/*)
-          if [ ${#files[@]} -eq 0 ]; then echo "no desktop installers on this platform — skipping" >&2; exit 0; fi
-          gh release upload "${{ needs.prepare.outputs.tag }}" "${files[@]}" --clobber
+        run: bash .github/scripts/upload-release-assets.sh "$TAG" dist-desktop skip "no desktop installers on this platform — skipping"
 
   # Island companion (Electron). Same rationale as desktop: source-available here,
   # so it builds on free public runners.
@@ -317,7 +219,7 @@ jobs:
         with:
           bun-version: 1.4.4
       # uiohook-napi compiles libuiohook from source on Linux and needs the X11
-      # headers; without them node-gyp dies with "X11/keysym.h: No such file".
+      # headers; how the set was derived is in .github/scripts/README.md.
       - name: Linux build deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libx11-xcb-dev libxt-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev libxrandr-dev libxi-dev libxcursor-dev libxss-dev
@@ -337,37 +239,24 @@ jobs:
         run: bun run dist -- --publish never
       - name: Collect installers
         shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist-island
-          # electron-builder's output layout varies per platform; take the
-          # installers and skip the unpacked build trees.
-          find apps/island -type f \
-            \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.exe" -o -name "*.zip" \) \
-            -not -path "*/node_modules/*" -not -path "*unpacked*" \
-            -exec cp {} dist-island/ \; || true
-          ls -la dist-island || true
-      # gh release upload (assets endpoint), NOT softprops: softprops PATCHes the
-      # release (update-a-release), which the App token is refused. Rolling builds
-      # stay lenient — a platform that produced no installer skips, not fails.
+        run: bash .github/scripts/collect-island-installers.sh
+      # gh release upload (assets endpoint), NOT softprops. Rolling builds stay
+      # lenient: a platform that produced no installer skips, not fails.
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          files=(dist-island/*)
-          if [ ${#files[@]} -eq 0 ]; then echo "no island installers on this platform — skipping" >&2; exit 0; fi
-          gh release upload "${{ needs.prepare.outputs.tag }}" "${files[@]}" --clobber
+        run: bash .github/scripts/upload-release-assets.sh "$TAG" dist-island skip "no island installers on this platform — skipping"
 
   build:
     needs: prepare
     name: ${{ matrix.target.asset }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # audiopus_sys (transitive: opus codec) vendors a CMakeLists that requires
-    # cmake_minimum_required(<3.5); CMake >= 4.0 (current runner images) removed that
-    # compatibility. CMake honours this env var to configure the legacy project anyway.
+    # Guard for vendored CMake builds, as in .cargo/config.toml: CMake >= 4.0
+    # (current runner images) refuses a project whose cmake_minimum_required is
+    # below 3.5 unless this is set. Opus no longer needs it: opus 0.4 builds its
+    # bundled libopus through opusic-sys, whose CMakeLists requires CMake >= 3.16.
     env:
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     strategy:
@@ -391,13 +280,17 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: scripts/release/bump-version.sh "$VERSION"
 
+      # pkg-config + libssl-dev for openssl-sys, libdbus-1-dev / dbus for
+      # libdbus-sys. No system libopus: opus 0.4 (opusic-sys, default `bundled`)
+      # compiles libopus from source with CMake and links it statically, so
+      # ryu-core needs no libopus to build or to run.
       - name: Linux build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libopus-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
 
       - name: macOS build deps
         if: runner.os == 'macOS'
-        run: brew install dbus pkg-config opus
+        run: brew install dbus pkg-config
 
       - name: Install protoc (prost-build)
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
@@ -409,104 +302,39 @@ jobs:
         with:
           workspaces: ${{ matrix.target.dir }}
 
-      # ── Core MUST carry its three shipped-but-not-default features ─────────────
-      #    `sandbox-wasmtime`, `voice-parakeet` and `voice-vad` are off in
-      #    `[features] default` so `cargo test`/`cargo check` stay lean (no
-      #    wasmtime/cranelift, no ONNX Runtime). Off in `default` does NOT mean off
-      #    in the product: this step used to run a bare `cargo build --release`, so
-      #    every `ryu-core` this workflow ever published shipped with NO WASM sandbox
-      #    (`detect_backend("wasmtime")` returns the compile-time feature, so it was
-      #    false), NO parakeet STT inference (silently degrading to whisper) and NO
-      #    Silero VAD. Core's updater has real channel support
-      #    (`apps/core/src/update/mod.rs`), so a node on this channel installs what
-      #    this job produces.
-      #
-      #    The flag lives on the matrix row because `ryu-gateway` declares none of
-      #    these features and `--features` on it would be a hard error. Every build
-      #    site that produces a ryu-core a human runs is enumerated in
-      #    `apps/core/Cargo.toml` just above the `sandbox-wasmtime` declaration;
-      #    adding a feature there means adding it to that list and to every site.
+      # Core MUST carry its shipped-but-not-default features (`sandbox-wasmtime`,
+      # `voice-parakeet`, `voice-vad`); the flag lives on the matrix row because
+      # `ryu-gateway` declares none of them. Rationale, and where every ryu-core
+      # build site is listed, in .github/scripts/build-cargo-target.sh.
       - name: Build
         shell: bash
-        run: |
-          set -eu
-          dir="${{ matrix.target.dir }}"
-          features="${{ matrix.target.features }}"
-          # Swatinem/rust-cache restores `target/`, so a fingerprint written by an
-          # earlier (possibly featureless) run can survive into this one. Drop the
-          # ryu-core bin fingerprint first: cargo re-links that single unit and
-          # writes a fresh record, which is what the assert below grades. Without
-          # this the assert could pass on a stale artifact — and an assertion that
-          # might be reading last week's build is not an assertion.
-          find "$dir/target/release/.fingerprint" -name bin-ryu-core.json -delete 2>/dev/null || true
-          if [ -n "$features" ]; then
-            cargo build --release --manifest-path "$dir/Cargo.toml" --features "$features"
-          else
-            cargo build --release --manifest-path "$dir/Cargo.toml"
-          fi
+        env:
+          TARGET_DIR: ${{ matrix.target.dir }}
+          FEATURES: ${{ matrix.target.features }}
+        run: bash .github/scripts/build-cargo-target.sh
 
-      # ── Feature-set gate. Asserts what cargo actually BUILT (it records each
-      #    unit's resolved feature set in the fingerprint JSON) rather than
-      #    re-resolving with `cargo tree`, which would happily pass its own
-      #    `--features` and go green over a featureless binary.
-      #
-      #    MATCH THE `features` KEY, NOT THE WHOLE FILE. The fingerprint holds two
-      #    lists and only one says what was built:
-      #      "features":"[\"default\", \"tool-exec-deno\"]"
-      #      "declared_features":"[\"default\", \"sandbox-wasmtime\", …]"
-      #    `declared_features` is present verbatim whether or not a feature was
-      #    enabled, so grepping the file as a whole passes unconditionally. The
-      #    leading `"` in the pattern is what keeps it out of `declared_features`
-      #    (whose `features` is preceded by `_`).
-      #
-      #    The feature list is SPLIT OUT OF the matrix row rather than repeated, so
-      #    the gate cannot drift from the flag it is guarding.
+      # Feature-set gate: asserts what cargo actually BUILT, read from the
+      # fingerprint's `features` key (never `declared_features`, which passes on
+      # any build). See .github/scripts/assert-feature-set.sh.
       - name: Assert the shipped feature set was actually built
         if: matrix.target.features != ''
         shell: bash
-        run: |
-          set -eu
-          found=0
-          missing=0
-          for fingerprint in $(find "${{ matrix.target.dir }}/target/release/.fingerprint" -name "bin-${{ matrix.target.bin }}.json" 2>/dev/null); do
-            found=$((found + 1))
-            enabled=$(grep -ao '"features":"\[[^]]*\]"' "$fingerprint" | tr -d '\\' || true)
-            if [ -z "$enabled" ]; then
-              echo "::error::could not read the ENABLED feature list out of $fingerprint. Cargo's fingerprint format changed, so this assertion no longer guards the shipped feature set. Fix the check rather than deleting it — and do NOT fall back to grepping the whole file, which matches 'declared_features' and passes on any build."
-              exit 1
-            fi
-            for feature in $(printf '%s' "${{ matrix.target.features }}" | tr ',' ' '); do
-              if ! printf '%s' "$enabled" | grep -qF -- "\"$feature\""; then
-                echo "::error::${{ matrix.target.bin }} was built WITHOUT '$feature' — enabled set per $fingerprint is $enabled. The published binary would ship without it and degrade silently."
-                missing=1
-              fi
-            done
-          done
-          if [ "$found" = "0" ]; then
-            echo "::error::no ${{ matrix.target.bin }} fingerprint under ${{ matrix.target.dir }}/target/release/.fingerprint — cargo's layout changed, so this assertion no longer guards the shipped feature set. Fix the check rather than deleting it."
-            exit 1
-          fi
-          [ "$missing" = "0" ] || exit 1
-          echo "${{ matrix.target.bin }} carries ${{ matrix.target.features }} ($found fingerprint(s) checked)"
+        env:
+          TARGET_DIR: ${{ matrix.target.dir }}
+          TARGET_BIN: ${{ matrix.target.bin }}
+          FEATURES: ${{ matrix.target.features }}
+        run: bash .github/scripts/assert-feature-set.sh
 
+      # Same os-arch labels as release.yml so asset names line up across trains;
+      # macos-latest is Apple Silicon, so MACOS_PLAT pins aarch64.
       - name: Package
         shell: bash
-        run: |
-          set -e
-          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          case "${{ runner.os }}" in
-            Linux)   plat="linux-x86_64" ;;
-            macOS)   plat="macos-aarch64" ;;
-            Windows) plat="windows-x86_64" ;;
-          esac
-          src="${{ matrix.target.dir }}/target/release/${{ matrix.target.bin }}${ext}"
-          asset="${{ matrix.target.asset }}-${plat}${ext}"
-          mkdir -p dist
-          cp "$src" "dist/$asset"
-          ( cd dist
-            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$asset" > "$asset.sha256"
-            elif command -v shasum   >/dev/null 2>&1; then shasum -a 256 "$asset" > "$asset.sha256"
-            else echo "! no sha256 tool — skipping checksum for $asset" >&2; fi )
+        env:
+          TARGET_DIR: ${{ matrix.target.dir }}
+          TARGET_BIN: ${{ matrix.target.bin }}
+          TARGET_ASSET: ${{ matrix.target.asset }}
+          MACOS_PLAT: macos-aarch64
+        run: bash .github/scripts/package-binary.sh
 
       - name: Upload to the canary prerelease
         shell: bash

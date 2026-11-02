@@ -24,13 +24,8 @@ import { isNativeNumber } from "../../lib/native-primitive-observation.ts";
  * copied, so a second face cannot drift from the first by retyping a number.
  */
 
-import { passQrColors } from "../../lib/pass-qr.ts";
-import { createQRCodeGeometry } from "../../lib/qr-code.ts";
-import { ditherAvatarHue } from "../dither-kit/avatar.tsx";
 import { METAL_EDGE_RING_PX } from "../metal-edge.tsx";
-import { FACE_RADIUS_PX } from "../pass-card-shell.tsx";
 import {
-	FIT_STEP_PX,
 	HANDLE_MAX_PX,
 	HANDLE_MIN_PX,
 	NAME_MAX_PX,
@@ -43,6 +38,36 @@ import {
  * `min-h-[27rem]` body — so these are that layout resolved, and the only two
  * figures here with no constant to import.
  */
+import { activePassTranslate, type PassTranslate } from "./labels.ts";
+import { paintBackQr } from "./paint-back.ts";
+import { passInline, withPassDirection } from "./paint-direction.ts";
+import { drawGhost } from "./paint-ghost.ts";
+import {
+	fitFontSize,
+	font,
+	type PassPalette,
+	setTracking,
+	wrapLines,
+} from "./paint-text.ts";
+
+export {
+	faceRect,
+	loadAvatar,
+	paintBackQr,
+	paintBackType,
+} from "./paint-back.ts";
+export { drawGhost, type GhostEyes, ghostEyesAt } from "./paint-ghost.ts";
+export {
+	fitFontSize,
+	font,
+	type PassPalette,
+	readPassFontFamily,
+	readPassPalette,
+	roundedRect,
+	setTracking,
+	wrapLines,
+} from "./paint-text.ts";
+
 export const CARD_WIDTH_PX = 320;
 export const CARD_HEIGHT_PX = 432;
 /** `p-7` on the body. */
@@ -63,313 +88,12 @@ export const STAT_LABEL_PX = 12;
 /** The avatar disc: `size-14` with a `mb-3`. */
 const AVATAR_PX = 56;
 const AVATAR_GAP_PX = 12;
-/** The mark alone on the back, at the size the live back face draws it. */
-const BACK_LOGO_PX = 48;
 
 /** `leading-[1.02]` on the name, `leading-none` on the stat value. */
 const NAME_LINE_HEIGHT = 1.02;
 /** `tracking-tight`. Canvas takes it in px, so it is resolved per size. */
 const NAME_TRACKING_EM = -0.025;
 
-/**
- * The Ryu ghost, as the same 24-unit path `logo.tsx` builds. Copied rather than
- * imported because the component composes it from `scaleFactor` arithmetic
- * inside a render, with no exported d-string to reach — but it is byte-identical
- * to the `scaleFactor === 1` case, and to the path the OG raster carries.
- */
-const GHOST_PATH_24 =
-	"M12,24c9.2,0,12.9-4.8,12.4-14.6C24.1,0.3,12.8-3.7,8.8,5.4c-2.2,5.7,1.1,7.9-2.9,12.6c-0.9,1.1-1.8,2-2.7,3.1c-1.2,1.3,0.7,2.2,1.9,2.2C7.4,23.3,9.7,24,12,24z";
-/** `logo.tsx`: eyes at (15,10) and (19,10), 1.5x3.0 in the 24-unit space... */
-const EYE_LEFT_X = 15;
-const EYE_RIGHT_X = 19;
-const EYE_Y = 10;
-const EYE_RX = 1.5;
-const EYE_RY = 3;
-/** ...capped in ABSOLUTE px once the mark is drawn large, exactly as the component caps them. */
-const EYE_MAX_RX = 3;
-const EYE_MAX_RY = 5;
-/** `vector-effect: non-scaling-stroke` keeps the outline a 1.5 DEVICE-px hairline. */
-const GHOST_STROKE_DEVICE_PX = 1.5;
-
-/**
- * The mark's eyes, animated — the same two behaviours `logo.tsx` runs, replayed
- * from loop time instead of from timers.
- *
- * The component blinks on a `setInterval` of 3-5s and, once the mouse has been
- * idle for three seconds, drifts its gaze to a fresh random point every 2-4s. A
- * video has no mouse, so it is always in the idle-gaze state — but it also has to
- * LOOP, and a random walk driven by wall-clock timers cannot: the last frame
- * would not match the first, and the eyes would jump on every repeat. So the
- * gaze is a fixed keyframe ring that closes on itself and the blinks sit at fixed
- * offsets well clear of the seam.
- */
-const GAZE_KEYS = [
-	{ x: 0, y: 0 },
-	{ x: 0.85, y: -0.45 },
-	{ x: -0.75, y: 0.35 },
-	{ x: 0.25, y: 0.7 },
-] as const;
-/** `min(size * 0.08, 8)` px in the component, which is 1.92 of the 24 units. */
-const GAZE_MAX_UNITS = 1.92;
-/** Seconds into the loop each blink starts, and how long it lasts. */
-const BLINK_TIMES = [2.4, 6.9] as const;
-const BLINK_SECONDS = 0.15;
-/** How much of a keyframe's slot is spent travelling rather than holding. */
-const GAZE_TRAVEL = 0.45;
-
-export interface GhostEyes {
-	blinking: boolean;
-	/** Gaze offset in the mark's own 24-unit space. */
-	gazeX: number;
-	gazeY: number;
-}
-
-const smoothstep = (t: number): number => t * t * (3 - 2 * t);
-
-/** The eye state at `time` seconds into a `loop`-second cycle. */
-export function ghostEyesAt(time: number, loop: number): GhostEyes {
-	const slot = loop / GAZE_KEYS.length;
-	const index = Math.floor(time / slot) % GAZE_KEYS.length;
-	const within = (time % slot) / slot;
-	// Travel, then hold — the component's gaze snaps to a point and rests there,
-	// so easing across the whole slot would read as a constant slow drift.
-	const eased = smoothstep(Math.min(1, within / GAZE_TRAVEL));
-	const from = GAZE_KEYS[index] ?? GAZE_KEYS[0];
-	const to = GAZE_KEYS[(index + 1) % GAZE_KEYS.length] ?? GAZE_KEYS[0];
-	return {
-		blinking: BLINK_TIMES.some((at) => time >= at && time < at + BLINK_SECONDS),
-		gazeX: (from.x + (to.x - from.x) * eased) * GAZE_MAX_UNITS,
-		gazeY: (from.y + (to.y - from.y) * eased) * GAZE_MAX_UNITS,
-	};
-}
-
-let ghostPath: Path2D | null = null;
-const ghost = (): Path2D => {
-	ghostPath ??= new Path2D(GHOST_PATH_24);
-	return ghostPath;
-};
-
-/**
- * Draw the mark at `size` CSS px with its top-left at (x, y).
- *
- * `scale` is the supersample factor the whole face is drawn at. It is taken
- * separately from `size` because the stroke must NOT scale with it: on screen
- * the outline is a non-scaling 1.5px hairline, so at 3x supersample it is 4.5
- * device px — the same hairline, not a mark three times as heavy.
- */
-export function drawGhost(
-	ctx: CanvasRenderingContext2D,
-	{
-		color,
-		eyes,
-		scale,
-		size,
-		x,
-		y,
-	}: {
-		color: string;
-		/** Omit for the resting mark, which is what the card's own faces wear. */
-		eyes?: GhostEyes;
-		scale: number;
-		size: number;
-		x: number;
-		y: number;
-	}
-): void {
-	const unit = (size / 24) * scale;
-	ctx.save();
-	ctx.translate(x * scale, y * scale);
-	ctx.scale(unit, unit);
-	ctx.strokeStyle = color;
-	ctx.fillStyle = color;
-	ctx.lineCap = "round";
-	ctx.lineJoin = "round";
-	ctx.lineWidth = (GHOST_STROKE_DEVICE_PX * scale) / unit;
-	ctx.stroke(ghost());
-	const rx = Math.min(EYE_RX * unit, EYE_MAX_RX * scale) / unit;
-	const ry = Math.min(EYE_RY * unit, EYE_MAX_RY * scale) / unit;
-	const gazeX = eyes?.gazeX ?? 0;
-	const gazeY = eyes?.gazeY ?? 0;
-	if (eyes?.blinking) {
-		// A blink is a closed lid, which the component draws as a stroked line
-		// across the eye rather than a squashed ellipse — the same shape here.
-		const lid = Math.min(Math.max(2 * unit, 1), 4) * scale;
-		ctx.lineWidth = lid / unit;
-		for (const cx of [EYE_LEFT_X, EYE_RIGHT_X]) {
-			ctx.beginPath();
-			ctx.moveTo(cx + gazeX - rx, EYE_Y + gazeY);
-			ctx.lineTo(cx + gazeX + rx, EYE_Y + gazeY);
-			ctx.stroke();
-		}
-		ctx.restore();
-		return;
-	}
-	for (const cx of [EYE_LEFT_X, EYE_RIGHT_X]) {
-		ctx.beginPath();
-		ctx.ellipse(cx + gazeX, EYE_Y + gazeY, rx, ry, 0, 0, Math.PI * 2);
-		ctx.fill();
-	}
-	ctx.restore();
-}
-
-/** The colours the face is printed in, resolved from the live theme tokens. */
-export interface PassPalette {
-	border: string;
-	card: string;
-	cardForeground: string;
-	mutedForeground: string;
-	primary: string;
-}
-
-/**
- * Resolve the design tokens the card uses into something canvas accepts.
- *
- * Read off a probe element rather than `getPropertyValue("--card")`, because
- * the raw custom property in this repo is an `oklch(...)` string that older
- * canvas implementations reject outright — and because the probe picks up
- * whichever theme class is actually on the tree, so a card drawn while the app
- * is in dark mode comes out dark without being told.
- */
-export function readPassPalette(host: HTMLElement): PassPalette {
-	const probe = document.createElement("div");
-	probe.style.cssText = "position:absolute;width:0;height:0;visibility:hidden";
-	host.appendChild(probe);
-	const read = (token: string): string => {
-		probe.style.color = "";
-		probe.style.color = `var(${token})`;
-		const value = getComputedStyle(probe).color;
-		// An unresolvable token leaves `color` at its inherited value rather than
-		// erroring, so a token that has been renamed shows up as the wrong colour
-		// instead of a crash. Both are wrong; a visible black is the easier one to
-		// spot in review.
-		return value || "#000000";
-	};
-	const palette: PassPalette = {
-		border: read("--border"),
-		card: read("--card"),
-		cardForeground: read("--card-foreground"),
-		mutedForeground: read("--muted-foreground"),
-		primary: read("--primary"),
-	};
-	probe.remove();
-	return palette;
-}
-
-/** The face's own font stack — whatever the app actually loaded, not a guess. */
-export function readPassFontFamily(host: HTMLElement): string {
-	return getComputedStyle(host).fontFamily || "system-ui, sans-serif";
-}
-
-/** A canvas `font` string at the face's supersample. */
-export const font = (
-	family: string,
-	weight: number,
-	px: number,
-	scale: number
-): string => `${weight} ${px * scale}px ${family}`;
-
-/**
- * `AutoFitText`, with `measureText` where the DOM had `scrollWidth`.
- *
- * Deliberately the same shape as the component: start at the ceiling, step down
- * by `FIT_STEP_PX` while the single line overruns, stop at the floor, and report
- * whether it still overruns there — which is the card's signal to wrap rather
- * than to shrink into the body copy.
- */
-export function fitFontSize(
-	ctx: CanvasRenderingContext2D,
-	{
-		available,
-		family,
-		maxPx,
-		minPx,
-		scale,
-		stepPx = FIT_STEP_PX,
-		text,
-		trackingEm = 0,
-		weight,
-	}: {
-		available: number;
-		family: string;
-		maxPx: number;
-		minPx: number;
-		scale: number;
-		/** The ramp's step. Defaults to the waitlist card's; a face with its own
-		 * `AutoFitText` step must pass that one or the two searches stop at
-		 * different sizes for the same string. */
-		stepPx?: number;
-		text: string;
-		trackingEm?: number;
-		weight: number;
-	}
-) {
-	let size = maxPx;
-	const widthAt = (px: number): number => {
-		ctx.font = font(family, weight, px, scale);
-		setTracking(ctx, px * trackingEm * scale);
-		return ctx.measureText(text).width;
-	};
-	while (size > minPx && widthAt(size) > available) {
-		size = Math.max(minPx, size - stepPx);
-	}
-	return { size, wrapped: widthAt(size) > available };
-}
-
-/**
- * `ctx.letterSpacing` is recent (Chrome 99, Safari 17.4). Where it is missing
- * the card loses `tracking-tight` on the name, which is a fraction of a pixel
- * per glyph — not worth a manual per-glyph draw to recover.
- */
-export function setTracking(ctx: CanvasRenderingContext2D, px: number): void {
-	if ("letterSpacing" in ctx) {
-		ctx.letterSpacing = `${px}px`;
-	}
-}
-
-/** Greedy wrap, used only once the name has already bottomed out on its ramp. */
-export function wrapLines(
-	ctx: CanvasRenderingContext2D,
-	text: string,
-	available: number
-): string[] {
-	const words = text.split(/\s+/).filter(Boolean);
-	const lines: string[] = [];
-	let line = "";
-	for (const word of words) {
-		const next = line ? `${line} ${word}` : word;
-		if (line && ctx.measureText(next).width > available) {
-			lines.push(line);
-			line = word;
-		} else {
-			line = next;
-		}
-	}
-	if (line) {
-		lines.push(line);
-	}
-	return lines.length > 0 ? lines : [text];
-}
-
-/** A rounded rectangle path in the current transform. */
-export function roundedRect(
-	ctx: CanvasRenderingContext2D,
-	x: number,
-	y: number,
-	width: number,
-	height: number,
-	radius: number
-): void {
-	ctx.beginPath();
-	ctx.roundRect(x, y, width, height, radius);
-}
-
-/**
- * The body's box on the face, in DEVICE px — the ring gutter, then `p-7`.
- *
- * Every face on this shell is laid out against the same four edges, so they are
- * computed once here rather than re-derived per painter. `available` is the
- * width a line of type has before it has to shrink or wrap.
- */
 export interface PassFaceBox {
 	available: number;
 	bottom: number;
@@ -404,6 +128,12 @@ export interface PassFaceEnv {
 	family: string;
 	isDark: boolean;
 	palette: PassPalette;
+	/**
+	 * Paint the face right-to-left (see `paint-direction.ts`). Set by the face
+	 * painter from its translator, not by the scene: a face pinned to English
+	 * stays LTR whatever the UI's language.
+	 */
+	rtl?: boolean;
 	scale: number;
 }
 
@@ -429,16 +159,25 @@ export interface PassFaceContent {
 }
 
 /** The waitlist pass, as a painter. Today's face, unchanged, behind the seam. */
-export function waitlistFacePainter(content: PassFaceContent): PassFacePainter {
+export function waitlistFacePainter(
+	content: PassFaceContent,
+	tl: PassTranslate = activePassTranslate
+): PassFacePainter {
 	return {
 		back: (ctx, env) =>
 			paintBackQr(ctx, {
-				caption: "Scan to invite",
-				env,
+				caption: tl("Scan to invite"),
+				env: withPassDirection(ctx, env, tl),
 				seed: content.username || content.name || "ryu",
+				tl,
 				value: content.referralUrl,
 			}),
-		front: (ctx, env) => paintFrontType(ctx, { content, ...env }),
+		front: (ctx, env) =>
+			paintFrontType(ctx, {
+				content,
+				tl,
+				...withPassDirection(ctx, env, tl),
+			}),
 	};
 }
 
@@ -457,34 +196,35 @@ export function paintPassHeader(
 ): void {
 	const { family, palette, scale } = env;
 	const box = passFaceBox(scale);
+	const inline = passInline(env);
 	const inset = METAL_EDGE_RING_PX + CARD_PADDING_PX;
 	ctx.textBaseline = "alphabetic";
 	drawGhost(ctx, {
 		color: palette.cardForeground,
 		scale,
 		size: HEADER_LOGO_PX,
-		x: inset,
+		x: inline.boxCss(inset, HEADER_LOGO_PX),
 		y: inset,
 	});
 	setTracking(ctx, 0);
 	ctx.font = font(family, 500, HEADER_LABEL_PX, scale);
 	ctx.fillStyle = palette.cardForeground;
-	ctx.textAlign = "left";
+	ctx.textAlign = inline.start;
 	// Centred against the mark's box rather than sat on its baseline: the live
 	// header is a flex row with `items-center`, and the mark is the tall item.
 	const headerMiddle = box.top + (HEADER_LOGO_PX * scale) / 2;
 	ctx.fillText(
 		"Ryu",
-		box.left + (HEADER_LOGO_PX + HEADER_LOGO_GAP_PX) * scale,
+		inline.x(box.left + (HEADER_LOGO_PX + HEADER_LOGO_GAP_PX) * scale),
 		headerMiddle + HEADER_LABEL_PX * scale * 0.36
 	);
 	if (right) {
 		ctx.font = font(family, 400, HEADER_DATE_PX, scale);
 		ctx.fillStyle = palette.mutedForeground;
-		ctx.textAlign = "right";
+		ctx.textAlign = inline.end;
 		ctx.fillText(
 			right,
-			box.right,
+			inline.x(box.right),
 			headerMiddle + HEADER_DATE_PX * scale * 0.36
 		);
 	}
@@ -540,11 +280,13 @@ export function paintPassStat(
 		maxWidth?: number;
 		value: string;
 		valuePx?: number;
+		/** The stat's START edge in device px; mirrored when the face is RTL. */
 		x: number;
 	}
 ): number {
 	const { family, palette, scale } = env;
-	ctx.textAlign = "left";
+	const inline = passInline(env);
+	ctx.textAlign = inline.start;
 	ctx.textBaseline = "alphabetic";
 	setTracking(ctx, 0);
 	// Not named `fit`: Biome reads a bare `fit(` as a focused test and fails the
@@ -554,10 +296,10 @@ export function paintPassStat(
 	const valueBaseline = baseline - labelPx * scale * 1.1;
 	ctx.font = font(family, 500, valuePx, scale);
 	ctx.fillStyle = palette.cardForeground;
-	ctx.fillText(cut(value), x, valueBaseline);
+	ctx.fillText(cut(value), inline.x(x), valueBaseline);
 	ctx.font = font(family, 400, labelPx, scale);
 	ctx.fillStyle = palette.mutedForeground;
-	ctx.fillText(cut(label), x, baseline);
+	ctx.fillText(cut(label), inline.x(x), baseline);
 	return valueBaseline - valuePx * scale;
 }
 
@@ -577,11 +319,14 @@ export function paintFrontType(
 		family,
 		isDark,
 		palette,
+		rtl,
 		scale,
-	}: PassFaceEnv & { content: PassFaceContent }
+		tl = activePassTranslate,
+	}: PassFaceEnv & { content: PassFaceContent; tl?: PassTranslate }
 ): void {
 	const { available, bottom, left } = passFaceBox(scale);
-	const env: PassFaceEnv = { avatar, family, isDark, palette, scale };
+	const env: PassFaceEnv = { avatar, family, isDark, palette, rtl, scale };
+	const inline = passInline(env);
 
 	ctx.textBaseline = "alphabetic";
 
@@ -594,7 +339,7 @@ export function paintFrontType(
 	if (isNativeNumber(content.position)) {
 		const statTop = paintPassStat(ctx, env, {
 			baseline: bottom,
-			label: "Position",
+			label: tl("Position"),
 			value: `#${content.position}`,
 			x: left,
 		});
@@ -602,7 +347,7 @@ export function paintFrontType(
 	}
 
 	// Hero, built upward from its floor: handle, then name, then the avatar.
-	ctx.textAlign = "left";
+	ctx.textAlign = inline.start;
 	let cursor = heroFloor;
 	if (content.username) {
 		const handle = `@${content.username}`;
@@ -618,7 +363,7 @@ export function paintFrontType(
 		ctx.font = font(family, 400, size, scale);
 		setTracking(ctx, 0);
 		ctx.fillStyle = palette.mutedForeground;
-		ctx.fillText(handle, left, cursor);
+		ctx.fillText(handle, inline.x(left), cursor);
 		cursor -= size * scale + HERO_GAP_PX * scale;
 	}
 
@@ -640,7 +385,7 @@ export function paintFrontType(
 		: [content.name];
 	const lineHeight = nameSize * NAME_LINE_HEIGHT * scale;
 	for (let i = lines.length - 1; i >= 0; i--) {
-		ctx.fillText(lines[i] ?? "", left, cursor);
+		ctx.fillText(lines[i] ?? "", inline.x(left), cursor);
 		cursor -= lineHeight;
 	}
 	cursor += lineHeight;
@@ -649,14 +394,15 @@ export function paintFrontType(
 	if (avatar) {
 		const size = AVATAR_PX * scale;
 		const y = cursor - nameSize * scale - AVATAR_GAP_PX * scale - size;
+		const x = inline.box(left, size);
 		ctx.save();
 		ctx.beginPath();
-		ctx.arc(left + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+		ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
 		ctx.clip();
-		ctx.drawImage(avatar, left, y, size, size);
+		ctx.drawImage(avatar, x, y, size, size);
 		ctx.restore();
 		ctx.beginPath();
-		ctx.arc(left + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+		ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
 		ctx.strokeStyle = palette.border;
 		ctx.lineWidth = scale;
 		ctx.stroke();
@@ -664,181 +410,3 @@ export function paintFrontType(
 }
 
 /** Paint the same dot QR used by the live waitlist/referral pass backs. */
-export function paintBackQr(
-	ctx: CanvasRenderingContext2D,
-	{
-		caption,
-		env,
-		seed,
-		value,
-	}: {
-		caption: string;
-		env: PassFaceEnv;
-		seed: string;
-		value?: string | null;
-	}
-): void {
-	const { family, isDark, scale } = env;
-	const size = 224 * scale;
-	const left = (CARD_WIDTH_PX * scale - size) / 2;
-	const top = (CARD_HEIGHT_PX * scale - size) / 2 - 8 * scale;
-	const colors = passQrColors(ditherAvatarHue(seed), isDark);
-	const geometry = value ? createQRCodeGeometry(value.trim(), size, "H") : null;
-
-	ctx.save();
-	ctx.fillStyle = colors.surface;
-	ctx.shadowColor = colors.glow;
-	ctx.shadowBlur = 24 * scale;
-	ctx.beginPath();
-	ctx.roundRect(
-		left - 14 * scale,
-		top - 14 * scale,
-		size + 28 * scale,
-		size + 28 * scale,
-		26 * scale
-	);
-	ctx.fill();
-	ctx.shadowBlur = 0;
-
-	if (geometry) {
-		const {
-			circleRadius,
-			circles,
-			finderPositions,
-			finderSize,
-			innerBlackSize,
-			innerPadding,
-			innerWhiteSize,
-			moduleSize,
-		} = geometry;
-		ctx.fillStyle = colors.foreground;
-		for (const [row, column] of finderPositions) {
-			const x = left + column * moduleSize;
-			const y = top + row * moduleSize;
-			ctx.beginPath();
-			ctx.roundRect(x, y, finderSize, finderSize, 12 * scale);
-			ctx.fill();
-			ctx.fillStyle = colors.surface;
-			ctx.beginPath();
-			ctx.roundRect(
-				x + innerPadding,
-				y + innerPadding,
-				innerWhiteSize,
-				innerWhiteSize,
-				8 * scale
-			);
-			ctx.fill();
-			ctx.fillStyle = colors.foreground;
-			ctx.beginPath();
-			ctx.roundRect(
-				x + innerPadding * 2,
-				y + innerPadding * 2,
-				innerBlackSize,
-				innerBlackSize,
-				3 * scale
-			);
-			ctx.fill();
-		}
-		ctx.fillStyle = colors.foreground;
-		for (const { cx, cy } of circles) {
-			ctx.beginPath();
-			ctx.arc(left + cx, top + cy, circleRadius, 0, Math.PI * 2);
-			ctx.fill();
-		}
-
-		const logoPlate = 40 * scale;
-		ctx.fillStyle = colors.surface;
-		ctx.beginPath();
-		ctx.roundRect(
-			left + (size - logoPlate) / 2,
-			top + (size - logoPlate) / 2,
-			logoPlate,
-			logoPlate,
-			10 * scale
-		);
-		ctx.fill();
-		drawGhost(ctx, {
-			color: colors.foreground,
-			scale,
-			size: 25,
-			x: (CARD_WIDTH_PX - 25) / 2,
-			y: (CARD_HEIGHT_PX - 25) / 2 - 8,
-		});
-	} else {
-		ctx.strokeStyle = colors.glow;
-		ctx.lineWidth = scale;
-		ctx.setLineDash([4 * scale, 4 * scale]);
-		ctx.beginPath();
-		ctx.roundRect(left, top, size, size, 24 * scale);
-		ctx.stroke();
-		ctx.setLineDash([]);
-	}
-
-	ctx.font = font(family, 500, 10, scale);
-	ctx.fillStyle = colors.foreground;
-	ctx.textAlign = "center";
-	ctx.fillText(
-		geometry ? caption.toUpperCase() : "INVITE LINK IS PREPARING",
-		(CARD_WIDTH_PX * scale) / 2,
-		(CARD_HEIGHT_PX - 52) * scale
-	);
-	ctx.restore();
-}
-
-/** The legacy default back for passes that do not carry a share destination. */
-export function paintBackType(
-	ctx: CanvasRenderingContext2D,
-	{ palette, scale }: { palette: PassPalette; scale: number }
-): void {
-	drawGhost(ctx, {
-		color: palette.cardForeground,
-		scale,
-		size: BACK_LOGO_PX,
-		x: (CARD_WIDTH_PX - BACK_LOGO_PX) / 2,
-		y: (CARD_HEIGHT_PX - BACK_LOGO_PX) / 2,
-	});
-}
-
-/** The face's rounded silhouette, inset by the ring gutter, in device px. */
-export function faceRect(scale: number) {
-	return {
-		height: (CARD_HEIGHT_PX - METAL_EDGE_RING_PX * 2) * scale,
-		radius: FACE_RADIUS_PX * scale,
-		width: (CARD_WIDTH_PX - METAL_EDGE_RING_PX * 2) * scale,
-		x: METAL_EDGE_RING_PX * scale,
-		y: METAL_EDGE_RING_PX * scale,
-	};
-}
-
-/**
- * Load an avatar without tainting the canvas.
- *
- * Fetched to a blob rather than pointed at with `img.src`: a cross-origin image
- * drawn straight in marks the canvas as origin-unclean, and `toBlob` on an
- * unclean canvas throws — so the picture would fail at the copy step rather
- * than at the draw, long after it could be diagnosed. A URL that will not fetch
- * simply returns null and the card renders as it does for a member with no
- * picture, which is a face the card already knows how to draw.
- */
-export async function loadAvatar(
-	url: string | null | undefined
-): Promise<HTMLImageElement | null> {
-	if (!url) {
-		return null;
-	}
-	try {
-		const response = await fetch(url, { mode: "cors" });
-		if (!response.ok) {
-			return null;
-		}
-		const blob = await response.blob();
-		const objectUrl = URL.createObjectURL(blob);
-		const image = new Image();
-		image.src = objectUrl;
-		await image.decode();
-		URL.revokeObjectURL(objectUrl);
-		return image;
-	} catch {
-		return null;
-	}
-}

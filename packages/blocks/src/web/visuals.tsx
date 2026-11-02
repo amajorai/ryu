@@ -2,6 +2,8 @@
 
 import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
+import { copyMarker as t } from "./copy-marker.ts";
+import { LiteralText } from "./literal-text.tsx";
 import {
 	AppShell,
 	CodePane,
@@ -52,9 +54,9 @@ const RUN_DOT = new Map(
 
 export function CoreVisual() {
 	const runs = [
-		{ name: "Refactor auth", state: "running" },
-		{ name: "Summarize inbox", state: "done" },
-		{ name: "Triage issues", state: "queued" },
+		{ name: t("Refactor auth"), state: "running" },
+		{ name: t("Summarize inbox"), state: "done" },
+		{ name: t("Triage issues"), state: "queued" },
 	];
 	return (
 		<AppShell>
@@ -68,7 +70,9 @@ export function CoreVisual() {
 							aria-hidden="true"
 							className={cn("size-1.5 rounded-full", RUN_DOT.get(r.state))}
 						/>
-						<span className="text-foreground/80 text-sm">{r.name}</span>
+						<span className="text-foreground/80 text-sm">
+							<LiteralText text={r.name} />
+						</span>
 					</div>
 				))}
 			</div>
@@ -143,8 +147,8 @@ export function AgentsVisual() {
 		<MinimalCard>
 			<div className="grid gap-2">
 				<Slot label="Model" value="Gemma 4" />
-				<Slot label="Memory" value="Your Spaces" />
-				<Slot label="Tools" value="Web search" />
+				<Slot label="Memory" value={t("Your Spaces")} />
+				<Slot label="Tools" value={t("Web search")} />
 			</div>
 		</MinimalCard>
 	);
@@ -185,13 +189,13 @@ export function GatewayBaseUrlVisual() {
 		<div className="flex h-full w-full flex-col justify-center px-1 py-2">
 			<div className="space-y-1.5 whitespace-pre-wrap break-words px-2 font-mono text-[13px] leading-6 sm:text-sm sm:leading-relaxed">
 				<p className="text-muted-foreground">const client = new OpenAI({"{"}</p>
-				<p className="break-all pl-4 text-muted-foreground line-through">
+				<p className="break-all ps-4 text-muted-foreground line-through">
 					baseURL: "https://api.openai.com/v1",
 				</p>
-				<p className="-mx-2 break-all rounded-md bg-foreground/[0.06] px-2 py-0.5 pl-6 text-foreground">
+				<p className="-mx-2 break-all rounded-md bg-foreground/[0.06] px-2 py-0.5 ps-6 text-foreground">
 					baseURL: "https://your-gateway/v1",
 				</p>
-				<p className="pl-4 text-muted-foreground">
+				<p className="ps-4 text-muted-foreground">
 					apiKey: process.env.API_KEY,
 				</p>
 				<p className="text-muted-foreground">{"});"}</p>
@@ -206,9 +210,9 @@ export function GatewayBaseUrlVisual() {
 /** Passport's vault: per-site sign-ins with their status, sealed credential state. */
 export function PassportVaultVisual() {
 	const connections = [
-		{ site: "github.com", status: "Signed in" },
-		{ site: "linear.app", status: "Signed in" },
-		{ site: "notion.so", status: "Needs sign-in" },
+		{ site: "github.com", signedIn: true, status: t("Signed in") },
+		{ site: "linear.app", signedIn: true, status: t("Signed in") },
+		{ site: "notion.so", signedIn: false, status: t("Needs sign-in") },
 	];
 	return (
 		<div className="w-full space-y-3 px-1 py-2">
@@ -230,12 +234,10 @@ export function PassportVaultVisual() {
 						<span
 							className={cn(
 								"type-compact",
-								c.status === "Signed in"
-									? "text-foreground"
-									: "text-muted-foreground"
+								c.signedIn ? "text-foreground" : "text-muted-foreground"
 							)}
 						>
-							{c.status}
+							<LiteralText text={c.status} />
 						</span>
 					</div>
 				))}
@@ -254,8 +256,8 @@ export function PassportVaultVisual() {
 /** Two tenants reaching different allowlisted tool sets through one Connect endpoint. */
 export function ConnectTenantsVisual() {
 	const tenants = [
-		{ name: "Customer A", tools: ["Gmail", "Slack"] },
-		{ name: "Customer B", tools: ["GitHub", "Linear"] },
+		{ name: t("Customer A"), tools: ["Gmail", "Slack"] },
+		{ name: t("Customer B"), tools: ["GitHub", "Linear"] },
 	];
 	return (
 		<div className="w-full space-y-6 px-2 py-8 sm:px-6">
@@ -265,11 +267,13 @@ export function ConnectTenantsVisual() {
 				</Node>
 			</div>
 			<div className="grid grid-cols-2 gap-4 sm:gap-6">
-				{tenants.map((t) => (
-					<div className="space-y-3" key={t.name}>
-						<p className="font-medium text-foreground text-sm">{t.name}</p>
+				{tenants.map((tenant) => (
+					<div className="space-y-3" key={tenant.name}>
+						<p className="font-medium text-foreground text-sm">
+							<LiteralText text={tenant.name} />
+						</p>
 						<div className="grid gap-2">
-							{t.tools.map((tool) => (
+							{tenant.tools.map((tool) => (
 								<Node className="py-2 text-sm" key={tool}>
 									{tool}
 								</Node>
@@ -307,9 +311,9 @@ export function SkillsVisual() {
 /** Ryu over MCP: each agent gets an allowlist of MCP tools, and risky ones wait for approval. */
 export function McpVisual() {
 	const tools = [
-		{ name: "Screen capture", access: "Allowed" },
-		{ name: "Desktop clicks", access: "Needs approval" },
-		{ name: "Delete tickets", access: "Off" },
+		{ name: t("Screen capture"), allowed: true, access: t("Allowed") },
+		{ name: t("Desktop clicks"), allowed: false, access: t("Needs approval") },
+		{ name: t("Delete tickets"), allowed: false, access: t("Off") },
 	];
 	return (
 		<MinimalCard>
@@ -324,17 +328,15 @@ export function McpVisual() {
 							key={tool.name}
 						>
 							<span className="min-w-0 truncate text-foreground/80 text-sm">
-								{tool.name}
+								<LiteralText text={tool.name} />
 							</span>
 							<span
 								className={cn(
 									"shrink-0 whitespace-nowrap text-sm",
-									tool.access === "Allowed"
-										? "text-foreground"
-										: "text-muted-foreground"
+									tool.allowed ? "text-foreground" : "text-muted-foreground"
 								)}
 							>
-								{tool.access}
+								<LiteralText text={tool.access} />
 							</span>
 						</div>
 					))}
@@ -424,12 +426,12 @@ export function MobileVisual() {
 			<PhoneFrame className="w-64 sm:w-72">
 				<div className="flex min-h-64 flex-col gap-3">
 					<p className="font-medium text-foreground text-sm">Ryu</p>
-					<div className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-background text-sm">
+					<div className="ms-auto max-w-[80%] rounded-2xl rounded-se-sm bg-foreground px-3 py-2 text-background text-sm">
 						Draft a reply
 					</div>
 					<div
 						aria-hidden="true"
-						className="w-4/5 space-y-2 rounded-2xl rounded-tl-sm border border-border/60 px-3 py-3"
+						className="w-4/5 space-y-2 rounded-2xl rounded-ss-sm border border-border/60 px-3 py-3"
 					>
 						<span className="block h-1.5 w-full rounded-full bg-foreground/15" />
 						<span className="block h-1.5 w-5/6 rounded-full bg-foreground/10" />
@@ -440,7 +442,7 @@ export function MobileVisual() {
 						className="mt-auto flex items-center gap-2 rounded-full border border-border/60 px-3 py-2"
 					>
 						<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
-						<span className="ml-auto size-5 rounded-full bg-foreground/80" />
+						<span className="ms-auto size-5 rounded-full bg-foreground/80" />
 					</div>
 				</div>
 			</PhoneFrame>
@@ -465,7 +467,7 @@ export function ChromeVisual() {
 					<span className="block h-1.5 w-3/5 rounded-full bg-foreground/10" />
 				</div>
 				<div className="w-full shrink-0 space-y-2.5 sm:w-48">
-					<div className="ml-auto w-fit rounded-lg bg-foreground px-2.5 py-1.5 text-background text-xs">
+					<div className="ms-auto w-fit rounded-lg bg-foreground px-2.5 py-1.5 text-background text-xs">
 						Summarize this page
 					</div>
 					<div className="space-y-2 rounded-lg border border-border px-2.5 py-2.5">

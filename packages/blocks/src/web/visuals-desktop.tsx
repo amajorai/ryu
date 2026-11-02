@@ -9,7 +9,9 @@ import {
 	Mail,
 	MessageSquare,
 } from "lucide-react";
+import { copyMarker as t } from "./copy-marker.ts";
 import { LinkArrow } from "./link-arrow.tsx";
+import { LiteralText } from "./literal-text.tsx";
 import { MinimalCard, Node, WindowFrame } from "./mockups.tsx";
 import { Slot, WindowDots } from "./visuals-primitives.tsx";
 
@@ -29,18 +31,18 @@ export function DesktopVisual({
 				{prompt === null ? (
 					<div
 						aria-hidden="true"
-						className="ml-auto w-2/5 max-w-40 rounded-2xl rounded-tr-sm bg-foreground px-3 py-3"
+						className="ms-auto w-2/5 max-w-40 rounded-2xl rounded-se-sm bg-foreground px-3 py-3"
 					>
 						<span className="block h-1.5 w-full rounded-full bg-background/40" />
 					</div>
 				) : (
-					<div className="ml-auto max-w-[85%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-background text-sm">
+					<div className="ms-auto max-w-[85%] rounded-2xl rounded-se-sm bg-foreground px-3 py-2 text-background text-sm">
 						{prompt}
 					</div>
 				)}
 				<div
 					aria-hidden="true"
-					className="w-3/4 max-w-xs space-y-2 rounded-2xl rounded-tl-sm border border-border px-3 py-3"
+					className="w-3/4 max-w-xs space-y-2 rounded-2xl rounded-ss-sm border border-border px-3 py-3"
 				>
 					<span className="block h-1.5 w-full rounded-full bg-foreground/15" />
 					<span className="block h-1.5 w-5/6 rounded-full bg-foreground/10" />
@@ -51,7 +53,7 @@ export function DesktopVisual({
 					className="mt-auto flex items-center gap-2 rounded-full border border-border px-3 py-2"
 				>
 					<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
-					<span className="ml-auto size-5 rounded-full bg-foreground/80" />
+					<span className="ms-auto size-5 rounded-full bg-foreground/80" />
 				</div>
 			</div>
 		</WindowFrame>
@@ -122,11 +124,11 @@ export function HealthcareDesktopVisual() {
 							)}
 						/>
 						{row.missing ? (
-							<span className="ml-auto size-2 rounded-full bg-foreground" />
+							<span className="ms-auto size-2 rounded-full bg-foreground" />
 						) : (
 							<span
 								className={cn(
-									"ml-auto block h-1.5 rounded-full bg-foreground/10",
+									"ms-auto block h-1.5 rounded-full bg-foreground/10",
 									row.field
 								)}
 							/>
@@ -200,7 +202,7 @@ export function ConnectionsVisual({
 					/>
 					<span
 						className={cn(
-							"ml-auto flex h-4 w-7 items-center rounded-full p-0.5",
+							"ms-auto flex h-4 w-7 items-center rounded-full p-0.5",
 							on
 								? "justify-end bg-foreground"
 								: "justify-start bg-foreground/20"
@@ -261,7 +263,9 @@ function Segmented({
 }) {
 	return (
 		<div className="space-y-1.5">
-			<p className="text-muted-foreground text-xs">{label}</p>
+			<p className="text-muted-foreground text-xs">
+				<LiteralText text={label} />
+			</p>
 			<div className="grid auto-cols-fr grid-flow-col gap-1 rounded-lg border border-border p-1">
 				{options.map((option) => (
 					<span
@@ -273,7 +277,7 @@ function Segmented({
 						)}
 						key={option}
 					>
-						{option}
+						<LiteralText text={option} />
 					</span>
 				))}
 			</div>
@@ -304,21 +308,21 @@ export function ComputeExchangeVisual({
 						/>
 						<Segmented
 							label="Lease"
-							options={["15 min", "1 hour", "4 hours"]}
-							selected="1 hour"
+							options={[t("15 min"), t("1 hour"), t("4 hours")]}
+							selected={t("1 hour")}
 						/>
 					</>
 				) : (
 					<>
 						<Segmented
 							label="Offer"
-							options={["Spare compute", "Hosted agent"]}
-							selected="Spare compute"
+							options={[t("Spare compute"), t("Hosted agent")]}
+							selected={t("Spare compute")}
 						/>
 						<Segmented
 							label="Availability"
-							options={["When idle", "On a schedule"]}
-							selected="When idle"
+							options={[t("When idle"), t("On a schedule")]}
+							selected={t("When idle")}
 						/>
 					</>
 				)}
@@ -417,7 +421,7 @@ export function DevicesVisual() {
 }
 
 export function CommandBarVisual() {
-	const results = ["Chat", "Spaces", "Skills", "Mission Control"];
+	const results = [t("Chat"), t("Spaces"), t("Skills"), t("Mission Control")];
 	return (
 		<WindowFrame contentClassName="p-6" title="OS">
 			<div className="mx-auto max-w-sm overflow-hidden rounded-xl border border-border bg-card">
@@ -426,7 +430,7 @@ export function CommandBarVisual() {
 					<span className="text-muted-foreground text-sm">Search apps…</span>
 					<span
 						aria-hidden="true"
-						className="ml-auto inline-block h-3.5 w-px animate-pulse bg-foreground/50"
+						className="ms-auto inline-block h-3.5 w-px animate-pulse bg-foreground/50"
 					/>
 				</div>
 				<div className="p-1.5">
@@ -438,7 +442,7 @@ export function CommandBarVisual() {
 							)}
 							key={name}
 						>
-							{name}
+							<LiteralText text={name} />
 						</div>
 					))}
 				</div>
@@ -448,7 +452,7 @@ export function CommandBarVisual() {
 }
 
 export function AgentsAsServiceVisual() {
-	const steps = ["Your task", "We scope it", "Set up"];
+	const steps = [t("Your task"), t("We scope it"), t("Set up")];
 	return (
 		<MinimalCard>
 			<div className="space-y-4">
@@ -462,7 +466,7 @@ export function AgentsAsServiceVisual() {
 							key={step}
 						>
 							{i > 0 ? <LinkArrow /> : null}
-							{step}
+							<LiteralText text={step} />
 						</li>
 					))}
 				</ol>
@@ -470,9 +474,9 @@ export function AgentsAsServiceVisual() {
 					<p className="font-medium text-foreground text-sm">
 						Weekly sales summary
 					</p>
-					<Slot label="Task" value="Summarize the pipeline" />
-					<Slot label="Tools" value="CRM · Email" />
-					<Slot label="Runs on" value="Ryu Cloud or your machines" />
+					<Slot label="Task" value={t("Summarize the pipeline")} />
+					<Slot label="Tools" value={t("CRM · Email")} />
+					<Slot label="Runs on" value={t("Ryu Cloud or your machines")} />
 				</div>
 			</div>
 		</MinimalCard>

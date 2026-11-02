@@ -245,7 +245,7 @@ export function EvaluatorCatalog({
 		<div className="flex flex-col gap-3">
 			<div className="relative">
 				<HugeiconsIcon
-					className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+					className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
 					icon={Search01Icon}
 				/>
 				<Input

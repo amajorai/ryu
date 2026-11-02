@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Tooltip,
@@ -7,13 +8,13 @@ import {
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 	type ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { Check } from "lucide-react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type SheetRow,
 	sheetAbsoluteTime,
@@ -54,7 +55,7 @@ export function SheetStatusMark({
 				aria-hidden="true"
 				className={cn(
 					className,
-					"inline-block size-2.5 shrink-0 rounded-full border-2 border-success/25 border-t-success border-r-success motion-safe:animate-spin motion-safe:[animation-duration:1.4s]"
+					"inline-block size-2.5 shrink-0 rounded-full border-2 border-success/25 border-e-success border-t-success motion-safe:animate-spin motion-safe:[animation-duration:1.4s]"
 				)}
 			/>
 		);
@@ -72,7 +73,7 @@ export function SheetStatusPill({ status }: { status: ThreadStatus }) {
 			)}
 		>
 			<SheetStatusMark className="size-2" status={status} />
-			<span className="truncate">{THREAD_STATUS_LABELS[status]}</span>
+			<span className="truncate">{threadStatusLabel(status)}</span>
 		</span>
 	);
 }
@@ -102,7 +103,12 @@ export function SheetStatusShare({
 		return null;
 	}
 	const label = present
-		.map((status) => `${counts[status]} ${THREAD_STATUS_LABELS[status]}`)
+		.map((status) =>
+			tr("{count} {status}", {
+				count: counts[status],
+				status: threadStatusLabel(status),
+			})
+		)
 		.join(", ");
 	return (
 		<Tooltip>
@@ -130,7 +136,7 @@ export function SheetStatusShare({
 					{present.map((status) => (
 						<span className="flex items-center gap-2" key={status}>
 							<SheetStatusMark className="size-2" status={status} />
-							<span className="flex-1">{THREAD_STATUS_LABELS[status]}</span>
+							<span className="flex-1">{threadStatusLabel(status)}</span>
 							<span className="tabular-nums">{counts[status]}</span>
 						</span>
 					))}
@@ -301,7 +307,9 @@ export function SheetLastMessage({
 			{row.thread.lastMessageRole === "user" ? (
 				<span className="text-foreground">You: </span>
 			) : null}
-			<SheetHighlight query={query} text={sheetSnippet(text, query)} />
+			<span data-ryu-i18n="off">
+				<SheetHighlight query={query} text={sheetSnippet(text, query)} />
+			</span>
 		</span>
 	);
 }

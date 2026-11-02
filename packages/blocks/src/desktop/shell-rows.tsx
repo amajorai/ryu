@@ -37,7 +37,7 @@ export function NavButton({
 				<HugeiconsIcon className="size-4" icon={icon} />
 				<span>{label}</span>
 				{shortcut ? (
-					<span className="ml-auto text-muted-foreground text-xs">
+					<span className="ms-auto text-muted-foreground text-xs">
 						{shortcut}
 					</span>
 				) : null}
@@ -62,12 +62,12 @@ export function Section({
 				<div className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground text-xs">
 					<span className="min-w-0 truncate">{label}</span>
 					<HugeiconsIcon
-						className="-ml-1 size-3 shrink-0 opacity-0 transition group-hover/section:opacity-100"
+						className="-ms-1 size-3 shrink-0 opacity-0 transition group-hover/section:opacity-100"
 						icon={ArrowDown01Icon}
 					/>
 				</div>
-				<div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
-					<span className="mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/section:opacity-100">
+				<div className="absolute end-1 top-1/2 flex -translate-y-1/2 items-center">
+					<span className="me-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/section:opacity-100">
 						<HugeiconsIcon icon={Add01Icon} size={14} />
 					</span>
 				</div>

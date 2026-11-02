@@ -1,3 +1,10 @@
+import {
+	activeLocale,
+	dateFormatter,
+	formatCompactAge,
+	formatRelativeTime,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -8,6 +15,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { formatNameList } from "./interface-renderer.ts";
 
 /**
  * Moments' view model, after MercuryOS: conversations gather into flows (what
@@ -188,7 +196,9 @@ export function buildMomentsFlows(snapshot: InterfaceSnapshot): MomentsFlow[] {
 					id: key,
 					kind: "agent",
 					modules: list,
-					name: `Work with ${agent?.name ?? "an agent"}`,
+					name: agent
+						? tr("Work with {name}", { name: agent.name })
+						: tr("Work with an agent"),
 					start: { agentId: id },
 				})
 			);
@@ -215,25 +225,29 @@ export function buildMomentsFlows(snapshot: InterfaceSnapshot): MomentsFlow[] {
 const DAY_MS = 86_400_000;
 
 /** "Today", "Yesterday", a weekday within the week, then "October 5". */
-export function momentsDayLabel(key: string, now: number): string {
+export function momentsDayLabel(
+	key: string,
+	now: number,
+	locale: string = activeLocale()
+): string {
 	const today = localDayKey(new Date(now));
 	if (key === today) {
-		return "Today";
+		return tr("Today");
 	}
 	if (key === localDayKey(new Date(now - DAY_MS))) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
 	const [year, month, day] = key.split("-").map(Number);
 	const date = new Date(year ?? 1970, (month ?? 1) - 1, day ?? 1);
 	if (now - date.getTime() < 6 * DAY_MS) {
-		return date.toLocaleDateString("en-US", { weekday: "long" });
+		return dateFormatter(locale, { weekday: "long" }).format(date);
 	}
 	const sameYear = date.getFullYear() === new Date(now).getFullYear();
-	return date.toLocaleDateString("en-US", {
+	return dateFormatter(locale, {
 		day: "numeric",
 		month: "long",
 		...(sameYear ? {} : { year: "numeric" }),
-	});
+	}).format(date);
 }
 
 function dayKeyOf(iso: string, now: number): string {
@@ -311,11 +325,10 @@ export function groupMomentsDays(
 	return grouped;
 }
 
-function clockTime(date: Date): string {
-	return date.toLocaleTimeString("en-US", {
-		hour: "numeric",
-		minute: "2-digit",
-	});
+function clockTime(date: Date, locale: string): string {
+	return dateFormatter(locale, { hour: "numeric", minute: "2-digit" }).format(
+		date
+	);
 }
 
 /**
@@ -325,7 +338,8 @@ function clockTime(date: Date): string {
 export function momentsUpdatedLabel(
 	iso: string,
 	now: number,
-	tl: LiteralMessage
+	tl: LiteralMessage,
+	locale: string = activeLocale()
 ): string {
 	const at = Date.parse(iso);
 	if (Number.isNaN(at)) {
@@ -334,58 +348,49 @@ export function momentsUpdatedLabel(
 	const date = new Date(at);
 	const key = localDayKey(date);
 	if (key === localDayKey(new Date(now))) {
-		const minutes = Math.max(0, Math.floor((now - at) / 60_000));
-		if (minutes < 1) {
-			return "Updated just now";
+		if (now - at < 60_000) {
+			return tl("Updated just now");
 		}
-		if (minutes < 60) {
-			return tl("Updated {minutes} min ago", { minutes: String(minutes) });
-		}
-		const hours = Math.floor(minutes / 60);
-		return tl("Updated {hours} hr ago", { hours: String(hours) });
+		return tl("Updated {age}", {
+			age: formatRelativeTime(locale, Math.min(at, now), {
+				now,
+				style: "short",
+			}),
+		});
 	}
 	if (key === localDayKey(new Date(now - DAY_MS))) {
-		return `Yesterday, ${clockTime(date)}`;
+		return tl("Yesterday, {time}", { time: clockTime(date, locale) });
 	}
-	const day = date.toLocaleDateString("en-US", {
-		day: "numeric",
-		month: "short",
-	});
-	return `${day}, ${clockTime(date)}`;
+	const day = dateFormatter(locale, { day: "numeric", month: "short" }).format(
+		date
+	);
+	return tl("{day}, {time}", { day, time: clockTime(date, locale) });
 }
 
 /** A short relative age for a module ("now", "18m", "3h", "2d"). */
-export function momentsAge(iso: string, now: number): string {
-	const at = Date.parse(iso);
-	if (Number.isNaN(at)) {
+export function momentsAge(
+	iso: string,
+	now: number,
+	locale: string = activeLocale()
+): string {
+	if (Number.isNaN(Date.parse(iso))) {
 		return "";
 	}
-	const minutes = Math.max(0, Math.floor((now - at) / 60_000));
-	if (minutes < 1) {
-		return "now";
-	}
-	if (minutes < 60) {
-		return `${minutes}m`;
-	}
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) {
-		return `${hours}h`;
-	}
-	return `${Math.floor(hours / 24)}d`;
+	return formatCompactAge(locale, iso, { now });
 }
 
 /** "Atlas", "Atlas and Brook", "Atlas, Brook, and Cipher", "Atlas, Brook, and 3 others". */
 export function momentsNameList(names: string[]): string {
-	if (names.length <= 1) {
-		return names[0] ?? "";
+	if (names.length <= 3) {
+		return formatNameList(names);
 	}
-	if (names.length === 2) {
-		return `${names[0]} and ${names[1]}`;
-	}
-	if (names.length === 3) {
-		return `${names[0]}, ${names[1]}, and ${names[2]}`;
-	}
-	return `${names[0]}, ${names[1]}, and ${names.length - 2} others`;
+	return formatNameList([
+		names[0] ?? "",
+		names[1] ?? "",
+		tr("{count, plural, one {# other} other {# others}}", {
+			count: names.length - 2,
+		}),
+	]);
 }
 
 /**
@@ -403,10 +408,22 @@ export function momentsFlowSummary(
 			{ count, itemCount: String(count) }
 		);
 	}
-	const items = `${count} ${count === 1 ? "item" : "items"}`;
 	const names = momentsNameList(flow.agents.map((agent) => agent.name));
-	const joiner = count === 1 && flow.agents.length > 1 ? "with" : "from";
-	return `${items} ${joiner} ${names}`;
+	return count === 1 && flow.agents.length > 1
+		? tl(
+				"{count, plural, one {# item with {names}} other {# items with {names}}}",
+				{
+					count,
+					names,
+				}
+			)
+		: tl(
+				"{count, plural, one {# item from {names}} other {# items from {names}}}",
+				{
+					count,
+					names,
+				}
+			);
 }
 
 /**

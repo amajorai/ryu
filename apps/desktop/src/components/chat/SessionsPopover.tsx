@@ -7,6 +7,7 @@
 
 import { ActivityIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
@@ -61,7 +62,9 @@ function summarizeRun(entries: AuditEntry[]): RunCostSummary {
 
 /** Format a millisecond latency compactly (e.g. 1234 -> "1.2s", 800 -> "800ms"). */
 function formatLatency(ms: number): string {
-	return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+	return ms >= 1000
+		? formatDurationUnit(ms / 1000, "second", 1)
+		: formatDurationUnit(ms, "millisecond");
 }
 
 const STATUS_COLOR = {

@@ -38,6 +38,7 @@ import {
 } from "./calendar-parts.tsx";
 import { CalendarRail } from "./calendar-rail.tsx";
 import { CalendarWeekGrid } from "./calendar-week.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
@@ -273,7 +274,7 @@ export function CalendarInterface({
 							?.getAttribute(CALENDAR_DAY_ATTRIBUTE)
 					: null) ??
 				selectedKey;
-			const next = moveDayKey(from, event.key, scale);
+			const next = moveDayKey(from, logicalArrowKey(event.key, root), scale);
 			if (next) {
 				event.preventDefault();
 				selectDay(next, zone);
@@ -426,7 +427,7 @@ export function CalendarInterface({
 							aria-label={tl("Calendar, {title}", { title })}
 							className={cn(
 								"relative flex min-h-0 min-w-0 flex-1 flex-col",
-								railInline && "border-border border-l"
+								railInline && "border-border border-s"
 							)}
 						>
 							{scale === "month" ? (

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
@@ -7,6 +8,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 import styles from "./elements-one.module.css";
 import type { AgentGeometryStyle } from "./elements-one-style.ts";
+import { formatStatsCount } from "./stats-count-format.ts";
 import {
 	compactionValue,
 	formatCost,
@@ -22,7 +24,6 @@ import { DetailRow, MetricChip, UsageDetails } from "./stats-footer-parts.tsx";
 import { StatsPreferencesPanel } from "./stats-footer-preferences.tsx";
 import {
 	deriveSessionStats,
-	formatStatsCount,
 	type StatsMessage,
 	type StatsPreferences,
 	type StatsUsageSnapshot,
@@ -45,6 +46,7 @@ export function StatsFooter({
 	modelName?: string;
 	usage?: StatsUsageSnapshot | null;
 }) {
+	const tl = useLiteralMessages();
 	const [preferences, setPreferencesState] = useState(readPreferences);
 	const [now, setNow] = useState(() => Date.now());
 	const setPreferences = (next: Partial<StatsPreferences>) => {
@@ -125,7 +127,7 @@ export function StatsFooter({
 				closeDelay={80}
 				delay={120}
 			>
-				<span className="mr-0.5 text-muted-foreground/70 text-xs">Stats</span>
+				<span className="me-0.5 text-muted-foreground/70 text-xs">Stats</span>
 				<MetricChip
 					label="Turns"
 					testId="stats-turns"
@@ -247,7 +249,10 @@ export function StatsFooter({
 						value={
 							stats.cacheRead === undefined
 								? null
-								: `${formatStatsCount(stats.cacheRead)} (${formatPercent(stats.cacheReadShare) ?? "—"} of prompt)`
+								: tl("{count} ({share} of prompt)", {
+										count: formatStatsCount(stats.cacheRead) ?? "—",
+										share: formatPercent(stats.cacheReadShare) ?? "—",
+									})
 						}
 					/>
 					<DetailRow
@@ -255,7 +260,10 @@ export function StatsFooter({
 						value={
 							stats.cacheWrite === undefined
 								? null
-								: `${formatStatsCount(stats.cacheWrite)} (${formatPercent(stats.cacheWriteShare) ?? "—"} of prompt)`
+								: tl("{count} ({share} of prompt)", {
+										count: formatStatsCount(stats.cacheWrite) ?? "—",
+										share: formatPercent(stats.cacheWriteShare) ?? "—",
+									})
 						}
 					/>
 					<DetailRow label="Cache Timer" value={timer} />
@@ -309,7 +317,10 @@ export function StatsFooter({
 						value={
 							stats.contextPercent === undefined
 								? null
-								: `${formatPercentagePoints(stats.contextPercent)} used`
+								: tl("{percent} used", {
+										percent:
+											formatPercentagePoints(stats.contextPercent) ?? "—",
+									})
 						}
 					/>
 					<DetailRow label="Compaction Counter" value={compactions} />

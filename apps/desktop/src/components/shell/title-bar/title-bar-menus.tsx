@@ -20,6 +20,7 @@ import {
 	ContextMenuSeparator,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	TabBarAppearanceMenuItems,
 	TabLayoutMenuItems,
@@ -28,6 +29,7 @@ import type { Split, Tab } from "@/src/contexts/TabsContext.tsx";
 import { findSplit } from "@/src/contexts/TabsContext.tsx";
 import { setTabLayout, type TabLayout } from "@/src/hooks/useTabLayout.ts";
 import { setTabSizing, type TabSizing } from "@/src/hooks/useTabSizing.ts";
+import { tabCloseRanges } from "./tab-close-ranges.ts";
 import { MoveTabToRegionMenu } from "./tab-menu-items.tsx";
 
 export interface TabStripContextMenuContentProps {
@@ -78,6 +80,7 @@ export function TabStripContextMenuContent({
 	tabs,
 	toggleSplitActive,
 }: TabStripContextMenuContentProps) {
+	const closeRanges = tabCloseRanges(tabs, activeTabIndex);
 	return (
 		<ContextMenuContent>
 			<MoveTabToRegionMenu tabId={activeTabId} />
@@ -130,36 +133,26 @@ export function TabStripContextMenuContent({
 			</ContextMenuItem>
 			<ContextMenuSeparator />
 			<ContextMenuItem
-				disabled={
-					activeTabIndex <= 0 ||
-					!tabs.slice(0, activeTabIndex).some((tab) => !tab.pinned)
-				}
+				disabled={closeRanges.before.length === 0}
 				onClick={() => {
-					for (const t of tabs.slice(0, activeTabIndex)) {
-						if (!t.pinned) {
-							closeTab(t.id);
-						}
+					for (const t of closeRanges.before) {
+						closeTab(t.id);
 					}
 				}}
 			>
-				<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
-				Close tabs to the left
+				<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
+				Close tabs before this one
 			</ContextMenuItem>
 			<ContextMenuItem
-				disabled={
-					activeTabIndex < 0 ||
-					!tabs.slice(activeTabIndex + 1).some((tab) => !tab.pinned)
-				}
+				disabled={closeRanges.after.length === 0}
 				onClick={() => {
-					for (const t of tabs.slice(activeTabIndex + 1)) {
-						if (!t.pinned) {
-							closeTab(t.id);
-						}
+					for (const t of closeRanges.after) {
+						closeTab(t.id);
 					}
 				}}
 			>
-				<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
-				Close tabs to the right
+				<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
+				Close tabs after this one
 			</ContextMenuItem>
 			<ContextMenuSeparator />
 			<ContextMenuItem

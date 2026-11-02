@@ -29,7 +29,7 @@ export function PaneBadge({
 	return (
 		// Fixed row height (h-8, the action buttons' size) so the pill sits at the
 		// same spot whether or not the focused pane's actions are beside it.
-		<div className="pointer-events-none absolute bottom-2 left-2 z-10 flex h-8 items-center gap-1">
+		<div className="pointer-events-none absolute start-2 bottom-2 z-10 flex h-8 items-center gap-1">
 			<div
 				className={cn(
 					"flex h-6 items-center gap-1.5 rounded-full bg-muted px-2 text-xs transition-opacity duration-150 group-hover/pane:opacity-0",

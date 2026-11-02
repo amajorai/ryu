@@ -322,11 +322,14 @@ export function BrowserSidecarPanel({
 	});
 
 	const activeTab = tabs.find((tab) => tab.id === activeId);
+	const activeTabLabel = activeTab?.title || activeTab?.url;
 	useAssistantPageContext(
 		activeId
 			? {
 					id: `browser:${activeId}:context`,
-					title: `Browser · ${activeTab?.title || activeTab?.url || "tab"}`,
+					title: activeTabLabel
+						? tl("Browser · {title}", { title: activeTabLabel })
+						: tl("Browser · tab"),
 					text: "",
 					getText: async () => {
 						try {
@@ -390,7 +393,7 @@ export function BrowserSidecarPanel({
 				</form>
 			</div>
 			<div className="flex min-h-0 flex-1">
-				<ul className="w-48 shrink-0 overflow-y-auto border-border border-r text-xs">
+				<ul className="w-48 shrink-0 overflow-y-auto border-border border-e text-xs">
 					{tabs.length === 0 && (
 						<li className="p-2 text-muted-foreground">No open tabs.</li>
 					)}
@@ -403,7 +406,7 @@ export function BrowserSidecarPanel({
 							key={t.id}
 						>
 							<button
-								className="min-w-0 flex-1 truncate text-left"
+								className="min-w-0 flex-1 truncate text-start"
 								onClick={() => {
 									setActiveId(t.id);
 									screenshot(t.id).catch(() => undefined);
@@ -425,7 +428,7 @@ export function BrowserSidecarPanel({
 				</ul>
 				<div className="relative flex min-w-0 flex-1">
 					{error && (
-						<div className="pointer-events-none absolute top-2 right-2 left-2 z-10 rounded-lg border border-border bg-popover px-2 py-1 text-center text-status-destructive text-xs shadow-lg">
+						<div className="pointer-events-none absolute start-2 end-2 top-2 z-10 rounded-lg border border-border bg-popover px-2 py-1 text-center text-status-destructive text-xs shadow-lg">
 							{error}
 						</div>
 					)}

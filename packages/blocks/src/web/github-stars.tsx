@@ -20,7 +20,7 @@ function formatCompactCount(
 
 export function GitHubStars({
 	stargazersCount,
-	locales = "en-US",
+	locales,
 	className,
 }: GitHubStarsProps) {
 	return (

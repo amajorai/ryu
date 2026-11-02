@@ -354,7 +354,7 @@ export function DelegationView({
 															<Badge variant="secondary">{p.preset}</Badge>
 															<Badge variant={STATUS_VARIANT[p.status]}>
 																{p.status === "running" ? (
-																	<Spinner className="mr-1 size-3" />
+																	<Spinner className="me-1 size-3" />
 																) : null}
 																{STATUS_LABEL[p.status]}
 															</Badge>

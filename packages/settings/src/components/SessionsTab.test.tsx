@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import type { DeviceLimitSummary } from "@ryu/auth/lib/device-limits";
+import { I18nProvider } from "@ryu/i18n/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SessionWithSurface } from "../utils/device-limits-api.ts";
 import { SessionsTab } from "./SessionsTab.tsx";
 
-// Static markup over a pre-seeded query cache: no network, no DOM. Covers the
-// device-limit surface label on each row and the enforced usage line.
+// Static markup over a pre-seeded query cache: no network, no DOM. Covers
+// locale-aware session ages (Intl.RelativeTimeFormat in the UI language, not
+// date-fns's English "… ago"), the device-limit surface label on each row and
+// the enforced usage line.
+
+const HOUR_MS = 60 * 60 * 1000;
 
 const sessions: SessionWithSurface[] = [
 	{
@@ -39,12 +44,38 @@ function summary(enforced: boolean): DeviceLimitSummary {
 	};
 }
 
-function render(limits: DeviceLimitSummary | null): string {
-	const client = new QueryClient({
+function queryClient(): QueryClient {
+	return new QueryClient({
 		defaultOptions: {
 			queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
 		},
 	});
+}
+
+function renderLocale(locale: string): string {
+	const client = queryClient();
+	client.setQueryData(["sessions"], {
+		sessions: [
+			{
+				createdAt: new Date(Date.now() - 3 * HOUR_MS).toISOString(),
+				current: false,
+				id: "s1",
+				ipAddress: "203.0.113.4",
+				userAgent: null,
+			},
+		],
+	});
+	return renderToStaticMarkup(
+		<I18nProvider initialLocale={locale} initialPackId={null}>
+			<QueryClientProvider client={client}>
+				<SessionsTab />
+			</QueryClientProvider>
+		</I18nProvider>
+	);
+}
+
+function render(limits: DeviceLimitSummary | null): string {
+	const client = queryClient();
 	client.setQueryData(["sessions"], { sessions });
 	client.setQueryData(["sessions", "device-limits"], limits);
 	return renderToStaticMarkup(
@@ -53,6 +84,18 @@ function render(limits: DeviceLimitSummary | null): string {
 		</QueryClientProvider>
 	);
 }
+
+describe("SessionsTab session ages", () => {
+	test("session ages read in English under en", () => {
+		expect(renderLocale("en")).toContain("3 hours ago");
+	});
+
+	test("session ages follow the UI locale", () => {
+		const html = renderLocale("ja");
+		expect(html).toContain("3 時間前");
+		expect(html).not.toContain("ago");
+	});
+});
 
 describe("SessionsTab device surfaces", () => {
 	test("each row names the surface it counts against when the server sent one", () => {

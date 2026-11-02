@@ -84,7 +84,7 @@ export function NodeItem({
 					<StatusDot online={online} />
 					<button
 						aria-pressed={isActive}
-						className="min-w-0 flex-1 cursor-pointer truncate text-left outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-ring"
+						className="min-w-0 flex-1 cursor-pointer truncate text-start outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-ring"
 						onClick={onSelect}
 						title={computerName(node)}
 						type="button"

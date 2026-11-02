@@ -21,6 +21,7 @@ import {
 	fetchCloudTaskDiff,
 	stopCloudTask,
 } from "@/src/lib/api/cloud-tasks.ts";
+import { formatLocalTime } from "@/src/lib/locale-format.ts";
 import { failureMessage, formatRemaining } from "./CloudTaskPanel-labels.ts";
 
 export function Countdown({ expiresAt }: { expiresAt: string }) {
@@ -38,7 +39,7 @@ export function Countdown({ expiresAt }: { expiresAt: string }) {
 		<span
 			className="text-muted-foreground text-xs tabular-nums"
 			title={tl("Session ends at {time}", {
-				time: new Date(deadline).toLocaleTimeString(),
+				time: formatLocalTime(deadline),
 			})}
 		>
 			{tl("{remaining} left", { remaining: formatRemaining(deadline - now) })}

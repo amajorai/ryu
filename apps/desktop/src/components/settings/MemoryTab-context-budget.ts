@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import {
 	CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX,
@@ -15,25 +16,30 @@ export const BUDGET_CUSTOM = "custom";
 /** Seed for a Custom pick made from Off/Auto, where there is no current number. */
 export const CUSTOM_SEED_TOKENS = 8192;
 
-export const BUDGET_ITEMS = [
-	{ value: BUDGET_OFF, label: "Off — send the whole conversation" },
-	{
-		value: BUDGET_AUTO,
-		label: "Auto — needs a context size set for the model",
-	},
-	...CONTEXT_PRESETS.map((n) => ({
-		value: String(n),
-		label: `${formatNumber(n)} tokens`,
-	})),
-	{ value: BUDGET_CUSTOM, label: "Custom…" },
-];
+/** The budget select's options, labelled in the language the UI shows now. */
+export function budgetItems(): { label: string; value: string }[] {
+	return [
+		{ value: BUDGET_OFF, label: tl("Off — send the whole conversation") },
+		{
+			value: BUDGET_AUTO,
+			label: tl("Auto — needs a context size set for the model"),
+		},
+		...CONTEXT_PRESETS.map((n) => ({
+			value: String(n),
+			label: tl("{count} tokens", { count: formatNumber(n) }),
+		})),
+		{ value: BUDGET_CUSTOM, label: tl("Custom…") },
+	];
+}
 
 /** Who a scoped `context.max-tokens` key applies to, for the card's note. */
 function scopedOverrideAudience(key: string): string {
 	if (key.startsWith(CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX)) {
-		return `agents on the ${key.slice(CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX.length)} engine`;
+		return tl("agents on the {engine} engine", {
+			engine: key.slice(CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX.length),
+		});
 	}
-	return "local-engine agents";
+	return tl("local-engine agents");
 }
 
 /**
@@ -49,10 +55,12 @@ export function scopedOverrideEffect(
 	const audience = scopedOverrideAudience(override.key);
 	if (parseContextBudget(override.value).kind === "off") {
 		return globalBudget.kind === "off"
-			? `It also keeps trimming off for ${audience}.`
-			: `It turns trimming off for ${audience}, overriding this setting.`;
+			? tl("It also keeps trimming off for {audience}.", { audience })
+			: tl("It turns trimming off for {audience}, overriding this setting.", {
+					audience,
+				});
 	}
 	return globalBudget.kind === "off"
-		? `It trims turns for ${audience} even while this is Off.`
-		: `It overrides this setting for ${audience}.`;
+		? tl("It trims turns for {audience} even while this is Off.", { audience })
+		: tl("It overrides this setting for {audience}.", { audience });
 }

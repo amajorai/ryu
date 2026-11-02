@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -79,7 +80,7 @@ export function toStreamPost(
 		.map((id) => agents.get(id))
 		.filter((agent): agent is InterfaceAgent => agent !== undefined);
 	const [author, ...others] = participants;
-	const title = flatten(thread.title) || "Untitled thread";
+	const title = flatten(thread.title) || tr("Untitled thread");
 	const message = flatten(thread.lastMessage);
 	return {
 		author,
@@ -247,11 +248,11 @@ export function threadCounts(posts: StreamPost[]): Map<string, number> {
 }
 
 export function replyLabel(count: number): string {
-	return count === 1 ? "1 reply" : `${count} replies`;
+	return tr("{count, plural, one {# reply} other {# replies}}", { count });
 }
 
 export function threadLabel(count: number): string {
-	return count === 1 ? "1 thread" : `${count} threads`;
+	return tr("{count, plural, one {# thread} other {# threads}}", { count });
 }
 
 /** Where the conversation stands, in a few words, or null when it is idle. */

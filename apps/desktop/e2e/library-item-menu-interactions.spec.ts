@@ -410,11 +410,10 @@ test("delete cancel and failed confirmation preserve the chat; retry deletes it 
 		name: "Delete Fixture conversation",
 	});
 	await slider.focus();
-	// CutToConfirm is a vertical blade: ArrowDown advances one of its five steps
-	// and ArrowRight is deliberately unbound (KEY_DELTAS in
-	// packages/ui/src/components/cut-to-confirm-config.ts).
+	// DestructiveConfirmDialog is a SlideCommit since a9565fe080 (#941):
+	// five ArrowRight presses (keyboardSteps={5}) commit it.
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowDown");
+		await slider.press("ArrowRight");
 	}
 	await expect
 		.poll(
@@ -436,7 +435,7 @@ test("delete cancel and failed confirmation preserve the chat; retry deletes it 
 	await captureProductScreenshot(page, "library-chat-delete-error-retry");
 
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowDown");
+		await slider.press("ArrowRight");
 	}
 	await expect
 		.poll(

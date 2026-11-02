@@ -4,7 +4,7 @@ import {
 	SquareLock01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -68,6 +68,7 @@ export function ModelDetailPanel({
 }) {
 	const host = useCatalogHost();
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const installLayer = host.install;
 	const Markdown = host.Markdown;
 	const ActiveModelControl = host.ActiveModelControl;
@@ -227,20 +228,25 @@ export function ModelDetailPanel({
 						icon={SquareLock01Icon}
 					/>
 					<p>
-						This is a gated model. Add a Hugging Face access token in{" "}
-						<span className="font-medium text-foreground">
-							Settings → Integrations
-						</span>{" "}
-						and accept this model's terms on its{" "}
-						<a
-							className="underline hover:text-foreground"
-							href={`https://huggingface.co/${card.id}`}
-							rel="noopener noreferrer"
-							target="_blank"
-						>
-							Hugging Face page
-						</a>{" "}
-						before downloading.
+						{tlRich(
+							"This is a gated model. Add a Hugging Face access token in <setting>Settings → Integrations</setting> and accept this model's terms on its <a>Hugging Face page</a> before downloading.",
+							{},
+							{
+								a: (chunks) => (
+									<a
+										className="underline hover:text-foreground"
+										href={`https://huggingface.co/${card.id}`}
+										rel="noopener noreferrer"
+										target="_blank"
+									>
+										{chunks}
+									</a>
+								),
+								setting: (chunks) => (
+									<span className="font-medium text-foreground">{chunks}</span>
+								),
+							}
+						)}
 					</p>
 				</section>
 			)}
@@ -289,7 +295,7 @@ export function ModelDetailPanel({
 				<section className="flex flex-col gap-2">
 					<h3 className="font-medium text-sm">About this model</h3>
 					<div className="prose prose-sm dark:prose-invert max-w-none text-sm">
-						<Markdown className="[&_ol]:pl-10 [&_ul]:pl-9" content={readme} />
+						<Markdown className="[&_ol]:ps-10 [&_ul]:ps-9" content={readme} />
 					</div>
 				</section>
 			)}

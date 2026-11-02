@@ -1,10 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proof = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/recap-ui"
+const proof = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/plugins-runtime/full/recap-ui"
 );
 const conversationId = "conversation-toolbar-share-fixture";
 

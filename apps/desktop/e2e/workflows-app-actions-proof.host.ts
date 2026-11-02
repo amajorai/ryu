@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
-
+import path from "node:path";
 import {
 	parseWorkflowFixtureArgs,
 	parseWorkflowFixtureReset,
 	parseWorkflowFixtureSave,
 	type TriggerFixtureState,
 } from "./workflow-fixture-contract.ts";
+import { workflowsProofBuildDir } from "./workflows-proof-build.ts";
 
 type FixtureState = Pick<
 	TriggerFixtureState,
@@ -13,7 +14,7 @@ type FixtureState = Pick<
 >;
 
 const appHtml = await readFile(
-	"/tmp/ryu-workflows-app-actions-build/index.html",
+	path.join(workflowsProofBuildDir("app-actions"), "index.html"),
 	"utf8"
 );
 const bridgeScript = `<script>

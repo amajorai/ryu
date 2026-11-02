@@ -1,14 +1,15 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { SKIN_COUNT } from "./arcade-palette.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 export {
 	AISLE_VIEW,
@@ -27,7 +28,6 @@ export {
 export {
 	machineSummary,
 	meterDigits,
-	plural,
 	reelLabel,
 	type ScoreRow,
 	scoreRows,
@@ -431,7 +431,7 @@ export function composeInput(
 }
 
 export function threadTitle(thread: InterfaceThread | undefined): string {
-	return thread?.title.trim() || "Untitled conversation";
+	return thread?.title.trim() || tr("Untitled conversation");
 }
 
 /**
@@ -477,7 +477,7 @@ export function paytable(floor: ArcadeFloor): PaytableLine[] {
 	}
 	return THREAD_STATUS_ORDER.map((status) => ({
 		count: counts.get(status) ?? 0,
-		label: THREAD_STATUS_LABELS[status],
+		label: threadStatusLabel(status),
 		status,
 		symbol: STATUS_SYMBOL[status],
 	}));

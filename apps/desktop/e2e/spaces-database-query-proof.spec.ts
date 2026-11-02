@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 import { databaseQueryProofSchema } from "./settings-domain-proof.contracts.ts";
 
 test("Space database query panel runs read-only SQL and renders typed results", async ({
@@ -97,10 +98,7 @@ test("Space database query panel runs read-only SQL and renders typed results", 
 	).toBeVisible();
 	expect(errors).toEqual([]);
 
-	const proofPath = path.join(
-		import.meta.dirname,
-		"../../../docs/proof/spaces-database-query.png"
-	);
+	const proofPath = proofEvidencePath("spaces-database-query.png");
 	await mkdir(path.dirname(proofPath), { recursive: true });
 	await page.screenshot({
 		path: proofPath,

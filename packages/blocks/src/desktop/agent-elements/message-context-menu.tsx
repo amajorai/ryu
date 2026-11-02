@@ -16,6 +16,7 @@ import {
 	ContextMenuSubTrigger,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { LazyEmojiPicker } from "@ryu/ui/components/emoji-picker-lazy.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -287,7 +288,7 @@ export function MessageContextMenu({
 				) : null}
 				{onReply ? (
 					<ContextMenuItem onClick={onReply}>
-						<HugeiconsIcon
+						<DirectionalIcon
 							aria-hidden="true"
 							className={ITEM_ICON_CLASS}
 							icon={ArrowTurnBackwardIcon}

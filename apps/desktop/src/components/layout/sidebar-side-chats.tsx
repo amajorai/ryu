@@ -51,15 +51,15 @@ export function SidebarSideChats({
 	}, [conversationId]);
 
 	if (loading) {
-		return <p className="py-1 pl-8 text-muted-foreground text-xs">Loading…</p>;
+		return <p className="py-1 ps-8 text-muted-foreground text-xs">Loading…</p>;
 	}
 	if (entries.length === 0) {
 		return (
-			<p className="py-1 pl-8 text-muted-foreground text-xs">No side chats</p>
+			<p className="py-1 ps-8 text-muted-foreground text-xs">No side chats</p>
 		);
 	}
 	return (
-		<div className="relative ml-2 border-border border-l pl-2">
+		<div className="relative ms-2 border-border border-s ps-2">
 			<SidebarMenu>
 				{entries.map((entry) => {
 					const answerPreview = entry.answer.split(/\r?\n/)[0]?.trim() ?? "";
@@ -77,13 +77,13 @@ export function SidebarSideChats({
 												question: entry.question,
 											})
 								}
-								className="group relative flex min-h-10 w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
+								className="group relative flex min-h-10 w-full items-start gap-2 rounded-lg px-2 py-1.5 text-start transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 								onClick={() => onOpen(entry)}
 								type="button"
 							>
 								<span
 									aria-hidden="true"
-									className="absolute top-3 -left-[5px] size-2 rounded-full bg-primary ring-2 ring-sidebar"
+									className="absolute -start-[5px] top-3 size-2 rounded-full bg-primary ring-2 ring-sidebar"
 								/>
 								<HugeiconsIcon
 									className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"

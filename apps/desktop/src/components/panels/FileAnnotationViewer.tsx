@@ -9,6 +9,7 @@ import type { LineAnnotation, SelectedLineRange } from "@pierre/diffs";
 import { File } from "@pierre/diffs/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
@@ -293,7 +294,7 @@ export function FileAnnotationViewer({
 					type="button"
 					variant="ghost-muted"
 				>
-					<HugeiconsIcon icon={ArrowLeft01Icon} />
+					<DirectionalIcon icon={ArrowLeft01Icon} />
 				</Button>
 				<span className="min-w-0 flex-1 truncate text-xs" title={path}>
 					{basename(path)}
@@ -401,7 +402,7 @@ function DraftNoteCard({
 					Quote in chat
 				</Button>
 				<Button
-					className="ml-auto"
+					className="ms-auto"
 					onClick={onCancel}
 					size="xs"
 					type="button"
@@ -432,7 +433,7 @@ function SavedNoteCard({
 					aria-label={tl("Remove note on {lineLabel}", {
 						lineLabel: formatLineLabel(note),
 					})}
-					className="ml-auto rounded-lg px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+					className="ms-auto rounded-lg px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					onClick={onRemove}
 					type="button"
 				>

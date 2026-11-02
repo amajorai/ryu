@@ -70,7 +70,6 @@ export interface ChannelSetup {
  * UI verbatim because the user must proxy exactly this to a public HTTPS URL. */
 const WHATSAPP_WEBHOOK_BIND = "0.0.0.0:8443";
 const WHATSAPP_WEBHOOK_PATH = "/webhooks/whatsapp";
-const WHATSAPP_PERSONAL_WEBHOOK_BIND = "0.0.0.0:8444";
 const WHATSAPP_PERSONAL_WEBHOOK_PATH = "/webhooks/whatsapp-personal";
 
 interface ChannelSetupGuides {
@@ -111,7 +110,8 @@ export const CHANNEL_SETUP: ChannelSetupGuides = {
 				"A random string you invent. You paste the same value into Meta's webhook callback config; it's only used for the subscription handshake.",
 			app_secret:
 				"Meta app → Settings → Basic → App Secret. Used to verify the X-Hub-Signature-256 on every inbound webhook — without it, the payload is spoofable, so it is required.",
-			webhook_bind: `Local address for this channel's receiver. Defaults to ${WHATSAPP_WEBHOOK_BIND}; choose a distinct port per Cloud API channel.`,
+			webhook_bind:
+				"Local address for this channel's receiver. Defaults to 0.0.0.0:8443; choose a distinct port per Cloud API channel.",
 			webhook_path: `Local path for this channel's receiver. Defaults to ${WHATSAPP_WEBHOOK_PATH}; register the same path in Meta's callback URL.`,
 			graph_version:
 				"Optional Graph API version override. Leave blank to use the gateway default.",
@@ -131,7 +131,8 @@ export const CHANNEL_SETUP: ChannelSetupGuides = {
 				"The URL OpenWA can POST to, including the path, e.g. https://ryu.example.com/webhooks/whatsapp-personal.",
 			webhook_secret:
 				"A random shared secret. OpenWA signs every delivery with X-OpenWA-Signature and Ryu verifies it before parsing.",
-			webhook_bind: `Local address for this channel's receiver. Defaults to ${WHATSAPP_PERSONAL_WEBHOOK_BIND}; choose a distinct port per personal channel.`,
+			webhook_bind:
+				"Local address for this channel's receiver. Defaults to 0.0.0.0:8444; choose a distinct port per personal channel.",
 			webhook_path: `Local path for this channel's receiver. Defaults to ${WHATSAPP_PERSONAL_WEBHOOK_PATH}; it must match the path in Public webhook URL.`,
 			self_chat_only:
 				"Optional true/false switch for Hermes-style self-chat mode. Leave blank for normal personal-account DMs and groups.",

@@ -115,7 +115,7 @@ export function BtwOverlay({
 						/>
 						Side question
 					</DialogTitle>
-					<DialogDescription className="text-left">
+					<DialogDescription className="text-start">
 						The answer stays out of the main transcript and this side chat has
 						no tools.
 					</DialogDescription>

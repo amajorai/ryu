@@ -150,7 +150,7 @@ export function CloudEnvironmentPicker({
 					{cloud
 						? managedExecutor
 							? tl("Cloud · {executorLabel}", {
-									executorLabel: CLOUD_EXECUTOR_LABELS[managedExecutor],
+									executorLabel: tl(CLOUD_EXECUTOR_LABELS[managedExecutor]),
 								})
 							: "Cloud"
 						: "Use cloud"}

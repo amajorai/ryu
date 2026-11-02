@@ -9,7 +9,7 @@ import {
 } from "@/src/components/settings/shared/settings-items.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { fetchGatewayConfig } from "@/src/lib/api/gateway.ts";
-import { ROTATION_PROVIDERS } from "./format.ts";
+import { ROTATION_PROVIDERS } from "../UsageCostSection-format.ts";
 
 // ── 4. Additional account keys (rotation) — read-only ────────────────────────
 //

@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -29,10 +29,7 @@ test("Fal provider keys support masked multiple accounts", async ({ page }) => {
 	await page.getByRole("button", { name: "Remove Fal account 1" }).click();
 	await expect(page.getByText("Account 3 · key hidden")).toHaveCount(0);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/fal-accounts/fal-accounts.png"
-		),
+		path: proofEvidencePath("fal-accounts/fal-accounts.png"),
 		fullPage: true,
 	});
 });
@@ -54,10 +51,7 @@ test("Replicate provider keys support masked multiple accounts", async ({
 		.click();
 	await expect(page.getByText("Account 3 · key hidden")).toHaveCount(0);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/replicate-accounts/replicate-accounts.png"
-		),
+		path: proofEvidencePath("replicate-accounts/replicate-accounts.png"),
 		fullPage: true,
 	});
 });
@@ -78,10 +72,7 @@ test("Modal provider keys support masked multiple accounts and removal", async (
 	await expect(page.getByText("Account 3 · key hidden")).toHaveCount(0);
 	await expect(page.getByText("Account 2 · key hidden")).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/modal-accounts/modal-accounts.png"
-		),
+		path: proofEvidencePath("modal-accounts/modal-accounts.png"),
 		fullPage: true,
 	});
 });
@@ -101,10 +92,7 @@ test("Gemini provider keys show multiple accounts and support add and remove", a
 	await addAccount(page, "Gemini");
 	await expect(page.getByText("Account 3 · key hidden")).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/gemini-accounts/gemini-accounts.png"
-		),
+		path: proofEvidencePath("gemini-accounts/gemini-accounts.png"),
 		fullPage: true,
 	});
 	await page.getByRole("button", { name: "Remove Gemini account 1" }).click();
@@ -136,18 +124,12 @@ test("Named accounts retain name, priority and disabled state on reload", async 
 	await expect(page.getByText("first-secret")).toHaveCount(0);
 	await expect(page.getByText("second-secret")).toHaveCount(0);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/named-provider-accounts/desktop.png"
-		),
+		path: proofEvidencePath("named-provider-accounts/desktop.png"),
 		fullPage: true,
 	});
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/named-provider-accounts/mobile.png"
-		),
+		path: proofEvidencePath("named-provider-accounts/mobile.png"),
 		fullPage: true,
 	});
 });
@@ -166,10 +148,7 @@ test("Recraft account controls show named image accounts", async ({ page }) => {
 		"5"
 	);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/recraft-accounts/desktop.png"
-		),
+		path: proofEvidencePath("recraft-accounts/desktop.png"),
 		fullPage: true,
 	});
 });
@@ -216,10 +195,7 @@ test("Live account save accepts applied settings without a Gateway restart", asy
 	});
 	expect(errors).toEqual([]);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/live-account-settings/desktop.png"
-		),
+		path: proofEvidencePath("live-account-settings/desktop.png"),
 		fullPage: true,
 	});
 });
@@ -246,10 +222,7 @@ test("Stability accounts use the bundled SVGL mark", async ({ page }) => {
 		"Image account"
 	);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/stability-accounts/desktop.png"
-		),
+		path: proofEvidencePath("stability-accounts/desktop.png"),
 		fullPage: true,
 	});
 });
@@ -272,10 +245,7 @@ test("BFL accounts expose private named connection controls", async ({
 		page.getByLabel("Black Forest Labs FLUX project priority")
 	).toHaveValue("10");
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/bfl-accounts/desktop.png"
-		),
+		path: proofEvidencePath("bfl-accounts/desktop.png"),
 		fullPage: true,
 	});
 });
@@ -296,10 +266,7 @@ test("MiniMax accounts expose private named connection controls", async ({
 		"10"
 	);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/minimax-accounts/desktop.png"
-		),
+		path: proofEvidencePath("minimax-accounts/desktop.png"),
 		fullPage: true,
 	});
 });
@@ -329,10 +296,7 @@ test("Runway accounts expose private named connection controls", async ({
 		"10"
 	);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/runway-accounts/desktop.png"
-		),
+		path: proofEvidencePath("runway-accounts/desktop.png"),
 		fullPage: true,
 	});
 });
@@ -355,10 +319,7 @@ test("Topaz accounts expose private named video connection controls", async ({
 		page.getByLabel("Topaz Labs Enhancement project priority")
 	).toHaveValue("10");
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/topaz-accounts/desktop.png"
-		),
+		path: proofEvidencePath("topaz-accounts/desktop.png"),
 		fullPage: true,
 	});
 });

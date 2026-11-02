@@ -1,13 +1,14 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const ORG_ID = "507f1f77bcf86cd799439091";
 // RYU_OPENROUTER_ROUTING_PROOF_DIR redirects screenshots for verification runs
 // that must not rewrite the tracked proof images.
 const proofDir =
 	process.env.RYU_OPENROUTER_ROUTING_PROOF_DIR ??
-	path.resolve(import.meta.dirname, "../../../docs/proof/openrouter-routing");
+	proofEvidencePath("openrouter-routing");
 const corsHeaders = {
 	"Access-Control-Allow-Headers":
 		"Authorization, Content-Type, x-ryu-user-jwt, x-ryu-user-id, x-ryu-agent-id",

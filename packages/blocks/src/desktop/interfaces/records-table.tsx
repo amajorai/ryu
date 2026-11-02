@@ -1,15 +1,14 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { AlignLeft, ArrowDown, ArrowUp } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import {
-	RECORDS_OBJECT_LABELS,
-	type RecordsObject,
-	type RecordsRow,
-	type RecordsSort,
-	type RecordsSortKey,
-	recordsPlural,
+import type {
+	RecordsObject,
+	RecordsRow,
+	RecordsSort,
+	RecordsSortKey,
 } from "./records-model.ts";
 import { RecordsMark } from "./records-parts.tsx";
 import {
@@ -49,7 +48,7 @@ function HeaderCell({
 	const content = (
 		<>
 			<Icon aria-hidden="true" className="size-3.5 shrink-0" />
-			<span className="truncate">{column.label}</span>
+			<span className="truncate">{column.label(tl)}</span>
 			<SortGlyph active={active} sort={sort} />
 		</>
 	);
@@ -57,8 +56,8 @@ function HeaderCell({
 		<th
 			aria-sort={ariaSort}
 			className={cn(
-				"h-10 border-border border-r border-b bg-background p-0 text-left font-normal last:border-r-0",
-				name && "sticky left-0 z-20"
+				"h-10 border-border border-e border-b bg-background p-0 text-start font-normal last:border-e-0",
+				name && "sticky start-0 z-20"
 			)}
 			scope="col"
 		>
@@ -70,7 +69,7 @@ function HeaderCell({
 						column.align === "end" && "justify-end"
 					)}
 					onClick={() => onSort(sortKey)}
-					title={tl("Sort by {label}", { label: column.label.toLowerCase() })}
+					title={tl("Sort by {label}", { label: column.label(tl) })}
 					type="button"
 				>
 					{content}
@@ -94,14 +93,12 @@ function SumRow({
 	object: RecordsObject;
 	rows: RecordsRow[];
 }) {
-	const noun = RECORDS_OBJECT_LABELS[object];
 	return (
 		<tr className="h-10 text-[13px] text-muted-foreground">
-			<td className="sticky left-0 z-[1] border-border border-r border-b bg-background px-3">
-				{recordsPlural(
-					rows.length,
-					noun.singular.toLowerCase(),
-					noun.plural.toLowerCase()
+			<td className="sticky start-0 z-[1] border-border border-e border-b bg-background px-3">
+				{tr(
+					"{object, select, agents {{count, plural, one {# agent} other {# agents}}} projects {{count, plural, one {# project} other {# projects}}} other {{count, plural, one {# team} other {# teams}}}}",
+					{ count: rows.length, object }
 				)}
 			</td>
 			{columns.map((column) => {
@@ -116,8 +113,8 @@ function SumRow({
 				return (
 					<td
 						className={cn(
-							"border-border border-r border-b px-3 last:border-r-0",
-							column.align === "end" && "text-right"
+							"border-border border-e border-b px-3 last:border-e-0",
+							column.align === "end" && "text-end"
 						)}
 						key={column.id}
 					>
@@ -142,7 +139,7 @@ function SkeletonRows({ columns }: { columns: Column[] }) {
 		<>
 			{["a", "b", "c", "d", "e", "f"].map((key, index) => (
 				<tr className="h-11" key={key}>
-					<td className="border-border border-r border-b px-3">
+					<td className="border-border border-e border-b px-3">
 						<span className="flex items-center gap-2">
 							<Skeleton className="size-5 rounded-full" />
 							<Skeleton
@@ -153,7 +150,7 @@ function SkeletonRows({ columns }: { columns: Column[] }) {
 					</td>
 					{columns.map((column) => (
 						<td
-							className="border-border border-r border-b px-3 last:border-r-0"
+							className="border-border border-e border-b px-3 last:border-e-0"
 							key={column.id}
 						>
 							<Skeleton
@@ -225,7 +222,11 @@ export function RecordsTable({
 			<thead className="sticky top-0 z-10">
 				<tr>
 					<HeaderCell
-						column={{ icon: AlignLeft, label: "Name", sortKey: "name" }}
+						column={{
+							icon: AlignLeft,
+							label: (tl) => tl("Name"),
+							sortKey: "name",
+						}}
 						name
 						onSort={onSort}
 						sort={sort}
@@ -254,11 +255,11 @@ export function RecordsTable({
 								onClick={() => onOpen(row.id)}
 							>
 								<th
-									className="sticky left-0 z-[1] border-border border-r border-b bg-background p-0 text-left font-normal transition-colors group-hover/row:bg-muted"
+									className="sticky start-0 z-[1] border-border border-e border-b bg-background p-0 text-start font-normal transition-colors group-hover/row:bg-muted"
 									scope="row"
 								>
 									<button
-										className="flex size-full min-w-0 items-center gap-2 px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+										className="flex size-full min-w-0 items-center gap-2 px-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 										onClick={(event) => {
 											event.stopPropagation();
 											onOpen(row.id);
@@ -270,14 +271,16 @@ export function RecordsTable({
 										type="button"
 									>
 										<RecordsMark agent={row.agent} name={row.name} size={20} />
-										<span className="truncate font-medium">{row.name}</span>
+										<span className="truncate font-medium" data-ryu-i18n="off">
+											{row.name}
+										</span>
 									</button>
 								</th>
 								{columns.map((column) => (
 									<td
 										className={cn(
-											"overflow-hidden border-border border-r border-b bg-background px-3 transition-colors last:border-r-0 group-hover/row:bg-muted",
-											column.align === "end" && "text-right"
+											"overflow-hidden border-border border-e border-b bg-background px-3 transition-colors last:border-e-0 group-hover/row:bg-muted",
+											column.align === "end" && "text-end"
 										)}
 										key={column.id}
 									>

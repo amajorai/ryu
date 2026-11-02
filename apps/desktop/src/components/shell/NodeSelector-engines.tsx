@@ -181,7 +181,9 @@ export async function installEngine(
 			undefined,
 			target.userJwt
 		);
-		sileo.success({ title: `Installing ${item.displayName}` });
+		sileo.success({
+			title: tl("Installing {displayName}", { displayName: item.displayName }),
+		});
 	} catch (e) {
 		sileo.error({
 			title:
@@ -213,7 +215,9 @@ export function EnginesSection({ target }: { target: ApiTarget }) {
 				item.name,
 				target.userJwt
 			);
-			sileo.success({ title: `Removed ${item.displayName}` });
+			sileo.success({
+				title: tl("Removed {displayName}", { displayName: item.displayName }),
+			});
 		} catch (e) {
 			sileo.error({
 				title:
@@ -234,7 +238,11 @@ export function EnginesSection({ target }: { target: ApiTarget }) {
 		try {
 			const swap = await setActiveEngine(target, item.name);
 			if (!swap.unchanged) {
-				sileo.success({ title: `Chat → ${item.displayName}` });
+				sileo.success({
+					title: tl("Chat → {displayName}", {
+						displayName: item.displayName,
+					}),
+				});
 			}
 		} catch (e) {
 			sileo.error({
@@ -264,7 +272,13 @@ export function EnginesSection({ target }: { target: ApiTarget }) {
 				title:
 					e instanceof Error
 						? e.message
-						: `Couldn't ${next ? "start" : "stop"} ${item.displayName}`,
+						: next
+							? tl("Couldn't start {displayName}", {
+									displayName: item.displayName,
+								})
+							: tl("Couldn't stop {displayName}", {
+									displayName: item.displayName,
+								}),
 			});
 		}
 		await refresh();

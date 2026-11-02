@@ -330,7 +330,7 @@ function AgentSelectionFieldContent({
 						<SelectionMark agent={activeAgent} selection={value} />
 						<span
 							className={cn(
-								"min-w-0 flex-1 truncate text-left",
+								"min-w-0 flex-1 truncate text-start",
 								isAgentSelectionEmpty(value)
 									? "text-muted-foreground"
 									: "text-foreground"

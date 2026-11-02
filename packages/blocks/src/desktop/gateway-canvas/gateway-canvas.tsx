@@ -6,6 +6,7 @@
 // Built once here and hosted by the desktop Gateway dialog and the web
 // console; each host passes an adapter for its topology, feed and editors.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	Background,
@@ -24,6 +25,7 @@ import {
 	useState,
 } from "react";
 import { usePrefersReducedMotion } from "../interfaces/graph-canvas.tsx";
+import { useReactFlowAriaLabels } from "../react-flow-labels.ts";
 import {
 	AssignPolicyDialog,
 	type AssignRequest,
@@ -37,6 +39,7 @@ import {
 import {
 	buildEdges,
 	buildNodes,
+	labelEdges,
 	readingOrder,
 } from "./gateway-canvas-build.ts";
 import {
@@ -83,6 +86,8 @@ function GatewayCanvasInner({
 	onNodesBuilt,
 	toolbar,
 }: GatewayCanvasProps) {
+	const ariaLabels = useReactFlowAriaLabels();
+	const tl = useLiteralMessages();
 	const [store] = useState(() => createCanvasLiveStore());
 	const reducedMotion = usePrefersReducedMotion();
 	const motion = !reducedMotion;
@@ -142,6 +147,11 @@ function GatewayCanvasInner({
 			order: readingOrder(placed),
 		};
 	}, [version]);
+	// Edge names follow the language without rebuilding the layout.
+	const namedEdges = useMemo(
+		() => labelEdges(edges, topologyRef.current, tl),
+		[edges, tl]
+	);
 
 	const selected = selectedId
 		? (topology.nodes.find((node) => node.id === selectedId) ?? null)
@@ -302,8 +312,9 @@ function GatewayCanvasInner({
 				) : (
 					<ReactFlow<CanvasFlowNode, CanvasFlowEdge>
 						aria-label={label}
+						ariaLabelConfig={ariaLabels}
 						className="text-foreground"
-						edges={edges}
+						edges={namedEdges}
 						edgeTypes={CANVAS_EDGE_TYPES}
 						elementsSelectable={false}
 						fitView

@@ -1,147 +1,22 @@
+import { expect, test } from "@playwright/test";
 import {
-	type APIRequestContext,
-	expect,
-	type Page,
-	test,
-} from "@playwright/test";
+	control,
+	entryWrites,
+	errors,
+	HOST,
+	pluginRow,
+	record,
+	registerNativeLedgerHooks,
+	selectAuthority,
+	settled,
+	twoFrames,
+	unexpected,
+} from "./harness/plugin-shortcuts-proof/ledger.ts";
 
-const HOST = "http://127.0.0.1:33367";
-type Document = Record<string, string | null>;
-interface Call {
-	admitted: boolean;
-	authority: string;
-	authorization: string | null;
-	buyerToken: string | null;
-	completed: boolean;
-	contentType: string | null;
-	delegation: string | null;
-	document?: Document;
-	endpoint: string;
-	id: number;
-	method: string;
-	preferenceValue?: string | null;
-	query: string;
-	rawBody: string;
-	status: number;
-}
-interface Receipt {
-	calls: Call[];
-	disk: { a: Document; b: Document };
-	held: Array<{ id: number }>;
-	rawDisk: {
-		a: { bytes: string; sha256: string };
-		b: { bytes: string; sha256: string };
-	};
-	unexpectedNative: string[];
-}
-const errors = new WeakMap<Page, string[]>();
-const consoles = new WeakMap<Page, string[]>();
-const unexpected = new WeakMap<Page, string[]>();
-async function control(
-	request: APIRequestContext,
-	body?: unknown
-): Promise<Receipt> {
-	const response =
-		body === undefined
-			? await request.get(`${HOST}/control`, {
-					headers: { "x-fixture-control": "plugin-control" },
-				})
-			: await request.post(`${HOST}/control`, {
-					headers: { "x-fixture-control": "plugin-control" },
-					data: body,
-				});
-	expect(response.ok()).toBe(true);
-	return response.json();
-}
-async function settled(request: APIRequestContext) {
-	await expect
-		.poll(async () => {
-			const state = await control(request);
-			return (
-				state.held.length === 0 && state.calls.every((call) => call.completed)
-			);
-		})
-		.toBe(true);
-}
-const pluginRow = (page: Page, label: string) =>
-	page
-		.locator('[data-slot="item"]')
-		.filter({ has: page.getByText(label, { exact: true }) });
-async function record(page: Page, label: string, chord: string) {
-	const row = pluginRow(page, label);
-	await expect(row).toHaveCount(1);
-	const recorder = row.locator("button").filter({ has: page.locator("kbd") });
-	await expect(recorder).toHaveCount(1);
-	await recorder.click();
-	await expect(row.getByText("Press keys…", { exact: true })).toBeVisible();
-	await page.keyboard.press(chord);
-}
-test.beforeEach(async ({ page, request }) => {
-	await control(request, { reset: true });
-	const pageErrors: string[] = [];
-	const consoleErrors: string[] = [];
-	const network: string[] = [];
-	errors.set(page, pageErrors);
-	consoles.set(page, consoleErrors);
-	unexpected.set(page, network);
-	page.on("pageerror", (error) => pageErrors.push(error.message));
-	page.on("console", (message) => {
-		if (message.type() === "error") {
-			consoleErrors.push(message.text());
-		}
-	});
-	await page.route("**/*", async (route) => {
-		const url = new URL(route.request().url());
-		if (
-			["http://127.0.0.1:33367", "http://127.0.0.1:33368"].includes(url.origin)
-		) {
-			await route.continue();
-			return;
-		}
-		network.push(`${route.request().method()} ${url.href}`);
-		await route.abort();
-	});
-});
-test.afterEach(async ({ page, request }, info) => {
-	try {
-		await control(request, { release: true });
-		await settled(request);
-		await page.close();
-		await settled(request);
-		const receipt = await control(request);
-		expect(receipt.unexpectedNative).toEqual([]);
-		for (const call of receipt.calls) {
-			expect(call).toMatchObject({
-				delegation: null,
-				buyerToken: null,
-				contentType: "application/json",
-				query: "",
-				completed: true,
-			});
-			if (call.method === "GET") {
-				expect(call.rawBody).toBe("");
-			}
-		}
-		expect(errors.get(page) ?? []).toEqual([]);
-		expect(unexpected.get(page) ?? []).toEqual([]);
-	} finally {
-		let native: Receipt | { diagnosticError: string };
-		try {
-			native = await control(request);
-		} catch (error) {
-			native = { diagnosticError: String(error) };
-		}
-		await info.attach("plugin-native-authority-ledger", {
-			body: JSON.stringify({
-				native,
-				browserErrors: errors.get(page) ?? [],
-				consoleErrors: consoles.get(page) ?? [],
-				unexpectedRequests: unexpected.get(page) ?? [],
-			}),
-			contentType: "application/json",
-		});
-	}
-});
+registerNativeLedgerHooks();
+// Every chord and Reset is one `POST /api/keybindings/entry` (Core's locked
+// per-entry edit, ec6fac15e2), not a client-side read and whole-document PUT:
+// the receipts below assert those entry calls and the document Core stored.
 test("retired A keybindings read cannot replace B's plugin recorder or overwrite unrelated B bindings in a genuine saved chord", async ({
 	page,
 	request,
@@ -177,8 +52,8 @@ test("retired A keybindings read cannot replace B's plugin recorder or overwrite
 	await expect
 		.poll(
 			async () =>
-				(await control(request)).calls.filter(
-					(call) => call.method === "PUT" && call.completed && call.admitted
+				entryWrites(await control(request)).filter(
+					(call) => call.completed && call.admitted
 				).length
 		)
 		.toBe(1);
@@ -189,12 +64,13 @@ test("retired A keybindings read cannot replace B's plugin recorder or overwrite
 		"plugin:proof-shared": "CommandOrControl+Alt+C",
 	});
 	expect(displayedBefore).toEqual(["Ctrl", "Alt", "B"]);
-	const write = receipt.calls.filter((call) => call.method === "PUT");
+	const write = entryWrites(receipt);
 	expect(write).toHaveLength(1);
 	expect(write[0]).toMatchObject({
 		authority: "b",
 		authorization: "Bearer plugin-token-b",
-		endpoint: "/api/preferences/keybindings",
+		endpoint: "/api/keybindings/entry",
+		entry: { entry: "plugin:proof-shared", value: "CommandOrControl+Alt+C" },
 		admitted: true,
 		status: 200,
 		document: receipt.disk.b,
@@ -224,8 +100,8 @@ test("refused actual plugin chord conserves the saved whole document, reports fa
 	await control(request, { refuseWrite: true });
 	const refusalResponse = page.waitForResponse(
 		(response) =>
-			response.url() === `${HOST}/b/api/preferences/keybindings` &&
-			response.request().method() === "PUT" &&
+			response.url() === `${HOST}/b/api/keybindings/entry` &&
+			response.request().method() === "POST" &&
 			response.status() === 503
 	);
 	await record(page, "B Shared companion", "Control+Alt+R");
@@ -239,9 +115,8 @@ test("refused actual plugin chord conserves the saved whole document, reports fa
 	await expect
 		.poll(
 			async () =>
-				(await control(request)).calls.filter(
-					(call) =>
-						call.method === "PUT" && call.completed && call.status === 503
+				entryWrites(await control(request)).filter(
+					(call) => call.completed && call.status === 503
 				).length
 		)
 		.toBe(1);
@@ -254,17 +129,18 @@ test("refused actual plugin chord conserves the saved whole document, reports fa
 	await expect
 		.poll(
 			async () =>
-				(await control(request)).calls.filter(
-					(call) => call.method === "PUT" && call.completed && call.admitted
+				entryWrites(await control(request)).filter(
+					(call) => call.completed && call.admitted
 				).length
 		)
 		.toBe(1);
 	const receipt = await control(request);
-	const writes = receipt.calls.filter((call) => call.method === "PUT");
+	const writes = entryWrites(receipt);
 	expect(writes).toHaveLength(2);
 	expect(
 		writes.map((call) => ({
 			authority: call.authority,
+			entry: call.entry,
 			status: call.status,
 			admitted: call.admitted,
 			authorization: call.authorization,
@@ -272,12 +148,14 @@ test("refused actual plugin chord conserves the saved whole document, reports fa
 	).toEqual([
 		{
 			authority: "b",
+			entry: { entry: "plugin:proof-shared", value: "CommandOrControl+Alt+R" },
 			status: 503,
 			admitted: false,
 			authorization: "Bearer plugin-token-b",
 		},
 		{
 			authority: "b",
+			entry: { entry: "plugin:proof-shared", value: "CommandOrControl+Alt+R" },
 			status: 200,
 			admitted: true,
 			authorization: "Bearer plugin-token-b",
@@ -301,28 +179,6 @@ test("refused actual plugin chord conserves the saved whole document, reports fa
 });
 
 // Separate additive regressions; original two bodies and hooks above are unchanged.
-const puts = (receipt: Receipt) =>
-	receipt.calls.filter((call) => call.method === "PUT");
-async function twoFrames(page: Page) {
-	await page.evaluate(
-		() =>
-			new Promise<void>((resolve) =>
-				requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-			)
-	);
-}
-async function selectAuthority(page: Page, keys: Array<"a" | "b">) {
-	await page.evaluate((keys) => {
-		for (const key of keys) {
-			(
-				window as unknown as {
-					__PLUGIN_AUTHORITY__: { select: (key: "a" | "b") => void };
-				}
-			).__PLUGIN_AUTHORITY__.select(key);
-		}
-	}, keys);
-}
-
 test("Reset refusal preserves the saved full document; retry deletes only the shared override and survives reload", async ({
 	page,
 	request,
@@ -343,8 +199,8 @@ test("Reset refusal preserves the saved full document; retry deletes only the sh
 	await control(request, { refuseWrite: true });
 	const refused = page.waitForResponse(
 		(r) =>
-			r.url() === `${HOST}/a/api/preferences/keybindings` &&
-			r.request().method() === "PUT" &&
+			r.url() === `${HOST}/a/api/keybindings/entry` &&
+			r.request().method() === "POST" &&
 			r.status() === 503
 	);
 	await row.getByRole("button", { name: "Reset", exact: true }).click();
@@ -353,14 +209,15 @@ test("Reset refusal preserves the saved full document; retry deletes only the sh
 	await twoFrames(page);
 	const retained = await control(request);
 	const { "plugin:proof-shared": _removed, ...expected } = seeded;
-	expect(puts(retained)).toHaveLength(1);
-	expect(puts(retained)[0]).toMatchObject({
+	expect(entryWrites(retained)).toHaveLength(1);
+	expect(entryWrites(retained)[0]).toMatchObject({
 		authority: "a",
 		status: 503,
 		admitted: false,
 		completed: true,
-		document: expected,
+		entry: { entry: "plugin:proof-shared", remove: true },
 	});
+	expect(entryWrites(retained)[0]?.document).toBeUndefined();
 	expect(retained.disk).toEqual(before.disk);
 	expect(retained.rawDisk).toEqual(before.rawDisk);
 	await expect(row.locator("kbd")).toHaveText(["Ctrl", "Alt", "A"]);
@@ -369,15 +226,17 @@ test("Reset refusal preserves the saved full document; retry deletes only the sh
 	await expect
 		.poll(
 			async () =>
-				puts(await control(request)).filter((c) => c.admitted && c.completed)
-					.length
+				entryWrites(await control(request)).filter(
+					(c) => c.admitted && c.completed
+				).length
 		)
 		.toBe(1);
 	const saved = await control(request);
-	expect(puts(saved)).toHaveLength(2);
-	expect(puts(saved)[1]).toMatchObject({
+	expect(entryWrites(saved)).toHaveLength(2);
+	expect(entryWrites(saved)[1]).toMatchObject({
 		authority: "a",
 		authorization: "Bearer plugin-token-a",
+		entry: { entry: "plugin:proof-shared", remove: true },
 		document: expected,
 		status: 200,
 		admitted: true,
@@ -393,7 +252,7 @@ test("Reset refusal preserves the saved full document; retry deletes only the sh
 	expect((await control(request)).disk).toEqual(saved.disk);
 });
 
-test("malformed native documents disable editing and never PUT; repaired full document loads only through explicit Retry", async ({
+test("malformed native documents disable editing and never write; repaired full document loads only through explicit Retry", async ({
 	page,
 	request,
 }) => {
@@ -420,7 +279,7 @@ test("malformed native documents disable editing and never PUT; repaired full do
 		await twoFrames(page);
 		await settled(request);
 		const refused = await control(request);
-		expect(puts(refused)).toHaveLength(0);
+		expect(entryWrites(refused)).toHaveLength(0);
 		expect(refused.rawDisk.a.bytes).toBe(bytes);
 	}
 	const corruptReads = await control(request);
@@ -471,8 +330,9 @@ test("malformed native documents disable editing and never PUT; repaired full do
 	await expect
 		.poll(
 			async () =>
-				puts(await control(request)).filter((c) => c.admitted && c.completed)
-					.length
+				entryWrites(await control(request)).filter(
+					(c) => c.admitted && c.completed
+				).length
 		)
 		.toBe(1);
 	const saved = await control(request);
@@ -480,53 +340,56 @@ test("malformed native documents disable editing and never PUT; repaired full do
 		...repaired,
 		"plugin:proof-shared": "CommandOrControl+Alt+R",
 	});
-	expect(puts(saved)).toHaveLength(1);
+	expect(entryWrites(saved)).toHaveLength(1);
 	expect(saved.disk.b).toEqual(beforeRetry.disk.b);
 	await page.reload();
 	await expect(row.locator("kbd")).toHaveText(["Ctrl", "Alt", "R"]);
 	expect((await control(request)).disk).toEqual(saved.disk);
-	// A valid initial load cannot authorize replacing later externally corrupted data.
+	// A valid initial load cannot authorize replacing later externally corrupted
+	// data: Core's locked entry edit refuses a stored document that is not a
+	// JSON object instead of replacing it, and the editor reports the refusal.
 	const stable = await control(request);
-	const invalid = '{"plugin:proof-shared":42}';
+	const invalid = JSON.stringify(["plugin:proof-shared"]);
 	for (const action of ["record", "reset"] as const) {
 		await settled(request);
 		await control(request, { rawDocument: { authority: "a", bytes: invalid } });
 		const beforeWrite = await control(request);
-		const oldPuts = puts(beforeWrite).length;
-		const corruptResponse = page.waitForResponse(
+		const oldWrites = entryWrites(beforeWrite).length;
+		const refusedEdit = page.waitForResponse(
 			(response) =>
-				response.url() === `${HOST}/a/api/preferences/keybindings` &&
-				response.request().method() === "GET"
+				response.url() === `${HOST}/a/api/keybindings/entry` &&
+				response.request().method() === "POST"
 		);
 		if (action === "record") {
 			await record(page, "A Shared companion", "Control+Alt+Z");
 		} else {
 			await row.getByRole("button", { name: "Reset", exact: true }).click();
 		}
-		const observedCorrupt = await corruptResponse;
-		await observedCorrupt.finished();
-		expect((await observedCorrupt.json()).value).toBe(invalid);
+		const observedRefusal = await refusedEdit;
+		await observedRefusal.finished();
+		expect(observedRefusal.status()).toBe(500);
 		await settled(request);
 		await expect(
 			page.getByText("Couldn't update plugin shortcut", { exact: true })
 		).toBeVisible();
 		await twoFrames(page);
 		const blocked = await control(request);
-		expect(puts(blocked)).toHaveLength(oldPuts);
+		expect(entryWrites(blocked)).toHaveLength(oldWrites + 1);
+		expect(entryWrites(blocked).at(-1)).toMatchObject({
+			authority: "a",
+			entry:
+				action === "record"
+					? {
+							entry: "plugin:proof-shared",
+							value: "CommandOrControl+Alt+Z",
+						}
+					: { entry: "plugin:proof-shared", remove: true },
+			status: 500,
+			admitted: false,
+			completed: true,
+		});
 		expect(blocked.rawDisk.a.bytes).toBe(invalid);
 		expect(blocked.disk.b).toEqual(stable.disk.b);
-		const newReads = blocked.calls.filter(
-			(call) =>
-				call.id > Math.max(0, ...beforeWrite.calls.map((c) => c.id)) &&
-				call.authority === "a" &&
-				call.endpoint === "/api/preferences/keybindings" &&
-				call.method === "GET"
-		);
-		expect(
-			newReads.some(
-				(call) => call.preferenceValue === invalid && call.completed
-			)
-		).toBe(true);
 		await expect(row.locator("kbd")).toHaveText(["Ctrl", "Alt", "R"]);
 		await control(request, {
 			rawDocument: { authority: "a", bytes: JSON.stringify(stable.disk.a) },
@@ -547,7 +410,12 @@ test("malformed native documents disable editing and never PUT; repaired full do
 	expect((await control(request)).disk).toEqual(stable.disk);
 });
 
-test("synchronous A to B to A retires held old write intent; only a fresh current-A chord can change the native document", async ({
+// Since the per-entry route (ec6fac15e2) a chord is sent at once, so an
+// A -> B -> A switch cannot retire an intent that never waited on a read; what
+// the editor guarantees instead (usePluginShortcutOverrides.http.test.tsx) is
+// that a write in flight lands only on the node it was addressed to and never
+// repaints the editor it no longer belongs to.
+test("synchronous A to B to A keeps a held A write on A without repainting the editor; only a fresh current-A chord changes what it shows", async ({
 	page,
 	request,
 }) => {
@@ -557,17 +425,33 @@ test("synchronous A to B to A retires held old write intent; only a fresh curren
 	);
 	await settled(request);
 	const before = await control(request);
-	await control(request, { holdRead: true });
+	await control(request, { holdWrite: true });
 	await record(page, "A Shared companion", "Control+Alt+R");
 	await expect.poll(async () => (await control(request)).held.length).toBe(1);
 	const held = await control(request);
+	expect(entryWrites(held)).toHaveLength(1);
+	expect(entryWrites(held)[0]).toMatchObject({
+		authority: "a",
+		admitted: false,
+		completed: false,
+	});
 	await selectAuthority(page, ["b", "a"]);
 	await control(request, { releaseIds: held.held.map((item) => item.id) });
 	await settled(request);
 	await twoFrames(page);
-	const retired = await control(request);
-	expect(puts(retired)).toHaveLength(0);
-	expect(retired.disk).toEqual(before.disk);
+	const landed = await control(request);
+	expect(entryWrites(landed)).toHaveLength(1);
+	expect(entryWrites(landed)[0]).toMatchObject({
+		authority: "a",
+		authorization: "Bearer plugin-token-a",
+		entry: { entry: "plugin:proof-shared", value: "CommandOrControl+Alt+R" },
+		admitted: true,
+		status: 200,
+	});
+	expect(landed.disk).toEqual({
+		a: { ...before.disk.a, "plugin:proof-shared": "CommandOrControl+Alt+R" },
+		b: before.disk.b,
+	});
 	await expect(pluginRow(page, "A Shared companion").locator("kbd")).toHaveText(
 		["Ctrl", "Alt", "A"]
 	);
@@ -576,21 +460,26 @@ test("synchronous A to B to A retires held old write intent; only a fresh curren
 	await expect
 		.poll(
 			async () =>
-				puts(await control(request)).filter((c) => c.admitted && c.completed)
-					.length
+				entryWrites(await control(request)).filter(
+					(c) => c.admitted && c.completed
+				).length
 		)
-		.toBe(1);
+		.toBe(2);
 	const saved = await control(request);
-	expect(puts(saved)).toHaveLength(1);
-	expect(puts(saved)[0]).toMatchObject({
+	expect(entryWrites(saved)).toHaveLength(2);
+	expect(entryWrites(saved)[1]).toMatchObject({
 		authority: "a",
 		authorization: "Bearer plugin-token-a",
+		entry: { entry: "plugin:proof-shared", value: "CommandOrControl+Alt+C" },
 		document: {
 			...before.disk.a,
 			"plugin:proof-shared": "CommandOrControl+Alt+C",
 		},
 	});
 	expect(saved.disk.b).toEqual(before.disk.b);
+	await expect(pluginRow(page, "A Shared companion").locator("kbd")).toHaveText(
+		["Ctrl", "Alt", "C"]
+	);
 	await page.reload();
 	await expect(pluginRow(page, "A Shared companion").locator("kbd")).toHaveText(
 		["Ctrl", "Alt", "C"]
@@ -617,15 +506,17 @@ test("a disabled plugin's shortcut is withheld from editing while its saved over
 	await expect
 		.poll(
 			async () =>
-				puts(await control(request)).filter((c) => c.admitted && c.completed)
-					.length
+				entryWrites(await control(request)).filter(
+					(c) => c.admitted && c.completed
+				).length
 		)
 		.toBe(1);
 	const saved = await control(request);
-	expect(puts(saved)).toHaveLength(1);
-	expect(puts(saved)[0]).toMatchObject({
+	expect(entryWrites(saved)).toHaveLength(1);
+	expect(entryWrites(saved)[0]).toMatchObject({
 		authority: "a",
 		authorization: "Bearer plugin-token-a",
+		entry: { entry: "plugin:proof-shared", value: "CommandOrControl+Alt+C" },
 		status: 200,
 		admitted: true,
 		document: {

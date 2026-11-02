@@ -108,7 +108,7 @@ export function NodeStatusIcon({
 			{tone && (
 				<span
 					className={cn(
-						"absolute -right-0.5 -bottom-0.5 size-2 rounded-full border-2",
+						"absolute -end-0.5 -bottom-0.5 size-2 rounded-full border-2",
 						borderClassName,
 						TONE_DOT[tone]
 					)}

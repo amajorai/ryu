@@ -27,6 +27,8 @@ export interface TitlebarFixtureHooks {
 	__getNodeTabOverrides: () => NodeFixtureStore["tabOverrides"];
 	__getPendingSidePanelRoute: () => SidePanelRouteRequest | null;
 	__getRenameRequests: () => TitlebarRenameRequest[];
+	/** The app's own sealed reader: `ryu_session_tabs` is sealed on disk. */
+	__readSealedLocalStorage: (key: string) => string | null;
 	__titlebarHost: TitlebarHost;
 }
 export interface TitlebarSplitNode {

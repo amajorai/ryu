@@ -8,6 +8,7 @@
 // beside grant-labels.ts / plugin-id.ts / safe-url.ts, the other small shared
 // presentation helpers.
 
+import { translate as tl } from "@ryu/i18n/core";
 import type { CompatibilityVerdict, Surface } from "./types.ts";
 import { blockingUnmet } from "./types.ts";
 
@@ -69,12 +70,22 @@ export function describeIncompatibility(
 	}
 	const parts = blocking.map((u) => {
 		if (u.code === "host_api_too_old") {
-			return `Ryu plugin host API ${u.required} (you have ${u.present})`;
+			return tl("Ryu plugin host API {required} (you have {present})", {
+				required: u.required,
+				present: u.present,
+			});
 		}
 		const label = u.surface === "core" ? "Ryu" : surfaceLabel(u.surface);
 		return u.code === "too_old"
-			? `${label} ${u.required} (you have ${u.present})`
-			: `${label} ${u.required} (unreadable requirement)`;
+			? tl("{label} {required} (you have {present})", {
+					label,
+					required: u.required,
+					present: u.present,
+				})
+			: tl("{label} {required} (unreadable requirement)", {
+					label,
+					required: u.required,
+				});
 	});
-	return `Requires ${parts.join(", ")}`;
+	return tl("Requires {requirements}", { requirements: parts.join(", ") });
 }

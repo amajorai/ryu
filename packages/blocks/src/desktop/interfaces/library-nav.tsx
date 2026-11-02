@@ -50,7 +50,7 @@ function NavItem({
 			<button
 				aria-current={active ? "page" : undefined}
 				className={cn(
-					"flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-sidebar-ring motion-reduce:transition-none",
+					"flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-start text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-sidebar-ring motion-reduce:transition-none",
 					active
 						? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
 						: "text-sidebar-foreground hover:bg-sidebar-accent/60"
@@ -107,7 +107,7 @@ export function LibrarySidebar({
 	return (
 		<nav
 			aria-label="Library"
-			className="@3xl/library:flex hidden w-56 shrink-0 flex-col gap-5 overflow-y-auto border-border border-r bg-sidebar px-3 pt-4 pb-6"
+			className="@3xl/library:flex hidden w-56 shrink-0 flex-col gap-5 overflow-y-auto border-border border-e bg-sidebar px-3 pt-4 pb-6"
 		>
 			<ul>
 				<NavItem

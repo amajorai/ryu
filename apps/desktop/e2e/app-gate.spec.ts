@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, type Route, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // A complete `/api/plugins` manifest row. The desktop roster contract
 // (`appManifestWireResponseSchema`, strict since before Ryu Quiet) rejects rows that
@@ -114,11 +114,10 @@ test("app gates reuse the shared roster and stop Meetings work on disable", asyn
 	expect(seeds).toBe(1);
 	expect(streams).toBe(1);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
+		path: proofEvidencePath(
 			browserName === "webkit"
-				? "../../../docs/proof/performance-sweep/app-gate-webkit-completed.png"
-				: "../../../docs/proof/performance-sweep/app-gate-completed.png"
+				? "performance-sweep/app-gate-webkit-completed.png"
+				: "performance-sweep/app-gate-completed.png"
 		),
 		fullPage: true,
 		animations: "disabled",
@@ -195,9 +194,8 @@ test("a denied app enable shows the failure and retries before refreshing its fe
 	await expect(page.getByTestId("enabled-refreshes")).toHaveText("0");
 
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-app-disabled-enable-retry.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/evidence/desktop-app-disabled-enable-retry.png"
 		),
 		fullPage: true,
 		animations: "disabled",

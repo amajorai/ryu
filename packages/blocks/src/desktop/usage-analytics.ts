@@ -1,413 +1,73 @@
-import { OWN_SUPPLY_POOLS } from "@ryu/auth/lib/credit-pools";
+import {
+	bucketStartFor,
+	formatBucketLabel,
+	nextBucketStart,
+} from "./usage-analytics-buckets.ts";
+import {
+	FOREGROUND_PURPOSE_KEY,
+	POOL_PROVIDER_LABELS,
+	SOURCE_LABELS,
+	usagePurposeLabel,
+} from "./usage-analytics-labels.ts";
+import type {
+	UsageAnalyticsData,
+	UsageAnalyticsTotals,
+	UsageBreakdownRow,
+	UsageEvent,
+	UsageGranularity,
+	UsageProviderSeries,
+	UsageScope,
+} from "./usage-analytics-types.ts";
 
-export const USAGE_SCOPES = ["you", "organization", "node"] as const;
-export type UsageScope = (typeof USAGE_SCOPES)[number];
-
-export const USAGE_GRANULARITIES = [
-	"15m",
-	"hourly",
-	"daily",
-	"weekly",
-	"monthly",
-] as const;
-export type UsageGranularity = (typeof USAGE_GRANULARITIES)[number];
-
-export type UsageSource =
-	| "managed"
-	| "byok"
-	| "self_hosted"
-	| "local"
-	| "unknown";
-
-export interface UsageDateRange {
-	from: Date;
-	to: Date;
-}
-
-export interface UsageEvent {
-	agentSeconds?: number;
-	/** Width of a server-owned aggregate represented by this event. */
-	bucketSeconds?: number;
-	/** Prompt tokens read from the provider cache, when the host reports them. */
-	cacheReadTokens?: number;
-	/** Prompt tokens written to the provider cache, when the host reports them. */
-	cacheWriteTokens?: number;
-	costMicroUsd?: number | null;
-	durationMs?: number | null;
-	error?: boolean;
-	errorCount?: number;
-	feature?: string | null;
-	inputTokens?: number;
-	latencySamples?: number;
-	latencyTotalMs?: number;
-	memberId?: string | null;
-	model?: string | null;
-	nodeId?: string | null;
-	organizationId?: string | null;
-	outputTokens?: number;
-	provider?: string | null;
-	/**
-	 * Background work tag. `null` is a foreground (or untagged) call;
-	 * `undefined` means the host does not report purpose at all.
-	 */
-	purpose?: string | null;
-	requestCount?: number;
-	/** Stable request identity used to join audit events with billing rows. */
-	requestId?: string | null;
-	source?: UsageSource | null;
-	/** ISO timestamp for the start of the observed request. */
-	timestamp: string;
-}
-
-export interface UsageBucket {
-	averageLatencyMs: number | null;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	end: string;
-	errors: number;
-	inputTokens: number;
-	label: string;
-	outputTokens: number;
-	requests: number;
-	spendMicroUsd: number | null;
-	start: string;
-}
-
-export interface UsageTrendPoint {
-	errors: number;
-	label: string;
-	requests: number;
-	spend: number | null;
-	tokens: number;
-}
-
-/** Bound chart work while preserving exact totals for long, detailed ranges. */
-export function compactUsageTrendPoints(
-	points: UsageTrendPoint[],
-	maximumPoints = 1000
-): UsageTrendPoint[] {
-	if (maximumPoints < 1 || points.length <= maximumPoints) {
-		return maximumPoints < 1 ? [] : points;
-	}
-	const groupSize = Math.ceil(points.length / maximumPoints);
-	const compacted: UsageTrendPoint[] = [];
-	for (let index = 0; index < points.length; index += groupSize) {
-		const group = points.slice(index, index + groupSize);
-		const first = group[0];
-		const last = group.at(-1);
-		if (!(first && last)) {
-			continue;
-		}
-		let spend: number | null = null;
-		let errors = 0;
-		let requests = 0;
-		let tokens = 0;
-		for (const point of group) {
-			errors += point.errors;
-			requests += point.requests;
-			tokens += point.tokens;
-			if (point.spend !== null) {
-				spend = (spend ?? 0) + point.spend;
-			}
-		}
-		compacted.push({
-			errors,
-			label: first === last ? first.label : `${first.label} – ${last.label}`,
-			requests,
-			spend,
-			tokens,
-		});
-	}
-	return compacted;
-}
-
-/** One provider's per-bucket values, aligned index-for-index with `buckets`. */
-export interface UsageProviderSeries {
-	errors: number[];
-	key: string;
-	label: string;
-	requests: number[];
-	spendMicroUsd: (number | null)[];
-	tokens: number[];
-}
-
-export interface UsageBreakdownRow {
-	key: string;
-	label: string;
-	requests: number;
-	spendMicroUsd: number | null;
-	tokens: number;
-}
-
-export interface UsageAnalyticsTotals {
-	activeDays: number;
-	activeMembers: number;
-	activeNodes: number;
-	agentSeconds: number;
-	averageLatencyMs: number | null;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	errors: number;
-	inputTokens: number;
-	outputTokens: number;
-	requests: number;
-	spendMicroUsd: number | null;
-}
-
-export interface UsageAnalyticsData {
-	availability?: {
-		message?: string;
-		supported: boolean;
-	};
-	buckets: UsageBucket[];
-	byFeature: UsageBreakdownRow[];
-	byModel: UsageBreakdownRow[];
-	byProvider: UsageBreakdownRow[];
-	/**
-	 * Request counts by background purpose, keyed by the raw purpose tag (or
-	 * {@link FOREGROUND_PURPOSE_KEY}). Absent unless the host reports at least
-	 * one tagged call in range.
-	 */
-	byPurpose?: UsageBreakdownRow[];
-	bySource: UsageBreakdownRow[];
-	caption: string;
-	from: string;
-	granularity: UsageGranularity;
-	modelOptions: string[];
-	providerOptions: string[];
-	/** Top providers over time; absent from hosts that only report totals. */
-	providerSeries?: UsageProviderSeries[];
-	scope: UsageScope;
-	scopeLabel: string;
-	to: string;
-	totals: UsageAnalyticsTotals;
-}
-
-export const GRANULARITY_LABELS = {
-	"15m": "15 min",
-	daily: "Daily",
-	hourly: "Hourly",
-	monthly: "Monthly",
-	weekly: "Weekly",
-} satisfies Record<UsageGranularity, string>;
-
-export const SOURCE_LABELS = {
-	byok: "BYOK",
-	local: "Local",
-	managed: "Managed credits",
-	self_hosted: "Self-hosted",
-	unknown: "Other",
-} satisfies Record<UsageSource, string>;
-
-/** Background purposes the Gateway attributes (`x-ryu-purpose` wire names). */
-export const USAGE_PURPOSES = [
-	"btw",
-	"advisor",
-	"compaction",
-	"handoff",
-	"auto_title",
-	"chat_suggestions",
-	"composer_prediction",
-	"predict",
-	"memory_dream",
-	"recommendations",
-	"learning_judge",
-	"agent_auto_route",
-	"workflow_prompt",
-	"delegate",
-	"app_model_stream",
-	"retrieval_expansion",
-] as const;
-export type UsagePurpose = (typeof USAGE_PURPOSES)[number];
-
-/**
- * Row key for calls without a purpose (your own chat and agent turns). The
- * parentheses are outside the Gateway's purpose grammar (`[a-z0-9_:.@/-]`),
- * so no tagged call can ever land in this row.
- */
-export const FOREGROUND_PURPOSE_KEY = "(foreground)";
-
-/** Prefix the Gateway uses for plugin-initiated background calls. */
-export const PLUGIN_PURPOSE_PREFIX = "plugin:";
-
-/**
- * English source literals for purpose rows. Render them through the i18n
- * literal boundary (`useLocalizedText(label, { literal: true })`), like the
- * rest of this dashboard's copy.
- */
-export const PURPOSE_LABELS = {
-	advisor: "Advisor",
-	agent_auto_route: "Agent auto-route",
-	app_model_stream: "App model calls",
-	auto_title: "Chat titles",
-	btw: "/btw side questions",
-	chat_suggestions: "Chat suggestions",
-	compaction: "Context compaction",
-	composer_prediction: "Composer prediction",
-	delegate: "Delegation",
-	handoff: "Handoff summaries",
-	learning_judge: "Learning judge",
-	memory_dream: "Memory consolidation",
-	predict: "Predictions",
-	recommendations: "Recommendations",
-	retrieval_expansion: "Search query expansion",
-	workflow_prompt: "Workflow steps",
-} satisfies Record<UsagePurpose, string>;
-
-export const FOREGROUND_PURPOSE_LABEL = "Chat and agent turns";
-export const PLUGIN_PURPOSE_LABEL = "Plugin";
-
-function isUsagePurpose(key: string): key is UsagePurpose {
-	return Object.hasOwn(PURPOSE_LABELS, key);
-}
-
-/** The plugin id of a `plugin:<id>` purpose, or `null` for any other key. */
-export function pluginIdForPurpose(key: string): string | null {
-	if (!key.startsWith(PLUGIN_PURPOSE_PREFIX)) {
-		return null;
-	}
-	const pluginId = key.slice(PLUGIN_PURPOSE_PREFIX.length);
-	return pluginId.length > 0 ? pluginId : null;
-}
-
-/**
- * The English label for a purpose row key. Unknown tags from newer Gateways
- * render verbatim rather than disappearing.
- */
-export function usagePurposeLabel(key: string): string {
-	if (key === FOREGROUND_PURPOSE_KEY) {
-		return FOREGROUND_PURPOSE_LABEL;
-	}
-	if (isUsagePurpose(key)) {
-		return PURPOSE_LABELS[key];
-	}
-	const pluginId = pluginIdForPurpose(key);
-	return pluginId === null ? key : `${PLUGIN_PURPOSE_LABEL} · ${pluginId}`;
-}
-
-/** Whether a purpose row key has a first-party English label to localize. */
-export function isLabelledPurposeKey(key: string): boolean {
-	return key === FOREGROUND_PURPOSE_KEY || isUsagePurpose(key);
-}
-
-/**
- * Share of cache traffic that was reuse: reads / (reads + writes), or `null`
- * with no cache traffic. Some providers report cache reads but never writes,
- * so this reads 100% for them; it is a reuse ratio, not a hit rate over all
- * prompt tokens.
- */
-export function cacheReuseRatio(read: number, write: number): number | null {
-	const total = read + write;
-	return total > 0 ? read / total : null;
-}
-
-export interface UsageCachePoint {
-	label: string;
-	/** Reuse ratio of the summed reads and writes; `null` with no cache traffic. */
-	ratio: number | null;
-	read: number;
-	write: number;
-}
-
-/** Per-bucket prompt-cache traffic, grouped to at most `maximumPoints`. */
-export function usageCacheSeries(
-	buckets: readonly UsageBucket[],
-	maximumPoints = 1000
-): UsageCachePoint[] {
-	if (maximumPoints < 1) {
-		return [];
-	}
-	const groupSize = Math.max(1, Math.ceil(buckets.length / maximumPoints));
-	const points: UsageCachePoint[] = [];
-	for (let index = 0; index < buckets.length; index += groupSize) {
-		const group = buckets.slice(index, index + groupSize);
-		const first = group[0];
-		const last = group.at(-1);
-		if (!(first && last)) {
-			continue;
-		}
-		let read = 0;
-		let write = 0;
-		for (const bucket of group) {
-			read += bucket.cacheReadTokens;
-			write += bucket.cacheWriteTokens;
-		}
-		points.push({
-			label: first === last ? first.label : `${first.label} – ${last.label}`,
-			// A ratio of sums: averaging per-bucket ratios would overweight
-			// quiet buckets.
-			ratio: cacheReuseRatio(read, write),
-			read,
-			write,
-		});
-	}
-	return points;
-}
-
-const GRANULARITY_MS = {
-	"15m": 15 * 60 * 1000,
-	hourly: 60 * 60 * 1000,
-	daily: 24 * 60 * 60 * 1000,
-	weekly: 7 * 24 * 60 * 60 * 1000,
-	monthly: 0,
-} satisfies Record<UsageGranularity, number>;
+export {
+	bucketStartFor,
+	cacheReuseRatio,
+	formatBucketLabel,
+	nextBucketStart,
+	USAGE_FORECAST_HORIZON,
+	USAGE_FORECAST_HORIZON_LABELS,
+	type UsageCachePoint,
+	type UsageForecastSlot,
+	type UsageForecastTimeline,
+	usageCacheSeries,
+	usageForecastTimeline,
+} from "./usage-analytics-buckets.ts";
+export {
+	FOREGROUND_PURPOSE_KEY,
+	FOREGROUND_PURPOSE_LABEL,
+	GRANULARITY_LABELS,
+	isLabelledPurposeKey,
+	ledgerProviderLabel,
+	PLUGIN_PURPOSE_LABEL,
+	PLUGIN_PURPOSE_PREFIX,
+	PURPOSE_LABELS,
+	pluginIdForPurpose,
+	RYU_ROUTER_LABEL,
+	SOURCE_LABELS,
+	USAGE_PURPOSES,
+	type UsagePurpose,
+	usageProviderLabel,
+	usagePurposeLabel,
+} from "./usage-analytics-labels.ts";
+export {
+	compactUsageTrendPoints,
+	USAGE_GRANULARITIES,
+	USAGE_SCOPES,
+	type UsageAnalyticsData,
+	type UsageAnalyticsTotals,
+	type UsageBreakdownRow,
+	type UsageBucket,
+	type UsageDateRange,
+	type UsageEvent,
+	type UsageGranularity,
+	type UsageProviderSeries,
+	type UsageScope,
+	type UsageSource,
+	type UsageTrendPoint,
+} from "./usage-analytics-types.ts";
 
 const numberOrZero = (value: number | undefined): number =>
 	Number.isFinite(value) ? (value ?? 0) : 0;
-
-function startOfUtcMonth(date: Date): Date {
-	return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-}
-
-function startOfUtcWeek(date: Date): Date {
-	const start = new Date(
-		Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-	);
-	const day = start.getUTCDay();
-	const daysFromMonday = day === 0 ? 6 : day - 1;
-	start.setUTCDate(start.getUTCDate() - daysFromMonday);
-	return start;
-}
-
-export function bucketStartFor(
-	date: Date,
-	granularity: UsageGranularity
-): Date {
-	if (granularity === "monthly") {
-		return startOfUtcMonth(date);
-	}
-	if (granularity === "weekly") {
-		return startOfUtcWeek(date);
-	}
-	const interval = GRANULARITY_MS[granularity];
-	return new Date(Math.floor(date.getTime() / interval) * interval);
-}
-
-export function nextBucketStart(
-	date: Date,
-	granularity: UsageGranularity
-): Date {
-	if (granularity === "monthly") {
-		return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
-	}
-	if (granularity === "weekly") {
-		return new Date(date.getTime() + GRANULARITY_MS.weekly);
-	}
-	return new Date(date.getTime() + GRANULARITY_MS[granularity]);
-}
-
-export function formatBucketLabel(
-	date: Date,
-	granularity: UsageGranularity
-): string {
-	const options: Intl.DateTimeFormatOptions =
-		granularity === "15m" || granularity === "hourly"
-			? { day: "numeric", hour: "numeric", minute: "2-digit", month: "short" }
-			: granularity === "monthly"
-				? { month: "short", year: "numeric" }
-				: { day: "numeric", month: "short" };
-	return new Intl.DateTimeFormat(undefined, options).format(date);
-}
 
 function labelForKey(key: string, granularity: UsageGranularity): string {
 	return formatBucketLabel(new Date(key), granularity);
@@ -458,40 +118,6 @@ function addBreakdown(
 		breakdown.spendMicroUsd += numberOrZero(event.costMicroUsd);
 	}
 	map.set(key, breakdown);
-}
-
-/** The one provider name a user reads for any Ryu-served work. */
-export const RYU_ROUTER_LABEL = "Ryu Router";
-
-/**
- * Gateway slots of Ryu's OWN supply, all shown as "Ryu Router": users pick
- * models from one provider and never see the supplier that served a request.
- * The OpenRouter pass-through is deliberately absent here, because usage
- * analytics also carries BYOK OpenRouter traffic; ledger surfaces, which only
- * ever carry managed traffic, use {@link ledgerProviderLabel}.
- */
-const POOL_PROVIDER_LABELS: Record<string, string> = {
-	...Object.fromEntries(
-		OWN_SUPPLY_POOLS.flatMap((pool) =>
-			pool.gatewayProviders.map((provider) => [provider, RYU_ROUTER_LABEL])
-		)
-	),
-	// The provider id the gateway reports for managed Ryu Router work.
-	ryu: RYU_ROUTER_LABEL,
-};
-
-/** The user-facing name for a usage row's provider key. */
-export function usageProviderLabel(key: string): string {
-	return POOL_PROVIDER_LABELS[key] ?? key;
-}
-
-/**
- * The user-facing name for a credit-LEDGER row's provider. Every ledger debit
- * is managed (Ryu-billed) traffic, so the managed OpenRouter pass-through is
- * Ryu Router too; anything else falls back to {@link usageProviderLabel}.
- */
-export function ledgerProviderLabel(key: string): string {
-	return key === "openrouter" ? RYU_ROUTER_LABEL : usageProviderLabel(key);
 }
 
 function toRows(
@@ -849,77 +475,4 @@ export function aggregateUsageEvents({
 		}));
 	}
 	return data;
-}
-
-/** Buckets projected ahead of the last completed bucket, per resolution. */
-export const USAGE_FORECAST_HORIZON = {
-	"15m": 16,
-	daily: 14,
-	hourly: 24,
-	monthly: 3,
-	weekly: 4,
-} satisfies Record<UsageGranularity, number>;
-
-export const USAGE_FORECAST_HORIZON_LABELS = {
-	"15m": "next 4 hours",
-	daily: "next 14 days",
-	hourly: "next 24 hours",
-	monthly: "next 3 months",
-	weekly: "next 4 weeks",
-} satisfies Record<UsageGranularity, string>;
-
-export interface UsageForecastSlot {
-	/** Index into `buckets` when the slot is inside the selected range. */
-	bucketIndex: number | null;
-	label: string;
-	start: string;
-}
-
-export interface UsageForecastTimeline {
-	/** Completed buckets at the start of the range; only these are fitted. */
-	fitCount: number;
-	slots: UsageForecastSlot[];
-}
-
-/**
- * Lay out forecast slots after the last completed bucket. The in-progress
- * bucket is projected, not fitted, so a partial "today" never drags the trend
- * down. Ranges that ended before the current bucket get no forecast.
- */
-export function usageForecastTimeline(
-	buckets: readonly UsageBucket[],
-	granularity: UsageGranularity,
-	now = Date.now()
-): UsageForecastTimeline | null {
-	const last = buckets.at(-1);
-	if (!last || Date.parse(last.end) < now) {
-		return null;
-	}
-	let fitCount = 0;
-	while (
-		fitCount < buckets.length &&
-		Date.parse(buckets[fitCount]?.end ?? "") <= now
-	) {
-		fitCount += 1;
-	}
-	const slots: UsageForecastSlot[] = [];
-	let cursor = new Date(buckets[fitCount]?.start ?? last.end);
-	for (
-		let index = fitCount;
-		slots.length < USAGE_FORECAST_HORIZON[granularity];
-		index += 1
-	) {
-		const bucket = buckets[index];
-		slots.push(
-			bucket
-				? { bucketIndex: index, label: bucket.label, start: bucket.start }
-				: {
-						bucketIndex: null,
-						label: formatBucketLabel(cursor, granularity),
-						start: cursor.toISOString(),
-					}
-		);
-		cursor = nextBucketStart(cursor, granularity);
-	}
-	return { fitCount, slots };
 }

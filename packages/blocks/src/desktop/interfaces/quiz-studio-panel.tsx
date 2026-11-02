@@ -1,5 +1,6 @@
 /* eslint-disable react/no-unknown-property */
 import { Html } from "@react-three/drei";
+import { activeLocale, translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { Check, CircleHelp } from "lucide-react";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
@@ -72,8 +73,11 @@ export function panelCanvas(
 }
 
 /** Splits a category name over at most two lines for its header panel. */
-export function headerLines(name: string): string[] {
-	const words = name.toUpperCase().split(/\s+/);
+export function headerLines(
+	name: string,
+	locale: string = activeLocale()
+): string[] {
+	const words = name.toLocaleUpperCase(locale).split(/\s+/);
 	if (words.join(" ").length <= 12 || words.length === 1) {
 		return [words.join(" ")];
 	}
@@ -126,7 +130,7 @@ export function cellWords(
 	headlines: ReadonlyMap<string, string>
 ): string[] {
 	if (cell.state === "inPlay") {
-		return ["ANSWERING"];
+		return [tr("ANSWERING")];
 	}
 	// With acts, an answer waiting to be read flips its tile to the answer.
 	const headline = cell.tile ? headlines.get(cell.tile.thread.id) : undefined;

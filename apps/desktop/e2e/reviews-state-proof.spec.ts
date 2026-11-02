@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 for (const theme of ["light", "dark"]) {
 	test(`reviews recover from a failed read in ${theme}`, async ({ page }) => {
@@ -19,9 +19,8 @@ for (const theme of ["light", "dark"]) {
 			0
 		);
 		await page.screenshot({
-			path: resolve(
-				import.meta.dirname,
-				`../../../docs/proof/unfinished-feature-sweep-2026-09-22/reviews-error-${theme}.png`
+			path: proofEvidencePath(
+				`unfinished-feature-sweep-2026-09-22/reviews-error-${theme}.png`
 			),
 		});
 		await page.getByRole("button", { name: "Try again", exact: true }).click();
@@ -36,9 +35,8 @@ for (const theme of ["light", "dark"]) {
 		).toBe(false);
 		expect(errors).toEqual([]);
 		await page.screenshot({
-			path: resolve(
-				import.meta.dirname,
-				`../../../docs/proof/unfinished-feature-sweep-2026-09-22/reviews-recovered-${theme}.png`
+			path: proofEvidencePath(
+				`unfinished-feature-sweep-2026-09-22/reviews-recovered-${theme}.png`
 			),
 		});
 	});

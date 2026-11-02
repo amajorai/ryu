@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { WorldEntity } from "@ryuhq/protocol/interfaces";
 import { memo, type RefObject } from "react";
@@ -44,7 +45,11 @@ export const AgentActor = memo(function AgentActor({
 	const height = indoor ? 26 : CHARACTER.h;
 	return (
 		<button
-			aria-label={`${asking ? "Answer" : "Talk to"} ${entity.name}`}
+			aria-label={
+				asking
+					? tr("Answer {name}", { name: entity.name })
+					: tr("Talk to {name}", { name: entity.name })
+			}
 			className="group absolute cursor-pointer outline-none"
 			onClick={() => onTalk(entity.agentId)}
 			style={{
@@ -93,6 +98,7 @@ export const AgentActor = memo(function AgentActor({
 						"font-(family-name:--sv-font) pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap border-(--sv-wood-dark) border-2 bg-(--sv-key) px-1 font-normal text-[16px] leading-5 opacity-0 shadow-[0_2px_0_var(--sv-outline)] [font-synthesis:none] group-hover:opacity-100 group-focus-visible:opacity-100",
 						emote ? "-top-[64px]" : "-top-[24px]"
 					)}
+					data-ryu-i18n="off"
 					style={SV_TEXT}
 				>
 					{entity.name}

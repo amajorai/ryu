@@ -86,7 +86,7 @@ export function ProviderListEditor({
 				<div className="flex flex-wrap gap-2">
 					{values.map((slug) => (
 						<span
-							className="inline-flex items-center gap-2 rounded-full bg-muted py-0.5 pr-0.5 pl-3 text-xs"
+							className="inline-flex items-center gap-2 rounded-full bg-muted py-0.5 ps-3 pe-0.5 text-xs"
 							key={slug}
 						>
 							<span>{providerName(providers, slug)}</span>
@@ -151,13 +151,13 @@ export function OrderedProviderEditor({
 							key={`${slug}-${index}`}
 						>
 							<span className="min-w-0">
-								<span className="mr-2 inline-flex size-5 items-center justify-center rounded-full bg-muted text-xs">
+								<span className="me-2 inline-flex size-5 items-center justify-center rounded-full bg-muted text-xs">
 									{index + 1}
 								</span>
 								<span className="font-medium text-sm">
 									{providerName(providers, slug)}
 								</span>
-								<code className="ml-2 text-muted-foreground text-xs">
+								<code className="ms-2 text-muted-foreground text-xs">
 									{slug}
 								</code>
 							</span>

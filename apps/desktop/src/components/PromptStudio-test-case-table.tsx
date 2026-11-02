@@ -201,7 +201,7 @@ function TestCaseRowEditor({
 					aria-label={tl("Remove test case {number}", {
 						number: String(index + 1),
 					})}
-					className="ml-auto"
+					className="ms-auto"
 					onClick={() => onRemove(row.id)}
 					size="icon-sm"
 					variant="ghost"

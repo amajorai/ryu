@@ -34,7 +34,7 @@ const inputVariants = cva(
 					"h-auto border-0 bg-transparent px-0 py-0 font-medium text-xl shadow-none focus-visible:ring-0",
 				"agent-profile-description":
 					"h-auto border-0 bg-transparent px-0 py-0 text-muted-foreground text-sm shadow-none focus-visible:ring-0",
-				"blog-search": "h-14 border-none bg-muted pl-10 text-lg shadow-none",
+				"blog-search": "h-14 border-none bg-muted ps-10 text-lg shadow-none",
 				"store-search":
 					"h-8 border-none bg-transparent shadow-none focus-visible:ring-0",
 				"pricing-amount": "h-8 font-heading text-sm tabular-nums",
@@ -58,14 +58,14 @@ const inputVariants = cva(
 					"border-0 bg-transparent px-0 py-0 font-medium text-xl shadow-none focus-visible:ring-0 md:text-xl",
 			},
 			trailingAdornment: {
-				"password-toggle": "pr-14",
-				"password-reveal": "pr-10",
-				compact: "pr-8",
+				"password-toggle": "pe-14",
+				"password-reveal": "pe-10",
+				compact: "pe-8",
 			},
 			leadingAdornment: {
-				"search-icon": "pl-7",
-				compact: "pl-8",
-				default: "pl-9",
+				"search-icon": "ps-7",
+				compact: "ps-8",
+				default: "ps-9",
 			},
 			purpose: {
 				"command-search":
@@ -75,7 +75,7 @@ const inputVariants = cva(
 				"space-row-title":
 					"h-auto border-none bg-transparent px-0 font-medium text-2xl shadow-none focus-visible:ring-0",
 				"picker-filter":
-					"text-(length:--text-xs) h-7 border-0 bg-transparent pl-7",
+					"text-(length:--text-xs) h-7 border-0 bg-transparent ps-7",
 				"picker-code-value": "text-(length:--text-xs) h-7",
 				"model-filter": "text-(length:--text-detail) h-8",
 				"model-identifier": "text-(length:--text-detail) h-7",

@@ -6,6 +6,7 @@ type OpenTabOptions = NonNullable<
 
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface DraftTrigger {
 	agent_id?: string;
@@ -71,10 +72,7 @@ const DRAFT_ID = "drafts-proof-armed";
 const ORIGINAL_TEXT = "Review the release notes after the Atlas run";
 const UPDATED_TEXT =
 	"Review the release notes after the Atlas run and note blockers";
-const EVIDENCE_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 async function openDrafts(
 	page: Page,

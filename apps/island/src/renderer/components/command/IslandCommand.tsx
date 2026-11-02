@@ -47,7 +47,9 @@ function intentTitle(intent: SmartIntent, tl: LiteralMessage): string {
 		case "search":
 			return tl('Search the web for "{query}"', { query: intent.query });
 		case "skill":
-			return intent.name ? `Run /${intent.name}` : "Pick a skill";
+			return intent.name
+				? tl("Run /{name}", { name: intent.name })
+				: "Pick a skill";
 		default:
 			return intent.prompt.trim().length > 0
 				? tl('Ask Ryu: "{prompt}"', { prompt: intent.prompt })

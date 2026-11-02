@@ -12,7 +12,6 @@ import { useNow } from "./kitchen-hooks.ts";
 import {
 	cookProgress,
 	type KitchenService,
-	plural,
 	TICKET_LABELS,
 	ticketLabel,
 } from "./kitchen-model.ts";
@@ -72,7 +71,9 @@ export function KitchenLine({
 						if (station.working) {
 							status = progress.over
 								? "Cooking, longer than usual"
-								: `Cooking, ~${Math.round(progress.fraction * 100)}% (estimate)`;
+								: tl("Cooking, ~{percent}% (estimate)", {
+										percent: Math.round(progress.fraction * 100),
+									});
 							tone = STATE_TEXT.cooking;
 						} else if (station.burnt) {
 							status = "Burnt order";
@@ -89,18 +90,24 @@ export function KitchenLine({
 								) : null}
 								<button
 									aria-describedby={act ? describedBy : undefined}
-									className="flex w-full items-center gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
+									className="flex w-full items-center gap-3 px-3 py-2.5 text-start outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
 									onClick={() => onSelectChef(station.agent.id)}
 									type="button"
 								>
 									<ChefAvatar agentId={station.agent.id} size={28} />
 									<span className="flex min-w-0 flex-1 flex-col">
-										<span className="truncate font-medium text-sm">
+										<span
+											className="truncate font-medium text-sm"
+											data-ryu-i18n="off"
+										>
 											{station.agent.name}
 										</span>
 										<span className="truncate text-[13px] text-muted-foreground">
 											{STATION_LABEL[station.kind]} ·{" "}
-											{plural(station.orders.length, "open order")}
+											{tl(
+												"{count, plural, one {# open order} other {# open orders}}",
+												{ count: station.orders.length }
+											)}
 											{!act && station.burnt && station.working ? (
 												<span className={STATE_TEXT.burnt}> · 1 burnt</span>
 											) : null}

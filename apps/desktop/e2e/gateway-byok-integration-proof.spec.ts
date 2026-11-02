@@ -1,12 +1,14 @@
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
+// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
+// the tracked proof ledger, as the other gateway proofs do.
+const evidenceOverride = process.env.RYU_PROOF_EVIDENCE_DIR;
 const evidence = (name: string) =>
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	evidenceOverride
+		? path.join(evidenceOverride, name)
+		: proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 const providers = [
 	{ key: "sk-openai-test", label: "OpenAI", slug: "openai" },

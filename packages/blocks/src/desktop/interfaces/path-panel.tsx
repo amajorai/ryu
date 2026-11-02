@@ -57,10 +57,10 @@ export function PathThreadPanel({
 						{meta}
 					</span>
 					{unit
-						? tl(" · Unit {index} · {title}", {
+						? ` · ${tl("Unit {index} · {title}", {
 								index: String(unit.index),
 								title: unit.title,
-							})
+							})}`
 						: ""}
 				</span>
 			}

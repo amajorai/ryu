@@ -132,10 +132,10 @@ function ProjectsListBody({
 			);
 		});
 
-	// No `ml-2` here, unlike the Chats date buckets. Those buckets are dividers
+	// No `ms-2` here, unlike the Chats date buckets. Those buckets are dividers
 	// INSIDE a section, so the indent says "these belong to Chats"; a project folder
 	// is a top-level entity like a chat or a space, and indenting it left a gap on
-	// the left edge that nothing else in the sidebar has.
+	// the start edge that nothing else in the sidebar has.
 	return (
 		<>
 			<div className="space-y-0.5">{renderProjectRows(paged.visible)}</div>
@@ -277,7 +277,7 @@ export function ProjectsSection({
 		<>
 			<SidebarSection
 				action={
-					<span className="mr-1">
+					<span className="me-1">
 						<Button
 							aria-haspopup="dialog"
 							aria-label="Add project"

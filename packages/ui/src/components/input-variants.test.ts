@@ -6,16 +6,16 @@ describe("input leading adornment", () => {
 	test("keeps ordinary inputs at their size padding", () => {
 		const classes = cn(inputVariants({ size: "default" })).split(" ");
 		expect(classes).toContain("px-3");
-		expect(classes).not.toContain("pl-8");
-		expect(classes).not.toContain("pl-9");
+		expect(classes).not.toContain("ps-8");
+		expect(classes).not.toContain("ps-9");
 	});
 
-	test("reserves compact icon space while retaining right padding", () => {
+	test("reserves compact icon space while retaining end padding", () => {
 		const classes = cn(
 			inputVariants({ size: "default", leadingAdornment: "compact" })
 		).split(" ");
 		expect(classes).toContain("px-3");
-		expect(classes).toContain("pl-8");
+		expect(classes).toContain("ps-8");
 	});
 
 	test("reserves default icon space for large inputs", () => {
@@ -23,7 +23,7 @@ describe("input leading adornment", () => {
 			inputVariants({ size: "lg", leadingAdornment: "default" })
 		).split(" ");
 		expect(classes).toContain("px-4");
-		expect(classes).toContain("pl-9");
+		expect(classes).toContain("ps-9");
 	});
 
 	test("title inputs retain their larger typography at desktop widths", () => {

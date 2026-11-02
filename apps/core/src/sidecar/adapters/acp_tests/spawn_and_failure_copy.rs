@@ -238,7 +238,7 @@ fn managed_openrouter_credit_failure_has_managed_recovery_copy() {
     );
     assert_eq!(failure.code, "insufficient_credits");
     assert_eq!(failure.title, "Ryu credits exhausted");
-    assert!(failure.message.contains("Settings > Credits"));
+    assert!(failure.message.contains("Credits in Settings"));
     assert!(failure.message.contains("BYOK or local model"));
 }
 

@@ -1,12 +1,14 @@
 import { expect, test } from "@playwright/test";
 import {
 	action,
+	activeToken,
 	held,
 	local,
 	ownShortcutEdit,
 	pullCount,
 	read,
 	registerNativeHttpLedgerHooks,
+	sealedActiveToken,
 	seed,
 	settled,
 	shortcutKey,
@@ -306,7 +308,11 @@ test("native incoming and outgoing allowlists preserve credentials machine paths
 	});
 	await settled(page);
 	expect(await local(page, "theme")).toBe("light");
-	expect(await local(page, "ryu_session_token")).toBe("account-A");
+	// A synced credential key is never imported: the vault keeps A, and the
+	// purged plaintext token is not written back.
+	expect(await activeToken(page)).toBe("account-A");
+	expect(await sealedActiveToken(page)).toBe("account-A");
+	expect(await local(page, "ryu_session_token")).toBeNull();
 	expect(await local(page, "ryu_workspace_path")).toBe("/owned/private");
 	expect(await local(page, "ryu:node-config")).toBe("owned-node");
 	const receipt = await read(request);

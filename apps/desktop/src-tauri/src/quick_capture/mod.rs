@@ -32,6 +32,9 @@
 pub mod gesture;
 #[cfg(target_os = "macos")]
 pub(crate) mod mac;
+pub mod native_error;
+
+pub use native_error::{NativeError, NativeErrorCode};
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::AtomicBool;
@@ -88,7 +91,7 @@ pub struct Config {
 }
 
 static STARTED: AtomicBool = AtomicBool::new(false);
-static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+static LAST_ERROR: Mutex<Option<NativeError>> = Mutex::new(None);
 
 fn config_path() -> std::path::PathBuf {
     ryu_sidecar_runtime::layout::state_path(&crate::profile::ryu_home_dir(), "quick-capture.json")
@@ -110,13 +113,13 @@ fn save_config(config: &Config) -> Result<(), String> {
     std::fs::write(&path, body).map_err(|e| e.to_string())
 }
 
-fn set_error(message: Option<String>) {
+fn set_error(error: Option<NativeError>) {
     if let Ok(mut slot) = LAST_ERROR.lock() {
-        *slot = message;
+        *slot = error;
     }
 }
 
-fn last_error() -> Option<String> {
+fn last_error() -> Option<NativeError> {
     LAST_ERROR.lock().ok().and_then(|slot| slot.clone())
 }
 
@@ -138,7 +141,7 @@ pub fn init<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 /// `_config` is intentionally unused: the worker re-reads the config on every
 /// trigger so a binding change applies without restarting the tap.
 #[cfg(target_os = "macos")]
-fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>, _config: Config) -> Result<(), String> {
+fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>, _config: Config) -> Result<(), NativeError> {
     mac::set_listening(true);
     if STARTED.swap(true, Ordering::SeqCst) {
         // The tap already exists; enabling is all that was needed.
@@ -149,7 +152,7 @@ fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>, _config: Config) -> Result
     if let Err(err) = mac::spawn_listener(tx) {
         STARTED.store(false, Ordering::SeqCst);
         mac::set_listening(false);
-        return Err(err);
+        return Err(NativeError::from_listener(err));
     }
 
     // The worker: everything slow happens here, never in the tap callback.
@@ -173,15 +176,15 @@ fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>, _config: Config) -> Result
                 handle_trigger(&app);
             }
         })
-        .map_err(|e| format!("couldn't start the Quick Capture worker: {e}"))?;
+        .map_err(|e| NativeError::with_detail(NativeErrorCode::WorkerFailed, e))?;
 
     set_error(None);
     Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn start<R: tauri::Runtime>(_app: tauri::AppHandle<R>, _config: Config) -> Result<(), String> {
-    Err("Quick Capture is macOS-only for now".into())
+fn start<R: tauri::Runtime>(_app: tauri::AppHandle<R>, _config: Config) -> Result<(), NativeError> {
+    Err(NativeError::new(NativeErrorCode::UnsupportedPlatform))
 }
 
 #[cfg(target_os = "macos")]
@@ -210,6 +213,7 @@ fn handle_trigger<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             let _ = tauri::Emitter::emit(
                 app,
                 "quick-capture:failed",
+                // `error` is the coded failure; the webview words the sentence.
                 serde_json::json!({ "error": err }),
             );
         }
@@ -217,9 +221,14 @@ fn handle_trigger<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 /// POST the capture to the quests sidecar through Core's public mount. Returns the
-/// title the sidecar derived, for the toast.
+/// title the sidecar derived, for the toast (`None` when it sent none; the webview
+/// then names the capture itself, in the user's language).
 #[cfg(target_os = "macos")]
-fn deliver(text: &str, context: &CaptureContext, kind: Option<&str>) -> Result<String, String> {
+fn deliver(
+    text: &str,
+    context: &CaptureContext,
+    kind: Option<&str>,
+) -> Result<Option<String>, NativeError> {
     let url = format!("{}/api/quests/capture", crate::profile::core_base_url());
     let mut body = serde_json::json!({
         "body": text,
@@ -241,7 +250,7 @@ fn deliver(text: &str, context: &CaptureContext, kind: Option<&str>) -> Result<S
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| NativeError::with_detail(NativeErrorCode::WorkerFailed, e))?;
         let mut request = client.post(&url).json(&body);
         if let Some(token) = token {
             request = request.bearer_auth(token);
@@ -250,21 +259,15 @@ fn deliver(text: &str, context: &CaptureContext, kind: Option<&str>) -> Result<S
         let response = request
             .send()
             .await
-            .map_err(|e| format!("couldn't reach Ryu Core: {e}"))?;
-        let status = response.status();
-        if status == reqwest::StatusCode::NOT_FOUND {
-            return Err(
-                "the Quests app is turned off — enable it from the Store and try again".to_string(),
-            );
+            .map_err(|e| NativeError::with_detail(NativeErrorCode::CoreUnreachable, e))?;
+        if let Some(error) = NativeError::from_capture_status(response.status().as_u16()) {
+            return Err(error);
         }
-        if !status.is_success() {
-            return Err(format!("Ryu Core rejected the capture ({status})"));
-        }
-        let parsed: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        Ok(parsed["quest"]["title"]
-            .as_str()
-            .unwrap_or("Kept")
-            .to_string())
+        let parsed: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| NativeError::with_detail(NativeErrorCode::InvalidResponse, e))?;
+        Ok(parsed["quest"]["title"].as_str().map(str::to_string))
     })
 }
 
@@ -282,7 +285,7 @@ pub struct Status {
     pub input_monitoring: bool,
     pub accessibility: bool,
     pub quests_enabled: bool,
-    pub error: Option<String>,
+    pub error: Option<NativeError>,
 }
 
 #[tauri::command]
@@ -343,7 +346,7 @@ fn quests_reachable() -> bool {
 pub fn quick_capture_set_enabled<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     enabled: bool,
-) -> Result<Status, String> {
+) -> Result<Status, NativeError> {
     let mut config = load_config();
     config.enabled = enabled;
 
@@ -359,16 +362,16 @@ pub fn quick_capture_set_enabled<R: tauri::Runtime>(
         stop();
         set_error(None);
     }
-    save_config(&config)?;
+    save_config(&config).map_err(NativeError::settings_save)?;
     Ok(quick_capture_status())
 }
 
 /// Change which Shift key arms the gesture.
 #[tauri::command]
-pub fn quick_capture_set_binding(binding: Binding) -> Result<Status, String> {
+pub fn quick_capture_set_binding(binding: Binding) -> Result<Status, NativeError> {
     let mut config = load_config();
     config.binding = binding;
-    save_config(&config)?;
+    save_config(&config).map_err(NativeError::settings_save)?;
     Ok(quick_capture_status())
 }
 

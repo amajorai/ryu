@@ -11,10 +11,12 @@
 
 import { Alert02Icon, DollarCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { SessionBoxView } from "@/src/lib/api/session-box.ts";
+import { formatUsd } from "@/src/lib/locale-format.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 
 const SIZE_LABELS = {
@@ -26,35 +28,48 @@ const SIZE_LABELS = {
 /** `$0.0123` under a dollar, `$1.23` from a dollar up. */
 export function formatBoxCost(microUsd: number): string {
 	const usd = Math.max(0, microUsd) / 1_000_000;
-	return usd >= 1 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`;
+	return formatUsd(usd);
 }
 
 /** `<1 min`, `18 min`, or `1 h 05 min`. */
 export function formatBoxRunningTime(seconds: number): string {
 	const minutes = Math.floor(Math.max(0, seconds) / 60);
 	if (minutes < 1) {
-		return "<1 min";
+		return tl("<1 min");
 	}
 	if (minutes < 60) {
-		return `${minutes} min`;
+		return tl("{minutes} min", { minutes });
 	}
 	const hours = Math.floor(minutes / 60);
-	return `${hours} h ${String(minutes % 60).padStart(2, "0")} min`;
+	return tl("{hours} h {minutes} min", {
+		hours,
+		minutes: String(minutes % 60).padStart(2, "0"),
+	});
 }
 
 function chipTitle(box: SessionBoxView): string {
-	const lines: string[] = ["Box session compute"];
+	const lines: string[] = [tl("Box session compute")];
 	if (box.size) {
-		lines.push(`Size: ${SIZE_LABELS[box.size]}`);
+		lines.push(tl("Size: {size}", { size: tl(SIZE_LABELS[box.size]) }));
 	}
 	if (box.ratePerHourMicroUsd !== null) {
-		lines.push(`Rate: ${formatBoxCost(box.ratePerHourMicroUsd)} per hour`);
+		lines.push(
+			tl("Rate: {rate} per hour", {
+				rate: formatBoxCost(box.ratePerHourMicroUsd),
+			})
+		);
 	}
 	if (box.minutesRemaining !== null) {
-		lines.push(`About ${box.minutesRemaining} min of credit left`);
+		lines.push(
+			tl("About {minutes} min of credit left", {
+				minutes: box.minutesRemaining,
+			})
+		);
 	}
 	if (box.placement?.location) {
-		lines.push(`Location: ${box.placement.location}`);
+		lines.push(
+			tl("Location: {location}", { location: box.placement.location })
+		);
 	}
 	return lines.join("\n");
 }
@@ -78,7 +93,7 @@ export function boxCostLabel(box: SessionBoxView): string | null {
 	}
 	const accrued = box.accruedMicroUsd ?? 0;
 	if (accrued <= 0) {
-		return isRunning(box) ? "starting" : null;
+		return isRunning(box) ? tl("starting") : null;
 	}
 	return `${formatBoxCost(accrued)} · ${formatBoxRunningTime(box.runningSeconds ?? 0)}`;
 }

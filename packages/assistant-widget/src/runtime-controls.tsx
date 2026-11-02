@@ -7,6 +7,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { BrowserRuntimeStatus } from "@ryu/browser-local-ai";
+import type { LiteralMessage } from "@ryu/i18n/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Checkbox } from "@ryu/ui/components/checkbox";
 import { Input } from "@ryu/ui/components/input";
@@ -75,19 +77,24 @@ function needsCoreAllowlist(): boolean {
 	return !CORE_DEFAULT_ORIGINS.has(window.location.origin);
 }
 
-function statusLabel(status: BrowserRuntimeStatus | undefined): string {
+function statusLabel(
+	status: BrowserRuntimeStatus | undefined,
+	tl: LiteralMessage
+): string {
 	if (!status || status.status === "not-prepared") {
-		return "Not downloaded";
+		return tl("Not downloaded");
 	}
 	if (status.status === "preparing") {
 		return status.progress == null
-			? "Preparing"
-			: `Downloading ${Math.round(status.progress)}%`;
+			? tl("Preparing")
+			: tl("Downloading {percent}%", {
+					percent: Math.round(status.progress),
+				});
 	}
 	if (status.status === "ready") {
-		return "Ready in this browser";
+		return tl("Ready in this browser");
 	}
-	return "Could not prepare";
+	return tl("Could not prepare");
 }
 /** A checked row in the settings popover, on the menu item's geometry. */
 function SettingsChoice({
@@ -339,6 +346,7 @@ export function RuntimeSetupPrompt({
 }: RuntimeSetupProps) {
 	const addressId = useId();
 	const tokenId = useId();
+	const tl = useLiteralMessages();
 	// Read after mount so server and first client render agree.
 	const [showAllowlistNote, setShowAllowlistNote] = useState(false);
 	useEffect(() => {
@@ -353,7 +361,7 @@ export function RuntimeSetupPrompt({
 			>
 				<div className="flex flex-col gap-1">
 					<SetupHeading
-						status={statusLabel(browserStatus)}
+						status={statusLabel(browserStatus, tl)}
 						title="Download the browser model"
 					/>
 					<p className="text-detail text-muted-foreground">

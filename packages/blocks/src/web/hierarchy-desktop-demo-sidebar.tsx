@@ -7,6 +7,8 @@ import {
 	FolderOpenIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { dateFormatter } from "@ryu/i18n/lite";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { EntityAvatar } from "@ryu/ui/components/entity-avatar.tsx";
 import {
 	SidebarGroup,
@@ -40,7 +42,7 @@ export function MessagingRow({
 		<SidebarMenuItem>
 			<div
 				className={cn(
-					"flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
+					"flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-start transition-colors",
 					active ? "bg-muted" : "hover:bg-muted"
 				)}
 			>
@@ -97,7 +99,7 @@ export function GroupAvatar({ names }: { names: string[] }) {
 				<span
 					className={cn(
 						"absolute size-6 rounded-full ring-2 ring-sidebar",
-						index === 0 ? "top-0 left-0" : "right-0 bottom-0"
+						index === 0 ? "start-0 top-0" : "end-0 bottom-0"
 					)}
 					key={name}
 				>
@@ -131,12 +133,26 @@ export function SectionHeader({ label }: { label: string }) {
 	return (
 		<div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground text-xs">
 			<span>{label}</span>
-			<HugeiconsIcon className="-ml-1 size-3" icon={ArrowDown01Icon} />
+			<HugeiconsIcon className="-ms-1 size-3" icon={ArrowDown01Icon} />
 		</div>
 	);
 }
 
+/** Fixed UTC dates whose weekday is the stamp each older row shows. */
+const STAMP_DAYS = {
+	tuesday: Date.UTC(2024, 0, 2),
+	monday: Date.UTC(2024, 0, 1),
+	sunday: Date.UTC(2023, 11, 31),
+	saturday: Date.UTC(2023, 11, 30),
+} as const;
+
 export function DemoSidebar({ phase, view }: { phase: Phase; view: string }) {
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
+	const weekday = (day: keyof typeof STAMP_DAYS) =>
+		dateFormatter(locale, { timeZone: "UTC", weekday: "short" }).format(
+			STAMP_DAYS[day]
+		);
 	const projectRunning = phase > 0 && phase < 4;
 	return (
 		<div className="flex flex-col" data-testid="hierarchy-demo-sidebar">
@@ -178,9 +194,9 @@ export function DemoSidebar({ phase, view }: { phase: Phase; view: string }) {
 						/>
 						<MessagingRow
 							avatar={<GlyphAvatar emoji="🔬" tone="bg-success/10" />}
-							name="Q4 research"
+							name={tl("Q4 research")}
 							preview="Analyst: competitor table updated"
-							stamp="Tue"
+							stamp={weekday("tuesday")}
 						/>
 					</SidebarMenu>
 					<SubSectionLabel count={2} icon={BubbleChatIcon} label="Chats" />
@@ -190,13 +206,13 @@ export function DemoSidebar({ phase, view }: { phase: Phase; view: string }) {
 							badge="Debate"
 							name="Reviewers"
 							preview="Critic: tighten the second paragraph"
-							stamp="Mon"
+							stamp={weekday("monday")}
 						/>
 						<MessagingRow
 							avatar={<EntityAvatar className="size-9 shrink-0" name="Ana" />}
 							name="Ana"
 							preview="You: shipping Friday 🎉"
-							stamp="Sun"
+							stamp={weekday("sunday")}
 						/>
 					</SidebarMenu>
 					<SubSectionLabel
@@ -207,9 +223,9 @@ export function DemoSidebar({ phase, view }: { phase: Phase; view: string }) {
 					<SidebarMenu>
 						<MessagingRow
 							avatar={<GlyphAvatar emoji="📰" tone="bg-warning/10" />}
-							name="Press kit"
+							name={tl("Press kit")}
 							preview="Writer: embargo notes drafted"
-							stamp="Sat"
+							stamp={weekday("saturday")}
 						/>
 					</SidebarMenu>
 				</SidebarGroupContent>

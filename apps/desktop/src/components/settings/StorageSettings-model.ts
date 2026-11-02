@@ -1,3 +1,4 @@
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import { useMemo } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
@@ -20,15 +21,12 @@ export const PROFILE_COPY_TARGETS = [
 	"beta",
 ] as const;
 
+/** One decimal at every scale ("512.0 B", "4.7 GB"), in the UI locale. */
 export function humanBytes(n: number): string {
-	const units = ["B", "KB", "MB", "GB", "TB"];
-	let v = n;
-	let i = 0;
-	while (v >= 1024 && i < units.length - 1) {
-		v /= 1024;
-		i += 1;
-	}
-	return `${v.toFixed(1)} ${units[i]}`;
+	return formatByteSize(n, undefined, {
+		fractionDigits: 1,
+		maxUnit: "terabyte",
+	});
 }
 
 export interface PickedTarget {

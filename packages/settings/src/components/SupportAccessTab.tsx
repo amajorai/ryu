@@ -1,6 +1,7 @@
 import { SecurityCheckIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
@@ -9,7 +10,6 @@ import { Label } from "@ryu/ui/components/label.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../utils/api-client.ts";
@@ -56,6 +56,7 @@ const SCOPE_OPTIONS: { id: string; label: string; description: string }[] = [
 export function SupportAccessTab() {
 	const queryClient = useQueryClient();
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale ?? activeLocale();
 	const [selectedScopes, setSelectedScopes] = useState<string[]>(["billing"]);
 	const [note, setNote] = useState("");
 
@@ -113,8 +114,9 @@ export function SupportAccessTab() {
 		);
 	};
 
-	const intro =
-		"Let Ryu support temporarily act on your account to help you. Off by default, scoped to what you choose, auto-expires within an hour, and revocable any time. Every support session is logged below.";
+	const intro = tl(
+		"Let Ryu support temporarily act on your account to help you. Off by default, scoped to what you choose, auto-expires within an hour, and revocable any time. Every support session is logged below."
+	);
 
 	return (
 		<div>
@@ -150,9 +152,10 @@ export function SupportAccessTab() {
 							<p className="text-detail text-muted-foreground">
 								{tl("Scopes: {scopeList}. Expires {relativeTime}.", {
 									scopeList: grant.scopes.join(", ") || tl("none"),
-									relativeTime: formatDistanceToNow(new Date(grant.expiresAt), {
-										addSuffix: true,
-									}),
+									relativeTime: formatRelativeTime(
+										locale,
+										new Date(grant.expiresAt)
+									),
 								})}
 							</p>
 						</Item>
@@ -258,9 +261,9 @@ export function SupportAccessTab() {
 									<p>
 										{tl("Scopes: {scopeList} · {relativeTime}", {
 											scopeList: entry.scopes.join(", ") || tl("none"),
-											relativeTime: formatDistanceToNow(
-												new Date(entry.startedAt),
-												{ addSuffix: true }
+											relativeTime: formatRelativeTime(
+												locale,
+												new Date(entry.startedAt)
 											),
 										})}
 									</p>

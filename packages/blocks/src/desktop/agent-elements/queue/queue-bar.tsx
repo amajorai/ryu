@@ -301,7 +301,7 @@ function QueueItem({
 								)}
 							</div>
 						)}
-						<div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/qcard:opacity-100">
+						<div className="ms-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/qcard:opacity-100">
 							<Button
 								appearance="queued-message-action"
 								aria-label="Send now"

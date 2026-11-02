@@ -227,7 +227,7 @@ function Channel({
 						/>
 						<motion.span
 							animate={{ opacity: 1, x: 0 }}
-							className="type-compact absolute left-[calc(50%+0.75rem)] whitespace-nowrap text-foreground/40"
+							className="type-compact absolute start-[calc(50%+0.75rem)] whitespace-nowrap text-foreground/40"
 							exit={{ opacity: 0 }}
 							initial={{ opacity: 0, x: -4 }}
 							key="label"

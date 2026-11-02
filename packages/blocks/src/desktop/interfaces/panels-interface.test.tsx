@@ -331,7 +331,7 @@ describe("panels model", () => {
 
 	test("summarises what needs you in one sentence", () => {
 		expect(summarySentence(panelsSummary(SNAPSHOT))).toBe(
-			"Two conversations need you, and one agent is working."
+			"2 conversations need you, and 1 agent is working."
 		);
 		expect(summarySentence(panelsSummary(EMPTY))).toBe(
 			"Nothing needs you right now."

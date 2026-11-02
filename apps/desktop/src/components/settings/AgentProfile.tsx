@@ -5,12 +5,12 @@
 // A back affordance returns to the roster.
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ContributionsGraph,
 	StatCard,
 } from "@ryu/ui/components/contributions-graph.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { EmployeeBadge } from "@ryu/ui/components/employee-badge.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
@@ -27,6 +27,8 @@ import {
 	fetchAgentProfile,
 	fetchAgentUsageDaily,
 } from "@/src/lib/api/profile.ts";
+import { formatDurationSpan } from "@/src/lib/expiry.ts";
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
 const SECONDS_PER_HOUR = 3600;
@@ -74,7 +76,7 @@ export function AgentProfile({ agent, onBack }: AgentProfileProps) {
 
 	const backButton = (
 		<Button onClick={onBack} size="sm" variant="ghost">
-			<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+			<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 			Back to team
 		</Button>
 	);
@@ -140,7 +142,9 @@ export function AgentProfile({ agent, onBack }: AgentProfileProps) {
 						},
 						{
 							label: "Streak",
-							value: `${profile?.streak.current ?? 0}d`,
+							value: formatDurationSpan([
+								[profile?.streak.current ?? 0, "day"],
+							]),
 						},
 					]}
 				/>
@@ -164,7 +168,13 @@ export function AgentProfile({ agent, onBack }: AgentProfileProps) {
 			<SettingsSection title="Lifetime stats">
 				<div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
 					<StatCard title="Total tokens" value={formatNumber(totalTokens)} />
-					<StatCard title="Hours worked" value={hoursWorked.toFixed(1)} />
+					<StatCard
+						title="Hours worked"
+						value={formatLocalNumber(hoursWorked, {
+							maximumFractionDigits: 1,
+							minimumFractionDigits: 1,
+						})}
+					/>
 					<StatCard
 						title="Requests"
 						value={formatNumber(profile?.totals.requestCount ?? 0)}
@@ -172,7 +182,7 @@ export function AgentProfile({ agent, onBack }: AgentProfileProps) {
 					<StatCard title="Level" value={formatNumber(profile?.level ?? 0)} />
 					<StatCard
 						title="Best streak"
-						value={`${profile?.streak.longest ?? 0}d`}
+						value={formatDurationSpan([[profile?.streak.longest ?? 0, "day"]])}
 					/>
 				</div>
 			</SettingsSection>

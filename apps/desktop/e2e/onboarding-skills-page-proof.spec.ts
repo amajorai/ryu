@@ -1,13 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 import { selectedPacksProofSchema } from "./settings-domain-proof.contracts.ts";
 
 const PROOF_URL = "/onboarding-skills-page-proof.html";
-const EVIDENCE_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 const PACKS = [
 	{
 		description: "Code review and debugging workflows.",

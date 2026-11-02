@@ -35,7 +35,7 @@ export function AnnotationToolbar({
 				type="button"
 			>
 				<HugeiconsIcon
-					className="mr-1 inline-block size-3.5"
+					className="me-1 inline-block size-3.5"
 					icon={Comment01Icon}
 				/>
 				{isAnnotating ? "Annotation mode on" : "Annotate"}
@@ -45,7 +45,7 @@ export function AnnotationToolbar({
 					? "Click an element or drag an area · Shift-click adds targets"
 					: "Add visual feedback to the live browser frame"}
 			</span>
-			<div className="ml-auto flex items-center gap-1">
+			<div className="ms-auto flex items-center gap-1">
 				{annotationCount > 0 && (
 					<button
 						className="rounded-lg px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"

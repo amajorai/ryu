@@ -2,7 +2,7 @@
 
 import { Download04Icon, Gif01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils.ts";
@@ -84,6 +84,7 @@ export function HeatmapClipDialog({
 	open,
 }: HeatmapClipDialogProps) {
 	const tl = useLiteralMessages();
+	const direction = useOptionalI18n()?.direction ?? "ltr";
 	const reduceMotion = Boolean(useReducedMotion());
 	const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
 	const [formatId, setFormatId] = useState<PassFormatId>(
@@ -117,6 +118,7 @@ export function HeatmapClipDialog({
 			{
 				cells: buildHeatmapCells(current.days, current.endDay),
 				fontFamily: readFontFamily(target),
+				rtl: direction === "rtl",
 				tl,
 			}
 		);
@@ -143,7 +145,16 @@ export function HeatmapClipDialog({
 		};
 		raf = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(raf);
-	}, [open, canvas, busy, reduceMotion, format.width, format.height, isDark]);
+	}, [
+		open,
+		canvas,
+		busy,
+		reduceMotion,
+		format.width,
+		format.height,
+		isDark,
+		direction,
+	]);
 
 	const filename = (extension: string) =>
 		`${filenameStem}-${format.ratio.replace(":", "x")}.${extension}`;
@@ -220,7 +231,11 @@ export function HeatmapClipDialog({
 	};
 
 	const label = (kind: ExportKind, idle: string) =>
-		busy === kind ? `Exporting ${Math.round(progress * PERCENT)}%` : idle;
+		busy === kind
+			? tl("Exporting {percent}%", {
+					percent: Math.round(progress * PERCENT),
+				})
+			: idle;
 
 	return (
 		<Dialog onOpenChange={handleOpenChange} open={open}>

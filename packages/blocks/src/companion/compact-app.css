@@ -160,11 +160,11 @@ p {
 }
 
 .rubric {
-	padding-left: 10px;
+	padding-inline-start: 10px;
 	margin: 8px 0 0;
 	color: var(--compact-muted);
 	white-space: pre-wrap;
-	border-left: 3px solid var(--compact-line);
+	border-inline-start: 3px solid var(--compact-line);
 }
 
 .empty {

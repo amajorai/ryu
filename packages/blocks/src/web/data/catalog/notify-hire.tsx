@@ -90,16 +90,19 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		},
 		faq: [
 			{
-				q: "Is Ryu Notify the same as Core notifications?",
-				a: "No. Core owns the local user inbox, workflow acknowledgements, desktop stream, and node fan-out. Notify is a separate event API for products and agents.",
+				question: "Is Ryu Notify the same as Core notifications?",
+				answer:
+					"No. Core owns the local user inbox, workflow acknowledgements, desktop stream, and node fan-out. Notify is a separate event API for products and agents.",
 			},
 			{
-				q: "Does it send push, email, or SMS?",
-				a: "Notify delivers to signed webhooks and ntfy-compatible endpoints. It does not send push, email, or SMS itself. Email stays with Ryu Mail, SMS, WhatsApp, and voice messages with Ryu Messaging, and native push with Core.",
+				question: "Does it send push, email, or SMS?",
+				answer:
+					"Notify delivers to signed webhooks and ntfy-compatible endpoints. It does not send push, email, or SMS itself. Email stays with Ryu Mail, SMS, WhatsApp, and voice messages with Ryu Messaging, and native push with Core.",
 			},
 			{
-				q: "Can I call it from Box or Ryu Mail?",
-				a: "Yes, over its HTTP API. Example scripts show Box and Mail publishing metadata such as the sender and subject, not message bodies.",
+				question: "Can I call it from Box or Ryu Mail?",
+				answer:
+					"Yes, over its HTTP API. Example scripts show Box and Mail publishing metadata such as the sender and subject, not message bodies.",
 			},
 		],
 		cta: {
@@ -157,12 +160,14 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		},
 		faq: [
 			{
-				q: "Does Mail receive email directly?",
-				a: "No. Mail arrives from your mail provider as a signed request, and sending uses a configured mail transport.",
+				question: "Does Mail receive email directly?",
+				answer:
+					"No. Mail arrives from your mail provider as a signed request, and sending uses a configured mail transport.",
 			},
 			{
-				q: "Does a Mail event include the email body?",
-				a: "The Notify example and app hooks carry metadata only, such as the sender and subject. Mail's own webhooks can include the body.",
+				question: "Does a Mail event include the email body?",
+				answer:
+					"The Notify example and app hooks carry metadata only, such as the sender and subject. Mail's own webhooks can include the body.",
 			},
 		],
 		cta: {
@@ -229,16 +234,19 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		},
 		faq: [
 			{
-				q: "What does a message cost?",
-				a: "What AWS End User Messaging charges for it, with no Ryu markup. Prices depend on the destination country, carrier, number type, and WhatsApp category; see the AWS End User Messaging pricing page. Credit top-ups keep their usual deposit fee.",
+				question: "What does a message cost?",
+				answer:
+					"What AWS End User Messaging charges for it, with no Ryu markup. Prices depend on the destination country, carrier, number type, and WhatsApp category; see the AWS End User Messaging pricing page. Credit top-ups keep their usual deposit fee.",
 			},
 			{
-				q: "Can it place live phone calls?",
-				a: "No. Voice messages are outbound text-to-speech only. Live and inbound calls use the Gateway phone assistant.",
+				question: "Can it place live phone calls?",
+				answer:
+					"No. Voice messages are outbound text-to-speech only. Live and inbound calls use the Gateway phone assistant.",
 			},
 			{
-				q: "How do I get WhatsApp?",
-				a: "During early access Ryu links a WhatsApp Business Account and assigns its number to your organization as a sender. Business-initiated messages use approved templates; free-form text is allowed within 24 hours of the contact's last message.",
+				question: "How do I get WhatsApp?",
+				answer:
+					"During early access Ryu links a WhatsApp Business Account and assigns its number to your organization as a sender. Business-initiated messages use approved templates; free-form text is allowed within 24 hours of the contact's last message.",
 			},
 		],
 		cta: {
@@ -296,16 +304,19 @@ export const NOTIFY_TO_HIRE: Product[] = [
 		},
 		faq: [
 			{
-				q: "Does Sites generate pages with AI on its own?",
-				a: "No. AI page generation and the Sites management UI are in Ryu Desktop. A self‑hosted install accepts finished HTML through its API.",
+				question: "Does Sites generate pages with AI on its own?",
+				answer:
+					"No. AI page generation and the Sites management UI are in Ryu Desktop. A self‑hosted install accepts finished HTML through its API.",
 			},
 			{
-				q: "Can one Sites setup serve several customers?",
-				a: "No. Each self‑hosted setup serves one customer. Run a separate one for each customer you need to keep apart.",
+				question: "Can one Sites setup serve several customers?",
+				answer:
+					"No. Each self‑hosted setup serves one customer. Run a separate one for each customer you need to keep apart.",
 			},
 			{
-				q: "Can I use a custom domain?",
-				a: "Not yet. You can add a domain and verify you own it, but it can't serve traffic until HTTPS support ships. Use a subdomain of your Sites address for now.",
+				question: "Can I use a custom domain?",
+				answer:
+					"Not yet. You can add a domain and verify you own it, but it can't serve traffic until HTTPS support ships. Use a subdomain of your Sites address for now.",
 			},
 		],
 		cta: {

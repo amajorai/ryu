@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export default defineConfig({
 	testDir: ".",
@@ -8,7 +9,7 @@ export default defineConfig({
 	timeout: 90_000,
 	expect: { timeout: 15_000 },
 	retries: 0,
-	outputDir: "../../../docs/proof/dev-reload-recovery/results",
+	outputDir: proofEvidencePath("dev-reload-recovery/results"),
 	use: {
 		...devices["Desktop Chrome"],
 		baseURL: "http://127.0.0.1:5198",

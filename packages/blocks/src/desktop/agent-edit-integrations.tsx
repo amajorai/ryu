@@ -107,7 +107,7 @@ export function AgentIntegrationsView({
 						))}
 						<Button
 							aria-label={copied ? "Code sample copied" : "Copy code sample"}
-							className="ml-auto"
+							className="ms-auto"
 							onClick={onCopy}
 							size="icon-sm"
 							type="button"

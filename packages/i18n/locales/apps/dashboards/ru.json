@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "Виджеты агентов недоступны на этом узле: для их обновления нужны делегированные права выполнения от имени пользователя, которых нет у заданий обновления. Используйте источник http, composio или статический источник.",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "Виджеты мониторинга пока недоступны: нет возможности хоста, позволяющей приложению читать результаты мониторинга. Используйте источник http, composio или статический источник.",
+  "The Composio action failed: {error}": "Действие Composio завершилось с ошибкой: {error}",
+  "The Composio action returned HTTP {status}.": "Действие Composio вернуло HTTP {status}.",
+  "The web source redirected, and redirects are not allowed.": "Веб-источник выполнил перенаправление, но перенаправления не допускаются.",
+  "The web source returned HTTP {status}.": "Веб-источник вернул HTTP {status}.",
+  "The web source sent a reply Ryu could not read: {error}": "Веб-источник прислал ответ, который Ryu не смог прочитать: {error}",
+  "The widget's agent run failed: {error}": "Запуск агента виджета завершился с ошибкой: {error}",
+  "Widget “{title}” broke": "Виджет «{title}» перестал работать",
+  "Widget “{title}” recovered": "Виджет «{title}» восстановлен",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Виджеты рабочих процессов пока недоступны: нет возможности хоста, позволяющей приложению запускать сохранённый рабочий процесс. Используйте источник http, composio или статический источник.",
+  "dashboard not found": "панель мониторинга не найдена",
+  "kind is required": "требуется указать тип",
+  "name is required": "требуется имя",
+  "not found": "не найдено"
+}

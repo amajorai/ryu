@@ -7,6 +7,7 @@
 
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
+import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { X } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
@@ -20,8 +21,9 @@ import {
 } from "./model.ts";
 import { HealthDot, KIND_ICON, useNodeCounters } from "./nodes.tsx";
 
+/** Sub-cent costs keep four decimals; the UI locale sets the separators. */
 function usdFromMicro(micro: number): string {
-	return `$${(micro / 1_000_000).toFixed(micro < 10_000 ? 4 : 2)}`;
+	return formatMicroUsd(micro, "USD", micro < 10_000 ? 4 : 2);
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -44,6 +46,7 @@ export function CanvasNodeSummary({
 	store: CanvasLiveStore;
 }) {
 	const counters = useNodeCounters(store, node.id);
+	const tl = useLiteralMessages();
 	if (!(counted && carriesRequests(node))) {
 		return node.health ? (
 			<dl className="grid grid-cols-3 gap-3">
@@ -56,7 +59,10 @@ export function CanvasNodeSummary({
 			<Stat label="Requests" value={formatCount(counters.requests)} />
 			<Stat label="Blocked" value={formatCount(counters.blocked)} />
 			{typeof counters.p50Ms === "number" ? (
-				<Stat label="Median" value={`${Math.round(counters.p50Ms)} ms`} />
+				<Stat
+					label="Median"
+					value={tl("{ms} ms", { ms: Math.round(counters.p50Ms) })}
+				/>
 			) : null}
 			{counters.costMicroUsd ? (
 				<Stat label="Cost" value={usdFromMicro(counters.costMicroUsd)} />

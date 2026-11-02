@@ -312,7 +312,7 @@ export function RecordDetail({
 
 			<div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
 				{/* Fields + relations */}
-				<aside className="scroll-fade min-h-0 overflow-y-auto border-b p-4 lg:border-r lg:border-b-0">
+				<aside className="scroll-fade min-h-0 overflow-y-auto border-b p-4 lg:border-e lg:border-b-0">
 					<h3 className="mb-1 font-semibold text-foreground text-sm">
 						Details
 					</h3>
@@ -343,7 +343,7 @@ export function RecordDetail({
 											/>
 										) : (
 											<button
-												className="w-full rounded-lg px-1 py-0.5 text-left hover:bg-muted"
+												className="w-full rounded-lg px-1 py-0.5 text-start hover:bg-muted"
 												onClick={() => setEditingField(field.id)}
 												type="button"
 											>

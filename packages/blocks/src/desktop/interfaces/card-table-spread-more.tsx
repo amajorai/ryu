@@ -71,7 +71,7 @@ export function FanMoreCard({
 					<CardBack className="absolute inset-0 size-full rounded-xl border-[5px] shadow-none" />
 					<span className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center">
 						<span className="rounded-md bg-card px-2 py-1 font-medium text-card-foreground text-sm tabular-nums shadow-sm transition-colors group-hover/more:bg-muted">
-							{tl("{count} more", { count: String(count) })}
+							{tl("{count, plural, other {# more}}", { count })}
 						</span>
 					</span>
 				</PopoverTrigger>

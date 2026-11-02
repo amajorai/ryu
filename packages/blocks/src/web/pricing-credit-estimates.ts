@@ -1,3 +1,4 @@
+import { formatNumberValue } from "@ryu/i18n/format-intl";
 import {
 	BUSINESS_CREDIT_BUNDLE_SIZE,
 	businessIncludedCreditUsd,
@@ -126,19 +127,25 @@ export function planCreditEstimates(): PlanCreditEstimate[] {
 	}));
 }
 
-const countFormat = new Intl.NumberFormat("en-US");
-
 /**
  * A rounded-down count for "about" copy: whole numbers below 100, otherwise
- * two significant figures ("9,727" becomes "9,700").
+ * two significant figures (9,727 becomes 9,700).
  */
-export function approximateCount(value: number): string {
+export function approximateValue(value: number): number {
 	if (!(Number.isFinite(value) && value > 0)) {
-		return "0";
+		return 0;
 	}
 	if (value < 100) {
-		return countFormat.format(Math.floor(value));
+		return Math.floor(value);
 	}
 	const magnitude = 10 ** (Math.floor(Math.log10(value)) - 1);
-	return countFormat.format(Math.floor(value / magnitude) * magnitude);
+	return Math.floor(value / magnitude) * magnitude;
+}
+
+/** {@link approximateValue} grouped for `locale` ("9,700", "9.700"). */
+export function approximateCount(
+	value: number,
+	locale: string | null | undefined = "en"
+): string {
+	return formatNumberValue(locale, approximateValue(value));
 }

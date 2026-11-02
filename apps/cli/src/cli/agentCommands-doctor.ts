@@ -1,6 +1,6 @@
 // `ryu doctor agents`: probe Core's MCP endpoint and each coding agent's entry.
 
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import {
 	BIN,
 	connectionTarget,
@@ -274,7 +274,11 @@ export async function buildAgentsDoctorReport(
 		if (!info.url?.startsWith(mcpBase)) {
 			report.status = "other-node";
 			report.notes.push(
-				`The '${MCP_SERVER_NAME}' entry points at ${info.url ?? "no URL"}, not at ${mcpBase}…`
+				tf("The '{MCP_SERVER_NAME}' entry points at {url}, not at {mcpBase}…", {
+					MCP_SERVER_NAME,
+					url: info.url ?? tr("no URL"),
+					mcpBase,
+				})
 			);
 			report.fix = `${BIN} connect ${agent.id}${report.managedByRyu ? "" : " --force"}`;
 			continue;
@@ -289,7 +293,11 @@ export async function buildAgentsDoctorReport(
 				credential = fromEnv;
 			} else {
 				report.notes.push(
-					`The entry reads the token from $${TOKEN_ENV_VAR}, which is not set in this shell; ${agent.label} needs it in its environment.`
+					tf(
+						// biome-ignore lint/suspicious/noTemplateCurlyInString: ICU message with a literal dollar sign before the env var placeholder.
+						"The entry reads the token from ${TOKEN_ENV_VAR}, which is not set in this shell; {label} needs it in its environment.",
+						{ TOKEN_ENV_VAR, label: agent.label }
+					)
 				);
 			}
 		} else {
@@ -326,7 +334,11 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
 
 export function renderAgentsDoctorReport(report: AgentsDoctorReport): string {
 	const lines = [
-		`Ryu MCP endpoint ${report.endpoint.url}: ${report.endpoint.status === "ok" ? "ok" : report.endpoint.status} (${report.endpoint.detail})`,
+		tf("Ryu MCP endpoint {url}: {status} ({detail})", {
+			url: report.endpoint.url,
+			status: report.endpoint.status,
+			detail: report.endpoint.detail,
+		}),
 		"",
 		formatTable(
 			["AGENT", "ON PATH", "RYU ENTRY", "CONFIG"],

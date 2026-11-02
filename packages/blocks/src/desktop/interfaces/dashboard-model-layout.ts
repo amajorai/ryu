@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 // ---------------------------------------------------------------------------
 // Widget catalog and layout
 // ---------------------------------------------------------------------------
@@ -17,6 +18,20 @@ export const WIDGET_SIZE_SHORT: Record<WidgetSize, string> = {
 	m: "M",
 	s: "S",
 };
+
+/** The label in the UI language, for copy that interpolates it. */
+export function widgetSizeName(value: WidgetSize): string {
+	switch (value) {
+		case "full":
+			return tr("full width");
+		case "l":
+			return tr("large");
+		case "m":
+			return tr("medium");
+		default:
+			return tr("small");
+	}
+}
 
 export const WIDGET_SIZE_NAMES: Record<WidgetSize, string> = {
 	full: "full width",

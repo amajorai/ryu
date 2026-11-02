@@ -246,7 +246,7 @@ export function AvailableUpdates({ compact = false }: { compact?: boolean }) {
 				<div className="flex flex-col">
 					<span className="font-medium text-sm">
 						Available updates
-						<span className="ml-1.5 text-muted-foreground tabular-nums">
+						<span className="ms-1.5 text-muted-foreground tabular-nums">
 							{updates.length}
 						</span>
 					</span>

@@ -82,7 +82,7 @@ export function DetailBody({
 
 	return (
 		<div className="flex flex-col gap-6 p-5 lg:p-7">
-			<header className="flex items-start gap-4 pr-10">
+			<header className="flex items-start gap-4 pe-10">
 				<div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
 					<DetailLogo iconUrl={iconUrl} name={name} />
 				</div>

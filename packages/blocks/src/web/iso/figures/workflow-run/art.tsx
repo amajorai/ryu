@@ -1,7 +1,8 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Line, Solid } from "../../kit/react/draw.tsx";
 import { DISCS, depthAt, EDGES, edgePath, placeOf } from "./geometry.ts";
 import { WorkflowRunLive } from "./live.tsx";
-import { WEBHOOK } from "./model.ts";
+import { describeWorkflowRun, WEBHOOK } from "./model.ts";
 
 /**
  * The static drawing: hairline edges, then the node discs far to near. Every part sits in
@@ -37,9 +38,11 @@ const STATIC = (
 	</>
 );
 
-const DESCRIPTION =
-	"One Ryu workflow run, drawn as a marble rolling through seven nodes in order: input, prompt, a condition, then one of two branches (tool or webhook), an approval gate and output. The condition takes the tool branch, so the webhook branch fades out as skipped. The marble waits at the approval gate until the run is approved. A pin rises on each node as it finishes: the checkpoint Core writes to disk after every node, which is what lets an interrupted run resume. Every checkpoint is kept; only the latest pin is drawn standing. This is a slowed simulation with an example graph. Arrow keys pick a node to hear its state.";
-
 export function WorkflowRunArt() {
-	return <WorkflowRunLive description={DESCRIPTION}>{STATIC}</WorkflowRunLive>;
+	const tl = useLiteralMessages();
+	return (
+		<WorkflowRunLive description={describeWorkflowRun(tl)}>
+			{STATIC}
+		</WorkflowRunLive>
+	);
 }

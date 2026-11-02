@@ -341,7 +341,7 @@ export function FeedInterface({
 												aria-hidden="true"
 												className="relative @max-[700px]:flex hidden h-[53px] items-center justify-center px-4"
 											>
-												<span className="absolute left-4">
+												<span className="absolute start-4">
 													<FeedAvatar author={YOU} size="sm" />
 												</span>
 												<Logo size="28px" tone="foreground" variant="outline" />
@@ -427,7 +427,7 @@ export function FeedInterface({
 										<button
 											aria-label="Back to feed"
 											className={cn(
-												"-ml-2 flex size-9 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted",
+												"-ms-2 flex size-9 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted",
 												FEED_FOCUS
 											)}
 											onClick={port.closeThread}
@@ -436,7 +436,7 @@ export function FeedInterface({
 										>
 											<ArrowLeft
 												aria-hidden="true"
-												className="size-5"
+												className="size-5 rtl:-scale-x-100"
 												strokeWidth={2.25}
 											/>
 										</button>

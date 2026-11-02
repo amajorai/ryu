@@ -98,7 +98,7 @@ function AccountTargetItem({
 					/>
 				)}
 			</span>
-			<span className="w-full truncate text-left font-normal text-muted-foreground text-xs">
+			<span className="w-full truncate text-start font-normal text-muted-foreground text-xs">
 				{description}
 			</span>
 		</DropdownMenuItem>
@@ -279,7 +279,7 @@ function AccountRow({
 					onSelect={() =>
 						commandNavigation.push({
 							body: targetPage,
-							title: `Set ${account.label}`,
+							title: tl("Set {label}", { label: account.label }),
 						})
 					}
 				>

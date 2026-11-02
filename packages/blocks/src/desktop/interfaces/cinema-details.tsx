@@ -20,7 +20,6 @@ import {
 	cinemaStatusText,
 } from "./cinema-model.ts";
 import { CinemaBoxart } from "./cinema-poster.tsx";
-import { compactAge } from "./interface-renderer.ts";
 
 const STATUS_TONE: Record<CinemaTitle["status"], string> = {
 	attention: "text-destructive",
@@ -104,7 +103,7 @@ export function CinemaDetails({
 	const thread = title.thread;
 	const agent = title.agents[0];
 	const names = cinemaNames(title.agents);
-	const age = cinemaAge(compactAge(thread.updatedAt, now));
+	const age = cinemaAge(thread.updatedAt, now);
 
 	// Focus lands on Close, and each title (including one picked from "More
 	// like this") starts at the top.
@@ -171,7 +170,7 @@ export function CinemaDetails({
 					/>
 					<div
 						className={cn(
-							"absolute bottom-0 left-0 flex flex-col items-start gap-5",
+							"absolute start-0 bottom-0 flex flex-col items-start gap-5",
 							compact ? "w-full px-4 pb-4" : "w-3/5 px-12 pb-10"
 						)}
 					>
@@ -181,6 +180,7 @@ export function CinemaDetails({
 									"line-clamp-3 text-balance font-bold tracking-tight",
 									compact ? "text-2xl leading-8" : "text-4xl leading-[44px]"
 								)}
+								data-ryu-i18n="off"
 							>
 								{thread.title}
 							</span>
@@ -211,7 +211,7 @@ export function CinemaDetails({
 					</div>
 					<button
 						aria-label="Close"
-						className="absolute top-4 right-4 flex size-9 items-center justify-center rounded-full bg-card text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+						className="absolute end-4 top-4 flex size-9 items-center justify-center rounded-full bg-card text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={onClose}
 						ref={closeRef}
 						type="button"
@@ -243,10 +243,10 @@ export function CinemaDetails({
 							</p>
 							{thread.lastMessage ? (
 								<blockquote className="text-base text-foreground leading-7">
-									<span className="mr-2 font-semibold">
+									<span className="me-2 font-semibold">
 										{cinemaLastSpeaker(title)}
 									</span>
-									{thread.lastMessage}
+									<span data-ryu-i18n="off">{thread.lastMessage}</span>
 								</blockquote>
 							) : (
 								<p className="text-base text-muted-foreground leading-7">
@@ -301,7 +301,7 @@ export function CinemaDetails({
 														{cinemaStatusText(item)}
 													</span>
 													<span className="truncate text-foreground/70 text-sm leading-5">
-														{cinemaAge(compactAge(item.thread.updatedAt, now))}
+														{cinemaAge(item.thread.updatedAt, now)}
 													</span>
 												</span>
 												<button
@@ -320,7 +320,10 @@ export function CinemaDetails({
 												</button>
 											</div>
 											{item.thread.lastMessage ? (
-												<p className="line-clamp-4 text-foreground/75 text-sm leading-5">
+												<p
+													className="line-clamp-4 text-foreground/75 text-sm leading-5"
+													data-ryu-i18n="off"
+												>
 													{item.thread.lastMessage}
 												</p>
 											) : null}

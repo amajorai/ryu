@@ -3,11 +3,11 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { MessageSquarePlus } from "lucide-react";
 import { BoardAvatar } from "./board-avatar.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 import {
 	type MissionStation,
 	missionThreadTitle,
-	STATION_STATE_LABELS,
+	stationStateLabel,
 } from "./mission-control-model.ts";
 import {
 	Lamp,
@@ -18,37 +18,46 @@ import {
 
 function ageLabel(iso: string | null, now: number, tl: LiteralMessage): string {
 	if (!iso) {
-		return "Never active";
+		return tl("Never active");
 	}
-	const age = compactAge(iso, now);
-	return age === "now" ? "Active now" : tl("Active {age} ago", { age });
+	if (now - Date.parse(iso) < 60_000) {
+		return tl("Active now");
+	}
+	return tl("Active {age}", { age: relativeAge(iso, now) });
 }
 
 /**
  * The latest line of the station's thread, attributed when it was yours. A
  * closing period is dropped so a clamp never ends on ".…".
  */
-function previewLine(station: MissionStation): string | null {
+function previewLine(
+	station: MissionStation,
+	tl: LiteralMessage
+): string | null {
 	const message = station.focusThread?.lastMessage?.trim().replace(/\.$/, "");
 	if (!message) {
 		return null;
 	}
 	return station.focusThread?.lastMessageRole === "user"
-		? `You: ${message}`
+		? tl("You: {message}", { message })
 		: message;
 }
 
-function stationSummary(station: MissionStation): string {
+function stationSummary(station: MissionStation, tl: LiteralMessage): string {
 	const { counts, threadCount } = station;
 	if (threadCount === 0) {
-		return "No threads";
+		return tl("No threads");
 	}
-	const parts = [`${threadCount} ${threadCount === 1 ? "thread" : "threads"}`];
+	const parts = [
+		tl("{count, plural, one {# thread} other {# threads}}", {
+			count: threadCount,
+		}),
+	];
 	if (counts.attention > 0) {
-		parts.push(`${counts.attention} failed`);
+		parts.push(tl("{count} failed", { count: counts.attention }));
 	}
 	if (counts["your-turn"] > 0) {
-		parts.push(`${counts["your-turn"]} your turn`);
+		parts.push(tl("{count} your turn", { count: counts["your-turn"] }));
 	}
 	return parts.join(" · ");
 }
@@ -73,23 +82,29 @@ function Station({
 		focusThread && activeThreadId && focusThread.id === activeThreadId
 	);
 	const title = focusThread ? missionThreadTitle(focusThread) : null;
-	const preview = previewLine(station);
+	const preview = previewLine(station, tl);
 	return (
-		<li className="min-w-0 border-border border-r border-b">
+		<li className="min-w-0 border-border border-e border-b">
 			<article
 				aria-current={current ? "true" : undefined}
-				aria-label={`${agent.name}, ${STATION_STATE_LABELS[state]}`}
+				aria-label={tl("{name}, {state}", {
+					name: agent.name,
+					state: stationStateLabel(state, tl),
+				})}
 				className={cn(
 					"group/station relative flex h-full min-w-0 flex-col gap-2 p-3",
 					current &&
-						"bg-muted/60 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary"
+						"bg-muted/60 before:absolute before:inset-y-0 before:start-0 before:w-0.5 before:bg-primary"
 				)}
 				data-agent-id={agent.id}
 				data-state={state}
 			>
 				<div className="flex min-w-0 items-center gap-2">
 					<BoardAvatar agent={agent} name={agent.name} size={20} />
-					<span className="min-w-0 flex-1 truncate font-medium text-[13px] text-foreground leading-5">
+					<span
+						className="min-w-0 flex-1 truncate font-medium text-[13px] text-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{agent.name}
 					</span>
 					<span className="flex shrink-0 items-center gap-1.5">
@@ -97,7 +112,7 @@ function Station({
 						<span
 							className={cn("font-medium text-xs leading-5", TONE_TEXT[tone])}
 						>
-							{STATION_STATE_LABELS[state]}
+							{stationStateLabel(state, tl)}
 						</span>
 					</span>
 				</div>
@@ -107,15 +122,21 @@ function Station({
 							name: agent.name,
 							title,
 						})}
-						className="group/current -mx-1.5 flex min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+						className="group/current -mx-1.5 flex min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={() => onOpen(focusThread.id)}
 						type="button"
 					>
-						<span className="truncate text-[13px] text-foreground leading-5">
+						<span
+							className="truncate text-[13px] text-foreground leading-5"
+							data-ryu-i18n="off"
+						>
 							{title}
 						</span>
-						<span className="@min-[1100px]/wall:line-clamp-2 line-clamp-1 text-muted-foreground text-xs leading-4">
-							{preview ?? "No messages yet"}
+						<span
+							className="@min-[1100px]/wall:line-clamp-2 line-clamp-1 text-muted-foreground text-xs leading-4"
+							data-ryu-i18n="off"
+						>
+							{preview ?? tl("No messages yet")}
 						</span>
 					</button>
 				) : (
@@ -125,7 +146,7 @@ function Station({
 				)}
 				<div className="mt-auto flex min-w-0 flex-col gap-2">
 					<div className="flex h-5 min-w-0 items-center justify-between gap-2 text-muted-foreground text-xs tabular-nums">
-						<span className="truncate">{stationSummary(station)}</span>
+						<span className="truncate">{stationSummary(station, tl)}</span>
 						<span className="relative flex shrink-0 items-center justify-end">
 							{/* The age gives way to the action at once, never mid-fade under
 							    a focus ring. */}
@@ -134,7 +155,7 @@ function Station({
 							</span>
 							<Button
 								aria-label={tl("Message {name}", { name: agent.name })}
-								className="absolute right-0 text-muted-foreground opacity-0 focus-visible:opacity-100 group-focus-within/station:opacity-100 group-hover/station:opacity-100"
+								className="absolute end-0 text-muted-foreground opacity-0 focus-visible:opacity-100 group-focus-within/station:opacity-100 group-hover/station:opacity-100"
 								onClick={() => onMessage(agent.id)}
 								size="icon-xs"
 								title={tl("New thread with {name}", { name: agent.name })}

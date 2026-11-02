@@ -47,11 +47,13 @@ describe("DownloadOsLabel", () => {
 		expect(logo?.[1]).toContain("opacity-0");
 	});
 
-	test('keeps a visible gap between "Download for" and the OS logo', () => {
+	test('keeps a visible gap between "Download for" and the OS logo, on the inline end', () => {
 		const html = renderToStaticMarkup(
 			<DownloadOsLabel arch={null} detected iconSize={16} os="macos" />
 		);
 		const lead = html.match(/<span class="([^"]*)" data-slot="download-for">/);
-		expect(lead?.[1]).toContain("mr-2.5");
+		// Logical margin, so the gap stays between the words and the logo in RTL.
+		expect(lead?.[1]).toContain("me-2.5");
+		expect(lead?.[1]).not.toContain("mr-2.5");
 	});
 });

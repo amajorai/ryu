@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -23,7 +24,6 @@ import {
 	recordsClockTime,
 	recordsFullTime,
 	recordsLatestLine,
-	recordsPlural,
 	recordsRunTime,
 	recordsThreadAgents,
 	recordsThreadTitle,
@@ -107,7 +107,7 @@ function MetaDot() {
 
 /** Shared box for timeline entries, so threads and runs line up exactly. */
 const ENTRY_BOX =
-	"flex min-w-0 flex-1 flex-col gap-1 rounded-md px-3 py-2 text-left";
+	"flex min-w-0 flex-1 flex-col gap-1 rounded-md px-3 py-2 text-start";
 
 function ThreadEntry({
 	active,
@@ -165,11 +165,16 @@ function ThreadEntry({
 					) : null}
 					<MetaDot />
 					<span className="shrink-0 text-muted-foreground tabular-nums">
-						{recordsPlural(thread.messageCount, "message")}
+						{tr("{count, plural, one {# message} other {# messages}}", {
+							count: thread.messageCount,
+						})}
 					</span>
 				</span>
 				{latest ? (
-					<span className="line-clamp-2 text-[13px] text-muted-foreground leading-5">
+					<span
+						className="line-clamp-2 text-[13px] text-muted-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{latest}
 					</span>
 				) : null}
@@ -293,10 +298,10 @@ export function RecordsActivity({
 	if (days.length === 0 && upcoming.length === 0) {
 		return (
 			<Empty
-				className="items-start p-0 text-left"
+				className="items-start p-0 text-start"
 				data-testid="records-activity-empty"
 			>
-				<EmptyHeader className="items-start text-left">
+				<EmptyHeader className="items-start text-start">
 					<EmptyTitle className="text-[13px]">No activity yet</EmptyTitle>
 					<EmptyDescription className="text-[13px]">
 						{tl("Threads with {name} are listed here, newest first.", {

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { useId } from "react";
@@ -14,8 +15,10 @@ function cadenceOf(run: TickerRun): string {
 		return event.label.trim();
 	}
 	return event.count && event.count > 1
-		? `${event.count} times a day`
-		: "Scheduled";
+		? tr("{count, plural, one {# time a day} other {# times a day}}", {
+				count: event.count,
+			})
+		: tr("Scheduled");
 }
 
 /**
@@ -28,7 +31,9 @@ function RunBody({ now, run }: { now: number; run: TickerRun }) {
 	return (
 		<>
 			<span className="flex min-w-0 flex-col gap-0.5">
-				<span className="truncate text-foreground text-sm">{event.title}</span>
+				<span className="truncate text-foreground text-sm" data-ryu-i18n="off">
+					{event.title}
+				</span>
 				<span className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground text-xs">
 					{run.symbol ? (
 						<span className={cn(SYMBOL_TEXT, "text-xs")}>{run.symbol}</span>

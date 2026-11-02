@@ -2,15 +2,13 @@ import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PAGE_URL = "/rules-agent-edit-panel-proof.html";
 const AGENT_ID = "rules-panel-proof-agent";
 const PREFERENCE_KEY = `rules.agent.${encodeURIComponent(AGENT_ID)}`;
 const STORAGE_KEY = "ryu:e2e:rules-agent-edit-panel";
-const EVIDENCE_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 const RULES_HOOK_PATH = path.resolve(
 	import.meta.dirname,
 	"../../../plugins-store/plugins/rules/hooks/inject.js"

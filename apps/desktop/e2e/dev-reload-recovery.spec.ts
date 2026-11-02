@@ -3,11 +3,9 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { z } from "zod";
 import type { runSummarySchema } from "../src/lib/api/run-wire-contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/dev-reload-recovery"
-);
+const proofDir = proofEvidencePath("dev-reload-recovery");
 const story = "/dev-reload-recovery-proof.html";
 
 test("reload recovers every interrupted dev chat once and leaves surviving and stopped turns alone", async ({

@@ -262,7 +262,7 @@ export function MessagingAgentRowBody({
 						variant="ghost-muted"
 					>
 						<HugeiconsIcon
-							className={`size-3.5 transition-transform duration-150 ${threadsExpanded ? "" : "-rotate-90"}`}
+							className={`size-3.5 transition-transform duration-150 ${threadsExpanded ? "" : "-rotate-90 rtl:rotate-90"}`}
 							icon={ArrowDown01Icon}
 						/>
 					</Button>
@@ -342,7 +342,7 @@ export function AgentThreadRow({
 					{/* thread row owns nested menu controls */}
 					<div
 						aria-label={tl("Open thread: {title}", { title: thread.title })}
-						className="group/thread relative flex min-h-9 w-full items-center gap-2 overflow-hidden rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
+						className="group/thread relative flex min-h-9 w-full items-center gap-2 overflow-hidden rounded-lg px-2 py-1.5 text-start transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0"
 						data-testid={`agent-thread-row-${thread.id}`}
 						{...sidebarUnreadRowAttributes(isUnread)}
 						onClick={(event) => {
@@ -381,7 +381,7 @@ export function AgentThreadRow({
 						) : null}
 						<span
 							aria-hidden="true"
-							className="absolute top-1/2 -left-[5px] size-2 -translate-y-1/2 rounded-full bg-sidebar-foreground/35 ring-2 ring-sidebar"
+							className="absolute -start-[5px] top-1/2 size-2 -translate-y-1/2 rounded-full bg-sidebar-foreground/35 ring-2 ring-sidebar"
 						/>
 						<HugeiconsIcon
 							className={`size-3.5 shrink-0 ${forked ? "text-foreground" : "text-muted-foreground"}`}

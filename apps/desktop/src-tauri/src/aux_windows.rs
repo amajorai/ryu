@@ -1,5 +1,4 @@
-//! Auxiliary windows: the companion overlay, live-media PiP, and the Agent
-//! Browser stream probe.
+//! Auxiliary windows: the companion overlay, live-media PiP, and Agent Browser stream status.
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -48,6 +47,7 @@ pub(crate) fn toggle_companion_window(app: &tauri::AppHandle) {
                 .unwrap_or((1920.0 - COMPANION_WIDTH) / 2.0);
 
             match WebviewWindowBuilder::new(app, "companion", url)
+                // English fallback until the webview mounts; `useAuxWindowTitle` localizes it.
                 .title("Ryu Companion")
                 .inner_size(COMPANION_WIDTH, 80.0)
                 .position(companion_x, 40.0)
@@ -98,6 +98,7 @@ pub(crate) fn open_media_pip(app: tauri::AppHandle) -> Result<(), String> {
     };
 
     let win = WebviewWindowBuilder::new(&app, LABEL, url)
+        // English fallback until the webview mounts; `useAuxWindowTitle` localizes it.
         .title("Ryu Live Media")
         .inner_size(420.0, 280.0)
         .min_inner_size(280.0, 180.0)

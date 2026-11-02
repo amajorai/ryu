@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -5,7 +6,7 @@ import type {
 	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import { type ReactNode, useCallback, useId, useState } from "react";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import { agentById, relativeAge } from "./interface-renderer.ts";
 import { TIME_TEXT, WholeRowList } from "./mission-control-alerts-list.tsx";
 import { useNow } from "./mission-control-hooks.ts";
 import { countdown, countdownTicks, runWhen } from "./mission-control-model.ts";
@@ -15,7 +16,7 @@ function ownerName(
 	agentId: string | null,
 	snapshot: InterfaceSnapshot
 ): string {
-	return agentById(snapshot, agentId)?.name ?? "Workflow";
+	return agentById(snapshot, agentId)?.name ?? tr("Workflow");
 }
 
 /** Time column, then what ran and who: shared by upcoming and recent rows. */
@@ -25,10 +26,16 @@ const RUN_ROW =
 function RunText({ detail, title }: { detail: string; title: string }) {
 	return (
 		<span className="flex min-w-0 flex-col gap-0.5">
-			<span className="truncate font-medium text-[13px] text-foreground leading-5">
+			<span
+				className="truncate font-medium text-[13px] text-foreground leading-5"
+				data-ryu-i18n="off"
+			>
 				{title}
 			</span>
-			<span className="truncate text-muted-foreground text-xs leading-4">
+			<span
+				className="truncate text-muted-foreground text-xs leading-4"
+				data-ryu-i18n="off"
+			>
 				{detail}
 			</span>
 		</span>
@@ -36,7 +43,7 @@ function RunText({ detail, title }: { detail: string; title: string }) {
 }
 
 function runTitle(event: InterfaceEvent): string {
-	return event.title.trim() || "Scheduled run";
+	return event.title.trim() || tr("Scheduled run");
 }
 
 /** The next run's countdown: the one row that ticks every second. */
@@ -84,7 +91,7 @@ function UpcomingRow({
 			</span>
 			<RunText
 				detail={[
-					event.label || "One-off run",
+					event.label || tr("One-off run"),
 					repeat,
 					ownerName(event.agentId, snapshot),
 				]
@@ -108,7 +115,7 @@ function RecentRow({
 	const tl = useLiteralMessages();
 	const failed = event.outcome === "failure";
 	const at = event.end ?? event.start;
-	const age = compactAge(at, now);
+	const age = relativeAge(at, now);
 	return (
 		<li
 			className={RUN_ROW}
@@ -124,15 +131,13 @@ function RecentRow({
 					)}
 				>
 					<Lamp state={failed ? "failure" : "success"} />
-					{failed ? "Failed" : "Succeeded"}
+					{failed ? tl("Failed") : tl("Succeeded")}
 				</span>
-				<span className={cn("truncate leading-4", TIME_TEXT)}>
-					{age === "now" ? "just now" : tl("{age} ago", { age })}
-				</span>
+				<span className={cn("truncate leading-4", TIME_TEXT)}>{age}</span>
 			</span>
 			<RunText
 				detail={[
-					event.label || "Scheduled run",
+					event.label || tl("Scheduled run"),
 					ownerName(event.agentId, snapshot),
 				].join(" · ")}
 				title={runTitle(event)}
@@ -177,7 +182,7 @@ function RunsTabs({
 	return (
 		<span
 			aria-label="Scheduled runs"
-			className="-mr-1.5 flex items-center"
+			className="-me-1.5 flex items-center"
 			role="tablist"
 		>
 			{RUNS_TABS.map((tab) => {

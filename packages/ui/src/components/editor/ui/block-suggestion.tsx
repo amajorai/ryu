@@ -2,6 +2,7 @@
 
 import { acceptSuggestion, rejectSuggestion } from "@platejs/suggestion";
 import { SuggestionPlugin } from "@platejs/suggestion/react";
+import { useOptionalI18n } from "@ryu/i18n/react";
 import {
 	discussionPlugin,
 	type TDiscussion,
@@ -31,6 +32,7 @@ export function BlockSuggestionCard({
 	suggestion: ResolvedSuggestion;
 }) {
 	const { api, editor } = useEditorPlugin(SuggestionPlugin);
+	const locale = useOptionalI18n()?.locale ?? "en";
 
 	const userInfo = usePluginOption(discussionPlugin, "user", suggestion.userId);
 
@@ -102,7 +104,7 @@ export function BlockSuggestionCard({
 					</h4>
 					<div className="text-muted-foreground/80 text-xs leading-none">
 						<span className="me-1">
-							{formatCommentDate(new Date(suggestion.createdAt))}
+							{formatCommentDate(new Date(suggestion.createdAt), locale)}
 						</span>
 					</div>
 				</div>

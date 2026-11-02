@@ -15,7 +15,7 @@ test("pins an agent's acknowledgement to the opposite corner of the bubble", () 
 	);
 	expect(markup).toContain('data-slot="message-reaction-badge"');
 	expect(markup).toContain('aria-label="Reactions: 👍 1"');
-	expect(markup).toContain("-left-2");
+	expect(markup).toContain("-start-2");
 	expect(markup).toContain("👍");
 	// One reaction reads as just the emoji, the way a messaging app shows it.
 	expect(markup).not.toContain("tabular-nums");
@@ -33,7 +33,7 @@ test("summarises several reactions with a total", () => {
 			]}
 		/>
 	);
-	expect(markup).toContain("-right-2");
+	expect(markup).toContain("-end-2");
 	expect(markup).toContain('aria-label="Reactions: 👍 2, 🎉 1, 🙏 1, 😂 1"');
 	expect(markup).not.toContain(">😂<");
 	expect(markup).toContain(">5</span>");

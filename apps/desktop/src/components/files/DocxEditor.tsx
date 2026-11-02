@@ -1,4 +1,5 @@
 import { importDocx } from "@platejs/docx-io";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { EditorKit } from "@ryu/ui/components/editor/editor-kit.tsx";
 import { exportEditorDocx } from "@ryu/ui/components/editor/lib/export-editor-docx.ts";
 import {
@@ -29,6 +30,7 @@ interface DocxEditorProps {
 
 export const DocxEditor = forwardRef<FileEditorHandle, DocxEditorProps>(
 	function DocxEditor({ bytes, onDirty, onLoadError }, ref) {
+		const tl = useLiteralMessages();
 		const editor = usePlateEditor({
 			plugins: EditorKit,
 			value: [{ children: [{ text: "" }], type: "p" }],
@@ -89,7 +91,7 @@ export const DocxEditor = forwardRef<FileEditorHandle, DocxEditorProps>(
 						</FixedToolbar>
 					</div>
 					<EditorContainer className="min-h-0 flex-1 overflow-y-auto">
-						<Editor placeholder="Start writing…" />
+						<Editor placeholder={tl("Start writing…")} />
 					</EditorContainer>
 				</Plate>
 			</div>

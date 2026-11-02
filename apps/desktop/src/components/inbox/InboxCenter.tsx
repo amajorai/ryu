@@ -389,7 +389,7 @@ export function InboxCenter({
 						/>
 						{hidden > 0 && (
 							<button
-								className="rounded-(--radius-inbox-status) px-2 py-2 text-left text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
+								className="rounded-(--radius-inbox-status) px-2 py-2 text-start text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
 								onClick={showInbox ? openInbox : () => setOpen(false)}
 								type="button"
 							>

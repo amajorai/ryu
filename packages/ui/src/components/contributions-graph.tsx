@@ -146,7 +146,7 @@ export function ContributionsGraph({
 	};
 	const tooltipTags = {
 		count: (chunks: ReactNode) => (
-			<span className="mr-1 font-medium">{chunks}</span>
+			<span className="me-1 font-medium">{chunks}</span>
 		),
 		description: (chunks: ReactNode) => (
 			<span className={styles.tooltipDescription}>{chunks}</span>

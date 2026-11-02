@@ -33,10 +33,15 @@ mockIPC(async (command, args) => {
 		headers: { ...headers, "content-type": "application/json" },
 		body: JSON.stringify({ command, args }),
 	});
-	const body = (await response.json()) as { result?: unknown; error?: string };
+	const body = (await response.json()) as {
+		result?: unknown;
+		error?: unknown;
+	};
 	window.__fileTreeCompletions.push({ command, args });
 	if (!response.ok) {
-		throw new Error(body.error);
+		// Native refusals arrive as the coded `{ code, detail }` object Tauri
+		// rejects with; fixture-only refusals stay plain strings.
+		throw typeof body.error === "string" ? new Error(body.error) : body.error;
 	}
 	return body.result;
 });

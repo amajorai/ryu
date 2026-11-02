@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -22,24 +23,34 @@ import {
 	describeChange,
 	formatPrice,
 	TICKER_RANGE_LABELS,
-	TICKER_RANGE_NAMES,
 	type TickerQuote,
 	type TickerRange,
 	type TickerSort,
 	type TickerSortKey,
+	tickerRangeName,
 } from "./ticker-model.ts";
 import { ChangePill, Sparkline, SYMBOL_TEXT } from "./ticker-parts.tsx";
 
 const SORT_LABELS: Record<TickerSortKey, string> = {
-	change: "Change",
-	price: "Price",
-	symbol: "Symbol",
+	get change() {
+		return tr("Change");
+	},
+	get price() {
+		return tr("Price");
+	},
+	get symbol() {
+		return tr("Symbol");
+	},
 };
 
 /** What the market metaphor counts, explained where the numbers are read. */
 const SORT_HINTS: Partial<Record<TickerSortKey, string>> = {
-	change: "Messages in threads active today",
-	price: "Messages across the agent's threads",
+	get change() {
+		return tr("Messages in threads active today");
+	},
+	get price() {
+		return tr("Messages across the agent's threads");
+	},
 };
 
 /** Footer key hints: square-cornered keycaps with legible glyphs in every theme. */
@@ -207,7 +218,10 @@ function WatchRow({
 							/>
 						) : null}
 					</span>
-					<span className="w-full truncate text-muted-foreground text-xs">
+					<span
+						className="w-full truncate text-muted-foreground text-xs"
+						data-ryu-i18n="off"
+					>
 						{quote.agent.name}
 					</span>
 				</button>
@@ -250,7 +264,7 @@ function WatchRow({
 /** The sparkline column's heading, e.g. "Recent activity within the past 2 weeks". */
 function sparkHeaderText(range: TickerRange, tl: LiteralMessage): string {
 	return tl("Recent activity within the past {range}", {
-		range: TICKER_RANGE_NAMES[range],
+		range: tickerRangeName(range),
 	});
 }
 
@@ -337,7 +351,7 @@ export function TickerWatchlist({
 	return (
 		<section
 			aria-labelledby="ticker-watchlist-heading"
-			className="flex min-h-0 flex-col border-border bg-background md:w-[22rem] md:shrink-0 md:border-r xl:w-[25rem]"
+			className="flex min-h-0 flex-col border-border bg-background md:w-[22rem] md:shrink-0 md:border-e xl:w-[25rem]"
 			data-testid="ticker-watchlist"
 		>
 			<header className="flex h-11 shrink-0 items-center gap-2 border-border border-b px-4">

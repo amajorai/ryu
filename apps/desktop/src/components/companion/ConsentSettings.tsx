@@ -250,7 +250,7 @@ export default function ConsentSettings({
 				<p className="text-muted-foreground text-xs">
 					Comma-separated list of app names. Leave empty to allow all apps.
 					{allowlist.length > 0 && (
-						<span className="ml-1 font-medium text-foreground">
+						<span className="ms-1 font-medium text-foreground">
 							{tl(
 								"Active ({appCount, plural, one {{appLabel} app} other {{appLabel} apps}}).",
 								{

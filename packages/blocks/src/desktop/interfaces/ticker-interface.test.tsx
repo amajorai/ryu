@@ -390,9 +390,14 @@ describe("ticker model", () => {
 		expect(shownPercent(500, 7, 42)).toBe(null);
 		expect(shownPercent(20, 50, 60)).toBe(20);
 		expect(shownPercent(null, 50, 60)).toBe(null);
-		expect(spokenAge("1m")).toBe("1 minute ago");
-		expect(spokenAge("3h")).toBe("3 hours ago");
-		expect(spokenAge("now")).toBe("just now");
+		const at = (ms: number) => new Date(NOW - ms).toISOString();
+		expect(spokenAge(at(MINUTE), NOW)).toBe("1 minute ago");
+		expect(spokenAge(at(3 * HOUR), NOW)).toBe("3 hours ago");
+		expect(spokenAge(at(0), NOW)).toBe("just now");
+		expect(spokenAge("nope", NOW)).toBe("");
+		expect(spokenAge(at(3 * HOUR), NOW, "ja")).toBe("3 時間前");
+		expect(spokenAge(at(3 * HOUR), NOW, "de")).toBe("vor 3 Stunden");
+		expect(spokenAge(at(3 * HOUR), NOW, "ar")).toBe("قبل 3 ساعات");
 	});
 
 	test("an agent with no activity is flat at zero", () => {

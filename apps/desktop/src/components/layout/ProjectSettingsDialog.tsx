@@ -288,7 +288,9 @@ export function ProjectSettingsDialog({
 			);
 			onOpenChange(false);
 			toast.success(
-				existed ? `Saved ${fileName}` : `Created ${basename(targetPath)}`,
+				existed
+					? tl("Saved {fileName}", { fileName })
+					: tl("Created {file}", { file: basename(targetPath) }),
 				{
 					description: existed
 						? "Project instructions updated."
@@ -370,7 +372,7 @@ export function ProjectSettingsDialog({
 							<Label htmlFor="project-settings-instructions">
 								Instructions
 								{!existed && markdown !== null ? (
-									<span className="ml-2 font-normal text-muted-foreground">
+									<span className="ms-2 font-normal text-muted-foreground">
 										{tl("— will create {fileName} on save", { fileName })}
 									</span>
 								) : null}

@@ -142,3 +142,26 @@ test("a session with a user hands that account to the subscription lookup", asyn
 
 	expect(subscriptionQueries.at(-1)).toEqual({ accountId: "user-1" });
 });
+
+test("signing in after a signed-out render keeps the menu's hooks in order", async () => {
+	// Signed out, the menu renders nothing and returns early. Every hook must
+	// still have run by then, or the signed-in render that follows calls more
+	// hooks than the previous one and React throws.
+	session = null;
+	useAppStore.setState({ isAuthenticated: false, oidcUser: null });
+	await renderNavUser();
+	expect(
+		container.querySelector("[data-testid='ryu-os-user-navigation']")
+	).toBeNull();
+
+	session = {
+		user: { id: "user-2", name: "Lin", email: "lin@example.test", image: null },
+	};
+	await act(async () => {
+		useAppStore.setState({ isAuthenticated: true });
+	});
+	await renderNavUser();
+	expect(
+		container.querySelector("[data-testid='ryu-os-user-navigation']")
+	).not.toBeNull();
+});

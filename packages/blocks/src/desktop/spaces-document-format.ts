@@ -1,3 +1,5 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import type { SpaceDocumentRow } from "./spaces-types.ts";
 
 /** A page preview is only meaningful for the first-party Markdown page kind. */
@@ -5,7 +7,10 @@ export function isMarkdownPage(doc: SpaceDocumentRow): boolean {
 	return doc.kind === "page" && (!doc.rawKind || doc.rawKind === "page");
 }
 
-export function formatDocumentDate(timestamp: number | undefined): string {
+export function formatDocumentDate(
+	timestamp: number | undefined,
+	locale: string = activeLocale()
+): string {
 	if (!timestamp) {
 		return "—";
 	}
@@ -13,7 +18,7 @@ export function formatDocumentDate(timestamp: number | undefined): string {
 	if (Number.isNaN(date.valueOf())) {
 		return "—";
 	}
-	return new Intl.DateTimeFormat(undefined, {
+	return dateFormatter(locale, {
 		day: "numeric",
 		month: "short",
 		year: "numeric",
@@ -24,16 +29,11 @@ export function formatDocumentSize(bytes: number | null | undefined): string {
 	if (bytes === null || bytes === undefined || bytes <= 0) {
 		return "—";
 	}
-	const units = ["B", "KB", "MB", "GB"];
-	let value = bytes;
-	let unit = 0;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit += 1;
-	}
-	const rounded =
-		value >= 10 || Number.isInteger(value) ? Math.round(value) : value;
-	return `${Number(rounded.toFixed(1))} ${units[unit]}`;
+	return formatByteSize(bytes, activeLocale(), {
+		fractionDigits: (value) => (value >= 10 || Number.isInteger(value) ? 0 : 1),
+		maxUnit: "gigabyte",
+		trimZeros: true,
+	});
 }
 
 export function documentTypeLabel(doc: SpaceDocumentRow): string {

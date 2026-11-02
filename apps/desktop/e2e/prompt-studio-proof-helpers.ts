@@ -1,11 +1,11 @@
 // Shared helpers for the Prompt Studio proof specs (split from
 // prompt-studio-proof.spec.ts to stay under the file size limit).
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { expect } from "@playwright/test";
 import { z } from "zod";
 import { pluginDocumentSchema } from "../src/lib/api/plugin-wire-values.ts";
 import type { PromptStudioFixtureHooks } from "./prompt-studio-fixture-contract.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare global {
 	interface Window {
@@ -37,11 +37,7 @@ export const exportedPromptFixtureSchema = z.object({
 });
 
 export const evidence = (name: string) =>
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 export async function readProof(page: import("@playwright/test").Page) {
 	return await page.evaluate(() => window.__promptStudioProof.snapshot());

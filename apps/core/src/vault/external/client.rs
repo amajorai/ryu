@@ -214,6 +214,8 @@ impl<'a> Session<'a> {
                         json!({ "role_id": credentials.role_id, "secret_id": credentials.secret_id }),
                     )
                 } else {
+                    // Checked again here: a stored record may predate the pin.
+                    super::k8s_origin::check(&self.base)?;
                     let jwt = read_k8s_jwt(&k8s_jwt_path()).await?;
                     ("kubernetes", json!({ "role": self.store.role, "jwt": jwt }))
                 };

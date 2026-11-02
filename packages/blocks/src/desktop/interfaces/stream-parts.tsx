@@ -1,6 +1,7 @@
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { KeyboardEvent, ReactNode } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { STREAM_TEXT } from "./stream-post.tsx";
 import { STREAM_FOCUS } from "./stream-rail.tsx";
 
@@ -77,9 +78,10 @@ export function onStreamTabKeyDown<T extends string>(
 ): void {
 	const index = options.findIndex((option) => option.value === value);
 	let next = -1;
-	if (event.key === "ArrowRight") {
+	const key = logicalArrowKey(event.key, event.currentTarget);
+	if (key === "ArrowRight") {
 		next = (index + 1) % options.length;
-	} else if (event.key === "ArrowLeft") {
+	} else if (key === "ArrowLeft") {
 		next = (index - 1 + options.length) % options.length;
 	} else if (event.key === "Home") {
 		next = 0;

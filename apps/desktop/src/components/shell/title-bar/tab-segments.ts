@@ -71,55 +71,61 @@ export const COLOR_LABELS = {
 	orange: "Orange",
 } satisfies Record<TabGroupColor, string>;
 
-// A contiguous run of unpinned tabs: a single ungrouped tab, a group bracket, or
-// a split bracket — each with its members.
+// One cluster of unpinned tabs: a single ungrouped tab, a group bracket, or a
+// split bracket — each with its members.
 export type Segment =
 	| { type: "tab"; tab: Tab }
 	| { type: "group"; group: TabGroup; members: Tab[] }
 	| { type: "split"; split: Split; members: Tab[] };
 
 // legacy component
+// Each group or split is one segment, placed at its first member, even when the
+// tab order interleaves it with other tabs: the Workbench projection lists a
+// Center split's members group by group, so a split's second pane can follow
+// tabs that are not in it. Emitting one bracket per contiguous run instead gave
+// two segments with the same split id (and React key) and a split shown twice.
 export function buildSegments(
 	unpinned: Tab[],
 	groups: TabGroup[],
 	splits: Split[]
 ): Segment[] {
-	const segments: Segment[] = [];
-	let i = 0;
-	while (i < unpinned.length) {
-		const tab = unpinned[i];
-		if (tab.groupId) {
-			const group = groups.find((g) => g.id === tab.groupId);
-			const members: Tab[] = [];
-			while (i < unpinned.length && unpinned[i].groupId === tab.groupId) {
-				members.push(unpinned[i]);
-				i += 1;
-			}
-			if (group) {
-				segments.push({ type: "group", group, members });
-			} else {
-				for (const m of members) {
-					segments.push({ type: "tab", tab: m });
-				}
-			}
-		} else if (tab.splitId) {
-			const split = splits.find((s) => s.id === tab.splitId);
-			const members: Tab[] = [];
-			while (i < unpinned.length && unpinned[i].splitId === tab.splitId) {
-				members.push(unpinned[i]);
-				i += 1;
-			}
-			if (split) {
-				segments.push({ type: "split", split, members });
-			} else {
-				for (const m of members) {
-					segments.push({ type: "tab", tab: m });
-				}
-			}
-		} else {
-			segments.push({ type: "tab", tab });
-			i += 1;
+	const clusterOf = (
+		tab: Tab
+	):
+		| { key: string; type: "group"; group: TabGroup }
+		| { key: string; type: "split"; split: Split }
+		| undefined => {
+		const group = tab.groupId
+			? groups.find((g) => g.id === tab.groupId)
+			: undefined;
+		if (group) {
+			return { key: `g:${group.id}`, type: "group", group };
 		}
+		// A tab whose group is gone renders on its own, as it always has.
+		const split =
+			!tab.groupId && tab.splitId
+				? splits.find((s) => s.id === tab.splitId)
+				: undefined;
+		return split ? { key: `s:${split.id}`, type: "split", split } : undefined;
+	};
+	const segments: Segment[] = [];
+	const emitted = new Set<string>();
+	for (const tab of unpinned) {
+		const cluster = clusterOf(tab);
+		if (!cluster) {
+			segments.push({ type: "tab", tab });
+			continue;
+		}
+		if (emitted.has(cluster.key)) {
+			continue;
+		}
+		emitted.add(cluster.key);
+		const members = unpinned.filter((m) => clusterOf(m)?.key === cluster.key);
+		segments.push(
+			cluster.type === "group"
+				? { type: "group", group: cluster.group, members }
+				: { type: "split", split: cluster.split, members }
+		);
 	}
 	return segments;
 }

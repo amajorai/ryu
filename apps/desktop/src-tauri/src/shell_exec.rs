@@ -1,4 +1,4 @@
-//! Embedded terminal panel shell execution.
+//! The embedded terminal panel's shell execution command.
 
 #[derive(serde::Serialize)]
 pub(crate) struct ShellOutput {
@@ -23,7 +23,7 @@ pub(crate) struct ShellOutput {
 /// as the binary directly — that would be arbitrary-binary execution. Any
 /// unrecognized, empty, or absent value falls back to the OS default, so a
 /// garbage value can never spawn something outside this list.
-fn default_shell() -> (&'static str, &'static str) {
+pub(crate) fn default_shell() -> (&'static str, &'static str) {
     if cfg!(windows) {
         return ("powershell", "-Command");
     }
@@ -46,7 +46,7 @@ fn default_shell() -> (&'static str, &'static str) {
     }
 }
 
-fn resolve_shell(requested: Option<&str>) -> (&'static str, &'static str) {
+pub(crate) fn resolve_shell(requested: Option<&str>) -> (&'static str, &'static str) {
     match requested.map(str::trim).filter(|s| !s.is_empty()) {
         Some("bash") => ("bash", "-c"),
         Some("zsh") => ("zsh", "-c"),

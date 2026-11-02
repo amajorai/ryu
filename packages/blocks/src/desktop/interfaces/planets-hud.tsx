@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -20,10 +21,9 @@ import {
 	starMeta,
 } from "./planets-hud-rows.tsx";
 import {
-	PLANET_KIND_LABELS,
 	type PlanetSystem,
 	planetDescription,
-	plural,
+	planetKindLabel,
 } from "./planets-model.ts";
 import { STAR_ID } from "./planets-overlay.tsx";
 import {
@@ -342,8 +342,16 @@ export function PlanetsSystemCard({
 												yourTurn={planet.counts["your-turn"]}
 											/>
 											{needsYou > 0
-												? plural(planet.threadCount, "moon")
-												: `${PLANET_KIND_LABELS[planet.kind]} · ${plural(planet.threadCount, "moon")}`}
+												? tr("{count, plural, one {# moon} other {# moons}}", {
+														count: planet.threadCount,
+													})
+												: tr(
+														"{kind} · {count, plural, one {# moon} other {# moons}}",
+														{
+															count: planet.threadCount,
+															kind: planetKindLabel(planet.kind),
+														}
+													)}
 										</>
 									}
 									name={planet.name}

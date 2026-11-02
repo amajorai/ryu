@@ -11,9 +11,9 @@ import {
 	Widget,
 } from "./glance-home-chrome.tsx";
 import {
-	GLANCE_AGENT_STATE_LABELS,
 	GLANCE_NEEDS_YOU_LABEL,
 	type GlanceDistance,
+	glanceAgentStateLabel,
 	glanceListWindow,
 	glanceThreadTitle,
 	glanceWaitingOnYou,
@@ -71,7 +71,7 @@ export function NeedsYouWidget({
 							<li key={thread.id}>
 								<button
 									aria-label={tl("Open {title}, {state}", {
-										state: GLANCE_AGENT_STATE_LABELS[state],
+										state: glanceAgentStateLabel(state),
 										title: glanceThreadTitle(thread),
 									})}
 									className={cn(
@@ -88,6 +88,7 @@ export function NeedsYouWidget({
 												"truncate font-medium text-foreground",
 												W.row
 											)}
+											data-ryu-i18n="off"
 										>
 											{glanceThreadTitle(thread)}
 										</span>
@@ -96,7 +97,11 @@ export function NeedsYouWidget({
 												className={cn("truncate", GLANCE_INK_SECONDARY, W.sub)}
 											>
 												{names(snapshot, thread)}
-												{thread.lastMessage ? ` · ${thread.lastMessage}` : ""}
+												{thread.lastMessage ? (
+													<span data-ryu-i18n="off">
+														{` · ${thread.lastMessage}`}
+													</span>
+												) : null}
 											</span>
 										) : null}
 									</span>
@@ -181,6 +186,7 @@ export function WorkingWidget({
 												"truncate font-medium text-foreground",
 												W.row
 											)}
+											data-ryu-i18n="off"
 										>
 											{glanceThreadTitle(thread)}
 										</span>
@@ -193,7 +199,11 @@ export function WorkingWidget({
 												)}
 											>
 												{lead?.name ?? names(snapshot, thread)}
-												{thread.lastMessage ? ` · ${thread.lastMessage}` : ""}
+												{thread.lastMessage ? (
+													<span data-ryu-i18n="off">
+														{` · ${thread.lastMessage}`}
+													</span>
+												) : null}
 											</span>
 										) : null}
 									</span>

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -13,7 +14,6 @@ import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import type { SidePanel } from "./seasonal-interface-constants.tsx";
 import {
 	boardSummary,
-	plural,
 	type SeasonBoard,
 	type SeasonCopy,
 	type SeasonDoor,
@@ -142,7 +142,7 @@ export function seasonalSheet({
 				leading={activeDoor ? <GiftTag number={activeDoor.number} /> : null}
 				onClose={closePanel}
 				sheetKey={activeThreadId ?? "thread"}
-				title={activeThread?.title || "New conversation"}
+				title={activeThread?.title || tr("New conversation")}
 			>
 				<GiftTagPanel
 					acts={actsOn}
@@ -195,15 +195,14 @@ export function seasonalSheet({
 	} else if (side === "more") {
 		sheet = (
 			<GameSheet
-				closeLabel={tl("Close {more}", { more: copy.more.toLowerCase() })}
+				closeLabel={tl("Close {more}", { more: copy.more })}
 				data-seasonal-panel=""
 				label={copy.more}
 				onClose={() => setSide(null)}
 				sheetKey="more"
-				subtitle={plural(
-					board.overflow.length,
-					"conversation",
-					"conversations"
+				subtitle={tl(
+					"{count, plural, one {# conversation} other {# conversations}}",
+					{ count: board.overflow.length }
 				)}
 				title={copy.more}
 			>
@@ -224,17 +223,20 @@ export function seasonalSheet({
 	} else if (side === "all") {
 		sheet = (
 			<GameSheet
-				closeLabel={tl("Close all {doors}", { doors: copy.doors })}
+				closeLabel={copy.closeAll}
 				data-seasonal-panel=""
-				label={tl("All {doors}", { doors: copy.doors })}
+				label={copy.all}
 				onClose={() => setSide(null)}
 				sheetKey="all"
 				subtitle={
 					actsOn
-						? `${plural(board.totals.threads, copy.door, copy.doors)} · ${actSummaryLine(totals)}`
+						? tl("{doors} · {acts}", {
+								acts: actSummaryLine(totals),
+								doors: copy.count(board.totals.threads),
+							})
 						: boardSummary(board, copy)
 				}
-				title={tl("All {doors}", { doors: copy.doors })}
+				title={copy.all}
 			>
 				<div className="min-h-0 flex-1 overflow-y-auto">{doorList(false)}</div>
 			</GameSheet>

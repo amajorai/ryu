@@ -1,10 +1,11 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type PassportCountry,
 	stampDate,
 	UNASSIGNED_CODE,
-	UNASSIGNED_LABEL,
+	unassignedLabel,
 } from "./passport-model.ts";
 import { CAPTION } from "./passport-pages-paper.tsx";
 import { stampInk } from "./passport-palette.ts";
@@ -53,7 +54,10 @@ export function VisaBlock({
 				/>
 				<div className="flex min-w-0 flex-1 flex-col">
 					<div className="flex items-baseline justify-between gap-2">
-						<h2 className="truncate font-semibold font-serif text-[22px] leading-7">
+						<h2
+							className="truncate font-semibold font-serif text-[22px] leading-7"
+							data-ryu-i18n="off"
+						>
 							{country.agent.name}
 						</h2>
 						<span className="font-mono font-semibold text-[11px] tracking-[0.2em]">
@@ -61,7 +65,7 @@ export function VisaBlock({
 						</span>
 					</div>
 					<p className="mt-0.5 truncate text-(--pp-ink-muted) text-xs leading-4">
-						{country.agent.description || "No description."}
+						{country.agent.description || tr("No description.")}
 					</p>
 					{/* Reserved when idle, so facing visa blocks keep their rows level. */}
 					<p
@@ -113,13 +117,13 @@ export function UnassignedBlock({ count }: { count: number }) {
 	const tl = useLiteralMessages();
 	return (
 		<section
-			aria-label={tl("{name} visa", { name: UNASSIGNED_LABEL })}
+			aria-label={tl("{name} visa", { name: unassignedLabel() })}
 			className="border-[3px] border-double p-4"
 			style={{ borderColor: STICKER_RULE }}
 		>
 			<div className="flex items-baseline justify-between gap-2">
 				<h2 className="font-semibold font-serif text-[22px] leading-7">
-					{UNASSIGNED_LABEL}
+					{unassignedLabel()}
 				</h2>
 				<span className="font-mono font-semibold text-[11px] tracking-[0.2em]">
 					{UNASSIGNED_CODE}

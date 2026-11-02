@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("tools library shares registry reads and fetches only tools on agent filter changes", async ({
 	page,
@@ -77,10 +78,7 @@ test("tools library shares registry reads and fetches only tools on agent filter
 	expect(calls["/api/agents"]).toBe(1);
 	await page.keyboard.press("Escape");
 	expect(errors).toEqual([]);
-	const dir = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep"
-	);
+	const dir = proofEvidencePath("performance-sweep");
 	await mkdir(dir, { recursive: true });
 	await page.screenshot({
 		path: path.join(dir, "mcp-library-completed.png"),
@@ -162,10 +160,7 @@ test("server details open while tool discovery is pending", async ({
 		).toBeVisible();
 		await page.keyboard.press("Escape");
 		expect(errors).toEqual([]);
-		const dir = path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep"
-		);
+		const dir = proofEvidencePath("performance-sweep");
 		await mkdir(dir, { recursive: true });
 		await page.screenshot({
 			path: path.join(dir, "mcp-progressive-completed.png"),
@@ -326,9 +321,8 @@ test("agent edits update the shared Tools picker while engine metadata is pendin
 		expect(calls["/api/mcp/tools"]).toBe(1);
 		expect(errors).toEqual([]);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/agent-picker-shared-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/agent-picker-shared-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",

@@ -14,6 +14,7 @@ import {
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { proofEvidencePath } from "../proof-evidence-path.ts";
 import {
 	proofClientCapability,
 	proofProxyAuthorization,
@@ -38,7 +39,7 @@ const seams = path.join(
 	"core-voice-provider-repair-seams.ts"
 );
 const hashes = new Map<string, string>();
-const proof = path.join(root, "docs/proof/core-voice-provider-repair");
+const proof = proofEvidencePath("core-voice-provider-repair");
 mkdirSync(proof, { recursive: true });
 const record = () =>
 	writeFileSync(

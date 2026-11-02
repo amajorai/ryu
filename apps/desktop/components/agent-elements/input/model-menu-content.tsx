@@ -148,7 +148,7 @@ function ModelRow({
 				) : null}
 			</span>
 			{model.description ? (
-				<span className="w-full truncate text-left font-normal text-muted-foreground text-xs">
+				<span className="w-full truncate text-start font-normal text-muted-foreground text-xs">
 					{model.description}
 				</span>
 			) : null}

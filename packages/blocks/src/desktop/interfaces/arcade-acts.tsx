@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 /* eslint-disable react/no-unknown-property */
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
@@ -82,6 +83,25 @@ export const ARCADE_ACT_SKIN: ActSkin = {
 	},
 };
 
+/**
+ * The two lines of an arcade's words for a usage limit: "INSERT COIN" (or
+ * "Likely INSERT COIN" for an estimate) over its reset time, when known.
+ */
+export function insertCoinLines(
+	act: InterfaceAgentAct,
+	nowMs: number,
+	clock?: ClockOptions
+): { head: string; time: string | null } {
+	const focus = act.blockers[0];
+	const clears = focus?.clearsAt ?? act.timer?.until ?? null;
+	const coin = tr("INSERT COIN");
+	return {
+		head:
+			focus?.source === "estimate" ? tr("Likely {text}", { text: coin }) : coin,
+		time: clears ? clockLabel(clears, nowMs, clock) : null,
+	};
+}
+
 /** "INSERT COIN 15:10": an arcade's words for a usage limit. */
 export function insertCoinText(
 	act: InterfaceAgentAct,
@@ -91,9 +111,11 @@ export function insertCoinText(
 	const focus = act.blockers[0];
 	const clears = focus?.clearsAt ?? act.timer?.until ?? null;
 	const coin = clears
-		? `INSERT COIN ${clockLabel(clears, nowMs, clock)}`
-		: "INSERT COIN";
-	return focus?.source === "estimate" ? `Likely ${coin}` : coin;
+		? tr("INSERT COIN {time}", { time: clockLabel(clears, nowMs, clock) })
+		: tr("INSERT COIN");
+	return focus?.source === "estimate"
+		? tr("Likely {text}", { text: coin })
+		: coin;
 }
 
 /** "INSERT COIN 15:10" on the station board (the kit adds "Likely"). */
@@ -143,19 +165,20 @@ export function cabinetWords(
 	if (act.act === "blocked" && focus) {
 		const paused = focus.kind === "interrupted";
 		return {
-			marquee: `${paused ? "PAUSED" : "TILT"} · ${focus.title}`,
+			// " · " splits the sign into two lines: the head word over the why.
+			marquee: paused
+				? tr("PAUSED · {title}", { title: focus.title })
+				: tr("TILT · {title}", { title: focus.title }),
 			next: act.next,
 			reels,
 			tone: paused ? "paused" : "tilt",
 		};
 	}
 	if (act.act === "limited") {
+		// Two lines on the sign: INSERT COIN over its reset time.
+		const { head, time } = insertCoinLines(act, nowMs, clock);
 		return {
-			// Two lines on the sign: INSERT COIN over its reset time.
-			marquee: insertCoinText(act, nowMs, clock).replace(
-				"INSERT COIN ",
-				"INSERT COIN · "
-			),
+			marquee: time ? `${head} · ${time}` : head,
 			next: act.next,
 			reels,
 			tone: "limit",

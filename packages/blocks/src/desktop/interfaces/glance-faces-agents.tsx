@@ -14,6 +14,7 @@ import {
 	GLANCE_TILE_LIMIT,
 	type GlanceAgentState,
 	type GlanceAgentTile,
+	glanceAgentStateLabel,
 	glanceSharedGroup,
 	glanceThreadTitle,
 	glanceTileColumns,
@@ -30,7 +31,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function tileLabel(tile: GlanceAgentTile, tl: LiteralMessage): string {
-	const state = GLANCE_AGENT_STATE_LABELS[tile.state];
+	const state = glanceAgentStateLabel(tile.state);
 	if (tile.thread) {
 		return tl("{name}, {state}. Open {title}", {
 			name: tile.agent.name,
@@ -98,6 +99,7 @@ function AgentTile({
 					? "text-[clamp(0.9375rem,3.3cqw,1.5rem)] leading-tight tracking-[-0.01em]"
 					: "text-[clamp(1.125rem,5.2cqw,2.5rem)] leading-[1.1] tracking-[-0.025em]"
 			)}
+			data-ryu-i18n="off"
 		>
 			{agent.name}
 		</span>
@@ -105,7 +107,7 @@ function AgentTile({
 	return (
 		<button
 			aria-label={tileLabel(tile, tl)}
-			className="corner-squircle flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[4.4cqw] bg-muted p-[3.6cqw] text-left outline-none transition-[background-color,scale] duration-200 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] motion-reduce:active:scale-100"
+			className="corner-squircle flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[4.4cqw] bg-muted p-[3.6cqw] text-start outline-none transition-[background-color,scale] duration-200 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] motion-reduce:active:scale-100"
 			data-agent-id={agent.id}
 			data-state={state}
 			onClick={onOpen}
@@ -135,7 +137,7 @@ function AgentTile({
 									{group ? (
 										<span className={GLANCE_INK_SECONDARY}>{group} · </span>
 									) : null}
-									{glanceThreadTitle(thread)}
+									<span data-ryu-i18n="off">{glanceThreadTitle(thread)}</span>
 								</span>
 								<span
 									className={cn(
@@ -144,7 +146,11 @@ function AgentTile({
 										GLANCE_TYPE.detail
 									)}
 								>
-									{thread.lastMessage ?? "No messages yet"}
+									{thread.lastMessage ? (
+										<span data-ryu-i18n="off">{thread.lastMessage}</span>
+									) : (
+										tl("No messages yet")
+									)}
 								</span>
 							</>
 						) : (
@@ -267,7 +273,7 @@ export function GlanceAgentsFace({
 				<li className="flex min-h-0 min-w-0 *:flex-1">
 					<button
 						className={cn(
-							"corner-squircle flex flex-col justify-end rounded-[4.4cqw] bg-muted p-[3.6cqw] text-left font-semibold text-foreground outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
+							"corner-squircle flex flex-col justify-end rounded-[4.4cqw] bg-muted p-[3.6cqw] text-start font-semibold text-foreground outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
 							GLANCE_TYPE.lead
 						)}
 						onClick={onShowAll}

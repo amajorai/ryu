@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { DeepLinkController } from "@/src/components/deeplink/DeepLinkController.tsx";
 import { MediaPipDock } from "@/src/components/media/MediaPip.tsx";
+import { SecurityKeyRequests } from "@/src/components/security-key/SecurityKeyRequests.tsx";
 import { SupportAccessBanner } from "@/src/components/settings/support-access-banner.tsx";
 import { ConnectionStatusToast } from "@/src/components/shell/ConnectionStatusToast.tsx";
 import { ReconnectRetryBanner } from "@/src/components/shell/ReconnectRetryBanner.tsx";
@@ -20,6 +21,10 @@ import type { useAssistantStore } from "@/src/store/useAssistantStore.ts";
 import { AssistantDock } from "../../assistant/AssistantDock.tsx";
 import { PullRequestAutomationWatcher } from "../../layout/PullRequestAutomationWatcher.tsx";
 import { SaveSplitPresetDialog } from "../../layout/SplitPresetMenu.tsx";
+import {
+	TITLEBAR_CLEARANCE_PX,
+	titlebarInsetLength,
+} from "../../layout/TitlebarPage.tsx";
 import type { OsWindow } from "../../os/OsDesktopSurface.tsx";
 import { DeferredCommandPalette } from "../command-palette/deferred-command-palette.tsx";
 import {
@@ -176,6 +181,9 @@ export function ShellOverlays({
 			) : null}
 			<DeepLinkController />
 			<MediaPipDock />
+			{/* Browsers on other nodes asking for this device's security key. One
+			    per main window, so a detached window never shows a second copy. */}
+			{detachedWindow ? null : <SecurityKeyRequests />}
 			{/* The OS desktop has no header to hang the strip under, so it keeps
 			    the floating toast; every other shell mounts ShellBanners. */}
 			{osProduct ? <ConnectionStatusToast layout="toast" /> : null}
@@ -250,7 +258,7 @@ export function layoutCssVariables({
 	titleBarClearsContent: boolean;
 }) {
 	const cssVariables2: LayoutCssVariables = {
-		"--desktop-inline2-left": `${sidebarWidth - 4}px`,
+		"--desktop-inline2-inset-Start": `${sidebarWidth - 4}px`,
 	};
 	const cssVariables3: LayoutCssVariables = {
 		"--desktop-inline3-width": `${sidebarWidth + 16}px`,
@@ -258,9 +266,8 @@ export function layoutCssVariables({
 	const cssVariables4: LayoutCssVariables = {
 		"--desktop-inline4-width": `${sidebarWidth}px`,
 		"--desktop-inline4-pointer-Events": floatOpen ? "auto" : "none",
-		"--desktop-inline4-transform": floatOpen
-			? "translateX(0)"
-			: "translateX(calc(-100% - 12px))",
+		// Distance off-screen toward the inline start; the peek applies the sign.
+		"--desktop-inline4-offset": floatOpen ? "0px" : "calc(100% + 12px)",
 		"--desktop-inline4-opacity": floatOpen ? 1 : 0,
 	};
 	const cssVariables5: LayoutCssVariables = {
@@ -270,7 +277,7 @@ export function layoutCssVariables({
 		// Both variants now start the content at the window's top edge (the
 		// flush inset no longer has the primitive's 8px card margin).
 		"--ryu-titlebar-inset": titleBarClearsContent
-			? "calc(var(--spacing) * 20)"
+			? titlebarInsetLength(TITLEBAR_CLEARANCE_PX)
 			: "0px",
 	};
 	return {

@@ -356,7 +356,7 @@ export function DynamicSidebarSection({
 			) : null}
 			{groupByDate ? (
 				<DateGroupedRows
-					className="ml-2 space-y-0.5"
+					className="ms-2 space-y-0.5"
 					collapsedKey={contributedBucketKeys.collapsedKey}
 					items={rows}
 					orderKey={contributedBucketKeys.orderKey}

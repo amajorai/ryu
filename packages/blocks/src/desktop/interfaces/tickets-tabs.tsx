@@ -7,7 +7,7 @@ import type { Ticket } from "./tickets-model.ts";
 import { TicketStatusMark } from "./tickets-parts.tsx";
 
 const TAB =
-	"group/tab relative flex h-full min-w-0 shrink-0 items-center border-border border-r text-[13px] transition-colors";
+	"group/tab relative flex h-full min-w-0 shrink-0 items-center border-border border-e text-[13px] transition-colors";
 const TAB_IDLE =
 	"text-muted-foreground hover:bg-muted/60 hover:text-foreground";
 const TAB_CURRENT = "bg-background text-foreground";
@@ -119,7 +119,9 @@ export function TicketsTabs({
 									type="button"
 								>
 									<TicketStatusMark status={tab.status} />
-									<span className="truncate">{tab.thread.title}</span>
+									<span className="truncate" data-ryu-i18n="off">
+										{tab.thread.title}
+									</span>
 									<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 										#{tab.number}
 									</span>

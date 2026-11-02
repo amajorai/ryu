@@ -7,7 +7,7 @@
 // than imported so this package never pulls in Mongoose; each surface's API
 // client decodes the wire into these shapes.
 
-import { GUARDRAIL_ACTION_LABELS } from "./copy.ts";
+import { translate as tl } from "@ryu/i18n/core";
 import type {
 	GuardrailFirewallAction,
 	GuardrailFirewallOverlay,
@@ -276,7 +276,9 @@ const PREVIEW_FIELD_LABELS: Record<string, string> = {
 
 export function previewFieldLabel(field: string): string {
 	if (field.startsWith("evaluators.")) {
-		return `Evaluator: ${field.slice("evaluators.".length)}`;
+		return tl("Evaluator: {name}", {
+			name: field.slice("evaluators.".length),
+		});
 	}
 	return PREVIEW_FIELD_LABELS[field] ?? field;
 }
@@ -293,12 +295,6 @@ const PREVIEW_WARNINGS: Record<string, string> = {
 /** A sentence for a preview warning code; unknown codes show as sent. */
 export function previewWarningText(code: string): string {
 	return PREVIEW_WARNINGS[code] ?? code;
-}
-
-function actionLabelFor(value: string): string | undefined {
-	return Object.entries(GUARDRAIL_ACTION_LABELS).find(
-		([action]) => action === value
-	)?.[1];
 }
 
 export function emptyPolicyRules(): PolicyRules {
@@ -468,58 +464,6 @@ export function policyFirewallCtx(input: {
 	};
 }
 
-/** `POLICY_DENY_ALL` in `packages/db/src/models/control-plane.model.ts`. */
-const POLICY_DENY_ALL_MARKER = "<deny-all>";
-
-/** One line describing a preview value. */
-export function formatPreviewValue(value: unknown): string {
-	if (value === null || value === undefined) {
-		return "Not set";
-	}
-	if (typeof value === "boolean") {
-		return value ? "On" : "Off";
-	}
-	if (typeof value === "string") {
-		return actionLabelFor(value) ?? value;
-	}
-	if (typeof value === "number") {
-		return String(value);
-	}
-	if (Array.isArray(value)) {
-		if (value.length === 0) {
-			return "No restriction";
-		}
-		// The control plane's marker for an allowlist that intersected to empty.
-		if (value.includes(POLICY_DENY_ALL_MARKER)) {
-			return "Nothing allowed";
-		}
-		return value.map((entry) => formatPreviewValue(entry)).join(", ");
-	}
-	if (typeof value === "object") {
-		const record: Record<string, unknown> = Object.fromEntries(
-			Object.entries(value)
-		);
-		if (typeof record.usdMicro === "number") {
-			const window =
-				typeof record.window === "string" ? ` ${record.window}` : "";
-			return `$${usdFromMicro(record.usdMicro)}${window}`;
-		}
-		if (typeof record.name === "string") {
-			return record.name;
-		}
-		if (typeof record.id === "string") {
-			const enabled = record.enabled === false ? " (off)" : "";
-			const action =
-				typeof record.inlineAction === "string"
-					? `: ${actionLabelFor(record.inlineAction) ?? record.inlineAction}`
-					: "";
-			return `${record.id}${action}${enabled}`;
-		}
-		return JSON.stringify(value);
-	}
-	return String(value);
-}
-
 /** "Team: Platform" style label for an assignment chip. */
 export function scopeChipLabel(
 	scope: PolicyScopeRef,
@@ -533,29 +477,6 @@ export function scopeChipLabel(
 	return `${kindLabel}: ${match?.label ?? scope.id}`;
 }
 
-/**
- * A short sentence for a refusal code the policy API returns, or `null` to
- * show the server's own message.
- */
-export function policyErrorHint(code: string | null): string | null {
-	switch (code) {
-		case "version_conflict":
-			return "Someone else saved this policy first. Reload it to see their changes, then reapply yours.";
-		case "policy_assigned":
-			return "Remove every assignment of this policy before archiving it.";
-		case "scope_already_assigned":
-			return "That scope already has a policy. Replace it or remove it first.";
-		case "invalid_regex_pattern":
-			return "A custom pattern is not allowed. Patterns cannot use lookarounds, backreferences or a repeated group that already repeats.";
-		case "invalid_permission_pattern":
-			return "Permission resources may use only * and ? as wildcards.";
-		case "glob_not_supported":
-			return "Model permissions take an exact model id or *.";
-		case "agent_scope_unsupported":
-			return "An agent assignment carries firewall settings and evaluators only.";
-		case "scope_not_found":
-			return "That scope was not found in this organization.";
-		default:
-			return null;
-	}
-}
+// Kept importable from here; they live in their own modules.
+export { policyErrorHint } from "./policy-error-hints.ts";
+export { formatPreviewValue } from "./policy-preview-format.ts";

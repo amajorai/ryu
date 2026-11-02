@@ -5,6 +5,7 @@ import {
 	type DatabaseDoc,
 	parseDatabaseDoc,
 } from "@/src/lib/realtime/yjs-database.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const documentPath = "/api/spaces/space-proof/documents/database-proof";
 async function install(page: Page) {
@@ -184,9 +185,8 @@ test("creates and edits typed column options through the production database rou
 		"Priority saved"
 	);
 	await expect(page.getByPlaceholder("Option", { exact: true })).toHaveCount(0);
-	const proof = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-spaces-column-editor-persisted-number.png"
+	const proof = proofEvidencePath(
+		"test-coverage-sweep-20260924/evidence/desktop-spaces-column-editor-persisted-number.png"
 	);
 	await mkdir(path.dirname(proof), { recursive: true });
 	await page.screenshot({ animations: "disabled", path: proof });

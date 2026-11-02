@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -109,6 +110,7 @@ function PortraitCard({
 					"mt-auto max-w-[148px] truncate border-(--sv-slot-shade) border-t-2 pt-2 text-center text-[16px] leading-5",
 					UI_TYPE
 				)}
+				data-ryu-i18n="off"
 			>
 				{agent.name}
 			</figcaption>
@@ -165,7 +167,7 @@ export function DialogueBox({
 						)}
 					>
 						<span className="sr-only">Role: </span>
-						{agent.description}
+						<span data-ryu-i18n="off">{agent.description}</span>
 					</p>
 				) : null}
 				<p
@@ -247,7 +249,7 @@ export function DialogueChoices({
 								>
 									<ChoiceGlove />
 									<span className="min-w-0 flex-1 truncate">
-										{thread.title || "Untitled"}
+										{thread.title || tr("Untitled")}
 									</span>
 									<span className="flex w-4 shrink-0 justify-center">
 										{marked ? (

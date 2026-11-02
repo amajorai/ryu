@@ -31,6 +31,7 @@
  * never a recording of a real run, and it is not timed to one.
  */
 
+import { formatNumberValue } from "@ryu/i18n/format-intl";
 import type { LiteralMessage } from "@ryu/i18n/react";
 
 /** `DEFAULT_MEMORY_MB`, crates/core/tool-exec/src/lib.rs:223. */
@@ -42,20 +43,18 @@ export const RESULT_BYTES = 30_000;
 /** `DEFAULT_DEADLINE_SECS`, crates/core/tool-exec/src/lib.rs:219. */
 export const DEADLINE_S = 30;
 
-const grouped = (value: number) => value.toLocaleString("en-US");
-
 /** The short name assistive tech hears for the drawing. */
 export const LABEL =
 	"Ryu's JavaScript sandbox drawn as one sealed box with a single hatch";
 
 /** What the drawing shows, for assistive tech only; nothing here is drawn as text. */
-export function describeSandbox(tl: LiteralMessage): string {
+export function describeSandbox(tl: LiteralMessage, locale?: string): string {
 	return tl(
 		"A simulation of the mechanism, not a recording of a real run. Agent programs run in QuickJS compiled to WebAssembly, sealed in a box: the three blanked ports on its roof stand for the filesystem, network and environment the program never gets. The only way in or out is the hatch on the right. A tool call or timer leaves through it and the answer comes back the same way, and the final result comes out cut to {resultBytes} bytes. Memory is capped at {memoryMib} MiB by default and active compute at {deadlineSeconds} seconds, and starting another program needs both the app's manifest grant and the host's allowlist.",
 		{
 			deadlineSeconds: DEADLINE_S,
 			memoryMib: MEMORY_MIB,
-			resultBytes: grouped(RESULT_BYTES),
+			resultBytes: formatNumberValue(locale, RESULT_BYTES),
 		}
 	);
 }

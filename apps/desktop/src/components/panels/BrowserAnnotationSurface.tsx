@@ -1,5 +1,6 @@
 import { Mic01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale } from "@ryu/i18n/core";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -189,7 +190,8 @@ export function BrowserAnnotationSurface({
 		}
 		recognition.continuous = true;
 		recognition.interimResults = false;
-		recognition.lang = "en-US";
+		// Recognize speech in the language the UI shows, not always English.
+		recognition.lang = activeLocale();
 		recognition.onresult = (event) => {
 			const transcript = extractTranscript(event);
 			if (transcript) {
@@ -301,7 +303,7 @@ export function BrowserAnnotationSurface({
 											key={annotation.id}
 											style={geometry}
 										>
-											<span className="absolute -top-5 left-0 rounded bg-highlight px-1.5 py-0.5 font-medium text-black text-xs shadow-sm">
+											<span className="absolute start-0 -top-5 rounded bg-highlight px-1.5 py-0.5 font-medium text-black text-xs shadow-sm">
 												{index + 1}
 											</span>
 										</div>

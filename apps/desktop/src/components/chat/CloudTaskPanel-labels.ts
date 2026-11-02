@@ -3,6 +3,7 @@
 // Status labels, limits, and message helpers shared by the cloud task panel
 // and its dialogs.
 
+import { translate as tl } from "@ryu/i18n/core";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { ApiError } from "@/src/lib/api/client.ts";
 import type {
@@ -11,6 +12,7 @@ import type {
 	CloudTaskStatus,
 } from "@/src/lib/api/cloud-tasks.ts";
 import { CLOUD_EXECUTOR_LABELS } from "@/src/lib/cloud-task-selection.ts";
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
 
 export const STATUS = {
 	preparing: { label: "Preparing box", dotClass: "bg-warning" },
@@ -37,7 +39,10 @@ export const DEFAULT_COMMIT_MESSAGE = "Changes from Ryu cloud task";
 export const MAX_PULL_REQUEST_TITLE_CHARS = 256;
 /** Core's limit, counted in Unicode code points like Core counts it. */
 export const MAX_PULL_REQUEST_BODY_CHARS = 65_536;
-export const characterCount = new Intl.NumberFormat("en-US");
+/** Character counts grouped the way the UI language groups digits. */
+export const characterCount = {
+	format: (value: number): string => formatLocalNumber(value),
+};
 
 export function codePointLength(text: string): number {
 	let count = 0;
@@ -47,16 +52,19 @@ export function codePointLength(text: string): number {
 	return count;
 }
 
-const PULL_REQUEST_ERROR_LABELS = {
-	auth: "GitHub denied access",
-	already_exists: "a pull request for this branch already exists",
-	validation: "GitHub rejected the request",
-	network: "GitHub could not be reached",
-	unknown: "unknown error",
-} satisfies Record<CloudTaskPullRequestError, string>;
+const PULL_REQUEST_FAILURES = {
+	auth: () => tl("Pull request not opened: GitHub denied access."),
+	already_exists: () =>
+		tl(
+			"Pull request not opened: a pull request for this branch already exists."
+		),
+	validation: () => tl("Pull request not opened: GitHub rejected the request."),
+	network: () => tl("Pull request not opened: GitHub could not be reached."),
+	unknown: () => tl("Pull request not opened: unknown error."),
+} satisfies Record<CloudTaskPullRequestError, () => string>;
 
 export function pullRequestFailure(error: CloudTaskPullRequestError): string {
-	return `Pull request not opened: ${PULL_REQUEST_ERROR_LABELS[error]}.`;
+	return PULL_REQUEST_FAILURES[error]();
 }
 
 /** A readable message for a failed mutation; 403 is called out as a permission problem. */
@@ -92,7 +100,9 @@ export function statusLabel(
 	stopReason: string | null
 ): string {
 	if (task.state === "running") {
-		return `Running ${CLOUD_EXECUTOR_LABELS[task.executor]}`;
+		return tl("Running {executor}", {
+			executor: CLOUD_EXECUTOR_LABELS[task.executor],
+		});
 	}
 	const reason = stopReason ? STOP_REASON_LABELS[stopReason] : undefined;
 	if (task.state === "stopped" && reason) {
@@ -116,11 +126,15 @@ export function lastRunFailure(task: CloudTaskStatus): string | null {
 		return null;
 	}
 	if (run.reason) {
-		return `Last run failed: ${run.reason.replaceAll("_", " ")}`;
+		return tl("Last run failed: {reason}", {
+			reason: run.reason.replaceAll("_", " "),
+		});
 	}
 	return run.exitCode === null
-		? "Last run failed"
-		: `Last run failed (exit ${run.exitCode})`;
+		? tl("Last run failed")
+		: tl("Last run failed (exit {exitCode})", {
+				exitCode: String(run.exitCode),
+			});
 }
 
 export function finishKey(finish: CloudTaskFinish | null): string | null {

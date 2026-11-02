@@ -475,7 +475,7 @@ fn version_dir_is_namespaced() {
         args: vec![],
         env: BTreeMap::new(),
     };
-    let dir = version_dir(Path::new("/plugins/acme"), &bin);
+    let dir = version_dir(Path::new("/plugins/acme"), &bin).unwrap();
     assert_eq!(dir, Path::new("/plugins/acme").join("bin").join("1.2.3"));
     assert_eq!(
         dir.join(url_filename(&bin.url).unwrap()),

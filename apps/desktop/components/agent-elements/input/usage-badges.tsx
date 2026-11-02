@@ -167,7 +167,7 @@ function AccountTooltipRow({ account }: { account: SubscriptionAccount }) {
 						},
 						{
 							span: (children) => (
-								<span className="ml-1 font-normal text-muted-foreground">
+								<span className="ms-1 font-normal text-muted-foreground">
 									{children}
 								</span>
 							),

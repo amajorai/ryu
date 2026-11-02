@@ -1,4 +1,11 @@
 import {
+	activeLocale,
+	dateFormatter,
+	isEnglishLocale,
+	translate as tr,
+	unitFormatter,
+} from "@ryu/i18n/lite";
+import {
 	type InterfaceAgent,
 	type InterfaceEvent,
 	type InterfaceSnapshot,
@@ -84,45 +91,82 @@ export function boardTime(time: number): string {
 	return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-const DAY_FORMAT = new Intl.DateTimeFormat("en-GB", {
-	day: "numeric",
-	month: "short",
-	weekday: "short",
-});
-
-/** "Wed 14 Oct". */
-export function boardDate(time: number): string {
-	return DAY_FORMAT.format(new Date(time)).replace(",", "");
+/**
+ * "Wed 14 Oct": the board's day-first style in English; the locale's own
+ * short weekday and date elsewhere ("Mi., 14. Okt.", "10月14日(水)").
+ */
+export function boardDate(
+	time: number,
+	locale: string = activeLocale()
+): string {
+	const options: Intl.DateTimeFormatOptions = {
+		day: "numeric",
+		month: "short",
+		weekday: "short",
+	};
+	if (isEnglishLocale(locale)) {
+		return dateFormatter("en-GB", options)
+			.format(new Date(time))
+			.replace(",", "");
+	}
+	return dateFormatter(locale, options).format(new Date(time));
 }
 
-const SHORT_DAY_FORMAT = new Intl.DateTimeFormat("en-GB", {
-	day: "numeric",
-	month: "short",
-});
-
-/** "5 Oct". */
-export function shortDate(time: number): string {
-	return SHORT_DAY_FORMAT.format(new Date(time));
+/** "5 Oct" in English; the locale's own short date elsewhere. */
+export function shortDate(
+	time: number,
+	locale: string = activeLocale()
+): string {
+	return dateFormatter(isEnglishLocale(locale) ? "en-GB" : locale, {
+		day: "numeric",
+		month: "short",
+	}).format(new Date(time));
 }
 
 /** "Today", "Tomorrow", "Yesterday", or "Wed 14 Oct". */
 export function relativeDay(time: number, now: number): string {
 	const key = localDayKey(new Date(time));
 	if (key === localDayKey(new Date(now))) {
-		return "Today";
+		return tr("Today");
 	}
 	if (key === localDayKey(new Date(now + DAY))) {
-		return "Tomorrow";
+		return tr("Tomorrow");
 	}
 	if (key === localDayKey(new Date(now - DAY))) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
 	return boardDate(time);
 }
 
-/** "45s", "12m", "3h 05m", "2d 4h". */
-export function flightDuration(ms: number): string {
+/** The two largest whole units of a duration, in the locale's narrow units. */
+function localDuration(total: number, locale: string): string {
+	const unit = (name: string, value: number) =>
+		unitFormatter(locale, name).format(value);
+	if (total < MINUTE) {
+		return unit("second", Math.floor(total / 1000));
+	}
+	if (total < HOUR) {
+		return unit("minute", Math.floor(total / MINUTE));
+	}
+	const inDays = total >= DAY;
+	const bigSize = inDays ? DAY : HOUR;
+	const smallSize = inDays ? HOUR : MINUTE;
+	const rest = Math.floor((total % bigSize) / smallSize);
+	const lead = unit(inDays ? "day" : "hour", Math.floor(total / bigSize));
+	return rest === 0
+		? lead
+		: `${lead} ${unit(inDays ? "hour" : "minute", rest)}`;
+}
+
+/** "45s", "12m", "3h 05m", "2d 4h" in English; the locale's units elsewhere. */
+export function flightDuration(
+	ms: number,
+	locale: string = activeLocale()
+): string {
 	const total = Math.max(0, ms);
+	if (!isEnglishLocale(locale)) {
+		return localDuration(total, locale);
+	}
 	if (total < MINUTE) {
 		return `${Math.floor(total / 1000)}s`;
 	}

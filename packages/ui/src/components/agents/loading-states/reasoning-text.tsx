@@ -211,7 +211,7 @@ export function ReasoningText({
 				)}
 			</span>
 
-			<span aria-hidden="true" className="grid overflow-hidden text-left">
+			<span aria-hidden="true" className="grid overflow-hidden text-start">
 				<span className="invisible col-start-1 row-start-1 whitespace-nowrap">
 					{longestPhrase}…
 				</span>

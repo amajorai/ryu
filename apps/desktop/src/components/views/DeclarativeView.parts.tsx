@@ -254,7 +254,7 @@ export function ListDetail({
 							<ItemContent>
 								<ItemTitle>
 									<button
-										className="text-left"
+										className="text-start"
 										onClick={() => setSelectedId(item.id)}
 										type="button"
 									>

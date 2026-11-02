@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -53,7 +54,11 @@ import {
 } from "react";
 import { DeskAvatar } from "./desk-avatar.tsx";
 import { DESK_FOCUS_RING, deskCursorStep } from "./desk-list.tsx";
-import { DESK_NEEDS_YOU_VIEW_ID, pluralize } from "./desk-model.ts";
+import {
+	conversationCount,
+	DESK_NEEDS_YOU_VIEW_ID,
+	needsYouCount,
+} from "./desk-model.ts";
 import { agentById } from "./interface-renderer.ts";
 
 /**
@@ -61,7 +66,7 @@ import { agentById } from "./interface-renderer.ts";
  * hook needs a `SidebarProvider`, and a second provider would register its own
  * Cmd/Ctrl+B shortcut and cookie, fighting the app's real sidebar.
  */
-const MENU_BUTTON_CLASS = `peer/menu-button group/menu-button flex h-8 w-full items-center gap-2 overflow-hidden rounded-lg pr-9 pl-2 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 ${DESK_FOCUS_RING}`;
+const MENU_BUTTON_CLASS = `peer/menu-button group/menu-button flex h-8 w-full items-center gap-2 overflow-hidden rounded-lg pe-9 ps-2 text-start text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 ${DESK_FOCUS_RING}`;
 
 const SHARED_ICONS: Record<string, LucideIcon> = {
 	all: Inbox,
@@ -90,17 +95,19 @@ function viewAccessibleName(
 	needsYou: number
 ): string {
 	const parts = [
-		view.kind === "agent" ? `${view.label} inbox` : view.label,
-		pluralize(view.threadIds.length, "conversation"),
+		view.kind === "agent"
+			? tr("{name} inbox", { name: view.label })
+			: view.label,
+		conversationCount(view.threadIds.length),
 	];
 	if (needsYou > 0) {
-		parts.push(`${needsYou} need${needsYou === 1 ? "s" : ""} you`);
+		parts.push(needsYouCount(needsYou));
 	}
 	if (
 		view.kind === "agent" &&
 		agentById(snapshot, view.refId)?.status === "working"
 	) {
-		parts.push("working now");
+		parts.push(tr("working now"));
 	}
 	return parts.join(", ");
 }
@@ -181,6 +188,7 @@ function RailItem({
 				)}
 				<span
 					className={cn("truncate", needsYou > 0 && "font-medium")}
+					data-ryu-i18n="off"
 					data-testid={
 						needsYou > 0 ? `desk-view-${view.id}-needs-you` : undefined
 					}
@@ -192,7 +200,7 @@ function RailItem({
 				<SidebarMenuBadge
 					aria-hidden="true"
 					className={cn(
-						"top-1.5 right-1.5 tabular-nums",
+						"end-1.5 top-1.5 tabular-nums",
 						railBadgeClass(urgent, needsYou > 0)
 					)}
 					data-testid={`desk-view-${view.id}-count`}
@@ -275,10 +283,10 @@ export function DeskViewsRail({
 	return (
 		<nav
 			aria-label="Desk views"
-			className="flex w-60 shrink-0 flex-col border-sidebar-border border-r bg-sidebar text-sidebar-foreground"
+			className="flex w-60 shrink-0 flex-col border-sidebar-border border-e bg-sidebar text-sidebar-foreground"
 			data-testid="desk-rail"
 		>
-			<SidebarHeader className="h-14 shrink-0 flex-row items-center gap-2 border-sidebar-border border-b py-0 pr-2 pl-4">
+			<SidebarHeader className="h-14 shrink-0 flex-row items-center gap-2 border-sidebar-border border-b py-0 ps-4 pe-2">
 				<h2 className="min-w-0 flex-1 truncate text-sidebar-foreground text-sm">
 					<span className="font-semibold">Desk</span>
 				</h2>
@@ -322,6 +330,7 @@ export function DeskViewsRail({
 							<SidebarGroup className="py-1" key={section.id}>
 								<SidebarGroupLabel
 									className="h-7 px-2 text-muted-foreground"
+									data-ryu-i18n="off"
 									id={`desk-rail-${section.id}`}
 								>
 									{section.label}
@@ -369,7 +378,7 @@ export function DeskViewSelect({
 	const selected = sections
 		.flatMap((section) => section.views)
 		.find((view) => view.id === selectedId);
-	const label = selected?.label ?? "Conversations";
+	const label = selected?.label ?? tl("Conversations");
 	return (
 		<div className={cn("flex min-w-0", className)}>
 			<DropdownMenu>
@@ -379,14 +388,17 @@ export function DeskViewSelect({
 					render={
 						<button
 							className={cn(
-								"-ml-2 flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-muted aria-expanded:bg-muted",
+								"-ms-2 flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-muted aria-expanded:bg-muted",
 								DESK_FOCUS_RING
 							)}
 							type="button"
 						/>
 					}
 				>
-					<span className="truncate font-semibold text-foreground">
+					<span
+						className="truncate font-semibold text-foreground"
+						data-ryu-i18n="off"
+					>
 						{label}
 					</span>
 					<span className="shrink-0 text-muted-foreground tabular-nums">
@@ -412,10 +424,15 @@ export function DeskViewSelect({
 								<Fragment key={section.id}>
 									{index > 0 ? <DropdownMenuSeparator /> : null}
 									<DropdownMenuGroup>
-										<DropdownMenuLabel>{section.label}</DropdownMenuLabel>
+										<DropdownMenuLabel data-ryu-i18n="off">
+											{section.label}
+										</DropdownMenuLabel>
 										{section.views.map((view) => (
 											<DropdownMenuRadioItem key={view.id} value={view.id}>
-												<span className="min-w-0 flex-1 truncate">
+												<span
+													className="min-w-0 flex-1 truncate"
+													data-ryu-i18n="off"
+												>
 													{view.label}
 												</span>
 												<span className="text-muted-foreground text-xs tabular-nums">

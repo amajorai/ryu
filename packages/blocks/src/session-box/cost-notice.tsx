@@ -53,7 +53,7 @@ export function ComputerUseCostNotice({
 			setError(
 				failure instanceof Error
 					? failure.message
-					: "The acknowledgement could not be saved."
+					: tl("The acknowledgement could not be saved.")
 			);
 		} finally {
 			setBusy(false);

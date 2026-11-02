@@ -1,5 +1,11 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { runInNewContext } from "node:vm";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	type ActiveI18nRuntime,
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../i18n/src/active-locale.ts";
 import {
 	type CompanionPrivacyBridge,
 	getCompanionStreamingPrivacy,
@@ -149,5 +155,36 @@ describe("cached notification privacy", () => {
 		expect(redactConnectSuggestionEvent(event, false)).toBe(event);
 		const ordinary = { ...event, notification_id: "ntf_workflow" };
 		expect(redactConnectSuggestionEvent(ordinary, true)).toBe(ordinary);
+	});
+});
+
+describe("the privacy placeholder follows the UI locale", () => {
+	const german: Record<string, string> = {
+		"Private connected-app activity": "Private Aktivität einer verbundenen App",
+		"A connected-app event was hidden during Streaming. Review it in the source app when you’re ready.":
+			"Ein Ereignis einer verbundenen App wurde während des Streamings ausgeblendet.",
+	};
+	const runtime: ActiveI18nRuntime = {
+		direction: "ltr",
+		locale: "de",
+		translate: (_id, _values, fallback = "") => german[fallback] ?? fallback,
+	};
+	afterEach(() => unregisterActiveI18nRuntime(runtime));
+
+	it("renders the cached-row and event placeholders in German", () => {
+		registerActiveI18nRuntime(runtime);
+		const [row] = redactConnectSuggestionNotifications(
+			cached.slice(0, 1),
+			true
+		);
+		expect(row?.title).toBe("Private Aktivität einer verbundenen App");
+		expect(row?.body).toBe(
+			"Ein Ereignis einer verbundenen App wurde während des Streamings ausgeblendet."
+		);
+		const event = redactConnectSuggestionEvent(
+			{ notification_id: "ntf_connect_private", title: "Secret", body: "x" },
+			true
+		);
+		expect(event.title).toBe("Private Aktivität einer verbundenen App");
 	});
 });

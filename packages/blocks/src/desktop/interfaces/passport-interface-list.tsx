@@ -10,7 +10,7 @@ import {
 	type DeskLayout,
 	stationLabel,
 } from "./passport-desk.tsx";
-import { UNASSIGNED_LABEL } from "./passport-model.ts";
+import { unassignedLabel } from "./passport-model.ts";
 
 export function LoadingIsles() {
 	return (
@@ -76,7 +76,7 @@ export function PassportList({
 							type="button"
 						>
 							<Stamp aria-hidden="true" className="size-4" />
-							{station.country?.agent.name ?? UNASSIGNED_LABEL}
+							{station.country?.agent.name ?? unassignedLabel()}
 							<span className="text-(--gk-ink-muted) text-[13px] tabular-nums">
 								{station.stamps.length}
 							</span>

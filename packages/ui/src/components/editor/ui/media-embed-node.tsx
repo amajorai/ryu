@@ -3,6 +3,7 @@
 import { parseTwitterUrl, parseVideoUrl } from "@platejs/media";
 import { MediaEmbedPlugin, useMediaState } from "@platejs/media/react";
 import { ResizableProvider, useResizableValue } from "@platejs/resizable";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { safeHttpUrl } from "@ryu/ui/lib/safe-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -11,7 +12,6 @@ import type { PlateElementProps } from "platejs/react";
 import { PlateElement, withHOC } from "platejs/react";
 import type { CSSProperties as ReactCSSProperties } from "react";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
-import { Tweet } from "react-tweet";
 import editorStyles from "../editor-lint.module.css";
 import { Caption, CaptionTextarea } from "./caption.tsx";
 import { MediaToolbar } from "./media-toolbar.tsx";
@@ -21,6 +21,7 @@ import {
 	Resizable,
 	ResizeHandle,
 } from "./resize-handle.tsx";
+import { TweetCard } from "./tweet-card.tsx";
 
 interface EditorVariableStyle extends ReactCSSProperties {
 	"--editormediaEmbedNode1-width"?: string | number;
@@ -42,6 +43,7 @@ export const MediaEmbedElement = withHOC(
 			urlParsers: [parseTwitterUrl, parseVideoUrl],
 		});
 		const width = useResizableValue("width");
+		const tl = useLiteralMessages();
 		const provider = embed?.provider;
 		const safeEmbedUrl = safeHttpUrl(embed?.url);
 
@@ -74,8 +76,9 @@ export const MediaEmbedElement = withHOC(
 								isYoutube ? (
 									<div>
 										<LiteYouTubeEmbed
+											announce={tl("Watch")}
 											id={requireMediaEmbedId(embed?.id)}
-											title="youtube"
+											title={tl("YouTube video")}
 											wrapperClass={cn(
 												"rounded-sm",
 												focused && selected && "ring-2 ring-ring ring-offset-2",
@@ -112,7 +115,7 @@ export const MediaEmbedElement = withHOC(
 												focused && selected && "ring-2 ring-ring ring-offset-2"
 											)}
 											src={safeEmbedUrl ?? undefined}
-											title="embed"
+											title={tl("Embedded video")}
 										/>
 									</div>
 								)
@@ -127,7 +130,7 @@ export const MediaEmbedElement = withHOC(
 											"[&_.react-tweet-theme]:ring-2 [&_.react-tweet-theme]:ring-ring [&_.react-tweet-theme]:ring-offset-2"
 									)}
 								>
-									<Tweet id={requireMediaEmbedId(embed?.id)} />
+									<TweetCard id={requireMediaEmbedId(embed?.id)} />
 								</div>
 							)}
 
@@ -142,7 +145,7 @@ export const MediaEmbedElement = withHOC(
 							className={editorStyles.editormediaEmbedNode1}
 							style={editormediaEmbedNode1Style}
 						>
-							<CaptionTextarea placeholder="Write a caption…" />
+							<CaptionTextarea placeholder={tl("Write a caption…")} />
 						</Caption>
 					</figure>
 

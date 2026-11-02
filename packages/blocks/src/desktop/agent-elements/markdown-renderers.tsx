@@ -54,11 +54,12 @@ function MarkdownImage({
 	src,
 	...props
 }: ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }) {
+	const tl = useLiteralMessages();
 	const allowResponseImages = useContext(MarkdownResponseImages);
 	if (!allowResponseImages) {
 		return (
 			<span className="text-muted-foreground text-sm">
-				{alt || "Image omitted"}
+				{alt || tl("Image omitted")}
 			</span>
 		);
 	}
@@ -197,7 +198,7 @@ function MarkdownLink({ href, children, ...props }: AnchorProps) {
 				title={ref.path}
 				type="button"
 			>
-				<FileTypeIcon className="mr-1 size-3.5" path={ref.path} />
+				<FileTypeIcon className="me-1 size-3.5" path={ref.path} />
 				{children}
 			</button>
 		);
@@ -218,7 +219,7 @@ function MarkdownLink({ href, children, ...props }: AnchorProps) {
 					title={mentionedFile}
 					type="button"
 				>
-					<FileTypeIcon className="mr-1 size-3.5" path={mentionedFile} />
+					<FileTypeIcon className="me-1 size-3.5" path={mentionedFile} />
 					{children}
 				</button>
 			</LinkPreview>
@@ -416,7 +417,7 @@ export const MARKDOWN_COMPONENTS: Components = {
 	),
 	ul: ({ children, ...props }) => (
 		<ul
-			className="mb-2 list-outside list-disc space-y-0.5 pl-4 text-foreground text-sm"
+			className="mb-2 list-outside list-disc space-y-0.5 ps-4 text-foreground text-sm"
 			{...props}
 		>
 			{children}
@@ -424,14 +425,14 @@ export const MARKDOWN_COMPONENTS: Components = {
 	),
 	ol: ({ children, ...props }) => (
 		<ol
-			className="mb-2 list-outside list-decimal space-y-0.5 pl-5 text-foreground text-sm"
+			className="mb-2 list-outside list-decimal space-y-0.5 ps-5 text-foreground text-sm"
 			{...props}
 		>
 			{children}
 		</ol>
 	),
 	li: ({ children, ...props }) => (
-		<li className="pl-0.5 text-foreground text-sm" {...props}>
+		<li className="ps-0.5 text-foreground text-sm" {...props}>
 			{children}
 		</li>
 	),
@@ -443,7 +444,7 @@ export const MARKDOWN_COMPONENTS: Components = {
 	a: MarkdownLink,
 	blockquote: ({ children, ...props }) => (
 		<blockquote
-			className="mb-2 border-border border-l-2 pl-3 text-muted-foreground text-sm italic"
+			className="mb-2 border-border border-s-2 ps-3 text-muted-foreground text-sm italic"
 			{...props}
 		>
 			{children}
@@ -453,7 +454,7 @@ export const MARKDOWN_COMPONENTS: Components = {
 	table: MarkdownTable,
 	img: MarkdownImage,
 	th: ({ children, ...props }) => (
-		<th className="bg-muted px-3 py-2 text-left font-medium" {...props}>
+		<th className="bg-muted px-3 py-2 text-start font-medium" {...props}>
 			{children}
 		</th>
 	),

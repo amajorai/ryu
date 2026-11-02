@@ -32,7 +32,6 @@ import {
 	isEditableTarget,
 	NODE_STYLE,
 	nodeDescription,
-	plural,
 } from "./graph-interface-model.ts";
 import {
 	GRAPH_NODE_SIZE,
@@ -136,6 +135,8 @@ export function GraphInterface({
 							(thread) => threadStatus(thread) === "your-turn"
 						).length,
 					},
+					// React Flow hard-codes an English role description.
+					domAttributes: { "aria-roledescription": tl("node") },
 					height: GRAPH_NODE_SIZE[node.kind].height,
 					id: node.id,
 					position: { x: node.x, y: node.y },
@@ -146,7 +147,7 @@ export function GraphInterface({
 					width: GRAPH_NODE_SIZE[node.kind].width,
 				};
 			}),
-		[agentsById, graph.nodes, snapshot]
+		[agentsById, graph.nodes, snapshot, tl]
 	);
 	const edges = useMemo<GraphFlowEdge[]>(
 		() =>
@@ -162,6 +163,10 @@ export function GraphInterface({
 					const target = nodeById.get(edge.target);
 					const live = edge.kind === "talks" && target?.status === "working";
 					return {
+						ariaLabel: tl("Edge from {source} to {target}", {
+							source: nodeById.get(edge.source)?.label ?? edge.source,
+							target: target?.label ?? edge.target,
+						}),
 						data: {
 							emphasis: edgeEmphasis,
 							kind: edge.kind,
@@ -169,13 +174,14 @@ export function GraphInterface({
 							motion: !reducedMotion,
 							weight: edge.weight,
 						},
+						domAttributes: { "aria-roledescription": tl("edge") },
 						id: edge.id,
 						source: edge.source,
 						target: edge.target,
 						type: "graph",
 					};
 				}),
-		[focusIds, graph.edges, nodeById, reducedMotion]
+		[focusIds, graph.edges, nodeById, reducedMotion, tl]
 	);
 
 	const focusNode = useCallback((nodeId: string) => {
@@ -295,7 +301,14 @@ export function GraphInterface({
 	const workingCount = snapshot.agents.filter(
 		(agent) => agent.status === "working"
 	).length;
-	const stats = `${plural(snapshot.agents.length, "agent")} · ${workingCount} working · ${plural(snapshot.threads.length, "thread")}`;
+	const stats = tl(
+		"{agents, plural, one {# agent} other {# agents}} · {working} working · {threads, plural, one {# thread} other {# threads}}",
+		{
+			agents: snapshot.agents.length,
+			threads: snapshot.threads.length,
+			working: workingCount,
+		}
+	);
 
 	if (
 		loading &&

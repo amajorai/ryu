@@ -139,7 +139,7 @@ test("migrate openclaw --dry-run: scans the first existing default and changes n
 	expect(cap.out()).toContain("+ OpenClaw agent 'Clawd'");
 	expect(cap.out()).toContain("= Skill 'deploy'  (already in Ryu)");
 	expect(cap.out()).toContain("! Channels configured in OpenClaw");
-	expect(cap.out()).toContain("3 item(s) would be imported");
+	expect(cap.out()).toContain("3 items would be imported");
 });
 
 test("migrate openclaw --yes --only: imports only the selected new kinds", async () => {

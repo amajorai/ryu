@@ -117,12 +117,15 @@ export function SensitiveRevealButton({
 	tabIndex?: number;
 }) {
 	const tl = useLiteralMessages();
+	// Callers pass catalog literals ("referral link"); translate the noun
+	// before it fills the sentence so it does not stay English.
+	const localizedLabel = tl(label);
 	return (
 		<Button
 			aria-label={
 				revealed
-					? tl("Hide {label}", { label })
-					: tl("Reveal {label}", { label })
+					? tl("Hide {label}", { label: localizedLabel })
+					: tl("Reveal {label}", { label: localizedLabel })
 			}
 			aria-pressed={revealed}
 			className="shrink-0 self-start"

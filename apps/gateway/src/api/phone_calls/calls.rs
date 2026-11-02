@@ -1,4 +1,6 @@
 //! Outbound call placement and live-call controls (steer, hand off, hang up).
+use ryu_gw_channels::i18n::{self, OwnerLocale};
+
 use super::*;
 
 pub async fn start_call(
@@ -234,11 +236,8 @@ pub async fn handoff_call(
         GatewayError::BadRequest("this phone line has no handoff number".to_owned())
     })?;
     let credentials = TwilioCredentials::from_env()?;
-    let twiml = format!(
-        "<Response><Say>Connecting you with the account owner.</Say><Dial callerId=\"{}\" answerOnBridge=\"true\"><Number>{}</Number></Dial></Response>",
-        xml_escape(&line.caller_id),
-        xml_escape(transfer_to),
-    );
+    let locale = handoff_locale(&state).await;
+    let twiml = handoff_twiml(locale, &line.caller_id, transfer_to);
     let body = twilio_request::<Value>(
         &state,
         &credentials,
@@ -254,6 +253,77 @@ pub async fn handoff_call(
             .and_then(Value::as_str)
             .map(str::to_owned),
     }))
+}
+
+/// The language the handoff sentence is spoken in: the account owner's (Core's
+/// `ui-language` preference, cached), since the caller's is unknown. Tests
+/// get English so they never depend on a Core running on the machine.
+async fn handoff_locale(state: &SharedState) -> &'static str {
+    static OWNER: std::sync::OnceLock<OwnerLocale> = std::sync::OnceLock::new();
+    let owner = OWNER.get_or_init(|| {
+        if cfg!(test) {
+            OwnerLocale::fixed("en")
+        } else {
+            OwnerLocale::from_core()
+        }
+    });
+    let core_url = std::env::var("RYU_CORE_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(crate::config::default_core_url);
+    owner.get(&state.http, &core_url).await
+}
+
+/// The TwiML that announces the handoff in `locale` and bridges the caller to
+/// the line's handoff number.
+pub(super) fn handoff_twiml(locale: &str, caller_id: &str, transfer_to: &str) -> String {
+    let sentence = i18n::render(locale, i18n::messages::PHONE_HANDOFF_MESSAGE, &[]);
+    let voice = twilio_say_voice(locale)
+        .map(|voice| format!(" voice=\"{voice}\""))
+        .unwrap_or_default();
+    format!(
+        "<Response><Say language=\"{}\"{voice}>{}</Say><Dial callerId=\"{}\" answerOnBridge=\"true\"><Number>{}</Number></Dial></Response>",
+        twilio_say_language(locale),
+        xml_escape(&sentence),
+        xml_escape(caller_id),
+        xml_escape(transfer_to),
+    )
+}
+
+/// The Twilio `<Say language>` voice locale for a catalog locale (English
+/// when the catalog has no voice for it).
+pub(super) fn twilio_say_language(locale: &str) -> &'static str {
+    match i18n::resolve(locale) {
+        "ar" => "ar-XA",
+        "de" => "de-DE",
+        "es" => "es-ES",
+        "fr" => "fr-FR",
+        "hi" => "hi-IN",
+        "it" => "it-IT",
+        "ja" => "ja-JP",
+        "ko" => "ko-KR",
+        "pt-BR" => "pt-BR",
+        "ru" => "ru-RU",
+        "zh-CN" => "cmn-CN",
+        _ => "en-US",
+    }
+}
+
+/// The voice for a language Twilio's free basic voices do not speak (they
+/// cover only en, de, es, fr and it; another language with the account's
+/// default voice can fail the `<Say>`): a Google standard voice, named as in
+/// Twilio's text-to-speech voice table. `None` keeps the account default.
+pub(super) fn twilio_say_voice(locale: &str) -> Option<&'static str> {
+    match twilio_say_language(locale) {
+        "ar-XA" => Some("Google.ar-XA-Standard-A"),
+        "hi-IN" => Some("Google.hi-IN-Standard-A"),
+        "ja-JP" => Some("Google.ja-JP-Standard-B"),
+        "ko-KR" => Some("Google.ko-KR-Standard-A"),
+        "pt-BR" => Some("Google.pt-BR-Standard-B"),
+        "ru-RU" => Some("Google.ru-RU-Standard-A"),
+        "cmn-CN" => Some("Google.cmn-CN-Standard-A"),
+        _ => None,
+    }
 }
 
 pub async fn hangup_call(

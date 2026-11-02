@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
@@ -171,7 +172,7 @@ export function flowLogs(
 			at: thread.updatedAt,
 			id: `thread:${thread.id}`,
 			threadId: thread.id,
-			title: thread.title.trim() || "Untitled conversation",
+			title: thread.title.trim() || tr("Untitled conversation"),
 			tone: threadStatus(thread),
 			verb: threadVerb(thread),
 		})
@@ -202,20 +203,6 @@ export function flowLogs(
 }
 
 const pad = (value: number) => String(value).padStart(2, "0");
-const MONTHS = [
-	"Jan",
-	"Feb",
-	"Mar",
-	"Apr",
-	"May",
-	"Jun",
-	"Jul",
-	"Aug",
-	"Sep",
-	"Oct",
-	"Nov",
-	"Dec",
-];
 
 /** `HH:MM` in local time, for the log's fixed-width time column. */
 export function logClock(iso: string): string {
@@ -238,10 +225,13 @@ export function logDay(iso: string, now: number): string {
 	day.setHours(0, 0, 0, 0);
 	const daysAgo = Math.round((start.getTime() - day.getTime()) / 86_400_000);
 	if (daysAgo === 0) {
-		return "Today";
+		return tr("Today");
 	}
 	if (daysAgo === 1) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
-	return `${MONTHS[date.getMonth()]} ${date.getDate()}`;
+	return dateFormatter(activeLocale(), {
+		day: "numeric",
+		month: "short",
+	}).format(date);
 }

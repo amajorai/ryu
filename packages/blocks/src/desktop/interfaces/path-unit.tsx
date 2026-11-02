@@ -56,7 +56,7 @@ function addLabel(unit: PathUnit, tl: LiteralMessage) {
 	if (unit.kind === "project") {
 		return {
 			label: tl("New thread in {title}", { title: unit.title }),
-			meta: `In ${unit.title}`,
+			meta: tl("In {title}", { title: unit.title }),
 		};
 	}
 	if (unit.kind === "unfiled") {
@@ -64,7 +64,7 @@ function addLabel(unit: PathUnit, tl: LiteralMessage) {
 	}
 	return {
 		label: tl("New thread with {title}", { title: unit.title }),
-		meta: `With ${unit.title}`,
+		meta: tl("With {title}", { title: unit.title }),
 	};
 }
 

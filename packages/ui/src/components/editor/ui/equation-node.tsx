@@ -2,6 +2,7 @@
 
 import { useEquationElement, useEquationInput } from "@platejs/math/react";
 import { BlockSelectionPlugin } from "@platejs/selection/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import {
 	Popover,
@@ -34,6 +35,7 @@ export function EquationElement(
 	const [open, setOpen] = useState(selected);
 	const katexRef = useRef<HTMLDivElement | null>(null);
 	const lineBreakBadge = props.lineBreakBadge;
+	const tl = useLiteralMessages();
 
 	useEquationElement({
 		element: props.element,
@@ -74,7 +76,7 @@ export function EquationElement(
 					) : (
 						<div className="flex h-7 w-full items-center gap-2 whitespace-nowrap text-muted-foreground text-sm">
 							<RadicalIcon className="size-6 text-muted-foreground/80" />
-							<div>Add a Tex equation</div>
+							<div>{tl("Add a Tex equation")}</div>
 						</div>
 					)}
 					{lineBreakBadge}
@@ -106,6 +108,7 @@ export function InlineEquationElement(
 		[]
 	);
 	const [open, setOpen] = useState(selected && isCollapsed);
+	const tl = useLiteralMessages();
 
 	useEffect(() => {
 		if (selected && isCollapsed) {
@@ -164,7 +167,7 @@ export function InlineEquationElement(
 					{element.texExpression.length === 0 && (
 						<span>
 							<RadicalIcon className="me-1 inline-block h-[19px] w-4 py-[1.5px] align-text-bottom" />
-							New equation
+							{tl("New equation")}
 						</span>
 					)}
 				</PopoverTrigger>

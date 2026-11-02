@@ -1,0 +1,36 @@
+[package]
+name = "ryu-security-key"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Runs a relayed WebAuthn ceremony against the hardware security key plugged into the user's desktop."
+repository = "https://github.com/amajorai/ryu"
+
+[features]
+# The real key backends: CTAP2 over USB HID on macOS and Linux (Mozilla's
+# `authenticator`, the library Firefox uses) and webauthn.dll on Windows.
+# Off by default so the workspace builds and tests without libudev headers;
+# the desktop app enables it. Linux builds with it need `libudev-dev`.
+native = ["dep:authenticator", "dep:serde_cbor", "dep:windows"]
+
+[dependencies]
+ryu-webauthn-relay = { path = "../webauthn-relay" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+
+# `crypto_rust` keeps the PIN protocol's ECDH/AES/HMAC in pure Rust, so the
+# build needs neither NSS (the crate default) nor a system OpenSSL.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+authenticator = { version = "0.5", default-features = false, features = ["crypto_rust"], optional = true }
+# Encodes the attestation object the crate returns (the crate's own CBOR codec).
+serde_cbor = { version = "0.11", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.59", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Networking_WindowsWebServices",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }

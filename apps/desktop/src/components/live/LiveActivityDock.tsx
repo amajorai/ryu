@@ -68,7 +68,7 @@ function ActivityCard({
 	} = { "--live-activity-tint": tone };
 	return (
 		<motion.div
-			className="flex w-64 flex-col gap-2 rounded-xl border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg"
+			className="flex w-64 flex-col gap-2 rounded-xl border border-border bg-popover p-3 text-start text-popover-foreground shadow-lg"
 			layout
 			transition={SPRING_MORPH}
 		>
@@ -168,7 +168,7 @@ function ActivityPill({
 			{expanded && (
 				<span
 					aria-hidden
-					className="ml-0.5 text-muted-foreground/70 text-xs tabular-nums"
+					className="ms-0.5 text-muted-foreground/70 text-xs tabular-nums"
 				>
 					{statusLabel(activity.status)}
 				</span>
@@ -176,7 +176,7 @@ function ActivityPill({
 			{activity.action && (
 				<span
 					aria-hidden
-					className="ml-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+					className="ms-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
 					onClick={(e) => {
 						e.stopPropagation();
 						onOpen(activity);

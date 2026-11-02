@@ -195,7 +195,7 @@ function ChoiceCard({
 	const localizedTitle = useLocalizedText(title, { literal: true });
 	return (
 		<div
-			className="flex flex-col rounded-xl border border-border p-4 text-left"
+			className="flex flex-col rounded-xl border border-border p-4 text-start"
 			data-testid={testId}
 		>
 			<h2 className="font-semibold text-sm">{localizedTitle}</h2>

@@ -47,7 +47,7 @@ export function BeforeAfterSummary({
 				<SummarySide item={current} />
 				<ArrowRight
 					aria-hidden="true"
-					className="size-4 text-muted-foreground/70"
+					className="size-4 text-muted-foreground/70 rtl:-scale-x-100"
 				/>
 				<SummarySide accent item={next} />
 			</div>

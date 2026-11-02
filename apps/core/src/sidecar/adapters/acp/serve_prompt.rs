@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{messages as m, Message};
 
 /// The per-turn result slots [`send_turn_prompt`] wires to the prompt callback.
 pub(super) struct TurnPrompt {
@@ -190,11 +191,11 @@ pub(super) async fn read_turn_update(
             Err(error) => {
                 let detail = error.to_string();
                 tracing::error!(error = %detail, "ACP session update stream failed");
-                let _ = tx.send(AcpEvent::Error(AcpFailure {
-                    code: "acp_transport_error".to_owned(),
-                    title: "Agent connection lost".to_owned(),
-                    message: format!("The agent connection ended before the turn completed: {detail}"),
-                }));
+                let _ = tx.send(AcpEvent::Error(AcpFailure::localized(
+                    "acp_transport_error",
+                    m::ACP_CONNECTION_LOST_TITLE_MESSAGE,
+                    vec![Message::new(m::ACP_CONNECTION_LOST_MID_TURN_MESSAGE).text("error", detail)],
+                )));
                 if let Ok(mut g) = sink.lock() {
                     *g = None;
                 }

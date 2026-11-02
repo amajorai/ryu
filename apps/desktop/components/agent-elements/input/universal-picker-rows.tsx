@@ -111,7 +111,7 @@ export function SettingItemRow({
 				)}
 			</span>
 			{item.description && (
-				<span className="w-full truncate text-left font-normal text-muted-foreground text-xs">
+				<span className="w-full truncate text-start font-normal text-muted-foreground text-xs">
 					{item.description}
 				</span>
 			)}
@@ -203,7 +203,7 @@ export function ActionRow({
 				<span className="flex-1 truncate">{label}</span>
 			</span>
 			{description && (
-				<span className="w-full truncate pl-6 text-left font-normal text-muted-foreground text-xs">
+				<span className="w-full truncate ps-6 text-start font-normal text-muted-foreground text-xs">
 					{description}
 				</span>
 			)}

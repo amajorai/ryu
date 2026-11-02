@@ -446,11 +446,11 @@ export {
 	absoluteTime,
 	communityLabel,
 	flairLabel,
-	plural,
 	posterLabel,
 	redditAge,
 	STATUS_FLAIR,
 	shortCount,
+	threadCountLabel,
 } from "./community-model-format.ts";
 export { PROFILE_KEY } from "./community-model-keys.ts";
 export {

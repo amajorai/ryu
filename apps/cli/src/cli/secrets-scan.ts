@@ -113,12 +113,12 @@ export async function scan(
 		printJson(ctx, { files: files.length, findings });
 	} else if (findings.length === 0) {
 		ctx.io.out(
-			`${tf("No secrets found in {fileCount} file(s).", { fileCount: String(files.length) })}\n`
+			`${tf("No secrets found in {fileCount, plural, one {# file} other {# files}}.", { fileCount: files.length })}\n`
 		);
 	} else {
 		ctx.io.out(`${findings.map(findingLine).join("\n")}\n`);
 		ctx.io.err(
-			`${tf("{findingCount} finding(s) in {fileCount} file(s). Suppress a reviewed finding with --allow <fingerprint>.", { findingCount: String(findings.length), fileCount: String(files.length) })}\n`
+			`${tf("{findingCount, plural, one {# finding} other {# findings}} in {fileCount, plural, one {# file} other {# files}}. Suppress a reviewed finding with --allow <fingerprint>.", { findingCount: findings.length, fileCount: files.length })}\n`
 		);
 	}
 	return findings.length > 0 ? 1 : 0;

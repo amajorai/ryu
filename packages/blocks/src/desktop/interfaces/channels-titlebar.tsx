@@ -28,12 +28,12 @@ export function ChannelsTitleBar({
 			>
 				<Search
 					aria-hidden="true"
-					className="pointer-events-none absolute left-2.5 z-10 size-4 text-foreground/60"
+					className="pointer-events-none absolute start-2.5 z-10 size-4 text-foreground/60"
 				/>
 				<input
 					aria-label="Search Ryu"
 					autoComplete="off"
-					className="h-8 w-full rounded-md border border-input bg-background pr-16 pl-8 text-foreground text-sm outline-hidden ring-ring/30 transition-[border-color,box-shadow] placeholder:text-foreground/60 hover:border-ring/60 focus-visible:border-ring focus-visible:ring-3 dark:bg-input/30 [&::-webkit-search-cancel-button]:hidden"
+					className="h-8 w-full rounded-md border border-input bg-background ps-8 pe-16 text-foreground text-sm outline-hidden ring-ring/30 transition-[border-color,box-shadow] placeholder:text-foreground/60 hover:border-ring/60 focus-visible:border-ring focus-visible:ring-3 dark:bg-input/30 [&::-webkit-search-cancel-button]:hidden"
 					onChange={(event) => onQueryChange(event.target.value)}
 					onKeyDown={onKeyDown}
 					placeholder="Search Ryu"
@@ -42,7 +42,7 @@ export function ChannelsTitleBar({
 					value={query}
 				/>
 				{query ? (
-					<span className="absolute right-1 flex items-center gap-1">
+					<span className="absolute end-1 flex items-center gap-1">
 						<Kbd aria-hidden="true" className="h-5 text-foreground/70 text-xs">
 							Esc
 						</Kbd>

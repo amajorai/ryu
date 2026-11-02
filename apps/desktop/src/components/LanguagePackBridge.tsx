@@ -5,6 +5,7 @@ import {
 	LANGUAGE_PACKS_CHANGED_EVENT,
 	type LanguagePack,
 } from "@ryu/i18n";
+import { systemLocales } from "@ryu/i18n/core";
 import { I18nProvider } from "@ryu/i18n/react";
 import { I18nDirectionProvider } from "@ryu/ui/components/direction.tsx";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
@@ -14,6 +15,10 @@ import {
 } from "@/src/hooks/useLanguageMode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { fetchInstalledLanguagePacks } from "@/src/lib/api/language-packs.ts";
+import {
+	cachedOsPreferredLanguages,
+	fetchOsPreferredLanguages,
+} from "@/src/lib/native-copy.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 /**
@@ -45,6 +50,37 @@ function persistPackChoice(id: string | null): void {
 }
 
 /**
+ * The OS's preferred languages from the desktop shell (cached from the last
+ * launch until it answers), refreshed when the system reports a change. Null
+ * outside the desktop, where the browser's own list is accurate.
+ */
+function useOsPreferredLanguages(): readonly string[] | null {
+	const [languages, setLanguages] = useState<readonly string[] | null>(
+		cachedOsPreferredLanguages
+	);
+	useEffect(() => {
+		let cancelled = false;
+		const refresh = () => {
+			void fetchOsPreferredLanguages().then((next) => {
+				if (cancelled || next === null) {
+					return;
+				}
+				setLanguages((current) =>
+					current?.join(",") === next.join(",") ? current : next
+				);
+			});
+		};
+		refresh();
+		window.addEventListener("languagechange", refresh);
+		return () => {
+			cancelled = true;
+			window.removeEventListener("languagechange", refresh);
+		};
+	}, []);
+	return languages;
+}
+
+/**
  * Loads Core-installed packs for both the native Tauri app and the browser-hosted
  * webapp. The built-in flavor pack is always present, so an offline/unavailable
  * node never blanks the UI or removes the default fallback catalog.
@@ -58,6 +94,7 @@ export function LanguagePackBridge({ children }: { children: ReactNode }) {
 	const [packs, setPacks] = useState<LanguagePack[]>([]);
 	const [languageMode] = useLanguageMode();
 	const [selectionVersion, setSelectionVersion] = useState(0);
+	const osLanguages = useOsPreferredLanguages();
 	useEffect(() => {
 		const onStorage = (event: StorageEvent) => {
 			if (!(event.storageArea === null || event.storageArea === localStorage)) {
@@ -120,13 +157,18 @@ export function LanguagePackBridge({ children }: { children: ReactNode }) {
 		};
 	}, [target]);
 
+	const auto = languageMode === "auto";
+	// Auto mode follows the OS list the desktop shell reports; the browser's
+	// list is the fallback (the webapp, or before the shell first answers).
+	const osKey = auto && osLanguages ? `-${osLanguages.join(",")}` : "";
 	return (
 		<I18nProvider
-			initialLocale={languageMode === "auto" ? navigator.language : null}
-			initialPackId={languageMode === "auto" ? null : unsavedPackChoice}
+			followSystemLocale={auto && osLanguages === null}
+			initialLocale={auto ? (osLanguages ?? systemLocales()) : null}
+			initialPackId={auto ? null : unsavedPackChoice}
 			packs={packs}
 			persistPackId={persistPackChoice}
-			selectionKey={`${languageMode}-${selectionVersion}`}
+			selectionKey={`${languageMode}-${selectionVersion}${osKey}`}
 		>
 			<I18nDirectionProvider>{children}</I18nDirectionProvider>
 		</I18nProvider>

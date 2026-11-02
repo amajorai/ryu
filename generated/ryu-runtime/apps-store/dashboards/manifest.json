@@ -292,7 +292,7 @@
           "title": "Open incidents",
           "kind": "stat",
           "source_type": "http",
-          "error": "http GET returned 503",
+          "error": "The web source returned HTTP 503.",
           "at": "2026-08-01T10:15:00Z"
         }
       },

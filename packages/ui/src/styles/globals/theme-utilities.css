@@ -333,6 +333,18 @@
 	);
 	-webkit-mask-image: var(--text-fade-edge);
 	mask-image: var(--text-fade-edge);
+
+	/* Right to left the label's trailing edge is on the left. */
+	&:where([dir="rtl"], [dir="rtl"] *) {
+		--text-fade-edge: linear-gradient(
+			to left,
+			#000 calc(100% - 2.5rem),
+			rgb(0 0 0 / 0.854) calc(100% - 1.875rem),
+			rgb(0 0 0 / 0.5) calc(100% - 1.25rem),
+			rgb(0 0 0 / 0.146) calc(100% - 0.625rem),
+			transparent
+		);
+	}
 }
 
 /* Eased scrim for legible text over imagery. Sine in-out alpha stops keep the

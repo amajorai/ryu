@@ -193,6 +193,7 @@ export function installCoreFixture(): void {
 					{
 						accountId: "claude-work",
 						active: true,
+						gatewayActive: false,
 						kind: "oauth",
 						label: "work@example.com",
 						updatedAt: Date.now(),

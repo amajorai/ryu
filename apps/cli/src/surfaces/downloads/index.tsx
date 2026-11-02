@@ -9,34 +9,20 @@
 // the desktop download center - this only surfaces state so the link works.
 
 import type { ApiTarget } from "@ryuhq/core-client/client";
-import { type DownloadTask, listDownloads } from "@ryuhq/core-client/downloads";
+import { listDownloads } from "@ryuhq/core-client/downloads";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import type { ListRow } from "../../core/featureList.ts";
 import { ListTab } from "../../ui/ListTab.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
-
-const MB = 1024 * 1024;
-
-// Percent-complete badge when the total is known, otherwise the received size in
-// MB (matches how the desktop download center degrades on an unknown total).
-function progressBadge(task: DownloadTask): string {
-	if (task.total_bytes !== null && task.total_bytes > 0) {
-		const pct = Math.floor((task.received_bytes / task.total_bytes) * 100);
-		return `${task.state} ${pct}%`;
-	}
-	if (task.received_bytes > 0) {
-		return `${task.state} ${(task.received_bytes / MB).toFixed(1)}MB`;
-	}
-	return task.state;
-}
+import { downloadKindLabel, progressBadge } from "./progress-badge.ts";
 
 async function loadDownloads(target: ApiTarget): Promise<ListRow[]> {
 	const tasks = await listDownloads(target);
 	return tasks.map((task) => ({
 		id: task.id,
 		title: task.label || task.id,
-		subtitle: task.error ?? task.kind,
+		subtitle: task.error ?? downloadKindLabel(task.kind),
 		badge: progressBadge(task),
 	}));
 }

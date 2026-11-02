@@ -16,7 +16,7 @@ export function ImageEditorModelSettingsPanel({
 	return (
 		<section
 			aria-label="Local image model settings"
-			className="absolute top-14 right-3 z-30 grid w-[min(35rem,calc(100vw-1.5rem))] gap-3 rounded-xl border bg-popover/95 p-4 text-popover-foreground shadow-xl backdrop-blur-xl sm:right-6 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+			className="absolute end-3 top-14 z-30 grid w-[min(35rem,calc(100vw-1.5rem))] gap-3 rounded-xl border bg-popover/95 p-4 text-popover-foreground shadow-xl backdrop-blur-xl sm:end-6 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
 		>
 			<label className="grid gap-1.5 text-xs">
 				<span>Segmentation engine</span>
@@ -121,7 +121,7 @@ export function ImageEditorSubjectsPanel({
 	return (
 		<section
 			aria-label="Detected subjects"
-			className="absolute top-14 left-3 z-20 grid max-h-[min(55dvh,28rem)] w-56 gap-2 overflow-y-auto rounded-xl border bg-popover/95 p-3 text-popover-foreground shadow-xl backdrop-blur-xl sm:left-6"
+			className="absolute start-3 top-14 z-20 grid max-h-[min(55dvh,28rem)] w-56 gap-2 overflow-y-auto rounded-xl border bg-popover/95 p-3 text-popover-foreground shadow-xl backdrop-blur-xl sm:start-6"
 			role="group"
 		>
 			<h3 className="font-medium text-xs">Detected subjects</h3>

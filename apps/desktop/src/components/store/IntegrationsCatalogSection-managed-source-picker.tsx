@@ -41,7 +41,9 @@ export function ManagedSourcePicker({
 	const items = [
 		{
 			value: AUTO_SOURCE,
-			label: suggested ? `Suggested (${suggested})` : "Suggested",
+			label: suggested
+				? tl("Suggested ({suggested})", { suggested })
+				: "Suggested",
 		},
 		{ value: "treg", label: "Treg (provider cost)" },
 		{ value: "composio", label: "Composio" },

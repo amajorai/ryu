@@ -14,6 +14,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { formatDurationParts, formatDurationUnit } from "../locale-format.ts";
 
 /**
  * Per-tool-call timing, the row-level counterpart to the whole-turn duration in
@@ -146,18 +147,21 @@ export function formatToolDuration(ms: number): string {
 		return "";
 	}
 	if (ms < SUB_SECOND_CUTOFF_MS) {
-		return `${Math.round(ms)}ms`;
+		return formatDurationUnit(Math.round(ms), "millisecond");
 	}
 	if (ms < TEN_SECONDS_MS) {
-		return `${(ms / MS_PER_SECOND).toFixed(1)}s`;
+		return formatDurationUnit(ms / MS_PER_SECOND, "second", 1);
 	}
 	const totalSeconds = Math.round(ms / MS_PER_SECOND);
 	if (totalSeconds < SECONDS_PER_MINUTE) {
-		return `${totalSeconds}s`;
+		return formatDurationParts([[totalSeconds, "second"]]);
 	}
 	const minutes = Math.floor(totalSeconds / SECONDS_PER_MINUTE);
 	const seconds = totalSeconds % SECONDS_PER_MINUTE;
-	return `${minutes}m ${seconds}s`;
+	return formatDurationParts([
+		[minutes, "minute"],
+		[seconds, "second"],
+	]);
 }
 
 /** Wall-clock time of day, the form a start stamp is readable in. */

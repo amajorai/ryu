@@ -92,7 +92,7 @@ export function AgentThreadList({
 }) {
 	const paged = usePaged(threads, pageSize);
 	const renderList = (list: Conversation[]) => (
-		<div className="relative ml-5 border-border border-l pl-2">
+		<div className="relative ms-5 border-border border-s ps-2">
 			<SidebarMenu>
 				{list.map((thread) => (
 					<AgentThreadRow
@@ -114,7 +114,7 @@ export function AgentThreadList({
 
 	return (
 		<div className="mt-0.5" data-testid="agent-thread-list">
-			<div className="flex h-7 items-center gap-1.5 px-2 pl-7 text-detail text-muted-foreground">
+			<div className="flex h-7 items-center gap-1.5 px-2 ps-7 text-detail text-muted-foreground">
 				<HugeiconsIcon className="size-3.5" icon={GitBranchIcon} />
 				<span>Threads</span>
 				<span className="text-muted-foreground/70 text-xs tabular-nums">

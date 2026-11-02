@@ -6,8 +6,12 @@ import {
 	Delete01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { formatMessage } from "@ryu/i18n/core";
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { dateFormatter, formatMessage } from "@ryu/i18n/core";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
@@ -40,6 +44,17 @@ const WEEKDAYS = [
 	"saturday",
 	"sunday",
 ];
+
+/** 1 January 2024 (UTC) was a Monday, so `WEEKDAYS[index]` is `index` days on. */
+const A_MONDAY_UTC = Date.UTC(2024, 0, 1);
+const DAY_MS = 86_400_000;
+
+/** The weekday's name in the UI language ("Monday", "Montag", "月曜日"). */
+function weekdayLabel(locale: string | undefined, index: number): string {
+	return dateFormatter(locale, { timeZone: "UTC", weekday: "long" }).format(
+		A_MONDAY_UTC + index * DAY_MS
+	);
+}
 
 const SCHEDULE_PHRASE_ITEMS = [
 	{ value: "everyminute", label: "Every minute" },
@@ -110,6 +125,7 @@ export function AgentTriggersPanel({
 		ownAccountsAllowed = false,
 	} = props;
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const showTimeField =
 		schedulePhrase === "daily" ||
 		schedulePhrase === "weekdays" ||
@@ -191,9 +207,9 @@ export function AgentTriggersPanel({
 								actions={
 									<Select
 										disabled={isLocked}
-										items={WEEKDAYS.map((d) => ({
+										items={WEEKDAYS.map((d, index) => ({
 											value: d,
-											label: d.charAt(0).toUpperCase() + d.slice(1),
+											label: weekdayLabel(locale, index),
 										}))}
 										onValueChange={(v) => onWeeklyDayChange?.(v ?? "")}
 										value={weeklyDay}
@@ -206,9 +222,9 @@ export function AgentTriggersPanel({
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											{WEEKDAYS.map((d) => (
+											{WEEKDAYS.map((d, index) => (
 												<SelectItem key={d} value={d}>
-													{d.charAt(0).toUpperCase() + d.slice(1)}
+													{weekdayLabel(locale, index)}
 												</SelectItem>
 											))}
 										</SelectContent>

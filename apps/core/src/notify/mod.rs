@@ -22,6 +22,9 @@
 pub mod delivery_view;
 pub mod run_push;
 pub mod store;
+mod streaming_privacy;
+#[cfg(test)]
+mod tests;
 
 use std::sync::OnceLock;
 
@@ -32,6 +35,7 @@ pub const ISLAND_CONNECT_SUGGESTION_SOURCE: &str = "@ryu/island";
 pub const CONNECT_SUGGESTION_PRIVACY_TITLE: &str = "Private connected-app activity";
 pub const CONNECT_SUGGESTION_PRIVACY_BODY: &str = "A connected-app event was hidden during Streaming. Review it in the source app when you’re ready.";
 pub use store::{NotificationRow, NotifyStore};
+pub use streaming_privacy::{localize_privacy_placeholder, privacy_placeholder};
 
 /// Process-global notification store, set once at startup from `main.rs`. The
 /// state-free scheduler, workflow executor, and policy-alert deliverer all reach
@@ -69,6 +73,11 @@ pub struct FanoutAlert {
 /// is Core-only): the `notification` plugin-hook dispatch, the BYO SMTP email
 /// send ([`ryu_email_send`], a logged skip when no transport is configured), and
 /// the whole-node Expo push broadcast.
+///
+/// When the alert carries localizable text (`hook_event.i18n`, see
+/// [`crate::i18n::AlertText`]), each channel gets it rendered: registered devices in
+/// the locale they registered with, everything else in the node's
+/// `ui-language`. Otherwise the producer's own `title`/`message` go out as-is.
 pub async fn notify_all(
     http: &reqwest::Client,
     store: &NotifyStore,
@@ -80,57 +89,75 @@ pub async fn notify_all(
     // when no `notification` plugin is loaded.
     fire_notification_hooks(alert.hook_event.clone());
 
+    let text = alert
+        .hook_event
+        .get("i18n")
+        .and_then(crate::i18n::AlertText::from_wire);
+    let node_locale = match text {
+        Some(_) => crate::i18n::locale::node_locale().await,
+        None => "en",
+    };
+    let render = |locale: &str| match &text {
+        Some(text) => text.render(locale),
+        None => (alert.title.clone(), alert.message.clone()),
+    };
+    let (title, message) = render(node_locale);
+
     for target in targets {
         match target {
             NotifyTarget::Webhook { url } => {
-                ryu_notify::send_webhook_alert(
-                    http,
-                    url,
-                    &alert.title,
-                    &alert.message,
-                    &alert.hook_event,
-                )
-                .await;
+                ryu_notify::send_webhook_alert(http, url, &title, &message, &alert.hook_event)
+                    .await;
             }
             NotifyTarget::Telegram { bot_token, chat_id } => {
-                ryu_notify::send_telegram_alert(
-                    http,
-                    bot_token,
-                    chat_id,
-                    &alert.title,
-                    &alert.message,
-                )
-                .await;
+                ryu_notify::send_telegram_alert(http, bot_token, chat_id, &title, &message).await;
             }
             NotifyTarget::ExpoPush { token } => {
                 ryu_notify::push_expo_message(
                     http,
                     &[token.clone()],
-                    &alert.title,
-                    &alert.message,
+                    &title,
+                    &message,
                     alert.data.clone(),
                 )
                 .await;
             }
-            NotifyTarget::Email { to } => send_email(to, &alert.title, &alert.message).await,
+            NotifyTarget::Email { to } => send_email(to, &title, &message).await,
         }
     }
 
-    // Globally-registered mobile devices always receive triggered alerts.
-    match store.push_tokens().await {
-        Ok(tokens) if !tokens.is_empty() => {
-            ryu_notify::push_expo_message(
-                http,
-                &tokens,
-                &alert.title,
-                &alert.message,
-                alert.data.clone(),
-            )
-            .await;
+    // Globally-registered mobile devices always receive triggered alerts, each
+    // in its own language when the alert is localizable.
+    match store.push_targets().await {
+        Ok(devices) if !devices.is_empty() => {
+            let groups = match text {
+                Some(_) => tokens_by_locale(&devices, node_locale),
+                None => vec![(node_locale, devices.into_iter().map(|d| d.token).collect())],
+            };
+            for (locale, tokens) in groups {
+                let (title, message) = render(locale);
+                ryu_notify::push_expo_message(http, &tokens, &title, &message, alert.data.clone())
+                    .await;
+            }
         }
         Ok(_) => {}
         Err(e) => tracing::warn!("notify: failed to read push tokens: {e}"),
     }
+}
+
+/// Group devices by the locale to render for them: the one each registered,
+/// else `fallback` (the node's). Sorted by locale, so delivery is stable.
+pub fn tokens_by_locale(
+    devices: &[store::PushTarget],
+    fallback: &'static str,
+) -> Vec<(&'static str, Vec<String>)> {
+    let mut groups: std::collections::BTreeMap<&'static str, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for device in devices {
+        let locale = crate::i18n::locale::stored(device.locale.as_deref()).unwrap_or(fallback);
+        groups.entry(locale).or_default().push(device.token.clone());
+    }
+    groups.into_iter().collect()
 }
 
 /// Deliver a user-targeted notification across all three surfaces: the app inbox
@@ -188,25 +215,49 @@ pub async fn deliver_user_notification(
     });
 
     // 3. Mobile push to the member's registered devices.
-    let http = reqwest::Client::new();
-    match store.push_tokens_for_user(user_id).await {
-        Ok(tokens) => {
-            ryu_notify::push_expo_message(
-                &http,
-                &tokens,
-                title,
-                body,
-                serde_json::json!({
-                    "notification_id": id,
-                    "workflow_run_id": workflow_run_id,
-                    "ack_required": ack_required,
-                }),
-            )
-            .await;
-        }
-        Err(e) => tracing::warn!("notify: failed to read push tokens for {user_id}: {e}"),
-    }
+    let data = serde_json::json!({
+        "notification_id": id,
+        "workflow_run_id": workflow_run_id,
+        "ack_required": ack_required,
+    });
+    push_to_user(
+        store,
+        user_id,
+        false,
+        &|_| (title.to_owned(), body.to_owned()),
+        data,
+    )
+    .await;
     Ok(id)
+}
+
+/// Push to `user_id`'s registered devices. When `localized`, the devices are
+/// grouped by the locale each registered with (else the node's) and `render`
+/// writes the text once per group; otherwise it is called once for every device.
+async fn push_to_user(
+    store: &NotifyStore,
+    user_id: &str,
+    localized: bool,
+    render: &(dyn Fn(&str) -> (String, String) + Sync),
+    data: serde_json::Value,
+) {
+    let devices = match store.push_targets_for_user(user_id).await {
+        Ok(devices) => devices,
+        Err(e) => {
+            tracing::warn!("notify: failed to read push tokens for {user_id}: {e}");
+            return;
+        }
+    };
+    let http = reqwest::Client::new();
+    let groups = if localized && !devices.is_empty() {
+        tokens_by_locale(&devices, crate::i18n::locale::node_locale().await)
+    } else {
+        vec![("en", devices.into_iter().map(|d| d.token).collect())]
+    };
+    for (locale, tokens) in groups {
+        let (title, body) = render(locale);
+        ryu_notify::push_expo_message(&http, &tokens, &title, &body, data.clone()).await;
+    }
 }
 
 /// Persist an Island suggestion without sending it to mobile push. The stable id
@@ -252,9 +303,15 @@ pub async fn deliver_connect_suggestion(
         .await
         .map_err(|error| format!("failed to persist Island suggestion: {error}"))?;
 
+    // The row keeps the English placeholder; the toast shows the node's language.
+    let (mut title, mut body) = (row.title, row.body);
+    if streaming_privacy::is_privacy_placeholder(&title, body.as_deref()) {
+        let locale = crate::i18n::locale::node_locale().await;
+        localize_privacy_placeholder(&mut title, &mut body, locale);
+    }
     crate::events::publish(crate::events::DesktopNotification {
-        title: row.title,
-        body: row.body,
+        title,
+        body,
         level: row.level,
         target_user_id: row.user_id,
         notification_id: Some(row.id.clone()),
@@ -288,6 +345,99 @@ pub async fn deliver_app_notification(
         Some(source_app_id),
     )
     .await
+}
+
+/// [`deliver_app_notification`] for localizable text (the `i18n` payload of
+/// `notify.deliver`): the inbox row and desktop toast are written in the node's
+/// `ui-language`, and each of the member's devices gets the push in the locale
+/// it registered with. `clip` bounds the rendered title and body the way the
+/// caller bounds plain text.
+pub async fn deliver_localized_app_notification(
+    store: &NotifyStore,
+    source_app_id: &str,
+    user_id: &str,
+    text: &crate::i18n::AlertText,
+    level: &str,
+    clip: fn(String, String) -> (String, String),
+) -> Result<String, String> {
+    deliver_localized_user_notification(store, user_id, text, level, Some(source_app_id), clip)
+        .await
+}
+
+/// [`deliver_user_notification`] for a Core-authored notification that
+/// carries message keys and arguments rather than rendered text: the inbox row
+/// and desktop toast are written in the node's `ui-language`, and each of the
+/// member's devices gets the push rendered in the locale it registered with
+/// (falling back to the node's). `clip` bounds every rendering.
+pub async fn deliver_localized_user_notification(
+    store: &NotifyStore,
+    user_id: &str,
+    text: &crate::i18n::AlertText,
+    level: &str,
+    source_app_id: Option<&str>,
+    clip: fn(String, String) -> (String, String),
+) -> Result<String, String> {
+    let node_locale = crate::i18n::locale::node_locale().await;
+    let (title, body) = {
+        let (title, body) = text.render(node_locale);
+        clip(title, body)
+    };
+    let id = format!("ntf_{}", uuid::Uuid::new_v4().simple());
+    persist_and_toast(store, &id, user_id, &title, &body, level, source_app_id).await?;
+    let data = serde_json::json!({
+        "notification_id": id,
+        "workflow_run_id": serde_json::Value::Null,
+        "ack_required": false,
+    });
+    // Each push is clipped like the inbox row: a translation may run longer.
+    let render = |locale: &str| {
+        let (title, body) = text.render(locale);
+        clip(title, body)
+    };
+    push_to_user(store, user_id, true, &render, data).await;
+    Ok(id)
+}
+
+/// Steps 1 and 2 of a plain app notification: the inbox row and the toast.
+/// Also the whole of a copy whose push already went out another way (the
+/// `notify.fanout` inbox copy, after `notify_all` pushed to every device).
+pub(crate) async fn persist_and_toast(
+    store: &NotifyStore,
+    id: &str,
+    user_id: &str,
+    title: &str,
+    body: &str,
+    level: &str,
+    source_app_id: Option<&str>,
+) -> Result<(), String> {
+    let row = NotificationRow {
+        id: id.to_owned(),
+        user_id: Some(user_id.to_owned()),
+        title: title.to_owned(),
+        body: (!body.is_empty()).then(|| body.to_owned()),
+        level: level.to_owned(),
+        workflow_run_id: None,
+        node_id: None,
+        ack_required: false,
+        acked: false,
+        read_at: None,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        source_app_id: source_app_id.map(str::to_owned),
+        archived_at: None,
+    };
+    store
+        .insert_notification(&row)
+        .await
+        .map_err(|e| format!("failed to persist notification: {e}"))?;
+    crate::events::publish(crate::events::DesktopNotification {
+        title: row.title,
+        body: row.body,
+        level: row.level,
+        target_user_id: row.user_id,
+        notification_id: Some(row.id),
+        source_app_id: row.source_app_id,
+    });
+    Ok(())
 }
 
 /// Send a single-recipient alert email over the shared BYO SMTP transport.

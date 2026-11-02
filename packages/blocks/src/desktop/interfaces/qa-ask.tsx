@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -56,7 +57,7 @@ function Field({
 				>
 					{label}
 					{optional ? (
-						<span className="pl-1.5 font-normal text-muted-foreground">
+						<span className="ps-1.5 font-normal text-muted-foreground">
 							Optional
 						</span>
 					) : null}
@@ -82,7 +83,7 @@ function PickerTrigger({
 			aria-labelledby={labelledBy}
 			render={
 				<button
-					className="flex h-9 w-full min-w-0 items-center gap-2 rounded-3xl border border-transparent bg-input/50 px-3 text-left text-foreground text-sm outline-none transition-[color,box-shadow,background-color] hover:bg-input/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+					className="flex h-9 w-full min-w-0 items-center gap-2 rounded-3xl border border-transparent bg-input/50 px-3 text-start text-foreground text-sm outline-none transition-[color,box-shadow,background-color] hover:bg-input/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
 					type="button"
 				/>
 			}
@@ -217,7 +218,7 @@ export function QaAsk({
 						<PickerTrigger
 							labelledBy={agentLabelId}
 							leading={agent ? <QaAvatar agent={agent} size={20} /> : null}
-							value={agent?.name ?? "Any agent"}
+							value={agent?.name ?? tr("Any agent")}
 						/>
 						<DropdownMenuContent className="w-60" drawerLabel="Who answers">
 							<DropdownMenuGroup>
@@ -237,7 +238,7 @@ export function QaAsk({
 									{agents.map((option) => (
 										<DropdownMenuRadioItem key={option.id} value={option.id}>
 											<QaAvatar agent={option} size={16} />
-											{option.name}
+											<span data-ryu-i18n="off">{option.name}</span>
 										</DropdownMenuRadioItem>
 									))}
 								</DropdownMenuRadioGroup>
@@ -254,7 +255,7 @@ export function QaAsk({
 					<DropdownMenu>
 						<PickerTrigger
 							labelledBy={topicLabelId}
-							value={topic?.name ?? "No topic"}
+							value={topic?.name ?? tr("No topic")}
 						/>
 						<DropdownMenuContent className="w-60" drawerLabel="Topic">
 							<DropdownMenuGroup>
@@ -273,7 +274,10 @@ export function QaAsk({
 									</DropdownMenuRadioItem>
 									{groups.map((option) => (
 										<DropdownMenuRadioItem key={option.id} value={option.id}>
-											<span className="min-w-0 flex-1 truncate">
+											<span
+												className="min-w-0 flex-1 truncate"
+												data-ryu-i18n="off"
+											>
 												{option.name}
 											</span>
 											<span className="text-muted-foreground text-xs capitalize">
@@ -294,7 +298,7 @@ export function QaAsk({
 				<Button onClick={onCancel} size="sm" type="button" variant="ghost">
 					Discard
 				</Button>
-				<span className="ml-auto @[640px]/qa:inline-flex hidden items-center gap-1.5 text-muted-foreground text-xs">
+				<span className="ms-auto @[640px]/qa:inline-flex hidden items-center gap-1.5 text-muted-foreground text-xs">
 					<Kbd>⌘↵</Kbd>
 					to post
 				</span>

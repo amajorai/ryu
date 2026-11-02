@@ -133,12 +133,12 @@ export function MissionPanel({
 					{title}
 				</h2>
 				{meta ? (
-					<span className="ml-auto flex min-w-0 items-center gap-3 truncate text-[11px] text-muted-foreground tabular-nums">
+					<span className="ms-auto flex min-w-0 items-center gap-3 truncate text-[11px] text-muted-foreground tabular-nums">
 						{meta}
 					</span>
 				) : null}
 				{actions ? (
-					<span className={cn("flex shrink-0 gap-1", !meta && "ml-auto")}>
+					<span className={cn("flex shrink-0 gap-1", !meta && "ms-auto")}>
 						{actions}
 					</span>
 				) : null}

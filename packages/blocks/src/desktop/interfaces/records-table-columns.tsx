@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	AlignLeft,
 	CalendarClock,
@@ -30,7 +31,8 @@ export interface Column {
 	cell: (row: RecordsRow, now: number) => ReactNode;
 	icon: LucideIcon;
 	id: string;
-	label: string;
+	/** The header text in the UI language. */
+	label: (tl: LiteralMessage) => string;
 	sortKey?: RecordsSortKey;
 	/** Footer calculation over the shown rows, Attio's "Sum" row. */
 	sum?: (row: RecordsRow) => number;
@@ -80,7 +82,7 @@ const STATUS: Column = {
 	cell: (row) => <RecordsRowStatus row={row} />,
 	icon: CircleDot,
 	id: "status",
-	label: "Status",
+	label: (tl) => tl("Status"),
 	sortKey: "status",
 	width: 160,
 };
@@ -89,7 +91,7 @@ const THREADS: Column = {
 	cell: (row) => <CountCell value={row.threads.length} />,
 	icon: MessagesSquare,
 	id: "threads",
-	label: "Threads",
+	label: (tl) => tl("Threads"),
 	sortKey: "threads",
 	sum: (row) => row.threads.length,
 	width: 104,
@@ -106,7 +108,7 @@ const NEEDS_YOU: Column = {
 		),
 	icon: Inbox,
 	id: "needs-you",
-	label: "Needs you",
+	label: (tl) => tl("Needs you"),
 	sortKey: "needsYou",
 	sum: (row) => row.needsYou,
 	width: 120,
@@ -115,7 +117,7 @@ const LAST: Column = {
 	cell: (row, now) => <TimeCell iso={row.lastInteraction} now={now} />,
 	icon: Clock3,
 	id: "last",
-	label: "Last interaction",
+	label: (tl) => tl("Last interaction"),
 	sortKey: "lastInteraction",
 	width: 160,
 };
@@ -138,7 +140,7 @@ const NEXT_RUN: Column = {
 	},
 	icon: CalendarClock,
 	id: "next-run",
-	label: "Next run",
+	label: (tl) => tl("Next run"),
 	width: 120,
 };
 
@@ -152,19 +154,19 @@ const AGENT_COLUMNS: Column[] = [
 		cell: (row) => <GroupNames groups={row.teams} />,
 		icon: UsersRound,
 		id: "team",
-		label: "Team",
+		label: (tl) => tl("Team"),
 		width: 152,
 	},
 	{
 		cell: (row) =>
 			row.description ? (
-				<span className="truncate text-muted-foreground">
+				<span className="truncate text-muted-foreground" data-ryu-i18n="off">
 					{row.description}
 				</span>
 			) : null,
 		icon: AlignLeft,
 		id: "description",
-		label: "Description",
+		label: (tl) => tl("Description"),
 		width: 200,
 	},
 ];
@@ -183,7 +185,7 @@ const GROUP_COLUMNS: Column[] = [
 			) : null,
 		icon: UserRound,
 		id: "members",
-		label: "Members",
+		label: (tl) => tl("Members"),
 		width: 200,
 	},
 	THREADS,
@@ -192,13 +194,13 @@ const GROUP_COLUMNS: Column[] = [
 	{
 		cell: (row) =>
 			row.description ? (
-				<span className="truncate text-muted-foreground">
+				<span className="truncate text-muted-foreground" data-ryu-i18n="off">
 					{row.description}
 				</span>
 			) : null,
 		icon: MessageSquareText,
 		id: "latest",
-		label: "Latest thread",
+		label: (tl) => tl("Latest thread"),
 		width: 288,
 	},
 ];

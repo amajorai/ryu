@@ -91,7 +91,7 @@ function DownloadSettingRow({
 		status === "unavailable" ||
 		!href;
 	const content = (
-		<span className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
+		<span className="flex w-full items-center gap-3 px-4 py-3.5 text-start">
 			<span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
 				{icon}
 			</span>
@@ -110,7 +110,7 @@ function DownloadSettingRow({
 					{status === "building" ? "Building" : "Not available"}
 				</span>
 			) : openInNewTab ? (
-				<ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+				<ArrowUpRight className="size-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
 			) : (
 				<Download className="size-4 shrink-0 text-muted-foreground" />
 			)}
@@ -323,7 +323,7 @@ export default function DownloadBlock({
 									}
 									variant="mono"
 								>
-									<Download className="mr-2 size-5" />
+									<Download className="me-2 size-5" />
 									{hero.kind === "ready"
 										? tl("Download for {osName} ({archLabel})", {
 												archLabel: archLabel(os, arch),

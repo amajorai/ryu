@@ -33,7 +33,7 @@ export function OnboardingCheckRow({
 		<button
 			aria-pressed={isSelected}
 			className={cn(
-				"flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors duration-150 hover:duration-0 disabled:opacity-50",
+				"flex w-full items-start gap-3 rounded-lg px-3 py-2 text-start transition-colors duration-150 hover:duration-0 disabled:opacity-50",
 				"hover:bg-muted",
 				className
 			)}

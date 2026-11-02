@@ -394,7 +394,7 @@ export function GitActionDialog({
 								className="size-4 shrink-0 text-muted-foreground"
 								icon={item.icon}
 							/>
-							<ButtonLabel className="min-w-0 flex-1 text-left">
+							<ButtonLabel className="min-w-0 flex-1 text-start">
 								{item.label}
 							</ButtonLabel>
 						</Button>

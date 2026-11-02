@@ -81,7 +81,7 @@ export function HeroSky({
 				style={{ maskImage: FADE, WebkitMaskImage: FADE }}
 			>
 				<div
-					className="absolute -top-[5%] -left-[5%] h-[110%] w-[110%] blur-[12.5px]"
+					className="absolute -start-[5%] -top-[5%] h-[110%] w-[110%] blur-[12.5px]"
 					data-testid="hero-sky-layer"
 					style={staticSky(colors)}
 				>

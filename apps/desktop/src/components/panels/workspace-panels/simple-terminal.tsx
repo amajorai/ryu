@@ -200,7 +200,7 @@ export function SimpleTerminal({
 					panelStyles.codeSize
 				)}
 			>
-				<span className="mr-1.5 shrink-0 select-none text-primary">
+				<span className="me-1.5 shrink-0 select-none text-primary">
 					{promptLabel}
 				</span>
 				<input

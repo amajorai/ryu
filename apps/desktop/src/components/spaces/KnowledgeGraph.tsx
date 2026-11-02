@@ -1,3 +1,4 @@
+import { useReactFlowAriaLabels } from "@ryu/blocks/desktop/react-flow-labels.ts";
 import {
 	Background,
 	Controls,
@@ -50,6 +51,7 @@ export function KnowledgeGraph({
 	graph: DocGraph;
 	onOpenNode: (node: DocGraph["nodes"][number]) => void;
 }) {
+	const ariaLabels = useReactFlowAriaLabels();
 	const positions = useMemo(
 		() =>
 			layoutForceGraph(
@@ -105,6 +107,7 @@ export function KnowledgeGraph({
 	return (
 		<div className="h-full w-full">
 			<ReactFlow
+				ariaLabelConfig={ariaLabels}
 				edges={edges}
 				fitView
 				nodes={nodes}

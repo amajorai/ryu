@@ -398,7 +398,7 @@ export function ShareConversationDialog({
 									onClick={() => void copyLink()}
 									variant="outline"
 								>
-									<HugeiconsIcon className="mr-2 size-4" icon={Copy01Icon} />{" "}
+									<HugeiconsIcon className="me-2 size-4" icon={Copy01Icon} />{" "}
 									Copy link
 								</Button>
 								{publicShare ? (
@@ -432,7 +432,7 @@ export function ShareConversationDialog({
 						>
 							{saving ? (
 								<>
-									<Spinner className="mr-2" /> Saving
+									<Spinner className="me-2" /> Saving
 								</>
 							) : (
 								"Done"

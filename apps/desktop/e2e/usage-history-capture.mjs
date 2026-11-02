@@ -1,8 +1,9 @@
 import { mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = new URL("../../../docs/proof/usage-history/", import.meta.url);
+const proofDir = pathToFileURL(`${proofEvidencePath("usage-history")}/`);
 await mkdir(proofDir, { recursive: true });
 const proofCapability = process.env.RYU_PROOF_CLIENT_TOKEN;
 if (!proofCapability) {

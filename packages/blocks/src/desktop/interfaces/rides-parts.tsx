@@ -12,7 +12,7 @@ import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { createContext, type ReactNode, useContext } from "react";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 import type { RidesActTrip, RidesTripTone } from "./rides-acts.tsx";
 import {
 	availabilityText,
@@ -28,7 +28,7 @@ import {
  * inset ring marks keyboard focus, so the two states never look alike.
  */
 export const SHEET_ROW =
-	"flex w-full items-center gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+	"flex w-full items-center gap-3 px-4 py-3 text-start outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
  * The square destination mark, shared by the map's pins and the sheet so
@@ -104,7 +104,10 @@ export function DriverOptionBody({ option }: { option: DriverOption }) {
 		<>
 			<RideAvatar agent={option.agent} size={40} />
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span className="truncate font-medium text-foreground text-sm">
+				<span
+					className="truncate font-medium text-foreground text-sm"
+					data-ryu-i18n="off"
+				>
 					{option.agent.name}
 				</span>
 				<span className="truncate text-[13px] text-muted-foreground">
@@ -174,11 +177,7 @@ export const RidesActEtas = createContext<ReadonlyMap<string, RidesActEta>>(
 );
 
 function ageText(iso: string, now: number): string {
-	const age = compactAge(iso, now);
-	if (age === "") {
-		return "";
-	}
-	return age === "now" ? "just now" : `${age} ago`;
+	return relativeAge(iso, now);
 }
 
 /**
@@ -227,7 +226,10 @@ export function TripRow({
 				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 					{/* The ETA (or clock time) shares the title's baseline. */}
 					<span className="flex items-baseline gap-3">
-						<span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
+						<span
+							className="min-w-0 flex-1 truncate font-medium text-foreground text-sm"
+							data-ryu-i18n="off"
+						>
 							{trip.thread.title}
 						</span>
 						{eta ? (

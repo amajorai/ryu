@@ -67,7 +67,7 @@ function AgentPicker({
 			>
 				<option value={ANY_AGENT}>Any agent</option>
 				{agents.map((agent) => (
-					<option key={agent.id} value={agent.id}>
+					<option data-ryu-i18n="off" key={agent.id} value={agent.id}>
 						{agent.name}
 					</option>
 				))}
@@ -205,7 +205,7 @@ export function CanvasComposer({
 						</h2>
 						<Button
 							aria-label="Close"
-							className="absolute top-2 right-2 text-foreground/65 hover:text-foreground"
+							className="absolute end-2 top-2 text-foreground/65 hover:text-foreground"
 							onClick={onClose}
 							size="icon-xs"
 							type="button"

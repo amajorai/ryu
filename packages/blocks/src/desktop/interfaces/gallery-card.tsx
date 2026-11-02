@@ -1,14 +1,13 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { MessageCirclePlus, Pin } from "lucide-react";
 import { motion } from "motion/react";
 import { useId } from "react";
 import { GalleryAvatarStack } from "./gallery-avatar.tsx";
 import { GalleryCover } from "./gallery-cover.tsx";
 import { type GalleryItem, galleryByline } from "./gallery-model.ts";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 
 const EASE_OUT: [number, number, number, number] = [0.2, 0, 0, 1];
 /** Cards after this many share one entrance delay, so long boards stay quick. */
@@ -64,7 +63,7 @@ export function GalleryCard({
 				/>
 				<span
 					aria-hidden="true"
-					className="pointer-events-none absolute top-2 right-2 z-10 inline-flex h-8 items-center rounded-full bg-primary px-3 font-medium text-primary-foreground text-sm opacity-0 transition-opacity duration-150 group-focus-within/card:opacity-100 group-hover/card:opacity-100 motion-reduce:transition-none"
+					className="pointer-events-none absolute end-2 top-2 z-10 inline-flex h-8 items-center rounded-full bg-primary px-3 font-medium text-primary-foreground text-sm opacity-0 transition-opacity duration-150 group-focus-within/card:opacity-100 group-hover/card:opacity-100 motion-reduce:transition-none"
 				>
 					Open
 				</span>
@@ -72,7 +71,7 @@ export function GalleryCard({
 					<button
 						aria-label={tl("Message {name}", { name: lead.name })}
 						className={cn(
-							"absolute right-2 bottom-2 z-10 inline-flex h-8 items-center gap-1.5 rounded-full bg-background px-3 font-medium text-foreground text-sm opacity-0 outline-none transition-[opacity,background-color] duration-150 hover:bg-muted focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-focus-within/card:opacity-100 group-hover/card:opacity-100 motion-reduce:transition-none",
+							"absolute end-2 bottom-2 z-10 inline-flex h-8 items-center gap-1.5 rounded-full bg-background px-3 font-medium text-foreground text-sm opacity-0 outline-none transition-[opacity,background-color] duration-150 hover:bg-muted focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-focus-within/card:opacity-100 group-hover/card:opacity-100 motion-reduce:transition-none",
 							"@max-[13rem]/card:w-8 @max-[13rem]/card:justify-center @max-[13rem]/card:px-0"
 						)}
 						onClick={() => onMessage(lead.id)}
@@ -88,12 +87,17 @@ export function GalleryCard({
 				) : null}
 			</div>
 			<div className="flex flex-col gap-1.5 px-1 pt-2.5">
-				<h3 className="line-clamp-2 font-semibold text-[15px] text-foreground leading-5 tracking-tight">
+				<h3
+					className="line-clamp-2 font-semibold text-[15px] text-foreground leading-5 tracking-tight"
+					data-ryu-i18n="off"
+				>
 					{thread.title}
 				</h3>
 				<div className="flex h-5 min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
 					{agents.length > 0 ? <GalleryAvatarStack agents={agents} /> : null}
-					<span className="min-w-0 truncate">{galleryByline(agents)}</span>
+					<span className="min-w-0 truncate" data-ryu-i18n="off">
+						{galleryByline(agents)}
+					</span>
 					<span className="ms-auto flex shrink-0 items-center gap-1.5 tabular-nums">
 						{thread.pinned ? (
 							<Pin aria-hidden="true" className="size-3" strokeWidth={2} />
@@ -108,12 +112,12 @@ export function GalleryCard({
 					</span>
 				</div>
 			</div>
-			<span className="sr-only" id={describedBy}>
+			<span className="sr-only" data-ryu-i18n="off" id={describedBy}>
 				{[
-					THREAD_STATUS_LABELS[status],
+					threadStatusLabel(status, tl),
 					galleryByline(agents),
-					thread.pinned ? "Pinned" : null,
-					age ? `Updated ${age}` : null,
+					thread.pinned ? tl("Pinned") : null,
+					age ? tl("Updated {age}", { age }) : null,
 				]
 					.filter(Boolean)
 					.join(", ")}
@@ -125,7 +129,9 @@ export function GalleryCard({
 				type="button"
 				{...{ [GALLERY_CARD_ATTRIBUTE]: thread.id }}
 			>
-				<span className="sr-only">{thread.title}</span>
+				<span className="sr-only" data-ryu-i18n="off">
+					{thread.title}
+				</span>
 			</button>
 		</motion.div>
 	);

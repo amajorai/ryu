@@ -176,7 +176,7 @@ export function AgentRunHistoryView({
 				</Empty>
 			) : (
 				<ScrollArea className="max-h-[60vh]">
-					<div className="flex flex-col gap-5 pr-2">
+					<div className="flex flex-col gap-5 pe-2">
 						<HistorySection
 							entries={automated}
 							onOpen={openRun}

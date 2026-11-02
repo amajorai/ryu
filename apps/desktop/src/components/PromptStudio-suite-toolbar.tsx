@@ -10,6 +10,7 @@ import {
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
 import { z } from "zod";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 import type { PromptSuiteState } from "./PromptStudio-suite-state.ts";
 
 export function PromptSuiteToolbar({
@@ -115,7 +116,7 @@ export function PromptSuiteToolbar({
 						<NativeSelectOption value="">Restore version…</NativeSelectOption>
 						{suiteVersions.map((version) => (
 							<NativeSelectOption key={version.id} value={version.id}>
-								{version.label || new Date(version.createdAt).toLocaleString()}
+								{version.label || formatLocalDateTime(version.createdAt)}
 							</NativeSelectOption>
 						))}
 					</NativeSelect>

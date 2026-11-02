@@ -147,7 +147,7 @@ export function LibraryToolbar({
 			{showSearch ? (
 				<div className="relative min-w-48 flex-1">
 					<HugeiconsIcon
-						className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+						className="absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 						icon={Search01Icon}
 					/>
 					<Input
@@ -351,7 +351,7 @@ export function LibraryCard({
 	if (view === "list") {
 		return withMenu(
 			<div
-				className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 text-left transition-colors hover:bg-muted"
+				className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 text-start transition-colors hover:bg-muted"
 				onClick={onOpen}
 				onKeyDown={onKeyDown}
 				role="button"

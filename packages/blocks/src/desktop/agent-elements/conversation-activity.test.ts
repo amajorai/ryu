@@ -102,3 +102,27 @@ describe("describeConversationActivity", () => {
 		).toEqual({ label: "Ran into a problem", state: "error" });
 	});
 });
+
+describe("tool activity copy", () => {
+	test("names an unknown tool through the translator as one sentence", () => {
+		const seen: string[] = [];
+		const activity = describeConversationActivity(
+			{
+				status: "streaming",
+				messages: [
+					assistant({
+						type: "tool-create_issue",
+						state: "input-available",
+					}),
+				],
+			},
+			(source, values) => {
+				seen.push(source);
+				const tool = (values as { tool?: string } | undefined)?.tool ?? "";
+				return `«${tool}»`;
+			}
+		);
+		expect(seen).toContain("Using {tool}…");
+		expect(activity.label?.startsWith("«")).toBe(true);
+	});
+});

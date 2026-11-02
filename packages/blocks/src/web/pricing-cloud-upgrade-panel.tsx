@@ -40,7 +40,7 @@ export function CloudUpgradePanel({
 		<div className="mt-8">
 			<button
 				aria-expanded={expanded}
-				className="flex w-full items-center justify-between gap-2 text-left font-medium text-sm"
+				className="flex w-full items-center justify-between gap-2 text-start font-medium text-sm"
 				onClick={() => setExpanded((prev) => !prev)}
 				type="button"
 			>
@@ -79,7 +79,7 @@ export function CloudUpgradePanel({
 							if (isIncluded) {
 								return (
 									<li key={tier.slug}>
-										<div className="mt-3 flex w-full items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3 text-left">
+										<div className="mt-3 flex w-full items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3 text-start">
 											<Cloud className="size-4 shrink-0 text-primary" />
 											<span className="flex-1">
 												<span className="block font-medium text-sm">
@@ -109,7 +109,7 @@ export function CloudUpgradePanel({
 									>
 										{(canContinue) => (
 											<button
-												className="mt-3 flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:border-primary disabled:opacity-60"
+												className="mt-3 flex w-full items-center gap-3 rounded-lg border p-3 text-start transition-colors hover:border-primary disabled:opacity-60"
 												disabled={!canContinue}
 												onClick={() => onCheckout(tier.slug)}
 												type="button"
@@ -123,7 +123,7 @@ export function CloudUpgradePanel({
 														{specs}
 													</span>
 												</span>
-												<span className="shrink-0 text-right">
+												<span className="shrink-0 text-end">
 													{isLoading ? (
 														<Loader2 className="size-4 animate-spin" />
 													) : (

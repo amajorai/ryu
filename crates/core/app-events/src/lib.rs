@@ -49,6 +49,10 @@
 //! [`EventEmitter::emit`] therefore logs and swallows, and [`EventEmitter::try_emit`]
 //! is available when a caller genuinely wants the outcome.
 
+mod notify;
+
+pub use notify::{NotifyHint, NotifyMessage, NotifyTemplate};
+
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -609,48 +613,6 @@ pub struct EmitOutcome {
     /// Workflow runs started for this event.
     #[serde(default)]
     pub workflows: usize,
-}
-
-/// An optional user-facing notification to raise alongside an emitted event.
-///
-/// When present, Core delivers it into the app-inbox feed (the desktop Inbox
-/// renders it, showing this app's icon) in addition to the hook/workflow fan-out.
-/// Delivering is best-effort on Core's side — the emit itself never fails over a
-/// notification. `target_user_id` names a specific member; omit it on a local
-/// single-user node and Core delivers to the active account.
-#[derive(Debug, Clone, Serialize)]
-pub struct NotifyHint {
-    /// The notification title (the row's headline).
-    pub title: String,
-    /// Optional body text.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
-    /// One of `info` | `success` | `warning` | `error` (defaults to `info`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub level: Option<String>,
-    /// The member to deliver to; omit to target the node's active account.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_user_id: Option<String>,
-}
-
-impl NotifyHint {
-    /// Build a plain `info` hint with just a title and optional body.
-    #[must_use]
-    pub fn info(title: impl Into<String>, body: Option<String>) -> Self {
-        Self {
-            title: title.into(),
-            body,
-            level: None,
-            target_user_id: None,
-        }
-    }
-
-    /// Mark the hint `level` (`info` | `success` | `warning` | `error`).
-    #[must_use]
-    pub fn with_level(mut self, level: impl Into<String>) -> Self {
-        self.level = Some(level.into());
-        self
-    }
 }
 
 /// An optional **activity-feed row** to record alongside an emitted event.

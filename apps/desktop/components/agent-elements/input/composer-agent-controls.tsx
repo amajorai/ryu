@@ -376,7 +376,7 @@ export function useComposerAgentControls(
 				sections={triggerSections.filter((section) => section.key !== "model")}
 				trailing={
 					compact || compactTrigger ? (
-						<UsageBar agentId={agentId} className="ml-0.5" compact />
+						<UsageBar agentId={agentId} className="ms-0.5" compact />
 					) : undefined
 				}
 			/>

@@ -82,6 +82,25 @@ const LazyDownloadDropdownContent = lazy<
 	)
 );
 
+// Without a divider the two segments read as one pill, so their padding must
+// read as one too. Left alone, the primary keeps its full end padding and the
+// chevron sits centered in a square segment: the gap before the chevron came
+// out twice the label's lead-in, and the chevron crowded the right end. These
+// trim the primary's end and let the chevron segment hug the edge, so the
+// chevron sits one label gap (10px) after the label and the right end matches
+// the left padding (the 16px chevron glyph carries 4px of air on each side).
+// Literal per size so Tailwind's scan sees every class.
+const UNDIVIDED_PRIMARY_CLASS = {
+	default: "pe-1",
+	lg: "pe-1.5",
+	sm: "pe-1",
+} as const;
+const UNDIVIDED_TRIGGER_CLASS = {
+	default: "w-auto ps-0.5 pe-2",
+	lg: "w-auto ps-0 pe-5",
+	sm: "w-auto ps-0.5 pe-2",
+} as const;
+
 export function DownloadMenu({
 	className,
 	contentAlign = "start",
@@ -234,6 +253,8 @@ export function DownloadMenu({
 	// (transparent) buttons keep their border, so they keep the menu.
 	const showMenu = variant !== "outline" || transparentBackground;
 	const separatorVisible = showSeparator && showMenu;
+	const undivided = showMenu && !separatorVisible;
+	const triggerClass = undivided ? UNDIVIDED_TRIGGER_CLASS[size] : undefined;
 	// A mono split button needs a divider drawn on its own fill. A translucent
 	// tone would let the page show through in dark mode, so mix an opaque one
 	// and run it the full height so no strip of page shows between segments.
@@ -257,7 +278,11 @@ export function DownloadMenu({
 							: "download-primary"
 					}
 					aria-haspopup={sendLink.mobile ? "dialog" : undefined}
-					className={cn(showOsLogo && "group/download", className)}
+					className={cn(
+						showOsLogo && "group/download",
+						undivided && UNDIVIDED_PRIMARY_CLASS[size],
+						className
+					)}
 					// The button base draws a transparent, padding-clipped border; on a mono
 					// split it would leave a strip of page beside the divider, so join it.
 					edge={
@@ -315,6 +340,7 @@ export function DownloadMenu({
 						}
 						aria-haspopup="dialog"
 						aria-label="Send the download link to yourself"
+						className={triggerClass}
 						// Same slot as the menu trigger it stands in for, so the split
 						// control keeps its pill ends (download-menu.module.css).
 						data-slot="dropdown-menu-trigger"
@@ -337,6 +363,7 @@ export function DownloadMenu({
 											: "download-trigger"
 									}
 									aria-label="More download options"
+									className={triggerClass}
 									onFocus={requestMenu}
 									onPointerEnter={requestMenu}
 									size={size}

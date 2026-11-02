@@ -6,7 +6,7 @@ const baseURL = "http://127.0.0.1:5411/";
 export default defineConfig({
 	outputDir: `${tmpdir()}/ryu-node-selector-playwright-results`,
 	testDir: ".",
-	testMatch: /node-selector-proof\.spec\.ts$/,
+	testMatch: /node-selector-proof(-menu|-mesh)?\.spec\.ts$/,
 	fullyParallel: false,
 	retries: 0,
 	use: {

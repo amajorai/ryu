@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -12,6 +13,7 @@ import type { InterfaceEvent } from "@ryuhq/protocol/interfaces";
 import { Plus, Search, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useId, useRef } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 import {
 	rowWhen,
 	stageStep,
@@ -82,14 +84,14 @@ function TrackingRow({
 	parcel: TrackingParcel;
 	selected: boolean;
 }) {
-	const title = parcel.thread.title.trim() || "Untitled conversation";
+	const title = parcel.thread.title.trim() || tr("Untitled conversation");
 	const courier = parcel.courier;
 	return (
 		<li>
 			<button
 				aria-current={selected ? "true" : undefined}
 				className={cn(
-					"group relative flex w-full flex-col gap-1 px-4 py-3 text-left outline-none transition-colors",
+					"group relative flex w-full flex-col gap-1 px-4 py-3 text-start outline-none transition-colors",
 					"hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 					selected && "bg-muted/60 hover:bg-muted/60"
 				)}
@@ -193,9 +195,10 @@ function TrackingTabs({
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		const index = TRACKING_TABS.findIndex((item) => item.id === tab);
 		let next = index;
-		if (event.key === "ArrowRight") {
+		const key = logicalArrowKey(event.key, event.currentTarget);
+		if (key === "ArrowRight") {
 			next = (index + 1) % TRACKING_TABS.length;
-		} else if (event.key === "ArrowLeft") {
+		} else if (key === "ArrowLeft") {
 			next = (index - 1 + TRACKING_TABS.length) % TRACKING_TABS.length;
 		} else {
 			return;
@@ -393,7 +396,7 @@ export function TrackingList({
 			<ul
 				aria-label={tl("{tabLabel} deliveries", {
 					tabLabel:
-						TRACKING_TABS.find((item) => item.id === tab)?.label ?? "All",
+						TRACKING_TABS.find((item) => item.id === tab)?.label ?? tr("All"),
 				})}
 				className="flex flex-col divide-y divide-border/60"
 				onKeyDown={(event) => onListKeyDown(event, onSelect)}

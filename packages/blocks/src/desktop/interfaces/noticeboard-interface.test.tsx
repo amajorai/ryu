@@ -403,10 +403,11 @@ describe("noticeboard model", () => {
 		const loose = areas[3]?.notes[0];
 		expect(loose).toBeDefined();
 		if (loose) {
-			expect(noteAccessibleName(loose, "10h")).toBe(
-				"Loose ends. Waiting on agent. No agent. updated 10h ago. pinned"
+			const updated = Date.parse(loose.thread.updatedAt);
+			expect(noteAccessibleName(loose, updated + 10 * 3_600_000)).toBe(
+				"Loose ends. Waiting on agent. No agent. updated 10h ago. Pinned"
 			);
-			expect(noteAccessibleName(loose, "now")).toContain("updated just now");
+			expect(noteAccessibleName(loose, updated)).toContain("updated now");
 		}
 		expect(summaryText(noticeboardSummary(SNAPSHOT))).toBe(
 			"6 notes · 1 need attention · 2 your turn · 1 working"

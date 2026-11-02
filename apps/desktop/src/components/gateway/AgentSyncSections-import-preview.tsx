@@ -51,7 +51,7 @@ export function ImportScanPreview({
 			>
 				<SettingsItem
 					actions={
-						<span className="text-right text-muted-foreground text-sm">
+						<span className="text-end text-muted-foreground text-sm">
 							{tl(
 								"{provider} · {threads, select, native {native threads readable} other {bundle-only threads}} · ACP {acp, select, resume {resume} other {replay fallback}}",
 								{

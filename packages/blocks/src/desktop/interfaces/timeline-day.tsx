@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -89,14 +90,14 @@ function TimelineEventRow({
 	const group = threadGroupName(snapshot, thread);
 	const excerpt = thread.lastMessage?.trim();
 	const isRecent = now - Date.parse(thread.updatedAt) < 60_000;
-	const time = isRecent ? "Just now" : timeOfDay(thread.updatedAt);
+	const time = isRecent ? tr("Just now") : timeOfDay(thread.updatedAt);
 	const meta = [
 		agentSummary(agents),
 		group,
 		thread.messageCount > 0
-			? `${thread.messageCount} ${
-					thread.messageCount === 1 ? "message" : "messages"
-				}`
+			? tr("{count, plural, one {# message} other {# messages}}", {
+					count: thread.messageCount,
+				})
 			: null,
 	]
 		.filter(Boolean)
@@ -110,7 +111,7 @@ function TimelineEventRow({
 				aria-label={threadAccessibleName(snapshot, thread)}
 				className={cn(
 					TIMELINE_DAY_ROW_GRID,
-					"group/event w-full text-left outline-none"
+					"group/event w-full text-start outline-none"
 				)}
 				data-thread-id={thread.id}
 				onClick={() => onOpen(thread.id)}
@@ -118,7 +119,7 @@ function TimelineEventRow({
 				type="button"
 			>
 				<time
-					className="pt-2 text-right text-muted-foreground text-xs tabular-nums leading-5 max-sm:hidden"
+					className="pt-2 text-end text-muted-foreground text-xs tabular-nums leading-5 max-sm:hidden"
 					dateTime={thread.updatedAt}
 					title={fullDateTime(thread.updatedAt)}
 				>
@@ -187,7 +188,7 @@ function TimelineEventRow({
 								id={excerptId}
 							>
 								{thread.lastMessageRole === "user" ? "You: " : null}
-								{excerpt}
+								<span data-ryu-i18n="off">{excerpt}</span>
 							</span>
 						) : null}
 					</span>

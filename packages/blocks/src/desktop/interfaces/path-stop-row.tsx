@@ -55,7 +55,7 @@ export function PathRow({
 			style={{ "--path-swing": swing } as CSSProperties}
 		>
 			<div
-				className="relative ml-[calc(var(--path-center)+var(--path-swing)*var(--path-step)-32px)] h-[72px] w-16"
+				className="relative ms-[calc(var(--path-center)+var(--path-swing)*var(--path-step)-32px)] h-[72px] w-16"
 				data-done={done ? "" : undefined}
 			>
 				{children}
@@ -67,10 +67,10 @@ export function PathRow({
 /** Labels sit on the open side of the swing; narrow paths keep them right. */
 export function labelPlacement(swing: number): string {
 	const base =
-		"absolute top-[32px] w-max max-w-60 -translate-y-1/2 rounded-xl border-(--gk-edge)/15 border-2 bg-(--gk-plate)/92 px-3 py-1.5 shadow-[0_2px_0_var(--gk-shadow)] @max-[519px]/col:right-auto @max-[519px]/col:left-full @max-[519px]/col:ml-5 @max-[519px]/col:mr-0 @max-[519px]/col:w-[min(15rem,calc(74cqw-var(--path-step)*1.6-3.5rem))] @max-[519px]/col:text-left";
+		"absolute top-[32px] w-max max-w-60 -translate-y-1/2 rounded-xl border-(--gk-edge)/15 border-2 bg-(--gk-plate)/92 px-3 py-1.5 shadow-[0_2px_0_var(--gk-shadow)] @max-[519px]/col:end-auto @max-[519px]/col:start-full @max-[519px]/col:ms-5 @max-[519px]/col:me-0 @max-[519px]/col:w-[min(15rem,calc(74cqw-var(--path-step)*1.6-3.5rem))] @max-[519px]/col:text-start";
 	return swing > 0
-		? cn(base, "right-full mr-5 text-right")
-		: cn(base, "left-full ml-5 text-left");
+		? cn(base, "end-full me-5 text-end")
+		: cn(base, "start-full ms-5 text-start");
 }
 
 export function StopLabel({
@@ -100,6 +100,7 @@ export function StopLabel({
 					interactive && "group-hover/stop:underline",
 					titleClassName
 				)}
+				data-ryu-i18n="off"
 			>
 				{title}
 			</span>

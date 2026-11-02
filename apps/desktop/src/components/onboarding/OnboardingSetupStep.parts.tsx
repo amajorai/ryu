@@ -167,7 +167,7 @@ export function OrganizationPicker({
 						<button
 							aria-pressed={selected}
 							className={cn(
-								"flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors duration-150 hover:duration-0",
+								"flex items-center gap-3 rounded-lg px-3 py-2 text-start transition-colors duration-150 hover:duration-0",
 								selected ? "bg-accent" : "hover:bg-muted"
 							)}
 							key={organization.id}

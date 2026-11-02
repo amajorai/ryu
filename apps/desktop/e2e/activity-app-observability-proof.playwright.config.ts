@@ -3,7 +3,13 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
 	testDir: path.resolve(import.meta.dirname),
-	testMatch: "activity-app-observability-proof.spec.ts",
+	testMatch: [
+		"activity-app-observability-proof.spec.ts",
+		"part*-activity-app-observability-proof.spec.ts",
+	],
+	// The spec is split across files under the token limit; one worker keeps
+	// them in the original order against the shared harness state.
+	workers: 1,
 	use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:5190" },
 	webServer: {
 		command:

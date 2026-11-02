@@ -5,12 +5,12 @@ import path from "node:path";
 import vm from "node:vm";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const conversationId = "conversation-toolbar-share-fixture";
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
-const evidence = path.join(
-	repoRoot,
-	"docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime"
+const evidence = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/plugins-runtime"
 );
 test.describe.configure({ timeout: 120_000 });
 

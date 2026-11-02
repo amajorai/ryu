@@ -9,10 +9,10 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
-	RECORDS_OBJECT_LABELS,
 	RECORDS_OBJECTS,
 	RECORDS_VIEWS,
 	type RecordsObject,
+	recordsObjectLabels,
 } from "./records-model.ts";
 
 export const RECORDS_OBJECT_ICONS: Record<RecordsObject, LucideIcon> = {
@@ -41,7 +41,7 @@ function NavItem({
 			<button
 				aria-current={active ? "page" : undefined}
 				className={cn(
-					"group flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+					"group flex h-9 w-full items-center gap-2 rounded-md px-2 text-start text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
 					active
 						? "bg-muted font-medium text-foreground"
 						: "text-foreground/80 hover:bg-muted/60 hover:text-foreground"
@@ -109,7 +109,7 @@ export function RecordsNav({
 	return (
 		<nav
 			aria-label="Records"
-			className="flex w-56 shrink-0 flex-col border-border border-r bg-muted/30"
+			className="flex w-56 shrink-0 flex-col border-border border-e bg-muted/30"
 		>
 			<div className="flex h-12 shrink-0 items-center border-border border-b px-4">
 				<h2 className="text-foreground text-sm">
@@ -124,7 +124,7 @@ export function RecordsNav({
 							count={counts[option]}
 							icon={RECORDS_OBJECT_ICONS[option]}
 							key={option}
-							label={RECORDS_OBJECT_LABELS[option].plural}
+							label={recordsObjectLabels(option).plural}
 							loading={loading}
 							onSelect={() => onSelectObject(option)}
 						/>

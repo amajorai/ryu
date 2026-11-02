@@ -54,7 +54,7 @@ function formatPlan(sub: SubscriptionStatus): string {
 			return "Lifetime (updates expired)";
 		}
 		const until = lt.updatesExpiresAt?.split("T")[0] ?? "—";
-		return `Lifetime (updates until ${until})`;
+		return tf("Lifetime (updates until {until})", { until });
 	}
 
 	const subscription = sub.subscription;
@@ -63,15 +63,15 @@ function formatPlan(sub: SubscriptionStatus): string {
 		const status = s.status;
 		const interval = s.interval;
 		if (status === "trialing") {
-			return `Trial (${interval}ly after trial)`;
+			return tf("Trial ({interval}ly after trial)", { interval });
 		}
-		let label = interval;
 		if (interval === "month") {
-			label = "monthly";
-		} else if (interval === "year") {
-			label = "annual";
+			return tr("Pro (monthly)");
 		}
-		return `Pro (${label})`;
+		if (interval === "year") {
+			return tr("Pro (annual)");
+		}
+		return tf("Pro ({label})", { label: interval });
 	}
 
 	return "Free";

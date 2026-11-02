@@ -224,7 +224,7 @@ export function TunnelLayer({
 			return;
 		}
 		sileo.success({
-			title: `Network → ${backendLabel(next)}`,
+			title: tl("Network → {backend}", { backend: backendLabel(next) }),
 			description: enabled
 				? next === MESH_BACKEND_TAILCAT
 					? "The listener was restarted with a new short-lived address."
@@ -331,10 +331,10 @@ export function TunnelLayer({
 				return "Off · public stable URL";
 			}
 			if (backend === MESH_BACKEND_PLUGIN) {
-				return `Off · ${pluginName}`;
+				return tl("Off · {pluginName}", { pluginName });
 			}
 			if (backend === MESH_BACKEND_HEADSCALE) {
-				return `Off · ${loginServer}`;
+				return tl("Off · {loginServer}", { loginServer });
 			}
 			return backend === MESH_BACKEND_TAILCAT
 				? "Off · Tailcat"
@@ -361,7 +361,9 @@ export function TunnelLayer({
 					: "Tailcat connected";
 			}
 			return status.magicDnsName
-				? `Connected as ${status.magicDnsName}`
+				? tl("Connected as {magicDnsName}", {
+						magicDnsName: status.magicDnsName,
+					})
 				: "Connected";
 		}
 		if (status.backendState === "Provisioning") {

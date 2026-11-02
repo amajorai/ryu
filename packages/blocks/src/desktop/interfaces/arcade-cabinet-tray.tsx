@@ -50,7 +50,7 @@ export function Meter({
 							}
 						)
 					: tl(
-							"Credit: {count, plural, one {{credits} message} other {{credits} messages}} in conversations {name} leads. Win: {wins, plural, one {{winsText} reply} other {{winsText} replys}} waiting on you.",
+							"Credit: {count, plural, one {{credits} message} other {{credits} messages}} in conversations {name} leads. Win: {wins, plural, one {{winsText} reply} other {{winsText} replies}} waiting on you.",
 							{
 								count: machine.credits,
 								credits: String(machine.credits),
@@ -166,7 +166,9 @@ function Ticket({
 	const tl = useLiteralMessages();
 	const barcode = zoom >= TICKET_BARCODE_ZOOM;
 	const withOthers =
-		shared.length > 0 ? `${title}, with ${shared.join(", ")}` : title;
+		shared.length > 0
+			? tl("{title}, with {names}", { names: shared.join(", "), title })
+			: title;
 	return (
 		<button
 			aria-current={active ? "true" : undefined}
@@ -256,7 +258,7 @@ export function Tray({
 		>
 			<ul
 				aria-label={tl(
-					"Payout tray: {count, plural, one {{countText} reply} other {{countText} replys}} waiting on you",
+					"Payout tray: {count, plural, one {{countText} reply} other {{countText} replies}} waiting on you",
 					{
 						count: machine.jackpots.length,
 						countText: String(machine.jackpots.length),

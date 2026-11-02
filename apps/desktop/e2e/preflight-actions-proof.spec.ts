@@ -1,10 +1,8 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/feature-integrity-sweep-2026-09-22"
-);
+const proofDir = proofEvidencePath("feature-integrity-sweep-2026-09-22");
 
 test("disabled reporting explains why no report was queued", async ({
 	page,

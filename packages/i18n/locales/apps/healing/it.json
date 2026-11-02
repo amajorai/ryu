@@ -1,0 +1,7 @@
+{
+  "A failed run was diagnosed": "È stata diagnosticata un’esecuzione non riuscita",
+  "Auto-fix attempts used: {count}. Review it manually.": "Tentativi di correzione automatica usati: {count}. Verifica manualmente.",
+  "Auto-fix gave up": "La correzione automatica ha rinunciato",
+  "Fix waiting in your inbox: {diagnosis}": "Correzione in attesa nella posta in arrivo: {diagnosis}",
+  "heal engine unavailable": "motore di riparazione non disponibile"
+}

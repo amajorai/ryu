@@ -1,0 +1,11 @@
+{
+  "New submission to review": "Новая заявка на проверку",
+  "Ryu's managed Composio provider is not configured for this node — record metrics manually": "Управляемый провайдер Composio от Ryu не настроен для этого узла — записывайте метрики вручную",
+  "Submitted by {creator} on {platform}": "Отправлено: {creator}, {platform}",
+  "approve this payout before marking it paid": "одобрите эту выплату, прежде чем отметить её как оплаченную",
+  "curated action '{slug}' is not a safe action slug": "выбранное действие '{slug}' не является безопасным slug действия",
+  "no Composio metric source is curated for platform '{platform}' — record metrics manually": "для платформы '{platform}' не выбран источник метрик Composio — записывайте метрики вручную",
+  "this payout has already been paid": "эта выплата уже произведена",
+  "this post has already been submitted to this campaign": "эта публикация уже отправлена в эту кампанию",
+  "this submission's payout is already paid; deleting it would corrupt the campaign's spend": "выплата по этой заявке уже произведена; её удаление исказит расходы кампании"
+}

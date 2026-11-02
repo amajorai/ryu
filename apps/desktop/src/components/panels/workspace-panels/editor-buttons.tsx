@@ -353,7 +353,9 @@ export function EditorButtonGroup({ folder }: { folder?: string | null }) {
 				<TooltipTrigger
 					render={
 						<Button
-							aria-label={tl("Open in {label}", { label: activeDef.label })}
+							// The label is already the whole action ("Open in VS Code",
+							// "Show in Finder"); prefixing "Open in" doubled it.
+							aria-label={activeDef.label}
 							onClick={() => run(activeDef.id)}
 							size="icon-sm"
 							variant="ghost-muted"
@@ -384,7 +386,7 @@ export function EditorButtonGroup({ folder }: { folder?: string | null }) {
 							<EditorIcon def={def} />
 							{def.shortLabel}
 							{def.id === activeId && (
-								<span className="ml-auto text-muted-foreground text-xs">
+								<span className="ms-auto text-muted-foreground text-xs">
 									active
 								</span>
 							)}

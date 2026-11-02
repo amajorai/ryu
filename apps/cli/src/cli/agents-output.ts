@@ -8,6 +8,7 @@ import {
 	isRemotePeerEngine,
 	REMOTE_PEER_IDENTITY_NOTE,
 } from "../core/agentIdentity.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import type { AgentIdentityView } from "./agents-core.ts";
 import { formatTable } from "./output.ts";
 import { type CliContext, UsageError } from "./types.ts";
@@ -16,7 +17,9 @@ import { type CliContext, UsageError } from "./types.ts";
 
 export function describeAccess(view: AgentIdentityView): string[] {
 	const lines = [
-		`Account access: ${accountAccessHeadline(view.accountAccess)}`,
+		tf("Account access: {headline}", {
+			headline: accountAccessHeadline(view.accountAccess),
+		}),
 	];
 	lines.push(
 		`                ${accountAccessNote(view.accountAccess, view.identityMode)}`
@@ -39,7 +42,10 @@ export function describePendingIdentity(view: AgentIdentityView): string[] {
 		return [];
 	}
 	return [
-		`App request:    ${identityModeLabel(view.pendingIdentityMode)}. A newer version of this agent's app asks for it; nothing changes until you choose.`,
+		tf(
+			"App request:    {mode}. A newer version of this agent's app asks for it; nothing changes until you choose.",
+			{ mode: identityModeLabel(view.pendingIdentityMode) }
+		),
 		`                Accept: ryu-cli agents identity ${view.id} ${view.pendingIdentityMode}`,
 		`                Dismiss and keep ${identityModeLabel(view.identityMode)}: ryu-cli agents identity ${view.id} dismiss`,
 	];
@@ -47,8 +53,10 @@ export function describePendingIdentity(view: AgentIdentityView): string[] {
 
 export function describeRemotePeer(): string[] {
 	return [
-		`How it works:   ${REMOTE_PEER_IDENTITY_NOTE.title}`,
-		`                ${REMOTE_PEER_IDENTITY_NOTE.description}`,
+		tf("How it works:   {title}", {
+			title: tr(REMOTE_PEER_IDENTITY_NOTE.title),
+		}),
+		`                ${tr(REMOTE_PEER_IDENTITY_NOTE.description)}`,
 	];
 }
 

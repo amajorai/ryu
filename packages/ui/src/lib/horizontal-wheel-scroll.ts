@@ -25,6 +25,8 @@ export interface HorizontalWheelEvent {
 }
 
 type OverflowXReader = (element: HorizontalWheelElement) => string;
+/** Reads the computed inline direction; "rtl" flips the vertical wheel term. */
+type DirectionReader = (element: HorizontalWheelElement) => string;
 /** The listener installer needs event ownership, rather than the whole DOM. */
 export type HorizontalWheelDocument = Pick<
 	Document,
@@ -56,6 +58,7 @@ const computedStyleReaderSchema = z.custom<typeof globalThis.getComputedStyle>(
 	(value) => z.function().safeParse(value).success
 );
 const computedOverflowSchema = z.object({ overflowX: z.string() });
+const computedDirectionSchema = z.object({ direction: z.string() });
 const elementConstructorSchema = z.custom<typeof Element>(
 	(value) => z.function().safeParse(value).success
 );
@@ -94,11 +97,21 @@ export function normalizeWheelDelta(
 }
 
 /**
- * Create the delegated wheel handler. The reader is injectable so the event
+ * The vertical wheel term in `scrollLeft` units. Under RTL `scrollLeft` runs
+ * from zero toward negative values, so wheel-down must subtract to keep moving
+ * toward the inline end. `deltaX` is physical and never passes through here.
+ */
+export function inlineWheelDeltaY(deltaY: number, direction: string): number {
+	return direction.trim().toLowerCase() === "rtl" ? -deltaY : deltaY;
+}
+
+/**
+ * Create the delegated wheel handler. The readers are injectable so the event
  * rules can be tested with structural elements without requiring a DOM shim.
  */
 export function createHorizontalWheelHandler(
-	getOverflowX: OverflowXReader = readOverflowX
+	getOverflowX: OverflowXReader = readOverflowX,
+	getDirection: DirectionReader = readDirection
 ): (event: HorizontalWheelEvent) => void {
 	return (event) => {
 		if (
@@ -127,10 +140,13 @@ export function createHorizontalWheelHandler(
 						event.deltaMode,
 						candidate.clientWidth
 					) +
-					normalizeWheelDelta(
-						event.deltaY,
-						event.deltaMode,
-						candidate.clientHeight
+					inlineWheelDeltaY(
+						normalizeWheelDelta(
+							event.deltaY,
+							event.deltaMode,
+							candidate.clientHeight
+						),
+						getDirection(candidate)
 					);
 
 				if (delta !== 0 && moveScrollLeft(candidate, delta)) {
@@ -208,6 +224,20 @@ function readOverflowX(element: HorizontalWheelElement): string {
 	return computedOverflowSchema.parse(
 		reader.data.call(globalThis, computedStyleElementSchema.parse(element))
 	).overflowX;
+}
+
+function readDirection(element: HorizontalWheelElement): string {
+	const reader = computedStyleReaderSchema.safeParse(
+		globalThis.getComputedStyle
+	);
+	const target = computedStyleElementSchema.safeParse(element);
+	if (!(reader.success && target.success)) {
+		return "ltr";
+	}
+	const style = computedDirectionSchema.safeParse(
+		reader.data.call(globalThis, target.data)
+	);
+	return style.success ? style.data.direction : "ltr";
 }
 
 const wheelEventTargetSchema = z

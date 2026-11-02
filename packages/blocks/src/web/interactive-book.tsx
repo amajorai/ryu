@@ -179,7 +179,7 @@ export function InteractiveBook({
 							? tl("Close {bookTitle}", { bookTitle })
 							: tl("Open {bookTitle}", { bookTitle })
 					}
-					className="absolute inset-0 z-50 flex h-full w-full origin-left flex-col overflow-hidden rounded-r-xl rounded-l-md border border-border bg-card p-5 text-left text-foreground shadow-sm [backface-visibility:hidden] [transform-style:preserve-3d] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
+					className="absolute inset-0 z-50 flex h-full w-full origin-left flex-col overflow-hidden rounded-r-xl rounded-l-md border border-border bg-card p-5 text-start text-foreground shadow-sm [backface-visibility:hidden] [transform-style:preserve-3d] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
 					onClick={() => {
 						setIsOpen(true);
 						rootRef.current?.focus();
@@ -270,7 +270,7 @@ export function InteractiveBook({
 								{index === pages.length - 1 ? (
 									<div
 										aria-hidden={!isCurrentFront}
-										className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-r-xl rounded-l-md bg-card p-5 text-left text-foreground [backface-visibility:hidden]"
+										className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-r-xl rounded-l-md bg-card p-5 text-start text-foreground [backface-visibility:hidden]"
 									>
 										{frontFaceContent}
 									</div>
@@ -280,7 +280,7 @@ export function InteractiveBook({
 										aria-label={tl("Read page {pageNumber}", {
 											pageNumber: page.pageNumber * 2 - 1,
 										})}
-										className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-r-xl rounded-l-md bg-card p-5 text-left text-foreground [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
+										className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-r-xl rounded-l-md bg-card p-5 text-start text-foreground [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
 										onClick={nextPage}
 										tabIndex={isCurrentFront ? 0 : -1}
 										type="button"
@@ -294,7 +294,7 @@ export function InteractiveBook({
 										pageNumber: page.pageNumber * 2,
 									})}
 									className={cn(
-										"absolute inset-0 flex h-full w-full origin-center flex-col overflow-hidden rounded-r-md rounded-l-xl border-border border-r bg-card p-5 text-left text-foreground [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4",
+										"absolute inset-0 flex h-full w-full origin-center flex-col overflow-hidden rounded-r-md rounded-l-xl border-border border-r bg-card p-5 text-start text-foreground [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4",
 										styles.backFace
 									)}
 									data-hidden={compact}
@@ -330,7 +330,7 @@ export function InteractiveBook({
 					<>
 						<button
 							aria-label={tl("Close {bookTitle}", { bookTitle })}
-							className="absolute top-3 right-3 z-[100] rounded-full border border-border bg-background p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+							className="absolute end-3 top-3 z-[100] rounded-full border border-border bg-background p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
 							onClick={closeBook}
 							type="button"
 						>
@@ -344,7 +344,10 @@ export function InteractiveBook({
 								onClick={previousPage}
 								type="button"
 							>
-								<ChevronLeft aria-hidden="true" className="size-4" />
+								<ChevronLeft
+									aria-hidden="true"
+									className="size-4 rtl:-scale-x-100"
+								/>
 							</button>
 							<span
 								aria-live="polite"
@@ -371,7 +374,10 @@ export function InteractiveBook({
 									onClick={nextPage}
 									type="button"
 								>
-									<ChevronRight aria-hidden="true" className="size-4" />
+									<ChevronRight
+										aria-hidden="true"
+										className="size-4 rtl:-scale-x-100"
+									/>
 								</button>
 							</div>
 						</div>

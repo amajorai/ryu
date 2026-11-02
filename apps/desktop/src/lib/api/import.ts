@@ -38,19 +38,32 @@ export interface ScanItem {
 	/** Content revision supplied by current Core; absent on older nodes. */
 	contentRevision?: string;
 	detail?: string;
+	/** The detail's sentences as Core messages (`{ message, args }`); empty
+	    when the detail is a path or the node is older. */
+	detailI18n?: unknown[];
 	/** Opaque, root-relative locator Core round-trips back to disk. */
 	id: string;
 	kind: ImportItemKind;
 	title: string;
+	/** The title as a Core message; absent from an older node. */
+	titleI18n?: unknown;
 }
 
 interface ScanItemWire {
 	already_exists?: boolean;
 	content_revision?: string;
 	detail?: string;
+	detail_i18n?: unknown;
 	id: string;
 	kind: ImportItemKind;
 	title: string;
+	title_i18n?: unknown;
+}
+
+/** One scan warning: the English sentence and, from a current node, its Core message. */
+export interface ScanNotice {
+	i18n: unknown;
+	message: string;
 }
 
 export interface ScanResult {
@@ -60,6 +73,9 @@ export interface ScanResult {
 	/** Detected source framework (`openclaw`, `hermes`, `muse`, `mastra`,
 	    `langchain`, `persona`); absent for a plain folder or an older node. */
 	source?: string;
+	/** The warnings with their Core messages; from an older node, the English
+	    `warnings` with no message. */
+	warningNotices?: ScanNotice[];
 	warnings: string[];
 }
 
@@ -67,7 +83,27 @@ interface ScanResultWire {
 	items?: ScanItemWire[];
 	root?: string;
 	source?: string | null;
+	warning_notices?: unknown;
 	warnings?: string[];
+}
+
+function toNotices(wire: ScanResultWire, warnings: string[]): ScanNotice[] {
+	const notices = Array.isArray(wire.warning_notices)
+		? wire.warning_notices.flatMap((notice: unknown) => {
+				if (
+					typeof notice !== "object" ||
+					notice === null ||
+					typeof (notice as { message?: unknown }).message !== "string"
+				) {
+					return [];
+				}
+				const { i18n, message } = notice as { i18n?: unknown; message: string };
+				return [{ i18n: i18n ?? null, message }];
+			})
+		: [];
+	return notices.length === warnings.length
+		? notices
+		: warnings.map((message) => ({ i18n: null, message }));
 }
 
 function toItem(i: ScanItemWire): ScanItem {
@@ -80,7 +116,9 @@ function toItem(i: ScanItemWire): ScanItem {
 		kind: i.kind,
 		id: i.id,
 		title: i.title,
+		titleI18n: i.title_i18n ?? null,
 		detail: i.detail,
+		detailI18n: Array.isArray(i.detail_i18n) ? i.detail_i18n : [],
 		alreadyExists: i.already_exists ?? false,
 	};
 }
@@ -146,11 +184,13 @@ export async function scanImportFolder(
 	}
 	// SAFETY: After the status check, native scan_import_handler serializes ScanResult root/items/warnings/source; every scanner ScanItem kind is one of the seven authored kind constants, and serde omits absent optional strings/false existence hints. This trusts that native route producer, not arbitrary JSON.
 	const body = (await resp.json()) as ScanResultWire;
+	const warnings = body.warnings ?? [];
 	return {
 		root: body.root ?? path,
 		items: (body.items ?? []).map(toItem),
 		source: typeof body.source === "string" ? body.source : undefined,
-		warnings: body.warnings ?? [],
+		warningNotices: toNotices(body, warnings),
+		warnings,
 	};
 }
 

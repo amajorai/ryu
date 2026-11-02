@@ -234,7 +234,7 @@ export function ProjectRow({
 						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 						Delete all chats
 						{count > 0 && (
-							<span className="ml-auto pl-2 text-muted-foreground/70">
+							<span className="ms-auto ps-2 text-muted-foreground/70">
 								{count}
 							</span>
 						)}

@@ -129,14 +129,16 @@ export function PaywallModal({
 				<ul className="flex list-disc flex-col gap-1 ps-4 text-muted-foreground text-sm">
 					{(intent === "tabs"
 						? [
-								"Unlimited open tabs",
-								"Run work on your own hardware or with your own provider",
-								"One-time desktop purchase; managed AI and hosting are separate",
+								tl("Unlimited open tabs"),
+								tl("Run work on your own hardware or with your own provider"),
+								tl(
+									"One-time desktop purchase; managed AI and hosting are separate"
+								),
 							]
 						: [
-								"Unlimited tabs with a desktop license",
-								"Ryu-managed inference with a subscription",
-								"Choose the plan that fits where your work runs",
+								tl("Unlimited tabs with a desktop license"),
+								tl("Ryu-managed inference with a subscription"),
+								tl("Choose the plan that fits where your work runs"),
 							]
 					).map((feature) => (
 						<li key={feature}>{feature}</li>

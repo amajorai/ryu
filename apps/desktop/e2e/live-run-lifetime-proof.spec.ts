@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("resumed run survives its former removal deadline without dropping other live cards", async ({
 	page,
@@ -26,9 +26,8 @@ test("resumed run survives its former removal deadline without dropping other li
 	await page.waitForTimeout(400);
 	expect(errors).toEqual([]);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/live-run-lifetime-completed.png"
+		path: proofEvidencePath(
+			"performance-sweep/live-run-lifetime-completed.png"
 		),
 		fullPage: true,
 	});
@@ -62,10 +61,7 @@ test("contributed cards share their source and disappear when their declaration 
 	await page.waitForTimeout(400);
 	expect(errors).toEqual([]);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/contributed-live-completed.png"
-		),
+		path: proofEvidencePath("performance-sweep/contributed-live-completed.png"),
 		fullPage: true,
 	});
 });

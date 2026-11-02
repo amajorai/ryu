@@ -1,5 +1,5 @@
 export const LIST =
-	"list-disc space-y-1 pl-6 text-sm leading-6 marker:text-muted-foreground";
+	"list-disc space-y-1 ps-6 text-sm leading-6 marker:text-muted-foreground";
 
 export function Dot() {
 	return (

@@ -40,3 +40,64 @@ describe("currency formatting", () => {
 		expect(formatMinorCurrency(100_000_000)).toBe("$1m");
 	});
 });
+
+describe("locale-aware formatting", () => {
+	test("keeps every English variant on the English policy", () => {
+		expect(formatCount(1234, "en-GB")).toBe("1,234");
+		expect(formatCount(1_234_567, "en-GB")).toBe("1.2m");
+		expect(formatCurrency(1234.5, "USD", {}, "en-GB")).toBe("$1,234.50");
+		expect(formatCurrency(1_234_567, "USD", {}, "en")).toBe("$1.2m");
+	});
+
+	test("groups and abbreviates in the requested locale", () => {
+		const expectations: [string, number][] = [
+			["de", 1234.5],
+			["fr", 1234],
+			["ja", 1_234_567],
+			["ar", 1234],
+		];
+		for (const [locale, value] of expectations) {
+			const expected =
+				Math.abs(value) >= 1_000_000
+					? new Intl.NumberFormat(locale, {
+							compactDisplay: "short",
+							maximumFractionDigits: 1,
+							minimumFractionDigits: 0,
+							notation: "compact",
+						}).format(value)
+					: new Intl.NumberFormat(locale, {
+							maximumFractionDigits: Number.isInteger(value) ? 0 : 3,
+						}).format(value);
+			expect(formatCount(value, locale)).toBe(expected);
+		}
+		expect(formatCount(1234.5, "de")).toBe("1.234,5");
+		expect(formatCount(1_234_567, "ja")).not.toContain("m");
+	});
+
+	test("formats currency in the requested locale", () => {
+		expect(formatCurrency(1234.5, "USD", {}, "de")).toBe(
+			new Intl.NumberFormat("de", {
+				currency: "USD",
+				style: "currency",
+			}).format(1234.5)
+		);
+		expect(formatCurrency(1_234_567, "EUR", {}, "fr")).toBe(
+			new Intl.NumberFormat("fr", {
+				compactDisplay: "short",
+				currency: "EUR",
+				maximumFractionDigits: 1,
+				minimumFractionDigits: 0,
+				notation: "compact",
+				style: "currency",
+			}).format(1_234_567)
+		);
+		expect(formatMinorCurrency(123_456, "USD", undefined, "ja")).toBe(
+			new Intl.NumberFormat("ja", {
+				currency: "USD",
+				maximumFractionDigits: 2,
+				minimumFractionDigits: 2,
+				style: "currency",
+			}).format(1234.56)
+		);
+	});
+});

@@ -18,7 +18,7 @@ interface Snapshot {
 	consoleAccess: boolean;
 	defaultNode: string;
 	node: { name: string; managed?: boolean; orgId?: string | null };
-	organizationQuery?: { status: string; fetchStatus: string };
+	permissionsQuery?: { status: string; fetchStatus: string } | null;
 	requestedMode: string;
 }
 declare global {
@@ -54,6 +54,16 @@ async function expectNoPlaintextVault(page: Page) {
 			[...LEGACY_VAULT_LOCAL_STORAGE_KEYS]
 		)
 	).toEqual([null, null, null]);
+}
+/**
+ * The shell replaces the startup splash once the wallet and cloud nodes load,
+ * which a cold harness takes longer than one 5 s assertion for. Wait for the
+ * mode lockup first, so every gate assertion below still has its own budget.
+ */
+async function shellMounted(page: Page) {
+	await expect(page.getByTestId("product-mode-lockup")).toBeVisible({
+		timeout: 60_000,
+	});
 }
 async function switchMenu(page: Page) {
 	await page.getByTestId("product-mode-trigger").click();
@@ -165,11 +175,12 @@ for (const initial of ["member", "error"] as const) {
 		const errors: string[] = [];
 		page.on("pageerror", (error) => errors.push(error.message));
 		await page.goto("/console-access-app-proof.html");
+		await shellMounted(page);
 		await expect
 			.poll(async () => (await snapshot(page)).node.managed)
 			.toBe(true);
 		await expect
-			.poll(async () => (await snapshot(page)).organizationQuery?.status)
+			.poll(async () => (await snapshot(page)).permissionsQuery?.status)
 			.toBe(initial === "error" ? "error" : "success");
 		await expect(
 			page.getByTestId("product-mode-lockup").getByText("Bot", { exact: true })
@@ -179,6 +190,7 @@ for (const initial of ["member", "error"] as const) {
 		fixture.setFailure(false);
 		fixture.setRole("owner");
 		await page.reload();
+		await shellMounted(page);
 		await expect
 			.poll(async () => (await snapshot(page)).consoleAccess)
 			.toBe(true);
@@ -201,23 +213,26 @@ for (const initial of ["member", "error"] as const) {
 		expect(
 			fixture
 				.snapshot()
-				.calls.filter((call) => call.path === "/api/control-plane/orgs")
+				.calls.filter(
+					(call) => call.path === "/api/control-plane/me/permissions"
+				)
 				.every((call) => call.authorization === "Bearer console-owner-token")
 		).toBe(true);
 		expect(errors).toEqual([]);
 	});
 }
 
-test("actual AppSidebar hides Console while organization response is pending and shows it only after owner readback", async ({
+test("actual AppSidebar hides Console while the permissions response is pending and shows it only after owner readback", async ({
 	page,
 }, testInfo) => {
 	const fixture = await installConsoleAccessAppFixture(page);
 	fixture.setRole("owner");
 	fixture.hold();
 	await page.goto("/console-access-app-proof.html");
+	await shellMounted(page);
 	await expect.poll(async () => (await snapshot(page)).node.managed).toBe(true);
 	await expect
-		.poll(async () => (await snapshot(page)).organizationQuery?.fetchStatus)
+		.poll(async () => (await snapshot(page)).permissionsQuery?.fetchStatus)
 		.toBe("fetching");
 	await expect(
 		page.getByTestId("product-mode-lockup").getByText("Bot", { exact: true })
@@ -241,6 +256,7 @@ test("actual node selector replaces owner node with member node without granting
 	const fixture = await installConsoleAccessAppFixture(page);
 	fixture.setRole("owner");
 	await page.goto("/console-access-app-proof.html");
+	await shellMounted(page);
 	await expect
 		.poll(async () => (await snapshot(page)).consoleAccess)
 		.toBe(true);
@@ -292,9 +308,10 @@ test("actual account menu switch supersedes a held owner response and reloads th
 	fixture.setRole("owner");
 	fixture.hold();
 	await page.goto("/console-access-app-proof.html");
+	await shellMounted(page);
 	await expect.poll(async () => (await snapshot(page)).node.managed).toBe(true);
 	await expect
-		.poll(async () => (await snapshot(page)).organizationQuery?.fetchStatus)
+		.poll(async () => (await snapshot(page)).permissionsQuery?.fetchStatus)
 		.toBe("fetching");
 	// Avatar alt text contributes to the accessible name; scope by visible account copy.
 	await page
@@ -310,9 +327,10 @@ test("actual account menu switch supersedes a held owner response and reloads th
 		page.waitForEvent("load"),
 		page.getByRole("menuitem", { name: /Member Two/ }).click(),
 	]);
+	await shellMounted(page);
 	fixture.release();
 	await expect
-		.poll(async () => (await snapshot(page)).organizationQuery?.status)
+		.poll(async () => (await snapshot(page)).permissionsQuery?.status)
 		.toBe("success");
 	expect((await sealedVault(page)).activeToken).toBe("console-member-token");
 	await expectNoPlaintextVault(page);
@@ -328,7 +346,7 @@ test("actual account menu switch supersedes a held owner response and reloads th
 			.snapshot()
 			.calls.some(
 				(call) =>
-					call.path === "/api/control-plane/orgs" &&
+					call.path === "/api/control-plane/me/permissions" &&
 					call.authorization === "Bearer console-member-token"
 			)
 	).toBe(true);
@@ -346,6 +364,7 @@ test("actual account sign-out confirmation removes owner identity and reloads th
 	const fixture = await installConsoleAccessAppFixture(page);
 	fixture.setRole("owner");
 	await page.goto("/console-access-app-proof.html");
+	await shellMounted(page);
 	await expect
 		.poll(async () => (await snapshot(page)).consoleAccess)
 		.toBe(true);
@@ -368,8 +387,9 @@ test("actual account sign-out confirmation removes owner identity and reloads th
 		page.waitForEvent("load"),
 		page.getByRole("button", { name: "Log out", exact: true }).click(),
 	]);
+	await shellMounted(page);
 	await expect
-		.poll(async () => (await snapshot(page)).organizationQuery?.status)
+		.poll(async () => (await snapshot(page)).permissionsQuery?.status)
 		.toBe("success");
 	await expect
 		.poll(async () => (await snapshot(page)).consoleAccess)

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
@@ -47,8 +48,8 @@ function DayHeader({
 		0
 	);
 	const summary = [
-		isToday ? "Today" : null,
-		entries.length > 0 ? countLabel(entries.length, "entry", "entries") : null,
+		isToday ? tr("Today") : null,
+		entries.length > 0 ? countLabel(entries.length, "entry") : null,
 		messages > 0 ? countLabel(messages, "message") : null,
 	].filter(Boolean);
 	return (
@@ -79,7 +80,7 @@ function DayHeader({
 				</span>
 			</h1>
 			{summary.length > 0 ? (
-				<p className="ms-auto shrink-0 pb-1 text-right text-muted-foreground text-sm leading-5 max-sm:hidden">
+				<p className="ms-auto shrink-0 pb-1 text-end text-muted-foreground text-sm leading-5 max-sm:hidden">
 					{summary.join(" · ")}
 				</p>
 			) : null}
@@ -116,7 +117,8 @@ function DayEntry({
 					)}
 				>
 					<button
-						className="rounded-sm text-left font-semibold decoration-foreground/30 underline-offset-4 outline-none after:absolute after:inset-0 after:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50 group-hover:underline"
+						className="rounded-sm text-start font-semibold decoration-foreground/30 underline-offset-4 outline-none after:absolute after:inset-0 after:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50 group-hover:underline"
+						data-ryu-i18n="off"
 						onClick={() => onOpen(entry)}
 						type="button"
 					>
@@ -182,7 +184,7 @@ function OnThisDay({
 							{group.entries.map((entry) => (
 								<li key={entry.thread.id}>
 									<button
-										className="-mx-3 flex w-[calc(100%+1.5rem)] flex-col rounded-md px-3 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
+										className="-mx-3 flex w-[calc(100%+1.5rem)] flex-col rounded-md px-3 py-2 text-start outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
 										onClick={() => onOpen(entry)}
 										type="button"
 									>
@@ -191,6 +193,7 @@ function OnThisDay({
 												"truncate font-semibold text-base text-foreground leading-6",
 												titleClass
 											)}
+											data-ryu-i18n="off"
 										>
 											{entryTitle(entry.thread)}
 										</span>
@@ -210,7 +213,11 @@ function OnThisDay({
 
 function runState(event: InterfaceEvent): string {
 	if (event.kind === "upcoming") {
-		return event.count ? `${event.count} runs` : "Scheduled";
+		return event.count
+			? tr("{count, plural, one {# run} other {# runs}}", {
+					count: event.count,
+				})
+			: tr("Scheduled");
 	}
 	if (event.outcome === "failure") {
 		return "Failed";

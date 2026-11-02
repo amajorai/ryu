@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-
+import path from "node:path";
 import { z } from "zod";
 import {
 	parseWorkflowFixtureArgs,
@@ -9,6 +9,7 @@ import {
 	type TriggerFixtureState,
 	type WorkflowDefinition,
 } from "./workflow-fixture-contract.ts";
+import { workflowsProofBuildDir } from "./workflows-proof-build.ts";
 
 type FixtureState = TriggerFixtureState;
 interface FixtureVersion {
@@ -17,7 +18,7 @@ interface FixtureVersion {
 }
 
 const appHtml = await readFile(
-	"/tmp/ryu-workflows-revision-recovery-build/index.html",
+	path.join(workflowsProofBuildDir("revision-recovery"), "index.html"),
 	"utf8"
 );
 const bridgeScript = `<script>

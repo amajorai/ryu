@@ -56,33 +56,33 @@ export function LifetimePlanCard({
 					<span className="font-heading text-muted-foreground text-xl tabular-nums line-through">
 						$200
 					</span>
-					<span className="ml-1 text-muted-foreground">once</span>
+					<span className="ms-1 text-muted-foreground">once</span>
 				</div>
 				<p className={`mb-6 font-medium text-primary ${helperText}`}>
 					Launch price with 36% savings
 				</p>
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Monitor className="mr-2 size-4" />
+						<Monitor className="me-2 size-4" />
 						<span>You can run local agents and workflows on your computer</span>
 					</li>
 					<li className="flex items-center">
-						<Key className="mr-2 size-4" />
+						<Key className="me-2 size-4" />
 						<span>You can use your own keys for cloud AI if you want</span>
 					</li>
 					<li className="flex items-center">
-						<Wrench className="mr-2 size-4" />
+						<Wrench className="me-2 size-4" />
 						<span>
 							Hosted agents, managed servers, and monthly credits are not
 							included
 						</span>
 					</li>
 					<li className="flex items-center">
-						<Calendar className="mr-2 size-4" />
+						<Calendar className="me-2 size-4" />
 						<span>One year of updates is included</span>
 					</li>
 					<li className="flex items-center">
-						<Star className="mr-2 size-4" />
+						<Star className="me-2 size-4" />
 						<span>The local trial lasts 7 days and needs no card</span>
 					</li>
 				</PlanFeatureList>
@@ -141,27 +141,27 @@ export function MarketplacePassPlanCard({
 				</div>
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Download className="mr-2 size-4" />
+						<Download className="me-2 size-4" />
 						<span>
 							One person can access all supported paid Marketplace apps
 						</span>
 					</li>
 					<li className="flex items-center">
-						<Users className="mr-2 size-4" />
+						<Users className="me-2 size-4" />
 						<span>The pass is for one individual user</span>
 					</li>
 					<li className="flex items-center">
-						<Star className="mr-2 size-4" />
+						<Star className="me-2 size-4" />
 						<span>You can see the ticket marker before you install</span>
 					</li>
 					<li className="flex items-center">
-						<Calendar className="mr-2 size-4" />
+						<Calendar className="me-2 size-4" />
 						<span>
 							You can cancel anytime, and access lasts through your paid period
 						</span>
 					</li>
 					<li className="flex items-center text-muted-foreground">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>
 							Managed AI, cloud servers, and monthly credits are not included
 						</span>

@@ -1,0 +1,7 @@
+{
+  "A failed run was diagnosed": "Неудачный запуск диагностирован",
+  "Auto-fix attempts used: {count}. Review it manually.": "Использовано попыток автоисправления: {count}. Проверьте вручную.",
+  "Auto-fix gave up": "Автоисправление прекращено",
+  "Fix waiting in your inbox: {diagnosis}": "Исправление ждёт во входящих: {diagnosis}",
+  "heal engine unavailable": "механизм восстановления недоступен"
+}

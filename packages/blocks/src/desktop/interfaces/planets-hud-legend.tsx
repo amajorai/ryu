@@ -1,11 +1,9 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	THREAD_STATUS_ORDER,
-} from "@ryuhq/protocol/interfaces";
+import { THREAD_STATUS_ORDER } from "@ryuhq/protocol/interfaces";
 import { GAME_PLATE } from "./game-hud.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import type { PlanetSystem } from "./planets-model.ts";
 import { type PlanetsPalette, teamColor } from "./planets-palette.ts";
 import { PlanetsStatusDot, TeamMark } from "./planets-parts.tsx";
@@ -44,7 +42,7 @@ export function PlanetsLegend({
 							key={status}
 						>
 							<PlanetsStatusDot status={status} />
-							{THREAD_STATUS_LABELS[status]}
+							{threadStatusLabel(status)}
 						</li>
 					))}
 				</ul>

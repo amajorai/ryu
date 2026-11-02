@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -260,13 +261,20 @@ export function TimelineInterface({
 		(sum, day) => sum + day.threadIds.length,
 		0
 	);
-	let summary = `${threadCount} ${threadCount === 1 ? "thread" : "threads"}${
-		workingCount > 0 ? ` · ${workingCount} working` : ""
-	}`;
+	let summary =
+		workingCount > 0
+			? tr(
+					"{count, plural, one {# thread} other {# threads}} · {working} working",
+					{ count: threadCount, working: workingCount }
+				)
+			: tr("{count, plural, one {# thread} other {# threads}}", {
+					count: threadCount,
+				});
 	if (scale === "week" && firstKey && lastKey) {
-		summary = `${weekRangeLabel(firstKey, lastKey)} · ${weekCount} ${
-			weekCount === 1 ? "thread" : "threads"
-		}`;
+		summary = tr(
+			"{range} · {count, plural, one {# thread} other {# threads}}",
+			{ count: weekCount, range: weekRangeLabel(firstKey, lastKey) }
+		);
 	}
 
 	return (
@@ -305,7 +313,11 @@ export function TimelineInterface({
 							type="button"
 							variant="ghost"
 						>
-							<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+							<ArrowLeft
+								aria-hidden="true"
+								className="rtl:-scale-x-100"
+								data-icon="inline-start"
+							/>
 							Earlier in Day view
 						</Button>
 					) : null}
@@ -323,7 +335,7 @@ export function TimelineInterface({
 					<ToggleGroup
 						appearance="segmented"
 						aria-label="Timeline scale"
-						className="ml-1 h-7 rounded-md bg-muted p-0.5"
+						className="ms-1 h-7 rounded-md bg-muted p-0.5"
 						multiple={false}
 						onValueChange={(values: string[]) => {
 							const value = values[0];
@@ -352,7 +364,7 @@ export function TimelineInterface({
 				</nav>
 				<Button
 					aria-label="New thread"
-					className={cn(HEADER_CONTROL, "ml-1")}
+					className={cn(HEADER_CONTROL, "ms-1")}
 					onClick={() => port.startThread({})}
 					size="sm"
 					type="button"

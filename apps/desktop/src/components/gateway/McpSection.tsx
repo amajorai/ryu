@@ -99,6 +99,7 @@ function ServersList({
 	pending: ReadonlySet<string>;
 	servers: McpServer[];
 }) {
+	const tl = useLiteralMessages();
 	if (loading) {
 		return <SkeletonRows label="Loading…" spacing="panel" />;
 	}
@@ -125,7 +126,11 @@ function ServersList({
 							) : null}
 							<McpAuthStatus server={s} />
 							<Switch
-								aria-label={`${s.enabled ? "Disable" : "Enable"} ${s.name}`}
+								aria-label={
+									s.enabled
+										? tl("Disable {name}", { name: s.name })
+										: tl("Enable {name}", { name: s.name })
+								}
 								checked={s.enabled}
 								disabled={s.ownerPluginId !== null || pending.has(s.name)}
 								onCheckedChange={(checked) => onToggle(s, checked)}
@@ -226,6 +231,7 @@ function ToolsList({
 }
 
 export function McpSection({ target }: { target: ApiTarget }) {
+	const tl = useLiteralMessages();
 	const [servers, setServers] = useState<McpServer[]>([]);
 	const [tools, setTools] = useState<McpTool[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -319,7 +325,9 @@ export function McpSection({ target }: { target: ApiTarget }) {
 					cause instanceof Error &&
 					cause.message.includes("not user-configured");
 				toast.error({
-					title: `Couldn't ${enabled ? "enable" : "disable"} ${server.name}`,
+					title: enabled
+						? tl("Couldn't enable {name}", { name: server.name })
+						: tl("Couldn't disable {name}", { name: server.name }),
 					description: notOwned
 						? "Only servers you added can be switched here."
 						: "Check that Core is running, then try again.",

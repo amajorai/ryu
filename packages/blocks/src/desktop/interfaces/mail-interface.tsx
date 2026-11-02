@@ -396,7 +396,7 @@ export function MailInterface({
 					aria-label={searching ? "Search results" : viewLabel}
 					className={cn(
 						"flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl bg-background",
-						navHidden ? "mx-2 mb-2" : "mr-4 mb-4"
+						navHidden ? "mx-2 mb-2" : "me-4 mb-4"
 					)}
 				>
 					{showList ? (
@@ -404,7 +404,7 @@ export function MailInterface({
 							className={cn(
 								"flex min-h-0 min-w-0",
 								paneOpen
-									? "w-[40%] min-w-[340px] max-w-[520px] shrink-0 border-border border-r"
+									? "w-[40%] min-w-[340px] max-w-[520px] shrink-0 border-border border-e"
 									: "flex-1"
 							)}
 						>

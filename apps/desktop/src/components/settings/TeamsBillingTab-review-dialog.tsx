@@ -14,6 +14,10 @@ import {
 import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import type { OrganizationPlanId } from "@/src/lib/api/teams-billing.ts";
 import {
+	formatWholeUsd,
+	memberSeatCountLabel,
+} from "@/src/lib/billing-amounts.ts";
+import {
 	formatMonthlyUsd,
 	planLabel,
 	poolBundleRule,
@@ -81,14 +85,14 @@ export function TeamsBillingReviewDialog({
 						detail: tl(
 							"Shared AI pool: {pool}/mo. It adds {bundle} for {rule}. Each additional billed member seat is {seatPrice}/mo.",
 							{
-								bundle: `$${includedCreditBundle}`,
+								bundle: formatWholeUsd(includedCreditBundle),
 								pool: formatMicroUsd(Math.round(previewCreditPool * 1_000_000)),
 								rule: poolBundleRule(organizationPlanId, tl),
-								seatPrice: `$${TEAMS_AGENT_STANDARD_USD}`,
+								seatPrice: formatWholeUsd(TEAMS_AGENT_STANDARD_USD),
 							}
 						),
 						label: "New allowance",
-						value: `${previewSeatCount} member seats`,
+						value: memberSeatCountLabel(previewSeatCount, tl),
 					}}
 					next={{
 						amount: formatMonthlyUsd(previewMonthlyPrice),

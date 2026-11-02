@@ -2,6 +2,7 @@
 
 import { useMediaState } from "@platejs/media/react";
 import { ResizableProvider } from "@platejs/resizable";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { FileUp } from "lucide-react";
@@ -16,6 +17,7 @@ export const FileElement = withHOC(
 		const readOnly = useReadOnly();
 		const { name, unsafeUrl } = useMediaState();
 		const safeUrl = safeMediaUrl(unsafeUrl);
+		const tl = useLiteralMessages();
 
 		return (
 			<PlateElement className="my-px rounded-sm" {...props}>
@@ -38,7 +40,7 @@ export const FileElement = withHOC(
 					<Caption align="left">
 						<CaptionTextarea
 							className="text-start"
-							placeholder="Write a caption…"
+							placeholder={tl("Write a caption…")}
 							readOnly={readOnly}
 						/>
 					</Caption>

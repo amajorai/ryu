@@ -99,7 +99,7 @@ export function SectionOverflowPopover<T>({
 
 	return (
 		<Popover onOpenChange={onOpenChange} open={open}>
-			<div className="mt-0.5 flex items-center gap-1 pl-6">
+			<div className="mt-0.5 flex items-center gap-1 ps-6">
 				<PopoverTrigger size="compact" variant="muted">
 					{tl("Show {remaining} more", { remaining: String(remaining) })}
 				</PopoverTrigger>
@@ -183,7 +183,7 @@ export function SectionPagingControls<T>({
 		);
 	}
 	return (
-		<div className="mt-0.5 flex items-center gap-1 pl-6">
+		<div className="mt-0.5 flex items-center gap-1 ps-6">
 			{paged.hasMore ? (
 				<ShowMoreButton onClick={paged.showMore} remaining={paged.remaining} />
 			) : null}

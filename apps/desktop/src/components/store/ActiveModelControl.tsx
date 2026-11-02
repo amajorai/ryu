@@ -113,7 +113,7 @@ export function ActiveModelControl({
 			forceNew: true,
 			initialAgent: "ryu",
 			initialModel: modelId,
-			title: `Chat · ${modelName}`,
+			title: tl("Chat · {modelName}", { modelName }),
 		});
 	};
 
@@ -147,7 +147,9 @@ export function ActiveModelControl({
 			}
 
 			if (engine.installState !== "installed") {
-				setSetupStage(`Installing ${engine.displayName}…`);
+				setSetupStage(
+					tl("Installing {displayName}…", { displayName: engine.displayName })
+				);
 				await installSidecar(
 					target.url,
 					target.token,
@@ -175,7 +177,7 @@ export function ActiveModelControl({
 				});
 			}
 
-			setSetupStage(`Starting ${modelName}…`);
+			setSetupStage(tl("Starting {modelName}…", { modelName }));
 			return setActiveModel(target, repoId, engine.name);
 		},
 		onSuccess: async (result) => {
@@ -333,7 +335,7 @@ export function ActiveModelControl({
 			>
 				{label}
 			</Button>
-			<p className="max-w-64 text-right text-muted-foreground text-xs">
+			<p className="max-w-64 text-end text-muted-foreground text-xs">
 				{helper}
 			</p>
 		</div>

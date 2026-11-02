@@ -37,7 +37,7 @@ import { agentById } from "./interface-renderer.ts";
  * focus-visible is the only outline in the list.
  */
 const MENU_BUTTON_CLASS =
-	"peer/menu-button group/menu-button flex h-7 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm outline-hidden ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-active:bg-sidebar-primary/15 data-active:font-medium data-active:text-sidebar-foreground data-active:hover:bg-sidebar-primary/20";
+	"peer/menu-button group/menu-button flex h-7 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-start text-sm outline-hidden ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-active:bg-sidebar-primary/15 data-active:font-medium data-active:text-sidebar-foreground data-active:hover:bg-sidebar-primary/20";
 
 /**
  * The sidebar's disclosure state, owned by the interface so the workspace
@@ -149,7 +149,7 @@ export function ChannelsSidebar({
 			)}
 			data-slot="channels-sidebar"
 		>
-			<SidebarHeader className="h-12 shrink-0 flex-row items-center gap-2 py-0 pr-2 pl-4">
+			<SidebarHeader className="h-12 shrink-0 flex-row items-center gap-2 py-0 ps-4 pe-2">
 				<p className="min-w-0 flex-1 truncate font-bold text-base text-sidebar-foreground">
 					Ryu
 				</p>
@@ -185,7 +185,7 @@ export function ChannelsSidebar({
 			<Button
 				aria-describedby={composeHintId}
 				aria-label="New message"
-				className="absolute right-4 bottom-4 @min-[640px]:hidden size-12 rounded-xl shadow-md [&_svg:not([class*='size-'])]:size-5"
+				className="absolute end-4 bottom-4 @min-[640px]:hidden size-12 rounded-xl shadow-md [&_svg:not([class*='size-'])]:size-5"
 				onClick={onCompose}
 				size="icon"
 			>
@@ -250,7 +250,7 @@ export function WorkspaceRail({
 	return (
 		<div
 			className={cn(
-				"flex @max-[900px]:hidden w-14 shrink-0 flex-col items-center gap-3 border-sidebar-border border-r bg-sidebar pt-2 pb-3 text-sidebar-foreground",
+				"flex @max-[900px]:hidden w-14 shrink-0 flex-col items-center gap-3 border-sidebar-border border-e bg-sidebar pt-2 pb-3 text-sidebar-foreground",
 				threadOpen && "@max-[1100px]:hidden"
 			)}
 		>
@@ -334,8 +334,8 @@ function SidebarSection({
 					<ChevronRight
 						aria-hidden="true"
 						className={cn(
-							"size-4! transition-transform duration-150 motion-reduce:transition-none",
-							collapsed ? "rotate-0" : "rotate-90"
+							"size-4! transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100",
+							collapsed ? "rotate-0" : "rotate-90 rtl:-rotate-90"
 						)}
 					/>
 					{section.label}
@@ -343,7 +343,7 @@ function SidebarSection({
 			</h2>
 			<SidebarMenu className="gap-0" id={listId}>
 				{section.channels.length === 0 ? (
-					<SidebarMenuItem className="flex h-7 items-center pl-8 text-sidebar-foreground/70 text-sm">
+					<SidebarMenuItem className="flex h-7 items-center ps-8 text-sidebar-foreground/70 text-sm">
 						{filtering ? "No matches" : "None yet"}
 					</SidebarMenuItem>
 				) : null}

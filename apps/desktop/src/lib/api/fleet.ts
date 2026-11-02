@@ -1,3 +1,4 @@
+import { translate } from "@ryu/i18n/core";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
@@ -81,7 +82,10 @@ export class NodeAlreadyBoundError extends Error {
 
 	constructor(status: Extract<FleetBindingStatus, { enrolled: true }>) {
 		super(
-			`This node is already bound to ${status.organizationName ?? status.organizationId}. Revoke that binding before moving it to another organization.`
+			translate(
+				"This node is already bound to {organization}. Revoke that binding before moving it to another organization.",
+				{ organization: status.organizationName ?? status.organizationId }
+			)
 		);
 		this.name = "NodeAlreadyBoundError";
 		this.status = status;
@@ -132,7 +136,9 @@ function sessionToken(): string | null {
 }
 
 async function cloudError(response: Response): Promise<string> {
-	const fallback = `Could not create enrollment code (${response.status}).`;
+	const fallback = translate("Could not create enrollment code ({status}).", {
+		status: response.status,
+	});
 	const value: FleetResponseInput = await response.json().catch(() => null);
 	const parsed = fleetErrorSchema.safeParse(value);
 	if (!parsed.success) {

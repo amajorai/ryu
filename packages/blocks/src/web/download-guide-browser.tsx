@@ -130,6 +130,9 @@ export function BrowserToolbarMock({
 			className="relative w-full select-none overflow-hidden rounded-2xl border border-border/70 bg-muted/40 shadow-sm"
 			data-browser={hint.browser}
 			data-testid="download-guide-toolbar"
+			// A picture of browser chrome, kept left to right like the browser
+			// itself: the download control stays at the top-right corner.
+			dir="ltr"
 		>
 			<div className="flex h-8 items-center gap-3 border-border/60 border-b bg-muted/60 px-3">
 				{os === "macos" ? <WindowControls os={os} /> : null}

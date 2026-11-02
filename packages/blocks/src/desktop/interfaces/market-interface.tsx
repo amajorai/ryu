@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +24,7 @@ import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { keeperWords, worksLive } from "./market-acts.tsx";
 import { MarketDioramaScene } from "./market-diorama.tsx";
 import { useElementSize } from "./market-hooks.ts";
-import { MarketStreetHud, STREET_NAME } from "./market-hud.tsx";
+import { MarketStreetHud, streetName } from "./market-hud.tsx";
 import { useMarketActCast } from "./market-interface-cast.tsx";
 import { MarketEmptyState } from "./market-interface-empty.tsx";
 import { useMarketEscape } from "./market-interface-escape.ts";
@@ -34,7 +35,7 @@ import {
 	useMarketStreet,
 } from "./market-interface-street.ts";
 import { MarketList } from "./market-list.tsx";
-import { newOrderInput, plural, shopForThread } from "./market-model.ts";
+import { newOrderInput, shopForThread } from "./market-model.ts";
 import { MARKET_SCENE_CSS, marketArt } from "./market-palette.ts";
 import { MarketPanel, type MarketPanelView } from "./market-panel.tsx";
 
@@ -151,7 +152,7 @@ export function MarketInterface({
 		setShopId(id);
 		setComposerAgentId(null);
 		focusTarget.current = "panel";
-		setAnnouncement(next ? `Inside ${next.name}` : "");
+		setAnnouncement(next ? tl("Inside {name}", { name: next.name }) : "");
 	};
 	const openKeeper = (id: string, agentId: string) => {
 		if (threadOpen) {
@@ -168,7 +169,7 @@ export function MarketInterface({
 		setShopId(null);
 		setComposerAgentId(null);
 		focusTarget.current = "hud";
-		setAnnouncement(tl("Back on {street}", { street: STREET_NAME }));
+		setAnnouncement(tl("Back on {street}", { street: streetName(tl) }));
 	};
 	const serve = (threadId: string) => {
 		focusTarget.current = "panel";
@@ -265,7 +266,14 @@ export function MarketInterface({
 		opener?: HTMLElement
 	) => cards.openBlocker(threadId, agentName, opener);
 	const summary = actsOn
-		? `${STREET_NAME}: ${plural(totals.shops, "shop")}, ${actSummaryLine(actTotalsNow)}.`
+		? tl(
+				"{street}: {shopCount, plural, one {# shop} other {# shops}}, {acts}.",
+				{
+					acts: actSummaryLine(actTotalsNow),
+					shopCount: totals.shops,
+					street: streetName(tl),
+				}
+			)
 		: tl(
 				"{street}: {shopCount, plural, one {{shops} shop} other {{shops} shops}}, {orderCount, plural, one {{orders} order} other {{orders} orders}}, {waitingOnYou} waiting on you, {busy} busy.",
 				{
@@ -274,7 +282,7 @@ export function MarketInterface({
 					orders: String(totals.orders),
 					shopCount: totals.shops,
 					shops: String(totals.shops),
-					street: STREET_NAME,
+					street: streetName(tl),
 					waitingOnYou: String(totals.waitingOnYou),
 				}
 			);
@@ -325,7 +333,7 @@ export function MarketInterface({
 					view={isoView}
 				/>
 			}
-			label={STREET_NAME}
+			label={streetName(tl)}
 			onKeyDown={onRootKeyDown}
 			rootRef={rootRef}
 			sheet={
@@ -339,7 +347,8 @@ export function MarketInterface({
 											viewShops.find((item) => item.id === id)?.busy ?? false,
 										statuses: orderStatuses,
 										sign: (id) =>
-											viewShops.find((item) => item.id === id)?.sign ?? "Open",
+											viewShops.find((item) => item.id === id)?.sign ??
+											tr("Open"),
 										needYou: (id) => needYou.get(id) ?? 0,
 										keeper: (agentId) => {
 											const act = acts.get(agentId);
@@ -374,7 +383,7 @@ export function MarketInterface({
 		>
 			<style>{MARKET_SCENE_CSS}</style>
 			<h1 className="sr-only" ref={hudHeadingRef} tabIndex={-1}>
-				{STREET_NAME}
+				{streetName(tl)}
 			</h1>
 			<div className="absolute inset-0" ref={stageRef}>
 				{loading ? null : (

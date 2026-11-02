@@ -64,12 +64,12 @@ function Bubble({
 const bubbleContentCorners = {
 	default: "",
 	single: "rounded-2xl",
-	"start-first": "rounded-2xl rounded-bl-md",
-	"start-last": "rounded-2xl rounded-tl-md",
-	"start-middle": "rounded-2xl rounded-l-md",
-	"end-first": "rounded-2xl rounded-br-md",
-	"end-last": "rounded-2xl rounded-tr-md",
-	"end-middle": "rounded-2xl rounded-r-md",
+	"start-first": "rounded-2xl rounded-es-md",
+	"start-last": "rounded-2xl rounded-ss-md",
+	"start-middle": "rounded-2xl rounded-s-md",
+	"end-first": "rounded-2xl rounded-ee-md",
+	"end-last": "rounded-2xl rounded-se-md",
+	"end-middle": "rounded-2xl rounded-e-md",
 };
 
 function BubbleContent({
@@ -87,7 +87,7 @@ function BubbleContent({
 		props: mergeProps<"div">(
 			{
 				className: cn(
-					"wrap-break-word w-fit min-w-0 max-w-full overflow-hidden rounded-3xl border border-transparent px-3.5 py-2.5 text-sm leading-relaxed group-data-[align=end]/bubble:self-end [button,a]:outline-none [button,a]:transition-colors [button,a]:focus-visible:border-ring [button,a]:focus-visible:ring-3 [button,a]:focus-visible:ring-ring [button]:text-left",
+					"wrap-break-word w-fit min-w-0 max-w-full overflow-hidden rounded-3xl border border-transparent px-3.5 py-2.5 text-sm leading-relaxed group-data-[align=end]/bubble:self-end [button,a]:outline-none [button,a]:transition-colors [button,a]:focus-visible:border-ring [button,a]:focus-visible:ring-3 [button,a]:focus-visible:ring-ring [button]:text-start",
 					surface === "transcript" && "overflow-visible text-sm",
 					bubbleContentCorners[corner],
 					className
@@ -111,8 +111,8 @@ const bubbleReactionsVariants = cva(
 				bottom: "bottom-0 translate-y-3/4",
 			},
 			align: {
-				start: "left-3",
-				end: "right-3",
+				start: "start-3",
+				end: "end-3",
 			},
 		},
 		defaultVariants: {

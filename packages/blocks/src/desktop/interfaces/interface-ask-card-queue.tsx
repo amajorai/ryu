@@ -27,7 +27,6 @@ import {
 	askOwners,
 	isolateKeys,
 	ownerName,
-	plural,
 } from "./interface-ask-card-core.ts";
 
 // ---------------------------------------------------------------------------
@@ -36,9 +35,9 @@ import {
 
 /** "3 asks need you", "1 ask needs you". */
 export function needYouHeading(count: number, tl: LiteralMessage): string {
-	return count === 1
-		? "1 ask needs you"
-		: tl("{count} asks need you", { count: String(count) });
+	return tl("{count, plural, one {# ask needs you} other {# asks need you}}", {
+		count,
+	});
 }
 
 /** The queue's four groups, in order (empty groups are left out). */
@@ -271,7 +270,10 @@ export function AskQueueList({
 			<QueueGroup
 				capped
 				count={groups.stopped.length}
-				heading={plural(groups.stopped.length, "run stopped", "runs stopped")}
+				heading={tl(
+					"{count, plural, one {# run stopped} other {# runs stopped}}",
+					{ count: groups.stopped.length }
+				)}
 			>
 				{(limit) =>
 					groups.stopped.slice(0, limit).map((entry) => (
@@ -309,14 +311,20 @@ export function AskQueueList({
 			<QueueGroup
 				capped
 				count={groups.suggestions.length}
-				heading={plural(groups.suggestions.length, "suggestion", "suggestions")}
+				heading={tl(
+					"{count, plural, one {# suggestion} other {# suggestions}}",
+					{ count: groups.suggestions.length }
+				)}
 			>
 				{(limit) => groups.suggestions.slice(0, limit).map(askButton)}
 			</QueueGroup>
 			<QueueGroup
 				capped
 				count={groups.answers.length}
-				heading={plural(groups.answers.length, "answer ready", "answers ready")}
+				heading={tl(
+					"{count, plural, one {# answer ready} other {# answers ready}}",
+					{ count: groups.answers.length }
+				)}
 			>
 				{(limit) => groups.answers.slice(0, limit).map(askButton)}
 			</QueueGroup>

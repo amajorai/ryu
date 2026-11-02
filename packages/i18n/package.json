@@ -8,15 +8,20 @@
     "./account-locale": "./src/account-locale.ts",
     "./catalog-locale": "./src/catalog-locale.ts",
     "./core": "./src/core.ts",
+    "./format-intl": "./src/format-intl.ts",
+    "./format-percent": "./src/format-percent.ts",
     "./lite": "./src/lite.ts",
     "./messages": "./src/messages.ts",
     "./official-catalog": "./src/official-catalog.ts",
+    "./official-catalog/app": "./src/official-catalog-app.ts",
+    "./official-catalog/bot": "./src/official-catalog-bot.ts",
     "./official-catalog/cli": "./src/official-catalog-cli.ts",
     "./official-catalog/email": "./src/official-catalog-email.ts",
     "./official-catalog/extension": "./src/official-catalog-extension.ts",
     "./official-catalog/native": "./src/official-catalog-native.ts",
     "./react": "./src/react.tsx",
-    "./react-lite": "./src/react-lite.tsx"
+    "./react-lite": "./src/react-lite.tsx",
+    "./sentence-label": "./src/sentence-label.ts"
   },
   "sideEffects": [
     "./src/official-catalog.ts",

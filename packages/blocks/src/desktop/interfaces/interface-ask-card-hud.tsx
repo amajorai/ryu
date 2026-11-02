@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
@@ -165,7 +166,7 @@ export function QueueButton({
 	if (empty) {
 		return null;
 	}
-	const label = `Queue · ${totals.queue}`;
+	const label = tr("Queue · {count}", { count: totals.queue });
 	// The kit stops key propagation inside its DOM, which also keeps Escape
 	// from the dismiss listener on the document: close on Escape here.
 	const keepKeys = (event: KeyboardEvent) => {

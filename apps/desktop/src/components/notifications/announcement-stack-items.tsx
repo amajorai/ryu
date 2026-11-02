@@ -13,6 +13,7 @@ import {
 	StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import type { NotificationStackItem } from "@ryu/ui/components/notification-stack.tsx";
 import type { SystemAnnouncement } from "@/src/hooks/useSystemAnnouncements.ts";
 import type { Announcement } from "@/src/lib/api/announcements.ts";
@@ -109,7 +110,7 @@ export function buildAnnouncementStackItems({
 					onClick={() => onOpenSystem(announcement)}
 				/>
 			) : undefined,
-			ariaLabel: `Open ${announcement.title}`,
+			ariaLabel: tl("Open {title}", { title: announcement.title }),
 			description: announcement.body,
 			id: announcement.id,
 			leading: accentIcon(announcement.accent, announcement.icon),
@@ -135,7 +136,7 @@ export function buildAnnouncementStackItems({
 						<DismissAction onClick={() => dismiss(announcement.id)} />
 					</span>
 				),
-				ariaLabel: `Open ${announcement.title}`,
+				ariaLabel: tl("Open {title}", { title: announcement.title }),
 				description: announcement.body,
 				id: announcement.id,
 				leading: accentIcon(accent, iconFor(announcement.icon)),

@@ -12,6 +12,7 @@ import {
 	hubKeyAction,
 	isHubTypingTarget,
 } from "./hub-model.ts";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 
 /** Automation and reduced motion keep the cards up until someone leaves. */
@@ -45,7 +46,13 @@ export function useHubKeys({
 			if (event.defaultPrevented || event.isComposing) {
 				return;
 			}
-			const action = hubKeyAction(event);
+			// Left and right follow the reading direction of the card row.
+			const action = hubKeyAction({
+				altKey: event.altKey,
+				ctrlKey: event.ctrlKey,
+				key: logicalArrowKey(event.key, rootRef.current),
+				metaKey: event.metaKey,
+			});
 			if (!action || isHubTypingTarget(event.target)) {
 				return;
 			}

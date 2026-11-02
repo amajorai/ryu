@@ -3,6 +3,7 @@ import {
 	LANGUAGE_PACKS_CHANGED_EVENT,
 	type LanguagePack,
 } from "@ryu/i18n";
+import { preferredOfficialLocale, systemLocales } from "@ryu/i18n/core";
 import { useI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -26,6 +27,7 @@ import {
 	importLanguagePack,
 	setLanguagePackEnabled,
 } from "@/src/lib/api/language-packs.ts";
+import { cachedOsPreferredLanguages } from "@/src/lib/native-copy.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -102,7 +104,14 @@ export function LanguageSettings({
 			if (value === AUTO_DETECT_VALUE) {
 				setLanguageMode("auto");
 				selectPack(null);
-				setLocale(navigator.language);
+				// The OS list the desktop shell reported (WKWebView's own
+				// `navigator.language` is English on a non-English Mac).
+				const languages = cachedOsPreferredLanguages() ?? systemLocales();
+				setLocale(
+					preferredOfficialLocale(languages, availablePacks) ??
+						languages[0] ??
+						navigator.language
+				);
 				return;
 			}
 			const id = value === DEFAULT_PACK_VALUE ? null : value;
@@ -136,7 +145,15 @@ export function LanguageSettings({
 			setLanguageMode("fixed");
 			selectPack(id);
 		},
-		[node, packs, retireOperation, selectPack, setLanguageMode, setLocale]
+		[
+			availablePacks,
+			node,
+			packs,
+			retireOperation,
+			selectPack,
+			setLanguageMode,
+			setLocale,
+		]
 	);
 
 	useEffect(() => {

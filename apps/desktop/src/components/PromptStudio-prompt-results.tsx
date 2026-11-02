@@ -92,7 +92,7 @@ export function PromptResultCard({
 								}
 							/>
 						</div>
-						<span className="type-compact w-10 text-right tabular-nums">
+						<span className="type-compact w-10 text-end tabular-nums">
 							{pct(entry.aggregate.mean_overall)}
 						</span>
 					</div>
@@ -136,7 +136,7 @@ export function PromptResultCard({
 				})()}
 			</div>
 			<div className="overflow-auto rounded-lg border">
-				<table className="w-full text-left text-xs">
+				<table className="w-full text-start text-xs">
 					<thead className="bg-muted/50 text-muted-foreground">
 						<tr>
 							<th className="px-2 py-1.5 font-medium">Case</th>

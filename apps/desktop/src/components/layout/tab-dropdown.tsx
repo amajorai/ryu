@@ -74,7 +74,7 @@ export function TabDropdown({
 							)}
 						</span>
 						<span
-							className="min-w-0 truncate text-left"
+							className="min-w-0 truncate text-start"
 							data-tab-dropdown-label
 						>
 							<AnimatedTitle text={activeTitle} />

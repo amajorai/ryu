@@ -193,7 +193,7 @@ export function PanelTabBar({
 								<button
 									aria-label="Close tab"
 									className={cn(
-										"relative ml-2 flex size-4 shrink-0 items-center justify-center rounded-full",
+										"relative ms-2 flex size-4 shrink-0 items-center justify-center rounded-full",
 										activeUid === tab.uid
 											? "text-muted-foreground"
 											: "text-muted-foreground/70"
@@ -214,7 +214,7 @@ export function PanelTabBar({
 								{/* Title — activates the tab. */}
 								<button
 									className={cn(
-										"flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden pr-3 pl-1.5",
+										"flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden ps-1.5 pe-3",
 										activeUid === tab.uid
 											? "text-foreground"
 											: "text-muted-foreground"
@@ -305,7 +305,7 @@ export function PanelTabBar({
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					aria-label="New tab"
-					className="ml-0.5 flex size-7 items-center justify-center"
+					className="ms-0.5 flex size-7 items-center justify-center"
 					variant="panel-action"
 				>
 					<HugeiconsIcon className="size-3.5" icon={PlusSignIcon} />
@@ -364,7 +364,7 @@ export function PanelTabBar({
 					render={
 						<button
 							aria-label="Close panel"
-							className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+							className="me-1 flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
 							onClick={onClosePanel}
 							type="button"
 						>
@@ -394,15 +394,18 @@ export function PanelEmptyState({
 	onAdd: (kind: TabKind) => void;
 }) {
 	return (
-		<div className="flex h-full w-full items-center justify-center overflow-auto p-6">
-			<div className="flex flex-col items-center gap-4">
+		// Centred with auto margins, not items-center: when the cards outgrow a
+		// short or narrow dock, flex centring pushes the first cards above the
+		// scroll origin where they can't be reached; m-auto stops at the edge.
+		<div className="flex h-full w-full overflow-auto p-6">
+			<div className="m-auto flex flex-col items-center gap-4">
 				<p className="text-center text-muted-foreground text-xs">
 					No tabs open. Open one to get started.
 				</p>
 				<div className="flex flex-wrap items-stretch justify-center gap-2">
 					{addTypes.map((t) => (
 						<button
-							className="group flex w-36 flex-col justify-between gap-3 rounded-xl bg-muted/50 p-3 text-left transition-colors hover:bg-muted/70"
+							className="group flex w-36 flex-col justify-between gap-3 rounded-xl bg-muted/50 p-3 text-start transition-colors hover:bg-muted/70"
 							key={t.kind}
 							onClick={() => onAdd(t.kind)}
 							type="button"

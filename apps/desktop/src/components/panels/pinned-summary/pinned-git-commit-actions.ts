@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import type { PullRequestAction } from "@/src/components/panels/GitActionDialogs.tsx";
 import { invalidateGitPullRequest } from "@/src/hooks/useGitPullRequest.ts";
@@ -138,11 +139,17 @@ export function pinnedGitCommitActions(
 				return;
 			}
 
+			const committedLabel = result.commit
+				? tl("Committed {commit}", { commit: result.commit })
+				: tl("Committed changes");
+			const pushedLabel = result.commit
+				? tl("Pushed {commit}", { commit: result.commit })
+				: tl("Pushed commit");
 			const label =
 				action === "commit"
-					? `Committed ${result.commit ?? "changes"}`
+					? committedLabel
 					: result.committed
-						? `Pushed ${result.commit ?? "commit"}`
+						? pushedLabel
 						: "Push complete";
 			setCommit({ status: "done", label });
 			setCommitDialogOpen(false);
@@ -217,7 +224,9 @@ export function pinnedGitCommitActions(
 				number: result.number,
 				pr_url: result.pr_url,
 				repository: result.repository,
-				title: result.title ?? (pullRequestTitle.trim() || `Update ${branch}`),
+				title:
+					result.title ??
+					(pullRequestTitle.trim() || tl("Update {branch}", { branch })),
 			});
 			if (nextPullRequest) {
 				setCreatedPullRequest(nextPullRequest);

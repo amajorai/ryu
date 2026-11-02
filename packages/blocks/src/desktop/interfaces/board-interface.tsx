@@ -337,7 +337,7 @@ export function BoardInterface({
 			onKeyDown={onRootKeyDown}
 			ref={rootRef}
 		>
-			<header className="@container/header flex h-12 shrink-0 items-center gap-1 border-border border-b pr-3 pl-4">
+			<header className="@container/header flex h-12 shrink-0 items-center gap-1 border-border border-b ps-4 pe-3">
 				<div className="flex min-w-0 flex-1 items-baseline gap-2">
 					<h1 className="shrink-0 font-heading font-semibold! text-foreground text-sm">
 						Board
@@ -345,9 +345,13 @@ export function BoardInterface({
 					{loading ? null : (
 						<p className="@max-[480px]/header:hidden truncate text-muted-foreground text-xs tabular-nums">
 							{filtered
-								? `${shownCount} of ${snapshot.threads.length}`
-								: snapshot.threads.length}{" "}
-							{snapshot.threads.length === 1 ? "thread" : "threads"}
+								? tl(
+										"{shown} of {count, plural, one {# thread} other {# threads}}",
+										{ count: snapshot.threads.length, shown: shownCount }
+									)
+								: tl("{count, plural, one {# thread} other {# threads}}", {
+										count: snapshot.threads.length,
+									})}
 							{workingCount > 0
 								? ` ${tl("· {workingCount} working", {
 										workingCount: String(workingCount),
@@ -382,7 +386,7 @@ export function BoardInterface({
 				<Button
 					aria-keyshortcuts="C"
 					aria-label="New thread"
-					className="ml-1 @max-[640px]/header:w-7 @max-[640px]/header:px-0"
+					className="ms-1 @max-[640px]/header:w-7 @max-[640px]/header:px-0"
 					onClick={() => startThread()}
 					size="compact"
 					title="New thread (C)"

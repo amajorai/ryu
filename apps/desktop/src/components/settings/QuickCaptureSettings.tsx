@@ -16,11 +16,16 @@
 // All three are surfaced as their own line with its own fix, because "it doesn't
 // work" with no explanation is the failure mode this feature is most prone to.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import {
+	formatNativeCaptureError,
+	type NativeCaptureError,
+} from "@/src/lib/native-capture-error.ts";
 import {
 	openAccessibilitySettings,
 	openInputMonitoringSettings,
@@ -39,7 +44,7 @@ interface QuickCaptureStatus {
 	accessibility: boolean;
 	binding: Binding;
 	enabled: boolean;
-	error: string | null;
+	error: NativeCaptureError | null;
 	input_monitoring: boolean;
 	listening: boolean;
 	quests_enabled: boolean;
@@ -55,6 +60,7 @@ const BINDINGS: { id: Binding; label: string }[] = [
 ];
 
 export function QuickCaptureSettings() {
+	const tl = useLiteralMessages();
 	const [status, setStatus] = useState<QuickCaptureStatus | null>(null);
 	const [busy, setBusy] = useState(false);
 
@@ -84,15 +90,22 @@ export function QuickCaptureSettings() {
 			setStatus(updated);
 			if (next && !updated.listening) {
 				toast.error({
-					title: "Quick Capture couldn't start",
-					description:
-						updated.error ?? "Grant Input Monitoring to Ryu, then try again.",
+					title: tl("Quick Capture couldn't start"),
+					description: formatNativeCaptureError(
+						updated.error,
+						tl,
+						tl("Grant Input Monitoring to Ryu, then try again.")
+					),
 				});
 			}
 		} catch (e) {
 			toast.error({
-				title: "Quick Capture couldn't start",
-				description: e instanceof Error ? e.message : String(e),
+				title: tl("Quick Capture couldn't start"),
+				description: formatNativeCaptureError(
+					e,
+					tl,
+					tl("Quick Capture couldn't start")
+				),
 			});
 			await refresh();
 		} finally {
@@ -196,7 +209,11 @@ export function QuickCaptureSettings() {
 
 				{status.error ? (
 					<SettingsItem
-						description={status.error}
+						description={formatNativeCaptureError(
+							status.error,
+							tl,
+							tl("The capture didn't reach Ryu.")
+						)}
 						title="Last Capture Failed"
 					/>
 				) : null}

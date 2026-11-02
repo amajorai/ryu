@@ -38,6 +38,9 @@ import {
 } from "@/src/lib/analytics.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
 
+/** The event catalog: a count of event ids, not an English label map. */
+const eventCatalog: readonly string[] = ANALYTICS_EVENT_NAMES;
+
 function formatProps(props: Record<string, string | number | boolean>): string {
 	const entries = Object.entries(props);
 	if (entries.length === 0) {
@@ -133,7 +136,7 @@ export function AnalyticsInspector() {
 					<section className="space-y-2">
 						<h3 className="font-medium text-sm">
 							{tl("Event catalog ({eventCount})", {
-								eventCount: ANALYTICS_EVENT_NAMES.length,
+								eventCount: eventCatalog.length,
 							})}
 						</h3>
 						<p className="text-detail text-muted-foreground">

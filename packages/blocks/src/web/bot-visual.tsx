@@ -69,7 +69,7 @@ export function BotAppVisual() {
 	return (
 		<div className="@container mx-auto w-full max-w-5xl overflow-hidden text-foreground/80">
 			<div className="grid @3xl:min-h-[26rem] @3xl:grid-cols-[18rem_1fr]">
-				<aside className="@3xl:block hidden border-border/60 border-r bg-background/60 p-4">
+				<aside className="@3xl:block hidden border-border/60 border-e bg-background/60 p-4">
 					<div className="flex items-center justify-between">
 						<div className="flex items-center gap-2 text-foreground/80 text-sm">
 							<Logo size="22px" tone="foreground" variant="outline" />
@@ -166,7 +166,7 @@ export function BotAppVisual() {
 							className="flex items-center gap-3 rounded-full bg-card px-4 py-3 text-foreground/40 ring-1 ring-border/60"
 						>
 							<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
-							<Send className="ml-auto size-4 shrink-0" />
+							<Send className="ms-auto size-4 shrink-0" />
 						</div>
 					</div>
 				</section>

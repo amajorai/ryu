@@ -14,6 +14,7 @@ import {
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { proofEvidencePath } from "../proof-evidence-path.ts";
 
 const root = path.resolve(import.meta.dirname, "../../../..");
 const tree =
@@ -35,7 +36,7 @@ const statusSeams = path.join(
 	"provider-ui-contract-repair-seams.ts"
 );
 const hashes = new Map<string, string>();
-const proof = path.join(root, "docs/proof/provider-ui-contract-repair");
+const proof = proofEvidencePath("provider-ui-contract-repair");
 mkdirSync(proof, { recursive: true });
 const record = () =>
 	writeFileSync(

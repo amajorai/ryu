@@ -26,6 +26,8 @@ export interface PromptTestCasesProps {
 	engine: string;
 	locked: boolean;
 	model: string;
+	/** Applies the durable suite's prompt unless the user already edited it. */
+	onLoadedPrompt: (value: string) => void;
 	onPromptChange: (value: string) => void;
 	promptDraft: string;
 	target: ApiTarget;
@@ -38,10 +40,11 @@ export function PromptTestCases({
 	model,
 	engine,
 	locked,
+	onLoadedPrompt,
 	onPromptChange,
 }: PromptTestCasesProps) {
 	const state = usePromptSuiteState(agentId);
-	usePromptSuiteLoad(state, agentId, onPromptChange, target);
+	usePromptSuiteLoad(state, agentId, onLoadedPrompt, target);
 	const {
 		activeRunId,
 		comparisonResults,

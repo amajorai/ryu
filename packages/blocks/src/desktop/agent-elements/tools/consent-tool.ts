@@ -1,4 +1,9 @@
+import { activeLocale } from "@ryu/i18n/core";
 import { z } from "zod";
+import {
+	formatDecimal,
+	formatCompactNumber as formatLocaleCompactNumber,
+} from "../locale-format.ts";
 
 /**
  * Pure helpers for the built-in consent cards (`consent.connect_app` /
@@ -276,27 +281,26 @@ export function rankPluginCandidates(
 		.map(({ candidate }) => candidate);
 }
 
-const COMPACT_COUNT = new Intl.NumberFormat("en-US", {
-	maximumFractionDigits: 1,
-	notation: "compact",
-});
-
-/** "1.2K"-style count, or null when there is nothing worth showing. */
-export function formatCompactCount(value: number | null): string | null {
+/** "1.2K"-style count (in the UI language), or null when there is nothing worth showing. */
+export function formatCompactCount(
+	value: number | null,
+	locale: string = activeLocale()
+): string | null {
 	const count = finiteOrZero(value);
-	return count > 0 ? COMPACT_COUNT.format(count) : null;
+	return count > 0 ? formatLocaleCompactNumber(count, locale) : null;
 }
 
-/** "4.7" for a rating with at least one review, else null. */
+/** "4.7" (in the UI language) for a rating with at least one review, else null. */
 export function formatRating(
 	average: number | null,
-	count: number | null
+	count: number | null,
+	locale: string = activeLocale()
 ): string | null {
 	if (finiteOrZero(count) === 0) {
 		return null;
 	}
 	const rating = finiteOrZero(average);
-	return rating > 0 ? Math.min(rating, 5).toFixed(1) : null;
+	return rating > 0 ? formatDecimal(Math.min(rating, 5), 1, locale) : null;
 }
 
 /** The follow-up the card sends as the user's reply once they decide. */

@@ -1,5 +1,6 @@
 "use client";
 
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import * as React from "react";
 import type { SolidPaths } from "../../kit/iso-kit.ts";
 import { follow, useInView, useLoop } from "../../kit/react/live.tsx";
@@ -19,6 +20,7 @@ import {
 	finishedSim,
 	newSim,
 	type Sim,
+	statusLabel,
 	statusOf,
 	step,
 } from "./sim.ts";
@@ -197,9 +199,19 @@ function nearestNode(sx: number, sy: number) {
 	return best;
 }
 
-function spokenOf(sim: Sim, node: number) {
+function spokenOf(sim: Sim, node: number, tl: LiteralMessage) {
 	const item = nodeAt(node);
-	return `Node ${node + 1} of ${NODE_COUNT}, ${item.name} (${item.kind}): ${statusOf(sim, node)}. ${item.does}`;
+	return tl(
+		"Node {position} of {nodeCount}, {name} ({kind}): {status}. {does}",
+		{
+			position: node + 1,
+			nodeCount: NODE_COUNT,
+			name: item.name(tl),
+			kind: item.kind,
+			status: statusLabel(statusOf(sim, node), tl),
+			does: item.does(tl),
+		}
+	);
 }
 
 export interface WorkflowRunLiveProps {
@@ -211,6 +223,7 @@ export function WorkflowRunLive({
 	description,
 	children,
 }: WorkflowRunLiveProps) {
+	const tl = useLiteralMessages();
 	const root = React.useRef<HTMLDivElement | null>(null);
 	const visible = useInView(root);
 
@@ -267,11 +280,11 @@ export function WorkflowRunLive({
 			root.current?.toggleAttribute("data-skip", current.skipped);
 			root.current?.setAttribute(
 				"aria-valuetext",
-				spokenOf(current, selectedRef.current ?? current.at)
+				spokenOf(current, selectedRef.current ?? current.at, tl)
 			);
 			return !calm;
 		},
-		[pinNodes]
+		[pinNodes, tl]
 	);
 
 	useLoop(tick, visible);
@@ -311,7 +324,7 @@ export function WorkflowRunLive({
 				aria-valuemax={NODE_COUNT}
 				aria-valuemin={1}
 				aria-valuenow={shown + 1}
-				aria-valuetext={spokenOf(REST, shown)}
+				aria-valuetext={spokenOf(REST, shown, tl)}
 				className="iso-quiet-live wfr-live"
 				data-focus={selected === null ? undefined : ""}
 				data-skip=""

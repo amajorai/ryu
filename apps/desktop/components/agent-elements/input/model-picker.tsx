@@ -143,7 +143,7 @@ export const ModelPicker = memo(function ModelPicker({
 					<div className="sticky top-0 z-10 mb-1">
 						<div className="relative">
 							<HugeiconsIcon
-								className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+								className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
 								icon={Search01Icon}
 							/>
 							<Input
@@ -183,7 +183,7 @@ export const ModelPicker = memo(function ModelPicker({
 									>
 										{display(model.name).label}
 										{model.version && (
-											<span className="ml-1 font-normal text-muted-foreground">
+											<span className="ms-1 font-normal text-muted-foreground">
 												{model.version}
 											</span>
 										)}
@@ -229,7 +229,7 @@ export const ModelBadge = memo(function ModelBadge({
 		>
 			<span className="font-medium">{activeModel?.name ?? placeholder}</span>
 			{activeModel?.version && (
-				<span className="ml-0.5 font-normal text-foreground/20">
+				<span className="ms-0.5 font-normal text-foreground/20">
 					{activeModel.version}
 				</span>
 			)}

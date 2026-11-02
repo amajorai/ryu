@@ -1,8 +1,8 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 	waitLabel,
@@ -10,7 +10,11 @@ import {
 import { createContext, useContext } from "react";
 import type { CardVerdict } from "./card-table-model.ts";
 import { SuitGlyph } from "./card-table-pieces.tsx";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	compactAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 /**
  * The act layer's word on each thread's card (`actCardVerdicts`) and the
@@ -48,10 +52,10 @@ export function actStatusLabel(
 	status: ThreadStatus,
 	thread: InterfaceThread
 ): string {
-	if (status === "quiet") {
-		return thread.messageCount > 0 ? "Done" : THREAD_STATUS_LABELS.quiet;
+	if (status === "quiet" && thread.messageCount > 0) {
+		return tr("Done");
 	}
-	return THREAD_STATUS_LABELS[status];
+	return threadStatusLabel(status);
 }
 
 export function useThreadReading(
@@ -73,7 +77,7 @@ export function threadReading(
 		return {
 			age: compactAge(thread.updatedAt, now),
 			head: null,
-			label: THREAD_STATUS_LABELS[status],
+			label: threadStatusLabel(status),
 			status,
 			verdictLabel: null,
 			viaActs: false,
@@ -112,11 +116,11 @@ export function ThreadRow({
 }) {
 	const reading = useThreadReading(thread, now);
 	const { age, status } = reading;
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tr("Untitled thread");
 	const agent = agentById(snapshot, thread.agentIds[0]);
 	const meta = [
 		reading.label,
-		showAgent ? (agent?.name ?? "No agent") : null,
+		showAgent ? (agent?.name ?? tr("No agent")) : null,
 		age,
 	]
 		.filter(Boolean)
@@ -126,7 +130,7 @@ export function ThreadRow({
 			<button
 				aria-current={active ? "true" : undefined}
 				className={cn(
-					"group/row flex w-full min-w-0 items-start gap-2.5 rounded-xl px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+					"group/row flex w-full min-w-0 items-start gap-2.5 rounded-xl px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
 					active && "bg-muted"
 				)}
 				data-thread-id={thread.id}
@@ -137,7 +141,10 @@ export function ThreadRow({
 					<SuitGlyph status={status} />
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate font-medium text-foreground text-sm leading-5">
+					<span
+						className="truncate font-medium text-foreground text-sm leading-5"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</span>
 					<span
@@ -145,6 +152,7 @@ export function ThreadRow({
 							"truncate text-muted-foreground text-xs",
 							status === "attention" && "text-status-destructive"
 						)}
+						data-ryu-i18n="off"
 					>
 						{meta}
 					</span>

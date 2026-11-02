@@ -41,6 +41,7 @@ import {
 } from "@/src/lib/api/pi-config.ts";
 import { isTauriReady } from "@/src/lib/tauri-ready.ts";
 import { providerLoginErrorMessage } from "./ProviderLoginDialog-error-message.ts";
+import { providerLoginEventText } from "./ProviderLoginDialog-event-text.ts";
 import { useProviderLoginNodeTarget } from "./ProviderLoginDialog-node-target.ts";
 
 interface ProviderLoginDialogProps {
@@ -106,7 +107,9 @@ export function ProviderLoginDialog({
 			switch (event.type) {
 				case "auth_url":
 					setAuthUrl(event.url ?? null);
-					setInstructions(event.instructions ?? null);
+					setInstructions(
+						providerLoginEventText(event, event.instructions, tl)
+					);
 					// Opening it immediately is the whole point of the flow: the user
 					// asked to log in, so put them in front of the consent screen.
 					if (event.url) {
@@ -135,25 +138,30 @@ export function ProviderLoginDialog({
 					break;
 				case "info":
 				case "progress":
-					setStatus(event.message ?? null);
+					setStatus(providerLoginEventText(event, event.message, tl));
 					break;
 				case "success":
 					setDone(true);
 					setPrompt(null);
 					setStatus(null);
 					setError(null);
-					toast.success({ title: `Connected ${providerLabel}` });
+					toast.success({
+						title: tl("Connected {providerLabel}", { providerLabel }),
+					});
 					onSuccess(event);
 					break;
 				case "error":
-					setError(event.message ?? "The login failed.");
+					setError(
+						providerLoginEventText(event, event.message, tl) ??
+							tl("The login failed.")
+					);
 					setPrompt(null);
 					break;
 				default:
 					break;
 			}
 		},
-		[onSuccess, openInBrowser, providerLabel]
+		[onSuccess, openInBrowser, providerLabel, tl]
 	);
 
 	// One flow per opening of the dialog. Closing aborts the stream AND cancels

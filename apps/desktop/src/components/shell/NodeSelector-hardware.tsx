@@ -111,18 +111,23 @@ function UsageBar({
 
 /** Full per-node hardware block (specs line + RAM/disk usage bars) for the sidebar. */
 export function NodeStats({ info }: { info: SystemInfo }) {
+	const tl = useLiteralMessages();
 	const specs: string[] = [];
 	if (info.cpuCores) {
-		specs.push(`${info.cpuCores} cores`);
+		specs.push(
+			tl("{count, plural, one {# core} other {# cores}}", {
+				count: info.cpuCores,
+			})
+		);
 	}
 	if (info.gpuName) {
 		specs.push(shortGpu(info.gpuName));
 	} else if (info.vramHuman) {
-		specs.push(`${info.vramHuman} VRAM`);
+		specs.push(tl("{vram} VRAM", { vram: info.vramHuman }));
 	}
 
 	return (
-		<div className="mt-1 space-y-1 pl-4">
+		<div className="mt-1 space-y-1 ps-4">
 			{specs.length > 0 &&
 				(info.cpuName ? (
 					<Tooltip>
@@ -168,7 +173,7 @@ function HardwareRow({ label, value }: { label: string; value: ReactNode }) {
 	return (
 		<SettingsItem
 			actions={
-				<span className="text-right font-mono text-muted-foreground text-xs">
+				<span className="text-end font-mono text-muted-foreground text-xs">
 					{value}
 				</span>
 			}
@@ -384,7 +389,7 @@ export function NodeHardwareDialog({
 							: tl("Hardware")}
 					</DialogTitle>
 				</DialogHeader>
-				<div className="scroll-fade -mr-2 min-h-0 flex-1 space-y-5 overflow-y-auto pr-2">
+				<div className="scroll-fade -me-2 min-h-0 flex-1 space-y-5 overflow-y-auto pe-2">
 					<NodeHardwareContent
 						enabled={open && node !== null}
 						target={target}

@@ -41,7 +41,6 @@ import {
 	boardTiles,
 	buildContestants,
 	isRevealed,
-	plural,
 	pruneRevealed,
 	QUIZ_PODIUMS,
 	type QuizTile,
@@ -328,11 +327,17 @@ export function QuizInterface({
 	const needYou = tiles.filter((tile) => tile.needsYou && !shown(tile)).length;
 	const tally =
 		board.threadCount === 0
-			? "Board empty"
-			: `${plural(left, "clue", "clues")} left`;
+			? tl("Board empty")
+			: tl("{count, plural, one {# clue left} other {# clues left}}", {
+					count: left,
+				});
 	const status = loading
-		? "Setting up the board"
-		: [board.round, tally, needYou > 0 ? `${needYou} need you` : null]
+		? tl("Setting up the board")
+		: [
+				board.round,
+				tally,
+				needYou > 0 ? tl("{count} need you", { count: needYou }) : null,
+			]
 				.filter(Boolean)
 				.join(" \u00b7 ");
 	const canReset = !loading && Object.keys(revealed).length > 0;

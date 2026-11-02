@@ -8,6 +8,7 @@ import {
 	ContextMenuItem,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type KeyboardEvent,
@@ -30,6 +31,7 @@ import { setTabLayout, useTabLayout } from "@/src/hooks/useTabLayout.ts";
 import { GROUP_COLOR_CLASSES } from "../shell/title-bar/tab-segments.ts";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 import layoutStyles from "./ScrollableTabsView.module.css";
+import { cardIndexForKey, inlineWheelDelta } from "./scrollable-tabs-keys.ts";
 import { TabGlyph } from "./TitleBar.tsx";
 
 interface TabCluster {
@@ -120,7 +122,7 @@ function TabCardHeader({
 						</span>
 						<button
 							className={cn(
-								"min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+								"min-w-0 flex-1 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 								focused ? "text-foreground" : "text-muted-foreground"
 							)}
 							onClick={onFocus}
@@ -173,6 +175,7 @@ function TabCardHeader({
 
 export function ScrollableTabsView() {
 	const tl = useLiteralMessages();
+	const direction = useDirection();
 	const { activeTabId, closeTab, focusTab, openTab, tabs, groups, splits } =
 		useTabsContext();
 	const tabLayout = useTabLayout();
@@ -240,21 +243,18 @@ export function ScrollableTabsView() {
 			return;
 		}
 		event.preventDefault();
-		element.scrollLeft += event.deltaY;
+		element.scrollLeft += inlineWheelDelta(event.deltaY, direction);
 	};
 
 	const handleCardKeyDown = (
 		event: KeyboardEvent<HTMLDivElement>,
 		index: number
 	) => {
-		if (
-			event.target !== event.currentTarget ||
-			(event.key !== "ArrowLeft" && event.key !== "ArrowRight")
-		) {
+		const nextIndex = cardIndexForKey(event.key, index, direction);
+		if (event.target !== event.currentTarget || nextIndex === undefined) {
 			return;
 		}
 		event.preventDefault();
-		const nextIndex = index + (event.key === "ArrowRight" ? 1 : -1);
 		const nextTab = tabs[nextIndex];
 		if (!nextTab) {
 			return;

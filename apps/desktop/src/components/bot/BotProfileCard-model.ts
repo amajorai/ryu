@@ -15,6 +15,7 @@ import {
 	type BotFeedSource,
 	feedSourceForActivity,
 } from "@/src/lib/bot-feed.ts";
+import { compactAge, compactAgo } from "@/src/lib/time.ts";
 import type { Conversation } from "@/types/chat.ts";
 
 export type BotProfileTab = "overview" | "approvals" | "goals" | "feed";
@@ -75,18 +76,14 @@ export function sourceIcon(item: ActivityItem): typeof Activity01Icon {
 	return FEED_SOURCE_ICONS[feedSourceForActivity(item)];
 }
 
+/** Compact age of a post ("5m", "5分") from its unix-seconds stamp. */
 export function relativeAge(createdAtSeconds: number): string {
-	const delta = Math.max(0, Date.now() - createdAtSeconds * 1000);
-	if (delta < 60_000) {
-		return "now";
-	}
-	if (delta < 3_600_000) {
-		return `${Math.floor(delta / 60_000)}m`;
-	}
-	if (delta < 86_400_000) {
-		return `${Math.floor(delta / 3_600_000)}h`;
-	}
-	return `${Math.floor(delta / 86_400_000)}d`;
+	return compactAge(createdAtSeconds * 1000);
+}
+
+/** "5m ago" / "5 分前" for a post's unix-seconds stamp. */
+export function relativeAgo(createdAtSeconds: number): string {
+	return compactAgo(createdAtSeconds * 1000);
 }
 
 export function useBotGoalRows(

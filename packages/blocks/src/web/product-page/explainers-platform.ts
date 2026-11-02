@@ -1,10 +1,14 @@
-import type { ProductExplainer } from "./explainer-types.ts";
+import {
+	type ProductExplainer,
+	statementSource as tl,
+} from "./explainer-types.ts";
 
 /** Platform products: Core, Gateway, Cloud, Agents as a Service, Red Teaming. */
 export const PLATFORM_EXPLAINERS: Record<string, ProductExplainer> = {
 	core: {
-		statement:
-			"Ryu Core is the open-source, local-first runtime every agent, session, and tool runs on. It runs Claude Code, Codex, Gemini CLI, or any OpenAI-compatible agent, headless or in Docker, on a Mac, a Windows or Linux PC, or a server.",
+		statement: tl(
+			"Ryu Core is the open-source, local-first runtime every agent, session, and tool runs on. It runs Claude Code, Codex, Gemini CLI, or any OpenAI-compatible agent, headless or in Docker, on a Mac, a Windows or Linux PC, or a server."
+		),
 		steps: [
 			{
 				title: "Install it where you work",
@@ -37,8 +41,9 @@ export const PLATFORM_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["gateway", "cloud", "desktop", "cli"],
 	},
 	gateway: {
-		statement:
-			"Ryu Gateway is one OpenAI-compatible API for model and tool calls. Point an agent you already built at it, and every call it routes is checked, routed, budgeted, and audited by your rules, without rewriting the agent.",
+		statement: tl(
+			"Ryu Gateway is one OpenAI-compatible API for model and tool calls. Point an agent you already built at it, and every call it routes is checked, routed, budgeted, and audited by your rules, without rewriting the agent."
+		),
 		steps: [
 			{
 				title: "Swap the base URL",
@@ -59,8 +64,9 @@ export const PLATFORM_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["core", "cloud", "red-team", "sdk"],
 	},
 	cloud: {
-		statement:
-			"Ryu Cloud is managed hosting for your agents: a cloud node in the EU or Singapore that keeps scheduled and event-driven runs going while your devices are off. It is built on open-source Ryu Core and Gateway, so you can self-host the same stack.",
+		statement: tl(
+			"Ryu Cloud is managed hosting for your agents: a cloud node in the EU or Singapore that keeps scheduled and event-driven runs going while your devices are off. It is built on open-source Ryu Core and Gateway, so you can self-host the same stack."
+		),
 		steps: [
 			{
 				title: "Get a node",
@@ -91,8 +97,9 @@ export const PLATFORM_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["core", "gateway", "workflows"],
 	},
 	"agents-as-a-service": {
-		statement:
-			"Agents as a Service is hands-on help with your first agent. Tell us the task and the tools it uses, and we help scope and set it up on standard Ryu, so you can take it in-house later.",
+		statement: tl(
+			"Agents as a Service is hands-on help with your first agent. Tell us the task and the tools it uses, and we help scope and set it up on standard Ryu, so you can take it in-house later."
+		),
 		steps: [
 			{
 				title: "Describe the task",
@@ -110,8 +117,9 @@ export const PLATFORM_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["cloud", "gateway", "agents"],
 	},
 	"red-team": {
-		statement:
-			"Red Teaming is a self-serve tool in Ryu Desktop and the CLI. It runs ten built-in probes against each agent, from prompt injection to tool abuse and harmful output, and shows which ones it withstands.",
+		statement: tl(
+			"Red Teaming is a self-serve tool in Ryu Desktop and the CLI. It runs ten built-in probes against each agent, from prompt injection to tool abuse and harmful output, and shows which ones it withstands."
+		),
 		steps: [
 			{
 				title: "Pick an agent",

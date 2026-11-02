@@ -44,7 +44,9 @@ export function useFileCellUploads<TData>({
 	const validateFile = useCallback(
 		(file: File): string | null => {
 			if (maxFileSize && file.size > maxFileSize) {
-				return `File size exceeds ${formatFileSize(maxFileSize)}`;
+				return tl("File size exceeds {size}", {
+					size: formatFileSize(maxFileSize),
+				});
 			}
 			if (acceptedTypes) {
 				const fileExtension = `.${file.name.split(".").pop()}`;
@@ -64,7 +66,7 @@ export function useFileCellUploads<TData>({
 			}
 			return null;
 		},
-		[maxFileSize, acceptedTypes]
+		[maxFileSize, acceptedTypes, tl]
 	);
 
 	const addFiles = useCallback(

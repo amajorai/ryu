@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { z } from "zod";
 import type { AuditEntry } from "@/src/lib/api/gateway.ts";
 import type {
@@ -176,7 +177,7 @@ function userLabel(
 	name: string | null | undefined,
 	id: string | null | undefined
 ): string | null {
-	return name ?? (id ? `User ${compactId(id)}` : null);
+	return name ?? (id ? tl("User {id}", { id: compactId(id) }) : null);
 }
 
 export function passportRowFromGateway(
@@ -255,7 +256,9 @@ export function passportRowFromOrganizationControl(
 	const actorLabel =
 		entry.actor.name ??
 		entry.actor.email ??
-		(entry.actor.id ? `User ${compactId(entry.actor.id)}` : "System");
+		(entry.actor.id
+			? tl("User {id}", { id: compactId(entry.actor.id) })
+			: tl("System"));
 	const isAgentAction =
 		entry.agentId !== null ||
 		entry.target.startsWith("agent:") ||

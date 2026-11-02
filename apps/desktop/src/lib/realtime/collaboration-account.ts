@@ -6,6 +6,7 @@
 // never received are kept (sealed, never shown to the next account) and the
 // user is told, instead of losing them silently.
 
+import { translate as tl } from "@ryu/i18n/core";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 
 import {
@@ -27,9 +28,13 @@ export interface CollaborationAuth {
 }
 
 export function reportKeptCollaborationEdits(kept: number): void {
-	const noun = kept === 1 ? "document has" : "documents have";
+	// Raised from an auth callback, often before any component mounts, so it
+	// translates through the active runtime rather than a hook.
 	toast.warning(
-		`${kept} ${noun} local edits that were not synced. They were kept on this device, encrypted, and will sync when you sign back in to that account.`
+		tl(
+			"{count, plural, one {# document has local edits that were not synced. It was kept on this device, encrypted, and will sync when you sign back in to that account.} other {# documents have local edits that were not synced. They were kept on this device, encrypted, and will sync when you sign back in to that account.}}",
+			{ count: kept }
+		)
 	);
 }
 

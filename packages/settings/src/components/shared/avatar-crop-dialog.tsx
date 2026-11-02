@@ -13,6 +13,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Slider } from "@ryu/ui/components/slider.tsx";
 import type { CSSProperties } from "react";
 import type { Area } from "./avatar-crop-image.ts";
@@ -80,7 +81,7 @@ export function AvatarCropDialog({
 								type="button"
 								variant="ghost-muted"
 							>
-								<HugeiconsIcon icon={ArrowLeft01Icon} size={16} />
+								<DirectionalIcon icon={ArrowLeft01Icon} size={16} />
 							</Button>
 							<span>Crop image</span>
 						</div>

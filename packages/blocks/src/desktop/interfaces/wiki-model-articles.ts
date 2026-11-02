@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -11,14 +12,16 @@ import {
 	agentLink,
 	bold,
 	countWord,
+	escapeValues,
 	groupLink,
 	joinSegments,
-	lowerFirst,
-	plural,
+	richSegments,
+	segmentsText,
 	text,
 	threadLink,
 	type WikiSegment,
 	wikiAgo,
+	wikiCount,
 } from "./wiki-model-prose.ts";
 import {
 	byName,
@@ -29,18 +32,14 @@ import {
 	wikiThreadTitle,
 } from "./wiki-model-routes.ts";
 
+export {
+	agentLeadActivity,
+	agentLeadIntro,
+} from "./wiki-model-leads.ts";
+
 // ---------------------------------------------------------------------------
 // Status phrasing
 // ---------------------------------------------------------------------------
-
-/** Status in running prose ("is working", "needs attention"). */
-const STATUS_PROSE: Record<ThreadStatus, string> = {
-	attention: "needs attention after its last run stopped",
-	quiet: "has not started yet",
-	waiting: "is waiting on an agent to pick up your last message",
-	working: "is being worked on right now",
-	"your-turn": "is waiting on your reply",
-};
 
 export function statusCounts(
 	threads: InterfaceThread[]
@@ -179,92 +178,6 @@ export function wikiAgentArticle(
 	};
 }
 
-/** First lead paragraph: who the agent is and where it belongs. */
-export function agentLeadIntro(article: WikiAgentArticle): WikiSegment[] {
-	const { agent, teams, projects } = article;
-	const out: WikiSegment[] = [
-		bold(agent.name),
-		text(" is an agent in this workspace"),
-	];
-	const description = lowerFirst(agent.description);
-	if (description) {
-		out.push(text(`, described as “${description}”`));
-	}
-	out.push(text("."));
-	const memberships = [
-		...teams.map((group) => ({ group, noun: "team" })),
-		...projects.map((group) => ({ group, noun: "project" })),
-	].filter(({ group }) => group.memberAgentIds.includes(agent.id));
-	if (memberships.length > 0) {
-		out.push(text(" It is a member of "));
-		const phrases: WikiSegment[][] = [];
-		for (const noun of ["team", "project"]) {
-			const groups = memberships.filter((item) => item.noun === noun);
-			if (groups.length === 0) {
-				continue;
-			}
-			phrases.push([
-				text("the "),
-				...joinSegments(groups.map(({ group }) => groupLink(group))),
-				text(groups.length === 1 ? ` ${noun}` : ` ${noun}s`),
-			]);
-		}
-		for (const [index, phrase] of phrases.entries()) {
-			if (index > 0) {
-				out.push(text(" and "));
-			}
-			out.push(...phrase);
-		}
-		out.push(text("."));
-	}
-	return out;
-}
-
-/** Second lead paragraph: activity in numbers. */
-export function agentLeadActivity(
-	article: WikiAgentArticle,
-	now: number
-): WikiSegment[] {
-	const { agent, threads, counts, messages } = article;
-	const latest = threads[0];
-	if (!latest) {
-		return [
-			text(
-				`${agent.name} has not taken part in any threads yet. Its talk page is where to start one.`
-			),
-		];
-	}
-	const out: WikiSegment[] = [
-		text(
-			`${agent.name} has taken part in ${plural(threads.length, "thread")}, with ${plural(messages, "message")} in all. Its most recent is `
-		),
-		threadLink(latest),
-		text(`, updated ${wikiAgo(latest.updatedAt, now)}.`),
-	];
-	const notes: string[] = [];
-	if (counts.working > 0) {
-		notes.push(`it is working on ${plural(counts.working, "thread")}`);
-	}
-	if (counts["your-turn"] > 0) {
-		notes.push(
-			`${countWord(counts["your-turn"])} of its threads ${counts["your-turn"] === 1 ? "is" : "are"} waiting on your reply`
-		);
-	}
-	if (counts.attention > 0) {
-		notes.push(
-			`${countWord(counts.attention)} of its threads ${counts.attention === 1 ? "needs" : "need"} attention after a stopped run`
-		);
-	}
-	if (notes.length > 0) {
-		out.push(
-			text(" Right now, "),
-			...joinSegments(notes.map((note) => text(note))),
-			text(".")
-		);
-	}
-	return out;
-}
-
 // ---------------------------------------------------------------------------
 // Group (team / project) articles
 // ---------------------------------------------------------------------------
@@ -323,42 +236,72 @@ export function groupLead(
 	now: number
 ): WikiSegment[] {
 	const { group, members, threads, counts } = article;
-	const noun = group.kind === "team" ? "team" : "project";
-	const out: WikiSegment[] = [
-		bold(group.name),
-		text(` is a ${noun} in this workspace`),
-	];
-	if (members.length > 0) {
-		out.push(
-			text(
-				group.kind === "team"
-					? ` made up of ${plural(members.length, "agent")}: `
-					: ` staffed by ${plural(members.length, "agent")}: `
-			),
-			...joinSegments(members.map(agentLink))
-		);
-	} else {
-		out.push(text(" with no agents assigned"));
-	}
-	out.push(text("."));
+	const memberList = joinSegments(members.map(agentLink));
 	const latest = threads[0];
-	if (latest) {
+	const latestLink = latest ? threadLink(latest) : null;
+	const values = escapeValues({
+		ago: latest ? wikiAgo(latest.updatedAt, now) : "",
+		agents: wikiCount(members.length, "agent"),
+		count: threads.length,
+		kind: group.kind === "team" ? "team" : "project",
+		latest: latestLink?.text ?? "",
+		members: segmentsText(memberList),
+		messages: wikiCount(article.messages, "message"),
+		name: group.name,
+		threads: wikiCount(threads.length, "thread"),
+	});
+	const tags = {
+		b: (inner: string) => [bold(inner)],
+		latest: () => (latestLink ? [latestLink] : []),
+		members: () => memberList,
+	};
+	const out =
+		members.length > 0
+			? richSegments(
+					tr(
+						"{kind, select, team {<b>{name}</b> is a team in this workspace made up of {agents}: <members>{members}</members>.} other {<b>{name}</b> is a project in this workspace staffed by {agents}: <members>{members}</members>.}}",
+						values
+					),
+					tags
+				)
+			: richSegments(
+					tr(
+						"{kind, select, team {<b>{name}</b> is a team in this workspace with no agents assigned.} other {<b>{name}</b> is a project in this workspace with no agents assigned.}}",
+						values
+					),
+					tags
+				);
+	out.push(text(" "));
+	if (!latest) {
 		out.push(
 			text(
-				` Its ${plural(threads.length, "thread")} ${threads.length === 1 ? "holds" : "hold"} ${plural(article.messages, "message")}; the most recent is `
-			),
-			threadLink(latest),
-			text(`, updated ${wikiAgo(latest.updatedAt, now)}.`)
-		);
-		if (counts.working > 0) {
-			out.push(
-				text(
-					` ${countWord(counts.working)} ${counts.working === 1 ? "run is" : "runs are"} live.`
+				tr(
+					"{kind, select, team {No threads have been filed under this team yet.} other {No threads have been filed under this project yet.}}",
+					values
 				)
-			);
-		}
-	} else {
-		out.push(text(` No threads have been filed under this ${noun} yet.`));
+			)
+		);
+		return out;
+	}
+	out.push(
+		...richSegments(
+			tr(
+				"{count, plural, one {Its {threads} holds {messages}; the most recent is <latest>{latest}</latest>, updated {ago}.} other {Its {threads} hold {messages}; the most recent is <latest>{latest}</latest>, updated {ago}.}}",
+				values
+			),
+			tags
+		)
+	);
+	if (counts.working > 0) {
+		out.push(
+			text(" "),
+			text(
+				tr(
+					"{count, plural, one {{n} run is live.} other {{n} runs are live.}}",
+					{ count: counts.working, n: countWord(counts.working) }
+				)
+			)
+		);
 	}
 	return out;
 }
@@ -410,40 +353,79 @@ export function wikiThreadArticle(
 	};
 }
 
+/** The thread's status in running prose ("is being worked on right now"). */
+function statusProse(status: ThreadStatus): string {
+	switch (status) {
+		case "attention":
+			return tr("The thread needs attention after its last run stopped.");
+		case "quiet":
+			return tr("The thread has not started yet.");
+		case "waiting":
+			return tr(
+				"The thread is waiting on an agent to pick up your last message."
+			);
+		case "working":
+			return tr("The thread is being worked on right now.");
+		default:
+			return tr("The thread is waiting on your reply.");
+	}
+}
+
 export function threadLead(
 	article: WikiThreadArticle,
 	now: number
 ): WikiSegment[] {
 	const { agents, project, team, thread, status } = article;
-	const out: WikiSegment[] = [
-		bold(wikiThreadTitle(thread)),
-		text(" is a thread"),
-	];
 	const home = project ?? team;
-	if (home) {
-		out.push(
-			text(" in the "),
-			groupLink(home),
-			text(home.kind === "team" ? " team" : " project")
+	const homeLink = home ? groupLink(home) : null;
+	const agentList = joinSegments(agents.map(agentLink));
+	const values = escapeValues({
+		agents: segmentsText(agentList),
+		home: homeLink?.text ?? "",
+		kind: home?.kind === "team" ? "team" : "project",
+		title: wikiThreadTitle(thread),
+	});
+	const tags = {
+		agents: () => agentList,
+		b: (inner: string) => [bold(inner)],
+		home: () => (homeLink ? [homeLink] : []),
+	};
+	let opening: string;
+	if (home && agents.length > 0) {
+		opening = tr(
+			"{kind, select, team {<b>{title}</b> is a thread in the <home>{home}</home> team with <agents>{agents}</agents>.} other {<b>{title}</b> is a thread in the <home>{home}</home> project with <agents>{agents}</agents>.}}",
+			values
 		);
-	}
-	if (agents.length > 0) {
-		out.push(text(" with "), ...joinSegments(agents.map(agentLink)));
+	} else if (home) {
+		opening = tr(
+			"{kind, select, team {<b>{title}</b> is a thread in the <home>{home}</home> team with no agent assigned.} other {<b>{title}</b> is a thread in the <home>{home}</home> project with no agent assigned.}}",
+			values
+		);
+	} else if (agents.length > 0) {
+		opening = tr(
+			"<b>{title}</b> is a thread with <agents>{agents}</agents>.",
+			values
+		);
 	} else {
-		out.push(text(" with no agent assigned"));
+		opening = tr("<b>{title}</b> is a thread with no agent assigned.", values);
 	}
-	out.push(
+	return [
+		...richSegments(opening, tags),
+		text(" "),
 		text(
-			`. It has ${plural(thread.messageCount, "message")} and was last updated ${wikiAgo(thread.updatedAt, now)}. The thread ${STATUS_PROSE[status]}.`
-		)
-	);
-	return out;
+			tr("It has {messages} and was last updated {ago}. {status}", {
+				ago: wikiAgo(thread.updatedAt, now),
+				messages: wikiCount(thread.messageCount, "message"),
+				status: statusProse(status),
+			})
+		),
+	];
 }
 
 /** Who wrote the latest message, for its attribution line. */
 export function latestAuthor(article: WikiThreadArticle): string {
 	if (article.thread.lastMessageRole === "user") {
-		return "You";
+		return tr("You");
 	}
-	return article.agents[0]?.name ?? "An agent";
+	return article.agents[0]?.name ?? tr("An agent");
 }

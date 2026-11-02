@@ -76,7 +76,7 @@ export function PageHeader({
 	return (
 		<div
 			className={cn(
-				"space-y-1 text-left",
+				"space-y-1 text-start",
 				stagger && "t-stagger",
 				shown && "is-shown",
 				className

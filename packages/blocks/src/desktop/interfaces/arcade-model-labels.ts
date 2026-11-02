@@ -1,10 +1,7 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import type { Machine, Reel, WallCabinet } from "./arcade-model.ts";
-
-export function plural(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /** Credits on the LED meter: four digits, zero padded, the way meters read. */
 export function meterDigits(value: number, width = 4): string {
@@ -12,26 +9,42 @@ export function meterDigits(value: number, width = 4): string {
 	return String(whole).padStart(width, "0");
 }
 
-export function reelLabel(reel: Reel): string {
+export function reelLabel(reel: Reel, tl: LiteralMessage = tr): string {
 	if (!(reel.thread && reel.status)) {
-		return "Empty reel";
+		return tl("Empty reel");
 	}
-	const title = reel.thread.title.trim() || "Untitled conversation";
-	return `${title}: ${THREAD_STATUS_LABELS[reel.status]}`;
+	const title = reel.thread.title.trim() || tl("Untitled conversation");
+	return tl("{title}: {status}", {
+		status: threadStatusLabel(reel.status, tl),
+		title,
+	});
 }
 
 /** One sentence for screen readers that sums up a machine. */
-export function machineSummary(machine: Machine): string {
+export function machineSummary(
+	machine: Machine,
+	tl: LiteralMessage = tr
+): string {
 	const parts = [
-		`${machine.name}`,
-		machine.running ? "running" : "idle",
-		plural(machine.credits, "credit"),
+		tl(
+			"{name}, {running, select, yes {running} other {idle}}, {credits, plural, one {# credit} other {# credits}}",
+			{
+				credits: machine.credits,
+				name: machine.name,
+				running: machine.running ? "yes" : "no",
+			}
+		),
 	];
 	if (machine.jackpots.length > 0) {
-		parts.push(`${plural(machine.jackpots.length, "reply")} waiting on you`);
+		parts.push(
+			tl(
+				"{count, plural, one {# reply waiting on you} other {# replies waiting on you}}",
+				{ count: machine.jackpots.length }
+			)
+		);
 	}
 	if (machine.tilt) {
-		parts.push("a run needs attention");
+		parts.push(tl("a run needs attention"));
 	}
 	return parts.join(", ");
 }
@@ -62,9 +75,11 @@ export function wallCabinetLabel(
 	const kind = cabinet.group.kind === "team" ? "team" : "project";
 	const name = cabinet.group.name;
 	const counts = [
-		plural(cabinet.machines, "machine"),
-		acted ? null : `${cabinet.jackpots} waiting on you`,
-		`${cabinet.running} running`,
+		tl("{count, plural, one {# machine} other {# machines}}", {
+			count: cabinet.machines,
+		}),
+		acted ? null : tl("{count} waiting on you", { count: cabinet.jackpots }),
+		tl("{count} running", { count: cabinet.running }),
 	]
 		.filter(Boolean)
 		.join(", ");

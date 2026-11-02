@@ -4,6 +4,7 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	DropdownMenu,
@@ -61,6 +62,7 @@ export function CopyFormatMenu({
 	onCopy: (format: string) => Promise<void> | void;
 	options: readonly CopyFormatOption[];
 }) {
+	const tl = useLiteralMessages();
 	const [copied, setCopied] = useState(false);
 	const [failed, setFailed] = useState(false);
 	const timerRef = useRef<number | null>(null);
@@ -101,7 +103,7 @@ export function CopyFormatMenu({
 						className={cn(className)}
 						data-copy-state={failed ? "error" : copied ? "copied" : "idle"}
 						data-testid={dataTestId}
-						title={failed ? "Copy failed" : ariaLabel}
+						title={failed ? tl("Copy failed") : ariaLabel}
 						type="button"
 						variant="ghost"
 					>
@@ -118,7 +120,7 @@ export function CopyFormatMenu({
 								icon={Copy01Icon}
 							/>
 						)}
-						<span className="hidden sm:inline">Copy</span>
+						<span className="hidden sm:inline">{tl("Copy")}</span>
 						<HugeiconsIcon
 							aria-hidden="true"
 							className="size-3"

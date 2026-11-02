@@ -405,6 +405,7 @@ export function HoloOrbit({
 																	? "text-(--holo-ink)"
 																	: "text-(--holo-text)"
 															)}
+															data-ryu-i18n="off"
 														>
 															{agent.name}
 														</span>

@@ -48,7 +48,10 @@ import {
 	SplitGutters,
 } from "../../layout/SplitView.tsx";
 import { TitleBar } from "../../layout/TitleBar.tsx";
-import { TitlebarPage } from "../../layout/TitlebarPage.tsx";
+import {
+	TITLEBAR_CLEARANCE_PX,
+	TitlebarPage,
+} from "../../layout/TitlebarPage.tsx";
 import { useTabDnd } from "../../layout/tabDnd.tsx";
 import type { LayoutCssVariables } from "./layout-constants.ts";
 import { PaneBadge } from "./pane-badge.tsx";
@@ -173,7 +176,7 @@ export function AlternateTabPanes({
 					const titlebarInset =
 						titleBarClearsContent &&
 						(paneRect ? paneNeedsTopClearance(paneRect) : true)
-							? 80
+							? TITLEBAR_CLEARANCE_PX
 							: 0;
 					return (
 						<IsActiveTabProvider

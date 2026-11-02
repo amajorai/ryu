@@ -3,6 +3,8 @@
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import useEmblaCarousel, {
 	type UseEmblaCarouselType,
@@ -38,6 +40,23 @@ type CarouselContextProps = {
 	canScrollNext: boolean;
 } & CarouselProps;
 
+type CarouselDirection = "ltr" | "rtl";
+
+/**
+ * Which physical arrow key moves to the previous or next slide. Horizontal
+ * carousels follow the reading direction, so under RTL ArrowLeft advances.
+ */
+function carouselKeyAction(
+	key: string,
+	direction: CarouselDirection
+): "next" | "prev" | null {
+	if (key !== "ArrowLeft" && key !== "ArrowRight") {
+		return null;
+	}
+	const towardEnd = direction === "rtl" ? "ArrowLeft" : "ArrowRight";
+	return key === towardEnd ? "next" : "prev";
+}
+
 const CarouselContext = createContext<CarouselContextProps | null>(null);
 
 function useCarousel() {
@@ -59,10 +78,16 @@ function Carousel({
 	children,
 	...props
 }: ComponentProps<"div"> & CarouselProps) {
+	const contextDirection = useDirection();
+	// An explicit Embla `direction` wins; otherwise follow the UI direction so
+	// slide offsets and drag match an RTL container.
+	const direction: CarouselDirection =
+		opts?.direction ?? (contextDirection === "rtl" ? "rtl" : "ltr");
 	const [carouselRef, api] = useEmblaCarousel(
 		{
 			...opts,
 			axis: orientation === "horizontal" ? "x" : "y",
+			direction,
 		},
 		plugins
 	);
@@ -87,15 +112,21 @@ function Carousel({
 
 	const handleKeyDown = useCallback(
 		(event: KeyboardEvent<HTMLDivElement>) => {
-			if (event.key === "ArrowLeft") {
-				event.preventDefault();
-				scrollPrev();
-			} else if (event.key === "ArrowRight") {
-				event.preventDefault();
+			const action = carouselKeyAction(
+				event.key,
+				orientation === "horizontal" ? direction : "ltr"
+			);
+			if (!action) {
+				return;
+			}
+			event.preventDefault();
+			if (action === "next") {
 				scrollNext();
+			} else {
+				scrollPrev();
 			}
 		},
-		[scrollPrev, scrollNext]
+		[direction, orientation, scrollPrev, scrollNext]
 	);
 
 	useEffect(() => {
@@ -136,6 +167,7 @@ function Carousel({
 				aria-roledescription="carousel"
 				className={cn("relative", className)}
 				data-slot="carousel"
+				dir={opts?.direction}
 				onKeyDownCapture={handleKeyDown}
 				role="region"
 				{...props}
@@ -158,7 +190,7 @@ function CarouselContent({ className, ...props }: ComponentProps<"div">) {
 			<div
 				className={cn(
 					"flex",
-					orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col",
+					orientation === "horizontal" ? "-ms-4" : "-mt-4 flex-col",
 					className
 				)}
 				{...props}
@@ -175,7 +207,7 @@ function CarouselItem({ className, ...props }: ComponentProps<"div">) {
 			aria-roledescription="slide"
 			className={cn(
 				"min-w-0 shrink-0 grow-0 basis-full",
-				orientation === "horizontal" ? "pl-4" : "pt-4",
+				orientation === "horizontal" ? "ps-4" : "pt-4",
 				className
 			)}
 			data-slot="carousel-item"
@@ -198,7 +230,7 @@ function CarouselPrevious({
 			className={cn(
 				"absolute touch-manipulation rounded-full",
 				orientation === "horizontal"
-					? "top-1/2 -left-12 -translate-y-1/2"
+					? "-start-12 top-1/2 -translate-y-1/2"
 					: "-top-12 left-1/2 -translate-x-1/2 rotate-90",
 				className
 			)}
@@ -209,7 +241,11 @@ function CarouselPrevious({
 			variant={variant}
 			{...props}
 		>
-			<HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} />
+			{orientation === "horizontal" ? (
+				<DirectionalIcon icon={ArrowLeft01Icon} strokeWidth={2} />
+			) : (
+				<HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} />
+			)}
 			<span className="sr-only">Previous slide</span>
 		</Button>
 	);
@@ -228,7 +264,7 @@ function CarouselNext({
 			className={cn(
 				"absolute touch-manipulation rounded-full",
 				orientation === "horizontal"
-					? "top-1/2 -right-12 -translate-y-1/2"
+					? "-end-12 top-1/2 -translate-y-1/2"
 					: "-bottom-12 left-1/2 -translate-x-1/2 rotate-90",
 				className
 			)}
@@ -239,7 +275,11 @@ function CarouselNext({
 			variant={variant}
 			{...props}
 		>
-			<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />
+			{orientation === "horizontal" ? (
+				<DirectionalIcon icon={ArrowRight01Icon} strokeWidth={2} />
+			) : (
+				<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />
+			)}
 			<span className="sr-only">Next slide</span>
 		</Button>
 	);
@@ -252,5 +292,6 @@ export {
 	CarouselItem,
 	CarouselNext,
 	CarouselPrevious,
+	carouselKeyAction,
 	useCarousel,
 };

@@ -1,5 +1,7 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { z } from "zod";
+import { formatLocalDateTime } from "./locale-format.ts";
 
 /** Minimal message shape accepted by the transcript formatter. */
 export interface TranscriptMessage {
@@ -48,16 +50,9 @@ function textFromMessage(message: TranscriptMessage): string {
 	return content.success ? content.data.trim() : "";
 }
 
+/** The turn's date and time in the UI language ("Jul 27, 2026, 12:33 PM"). */
 function formatTimestampForTranscript(date: Date): string {
-	const day = date.getDate();
-	const month = date.getMonth() + 1;
-	const year = date.getFullYear();
-	const hours = date.getHours();
-	const minutes = date.getMinutes();
-	const ampm = hours >= 12 ? "pm" : "am";
-	const displayHours = hours % 12 || 12;
-	const displayMinutes = minutes.toString().padStart(2, "0");
-	return `${day}/${month}/${year}, ${displayHours}:${displayMinutes} ${ampm}`;
+	return formatLocalDateTime(date);
 }
 
 function getAuthorLabel(
@@ -65,7 +60,7 @@ function getAuthorLabel(
 	defaultUserName?: string
 ): string {
 	if (message.role === "assistant") {
-		return "Assistant";
+		return tl("Assistant");
 	}
 	if (message.role === "user") {
 		const author = message.metadata?.author;
@@ -73,7 +68,7 @@ function getAuthorLabel(
 		if (name) {
 			return name;
 		}
-		return defaultUserName || "User";
+		return defaultUserName || tl("User");
 	}
 	return message.role.charAt(0).toUpperCase() + message.role.slice(1);
 }

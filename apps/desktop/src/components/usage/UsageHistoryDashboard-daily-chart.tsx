@@ -223,19 +223,22 @@ export function DailyChart({
 	const totalForecast = view === "total" ? forecasts.get("total") : undefined;
 	return (
 		<SettingsSection
-			caption={`${
+			caption={[
 				metric === "tokens"
-					? "Processed tokens"
-					: "API-equivalent USD estimate. Unknown prices appear as gaps"
-			} ${
+					? tl("Processed tokens")
+					: tl("API-equivalent USD estimate. Unknown prices appear as gaps"),
 				scope === "unattributed"
-					? "· UTC observation dates. Snapshots may include earlier usage."
-					: "· UTC dates"
-			}${
+					? tl("UTC observation dates. Snapshots may include earlier usage.")
+					: tl("UTC dates"),
 				forecastable && showForecast
-					? ` · Dashed lines project the next ${HISTORY_FORECAST_DAYS} days from the recent trend.`
-					: ""
-			}`}
+					? tl(
+							"Dashed lines project the next {days} days from the recent trend.",
+							{ days: HISTORY_FORECAST_DAYS }
+						)
+					: null,
+			]
+				.filter(Boolean)
+				.join(" · ")}
 			title={
 				scope === "unattributed"
 					? "Observed usage by source"
@@ -263,7 +266,7 @@ export function DailyChart({
 						value={view}
 					/>
 					{forecastable ? (
-						<label className="ml-auto flex items-center gap-2 text-muted-foreground text-xs">
+						<label className="ms-auto flex items-center gap-2 text-muted-foreground text-xs">
 							Forecast
 							<Switch
 								checked={showForecast}

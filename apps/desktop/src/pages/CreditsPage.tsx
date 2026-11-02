@@ -22,7 +22,7 @@ import {
 	type CreditLedgerRow,
 	CreditsView,
 } from "@ryu/blocks/desktop/credits.tsx";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { formatMinorCurrency } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useMemo, useState } from "react";
 import { sileo } from "sileo";
@@ -41,6 +41,7 @@ import {
 	MAX_TOPUP_DOLLARS,
 	MIN_TOPUP_DOLLARS,
 } from "@/src/lib/api/credits.ts";
+import { formatWholeUsd } from "@/src/lib/billing-amounts.ts";
 import { formatDate, formatDateTime } from "@/src/lib/timezone.ts";
 
 /** A plan id → human label, for the included-pool line. */
@@ -81,7 +82,7 @@ function spendableOnForPool(poolId: string): string | undefined {
 
 /** `null` for a missing or unparseable timestamp — a grant with no readable
  *  expiry renders as one with no expiry, never as "Invalid Date". */
-function formatExpiry(iso: string | null): string | null {
+function formatExpiry(tl: LiteralMessage, iso: string | null): string | null {
 	if (!iso) {
 		return null;
 	}
@@ -89,11 +90,13 @@ function formatExpiry(iso: string | null): string | null {
 	if (Number.isNaN(at.getTime())) {
 		return null;
 	}
-	return `Expires ${formatDate(at, {
-		year: "numeric",
-		month: "short",
-		day: "numeric",
-	})}`;
+	return tl("Expires {date}", {
+		date: formatDate(at, {
+			year: "numeric",
+			month: "short",
+			day: "numeric",
+		}),
+	});
 }
 
 /** Where a solo user goes to create or pick an organization. */
@@ -177,8 +180,8 @@ export default function CreditsPage() {
 		if (dollars < MIN_TOPUP_DOLLARS || dollars > MAX_TOPUP_DOLLARS) {
 			sileo.error({
 				title: tl("Amount must be between {minAmount} and {maxAmount}.", {
-					minAmount: `$${MIN_TOPUP_DOLLARS}`,
-					maxAmount: `$${MAX_TOPUP_DOLLARS}`,
+					minAmount: formatWholeUsd(MIN_TOPUP_DOLLARS),
+					maxAmount: formatWholeUsd(MAX_TOPUP_DOLLARS),
 				}),
 			});
 			return;
@@ -223,9 +226,9 @@ export default function CreditsPage() {
 				remainingMicroUsd: pool.remainingMicroUsd,
 				isFreeProvider: pool.isFreeProvider,
 				spendableOn: pool.poolId ? spendableOnForPool(pool.poolId) : undefined,
-				expiresAtLabel: formatExpiry(pool.expiresAt),
+				expiresAtLabel: formatExpiry(tl, pool.expiresAt),
 			})),
-		[grantPools]
+		[grantPools, tl]
 	);
 
 	const noOrgMessage =
@@ -297,7 +300,7 @@ export default function CreditsPage() {
 								providerAllocations: wallet.providerAllocations?.map(
 									(allocation) => ({
 										expiresAt: allocation.expiresAt,
-										expiresAtLabel: formatExpiry(allocation.expiresAt),
+										expiresAtLabel: formatExpiry(tl, allocation.expiresAt),
 										id: allocation.poolId,
 										isFreeProvider: allocation.isFreeProvider,
 										label: allocation.label,

@@ -1,30 +1,42 @@
-//! Data folder relocation, import, and deep-clean commands.
+//! Data folder relocation / import commands (offline, run while Core is stopped).
 
 use tauri::Emitter;
 
 use crate::core_lifecycle::{resolve_core_binary, CoreState};
+use crate::fs_command_error::{FsCommandError, FsCommandErrorCode as Code};
 use crate::profile;
+
+/// The `ryu-core` binary these offline commands drive, or `core_missing`.
+fn core_binary() -> Result<std::path::PathBuf, FsCommandError> {
+    resolve_core_binary().ok_or_else(|| FsCommandError::new(Code::CoreMissing))
+}
+
+// ── Data folder relocation / import (offline, runs while Core is stopped) ─────────
 
 /// Stop the Core we manage, then wait until its HTTP server is actually down.
 /// Refuses (rather than copying a live database) if Core stays up — this covers
 /// dev, where Core is owned by the `core#dev` turbo task and we can't stop it.
-async fn stop_core_and_wait(state: &tauri::State<'_, CoreState>) -> Result<(), String> {
+pub(crate) async fn stop_core_and_wait(
+    state: &tauri::State<'_, CoreState>,
+) -> Result<(), FsCommandError> {
     let _operation = state.operation.lock().await;
     if crate::app_update::runtime_update_in_progress() {
-        return Err("Finish the app update before changing the data folder".to_owned());
+        return Err(FsCommandError::new(Code::UpdatePending));
     }
+    let stop_failed =
+        |e: &dyn std::fmt::Display| FsCommandError::with_detail(Code::CoreStopFailed, e);
     let process = {
-        let mut guard = state.process.lock().map_err(|e| e.to_string())?;
+        let mut guard = state.process.lock().map_err(|e| stop_failed(&e))?;
         guard.take()
     };
     if let Some(mut process) = process {
-        process.stop().await.map_err(|e| e.to_string())?;
+        process.stop().await.map_err(|e| stop_failed(&e))?;
     }
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(1))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| stop_failed(&e))?;
     for _ in 0..8 {
         let up = client
             .get(format!("{}/api/health", profile::core_base_url()))
@@ -37,13 +49,25 @@ async fn stop_core_and_wait(state: &tauri::State<'_, CoreState>) -> Result<(), S
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
-    Err("Ryu Core is still running and could not be stopped. In dev, stop the core dev task before relocating the data folder.".to_string())
+    // In dev, Core is owned by the `core#dev` turbo task and cannot be stopped.
+    Err(FsCommandError::new(Code::CoreRunning))
 }
 
 /// Run `ryu-core data-path …`, forwarding `@@PROGRESS {json}` lines to the
-/// `data-folder-progress` frontend event. Returns the subcommand's stderr on
-/// failure.
-async fn run_data_path_subcommand(
+/// `data-folder-progress` frontend event. A failure carries the subcommand's
+/// stderr as `detail`, classified by [`FsCommandError::from_data_command`].
+pub(crate) async fn run_data_path_subcommand(
+    app: &tauri::AppHandle,
+    binary: &std::path::Path,
+    args: &[String],
+    secret_env: &[(&str, String)],
+) -> Result<(), FsCommandError> {
+    run_data_path_process(app, binary, args, secret_env)
+        .await
+        .map_err(FsCommandError::from_data_command)
+}
+
+async fn run_data_path_process(
     app: &tauri::AppHandle,
     binary: &std::path::Path,
     args: &[String],
@@ -125,9 +149,8 @@ pub(crate) async fn deep_clean_node(
     state: tauri::State<'_, CoreState>,
     profile: Option<String>,
     depth: Option<String>,
-) -> Result<(), String> {
-    let binary =
-        resolve_core_binary().ok_or_else(|| "Could not find ryu-core binary.".to_string())?;
+) -> Result<(), FsCommandError> {
+    let binary = core_binary()?;
     stop_core_and_wait(&state).await?;
     let mut args = vec!["data-path".to_string(), "deep-clean".to_string()];
     // Passed EXPLICITLY rather than letting the child infer the profile from its
@@ -158,9 +181,8 @@ pub(crate) async fn copy_data_folder_to_profile(
     app: tauri::AppHandle,
     state: tauri::State<'_, CoreState>,
     to_profile: String,
-) -> Result<(), String> {
-    let binary =
-        resolve_core_binary().ok_or_else(|| "Could not find ryu-core binary.".to_string())?;
+) -> Result<(), FsCommandError> {
+    let binary = core_binary()?;
     // WAL is on for every store, so a live copy captures a torn snapshot.
     stop_core_and_wait(&state).await?;
     let args = vec![
@@ -181,9 +203,8 @@ pub(crate) async fn migrate_data_folder(
     state: tauri::State<'_, CoreState>,
     to: String,
     move_source: bool,
-) -> Result<(), String> {
-    let binary =
-        resolve_core_binary().ok_or_else(|| "Could not find ryu-core binary.".to_string())?;
+) -> Result<(), FsCommandError> {
+    let binary = core_binary()?;
     stop_core_and_wait(&state).await?;
     let mut args = vec![
         "data-path".to_string(),
@@ -200,7 +221,7 @@ pub(crate) async fn migrate_data_folder(
 
 /// Env var `ryu-core data-path import` reads an encrypted backup's passphrase from
 /// (`data_path::ARCHIVE_PASSPHRASE_ENV` in Core).
-const DATA_ARCHIVE_PASSPHRASE_ENV: &str = "RYU_DATA_ARCHIVE_PASSPHRASE";
+pub(crate) const DATA_ARCHIVE_PASSPHRASE_ENV: &str = "RYU_DATA_ARCHIVE_PASSPHRASE";
 
 /// Restore the data folder from a backup zip, then restart the app to apply.
 #[tauri::command]
@@ -210,9 +231,8 @@ pub(crate) async fn import_data_folder(
     archive: String,
     to: Option<String>,
     passphrase: Option<String>,
-) -> Result<(), String> {
-    let binary =
-        resolve_core_binary().ok_or_else(|| "Could not find ryu-core binary.".to_string())?;
+) -> Result<(), FsCommandError> {
+    let binary = core_binary()?;
     stop_core_and_wait(&state).await?;
     let mut args = vec![
         "data-path".to_string(),

@@ -1,9 +1,10 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import { motion, useIsPresent } from "motion/react";
 import { type ReactNode, useEffect, useId, useRef } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { MOMENTS_FOCUS, MomentsGlyph } from "./moments-glyph.tsx";
 import { type MomentsModule, momentsAge } from "./moments-model.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
@@ -47,10 +48,10 @@ function ModuleSource({
 		<div className="flex h-5 min-w-0 items-center gap-2 text-xs">
 			<MomentsGlyph agent={item.lead} />
 			<span className="truncate text-foreground">
-				{item.lead?.name ?? "No agent"}
+				{item.lead?.name ?? tr("No agent")}
 			</span>
 			<span className="truncate text-muted-foreground">{context}</span>
-			<span className="ml-auto flex shrink-0 items-center gap-2">
+			<span className="ms-auto flex shrink-0 items-center gap-2">
 				{trailing}
 			</span>
 		</div>
@@ -114,20 +115,27 @@ export function FocusCard({
 			/>
 			<h2
 				className="mt-8 font-light text-2xl text-foreground leading-8 tracking-tight"
+				data-ryu-i18n="off"
 				id={titleId}
 			>
 				{item.thread.title}
 			</h2>
 			<p className="mt-1 flex items-center gap-1.5 text-muted-foreground text-xs leading-5">
 				<BoardStatusDot className="size-1.5" status={item.status} />
-				{THREAD_STATUS_LABELS[item.status]}
+				{threadStatusLabel(item.status)}
 				<span aria-hidden="true">·</span>
-				{messages} {messages === 1 ? "message" : "messages"}
+				{tr("{count, plural, one {# message} other {# messages}}", {
+					count: messages,
+				})}
 			</p>
 			<p className="mt-5 line-clamp-8 text-base text-foreground/80 leading-7">
-				{item.thread.lastMessage ?? "No messages yet."}
+				{item.thread.lastMessage ? (
+					<span data-ryu-i18n="off">{item.thread.lastMessage}</span>
+				) : (
+					tr("No messages yet.")
+				)}
 			</p>
-			<div className="mt-8 -ml-2.5 flex items-center gap-1">
+			<div className="-ms-2.5 mt-8 flex items-center gap-1">
 				<button
 					className={cn(TEXT_BUTTON, reply ? quiet : primary)}
 					onClick={onOpen}
@@ -152,7 +160,7 @@ export function FocusCard({
 					</button>
 				) : null}
 				{count > 1 ? (
-					<span className="ml-auto text-muted-foreground text-xs tabular-nums">
+					<span className="ms-auto text-muted-foreground text-xs tabular-nums">
 						{index + 1} of {count}
 					</span>
 				) : null}
@@ -212,7 +220,7 @@ export function ExpandedCard({
 			tabIndex={-1}
 			transition={{ duration: reduceMotion ? 0 : 0.32, ease: EASE }}
 		>
-			<header className="flex h-12 shrink-0 items-center gap-3 border-border/60 border-b pr-2 pl-4">
+			<header className="flex h-12 shrink-0 items-center gap-3 border-border/60 border-b ps-4 pe-2">
 				<div className="min-w-0 flex-1">
 					{item ? (
 						<ModuleSource context={context} item={item} trailing={null} />

@@ -1,15 +1,15 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import type { KeyboardEvent } from "react";
 import { type FocusItem, focusRuns } from "./focus-model.ts";
+import { logicalArrowKey } from "./inline-direction.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /** Matches the strip, so the page-level J/K/arrow shortcuts leave it alone. */
 export const FOCUS_STRIP_SELECTOR = "[data-focus-strip]";
@@ -97,7 +97,11 @@ export function FocusStrip({
 				? event.target.closest<HTMLElement>("[data-segment-index]")
 				: null;
 		const from = Number(button?.dataset.segmentIndex ?? tabbable);
-		const next = targetIndex(event.key, from, total);
+		const next = targetIndex(
+			logicalArrowKey(event.key, event.currentTarget),
+			from,
+			total
+		);
 		event.preventDefault();
 		if (next === from) {
 			return;
@@ -123,7 +127,7 @@ export function FocusStrip({
 						style={{ flexGrow: run.items.length }}
 					>
 						<ol
-							aria-label={THREAD_STATUS_LABELS[run.status]}
+							aria-label={threadStatusLabel(run.status)}
 							className="flex w-full min-w-0 gap-0.5"
 						>
 							{run.items.map(({ index, item }) => (
@@ -188,7 +192,12 @@ function FocusSegment({
 	tabbable: boolean;
 	total: number;
 }) {
-	const label = `${index + 1} of ${total}: ${item.thread.title}, ${THREAD_STATUS_LABELS[item.status]}`;
+	const label = tr("{position} of {total}: {title}, {status}", {
+		position: index + 1,
+		status: threadStatusLabel(item.status),
+		title: item.thread.title,
+		total,
+	});
 	return (
 		<li className="flex min-w-0.5 flex-1">
 			<Tooltip>

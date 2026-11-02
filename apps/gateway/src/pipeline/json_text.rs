@@ -274,31 +274,9 @@ pub(super) fn redact_json_strings(
     }
 }
 
-pub(super) fn sanitize_json_strings(
-    value: &mut Value,
-    scanner: &dyn crate::firewall::FirewallBackend,
-) {
-    match value {
-        Value::String(text) => {
-            let sanitized = scanner.sanitize(text);
-            *text = scanner.redact_outbound(&sanitized).0;
-        }
-        Value::Array(values) => {
-            for value in values {
-                sanitize_json_strings(value, scanner);
-            }
-        }
-        Value::Object(values) => {
-            rewrite_object_keys(values, &|key| {
-                scanner.redact_outbound(&scanner.sanitize(key)).0
-            });
-            for value in values.values_mut() {
-                sanitize_json_strings(value, scanner);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
+#[path = "sanitize_survivor.rs"]
+mod sanitize_survivor;
+pub(super) use sanitize_survivor::*;
 
 /// Drop every choice's `logprobs`. Each token there mirrors a piece of the
 /// generated text, so per-string redaction cannot remove a match split across
@@ -376,6 +354,24 @@ pub(super) fn apply_outbound_json_dlp(
         FirewallPolicy::Sanitize => {
             sanitize_json_strings(response, scanner.as_ref());
             drop_choice_logprobs(response);
+            // Fail closed: a match that survives redaction is refused, never
+            // released as "sanitized".
+            if let Some(survivor) = outbound_sanitize_survivor(response, scanner.as_ref()) {
+                note_firewall_match(state, ctx, &survivor, &FirewallPolicy::Block);
+                state.metrics.inc_firewall_blocked();
+                warn!(
+                    request_id = %ctx.request_id,
+                    pattern = %survivor.pattern_name,
+                    "firewall: outbound match survived Sanitize; blocked"
+                );
+                return Err(GatewayError::FirewallBlocked(
+                    format!(
+                        "Outbound response could not be redacted: {} ({:?})",
+                        survivor.pattern_name, survivor.kind
+                    ),
+                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                ));
+            }
             Ok(false)
         }
         FirewallPolicy::WarnAndContinue => {
@@ -409,3 +405,7 @@ pub(super) fn apply_outbound_json_dlp(
 // string inside a `tools[].function` / legacy `functions[]` `description` or
 // `parameters` schema, and `prediction.content` (string or parts). Roles, types,
 // names, ids, image URLs and data URIs are never visited.
+
+#[cfg(test)]
+#[path = "sanitize_survivor_tests.rs"]
+mod sanitize_survivor_tests;

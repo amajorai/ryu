@@ -167,7 +167,7 @@ export function NestedOverflowToolbar({
 								ariaLabel="Back to editor tools"
 								onClick={() => setActiveCategoryId(null)}
 							>
-								<ArrowLeftIcon />
+								<ArrowLeftIcon className="rtl:-scale-x-100" />
 								<span className="sr-only">Back</span>
 							</RailButton>
 							<span className="hidden shrink-0 px-1 text-muted-foreground text-xs sm:inline">
@@ -208,7 +208,7 @@ export function NestedOverflowToolbar({
 										>
 											{category.icon}
 											<span>{category.label}</span>
-											<ChevronRightIcon className="size-3 text-muted-foreground" />
+											<ChevronRightIcon className="size-3 text-muted-foreground rtl:-scale-x-100" />
 										</RailButton>
 									))}
 								</div>

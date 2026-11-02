@@ -1,12 +1,13 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type GraphNode,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import type { CSSProperties } from "react";
 import { GRAPH_NODE_SIZE } from "./graph-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /*
  * View-level derivations for the Graph map: what each node calls out, and
@@ -37,27 +38,30 @@ export function agentSubLabel({
 	working: boolean;
 	yourTurn: number;
 }): { spoken: string; status: ThreadStatus; text: string | null } | null {
-	const yourTurnLabel = THREAD_STATUS_LABELS["your-turn"];
-	const owed = `${yourTurnLabel.toLowerCase()} on ${yourTurn} ${yourTurn === 1 ? "thread" : "threads"}`;
+	const owed = tr(
+		"{count, plural, one {your turn on # thread} other {your turn on # threads}}",
+		{ count: yourTurn }
+	);
 	if (urgent === "attention") {
 		return {
-			spoken: THREAD_STATUS_LABELS.attention.toLowerCase(),
+			spoken: tr("needs attention"),
 			status: "attention",
-			text: THREAD_STATUS_LABELS.attention,
+			text: threadStatusLabel("attention"),
 		};
 	}
 	if (working) {
 		return {
-			spoken: yourTurn > 0 ? `working, ${owed}` : "working",
+			spoken: yourTurn > 0 ? tr("working, {owed}", { owed }) : tr("working"),
 			status: "working",
-			text: THREAD_STATUS_LABELS.working,
+			text: threadStatusLabel("working"),
 		};
 	}
 	if (yourTurn > 0) {
 		return {
 			spoken: owed,
 			status: "your-turn",
-			text: yourTurn > 1 ? `${yourTurnLabel} · ${yourTurn}` : null,
+			text:
+				yourTurn > 1 ? tr("Your turn · {count}", { count: yourTurn }) : null,
 		};
 	}
 	return null;

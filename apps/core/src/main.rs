@@ -63,6 +63,7 @@ mod gaming;
 mod governance;
 mod hardware;
 mod hf_auth;
+mod i18n;
 mod identity;
 mod identity_verify;
 mod image_host;

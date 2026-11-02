@@ -1,7 +1,9 @@
 //! Which backend a cloud task runs on. Pure: availability comes in, a decision comes out.
 
 use super::CloudTaskBackend;
+use crate::i18n::Message;
 use serde::Serialize;
+use serde_json::Value;
 
 /// The default order when neither the session nor the agent names one: the user's own
 /// plans first, then the Ryu Box.
@@ -23,18 +25,24 @@ pub(crate) struct Notice {
     /// `subscription_cooling_down`.
     pub(crate) code: String,
     pub(crate) backend: CloudTaskBackend,
+    /// The English sentence, for clients that do not read `i18n`.
     pub(crate) message: String,
+    /// The sentence as a Core message: `{ message: <English ICU source>, args }`,
+    /// so a client renders it in the reader's language.
+    #[schema(value_type = Object)]
+    pub(crate) i18n: Value,
     /// The linked account it is about, when it is about one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) account_id: Option<String>,
 }
 
 impl Notice {
-    pub(crate) fn new(code: &str, backend: CloudTaskBackend, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, backend: CloudTaskBackend, message: Message) -> Self {
         Self {
             code: code.to_owned(),
             backend,
-            message: message.into(),
+            message: message.render("en"),
+            i18n: message.to_wire(),
             account_id: None,
         }
     }
@@ -119,49 +127,14 @@ pub(crate) fn resolve(
             }
             // Turned off is not news: no notice.
             Availability::Disabled => continue,
-            Availability::NotInstalled => Notice::new(
-                "subscription_unavailable",
-                backend,
-                format!("{} is not installed on this node.", backend.cli_name()),
-            ),
-            Availability::SignedOut => Notice::new(
-                "subscription_signed_out",
-                backend,
-                format!(
-                    "{} is not signed in on this node. Sign in from Settings to use your {} plan.",
-                    backend.cli_name(),
-                    backend.plan_name()
-                ),
-            ),
-            Availability::WrongSignIn => Notice::new(
-                "subscription_signed_out",
-                backend,
-                format!(
-                    "{} is signed in with an API key, not your {} plan.",
-                    backend.cli_name(),
-                    backend.plan_name()
-                ),
-            ),
-            Availability::NotConfigured => Notice::new(
-                "subscription_not_configured",
-                backend,
-                format!(
-                    "This environment has no {} set for your {} plan.",
-                    backend.setting_name(),
-                    backend.plan_name()
-                ),
-            ),
-            Availability::CoolingDown => Notice::new(
-                "subscription_cooling_down",
-                backend,
-                format!(
-                    "Your {} plan hit its usage limit recently, so this task did not use it.",
-                    backend.plan_name()
-                ),
-            ),
+            Availability::NotInstalled => Notice::not_installed(backend),
+            Availability::SignedOut => Notice::signed_out(backend),
+            Availability::WrongSignIn => Notice::wrong_sign_in(backend),
+            Availability::NotConfigured => Notice::not_configured(backend),
+            Availability::CoolingDown => Notice::cooling_down(backend),
         };
         // A provider's backends share one plan: say a plan-wide reason once.
-        // A missing setting is per backend (each names its own `setting_name`),
+        // A missing setting is per backend (each names its own setting),
         // so it is never folded into another backend's notice.
         let repeated = skipped.code != "subscription_not_configured"
             && plan.notices.iter().any(|notice| {

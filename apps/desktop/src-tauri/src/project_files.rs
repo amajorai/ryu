@@ -1,4 +1,4 @@
-//! Project file read/write commands for the in-app editors.
+//! Project file read/write commands backing the in-app editors.
 
 use crate::plugin_file_resource;
 
@@ -114,7 +114,7 @@ pub(crate) async fn write_project_markdown(
 }
 
 /// List markdown files under a canonical workspace without following symlinks.
-fn collect_project_markdown(root: &std::path::Path) -> Result<Vec<String>, String> {
+pub(crate) fn collect_project_markdown(root: &std::path::Path) -> Result<Vec<String>, String> {
     let root = std::fs::canonicalize(root)
         .map_err(|error| format!("invalid workspace folder: {error}"))?;
     if !root.is_dir() {

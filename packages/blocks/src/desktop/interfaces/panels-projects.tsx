@@ -1,16 +1,16 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { Plus } from "lucide-react";
 import { useId } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	buildTopics,
 	type PanelsTopic,
@@ -37,22 +37,28 @@ function TopicRow({
 	return (
 		<li>
 			<button
-				className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+				className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-2.5 text-start outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 				onClick={() => onOpenThread(thread.id)}
 				type="button"
 			>
 				<span
 					className="flex w-2 shrink-0 justify-center"
-					title={THREAD_STATUS_LABELS[status]}
+					title={threadStatusLabel(status)}
 				>
 					<BoardStatusDot status={status} />
-					<span className="sr-only">{THREAD_STATUS_LABELS[status]}: </span>
+					<span className="sr-only">{threadStatusLabel(status)}: </span>
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate font-medium text-foreground text-sm">
+					<span
+						className="truncate font-medium text-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{thread.title}
 					</span>
-					<span className="truncate text-muted-foreground text-sm">
+					<span
+						className="truncate text-muted-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{threadExcerpt(thread)}
 					</span>
 				</span>
@@ -61,17 +67,21 @@ function TopicRow({
 						{lead ? (
 							<>
 								<BoardAvatar agent={lead} name={lead.name} size={20} />
-								<span className="min-w-0 truncate text-foreground/80">
+								<span
+									className="min-w-0 truncate text-foreground/80"
+									data-ryu-i18n="off"
+								>
 									{lead.name}
 								</span>
 							</>
 						) : null}
 					</span>
-					<span className="@lg:inline hidden w-20 text-right">
-						{thread.messageCount}{" "}
-						{thread.messageCount === 1 ? "message" : "messages"}
+					<span className="@lg:inline hidden w-20 text-end">
+						{tr("{count, plural, one {# message} other {# messages}}", {
+							count: thread.messageCount,
+						})}
 					</span>
-					<span className="w-8 text-right">
+					<span className="w-8 text-end">
 						{compactAge(thread.updatedAt, now)}
 					</span>
 				</span>
@@ -109,16 +119,21 @@ function TopicSection({
 				<div className="flex min-w-0 flex-1 items-baseline gap-2">
 					<h2
 						className="truncate font-semibold text-base text-foreground"
+						data-ryu-i18n="off"
 						id={headingId}
 					>
 						{topic.name}
 					</h2>
 					<span className="shrink-0 text-muted-foreground text-xs">
-						{kind === "project" ? "Project" : null}
-						{kind === "team" ? "Team" : null}
+						{kind === "project" ? tr("Project") : null}
+						{kind === "team" ? tr("Team") : null}
 						{kind ? " · " : null}
-						{topic.threads.length}{" "}
-						{topic.threads.length === 1 ? "conversation" : "conversations"}
+						{tr(
+							"{count, plural, one {# conversation} other {# conversations}}",
+							{
+								count: topic.threads.length,
+							}
+						)}
 					</span>
 				</div>
 				{shown.length > 0 ? (

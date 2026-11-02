@@ -18,6 +18,7 @@ import {
 	getCloudSpeechAccounts,
 } from "@/src/lib/api/cloud-speech-accounts.ts";
 import type { GatewayProvidersConfig } from "@/src/lib/api/gateway.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 import { ProviderBrandLogo } from "@/src/lib/provider-brand.tsx";
 
 export function GatewayCloudSpeechAccounts({
@@ -128,7 +129,9 @@ export function GatewayCloudSpeechAccounts({
 			: null,
 		providers?.polly || view?.polly.accounts.length
 			? {
-					context: `Explicit AWS credentials · ${view?.polly.region ?? providers?.polly?.region ?? region}`,
+					context: tl("Explicit AWS credentials · {region}", {
+						region: view?.polly.region ?? providers?.polly?.region ?? region,
+					}),
 					count:
 						view?.polly.accounts.length ?? providers?.polly?.account_count ?? 0,
 					id: "polly",
@@ -180,7 +183,7 @@ export function GatewayCloudSpeechAccounts({
 									label={tl("Google · {quotaProject}{expiry}", {
 										quotaProject: account.quotaProject,
 										expiry: account.expiresAtUnixSecs
-											? ` · ${tl("expires {date}", { date: new Date(account.expiresAtUnixSecs * 1000).toLocaleString() })}`
+											? ` · ${tl("expires {date}", { date: formatLocalDateTime(account.expiresAtUnixSecs * 1000) })}`
 											: "",
 									})}
 									onConfigure={(accountPolicy) =>

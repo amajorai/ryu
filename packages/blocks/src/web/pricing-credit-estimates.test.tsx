@@ -98,6 +98,8 @@ describe("what your credits buy", () => {
 		expect(approximateCount(69.6)).toBe("69");
 		expect(approximateCount(200_000)).toBe("200,000");
 		expect(approximateCount(0)).toBe("0");
+		// Grouped the reader's way.
+		expect(approximateCount(9727.6, "de")).toBe("9.700");
 	});
 
 	it("renders labelled values, one estimate note, and no private plan names", () => {

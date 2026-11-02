@@ -1,6 +1,8 @@
-//! External editor detection and launching.
+//! External editor detection and launch.
 
-fn command_exists(command: &str) -> bool {
+use crate::fs_command_error::{FsCommandError, FsCommandErrorCode};
+
+pub(crate) fn command_exists(command: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;
     };
@@ -21,7 +23,7 @@ fn command_exists(command: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn mac_app_exists(name: &str) -> bool {
+pub(crate) fn mac_app_exists(name: &str) -> bool {
     [
         format!("/Applications/{name}.app"),
         format!("/System/Applications/{name}.app"),
@@ -31,7 +33,7 @@ fn mac_app_exists(name: &str) -> bool {
     .any(|path| std::path::Path::new(path).exists())
 }
 
-fn editor_is_available(editor: &str) -> bool {
+pub(crate) fn editor_is_available(editor: &str) -> bool {
     match editor {
         "vscode" => {
             command_exists("code") || {
@@ -112,6 +114,29 @@ pub(crate) async fn get_editor_availability(
         .collect())
 }
 
+/// Reject flag-like paths (argument injection) and URL-scheme paths (e.g.
+/// `javascript:`, `file://`). The reason is a technical detail, never shown.
+fn check_editor_path(raw_path: &str) -> Result<(), FsCommandError> {
+    if raw_path.starts_with('-') {
+        return Err(FsCommandError::with_detail(
+            FsCommandErrorCode::InvalidPath,
+            "path must not start with '-'",
+        ));
+    }
+    if raw_path.contains("://") {
+        return Err(FsCommandError::with_detail(
+            FsCommandErrorCode::InvalidPath,
+            "URL schemes are not allowed",
+        ));
+    }
+    Ok(())
+}
+
+/// An editor id this platform cannot launch (unknown, or Windows-only).
+fn editor_unavailable(editor: &str) -> FsCommandError {
+    FsCommandError::with_detail(FsCommandErrorCode::EditorUnavailable, editor)
+}
+
 /// Open a project folder in an external editor or file manager.
 /// `editor` is one of: vscode, zed, cursor, terminal, gitbash, explorer/finder.
 /// `path` defaults to "." when omitted.
@@ -120,17 +145,10 @@ pub(crate) async fn open_in_editor(
     app: tauri::AppHandle,
     editor: String,
     path: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), FsCommandError> {
     use tauri_plugin_shell::ShellExt;
     let raw_path = path.as_deref().unwrap_or(".");
-
-    // Reject flag-like paths (argument injection) and URL-scheme paths (e.g. javascript:, file://).
-    if raw_path.starts_with('-') {
-        return Err("Invalid path: must not start with '-'".to_string());
-    }
-    if raw_path.contains("://") {
-        return Err("Invalid path: URL schemes are not allowed".to_string());
-    }
+    check_editor_path(raw_path)?;
 
     // Canonicalize so symlinks and `..` traversal are resolved to an absolute path.
     // Fall back to the raw value only for paths that don't exist yet (e.g. ".").
@@ -234,7 +252,7 @@ pub(crate) async fn open_in_editor(
                     .current_dir(path)
                     .spawn()
             } else {
-                return Err("PowerShell launcher is only available on Windows".to_string());
+                return Err(editor_unavailable(&editor));
             }
         }
         "cmd" => {
@@ -245,7 +263,7 @@ pub(crate) async fn open_in_editor(
                     .current_dir(path)
                     .spawn()
             } else {
-                return Err("Command Prompt is only available on Windows".to_string());
+                return Err(editor_unavailable(&editor));
             }
         }
         "explorer" | "finder" => {
@@ -257,8 +275,37 @@ pub(crate) async fn open_in_editor(
                 app.shell().command("xdg-open").args([path]).spawn()
             }
         }
-        _ => return Err(format!("Unknown editor: {editor}")),
+        _ => return Err(editor_unavailable(&editor)),
     };
 
-    result.map(|_| ()).map_err(|e| e.to_string())
+    result
+        .map(|_| ())
+        .map_err(|e| FsCommandError::with_detail(FsCommandErrorCode::LaunchFailed, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flag_like_and_url_paths_are_coded_invalid() {
+        for raw in ["--goto", "-n", "file:///etc/passwd", "javascript://x"] {
+            let error = check_editor_path(raw).unwrap_err();
+            assert_eq!(error.code, FsCommandErrorCode::InvalidPath, "{raw}");
+            assert!(error.detail.is_some());
+        }
+        assert!(check_editor_path(".").is_ok());
+        assert!(check_editor_path("/home/me/project").is_ok());
+    }
+
+    #[test]
+    fn an_unlaunchable_editor_is_coded_unavailable_with_its_id_as_detail() {
+        let error = editor_unavailable("notepad");
+        assert_eq!(error.code, FsCommandErrorCode::EditorUnavailable);
+        assert_eq!(error.detail.as_deref(), Some("notepad"));
+        assert_eq!(
+            serde_json::to_value(&error).unwrap(),
+            serde_json::json!({ "code": "editor_unavailable", "detail": "notepad" })
+        );
+    }
 }

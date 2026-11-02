@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const paths = [
 	"/api/marketplace/licenses",
@@ -115,9 +115,8 @@ test("Marketplace readers coalesce focus refresh and isolate account and organiz
 			expect(calls.get(pathname)).toBe(4);
 		}
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/marketplace-org-cache-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/marketplace-org-cache-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -202,10 +201,7 @@ test("seller reports share scoped reads and discard pre-resolution snapshots", a
 			0
 		);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/seller-reports-completed.png"
-			),
+			path: proofEvidencePath("performance-sweep/seller-reports-completed.png"),
 			fullPage: true,
 			animations: "disabled",
 		});

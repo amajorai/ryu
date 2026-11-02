@@ -1,4 +1,5 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { translate as tr } from "@ryu/i18n/lite";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -119,7 +120,7 @@ function QuoteCard({
 		<div className="mt-3 overflow-hidden rounded-2xl border border-border p-3 text-foreground">
 			<span className="flex min-w-0 items-center gap-1 text-[15px] leading-5">
 				<FeedAvatar author={speaker} size="xs" />
-				<span className="ml-0.5 flex min-w-0 items-center gap-1">
+				<span className="ms-0.5 flex min-w-0 items-center gap-1">
 					<AuthorName author={speaker} />
 					<span className={cn("truncate", FEED_META)}>{speaker.handle}</span>
 					<span aria-hidden="true" className={cn("shrink-0", FEED_META)}>
@@ -130,7 +131,10 @@ function QuoteCard({
 					</span>
 				</span>
 			</span>
-			<p className="mt-1 line-clamp-3 break-words text-[15px] text-foreground leading-5">
+			<p
+				className="mt-1 line-clamp-3 break-words text-[15px] text-foreground leading-5"
+				data-ryu-i18n="off"
+			>
 				{excerpt}
 			</p>
 		</div>
@@ -181,10 +185,9 @@ function PostMoreMenu({ onOpen, text }: { onOpen: () => void; text: string }) {
 }
 
 function replyNoun(count: number): string {
-	if (count === 0) {
-		return "no replies";
-	}
-	return count === 1 ? "reply" : "replies";
+	return tr("{count, plural, =0 {no replies} one {reply} other {replies}}", {
+		count,
+	});
 }
 
 /** A count beside its icon, hidden at zero the way the timeline does. */
@@ -227,7 +230,7 @@ function ActionBar({
 				</span>
 				<span className="sr-only">Reply, </span>
 				{/* The count reads with its noun; at zero only the icon shows. */}
-				<span className="min-w-8 pl-3 tabular-nums">
+				<span className="min-w-8 ps-3 tabular-nums">
 					{post.replyCount > 0 ? compactCount(post.replyCount) : null}
 					<span className="sr-only"> {replyNoun(post.replyCount)}</span>
 				</span>
@@ -236,7 +239,7 @@ function ActionBar({
 				<span className="-m-2 flex size-[34px] items-center justify-center">
 					<Users aria-hidden="true" className="size-[18px]" />
 				</span>
-				<span className="min-w-8 pl-3">
+				<span className="min-w-8 ps-3">
 					{/* A lone agent is the default; the count appears once others join. */}
 					<StatCount value={agentCount > 1 ? agentCount : 0} />
 				</span>
@@ -316,7 +319,7 @@ export function FeedPostRow({
 	const quoted = hasLatest && !continues;
 	return (
 		<article
-			aria-label={`${author.name}: ${title}`}
+			aria-label={tl("{name}: {title}", { name: author.name, title })}
 			className={cn(
 				"group relative flex cursor-pointer flex-col border-border border-b px-4 pt-3 pb-3 transition-colors hover:bg-muted/50",
 				active && "bg-muted/70"
@@ -356,11 +359,17 @@ export function FeedPostRow({
 						/>
 					</div>
 					{/* One bold run per post, as on X: the name. The title is the body. */}
-					<p className="mt-0.5 line-clamp-2 whitespace-pre-line break-words text-[15px] text-foreground leading-5">
+					<p
+						className="mt-0.5 line-clamp-2 whitespace-pre-line break-words text-[15px] text-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</p>
 					{continues ? (
-						<p className="mt-0.5 line-clamp-4 break-words text-[15px] text-foreground leading-5">
+						<p
+							className="mt-0.5 line-clamp-4 break-words text-[15px] text-foreground leading-5"
+							data-ryu-i18n="off"
+						>
 							{post.excerpt}
 						</p>
 					) : null}
@@ -392,11 +401,13 @@ export function FocusedPost({
 	post: FeedPost;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const author = feedAuthor(agentById(snapshot, post.authorAgentId));
 	const thread = feedThreadOf(snapshot, post.threadId);
 	const marker = feedStatusMarker(feedPostStatus(snapshot, post), thread);
 	const agentCount = thread?.agentIds.length ?? 0;
-	const title = post.title || "Untitled";
+	const title = post.title || tl("Untitled");
 	// No excerpt here: the host's thread view right below opens with the
 	// prompt and the newest reply, so the post page shows each line once.
 	return (
@@ -412,7 +423,10 @@ export function FocusedPost({
 					<span className={cn("truncate", FEED_META)}>{author.handle}</span>
 				</div>
 			</div>
-			<p className="mt-3 whitespace-pre-line break-words text-[17px] text-foreground leading-6">
+			<p
+				className="mt-3 whitespace-pre-line break-words text-[17px] text-foreground leading-6"
+				data-ryu-i18n="off"
+			>
 				{title}
 			</p>
 			<p
@@ -447,17 +461,31 @@ export function FocusedPost({
 				)}
 			>
 				<span>
-					<span className="font-semibold text-foreground tabular-nums">
-						{compactCount(post.replyCount)}
-					</span>{" "}
-					{post.replyCount === 1 ? "Reply" : "Replies"}
+					{tlRich(
+						"{count, plural, one {<b>{shown}</b> Reply} other {<b>{shown}</b> Replies}}",
+						{ count: post.replyCount, shown: compactCount(post.replyCount) },
+						{
+							b: (chunks) => (
+								<span className="font-semibold text-foreground tabular-nums">
+									{chunks}
+								</span>
+							),
+						}
+					)}
 				</span>
 				{agentCount > 1 ? (
 					<span>
-						<span className="font-semibold text-foreground tabular-nums">
-							{agentCount}
-						</span>{" "}
-						Agents
+						{tlRich(
+							"<b>{count}</b> Agents",
+							{ count: agentCount },
+							{
+								b: (chunks) => (
+									<span className="font-semibold text-foreground tabular-nums">
+										{chunks}
+									</span>
+								),
+							}
+						)}
 					</span>
 				) : null}
 			</div>

@@ -6,6 +6,9 @@ const baseURL = "http://127.0.0.1:5198/";
 export default defineConfig({
 	testDir: ".",
 	testMatch: /feedback-board-behavior-proof\.spec\.ts$/,
+	// The spec is split across files under the token limit; one worker keeps
+	// them in the original order against the shared harness state.
+	workers: 1,
 	fullyParallel: false,
 	retries: 0,
 	use: {

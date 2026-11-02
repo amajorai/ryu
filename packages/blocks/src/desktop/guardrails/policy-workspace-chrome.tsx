@@ -1,8 +1,8 @@
 "use client";
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 
 export function StatusLine({
 	error,
@@ -45,12 +45,12 @@ export function SubpageHeader({
 		<div className="flex flex-col gap-1">
 			<Button
 				appearance="settings-back"
-				className="-ml-2 w-fit"
+				className="-ms-2 w-fit"
 				onClick={onBack}
 				size="sm"
 				variant="ghost-muted"
 			>
-				<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+				<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 				Policies
 			</Button>
 			<h3

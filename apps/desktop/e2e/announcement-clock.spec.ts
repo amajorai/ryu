@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("announcement status clock pauses hidden and catches up on return", async ({
 	page,
@@ -66,9 +66,8 @@ test("announcement status clock pauses hidden and catches up on return", async (
 		.getByText("Scheduled release", { exact: true })
 		.scrollIntoViewIfNeeded();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/announcement-clock-completed.png"
+		path: proofEvidencePath(
+			"performance-sweep/announcement-clock-completed.png"
 		),
 		fullPage: false,
 		animations: "disabled",

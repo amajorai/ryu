@@ -1,9 +1,9 @@
+import { activeLocale, numberFormatter, translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAgent,
 	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import { jobStatus } from "./jobs-model-core.ts";
-import { pluralize } from "./jobs-model-time.ts";
 
 // ---------------------------------------------------------------------------
 // Freelancers
@@ -142,14 +142,22 @@ export function filterFreelancers(
  */
 export function freelancerMeta(profile: FreelancerProfile): string {
 	if (profile.total === 0) {
-		return "No jobs yet";
+		return tr("No jobs yet");
 	}
 	const parts = [
-		pluralize(profile.total, "job"),
-		`${profile.completed} completed`,
+		tr("{count, plural, one {# job} other {# jobs}}", {
+			count: profile.total,
+		}),
+		tr("{count} completed", { count: profile.completed }),
 	];
 	if (profile.successRate !== null) {
-		parts.push(`${profile.successRate}% job success`);
+		parts.push(
+			tr("{rate} job success", {
+				rate: numberFormatter(activeLocale(), { style: "percent" }).format(
+					profile.successRate / 100
+				),
+			})
+		);
 	}
 	return parts.join(" · ");
 }

@@ -4,6 +4,7 @@
 // a concrete control plus a lock toggle, an overlay gets an Inherit selector,
 // and a field a broader scope froze renders read-only.
 
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label";
 import {
 	Select,
@@ -40,11 +41,15 @@ function inheritHint(
 }
 
 function inheritOption(
+	tl: LiteralMessage,
 	ctx: GuardrailScopeCtx,
 	label: string | undefined
 ): { label: string; value: string } {
 	const hint = label === undefined ? undefined : inheritHint(ctx, label);
-	return { value: "inherit", label: hint ? `Inherit (${hint})` : "Inherit" };
+	return {
+		value: "inherit",
+		label: hint ? tl("Inherit ({label})", { label: hint }) : "Inherit",
+	};
 }
 
 /**
@@ -162,6 +167,7 @@ export function GuardrailPolicyRow({
 	ctx: GuardrailScopeCtx;
 	title?: string;
 }) {
+	const tl = useLiteralMessages();
 	const nodeValue = ctx.node.policy;
 	const overlayValue = ctx.overlay.policy;
 	const resolved = overlayValue ?? nodeValue;
@@ -177,7 +183,7 @@ export function GuardrailPolicyRow({
 
 	if (ctx.isOverlay) {
 		const items = [
-			inheritOption(ctx, actionLabel(nodeValue)),
+			inheritOption(tl, ctx, actionLabel(nodeValue)),
 			...GUARDRAIL_ACTION_OPTIONS,
 		];
 		return (
@@ -265,6 +271,7 @@ export function GuardrailAlertRow({
 }) {
 	// `??` at every read: `alert` is optional on the wire for older gateways, and
 	// a Select bound to `undefined` renders uncontrolled.
+	const tl = useLiteralMessages();
 	const nodeValue: GuardrailAlertTier = ctx.node.alert ?? "silent";
 	const overlayValue = ctx.overlay.alert;
 	const resolved: GuardrailAlertTier = overlayValue ?? nodeValue;
@@ -282,7 +289,7 @@ export function GuardrailAlertRow({
 
 	if (ctx.isOverlay) {
 		const items = [
-			inheritOption(ctx, GUARDRAIL_ALERT_TIER_LABELS[nodeValue]),
+			inheritOption(tl, ctx, GUARDRAIL_ALERT_TIER_LABELS[nodeValue]),
 			...GUARDRAIL_ALERT_TIER_OPTIONS,
 		];
 		return (

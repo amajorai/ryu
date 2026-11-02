@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAgent,
 	InterfaceGroup,
@@ -9,21 +10,39 @@ export type OverallState = "degraded" | "operational" | "partial";
 export type IncidentSeverity = "degraded" | "outage";
 
 export const COMPONENT_STATE_LABELS: Record<ComponentState, string> = {
-	degraded: "Degraded performance",
-	operational: "Operational",
-	working: "Working",
+	get degraded() {
+		return tr("Degraded performance");
+	},
+	get operational() {
+		return tr("Operational");
+	},
+	get working() {
+		return tr("Working");
+	},
 };
 
 export const OVERALL_LABELS: Record<OverallState, string> = {
-	degraded: "Degraded performance",
-	operational: "All systems operational",
-	partial: "Partial outage",
+	get degraded() {
+		return tr("Degraded performance");
+	},
+	get operational() {
+		return tr("All systems operational");
+	},
+	get partial() {
+		return tr("Partial outage");
+	},
 };
 
 export const DAY_LEVEL_LABELS: Record<DayLevel, string> = {
-	degraded: "Partial outage",
-	operational: "No downtime recorded",
-	outage: "Outage",
+	get degraded() {
+		return tr("Partial outage");
+	},
+	get operational() {
+		return tr("No downtime recorded");
+	},
+	get outage() {
+		return tr("Outage");
+	},
 };
 
 /** One day of one component's history. */

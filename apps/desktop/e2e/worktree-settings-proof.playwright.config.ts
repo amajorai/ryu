@@ -1,10 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_URL = "http://127.0.0.1:5218/";
 
 export default defineConfig({
 	testDir: ".",
-	outputDir: "../../../docs/proof/worktree-settings/playwright-results",
+	outputDir: proofEvidencePath("worktree-settings/playwright-results"),
 	testMatch: /worktree-settings-proof\.spec\.ts$/,
 	fullyParallel: false,
 	timeout: 600_000,

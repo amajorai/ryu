@@ -8,6 +8,7 @@ import {
 } from "@ryu/ui/components/popover.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useDebouncedCallback } from "@ryu/ui/hooks/use-debounced-callback.ts";
+import { useFormatLocale } from "@ryu/ui/hooks/use-format-locale.ts";
 import { isFormulaError } from "@ryu/ui/lib/data-grid-formula.ts";
 import {
 	isNativeBoolean,
@@ -205,12 +206,13 @@ export function FormulaCell<TData>({
 	isActiveSearchMatch,
 }: DataGridCellProps<TData>) {
 	const value = cell.getValue();
+	const formatLocale = useFormatLocale();
 	const isError = isFormulaError(value);
 	let text = "";
 	if (isNativeBoolean(value)) {
 		text = value ? "TRUE" : "FALSE";
 	} else if (isNativeNumber(value)) {
-		text = value.toLocaleString(undefined, { maximumFractionDigits: 10 });
+		text = value.toLocaleString(formatLocale, { maximumFractionDigits: 10 });
 	} else if (value !== null && value !== undefined) {
 		text = String(value);
 	}

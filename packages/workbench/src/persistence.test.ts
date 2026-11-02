@@ -231,6 +231,35 @@ test("migrates route tabs, chat docks, project pins, and Navigation once", () =>
 	);
 });
 
+test("keeps a legacy session tab's pin through migration", () => {
+	const migrated = migrateWorkbenchSnapshot(
+		{
+			session: {
+				activeIndex: 1,
+				tabs: [
+					{ path: "/artifact/overview", pinned: true, title: "Overview" },
+					{ path: "/artifact/notes", title: "Notes" },
+					{ path: "/artifact/brief", pinned: "yes", title: "Brief" },
+				],
+			},
+		},
+		FIXED_IDS
+	);
+	const pins = Object.fromEntries(
+		migrated.items
+			.filter((item) => item.source.kind === "route")
+			.map((item) => [item.title, item.pinned])
+	);
+	expect(pins).toEqual({ Brief: false, Notes: false, Overview: true });
+	const reparsed = parseWorkbenchSnapshot(
+		serializeWorkbenchSnapshot(migrated),
+		FIXED_IDS
+	);
+	expect(
+		reparsed?.items.find((item) => item.title === "Overview")?.pinned
+	).toBe(true);
+});
+
 test("deduplicates equivalent project tabs without merging different owners", () => {
 	const migrated = migrateWorkbenchSnapshot(
 		{

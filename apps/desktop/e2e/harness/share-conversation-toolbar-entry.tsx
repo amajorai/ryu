@@ -34,6 +34,7 @@ import {
 	setToolbarLocalNode,
 	toolbarNativeBridge,
 } from "./share-conversation-toolbar-bridge.ts";
+import { windowTrayContracts } from "./window-tray-downloads-fixture.ts";
 import "@fontsource-variable/geist";
 import "../../src/index.css";
 
@@ -378,6 +379,9 @@ const background = createChatControlBackground(
 			"conversation-forked-fixture",
 		],
 		ownerId: OWNER_ID,
+		overrides: scenario.startsWith("window-tray")
+			? windowTrayContracts(scenario === "window-tray-downloads")
+			: undefined,
 	},
 	fixture.unexpectedRequests
 );

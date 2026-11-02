@@ -17,6 +17,7 @@ import {
 	isArchivedNotification,
 	isUnreadNotification,
 } from "@ryu/ui/lib/notification-filters.tsx";
+import { localizeApproval } from "@ryuhq/core-client/approval-text";
 import { riskTagLabel } from "@ryuhq/protocol/interfaces";
 import {
 	TrayIconAction,
@@ -87,6 +88,7 @@ export function buildInboxStackItems({
 			const busy =
 				approvals.deciding === approval.id ||
 				decidingApprovals.has(approval.id);
+			const text = localizeApproval(approval, tl);
 			return {
 				accent:
 					approval.risk_tags.length > 0 ? "var(--destructive)" : undefined,
@@ -101,17 +103,17 @@ export function buildInboxStackItems({
 						pendingLabel="Approval decision pending"
 					/>
 				),
-				ariaLabel: tl("Open {title} in the inbox", { title: approval.title }),
+				ariaLabel: tl("Open {title} in the inbox", { title: text.title }),
 				description: trayMeta(
 					...approval.risk_tags.slice(0, 2).map(riskTagLabel),
-					approval.summary
+					text.summary
 				),
 				id: `approval:${approval.id}`,
 				leading: (
 					<TrayRowIcon icon={KIND_ICON[approval.kind] ?? Wrench01Icon} />
 				),
 				onActivate: openInbox,
-				title: approval.title,
+				title: text.title,
 				trailing: shortAgo(approval.created_at),
 			};
 		});

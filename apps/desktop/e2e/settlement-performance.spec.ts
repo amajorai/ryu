@@ -1,6 +1,6 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const checkoutRequestSchema = z.object({ checkoutId: z.string() });
 
@@ -55,9 +55,8 @@ test("settlement stops obsolete requests and retry delays", async ({
 		expect(calls).toEqual(["first", "first", "second"]);
 		await expect(page.getByRole("status")).toContainText("Wallet credited");
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/settlement-lifetime-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/settlement-lifetime-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",

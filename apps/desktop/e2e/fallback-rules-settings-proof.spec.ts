@@ -2,12 +2,10 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { FallbackRulesProofPublisher } from "./harness/fallback-rules-settings-proof.tsx";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PAGE_URL = "/fallback-rules-settings-proof.html";
-const EVIDENCE_DIR = path.resolve(
-	process.cwd(),
-	"../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 interface ProofWindow extends Window {
 	__fallbackRulesProof: FallbackRulesProofPublisher;

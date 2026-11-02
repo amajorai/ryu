@@ -26,6 +26,7 @@ import {
 	setSupportAccessLocalEnabled,
 } from "@/src/lib/api/preferences.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { formatSupportAccessRemaining } from "./support-access-banner-remaining.ts";
 
 // How often to re-check the grant so an expiry that lapses (or a grant made on
 // another surface) is reflected without a manual refresh.
@@ -34,29 +35,6 @@ const POLL_INTERVAL_MS = 15_000;
 /** Mirror of Core's `SupportAccessLocal::is_active`: granted AND not expired. */
 function isGrantActive(enabled: boolean, expiryMs: number, nowMs: number) {
 	return enabled && (expiryMs === 0 || nowMs < expiryMs);
-}
-
-/** Human-readable "expires in N" for the banner; empty when no expiry is set. */
-function formatRemaining(expiryMs: number, nowMs: number): string {
-	if (expiryMs === 0) {
-		return "no expiry set";
-	}
-	const remaining = expiryMs - nowMs;
-	if (remaining <= 0) {
-		return "expiring";
-	}
-	const minutes = Math.floor(remaining / 60_000);
-	if (minutes < 60) {
-		return `expires in ${minutes} min`;
-	}
-	// Floor to whole hours and surface the leftover minutes so we never overstate
-	// the time left (e.g. 90 min reads "1 h 30 min", not "2 h").
-	const hours = Math.floor(minutes / 60);
-	const leftoverMinutes = minutes % 60;
-	if (leftoverMinutes === 0) {
-		return `expires in ${hours} h`;
-	}
-	return `expires in ${hours} h ${leftoverMinutes} min`;
 }
 
 /**
@@ -175,7 +153,7 @@ export function SupportAccessBanner() {
 			data-testid="support-access-banner"
 			detail={tl(
 				"Support can read redacted diagnostics over the mesh; {remaining}.",
-				{ remaining: formatRemaining(expiryMs, now) }
+				{ remaining: formatSupportAccessRemaining(expiryMs, now, tl) }
 			)}
 			icon={<HugeiconsIcon icon={ShieldKeyIcon} />}
 			title="Support access active."

@@ -89,7 +89,7 @@ export function StreamComposer({
 								STREAM_FOCUS
 							)}
 						>
-							{agent.name}
+							<span data-ryu-i18n="off">{agent.name}</span>
 							<ChevronDown
 								aria-hidden="true"
 								className="size-4 text-muted-foreground"
@@ -118,14 +118,19 @@ export function StreamComposer({
 										value={item.id}
 									>
 										<StreamAvatar agent={item} name={item.name} size={20} />
-										<span className="truncate">{item.name}</span>
+										<span className="truncate" data-ryu-i18n="off">
+											{item.name}
+										</span>
 									</DropdownMenuRadioItem>
 								))}
 							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : (
-					<span className={cn("font-semibold text-foreground", STREAM_TEXT)}>
+					<span
+						className={cn("font-semibold text-foreground", STREAM_TEXT)}
+						data-ryu-i18n="off"
+					>
 						{agent.name}
 					</span>
 				)}

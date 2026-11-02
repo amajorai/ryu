@@ -5,11 +5,11 @@ import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
 	localDayKey,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { dayHeading, fullDateTime, timeOfDay } from "./timeline-model.ts";
 import {
 	TimelineThreadAvatar,
@@ -45,11 +45,11 @@ export function TimelineThreadPanel({
 	return (
 		<aside
 			aria-label={tl("Thread: {title}", { title })}
-			className="flex min-h-0 w-[46%] min-w-90 max-w-[880px] shrink-0 flex-col border-border border-l bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:w-full max-md:min-w-0 max-md:max-w-none max-md:border-l-0"
+			className="flex min-h-0 w-[46%] min-w-90 max-w-[880px] shrink-0 flex-col border-border border-s bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:w-full max-md:min-w-0 max-md:max-w-none max-md:border-s-0"
 			data-testid="timeline-thread-panel"
 		>
 			<header
-				className="flex h-14 shrink-0 items-center gap-3 border-border border-b pr-2 pl-4"
+				className="flex h-14 shrink-0 items-center gap-3 border-border border-b ps-4 pe-2"
 				onKeyDown={(event) => {
 					if (event.key === "Escape") {
 						event.preventDefault();
@@ -70,7 +70,7 @@ export function TimelineThreadPanel({
 										timelineStatusTone(status) ?? "text-foreground"
 									)}
 								>
-									{THREAD_STATUS_LABELS[status]}
+									{threadStatusLabel(status)}
 								</span>
 								{" · "}
 								<time

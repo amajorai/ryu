@@ -21,12 +21,21 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
+import { parseIsolatedRunArgs, selectTestFiles } from "./test-isolated-args";
 
-const files = [
-	...new Glob("{src,components,lib,e2e}/**/*.test.{ts,tsx}").scanSync("."),
-].sort();
+// `bun run test <filter…>` narrows the run like `bun test <filter…>`; with no
+// filter every discovered file runs.
+const { childFlags, filters } = parseIsolatedRunArgs(process.argv.slice(2));
+const files = selectTestFiles(
+	[...new Glob("{src,components,lib,e2e}/**/*.test.{ts,tsx}").scanSync(".")],
+	filters
+).sort();
 if (files.length === 0) {
-	console.error("no test files found");
+	console.error(
+		filters.length > 0
+			? `no test files match ${filters.join(", ")}`
+			: "no test files found"
+	);
 	process.exit(1);
 }
 
@@ -67,7 +76,7 @@ const FILE_TIMEOUT_MS = 10 * 60 * 1000;
 
 let failed = 0;
 for (const file of files) {
-	const run = spawnSync("bun", ["test", file], {
+	const run = spawnSync("bun", ["test", ...childFlags, file], {
 		stdio: "inherit",
 		env: childEnv,
 		killSignal: "SIGKILL",

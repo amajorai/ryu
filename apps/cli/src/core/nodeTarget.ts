@@ -18,6 +18,7 @@
 // the same as when it is picked in the TUI node picker (nodeToTarget).
 
 import type { ApiTarget } from "@ryuhq/core-client/client";
+import { tf, tr } from "../i18n/translate.ts";
 import { withCoreIdentityCheck } from "./coreIdentity.ts";
 import { DEFAULT_CORE_URL } from "./defaultCoreUrl.ts";
 import {
@@ -40,9 +41,12 @@ export class UnknownNodeError extends Error {
 	readonly ref: string;
 
 	constructor(ref: string, configured: readonly string[]) {
-		const saved = configured.length > 0 ? configured.join(", ") : "none";
+		const saved = configured.length > 0 ? configured.join(", ") : tr("none");
 		super(
-			`No saved node named or at '${ref}'. Saved nodes: ${saved}. Pass a saved node name (see 'ryu node ls') or an http(s) URL.`
+			tf(
+				"No saved node named or at '{ref}'. Saved nodes: {saved}. Pass a saved node name (see 'ryu node ls') or an http(s) URL.",
+				{ ref, saved }
+			)
 		);
 		this.name = "UnknownNodeError";
 		this.ref = ref;

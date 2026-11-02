@@ -1,14 +1,14 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 } from "@ryuhq/protocol/interfaces";
 import { useContext } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
-import { type FarmCrop, type FarmPlot, plural } from "./farm-model.ts";
+import { cropCount, type FarmCrop, type FarmPlot } from "./farm-model.ts";
 import { CropRow, FarmActMode } from "./farm-panel-rows.tsx";
 import { InterfaceComposer } from "./interface-composer.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * The seed bag's plot picker: every plot with its agent, what it is for,
@@ -21,6 +21,7 @@ function PlotPicker({
 	onSelect: (plotId: string) => void;
 	plots: FarmPlot[];
 }) {
+	const tl = useLiteralMessages();
 	const agentPlots = plots.filter((plot) => plot.agent);
 	if (agentPlots.length === 0) {
 		return null;
@@ -56,7 +57,10 @@ function PlotPicker({
 								/>
 							) : null}
 							<span className="flex min-w-0 flex-col gap-0.5">
-								<span className="truncate font-medium text-foreground text-sm">
+								<span
+									className="truncate font-medium text-foreground text-sm"
+									data-ryu-i18n="off"
+								>
 									{plot.name}
 								</span>
 								<span className="truncate text-[13px] text-muted-foreground">
@@ -64,7 +68,7 @@ function PlotPicker({
 								</span>
 							</span>
 							<span className="text-right text-[13px] text-muted-foreground tabular-nums">
-								{plural(plot.crops.length, "crop")}
+								{cropCount(plot.crops.length, tl)}
 							</span>
 						</button>
 					</li>
@@ -111,7 +115,10 @@ export function PlotBody({
 								Plant a seed
 							</h3>
 							{agent?.description ? (
-								<p className="truncate text-[13px] text-muted-foreground">
+								<p
+									className="truncate text-[13px] text-muted-foreground"
+									data-ryu-i18n="off"
+								>
 									{agent.description}
 								</p>
 							) : null}
@@ -202,7 +209,7 @@ export function BarnBody({
 		: THREAD_STATUS_ORDER.map((status) => ({
 				crops: crops.filter((crop) => crop.status === status),
 				key: status,
-				label: THREAD_STATUS_LABELS[status],
+				label: threadStatusLabel(status),
 			}));
 	return (
 		<div className="min-h-0 flex-1 overflow-y-auto">

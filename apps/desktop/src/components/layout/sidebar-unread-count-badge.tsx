@@ -1,5 +1,7 @@
 // Trailing unread-message count pill shared by chat and agent rows.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
+
 export function UnreadMessageCountBadge({
 	conversationId,
 	count,
@@ -7,11 +9,15 @@ export function UnreadMessageCountBadge({
 	conversationId: string;
 	count: number;
 }) {
+	const tl = useLiteralMessages();
 	if (count <= 0) {
 		return null;
 	}
 
-	const label = `${count} unread ${count === 1 ? "message" : "messages"}`;
+	const label = tl(
+		"{count, plural, one {# unread message} other {# unread messages}}",
+		{ count }
+	);
 	return (
 		<span
 			aria-atomic="true"

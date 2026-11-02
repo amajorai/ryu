@@ -1,8 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 export default defineConfig({
 	testDir: ".",
 	testMatch: "app-icon-story.spec.ts",
-	outputDir: "../../../docs/proof/app-icons-v2/test-results",
+	outputDir: proofEvidencePath("app-icons-v2/test-results"),
 	workers: 1,
 	use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:5198" },
 	webServer: {

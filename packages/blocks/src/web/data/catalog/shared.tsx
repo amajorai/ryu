@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { Bot, Globe, Key, Shield, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
@@ -6,7 +7,18 @@ import { MockCard, StatusRow } from "../../product-row-visuals.tsx";
 import type { CtaLink } from "../../sections.tsx";
 import { readTheDocsCta } from "../resources.tsx";
 
-/* Shared CTAs and the small page-specific visuals the catalogue entries use. */
+/* Shared CTAs and the small page-specific visuals the catalogue entries use. The
+   visuals render outside a hook scope (server pages and client islands alike), so
+   their status values go through the active runtime with `tl` (English on the
+   server; the DOM localizer then matches the same catalog literal). */
+
+/**
+ * Marks catalogue copy in a position the i18n extractor does not read (a list
+ * of bullets, a mock's prop) and returns it unchanged. The catalogue is built
+ * once at module load, so it stays English here; the page's DOM localizer
+ * translates the rendered text. Import it as `t` so the extractor sees it.
+ */
+export const catalogCopy = (source: string): string => source;
 
 export const EARLY_ACCESS: CtaLink = {
 	label: "Get early access",
@@ -138,8 +150,8 @@ export function PassportFetchVisual() {
 					<Globe className="size-4" />
 				</ShapeNode>
 			</div>
-			<StatusRow label="Page content" value="Returned" />
-			<StatusRow label="Echoed credential" value="Redacted" />
+			<StatusRow label="Page content" value={tl("Returned")} />
+			<StatusRow label="Echoed credential" value={tl("Redacted")} />
 		</MockCard>
 	);
 }
@@ -152,8 +164,8 @@ export function SitesDeployVisual() {
 	return (
 		<div className="w-full space-y-2 px-1 py-2">
 			<CardHeader title="Saved version" />
-			<StatusRow label="Secret scan" value="Credential found" />
-			<StatusRow label="Deploy" value="Blocked" />
+			<StatusRow label="Secret scan" value={tl("Credential found")} />
+			<StatusRow label="Deploy" value={tl("Blocked")} />
 		</div>
 	);
 }
@@ -184,8 +196,8 @@ export function MailVerifyVisual() {
 				<Wire className="flex-1" delays={[]} />
 				<Node>Inbox</Node>
 			</div>
-			<StatusRow label="Valid signature" value="Accepted" />
-			<StatusRow label="Invalid signature" value="Rejected" />
+			<StatusRow label="Valid signature" value={tl("Accepted")} />
+			<StatusRow label="Invalid signature" value={tl("Rejected")} />
 		</div>
 	);
 }
@@ -257,8 +269,8 @@ export function AgentBriefVisual() {
 		<MinimalCard>
 			<div className="space-y-2">
 				<CardHeader title="Weekly sales summary" />
-				<StatusRow label="Tools" value="CRM · Email" />
-				<StatusRow label="Approval" value="Before send" />
+				<StatusRow label="Tools" value={tl("CRM · Email")} />
+				<StatusRow label="Approval" value={tl("Before send")} />
 			</div>
 		</MinimalCard>
 	);
@@ -279,7 +291,7 @@ export function AgentHostVisual() {
 					aria-hidden="true"
 					className="absolute inset-x-1/4 top-0 h-px bg-foreground/30"
 				/>
-				{["Ryu cloud node", "Your machines"].map((host) => (
+				{[tl("Ryu cloud node"), tl("Your machines")].map((host) => (
 					<div className="flex flex-col items-center" key={host}>
 						<FlowStem />
 						<Node className="w-full py-2.5 text-sm">{host}</Node>
@@ -299,9 +311,9 @@ export function ComputeReceiptVisual() {
 	return (
 		<MinimalCard>
 			<div className="space-y-2">
-				<CardHeader meta="Planned" title="Lease receipt" />
-				<StatusRow label="Duration" value="1 hour" />
-				<StatusRow label="Workspace" value="Cleared" />
+				<CardHeader meta={tl("Planned")} title="Lease receipt" />
+				<StatusRow label="Duration" value={tl("1 hour")} />
+				<StatusRow label="Workspace" value={tl("Cleared")} />
 			</div>
 		</MinimalCard>
 	);
@@ -312,10 +324,10 @@ export function SharePackageVisual() {
 	return (
 		<MinimalCard>
 			<div className="space-y-2">
-				<CardHeader meta="Planned" title="Host boundary" />
-				<StatusRow label="Node token" value="Stays here" />
-				<StatusRow label="Host files" value="Stay here" />
-				<StatusRow label="Job output" value="To the renter" />
+				<CardHeader meta={tl("Planned")} title="Host boundary" />
+				<StatusRow label="Node token" value={tl("Stays here")} />
+				<StatusRow label="Host files" value={tl("Stay here")} />
+				<StatusRow label="Job output" value={tl("To the renter")} />
 			</div>
 		</MinimalCard>
 	);
@@ -325,9 +337,9 @@ export function SharePackageVisual() {
 export function RedTeamTuneVisual() {
 	return (
 		<MockCard>
-			<CardHeader meta="1 of 10 failed" title="Security sweep" />
-			<StatusRow label="Jailbreak resistance" value="Needs attention" />
-			<StatusRow label="Firewall · jailbreak detection" value="Block" />
+			<CardHeader meta={tl("1 of 10 failed")} title="Security sweep" />
+			<StatusRow label="Jailbreak resistance" value={tl("Needs attention")} />
+			<StatusRow label="Firewall · jailbreak detection" value={tl("Block")} />
 		</MockCard>
 	);
 }
@@ -340,10 +352,10 @@ export function RedTeamTuneVisual() {
 export function ConnectionsScopeVisual() {
 	return (
 		<MockCard>
-			<CardHeader meta="Connected" title="Gmail" />
-			<StatusRow label="Read messages" value="Allowed" />
-			<StatusRow label="Send a reply" value="Asks first" />
-			<StatusRow label="Delete messages" value="Not allowed" />
+			<CardHeader meta={tl("Connected")} title="Gmail" />
+			<StatusRow label="Read messages" value={tl("Allowed")} />
+			<StatusRow label="Send a reply" value={tl("Asks first")} />
+			<StatusRow label="Delete messages" value={tl("Not allowed")} />
 		</MockCard>
 	);
 }
@@ -355,9 +367,9 @@ export function ConnectionsScopeVisual() {
 export function CloudScheduleVisual() {
 	return (
 		<MockCard>
-			<CardHeader meta="Your devices off" title="Your cloud node" />
-			<StatusRow label="Every Monday, 9:00" value="Ran" />
-			<StatusRow label="New support email" value="Ran" />
+			<CardHeader meta={tl("Your devices off")} title="Your cloud node" />
+			<StatusRow label="Every Monday, 9:00" value={tl("Ran")} />
+			<StatusRow label="New support email" value={tl("Ran")} />
 		</MockCard>
 	);
 }
@@ -369,8 +381,8 @@ export function CloudScheduleVisual() {
 export function RunTraceVisual() {
 	const spans = [
 		{ name: "Gemma 4", result: "1.2s" },
-		{ name: "Search tickets", result: "0.3s" },
-		{ name: "Send email", result: "Failed" },
+		{ name: tl("Search tickets"), result: "0.3s" },
+		{ name: tl("Send email"), result: tl("Failed") },
 		{ name: "Gemma 4", result: "0.9s" },
 	];
 	return (
@@ -398,7 +410,7 @@ export function MobileSyncVisual() {
 				<Wire className="flex-1" delays={[0.3, 0.7]} />
 				<Node>Desktop</Node>
 			</div>
-			<StatusRow label="On-device chats" value="Stay on the phone" />
+			<StatusRow label="On-device chats" value={tl("Stay on the phone")} />
 		</div>
 	);
 }
@@ -410,10 +422,10 @@ export function MobileSyncVisual() {
 export function WorkflowResumeVisual() {
 	return (
 		<MockCard>
-			<CardHeader meta="Resumed" title="Weekly report" />
-			<StatusRow label="Gather data" value="Saved" />
-			<StatusRow label="Draft report" value="Saved" />
-			<StatusRow label="Approval" value="Waiting" />
+			<CardHeader meta={tl("Resumed")} title="Weekly report" />
+			<StatusRow label="Gather data" value={tl("Saved")} />
+			<StatusRow label="Draft report" value={tl("Saved")} />
+			<StatusRow label="Approval" value={tl("Waiting")} />
 		</MockCard>
 	);
 }
@@ -426,9 +438,9 @@ export function TabConsentVisual() {
 	return (
 		<div className="w-full space-y-2 px-1 py-2">
 			<CardHeader title="This tab" />
-			<StatusRow label="Read the page" value="Allowed" />
-			<StatusRow label="Fill a form" value="Asks first" />
-			<StatusRow label="Download a file" value="Asks first" />
+			<StatusRow label="Read the page" value={tl("Allowed")} />
+			<StatusRow label="Fill a form" value={tl("Asks first")} />
+			<StatusRow label="Download a file" value={tl("Asks first")} />
 		</div>
 	);
 }

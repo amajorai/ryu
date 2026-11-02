@@ -11,7 +11,7 @@ import {
 	type PassportCountry,
 	type PassportSpread,
 	UNASSIGNED_CODE,
-	UNASSIGNED_LABEL,
+	unassignedLabel,
 } from "./passport-model.ts";
 import { chromeInk } from "./passport-palette.ts";
 
@@ -123,7 +123,7 @@ export function pageTabs(
 			active: onSpread(unassigned),
 			code: UNASSIGNED_CODE,
 			ink: null,
-			label: tl("{name} visa pages", { name: UNASSIGNED_LABEL }),
+			label: tl("{name} visa pages", { name: unassignedLabel() }),
 			page: unassigned,
 		});
 	}
@@ -173,7 +173,7 @@ export function PageNav({
 				>
 					<ChevronLeft
 						aria-hidden="true"
-						className="size-5"
+						className="size-5 rtl:-scale-x-100"
 						strokeWidth={2.75}
 					/>
 				</GameIconButton>
@@ -192,7 +192,7 @@ export function PageNav({
 				>
 					<ChevronRight
 						aria-hidden="true"
-						className="size-5"
+						className="size-5 rtl:-scale-x-100"
 						strokeWidth={2.75}
 					/>
 				</GameIconButton>

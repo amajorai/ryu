@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -79,7 +80,7 @@ export function buildAgentRows(snapshot: InterfaceSnapshot): PanelsAgentRow[] {
 		}
 		return {
 			agent,
-			line: trimSentence(agent.description) || "No role set",
+			line: trimSentence(agent.description) || tr("No role set"),
 			status,
 			target: thread
 				? { kind: "open", threadId: thread.id }
@@ -120,6 +121,13 @@ export interface PanelsActivity {
 	verb: string;
 }
 
+function activityVerb(fromYou: boolean, who: string | null): string {
+	if (!fromYou) {
+		return tr("replied");
+	}
+	return who ? tr("wrote to {who}", { who }) : tr("wrote");
+}
+
 function threadActivity(
 	snapshot: InterfaceSnapshot,
 	thread: InterfaceThread
@@ -127,14 +135,14 @@ function threadActivity(
 	const who = threadCounterpart(snapshot, thread);
 	const fromYou = thread.lastMessageRole === "user";
 	return {
-		actor: fromYou ? "You" : (who ?? "An agent"),
+		actor: fromYou ? tr("You") : (who ?? tr("An agent")),
 		agent: threadAgents(snapshot, thread)[0],
 		at: thread.updatedAt,
 		context: trimSentence(thread.title),
 		id: `thread:${thread.id}`,
 		kind: fromYou ? "wrote" : "replied",
 		target: { kind: "open", threadId: thread.id },
-		verb: fromYou ? `wrote${who ? ` to ${who}` : ""}` : "replied",
+		verb: activityVerb(fromYou, who),
 	};
 }
 
@@ -152,7 +160,7 @@ function runActivity(
 		id: `run:${event.id}`,
 		kind: failed ? "failed" : "finished",
 		target: runTarget(snapshot, event),
-		verb: failed ? "failed" : "finished",
+		verb: failed ? tr("failed") : tr("finished"),
 	};
 }
 
@@ -231,39 +239,26 @@ export function panelsSummary(snapshot: InterfaceSnapshot): PanelsSummary {
 	return { needsYou, working };
 }
 
-const SPELLED = [
-	"No",
-	"One",
-	"Two",
-	"Three",
-	"Four",
-	"Five",
-	"Six",
-	"Seven",
-	"Eight",
-	"Nine",
-];
-
-function spell(count: number): string {
-	return SPELLED[count] ?? String(count);
-}
-
-/** One calm sentence under the greeting. */
+/** One calm sentence under the greeting, in the UI language. */
 export function summarySentence(summary: PanelsSummary): string {
 	const { needsYou, working } = summary;
 	if (needsYou === 0 && working === 0) {
-		return "Nothing needs you right now.";
+		return tr("Nothing needs you right now.");
 	}
-	const parts: string[] = [];
-	if (needsYou > 0) {
-		parts.push(
-			`${spell(needsYou)} ${needsYou === 1 ? "conversation needs" : "conversations need"} you`
+	if (working === 0) {
+		return tr(
+			"{needsYou, plural, one {# conversation needs you.} other {# conversations need you.}}",
+			{ needsYou }
 		);
 	}
-	if (working > 0) {
-		const lead =
-			parts.length > 0 ? spell(working).toLowerCase() : spell(working);
-		parts.push(`${lead} ${working === 1 ? "agent is" : "agents are"} working`);
+	if (needsYou === 0) {
+		return tr(
+			"{working, plural, one {# agent is working.} other {# agents are working.}}",
+			{ working }
+		);
 	}
-	return `${parts.join(", and ")}.`;
+	return tr(
+		"{needsYou, plural, one {# conversation needs you} other {# conversations need you}}, and {working, plural, one {# agent is working.} other {# agents are working.}}",
+		{ needsYou, working }
+	);
 }

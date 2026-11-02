@@ -312,7 +312,7 @@ export function TodoList({
 			<button
 				aria-controls={contentId}
 				aria-expanded={currentOpen}
-				className="group flex h-10 w-full items-center gap-2 rounded-xl px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				className="group flex h-10 w-full items-center gap-2 rounded-xl px-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				id={triggerId}
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
@@ -410,7 +410,7 @@ export function TodoList({
 															opacity: status === "completed" ? 1 : 0,
 														}}
 														aria-hidden="true"
-														className="absolute inset-x-0 top-1/2 h-px origin-left bg-current"
+														className="absolute inset-x-0 top-1/2 h-px origin-left bg-current rtl:origin-right"
 														initial={false}
 														transition={
 															reduce

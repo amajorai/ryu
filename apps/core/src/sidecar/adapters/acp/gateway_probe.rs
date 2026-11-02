@@ -4,7 +4,10 @@ use super::*;
 pub(super) struct GatewayStartupPending;
 impl std::fmt::Display for GatewayStartupPending {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("The local Gateway is still verifying readiness; retry the agent after startup completes")
+        formatter.write_str(
+            &crate::i18n::Message::new(crate::i18n::messages::ACP_GATEWAY_STARTING_MESSAGE)
+                .render("en"),
+        )
     }
 }
 impl std::error::Error for GatewayStartupPending {}

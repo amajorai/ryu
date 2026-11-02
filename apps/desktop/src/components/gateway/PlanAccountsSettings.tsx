@@ -168,7 +168,7 @@ export function PlanAccountsSettings({
 				const own = accounts.filter((account) => account.provider === provider);
 				const defaultId = draft.defaultAccounts[provider] ?? DEFAULT_ACCOUNT_ID;
 				const fallbacks = fallbacksFor(provider);
-				const providerName = PROVIDER_NAMES[provider];
+				const providerName = tl(PROVIDER_NAMES[provider]);
 				return (
 					<div className="space-y-2" key={provider}>
 						<p className="font-medium text-sm">
@@ -233,13 +233,19 @@ export function PlanAccountsSettings({
 											)}
 										</div>
 									}
-									description={`${signInText(account)}${
-										account.id === defaultId ? " · Default" : ""
-									}${
+									description={[
+										signInText(account),
+										account.id === defaultId ? tl("Default") : null,
 										account.cooldownSecondsRemaining
-											? ` · Usage limit reached; skipped for ${Math.ceil(account.cooldownSecondsRemaining / 60)} min`
-											: ""
-									}`}
+											? tl("Usage limit reached; skipped for {minutes} min", {
+													minutes: Math.ceil(
+														account.cooldownSecondsRemaining / 60
+													),
+												})
+											: null,
+									]
+										.filter(Boolean)
+										.join(" · ")}
 									key={account.id}
 									title={account.tag}
 								/>

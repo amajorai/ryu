@@ -28,6 +28,7 @@ import {
 } from "@ryuhq/core-client/client";
 import { VAULT_TOKEN_HEADER } from "@ryuhq/core-client/vault";
 import { z } from "zod";
+import { tf, tr } from "../i18n/translate.ts";
 import {
 	dialLoopback,
 	type LoopbackConnection,
@@ -81,7 +82,10 @@ export class UnverifiableCoreError extends Error {
 export class CoreIdentityError extends Error {
 	constructor(url: string) {
 		super(
-			`The process answering at ${url} could not prove it is your Ryu Core, so the CLI did not send it your token. ${CORE_IDENTITY_CONFLICT_HINT}.`
+			tf(
+				"The process answering at {url} could not prove it is your Ryu Core, so the CLI did not send it your token. {hint}.",
+				{ hint: tr(CORE_IDENTITY_CONFLICT_HINT), url }
+			)
 		);
 		this.name = "CoreIdentityError";
 	}

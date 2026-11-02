@@ -1,85 +1,14 @@
-import path from "node:path";
-import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-
-const STORY_URL = "/app-sidebar-entity-rows-proof.html";
-const PROJECT_PATH = "/workspace/project-alpha";
-const SPACE_ID = "space-research";
-
-async function openProof(
-	page: Page,
-	options: {
-		failDelete?: boolean;
-		failRename?: boolean;
-		failSpaceIcon?: boolean;
-		failProjectWrite?: boolean;
-		failDocumentRead?: boolean;
-	} = {}
-) {
-	await page.goto(STORY_URL);
-	await page.evaluate(
-		(fixture) => {
-			localStorage.clear();
-			for (const [key, value] of Object.entries(fixture)) {
-				if (value) {
-					localStorage.setItem(key, "true");
-				}
-			}
-		},
-		{
-			"proof:fail-space-delete-once": options.failDelete,
-			"proof:fail-space-rename-once": options.failRename,
-			"proof:fail-space-icon-once": options.failSpaceIcon,
-			"proof:fail-project-write-once": options.failProjectWrite,
-			"proof:fail-document-read-once": options.failDocumentRead,
-		}
-	);
-	await page.reload();
-}
-
-async function openSpaceMenu(page: Page, rowId = "space-row-research") {
-	await expect(page.getByRole("dialog")).toHaveCount(0);
-	await expect(page.getByRole("alertdialog")).toHaveCount(0);
-	const menu = page.locator('[data-slot="context-menu-content"]').last();
-	if (await menu.isVisible().catch(() => false)) {
-		await page.keyboard.press("Escape");
-		await expect(menu).toBeHidden();
-	}
-	const row = page.getByTestId(rowId).locator('[role="button"]').first();
-	await row.click({ button: "right", force: true });
-	await expect(menu).toBeVisible();
-	return menu;
-}
-
-async function openProjectMenu(page: Page, rowId = "project-row-alpha") {
-	await expect(page.getByRole("dialog")).toHaveCount(0);
-	await expect(page.getByRole("alertdialog")).toHaveCount(0);
-	const menu = page.locator('[data-slot="context-menu-content"]').last();
-	if (await menu.isVisible().catch(() => false)) {
-		await page.keyboard.press("Escape");
-		await expect(menu).toBeHidden();
-	}
-	const header = page.getByTestId(rowId).getByRole("button").first();
-	await header.click({ button: "right", force: true });
-	await expect(menu).toBeVisible();
-	return menu;
-}
-
-async function chooseFixtureIcon(page: Page) {
-	const dialog = page.getByRole("dialog", { name: /icon/i });
-	await expect(dialog).toBeVisible();
-	await dialog.getByRole("tab", { name: "Icon", exact: true }).click();
-	const search = dialog.getByRole("textbox", { name: "Search icons" });
-	await search.fill("folder");
-	const icon = dialog.getByRole("button", {
-		name: "lucide:folder",
-		exact: true,
-	});
-	await expect(icon).toBeVisible();
-	await icon.click();
-	await dialog.getByRole("button", { name: "Use icon", exact: true }).click();
-	await expect(dialog).toBeHidden();
-}
+import {
+	chooseFixtureIcon,
+	confirmDestructiveDialog,
+	openProjectMenu,
+	openProof,
+	openSpaceMenu,
+	PROJECT_PATH,
+	SPACE_ID,
+} from "./app-sidebar-entity-rows-proof.helpers.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe("ProjectRow and SpaceSidebarRow", () => {
 	test("space row lazily loads documents and routes the row, page, new-tab, native-window, and contributed actions", async ({
@@ -150,9 +79,8 @@ test.describe("ProjectRow and SpaceSidebarRow", () => {
 			})
 		);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-space-rows.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-space-rows.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -289,9 +217,8 @@ test.describe("ProjectRow and SpaceSidebarRow", () => {
 			).some((space: { id: string }) => space.id === SPACE_ID)
 		).toBe(false);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-space-delete.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-space-delete.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -419,9 +346,8 @@ test.describe("ProjectRow and SpaceSidebarRow", () => {
 		await expect(page.getByTestId("active-folder")).toHaveText(PROJECT_PATH);
 		await page.getByTestId("project-row-alpha").hover();
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-project-rows.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-project-rows.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -448,9 +374,8 @@ test.describe("ProjectRow and SpaceSidebarRow", () => {
 		await page.reload();
 		await expect(page.getByTestId("project-removed")).toHaveText("true");
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-project-removed.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-project-removed.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -489,9 +414,8 @@ test.describe("ProjectRow and SpaceSidebarRow", () => {
 				.getByText("No chats", { exact: true })
 		).toBeVisible();
 		await page.getByTestId("project-row-alpha").screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-sidebar-project-delete-all-closed.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-sidebar-project-delete-all-closed.png"
 			),
 			animations: "disabled",
 		});
@@ -538,11 +462,3 @@ test.describe("ProjectRow and SpaceSidebarRow", () => {
 		).toMatchObject({ [PROJECT_PATH]: { kind: "icon", id: "lucide:folder" } });
 	});
 });
-
-async function confirmDestructiveDialog(page: Page, label: string) {
-	const slider = page.getByRole("slider", { name: label });
-	await slider.focus();
-	for (let step = 0; step < 5; step += 1) {
-		await page.keyboard.press("ArrowRight");
-	}
-}

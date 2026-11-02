@@ -67,7 +67,7 @@ function NavIcon({
 			{dot ? (
 				<span
 					aria-hidden="true"
-					className="absolute -top-0.5 -right-1 size-2 rounded-full bg-destructive ring-2 ring-background"
+					className="absolute -end-1 -top-0.5 size-2 rounded-full bg-destructive ring-2 ring-background"
 				/>
 			) : null}
 		</span>

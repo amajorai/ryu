@@ -1,11 +1,22 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	localDayKey,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+
+export {
+	outcomeAt,
+	type PathDay,
+	type PathLeader,
+	type PathStats,
+	pathLeaderboard,
+	pathStats,
+	pathStreak,
+	repliedToday,
+} from "./path-model-stats.ts";
 
 /**
  * Path view model: the snapshot as a learning path. Units are projects, then
@@ -101,15 +112,17 @@ export interface PathModel {
 	units: PathUnit[];
 }
 
-const KIND_LABEL = {
-	agent: "Agent",
-	project: "Project",
-	team: "Team",
-	unfiled: "Unassigned",
-} as const satisfies Record<PathUnitKind, string>;
-
 export function pathUnitKindLabel(kind: PathUnitKind): string {
-	return KIND_LABEL[kind];
+	switch (kind) {
+		case "agent":
+			return tr("Agent");
+		case "project":
+			return tr("Project");
+		case "team":
+			return tr("Team");
+		default:
+			return tr("Unassigned");
+	}
 }
 
 function byOldest(a: InterfaceThread, b: InterfaceThread): number {
@@ -226,10 +239,6 @@ function toStops(
 		.sort((a, b) => STATE_RANK[a.state] - STATE_RANK[b.state]);
 }
 
-function countLabel(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
 const NEEDS_YOU: ReadonlySet<PathStopState> = new Set([
 	"attention",
 	"current",
@@ -242,9 +251,11 @@ const NEEDS_YOU: ReadonlySet<PathStopState> = new Set([
  */
 export function pathUnitSummary(stops: readonly PathStop[]): string {
 	if (stops.length === 0) {
-		return "No threads yet";
+		return tr("No threads yet");
 	}
-	const total = countLabel(stops.length, "thread", "threads");
+	const total = tr("{count, plural, one {# thread} other {# threads}}", {
+		count: stops.length,
+	});
 	let needsYou = 0;
 	let working = 0;
 	let done = 0;
@@ -258,12 +269,15 @@ export function pathUnitSummary(stops: readonly PathStop[]): string {
 		}
 	}
 	if (needsYou > 0) {
-		return `${total} · ${needsYou} ${needsYou === 1 ? "needs" : "need"} you`;
+		return tr(
+			"{total} · {count, plural, one {# needs you} other {# need you}}",
+			{ count: needsYou, total }
+		);
 	}
 	if (working > 0) {
-		return `${total} · ${working} running`;
+		return tr("{total} · {count} running", { count: working, total });
 	}
-	return done === stops.length ? `${total} · all done` : total;
+	return done === stops.length ? tr("{total} · all done", { total }) : total;
 }
 
 interface UnitDraft {
@@ -343,7 +357,7 @@ function unitDrafts(snapshot: InterfaceSnapshot): UnitDraft[] {
 			members: [],
 			start: {},
 			threads: orphans,
-			title: "Without an agent",
+			title: tr("Without an agent"),
 		});
 	}
 	return drafts;
@@ -399,162 +413,4 @@ export function pathSwing(pathIndex: number): number {
 /** Items a unit puts on the path: its stops, its milestone, and its `+`. */
 export function pathUnitItemCount(unit: PathUnit): number {
 	return unit.stops.length + (unit.milestone ? 1 : 0) + 1;
-}
-
-// ---------------------------------------------------------------------------
-// Top bar and rail
-// ---------------------------------------------------------------------------
-
-export interface PathDay {
-	/** Some thread's last turn finished with an outcome that day. */
-	active: boolean;
-	key: string;
-	/** Narrow weekday label ("M", "T", ...). */
-	label: string;
-	today: boolean;
-}
-
-export interface PathStats {
-	/** Threads you replied to today, capped at nothing (the ring caps). */
-	repliedToday: number;
-	/** Consecutive days with an outcome, ending today (or yesterday). */
-	streakDays: number;
-	/** The last seven days, oldest first. */
-	week: PathDay[];
-	/** Every message in every thread. */
-	xp: number;
-}
-
-function addDays(date: Date, days: number): Date {
-	const next = new Date(date);
-	next.setDate(next.getDate() + days);
-	return next;
-}
-
-/**
- * When a thread's last turn finished with an outcome: it is not running,
- * the agent spoke last and the run neither failed nor was interrupted. The
- * time is the outcome's `finishedAt`, else `runEndedAt`, else the thread's
- * last update (the answer's last word). Null when there is no outcome.
- */
-export function outcomeAt(thread: InterfaceThread): number | null {
-	if (
-		thread.running ||
-		thread.lastMessageRole !== "assistant" ||
-		thread.runState === "failed" ||
-		thread.runState === "interrupted"
-	) {
-		return null;
-	}
-	const time = Date.parse(
-		thread.outcome?.finishedAt ?? thread.runEndedAt ?? thread.updatedAt
-	);
-	return Number.isNaN(time) ? null : time;
-}
-
-/** The local days on which some thread's last turn finished with an outcome. */
-function outcomeDayKeys(threads: readonly InterfaceThread[]): Set<string> {
-	const keys = new Set<string>();
-	for (const thread of threads) {
-		const time = outcomeAt(thread);
-		if (time !== null) {
-			keys.add(localDayKey(new Date(time)));
-		}
-	}
-	return keys;
-}
-
-/**
- * Days in a row with an outcome (a finished answer, not just messages); a
- * streak survives until today ends.
- */
-export function pathStreak(
-	threads: readonly InterfaceThread[],
-	now: Date
-): number {
-	const days = outcomeDayKeys(threads);
-	let cursor = days.has(localDayKey(now)) ? now : addDays(now, -1);
-	let streak = 0;
-	while (days.has(localDayKey(cursor))) {
-		streak += 1;
-		cursor = addDays(cursor, -1);
-	}
-	return streak;
-}
-
-/**
- * A thread counts toward today's goal when it moved today and the last word
- * was yours, or your message started the run that is live now.
- */
-export function repliedToday(
-	threads: readonly InterfaceThread[],
-	now: Date
-): number {
-	const today = localDayKey(now);
-	let count = 0;
-	for (const thread of threads) {
-		const time = Date.parse(thread.updatedAt);
-		if (Number.isNaN(time) || localDayKey(new Date(time)) !== today) {
-			continue;
-		}
-		if (thread.lastMessageRole === "user" || thread.running) {
-			count += 1;
-		}
-	}
-	return count;
-}
-
-const WEEKDAY = new Intl.DateTimeFormat("en-US", { weekday: "narrow" });
-
-export function pathStats(
-	snapshot: InterfaceSnapshot,
-	now: Date = new Date()
-): PathStats {
-	const days = outcomeDayKeys(snapshot.threads);
-	const todayKey = localDayKey(now);
-	const week: PathDay[] = [];
-	for (let offset = -6; offset <= 0; offset += 1) {
-		const date = addDays(now, offset);
-		const key = localDayKey(date);
-		week.push({
-			active: days.has(key),
-			key,
-			label: WEEKDAY.format(date),
-			today: key === todayKey,
-		});
-	}
-	let xp = 0;
-	for (const thread of snapshot.threads) {
-		xp += Math.max(0, thread.messageCount);
-	}
-	return {
-		repliedToday: repliedToday(snapshot.threads, now),
-		streakDays: pathStreak(snapshot.threads, now),
-		week,
-		xp,
-	};
-}
-
-export interface PathLeader {
-	agent: InterfaceAgent;
-	rank: number;
-	threads: number;
-	xp: number;
-}
-
-/** Agents ranked by messages across the threads they are in. */
-export function pathLeaderboard(snapshot: InterfaceSnapshot): PathLeader[] {
-	const rows = snapshot.agents.map((agent) => {
-		let xp = 0;
-		let threads = 0;
-		for (const thread of snapshot.threads) {
-			if (thread.agentIds.includes(agent.id)) {
-				xp += Math.max(0, thread.messageCount);
-				threads += 1;
-			}
-		}
-		return { agent, threads, xp };
-	});
-	rows.sort((a, b) => b.xp - a.xp || a.agent.name.localeCompare(b.agent.name));
-	return rows.map((row, position) => ({ ...row, rank: position + 1 }));
 }

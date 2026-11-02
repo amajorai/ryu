@@ -2,6 +2,7 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { motion } from "motion/react";
 import { type KeyboardEvent, type ReactNode, useId, useRef } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import {
 	type DriverOption,
 	type RideTrip,
@@ -83,9 +84,10 @@ export function RidesSheetTabs({
 	const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
 		const index = SHEET_TABS.findIndex((item) => item.id === tab);
 		let next = -1;
-		if (event.key === "ArrowRight") {
+		const key = logicalArrowKey(event.key, event.currentTarget);
+		if (key === "ArrowRight") {
 			next = (index + 1) % SHEET_TABS.length;
-		} else if (event.key === "ArrowLeft") {
+		} else if (key === "ArrowLeft") {
 			next = (index - 1 + SHEET_TABS.length) % SHEET_TABS.length;
 		} else if (event.key === "Home") {
 			next = 0;

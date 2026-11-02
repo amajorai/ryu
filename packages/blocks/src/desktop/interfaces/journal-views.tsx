@@ -1,7 +1,9 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, numberFormatter } from "@ryu/i18n/lite";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import {
 	countLabel,
 	entryTitle,
@@ -66,8 +68,9 @@ export function JournalCalendar({
 	const onGridKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		const index = keys.indexOf(activeKey);
 		let next: number;
-		if (event.key in CALENDAR_STEP) {
-			next = index + (CALENDAR_STEP[event.key] ?? 0);
+		const arrow = logicalArrowKey(event.key, event.currentTarget);
+		if (arrow in CALENDAR_STEP) {
+			next = index + (CALENDAR_STEP[arrow] ?? 0);
 		} else if (event.key === "Home") {
 			next = index - (index % 7);
 		} else if (event.key === "End") {
@@ -107,9 +110,7 @@ export function JournalCalendar({
 					{monthLabel(monthKey)}
 				</h1>
 				<p className="text-muted-foreground text-sm leading-5">
-					{total === 0
-						? "No entries this month"
-						: countLabel(total, "entry", "entries")}
+					{total === 0 ? "No entries this month" : countLabel(total, "entry")}
 				</p>
 			</header>
 			<div
@@ -184,9 +185,7 @@ function CalendarCell({
 	const shown = entries.slice(0, CELL_TITLES);
 	const more = entries.length - shown.length;
 	const label = `${fullDateLabel(dayKey)}, ${
-		entries.length === 0
-			? "no entries"
-			: countLabel(entries.length, "entry", "entries")
+		entries.length === 0 ? "no entries" : countLabel(entries.length, "entry")
 	}`;
 	return (
 		<div
@@ -198,7 +197,7 @@ function CalendarCell({
 				aria-label={label}
 				aria-pressed={selected}
 				className={cn(
-					"flex h-28 w-full flex-col gap-1 p-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset max-md:h-20",
+					"flex h-28 w-full flex-col gap-1 p-2 text-start outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset max-md:h-20",
 					selected && !today ? "bg-muted" : "hover:bg-muted/50"
 				)}
 				data-day={dayKey}
@@ -275,6 +274,10 @@ export function JournalStatsPage({
 	today: Date;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
+	const muted = (chunks: ReactNode) => (
+		<span className="text-muted-foreground">{chunks}</span>
+	);
 	const columns = yearHeatmap(byDay, today);
 	const figures: { label: string; unit?: string; value: number }[] = [
 		{ label: "Entries", value: stats.entries },
@@ -282,12 +285,16 @@ export function JournalStatsPage({
 		{ label: "Messages", value: stats.messages },
 		{
 			label: "Current streak",
-			unit: stats.currentStreak === 1 ? "day" : "days",
+			unit: tl("{count, plural, one {day} other {days}}", {
+				count: stats.currentStreak,
+			}),
 			value: stats.currentStreak,
 		},
 		{
 			label: "Longest streak",
-			unit: stats.longestStreak === 1 ? "day" : "days",
+			unit: tl("{count, plural, one {day} other {days}}", {
+				count: stats.longestStreak,
+			}),
 			value: stats.longestStreak,
 		},
 	];
@@ -305,7 +312,7 @@ export function JournalStatsPage({
 				</h1>
 				<p className="text-muted-foreground text-sm leading-5">
 					{tl("{entries} in the last year", {
-						entries: countLabel(stats.thisYear, "entry", "entries"),
+						entries: countLabel(stats.thisYear, "entry"),
 					})}
 				</p>
 			</header>
@@ -322,7 +329,7 @@ export function JournalStatsPage({
 									titleClass
 								)}
 							>
-								{figure.value.toLocaleString()}
+								{numberFormatter(activeLocale()).format(figure.value)}
 							</span>
 							{figure.unit ? (
 								<span className="text-muted-foreground text-sm">
@@ -385,12 +392,15 @@ export function JournalStatsPage({
 									key={share.agent.id}
 								>
 									<th
-										className="w-48 py-2.5 pe-4 text-left font-normal max-sm:w-32"
+										className="w-48 py-2.5 pe-4 text-start font-normal max-sm:w-32"
 										scope="row"
 									>
 										<span className="flex items-center gap-2.5">
 											<JournalFaces agents={[share.agent]} />
-											<span className="truncate text-foreground">
+											<span
+												className="truncate text-foreground"
+												data-ryu-i18n="off"
+											>
 												{share.agent.name}
 											</span>
 										</span>
@@ -405,17 +415,29 @@ export function JournalStatsPage({
 											/>
 										</span>
 									</td>
-									<td className="w-24 py-2.5 text-right text-foreground tabular-nums">
-										{share.entries.toLocaleString()}
-										<span className="text-muted-foreground">
-											{share.entries === 1 ? " entry" : " entries"}
-										</span>
+									<td className="w-24 py-2.5 text-end text-foreground tabular-nums">
+										{tlRich(
+											"{count, plural, one {{shown}<m> entry</m>} other {{shown}<m> entries</m>}}",
+											{
+												count: share.entries,
+												shown: numberFormatter(activeLocale()).format(
+													share.entries
+												),
+											},
+											{ m: muted }
+										)}
 									</td>
-									<td className="w-32 py-2.5 text-right text-foreground tabular-nums">
-										{share.messages.toLocaleString()}
-										<span className="text-muted-foreground">
-											{share.messages === 1 ? " message" : " messages"}
-										</span>
+									<td className="w-32 py-2.5 text-end text-foreground tabular-nums">
+										{tlRich(
+											"{count, plural, one {{shown}<m> message</m>} other {{shown}<m> messages</m>}}",
+											{
+												count: share.messages,
+												shown: numberFormatter(activeLocale()).format(
+													share.messages
+												),
+											},
+											{ m: muted }
+										)}
 									</td>
 								</tr>
 							))}

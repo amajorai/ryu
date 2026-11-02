@@ -59,7 +59,7 @@ export function RefreshReport({
 	const failed = results.filter((r) => r.status === "error");
 	return (
 		<div className="flex flex-col gap-2">
-			<PanelNotice>{describeRefreshCounts(counts)}.</PanelNotice>
+			<PanelNotice>{describeRefreshCounts(counts, tl)}.</PanelNotice>
 			{needsConnection.length > 0 ? (
 				<div className="flex flex-col gap-1.5 rounded-xl border border-border bg-muted/20 px-3 py-2 text-xs">
 					<span className="flex items-center gap-1.5 font-medium">
@@ -170,10 +170,10 @@ export function SubmissionsTable({
 					<TableHead size="compact">Platform</TableHead>
 					<TableHead size="compact">Post</TableHead>
 					<TableHead size="compact">Status</TableHead>
-					<TableHead className="text-right" size="compact">
+					<TableHead className="text-end" size="compact">
 						Views
 					</TableHead>
-					<TableHead className="text-right" size="compact">
+					<TableHead className="text-end" size="compact">
 						Accrued
 					</TableHead>
 					<TableHead size="compact">
@@ -202,14 +202,14 @@ export function SubmissionsTable({
 							/>
 						</TableCell>
 						<TableCell
-							className="text-right"
+							className="text-end"
 							presentation="numeric"
 							spacing="compact"
 						>
 							{submission.latest ? formatCount(submission.latest.views) : "—"}
 						</TableCell>
 						<TableCell
-							className="text-right"
+							className="text-end"
 							presentation="numeric"
 							spacing="compact"
 						>
@@ -218,7 +218,7 @@ export function SubmissionsTable({
 								status={submission.payout_status}
 							/>
 						</TableCell>
-						<TableCell className="text-right" spacing="compact">
+						<TableCell className="text-end" spacing="compact">
 							<SubmissionRowActions
 								hasMetricSource={hasMetricSource}
 								onApprove={onApprove}
@@ -340,16 +340,16 @@ export function LeaderboardTable({
 			<TableHeader>
 				<TableRow>
 					<TableHead size="compact">Creator</TableHead>
-					<TableHead className="text-right" size="compact">
+					<TableHead className="text-end" size="compact">
 						Views
 					</TableHead>
-					<TableHead className="text-right" size="compact">
+					<TableHead className="text-end" size="compact">
 						Approved
 					</TableHead>
-					<TableHead className="text-right" size="compact">
+					<TableHead className="text-end" size="compact">
 						Accrued
 					</TableHead>
-					<TableHead className="text-right" size="compact">
+					<TableHead className="text-end" size="compact">
 						Paid
 					</TableHead>
 				</TableRow>
@@ -365,28 +365,28 @@ export function LeaderboardTable({
 							{row.display_name || creatorName(row.creator_id)}
 						</TableCell>
 						<TableCell
-							className="text-right"
+							className="text-end"
 							presentation="numeric"
 							spacing="compact"
 						>
 							{formatCount(row.views)}
 						</TableCell>
 						<TableCell
-							className="text-right"
+							className="text-end"
 							presentation="numeric"
 							spacing="compact"
 						>
 							{formatCount(row.approved_submissions)}
 						</TableCell>
 						<TableCell
-							className="text-right"
+							className="text-end"
 							presentation="monospace-numeric"
 							spacing="compact"
 						>
 							{formatCents(row.accrued_cents)}
 						</TableCell>
 						<TableCell
-							className="text-right"
+							className="text-end"
 							presentation="monospace-numeric"
 							spacing="compact"
 						>

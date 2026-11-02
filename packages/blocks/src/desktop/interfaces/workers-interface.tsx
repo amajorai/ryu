@@ -289,7 +289,7 @@ export function WorkersInterface({
 
 	const empty = !loading && workers.length === 0;
 	const summary = actsOn
-		? `Office: ${actSummaryLine(tally)}.`
+		? tl("Office: {summary}.", { summary: actSummaryLine(tally) })
 		: tl(
 				"Office: {workers, plural, one {{workerCount} worker} other {{workerCount} workers}}, {working} working, {waitingOnYou} waiting on you.",
 				{

@@ -4,6 +4,7 @@ import {
 } from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { UIMessage } from "ai";
 import { z } from "zod";
+import { type DurationUnit, formatDurationParts } from "./locale-format.ts";
 import { nativeSdkSchemaAdmits } from "./utils/native-sdk-admission.ts";
 
 /** The durable completion data shown beside the assistant's final turn. */
@@ -25,13 +26,17 @@ export function formatGoalElapsed(ms: number): string {
 	const minutes = Math.floor(totalSeconds / 60) % 60;
 	const hours = Math.floor(totalSeconds / 3600);
 
+	const parts: [number, DurationUnit][] = [];
 	if (hours > 0) {
-		return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}${seconds > 0 ? ` ${seconds}s` : ""}`;
+		parts.push([hours, "hour"]);
 	}
 	if (minutes > 0) {
-		return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
+		parts.push([minutes, "minute"]);
 	}
-	return `${seconds}s`;
+	if (seconds > 0 || parts.length === 0) {
+		parts.push([seconds, "second"]);
+	}
+	return formatDurationParts(parts);
 }
 
 /** Resolve the fixed duration at completion, or the live duration for legacy state. */

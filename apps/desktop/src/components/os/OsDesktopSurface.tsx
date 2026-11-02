@@ -312,7 +312,7 @@ export function OsDesktopSurface({
 				<span className="hidden text-white/45 text-xs sm:block">Workspace</span>
 				<button
 					aria-label={shuffleLabel}
-					className="ml-auto inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-white/55 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 max-[360px]:px-1.5 sm:ml-0"
+					className="ms-auto inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-white/55 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 max-[360px]:px-1.5 sm:ms-0"
 					data-testid="os-wallpaper-shuffle"
 					onClick={shuffleWallpaper}
 					title={shuffleLabel}
@@ -339,7 +339,7 @@ export function OsDesktopSurface({
 					/>
 				</button>
 				<div
-					className="ml-auto flex shrink-0 items-center"
+					className="ms-auto flex shrink-0 items-center"
 					data-tauri-drag-region={false}
 					data-testid="ryu-os-menubar-actions"
 				>

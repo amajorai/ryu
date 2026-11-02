@@ -1,6 +1,15 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
-import { formatMessage, type LiteralMessage } from "@ryu/i18n";
+import {
+	formatMessage,
+	type LiteralMessage,
+	type MessageValuesInput,
+} from "@ryu/i18n";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../../packages/i18n/src/active-locale.ts";
 import {
 	bundleSkillChanges,
 	enabledSkillUpdates,
@@ -58,6 +67,30 @@ describe("skillSetChangeLabels", () => {
 			"C",
 			"2 more skills",
 		]);
+	});
+
+	describe("in German", () => {
+		const MORE = "{count, plural, one {# more skill} other {# more skills}}";
+		const german = {
+			direction: "ltr" as const,
+			locale: "de",
+			translate(id: string, values?: MessageValuesInput, fallback?: string) {
+				const source =
+					fallback === MORE
+						? "{count, plural, one {# weiterer Skill} other {# weitere Skills}}"
+						: (fallback ?? id);
+				return formatMessage(source, values, "de");
+			},
+		};
+		afterEach(() => {
+			unregisterActiveI18nRuntime(german);
+		});
+
+		it("summarises the rest with the locale's plural and digits", () => {
+			registerActiveI18nRuntime(german);
+			const many = Array.from({ length: 1003 }, (_, index) => `S${index}`);
+			expect(skillSetChangeLabels(many).at(-1)).toBe("1.000 weitere Skills");
+		});
 	});
 });
 

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -75,7 +76,10 @@ function RequesterCard({ ticket }: { ticket: Ticket }) {
 			<div className="flex items-center gap-3">
 				<TicketAvatar agent={requester} size={40} />
 				<div className="flex min-w-0 flex-col gap-0.5">
-					<span className="truncate font-medium text-foreground text-sm">
+					<span
+						className="truncate font-medium text-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{requester.name}
 					</span>
 					<span className="flex items-center gap-1.5 text-muted-foreground text-xs">
@@ -91,7 +95,10 @@ function RequesterCard({ ticket }: { ticket: Ticket }) {
 				</div>
 			</div>
 			{requester.description ? (
-				<p className="text-[13px] text-muted-foreground leading-5">
+				<p
+					className="text-[13px] text-muted-foreground leading-5"
+					data-ryu-i18n="off"
+				>
 					{requester.description}
 				</p>
 			) : null}
@@ -138,7 +145,7 @@ function ActivityList({
 					{index < items.length - 1 ? (
 						<span
 							aria-hidden="true"
-							className="absolute top-3 bottom-0 left-[3.5px] w-px bg-border"
+							className="absolute start-[3.5px] top-3 bottom-0 w-px bg-border"
 						/>
 					) : null}
 					<span
@@ -192,12 +199,12 @@ export function TicketsSidebar({
 	ticket: Ticket;
 }) {
 	const tl = useLiteralMessages();
-	const requesterName = ticket.requester?.name ?? "Requester";
+	const requesterName = ticket.requester?.name ?? tr("Requester");
 	return (
 		<aside
 			aria-label="Ticket details"
 			className={cn(
-				"flex w-80 shrink-0 flex-col overflow-y-auto overscroll-contain border-border border-l bg-background",
+				"flex w-80 shrink-0 flex-col overflow-y-auto overscroll-contain border-border border-s bg-background",
 				floating && "h-full max-w-full shadow-lg"
 			)}
 			data-testid="tickets-sidebar"
@@ -251,7 +258,7 @@ export function TicketsSidebar({
 									!ticket.project && "text-muted-foreground"
 								)}
 							>
-								{ticket.project?.name ?? "None"}
+								{ticket.project?.name ?? tr("None")}
 							</span>
 						</ReadOnlyField>
 						<ReadOnlyField label="Team">
@@ -261,7 +268,7 @@ export function TicketsSidebar({
 									!ticket.team && "text-muted-foreground"
 								)}
 							>
-								{ticket.team?.name ?? "None"}
+								{ticket.team?.name ?? tr("None")}
 							</span>
 						</ReadOnlyField>
 					</div>
@@ -276,12 +283,15 @@ export function TicketsSidebar({
 							{others.map((other) => (
 								<li key={other.id}>
 									<button
-										className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+										className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-start text-[13px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 										onClick={() => onOpenTicket(other.id)}
 										type="button"
 									>
 										<TicketStatusMark status={other.status} />
-										<span className="min-w-0 flex-1 truncate text-foreground">
+										<span
+											className="min-w-0 flex-1 truncate text-foreground"
+											data-ryu-i18n="off"
+										>
 											{other.thread.title}
 										</span>
 										<time

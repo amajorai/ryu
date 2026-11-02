@@ -38,7 +38,7 @@ export function PoweredByRyuBadge({
 		<a
 			aria-label="Powered by Ryu — make your own"
 			className={cn(
-				"inline-flex items-center gap-1.5 rounded-full bg-neutral-950/90 py-1.5 pr-2.5 pl-2 font-medium text-white text-xs leading-none shadow-md backdrop-blur-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+				"inline-flex items-center gap-1.5 rounded-full bg-neutral-950/90 py-1.5 ps-2 pe-2.5 font-medium text-white text-xs leading-none shadow-md backdrop-blur-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 				placement === "floating" && "fixed right-3 bottom-3 z-50",
 				className
 			)}

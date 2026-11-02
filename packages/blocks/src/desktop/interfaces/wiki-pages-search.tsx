@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { type FormEvent, useId, useMemo, useState } from "react";
 import { excerptAround, wikiSearch, wikiStamp } from "./wiki-model.ts";
@@ -18,6 +18,7 @@ export function SearchPage({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const hits = useMemo(
 		() => wikiSearch(snapshot, query, tl),
 		[snapshot, query, tl]
@@ -37,14 +38,14 @@ export function SearchPage({
 					Search query
 				</label>
 				<input
-					className="h-9 min-w-0 flex-1 rounded-l-[2px] border border-input bg-background px-3 text-sm outline-none hover:border-ring/60 focus:border-ring focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:appearance-none"
+					className="h-9 min-w-0 flex-1 rounded-s-[2px] border border-input bg-background px-3 text-sm outline-none hover:border-ring/60 focus:border-ring focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:appearance-none"
 					id={fieldId}
 					onChange={(event) => setDraft(event.target.value)}
 					type="search"
 					value={draft}
 				/>
 				<button
-					className="-ml-px h-9 cursor-pointer rounded-r-[2px] bg-primary px-4 font-medium text-primary-foreground text-sm outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:bg-primary/80"
+					className="-ms-px h-9 cursor-pointer rounded-e-[2px] bg-primary px-4 font-medium text-primary-foreground text-sm outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:bg-primary/80"
 					type="submit"
 				>
 					Search
@@ -93,11 +94,17 @@ export function SearchPage({
 				</ul>
 			) : (
 				<p className={`${PROSE} mt-3`}>
-					Try fewer words, or browse the{" "}
-					<WikiLink route={{ index: "threads", kind: "index" }}>
-						List of threads
-					</WikiLink>
-					.
+					{tlRich(
+						"Try fewer words, or browse the <threads>List of threads</threads>.",
+						{},
+						{
+							threads: (chunks) => (
+								<WikiLink route={{ index: "threads", kind: "index" }}>
+									{chunks}
+								</WikiLink>
+							),
+						}
+					)}
 				</p>
 			)}
 			<WikiFooter edited={null} />

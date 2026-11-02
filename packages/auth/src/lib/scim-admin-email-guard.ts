@@ -20,6 +20,7 @@
 
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError } from "better-auth/api";
+import { assertScimEmailOnVerifiedDomain } from "./scim-email-domain-guard.ts";
 import { isAdminEmail } from "./waitlist.ts";
 
 export const SCIM_ADMIN_EMAIL_REFUSED = "SCIM_ADMIN_EMAIL_REFUSED";
@@ -65,6 +66,21 @@ export function scimRenamesToAdminEmail(
 	);
 }
 
+/**
+ * True when a SCIM update moves an account to a new address. The SCIM plugin
+ * adds `emailVerified: false` only when the address changes.
+ */
+export function scimChangesEmail(
+	path: unknown,
+	data: { email?: unknown; emailVerified?: unknown }
+): boolean {
+	return (
+		isScimProvisioningPath(path) &&
+		typeof data.email === "string" &&
+		data.emailVerified === false
+	);
+}
+
 function refusal(): APIError {
 	return new APIError("FORBIDDEN", {
 		code: SCIM_ADMIN_EMAIL_REFUSED,
@@ -73,7 +89,12 @@ function refusal(): APIError {
 	});
 }
 
-/** Better Auth plugin that applies the guard to every SCIM user write. */
+/**
+ * Better Auth plugin that applies the guard to every SCIM user write, together
+ * with the verified-domain binding in `scim-email-domain-guard.ts`: a SCIM
+ * create, or a SCIM rename to a new address, must land on a DNS-verified SSO
+ * domain of the connection's organization.
+ */
 export function scimAdminEmailGuardPlugin(): BetterAuthPlugin {
 	return {
 		id: "ryu-scim-admin-email-guard",
@@ -86,12 +107,18 @@ export function scimAdminEmailGuardPlugin(): BetterAuthPlugin {
 								if (scimCreatesAdminEmail(ctx?.path, user)) {
 									throw refusal();
 								}
+								if (isScimProvisioningPath(ctx?.path)) {
+									await assertScimEmailOnVerifiedDomain(user.email, ctx);
+								}
 							},
 						},
 						update: {
 							before: async (data, ctx) => {
 								if (scimRenamesToAdminEmail(ctx?.path, data)) {
 									throw refusal();
+								}
+								if (scimChangesEmail(ctx?.path, data)) {
+									await assertScimEmailOnVerifiedDomain(data.email, ctx);
 								}
 							},
 						},

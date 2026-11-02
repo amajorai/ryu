@@ -12,7 +12,7 @@ export function CinemaInterfaceSearchEmpty({ query }: { query: string }) {
 			</p>
 			<div className="text-muted-foreground">
 				<p>Suggestions:</p>
-				<ul className="list-disc pl-5">
+				<ul className="list-disc ps-5">
 					<li>Try different keywords</li>
 					<li>Search for an agent, project, or team name</li>
 					<li>Try a word from the latest message</li>

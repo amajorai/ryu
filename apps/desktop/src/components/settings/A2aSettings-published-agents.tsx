@@ -127,7 +127,11 @@ export function PublishedAgentsPanel({
 							</p>
 						</div>
 						<Switch
-							aria-label={`${agent.enabled ? "Disable" : "Enable"} ${agent.name}`}
+							aria-label={
+								agent.enabled
+									? tl("Disable {name}", { name: agent.name })
+									: tl("Enable {name}", { name: agent.name })
+							}
 							checked={agent.enabled}
 							disabled={update.isPending}
 							onCheckedChange={() => update.mutate(agent)}

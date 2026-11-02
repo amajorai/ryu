@@ -3,7 +3,7 @@
 // host.sideModel / host.getPreference / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -25,6 +25,13 @@
 // Failure posture: fail open. A model outage, an empty reply, or a rewrite that
 // dropped a code block sends the original message rather than blocking the turn
 // or sending something the user did not write.
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const COMMAND = "/polite";
 const UNCHANGED = "UNCHANGED";
@@ -77,7 +84,7 @@ if (onDemand) {
 	if (!target) {
 		return {
 			kind: "handled",
-			text: "Usage: `/polite <message>` rewrites the message politely and sends it to the agent.",
+			text: await host.t("Usage: `/polite <message>` rewrites the message politely and sends it to the agent."),
 		};
 	}
 	const rewritten = await rewrite(target, false);

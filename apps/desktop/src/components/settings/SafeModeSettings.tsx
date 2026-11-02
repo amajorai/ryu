@@ -16,13 +16,15 @@
 // says so rather than hiding it. The desktop can restart its local Core; a
 // remote save remains pending until that node is restarted by its operator.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, isEnglishLocale } from "@ryu/i18n/core";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useSafeMode } from "@/src/hooks/useSafeMode.ts";
 import type { SafeModeState } from "@/src/lib/api/safe-mode.ts";
+import { formatLocalList } from "@/src/lib/locale-format.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -30,35 +32,73 @@ import {
 } from "./shared/settings-items.tsx";
 
 /** "3 apps, 12 skills and 2 MCP servers" — the empty parts are dropped. */
-function describeSuppressed(state: SafeModeState): string {
+function describeSuppressed(state: SafeModeState, tl: LiteralMessage): string {
 	const { mcpServers, plugins, skills } = state.suppressed;
 	const parts: string[] = [];
 	if (plugins > 0) {
-		parts.push(`${plugins} app${plugins === 1 ? "" : "s"}`);
+		parts.push(
+			tl("{count, plural, one {# app} other {# apps}}", { count: plugins })
+		);
 	}
 	if (skills > 0) {
-		parts.push(`${skills} skill${skills === 1 ? "" : "s"}`);
+		parts.push(
+			tl("{count, plural, one {# skill} other {# skills}}", { count: skills })
+		);
 	}
 	if (mcpServers > 0) {
-		parts.push(`${mcpServers} MCP server${mcpServers === 1 ? "" : "s"}`);
+		parts.push(
+			tl("{count, plural, one {# MCP server} other {# MCP servers}}", {
+				count: mcpServers,
+			})
+		);
 	}
 	if (parts.length === 0) {
-		return "nothing";
+		return tl("nothing");
+	}
+	return joinList(parts);
+}
+
+/** "a, b and c" in English (no serial comma), the locale's own list elsewhere. */
+function joinList(parts: string[]): string {
+	const locale = activeLocale();
+	if (!isEnglishLocale(locale)) {
+		return formatLocalList(parts, "conjunction", locale);
 	}
 	if (parts.length === 1) {
-		return parts[0];
+		return parts[0] ?? "";
 	}
 	return `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }
 
-function statusLine(state: SafeModeState): string {
-	const scope = describeSuppressed(state);
+function statusLine(state: SafeModeState, tl: LiteralMessage): string {
+	const scope = describeSuppressed(state, tl);
 	if (state.enabled) {
 		return state.source === "env"
-			? `Active, forced on by the RYU_SAFE_MODE environment variable. Holding back ${scope}.`
-			: `Active. Holding back ${scope}. Your apps are untouched; turning this off restores them exactly.`;
+			? tl(
+					"Active, forced on by the RYU_SAFE_MODE environment variable. Holding back {scope}.",
+					{ scope }
+				)
+			: tl(
+					"Active. Holding back {scope}. Your apps are untouched; turning this off restores them exactly.",
+					{ scope }
+				);
 	}
-	return `Off. Turning it on would start the node without ${scope}.`;
+	return tl("Off. Turning it on would start the node without {scope}.", {
+		scope,
+	});
+}
+
+function restartNote(
+	tl: LiteralMessage,
+	local: boolean,
+	unapplied: boolean
+): string {
+	if (local) {
+		return tl("Applies on restart; the node restarts when you flip this.");
+	}
+	return unapplied
+		? tl("Saved for this node. Restart the remote node to apply the change.")
+		: tl("Applies after you restart the remote node.");
 }
 
 export function SafeModeSettings() {
@@ -107,7 +147,7 @@ export function SafeModeSettings() {
 					}
 					description={
 						state
-							? `${statusLine(state)} ${local ? "Applies on restart; the node restarts when you flip this." : pending !== null || state.preferenceEnabled !== state.enabled ? "Saved for this node. Restart the remote node to apply the change." : "Applies after you restart the remote node."}`
+							? `${statusLine(state, tl)} ${restartNote(tl, local, pending !== null || state.preferenceEnabled !== state.enabled)}`
 							: local
 								? enabled
 									? "The node isn't answering, so this reads the on-disk flag instead: Safe Mode is armed for its next boot."
@@ -128,10 +168,17 @@ export function SafeModeSettings() {
 								Leave Safe Mode
 							</Button>
 						}
-						description={`${tl(
-							"{kernelPlugins, plural, one {# core plugin} other {# core plugins}} kept running so chat and retrieval still work.",
-							{ kernelPlugins: state.suppressed.kernelPlugins }
-						)} ${local ? "Leaving restarts the node and brings everything back." : "Restart the remote node after saving to bring everything back."}`}
+						description={[
+							tl(
+								"{kernelPlugins, plural, one {# core plugin} other {# core plugins}} kept running so chat and retrieval still work.",
+								{ kernelPlugins: state.suppressed.kernelPlugins }
+							),
+							local
+								? tl("Leaving restarts the node and brings everything back.")
+								: tl(
+										"Restart the remote node after saving to bring everything back."
+									),
+						].join(" ")}
 						title="Back to a normal boot"
 					/>
 				) : null}

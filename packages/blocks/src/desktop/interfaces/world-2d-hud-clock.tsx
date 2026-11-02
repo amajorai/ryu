@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, isEnglishLocale } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useState } from "react";
@@ -137,11 +138,32 @@ function DayDial({ hours, night }: { hours: number; night: boolean }) {
  * The time the way Stardew's clock shows it: "8:20 am", stepping in
  * ten-minute increments.
  */
-export function stardewTime(date: Date): string {
+export function stardewTime(
+	date: Date,
+	locale: string = activeLocale()
+): string {
 	const hours = date.getHours();
 	const minutes = Math.floor(date.getMinutes() / 10) * 10;
+	if (!isEnglishLocale(locale)) {
+		const rounded = new Date(date);
+		rounded.setMinutes(minutes, 0, 0);
+		return dateFormatter(locale, { hour: "numeric", minute: "2-digit" }).format(
+			rounded
+		);
+	}
 	const hour = hours % 12 === 0 ? 12 : hours % 12;
 	return `${hour}:${String(minutes).padStart(2, "0")} ${hours < 12 ? "am" : "pm"}`;
+}
+
+/** "Mon. 14", the almanac's date; the UI locale's own short date elsewhere. */
+function almanacDate(date: Date, locale: string = activeLocale()): string {
+	if (!isEnglishLocale(locale)) {
+		return dateFormatter(locale, { day: "numeric", weekday: "short" }).format(
+			date
+		);
+	}
+	const weekday = dateFormatter(locale, { weekday: "short" }).format(date);
+	return `${weekday}. ${date.getDate()}`;
 }
 
 /** The "!" quest marker as a small HUD glyph (gold, or red for trouble). */
@@ -211,14 +233,11 @@ export function ClockBox({
 }) {
 	const tl = useLiteralMessages();
 	const now = useNow();
-	const weekday = now.toLocaleDateString(undefined, { weekday: "short" });
 	const time = stardewTime(now);
 	const hours = now.getHours() + now.getMinutes() / 60;
 	const night = hours < DAY_START_HOUR || hours >= DAY_END_HOUR;
 	const date = (
-		<time dateTime={now.toISOString().slice(0, 10)}>
-			{weekday}. {now.getDate()}
-		</time>
+		<time dateTime={now.toISOString().slice(0, 10)}>{almanacDate(now)}</time>
 	);
 	const clock = (
 		<time className="tabular-nums" dateTime={now.toISOString()}>

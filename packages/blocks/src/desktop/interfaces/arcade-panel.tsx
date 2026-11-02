@@ -1,19 +1,10 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import {
-	type InterfaceThread,
-	THREAD_STATUS_LABELS,
-	threadStatus,
-} from "@ryuhq/protocol/interfaces";
+import { type InterfaceThread, threadStatus } from "@ryuhq/protocol/interfaces";
 import type { ReactNode, Ref } from "react";
-import {
-	type Machine,
-	machineSummary,
-	plural,
-	threadTitle,
-} from "./arcade-model.ts";
+import { type Machine, machineSummary, threadTitle } from "./arcade-model.ts";
 import { BoardStatusDot } from "./board-status.tsx";
 import { GameSheet } from "./game-shell.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * The redemption counter: the host's own conversation surface in the game
@@ -41,7 +32,7 @@ export function ArcadePanel({
 }) {
 	const title = thread ? threadTitle(thread) : "New conversation";
 	const status = thread ? threadStatus(thread) : null;
-	const age = thread && showAge ? compactAge(thread.updatedAt) : "";
+	const age = thread && showAge ? relativeAge(thread.updatedAt) : "";
 	const tl = useLiteralMessages();
 	return (
 		<GameSheet
@@ -57,7 +48,7 @@ export function ArcadePanel({
 					{status && showAge ? (
 						<>
 							<BoardStatusDot status={status} />
-							<span className="shrink-0">{THREAD_STATUS_LABELS[status]}</span>
+							<span className="shrink-0">{threadStatusLabel(status)}</span>
 							<span aria-hidden="true">·</span>
 						</>
 					) : null}
@@ -70,7 +61,9 @@ export function ArcadePanel({
 						<>
 							<span aria-hidden="true">·</span>
 							<span className="shrink-0 tabular-nums">
-								{plural(thread.messageCount, "credit")}
+								{tl("{count, plural, one {# credit} other {# credits}}", {
+									count: thread.messageCount,
+								})}
 							</span>
 						</>
 					) : null}
@@ -81,7 +74,7 @@ export function ArcadePanel({
 								className="shrink-0 tabular-nums"
 								dateTime={thread?.updatedAt}
 							>
-								{age === "now" ? "just now" : tl("{age} ago", { age })}
+								{age}
 							</time>
 						</>
 					) : null}
@@ -123,7 +116,9 @@ export function MachineSheet({
 			onClose={onClose}
 			sheetKey={machine.id}
 			subtitle={
-				<span className="truncate">{summary ?? machineSummary(machine)}</span>
+				<span className="truncate">
+					{summary ?? machineSummary(machine, tl)}
+				</span>
 			}
 			title={machine.name}
 		>

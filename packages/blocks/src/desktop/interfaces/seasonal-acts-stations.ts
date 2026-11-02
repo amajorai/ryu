@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAgentAct,
 	InterfaceSnapshot,
@@ -95,7 +96,10 @@ export function doorActs(
 	for (const entry of blockerEntries(snapshot, acts)) {
 		if (!needsYou.has(entry.threadId)) {
 			stopped.add(entry.threadId);
-			words.set(entry.threadId, `stopped: ${entry.blocker.title}`);
+			words.set(
+				entry.threadId,
+				tr("stopped: {title}", { title: entry.blocker.title })
+			);
 		}
 	}
 	for (const act of acts.values()) {
@@ -105,22 +109,22 @@ export function doorActs(
 		}
 		if (act.act === "working") {
 			working.add(id);
-			words.set(id, act.stalled ? "stalled?" : "working");
+			words.set(id, act.stalled ? tr("stalled?") : tr("working"));
 		} else if (act.act === "limited") {
-			words.set(id, "limited");
+			words.set(id, tr("limited"));
 		}
 	}
 	for (const thread of snapshot.threads) {
 		if (needsYou.has(thread.id)) {
-			words.set(thread.id, "needs you");
+			words.set(thread.id, tr("Needs you"));
 		} else if (words.has(thread.id)) {
 		} else if ((thread.unread ?? 0) > 0) {
-			words.set(thread.id, "answer ready");
+			words.set(thread.id, tr("answer ready"));
 		} else if (thread.blocker) {
 			// A stop too old to count: said, but not as waiting on you.
-			words.set(thread.id, "stopped a while ago");
+			words.set(thread.id, tr("stopped a while ago"));
 		} else {
-			words.set(thread.id, "quiet");
+			words.set(thread.id, tr("quiet"));
 		}
 	}
 	return { needsYou, stopped, words, working };

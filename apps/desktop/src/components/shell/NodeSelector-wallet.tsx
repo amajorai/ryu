@@ -13,6 +13,7 @@ import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import { formatMicroUsd } from "@/src/lib/api/credits.ts";
 import { creditBalanceStatus } from "@/src/lib/credit-warning.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 import { type Node, useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 import layoutStyles from "./NodeSelector.module.css";
@@ -39,12 +40,12 @@ function formatCreditResetDate(
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
-	return new Intl.DateTimeFormat(undefined, {
+	return formatLocalDateTime(date, {
 		day: "numeric",
 		hour: "numeric",
 		minute: "2-digit",
 		month: "short",
-	}).format(date);
+	});
 }
 
 export function ManagedNodeWallet({ node }: { node: Node | undefined }) {
@@ -102,7 +103,7 @@ export function ManagedNodeWallet({ node }: { node: Node | undefined }) {
 			data-testid="managed-node-wallet"
 		>
 			<button
-				className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-accent/50 hover:text-foreground"
+				className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-start hover:bg-accent/50 hover:text-foreground"
 				onClick={openCredits}
 				type="button"
 			>
@@ -191,7 +192,9 @@ export function CloudSuggestions({ compact = false }: { compact?: boolean }) {
 		setAddingUrl(node.url);
 		try {
 			await addSuggestedNode(node);
-			sileo.success({ title: `Added ${cloudLabel(node.name)}` });
+			sileo.success({
+				title: tl("Added {name}", { name: cloudLabel(node.name) }),
+			});
 		} catch {
 			sileo.error({ title: "Couldn't add cloud computer" });
 		} finally {

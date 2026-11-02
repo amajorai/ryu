@@ -1,5 +1,5 @@
-//! Managed Ryu Core process lifecycle: state, binary resolution, start/stop
-//! commands, and the Safe Mode sentinel.
+//! Desktop-managed Ryu Core lifecycle: managed state, binary resolution, and
+//! the start/stop/install commands.
 
 use std::sync::Mutex;
 
@@ -233,56 +233,6 @@ pub(crate) async fn get_ryu_status() -> String {
         Ok(response) if response.status().is_success() => "running".to_string(),
         _ => "stopped".to_string(),
     }
-}
-
-// ── Safe Mode sentinel (`<data dir>/state/safe-mode`) ──────────────────────────
-//
-// Core owns Safe Mode and normally the desktop drives it over `PUT /api/safe-mode`.
-// These two commands exist for the case that motivates the feature: a Core that
-// will not come up. HTTP is unavailable exactly then, and reading the flag out of
-// `preferences.db` is circular when the boot path or the store is what is wedged —
-// so the sentinel FILE is the tier that always works, and the desktop must be able
-// to write it without Core's help.
-//
-// Profile-aware via `profile::ryu_home_dir`, so arming safe mode from a dev build
-// never reaches into the release node's `~/.ryu`.
-
-fn safe_mode_sentinel_path() -> std::path::PathBuf {
-    ryu_sidecar_runtime::layout::state_path(&profile::ryu_home_dir(), "safe-mode")
-}
-
-/// Whether the next Core boot will enter Safe Mode because of the sentinel.
-///
-/// Only the sentinel tier — `RYU_SAFE_MODE` and the stored preference are Core's to
-/// resolve, and Core reports the effective answer over `GET /api/safe-mode`.
-#[tauri::command]
-pub(crate) async fn get_safe_mode_sentinel() -> bool {
-    safe_mode_sentinel_path().exists()
-}
-
-/// Arm or clear the sentinel. Returns the resulting state.
-///
-/// Does NOT restart Core: the caller decides when (the preflight page already owns
-/// that button), and a command that restarted as a side effect would be impossible
-/// to use from a crash screen where the process is already down.
-#[tauri::command]
-pub(crate) async fn set_safe_mode_sentinel(enabled: bool) -> Result<bool, String> {
-    let path = safe_mode_sentinel_path();
-    if enabled {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        std::fs::write(
-			&path,
-			b"safe mode: this node boots with apps, plugins, skills and user MCP servers disabled. Delete this file to boot normally.\n",
-		)
-		.map_err(|e| e.to_string())?;
-    } else if let Err(e) = std::fs::remove_file(&path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.to_string());
-        }
-    }
-    Ok(enabled)
 }
 
 #[tauri::command]

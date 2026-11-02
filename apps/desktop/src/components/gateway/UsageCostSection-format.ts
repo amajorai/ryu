@@ -1,5 +1,7 @@
 // Constants and formatting helpers shared by the Usage & Cost cards.
 
+import { formatDurationParts } from "@ryu/i18n/format-intl";
+import { translate as tl } from "@ryu/i18n/lite";
 import {
 	formatCurrency,
 	formatNumber as formatSharedNumber,
@@ -69,20 +71,24 @@ export function formatNumber(value: number): string {
 	return formatSharedNumber(value);
 }
 
-/** "2m 05s" / "42s" / "now" / "—" for a whole-seconds countdown. */
+/** "2m 5s" / "42s" / "now" / "—" for a whole-seconds countdown, in the UI
+ *  locale's own units ("2分 5秒"). */
 export function formatCountdown(secs: number | null): string {
 	if (secs === null) {
 		return "—";
 	}
 	if (secs <= 0) {
-		return "now";
+		return tl("now");
 	}
 	const minutes = Math.floor(secs / SECONDS_PER_MINUTE);
 	const seconds = secs % SECONDS_PER_MINUTE;
 	if (minutes > 0) {
-		return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+		return formatDurationParts([
+			[minutes, "minute"],
+			[seconds, "second"],
+		]);
 	}
-	return `${seconds}s`;
+	return formatDurationParts([[seconds, "second"]]);
 }
 
 export function formatQuota(quota: ProviderQuota): string {

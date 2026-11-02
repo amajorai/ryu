@@ -5,11 +5,12 @@ import {
 	useToolElapsed,
 } from "@ryu/blocks/desktop/agent-elements/tools/tool-timing.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useMemo, useState } from "react";
 import { MessageList } from "@/components/agent-elements/message-list.tsx";
 import { SubagentAvatar } from "@/src/components/panels/subagent-identity.tsx";
-import { compactAge } from "@/src/lib/time.ts";
+import { compactAgo } from "@/src/lib/time.ts";
 import { SourceItemRow } from "./cowork-rows.tsx";
 import { extractSources } from "./cowork-sources.ts";
 import { extractSubagents, type SubagentSummary } from "./cowork-subagents.ts";
@@ -53,8 +54,7 @@ function completedAge(completedAt: number | undefined): string {
 	if (completedAt === undefined) {
 		return "";
 	}
-	const age = compactAge(completedAt);
-	return age === "now" ? age : `${age} ago`;
+	return compactAgo(completedAt);
 }
 
 function SubagentRosterRow({
@@ -78,7 +78,7 @@ function SubagentRosterRow({
 		<li>
 			<button
 				aria-label={tl("Open {title}", { title: subagent.title })}
-				className="flex min-h-14 w-full min-w-0 items-start gap-3 rounded-lg px-1 py-2 text-left transition-colors duration-150 hover:bg-muted/50 active:scale-[0.99] motion-reduce:transition-none"
+				className="flex min-h-14 w-full min-w-0 items-start gap-3 rounded-lg px-1 py-2 text-start transition-colors duration-150 hover:bg-muted/50 active:scale-[0.99] motion-reduce:transition-none"
 				onClick={() => onOpen(subagent)}
 				type="button"
 			>
@@ -138,7 +138,7 @@ function SubagentTranscript({
 					onClick={onBack}
 					type="button"
 				>
-					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+					<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 				</button>
 				<SubagentAvatar animate={false} className="size-5" seed={subagent.id} />
 				<h2
@@ -237,7 +237,7 @@ export function SubagentsWorkspacePanel({
 							{hiddenActive > 0 && (
 								<li>
 									<button
-										className="ml-8 rounded-lg px-1 py-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
+										className="ms-8 rounded-lg px-1 py-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
 										onClick={() => setShowAllActive(true)}
 										type="button"
 									>

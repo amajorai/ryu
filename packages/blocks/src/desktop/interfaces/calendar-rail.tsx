@@ -1,9 +1,9 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
 	localDayKey,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 } from "@ryuhq/protocol/interfaces";
 import { Check, ChevronLeft, ChevronRight, Plus } from "lucide-react";
@@ -31,7 +31,7 @@ import {
 	MICRO_TEXT_CLASS,
 	RunPopover,
 } from "./calendar-parts.tsx";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 
 function RailHeading({ children, id }: { children: string; id: string }) {
 	return (
@@ -62,6 +62,7 @@ function MiniMonth({
 	selectedKey: string;
 	todayKey: string;
 }) {
+	const tl = useLiteralMessages();
 	const display = parseDayKey(displayKey);
 	const days = monthGridDays(display);
 	const names = weekdayNames();
@@ -91,7 +92,7 @@ function MiniMonth({
 					type="button"
 					variant="ghost-muted"
 				>
-					<ChevronLeft aria-hidden="true" />
+					<ChevronLeft aria-hidden="true" className="rtl:-scale-x-100" />
 				</Button>
 				<Button
 					aria-label="Next month in picker"
@@ -100,7 +101,7 @@ function MiniMonth({
 					type="button"
 					variant="ghost-muted"
 				>
-					<ChevronRight aria-hidden="true" />
+					<ChevronRight aria-hidden="true" className="rtl:-scale-x-100" />
 				</Button>
 			</div>
 			<div
@@ -151,7 +152,14 @@ function MiniMonth({
 									<button
 										{...{ [CALENDAR_DAY_ATTRIBUTE]: key }}
 										aria-current={isToday ? "date" : undefined}
-										aria-label={`${longDay(date)}${isToday ? ", today" : ""}${activeDayKeys.has(key) ? ", has items" : ""}`}
+										aria-label={tl(
+											"{day}{today, select, true {, today} other {}}{hasItems, select, true {, has items} other {}}",
+											{
+												day: longDay(date),
+												hasItems: activeDayKeys.has(key) ? "true" : "false",
+												today: isToday ? "true" : "false",
+											}
+										)}
 										aria-pressed={isSelected}
 										className={cn(
 											"relative flex size-7 items-center justify-center rounded-full text-xs tabular-nums outline-none transition-colors",
@@ -221,7 +229,7 @@ function UpcomingRuns({
 							<li key={run.key}>
 								<RunPopover
 									className={cn(
-										"group/run flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left outline-none transition-colors",
+										"group/run flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-start outline-none transition-colors",
 										"hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted"
 									)}
 									item={run}
@@ -231,7 +239,10 @@ function UpcomingRuns({
 									snapshot={snapshot}
 									tabStop
 								>
-									<span className="w-full truncate text-foreground text-sm leading-5">
+									<span
+										className="w-full truncate text-foreground text-sm leading-5"
+										data-ryu-i18n="off"
+									>
 										{run.event.title}
 									</span>
 									<span className="w-full truncate text-muted-foreground text-xs tabular-nums leading-4">
@@ -251,7 +262,7 @@ function UpcomingRuns({
 const LAYERS: readonly CalendarLayer[] = [...THREAD_STATUS_ORDER, "runs"];
 
 function layerLabel(layer: CalendarLayer): string {
-	return layer === "runs" ? "Scheduled runs" : THREAD_STATUS_LABELS[layer];
+	return layer === "runs" ? "Scheduled runs" : threadStatusLabel(layer);
 }
 
 /**
@@ -291,7 +302,7 @@ function LayerList({
 						<li key={layer}>
 							<button
 								aria-checked={visible}
-								className="flex h-8 w-full items-center gap-2 rounded-md ps-2 pe-1 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+								className="flex h-8 w-full items-center gap-2 rounded-md ps-2 pe-1 text-start text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 								onClick={() => onToggle(layer)}
 								role="checkbox"
 								type="button"

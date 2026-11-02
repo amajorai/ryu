@@ -7,6 +7,7 @@
 // what Core found.
 
 import type { SvglSpec } from "@ryu/blocks/web/svgl-icon.tsx";
+import { translate as tl } from "@ryu/i18n/core";
 import type { ApiTarget } from "./api/client.ts";
 import {
 	type ImportItemKind,
@@ -132,15 +133,32 @@ export function migrationSourceLabel(source: string | undefined): string {
 	);
 }
 
-const KIND_NOUNS: Record<ImportItemKind, [string, string]> = {
-	agent: ["agent", "agents"],
-	conversations: ["project", "projects"],
-	instructions: ["instructions file", "instructions files"],
-	mcp_server: ["MCP server", "MCP servers"],
-	memory: ["memory file", "memory files"],
-	plugin: ["plugin", "plugins"],
-	skill: ["skill", "skills"],
-	slash_command: ["slash command", "slash commands"],
+const KIND_COUNTS: Record<ImportItemKind, (count: number) => string> = {
+	agent: (count) =>
+		tl("{count, plural, one {# agent} other {# agents}}", { count }),
+	conversations: (count) =>
+		tl("{count, plural, one {# project} other {# projects}}", { count }),
+	instructions: (count) =>
+		tl(
+			"{count, plural, one {# instructions file} other {# instructions files}}",
+			{ count }
+		),
+	mcp_server: (count) =>
+		tl("{count, plural, one {# MCP server} other {# MCP servers}}", {
+			count,
+		}),
+	memory: (count) =>
+		tl("{count, plural, one {# memory file} other {# memory files}}", {
+			count,
+		}),
+	plugin: (count) =>
+		tl("{count, plural, one {# plugin} other {# plugins}}", { count }),
+	skill: (count) =>
+		tl("{count, plural, one {# skill} other {# skills}}", { count }),
+	slash_command: (count) =>
+		tl("{count, plural, one {# slash command} other {# slash commands}}", {
+			count,
+		}),
 };
 
 const KIND_ORDER: readonly ImportItemKind[] = [
@@ -166,7 +184,7 @@ const isSavedContext = (item: ScanItem) =>
 export function summarizeMigrationItems(items: readonly ScanItem[]): string {
 	const parts: string[] = [];
 	if (items.some(isLooseChats)) {
-		parts.push("Chats");
+		parts.push(tl("Chats"));
 	}
 	const rest = items.filter((item) => !isLooseChats(item));
 	for (const kind of KIND_ORDER) {
@@ -174,12 +192,11 @@ export function summarizeMigrationItems(items: readonly ScanItem[]): string {
 			(item) => item.kind === kind && !isSavedContext(item)
 		).length;
 		if (count > 0) {
-			const [one, many] = KIND_NOUNS[kind];
-			parts.push(`${count} ${count === 1 ? one : many}`);
+			parts.push(KIND_COUNTS[kind](count));
 		}
 	}
 	if (items.some(isSavedContext)) {
-		parts.push("saved context");
+		parts.push(tl("saved context"));
 	}
 	return parts.join(" · ");
 }

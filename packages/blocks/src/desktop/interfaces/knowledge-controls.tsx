@@ -221,9 +221,9 @@ export function KnowledgeControls({
 						) : null}
 					</form>
 					<ToggleRow
+						accessibleLabel={tl("Local graph")}
 						checked={local}
 						label="Local graph"
-						name="Local graph"
 						onChange={(checked) =>
 							onChange({ mode: checked ? "local" : "global" })
 						}
@@ -268,35 +268,35 @@ export function KnowledgeControls({
 						)
 					) : null}
 					<ToggleRow
+						accessibleLabel={tl("Show agents")}
 						checked={settings.agents}
 						label="Agents"
-						name="Show agents"
 						onChange={(agents) => onChange({ agents })}
 					/>
 					<ToggleRow
+						accessibleLabel={tl("Show projects and teams")}
 						checked={settings.groups}
 						label="Projects and teams"
-						name="Show projects and teams"
 						onChange={(groups) => onChange({ groups })}
 					/>
 					<ToggleRow
+						accessibleLabel={tl("Show conversations")}
 						checked={settings.conversations}
 						label="Conversations"
-						name="Show conversations"
 						onChange={(conversations) => onChange({ conversations })}
 					/>
 					<ToggleRow
+						accessibleLabel={tl("Show topics")}
 						checked={settings.topics}
 						label="Topics"
-						name="Show topics"
 						onChange={(topics) => onChange({ topics })}
 					/>
 					{settings.topics ? (
 						<ToggleRow
+							accessibleLabel={tl("Include latest messages in topics")}
 							checked={settings.messages}
 							inset
 							label="Include latest messages"
-							name="Include latest messages in topics"
 							onChange={(messages) => onChange({ messages })}
 						/>
 					) : null}
@@ -308,9 +308,9 @@ export function KnowledgeControls({
 						</p>
 					) : null}
 					<ToggleRow
+						accessibleLabel={tl("Show orphans")}
 						checked={settings.orphans}
 						label="Orphans"
-						name="Show orphans"
 						onChange={(orphans) => onChange({ orphans })}
 					/>
 				</Section>

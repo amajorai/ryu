@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -6,6 +6,7 @@ import type {
 	InterfaceThread,
 } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
+import { inlineArrowStep } from "./inline-direction.ts";
 import { agentById } from "./interface-renderer.ts";
 import {
 	type LiveCategoryEntry,
@@ -59,12 +60,13 @@ export function LiveTabs<T extends string>({
 						key={tab.id}
 						onClick={() => onChange(tab.id)}
 						onKeyDown={(event) => {
-							if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
+							// Left and right follow the tab row's reading direction.
+							const step = inlineArrowStep(event.key, event.currentTarget);
+							if (step === 0) {
 								return;
 							}
 							event.preventDefault();
 							const index = tabs.findIndex((item) => item.id === tab.id);
-							const step = event.key === "ArrowRight" ? 1 : -1;
 							const next = tabs[(index + step + tabs.length) % tabs.length];
 							if (next) {
 								onChange(next.id);
@@ -106,7 +108,7 @@ function Section({
 				<span className="font-semibold">
 					{title}
 					{count === undefined ? null : (
-						<span className="ml-2 font-normal text-muted-foreground tabular-nums">
+						<span className="ms-2 font-normal text-muted-foreground tabular-nums">
 							{count.toString()}
 						</span>
 					)}
@@ -163,6 +165,23 @@ function ChannelGrid({
 }
 
 /** A grid of threads (category pages and unassigned threads). */
+/** A tile's accessible name: watch a running thread, open any other. */
+function tileLabel(
+	tl: LiteralMessage,
+	thread: InterfaceThread,
+	agent: string | undefined
+): string {
+	const title = thread.title;
+	if (thread.running) {
+		return agent
+			? tl("Watch {title}, {agent}", { agent, title })
+			: tl("Watch {title}", { title });
+	}
+	return agent
+		? tl("Open {title}, {agent}", { agent, title })
+		: tl("Open {title}", { title });
+}
+
 export function LiveThreadGrid({
 	actions,
 	dense = false,
@@ -179,6 +198,7 @@ export function LiveThreadGrid({
 	threads: readonly InterfaceThread[];
 	withCategory?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<div className={dense ? DENSE_GRID : STREAM_GRID}>
 			{threads.map((thread) => {
@@ -189,7 +209,7 @@ export function LiveThreadGrid({
 						category={withCategory ? liveCategoryOf(snapshot, thread) : null}
 						current={thread.id === actions.activeThreadId}
 						key={thread.id}
-						label={`${thread.running ? "Watch" : "Open"} ${thread.title}${agent ? `, ${agent.name}` : ""}`}
+						label={tileLabel(tl, thread, agent?.name)}
 						live={thread.running}
 						now={actions.now}
 						onActivate={() => actions.onOpenThread(thread.id)}
@@ -349,11 +369,14 @@ export function LiveCategoryPage({
 	const { category } = entry;
 	const live = entry.threads.filter((thread) => thread.running);
 	const videos = entry.threads.filter((thread) => !thread.running);
-	const videoCount = `${entry.threads.length.toString()} ${entry.threads.length === 1 ? "video" : "videos"}`;
 	const meta = [
-		entry.liveCount > 0 ? `${entry.liveCount.toString()} live` : null,
-		videoCount,
-		`${entry.channelIds.length.toString()} ${entry.channelIds.length === 1 ? "channel" : "channels"}`,
+		entry.liveCount > 0 ? tl("{count} live", { count: entry.liveCount }) : null,
+		tl("{count, plural, one {# video} other {# videos}}", {
+			count: entry.threads.length,
+		}),
+		tl("{count, plural, one {# channel} other {# channels}}", {
+			count: entry.channelIds.length,
+		}),
 	]
 		.filter(Boolean)
 		.join(" · ");

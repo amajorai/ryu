@@ -10,6 +10,8 @@
 
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { tf } from "../i18n/translate.ts";
+import { refusal } from "./connect-refusal.ts";
 import {
 	type CallAnswer,
 	CatalogClient,
@@ -338,10 +340,14 @@ async function search(ctx: CliContext, args: ConnectArgs): Promise<number> {
 	if (result.data.length === 0) {
 		const lines = ["No tools matched."];
 		if (result.missedTerms?.length) {
-			lines.push(`No tool matched: ${result.missedTerms.join(", ")}`);
+			lines.push(
+				tf("No tool matched: {terms}", { terms: result.missedTerms.join(", ") })
+			);
 		}
 		if (result.didYouMean?.length) {
-			lines.push(`Did you mean: ${result.didYouMean.join(", ")}`);
+			lines.push(
+				tf("Did you mean: {ids}", { ids: result.didYouMean.join(", ") })
+			);
 		}
 		lines.push(
 			"File it with: ryu-cli connect request <what the tool should do>"
@@ -381,17 +387,31 @@ async function describe(ctx: CliContext, args: ConnectArgs): Promise<number> {
 	const reliability = tool.reliability;
 	const lines = [
 		`${tool.name} (${tool.id})`,
-		`Provider   ${tool.provider} · ${tool.tier}${tool.toolkit ? ` · ${tool.toolkit}` : ""}`,
-		`Price      ${priceText(tool.price)} per call (${tool.price.source})`,
+		tf("Provider   {provider} · {tier}{toolkit}", {
+			provider: tool.provider,
+			tier: tool.tier,
+			toolkit: tool.toolkit ? ` · ${tool.toolkit}` : "",
+		}),
+		tf("Price      {price} per call ({source})", {
+			price: priceText(tool.price),
+			source: tool.price.source,
+		}),
 	];
 	if (tool.catalog?.state) {
 		lines.push(
-			`Catalog    ${tool.catalog.state} (${tool.catalog.source ?? "ryu"})`
+			tf("Catalog    {state} ({source})", {
+				state: tool.catalog.state,
+				source: tool.catalog.source ?? "ryu",
+			})
 		);
 	}
 	if (reliability?.sufficient && typeof reliability.successRate === "number") {
 		lines.push(
-			`Reliable   ${(reliability.successRate * 100).toFixed(1)}% over 7 days, p50 ${reliability.p50Ms ?? "-"} ms, p95 ${reliability.p95Ms ?? "-"} ms`
+			tf("Reliable   {rate}% over 7 days, p50 {p50} ms, p95 {p95} ms", {
+				rate: (reliability.successRate * 100).toFixed(1),
+				p50: String(reliability.p50Ms ?? "-"),
+				p95: String(reliability.p95Ms ?? "-"),
+			})
 		);
 	}
 	lines.push("", tool.description, "", "Parameters:");
@@ -537,55 +557,22 @@ async function balance(ctx: CliContext, args: ConnectArgs): Promise<number> {
 		return 0;
 	}
 	const lines = [
-		`Available  ${formatMicroUsd(current.availableMicroUsd)}`,
-		`Held       ${formatMicroUsd(current.heldMicroUsd)}`,
-		`Unsettled  ${formatMicroUsd(current.unsettledMicroUsd)}`,
+		tf("Available  {amount}", {
+			amount: formatMicroUsd(current.availableMicroUsd),
+		}),
+		tf("Held       {amount}", { amount: formatMicroUsd(current.heldMicroUsd) }),
+		tf("Unsettled  {amount}", {
+			amount: formatMicroUsd(current.unsettledMicroUsd),
+		}),
 	];
 	if (current.suspended) {
 		lines.push("Suspended  yes: add credit to resume calls");
 	}
 	if (current.topUpUrl) {
-		lines.push(`Top up     ${current.topUpUrl}`);
+		lines.push(tf("Top up     {url}", { url: current.topUpUrl }));
 	}
 	ctx.io.out(`${lines.join("\n")}\n`);
 	return 0;
-}
-
-/** Render a refusal with what to do next; exit 1. */
-function refusal(ctx: CliContext, error: ConnectError): number {
-	if (ctx.flags.json) {
-		ctx.io.err(
-			`${JSON.stringify({
-				...error.body,
-				error: error.message,
-				code: error.code,
-				status: error.status,
-			})}\n`
-		);
-		return 1;
-	}
-	const lines = [`Error: ${error.message}`];
-	const body = error.body;
-	if (Array.isArray(body.didYouMean) && body.didYouMean.length > 0) {
-		lines.push(`Did you mean: ${body.didYouMean.join(", ")}`);
-	}
-	if (typeof body.top_up_url === "string") {
-		lines.push(`Add credit: ${body.top_up_url}`);
-	}
-	if (
-		body.precondition !== null &&
-		typeof body.precondition === "object" &&
-		"toolkit" in body.precondition
-	) {
-		lines.push(
-			`Connect the ${String(body.precondition.toolkit)} account (in Ryu, from Integrations), then run the same call again.`
-		);
-	}
-	if (error.retryAfterSeconds !== null) {
-		lines.push(`Retry after ${error.retryAfterSeconds} s.`);
-	}
-	ctx.io.err(`${lines.join("\n")}\n`);
-	return 1;
 }
 
 type Handler = (ctx: CliContext, args: ConnectArgs) => Promise<number>;

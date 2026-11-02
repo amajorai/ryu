@@ -150,7 +150,7 @@ export function WebSearchAccessMenu({
 			<DropdownMenuSub>
 				<DropdownMenuSubTrigger disabled={!enabled} purpose="layer-selection">
 					<span className="text-muted-foreground">Web search</span>
-					<span className="ml-auto text-muted-foreground/70">
+					<span className="ms-auto text-muted-foreground/70">
 						{triggerLabel}
 					</span>
 				</DropdownMenuSubTrigger>

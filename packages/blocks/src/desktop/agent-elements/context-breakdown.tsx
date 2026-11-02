@@ -64,7 +64,7 @@ function BandRow({
 					<div className="text-muted-foreground text-xs">{band.detail}</div>
 				) : null}
 			</div>
-			<div className="shrink-0 text-right">
+			<div className="shrink-0 text-end">
 				<div className="font-mono text-foreground text-xs tabular-nums">
 					{formatCount(band.tokens)}
 				</div>
@@ -133,7 +133,7 @@ function BreakdownBar({
 					<div
 						className={cn(
 							styles.width,
-							"h-full first:rounded-l-full last:rounded-r-full",
+							"h-full first:rounded-s-full last:rounded-e-full",
 							band.className
 						)}
 						key={band.key}
@@ -170,6 +170,7 @@ export function ContextBreakdownPanel({
 	className?: string;
 	usage?: ContextUsage | null;
 }) {
+	const tl = useLiteralMessages();
 	const windowSize = usage?.total || breakdown?.window || 0;
 	const reported = usage?.used ?? 0;
 	if (!breakdown) {
@@ -188,7 +189,7 @@ export function ContextBreakdownPanel({
 			</div>
 		);
 	}
-	const bands = contextBands(breakdown, reported);
+	const bands = contextBands(breakdown, reported, tl);
 	const occupied = isPositiveContextCount(reported)
 		? nativeContextMax(
 				() => reported,
@@ -252,21 +253,36 @@ export function ContextBreakdownPanel({
 					<SummaryRow
 						label="Over-estimated"
 						muted
-						value={`${formatCount(overEstimate)} tokens`}
+						value={tl(
+							"{count, plural, one {{countText} token} other {{countText} tokens}}",
+							{
+								count: overEstimate,
+								countText: formatCount(overEstimate) ?? "—",
+							}
+						)}
 					/>
 				) : null}
 				{breakdown.reserveOutput > 0 ? (
 					<SummaryRow
 						label="Reserved for reply"
 						muted
-						value={`${formatCount(breakdown.reserveOutput)} tokens`}
+						value={tl(
+							"{count, plural, one {{countText} token} other {{countText} tokens}}",
+							{
+								count: breakdown.reserveOutput,
+								countText: formatCount(breakdown.reserveOutput) ?? "—",
+							}
+						)}
 					/>
 				) : null}
 				{isPositiveContextCount(windowSize) ? (
 					<SummaryRow
 						label="Free"
 						muted
-						value={`${formatCount(free)} of ${formatCount(windowSize)}`}
+						value={tl("{free} of {total}", {
+							free: formatCount(free) ?? "—",
+							total: formatCount(windowSize) ?? "—",
+						})}
 					/>
 				) : null}
 			</div>

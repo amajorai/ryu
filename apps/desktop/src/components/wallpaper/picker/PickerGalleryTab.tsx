@@ -39,7 +39,7 @@ export function Tile({
 		>
 			{children}
 			{selected ? (
-				<span className="absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-foreground text-background">
+				<span className="absolute end-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-foreground text-background">
 					<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 				</span>
 			) : null}

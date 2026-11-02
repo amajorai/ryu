@@ -4,10 +4,10 @@ import {
 	Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import { formatDate, startOfDisplayDayMs } from "@ryu/ui/lib/timezone.ts";
-import { formatDistanceToNow } from "date-fns";
 import { useMemo } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useRuns } from "@/src/hooks/useRuns.ts";
+import { relativeTimeAgo } from "@/src/lib/time.ts";
 
 /** Prefix Core uses for the ephemeral conversation id of a workflow node run. */
 const WORKFLOW_RUN_PREFIX = "wfrun-";
@@ -80,11 +80,7 @@ export function statusMeta(status: string | undefined): {
 }
 
 export function relativeTime(ms: number): string {
-	try {
-		return formatDistanceToNow(new Date(ms), { addSuffix: true });
-	} catch {
-		return "";
-	}
+	return relativeTimeAgo(ms);
 }
 
 /**

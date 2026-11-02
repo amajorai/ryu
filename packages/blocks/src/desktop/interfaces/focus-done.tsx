@@ -20,21 +20,21 @@ function caughtUpDetail({
 }): string {
 	if (total === 0) {
 		return agentCount === 0
-			? "No threads and no agents yet. Start a thread and Ryu picks an agent."
-			: "No threads need you. Start something new below.";
+			? tl(
+					"No threads and no agents yet. Start a thread and Ryu picks an agent."
+				)
+			: tl("No threads need you. Start something new below.");
 	}
-	const seen =
-		total === 1
-			? "You've seen the only thread."
-			: tl("You've seen all {totalText} threads.", {
-					totalText: String(total),
-				});
+	const seen = tl(
+		"{total, plural, one {You've seen the only thread.} other {You've seen all # threads.}}",
+		{ total }
+	);
 	if (working === 0) {
 		return seen;
 	}
 	return tl(
-		"{seen} {working, plural, one {{workingText} is} other {{workingText} are}} still running.",
-		{ seen, working, workingText: String(working) }
+		"{seen} {working, plural, one {# is} other {# are}} still running.",
+		{ seen, working }
 	);
 }
 

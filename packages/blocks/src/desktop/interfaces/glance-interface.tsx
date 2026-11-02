@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ToggleGroup,
@@ -163,6 +164,21 @@ function PageDots({
  * detail; and a Home Screen lays the same snapshot out as widgets. Threads
  * open in a sheet that holds the host's own conversation surface.
  */
+/** The stage's spoken name for each face, as whole messages. */
+const GLANCE_STAGE_LABELS: Record<
+	keyof typeof GLANCE_FACE_LABELS,
+	() => string
+> = {
+	agents: () => tr("Agents face"),
+	clock: () => tr("Clock face"),
+	flow: () => tr("Flow face"),
+};
+const GLANCE_DISTANCE_TITLES: Record<GlanceDistanceMode, () => string> = {
+	auto: () => tr("Alternate Far and Near"),
+	far: () => tr("Far: large, simple"),
+	near: () => tr("Near: more detail"),
+};
+
 export function GlanceInterface({
 	activeThreadId,
 	loading,
@@ -327,7 +343,7 @@ export function GlanceInterface({
 	const offset = reduceMotion || change !== "face" ? 0 : 40;
 	const settle = reduceMotion || change === "face" ? 1 : 0.985;
 	const stageLabel =
-		view === "home" ? "Home Screen" : `${GLANCE_FACE_LABELS[face]} face`;
+		view === "home" ? tr("Home Screen") : GLANCE_STAGE_LABELS[face]();
 
 	return (
 		<div
@@ -379,11 +395,7 @@ export function GlanceInterface({
 													event.currentTarget.blur();
 												}
 											}}
-											title={
-												option.value === "auto"
-													? "Alternate Far and Near"
-													: `${option.label}: ${option.value === "far" ? "large, simple" : "more detail"}`
-											}
+											title={GLANCE_DISTANCE_TITLES[option.value]()}
 											value={option.value}
 										>
 											{option.label}
@@ -405,7 +417,7 @@ export function GlanceInterface({
 								</Button>
 							) : (
 								<Button
-									className="-mr-3 gap-1.5 text-muted-foreground"
+									className="-me-3 gap-1.5 text-muted-foreground"
 									onClick={() => setView("home")}
 									size="sm"
 									type="button"

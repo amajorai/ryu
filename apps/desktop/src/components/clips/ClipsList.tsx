@@ -81,7 +81,7 @@ export function ClipsList({ onPick }: ClipsListProps) {
 									{clip.title || "Untitled clip"}
 								</span>
 							</span>
-							<span className="ml-2 shrink-0 text-muted-foreground text-xs tabular-nums">
+							<span className="ms-2 shrink-0 text-muted-foreground text-xs tabular-nums">
 								{formatDuration(clip.durationMs)}
 							</span>
 						</DropdownMenuItem>

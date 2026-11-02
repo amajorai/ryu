@@ -5,12 +5,16 @@ import {
 	Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	activeLocale,
+	dateFormatter,
+	formatRelativeTime,
+} from "@ryu/i18n/core";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
-import { format, formatDistanceToNow } from "date-fns";
 import { type ReactNode, useMemo } from "react";
 import { QuietEmpty } from "@/src/components/agents/shared/quiet-empty.tsx";
 import { InlineErrorRow } from "@/src/components/chat/InlineErrorRow.tsx";
@@ -51,6 +55,12 @@ function hasDetail(agent: AgentIdentity): agent is Agent {
 	return "tools" in agent;
 }
 
+/** "Oct 30, 2026, 14:05:09" in the UI language. */
+const PASSPORT_DATE_TIME: Intl.DateTimeFormatOptions = {
+	dateStyle: "medium",
+	timeStyle: "medium",
+};
+
 function formatDate(value: string | null): string {
 	if (!value) {
 		return "Not recorded";
@@ -58,7 +68,7 @@ function formatDate(value: string | null): string {
 	const parsed = new Date(value);
 	return Number.isNaN(parsed.getTime())
 		? value
-		: format(parsed, "MMM d, yyyy · HH:mm:ss");
+		: dateFormatter(activeLocale(), PASSPORT_DATE_TIME).format(parsed);
 }
 
 /** Only an exceptional lifecycle earns a badge; "active" is the normal state. */
@@ -116,7 +126,8 @@ function activityTime(timestamp: string): string {
 	if (Number.isNaN(parsed.getTime())) {
 		return timestamp;
 	}
-	return `${format(parsed, "MMM d, yyyy · HH:mm:ss")} · ${formatDistanceToNow(parsed, { addSuffix: true })}`;
+	const locale = activeLocale();
+	return `${dateFormatter(locale, PASSPORT_DATE_TIME).format(parsed)} · ${formatRelativeTime(locale, parsed)}`;
 }
 
 function emphasize(chunks: ReactNode): ReactNode {
@@ -289,6 +300,7 @@ export function AgentPassportPanel({
 	organizationId = null,
 	target,
 }: AgentPassportPanelProps) {
+	const tl = useLiteralMessages();
 	const detailQuery = useQuery({
 		enabled: !hasDetail(agent),
 		queryFn: () => fetchAgent(target, agent.id),
@@ -381,7 +393,7 @@ export function AgentPassportPanel({
 								detail,
 								detailQuery.isLoading,
 								detail?.skills.length
-									? `${detail.skills.length} allowlisted`
+									? tl("{count} allowlisted", { count: detail.skills.length })
 									: "All enabled"
 							)}
 						/>
@@ -390,7 +402,9 @@ export function AgentPassportPanel({
 							value={capabilityValue(
 								detail,
 								detailQuery.isLoading,
-								`${detail?.identityProfileIds.length ?? 0} profile${detail?.identityProfileIds.length === 1 ? "" : "s"}`
+								tl("{count, plural, one {# profile} other {# profiles}}", {
+									count: detail?.identityProfileIds.length ?? 0,
+								})
 							)}
 						/>
 						<PassportField

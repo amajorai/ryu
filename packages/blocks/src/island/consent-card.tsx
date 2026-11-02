@@ -84,7 +84,7 @@ export function ConsentCardView({
 									Decline
 								</Button>
 								{answered ? (
-									<span className="ml-auto self-center text-muted-foreground text-xs">
+									<span className="ms-auto self-center text-muted-foreground text-xs">
 										{value ? "Allowed" : "Declined"}
 									</span>
 								) : null}

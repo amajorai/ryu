@@ -1,8 +1,34 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import { formatMessage, type MessageValuesInput } from "@ryu/i18n/core";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../packages/i18n/src/active-locale.ts";
 import {
 	formatChatTranscript,
 	formatChatTranscriptAsMarkdown,
 } from "./copy-chat-transcript.ts";
+
+function runtimeFor(locale: string, messages: Record<string, string> = {}) {
+	return {
+		direction: "ltr" as const,
+		locale,
+		translate(source: string, values?: MessageValuesInput, fallback?: string) {
+			const message = (fallback && messages[fallback]) ?? fallback ?? source;
+			return formatMessage(message, values, locale);
+		},
+	};
+}
+
+let mounted: ReturnType<typeof runtimeFor> | null = null;
+
+afterEach(() => {
+	if (mounted) {
+		unregisterActiveI18nRuntime(mounted);
+		mounted = null;
+	}
+});
 
 describe("formatChatTranscript", () => {
 	it("joins user and assistant text turns", () => {
@@ -57,7 +83,10 @@ describe("formatChatTranscript", () => {
 				metadata: { author: { name: "jiawei" } },
 			},
 		]);
-		expect(text).toBe("jiawei, [27/7/2026, 12:33 pm]:\nHello");
+		// ICU builds differ on the space before "PM" (U+0020 or U+202F).
+		expect(text.replace(/\s(?=PM)/u, " ")).toBe(
+			"jiawei, [Jul 27, 2026, 12:33 PM]:\nHello"
+		);
 	});
 
 	it("falls back to author id when name is not available", () => {
@@ -113,5 +142,23 @@ describe("formatChatTranscriptAsMarkdown", () => {
 		expect(
 			formatChatTranscriptAsMarkdown([{ role: "system", content: "ignore" }])
 		).toBe("");
+	});
+});
+
+describe("transcripts follow the UI language", () => {
+	it("translates role labels and formats the timestamp in German", () => {
+		mounted = runtimeFor("de", { Assistant: "Assistent", User: "Benutzer" });
+		registerActiveI18nRuntime(mounted);
+		const createdAt = new Date("2026-07-27T12:33:00");
+		const text = formatChatTranscript([
+			{ role: "user", content: "Hallo", createdAt },
+			{ role: "assistant", content: "Hi", createdAt },
+		]);
+		expect(text).toBe(
+			"Benutzer, [27.07.2026, 12:33]:\nHallo\n\nAssistent, [27.07.2026, 12:33]:\nHi"
+		);
+		expect(
+			formatChatTranscriptAsMarkdown([{ role: "assistant", content: "Ja" }])
+		).toBe("## Assistent\n\nJa");
 	});
 });

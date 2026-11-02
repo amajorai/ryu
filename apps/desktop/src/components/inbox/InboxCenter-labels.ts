@@ -4,6 +4,7 @@
 // InboxCenter.tsx.
 
 import type { LiteralMessage } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import {
 	type NotificationFilter,
 	notificationFilterLabel,
@@ -18,7 +19,10 @@ export function inboxEmptyTitle(
 		activeNotificationFilter === "unread"
 		? "You're all caught up"
 		: tl("No {label} notifications", {
-				label: notificationFilterLabel(activeNotificationFilter).toLowerCase(),
+				label: sentenceLabel(
+					tl,
+					notificationFilterLabel(activeNotificationFilter)
+				),
 			});
 }
 
@@ -33,9 +37,10 @@ export function inboxEmptyDescription(
 		: activeNotificationFilter !== "all" &&
 				activeNotificationFilter !== "unread"
 			? tl("No {label} notifications yet.", {
-					label: notificationFilterLabel(
-						activeNotificationFilter
-					).toLowerCase(),
+					label: sentenceLabel(
+						tl,
+						notificationFilterLabel(activeNotificationFilter)
+					),
 				})
 			: showAnnouncements
 				? "Approvals, tasks, app notifications, and announcements share this space."

@@ -3,15 +3,16 @@
 // Every segment is optional: a value Core did not report is left out instead
 // of printed as zero or "default".
 
+import {
+	formatCliCompact,
+	formatCliElapsed,
+	formatCliNumber,
+} from "../i18n/format.ts";
+import { CLI_FORMAT_LOCALE, tf } from "../i18n/translate.ts";
 import { isUsageSnapshot, type TurnUsage } from "./chatStream.ts";
 
 /** Joins receipt and meter segments. */
 export const RECEIPT_SEPARATOR = " · ";
-const THOUSAND = 1000;
-const MILLION = 1_000_000;
-const SECONDS_PER_MINUTE = 60;
-const MS_PER_SECOND = 1000;
-const TRAILING_ZERO_DECIMAL = /\.0$/;
 
 /** Combine a new snapshot onto the turn's previous one. Snapshots replace
  * field by field; they never add up (ACP re-sends cumulative values). */
@@ -22,44 +23,59 @@ export function mergeUsage(
 	return previous ? { ...previous, ...next } : next;
 }
 
-const oneDecimal = (value: number): string =>
-	value.toFixed(1).replace(TRAILING_ZERO_DECIMAL, "");
-
-/** 950 -> "950", 1234 -> "1.2K", 12300 -> "12.3K", 2_500_000 -> "2.5M". */
-export function formatTokenCount(tokens: number): string {
-	const value = Math.max(0, Math.round(tokens));
-	if (value < THOUSAND) {
-		return String(value);
-	}
-	// 999_950 and up would round to "1000K"; show it as "1M" instead.
-	if (value < MILLION - 50) {
-		return `${oneDecimal(value / THOUSAND)}K`;
-	}
-	return `${oneDecimal(value / MILLION)}M`;
+/** 950 -> "950", 1234 -> "1.2K", 12300 -> "12.3K", 2_500_000 -> "2.5M"
+ * (in English; other locales use their own compact notation). */
+export function formatTokenCount(
+	tokens: number,
+	locale: string = CLI_FORMAT_LOCALE
+): string {
+	return formatCliCompact(Math.max(0, Math.round(tokens)), locale);
 }
 
-/** 840 -> "0.8s", 12_400 -> "12.4s", 65_000 -> "1m 5s". */
-export function formatDuration(ms: number): string {
-	const seconds = Math.max(0, ms) / MS_PER_SECOND;
-	if (seconds < SECONDS_PER_MINUTE) {
-		return `${oneDecimal(seconds)}s`;
-	}
-	const whole = Math.round(seconds);
-	const minutes = Math.floor(whole / SECONDS_PER_MINUTE);
-	const rest = whole % SECONDS_PER_MINUTE;
-	return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+/** 840 -> "0.8s", 12_400 -> "12.4s", 65_000 -> "1m 5s", 120_000 -> "2m". */
+export function formatDuration(
+	ms: number,
+	locale: string = CLI_FORMAT_LOCALE
+): string {
+	return formatCliElapsed(ms, { trimZeros: true }, locale);
 }
 
-/** "$0.42" for USD (or an unnamed currency), "0.42 EUR" otherwise. */
-export function formatCost(amount: number, currency?: string): string {
-	const fixed =
-		amount >= 1 || amount === 0
-			? amount.toFixed(2)
-			: amount.toFixed(amount < 0.01 ? 4 : 2);
-	if (!currency || currency.toUpperCase() === "USD") {
-		return `$${fixed}`;
+/** "$0.42" for USD (or an unnamed currency), "0.42 EUR" otherwise, with the
+ * locale's separators (and currency placement for USD). */
+export function formatCost(
+	amount: number,
+	currency?: string,
+	locale: string = CLI_FORMAT_LOCALE
+): string {
+	const digits = amount > 0 && amount < 0.01 ? 4 : 2;
+	const options: Intl.NumberFormatOptions = {
+		maximumFractionDigits: digits,
+		minimumFractionDigits: digits,
+	};
+	const code = currency?.toUpperCase();
+	if (!code || code === "USD") {
+		return formatCliNumber(
+			amount,
+			{
+				...options,
+				currency: "USD",
+				// "$" in every locale (en-GB would otherwise print "US$", en-AU "USD").
+				currencyDisplay: "narrowSymbol",
+				style: "currency",
+			},
+			locale
+		);
 	}
-	return `${fixed} ${currency.toUpperCase()}`;
+	return `${formatCliNumber(amount, options, locale)} ${code}`;
+}
+
+/** Tokens per second: whole above 10, one decimal below. */
+function formatSpeed(speed: number, locale: string): string {
+	return formatCliNumber(
+		speed,
+		{ maximumFractionDigits: speed >= 10 ? 0 : 1, useGrouping: false },
+		locale
+	);
 }
 
 /** Tokens this turn consumed: the reported total, else input + output, else
@@ -85,6 +101,8 @@ export interface TurnReceiptInput {
 	agentLabel?: string | null;
 	/** Wall-clock turn time measured by the TUI, used when Core sent none. */
 	elapsedMs?: number;
+	/** Number locale; defaults to the CLI's (`RYU_LOCALE`). */
+	locale?: string;
 	modelLabel?: string | null;
 	usage?: TurnUsage;
 }
@@ -102,6 +120,7 @@ export function turnReceiptParts({
 	modelLabel,
 	usage,
 	elapsedMs,
+	locale = CLI_FORMAT_LOCALE,
 }: TurnReceiptInput): TurnReceiptParts {
 	const identity: string[] = [];
 	if (agentLabel) {
@@ -113,15 +132,15 @@ export function turnReceiptParts({
 	const stats: string[] = [];
 	const duration = usage?.durationMs ?? elapsedMs;
 	if (duration !== undefined) {
-		stats.push(formatDuration(duration));
+		stats.push(formatDuration(duration, locale));
 	}
 	const tokens = positive(turnTokens(usage));
 	if (tokens !== undefined) {
-		stats.push(`${formatTokenCount(tokens)} tok`);
+		stats.push(tf("{count} tok", { count: formatTokenCount(tokens, locale) }));
 	}
 	const speed = positive(usage?.tokensPerSecond);
 	if (speed !== undefined) {
-		stats.push(`${speed >= 10 ? Math.round(speed) : oneDecimal(speed)} tok/s`);
+		stats.push(tf("{rate} tok/s", { rate: formatSpeed(speed, locale) }));
 	}
 	return {
 		identity: identity.join(RECEIPT_SEPARATOR),
@@ -205,7 +224,10 @@ export function summarizeSessionUsage(
 
 /** `12.3K (8%) · $0.42`; the % needs a context window and the cost needs a
  * reported amount. Returns an empty string when nothing is known. */
-export function formatSessionMeter(session: SessionUsage): string {
+export function formatSessionMeter(
+	session: SessionUsage,
+	locale: string = CLI_FORMAT_LOCALE
+): string {
 	const segments: string[] = [];
 	if (session.tokens !== undefined) {
 		const { contextTotal, contextUsed } = session;
@@ -213,12 +235,12 @@ export function formatSessionMeter(session: SessionUsage): string {
 			contextUsed !== undefined &&
 			contextTotal !== undefined &&
 			contextTotal > 0
-				? ` (${Math.round((contextUsed / contextTotal) * 100)}%)`
+				? ` (${formatCliNumber(contextUsed / contextTotal, { maximumFractionDigits: 0, style: "percent" }, locale)})`
 				: "";
-		segments.push(`${formatTokenCount(session.tokens)}${percent}`);
+		segments.push(`${formatTokenCount(session.tokens, locale)}${percent}`);
 	}
 	if (session.costAmount !== undefined) {
-		segments.push(formatCost(session.costAmount, session.costCurrency));
+		segments.push(formatCost(session.costAmount, session.costCurrency, locale));
 	}
 	return segments.join(RECEIPT_SEPARATOR);
 }

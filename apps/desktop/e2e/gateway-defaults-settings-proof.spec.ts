@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedRequest {
 	body: unknown;
@@ -51,11 +52,14 @@ const CUSTOM_LOCAL_MODEL_SELECTION = {
 	access_mode: "",
 };
 
+// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
+// the tracked proof ledger, as the other gateway proofs do.
 function evidencePath(name: string): string {
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	const override = process.env.RYU_PROOF_EVIDENCE_DIR;
+	if (override) {
+		return path.join(override, `${name}.png`);
+	}
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 async function openDefaults(

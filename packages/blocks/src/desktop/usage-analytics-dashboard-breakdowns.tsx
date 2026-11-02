@@ -113,7 +113,7 @@ export function UsageDonut({
 												{entry.label}
 											</span>
 										</span>
-										<span className="shrink-0 text-right text-muted-foreground tabular-nums">
+										<span className="shrink-0 text-end text-muted-foreground tabular-nums">
 											{formatBreakdownValue(entry)}
 										</span>
 									</div>
@@ -368,7 +368,7 @@ export function RankedBreakdown({
 												{entry.label}
 											</span>
 										</span>
-										<span className="shrink-0 text-right text-muted-foreground tabular-nums">
+										<span className="shrink-0 text-end text-muted-foreground tabular-nums">
 											{formatBreakdownValue(entry)}
 										</span>
 									</div>

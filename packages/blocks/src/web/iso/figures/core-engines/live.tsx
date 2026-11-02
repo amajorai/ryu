@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import * as React from "react";
 import type { Flat } from "../../kit/iso-kit.ts";
 import { follow, useLoop } from "../../kit/react/live.tsx";
@@ -16,9 +17,9 @@ import {
 import {
 	DEFAULT_ENGINE,
 	ENGINE_COUNT,
-	engineAt,
 	type Phase,
-	RESTING_SPOKEN,
+	previewSpokenOf,
+	restingSpoken,
 	SWEEP_SHOWN_S,
 	spokenOf,
 } from "./model.ts";
@@ -78,6 +79,7 @@ interface Nodes {
 }
 
 export function CoreEnginesLive(props: Props) {
+	const tl = useLiteralMessages();
 	const root = React.useRef<HTMLDivElement | null>(null);
 	const descriptionId = React.useId();
 	const announce = React.useRef<HTMLSpanElement>(null);
@@ -102,13 +104,13 @@ export function CoreEnginesLive(props: Props) {
 			preview.current !== null &&
 			preview.current !== state.loaded &&
 			phase === "loaded"
-				? `${engineAt(preview.current).name}, engine ${preview.current + 1} of ${ENGINE_COUNT}: ${engineAt(preview.current).role}. Press Enter to load it.`
-				: spokenOf(state.loaded, phase, moving);
+				? previewSpokenOf(preview.current, tl)
+				: spokenOf(state.loaded, phase, moving, tl);
 		node.setAttribute("aria-valuenow", `${shown + 1}`);
 		if (node.getAttribute("aria-valuetext") !== spoken) {
 			node.setAttribute("aria-valuetext", spoken);
 		}
-	}, []);
+	}, [tl]);
 
 	const draw = React.useCallback(() => {
 		const state = changer.current;
@@ -150,10 +152,15 @@ export function CoreEnginesLive(props: Props) {
 			lastPhase.current = phase;
 			describe();
 			if (announce.current) {
-				announce.current.textContent = spokenOf(state.loaded, phase, moving);
+				announce.current.textContent = spokenOf(
+					state.loaded,
+					phase,
+					moving,
+					tl
+				);
 			}
 		}
-	}, [describe]);
+	}, [describe, tl]);
 
 	const startNext = React.useCallback(() => {
 		const state = changer.current;
@@ -257,7 +264,7 @@ export function CoreEnginesLive(props: Props) {
 				aria-valuemax={ENGINE_COUNT}
 				aria-valuemin={1}
 				aria-valuenow={DEFAULT_ENGINE + 1}
-				aria-valuetext={RESTING_SPOKEN}
+				aria-valuetext={restingSpoken(tl)}
 				className="iso-quiet-live ce-live"
 				onBlur={() => hover(null)}
 				onFocus={() => {

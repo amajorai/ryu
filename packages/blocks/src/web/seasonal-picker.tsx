@@ -143,7 +143,7 @@ export function SeasonalPicker({
 					{open ? (
 						<motion.div
 							animate={{ width: "auto", opacity: 1 }}
-							className="flex items-center gap-0.5 overflow-hidden pr-0.5"
+							className="flex items-center gap-0.5 overflow-hidden pe-0.5"
 							exit={{ width: 0, opacity: 0 }}
 							initial={{ width: 0, opacity: 0 }}
 							transition={{ type: "spring", stiffness: 420, damping: 36 }}

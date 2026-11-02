@@ -1,11 +1,11 @@
 "use client";
 
 import { ArrowLeft02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { type ReactNode, useState } from "react";
 import { cn } from "../lib/utils.ts";
 import { Button } from "./button.tsx";
+import { DirectionalIcon } from "./directional-icon.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs.tsx";
 import { WaitlistPass } from "./waitlist-pass.tsx";
 import { WaitlistOverviewStep } from "./waitlist-queue-overview.tsx";
@@ -291,12 +291,12 @@ export function WaitlistQueue({
 				// screen is an action inside the waitlist, with nothing pointing back at
 				// the marketing site.
 				<Button
-					className="absolute top-4 left-4 text-muted-foreground"
+					className="absolute start-4 top-4 text-muted-foreground"
 					onClick={onBack}
 					type="button"
 					variant="ghost"
 				>
-					<HugeiconsIcon icon={ArrowLeft02Icon} size={18} />
+					<DirectionalIcon icon={ArrowLeft02Icon} size={18} />
 					Back
 				</Button>
 			) : null}

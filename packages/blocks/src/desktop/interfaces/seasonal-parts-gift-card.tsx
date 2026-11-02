@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Tooltip,
@@ -15,10 +16,6 @@ import {
 	type SeasonCopy,
 	type SeasonDoor,
 } from "./seasonal-model.ts";
-
-function capitalize(word: string): string {
-	return word.charAt(0).toUpperCase() + word.slice(1);
-}
 
 /** Faces and names of the agents in a conversation, on the popover surface. */
 function GiftAgents({ agents }: { agents: SeasonDoor["agents"] }) {
@@ -93,8 +90,8 @@ export const GiftCard = forwardRef<
 	}
 	const latest = latestLine(thread);
 	const age = acts ? null : compactAge(thread.updatedAt, now);
-	const name = `${capitalize(copy.door)} ${door.number}`;
-	const title = thread.title || "Untitled";
+	const name = copy.numbered(door.number);
+	const title = thread.title || tr("Untitled");
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		if (event.key === "Escape") {
 			event.stopPropagation();
@@ -189,7 +186,10 @@ export const GiftCard = forwardRef<
 			<div className="flex flex-col gap-3 px-4">
 				<GiftAgents agents={door.agents} />
 				{latest ? (
-					<p className="line-clamp-3 text-foreground/80 text-sm leading-5">
+					<p
+						className="line-clamp-3 text-foreground/80 text-sm leading-5"
+						data-ryu-i18n="off"
+					>
 						{latest}
 					</p>
 				) : null}

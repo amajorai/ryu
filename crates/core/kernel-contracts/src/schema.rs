@@ -2173,9 +2173,12 @@ pub fn validate_sidecar_spec(spec: &SidecarSpec) -> Result<(), String> {
                     spec.name
                 ));
             }
-            if b.version.trim().is_empty() {
+            // `version` names the install dir `<plugin_dir>/bin/<version>`, so it
+            // must be one plain path segment: an absolute path or `..` would steer
+            // Core's download/extract/chmod outside the plugin's own directory.
+            if !is_safe_name_segment(b.version.trim()) || b.version != b.version.trim() {
                 return Err(format!(
-                    "sidecar '{}': binary 'version' must not be empty",
+                    "sidecar '{}': binary 'version' must be a non-empty single path segment (no '/', '\\', '..', or surrounding whitespace)",
                     spec.name
                 ));
             }
@@ -3883,3 +3886,7 @@ mod tests {
         assert_eq!(parsed.backend_sha256.as_deref(), Some("abc123"));
     }
 }
+
+#[cfg(test)]
+#[path = "schema_sidecar_version_tests.rs"]
+mod sidecar_version_tests;

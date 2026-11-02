@@ -40,7 +40,7 @@ export function DlpCard({ ctx }: { ctx: GuardrailScopeCtx }) {
 						{knownPolicy
 							? tl(
 									"Redaction toggles apply only when the firewall policy is set to Sanitize. Resolved policy for this scope: {policy}.",
-									{ policy: GUARDRAIL_ACTION_LABELS[knownPolicy] }
+									{ policy: tl(GUARDRAIL_ACTION_LABELS[knownPolicy]) }
 								)
 							: tl(
 									"Redaction toggles apply only when the firewall policy is set to Sanitize."

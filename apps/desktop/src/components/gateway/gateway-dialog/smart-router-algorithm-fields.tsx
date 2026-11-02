@@ -76,7 +76,7 @@ export function SmartRouterAlgorithmFields({
 							).map(([value, label]) => (
 								<SelectItem key={value} value={value}>
 									<span className="font-medium">{label}</span>
-									<span className="ml-1 text-muted-foreground text-xs">
+									<span className="ms-1 text-muted-foreground text-xs">
 										— {MODEL_ROUTER_TYPE_DESCRIPTIONS[value]}
 									</span>
 								</SelectItem>
@@ -111,7 +111,7 @@ export function SmartRouterAlgorithmFields({
 								).map(([val, label]) => (
 									<SelectItem key={val} value={val}>
 										<span className="font-medium">{label}</span>
-										<span className="ml-1 text-muted-foreground text-xs">
+										<span className="ms-1 text-muted-foreground text-xs">
 											— {strategyCopy.descriptions[val]}
 										</span>
 									</SelectItem>

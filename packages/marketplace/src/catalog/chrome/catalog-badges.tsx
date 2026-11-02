@@ -12,6 +12,7 @@
 import {
 	AiBrain01Icon,
 	AiNetworkIcon,
+	ArrowRight02Icon,
 	AudioWave01Icon,
 	BookOpen01Icon,
 	BubbleChatIcon,
@@ -44,6 +45,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Tooltip,
 	TooltipContent,
@@ -177,7 +179,11 @@ export function ModalityFlowBadges({
 		return (
 			<span className="inline-flex min-w-0 items-center justify-center gap-1 align-middle">
 				<ModalityChips compact modalities={flow.inputs} />
-				<span className="shrink-0 text-muted-foreground text-xs">→</span>
+				<DirectionalIcon
+					aria-hidden="true"
+					className="size-3 shrink-0 text-muted-foreground"
+					icon={ArrowRight02Icon}
+				/>
 				<ModalityChips compact modalities={flow.outputs} />
 			</span>
 		);
@@ -383,7 +389,7 @@ export function FilterChipBar({ chips }: { chips: ActiveChip[] }) {
 						aria-label={tl("Remove filter {filterLabel}", {
 							filterLabel: chip.label,
 						})}
-						className="-mr-1 rounded-full p-0.5 hover:bg-foreground/10"
+						className="-me-1 rounded-full p-0.5 hover:bg-foreground/10"
 						onClick={chip.onRemove}
 						type="button"
 					>

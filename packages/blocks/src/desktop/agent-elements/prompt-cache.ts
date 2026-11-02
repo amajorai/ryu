@@ -1,7 +1,9 @@
 import type { LiteralMessage } from "@ryu/i18n";
+import { activeLocale, isEnglishLocale, numberFormatter } from "@ryu/i18n/core";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import type { ContextUsage } from "./context-usage.tsx";
+import { formatList } from "./locale-format.ts";
 
 /**
  * Prompt-cache model shared by the composer's context hover card, the Context
@@ -201,10 +203,22 @@ export function formatCacheCountdown(milliseconds: number): string {
 	return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** `5 min` / `1 h` for a policy's TTL. */
-export function formatCacheTtl(milliseconds: number): string {
+/** `5 min` / `1 h` for a policy's TTL; the locale's short units elsewhere. */
+export function formatCacheTtl(
+	milliseconds: number,
+	locale: string = activeLocale()
+): string {
 	const minutes = Math.round(milliseconds / MINUTE_MS);
-	return minutes % 60 === 0 ? `${minutes / 60} h` : `${minutes} min`;
+	const hours = minutes % 60 === 0;
+	if (isEnglishLocale(locale)) {
+		return hours ? `${minutes / 60} h` : `${minutes} min`;
+	}
+	const [value, unit] = hours ? [minutes / 60, "hour"] : [minutes, "minute"];
+	return numberFormatter(locale, {
+		style: "unit",
+		unit,
+		unitDisplay: "short",
+	}).format(value);
 }
 
 /**
@@ -257,8 +271,8 @@ export function modelSwitchCacheWarning(
 			: "";
 	const resend = tokens
 		? tl(
-				"Prompt caches are per model, so the next message re-sends {tokens} tokens of context at the full input price.",
-				{ tokens }
+				"{count, plural, one {Prompt caches are per model, so the next message re-sends {tokens} token of context at the full input price.} other {Prompt caches are per model, so the next message re-sends {tokens} tokens of context at the full input price.}}",
+				{ count: resent, tokens }
 			)
 		: tl(
 				"Prompt caches are per model, so the next message re-sends the context at the full input price."
@@ -322,13 +336,7 @@ export function promptEditCacheWarning(
 	if (fields.length === 0) {
 		return null;
 	}
-	const list =
-		fields.length === 1
-			? (fields[0] ?? "")
-			: tl("{items} and {last}", {
-					items: fields.slice(0, -1).join(", "),
-					last: fields.at(-1) ?? "",
-				});
+	const list = formatList(fields, "conjunction");
 	const number =
 		fields.length === 1 && !PLURAL_LABEL.test(list) ? "singular" : "plural";
 	return {

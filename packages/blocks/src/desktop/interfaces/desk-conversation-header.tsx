@@ -48,8 +48,8 @@ export function ConversationHeader({
 	return (
 		<header
 			className={cn(
-				"flex h-14 shrink-0 items-center gap-3 border-border border-b bg-background pr-2",
-				stacked ? "pl-2" : "pl-4"
+				"flex h-14 shrink-0 items-center gap-3 border-border border-b bg-background pe-2",
+				stacked ? "ps-2" : "ps-4"
 			)}
 		>
 			{stacked ? (
@@ -59,7 +59,7 @@ export function ConversationHeader({
 					size="icon-sm"
 					variant="ghost"
 				>
-					<ArrowLeft aria-hidden="true" />
+					<ArrowLeft aria-hidden="true" className="rtl:-scale-x-100" />
 				</Button>
 			) : null}
 			{row && row.agents.length > 0 ? (

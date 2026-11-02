@@ -1,9 +1,10 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { MouseEvent, ReactNode } from "react";
 import { GAME_FOCUS } from "./game-hud.tsx";
-import { type PlanetSystem, plural } from "./planets-model.ts";
+import type { PlanetSystem } from "./planets-model.ts";
 
 /**
  * How the planet list folds. Without acts: hidden under 1100px unless
@@ -70,8 +71,10 @@ export function NeedsYou({
 /** The star's line when nothing waits on you. */
 export function starMeta(system: PlanetSystem): string {
 	return system.unassigned.length > 0
-		? plural(system.unassigned.length, "own thread")
-		: "Your star";
+		? tr("{count, plural, one {# own thread} other {# own threads}}", {
+				count: system.unassigned.length,
+			})
+		: tr("Your star");
 }
 
 export function HudStat({
@@ -153,7 +156,10 @@ export function BodyButton({
 			{swatch}
 			<span className="flex min-w-0 flex-1 flex-col">
 				<span className="flex min-w-0 items-center gap-1.5">
-					<span className="gk-display truncate text-(--gk-ink) text-[16px] leading-5">
+					<span
+						className="gk-display truncate text-(--gk-ink) text-[16px] leading-5"
+						data-ryu-i18n="off"
+					>
 						{name}
 					</span>
 					{team}

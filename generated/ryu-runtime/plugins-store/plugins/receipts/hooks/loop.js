@@ -3,7 +3,7 @@
 // host.runAgent / host.storage / host.getPreference / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -21,6 +21,13 @@
 //      branch, the agent's own engine/tools/MCP take over). So whether the verifier
 //      can literally see a PNG is the verifier agent's own capability. It is told to
 //      answer `no` when it cannot open the artifact rather than infer from the name.
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const MAX_ARTIFACTS = 4;
 const MAX_PATH_CHARS = 300;
@@ -43,7 +50,7 @@ if (lastUser) {
 	const t = (lastUser.content || "").trim();
 	if (t === "/receipt clear" || t === "/receipt stop") {
 		await host.storage.delete(convId);
-		return { kind: "note", text: "Receipt goal cleared." };
+		return { kind: "note", text: await host.t("Receipt goal cleared.") };
 	}
 	if (t.indexOf("/receipt ") === 0) {
 		const condition = t.slice(9).trim();
@@ -89,10 +96,10 @@ if (rounds >= maxRounds) {
 	await host.storage.delete(convId);
 	return {
 		kind: "note",
-		text:
-			"Receipt goal stopped after " +
-			maxRounds +
-			" verification rounds without accepted visual evidence.",
+		text: await host.t(
+			"Receipt goal stopped after {count} verification rounds without accepted visual evidence.",
+			{ count: maxRounds }
+		),
 	};
 }
 
@@ -107,11 +114,10 @@ if (artifacts.length === 0) {
 		await host.storage.delete(convId);
 		return {
 			kind: "note",
-			text:
-				"Receipt goal stopped: no visual evidence was produced after " +
-				MAX_NUDGES +
-				" requests. Goal was: " +
-				goal.condition,
+			text: await host.t(
+				"Receipt goal stopped: no visual evidence was produced after {count} requests. Goal was: {goal}",
+				{ count: MAX_NUDGES, goal: goal.condition }
+			),
 		};
 	}
 	goal.nudges = nudges + 1;
@@ -135,9 +141,9 @@ if (fresh.length === 0) {
 		await host.storage.delete(convId);
 		return {
 			kind: "note",
-			text:
-				"Receipt goal stopped: only already-rejected artifacts were resubmitted. Goal was: " +
-				goal.condition,
+			text: await host.t("Receipt goal stopped: only already-rejected artifacts were resubmitted. Goal was: {goal}", {
+				goal: goal.condition,
+			}),
 		};
 	}
 	goal.nudges = nudges + 1;
@@ -207,14 +213,14 @@ if (accepted) {
 	await host.storage.delete(convId);
 	return {
 		kind: "note",
-		text:
-			"Receipt accepted. An independent verifier agent inspected the captured " +
-			"artifact and confirmed it shows the goal done.\n\nGoal: " +
-			goal.condition +
-			"\n\nEvidence:\n" +
-			fresh.map((p) => "- " + p).join("\n") +
-			"\n\nVerifier: " +
-			(verdict || ""),
+		text: [
+			await host.t(
+				"Receipt accepted. An independent verifier agent inspected the captured artifact and confirmed it shows the goal done."
+			),
+			await host.t("Goal: {goal}", { goal: goal.condition }),
+			(await host.t("Evidence:")) + "\n" + fresh.map((p) => "- " + p).join("\n"),
+			await host.t("Verifier: {verdict}", { verdict: verdict || "" }),
+		].join("\n\n"),
 	};
 }
 

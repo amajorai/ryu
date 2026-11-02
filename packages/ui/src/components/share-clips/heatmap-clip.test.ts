@@ -130,6 +130,20 @@ describe("grid layout", () => {
 		expect(b.x - a.x).toBeGreaterThan(grid.cell);
 		expect(c.y - a.y).toBeGreaterThan(grid.cell);
 	});
+
+	test("RTL runs the weeks right to left inside the same grid", () => {
+		const grid = heatmapGridLayout({
+			height: 900,
+			left: 0,
+			top: 0,
+			width: 900,
+		});
+		const first = heatmapCellPosition(grid, 0, 2, true);
+		const second = heatmapCellPosition(grid, 1, 2, true);
+		expect(first.x + grid.cell).toBeCloseTo(grid.left + grid.width, 6);
+		expect(second.x).toBeLessThan(first.x);
+		expect(first.y).toBe(heatmapCellPosition(grid, 0, 2).y);
+	});
 });
 
 describe("timeline", () => {
@@ -177,10 +191,10 @@ test("the stats and footer only carry the Stats tab's own figures", () => {
 		{ label: "Day streak · best 12", value: "4" },
 		{ label: "Level", value: "7" },
 	]);
-	expect(heatmapClipFooter(DATA)).toContain("Peak day 2026-10-01");
-	expect(heatmapClipFooter(DATA)).toContain("Favourite model model-a");
+	expect(heatmapClipFooter(DATA, tl)).toContain("Peak day 2026-10-01");
+	expect(heatmapClipFooter(DATA, tl)).toContain("Favourite model model-a");
 	expect(
-		heatmapClipFooter({ ...DATA, favoriteModel: null, peakDay: null })
+		heatmapClipFooter({ ...DATA, favoriteModel: null, peakDay: null }, tl)
 	).toBe("");
 });
 
@@ -188,11 +202,15 @@ test("the stats and footer only carry the Stats tab's own figures", () => {
 function recordingContext() {
 	const texts: string[] = [];
 	const fills: string[] = [];
-	const state = { fillStyle: "", globalAlpha: 1 };
+	const placed: { align: unknown; text: string; x: number }[] = [];
+	const state = { fillStyle: "", globalAlpha: 1, textAlign: "start" };
 	const ctx = new Proxy(state as Record<string, unknown>, {
 		get(target, key) {
 			if (key === "fillText") {
-				return (text: string) => texts.push(text);
+				return (text: string, x: number) => {
+					texts.push(text);
+					placed.push({ align: target.textAlign, text, x });
+				};
 			}
 			if (key === "measureText") {
 				return (text: string) => ({ width: text.length * 10 });
@@ -210,7 +228,7 @@ function recordingContext() {
 			return true;
 		},
 	}) as unknown as CanvasRenderingContext2D;
-	return { ctx, fills, texts };
+	return { ctx, fills, placed, texts };
 }
 
 describe("drawHeatmapFrame", () => {
@@ -231,6 +249,33 @@ describe("drawHeatmapFrame", () => {
 			(palette.levels as readonly string[]).includes(fill)
 		);
 		expect(lit).toHaveLength(3);
+	});
+
+	test("an RTL frame starts its text at the right and puts the meta left", () => {
+		const { ctx, placed } = recordingContext();
+		drawHeatmapFrame(ctx, DATA, HEATMAP_CLIP_HOLD_TIME, size, palette, {
+			rtl: true,
+			tl,
+		});
+		expect(ctx.direction).toBe("rtl");
+		const layout = layoutHeatmapClip(size);
+		const name = placed.find((entry) => entry.text === "Ada Lovelace");
+		const meta = placed.find((entry) => entry.text === "Last 12 months");
+		expect(name).toMatchObject({
+			align: "right",
+			x: size.width - layout.margin,
+		});
+		expect(meta).toMatchObject({ align: "left", x: layout.margin });
+	});
+
+	test("an LTR frame keeps its left anchors", () => {
+		const { ctx, placed } = recordingContext();
+		drawHeatmapFrame(ctx, DATA, HEATMAP_CLIP_HOLD_TIME, size, palette, {
+			tl,
+		});
+		const layout = layoutHeatmapClip(size);
+		const name = placed.find((entry) => entry.text === "Ada Lovelace");
+		expect(name).toMatchObject({ align: "left", x: layout.margin });
 	});
 
 	test("before the fill starts no day is lit", () => {

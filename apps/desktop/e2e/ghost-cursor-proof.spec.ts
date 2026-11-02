@@ -1,6 +1,6 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { ghostCursorHueFor } from "../../island/src/main/control-protocol.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -145,10 +145,7 @@ test("renders the agent session cursor and proves its idle fade", async ({
 	await expect(cursor).toHaveCSS("opacity", "0.68");
 	await page.screenshot({
 		fullPage: true,
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/shadow-agent-session-cursor.png"
-		),
+		path: proofEvidencePath("shadow-agent-session-cursor.png"),
 	});
 
 	await page.getByTestId("ghost-cursor-replay").click();

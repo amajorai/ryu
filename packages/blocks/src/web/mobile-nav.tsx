@@ -221,7 +221,7 @@ export function MobileNav({
 
 	return (
 		<div
-			className={cn("fixed right-0 bottom-0 left-0 z-50 md:hidden", className)}
+			className={cn("fixed start-0 end-0 bottom-0 z-50 md:hidden", className)}
 			data-mobile-nav=""
 			data-sheet-open={open ? "" : undefined}
 		>

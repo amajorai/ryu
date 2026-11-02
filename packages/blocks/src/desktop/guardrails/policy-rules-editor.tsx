@@ -320,7 +320,7 @@ function LockedFields({
 						actions={
 							<Switch
 								aria-label={tl("Lock {field}", {
-									field: POLICY_LOCKABLE_FIELD_LABELS[field],
+									field: tl(POLICY_LOCKABLE_FIELD_LABELS[field]),
 								})}
 								checked={locked.includes(field)}
 								disabled={disabled}

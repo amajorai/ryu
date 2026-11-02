@@ -33,7 +33,7 @@ export function TerminalTitleBar({
 					})}
 				</span>
 			</p>
-			<p className="mb-2 ml-auto @md/terminal:flex hidden shrink-0 items-center gap-1.5 pr-1 text-muted-foreground">
+			<p className="ms-auto mb-2 @md/terminal:flex hidden shrink-0 items-center gap-1.5 pe-1 text-muted-foreground">
 				<span
 					aria-hidden="true"
 					className={cn(

@@ -20,10 +20,10 @@ import {
 import type { ReactNode } from "react";
 import { agentHandle } from "./interface-renderer.ts";
 import {
-	RECORDS_OBJECT_LABELS,
 	type RecordsObject,
 	type RecordsRow,
 	recordsFullTime,
+	recordsObjectLabels,
 	recordsRelativeTime,
 	recordsRunTime,
 } from "./records-model.ts";
@@ -146,7 +146,7 @@ export function RecordsAttributes({
 				</Attribute>
 			) : (
 				<Attribute icon={Shapes} label="Type">
-					{RECORDS_OBJECT_LABELS[row.object].singular}
+					{recordsObjectLabels(row.object).singular}
 				</Attribute>
 			)}
 			<Attribute icon={CircleDot} label="Status">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
@@ -96,7 +96,7 @@ export function BlogAuthor({
 							className="relative flex items-center gap-2 transition-colors hover:text-foreground"
 							href={`/blog/author/${encodeURIComponent(author.slug)}`}
 						>
-							<LinkPendingIndicator className="-top-0.5 -right-1" />
+							<LinkPendingIndicator className="-end-1 -top-0.5" />
 							{avatarSrc ? (
 								<Image
 									alt={author.name}
@@ -174,7 +174,7 @@ export function BlogTags({
 						}
 						key={tag.label}
 					>
-						<LinkPendingIndicator className="-top-0.5 -right-0.5" />
+						<LinkPendingIndicator className="-end-0.5 -top-0.5" />
 						{tag.label}
 					</Link>
 				);
@@ -207,7 +207,7 @@ export function SearchInput({
 		<div className={`relative ${className}`}>
 			<Search
 				aria-hidden="true"
-				className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+				className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 			/>
 			<Input
 				aria-label={placeholder}
@@ -223,6 +223,7 @@ export function SearchInput({
 
 /** One post as a list row: title and date, nothing else. */
 export function BlogPostRow({ post }: { post: BlogPostData }) {
+	const locale = useOptionalI18n()?.locale;
 	return (
 		<li>
 			<Link
@@ -236,7 +237,7 @@ export function BlogPostRow({ post }: { post: BlogPostData }) {
 					className="shrink-0 text-muted-foreground text-sm tabular-nums"
 					dateTime={post.date}
 				>
-					{formatPublicationDate(post.date, "short")}
+					{formatPublicationDate(post.date, "short", locale)}
 				</time>
 			</Link>
 		</li>
@@ -272,14 +273,15 @@ export function BlogFeatured({ posts }: { posts: BlogPostData[] }) {
 
 /** A single blog post card, presentational. */
 export function BlogPostCard({ post }: { post: BlogPostData }) {
-	const formattedDate = formatPublicationDate(post.date, "short");
+	const locale = useOptionalI18n()?.locale;
+	const formattedDate = formatPublicationDate(post.date, "short", locale);
 	const bannerSrc = safeMediaUrl(post.banner);
 
 	return (
 		<div className="group">
 			<div className="flex flex-col gap-1 pb-3">
 				<Link className="relative block" href={`/blog/${post.slug}`}>
-					<LinkPendingIndicator className="top-3 right-3" />
+					<LinkPendingIndicator className="end-3 top-3" />
 					{bannerSrc ? (
 						<div className="mb-4 aspect-video w-full overflow-hidden rounded-md">
 							<ThemedImage

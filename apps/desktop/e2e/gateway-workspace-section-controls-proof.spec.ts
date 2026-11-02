@@ -1,28 +1,10 @@
 import { expect, test } from "@playwright/test";
 import type { ProofJsonValue } from "./fixture-json.ts";
-
-interface WorkspaceRoleSnapshot {
-	requests: Array<{
-		body: unknown;
-		method: string;
-		path: string;
-	}>;
-	server: {
-		roles: Array<{
-			builtin: boolean;
-			key: string;
-			name: string;
-			permissions: string[];
-		}>;
-	};
-	stepUpScopes: string[];
-}
+// The harness owns __GATEWAY_WORKSPACE_PROOF__ and its snapshot type.
+import type { WorkspaceProofSnapshot } from "./harness/gateway-workspace-members-proof.mock.tsx";
 
 declare global {
 	interface Window {
-		__GATEWAY_WORKSPACE_PROOF__?: {
-			snapshot: () => WorkspaceRoleSnapshot;
-		};
 		__RELEASE_WORKSPACE_ROLE_WRITE__?: () => void;
 		__WORKSPACE_ROLE_WRITE_ATTEMPTS__?: Array<{
 			body: unknown;
@@ -73,7 +55,7 @@ async function openWorkspace(
 
 async function readProof(
 	page: import("@playwright/test").Page
-): Promise<WorkspaceRoleSnapshot> {
+): Promise<WorkspaceProofSnapshot> {
 	return page.evaluate(() => {
 		const proof = window.__GATEWAY_WORKSPACE_PROOF__;
 		if (!proof) {

@@ -26,7 +26,7 @@ export const ICON_BUTTON =
 
 /** Inline text button: a link-like control inside running text or tables. */
 export const TEXT_BUTTON =
-	"rounded-sm text-left outline-none underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring/50";
+	"rounded-sm text-start outline-none underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring/50";
 
 export type ForumAvatarSize = 16 | 20 | 24 | 40;
 

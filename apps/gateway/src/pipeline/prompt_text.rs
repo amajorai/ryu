@@ -311,8 +311,17 @@ pub(super) fn sanitize_inbound_or_survivor(
     Ok(changed)
 }
 
+/// The stage name the Inspector stage passes to [`sanitize_inbound_or_block`].
+pub(super) const INSPECTOR_STAGE: &str = "inspector";
+
 /// Run [`sanitize_inbound_or_survivor`] for a pipeline stage, mapping a surviving
 /// match to a 403 and logging what actually happened to the body.
+///
+/// The Inspector stage reaches Sanitize only with a PII, secret or unnamed
+/// flag (`InspectorClient::inspect` forwards an injection-only flag, which
+/// cannot be redacted, with a warning). Its judge sees PII the regexes do not
+/// (names, addresses, spelled-out numbers), so when redaction changes
+/// nothing the flagged content would leave verbatim: that is refused instead.
 pub(super) fn sanitize_inbound_or_block(
     state: &AppState,
     ctx: &RequestContext,
@@ -324,6 +333,18 @@ pub(super) fn sanitize_inbound_or_block(
         Ok(true) => {
             warn!(request_id = %ctx.request_id, stage, "{stage}: sanitized inbound content");
             Ok(true)
+        }
+        Ok(false) if stage == INSPECTOR_STAGE => {
+            warn!(
+                request_id = %ctx.request_id,
+                stage,
+                "{stage}: flagged content is not redactable under Sanitize; blocked"
+            );
+            state.metrics.inc_firewall_blocked();
+            Err(GatewayError::FirewallBlocked(
+                "Inbound content flagged by the inspector could not be redacted".to_owned(),
+                firewall_policy_alert(scanner.config(), ctx, "block"),
+            ))
         }
         Ok(false) => {
             warn!(

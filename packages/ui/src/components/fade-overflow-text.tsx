@@ -21,6 +21,24 @@ const SCROLL_MS_PER_PIXEL = 26;
 const MIN_SCROLL_TRAVEL_MS = 1600;
 const SCROLL_EDGE_PADDING_PX = 6;
 
+/**
+ * Hover/focus marquee frames for a label that overflows by `distance` pixels.
+ * Left to right the hidden tail is on the right, so the text slides left; right
+ * to left the tail is on the left, so it slides right.
+ */
+export function fadeOverflowMarqueeKeyframes(
+	distance: number,
+	direction: string
+): Keyframe[] {
+	const offset = direction === "rtl" ? distance : -distance;
+	return [
+		{ transform: "translateX(0)", offset: 0 },
+		{ transform: "translateX(0)", offset: 0.2 },
+		{ transform: `translateX(${offset}px)`, offset: 0.8 },
+		{ transform: `translateX(${offset}px)`, offset: 1 },
+	];
+}
+
 interface FadeOverflowState<T extends HTMLElement = HTMLSpanElement> {
 	clipped: boolean;
 	clipRef: RefObject<T | null>;
@@ -130,12 +148,7 @@ export function FadeOverflowText({
 		}
 
 		const animation = inner.animate(
-			[
-				{ transform: "translateX(0)", offset: 0 },
-				{ transform: "translateX(0)", offset: 0.2 },
-				{ transform: `translateX(-${distance}px)`, offset: 0.8 },
-				{ transform: `translateX(-${distance}px)`, offset: 1 },
-			],
+			fadeOverflowMarqueeKeyframes(distance, getComputedStyle(clip).direction),
 			{
 				duration: Math.max(
 					MIN_SCROLL_TRAVEL_MS,

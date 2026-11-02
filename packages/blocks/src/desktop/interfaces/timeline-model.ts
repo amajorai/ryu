@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceSnapshot,
 	InterfaceThread,
@@ -45,48 +46,30 @@ export function dayKeyBefore(now: Date, offset: number): string {
 	);
 }
 
-const WEEKDAY_DATE = new Intl.DateTimeFormat(undefined, {
+const WEEKDAY_DATE: Intl.DateTimeFormatOptions = {
 	day: "numeric",
 	month: "short",
 	weekday: "long",
-});
-const WEEKDAY_DATE_YEAR = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "short",
-	weekday: "long",
-	year: "numeric",
-});
-const SHORT_WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: "short" });
-const NARROW_WEEKDAY = new Intl.DateTimeFormat(undefined, {
-	weekday: "narrow",
-});
-const DAY_OF_MONTH = new Intl.DateTimeFormat(undefined, { day: "numeric" });
-const MONTH_DAY = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "short",
-});
-const TIME_OF_DAY = new Intl.DateTimeFormat(undefined, {
-	hour: "numeric",
-	minute: "2-digit",
-});
-const HOUR_ONLY = new Intl.DateTimeFormat(undefined, { hour: "numeric" });
-const FULL_DATE_TIME = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "full",
-	timeStyle: "short",
-});
+};
+const HOUR_ONLY: Intl.DateTimeFormatOptions = { hour: "numeric" };
+
+/** A cached formatter for the UI locale. */
+function format(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+	return dateFormatter(activeLocale(), options);
+}
 
 /** "Today", "Yesterday", or a weekday and date ("Friday, Oct 9"). */
 export function dayHeading(key: string, now: Date): string {
 	if (key === localDayKey(now)) {
-		return "Today";
+		return tr("Today");
 	}
 	if (key === dayKeyBefore(now, 1)) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
 	const date = dayKeyToDate(key);
 	return date.getFullYear() === now.getFullYear()
-		? WEEKDAY_DATE.format(date)
-		: WEEKDAY_DATE_YEAR.format(date);
+		? format(WEEKDAY_DATE).format(date)
+		: format({ ...WEEKDAY_DATE, year: "numeric" }).format(date);
 }
 
 /** Short weekday ("Mon"), its initial ("M") and day of month ("12") for a week column. */
@@ -98,35 +81,40 @@ export function weekColumnLabel(key: string): {
 } {
 	const date = dayKeyToDate(key);
 	return {
-		dayOfMonth: DAY_OF_MONTH.format(date),
-		full: WEEKDAY_DATE.format(date),
-		initial: NARROW_WEEKDAY.format(date),
-		weekday: SHORT_WEEKDAY.format(date),
+		dayOfMonth: format({ day: "numeric" }).format(date),
+		full: format(WEEKDAY_DATE).format(date),
+		initial: format({ weekday: "narrow" }).format(date),
+		weekday: format({ weekday: "short" }).format(date),
 	};
 }
 
 /** "Oct 6 – Oct 12" for the visible week. */
 export function weekRangeLabel(firstKey: string, lastKey: string): string {
-	return `${MONTH_DAY.format(dayKeyToDate(firstKey))} – ${MONTH_DAY.format(
+	return format({ day: "numeric", month: "short" }).formatRange(
+		dayKeyToDate(firstKey),
 		dayKeyToDate(lastKey)
-	)}`;
+	);
 }
 
 /** "9:42 AM" in the user's locale. */
 export function timeOfDay(iso: string): string {
 	const date = new Date(iso);
-	return Number.isNaN(date.getTime()) ? "" : TIME_OF_DAY.format(date);
+	return Number.isNaN(date.getTime())
+		? ""
+		: format({ hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 /** Full local date and time for a `title` / screen-reader label. */
 export function fullDateTime(iso: string): string {
 	const date = new Date(iso);
-	return Number.isNaN(date.getTime()) ? "" : FULL_DATE_TIME.format(date);
+	return Number.isNaN(date.getTime())
+		? ""
+		: format({ dateStyle: "full", timeStyle: "short" }).format(date);
 }
 
 /** Hour gutter label ("6 AM" / "18"). */
 export function hourLabel(hour: number): string {
-	return HOUR_ONLY.format(new Date(2000, 0, 1, hour));
+	return format(HOUR_ONLY).format(new Date(2000, 0, 1, hour));
 }
 
 /** Minutes since local midnight. */
@@ -136,8 +124,8 @@ export function minuteOfDay(date: Date): number {
 
 /** An hour range for a folded run of empty hours ("8–10 AM", "11 AM–2 PM"). */
 export function hourRangeLabel(fromHour: number, toHour: number): string {
-	const from = HOUR_ONLY.formatToParts(new Date(2000, 0, 1, fromHour));
-	const to = HOUR_ONLY.formatToParts(new Date(2000, 0, 1, toHour));
+	const from = format(HOUR_ONLY).formatToParts(new Date(2000, 0, 1, fromHour));
+	const to = format(HOUR_ONLY).formatToParts(new Date(2000, 0, 1, toHour));
 	const period = (parts: Intl.DateTimeFormatPart[]) =>
 		parts.find((part) => part.type === "dayPeriod")?.value;
 	const fromPeriod = period(from);

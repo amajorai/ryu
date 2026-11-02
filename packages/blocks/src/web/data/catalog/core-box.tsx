@@ -71,16 +71,19 @@ export const CORE_TO_BOX: Product[] = [
 		},
 		faq: [
 			{
-				q: "Is Ryu Core open source?",
-				a: "Yes. Core and the Gateway are open source and self‑hostable. Ryu Desktop is source-available; the web app and cloud backend are closed.",
+				question: "Is Ryu Core open source?",
+				answer:
+					"Yes. Core and the Gateway are open source and self‑hostable. Ryu Desktop is source-available; the web app and cloud backend are closed.",
 			},
 			{
-				q: "Do I need an API key or the cloud to use it?",
-				a: "No. On first run Core downloads llama.cpp and Gemma 4, then chats locally. Bring your own keys or a subscription only when you want hosted models.",
+				question: "Do I need an API key or the cloud to use it?",
+				answer:
+					"No. On first run Core downloads llama.cpp and Gemma 4, then chats locally. Bring your own keys or a subscription only when you want hosted models.",
 			},
 			{
-				q: "What does Core collect by default?",
-				a: "Diagnostics export is off by default. Product analytics and crash reports are on by default and can be turned off in Privacy settings.",
+				question: "What does Core collect by default?",
+				answer:
+					"Diagnostics export is off by default. Product analytics and crash reports are on by default and can be turned off in Privacy settings.",
 			},
 		],
 		cta: {
@@ -154,16 +157,19 @@ export const CORE_TO_BOX: Product[] = [
 		},
 		faq: [
 			{
-				q: "Which providers can it route to?",
-				a: "Agents call it in the OpenAI, Anthropic, or Gemini API format. Your routing config picks the provider for each model, with a fallback chain when one fails.",
+				question: "Which providers can it route to?",
+				answer:
+					"Agents call it in the OpenAI, Anthropic, or Gemini API format. Your routing config picks the provider for each model, with a fallback chain when one fails.",
 			},
 			{
-				q: "Does my data leave my infrastructure?",
-				a: "Self-hosted, the Gateway runs in your infrastructure, and calls leave it only for the providers you route to. Its audit log keeps usage metadata, not prompt text.",
+				question: "Does my data leave my infrastructure?",
+				answer:
+					"Self-hosted, the Gateway runs in your infrastructure, and calls leave it only for the providers you route to. Its audit log keeps usage metadata, not prompt text.",
 			},
 			{
-				q: "What happens when the firewall flags a request?",
-				a: "By default it is blocked with a 403 and never reaches a provider. You can instead redact the flagged text and continue, or log a warning, and set that per org or agent.",
+				question: "What happens when the firewall flags a request?",
+				answer:
+					"By default it is blocked with a 403 and never reaches a provider. You can instead redact the flagged text and continue, or log a warning, and set that per org or agent.",
 			},
 		],
 		cta: {
@@ -230,12 +236,14 @@ export const CORE_TO_BOX: Product[] = [
 		},
 		faq: [
 			{
-				q: "Is Passport a browser automation engine?",
-				a: "No. Passport stores sign-ins and tracks when they expire. A browser or capture tool can plug in as a source; today you import sessions by hand.",
+				question: "Is Passport a browser automation engine?",
+				answer:
+					"No. Passport stores sign-ins and tracks when they expire. A browser or capture tool can plug in as a source; today you import sessions by hand.",
 			},
 			{
-				q: "Can Passport run without Ryu Core?",
-				a: "Yes. The standalone service uses the same encrypted vault as Core, with its own tokens and data directory.",
+				question: "Can Passport run without Ryu Core?",
+				answer:
+					"Yes. The standalone service uses the same encrypted vault as Core, with its own tokens and data directory.",
 			},
 		],
 		cta: {
@@ -299,16 +307,19 @@ export const CORE_TO_BOX: Product[] = [
 		},
 		faq: [
 			{
-				q: "Does Connect replace the Gateway or Core?",
-				a: "No. Connect hosts and runs its own registered tools. Core runs agents, and the Gateway handles model routing and policy. A compatibility mode can forward to an existing Core and Gateway.",
+				question: "Does Connect replace the Gateway or Core?",
+				answer:
+					"No. Connect hosts and runs its own registered tools. Core runs agents, and the Gateway handles model routing and policy. A compatibility mode can forward to an existing Core and Gateway.",
 			},
 			{
-				q: "How is Connect different from Connections?",
-				a: "Connections is for your agents; Ryu Connect embeds the same sign-ins in your own product.",
+				question: "How is Connect different from Connections?",
+				answer:
+					"Connections is for your agents; Ryu Connect embeds the same sign-ins in your own product.",
 			},
 			{
-				q: "Where do connected accounts live?",
-				a: "With our app-connection provider, Composio. Connect keeps the provider key on the server and only lets each customer use its own accounts.",
+				question: "Where do connected accounts live?",
+				answer:
+					"With our app-connection provider, Composio. Connect keeps the provider key on the server and only lets each customer use its own accounts.",
 			},
 		],
 		cta: {
@@ -374,12 +385,14 @@ export const CORE_TO_BOX: Product[] = [
 		},
 		faq: [
 			{
-				q: "How do I get a node?",
-				a: "Teams and Business plans include one managed node, and team plans can add more. Choose a plan on the pricing page.",
+				question: "How do I get a node?",
+				answer:
+					"Teams and Business plans include one managed node, and team plans can add more. Choose a plan on the pricing page.",
 			},
 			{
-				q: "Am I locked in?",
-				a: "No. Agents run on open-source Ryu Core and Gateway, so you can move them to your own machines. Chat channels need your own bot credentials there.",
+				question: "Am I locked in?",
+				answer:
+					"No. Agents run on open-source Ryu Core and Gateway, so you can move them to your own machines. Chat channels need your own bot credentials there.",
 			},
 		],
 		cta: {
@@ -443,12 +456,14 @@ export const CORE_TO_BOX: Product[] = [
 		},
 		faq: [
 			{
-				q: "Is Ryu Box a model provider?",
-				a: "No. Box is the execution workspace. Core runs the agent, the Gateway applies rules to its model and tool calls, and you choose the model or provider separately.",
+				question: "Is Ryu Box a model provider?",
+				answer:
+					"No. Box is the execution workspace. Core runs the agent, the Gateway applies rules to its model and tool calls, and you choose the model or provider separately.",
 			},
 			{
-				q: "Can I use Box without Ryu Desktop?",
-				a: "Yes. Box has its own API, callable from your service or an agent. Hosted access is enabled per organization.",
+				question: "Can I use Box without Ryu Desktop?",
+				answer:
+					"Yes. Box has its own API, callable from your service or an agent. Hosted access is enabled per organization.",
 			},
 		],
 		cta: {

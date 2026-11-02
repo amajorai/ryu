@@ -245,7 +245,7 @@ export function WorkspaceSection() {
 								teamsQuery.isError ? (
 									<div className="flex flex-col items-end gap-2">
 										<p
-											className="text-right text-status-destructive text-xs"
+											className="text-end text-status-destructive text-xs"
 											role="alert"
 										>
 											Couldn’t load teams.

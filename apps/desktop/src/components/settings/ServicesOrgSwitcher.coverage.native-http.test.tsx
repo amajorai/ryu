@@ -434,7 +434,7 @@ test("with no active org on the session the picker shows the earliest membership
 
 	await openMenu();
 	await until(
-		() => menuItems()[0]?.textContent?.includes("PLUS") ?? false,
+		() => menuItems()[0]?.textContent?.includes("Plus") ?? false,
 		"plan badge in the menu"
 	);
 	const rows = menuItems().map((item) => ({
@@ -442,7 +442,7 @@ test("with no active org on the session the picker shows the earliest membership
 		text: (item.textContent ?? "").replace(/\s+/g, " ").trim(),
 	}));
 	expect(rows).toEqual([
-		{ checked: true, text: "Ada's WorkspacePLUSowner" },
+		{ checked: true, text: "Ada's WorkspacePlusowner" },
 		{ checked: false, text: "Acme Roboticsmember" },
 		{ checked: false, text: "Zeta Labsadmin" },
 	]);

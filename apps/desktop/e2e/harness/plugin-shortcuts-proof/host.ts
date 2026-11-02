@@ -25,6 +25,7 @@ interface Call {
 	delegation: string | null;
 	document?: Document;
 	endpoint: string;
+	entry?: KeybindingEntry;
 	id: number;
 	method: string;
 	preferenceValue?: string | null;
@@ -39,6 +40,7 @@ let calls: Call[] = [];
 let held: Array<{ id: number; release: () => void }> = [];
 let next = 1;
 let holdRead = false;
+let holdWrite = false;
 let refuseWrite = false;
 // Plugin ids Core reports installed-but-disabled. Disabled plugins keep their
 // roster record but contribute no companion, as Core's contributions endpoint does.
@@ -93,6 +95,7 @@ function reset() {
 	rawMutations = [];
 	unexpectedNative = [];
 	holdRead = false;
+	holdWrite = false;
 	refuseWrite = false;
 	disabledIds = new Set();
 }
@@ -131,7 +134,7 @@ function send(res: http.ServerResponse, status: number, body: unknown) {
 		"access-control-allow-origin": "http://127.0.0.1:33368",
 		"access-control-allow-headers":
 			"authorization,content-type,x-ryu-user-jwt,x-ryu-client-id,x-ryu-client-label,x-ryu-surface,x-ryu-user-id,x-ryu-user-name",
-		"access-control-allow-methods": "GET,PUT,POST,OPTIONS",
+		"access-control-allow-methods": "GET,POST,OPTIONS",
 	});
 	res.end(JSON.stringify(body));
 }
@@ -145,33 +148,48 @@ async function requestBody(req: http.IncomingMessage, limit: number) {
 	}
 	return bytes;
 }
-function preferenceValue(body: unknown): string {
-	if (
-		body === null ||
-		typeof body !== "object" ||
-		Array.isArray(body) ||
-		Object.keys(body).length !== 1
-	) {
-		throw new Error("Exact native preference value envelope required");
-	}
-	const value: unknown = Reflect.get(body, "value");
-	if (typeof value !== "string") {
-		throw new Error("Exact native preference value envelope required");
-	}
-	return value;
+/** Core's `POST /api/keybindings/entry` body: set, disable (null) or remove one plugin entry. */
+interface KeybindingEntry {
+	entry: string;
+	remove?: true;
+	value?: string | null;
 }
-function bindingsDocument(value: unknown): Document {
+function keybindingEntry(body: unknown): KeybindingEntry {
+	if (body === null || typeof body !== "object" || Array.isArray(body)) {
+		throw new Error("Exact native keybinding entry envelope required");
+	}
+	const keys = Object.keys(body).sort().join(",");
+	const entry: unknown = Reflect.get(body, "entry");
+	const value: unknown = Reflect.get(body, "value");
+	const remove: unknown = Reflect.get(body, "remove");
 	if (
-		value === null ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.values(value).some(
-			(entry) => entry !== null && typeof entry !== "string"
+		typeof entry !== "string" ||
+		!/^plugin:.+$/.test(entry) ||
+		!(
+			(keys === "entry,value" &&
+				(value === null || typeof value === "string")) ||
+			(keys === "entry,remove" && remove === true)
 		)
 	) {
-		throw new Error("Invalid plugin bindings document");
+		throw new Error("Exact native keybinding entry envelope required");
 	}
-	return value as Document;
+	return remove === true
+		? { entry, remove: true }
+		: { entry, value: value as string | null };
+}
+/**
+ * The stored document as Core's locked edit reads it: missing is empty, and a
+ * value that is not a JSON object is refused rather than replaced.
+ */
+function storedObject(authority: string): Record<string, unknown> | null {
+	try {
+		const value: unknown = JSON.parse(raw(authority));
+		return value !== null && typeof value === "object" && !Array.isArray(value)
+			? (value as Record<string, unknown>)
+			: null;
+	} catch {
+		return null;
+	}
 }
 const server = http.createServer(async (req, res) => {
 	let activeCall: Call | undefined;
@@ -237,6 +255,9 @@ const server = http.createServer(async (req, res) => {
 					for (const item of pending) {
 						item.release();
 					}
+				}
+				if ("holdWrite" in body) {
+					holdWrite = body.holdWrite;
 				}
 				if ("holdRead" in body) {
 					holdRead = body.holdRead;
@@ -370,19 +391,42 @@ const server = http.createServer(async (req, res) => {
 			send(res, 200, { key, value: snapshot });
 			return;
 		}
-		if (req.method === "PUT" && endpoint === "/api/preferences/keybindings") {
-			const envelope: unknown = JSON.parse(record.rawBody);
-			const parsed: unknown = JSON.parse(preferenceValue(envelope));
-			const document = bindingsDocument(parsed);
-			record.document = document;
+		// Core's one locked read-modify-write of one plugin entry
+		// (`edit_keybinding_entry`): every other entry of the stored document is
+		// kept, and the stored document comes back as `{ value }`.
+		if (req.method === "POST" && endpoint === "/api/keybindings/entry") {
+			const edit = keybindingEntry(JSON.parse(record.rawBody));
+			record.entry = edit;
+			if (holdWrite) {
+				holdWrite = false;
+				await new Promise<void>((release) =>
+					held.push({ id: record.id, release })
+				);
+			}
 			if (refuseWrite) {
 				record.status = 503;
 				send(res, 503, { error: "Owned plugin preference refusal" });
 				return;
 			}
-			store(authority, document);
+			const stored = storedObject(authority);
+			if (stored === null) {
+				record.status = 500;
+				send(res, 500, {
+					error: "the stored keybindings document is not a JSON object",
+				});
+				return;
+			}
+			const next: Record<string, unknown> = { ...stored };
+			if (edit.remove) {
+				delete next[edit.entry];
+			} else {
+				next[edit.entry] = edit.value ?? null;
+			}
+			const bytes = JSON.stringify(next);
+			storeRaw(authority, bytes);
+			record.document = next as Document;
 			record.admitted = true;
-			send(res, 200, { ok: true, key: "keybindings" });
+			send(res, 200, { value: bytes });
 			return;
 		}
 		unexpectedNative.push(

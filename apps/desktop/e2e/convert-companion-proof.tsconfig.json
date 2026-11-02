@@ -7,6 +7,8 @@
   "include": [
     "convert-companion-proof.playwright.config.ts",
     "convert-companion-proof.spec.ts",
+    "convert-companion-proof.helpers.ts",
+    "part2-convert-companion-proof.spec.ts",
     "convert-companion-proof-host/host.tsx",
     "convert-companion-proof.vite.config.ts"
   ]

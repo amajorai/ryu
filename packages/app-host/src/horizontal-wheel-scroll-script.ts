@@ -31,13 +31,18 @@ function ryuInstallHorizontalWheelScrolling() {
 
     while (candidate && seen.indexOf(candidate) === -1) {
       seen.push(candidate);
-      var overflowX = getComputedStyle(candidate).overflowX;
+      var style = getComputedStyle(candidate);
+      var overflowX = style.overflowX;
       var horizontalOverflow = candidate.scrollWidth - candidate.clientWidth > slack;
       var verticalOverflow = candidate.scrollHeight - candidate.clientHeight > slack;
       var scrollable = overflowX === "auto" || overflowX === "overlay" || overflowX === "scroll";
       if (horizontalOverflow && !verticalOverflow && scrollable) {
-        var delta = normalize(event.deltaX, event.deltaMode, candidate.clientWidth) +
-          normalize(event.deltaY, event.deltaMode, candidate.clientHeight);
+        // Under RTL scrollLeft runs from 0 toward negative values, so the
+        // vertical term flips to keep wheel-down moving toward the inline end.
+        // deltaX is physical and stays as it is.
+        var inlineY = normalize(event.deltaY, event.deltaMode, candidate.clientHeight);
+        if (style.direction === "rtl") inlineY = -inlineY;
+        var delta = normalize(event.deltaX, event.deltaMode, candidate.clientWidth) + inlineY;
         if (delta !== 0) {
           var before = candidate.scrollLeft;
           candidate.scrollLeft += delta;

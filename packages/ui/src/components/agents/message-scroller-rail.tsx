@@ -164,7 +164,7 @@ export function CollapsedMessageRail({
 								<button
 									aria-current={active ? "true" : undefined}
 									className={cn(
-										"flex w-full items-start gap-2 rounded-2xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+										"flex w-full items-start gap-2 rounded-2xl px-2.5 py-2 text-start outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
 										active && "bg-muted/80"
 									)}
 									data-active={active ? "true" : undefined}

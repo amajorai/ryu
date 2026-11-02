@@ -1,14 +1,14 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceSnapshot,
-	type InterfaceThread,
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
+import type {
+	InterfaceSnapshot,
+	InterfaceThread,
+	ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { useId } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type Planet,
 	planetVariant,
@@ -145,7 +145,7 @@ export function threadTitle(thread: InterfaceThread | undefined): string {
 	if (!thread) {
 		return "New thread";
 	}
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }
 
 /** Threads grouped under status headings, each row opening the thread. */
@@ -208,7 +208,7 @@ function ThreadGroup({
 				id={headingId}
 			>
 				<PlanetsStatusDot status={section.status} />
-				{THREAD_STATUS_LABELS[section.status]}
+				{threadStatusLabel(section.status)}
 				<span className="text-muted-foreground tabular-nums">
 					{section.threads.length}
 				</span>
@@ -276,8 +276,8 @@ function ThreadRow({
 				</span>
 				{thread.lastMessage ? (
 					<span className="line-clamp-2 text-muted-foreground text-xs leading-snug">
-						{thread.lastMessageRole === "user" ? "You: " : ""}
-						{thread.lastMessage}
+						{thread.lastMessageRole === "user" ? `${tr("You:")} ` : ""}
+						<span data-ryu-i18n="off">{thread.lastMessage}</span>
 					</span>
 				) : null}
 				{others.length > 0 ? (

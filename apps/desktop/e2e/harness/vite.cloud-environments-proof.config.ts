@@ -8,9 +8,12 @@ import { defineConfig } from "vite";
 const harnessDir = path.resolve(import.meta.dirname);
 const repositoryRoot = path.resolve(harnessDir, "../../../..");
 const stylesDirectory = path.resolve(repositoryRoot, "packages/ui/src/styles");
+// Inside the Desktop package's node_modules, not the repository's target/:
+// the generated stylesheet keeps bare imports such as "tailwindcss", which an
+// isolated install resolves only from apps/desktop/node_modules.
 const generatedStylesDirectory = path.resolve(
 	repositoryRoot,
-	"target/cloud-environments-proof-vite"
+	"apps/desktop/node_modules/.cloud-environments-proof-styles"
 );
 const generatedStylesPath = path.resolve(
 	generatedStylesDirectory,
@@ -163,6 +166,9 @@ export default defineConfig({
 			"target/cloud-environments-proof-build"
 		),
 		emptyOutDir: true,
+		// Desktop's own build target; Vite's default cannot lower the product's
+		// destructuring patterns.
+		target: "chrome105",
 		rollupOptions: {
 			input: path.resolve(harnessDir, "cloud-environments-proof.html"),
 		},

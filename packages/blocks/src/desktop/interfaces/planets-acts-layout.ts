@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -57,7 +58,7 @@ export const PLANETS_SKIN: ActSkin = {
 
 /** "Back 15:10": the eclipse's words (the kit adds "Likely"). */
 export const planetsLimitText: LimitText = (_act, at) =>
-	at ? `Back ${at}` : "Eclipsed";
+	at ? tr("Back {time}", { time: at }) : tr("Eclipsed");
 
 /** Each ask kind's satellite: its plate icon and its probe colour. */
 export const PROBE_ICONS: Record<InterfaceAskKind, LucideIcon> = {

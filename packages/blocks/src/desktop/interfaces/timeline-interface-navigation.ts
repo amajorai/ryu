@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { displayWallDate } from "./calendar-model.ts";
+import { inlineArrowStep } from "./inline-direction.ts";
 import { TIMELINE_EVENT_ATTRIBUTE } from "./timeline-parts.tsx";
 
 export const EVENT_SELECTOR = `[${TIMELINE_EVENT_ATTRIBUTE}]`;
@@ -84,7 +85,8 @@ export function chipAt(root: HTMLElement, column: number, row: number) {
 
 /**
  * Arrow keys in the week grid: up/down through a day by time, left/right to
- * the nearest thread in the next day that has any.
+ * the nearest thread in the next day that has any. Left/right follow the
+ * reading direction, since the week grid mirrors under RTL.
  */
 export function moveInWeek(root: HTMLElement, from: HTMLElement, key: string) {
 	const column = Number(from.dataset.column);
@@ -96,7 +98,7 @@ export function moveInWeek(root: HTMLElement, from: HTMLElement, key: string) {
 	if (key !== "ArrowLeft" && key !== "ArrowRight") {
 		return false;
 	}
-	const step = key === "ArrowRight" ? 1 : -1;
+	const step = inlineArrowStep(key, root);
 	for (let next = column + step; next >= 0 && next < 7; next += step) {
 		const count = root.querySelectorAll(
 			`${EVENT_SELECTOR}[data-column="${next}"]`

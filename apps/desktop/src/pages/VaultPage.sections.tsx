@@ -300,7 +300,7 @@ export function renderVaultSecretList({
 									<li key={item.path}>
 										<button
 											aria-current={folder === item.path ? "true" : undefined}
-											className={`w-full truncate rounded-lg px-2 py-1 text-left font-mono text-xs hover:bg-muted aria-[current=true]:bg-muted aria-[current=true]:font-medium ${styles.folder}`}
+											className={`w-full truncate rounded-lg px-2 py-1 text-start font-mono text-xs hover:bg-muted aria-[current=true]:bg-muted aria-[current=true]:font-medium ${styles.folder}`}
 											onClick={() => setFolder(item.path)}
 											style={folderStyle}
 											type="button"

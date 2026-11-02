@@ -85,12 +85,12 @@ export function EventRow({ event }: { event: CalendarEvent }) {
 						: eventClock(event.start)}
 				</span>
 			</div>
-			<p className="truncate pl-6 text-detail text-muted-foreground">
+			<p className="truncate ps-6 text-detail text-muted-foreground">
 				{event.scheduleLabel} · {targetLabel(event)}
 			</p>
 			{event.kind === "past" && event.outcome === "failure" && event.error ? (
 				<InlineErrorRow
-					className="h-6 pl-6"
+					className="h-6 ps-6"
 					details={event.error}
 					message="This run failed."
 				/>

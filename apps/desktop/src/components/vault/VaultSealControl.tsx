@@ -111,7 +111,10 @@ export function VaultSealControl({
 
 	const label = seal.sealed
 		? shamir
-			? `Sealed ${seal.progress}/${seal.threshold}`
+			? tl("Sealed {progress}/{threshold}", {
+					progress: seal.progress,
+					threshold: seal.threshold,
+				})
 			: "Sealed"
 		: "Unsealed";
 	let ariaLabel = tl("Vault unsealed");

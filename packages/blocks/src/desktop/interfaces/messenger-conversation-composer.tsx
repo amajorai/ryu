@@ -47,7 +47,7 @@ export function MessengerComposer({
 				<InputGroupTextarea
 					aria-describedby={disabledReason ? hintId : undefined}
 					aria-label={placeholder}
-					className="max-h-40 min-h-10 py-2.5 pl-4 text-sm"
+					className="max-h-40 min-h-10 py-2.5 ps-4 text-sm"
 					onChange={(event) => setDraft(event.target.value)}
 					onKeyDown={(event) => {
 						if (

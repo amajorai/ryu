@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
@@ -44,7 +45,7 @@ export function PostRow({
 	const titleId = useId();
 	const { thread } = item;
 	const comments = commentLabel(item.comments);
-	const authorName = item.author?.name ?? "You";
+	const authorName = item.author?.name ?? tr("You");
 	return (
 		<article
 			aria-labelledby={titleId}
@@ -73,7 +74,7 @@ export function PostRow({
 						{compactAge(thread.updatedAt, now)}
 					</time>
 					{thread.pinned ? (
-						<span className="ml-auto flex shrink-0 items-center gap-1 text-muted-foreground">
+						<span className="ms-auto flex shrink-0 items-center gap-1 text-muted-foreground">
 							<Pin aria-hidden="true" className="size-3.5" strokeWidth={2} />
 							<span className="text-[13px]">Pinned</span>
 						</span>
@@ -81,13 +82,13 @@ export function PostRow({
 				</div>
 				<h3 className="mt-1 font-semibold text-base text-foreground leading-6 tracking-[-0.005em]">
 					<button
-						className="text-left font-semibold outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring/60"
+						className="text-start font-semibold outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring/60"
 						id={titleId}
 						onClick={() => onOpen(thread.id)}
 						ref={(element) => registerRow(thread.id, element)}
 						type="button"
 					>
-						{thread.title || "Untitled post"}
+						{thread.title || tr("Untitled post")}
 					</button>
 				</h3>
 				{thread.lastMessage ? (
@@ -95,7 +96,7 @@ export function PostRow({
 						{thread.lastMessageRole === "user" && item.author ? (
 							<span className="font-medium text-foreground/90">You: </span>
 						) : null}
-						{thread.lastMessage}
+						<span data-ryu-i18n="off">{thread.lastMessage}</span>
 					</p>
 				) : null}
 				<div className="mt-3 flex min-w-0 items-center gap-3 text-[13px] leading-5">
@@ -109,7 +110,7 @@ export function PostRow({
 						</span>
 					) : (
 						<span className="shrink-0 text-muted-foreground">
-							{comments ?? "No comments yet"}
+							{comments ?? tr("No comments yet")}
 						</span>
 					)}
 					{hideMarker ? null : (

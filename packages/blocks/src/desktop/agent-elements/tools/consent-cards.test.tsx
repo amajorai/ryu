@@ -152,6 +152,15 @@ describe("plugin install card", () => {
 			expect(rows[0]?.textContent).toContain("Recommended");
 			expect(rows[1]?.textContent).toContain("Not reviewed by Ryu");
 			expect(rows[1]?.textContent).toContain("3.2K stars");
+			const statLabels = [
+				...view.container.querySelectorAll("li[aria-label]"),
+			].map((item) => item.getAttribute("aria-label"));
+			expect(statLabels).toContain("Rated 4.8 out of 5 from 52 reviews");
+			expect(statLabels).toContain("12.4K installs");
+			expect(statLabels).toContain("3.2K GitHub stars");
+			expect(statLabels).toContain("Version 1.2.0");
+			expect(statLabels).toContain("By Ryu");
+			expect(rows[0]?.textContent).toContain("Official");
 			// Community listings are browse-only: no Install button on that row.
 			expect(buttonByText(rows[1] as HTMLElement, "Install")).toBeUndefined();
 			expect(buttonByText(rows[1] as HTMLElement, "Review")).toBeDefined();

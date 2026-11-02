@@ -3,7 +3,6 @@ import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgentAct,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ScrollText, Sparkles } from "lucide-react";
@@ -30,7 +29,7 @@ import {
 	type VillagerSpec,
 	Villagers,
 } from "./game3d-villager.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	LobbyActProps,
 	type LobbyActView,
@@ -218,7 +217,11 @@ export function LobbyDiorama({
 			}
 			out.push({
 				id: member.agent.id,
-				label: `${member.agent.name}, ${SQUAD_STATE_DESCRIPTIONS[member.state]}, level ${member.level.level}`,
+				label: tl("{name}, {state}, level {level}", {
+					level: member.level.level,
+					name: member.agent.name,
+					state: tl(SQUAD_STATE_DESCRIPTIONS[member.state]),
+				}),
 				looks: base,
 				name: member.agent.name,
 				pose: POSE[member.state],
@@ -411,7 +414,29 @@ export function LobbyDiorama({
 						at={matchAt(row)}
 						className="font-sans font-semibold text-[12px]"
 						key={thread.id}
-						label={`${title}${agent ? ` with ${agent.name}` : ""}${acts ? "" : `, ${THREAD_STATUS_LABELS[status]}`}. ${open ? "Open now." : "Open thread."}`}
+						label={
+							open
+								? tl(
+										"{title}{hasAgent, select, true { with {agent}} other {}}{showStatus, select, true {, {status}} other {}}. Open now.",
+										{
+											agent: agent?.name ?? "",
+											hasAgent: agent ? "true" : "false",
+											showStatus: acts ? "false" : "true",
+											status: threadStatusLabel(status, tl),
+											title,
+										}
+									)
+								: tl(
+										"{title}{hasAgent, select, true { with {agent}} other {}}{showStatus, select, true {, {status}} other {}}. Open thread.",
+										{
+											agent: agent?.name ?? "",
+											hasAgent: agent ? "true" : "false",
+											showStatus: acts ? "false" : "true",
+											status: threadStatusLabel(status, tl),
+											title,
+										}
+									)
+						}
 						onSelect={() => onOpen(thread.id)}
 						pressed={open}
 					>

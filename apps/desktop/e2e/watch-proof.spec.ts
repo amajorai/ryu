@@ -1,6 +1,6 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { WatchSnapshot } from "../../../packages/protocol/src/watch.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("admin monitoring flow and responsive evidence", async ({ page }) => {
 	const errors: string[] = [];
@@ -162,10 +162,7 @@ test("admin monitoring flow and responsive evidence", async ({ page }) => {
 	await expect(
 		page.getByText("src/example.ts:42", { exact: true })
 	).toBeVisible();
-	const proof = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/ryu-watch/cloud-auto-enrollment"
-	);
+	const proof = proofEvidencePath("ryu-watch/cloud-auto-enrollment");
 	await page.screenshot({ path: `${proof}/admin-desktop.png`, fullPage: true });
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect(

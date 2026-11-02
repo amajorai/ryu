@@ -9,52 +9,47 @@ import {
 	PROOF_URL,
 } from "./onboarding-setup-page-proof.fixture.ts";
 
-test("production org/provider/cloud/import callers persist exact mutations and reload auto-import", async ({
+// After the organization choice the flow goes to the cloud default (paid) or
+// straight to safety/guidance (4f7563c79d, kept by the 5f8fe1f66e split);
+// provider keys, connections and thread imports are no longer onboarding steps.
+test("production org choice persists the exact active organization and an unpaid plan goes straight to guidance", async ({
 	page,
 }) => {
 	const f = await fixture(page);
 	try {
 		await localDefault(page);
 		await chooseOrg(page);
-		const key = page.getByLabel("Fixture Provider API key");
-		await expect(key).toHaveAttribute("type", "password");
-		await key.fill("  fixture-key-only  ");
-		await page.getByRole("button", { name: "Connect", exact: true }).click();
-		await expect(page.getByText("Configured on this node")).toBeVisible();
-		expect(
-			f.calls.find((c) => c.path === "/api/pi-config/providers")?.body
-		).toEqual({ apiKey: "fixture-key-only", provider: "fixture-provider" });
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-		await page
-			.getByRole("button", { name: "Skip for now", exact: true })
-			.click();
 		await expect(
-			page.getByText("No importable threads were found on this node.")
+			page.getByRole("heading", { name: "A few things to know" })
 		).toBeVisible();
-		const toggle = page.getByRole("switch");
-		await expect(toggle).toBeChecked();
-		await toggle.click();
-		await page.reload();
-		await expect(page.getByRole("switch")).not.toBeChecked();
+		await expect
+			.poll(() =>
+				page.evaluate(() =>
+					localStorage.getItem("ryu_desktop_onboarding_phase")
+				)
+			)
+			.toBe("guidance");
 		const saved = await f.read();
 		expect(saved.activeOrg).toBe("org-two");
-		expect(saved.preferences["default-cloud-agent-selection"]).toBe("");
+		// An unpaid plan has no cloud lane to set, and nothing is configured
+		// for a provider on the way.
+		expect(saved.preferences["default-cloud-agent-selection"]).toBeUndefined();
 		expect(
-			await page.evaluate(() =>
-				localStorage.getItem("ryu:auto-import-agent-threads")
+			f.calls.some(
+				(c) => c.method !== "GET" && c.path === "/api/pi-config/providers"
 			)
-		).toBe("false");
-		expect(
-			f.calls
-				.filter((c) => c.path === "/api/auth/organization/set-active")
-				.at(-1)?.body
-		).toEqual({ organizationId: "org-two" });
+		).toBe(false);
+		const setActive = f.calls.filter(
+			(c) => c.path === "/api/auth/organization/set-active"
+		);
+		expect(setActive.at(-1)).toMatchObject({
+			method: "POST",
+			authorization: "Bearer onboarding-fixture-session",
+			body: { organizationId: "org-two" },
+		});
 		await mkdir(EVIDENCE, { recursive: true });
 		await page.screenshot({
-			path: path.join(
-				EVIDENCE,
-				"onboarding-production-import-toggle-readback.png"
-			),
+			path: path.join(EVIDENCE, "onboarding-production-org-guidance.png"),
 			fullPage: true,
 		});
 	} finally {
@@ -83,8 +78,10 @@ test("production acquisition answer retries exact session mutation and navigates
 		).toBeVisible();
 		expect((await f.read()).onboardingSource).toBeNull();
 		await page.getByRole("button", { name: "Continue", exact: true }).click();
+		// The source hands off to the task picker ("Recommended for you" is gone
+		// since 4f7563c79d).
 		await expect(
-			page.getByRole("heading", { name: "Recommended for you" })
+			page.getByRole("heading", { name: "What would you like Ryu to do?" })
 		).toBeVisible();
 		const writes = f.calls.filter(
 			(c) => c.path === "/api/profile/me/onboarding-source"
@@ -98,16 +95,15 @@ test("production acquisition answer retries exact session mutation and navigates
 			});
 		}
 		expect((await f.read()).onboardingSource).toBe("search");
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-		await page.getByRole("button", { name: "See your first task" }).click();
+		await page
+			.getByRole("button", { name: "Preview a starting task", exact: true })
+			.click();
 		await expect(
-			page.getByRole("heading", { name: "Your subscription is ready" })
+			page.getByRole("heading", { name: "See what Ryu will work on" })
 		).toBeVisible();
-		await page.getByRole("button", { name: "Continue to task" }).click();
-		await expect(
-			page.getByRole("button", { name: "Start task" })
-		).toBeVisible();
-		await page.getByRole("button", { name: "Start task" }).click();
+		await page
+			.getByRole("button", { name: "Start managed task", exact: true })
+			.click();
 		await expect(page.getByRole("alert")).toHaveText(
 			"This workspace cannot create an onboarding task. Ask the node owner to continue."
 		);
@@ -238,9 +234,14 @@ test("production privacy choices reject failed write, retry and persist all four
 	const f = await fixture(page, { failedPreference: true });
 	try {
 		await page.addInitScript(() =>
-			localStorage.setItem("ryu_desktop_onboarding_phase", "welcome")
+			localStorage.setItem("ryu_desktop_onboarding_phase", "privacy")
 		);
 		await page.goto(PROOF_URL);
+		// The privacy choices are their own step; a stored "welcome" phase now
+		// resumes on guidance instead.
+		await expect(
+			page.getByRole("heading", { name: "Your privacy choices" })
+		).toBeVisible();
 		const analytics = page.locator(
 			'[role="switch"]:has(+ #onboarding-product-analytics)'
 		);
@@ -260,8 +261,17 @@ test("production privacy choices reject failed write, retry and persist all four
 		expect(
 			(await f.read()).preferences["product-analytics-enabled"]
 		).toBeUndefined();
-		await analytics.click();
+		// A failed write restores the previous choice and holds every switch
+		// until the user retries that same write.
+		await expect(page.getByRole("alert")).toContainText(
+			"Couldn't save your privacy choice."
+		);
+		await expect(analytics).toBeDisabled();
+		await page
+			.getByRole("button", { name: "Retry saving", exact: true })
+			.click();
 		await expect(analytics).not.toBeChecked();
+		await expect(analytics).toBeEnabled();
 		await page
 			.locator('[role="switch"]:has(+ #onboarding-community-stats)')
 			.click();
@@ -308,16 +318,14 @@ test("production privacy choices reject failed write, retry and persist all four
 			page.locator('[role="switch"]:has(+ #onboarding-diagnostics-export)')
 		).toBeChecked();
 		await mkdir(EVIDENCE, { recursive: true });
-		await page
-			.getByText("Choose your privacy settings", { exact: true })
-			.locator("..")
-			.screenshot({
-				path: path.join(
-					EVIDENCE,
-					"onboarding-production-privacy-persisted-readback.png"
-				),
-				animations: "disabled",
-			});
+		await page.screenshot({
+			path: path.join(
+				EVIDENCE,
+				"onboarding-production-privacy-persisted-readback.png"
+			),
+			animations: "disabled",
+			fullPage: true,
+		});
 		await page.getByTestId("onboarding-final-continue").click();
 		await expect
 			.poll(() =>

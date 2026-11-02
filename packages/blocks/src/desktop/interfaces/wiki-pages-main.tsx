@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
@@ -5,6 +6,7 @@ import { type ReactNode, useMemo } from "react";
 import {
 	agentLeadIntro,
 	byRecency,
+	countWord,
 	didYouKnow,
 	eventOutcome,
 	eventsOnDay,
@@ -54,7 +56,7 @@ function Panel({
 			<div className="px-3 pt-2 pb-3">
 				{children}
 				{footer ? (
-					<p className="mt-2 text-right text-[13px] leading-5">{footer}</p>
+					<p className="mt-2 text-end text-[13px] leading-5">{footer}</p>
 				) : null}
 			</div>
 		</section>
@@ -107,19 +109,19 @@ export function MainPage({
 				</p>
 				<p className="mt-2 text-[13px] text-muted-foreground leading-5">
 					<WikiLink route={{ index: "agents", kind: "index" }}>
-						{tally(snapshot.agents.length, "agent")}
+						{statCount(snapshot.agents.length, "agent")}
 					</WikiLink>
 					<Dot />
 					<WikiLink route={{ index: "teams", kind: "index" }}>
-						{tally(teams, "team")}
+						{statCount(teams, "team")}
 					</WikiLink>
 					<Dot />
 					<WikiLink route={{ index: "projects", kind: "index" }}>
-						{tally(projects, "project")}
+						{statCount(projects, "project")}
 					</WikiLink>
 					<Dot />
 					<WikiLink route={{ index: "threads", kind: "index" }}>
-						{tally(snapshot.threads.length, "thread")}
+						{statCount(snapshot.threads.length, "thread")}
 					</WikiLink>
 				</p>
 			</section>
@@ -159,7 +161,7 @@ export function MainPage({
 								<>
 									<WikiPortrait
 										agent={featured.agent}
-										className="float-left mt-1 mr-3 mb-1 border border-border"
+										className="float-left me-3 mt-1 mb-1 border border-border"
 										size={96}
 									/>
 									<p className={PROSE}>
@@ -273,10 +275,19 @@ export function MainPage({
 											{agent ? (
 												<>
 													{" "}
-													for{" "}
-													<WikiLink route={{ id: agent.id, kind: "agent" }}>
-														{agent.name}
-													</WikiLink>
+													{tlRich(
+														"for <agent>{name}</agent>",
+														{ name: agent.name },
+														{
+															agent: (chunks) => (
+																<WikiLink
+																	route={{ id: agent.id, kind: "agent" }}
+																>
+																	{chunks}
+																</WikiLink>
+															),
+														}
+													)}
 												</>
 											) : null}
 											<span className="text-muted-foreground">
@@ -297,6 +308,25 @@ export function MainPage({
 }
 
 /** Digits for stat lines ("6 agents"), where prose would spell them out. */
-function tally(count: number, noun: string): string {
-	return `${count.toLocaleString("en")} ${count === 1 ? noun : `${noun}s`}`;
+function statCount(
+	count: number,
+	noun: "agent" | "project" | "team" | "thread"
+): string {
+	const values = { count, n: countWord(count) };
+	switch (noun) {
+		case "agent":
+			return tr("{count, plural, one {{n} agent} other {{n} agents}}", values);
+		case "project":
+			return tr(
+				"{count, plural, one {{n} project} other {{n} projects}}",
+				values
+			);
+		case "team":
+			return tr("{count, plural, one {{n} team} other {{n} teams}}", values);
+		default:
+			return tr(
+				"{count, plural, one {{n} thread} other {{n} threads}}",
+				values
+			);
+	}
 }

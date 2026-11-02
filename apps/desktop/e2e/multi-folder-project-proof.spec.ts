@@ -1,17 +1,11 @@
 import { writeFile } from "node:fs/promises";
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PRIMARY_FOLDER = "/Users/jiawei/Documents/DescomicWeb";
 const SECONDARY_FOLDER = "/Users/jiawei/Documents/DescomicApi";
-const PROOF_SCREENSHOT = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/multi-folder-project-settings.png"
-);
-const PROOF_LOG = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/multi-folder-project-settings.log.json"
-);
+const PROOF_SCREENSHOT = proofEvidencePath("multi-folder-project-settings.png");
+const PROOF_LOG = proofEvidencePath("multi-folder-project-settings.log.json");
 
 test.describe.configure({ mode: "serial", timeout: 120_000 });
 

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { browserContentKeyHost } from "./browser-content-key-host.ts";
 
 const root = import.meta.dirname;
 
@@ -14,7 +15,8 @@ export default defineConfig({
 		esbuildOptions: { target: "esnext" },
 	},
 	assetsInclude: ["**/*.glb"],
-	plugins: [react()],
+	// The sealed session needs a content key; see browser-content-key-host.ts.
+	plugins: [browserContentKeyHost(), react()],
 	css: { postcss: { plugins: [tailwindcss()] } },
 	resolve: {
 		alias: [

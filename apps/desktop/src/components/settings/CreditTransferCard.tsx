@@ -1,8 +1,8 @@
 import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import {
@@ -219,7 +219,11 @@ function ScopedCreditTransferCard({
 			setSelectedGrants(new Set());
 			setTopupDollars("");
 			toast.success({
-				title: `Moved ${formatUsd(result.movedGrantMicroUsd + result.movedTopupMicroUsd)}`,
+				title: tl("Moved {amount}", {
+					amount: formatUsd(
+						result.movedGrantMicroUsd + result.movedTopupMicroUsd
+					),
+				}),
 				// Named explicitly because a PARTIAL success is a real outcome here: a
 				// grant spent between loading this list and pressing the button is
 				// simply absent from the result rather than failing the whole request.
@@ -342,7 +346,7 @@ function ScopedCreditTransferCard({
 							</SelectContent>
 						</Select>
 					</div>
-					<HugeiconsIcon
+					<DirectionalIcon
 						className="mb-2.5 hidden size-4 shrink-0 text-muted-foreground sm:block"
 						icon={ArrowRight02Icon}
 					/>
@@ -460,7 +464,7 @@ function ScopedCreditTransferCard({
 								variant="mono"
 							>
 								{!transferMutation.isPending && (
-									<HugeiconsIcon icon={ArrowRight02Icon} size={16} />
+									<DirectionalIcon icon={ArrowRight02Icon} size={16} />
 								)}
 								{tl("Move credits")}
 							</Button>

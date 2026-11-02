@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { JobRow } from "./jobs-model-core.ts";
 import {
 	type JobFilters,
@@ -120,5 +121,5 @@ export function pillLabel(field: string, selected: readonly string[]): string {
 	if (selected.length === 1) {
 		return selected[0] ?? field;
 	}
-	return `${field} · ${selected.length}`;
+	return tr("{field} · {count}", { count: selected.length, field });
 }

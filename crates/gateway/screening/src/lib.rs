@@ -16,6 +16,8 @@
 //!   (local, the primary screener; remote Jev, opt-in), guard models (Llama
 //!   Guard and Qwen3Guard dialects), the LLM-judge inspector adapter, and the
 //!   sentinel `TestBackend`.
+//! - [`template_tokens`]: the chat-template control-token neutraliser and the
+//!   untrusted-data fence every guard and judge request body uses.
 //!
 //! The admission glue (floor parsing, the fail rules of section 6, receipts,
 //! violation events) stays in `apps/gateway/src/screening/`.
@@ -25,6 +27,7 @@ pub mod backends;
 pub mod cache;
 pub mod chain;
 pub mod safety_client;
+pub mod template_tokens;
 #[cfg(any(test, feature = "test-backends"))]
 pub mod testing;
 
@@ -40,6 +43,7 @@ pub use chain::{
     QualificationRecord, RemoteMode, Role, ScreenerChain,
 };
 pub use safety_client::{Endpoint, EndpointError, SafetyClient};
+pub use template_tokens::{contains_template_tokens, fence_untrusted, neutralize_template_tokens};
 
 #[cfg(test)]
 mod coverage_probe_tests;
@@ -55,9 +59,12 @@ mod release_guard {
             include_str!("cache.rs"),
             include_str!("safety_client.rs"),
             include_str!("backends/mod.rs"),
-            include_str!("backends/guard_model.rs"),
+            include_str!("backends/guard_model/mod.rs"),
+            include_str!("backends/guard_model/parse.rs"),
             include_str!("backends/decision.rs"),
             include_str!("backends/inspector.rs"),
+            include_str!("backends/inspector_reply.rs"),
+            include_str!("template_tokens.rs"),
         ];
         let needle = concat!("RYU", "_TEST");
         for source in ungated {

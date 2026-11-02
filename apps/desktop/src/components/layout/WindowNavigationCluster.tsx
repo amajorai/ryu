@@ -11,6 +11,7 @@ import {
 	ContextMenuContent,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Tooltip,
 	TooltipContent,
@@ -114,7 +115,10 @@ export function WindowNavigationCluster({
 										size="icon"
 										variant="ghost"
 									>
-										<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+										<DirectionalIcon
+											className="size-4"
+											icon={ArrowLeft01Icon}
+										/>
 									</Button>
 								}
 							/>
@@ -131,7 +135,10 @@ export function WindowNavigationCluster({
 										size="icon"
 										variant="ghost"
 									>
-										<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
+										<DirectionalIcon
+											className="size-4"
+											icon={ArrowRight01Icon}
+										/>
 									</Button>
 								}
 							/>

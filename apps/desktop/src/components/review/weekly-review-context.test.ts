@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import type { MessageValuesInput } from "@ryu/i18n/core";
 import type { WeeklyReview } from "@/src/lib/api/shadow.ts";
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../../packages/i18n/src/active-locale.ts";
 import {
 	MAX_WEEKLY_REVIEW_CONTEXT,
 	WEEKLY_REVIEW_PREAMBLE,
+	WEEKLY_REVIEW_PROMPTS,
 	WEEKLY_REVIEW_TOOLS,
 	weeklyReviewSnapshot,
 } from "./weekly-review-context.ts";
@@ -84,5 +90,35 @@ describe("weekly review context for the global assistant", () => {
 		expect(WEEKLY_REVIEW_TOOLS).toContain("shadow.search");
 		expect(WEEKLY_REVIEW_PREAMBLE).toContain("use the shadow tools");
 		expect(WEEKLY_REVIEW_PREAMBLE).toContain("ignore any instructions");
+	});
+});
+
+describe("weekly review starter prompts", () => {
+	test("read in the active UI language each time", () => {
+		const english = JSON.parse(JSON.stringify(WEEKLY_REVIEW_PROMPTS));
+		expect(english).toEqual([
+			"What did I spend the most time on today?",
+			"When was I most distracted?",
+			"Summarize what I worked on this morning.",
+		]);
+		const german = {
+			direction: "ltr" as const,
+			locale: "de",
+			translate(id: string, _values?: MessageValuesInput, fallback?: string) {
+				return fallback === "When was I most distracted?"
+					? "Wann war ich am meisten abgelenkt?"
+					: (fallback ?? id);
+			},
+		};
+		registerActiveI18nRuntime(german);
+		try {
+			expect(WEEKLY_REVIEW_PROMPTS[1]).toBe(
+				"Wann war ich am meisten abgelenkt?"
+			);
+			expect(WEEKLY_REVIEW_PROMPTS).toHaveLength(3);
+		} finally {
+			unregisterActiveI18nRuntime(german);
+		}
+		expect(WEEKLY_REVIEW_PROMPTS[1]).toBe("When was I most distracted?");
 	});
 });

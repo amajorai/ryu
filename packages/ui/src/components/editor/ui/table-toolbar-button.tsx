@@ -159,7 +159,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 									editor.tf.focus();
 								}}
 							>
-								<ArrowLeft />
+								<ArrowLeft className="rtl:-scale-x-100" />
 								Insert column before
 							</DropdownMenuItem>
 							<DropdownMenuItem
@@ -170,7 +170,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 									editor.tf.focus();
 								}}
 							>
-								<ArrowRight />
+								<ArrowRight className="rtl:-scale-x-100" />
 								Insert column after
 							</DropdownMenuItem>
 							<DropdownMenuItem

@@ -76,7 +76,7 @@ function BotModeAgentRow({
 		<SidebarMenuItem>
 			<button
 				aria-label={tl("Chat with {name}", { name })}
-				className="group/agent-row flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+				className="group/agent-row flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-start transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 				data-testid={`hero-bot-agent-${id}`}
 				type="button"
 			>
@@ -93,7 +93,7 @@ function BotModeAgentRow({
 					</span>
 				</span>
 			</button>
-			<div className="relative ml-7 border-sidebar-border/70 border-l pl-2">
+			<div className="relative ms-7 border-sidebar-border/70 border-s ps-2">
 				<div className="type-compact px-2 py-1 text-muted-foreground uppercase tracking-(--tracking-eyebrow)">
 					Threads
 				</div>
@@ -126,7 +126,7 @@ function TrustModeAiRow({
 		<SidebarMenuItem>
 			<button
 				aria-label={tl("Use {name}", { name })}
-				className="group/ai-row flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+				className="group/ai-row flex min-h-14 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-start transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 				data-testid={`hero-trust-ai-${id}`}
 				type="button"
 			>

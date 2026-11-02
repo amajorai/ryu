@@ -232,7 +232,7 @@ export function ScrollProgress({ className, ...props }: ScrollProgressProps) {
 		<motion.div
 			aria-hidden="true"
 			className={cn(
-				"pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 origin-left bg-foreground/60",
+				"pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 origin-left bg-foreground/60 rtl:origin-right",
 				styles.progress,
 				className
 			)}

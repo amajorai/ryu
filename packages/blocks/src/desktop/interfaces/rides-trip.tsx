@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -90,12 +91,12 @@ export function RidesTrip({
 				<div className="flex items-start gap-2">
 					<Button
 						aria-label="Back to trips"
-						className="-ml-2 shrink-0"
+						className="-ms-2 shrink-0"
 						onClick={onBack}
 						size="icon-sm"
 						variant="ghost"
 					>
-						<ArrowLeft aria-hidden="true" />
+						<ArrowLeft aria-hidden="true" className="rtl:-scale-x-100" />
 					</Button>
 					<h2
 						className="line-clamp-2 min-w-0 pt-0.5 font-semibold text-foreground text-lg leading-7 tracking-tight outline-none"
@@ -104,7 +105,7 @@ export function RidesTrip({
 						tabIndex={-1}
 					>
 						<span className="sr-only">Trip to </span>
-						{trip?.thread.title ?? "New conversation"}
+						{trip?.thread.title ?? tr("New conversation")}
 					</h2>
 				</div>
 				<div className="flex flex-col gap-3">
@@ -112,7 +113,7 @@ export function RidesTrip({
 						<RideAvatar agent={trip?.driver} size={40} />
 						<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 							<p className="truncate font-medium text-foreground text-sm">
-								{trip?.driver?.name ?? "No driver"}
+								{trip?.driver?.name ?? tr("No driver")}
 							</p>
 							<p
 								className={cn(
@@ -124,7 +125,7 @@ export function RidesTrip({
 							</p>
 						</div>
 						{eta ? (
-							<p className="shrink-0 text-right">
+							<p className="shrink-0 text-end">
 								<span className="sr-only">Arriving in about </span>
 								<span className="font-semibold text-2xl text-foreground tabular-nums leading-8 tracking-tight">
 									{eta}
@@ -190,14 +191,14 @@ export function TripPreview({
 				<RideAvatar agent={trip.driver} size={40} />
 				<div className="flex min-w-0 flex-1 flex-col">
 					<p className="gk-display truncate text-(--gk-ink) text-[18px] leading-6">
-						{trip.driver?.name ?? "No driver"}
+						{trip.driver?.name ?? tr("No driver")}
 					</p>
 					<p className="truncate font-semibold text-(--gk-ink-muted) text-[13px] leading-5">
 						{headline.status}
 					</p>
 				</div>
 				{eta ? (
-					<p className="shrink-0 text-right">
+					<p className="shrink-0 text-end">
 						<span className="sr-only">Arriving in about </span>
 						<span className="gk-display text-(--gk-ink) text-[26px] tabular-nums leading-7">
 							{eta}
@@ -225,7 +226,10 @@ export function TripPreview({
 				/>
 				<li className="flex items-center gap-3">
 					<span aria-hidden="true" className="size-3 shrink-0 bg-(--gk-ink)" />
-					<span className="truncate font-semibold text-(--gk-ink) text-sm">
+					<span
+						className="truncate font-semibold text-(--gk-ink) text-sm"
+						data-ryu-i18n="off"
+					>
 						{trip.thread.title}
 					</span>
 					{acted ? null : (
@@ -236,7 +240,7 @@ export function TripPreview({
 				</li>
 			</ol>
 			<GameAction
-				icon={<ArrowRight strokeWidth={2.75} />}
+				icon={<ArrowRight className="rtl:-scale-x-100" strokeWidth={2.75} />}
 				label="Open trip"
 				onClick={onOpen}
 			/>

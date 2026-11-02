@@ -28,6 +28,33 @@ function withoutRetiredCorners(markup: string) {
 	);
 }
 
+// The archive predates the shared toggle group's move to logical edges for
+// right-to-left layouts; the same edges are named by their logical utilities.
+const LOGICAL_EDGE_UTILITIES: Readonly<Record<string, string>> = {
+	"border-l": "border-s",
+	"border-l-0": "border-s-0",
+	"pl-2.5": "ps-2.5",
+	"pr-2.5": "pe-2.5",
+	"rounded-l-3xl": "rounded-s-3xl",
+	"rounded-r-3xl": "rounded-e-3xl",
+};
+
+function withLogicalEdges(markup: string) {
+	return markup.replace(
+		/class="([^"]*)"/g,
+		(_attribute, classes: string) =>
+			`class="${classes
+				.split(" ")
+				.map((value) => {
+					const colon = value.lastIndexOf(":");
+					const utility = value.slice(colon + 1);
+					const logical = LOGICAL_EDGE_UTILITIES[utility];
+					return logical ? `${value.slice(0, colon + 1)}${logical}` : value;
+				})
+				.join(" ")}"`
+	);
+}
+
 // Archived native markup records the pre-migration caller treatment; fixtures
 // never restyle current primitives to manufacture their expected appearance.
 it("preserves the native segmented group's exact default-size and pressed-state markup", () => {
@@ -49,10 +76,12 @@ it("preserves the native segmented group's exact default-size and pressed-state 
 				</ToggleGroupItem>
 			</ToggleGroup>
 		);
-		expect(current).toBe(
-			withoutRetiredCorners(markup).replaceAll(
-				"focus-visible:ring-[3px]",
-				"focus-visible:ring-3"
+		expect(normalizeUtilityOrder(current)).toBe(
+			normalizeUtilityOrder(
+				withLogicalEdges(withoutRetiredCorners(markup)).replaceAll(
+					"focus-visible:ring-[3px]",
+					"focus-visible:ring-3"
+				)
 			)
 		);
 	}

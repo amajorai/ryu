@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { INTERFACE_PROTOCOL_VERSION } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
@@ -8,8 +9,8 @@ import type {
 } from "./terminal-model.ts";
 import {
 	ActionText,
+	countOf,
 	HintLine,
-	plural,
 	type RunAction,
 	type TerminalEntry,
 	type TerminalSegment,
@@ -54,9 +55,11 @@ function bannerSummary(
 	// the latest `ls`, so point at the clickable rows instead of a number.
 	// The hidden rows mix attention and your-turn threads; only a plain `ls`
 	// (most urgent first) lists both.
+	const all = tr("{command} for all", { command: "ls" });
+	const click = tr("click a row to open");
 	return more > 0
-		? [`+${more} more`, "ls for all", "click a row to open"]
-		: ["click a row to open", "ls for all"];
+		? [tr("+{count} more", { count: more }), all, click]
+		: [click, all];
 }
 
 /** The start-up wordmark, drawn in box characters like a shell's motd. */
@@ -155,9 +158,9 @@ function Banner({
 						<>
 							<HintLine
 								parts={[
-									plural(counts.agents, "agent"),
-									plural(counts.threads, "thread"),
-									"help for commands",
+									countOf(counts.agents, "agent"),
+									countOf(counts.threads, "thread"),
+									tr("{command} for commands", { command: "help" }),
 								]}
 							/>
 							<p className="flex flex-wrap gap-x-[3ch]">
@@ -260,7 +263,9 @@ export function TerminalEntryView({
 			return (
 				<p className="whitespace-pre-wrap break-words">
 					<span className="text-muted-foreground">you@ryu </span>
-					<span className="text-foreground">{entry.prompt}</span>
+					<span className="text-foreground" data-ryu-i18n="off">
+						{entry.prompt}
+					</span>
 					<span className="text-primary"> ❯ </span>
 					<span className="font-medium text-foreground">{entry.text}</span>
 				</p>

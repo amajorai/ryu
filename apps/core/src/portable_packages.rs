@@ -6,8 +6,10 @@
 //! then materialises a package on the node. Pricing never gates package bytes or
 //! lifecycle; local enable/disable/uninstall continues to work.
 
+mod archive;
+
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,7 +17,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use zip::ZipArchive;
+
+pub use archive::extract_archive;
+use archive::{safe_relative_path, validate_manifest};
 
 pub(crate) const PACKAGE_MANIFEST_FILE: &str = "ryu.package.json";
 const LANGUAGE_PACK_ARTIFACT: &str = "language-pack.json";
@@ -176,200 +180,6 @@ fn normalized_digest(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn safe_relative_path(raw: &str) -> Result<String> {
-    let path = raw.replace('\\', "/");
-    if path.is_empty() || path.starts_with('/') {
-        bail!("package archive contains an unsafe path `{raw}`");
-    }
-    let parts = path.split('/').collect::<Vec<_>>();
-    if parts
-        .iter()
-        .any(|part| part.is_empty() || *part == "." || *part == "..")
-    {
-        bail!("package archive contains an unsafe path `{raw}`");
-    }
-    Ok(path)
-}
-
-fn string_array(value: Option<&Value>, field: &str) -> Result<Vec<String>> {
-    let Some(value) = value else {
-        bail!("package manifest field `{field}` must be an array of strings");
-    };
-    let Some(values) = value.as_array() else {
-        bail!("package manifest field `{field}` must be an array of strings");
-    };
-    values
-        .iter()
-        .map(|item| {
-            item.as_str()
-                .map(str::to_owned)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "package manifest field `{field}` must contain only non-empty strings"
-                    )
-                })
-        })
-        .collect()
-}
-
-fn validate_manifest(value: Value) -> Result<(PortablePackageManifest, Value)> {
-    let object = value
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("package manifest must be a JSON object"))?;
-    if object.get("schemaVersion").and_then(Value::as_u64) != Some(PACKAGE_SCHEMA_VERSION) {
-        bail!("package manifest schemaVersion must be {PACKAGE_SCHEMA_VERSION}");
-    }
-    let kind = object
-        .get("kind")
-        .and_then(Value::as_str)
-        .filter(|value| PACKAGE_KINDS.contains(value))
-        .ok_or_else(|| anyhow::anyhow!("package manifest kind is unsupported"))?;
-    let id = object
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("package manifest id is required"))?;
-    if !id
-        .chars()
-        .all(|value| value.is_ascii_alphanumeric() || "@._/-".contains(value))
-        || id
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..")
-    {
-        bail!("package manifest id contains unsupported characters");
-    }
-    let name = object
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("package manifest name is required"))?;
-    let version = object
-        .get("version")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("package manifest version is required"))?;
-    let version_pattern = regex::Regex::new(r"^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")?;
-    if !version_pattern.is_match(version) {
-        bail!("package manifest version must be semver-like");
-    }
-    let artifacts = string_array(object.get("artifacts"), "artifacts")?;
-    let targets = string_array(object.get("targets"), "targets")?;
-    let scopes = string_array(object.get("scopes"), "scopes")?;
-    for artifact in &artifacts {
-        safe_relative_path(artifact)?;
-    }
-    let security = object
-        .get("security")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let security: PortablePackageSecurity =
-        serde_json::from_value(security).context("package manifest security is malformed")?;
-    if security.contains_secrets || security.private_content {
-        bail!("secret-bearing or private-content packages cannot be installed");
-    }
-    let manifest: PortablePackageManifest = serde_json::from_value(value.clone())
-        .context("package manifest has an invalid field shape")?;
-    if manifest.kind != kind
-        || manifest.id != id
-        || manifest.name != name
-        || manifest.version != version
-    {
-        bail!("package manifest identity fields are malformed");
-    }
-    if manifest.artifacts != artifacts || manifest.targets != targets || manifest.scopes != scopes {
-        bail!("package manifest array fields are malformed");
-    }
-    Ok((manifest, value))
-}
-
-pub fn extract_archive(bytes: &[u8]) -> Result<ExtractedPackage> {
-    if bytes.len() > MAX_ARCHIVE_BYTES {
-        bail!(
-            "package archive exceeds the {} MiB limit",
-            MAX_ARCHIVE_BYTES / (1024 * 1024)
-        );
-    }
-    let mut archive =
-        ZipArchive::new(Cursor::new(bytes)).context("package archive is not a ZIP")?;
-    if archive.len() > MAX_FILES + 1 {
-        bail!("package archive contains too many files");
-    }
-    let mut manifest_value = None;
-    let mut files = BTreeMap::new();
-    let mut total_bytes = 0_u64;
-    for index in 0..archive.len() {
-        let mut entry = archive
-            .by_index(index)
-            .with_context(|| format!("reading package archive entry {index}"))?;
-        let raw_name = entry
-            .name()
-            .with_context(|| format!("package archive entry {index} has an invalid name"))?
-            .into_owned();
-        if entry.is_dir() || raw_name.ends_with('/') {
-            continue;
-        }
-        let path = safe_relative_path(&raw_name)?;
-        if entry.size() > MAX_FILE_BYTES {
-            bail!("package archive entry `{path}` is too large");
-        }
-        let remaining_total = MAX_TOTAL_FILE_BYTES.saturating_sub(total_bytes);
-        let data = read_archive_file(&mut entry, &path, remaining_total)?;
-        total_bytes = total_bytes.saturating_add(data.len() as u64);
-        if total_bytes > MAX_TOTAL_FILE_BYTES {
-            bail!("package archive expands beyond the total file limit");
-        }
-        if path == PACKAGE_MANIFEST_FILE {
-            if manifest_value.is_some() {
-                bail!("package archive contains duplicate {PACKAGE_MANIFEST_FILE}");
-            }
-            manifest_value = Some(
-                serde_json::from_slice::<Value>(&data)
-                    .context("package manifest is not valid JSON")?,
-            );
-        } else if files.insert(path.clone(), data).is_some() {
-            bail!("package archive contains duplicate file `{path}`");
-        }
-    }
-    let manifest_value = manifest_value
-        .ok_or_else(|| anyhow::anyhow!("package archive is missing {PACKAGE_MANIFEST_FILE}"))?;
-    let (manifest, manifest_value) = validate_manifest(manifest_value)?;
-    for artifact in &manifest.artifacts {
-        if !files.contains_key(artifact) {
-            bail!("package artifact `{artifact}` is missing from the archive");
-        }
-    }
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{}\n", canonical_json(&manifest_value)).as_bytes());
-    for (path, data) in &files {
-        hasher.update(path.as_bytes());
-        hasher.update([0]);
-        hasher.update(data.len().to_string().as_bytes());
-        hasher.update([0]);
-        hasher.update(data);
-    }
-    Ok(ExtractedPackage {
-        manifest,
-        manifest_value,
-        files,
-        package_digest: hex::encode(hasher.finalize()),
-    })
-}
-
-fn read_archive_file(reader: &mut impl Read, path: &str, remaining_total: u64) -> Result<Vec<u8>> {
-    let mut data = Vec::new();
-    reader
-        .take(MAX_FILE_BYTES.min(remaining_total) + 1)
-        .read_to_end(&mut data)?;
-    if data.len() as u64 > MAX_FILE_BYTES {
-        bail!("package archive entry `{path}` is too large");
-    }
-    if data.len() as u64 > remaining_total {
-        bail!("package archive expands beyond the total file limit");
-    }
-    Ok(data)
-}
-
 /// Language packs are data-only overlays, not general portable packages. Keep
 /// this gate at the shared Rust install boundary so Marketplace installs and
 /// local imports cannot diverge on extra artifacts or executable grants.
@@ -472,7 +282,13 @@ pub fn install(
         manifest_bytes.as_bytes(),
     )?;
     for (path, data) in &extracted.files {
-        write_file(&temporary.join(path), data)?;
+        // `safe_relative_path` already refused prefixes and roots; re-check the
+        // joined result so no entry can be written outside the staging dir.
+        let target = temporary.join(path);
+        if !target.starts_with(&temporary) {
+            bail!("package archive contains an unsafe path `{path}`");
+        }
+        write_file(&target, data)?;
     }
     let enabled = if destination.exists() {
         read_state(&destination)
@@ -651,50 +467,4 @@ pub fn list() -> Result<Vec<InstalledPackage>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{canonical_json, read_archive_file, safe_relative_path, InstalledPackage};
-    use serde_json::json;
-
-    #[test]
-    fn canonical_json_sorts_object_keys_without_reordering_arrays() {
-        let value = json!({ "z": 1, "a": { "b": true, "a": [2, 1] } });
-        assert_eq!(
-            canonical_json(&value),
-            r#"{"a":{"a":[2,1],"b":true},"z":1}"#
-        );
-    }
-
-    #[test]
-    fn archive_paths_are_flat_and_traversal_safe() {
-        assert_eq!(
-            safe_relative_path("nested\\file.json").unwrap(),
-            "nested/file.json"
-        );
-        assert!(safe_relative_path("../file.json").is_err());
-        assert!(safe_relative_path("nested//file.json").is_err());
-        assert!(safe_relative_path("/absolute").is_err());
-    }
-
-    #[test]
-    fn installed_package_runtime_ids_are_backward_compatible() {
-        let record: InstalledPackage = serde_json::from_value(serde_json::json!({
-            "id": "demo",
-            "kind": "agent",
-            "version": "1.0.0",
-            "package_digest": "abc",
-            "enabled": false,
-            "installed_at_unix_ms": 1
-        }))
-        .expect("legacy install state should deserialize");
-        assert!(record.runtime_ids.is_empty());
-    }
-
-    #[test]
-    fn archive_reader_enforces_actual_decompressed_bytes() {
-        let mut entry = std::io::Cursor::new(vec![0u8; 10]);
-        assert!(read_archive_file(&mut entry, "file.bin", 5)
-            .unwrap_err()
-            .to_string()
-            .contains("total file limit"));
-    }
-}
+mod tests;

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -30,7 +31,9 @@ function RequesterCell({ ticket }: { ticket: Ticket }) {
 	return (
 		<span className="flex min-w-0 items-center gap-2">
 			<TicketAvatar agent={ticket.requester} size={20} />
-			<span className="truncate">{ticket.requester.name}</span>
+			<span className="truncate" data-ryu-i18n="off">
+				{ticket.requester.name}
+			</span>
 			{ticket.ccs.length > 0 ? (
 				<span
 					className="shrink-0 text-muted-foreground text-xs tabular-nums"
@@ -78,7 +81,7 @@ function cellFor(
 		default:
 			return layout === "compact" ? (
 				<time
-					className="block text-right text-muted-foreground text-xs tabular-nums"
+					className="block text-end text-muted-foreground text-xs tabular-nums"
 					dateTime={ticket.thread.updatedAt}
 					title={ticketFullTime(ticket.updatedAt)}
 				>
@@ -112,7 +115,7 @@ function CompactSubject({
 				/>
 				<TicketNumber number={ticket.number} />
 				<span className="truncate">
-					{ticket.requester?.name ?? "No requester"}
+					{ticket.requester?.name ?? tr("No requester")}
 				</span>
 				{ticket.sla ? <TicketSlaChip sla={ticket.sla} /> : null}
 			</span>
@@ -148,7 +151,7 @@ export function TicketRow({
 	const subjectButton = (
 		<button
 			aria-current={open ? "true" : undefined}
-			className="block min-w-0 max-w-full truncate text-left font-medium text-foreground outline-none"
+			className="block min-w-0 max-w-full truncate text-start font-medium text-foreground outline-none"
 			data-testid={`tickets-row-${ticket.id}`}
 			onClick={(event) => {
 				event.stopPropagation();
@@ -160,7 +163,7 @@ export function TicketRow({
 			title={ticket.thread.lastMessage ?? undefined}
 			type="button"
 		>
-			{ticket.thread.title || "Untitled ticket"}
+			{ticket.thread.title || tr("Untitled ticket")}
 		</button>
 	);
 	const subject =
@@ -193,7 +196,7 @@ export function TicketRow({
 				<span
 					aria-hidden="true"
 					className={cn(
-						"absolute inset-y-0 left-0 w-0.5 bg-primary opacity-0 transition-opacity",
+						"absolute inset-y-0 start-0 w-0.5 bg-primary opacity-0 transition-opacity",
 						cursor && "group-focus-within/table:opacity-100"
 					)}
 				/>

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 /* eslint-disable react/no-unknown-property */
 import type {
 	ClockOptions,
@@ -330,7 +331,7 @@ export function screenActivity(act: InterfaceAgentAct): string {
 	switch (act.act) {
 		case "working":
 		case "blocked":
-			return act.bubble?.text ?? "Working";
+			return act.bubble?.text ?? tr("Working");
 		case "asking":
 			return "Asks you";
 		case "delivering":
@@ -350,7 +351,7 @@ export function screenActivity(act: InterfaceAgentAct): string {
  * break" with no reset time.
  */
 export const workerLimitText: LimitText = (_act, at) =>
-	at ? `Back ${at}` : "On a break";
+	at ? tr("Back {time}", { time: at }) : tr("On a break");
 
 /** What the act props need to answer and open cards. */
 export interface WorkersActHandlers {

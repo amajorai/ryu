@@ -345,6 +345,13 @@ export function SlideCommit({
 		if (locked) {
 			return;
 		}
+		// After a failed confirm the handle is still parked or springing home: a
+		// keyboard retry starts from home instead of being wiped by that reset.
+		if (x.isAnimating() || (phase === "error" && x.get() >= TRAVEL - 0.5)) {
+			clearTimeout(homeTimer.current);
+			x.stop();
+			x.set(0);
+		}
 		const step = TRAVEL / Math.max(1, keyboardSteps);
 		if (event.key === "End") {
 			event.preventDefault();

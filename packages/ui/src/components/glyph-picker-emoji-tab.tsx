@@ -4,12 +4,14 @@ import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
 import { TabsContent } from "@ryu/ui/components/tabs.tsx";
+import { useEmojiMartLocaleProps } from "./emoji-picker-locale.ts";
 import type { EmojiSelectPayload } from "./glyph-picker-constants.ts";
 import { DitherLayerControls } from "./glyph-picker-dither-controls.tsx";
 import type { GlyphPickerState } from "./glyph-picker-state.ts";
 
 export function GlyphPickerEmojiTab({ state }: { state: GlyphPickerState }) {
 	const { ditherAsBg, setDitherAsBg, dither, setDither, applyEmoji } = state;
+	const { i18n, locale } = useEmojiMartLocaleProps();
 	return (
 		<TabsContent className="pt-3" value="emoji">
 			<div className="space-y-3">
@@ -40,6 +42,9 @@ export function GlyphPickerEmojiTab({ state }: { state: GlyphPickerState }) {
 						dynamicWidth
 						emojiButtonSize={32}
 						emojiSize={20}
+						i18n={i18n}
+						key={locale}
+						locale={locale}
 						maxFrequentRows={1}
 						navPosition="bottom"
 						onEmojiSelect={(emoji: EmojiSelectPayload) => {

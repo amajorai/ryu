@@ -31,7 +31,7 @@ function ForkDestinationRow({
 	return (
 		<button
 			className={cn(
-				"flex w-full items-center gap-4 rounded-2xl px-3 py-3.5 text-left transition-colors",
+				"flex w-full items-center gap-4 rounded-2xl px-3 py-3.5 text-start transition-colors",
 				disabled
 					? "cursor-not-allowed opacity-50"
 					: "hover:bg-muted/70 focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

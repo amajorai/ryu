@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceThread } from "@ryuhq/protocol/interfaces";
 import { useId } from "react";
@@ -46,7 +47,7 @@ export function DialogueChoices({
 						>
 							<ChoicePointer />
 							<span className="min-w-0 flex-1 truncate">
-								{thread.title || "Untitled"}
+								{thread.title || tr("Untitled")}
 							</span>
 							{thread.running ? (
 								<span

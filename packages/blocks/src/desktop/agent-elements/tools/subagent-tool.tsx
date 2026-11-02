@@ -1,5 +1,7 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { AgentActivity } from "@ryu/ui/components/agents/agent-activity";
 import { memo, useEffect, useMemo, useState } from "react";
+import { formatDurationParts } from "../locale-format.ts";
 import { getToolStatus } from "../utils/format-tool.ts";
 import { toolRegistry } from "./tool-registry.ts";
 
@@ -17,14 +19,17 @@ function formatElapsedTime(ms: number): string {
 	}
 	const seconds = Math.floor(ms / 1000);
 	if (seconds < 60) {
-		return `${seconds}s`;
+		return formatDurationParts([[seconds, "second"]]);
 	}
 	const minutes = Math.floor(seconds / 60);
 	const remainingSeconds = seconds % 60;
 	if (remainingSeconds === 0) {
-		return `${minutes}m`;
+		return formatDurationParts([[minutes, "minute"]]);
 	}
-	return `${minutes}m ${remainingSeconds}s`;
+	return formatDurationParts([
+		[minutes, "minute"],
+		[remainingSeconds, "second"],
+	]);
 }
 
 /** Map a nested ACP tool part onto a beUI AgentActivity trace item. */
@@ -47,6 +52,7 @@ export const SubagentTool = memo(function SubagentTool({
 	chatStatus,
 }: SubagentToolProps) {
 	const { isPending, isInterrupted } = getToolStatus(part, chatStatus);
+	const tl = useLiteralMessages();
 	const description = part.input?.description || "";
 	const [elapsedMs, setElapsedMs] = useState(0);
 	const startedAt =
@@ -110,8 +116,8 @@ export const SubagentTool = memo(function SubagentTool({
 			<AgentActivity
 				activeLabel={
 					elapsedTimeDisplay
-						? `${subtitle || "Running subagent"} · ${elapsedTimeDisplay}`
-						: subtitle || "Running subagent"
+						? `${subtitle || tl("Running subagent")} · ${elapsedTimeDisplay}`
+						: subtitle || tl("Running subagent")
 				}
 				collapseOnComplete={false}
 				contentType="trace"
@@ -121,7 +127,7 @@ export const SubagentTool = memo(function SubagentTool({
 				summary={
 					description.length > 60
 						? `${description.slice(0, 57)}…`
-						: description || "Subagent completed"
+						: description || tl("Subagent completed")
 				}
 			/>
 		</div>

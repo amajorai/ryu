@@ -36,7 +36,7 @@ export function CreateAgentChannelsSection({
 					<span>{CHANNEL_LABELS.telegram}</span>
 					<Switch
 						aria-label={tl("Set up {telegram} after creation", {
-							telegram: CHANNEL_LABELS.telegram,
+							telegram: tl(CHANNEL_LABELS.telegram),
 						})}
 						checked={autoSetupTelegram}
 						disabled={submitting}
@@ -47,7 +47,7 @@ export function CreateAgentChannelsSection({
 					<span>{CHANNEL_LABELS.discord}</span>
 					<Switch
 						aria-label={tl("Set up {discord} after creation", {
-							discord: CHANNEL_LABELS.discord,
+							discord: tl(CHANNEL_LABELS.discord),
 						})}
 						checked={autoSetupDiscord}
 						disabled={submitting}
@@ -55,10 +55,10 @@ export function CreateAgentChannelsSection({
 					/>
 				</label>
 				<label className="flex min-h-10 items-center justify-between gap-3 border-border border-b py-2 text-sm last:border-b-0">
-					<span>{CHANNEL_LABELS.whatsapp}</span>
+					<span>{tl(CHANNEL_LABELS.whatsapp)}</span>
 					<Switch
 						aria-label={tl("Set up {whatsapp} after creation", {
-							whatsapp: CHANNEL_LABELS.whatsapp,
+							whatsapp: tl(CHANNEL_LABELS.whatsapp),
 						})}
 						checked={autoSetupWhatsApp}
 						disabled={submitting}

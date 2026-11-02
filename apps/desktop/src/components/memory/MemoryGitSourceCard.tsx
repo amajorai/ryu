@@ -7,7 +7,7 @@ import {
 	Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -60,15 +60,20 @@ function storedRoot(): string {
 	}
 }
 
-function statusLabel(status: GitStatus | null): string {
+function statusLabel(status: GitStatus | null, tl: LiteralMessage): string {
 	if (!status?.is_repo) {
-		return "Not a Git repository";
+		return tl("Not a Git repository");
 	}
-	const changed =
-		status.changed_files_count === 1
-			? "1 changed file"
-			: `${status.changed_files_count} changed files`;
-	return `${status.branch ?? "detached HEAD"} · ${changed}`;
+	const count = status.changed_files_count;
+	return status.branch
+		? tl(
+				"{branch} · {count, plural, one {# changed file} other {# changed files}}",
+				{ branch: status.branch, count }
+			)
+		: tl(
+				"Detached HEAD · {count, plural, one {# changed file} other {# changed files}}",
+				{ count }
+			);
 }
 
 export function MemoryGitSourceCard({
@@ -302,7 +307,7 @@ export function MemoryGitSourceCard({
 					<HugeiconsIcon className="size-3.5 shrink-0" icon={FolderOpenIcon} />
 					<span className="truncate">{root || "No repository selected"}</span>
 					{root ? (
-						<span className="shrink-0">· {statusLabel(status)}</span>
+						<span className="shrink-0">· {statusLabel(status, tl)}</span>
 					) : null}
 				</p>
 			</div>

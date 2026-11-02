@@ -3,7 +3,6 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronRight, FolderKanban, UsersRound, X } from "lucide-react";
@@ -18,7 +17,11 @@ import {
 	deskThreadTitle,
 } from "./desk-model.ts";
 import { DeskStatusIcon } from "./desk-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import {
+	compactAge,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 function DetailsSection({
 	children,
@@ -42,7 +45,7 @@ function DetailsSection({
 	);
 }
 
-const LINK_ROW_CLASS = `group/link flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted ${DESK_FOCUS_RING}`;
+const LINK_ROW_CLASS = `group/link flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-muted ${DESK_FOCUS_RING}`;
 
 /**
  * The collapsible details sidebar for the open conversation: status and why,
@@ -75,12 +78,9 @@ export function DeskDetails({
 	const relatedTitle =
 		row.agents.length === 1 && row.lead
 			? tl("More with {name}", { name: row.lead.name })
-			: "More with these agents";
-	const age = compactAge(thread.updatedAt, now);
-	let lastActivity = age ? `${age} ago` : deskFullTimestamp(thread.updatedAt);
-	if (age === "now") {
-		lastActivity = "Just now";
-	}
+			: tl("More with these agents");
+	const lastActivity =
+		relativeAge(thread.updatedAt, now) || deskFullTimestamp(thread.updatedAt);
 	const team = thread.teamId
 		? snapshot.groups.find((group) => group.id === thread.teamId)
 		: undefined;
@@ -92,7 +92,7 @@ export function DeskDetails({
 		<aside
 			aria-label="Conversation details"
 			className={cn(
-				"flex w-[300px] shrink-0 flex-col border-border border-l bg-background outline-none",
+				"flex w-[300px] shrink-0 flex-col border-border border-s bg-background outline-none",
 				className
 			)}
 			data-testid="desk-details"
@@ -101,7 +101,7 @@ export function DeskDetails({
 		>
 			<header
 				className={cn(
-					"flex shrink-0 items-center gap-2 border-border border-b pr-2 pl-4",
+					"flex shrink-0 items-center gap-2 border-border border-b ps-4 pe-2",
 					floating ? "h-11" : "h-14"
 				)}
 			>
@@ -125,7 +125,7 @@ export function DeskDetails({
 					<DetailsSection id="desk-details-status" title="Status">
 						<p className="flex items-center gap-2 font-medium text-foreground text-sm">
 							<DeskStatusIcon status={row.status} />
-							{THREAD_STATUS_LABELS[row.status]}
+							{threadStatusLabel(row.status)}
 						</p>
 						<p className="text-pretty text-muted-foreground text-sm">
 							{deskStatusExplanation(row, tl)}
@@ -134,7 +134,9 @@ export function DeskDetails({
 				) : null}
 				<DetailsSection
 					id="desk-details-agents"
-					title={row.agents.length === 1 ? "Agent" : "Agents"}
+					title={tl("{count, plural, one {Agent} other {Agents}}", {
+						count: row.agents.length,
+					})}
 				>
 					{row.agents.length === 0 ? (
 						<p className="text-muted-foreground text-sm">
@@ -152,18 +154,24 @@ export function DeskDetails({
 									>
 										<DeskAvatar agent={agent} presence size={32} />
 										<span className="flex min-w-0 flex-1 flex-col">
-											<span className="truncate font-medium text-foreground">
+											<span
+												className="truncate font-medium text-foreground"
+												data-ryu-i18n="off"
+											>
 												{agent.name}
 											</span>
 											{agent.description ? (
-												<span className="line-clamp-2 text-pretty text-muted-foreground text-xs">
+												<span
+													className="line-clamp-2 text-pretty text-muted-foreground text-xs"
+													data-ryu-i18n="off"
+												>
 													{agent.description}
 												</span>
 											) : null}
 										</span>
 										<ChevronRight
 											aria-hidden="true"
-											className="mt-1 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/link:opacity-100 group-focus-visible/link:opacity-100"
+											className="mt-1 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/link:opacity-100 group-focus-visible/link:opacity-100 rtl:-scale-x-100"
 										/>
 									</button>
 								</li>
@@ -174,11 +182,11 @@ export function DeskDetails({
 				<DetailsSection id="desk-details-conversation" title="Conversation">
 					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
 						<dt className="text-muted-foreground">Messages</dt>
-						<dd className="text-right text-foreground tabular-nums">
+						<dd className="text-end text-foreground tabular-nums">
 							{thread.messageCount}
 						</dd>
 						<dt className="text-muted-foreground">Last activity</dt>
-						<dd className="text-right text-foreground">
+						<dd className="text-end text-foreground">
 							<time
 								dateTime={thread.updatedAt}
 								title={deskFullTimestamp(thread.updatedAt)}
@@ -214,7 +222,10 @@ export function DeskDetails({
 													className="size-4 shrink-0 text-muted-foreground"
 												/>
 											)}
-											<span className="min-w-0 flex-1 truncate text-foreground">
+											<span
+												className="min-w-0 flex-1 truncate text-foreground"
+												data-ryu-i18n="off"
+											>
 												{group.name}
 											</span>
 										</button>
@@ -235,7 +246,7 @@ export function DeskDetails({
 									<li key={other.id}>
 										<button
 											aria-label={tl("Open {title}, {status}", {
-												status: THREAD_STATUS_LABELS[status],
+												status: threadStatusLabel(status, tl),
 												title: otherTitle,
 											})}
 											className={LINK_ROW_CLASS}

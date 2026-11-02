@@ -12,6 +12,8 @@ import { fetchApps } from "@ryuhq/core-client/plugins";
 import { listQuests } from "@ryuhq/core-client/quests";
 import { z } from "zod";
 import type { ListRow } from "../../core/featureList.ts";
+import { formatCliDate, formatCliNumber } from "../../i18n/format.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 
 const TITLE_MAX = 72;
 const KIB = 1024;
@@ -26,7 +28,7 @@ export function oneLine(text: string, max = TITLE_MAX): string {
 /** Human-readable byte count (binary units, one decimal above KB). */
 export function formatBytes(bytes: number): string {
 	if (!Number.isFinite(bytes) || bytes < 0) {
-		return "unknown";
+		return tr("unknown");
 	}
 	let value = bytes;
 	let unit = 0;
@@ -34,17 +36,24 @@ export function formatBytes(bytes: number): string {
 		value /= KIB;
 		unit += 1;
 	}
-	return unit === 0
-		? `${value} ${BYTE_UNITS[unit]}`
-		: `${value.toFixed(1)} ${BYTE_UNITS[unit]}`;
+	const digits = unit === 0 ? 0 : 1;
+	const amount = formatCliNumber(value, {
+		maximumFractionDigits: digits,
+		minimumFractionDigits: digits,
+	});
+	return `${amount} ${BYTE_UNITS[unit]}`;
 }
 
-/** The date part of an ISO timestamp, or the raw value when it is not one. */
+/** An ISO timestamp's date in the CLI locale, or the raw value when it is not one. */
 function isoDate(value: string | null | undefined): string {
 	if (!value) {
 		return "";
 	}
-	return value.length >= 10 ? value.slice(0, 10) : value;
+	// A bare `YYYY-MM-DD` is a calendar day, not UTC midnight in another zone.
+	const dayOnly = /^\d{4}-\d{2}-\d{2}$/u.test(value)
+		? `${value}T12:00:00`
+		: value;
+	return formatCliDate(dayOnly) ?? value;
 }
 
 // ── Memory (GET /api/memory) ────────────────────────────────────────────────
@@ -88,7 +97,11 @@ export async function loadMeetings(target: ApiTarget): Promise<ListRow[]> {
 		const people = meeting.participants?.length ?? 0;
 		const parts = [isoDate(meeting.started_at || meeting.created_at)];
 		if (people > 0) {
-			parts.push(`${people} participant${people === 1 ? "" : "s"}`);
+			parts.push(
+				tf("{count, plural, one {# participant} other {# participants}}", {
+					count: people,
+				})
+			);
 		}
 		if (meeting.app) {
 			parts.push(meeting.app);

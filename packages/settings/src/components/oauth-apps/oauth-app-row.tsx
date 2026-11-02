@@ -4,9 +4,9 @@ import {
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { formatDistanceToNow } from "date-fns";
 import type { OwnedOAuthApp } from "../../utils/api-client.ts";
 import {
 	SETTINGS_ROW_REVEAL_CLASS,
@@ -26,6 +26,7 @@ export function OAuthAppRow({
 	onCancelAction: () => void;
 }) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale ?? activeLocale();
 	const isDeleting =
 		pendingAction?.kind === "delete" && pendingAction.clientId === app.clientId;
 	const isRotating =
@@ -33,7 +34,7 @@ export function OAuthAppRow({
 	const isPending = isDeleting || isRotating;
 
 	const created = app.createdAt
-		? formatDistanceToNow(new Date(app.createdAt), { addSuffix: true })
+		? formatRelativeTime(locale, new Date(app.createdAt))
 		: tl("recently");
 
 	return (

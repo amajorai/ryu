@@ -8,7 +8,6 @@ import {
 	hasRequestState,
 	queueAfterTransactionHook,
 } from "@better-auth/core/context";
-import { expo } from "@better-auth/expo";
 import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
 import { scim } from "@better-auth/scim";
@@ -105,6 +104,7 @@ import { resolveRyuCorsOrigins } from "./lib/cors-origins.ts";
 import { revokeDepartedMemberNodeCredentials } from "./lib/departed-member-node-credentials.ts";
 import { ryuEmailHarmony } from "./lib/email-harmony.ts";
 import { hasEnterpriseCapability } from "./lib/enterprise-entitlement.ts";
+import { expoWithoutSessionHandoff } from "./lib/expo-session-handoff.ts";
 import {
 	isCustomRoleWritePath,
 	type OrganizationSeatCopy,
@@ -243,7 +243,6 @@ import { encryptedMongoAdapter } from "./lib/sso-provider-encryption.ts";
 import {
 	boundedLoginDetail,
 	daysSinceLastActive,
-	formatLoginTime,
 	isStaleAccountLogin,
 } from "./lib/stale-account.ts";
 import {
@@ -1611,7 +1610,7 @@ async function recordLoginAndNotifyStaleAccount(
 			return;
 		}
 
-		const loginTime = formatLoginTime(session.createdAt ?? now);
+		const loginTime = session.createdAt ?? now;
 		const inactiveDays = daysSinceLastActive(lastLoginAt, now);
 		const loginDevice = boundedLoginDetail(session.userAgent);
 		const loginIp = boundedLoginDetail(session.ipAddress);
@@ -1627,7 +1626,7 @@ async function recordLoginAndNotifyStaleAccount(
 					loginTime,
 					securityUrl,
 					userEmail: previous.email,
-					userName: previous.name || "there",
+					userName: previous.name || undefined,
 				}),
 			}),
 		];
@@ -1645,7 +1644,7 @@ async function recordLoginAndNotifyStaleAccount(
 						loginTime,
 						userEmail: previous.email,
 						userId: session.userId,
-						userName: previous.name || "there",
+						userName: previous.name || undefined,
 					}),
 				})
 			);
@@ -2251,7 +2250,7 @@ const authOptions = {
 						to: user.email,
 						subject: "You already have a Ryu account",
 						react: AccountExistsEmail({
-							userName: user.name || "there",
+							userName: user.name || undefined,
 							signInUrl: `${frontendUrl}/login?view=signin`,
 							resetPasswordUrl: `${frontendUrl}/login?view=forgot`,
 						}),
@@ -2283,7 +2282,7 @@ const authOptions = {
 					to: user.email,
 					subject: "Let's get you a new password",
 					react: PasswordResetEmail({
-						userName: user.name || "there",
+						userName: user.name || undefined,
 						resetUrl: url,
 					}),
 				});
@@ -2326,7 +2325,7 @@ const authOptions = {
 					to: user.email,
 					subject: "Let's make it official",
 					react: VerificationEmail({
-						userName: user.name || "there",
+						userName: user.name || undefined,
 						verificationUrl: parsedUrl.toString(),
 					}),
 				});
@@ -2818,7 +2817,7 @@ const authOptions = {
 							to: session.user.email,
 							subject: "Your new password is live",
 							react: PasswordChangeEmail({
-								userName: session.user.name || "there",
+								userName: session.user.name || undefined,
 							}),
 						});
 					} catch (error) {
@@ -3208,7 +3207,7 @@ const authOptions = {
 							to: user.email,
 							subject: "One more step to get you in",
 							react: TwoFactorOTPEmail({
-								userName: user.name || "there",
+								userName: user.name || undefined,
 								otpCode: otp,
 							}),
 						});
@@ -3241,12 +3240,12 @@ const authOptions = {
 		emailOTP({
 			async sendVerificationOTP({ email, otp, type }) {
 				try {
-					let userName = "there";
+					let userName: string | undefined;
 					try {
 						const user = await User.findOne({ email: email.toLowerCase() })
 							.select("name")
 							.lean<{ name?: string }>();
-						userName = user?.name || "there";
+						userName = user?.name || undefined;
 					} catch {
 						// Use a generic greeting if the account lookup is unavailable.
 					}
@@ -3290,7 +3289,7 @@ const authOptions = {
 		magicLink({
 			sendMagicLink: async ({ email, url }, ctx) => {
 				try {
-					let userName = "there";
+					let userName: string | undefined;
 					try {
 						const user = await ctx?.context?.adapter?.findOne?.<{
 							name?: string;
@@ -3298,7 +3297,7 @@ const authOptions = {
 							model: "user",
 							where: [{ field: "email", value: email.toLowerCase() }],
 						});
-						userName = user?.name || "there";
+						userName = user?.name || undefined;
 					} catch {
 						// Use generic greeting if user not found
 					}
@@ -3411,7 +3410,8 @@ const authOptions = {
 		// drives web directly; the Bearer surfaces (desktop/cli/tui/extension/native)
 		// each keep their own local token vault and switch the active bearer token.
 		multiSession({ maximumSessions: 5 }),
-		expo(),
+		// Never copies the session cookie into a ryu:// redirect (see module).
+		expoWithoutSessionHandoff(),
 		admin({
 			// Support access (#545): cap any impersonation session at 1 hour, the AC
 			// ceiling for a user-granted support session. Admins still cannot

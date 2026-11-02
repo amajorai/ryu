@@ -1,6 +1,7 @@
 "use client";
 
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { useAvatarContributions } from "@ryu/ui/components/avatar-contributions.tsx";
 import {
 	accessoriesFor,
@@ -145,7 +146,7 @@ export function AvatarStyleControls({
 								{region.label}
 								<NativeSelect
 									aria-label={tl("Avatar {region}", {
-										region: region.label.toLowerCase(),
+										region: sentenceLabel(tl, region.label),
 									})}
 									className="w-full"
 									onChange={(event) => setPart(region.id, event.target.value)}

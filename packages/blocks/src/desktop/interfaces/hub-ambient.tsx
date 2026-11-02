@@ -124,7 +124,7 @@ export function HubAmbient({
 							<span className="sr-only">{glyphLabel}</span>
 						</p>
 					</div>
-					<div className="flex flex-col gap-1 pl-[0.08em]">
+					<div className="flex flex-col gap-1 ps-[0.08em]">
 						<p className="text-[28px] text-foreground leading-9 tracking-[-0.01em] max-sm:text-[17px] max-sm:leading-6 max-sm:tracking-normal">
 							{date}
 						</p>

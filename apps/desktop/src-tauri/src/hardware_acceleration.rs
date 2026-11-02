@@ -16,7 +16,9 @@
 //!   replaces the configured `additionalBrowserArgs`, so the configured flags are
 //!   repeated here alongside `--disable-gpu`. The variable is process-wide, which
 //!   keeps every webview in the shared WebView2 environment on identical
-//!   arguments (mismatched arguments make later webview creation fail).
+//!   arguments (mismatched arguments make later webview creation fail). The same
+//!   variable carries the saved UI language as `--lang` (`webview_locale`), so
+//!   it is set whenever either applies.
 //! - Linux: WebKitGTK reads `WEBKIT_DISABLE_COMPOSITING_MODE` and
 //!   `WEBKIT_DISABLE_DMABUF_RENDERER`.
 //! - macOS: WKWebView exposes no supported switch, so the setting is reported as
@@ -72,11 +74,34 @@ static OVERRIDDEN_ENV: std::sync::OnceLock<Vec<(&'static str, Option<std::ffi::O
 
 /// The variables to restore in a child process's environment: `Some` to set the
 /// user's original value, `None` to remove one this process added. Empty while
-/// hardware acceleration is on.
+/// hardware acceleration is on, except on Windows when the saved UI language
+/// was added to the WebView2 arguments.
 pub fn restore_child_env() -> &'static [(&'static str, Option<std::ffi::OsString>)] {
     OVERRIDDEN_ENV.get().map(Vec::as_slice).unwrap_or(&[])
 }
 
+/// The WebView2 arguments for this launch: the user's own variable (or the
+/// configured flags), then the GPU switches and the UI language. `None` when
+/// nothing needs adding. A `--lang` the user set themselves wins.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn webview2_arguments(existing: &str, gpu_off: bool, lang: Option<&str>) -> Option<String> {
+    let mut args = if existing.trim().is_empty() {
+        CONFIGURED_WEBVIEW2_ARGS.to_owned()
+    } else {
+        existing.to_owned()
+    };
+    let mut changed = false;
+    if gpu_off {
+        args.push_str(" --disable-gpu --disable-gpu-compositing");
+        changed = true;
+    }
+    if let Some(lang) = lang.filter(|_| !existing.contains("--lang")) {
+        args.push(' ');
+        args.push_str(lang);
+        changed = true;
+    }
+    changed.then_some(args)
+}
 
 /// Apply the saved preference to this process. Must run before any webview is
 /// created; `run()` calls it before the Tauri builder.
@@ -86,9 +111,6 @@ pub fn apply_before_webview() {
     // restart prompt clears after a restart even when the user's own
     // environment already disabled compositing.
     let _ = ACTIVE_AT_LAUNCH.set(enabled);
-    if enabled {
-        return;
-    }
     #[allow(unused_mut)]
     let mut overridden = Vec::new();
 
@@ -96,20 +118,15 @@ pub fn apply_before_webview() {
     {
         let original = std::env::var_os("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
         let existing = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
-        let base = if existing.trim().is_empty() {
-            CONFIGURED_WEBVIEW2_ARGS.to_owned()
-        } else {
-            existing
-        };
-        std::env::set_var(
-            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            format!("{base} --disable-gpu --disable-gpu-compositing"),
-        );
-        overridden.push(("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", original));
+        let lang = crate::webview_locale::launch_arg();
+        if let Some(args) = webview2_arguments(&existing, !enabled, lang.as_deref()) {
+            std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args);
+            overridden.push(("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", original));
+        }
     }
 
     #[cfg(target_os = "linux")]
-    {
+    if !enabled {
         // An explicit value from the user's environment wins over the setting.
         for name in [
             "WEBKIT_DISABLE_COMPOSITING_MODE",
@@ -167,7 +184,10 @@ mod tests {
     #[test]
     fn sentinel_lives_in_the_state_dir() {
         let path = sentinel_path();
-        assert_eq!(path.file_name().and_then(|name| name.to_str()), Some(SENTINEL_FILE));
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(SENTINEL_FILE)
+        );
         assert_eq!(
             path,
             ryu_sidecar_runtime::layout::state_path(&profile::ryu_home_dir(), SENTINEL_FILE)
@@ -189,6 +209,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn webview2_arguments_combine_gpu_switches_and_the_ui_language() {
+        assert_eq!(webview2_arguments("", false, None), None);
+        assert_eq!(
+            webview2_arguments("", false, Some("--lang=de")).as_deref(),
+            Some("--disable-features=msWebOOUI,msPdfOOUI --lang=de")
+        );
+        assert_eq!(
+            webview2_arguments("", true, Some("--lang=ar")).as_deref(),
+            Some(
+                "--disable-features=msWebOOUI,msPdfOOUI --disable-gpu --disable-gpu-compositing --lang=ar"
+            )
+        );
+        // The user's own variable replaces the configured flags, and their own
+        // `--lang` is kept.
+        assert_eq!(
+            webview2_arguments("--lang=fr", false, Some("--lang=de")),
+            None
+        );
+        assert_eq!(
+            webview2_arguments("--foo", false, Some("--lang=de")).as_deref(),
+            Some("--foo --lang=de")
+        );
     }
 
     #[test]

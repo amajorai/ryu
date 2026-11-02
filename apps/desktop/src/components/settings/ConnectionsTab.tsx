@@ -207,7 +207,7 @@ export function ConnectionsTab() {
 														}
 													>
 														<HugeiconsIcon
-															className="mr-2 size-4"
+															className="me-2 size-4"
 															icon={Unlink01Icon}
 														/>
 														{isUnlinking ? "Unlinking…" : "Unlink"}
@@ -254,7 +254,7 @@ export function ConnectionsTab() {
 													variant="ghost"
 												>
 													<HugeiconsIcon
-														className="mr-2 size-4"
+														className="me-2 size-4"
 														icon={Link01Icon}
 													/>
 													{isLinking ? "Opening browser…" : "Link"}

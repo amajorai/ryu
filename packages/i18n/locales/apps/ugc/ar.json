@@ -1,0 +1,11 @@
+{
+  "New submission to review": "إرسال جديد للمراجعة",
+  "Ryu's managed Composio provider is not configured for this node — record metrics manually": "موفّر Composio المُدار من Ryu غير مُعدّ لهذه العقدة — سجّل المقاييس يدويًا",
+  "Submitted by {creator} on {platform}": "أرسله {creator} على {platform}",
+  "approve this payout before marking it paid": "وافق على هذه الدفعة قبل وضع علامة مدفوعة عليها",
+  "curated action '{slug}' is not a safe action slug": "الإجراء المنتقى '{slug}' ليس معرّف إجراء آمنًا",
+  "no Composio metric source is curated for platform '{platform}' — record metrics manually": "لا يوجد مصدر مقاييس Composio منتقى للمنصة '{platform}' — سجّل المقاييس يدويًا",
+  "this payout has already been paid": "تم صرف هذه الدفعة بالفعل",
+  "this post has already been submitted to this campaign": "تم إرسال هذا المنشور إلى هذه الحملة بالفعل",
+  "this submission's payout is already paid; deleting it would corrupt the campaign's spend": "تم صرف دفعة هذا الإرسال بالفعل؛ وحذفه سيُفسد إنفاق الحملة"
+}

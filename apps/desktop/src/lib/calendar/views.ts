@@ -25,7 +25,11 @@ import {
 	subMonths,
 	subWeeks,
 } from "date-fns";
-import { calendarViewLabel } from "@/src/lib/calendar/date-labels.ts";
+import {
+	calendarViewLabel,
+	calendarWeekStart,
+	type WeekStart,
+} from "@/src/lib/calendar/date-labels.ts";
 import { displayDayStart } from "@/src/lib/calendar/display-days.ts";
 
 export type CalendarView = "month" | "week" | "day" | "agenda";
@@ -47,19 +51,27 @@ export interface ViewRange {
 	start: Date;
 }
 
-/** The `[start, end)` civil dates a view shows for the given cursor. */
-function civilRange(view: CalendarView, cursor: Date): ViewRange {
+/** The `[start, end)` civil dates a view shows for the given cursor; Month
+ * and Week grids begin on `weekStartsOn`. */
+function civilRange(
+	view: CalendarView,
+	cursor: Date,
+	weekStartsOn: WeekStart
+): ViewRange {
 	switch (view) {
 		case "month": {
-			const start = startOfWeek(startOfMonth(cursor));
+			const start = startOfWeek(startOfMonth(cursor), { weekStartsOn });
 			// endOfWeek/endOfMonth land on 23:59:59.999; normalise to midnight so
 			// the half-open end is exactly the day after the grid's last day (the
 			// grid stays a whole number of weeks, e.g. 35 cells, not 36).
-			const end = addDays(startOfDay(endOfWeek(endOfMonth(cursor))), 1);
+			const end = addDays(
+				startOfDay(endOfWeek(endOfMonth(cursor), { weekStartsOn })),
+				1
+			);
 			return { start, end };
 		}
 		case "week": {
-			const start = startOfWeek(cursor);
+			const start = startOfWeek(cursor, { weekStartsOn });
 			return { start, end: addDays(start, 7) };
 		}
 		case "day": {
@@ -78,19 +90,29 @@ function civilRange(view: CalendarView, cursor: Date): ViewRange {
 /**
  * The `[start, end)` window of events a view needs for the given cursor: the
  * display-zone instants at which its first and last-plus-one civil days begin.
+ * Weeks start on `weekStartsOn` (default: the UI locale's first day).
  */
-export function viewRange(view: CalendarView, cursor: Date): ViewRange {
-	const { start, end } = civilRange(view, cursor);
+export function viewRange(
+	view: CalendarView,
+	cursor: Date,
+	weekStartsOn: WeekStart = calendarWeekStart()
+): ViewRange {
+	const { start, end } = civilRange(view, cursor, weekStartsOn);
 	return { start: displayDayStart(start), end: displayDayStart(end) };
 }
 
 /**
- * The day columns a view renders. Month returns its 6-week (42-cell) grid,
+ * The day columns a view renders, weeks starting on `weekStartsOn` (default:
+ * the UI locale's first day). Month returns its whole-week grid,
  * Week returns 7 days, Day returns 1, and Agenda returns its full span (so the
  * list can iterate day-by-day and skip empty ones).
  */
-export function viewDays(view: CalendarView, cursor: Date): Date[] {
-	const { start, end } = civilRange(view, cursor);
+export function viewDays(
+	view: CalendarView,
+	cursor: Date,
+	weekStartsOn: WeekStart = calendarWeekStart()
+): Date[] {
+	const { start, end } = civilRange(view, cursor, weekStartsOn);
 	const days: Date[] = [];
 	for (let d = start; d < end; d = addDays(d, 1)) {
 		days.push(d);
@@ -124,7 +146,8 @@ export function navigate(
 export function viewLabel(
 	view: CalendarView,
 	cursor: Date,
-	locale?: string
+	locale?: string,
+	weekStartsOn: WeekStart = calendarWeekStart()
 ): string {
-	return calendarViewLabel(view, cursor, AGENDA_DAYS, locale);
+	return calendarViewLabel(view, cursor, AGENDA_DAYS, locale, weekStartsOn);
 }

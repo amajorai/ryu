@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import type { useAssistantStore } from "../src/store/useAssistantStore.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 type AssistantState = ReturnType<typeof useAssistantStore.getState>;
 type AssistantNoArgumentAction = {
@@ -11,8 +12,9 @@ type AssistantNoArgumentAction = {
 
 declare const window: Window & { assistantStore: typeof useAssistantStore };
 
-const proofDir =
-	"../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-panels/assistant";
+const proofDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-panels/assistant"
+);
 // Core answers `/api/chat/permission` with `{ resolved }`, and the desktop
 // client validates that shape; a resolved response is what closes the card.
 const permissionResolved = JSON.stringify({ resolved: true });

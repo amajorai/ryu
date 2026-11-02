@@ -74,16 +74,12 @@ export function Breakdown({
 									: "Date"}
 						</TableHead>
 						<TableHead className={HEAD}>Source</TableHead>
-						<TableHead className={cn(HEAD, "text-right")}>
+						<TableHead className={cn(HEAD, "text-end")}>
 							{scope === "unattributed" ? "Ryu conversations" : "Sessions"}
 						</TableHead>
-						<TableHead className={cn(HEAD, "text-right")}>Tokens</TableHead>
-						<TableHead className={cn(HEAD, "text-right")}>
-							Cached input
-						</TableHead>
-						<TableHead className={cn(HEAD, "text-right")}>
-							API estimate
-						</TableHead>
+						<TableHead className={cn(HEAD, "text-end")}>Tokens</TableHead>
+						<TableHead className={cn(HEAD, "text-end")}>Cached input</TableHead>
+						<TableHead className={cn(HEAD, "text-end")}>API estimate</TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody>
@@ -99,14 +95,14 @@ export function Breakdown({
 								{report.sources.find((source) => source.id === row.sourceId)
 									?.label ?? row.sourceId}
 							</TableCell>
-							<TableCell className={cn(CELL, "text-right tabular-nums")}>
+							<TableCell className={cn(CELL, "text-end tabular-nums")}>
 								{scope === "unattributed" &&
 								row.records > 0 &&
 								row.sessions === 0
 									? "Not reported"
 									: formatNumber(row.sessions)}
 							</TableCell>
-							<TableCell className={cn(CELL, "text-right tabular-nums")}>
+							<TableCell className={cn(CELL, "text-end tabular-nums")}>
 								<CounterCell
 									missing={[
 										row.totals.missingInputRecords,
@@ -118,14 +114,14 @@ export function Breakdown({
 									value={historyProcessedTokens(row.totals)}
 								/>
 							</TableCell>
-							<TableCell className={cn(CELL, "text-right tabular-nums")}>
+							<TableCell className={cn(CELL, "text-end tabular-nums")}>
 								<CounterCell
 									missing={row.totals.missingCacheReadRecords}
 									records={row.records}
 									value={row.totals.cacheReadTokens}
 								/>
 							</TableCell>
-							<TableCell className={cn(CELL, "text-right tabular-nums")}>
+							<TableCell className={cn(CELL, "text-end tabular-nums")}>
 								{money(row.estimatedCostUsd)}
 								{row.unpricedRecords ? (
 									<span className="block text-muted-foreground text-xs">

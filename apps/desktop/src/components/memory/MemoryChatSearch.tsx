@@ -36,6 +36,7 @@ import {
 	getChatMemoryEnabled,
 	setChatMemoryEnabled,
 } from "@/src/lib/api/preferences.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -57,10 +58,7 @@ function formatTimestamp(timestamp: number): string {
 		return "Unknown time";
 	}
 	try {
-		return new Intl.DateTimeFormat(undefined, {
-			dateStyle: "medium",
-			timeStyle: "short",
-		}).format(timestamp);
+		return formatLocalDateTime(timestamp);
 	} catch {
 		return "Unknown time";
 	}
@@ -94,7 +92,7 @@ function ChatSearchHitRow({
 		>
 			<Button
 				aria-label={tl("Open {title}", { title })}
-				className="h-auto w-full justify-start whitespace-normal text-left"
+				className="h-auto w-full justify-start whitespace-normal text-start"
 				onClick={() => onOpen(hit.conversationId)}
 				variant="ghost"
 			>
@@ -301,7 +299,7 @@ export function MemoryChatSearch({
 
 			<div className="relative">
 				<HugeiconsIcon
-					className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+					className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 					icon={Search01Icon}
 				/>
 				<Input

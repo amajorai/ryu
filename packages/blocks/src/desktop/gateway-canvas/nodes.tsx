@@ -3,7 +3,7 @@
 // Gateway canvas nodes: one accessible button per node, its live counters
 // read from the canvas store so a traffic tick re-renders only that node.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import {
@@ -25,6 +25,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { formatList } from "../agent-elements/locale-format.ts";
 import { carriesPolicy, POLICY_DRAG_TYPE } from "./assign.tsx";
 import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH } from "./layout.ts";
 import type { CanvasLiveStore } from "./live-store.ts";
@@ -35,7 +36,6 @@ import {
 	type CanvasNodeKind,
 	carriesRequests,
 	formatCount,
-	HEALTH_LABELS,
 	NODE_KIND_LABELS,
 } from "./model.ts";
 
@@ -105,33 +105,51 @@ export function HealthDot({ health }: { health: CanvasHealth }) {
 	);
 }
 
+/** A request count as one whole message: "1 request", "1.2k requests". */
+export function requestsPhrase(tl: LiteralMessage, count: number): string {
+	return tl(
+		"{count, plural, one {{formatted} request} other {{formatted} requests}}",
+		{ count, formatted: formatCount(count) }
+	);
+}
+
 /** "1.2k requests, 3 blocked" for a node's accessible name and table. */
-export function countersPhrase(counters: CanvasNodeCounters): string {
-	const parts = [`${formatCount(counters.requests)} requests`];
+export function countersPhrase(
+	tl: LiteralMessage,
+	counters: CanvasNodeCounters
+): string {
+	const parts = [requestsPhrase(tl, counters.requests)];
 	if (counters.blocked > 0) {
-		parts.push(`${formatCount(counters.blocked)} blocked`);
+		parts.push(
+			tl("{blocked} blocked", { blocked: formatCount(counters.blocked) })
+		);
 	}
 	if (typeof counters.p50Ms === "number") {
-		parts.push(`median ${Math.round(counters.p50Ms)} ms`);
+		parts.push(tl("median {ms} ms", { ms: Math.round(counters.p50Ms) }));
 	}
-	return parts.join(", ");
+	return formatList(parts);
 }
 
 export function nodeAccessibleName(
+	tl: LiteralMessage,
 	node: CanvasNode,
 	counters: CanvasNodeCounters | null
 ): string {
-	const parts = [node.label, NODE_KIND_LABELS[node.kind]];
+	const parts = [node.label, tl(NODE_KIND_LABELS[node.kind])];
 	if (node.locked) {
-		parts.push("locked");
+		parts.push(tl("locked"));
 	}
 	if (node.health && node.health !== "ok") {
-		parts.push(HEALTH_LABELS[node.health].toLowerCase());
+		parts.push(
+			tl("{health, select, degraded {degraded} down {down} other {healthy}}", {
+				health: node.health,
+			})
+		);
 	}
 	if (counters) {
-		parts.push(countersPhrase(counters));
+		parts.push(countersPhrase(tl, counters));
 	}
-	return parts.join(", ");
+	return formatList(parts);
 }
 
 const HIDDEN_HANDLE =
@@ -168,10 +186,10 @@ function GatewayCanvasNode({ data }: NodeProps<CanvasFlowNode>) {
 				type="source"
 			/>
 			<button
-				aria-label={nodeAccessibleName(node, counted ? counters : null)}
+				aria-label={nodeAccessibleName(tl, node, counted ? counters : null)}
 				aria-pressed={selected}
 				className={cn(
-					"nodrag nopan flex flex-col justify-center gap-0.5 rounded-lg border bg-card px-3 text-left text-card-foreground shadow-xs transition-colors",
+					"nodrag nopan flex flex-col justify-center gap-0.5 rounded-lg border bg-card px-3 text-start text-card-foreground shadow-xs transition-colors",
 					"outline-none hover:border-ring/60 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
 					selected ? "border-primary ring-1 ring-primary" : "border-border",
 					node.kind === "infra" && "border-dashed",
@@ -237,7 +255,7 @@ function GatewayCanvasNode({ data }: NodeProps<CanvasFlowNode>) {
 							</span>
 						) : null}
 						{typeof counters.p50Ms === "number" ? (
-							<span>{Math.round(counters.p50Ms)} ms</span>
+							<span>{tl("{ms} ms", { ms: Math.round(counters.p50Ms) })}</span>
 						) : null}
 					</span>
 				) : null}

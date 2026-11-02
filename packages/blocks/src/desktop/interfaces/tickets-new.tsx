@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -31,9 +32,9 @@ function GroupOptions({ groups }: { groups: InterfaceGroup[] }) {
 	const teams = groups.filter((item) => item.kind === "team");
 	return (
 		<>
-			<NativeSelectOption value={NO_GROUP}>None</NativeSelectOption>
+			<NativeSelectOption value={NO_GROUP}>{tr("None")}</NativeSelectOption>
 			{projects.length > 0 ? (
-				<NativeSelectOptGroup label="Projects">
+				<NativeSelectOptGroup label={tr("Projects")}>
 					{projects.map((item) => (
 						<NativeSelectOption key={item.id} value={item.id}>
 							{item.name}
@@ -42,7 +43,7 @@ function GroupOptions({ groups }: { groups: InterfaceGroup[] }) {
 				</NativeSelectOptGroup>
 			) : null}
 			{teams.length > 0 ? (
-				<NativeSelectOptGroup label="Teams">
+				<NativeSelectOptGroup label={tr("Teams")}>
 					{teams.map((item) => (
 						<NativeSelectOption key={item.id} value={item.id}>
 							{item.name}
@@ -244,7 +245,7 @@ export function TicketsNewTicket({
 				{stacked ? null : (
 					<aside
 						aria-label="Ticket fields"
-						className="flex w-80 shrink-0 flex-col overflow-y-auto border-border border-l"
+						className="flex w-80 shrink-0 flex-col overflow-y-auto border-border border-s"
 					>
 						<section className="flex flex-col gap-3 border-border border-b p-4">
 							<h2 className="font-semibold text-foreground text-xs">

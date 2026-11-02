@@ -1,4 +1,5 @@
 import { YjsPlugin } from "@platejs/yjs/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type CollabCursor,
 	createCollabEditorKit,
@@ -94,6 +95,7 @@ export function MarkdownEditor({
 	readOnly?: boolean;
 }) {
 	// Keep the page's sync callback fresh without rebuilding the provider/editor.
+	const tl = useLiteralMessages();
 	const onSyncedChangeRef = useRef(collab?.onSyncedChange);
 	onSyncedChangeRef.current = collab?.onSyncedChange;
 
@@ -301,7 +303,7 @@ export function MarkdownEditor({
 				variant={compact ? "select" : "default"}
 			>
 				<Editor
-					placeholder="Start writing, or press / for commands…"
+					placeholder={tl("Start writing, or press / for commands…")}
 					readOnly={readOnly}
 					variant={compact ? "select" : "default"}
 				/>

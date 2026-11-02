@@ -208,7 +208,7 @@ export function SidebarPanelHeader({
 							    top-left (in Layout). The node selector is right-aligned here so
 							    it never collides with that cluster. */}
 						<div
-							className="ml-auto flex items-center gap-0.5"
+							className="ms-auto flex items-center gap-0.5"
 							data-tauri-drag-region={false}
 						>
 							<NodeSelector mode="compact-dropdown" />

@@ -22,6 +22,7 @@ import {
 	STATIC_PLUGINS,
 	STREAMING_PLUGINS,
 } from "./markdown-renderers.tsx";
+import { useStreamdownTranslations } from "./markdown-streamdown-labels.ts";
 
 // The Streamdown renderer behind `Markdown` (markdown.tsx), which loads this
 // module on demand: Streamdown, its remark/rehype pipeline, Shiki and KaTeX are
@@ -58,6 +59,7 @@ export function StreamdownMarkdown({
 	// cap lands in CSS against its stable `data-streamdown` parts (agent-ui.css).
 	const { expandCodeBlocks, streamAnimation, animationsEnabled } =
 		useChatDisplayPrefs();
+	const translations = useStreamdownTranslations();
 	const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 	const animateText =
 		streamAnimation &&
@@ -123,6 +125,7 @@ export function StreamdownMarkdown({
 					components={MARKDOWN_COMPONENTS}
 					isAnimating={animateText}
 					plugins={isStreaming ? STREAMING_PLUGINS : STATIC_PLUGINS}
+					translations={translations}
 				>
 					{safeContent}
 				</Streamdown>

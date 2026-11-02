@@ -35,6 +35,7 @@ ryu-backup = { path = "../../crates/core/backup" }
 ryu-egress = { path = "../../crates/core/egress" }
 ryu-deletion-guard = { path = "../../crates/core/deletion-guard" }
 ryu-safe-actions = { path = "../../crates/core/safe-actions" }
+ryu-webauthn-relay = { path = "../../crates/core/webauthn-relay" }
 ryu-agent-contracts = { path = "../../crates/core/agent-contracts" }
 dirs = "5"
 anyhow = "1"

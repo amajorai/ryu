@@ -10,7 +10,7 @@ import {
 	type DashboardActivity,
 	HOUR_MS,
 	hourLabel,
-	plural,
+	threadCount,
 	threadTitle,
 } from "./dashboard-model.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
@@ -60,7 +60,7 @@ function BucketTooltip({
 		>
 			<p className="flex items-baseline justify-between gap-3 text-xs">
 				<span className="font-medium text-foreground tabular-nums">
-					{plural(bucket.count, "thread")}
+					{threadCount(bucket.count, tl)}
 				</span>
 				<span className="text-muted-foreground tabular-nums">
 					{hourRange(bucket)}
@@ -68,7 +68,11 @@ function BucketTooltip({
 			</p>
 			<ul className="mt-1.5 flex flex-col gap-1 border-border border-t pt-1.5">
 				{titles.map((thread) => (
-					<li className="truncate text-foreground text-xs" key={thread.id}>
+					<li
+						className="truncate text-foreground text-xs"
+						data-ryu-i18n="off"
+						key={thread.id}
+					>
 						{threadTitle(thread)}
 					</li>
 				))}
@@ -113,11 +117,11 @@ export function ActivityChart({
 			<div className="grid min-h-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] gap-x-3">
 				<ol
 					aria-hidden="true"
-					className="relative text-right text-muted-foreground text-xs tabular-nums leading-none"
+					className="relative text-end text-muted-foreground text-xs tabular-nums leading-none"
 				>
 					{ticks.map((tick) => (
 						<li
-							className="absolute right-0 -translate-y-1/2"
+							className="absolute end-0 -translate-y-1/2"
 							key={tick}
 							style={{ top: `${(1 - tick / top) * 100}%` }}
 						>

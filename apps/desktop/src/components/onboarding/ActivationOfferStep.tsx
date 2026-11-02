@@ -1,5 +1,4 @@
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { ONBOARDING_TEAMS_OFFER } from "@ryu/auth/lib/onboarding-offer";
 import {
 	OnboardingActions,
@@ -7,8 +6,13 @@ import {
 } from "@ryu/blocks/desktop/onboarding-shell.tsx";
 import { SubscriptionAgreement } from "@ryu/blocks/web/subscription-agreement.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import type { ReactNode } from "react";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
+import {
+	activationOfferTerms,
+	formatOfferPrice,
+} from "./activation-offer-terms.ts";
 
 const {
 	firstMonthCreditPoolUsd,
@@ -19,8 +23,6 @@ const {
 
 /** Prices and terms spell the seat count; the offer has always been five. */
 const includedSeatsWord = includedSeats === 5 ? "five" : String(includedSeats);
-
-const TEAMS_OFFER_TERMS = `US$${trialMonthlyPriceUsd} for the first month, then renews automatically at US$${listMonthlyPriceUsd} every month for ${includedSeatsWord} seats, plus applicable taxes, until canceled. The first month includes a US$${firstMonthCreditPoolUsd} shared credit pool; the offer is limited to one organization per account owner.`;
 
 export function ActivationOfferStep({
 	checkoutOpened = false,
@@ -55,10 +57,10 @@ export function ActivationOfferStep({
 		? tl(
 				"The first month is {trialMonthlyPrice} and includes a {firstMonthCreditPool} shared credit pool. From month two onward, the {includedSeatsWord}-seat Teams floor is {listMonthlyPrice}/month. One introductory month per account owner.",
 				{
-					firstMonthCreditPool: `$${firstMonthCreditPoolUsd}`,
+					firstMonthCreditPool: formatOfferPrice(firstMonthCreditPoolUsd),
 					includedSeatsWord,
-					listMonthlyPrice: `$${listMonthlyPriceUsd}`,
-					trialMonthlyPrice: `$${trialMonthlyPriceUsd}`,
+					listMonthlyPrice: formatOfferPrice(listMonthlyPriceUsd),
+					trialMonthlyPrice: formatOfferPrice(trialMonthlyPriceUsd),
 				}
 			)
 		: individualCheckoutClosed
@@ -66,7 +68,7 @@ export function ActivationOfferStep({
 			: "Ryu Pro is $49/month for one person. Choose Max later from Pricing if you need more capacity.";
 	const checkoutLabel = organizationPlan
 		? tl("Start first month for {trialMonthlyPrice}", {
-				trialMonthlyPrice: `$${trialMonthlyPriceUsd}`,
+				trialMonthlyPrice: formatOfferPrice(trialMonthlyPriceUsd),
 			})
 		: individualCheckoutClosed
 			? "Continue with local setup"
@@ -88,9 +90,9 @@ export function ActivationOfferStep({
 					</p>
 					<ul className="flex flex-col gap-1 text-detail text-muted-foreground">
 						{[
-							"Ryu lives where you already work",
-							"Use the connection needed for your selected task",
-							"Work starts only after subscription confirmation",
+							tl("Ryu lives where you already work"),
+							tl("Use the connection needed for your selected task"),
+							tl("Work starts only after subscription confirmation"),
 						].map((item) => (
 							<li key={item}>{item}</li>
 						))}
@@ -112,7 +114,7 @@ export function ActivationOfferStep({
 							onClick={onContinue}
 						>
 							Continue to task
-							<HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+							<DirectionalIcon icon={ArrowRight01Icon} size={16} />
 						</OnboardingCta>
 					) : checkoutOpened || individualCheckoutClosed ? (
 						<OnboardingCta
@@ -127,17 +129,13 @@ export function ActivationOfferStep({
 							}
 						>
 							{checkoutOpened ? "I finished checkout" : checkoutLabel}
-							<HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+							<DirectionalIcon icon={ArrowRight01Icon} size={16} />
 						</OnboardingCta>
 					) : (
 						<SubscriptionAgreement
 							blocked={pending}
 							offerKey={organizationPlan ? "teams-onboarding" : "pro-monthly"}
-							terms={
-								organizationPlan
-									? TEAMS_OFFER_TERMS
-									: "Renews automatically at US$49 every month, plus applicable taxes, until canceled."
-							}
+							terms={activationOfferTerms(tl, organizationPlan)}
 						>
 							{(canContinue) => (
 								<OnboardingCta
@@ -147,7 +145,7 @@ export function ActivationOfferStep({
 									onClick={onStartCheckout}
 								>
 									{checkoutLabel}
-									<HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+									<DirectionalIcon icon={ArrowRight01Icon} size={16} />
 								</OnboardingCta>
 							)}
 						</SubscriptionAgreement>

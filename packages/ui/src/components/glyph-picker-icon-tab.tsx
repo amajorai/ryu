@@ -52,10 +52,10 @@ export function GlyphPickerIconTab({ state }: { state: GlyphPickerState }) {
 				</div>
 
 				<div className="relative">
-					<Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+					<Search className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
 					<Input
 						aria-label="Search icons"
-						className="pl-9"
+						className="ps-9"
 						onChange={(e) => setIconQuery(e.target.value)}
 						placeholder="Search Iconify (Lucide, MDI, Tabler, …)"
 						value={iconQuery}

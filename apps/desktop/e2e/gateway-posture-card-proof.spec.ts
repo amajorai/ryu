@@ -5,6 +5,7 @@ import type {
 	GatewayFirewallConfig,
 	GatewayRoutingConfig,
 } from "../src/lib/api/gateway.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface PostureProofSnapshot {
 	config: { firewall: GatewayFirewallConfig; routing: GatewayRoutingConfig };
@@ -26,10 +27,7 @@ function screenshotPath(name: string): string {
 	if (override) {
 		return path.join(override, `${name}.png`);
 	}
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 async function readProofState(page: Page): Promise<PostureProofSnapshot> {
@@ -461,6 +459,10 @@ test("Doctor safe-fix preview retries after failure, changes nothing until Apply
 			status: 200,
 		},
 	]);
+	// The last menu click leaves the pointer where the error toast expands
+	// (bottom right); a hovered toast stack pauses every toast's lifetime by
+	// design, so park the pointer away from it before waiting for them to retire.
+	await page.mouse.move(0, 0);
 	await expect(page.getByText("Could not preview Doctor fixes")).toHaveCount(
 		0,
 		{

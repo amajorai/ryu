@@ -266,7 +266,9 @@ export function useChatCommands(deps: UseChatCommandsDeps) {
 				case "set-model":
 					setAcpModel(action.model);
 					notify(
-						action.model ? `Model: ${action.model}` : "Model override cleared",
+						action.model
+							? tf("Model: {model}", { model: action.model })
+							: "Model override cleared",
 						"info"
 					);
 					return true;

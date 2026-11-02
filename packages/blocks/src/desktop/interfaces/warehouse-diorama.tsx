@@ -39,9 +39,9 @@ import {
 	type FloorPlacement,
 	type OrderTab,
 	type Picker,
-	plural,
 	RACK,
 	type WarehouseOrder,
+	warehouseCount,
 } from "./warehouse-model.ts";
 import type { WarehouseArt } from "./warehouse-palette.ts";
 
@@ -266,7 +266,7 @@ export function WarehouseDioramaScene({
 					className="h-6 gap-1 px-2 text-[12px]"
 					key={zone.id}
 					label={tl("{zone}: {orders}. Show them on the clipboard", {
-						orders: plural(zone.count, "order"),
+						orders: warehouseCount(zone.count, "order"),
 						zone: actors && zone.id === "exception" ? "Stopped" : zone.label,
 					})}
 					onSelect={() => onPickTab(zone.tab)}

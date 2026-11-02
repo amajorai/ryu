@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -9,7 +10,7 @@ import { createContext, type ReactNode, useContext } from "react";
 import { type Deck, deckSummary } from "./card-table-decks.ts";
 import type { SeatTone } from "./card-table-model.ts";
 import { SeatAvatar } from "./card-table-pieces.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 
 // The pieces every deck of the Cards layout shows, at rest, docked or open:
 // its avatar, its name and detail, its labels, and the act layer they read.
@@ -44,8 +45,12 @@ export function deckLabel(
 	action: string
 ): string {
 	return act
-		? `${act.ariaLabel} ${action}.`
-		: `${deck.name}: ${deckSummary(deck)}. ${action}`;
+		? tr("{actLabel} {action}.", { action, actLabel: act.ariaLabel })
+		: tr("{name}: {summary}. {action}", {
+				action,
+				name: deck.name,
+				summary: deckSummary(deck),
+			});
 }
 
 export interface SpreadActions {
@@ -104,7 +109,7 @@ function deckSignal(
 ): { text: string; tone: string } | null {
 	if (deck.attention > 0) {
 		return {
-			text: `${deck.attention} failed`,
+			text: tl("{count, plural, other {# failed}}", { count: deck.attention }),
 			tone: "font-medium text-status-destructive",
 		};
 	}
@@ -138,8 +143,8 @@ function deckDetail(
 		""
 	);
 	return newest
-		? { text: `${compactAge(newest, now)} ago`, tone: "" }
-		: { text: "No cards yet", tone: "" };
+		? { text: relativeAge(newest, now), tone: "" }
+		: { text: tr("No cards yet"), tone: "" };
 }
 
 /** A deck's name with its card count beside it, then its detail under them. */
@@ -159,7 +164,10 @@ export function DeckTitle({
 	return (
 		<div className="flex min-w-0 flex-1 flex-col">
 			<Heading className="flex min-w-0 items-baseline gap-1.5 leading-5">
-				<span className="gk-display truncate text-(--gk-ink) text-[16px]">
+				<span
+					className="gk-display truncate text-(--gk-ink) text-[16px]"
+					data-ryu-i18n="off"
+				>
 					{deck.name}
 				</span>
 				<span

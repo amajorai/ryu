@@ -136,7 +136,7 @@ function HookRow({
 								? tl("Hide details for {hookId}", { hookId: hook.id })
 								: tl("Show details for {hookId}", { hookId: hook.id })
 						}
-						className="flex min-w-0 flex-1 items-center text-left"
+						className="flex min-w-0 flex-1 items-center text-start"
 					>
 						<span className="min-w-0 flex-1 truncate text-sm" title={hook.id}>
 							{hook.id}
@@ -154,7 +154,11 @@ function HookRow({
 						/>
 					</CollapsibleTrigger>
 					<Button
-						aria-label={`${trusted ? "Remove trust from" : "Trust"} ${hook.id}`}
+						aria-label={
+							trusted
+								? tl("Remove trust from {id}", { id: hook.id })
+								: tl("Trust {id}", { id: hook.id })
+						}
 						disabled={!canWrite || pending}
 						onClick={() =>
 							onUpdate(hook, {
@@ -169,7 +173,11 @@ function HookRow({
 						{trusted ? "Trusted" : "Trust"}
 					</Button>
 					<Switch
-						aria-label={`${enabled ? "Disable" : "Enable"} ${hook.id}`}
+						aria-label={
+							enabled
+								? tl("Disable {id}", { id: hook.id })
+								: tl("Enable {id}", { id: hook.id })
+						}
 						checked={enabled}
 						disabled={!canWrite || pending || !trusted}
 						onCheckedChange={(checked) =>

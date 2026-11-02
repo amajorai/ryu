@@ -27,43 +27,20 @@ fn failure_notice(
         FailureClass::Quota => {
             store::start_cooldown(&account.key(provider), unix_now());
             StartFailure::Fallback(
-                Notice::new(
-                    "subscription_quota_fallback",
-                    backend,
-                    format!(
-                        "Your {} plan ({}) reached its usage or rate limit. Ryu tries the next option: another account only if you listed it, otherwise a Ryu Box, which uses Ryu credits.",
-                        backend.plan_name(),
-                        account.label
-                    ),
-                )
-                .for_account(&account.id),
+                Notice::quota_fallback(backend, &account.label).for_account(&account.id),
             )
         }
         FailureClass::SignedOut => StartFailure::Fallback(
-            Notice::new(
-                "subscription_signed_out",
-                backend,
-                format!(
-                    "{} is not signed in to your {} plan ({}) on this node.",
-                    backend.cli_name(),
-                    backend.plan_name(),
-                    account.label
-                ),
-            )
-            .for_account(&account.id),
+            Notice::account_signed_out(backend, &account.label).for_account(&account.id),
         ),
-        FailureClass::Unavailable => StartFailure::Fallback(Notice::new(
-            "subscription_unavailable",
-            backend,
-            format!("{} could not start the task: {reason}", backend.cli_name()),
-        )),
+        FailureClass::Unavailable => StartFailure::Fallback(Notice::start_failed(backend, reason)),
         FailureClass::Rejected => StartFailure::Rejected(reason.to_owned()),
     }
 }
 
 fn cli_failure(backend: CloudTaskBackend, failure: &CliFailure) -> StartFailure {
-    let reason = match failure {
-        CliFailure::NotInstalled => "it is not installed on this node",
+    let notice = match failure {
+        CliFailure::NotInstalled => Notice::not_installed(backend),
         // The provider may have started the run before the CLI went quiet; a Box
         // fallback could run the task twice, so the user decides.
         CliFailure::TimedOut => {
@@ -72,13 +49,9 @@ fn cli_failure(backend: CloudTaskBackend, failure: &CliFailure) -> StartFailure 
                 backend.plan_name()
             ))
         }
-        CliFailure::Io(_) => "it could not be run",
+        CliFailure::Io(_) => Notice::not_runnable(backend),
     };
-    StartFailure::Fallback(Notice::new(
-        "subscription_unavailable",
-        backend,
-        format!("{} could not start the task: {reason}.", backend.cli_name()),
-    ))
+    StartFailure::Fallback(notice)
 }
 
 fn begin_failure(
@@ -116,15 +89,7 @@ async fn start_local(
             .await
             // A checkout Ryu cannot branch is a setup problem on this node, like a
             // missing checkout: try the next backend and say why.
-            .map_err(|reason| {
-                StartFailure::Fallback(Notice::new(
-                    "subscription_not_configured",
-                    backend,
-                    format!(
-                        "Ryu could not make a worktree of this environment's checkout: {reason}"
-                    ),
-                ))
-            })?;
+            .map_err(|reason| StartFailure::Fallback(Notice::no_worktree(backend, &reason)))?;
     let now = unix_now();
     let record = RunRecord {
         conversation_id: request.conversation_id.to_owned(),

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface TeamRequestEvidence {
 	authorization: string | null;
@@ -33,9 +34,8 @@ interface TeamDialogProofWindow extends Window {
 	__teamDialogProof: TeamDialogProofState;
 }
 
-const PROOF_DIRECTORY = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const PROOF_DIRECTORY = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 function screenshotPath(name: string): string {

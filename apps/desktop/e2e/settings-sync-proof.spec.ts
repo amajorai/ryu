@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 import {
 	installSyncApiMock,
 	REMOTE_UPDATED_AT,
@@ -12,11 +13,7 @@ const STORY_URL = "/settings-sync-proof.html";
 const evidence = (name: string) =>
 	process.env.RYU_PROOF_OUTPUT_ROOT
 		? path.resolve(process.env.RYU_PROOF_OUTPUT_ROOT, name)
-		: path.resolve(
-				process.cwd(),
-				"../../docs/proof/test-coverage-sweep-20260924/evidence",
-				name
-			);
+		: proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 const CONFLICT_SCREENSHOT = evidence("desktop-settings-sync-conflicts.png");
 const DELETE_CONFIRMATION_SCREENSHOT = evidence(
 	"desktop-settings-sync-delete-confirmation.png"

@@ -2,10 +2,18 @@
 
 import {
 	type ReactElement,
+	useContext,
 	useEffect,
+	useLayoutEffect,
 	useRef,
 	useSyncExternalStore,
 } from "react";
+import {
+	claimActiveI18nRuntimeForRender,
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "./active-locale.ts";
+import { systemLocales } from "./locale.ts";
 import type { LanguagePack } from "./pack.ts";
 import {
 	type AppliedCatalog,
@@ -23,6 +31,14 @@ import type {
 
 const EMPTY_PACKS: readonly LanguagePack[] = [];
 
+/** Layout effects on the client; plain effects (which never run) on the server. */
+const useClientLayoutEffect =
+	globalThis.document === undefined ? useEffect : useLayoutEffect;
+
+const subscribeNever = () => () => undefined;
+const onClient = () => true;
+const onServerOrHydrating = () => false;
+
 export interface I18nProviderProps extends I18nRuntimeOptions {
 	/**
 	 * Translate catalog literals and explicitly opted-in legacy UI DOM copy.
@@ -38,6 +54,12 @@ export interface I18nProviderProps extends I18nRuntimeOptions {
 	 * exist; omit it to localize the whole document.
 	 */
 	domRoot?: Node | null;
+	/**
+	 * Automatic language mode: follow the browser's or OS's preferred
+	 * languages when they change (`languagechange`), without persisting a
+	 * choice. Pass the current list (`systemLocales()`) as `initialLocale`.
+	 */
+	followSystemLocale?: boolean;
 	/**
 	 * Write `<html lang/dir>` and `--ryu-locale` for the active locale. Turn it
 	 * off when the provider renders inside a page it does not own.
@@ -72,6 +94,7 @@ export function useI18nProviderElement(
 		overlays,
 		autoLocalizeDom = true,
 		domRoot,
+		followSystemLocale = false,
 		manageDocument = true,
 		selectionKey,
 	}: I18nProviderProps,
@@ -107,6 +130,9 @@ export function useI18nProviderElement(
 		previousSelectionKey.current = selectionKey;
 	}
 	const instance = runtime.current;
+	// Only the outermost provider speaks for the UI outside React; a nested
+	// one (a preview, an embedded app) must not take `activeLocale()` over.
+	const isOutermost = useContext(I18nContext) === null;
 	const hostMethods = useI18nHostRelay(instance);
 
 	const overlaysRef = useRef(overlays);
@@ -154,15 +180,51 @@ export function useI18nProviderElement(
 		instance.getVersion
 	);
 
-	useEffect(() => {
+	// A fresh client render (not the server, not hydration) makes this runtime
+	// active right away, so children that read `activeLocale()` or
+	// `translate()` while rendering format in its locale in this same commit.
+	// The server keeps answering in English (a module-level runtime would leak
+	// one request's language into another's), and hydration must match it.
+	const freshClientRender = useSyncExternalStore(
+		subscribeNever,
+		onClient,
+		onServerOrHydrating
+	);
+	if (isOutermost && freshClientRender) {
+		claimActiveI18nRuntimeForRender(instance);
+	}
+
+	useClientLayoutEffect(() => {
+		// `activeLocale()` and `translate()` outside React read this runtime;
+		// registering before paint (and again on each version, to announce a
+		// changed locale) keeps layout effects and listeners in step.
+		if (isOutermost) {
+			registerActiveI18nRuntime(instance);
+		}
 		if (!manageDocument || globalThis.document === undefined) {
 			return;
 		}
 		const root = document.documentElement;
 		root.lang = instance.locale;
 		root.dir = instance.direction;
-		root.style.setProperty("--ryu-locale", instance.locale);
-	}, [instance, manageDocument, version]);
+		// Companion iframes format dates and numbers from this token, so it
+		// carries the regional tag (`pt-PT`), not the pack's (`pt-BR`).
+		root.style.setProperty("--ryu-locale", instance.formatLocale);
+	}, [instance, isOutermost, manageDocument, version]);
+
+	useEffect(
+		() => () => unregisterActiveI18nRuntime(instance),
+		[instance, isOutermost]
+	);
+
+	useEffect(() => {
+		if (!followSystemLocale || globalThis.addEventListener === undefined) {
+			return;
+		}
+		const follow = () => instance.applySystemLocales(systemLocales());
+		globalThis.addEventListener("languagechange", follow);
+		return () => globalThis.removeEventListener("languagechange", follow);
+	}, [followSystemLocale, instance]);
 
 	return {
 		element: (

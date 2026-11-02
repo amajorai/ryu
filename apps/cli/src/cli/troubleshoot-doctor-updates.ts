@@ -42,7 +42,7 @@ export async function checkGatewayDoctor(
 			id: "gateway.doctor",
 			status: "skip",
 			title: "Gateway Doctor",
-			detail: `Unavailable (${doctor.message}).`,
+			detail: tf("Unavailable ({message}).", { message: doctor.message }),
 		});
 		return;
 	}
@@ -61,15 +61,23 @@ export async function checkGatewayDoctor(
 				: result.appliedFixes.length;
 			state.fixes.push(
 				options.dryRun
-					? `Gateway Doctor would apply ${count} safe fix${count === 1 ? "" : "es"}.`
-					: `Gateway Doctor applied ${count} safe fix${count === 1 ? "" : "es"}.`
+					? tf(
+							"Gateway Doctor would apply {count, plural, one {# safe fix} other {# safe fixes}}.",
+							{ count }
+						)
+					: tf(
+							"Gateway Doctor applied {count, plural, one {# safe fix} other {# safe fixes}}.",
+							{ count }
+						)
 			);
 			if (!options.dryRun && result.report) {
 				({ errors, warnings } = result.report.counts);
 			}
 		} catch (error) {
 			state.fixes.push(
-				`Gateway Doctor fixes failed: ${error instanceof Error ? error.message : String(error)}`
+				tf("Gateway Doctor fixes failed: {message}", {
+					message: error instanceof Error ? error.message : String(error),
+				})
 			);
 		}
 	}
@@ -83,8 +91,13 @@ export async function checkGatewayDoctor(
 		),
 		fix:
 			fixable > 0 && !options.fix
-				? `Preview safe fixes with \`${host.commandName} doctor --dry-run\`, apply with \`${host.commandName} doctor --fix\`.`
-				: `Details: \`${host.commandName} doctor\`.`,
+				? tf(
+						"Preview safe fixes with `{commandName} doctor --dry-run`, apply with `{commandName} doctor --fix`.",
+						{ commandName: host.commandName }
+					)
+				: tf("Details: `{commandName} doctor`.", {
+						commandName: host.commandName,
+					}),
 		searchTerms: "gateway doctor",
 		unit: "apps/gateway",
 	});
@@ -98,7 +111,10 @@ export async function checkUpdates(
 	snapshot: CoreSnapshot,
 	options: TroubleshootOptions
 ): Promise<void> {
-	const fix = `Update: ${installCommand(host)}  (the desktop app updates from Settings › Updates).`;
+	const fix = tf(
+		"Update: {command}  (the desktop app updates from Settings › Updates).",
+		{ command: installCommand(host) }
+	);
 	if (snapshot.reachable) {
 		const verdict = await probeCore(
 			ctx,

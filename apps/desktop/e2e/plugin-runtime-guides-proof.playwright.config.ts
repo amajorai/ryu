@@ -1,12 +1,12 @@
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export default defineConfig({
 	testDir: ".",
 	testMatch: "plugin-runtime-guides-proof.spec.ts",
-	outputDir: path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/browser-results"
+	outputDir: proofEvidencePath(
+		"test-coverage-sweep-20260924/parallel/plugins-runtime/full/browser-results"
 	),
 	workers: 1,
 	retries: 0,

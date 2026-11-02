@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -34,7 +35,7 @@ export function TrackingThreadPanel({
 	const reduceMotion = useReducedMotion();
 	const tl = useLiteralMessages();
 	const title = parcel
-		? parcel.thread.title.trim() || "Untitled conversation"
+		? parcel.thread.title.trim() || tr("Untitled conversation")
 		: "New parcel";
 	return (
 		<motion.aside
@@ -43,7 +44,7 @@ export function TrackingThreadPanel({
 			className={cn(
 				"flex min-h-0 flex-col bg-background",
 				docked
-					? "w-[clamp(24rem,36vw,38rem)] shrink-0 border-border border-l"
+					? "w-[clamp(24rem,36vw,38rem)] shrink-0 border-border border-s"
 					: "absolute inset-0 z-20"
 			)}
 			data-testid="tracking-thread-panel"

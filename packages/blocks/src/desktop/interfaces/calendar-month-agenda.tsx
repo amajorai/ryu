@@ -112,7 +112,7 @@ function AgendaRow({
 			aria-current={active ? "true" : undefined}
 			aria-label={itemAccessibleName(snapshot, item, tl)}
 			className={cn(
-				"flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-left text-xs outline-none transition-colors",
+				"flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-start text-xs outline-none transition-colors",
 				"hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
 				active && ACTIVE_ITEM_CLASS
 			)}
@@ -206,7 +206,10 @@ export function DayAgendaPopover({
 							onClick={() => setDetail(null)}
 							type="button"
 						>
-							<ChevronLeft aria-hidden="true" className="size-4" />
+							<ChevronLeft
+								aria-hidden="true"
+								className="size-4 rtl:-scale-x-100"
+							/>
 							{longDay(date)}
 						</button>
 						<RunDetails
@@ -285,7 +288,11 @@ export function DayAgendaPopover({
 									variant="ghost"
 								>
 									Open week
-									<ArrowRight aria-hidden="true" data-icon="inline-end" />
+									<ArrowRight
+										aria-hidden="true"
+										className="rtl:-scale-x-100"
+										data-icon="inline-end"
+									/>
 								</Button>
 							</div>
 						) : null}

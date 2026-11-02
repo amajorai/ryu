@@ -381,6 +381,14 @@ describe("passport model", () => {
 		);
 	});
 
+	test("stamp dates print in the UI locale; English keeps the stamp style", () => {
+		const day = new Date(2026, 9, 14).getTime();
+		expect(stampDate(day, "en")).toBe("14 OCT 2026");
+		expect(stampDate(day, "de")).toBe("14. OKT. 2026");
+		expect(stampDate(day, "ja")).toBe("2026年10月14日");
+		expect(stampDate(day, "ar")).not.toMatch(/[A-Za-z]/u);
+	});
+
 	test("stamp layout is stable and skips unreadable timestamps", () => {
 		const now = Date.now();
 		const snapshot = snapshotAt(now);

@@ -1,5 +1,41 @@
 import { describe, expect, test } from "bun:test";
-import { resolveDesktopWindowTitle } from "./window-title.ts";
+import type { LiteralMessage } from "@ryu/i18n/react";
+import type { InterfaceDescriptor } from "@ryuhq/protocol/interfaces";
+import {
+	resolveDesktopWindowTitle as resolveTitle,
+	windowInterfaceLabel,
+} from "./window-title.ts";
+
+/** A stub translator over one catalog that fills `{name}` placeholders. */
+function translator(catalog: Record<string, string>): LiteralMessage {
+	return (source, values) =>
+		(catalog[source] ?? source).replace(/\{(\w+)\}/g, (_, key: string) =>
+			String((values as Record<string, unknown> | undefined)?.[key] ?? "")
+		);
+}
+
+const en = translator({});
+const de = translator({
+	Beta: "Beta",
+	Channels: "Kanäle",
+	Nightly: "Nightly-Build",
+	"Ryu · {product}": "Ryu · {product}",
+});
+
+/** The English title, as every case below was written before `tl` existed. */
+function resolveDesktopWindowTitle(
+	options: Omit<Parameters<typeof resolveTitle>[0], "tl">
+): string {
+	return resolveTitle({ ...options, tl: en });
+}
+
+function descriptor(
+	renderer: InterfaceDescriptor["renderer"],
+	label: string,
+	origin: InterfaceDescriptor["origin"] = "builtin"
+): Pick<InterfaceDescriptor, "label" | "origin" | "renderer"> {
+	return { label, origin, renderer };
+}
 
 describe("desktop window title", () => {
 	test("uses the active product mode", () => {
@@ -110,5 +146,68 @@ describe("desktop window title", () => {
 		expect(resolveDesktopWindowTitle({ ...base, mode: "console" })).toBe(
 			"Ryu · Agent"
 		);
+	});
+
+	test("translates built-in interface labels and the channel, not brand names", () => {
+		const base = {
+			channel: "stable",
+			dev: false,
+			mode: "os",
+			standaloneApp: false,
+			standaloneAppName: "",
+		} as const;
+		const channels = descriptor("channels", "Channels");
+		expect(
+			resolveTitle({
+				...base,
+				interfaceLabel: windowInterfaceLabel(channels, de),
+				tl: de,
+			})
+		).toBe("Ryu · Kanäle");
+		expect(
+			resolveTitle({
+				...base,
+				channel: "nightly",
+				interfaceLabel: windowInterfaceLabel(channels, de),
+				tl: de,
+			})
+		).toBe("Ryu · Kanäle Nightly-Build");
+		// Bot, Agent and OS are brand names and stay English.
+		const brandOnly = translator({
+			Agent: "Agent-DE",
+			Bot: "Bot-DE",
+			OS: "BS",
+		});
+		expect(windowInterfaceLabel(descriptor("os", "OS"), brandOnly)).toBe("OS");
+		expect(resolveTitle({ ...base, mode: "bot", tl: brandOnly })).toBe(
+			"Ryu · Bot"
+		);
+		// A Marketplace label arrives localized from its manifest: used as is.
+		expect(
+			windowInterfaceLabel(
+				descriptor("channels", "Channels", "marketplace"),
+				de
+			)
+		).toBe("Channels");
+	});
+
+	test("recomputes in the new language when the locale switches", () => {
+		const options = {
+			channel: "stable",
+			dev: false,
+			mode: "os",
+			standaloneApp: false,
+			standaloneAppName: "",
+		} as const;
+		const channels = descriptor("channels", "Channels");
+		const titleIn = (tl: LiteralMessage) =>
+			resolveTitle({
+				...options,
+				interfaceLabel: windowInterfaceLabel(channels, tl),
+				tl,
+			});
+		expect(titleIn(en)).toBe("Ryu · Channels");
+		expect(titleIn(de)).toBe("Ryu · Kanäle");
+		expect(titleIn(en)).toBe("Ryu · Channels");
 	});
 });

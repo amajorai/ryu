@@ -1,10 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidencePath = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence/identities-page-selected-detail-after-cancel.png"
+const evidencePath = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence/identities-page-selected-detail-after-cancel.png"
 );
 
 const profiles = [

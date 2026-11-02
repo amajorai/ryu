@@ -14,6 +14,7 @@ export default defineConfig({
 	testDir: ".",
 	testMatch: [
 		"voice-settings-proof.spec.ts",
+		"part*-voice-settings-proof.spec.ts",
 		"voice-install-native-http-outcomes.spec.ts",
 	],
 	workers: 1,

@@ -68,13 +68,13 @@ function ComputerOption({
 	const online = useNodeOnline(node);
 	return (
 		<DropdownMenuItem onClick={onSelect}>
-			<NodeStatusDot className="mr-2" online={online} />
+			<NodeStatusDot className="me-2" online={online} />
 			<span className="min-w-0 flex-1 truncate">
 				{nodeSettingsLabel(node)}
 				{node.managed ? " · cloud" : ""}
 			</span>
 			{selected ? (
-				<HugeiconsIcon className="ml-2" icon={Tick02Icon} size={12} />
+				<HugeiconsIcon className="ms-2" icon={Tick02Icon} size={12} />
 			) : null}
 		</DropdownMenuItem>
 	);

@@ -289,7 +289,7 @@ export function KeyboardShortcutsTab() {
 			</div>
 
 			<div
-				className="scroll-fade min-h-0 flex-1 overflow-y-auto pr-2"
+				className="scroll-fade min-h-0 flex-1 overflow-y-auto pe-2"
 				data-testid="keyboard-shortcuts-scroll"
 			>
 				<div className="space-y-6">

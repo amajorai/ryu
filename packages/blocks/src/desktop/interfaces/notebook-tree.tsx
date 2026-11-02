@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import {
@@ -6,10 +7,7 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { ChevronRight, FolderClosed, Plus, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -21,7 +19,8 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { agentById } from "./interface-renderer.ts";
+import { logicalArrowKey } from "./inline-direction.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type NotebookGroup,
 	type NotebookPage,
@@ -172,7 +171,8 @@ export function NotebookTree({
 			onStart(row.node);
 			return;
 		}
-		const move = notebookTreeMove(rows, current, event.key);
+		const key = logicalArrowKey(event.key, event.currentTarget);
+		const move = notebookTreeMove(rows, current, key);
 		if (!move) {
 			return;
 		}
@@ -234,7 +234,7 @@ export function NotebookTree({
 			<li
 				{...itemProps(page.id, level, index, size)}
 				aria-current={active ? "page" : undefined}
-				aria-label={`${page.title}, ${THREAD_STATUS_LABELS[page.status]}`}
+				aria-label={`${page.title}, ${threadStatusLabel(page.status)}`}
 				aria-selected={active}
 				className="outline-none"
 				key={page.id}
@@ -259,7 +259,9 @@ export function NotebookTree({
 							className={cn(active && "text-sidebar-accent-foreground")}
 						/>
 					</span>
-					<span className="min-w-0 flex-1 truncate">{page.title}</span>
+					<span className="min-w-0 flex-1 truncate" data-ryu-i18n="off">
+						{page.title}
+					</span>
 					{sidebarShowsStatus(page.status) ? (
 						<NotebookStatusMark className="me-1" status={page.status} />
 					) : null}
@@ -314,15 +316,20 @@ export function NotebookTree({
 				/>
 			);
 		}
-		const kindLabel = group.groupKind === "agent" ? "agent" : group.groupKind;
 		return (
 			<li
 				{...itemProps(group.id, level, index, size)}
 				aria-expanded={open}
 				aria-keyshortcuts="N"
-				aria-label={`${group.label}, ${kindLabel}${agentWorking ? ", working" : ""}, ${group.pages.length} ${
-					group.pages.length === 1 ? "page" : "pages"
-				}`}
+				aria-label={tr(
+					"{label}, {kind, select, agent {agent} project {project} other {team}}{working, select, yes {, working} other {}}, {count, plural, one {# page} other {# pages}}",
+					{
+						count: group.pages.length,
+						kind: group.groupKind,
+						label: group.label,
+						working: agentWorking ? "yes" : "no",
+					}
+				)}
 				className="outline-none"
 				key={group.id}
 			>
@@ -346,8 +353,8 @@ export function NotebookTree({
 						<ChevronRight
 							aria-hidden="true"
 							className={cn(
-								"absolute size-3.5 text-muted-foreground opacity-0 transition-[opacity,transform] duration-150 group-hover/row:opacity-100",
-								open && "rotate-90"
+								"absolute size-3.5 text-muted-foreground opacity-0 transition-[opacity,transform] duration-150 group-hover/row:opacity-100 rtl:-scale-x-100",
+								open && "rotate-90 rtl:-rotate-90"
 							)}
 							strokeWidth={2.25}
 						/>
@@ -446,8 +453,8 @@ export function NotebookTree({
 							<ChevronRight
 								aria-hidden="true"
 								className={cn(
-									"size-3 opacity-0 transition-[opacity,transform] duration-150 group-hover/row:opacity-100",
-									open && "rotate-90"
+									"size-3 opacity-0 transition-[opacity,transform] duration-150 group-hover/row:opacity-100 rtl:-scale-x-100",
+									open && "rotate-90 rtl:-rotate-90"
 								)}
 								strokeWidth={2.5}
 							/>

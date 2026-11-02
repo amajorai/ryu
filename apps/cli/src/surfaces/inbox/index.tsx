@@ -11,9 +11,11 @@
 
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { featureListLoader } from "../../core/featureList.ts";
+import { tf } from "../../i18n/translate.ts";
 import { ListTab } from "../../ui/ListTab.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
+import { localizeApprovalRecord } from "./approval-row.ts";
 
 const loadApprovals = featureListLoader({
 	path: "/api/approvals?status=pending",
@@ -22,6 +24,7 @@ const loadApprovals = featureListLoader({
 	subtitleKeys: ["description", "detail", "kind"],
 	badgeKeys: ["status", "kind"],
 	idKeys: ["id"],
+	localizeRecord: (record) => localizeApprovalRecord(record, tf),
 });
 
 function InboxSurface({ active, paneId }: SurfaceProps) {

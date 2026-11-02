@@ -1,5 +1,5 @@
 import type { LiteralMessage } from "@ryu/i18n/react";
-import { plural, type TankSummary } from "./aquarium-model.ts";
+import type { TankSummary } from "./aquarium-model.ts";
 
 /**
  * Escape inside a text field belongs to the field, except in the panel's own
@@ -34,11 +34,19 @@ export function summaryParts(
 	tl: LiteralMessage
 ): SummaryPart[] {
 	if (summary.agents === 0) {
-		return [{ essential: true, text: "No agents yet" }];
+		return [{ essential: true, text: tl("No agents yet") }];
 	}
 	const parts: SummaryPart[] = [
-		{ essential: false, text: plural(summary.agents, "agent") },
-		{ essential: true, text: `${summary.working} working` },
+		{
+			essential: false,
+			text: tl("{count, plural, one {# agent} other {# agents}}", {
+				count: summary.agents,
+			}),
+		},
+		{
+			essential: true,
+			text: tl("{count} working", { count: summary.working }),
+		},
 	];
 	if (summary.attention > 0) {
 		parts.push({

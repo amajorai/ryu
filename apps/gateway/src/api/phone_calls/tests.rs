@@ -1,3 +1,4 @@
+use super::calls::{handoff_twiml, twilio_say_language, twilio_say_voice};
 use super::{is_e164, outbound_caller_id, outbound_opening_prompt, valid_call_sid, xml_escape};
 use crate::config::PhoneCallLineConfig;
 
@@ -38,5 +39,36 @@ fn handoff_twiml_values_cannot_close_their_attribute_or_add_elements() {
     assert_eq!(
         xml_escape("+1555\"><Dial>'&"),
         "+1555&quot;&gt;&lt;Dial&gt;&apos;&amp;"
+    );
+}
+
+#[test]
+fn the_handoff_is_spoken_in_the_owner_locale() {
+    assert_eq!(twilio_say_language("ja"), "ja-JP");
+    assert_eq!(twilio_say_language("pt-PT"), "pt-BR");
+    assert_eq!(twilio_say_language("zh-TW"), "en-US");
+    assert_eq!(twilio_say_language("nl"), "en-US");
+    let twiml = handoff_twiml("de", "+15550001111", "+15550002222");
+    assert!(
+        twiml.starts_with("<Response><Say language=\"de-DE\">"),
+        "{twiml}"
+    );
+    assert!(twiml.ends_with(
+        "<Dial callerId=\"+15550001111\" answerOnBridge=\"true\"><Number>+15550002222</Number></Dial></Response>"
+    ));
+    // Basic voices speak only en/de/es/fr/it; other locales name a voice.
+    assert_eq!(twilio_say_voice("de"), None);
+    assert_eq!(twilio_say_voice("en"), None);
+    assert_eq!(twilio_say_voice("ja"), Some("Google.ja-JP-Standard-B"));
+    assert_eq!(twilio_say_voice("ar"), Some("Google.ar-XA-Standard-A"));
+    let twiml = handoff_twiml("ja", "+1", "+2");
+    assert!(
+        twiml.starts_with("<Response><Say language=\"ja-JP\" voice=\"Google.ja-JP-Standard-B\">"),
+        "{twiml}"
+    );
+    assert!(!twiml.contains("Connecting you with"), "{twiml}");
+    assert_eq!(
+        handoff_twiml("en", "+1", "+2"),
+        "<Response><Say language=\"en-US\">Connecting you with the account owner.</Say><Dial callerId=\"+1\" answerOnBridge=\"true\"><Number>+2</Number></Dial></Response>"
     );
 }

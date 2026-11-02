@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { EncryptionProofState } from "./harness/gateway-encryption-settings-proof.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare global {
 	interface Window {
@@ -13,11 +14,7 @@ declare global {
 const evidence = (name: string) =>
 	process.env.RYU_PROOF_OUTPUT_ROOT
 		? path.resolve(process.env.RYU_PROOF_OUTPUT_ROOT, name)
-		: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-				name
-			);
+		: proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 test.beforeEach(async ({ page }) => {
 	await page.goto("/gateway-encryption-settings-proof.html");

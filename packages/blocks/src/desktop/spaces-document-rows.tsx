@@ -22,9 +22,9 @@ export function MarkdownThumbnail({
 	return (
 		<div
 			aria-hidden="true"
-			className="relative h-[76px] w-14 shrink-0 overflow-hidden rounded-glyph-compact border border-space-paper-border bg-space-paper p-1.5 text-left text-space-paper-foreground shadow-space-paper dark:border-space-paper-border-dark dark:bg-space-paper-dark dark:text-space-paper-foreground-dark"
+			className="relative h-[76px] w-14 shrink-0 overflow-hidden rounded-glyph-compact border border-space-paper-border bg-space-paper p-1.5 text-start text-space-paper-foreground shadow-space-paper dark:border-space-paper-border-dark dark:bg-space-paper-dark dark:text-space-paper-foreground-dark"
 		>
-			<div className="absolute inset-y-0 left-0 w-0.5 bg-space-paper-accent" />
+			<div className="absolute inset-y-0 start-0 w-0.5 bg-space-paper-accent" />
 			{document.previewLoading && !document.preview ? (
 				<div className="space-y-1.5 pt-1">
 					<Skeleton className="h-1.5 w-4/5" tone="paper-heading" />
@@ -75,7 +75,7 @@ export function SpaceTemplateCard({
 	return (
 		<button
 			aria-label={tl("Create {label}", { label })}
-			className={`group flex w-36 shrink-0 flex-col gap-2 rounded-lg p-1.5 text-left outline-none transition-colors hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/5 ${featured ? "ring-2 ring-foreground/70" : ""}`}
+			className={`group flex w-36 shrink-0 flex-col gap-2 rounded-lg p-1.5 text-start outline-none transition-colors hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/5 ${featured ? "ring-2 ring-foreground/70" : ""}`}
 			onClick={onClick}
 			type="button"
 		>
@@ -125,7 +125,7 @@ export function RecentDocumentRow({
 	return (
 		<button
 			aria-label={tl("Open {title}", { title })}
-			className="flex w-full items-center gap-3 border-border/70 border-b px-3 py-3 text-left outline-none transition-colors last:border-b-0 hover:bg-black/[0.035] focus-visible:bg-black/[0.035] dark:focus-visible:bg-white/[0.035] dark:hover:bg-white/[0.035]"
+			className="flex w-full items-center gap-3 border-border/70 border-b px-3 py-3 text-start outline-none transition-colors last:border-b-0 hover:bg-black/[0.035] focus-visible:bg-black/[0.035] dark:focus-visible:bg-white/[0.035] dark:hover:bg-white/[0.035]"
 			onClick={() => onOpenDoc?.(document.id, title)}
 			type="button"
 		>
@@ -176,7 +176,7 @@ export function DocumentRow({
 		<li>
 			<button
 				aria-label={tl("Open {title}", { title: doc.title || "Untitled" })}
-				className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left hover:bg-accent/50"
+				className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-start hover:bg-accent/50"
 				onClick={() => onOpenDoc?.(doc.id, doc.title)}
 				type="button"
 			>
@@ -212,7 +212,9 @@ export function DocumentRow({
 									"{count, plural, =1 {{countText} searchable piece} other {{countText} searchable pieces}}",
 									{ count: doc.chunkCount, countText: String(doc.chunkCount) }
 								)
-							: `${doc.chunkCount} ${doc.chunkCount === 1 ? "chunk" : "chunks"}`}
+							: tl("{count, plural, one {# chunk} other {# chunks}}", {
+									count: doc.chunkCount,
+								})}
 					</Badge>
 				) : (
 					// Replaces the chunk badge rather than joining it — see

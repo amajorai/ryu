@@ -2,11 +2,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 async function proofDirectory(browserName: string) {
-	const directory = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep",
+	const directory = proofEvidencePath(
+		"performance-sweep",
 		browserName === "chromium" ? "" : `${browserName}-mount`
 	);
 	await mkdir(directory, { recursive: true });

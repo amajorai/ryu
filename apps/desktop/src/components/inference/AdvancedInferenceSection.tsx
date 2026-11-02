@@ -8,7 +8,6 @@
 // model shows Top K only where its provider accepts it.
 
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -16,6 +15,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@ryu/ui/components/collapsible.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMemo, useState } from "react";
@@ -195,7 +195,7 @@ export function AdvancedInferenceSection({
 				onOpenChange={setOpen}
 				open={open}
 			>
-				<CollapsibleTrigger className="group/disclosure flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left outline-none transition-colors duration-150 hover:bg-muted hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring">
+				<CollapsibleTrigger className="group/disclosure flex h-10 w-full items-center gap-2 rounded-lg px-2 text-start outline-none transition-colors duration-150 hover:bg-muted hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring">
 					<span className="font-semibold text-sm">
 						{scope === "engine"
 							? "Sampling defaults"
@@ -203,9 +203,9 @@ export function AdvancedInferenceSection({
 								? "Sampling parameters"
 								: "Advanced inference"}
 					</span>
-					<span className="ml-auto text-muted-foreground">
-						<HugeiconsIcon
-							className="size-4 transition-transform duration-(--duration-fast) ease-move group-data-[panel-open]/disclosure:rotate-90"
+					<span className="ms-auto text-muted-foreground">
+						<DirectionalIcon
+							className="size-4 transition-transform duration-(--duration-fast) ease-move group-data-[panel-open]/disclosure:rotate-90 rtl:group-data-[panel-open]/disclosure:-rotate-90"
 							icon={ArrowRight01Icon}
 						/>
 					</span>

@@ -36,7 +36,6 @@ import {
 	type ForumSort,
 	forumCategories,
 	forumTopic,
-	plural,
 	stepTopic,
 	topicList,
 	unreadCount,
@@ -401,15 +400,20 @@ export function ForumInterface({
 									className="mt-2 size-4 rounded-[3px]"
 								/>
 								<div className="min-w-0">
-									<h1 className="font-medium text-2xl text-foreground leading-8 tracking-tight">
+									<h1
+										className="font-medium text-2xl text-foreground leading-8 tracking-tight"
+										data-ryu-i18n="off"
+									>
 										{category.name}
 									</h1>
 									<p className="mt-0.5 text-muted-foreground text-sm leading-6">
-										{category.description}
+										<span data-ryu-i18n="off">{category.description}</span>
 										{category.description ? (
 											<span aria-hidden="true"> · </span>
 										) : null}
-										{plural(category.topicIds.length, "topic", "topics")}
+										{tl("{count, plural, one {# topic} other {# topics}}", {
+											count: category.topicIds.length,
+										})}
 									</p>
 								</div>
 							</div>

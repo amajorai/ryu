@@ -37,7 +37,7 @@ export function EventPill({
 				render={
 					<button
 						className={cn(
-							"pointer-events-auto flex w-full items-center gap-1 truncate rounded-lg px-1.5 py-0.5 text-left text-xs transition-colors hover:brightness-95 dark:hover:brightness-125",
+							"pointer-events-auto flex w-full items-center gap-1 truncate rounded-lg px-1.5 py-0.5 text-start text-xs transition-colors hover:brightness-95 dark:hover:brightness-125",
 							eventTone(event)
 						)}
 						onClick={() => onSelect(event)}
@@ -87,7 +87,7 @@ export function DayCell({
 	return (
 		<div
 			className={cn(
-				"relative flex min-h-[104px] flex-col gap-1 border-border border-r border-b p-1.5 text-left transition-colors duration-150 hover:bg-muted/40 hover:duration-0",
+				"relative flex min-h-[104px] flex-col gap-1 border-border border-e border-b p-1.5 text-start transition-colors duration-150 hover:bg-muted/40 hover:duration-0",
 				selected && "bg-accent"
 			)}
 		>

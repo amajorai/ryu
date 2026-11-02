@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { PICKUP, type Point } from "./rides-model-city.ts";
 import { pointAlong, routeLength } from "./rides-model-routes.ts";
@@ -67,7 +68,6 @@ export {
 	dayLabel,
 	driverOptions,
 	nowTrips,
-	plural,
 	SHEET_TABS,
 	type SheetTab,
 	type TripDay,
@@ -226,7 +226,7 @@ export function tripHeadline(
 	detail: string;
 	status: string;
 } {
-	const driver = trip.driver?.name ?? "No driver";
+	const driver = trip.driver?.name ?? tr("No driver");
 	switch (trip.stage) {
 		case "enroute":
 			return trip.carless

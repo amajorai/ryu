@@ -130,7 +130,7 @@ export function FeedNavRail({
 												"flex items-center gap-5 rounded-full p-3 transition-colors group-hover:bg-muted",
 												"group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background",
 												"text-foreground",
-												"@min-[1280px]:pr-6"
+												"@min-[1280px]:pe-6"
 											)}
 										>
 											<span className="relative">
@@ -145,7 +145,7 @@ export function FeedNavRail({
 												{badge ? (
 													<Badge
 														aria-hidden="true"
-														className="absolute -top-1.5 -right-1.5 h-[18px] min-w-[18px] bg-primary px-1 font-bold text-[11px] text-primary-foreground ring-2 ring-background"
+														className="absolute -end-1.5 -top-1.5 h-[18px] min-w-[18px] bg-primary px-1 font-bold text-[11px] text-primary-foreground ring-2 ring-background"
 														radius="pill"
 														typography="tabular"
 													>
@@ -190,7 +190,7 @@ export function FeedNavRail({
 					<DropdownMenuTrigger
 						aria-label="Account menu"
 						className={cn(
-							"mt-auto mb-3 flex @min-[1280px]:w-full shrink-0 items-center gap-3 rounded-full p-3 text-left text-foreground transition-colors hover:bg-muted data-popup-open:bg-muted",
+							"mt-auto mb-3 flex @min-[1280px]:w-full shrink-0 items-center gap-3 rounded-full p-3 text-start text-foreground transition-colors hover:bg-muted data-popup-open:bg-muted",
 							FEED_FOCUS
 						)}
 					>

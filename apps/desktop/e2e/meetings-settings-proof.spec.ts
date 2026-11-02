@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Page, Route } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_URL = "/meetings-settings-proof.html";
 const NODE_TOKEN = "meetings-settings-proof-node-token";
@@ -10,10 +11,7 @@ const USER_JWT = "meetings-settings-proof-user-jwt";
 // space instead of rewriting the tracked sweep evidence.
 const EVIDENCE_DIR = process.env.RYU_PROOF_OUTPUT_ROOT
 	? path.resolve(process.env.RYU_PROOF_OUTPUT_ROOT)
-	: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-		);
+	: proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 interface DetectionConfig {
 	apps: string[];

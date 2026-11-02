@@ -1,11 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const NOW = "2026-10-02T08:00:00Z";
-const evidence = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
+const evidence = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
 );
 function job(id: string, name: string, target: Record<string, string>) {
 	return {

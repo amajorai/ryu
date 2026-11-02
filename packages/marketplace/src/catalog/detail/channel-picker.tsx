@@ -254,7 +254,7 @@ export function ChannelPicker({
 						<SelectItem key={channel.channel} value={channel.channel}>
 							{channelLabel(channel.channel)}
 							{channel.version ? (
-								<span className="ml-2 font-mono text-muted-foreground text-xs">
+								<span className="ms-2 font-mono text-muted-foreground text-xs">
 									{channel.version}
 								</span>
 							) : null}

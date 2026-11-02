@@ -68,7 +68,7 @@ function RailAgentButton({
 				<span
 					aria-hidden
 					className={cn(
-						"absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-foreground transition-[height,opacity] duration-200",
+						"absolute start-0 top-1/2 w-1 -translate-y-1/2 rounded-e-full bg-foreground transition-[height,opacity] duration-200",
 						active ? "h-6 opacity-100" : "h-2 opacity-0"
 					)}
 				/>
@@ -97,7 +97,7 @@ function RailAgentButton({
 								{unread ? (
 									<span
 										aria-hidden
-										className="absolute top-1 right-1 size-2.5 rounded-full bg-primary ring-2 ring-background"
+										className="absolute end-1 top-1 size-2.5 rounded-full bg-primary ring-2 ring-background"
 										data-testid="compact-rail-unread"
 									/>
 								) : null}
@@ -109,12 +109,12 @@ function RailAgentButton({
 			</ContextMenuTrigger>
 			<ContextMenuContent>
 				<ContextMenuItem onClick={onEdit}>
-					<HugeiconsIcon className="mr-2 size-4" icon={PencilEdit01Icon} />
+					<HugeiconsIcon className="me-2 size-4" icon={PencilEdit01Icon} />
 					Edit agent
 				</ContextMenuItem>
 				<ContextMenuItem onClick={onTogglePin}>
 					<HugeiconsIcon
-						className="mr-2 size-4"
+						className="me-2 size-4"
 						icon={pinned ? PinOffIcon : PinIcon}
 					/>
 					{pinned ? "Unpin agent" : "Pin agent"}

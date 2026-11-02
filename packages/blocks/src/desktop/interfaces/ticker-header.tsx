@@ -5,22 +5,13 @@ import { cn } from "@ryu/ui/lib/utils";
 import { Plus } from "lucide-react";
 import {
 	describeChange,
+	formatClock,
+	formatDay,
 	formatPrice,
 	shownPercent,
 	type TickerIndex,
 } from "./ticker-model.ts";
 import { ChangeText } from "./ticker-parts.tsx";
-
-const clockFormat = new Intl.DateTimeFormat("en-US", {
-	hour: "2-digit",
-	hour12: false,
-	minute: "2-digit",
-});
-const dateFormat = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	month: "short",
-	weekday: "short",
-});
 
 function Divider() {
 	return (
@@ -151,9 +142,9 @@ export function TickerHeader({
 					className="flex items-baseline gap-2 text-muted-foreground text-xs max-lg:hidden"
 					dateTime={date.toISOString()}
 				>
-					<span>{dateFormat.format(date)}</span>
+					<span>{formatDay(date.getTime())}</span>
 					<span className="text-foreground tabular-nums">
-						{clockFormat.format(date)}
+						{formatClock(date.getTime())}
 					</span>
 				</time>
 				<Button onClick={onNewThread} size="sm" type="button" variant="outline">

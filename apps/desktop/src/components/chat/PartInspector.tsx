@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	isNativeBigInt,
 	isNativeFunction,
@@ -95,9 +96,9 @@ function safeStringify<TValue>(value: TValue): string {
 			2
 		);
 	} catch (err) {
-		return `Unable to serialize: ${
-			err instanceof Error ? err.message : String(err)
-		}`;
+		return tl("Unable to serialize: {error}", {
+			error: err instanceof Error ? err.message : String(err),
+		});
 	}
 	if (json === undefined) {
 		return String(value);

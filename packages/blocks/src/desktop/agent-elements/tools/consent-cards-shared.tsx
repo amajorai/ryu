@@ -4,7 +4,7 @@ import {
 	StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { VerificationPopover } from "@ryu/ui/components/verification-popover.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -24,18 +24,36 @@ import {
 /** Sends the user's decision back to the agent as their next message. */
 export type ConsentFollowUp = (text: string) => void | Promise<void>;
 
-const TIER_LABEL = {
-	official: "Official",
-	verified: "Verified",
-	community: "Community",
-} satisfies Record<PluginTrustTier, string>;
+interface TierCopy {
+	description: string;
+	label: string;
+	publisher: string;
+}
 
-const TIER_DESCRIPTION = {
-	official: "Published by Ryu. Officially verified by Ryu staff.",
-	verified: "The publisher's identity has been verified.",
-	community:
-		"Community publisher. Ryu has not verified who publishes this plugin.",
-} satisfies Record<PluginTrustTier, string>;
+/** Each tier's word, mark label and explanation as whole translated messages. */
+function tierCopy(tier: PluginTrustTier, tl: LiteralMessage): TierCopy {
+	if (tier === "official") {
+		return {
+			description: tl("Published by Ryu. Officially verified by Ryu staff."),
+			label: tl("Official"),
+			publisher: tl("Official publisher"),
+		};
+	}
+	if (tier === "verified") {
+		return {
+			description: tl("The publisher's identity has been verified."),
+			label: tl("Verified"),
+			publisher: tl("Verified publisher"),
+		};
+	}
+	return {
+		description: tl(
+			"Community publisher. Ryu has not verified who publishes this plugin."
+		),
+		label: tl("Community"),
+		publisher: tl("Community publisher"),
+	};
+}
 
 const TIER_APPEARANCE = {
 	official: "publisher-gold-card",
@@ -97,6 +115,7 @@ export function ListingIcon({
 /** Publisher trust mark plus its tier word, using the store's verification marks. */
 export function TrustTierMark({ tier }: { tier: PluginTrustTier }) {
 	const tl = useLiteralMessages();
+	const copy = tierCopy(tier, tl);
 	return (
 		<span
 			className={cn(
@@ -107,7 +126,7 @@ export function TrustTierMark({ tier }: { tier: PluginTrustTier }) {
 		>
 			<VerificationPopover
 				appearance={TIER_APPEARANCE[tier]}
-				description={TIER_DESCRIPTION[tier]}
+				description={copy.description}
 				details={
 					tier === "community"
 						? { methods: [] }
@@ -115,16 +134,16 @@ export function TrustTierMark({ tier }: { tier: PluginTrustTier }) {
 								methods: [
 									{
 										kind: tier === "official" ? "organization" : "identity",
-										label: TIER_DESCRIPTION[tier],
+										label: copy.description,
 									},
 								],
 							}
 				}
-				label={tl("{tier} publisher", { tier: TIER_LABEL[tier] })}
-				title={tl("{tier} publisher", { tier: TIER_LABEL[tier] })}
+				label={copy.publisher}
+				title={copy.publisher}
 				variant="badge"
 			/>
-			{TIER_LABEL[tier]}
+			{copy.label}
 		</span>
 	);
 }
@@ -144,10 +163,10 @@ export function PluginStats({
 	if (rating) {
 		items.push({
 			key: "rating",
-			label: tl("Rated {rating} out of 5 from {ratingCount} reviews", {
-				rating,
-				ratingCount,
-			}),
+			label: tl(
+				"{count, plural, one {Rated {rating} out of 5 from {ratingCount} review} other {Rated {rating} out of 5 from {ratingCount} reviews}}",
+				{ count: candidate.ratingCount ?? 0, rating, ratingCount }
+			),
 			node: (
 				<>
 					<HugeiconsIcon aria-hidden className="size-3.5" icon={StarIcon} />
@@ -160,7 +179,10 @@ export function PluginStats({
 	if (downloads) {
 		items.push({
 			key: "downloads",
-			label: `${downloads} installs`,
+			label: tl(
+				"{count, plural, one {{downloads} install} other {{downloads} installs}}",
+				{ count: candidate.downloads ?? 0, downloads }
+			),
 			node: (
 				<>
 					<HugeiconsIcon
@@ -176,22 +198,28 @@ export function PluginStats({
 	if (stars) {
 		items.push({
 			key: "stars",
-			label: tl("{stars} GitHub stars", { stars }),
-			node: `${stars} stars`,
+			label: tl(
+				"{count, plural, one {{stars} GitHub star} other {{stars} GitHub stars}}",
+				{ count: candidate.stars ?? 0, stars }
+			),
+			node: tl("{count, plural, one {{stars} star} other {{stars} stars}}", {
+				count: candidate.stars ?? 0,
+				stars,
+			}),
 		});
 	}
 	if (candidate.version) {
 		items.push({
 			key: "version",
-			label: `Version ${candidate.version}`,
-			node: `v${candidate.version}`,
+			label: tl("Version {version}", { version: candidate.version }),
+			node: tl("v{version}", { version: candidate.version }),
 		});
 	}
 	if (candidate.author) {
 		items.push({
 			key: "author",
-			label: `By ${candidate.author}`,
-			node: `by ${candidate.author}`,
+			label: tl("By {author}", { author: candidate.author }),
+			node: tl("by {author}", { author: candidate.author }),
 		});
 	}
 	if (items.length === 0) {

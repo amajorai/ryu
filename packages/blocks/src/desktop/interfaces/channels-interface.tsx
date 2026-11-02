@@ -297,11 +297,11 @@ export function ChannelsInterface({
 				/>
 				<div
 					className={cn(
-						"corner-squircle relative @max-[900px]:m-0 my-2 mr-2 flex min-w-0 flex-1 overflow-hidden @max-[900px]:rounded-none rounded-xl border border-border @max-[900px]:border-y-0 @max-[900px]:border-r-0 @max-[640px]:border-l-0 bg-background text-foreground",
+						"corner-squircle relative @max-[900px]:m-0 my-2 me-2 flex min-w-0 flex-1 overflow-hidden @max-[900px]:rounded-none rounded-xl border border-border @max-[900px]:border-y-0 @max-[640px]:border-s-0 @max-[900px]:border-e-0 bg-background text-foreground",
 						!showChannelColumn && "@max-[640px]:hidden",
 						// With the rail and list hidden for a thread, keep the
 						// frame's gap on the left edge too.
-						threadOpen && "@min-[900px]:@max-[1100px]:ml-2"
+						threadOpen && "@min-[900px]:@max-[1100px]:ms-2"
 					)}
 				>
 					{pane}

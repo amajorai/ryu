@@ -48,7 +48,7 @@ export function LoginApprovalPrompt({
 	if (!request) {
 		return null;
 	}
-	const surfaceLabel = LOGIN_APPROVAL_SURFACE_LABELS[request.surface];
+	const surfaceLabel = tl(LOGIN_APPROVAL_SURFACE_LABELS[request.surface]);
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent

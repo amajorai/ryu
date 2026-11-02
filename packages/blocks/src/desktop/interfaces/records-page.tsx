@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import {
@@ -8,11 +9,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, RefObject } from "react";
-import {
-	RECORDS_OBJECT_LABELS,
-	type RecordsRow,
-	recordsPlural,
-} from "./records-model.ts";
+import { type RecordsRow, recordsObjectLabels } from "./records-model.ts";
 import { RECORDS_OBJECT_ICONS } from "./records-nav.tsx";
 import { RecordsActivity, UPCOMING_LIMIT } from "./records-page-activity.tsx";
 import {
@@ -75,7 +72,7 @@ export function RecordsPage({
 }) {
 	const reduceMotion = useReducedMotion();
 	const ObjectIcon = RECORDS_OBJECT_ICONS[row.object];
-	const objectLabel = RECORDS_OBJECT_LABELS[row.object].plural;
+	const objectLabel = recordsObjectLabels(row.object).plural;
 	// An open thread takes the right column, so the attributes move inline
 	// rather than disappear.
 	const inline = side !== null || detailsInline;
@@ -107,13 +104,15 @@ export function RecordsPage({
 							</button>
 						</li>
 						<li aria-hidden="true" className="flex text-muted-foreground">
-							<ChevronRight className="size-3.5" />
+							<ChevronRight className="size-3.5 rtl:-scale-x-100" />
 						</li>
 						<li
 							aria-current="page"
 							className="flex min-w-0 items-center gap-2 px-1 font-medium text-foreground"
 						>
-							<span className="truncate">{row.name}</span>
+							<span className="truncate" data-ryu-i18n="off">
+								{row.name}
+							</span>
 						</li>
 					</ol>
 				</nav>
@@ -160,12 +159,20 @@ export function RecordsPage({
 									ref={headingRef}
 									tabIndex={-1}
 								>
-									<span className="font-semibold">{row.name}</span>
+									<span className="font-semibold" data-ryu-i18n="off">
+										{row.name}
+									</span>
 								</h2>
 								<p className="text-muted-foreground text-sm leading-5">
 									{row.object === "agents"
-										? row.description || "No description"
-										: `${RECORDS_OBJECT_LABELS[row.object].singular} · ${recordsPlural(row.members.length, "member")}`}
+										? row.description || tr("No description")
+										: tr(
+												"{kind} · {count, plural, one {# member} other {# members}}",
+												{
+													count: row.members.length,
+													kind: recordsObjectLabels(row.object).singular,
+												}
+											)}
 								</p>
 							</div>
 							<Button
@@ -221,7 +228,7 @@ export function RecordsPage({
 					(inline ? null : (
 						<aside
 							aria-labelledby="records-details"
-							className="flex w-80 shrink-0 flex-col overflow-y-auto border-border border-l"
+							className="flex w-80 shrink-0 flex-col overflow-y-auto border-border border-s"
 						>
 							<h3
 								className="flex h-11 shrink-0 items-center border-border border-b px-4 text-foreground text-sm"

@@ -8,12 +8,12 @@ import {
 	agentRevisions,
 	changesByDay,
 	eventOutcome,
-	plural,
 	threadRevisions,
 	type WikiRevision,
 	type WikiRoute,
 	wikiAgent,
 	wikiAgentArticle,
+	wikiCount,
 	wikiGroupArticle,
 	wikiStamp,
 	wikiThreadArticle,
@@ -55,7 +55,9 @@ function RevisionRow({
 		return (
 			<li className={row}>
 				{time}
-				<span className="shrink-0">{event.title}</span>
+				<span className="shrink-0" data-ryu-i18n="off">
+					{event.title}
+				</span>
 				<Sep />
 				<span
 					className={cn(
@@ -108,7 +110,7 @@ function RevisionRow({
 			)}
 			<Sep />
 			<span className="shrink-0 text-muted-foreground">
-				({plural(thread.messageCount, "message")})
+				({wikiCount(thread.messageCount, "message")})
 			</span>
 			<Sep />
 			<span className="shrink-0">
@@ -125,7 +127,7 @@ function RevisionRow({
 			</span>
 			{thread.lastMessage ? (
 				<i className="min-w-0 max-w-full flex-1 truncate text-muted-foreground">
-					({thread.lastMessage})
+					(<span data-ryu-i18n="off">{thread.lastMessage}</span>)
 				</i>
 			) : null}
 		</li>

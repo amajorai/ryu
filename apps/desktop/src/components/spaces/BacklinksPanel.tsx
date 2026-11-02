@@ -61,7 +61,7 @@ export function BacklinksPanel({
 				{links.map((link) => (
 					<li key={`${link.srcDocId}:${link.kind}`}>
 						<button
-							className="w-full rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-muted hover:duration-0"
+							className="w-full rounded-lg px-2 py-1.5 text-start transition-colors duration-150 hover:bg-muted hover:duration-0"
 							onClick={() => openTab(`/spaces/${spaceId}/doc/${link.srcDocId}`)}
 							type="button"
 						>

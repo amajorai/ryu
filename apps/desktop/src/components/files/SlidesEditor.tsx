@@ -115,14 +115,14 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 			<div className="grid min-h-0 flex-1 grid-cols-[148px_minmax(0,1fr)_280px] bg-muted/20">
 				<nav
 					aria-label="Slides"
-					className="min-h-0 overflow-y-auto border-border border-r bg-background p-2"
+					className="min-h-0 overflow-y-auto border-border border-e bg-background p-2"
 				>
 					{slides.map((item, index) => (
 						<button
 							aria-label={tl("Open slide {slideNumber}", {
 								slideNumber: String(index + 1),
 							})}
-							className={`mb-2 w-full rounded-lg border p-1 text-left transition-colors ${
+							className={`mb-2 w-full rounded-lg border p-1 text-start transition-colors ${
 								index === activeSlide
 									? "border-primary bg-primary/5"
 									: "border-border bg-background hover:bg-muted"
@@ -155,7 +155,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 						width={1280}
 					/>
 				</main>
-				<aside className="min-h-0 overflow-y-auto border-border border-l bg-background p-3">
+				<aside className="min-h-0 overflow-y-auto border-border border-s bg-background p-3">
 					<h2 className="mb-1 font-medium text-sm">Slide text</h2>
 					<p className="mb-4 text-muted-foreground text-xs">
 						Edit text boxes while the slide preview updates.

@@ -35,10 +35,6 @@ export function agentsFor(
 	return snapshot.agents.filter((agent) => wanted.has(agent.id));
 }
 
-export function plural(count: number, one: string): string {
-	return `${count} ${one}${count === 1 ? "" : "s"}`;
-}
-
 export function nodeDescription(
 	snapshot: InterfaceSnapshot,
 	node: GraphNode,
@@ -48,11 +44,15 @@ export function nodeDescription(
 ): string {
 	switch (node.kind) {
 		case "agent":
-			return agent?.description.trim() || "Agent";
+			return agent?.description.trim() || tl("Agent");
 		case "team":
-			return `Team · ${plural(linkedCount, "member")}`;
+			return tl("Team · {count, plural, one {# member} other {# members}}", {
+				count: linkedCount,
+			});
 		case "project":
-			return `Project · ${plural(linkedCount, "agent")}`;
+			return tl("Project · {count, plural, one {# agent} other {# agents}}", {
+				count: linkedCount,
+			});
 		default:
 			return tl(
 				"Everyone you work with · {count, plural, one {{countText} agent} other {{countText} agents}}",

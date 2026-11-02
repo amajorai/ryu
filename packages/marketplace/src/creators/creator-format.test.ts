@@ -7,7 +7,7 @@ import {
 	creatorRouteHandle,
 	creatorSinceLabel,
 	filterListingsByKind,
-	pluralCount,
+	ratingStatLabel,
 } from "./creator-format.ts";
 
 const tl: LiteralMessage = (source, values) => formatMessage(source, values);
@@ -43,11 +43,11 @@ describe("creatorSinceLabel", () => {
 	});
 });
 
-describe("pluralCount", () => {
-	it("pluralizes and clamps", () => {
-		expect(pluralCount(1, "listing")).toBe("1 listing");
-		expect(pluralCount(3, "follower")).toBe("3 followers");
-		expect(pluralCount(-2, "listing")).toBe("0 listings");
+describe("ratingStatLabel", () => {
+	it("pluralizes through ICU and clamps", () => {
+		expect(ratingStatLabel(tl, 1)).toBe("Rating (1 review)");
+		expect(ratingStatLabel(tl, 3)).toBe("Rating (3 reviews)");
+		expect(ratingStatLabel(tl, -2)).toBe("Rating (0 reviews)");
 	});
 });
 

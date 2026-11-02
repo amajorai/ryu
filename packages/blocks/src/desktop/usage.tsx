@@ -31,6 +31,10 @@ import {
 import { Spinner } from "@ryu/ui/components/spinner";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import {
+	formatDurationParts,
+	formatDurationUnit,
+} from "./agent-elements/locale-format.ts";
 import { formatMicroUsd } from "./credits.tsx";
 import {
 	SettingsCard,
@@ -85,13 +89,16 @@ export function formatDurationMs(ms: number | null): string {
 		return "—";
 	}
 	if (ms < 1000) {
-		return `${Math.round(ms)}ms`;
+		return formatDurationUnit(Math.round(ms), "millisecond");
 	}
 	const seconds = ms / 1000;
 	if (seconds < 60) {
-		return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+		return formatDurationUnit(seconds, "second", seconds < 10 ? 1 : 0);
 	}
-	return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+	return formatDurationParts([
+		[Math.floor(seconds / 60), "minute"],
+		[Math.round(seconds % 60), "second"],
+	]);
 }
 
 /** One row of the statement, already mapped by the container. */
@@ -191,7 +198,7 @@ function UsageBreakdownChart({
 }) {
 	const tl = useLiteralMessages();
 	const shown = rows.filter((row) => row.amountMicroUsd > 0).slice(0, 6);
-	const title = BREAKDOWN_TITLES[kind];
+	const title = tl(BREAKDOWN_TITLES[kind]);
 	const total = shown.reduce((sum, row) => sum + row.amountMicroUsd, 0);
 	const chartData = shown.map((row) => ({
 		amount: row.amountMicroUsd,
@@ -298,7 +305,7 @@ function UsageAnalytics({ summary }: { summary: UsageSummaryData }) {
 					).map(([kind, rows]) => (
 						<div
 							aria-label={tl("{title} credit spend chart", {
-								title: BREAKDOWN_TITLES[kind],
+								title: tl(BREAKDOWN_TITLES[kind]),
 							})}
 							data-testid={`usage-chart-${kind}`}
 							key={kind}

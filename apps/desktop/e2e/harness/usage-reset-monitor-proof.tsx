@@ -2,7 +2,7 @@ import {
 	markCompanionAppRoot,
 	subscribeCompanionTheme,
 } from "@ryu/app-host/companion-theme";
-import { RyuAppShell } from "@ryu/blocks/companion/app-ui.tsx";
+import { RyuAppShell } from "@ryu/blocks/companion/app-ui";
 import { Monitors } from "../../../../apps-store/monitors/ui/src/Monitors.tsx";
 import "../../../../apps-store/monitors/ui/src/tailwind.css";
 import { StrictMode } from "react";

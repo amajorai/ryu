@@ -1,5 +1,6 @@
 import type { LiteralMessage } from "@ryu/i18n";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
 
 export const MAX_EDITABLE_IMAGE_BYTES = 32 * 1024 * 1024;
 export const MAX_EDITABLE_IMAGE_PIXELS = 40_000_000;
@@ -36,7 +37,7 @@ export function imageDimensionError(
 	}
 	if (width > MAX_EDITABLE_IMAGE_SIDE || height > MAX_EDITABLE_IMAGE_SIDE) {
 		return tl("Image dimensions must stay below {maxSide} px per side.", {
-			maxSide: MAX_EDITABLE_IMAGE_SIDE.toLocaleString(),
+			maxSide: formatLocalNumber(MAX_EDITABLE_IMAGE_SIDE),
 		});
 	}
 	if (width * height > MAX_EDITABLE_IMAGE_PIXELS) {

@@ -1,3 +1,4 @@
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	archLabel,
@@ -27,32 +28,45 @@ export function DownloadOsLabel({
 	iconSize: number;
 	os: DownloadOS;
 }) {
+	const tlRich = useRichLiteralMessages();
+	// One sentence with the logo inside, so translators can move it.
+	const lead = tlRich(
+		"<lead>Download for</lead><logo></logo>",
+		{},
+		{
+			lead: (chunks) => (
+				<span className="me-2.5" data-slot="download-for">
+					{chunks}
+				</span>
+			),
+			logo: () => (
+				<span
+					className={cn(
+						"inline-flex items-center transition-opacity duration-200 motion-reduce:transition-none",
+						// The server guesses macOS; hide that guess until the browser has
+						// said which OS it is, so Windows and Linux visitors never see an
+						// Apple logo flash. The slot keeps its width, so nothing shifts.
+						detected ? "opacity-100" : "opacity-0"
+					)}
+					data-os={os}
+					data-slot="download-os-logo"
+				>
+					<SvglIcon size={iconSize} spec={OS_SVGL[os]} />
+					<span className="sr-only">{osName(os)}</span>
+				</span>
+			),
+		}
+	);
 	return (
 		<span className="inline-flex items-center">
-			<span className="mr-2.5" data-slot="download-for">
-				Download for
-			</span>
-			<span
-				className={cn(
-					"inline-flex items-center transition-opacity duration-200 motion-reduce:transition-none",
-					// The server guesses macOS; hide that guess until the browser has
-					// said which OS it is, so Windows and Linux visitors never see an
-					// Apple logo flash. The slot keeps its width, so nothing shifts.
-					detected ? "opacity-100" : "opacity-0"
-				)}
-				data-os={os}
-				data-slot="download-os-logo"
-			>
-				<SvglIcon size={iconSize} spec={OS_SVGL[os]} />
-				<span className="sr-only">{osName(os)}</span>
-			</span>
+			{lead}
 			{arch ? (
 				<span
 					className="grid grid-cols-[minmax(0,0fr)] opacity-0 transition-[grid-template-columns,opacity] duration-300 ease-out group-hover/download:grid-cols-[minmax(0,1fr)] group-hover/download:opacity-100 group-focus-visible/download:grid-cols-[minmax(0,1fr)] group-focus-visible/download:opacity-100 motion-reduce:transition-none"
 					data-slot="download-arch"
 				>
 					<span className="min-w-0 overflow-hidden whitespace-nowrap">
-						<span className="pl-1.5">{archLabel(os, arch)}</span>
+						<span className="ps-1.5">{archLabel(os, arch)}</span>
 					</span>
 				</span>
 			) : null}

@@ -109,7 +109,7 @@ export function JobDetail({
 										render={
 											<Button
 												aria-label="Close job"
-												className="-mr-2"
+												className="-me-2"
 												onClick={onClose}
 												size="icon-sm"
 												type="button"
@@ -160,12 +160,14 @@ export function JobDetail({
 					</section>
 					<aside
 						aria-label="Job details"
-						className="@[46rem]/jobs-detail:flex hidden w-68 shrink-0 flex-col gap-6 overflow-y-auto border-border border-l px-5 py-5"
+						className="@[46rem]/jobs-detail:flex hidden w-68 shrink-0 flex-col gap-6 overflow-y-auto border-border border-s px-5 py-5"
 						data-testid="jobs-detail-meta"
 					>
 						<section className="flex flex-col gap-2">
 							<PaneHeading>
-								{row.agents.length > 1 ? "Freelancers" : "Freelancer"}
+								{tl("{count, plural, one {Freelancer} other {Freelancers}}", {
+									count: row.agents.length,
+								})}
 							</PaneHeading>
 							<JobFreelancers onView={onViewFreelancer} row={row} />
 						</section>
@@ -202,7 +204,9 @@ export function JobDetail({
 								className="flex flex-col gap-2"
 							>
 								<PaneHeading id="jobs-preview-freelancer-label">
-									{row.agents.length > 1 ? "Freelancers" : "Freelancer"}
+									{tl("{count, plural, one {Freelancer} other {Freelancers}}", {
+										count: row.agents.length,
+									})}
 								</PaneHeading>
 								<JobFreelancers onView={onViewFreelancer} row={row} />
 							</section>
@@ -276,9 +280,13 @@ export function JobFullView({
 			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
 			data-testid="jobs-full-view"
 		>
-			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b pr-3 pl-2">
+			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b ps-2 pe-3">
 				<Button onClick={onBack} size="sm" type="button" variant="ghost">
-					<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+					<ArrowLeft
+						aria-hidden="true"
+						className="rtl:-scale-x-100"
+						data-icon="inline-start"
+					/>
 					Jobs
 				</Button>
 				<span aria-hidden="true" className="h-5 w-px bg-border" />
@@ -316,7 +324,7 @@ export function JobFullView({
 				{row && showSidebar ? (
 					<aside
 						aria-label="Job details"
-						className="flex w-80 shrink-0 flex-col gap-6 overflow-y-auto border-border border-l px-5 py-5"
+						className="flex w-80 shrink-0 flex-col gap-6 overflow-y-auto border-border border-s px-5 py-5"
 					>
 						<section className="flex flex-col gap-2">
 							<PaneHeading>Status</PaneHeading>
@@ -329,7 +337,9 @@ export function JobFullView({
 						</section>
 						<section className="flex flex-col gap-2">
 							<PaneHeading>
-								{row.agents.length > 1 ? "Freelancers" : "Freelancer"}
+								{tl("{count, plural, one {Freelancer} other {Freelancers}}", {
+									count: row.agents.length,
+								})}
 							</PaneHeading>
 							<JobFreelancers onView={onViewFreelancer} row={row} />
 						</section>

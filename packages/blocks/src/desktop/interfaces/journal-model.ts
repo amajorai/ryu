@@ -1,3 +1,4 @@
+import { activeLocale, relativeTimeFormatter } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -7,6 +8,33 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import {
+	monthLabel,
+	monthShort,
+	parseDayKey,
+	shiftDayKey,
+	shiftMonthKey,
+} from "./journal-model-dates.ts";
+
+export {
+	fullDateLabel,
+	mediumDateLabel,
+	monthLabel,
+	monthShort,
+	parseDayKey,
+	shiftDayKey,
+	shiftMonthKey,
+	timeLabel,
+	weekdayLong,
+	weekdayNarrow,
+	weekdayShort,
+} from "./journal-model-dates.ts";
+export {
+	agentNames,
+	countLabel,
+	entryExcerpt,
+	entryTitle,
+} from "./journal-model-text.ts";
 
 /**
  * Journal view model. A conversation is an entry, filed on the local day of
@@ -38,89 +66,6 @@ export interface JournalMonth {
 	/** `YYYY-MM`. */
 	key: string;
 	label: string;
-}
-
-const MONTH_LABEL = new Intl.DateTimeFormat(undefined, {
-	month: "long",
-	year: "numeric",
-});
-const TIME_LABEL = new Intl.DateTimeFormat(undefined, {
-	hour: "numeric",
-	minute: "2-digit",
-});
-const WEEKDAY_SHORT = new Intl.DateTimeFormat(undefined, { weekday: "short" });
-const WEEKDAY_LONG = new Intl.DateTimeFormat(undefined, { weekday: "long" });
-const WEEKDAY_NARROW = new Intl.DateTimeFormat(undefined, {
-	weekday: "narrow",
-});
-const MONTH_SHORT = new Intl.DateTimeFormat(undefined, { month: "short" });
-const FULL_DATE = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "long",
-	weekday: "long",
-	year: "numeric",
-});
-const MEDIUM_DATE = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "short",
-	weekday: "short",
-});
-
-/** Parse a local `YYYY-MM-DD` key into local midnight. */
-export function parseDayKey(key: string): Date {
-	const [year = "1970", month = "1", day = "1"] = key.split("-");
-	return new Date(Number(year), Number(month) - 1, Number(day));
-}
-
-export function shiftDayKey(key: string, days: number): string {
-	const date = parseDayKey(key);
-	date.setDate(date.getDate() + days);
-	return localDayKey(date);
-}
-
-/** The same day `months` away, clamped to the end of a shorter month. */
-export function shiftMonthKey(key: string, months: number): string {
-	const date = parseDayKey(key);
-	const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
-	const lastDay = new Date(
-		target.getFullYear(),
-		target.getMonth() + 1,
-		0
-	).getDate();
-	target.setDate(Math.min(date.getDate(), lastDay));
-	return localDayKey(target);
-}
-
-export function monthLabel(key: string): string {
-	return MONTH_LABEL.format(parseDayKey(key));
-}
-
-export function timeLabel(date: Date): string {
-	return TIME_LABEL.format(date);
-}
-
-export function fullDateLabel(key: string): string {
-	return FULL_DATE.format(parseDayKey(key));
-}
-
-export function mediumDateLabel(key: string): string {
-	return MEDIUM_DATE.format(parseDayKey(key));
-}
-
-export function weekdayShort(key: string): string {
-	return WEEKDAY_SHORT.format(parseDayKey(key));
-}
-
-export function weekdayLong(key: string): string {
-	return WEEKDAY_LONG.format(parseDayKey(key));
-}
-
-export function weekdayNarrow(date: Date): string {
-	return WEEKDAY_NARROW.format(date);
-}
-
-export function monthShort(date: Date): string {
-	return MONTH_SHORT.format(date);
 }
 
 /** Where a thread is filed: its project first, then its team. */
@@ -261,8 +206,12 @@ const WEEKS_BACK = 3;
 const MONTHS_BACK = 11;
 const YEARS_BACK = 5;
 
-function plural(count: number, unit: string): string {
-	return `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+/** "1 week ago", "3 months ago", in the UI locale. */
+function ago(count: number, unit: "month" | "week" | "year"): string {
+	return relativeTimeFormatter(activeLocale(), "long", "always").format(
+		-count,
+		unit
+	);
 }
 
 /**
@@ -278,7 +227,7 @@ export function onThisDay(
 	for (let weeks = 1; weeks <= WEEKS_BACK; weeks++) {
 		candidates.push({
 			key: shiftDayKey(key, -7 * weeks),
-			label: plural(weeks, "week"),
+			label: ago(weeks, "week"),
 		});
 	}
 	const day = parseDayKey(key).getDate();
@@ -286,13 +235,13 @@ export function onThisDay(
 		const earlier = shiftMonthKey(key, -months);
 		// A clamped date (Mar 31 to Feb 28) is not the same date.
 		if (parseDayKey(earlier).getDate() === day) {
-			candidates.push({ key: earlier, label: plural(months, "month") });
+			candidates.push({ key: earlier, label: ago(months, "month") });
 		}
 	}
 	for (let years = 1; years <= YEARS_BACK; years++) {
 		const earlier = shiftMonthKey(key, -12 * years);
 		if (parseDayKey(earlier).getDate() === day) {
-			candidates.push({ key: earlier, label: plural(years, "year") });
+			candidates.push({ key: earlier, label: ago(years, "year") });
 		}
 	}
 	const seen = new Set<string>();
@@ -539,40 +488,4 @@ export function eventsOnDay(
 			return !Number.isNaN(start.getTime()) && localDayKey(start) === key;
 		})
 		.sort((a, b) => a.start.localeCompare(b.start));
-}
-
-/** The body line a journal row shows: the latest message, attributed. */
-export function entryExcerpt(thread: InterfaceThread): string {
-	const text = thread.lastMessage?.trim();
-	if (!text) {
-		return "No messages yet.";
-	}
-	return thread.lastMessageRole === "user" ? `You: ${text}` : text;
-}
-
-/** "Forge", "Atlas and Echo", "Atlas, Echo and 1 more". */
-export function agentNames(agents: InterfaceAgent[]): string {
-	const [first, second] = agents;
-	if (!first) {
-		return "No agent";
-	}
-	if (!second) {
-		return first.name;
-	}
-	if (agents.length === 2) {
-		return `${first.name} and ${second.name}`;
-	}
-	return `${first.name}, ${second.name} and ${agents.length - 2} more`;
-}
-
-export function entryTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled entry";
-}
-
-export function countLabel(
-	count: number,
-	unit: string,
-	units = `${unit}s`
-): string {
-	return `${count.toLocaleString()} ${count === 1 ? unit : units}`;
 }

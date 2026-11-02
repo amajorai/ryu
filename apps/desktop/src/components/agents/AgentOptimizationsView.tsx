@@ -84,7 +84,7 @@ function ModelEvidence({ rec }: { rec: OptimizerRecommendation }) {
 		return null;
 	}
 	return (
-		<table className="w-full text-left text-xs">
+		<table className="w-full text-start text-xs">
 			<caption className="sr-only">Replay results per model</caption>
 			<thead className="text-muted-foreground">
 				<tr>

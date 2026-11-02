@@ -1,9 +1,11 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { type KeyboardEvent, useId, useRef, useState } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import {
-	DAY_LEVEL_LABELS,
 	type DayLevel,
+	dayLevelLabel,
 	describeActivity,
 	describeDay,
 	formatUptime,
@@ -22,12 +24,16 @@ const TOOLTIP_PROBLEMS = 3;
 /** Matches `w-64`: the tooltip never runs past either end of the strip. */
 const TOOLTIP_WIDTH = "16rem";
 
-const dayFormat = new Intl.DateTimeFormat("en-US", {
+const DAY_FORMAT: Intl.DateTimeFormatOptions = {
 	day: "numeric",
 	month: "short",
 	weekday: "short",
 	year: "numeric",
-});
+};
+
+function dayText(time: number): string {
+	return dateFormatter(activeLocale(), DAY_FORMAT).format(time);
+}
 
 /**
  * A component's 30-day history: one bar per day, coloured by that day's worst
@@ -59,7 +65,7 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 			End: days.length - 1,
 			Home: 0,
 		};
-		const target = keys[event.key];
+		const target = keys[logicalArrowKey(event.key, event.currentTarget)];
 		if (target !== undefined) {
 			event.preventDefault();
 			moveTo(target);
@@ -101,7 +107,10 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 						<li className="flex min-w-0 flex-1" key={day.key}>
 							<button
 								aria-describedby={shown === index ? tooltipId : undefined}
-								aria-label={`${dayFormat.format(day.start)}: ${describeDay(day, tl)}`}
+								aria-label={tl("{day}: {summary}", {
+									day: dayText(day.start),
+									summary: describeDay(day, tl),
+								})}
 								className={cn(
 									"w-full rounded-xs outline-none transition-opacity duration-100 hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card",
 									DAY_BAR[day.level],
@@ -133,7 +142,7 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 						}}
 					>
 						<p className="font-semibold text-foreground">
-							{dayFormat.format(shownDay.start)}
+							{dayText(shownDay.start)}
 						</p>
 						<p className="flex items-center gap-2">
 							<span
@@ -142,7 +151,7 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 							/>
 							{shownDay.level === "operational"
 								? describeDay(shownDay, tl)
-								: DAY_LEVEL_LABELS[shownDay.level]}
+								: dayLevelLabel(shownDay.level, tl)}
 						</p>
 						{shownDay.problems.length > 0 ? (
 							<div className="flex flex-col gap-1 border-border border-t pt-2">
@@ -170,9 +179,9 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 								) : null}
 							</div>
 						) : null}
-						{describeActivity(shownDay) ? (
+						{describeActivity(shownDay, tl) ? (
 							<p className="text-muted-foreground">
-								{describeActivity(shownDay)}
+								{describeActivity(shownDay, tl)}
 							</p>
 						) : null}
 					</div>

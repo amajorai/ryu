@@ -40,8 +40,10 @@ export interface InputProps
 	/** Truthy error triggers a shake, red border and (if a string) a message. */
 	error?: string | boolean;
 	label?: string;
+	/** Icon at the inline start (the left in a left-to-right layout). */
 	leftIcon?: ReactNode;
 	onChange?: (value: string) => void;
+	/** Icon at the inline end (the right in a left-to-right layout). */
 	rightIcon?: ReactNode;
 	success?: boolean;
 	value?: string;
@@ -83,7 +85,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 	const hasError = Boolean(error);
 	const errorMessage = isNativeText(error) ? error : null;
 
-	// Right edge shows the success check, otherwise the caller's right icon.
+	// The inline-end edge shows the success check, otherwise the caller's right icon.
 	const rightSlot = success ? null : rightIcon;
 
 	// Shake the field when an error appears.
@@ -142,7 +144,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 				{leftIcon ? (
 					<span
 						className={cn(
-							"pointer-events-none absolute top-1/2 left-3 flex -translate-y-1/2 items-center text-muted-foreground [&_svg]:h-4 [&_svg]:w-4",
+							"pointer-events-none absolute start-3 top-1/2 flex -translate-y-1/2 items-center text-muted-foreground [&_svg]:h-4 [&_svg]:w-4",
 							classNames?.leftIcon
 						)}
 					>
@@ -162,8 +164,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 					className={cn(
 						"peer h-full w-full bg-transparent text-base text-foreground leading-6 caret-foreground outline-none",
 						"placeholder:text-muted-foreground/60",
-						leftIcon ? "pl-10" : "pl-3.5",
-						rightSlot || success ? "pr-10" : "pr-3.5",
+						leftIcon ? "ps-10" : "ps-3.5",
+						rightSlot || success ? "pe-10" : "pe-3.5",
 						disabled && "cursor-not-allowed",
 						classNames?.input
 					)}
@@ -181,7 +183,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 				{success ? (
 					<motion.svg
 						className={cn(
-							"absolute top-1/2 right-3.5 h-5 w-5 -translate-y-1/2 text-(--color-success)",
+							"absolute end-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-(--color-success)",
 							classNames?.successIcon
 						)}
 						fill="none"
@@ -201,7 +203,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 				) : rightSlot ? (
 					<span
 						className={cn(
-							"absolute top-0 right-0 flex h-full items-center text-muted-foreground [&_button]:grid [&_button]:size-11 [&_button]:place-items-center [&_svg]:h-4 [&_svg]:w-4",
+							"absolute end-0 top-0 flex h-full items-center text-muted-foreground [&_button]:grid [&_button]:size-11 [&_button]:place-items-center [&_svg]:h-4 [&_svg]:w-4",
 							classNames?.rightIcon
 						)}
 					>

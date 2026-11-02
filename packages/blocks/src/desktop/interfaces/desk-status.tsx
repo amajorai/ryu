@@ -1,9 +1,6 @@
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import {
 	CircleAlert,
 	CircleDashed,
@@ -12,6 +9,7 @@ import {
 	type LucideIcon,
 	Reply,
 } from "lucide-react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 interface DeskStatusMeta {
 	icon: LucideIcon;
@@ -146,7 +144,7 @@ export function DeskStatusPill({
 			variant="outline"
 		>
 			<Icon aria-hidden="true" />
-			<span>{THREAD_STATUS_LABELS[status]}</span>
+			<span>{threadStatusLabel(status)}</span>
 		</Badge>
 	);
 }

@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import type { CrmRecord, Field, SchemaResponse } from "@/src/lib/api/crm.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const timestamp = "2026-10-02T00:00:00.000Z";
 const queryPath = "/api/crm/objects/deal/records/query";
@@ -328,9 +329,8 @@ async function open(page: Page) {
 	).toBeVisible();
 }
 async function capture(page: Page, name: string) {
-	const target = path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-data-flows/crm/${name}.png`
+	const target = proofEvidencePath(
+		`test-coverage-sweep-20260924/parallel/desktop-data-flows/crm/${name}.png`
 	);
 	await mkdir(path.dirname(target), { recursive: true });
 	await page.screenshot({ path: target, animations: "disabled" });

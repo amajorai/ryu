@@ -172,7 +172,7 @@ export function ServicesOrgSwitcher() {
 				    The plan badge lives in the menu, beside each workspace. */}
 				<DropdownMenuTrigger
 					className={cn(
-						"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring enabled:hover:bg-sidebar-accent/60 enabled:hover:duration-0 data-[popup-open]:bg-sidebar-accent",
+						"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring enabled:hover:bg-sidebar-accent/60 enabled:hover:duration-0 data-[popup-open]:bg-sidebar-accent",
 						// Dim only while a switch is in flight: with one workspace the
 						// row is a plain label, not a disabled control.
 						switchMutation.isPending && "opacity-60"
@@ -216,7 +216,7 @@ export function ServicesOrgSwitcher() {
 							    this person DO — an org they are a plain member of shows the
 							    same billing screen with every control disabled — so it is
 							    worth the line it costs. */}
-								<span className="mr-1 flex size-4 shrink-0 items-center justify-center">
+								<span className="me-1 flex size-4 shrink-0 items-center justify-center">
 									{org.id === activeId ? (
 										<HugeiconsIcon
 											className="size-3.5"
@@ -239,7 +239,7 @@ export function ServicesOrgSwitcher() {
 									<PlanBadge plan={billingPlan} size="sm" />
 								) : null}
 								{org.role ? (
-									<span className="ml-2 shrink-0 text-muted-foreground text-xs">
+									<span className="ms-2 shrink-0 text-muted-foreground text-xs">
 										{org.role}
 									</span>
 								) : null}

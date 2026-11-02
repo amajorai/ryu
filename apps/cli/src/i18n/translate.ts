@@ -5,7 +5,7 @@
 
 import { formatMessage, type LiteralCatalog } from "@ryu/i18n/core";
 import { officialCliLiteralCatalog } from "@ryu/i18n/official-catalog/cli";
-import { cliLocale } from "./locale.ts";
+import { cliLocales } from "./locale.ts";
 
 /** Props whose string values are rendered as copy, mirroring the extractor. */
 const TEXT_PROP =
@@ -75,12 +75,14 @@ export function createCliTranslator(
 	};
 }
 
-const locale = cliLocale();
+const locales = cliLocales();
 const translator = createCliTranslator(
-	locale,
-	locale ? officialCliLiteralCatalog(locale) : null
+	locales.messages,
+	locales.messages ? officialCliLiteralCatalog(locales.messages) : null
 );
 
-/** The locale the CLI renders in (`en` when no official catalog matches). */
+/** The locale the CLI renders copy in (`en` when no official catalog matches). */
 export const CLI_LOCALE = translator.locale;
+/** The locale the CLI formats dates and numbers in (`de-AT`, `en-GB`, `sv-SE`). */
+export const CLI_FORMAT_LOCALE = locales.format;
 export const { tr, tf, translateProps } = translator;

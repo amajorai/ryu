@@ -1,3 +1,8 @@
+import {
+	activeLocale,
+	relativeTimeFormatter,
+	translate as tl,
+} from "@ryu/i18n/lite";
 import { formatCount as formatSharedCount } from "@ryu/ui/lib/number-format.ts";
 import type { ComponentType } from "react";
 import {
@@ -62,7 +67,7 @@ export function buildModelChips(
 	if (org) {
 		out.push({
 			key: `org:${org}`,
-			label: `Org: ${org}`,
+			label: tl("Org: {org}", { org }),
 			icon: ORG_ICON,
 			onRemove: () => setOrg(""),
 		});
@@ -103,15 +108,13 @@ const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
 	["minute", 60 * 1000],
 ];
 
-/** Shared formatter — created once, never inside the render loop. */
-const RELATIVE_TIME = new Intl.RelativeTimeFormat(undefined, {
-	numeric: "auto",
-});
-
 /** Relative age of an ISO-8601 timestamp, e.g. "3 months ago". `null` when the
  *  date is missing or unparseable, so callers can omit the chip entirely.
  *  Uses the native Intl formatter — no third-party date dependency. */
-export function formatAgo(iso: string | null): string | null {
+export function formatAgo(
+	iso: string | null,
+	locale: string = activeLocale()
+): string | null {
 	if (!iso) {
 		return null;
 	}
@@ -119,18 +122,23 @@ export function formatAgo(iso: string | null): string | null {
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
+	// Cached per locale, so this stays cheap inside a render loop.
+	const relativeTime = relativeTimeFormatter(locale, "long", "auto");
 	const diffMs = date.getTime() - Date.now();
 	const absMs = Math.abs(diffMs);
 	for (const [unit, unitMs] of RELATIVE_UNITS) {
 		if (absMs >= unitMs) {
-			return RELATIVE_TIME.format(Math.round(diffMs / unitMs), unit);
+			return relativeTime.format(Math.round(diffMs / unitMs), unit);
 		}
 	}
-	return RELATIVE_TIME.format(Math.round(diffMs / 1000), "second");
+	return relativeTime.format(Math.round(diffMs / 1000), "second");
 }
 
-/** Absolute calendar date for a detail line, e.g. "10 Jun 2026". */
-export function formatDate(iso: string | null): string | null {
+/** Absolute calendar date for a detail line, e.g. "10 Jun 2026", in `locale`. */
+export function formatDate(
+	iso: string | null,
+	locale: string = activeLocale()
+): string | null {
 	if (!iso) {
 		return null;
 	}
@@ -138,7 +146,7 @@ export function formatDate(iso: string | null): string | null {
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
-	return date.toLocaleDateString(undefined, {
+	return date.toLocaleDateString(locale, {
 		year: "numeric",
 		month: "short",
 		day: "numeric",
@@ -175,28 +183,28 @@ export function formatParams(n: number | null): string | null {
 	return String(n);
 }
 
-/** Multi-line hardware summary for the detail overview. */
+/** Multi-line hardware summary for the detail overview, in the UI language. */
 export function deviceSummaryLines(device: ModelDetail["device"]): string[] {
 	// Free disk decides whether a download can land at all, so it closes every
 	// summary (when Core reports it).
 	const disk = device.diskFreeHuman
-		? [`${device.diskFreeHuman} free disk`]
+		? [tl("{diskFree} free disk", { diskFree: device.diskFreeHuman })]
 		: [];
 	if (device.unifiedMemory && device.ramHuman) {
-		return [`${device.ramHuman} unified memory`, ...disk];
+		return [tl("{ram} unified memory", { ram: device.ramHuman }), ...disk];
 	}
 	const lines: string[] = [];
 	if (device.gpuName) {
 		lines.push(device.gpuName);
 	}
 	if (device.vramHuman) {
-		lines.push(`${device.vramHuman} GPU RAM`);
+		lines.push(tl("{vram} GPU RAM", { vram: device.vramHuman }));
 	}
 	if (device.ramHuman) {
-		lines.push(`${device.ramHuman} system RAM`);
+		lines.push(tl("{ram} system RAM", { ram: device.ramHuman }));
 	}
 	if (lines.length === 0) {
-		return [device.os || "unknown hardware", ...disk];
+		return [device.os || tl("unknown hardware"), ...disk];
 	}
 	return [...lines, ...disk];
 }

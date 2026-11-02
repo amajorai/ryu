@@ -39,7 +39,7 @@ export function BlockCopyButton({
 	return (
 		<Button
 			aria-label={copied ? "Copied" : "Copy output"}
-			className="absolute top-2.5 @3xl/terminal:right-5 right-3 text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/block:opacity-100 motion-safe:transition-opacity"
+			className="absolute @3xl/terminal:end-5 end-3 top-2.5 text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/block:opacity-100 motion-safe:transition-opacity"
 			onClick={copy}
 			size="icon-xs"
 			variant="ghost"

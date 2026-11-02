@@ -63,7 +63,7 @@ export function SidebarTodoProgress({
 					data-testid="sidebar-todo-complete"
 				>
 					<HugeiconsIcon
-						className="absolute top-1/2 right-0 size-9 -translate-y-1/2 text-status-success/15"
+						className="absolute end-0 top-1/2 size-9 -translate-y-1/2 text-status-success/15"
 						icon={Tick02Icon}
 						strokeWidth={3}
 					/>
@@ -74,7 +74,7 @@ export function SidebarTodoProgress({
 				aria-valuemax={100}
 				aria-valuemin={0}
 				aria-valuenow={progress.percentage}
-				className="pointer-events-none absolute right-2 bottom-0 left-2 z-10 h-0.5 overflow-hidden rounded-full bg-border/60"
+				className="pointer-events-none absolute start-2 end-2 bottom-0 z-10 h-0.5 overflow-hidden rounded-full bg-border/60"
 				data-testid="sidebar-todo-progress"
 				role="progressbar"
 			>

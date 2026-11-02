@@ -1,5 +1,7 @@
 import { ArrowUp01Icon, Download04Icon } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { formatByteSize } from "@ryu/i18n/format-intl";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { sileo } from "sileo";
 import {
 	type SidecarDetail,
@@ -14,17 +16,10 @@ import {
 
 /** Compact "1.2 GB" / "340 MB" formatter for per-engine resident memory. */
 function formatBytes(bytes: number): string {
-	if (bytes <= 0) {
-		return "0 B";
-	}
-	const units = ["B", "KB", "MB", "GB", "TB"];
-	const i = Math.min(
-		Math.floor(Math.log(bytes) / Math.log(1024)),
-		units.length - 1
-	);
-	const val = bytes / 1024 ** i;
-	const rounded = val >= 100 || i === 0 ? Math.round(val) : val.toFixed(1);
-	return `${rounded} ${units[i]}`;
+	return formatByteSize(Math.max(0, bytes), undefined, {
+		fractionDigits: (value, unit) => (value >= 100 || unit === "byte" ? 0 : 1),
+		maxUnit: "terabyte",
+	});
 }
 
 /** A short "1.2 GB · 12%" usage caption, or null when no sample is available. */
@@ -105,6 +100,7 @@ export function ServiceRow({
 	 *  `readOnly`. */
 	onLaunch?: () => Promise<void>;
 }) {
+	const tl = useLiteralMessages();
 	const handleUpdate = async () => {
 		if (!onUpdate) {
 			return;
@@ -140,7 +136,9 @@ export function ServiceRow({
 				title:
 					e instanceof Error
 						? e.message
-						: `Couldn't ${next ? "start" : "stop"} ${label}`,
+						: next
+							? tl("Couldn't start {label}", { label })
+							: tl("Couldn't stop {label}", { label }),
 			});
 		}
 		// Give the process a moment to settle before re-polling status.

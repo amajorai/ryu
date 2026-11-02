@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { openExternal } from "@/lib/tauri-bridge.ts";
@@ -278,7 +279,7 @@ export function usePrivatePackageInstall(open: boolean) {
 						await refreshSetup(preview);
 					}
 					sileo.success({
-						title: `${requirement.displayName} connected`,
+						title: tl("{name} connected", { name: requirement.displayName }),
 						description: "This package can use the account now.",
 					});
 					return;

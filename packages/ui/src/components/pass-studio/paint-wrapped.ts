@@ -22,6 +22,12 @@ import {
 	WRAPPED_YEAR,
 } from "../wrapped-pass.tsx";
 import {
+	activePassTranslate,
+	formatPassDays,
+	formatPassDecimalHours,
+	type PassTranslate,
+} from "./labels.ts";
+import {
 	BLOCK_GAP_PX,
 	ellipsize,
 	fitFontSize,
@@ -34,12 +40,12 @@ import {
 	passFaceBox,
 	setTracking,
 } from "./paint.ts";
+import { passInline, withPassDirection } from "./paint-direction.ts";
 
 /** `gap-3` between the grid's columns and rows, at the app's 16px root. */
 const STAT_GAP_PX = 12;
 /** `tracking-tight` on the name. */
 const NAME_TRACKING_EM = -0.025;
-const DEFAULT_NAME = "A Ryu Developer";
 
 export interface WrappedFaceContent {
 	agentHours: number;
@@ -52,46 +58,58 @@ export interface WrappedFaceContent {
 }
 
 /** The name the card prints, and the seed its backdrop is hashed from. */
-export function wrappedDisplayName(name?: string | null): string {
-	return name?.trim() || DEFAULT_NAME;
+export function wrappedDisplayName(
+	name?: string | null,
+	tl: PassTranslate = activePassTranslate
+): string {
+	return name?.trim() || tl("A Ryu Developer");
 }
 
 /** The four footer stats, in the live card's order. */
 export function wrappedStats(
-	content: WrappedFaceContent
+	content: WrappedFaceContent,
+	tl: PassTranslate = activePassTranslate
 ): readonly [string, string][] {
 	return [
-		["Tokens", formatCount(content.totalTokens) ?? "—"],
-		["Agent hours", `${content.agentHours.toFixed(1)}h`],
-		["Best streak", `${content.streakLongest}d`],
-		["Top model", content.topModel?.trim() || "Ryu"],
+		[tl("Tokens"), formatCount(content.totalTokens) ?? "—"],
+		[tl("Agent hours"), formatPassDecimalHours(content.agentHours)],
+		[tl("Best streak"), formatPassDays(content.streakLongest)],
+		[tl("Top model"), content.topModel?.trim() || "Ryu"],
 	];
 }
 
 /** The Wrapped card, as a painter. Memoise it: it is half the scene's identity. */
 export function wrappedFacePainter(
-	content: WrappedFaceContent
+	content: WrappedFaceContent,
+	tl: PassTranslate = activePassTranslate
 ): PassFacePainter {
 	return {
-		front: (ctx, env) => paintWrappedFront(ctx, content, env),
+		front: (ctx, env) =>
+			paintWrappedFront(ctx, content, withPassDirection(ctx, env, tl), tl),
 	};
 }
 
 function paintWrappedFront(
 	ctx: CanvasRenderingContext2D,
 	content: WrappedFaceContent,
-	env: PassFaceEnv
+	env: PassFaceEnv,
+	tl: PassTranslate
 ): void {
 	const { family, palette, scale } = env;
 	const { available, bottom, left } = passFaceBox(scale);
+	const inline = passInline(env);
 
-	paintPassHeader(ctx, env, `WRAPPED · ${WRAPPED_YEAR}`);
+	paintPassHeader(
+		ctx,
+		env,
+		tl("Wrapped · {year}", { year: String(WRAPPED_YEAR) }).toUpperCase()
+	);
 
 	// The grid, bottom row first: the hero above is bottom-aligned against
 	// whatever the footer leaves, so the footer is measured before it.
 	const gap = STAT_GAP_PX * scale;
 	const column = (available - gap) / 2;
-	const [tokens, hours, streak, model] = wrappedStats(content);
+	const [tokens, hours, streak, model] = wrappedStats(content, tl);
 	const stat = (
 		pair: [string, string] | undefined,
 		x: number,
@@ -114,9 +132,12 @@ function paintWrappedFront(
 	let cursor = upperTop - BLOCK_GAP_PX * scale;
 
 	// Hero, built upward: the meta line, then the name above it.
-	ctx.textAlign = "left";
+	ctx.textAlign = inline.start;
 	ctx.textBaseline = "alphabetic";
-	const meta = `Level ${content.level} · ${content.streakCurrent}-day streak`;
+	const meta = tl("Level {level} · {days}-day streak", {
+		days: String(content.streakCurrent),
+		level: String(content.level),
+	});
 	const { size: metaSize } = fitFontSize(ctx, {
 		available,
 		family,
@@ -130,10 +151,10 @@ function paintWrappedFront(
 	ctx.font = font(family, 400, metaSize, scale);
 	setTracking(ctx, 0);
 	ctx.fillStyle = palette.mutedForeground;
-	ctx.fillText(ellipsize(ctx, meta, available), left, cursor);
+	ctx.fillText(ellipsize(ctx, meta, available), inline.x(left), cursor);
 	cursor -= metaSize * scale + HERO_GAP_PX * scale;
 
-	const name = wrappedDisplayName(content.name);
+	const name = wrappedDisplayName(content.name, tl);
 	const { size: nameSize } = fitFontSize(ctx, {
 		available,
 		family,
@@ -148,6 +169,6 @@ function paintWrappedFront(
 	ctx.font = font(family, 500, nameSize, scale);
 	setTracking(ctx, nameSize * NAME_TRACKING_EM * scale);
 	ctx.fillStyle = palette.cardForeground;
-	ctx.fillText(ellipsize(ctx, name, available), left, cursor);
+	ctx.fillText(ellipsize(ctx, name, available), inline.x(left), cursor);
 	setTracking(ctx, 0);
 }

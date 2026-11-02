@@ -2,16 +2,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(
 	HERE,
 	"../../core/src/plugin_manifest/fixtures/slides.ui.html"
 );
-const PROOF = path.resolve(
-	HERE,
-	"../../../docs/proof/slides-companion-host-proof.png"
-);
+const PROOF = proofEvidencePath("slides-companion-host-proof.png");
 
 test("Slides fixture mounts in the real Path-B Companion host", async ({
 	page,

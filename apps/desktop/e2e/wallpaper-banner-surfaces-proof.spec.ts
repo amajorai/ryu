@@ -7,11 +7,9 @@ import { parseMarketplaceWallpaperSelection } from "@ryuhq/protocol/marketplace-
 import { defaultPublicProfileContent } from "@ryuhq/protocol/public-profile";
 import { z } from "zod";
 import type { ProofJsonValue } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/marketplace-wallpaper-banners"
-);
+const PROOF_DIR = proofEvidencePath("marketplace-wallpaper-banners");
 const MESH_ID = "com.ryu.marketplace-defaults:mesh-gradient";
 const GRID_ID = "com.ryu.marketplace-defaults:dynamic-grid";
 const PROFILE_BANNER_KEY = "ryu.profile-banner-wallpaper.v1";

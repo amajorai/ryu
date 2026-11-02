@@ -421,10 +421,14 @@ const TabsSubtleItem = forwardRef<HTMLButtonElement, TabsSubtleItemProps>(
 					<AnimatePresence initial={false}>
 						{showLabel && (
 							<motion.span
-								animate={{ width: "auto", opacity: 1, marginLeft: 8 }}
+								animate={{
+									width: "auto",
+									opacity: 1,
+									marginInlineStart: "8px",
+								}}
 								className="overflow-hidden"
-								exit={{ width: 0, opacity: 0, marginLeft: 0 }}
-								initial={{ width: 0, opacity: 0, marginLeft: 0 }}
+								exit={{ width: 0, opacity: 0, marginInlineStart: "0px" }}
+								initial={{ width: 0, opacity: 0, marginInlineStart: "0px" }}
 								key="label"
 								transition={{
 									...spring.fast,

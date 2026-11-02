@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
@@ -54,9 +55,15 @@ const FEEDS: { label: string; value: StreamFeed }[] = [
 ];
 
 const TITLES: Record<Exclude<StreamView, "home">, string> = {
-	activity: "Activity",
-	profile: "Profile",
-	search: "Search",
+	get activity() {
+		return tr("Activity");
+	},
+	get profile() {
+		return tr("Profile");
+	},
+	get search() {
+		return tr("Search");
+	},
 };
 
 type PendingFocus = "composer" | "search" | null;
@@ -91,7 +98,11 @@ function StreamHeader({
 						ref={backRef}
 						type="button"
 					>
-						<ArrowLeft aria-hidden="true" className="size-4" strokeWidth={2} />
+						<ArrowLeft
+							aria-hidden="true"
+							className="size-4 rtl:-scale-x-100"
+							strokeWidth={2}
+						/>
 					</button>
 				) : null}
 			</div>
@@ -413,7 +424,7 @@ export function StreamInterface({
 					onCreate={create}
 					onNavigate={navigate}
 				/>
-				<div className="flex min-h-0 min-w-0 flex-1 justify-center @min-[640px]:pr-[76px]">
+				<div className="flex min-h-0 min-w-0 flex-1 justify-center @min-[640px]:pe-[76px]">
 					<div className="flex min-h-0 w-full max-w-[640px] flex-col">
 						<StreamHeader
 							backRef={backRef}
@@ -424,7 +435,7 @@ export function StreamInterface({
 							title={title}
 						/>
 						<main
-							aria-label={title ?? "Home"}
+							aria-label={title ?? tr("Home")}
 							className="relative flex min-h-0 flex-1 flex-col overflow-hidden @min-[640px]:rounded-t-[28px] border-border @min-[640px]:border-x border-t bg-card"
 						>
 							<motion.div

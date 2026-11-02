@@ -3,7 +3,7 @@
 // host.spaces / host.storage / host.getPreference / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -16,6 +16,13 @@
 //   /mistakes add <rule>   write one by hand
 //   /mistakes forget <n>   drop the rule with that number
 //   /mistakes off | on     stop / resume automatic learning in THIS chat
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const DEFAULT_SPACE_NAME = "Mistakes";
 const MAX_RULE_CHARS = 160;
@@ -42,24 +49,26 @@ if (word === "off" || word === "mute" || word === "stop") {
 	if (!(await setMuted(true))) {
 		return {
 			kind: "handled",
-			text: "Couldn't save that change, so I can't confirm whether this chat is muted. Try again.",
+			text: await host.t("Couldn't save that change, so I can't confirm whether this chat is muted. Try again."),
 		};
 	}
 	return {
 		kind: "handled",
-		text: "Not learning from corrections in this chat any more. The existing rules still apply — `/mistakes on` resumes, and `/mistakes add` still works.",
+		text: await host.t(
+			"Not learning from corrections in this chat any more. The existing rules still apply — `/mistakes on` resumes, and `/mistakes add` still works."
+		),
 	};
 }
 if (word === "on" || word === "unmute" || word === "start") {
 	if (!(await setMuted(false))) {
 		return {
 			kind: "handled",
-			text: "Couldn't save that change, so I can't confirm whether this chat is muted. Try again.",
+			text: await host.t("Couldn't save that change, so I can't confirm whether this chat is muted. Try again."),
 		};
 	}
 	return {
 		kind: "handled",
-		text: "Learning from corrections again in this chat.",
+		text: await host.t("Learning from corrections again in this chat."),
 	};
 }
 
@@ -76,7 +85,7 @@ try {
 	host.log("no-more-mistakes: opening the ledger failed", e);
 	return {
 		kind: "handled",
-		text: "Couldn't open the " + spaceName + " Space, so there is nothing to show. The rules are unchanged.",
+		text: await host.t("Couldn't open the {space} Space, so there is nothing to show. The rules are unchanged.", { space: spaceName }),
 	};
 }
 
@@ -86,18 +95,18 @@ if (word === "add" || word === "remember") {
 	if (!rule) {
 		return {
 			kind: "handled",
-			text: "Give me the rule to remember, e.g. `/mistakes add Never edit files under vendor/ — they are generated`.",
+			text: await host.t("Give me the rule to remember, e.g. `/mistakes add Never edit files under vendor/ — they are generated`."),
 		};
 	}
 	const existing = await listRules(spaceId);
 	if (!existing) {
 		return {
 			kind: "handled",
-			text: "Couldn't read the existing rules, so I didn't add anything. Try again.",
+			text: await host.t("Couldn't read the existing rules, so I didn't add anything. Try again."),
 		};
 	}
 	if (existing.some((r) => sameRule(r.title, rule))) {
-		return { kind: "handled", text: "Already on the list: " + rule };
+		return { kind: "handled", text: await host.t("Already on the list: {rule}", { rule }) };
 	}
 	try {
 		const docId = await host.spaces.createDoc({ space_id: spaceId, title: rule });
@@ -116,12 +125,12 @@ if (word === "add" || word === "remember") {
 		host.log("no-more-mistakes: writing the rule failed", e);
 		return {
 			kind: "handled",
-			text: "Couldn't write that rule to the " + spaceName + " Space. Nothing was recorded — try again.",
+			text: await host.t("Couldn't write that rule to the {space} Space. Nothing was recorded — try again.", { space: spaceName }),
 		};
 	}
 	return {
 		kind: "handled",
-		text: "Recorded. Every new chat starts with this one now:\n\n" + rule,
+		text: (await host.t("Recorded. Every new chat starts with this one now:")) + "\n\n" + rule,
 	};
 }
 
@@ -131,11 +140,11 @@ if (word === "forget" || word === "remove" || word === "delete") {
 	if (!rules) {
 		return {
 			kind: "handled",
-			text: "Couldn't read the rules, so nothing was deleted. Try again.",
+			text: await host.t("Couldn't read the rules, so nothing was deleted. Try again."),
 		};
 	}
 	if (rules.length === 0) {
-		return { kind: "handled", text: "Nothing recorded yet, so there is nothing to forget." };
+		return { kind: "handled", text: await host.t("Nothing recorded yet, so there is nothing to forget.") };
 	}
 	const index = Number.parseInt(argument, 10);
 	// By number only, deliberately: a substring match would let "forget git" drop a
@@ -143,10 +152,7 @@ if (word === "forget" || word === "remove" || word === "delete") {
 	if (!Number.isFinite(index) || index < 1 || index > rules.length) {
 		return {
 			kind: "handled",
-			text:
-				"Which one? Give me its number from `/mistakes` — 1 to " +
-				rules.length +
-				".",
+			text: await host.t("Which one? Give me its number from `/mistakes` — 1 to {count}.", { count: rules.length }),
 		};
 	}
 	const target = rules[index - 1];
@@ -156,10 +162,10 @@ if (word === "forget" || word === "remove" || word === "delete") {
 		host.log("no-more-mistakes: deleting the rule failed", e);
 		return {
 			kind: "handled",
-			text: "Couldn't delete that rule. It is still on the list.",
+			text: await host.t("Couldn't delete that rule. It is still on the list."),
 		};
 	}
-	return { kind: "handled", text: "Forgotten: " + target.title };
+	return { kind: "handled", text: await host.t("Forgotten: {rule}", { rule: target.title }) };
 }
 
 // ── list (the bare command, and anything unrecognized) ───────────────────────
@@ -167,17 +173,16 @@ const rules = await listRules(spaceId);
 if (!rules) {
 	return {
 		kind: "handled",
-		text: "Couldn't read the rules from the " + spaceName + " Space. Try again.",
+		text: await host.t("Couldn't read the rules from the {space} Space. Try again.", { space: spaceName }),
 	};
 }
 if (rules.length === 0) {
 	return {
 		kind: "handled",
-		text:
-			"No rules yet. I add one whenever you correct me — or write one now with " +
-			"`/mistakes add <rule>`. They live in the " +
-			spaceName +
-			" Space, one document each, and every new chat starts with them.",
+		text: await host.t(
+			"No rules yet. I add one whenever you correct me — or write one now with `/mistakes add <rule>`. They live in the {space} Space, one document each, and every new chat starts with them.",
+			{ space: spaceName }
+		),
 	};
 }
 
@@ -189,11 +194,15 @@ const listed = rules
 return {
 	kind: "handled",
 	text:
-		"Standing rules from past corrections (" +
-		spaceName +
-		" Space). Every new chat starts with these:\n\n" +
+		(await host.t("Standing rules from past corrections ({space} Space). Every new chat starts with these:", {
+			space: spaceName,
+		})) +
+		"\n\n" +
 		listed +
-		"\n\n`/mistakes add <rule>` records one, `/mistakes forget <number>` drops one, `/mistakes off` stops learning in this chat.",
+		"\n\n" +
+		(await host.t(
+			"`/mistakes add <rule>` records one, `/mistakes forget <number>` drops one, `/mistakes off` stops learning in this chat."
+		)),
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────

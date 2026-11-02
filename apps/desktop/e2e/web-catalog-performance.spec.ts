@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 function card(name: string, source = "huggingface") {
 	return {
@@ -88,9 +88,8 @@ test("Web Store shares reads, reuses a warm tab and cancels obsolete catalog loa
 		);
 		expect(errors).toEqual([]);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/web-catalog-cache-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/web-catalog-cache-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -212,9 +211,8 @@ test("universal search shows ready groups and cancels all pending groups when cl
 			page.getByText("Claude model", { exact: true }).first()
 		).toBeVisible();
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/universal-search-progressive-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/universal-search-progressive-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -318,9 +316,8 @@ test("catalog and Staff Picks coalesce refreshes and cancel superseded or closed
 		await expect(page.getByText("Current pick", { exact: true })).toBeVisible();
 		expect(calls).toHaveLength(4);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/marketplace-lists-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/marketplace-lists-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",

@@ -183,7 +183,7 @@ export function SpaceSidebarRow({
 								className={`size-3 transition-[opacity,rotate] motion-reduce:transition-opacity ${
 									expanded
 										? "opacity-100"
-										: "-rotate-90 opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 group-has-[button:focus-visible]/row:opacity-100"
+										: "-rotate-90 opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 group-has-[button:focus-visible]/row:opacity-100 rtl:rotate-90"
 								}`}
 								icon={ArrowDown01Icon}
 							/>

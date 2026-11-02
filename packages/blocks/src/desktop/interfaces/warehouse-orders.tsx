@@ -5,6 +5,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { Plus, X } from "lucide-react";
 import { type KeyboardEvent, useContext, useId, useRef } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { compactAge } from "./interface-renderer.ts";
 import {
 	ORDER_TABS,
@@ -116,7 +117,7 @@ export function OrdersList({
 			["End", last],
 			["Home", 0],
 		]);
-		const target = targets.get(event.key);
+		const target = targets.get(logicalArrowKey(event.key, event.currentTarget));
 		if (target === undefined) {
 			return;
 		}
@@ -199,7 +200,9 @@ export function OrdersList({
 				<div className="flex shrink-0 items-center gap-2 border-border border-b px-4 py-2 text-muted-foreground text-xs">
 					<span>Fulfiller</span>
 					<span className="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background ps-1.5 pe-0.5 text-foreground">
-						<span className="font-medium">{fulfiller.name}</span>
+						<span className="font-medium" data-ryu-i18n="off">
+							{fulfiller.name}
+						</span>
 						<button
 							aria-label={tl("Clear fulfiller filter {name}", {
 								name: fulfiller.name,
@@ -261,7 +264,7 @@ export function OrdersList({
 					<table className="w-full table-fixed border-collapse text-sm">
 						<caption className="sr-only">Orders</caption>
 						<thead className="sticky top-0 z-10 bg-(--wh-paper)">
-							<tr className="h-9 border-border border-b text-left text-muted-foreground text-xs">
+							<tr className="h-9 border-border border-b text-start text-muted-foreground text-xs">
 								<th className="ps-4 font-medium" scope="col">
 									Order
 								</th>
@@ -275,7 +278,7 @@ export function OrdersList({
 									Fulfiller
 								</th>
 								{acts ? null : (
-									<th className="w-12 pe-4 text-right font-medium" scope="col">
+									<th className="w-12 pe-4 text-end font-medium" scope="col">
 										Age
 									</th>
 								)}
@@ -303,7 +306,7 @@ export function OrdersList({
 										<td className="min-w-0 ps-4 pe-3">
 											<button
 												aria-current={selected ? "true" : undefined}
-												className="flex w-full min-w-0 flex-col items-start gap-0.5 text-left outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+												className="flex w-full min-w-0 flex-col items-start gap-0.5 text-start outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
 												data-order-row={order.id}
 												onClick={() => onSelect(order.id)}
 												type="button"
@@ -311,7 +314,10 @@ export function OrdersList({
 												<span className="font-mono font-semibold text-[13px] text-foreground tabular-nums leading-5 tracking-wide">
 													{order.number}
 												</span>
-												<span className="w-full truncate text-[13px] text-foreground/80 leading-5">
+												<span
+													className="w-full truncate text-[13px] text-foreground/80 leading-5"
+													data-ryu-i18n="off"
+												>
 													{order.thread.title}
 												</span>
 											</button>
@@ -326,7 +332,7 @@ export function OrdersList({
 											/>
 										</td>
 										{acts ? null : (
-											<td className="pe-4 text-right text-[13px] text-muted-foreground tabular-nums">
+											<td className="pe-4 text-end text-[13px] text-muted-foreground tabular-nums">
 												{compactAge(order.thread.updatedAt, now)}
 											</td>
 										)}

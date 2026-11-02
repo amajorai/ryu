@@ -86,7 +86,7 @@ export function useChatOverlayKeys(deps: UseChatOverlayKeysDeps) {
 			if (chosen) {
 				setSelectedAgent(chosen.id);
 				setSelectedTeam(null);
-				notify(`Agent: ${chosen.name}`, "info");
+				notify(tf("Agent: {name}", { name: chosen.name }), "info");
 			}
 			setOverlay({ kind: "none" });
 		}
@@ -136,7 +136,7 @@ export function useChatOverlayKeys(deps: UseChatOverlayKeysDeps) {
 			if (selected) {
 				setSelectedTeam(selected.id);
 				setSelectedAgent(null);
-				notify(`Group: ${selected.name}`, "info");
+				notify(tf("Group: {name}", { name: selected.name }), "info");
 			}
 			setOverlay({ kind: "none" });
 		}
@@ -163,7 +163,9 @@ export function useChatOverlayKeys(deps: UseChatOverlayKeysDeps) {
 			if (choice) {
 				setAcpModel(choice.id);
 				notify(
-					choice.id ? `Model: ${choice.label}` : "Model override cleared",
+					choice.id
+						? tf("Model: {label}", { label: choice.label })
+						: "Model override cleared",
 					"info"
 				);
 			}

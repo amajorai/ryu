@@ -14,6 +14,7 @@ import {
 	type ViewAction,
 } from "@ryu/app-host/views";
 import { InstallProgressButton } from "@ryu/blocks/desktop/install-button.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ListingAsideCard,
 	ListingDetailShell,
@@ -38,6 +39,7 @@ import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { apiUrl, requestHeaders, toTarget } from "@/src/lib/api/client.ts";
 import { pluginStoreSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 import type { PluginStoreTab } from "@/src/lib/api/plugins.ts";
+import { localizeStoreSpec } from "./ContributedStoreSection-localize.ts";
 import { TabIcon } from "./ContributedStoreSection-tab-icon.tsx";
 import StoreDetailGraph from "./StoreDetailGraph.tsx";
 
@@ -67,6 +69,7 @@ export function DetailPanel({
 	runAction: (action: ViewAction, item: StoreCatalogItem) => void;
 	tab: PluginStoreTab;
 }) {
+	const tl = useLiteralMessages();
 	if (!item) {
 		return (
 			<Empty className="h-full">
@@ -82,7 +85,9 @@ export function DetailPanel({
 			</Empty>
 		);
 	}
-	const installSpec = pluginStoreSpec(tab)?.install;
+	// The spec's install and action labels in the active locale.
+	const spec = localizeStoreSpec(tl, pluginStoreSpec(tab));
+	const installSpec = spec?.install;
 	const installable = installSpec != null;
 	const sourceHref = safeHttpUrl(item.sourceUrl);
 	return (
@@ -100,7 +105,7 @@ export function DetailPanel({
 					{/* Declared per-item extras (Preview, Duplicate, …) fire against the
 					    SELECTED row, so they live here rather than on the card — a
 					    card-level slot would have to pick a row before the user did. */}
-					{pluginStoreSpec(tab)?.itemActions?.map((action) => (
+					{spec?.itemActions?.map((action) => (
 						<Button
 							key={action.id}
 							onClick={() => runAction(action, item)}
@@ -127,7 +132,7 @@ export function DetailPanel({
 						</Button>
 					) : null}
 					{error ? (
-						<span className="ml-auto flex items-center gap-1.5 text-sm text-status-destructive">
+						<span className="ms-auto flex items-center gap-1.5 text-sm text-status-destructive">
 							<HugeiconsIcon className="size-4 shrink-0" icon={Alert01Icon} />
 							{error}
 						</span>
@@ -200,7 +205,11 @@ function ContributedDetailGraph({
 	tab: PluginStoreTab;
 }) {
 	const node = useActiveNode();
-	const spec = useMemo(() => pluginStoreSpec(tab), [tab]);
+	const tl = useLiteralMessages();
+	const spec = useMemo(
+		() => localizeStoreSpec(tl, pluginStoreSpec(tab)),
+		[tab, tl]
+	);
 	const source = spec?.detail?.source;
 	const sourceRequest =
 		source?.http.method === "GET"

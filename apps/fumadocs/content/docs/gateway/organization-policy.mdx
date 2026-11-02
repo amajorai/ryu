@@ -105,14 +105,16 @@ can configure the Gateway or manage members can see another person's user layer.
   belongs to a team, that team's layer. A project outside the server's own team is refused.
 - **User.** On a server shared by an organization or team, the person a call runs for also gets
   their user layer. It applies to tool calls (as described below) and to model calls, where their
-  approved models, providers, regions, and locked guardrails are applied when the Gateway knows who
-  the caller is.
+  approved models, providers, regions, and locked guardrails apply once the Gateway knows the
+  caller.
 - **Unknown caller policy.** If the Gateway has never received a caller's policy, it refuses that
-  caller's model requests rather than serving the shared policy.
+  caller's model requests instead of using the shared policy.
 - **Background work.** Model calls from workflows, apps, and agents that an organization-wide node
   runs in the background reach the hosted Gateway without a signed-in caller. Only the organization
   layer applies to them, even when a member started the work. Run that work on the member's
-  personal node when their narrower user layer must also cover it.
+  personal node when their user layer must also cover it.
+- **Cloud computers.** Model calls get the organization's policy, limits, standing, and
+  the member's layer and caps, or fail retryably.
 
 ### Allowed features
 

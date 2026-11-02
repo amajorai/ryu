@@ -1,5 +1,7 @@
 "use client";
 
+import { numberFormatter } from "@ryu/i18n/lite";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { DataGridColumnHeader } from "@ryu/ui/components/data-grid/data-grid-column-header.tsx";
 import { DataGridContextMenu } from "@ryu/ui/components/data-grid/data-grid-context-menu.tsx";
 import { DataGridPasteDialog } from "@ryu/ui/components/data-grid/data-grid-paste-dialog.tsx";
@@ -7,6 +9,7 @@ import { DataGridRow } from "@ryu/ui/components/data-grid/data-grid-row.tsx";
 import { DataGridSearch } from "@ryu/ui/components/data-grid/data-grid-search.tsx";
 import { useAsRef } from "@ryu/ui/hooks/use-as-ref.ts";
 import type { useDataGrid } from "@ryu/ui/hooks/use-data-grid.ts";
+import { useFormatLocale } from "@ryu/ui/hooks/use-format-locale.ts";
 import {
 	type ColumnPinningStyle,
 	flexRender,
@@ -373,9 +376,9 @@ export function DataGrid<TData>({
 	);
 }
 
-const numberFormat = new Intl.NumberFormat(undefined, {
+const STATUS_NUMBER_OPTIONS: Intl.NumberFormatOptions = {
 	maximumFractionDigits: 4,
-});
+};
 
 function DataGridStatusBar({
 	rowCount,
@@ -386,22 +389,38 @@ function DataGridStatusBar({
 	summary: SelectionSummary | null;
 	totalRowCount: number;
 }) {
+	const tl = useLiteralMessages();
+	const numberFormat = numberFormatter(
+		useFormatLocale(),
+		STATUS_NUMBER_OPTIONS
+	);
 	const rowsLabel =
 		rowCount === totalRowCount
 			? numberFormat.format(rowCount)
-			: `${numberFormat.format(rowCount)} of ${numberFormat.format(totalRowCount)}`;
-	const items: [label: string, value: string][] = summary
-		? [["Count", numberFormat.format(summary.count)]]
-		: [[totalRowCount === 1 ? "Row" : "Rows", rowsLabel]];
+			: tl("{shown} of {total}", {
+					shown: numberFormat.format(rowCount),
+					total: numberFormat.format(totalRowCount),
+				});
+	const items: [key: string, label: string, value: string][] = summary
+		? [["count", tl("Count"), numberFormat.format(summary.count)]]
+		: [
+				[
+					"rows",
+					tl("{count, plural, one {Row} other {Rows}}", {
+						count: totalRowCount,
+					}),
+					rowsLabel,
+				],
+			];
 	if (summary && summary.numericCount > 0) {
-		for (const [label, value] of [
-			["Average", summary.average],
-			["Min", summary.min],
-			["Max", summary.max],
-			["Sum", summary.sum],
+		for (const [key, label, value] of [
+			["average", tl("Average"), summary.average],
+			["min", tl("Min"), summary.min],
+			["max", tl("Max"), summary.max],
+			["sum", tl("Sum"), summary.sum],
 		] as const) {
 			if (value !== null) {
-				items.push([label, numberFormat.format(value)]);
+				items.push([key, label, numberFormat.format(value)]);
 			}
 		}
 	}
@@ -412,9 +431,10 @@ function DataGridStatusBar({
 			className="flex h-7 items-center justify-end gap-4 px-1 text-muted-foreground text-xs tabular-nums"
 			data-slot="grid-status-bar"
 		>
-			{items.map(([label, value]) => (
-				<span key={label}>
-					{label}: <span className="text-foreground">{value}</span>
+			{items.map(([key, label, value]) => (
+				<span key={key}>
+					{tl("{label}:", { label })}{" "}
+					<span className="text-foreground">{value}</span>
 				</span>
 			))}
 		</output>

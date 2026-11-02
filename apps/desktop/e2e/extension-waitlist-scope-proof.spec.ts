@@ -2,12 +2,9 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { WAITLIST_MANAGED_ONLY_FLAG } from "@ryuhq/protocol/feature-flags";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../..",
-	"docs/proof/waitlist-managed-nodes"
-);
+const proofDir = proofEvidencePath("waitlist-managed-nodes");
 
 test.afterEach(async ({ page }) => {
 	if (!page.isClosed()) {

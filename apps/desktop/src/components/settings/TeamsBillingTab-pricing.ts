@@ -9,6 +9,8 @@ import {
 } from "@ryu/auth/lib/plans";
 import { SELF_SERVE_MAX_SEATS } from "@ryu/auth/lib/seat-tiers";
 import { TEAMS_MIN_SEATS } from "@ryu/blocks/web/pricing.tsx";
+import { translate as tl } from "@ryu/i18n/core";
+import { formatPerPeriod } from "@ryu/i18n/format-intl";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import type { OrganizationPlanId } from "@/src/lib/api/teams-billing.ts";
@@ -44,7 +46,10 @@ export function normalizeTeamsSeatCount(
 }
 
 export function formatMonthlyUsd(value: number): string {
-	return `${formatMicroUsd(Math.round(value * 1_000_000))}/mo`;
+	return formatPerPeriod(
+		formatMicroUsd(Math.round(value * 1_000_000)),
+		"month"
+	);
 }
 
 const isCatalogPlanId = (plan: string): plan is PlanId =>
@@ -127,7 +132,10 @@ export function planMonthlyAmount(
 		// Seat counts beyond the self-serve price bands are contracted.
 		return "Contract pricing";
 	}
-	const amount = `${formatMicroUsd(amountMicroUsd, "USD", 2)}/mo`;
+	const amount = formatPerPeriod(
+		formatMicroUsd(amountMicroUsd, "USD", 2),
+		"month"
+	);
 	if (!perSeat || billedSeats !== null) {
 		return amount;
 	}
@@ -152,9 +160,11 @@ export function formatCreditExpiry(value: string | null): string | null {
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
-	return `Expires ${formatDate(date, {
-		day: "numeric",
-		month: "short",
-		year: "numeric",
-	})}`;
+	return tl("Expires {date}", {
+		date: formatDate(date, {
+			day: "numeric",
+			month: "short",
+			year: "numeric",
+		}),
+	});
 }

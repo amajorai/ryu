@@ -25,6 +25,11 @@
 
 import { z } from "zod";
 
+import {
+	type CompanionLocale,
+	companionHtmlLocaleAttributes,
+	companionLocaleScript,
+} from "./companion-locale.ts";
 import { dialogEscapeScript } from "./dialog-escape-script.ts";
 import { HORIZONTAL_WHEEL_SCROLL_SCRIPT } from "./horizontal-wheel-scroll-script.ts";
 import { COMPANION_PRIVACY_STATE_SCRIPT } from "./notification-privacy.ts";
@@ -193,7 +198,12 @@ export function thirdPartyPluginSrcdoc(
 	themeTokens?: Record<string, string>,
 	/** True when the containing Ryu root already applies `--ryu-ui-scale`. */
 	scaleInParent = false,
-	options?: { enforceDefaultCsp?: boolean; closeOnEscape?: boolean }
+	options?: {
+		enforceDefaultCsp?: boolean;
+		closeOnEscape?: boolean;
+		/** The host UI language: seeds `<html lang dir>`, then follows changes. */
+		locale?: CompanionLocale;
+	}
 ): string {
 	const enforceDefaultCsp = options?.enforceDefaultCsp ?? true;
 	// JSON.stringify does NOT escape `</script>` or the JS line separators U+2028/9,
@@ -215,7 +225,7 @@ export function thirdPartyPluginSrcdoc(
 		? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" />`
 		: "";
 	return `<!doctype html>
-<html lang="en">
+<html ${companionHtmlLocaleAttributes(options?.locale)}>
 <head>
 <meta charset="utf-8" />
 <!-- A null-origin sandbox isolates the DOM but does NOT block network. When the
@@ -294,6 +304,7 @@ ${indentGeneratedScript(COMPANION_PRIVACY_STATE_SCRIPT, "    ")}
 
 ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
 ${dialogEscapeScript(options?.closeOnEscape === true)}
+${indentGeneratedScript(companionLocaleScript(), "    ")}
 
     function fail(text) {
       if (errEl) {
@@ -943,6 +954,7 @@ ${indentGeneratedScript(I18N_BRIDGE, "        ")},
       // Install window.ryu BEFORE the bundle runs so an app's top-level code (and the
       // SDK bridge adoption) sees a live host bridge.
       installWindowRyu();
+      followHostLocale();
 
       // Decode + evaluate the plugin bundle once the bridge is live. The plugin's
       // id is baked into this trusted bootstrap (not secret); the host re-validates
@@ -1116,7 +1128,8 @@ function htmlCompanionHeadFragment(
 	mountContextLiteral: string,
 	cspString: string | null,
 	initialThemeTokensLiteral: string,
-	closeOnEscape: boolean
+	closeOnEscape: boolean,
+	locale?: CompanionLocale
 ): string {
 	const themeAliases = JSON.stringify(COMPANION_THEME_ALIASES);
 	return `${cspString ? `<meta http-equiv="Content-Security-Policy" content="${cspString}" />` : ""}
@@ -1780,6 +1793,8 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
 
 ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
 ${dialogEscapeScript(closeOnEscape)}
+${indentGeneratedScript(companionLocaleScript(locale), "    ")}
+    followHostLocale();
 
     // Accept the port ONLY from the host message carrying our nonce, once.
     window.addEventListener("message", function (ev) {
@@ -1940,7 +1955,12 @@ export function htmlCompanionSrcdoc(
 	themeTokens?: Record<string, string>,
 	/** True when the containing Ryu root already applies `--ryu-ui-scale`. */
 	scaleInParent = false,
-	options?: { enforceDefaultCsp?: boolean; closeOnEscape?: boolean }
+	options?: {
+		enforceDefaultCsp?: boolean;
+		closeOnEscape?: boolean;
+		/** The host UI language: seeds `<html lang dir>`, then follows changes. */
+		locale?: CompanionLocale;
+	}
 ): string {
 	const enforceDefaultCsp = options?.enforceDefaultCsp ?? true;
 	const fragment = htmlCompanionHeadFragment(
@@ -1949,7 +1969,8 @@ export function htmlCompanionSrcdoc(
 		scriptSafe(mountContext),
 		csp || enforceDefaultCsp ? buildHtmlCompanionCsp(csp) : null,
 		scriptSafe(themeTokens),
-		options?.closeOnEscape === true
+		options?.closeOnEscape === true,
+		options?.locale
 	);
 	// The theme-token bridge goes AFTER the bridge script but still inside <head>.
 	// It uses an `html:root` selector (higher specificity than the companion's own

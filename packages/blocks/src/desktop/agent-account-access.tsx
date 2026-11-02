@@ -116,7 +116,7 @@ export function AccountAccessRows({
 							</span>
 						</Label>
 						{trailing ? (
-							<div className="ml-auto shrink-0">{trailing(row)}</div>
+							<div className="ms-auto shrink-0">{trailing(row)}</div>
 						) : null}
 					</div>
 				);

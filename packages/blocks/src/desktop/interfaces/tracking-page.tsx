@@ -79,7 +79,7 @@ function HistoryRow({
 	const latest = entry.id === "latest";
 	return (
 		<li className="grid grid-cols-[4.5rem_0.75rem_minmax(0,1fr)] gap-x-3">
-			<span className="flex flex-col text-right text-[13px] text-muted-foreground tabular-nums leading-6">
+			<span className="flex flex-col text-end text-[13px] text-muted-foreground tabular-nums leading-6">
 				{date && !Number.isNaN(date.getTime()) ? (
 					<time dateTime={entry.at ?? undefined}>{clockTime(date)}</time>
 				) : null}
@@ -113,18 +113,25 @@ function HistoryRow({
 						latest ? "font-medium text-foreground" : "text-foreground",
 						entry.tone === "exception" && "text-status-destructive"
 					)}
+					data-ryu-i18n="off"
 				>
 					{entry.title}
 				</p>
 				{entry.location ? (
-					<p className="text-[13px] text-muted-foreground leading-5">
+					<p
+						className="text-[13px] text-muted-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{entry.detail
 							? `${entry.location} · ${entry.detail}`
 							: entry.location}
 					</p>
 				) : null}
 				{entry.detail && !entry.location ? (
-					<p className="line-clamp-2 max-w-prose text-[13px] text-muted-foreground leading-5">
+					<p
+						className="line-clamp-2 max-w-prose text-[13px] text-muted-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{entry.detail}
 					</p>
 				) : null}
@@ -227,13 +234,17 @@ export function TrackingPage({
 			<header className="flex flex-col gap-4">
 				{onBack ? (
 					<Button
-						className="-ml-2 self-start"
+						className="-ms-2 self-start"
 						onClick={onBack}
 						size="sm"
 						type="button"
 						variant="ghost-muted"
 					>
-						<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+						<ArrowLeft
+							aria-hidden="true"
+							className="rtl:-scale-x-100"
+							data-icon="inline-start"
+						/>
 						My deliveries
 					</Button>
 				) : null}

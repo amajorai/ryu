@@ -10,16 +10,14 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { installConsoleAccessAppFixture } from "./console-access-app-proof.fixture.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Under software WebGL (CI) a 3D scene's frame can hold the main thread for
 // over a second, so every step here allows for slow input handling.
 test.describe.configure({ timeout: 600_000 });
 const STEP_MS = 90_000;
 
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/interfaces/surface"
-);
+const PROOF_DIR = proofEvidencePath("interfaces/surface");
 mkdirSync(PROOF_DIR, { recursive: true });
 
 /** A Marketplace interface with junk params and a long label. */

@@ -7,7 +7,8 @@
 //! (those can carry prompt/agent content and `~/.ryu` paths), so we deliberately do
 //! NOT add `sentry-tracing`/`sentry-log`. The only integrations are panic +
 //! backtrace + contexts, and a `before_send` scrubs the user's home-dir prefix out
-//! of the panic message and every stack frame's path. We also force
+//! of the panic message and every stack frame's path, and strips quoted strings,
+//! PII and secrets from the panic message (see `scrub_message`). We also force
 //! `send_default_pii = false` and `server_name = None` so the machine hostname
 //! never leaves the box.
 //!
@@ -118,13 +119,66 @@ fn init_with_dsn(dsn: String) -> sentry::ClientInitGuard {
     ))
 }
 
-/// Scrub a captured event in place: home-dir prefixes out of the exception value
-/// (the panic message) and every stack-frame `abs_path`/`filename`. Pure over the
+/// Longest panic message (in bytes) that leaves the machine. A panic message is
+/// diagnostic text, not content: anything past this is cut on a char boundary.
+const MAX_SCRUBBED_MESSAGE_BYTES: usize = 512;
+
+/// Scrub one panic or log message before it leaves the machine:
+///
+/// 1. home-dir prefixes become `~`;
+/// 2. the quoted string std embeds in slicing panics (`... of `<up to 256 bytes
+///    of the string>``, `when slicing `...``, `it is inside 'é'`) is replaced, since
+///    that string is often prompt or document text;
+/// 3. PII and secrets are replaced by the locked export redactor
+///    (`conversation_history::redaction::redact_text`), which also folds
+///    fullwidth and zero-width obfuscation;
+/// 4. the result is capped at [`MAX_SCRUBBED_MESSAGE_BYTES`].
+fn scrub_message(home: Option<&str>, message: &str) -> String {
+    static SLICED_STRING: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static INSIDE_CHAR: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let sliced = SLICED_STRING.get_or_init(|| {
+        regex::Regex::new(r"(?s)(\bof |\bslicing )`.*`").expect("static slicing-panic regex")
+    });
+    let inside = INSIDE_CHAR
+        .get_or_init(|| regex::Regex::new(r"(\binside )'.'").expect("static char-boundary regex"));
+    let scrubbed = scrub_home(home, message);
+    let scrubbed = sliced.replace_all(&scrubbed, "${1}`[redacted]`");
+    let scrubbed = inside.replace_all(&scrubbed, "${1}'?'");
+    let mut counts = crate::server::conversation_history::redaction::RedactionCounts::default();
+    let mut redacted =
+        crate::server::conversation_history::redaction::redact_text(&scrubbed, &mut counts);
+    if redacted.len() > MAX_SCRUBBED_MESSAGE_BYTES {
+        let mut end = MAX_SCRUBBED_MESSAGE_BYTES;
+        while !redacted.is_char_boundary(end) {
+            end -= 1;
+        }
+        redacted.truncate(end);
+        redacted.push_str(" [truncated]");
+    }
+    redacted
+}
+
+/// Scrub a captured event in place: the exception values (panic messages), the
+/// event message and log entry go through [`scrub_message`], and every
+/// stack-frame `abs_path`/`filename` loses its home-dir prefix. Pure over the
 /// home string so it can be reasoned about; mutates the event the caller forwards.
 fn scrub_event(home: Option<&str>, event: &mut sentry::protocol::Event<'static>) {
+    if let Some(message) = &event.message {
+        event.message = Some(scrub_message(home, message));
+    }
+    if let Some(entry) = &mut event.logentry {
+        entry.message = scrub_message(home, &entry.message);
+        for param in &mut entry.params {
+            let text = match &*param {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            *param = serde_json::Value::String(scrub_message(home, &text));
+        }
+    }
     for exception in &mut event.exception.values {
         if let Some(value) = &exception.value {
-            exception.value = Some(scrub_home(home, value));
+            exception.value = Some(scrub_message(home, value));
         }
         if let Some(stacktrace) = &mut exception.stacktrace {
             for frame in &mut stacktrace.frames {
@@ -163,6 +217,53 @@ mod tests {
         assert_eq!(scrub_home(Some("/home/alice"), "boom"), "boom");
         assert_eq!(scrub_home(None, "/home/alice/x"), "/home/alice/x");
         assert_eq!(scrub_home(Some(""), "/home/alice/x"), "/home/alice/x");
+    }
+
+    #[test]
+    fn scrub_event_strips_pii_secrets_and_sliced_strings_from_panics() {
+        let mut event = sentry::protocol::Event {
+            message: Some("lost contact alice@example.com".to_owned()),
+            ..Default::default()
+        };
+        event.exception.values.push(sentry::protocol::Exception {
+            ty: "panic".to_owned(),
+            value: Some(
+                "byte index 5 is not a char boundary; it is inside 'é' (bytes 4..6) of `secret prompt for alice@example.com` key sk-ant-abcdefghijklmnopqrstuvwxyz0123 in /home/alice/.ryu/x"
+                    .to_owned(),
+            ),
+            ..Default::default()
+        });
+        scrub_event(Some("/home/alice"), &mut event);
+        let value = event.exception.values[0].value.clone().unwrap();
+        for leaked in [
+            "alice@example.com",
+            "sk-ant-abcdefghijklmnopqrstuvwxyz0123",
+            "secret prompt",
+            "'é'",
+            "/home/alice",
+        ] {
+            assert!(!value.contains(leaked), "{leaked} leaked: {value}");
+        }
+        assert!(value.contains("is not a char boundary"), "{value}");
+        assert!(value.contains("~/.ryu/x"), "{value}");
+        let message = event.message.unwrap();
+        assert!(!message.contains("alice@example.com"), "{message}");
+    }
+
+    #[test]
+    fn scrub_message_caps_length_on_a_char_boundary() {
+        let long = "é".repeat(600);
+        let scrubbed = scrub_message(None, &long);
+        assert!(scrubbed.len() <= MAX_SCRUBBED_MESSAGE_BYTES + " [truncated]".len());
+        assert!(scrubbed.ends_with(" [truncated]"));
+    }
+
+    #[test]
+    fn scrub_message_keeps_diagnostic_text() {
+        assert_eq!(
+            scrub_message(None, "called `Option::unwrap()` on a `None` value"),
+            "called `Option::unwrap()` on a `None` value"
+        );
     }
 
     #[test]

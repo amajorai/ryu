@@ -32,7 +32,15 @@ function viewTabId(view: PluginView): string {
 	return `view__${view.plugin}__${view.id}`;
 }
 
-/** Arrow keys, Home and End move between tabs (and select them) in the strip. */
+/** The arrow key that moves to the next tab: the strip mirrors under RTL. */
+function forwardArrowKey(element: Element): "ArrowLeft" | "ArrowRight" {
+	return getComputedStyle(element).direction === "rtl"
+		? "ArrowLeft"
+		: "ArrowRight";
+}
+
+/** Arrow keys, Home and End move between tabs (and select them) in the strip.
+ *  Left/right follow the reading direction, as the tab row mirrors under RTL. */
 function onTabListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 	const tabs = [
 		...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
@@ -41,10 +49,11 @@ function onTabListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 	if (current < 0) {
 		return;
 	}
+	const forward = forwardArrowKey(event.currentTarget);
 	let next: number | null = null;
-	if (event.key === "ArrowRight") {
+	if (event.key === forward) {
 		next = (current + 1) % tabs.length;
-	} else if (event.key === "ArrowLeft") {
+	} else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
 		next = (current - 1 + tabs.length) % tabs.length;
 	} else if (event.key === "Home") {
 		next = 0;

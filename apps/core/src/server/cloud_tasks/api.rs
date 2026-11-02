@@ -570,39 +570,24 @@ async fn prompt_inner(
         match outcome {
             plans::RouteOutcome::Started { record, notices } => {
                 let author = auth.caller.as_ref().map(|caller| caller.user_id.as_str());
-                let reply = match (&record.workspace, &record.branch) {
-                    (Some(_), Some(branch)) => format!(
-                        "Running in {} on your {} plan, on branch {branch}. Follow it in the task panel. This task does not use Ryu credits.",
-                        record.backend.cli_name(),
-                        record.backend.plan_name(),
-                    ),
-                    _ => format!(
-                        "Sent to {} on your {} plan. Follow it at {}. This task does not use Ryu credits.",
-                        record.backend.cli_name(),
-                        record.backend.plan_name(),
-                        record.url.as_deref().unwrap_or("the provider's site"),
-                    ),
-                };
-                for (role, text, by) in [
-                    ("user", request.text.as_str(), author),
-                    ("assistant", reply.as_str(), None),
-                ] {
-                    if state
-                        .conversations
-                        .append_message_as(
-                            conversation_id,
-                            role,
-                            text,
-                            None,
-                            by,
-                            None,
-                            tenancy.clone(),
-                        )
-                        .await
-                        .is_err()
-                    {
-                        tracing::warn!("Cloud task prompt could not be saved to the conversation");
-                    }
+                let reply = plans::chat_event::plan_start_event(&record);
+                let user = state.conversations.append_message_as(
+                    conversation_id,
+                    "user",
+                    &request.text,
+                    None,
+                    author,
+                    None,
+                    tenancy.clone(),
+                );
+                // Both are saved even when one fails, as before.
+                let user_saved = user.await.is_ok();
+                let reply_saved = reply
+                    .append(&state.conversations, conversation_id, None, tenancy.clone())
+                    .await
+                    .is_ok();
+                if !(user_saved && reply_saved) {
+                    tracing::warn!("Cloud task prompt could not be saved to the conversation");
                 }
                 return Ok(PromptAccepted {
                     run: PromptRunAccepted {
@@ -1009,15 +994,11 @@ async fn finish_inner(
     }
     drop(guard);
     box_arm::remember_finish(&owner, conversation_id, &summary);
-    if state
-        .conversations
-        .append_message_as(
+    if box_arm::finish_event(&summary)
+        .append(
+            &state.conversations,
             conversation_id,
-            "assistant",
-            &box_arm::finish_message(&summary),
             Some(&format!("cloud:{executor}")),
-            None,
-            None,
             crate::server::caller_tenancy(&auth.caller),
         )
         .await

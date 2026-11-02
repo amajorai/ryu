@@ -305,7 +305,7 @@ export default function Header({
 								</div>
 							) : null}
 							{portalUtilityMenu ? (
-								<div className="ml-auto flex items-center gap-1.5">
+								<div className="ms-auto flex items-center gap-1.5">
 									{portalUtilityMenu}
 								</div>
 							) : null}
@@ -323,7 +323,10 @@ export default function Header({
 									data-cuelume-hover="tick"
 									href="/console"
 								>
-									<ArrowLeft aria-hidden="true" className="size-4" />
+									<ArrowLeft
+										aria-hidden="true"
+										className="size-4 rtl:-scale-x-100"
+									/>
 									<span>{localizedConsole}</span>
 								</Link>
 								<div className="min-w-0 flex-1 overflow-x-auto">
@@ -338,7 +341,7 @@ export default function Header({
 								>
 									<HeaderLinkList links={links} pathname={pathname} portal />
 								</nav>
-								<div className="ml-auto md:hidden">
+								<div className="ms-auto md:hidden">
 									<PortalMobileNavigation links={links} pathname={pathname} />
 								</div>
 							</div>
@@ -392,7 +395,7 @@ export default function Header({
 								badgeVariants({ variant: "secondary" }),
 								// Glass pill: a translucent fill and hairline over a backdrop blur,
 								// so the hero sky shows through it.
-								"hidden shrink-0 rounded-bl-lg border border-foreground/10 bg-foreground/[0.06] shadow-[inset_0_1px_0_--theme(--color-white/12%)] backdrop-blur-md backdrop-saturate-150 lg:inline-flex dark:bg-white/[0.08]"
+								"hidden shrink-0 rounded-es-lg border border-foreground/10 bg-foreground/[0.06] shadow-[inset_0_1px_0_--theme(--color-white/12%)] backdrop-blur-md backdrop-saturate-150 lg:inline-flex dark:bg-white/[0.08]"
 							)}
 							data-slot="badge"
 						>

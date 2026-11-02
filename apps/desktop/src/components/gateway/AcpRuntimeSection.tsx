@@ -1,4 +1,5 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatByteSize } from "@ryu/i18n/format-intl";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -44,12 +45,17 @@ function acpSettings(config: GatewayAcpConfig): GatewayAcpSettings {
 	};
 }
 
-function formatRam(bytes: number | undefined): string {
+/** "16 GB RAM", with the UI locale's separators and unit names. */
+function formatRam(bytes: number | undefined, tl: LiteralMessage): string {
 	if (!bytes || bytes < 1) {
-		return "RAM unavailable";
+		return tl("RAM unavailable");
 	}
-	const gib = bytes / 1024 ** 3;
-	return `${gib >= 10 ? gib.toFixed(0) : gib.toFixed(1)} GiB RAM`;
+	const size = formatByteSize(bytes, undefined, {
+		fractionDigits: (value) => (value >= 10 ? 0 : 1),
+		minUnit: "gigabyte",
+		maxUnit: "gigabyte",
+	});
+	return tl("{size} RAM", { size });
 }
 
 function runtimeConfig(config: GatewayConfig | undefined): GatewayAcpConfig {
@@ -204,7 +210,7 @@ export function AcpRuntimeSection({
 							<div className="flex items-center gap-2">
 								<Input
 									aria-label="ACP idle timeout in minutes"
-									className="w-20 text-right"
+									className="w-20 text-end"
 									disabled={disabled}
 									id={`${controlId}-acp-idle-timeout`}
 									inputMode="numeric"
@@ -296,7 +302,7 @@ export function AcpRuntimeSection({
 								<span className="text-muted-foreground">
 									{tl("{physicalCores} physical · {ramSummary}", {
 										physicalCores: String(config.hardware.physical_cores),
-										ramSummary: formatRam(config.hardware.total_ram_bytes),
+										ramSummary: formatRam(config.hardware.total_ram_bytes, tl),
 									})}
 								</span>
 							) : null}

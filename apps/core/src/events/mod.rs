@@ -18,6 +18,8 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+mod system_text;
+
 /// A desktop notification request, fanned out to SSE subscribers.
 #[derive(Clone, Debug, Serialize)]
 pub struct DesktopNotification {
@@ -58,20 +60,14 @@ pub fn publish(notification: DesktopNotification) {
 /// Publish a Core-owned system notification to every connected surface.
 ///
 /// This convenience seam keeps server call sites from having to know the
-/// transport-only fields on [`DesktopNotification`].
+/// transport-only fields on [`DesktopNotification`]. Call sites pass English;
+/// a known sentence is rendered in the node's language (see [`system_text`]).
 pub fn publish_system_notification(
     title: impl Into<String>,
     body: impl Into<String>,
     level: impl Into<String>,
 ) {
-    publish(DesktopNotification {
-        title: title.into(),
-        body: Some(body.into()),
-        level: level.into(),
-        target_user_id: None,
-        notification_id: None,
-        source_app_id: None,
-    });
+    publish_system(title.into(), body.into(), level.into(), None);
 }
 
 /// Publish a system notification addressed to one verified user. `None`
@@ -82,13 +78,35 @@ pub fn publish_system_notification_for_user(
     level: impl Into<String>,
     target_user_id: Option<String>,
 ) {
-    publish(DesktopNotification {
-        title: title.into(),
-        body: Some(body.into()),
-        level: level.into(),
-        target_user_id,
+    publish_system(title.into(), body.into(), level.into(), target_user_id);
+}
+
+fn publish_system(title: String, body: String, level: String, target_user_id: Option<String>) {
+    let notification = |title: String, body: String| DesktopNotification {
+        title,
+        body: Some(body),
+        level: level.clone(),
+        target_user_id: target_user_id.clone(),
         notification_id: None,
         source_app_id: None,
+    };
+    // The locale is a preference read, so rendering needs the runtime; outside
+    // one (or for text that is not a known sentence) the English goes out.
+    let runtime = tokio::runtime::Handle::try_current();
+    let (Some(text), Ok(runtime)) = (system_text::localize(&title, &body), runtime) else {
+        publish(notification(title, body));
+        return;
+    };
+    let english = notification(title, body);
+    runtime.spawn(async move {
+        // The OS banner and toast are drawn by this node's desktop, so they
+        // read the node's language, as policy alerts do.
+        let (title, body) = text.render(crate::i18n::locale::node_locale().await);
+        publish(DesktopNotification {
+            title,
+            body: Some(body),
+            ..english
+        });
     });
 }
 

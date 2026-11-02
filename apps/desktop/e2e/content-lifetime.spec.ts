@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 async function hidden(page: import("@playwright/test").Page, value: boolean) {
 	await page.evaluate((value) => {
@@ -60,10 +60,7 @@ test("content entrypoint pauses work, disposes resources and restarts cleanly", 
 		.getByRole("button", { name: "Resolve answer", exact: true })
 		.click();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/content-lifetime-completed.png"
-		),
+		path: proofEvidencePath("performance-sweep/content-lifetime-completed.png"),
 		fullPage: true,
 		animations: "disabled",
 	});

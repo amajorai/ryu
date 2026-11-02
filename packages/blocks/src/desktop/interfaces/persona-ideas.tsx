@@ -64,14 +64,17 @@ export function PersonaIdeas({
 										<button
 											aria-pressed={selected}
 											className={cn(
-												"group/idea flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+												"group/idea flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
 												selected ? "bg-accent" : "hover:bg-muted"
 											)}
 											data-persona-idea={idea.id}
 											onClick={() => onPick(idea.prompt)}
 											type="button"
 										>
-											<span className="min-w-0 flex-1 text-sm">
+											<span
+												className="min-w-0 flex-1 text-sm"
+												data-ryu-i18n="off"
+											>
 												{idea.prompt}
 											</span>
 											<span className="relative flex h-5 min-w-4 shrink-0 items-center justify-end">
@@ -92,7 +95,7 @@ export function PersonaIdeas({
 												<CornerDownLeft
 													aria-hidden="true"
 													className={cn(
-														"absolute right-0 size-4 text-muted-foreground transition-opacity",
+														"absolute end-0 size-4 text-muted-foreground transition-opacity",
 														selected
 															? "opacity-100"
 															: "opacity-0 group-hover/idea:opacity-100 group-focus-visible/idea:opacity-100"

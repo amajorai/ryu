@@ -5,7 +5,8 @@
 // The contract under test:
 //   • one binary switch between Ryu Work and Code, with Ryu Work as the default
 //     an untouched install lands on;
-//   • Code uses the Google gradient animation shared with decosmicweb;
+//   • Code is the plain checked switch: the Ryu Quiet direction keeps one accent
+//     and no decorative motion, so it carries no animated gradient;
 //   • clicking the switch keeps the account menu open and writes the prefs it implies
 //     (hidden compact detail at Ryu Work, full detail and run stats in Code).
 
@@ -122,24 +123,28 @@ test("switching modes writes the prefs each mode implies", async ({ page }) => {
 	await expect(page.getByTestId("ryu:sidebar-mode")).toHaveText("agent");
 });
 
-test("Code uses the animated Google gradient", async ({ page }) => {
+test("Code is the plain checked switch with no animated decoration", async ({
+	page,
+}) => {
 	await openModePicker(page);
 	const toggle = page.getByRole("switch", { name: "Interface mode" });
+	const paint = () =>
+		toggle.evaluate((element) => {
+			const computed = getComputedStyle(element);
+			return {
+				animationName: computed.animationName,
+				backgroundColor: computed.backgroundColor,
+				backgroundImage: computed.backgroundImage,
+			};
+		});
+	const workPaint = await paint();
 	await toggle.click();
+	await expect(toggle).toHaveAttribute("aria-checked", "true");
+	await expect(toggle).toHaveAttribute("data-checked", "");
 
-	const styles = await toggle.evaluate((element) => {
-		const computed = getComputedStyle(element);
-		return {
-			animationDuration: computed.animationDuration,
-			animationName: computed.animationName,
-			backgroundImage: computed.backgroundImage,
-			backgroundSize: computed.backgroundSize,
-		};
-	});
-	await expect(styles.backgroundImage).toContain("linear-gradient");
-	await expect(styles.backgroundImage).toMatch(/#db4437|rgb\(219, 68, 55\)/i);
-	await expect(styles.backgroundImage).toMatch(/#4285f4|rgb\(66, 133, 244\)/i);
-	await expect(styles.backgroundSize).toBe("300% 100%");
-	await expect(styles.animationName).toBe("ryu-interface-mode-gradient");
-	await expect(styles.animationDuration).toBe("3s");
+	const codePaint = await paint();
+	// The checked state still reads at a glance: its track colour changes.
+	expect(codePaint.backgroundColor).not.toBe(workPaint.backgroundColor);
+	expect(codePaint.backgroundImage).toBe("none");
+	expect(codePaint.animationName).toBe("none");
 });

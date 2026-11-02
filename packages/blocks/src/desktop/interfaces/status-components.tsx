@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronRight } from "lucide-react";
@@ -52,6 +53,7 @@ function ComponentRow({
 			<div className="flex min-w-0 items-baseline justify-between gap-4">
 				<h3
 					className="min-w-0 truncate font-medium text-foreground text-sm"
+					data-ryu-i18n="off"
 					title={component.agent.description || undefined}
 				>
 					{component.agent.name}
@@ -92,11 +94,14 @@ function GroupBlock({
 							!collapsed && "rotate-90"
 						)}
 					/>
-					<span className="min-w-0 truncate font-medium text-foreground text-sm">
+					<span
+						className="min-w-0 truncate font-medium text-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{section.group.name}
 					</span>
 					<span className="shrink-0 text-muted-foreground text-sm">
-						{count} {count === 1 ? "agent" : "agents"}
+						{tr("{count, plural, one {# agent} other {# agents}}", { count })}
 					</span>
 					<span className="ms-auto" />
 					<StateLabel state={section.state} />

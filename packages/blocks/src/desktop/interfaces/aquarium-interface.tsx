@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import { AnimatePresence } from "motion/react";
@@ -167,7 +168,9 @@ export function AquariumInterface({
 		}
 		focusHeading.current = true;
 		setSelection({ agentId, kind: "agent" });
-		setAnnouncement(creature ? `${creature.name} selected` : "");
+		setAnnouncement(
+			creature ? tr("{name} selected", { name: creature.name }) : ""
+		);
 	};
 	const openThread = (threadId: string) => {
 		focusHeading.current = true;

@@ -91,7 +91,7 @@ export function IslandChatView({
 			) : null}
 
 			{!transcript && hasHistory ? (
-				<div className="relative z-10 min-h-0 flex-1 overflow-y-auto pr-1">
+				<div className="relative z-10 min-h-0 flex-1 overflow-y-auto pe-1">
 					<MessageList messages={messages} />
 				</div>
 			) : null}

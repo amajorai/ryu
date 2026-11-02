@@ -143,7 +143,7 @@ export function TriggerEditor({
 				size="sm"
 				variant="outline"
 			>
-				<HugeiconsIcon className="mr-1 size-4" icon={Clock01Icon} />
+				<HugeiconsIcon className="me-1 size-4" icon={Clock01Icon} />
 				Queue it
 			</Button>
 		</div>
@@ -182,7 +182,10 @@ export function DraftCard({
 			const agentName =
 				agents.find((agent) => agent.id === trigger.agent_id)?.name ??
 				trigger.agent_id;
-			return `Waiting for ${agentName} to drop under ${trigger.below_percent}% used`;
+			return tl("Waiting for {agentName} to drop under {below_percent}% used", {
+				agentName,
+				below_percent: String(trigger.below_percent),
+			});
 		}
 		return draft.waiting_for;
 	})();
@@ -207,7 +210,7 @@ export function DraftCard({
 						{waitingFor}
 					</span>
 				)}
-				<span className="ml-auto shrink-0 text-muted-foreground/70 text-xs tabular-nums">
+				<span className="ms-auto shrink-0 text-muted-foreground/70 text-xs tabular-nums">
 					{compactAge(draft.updated_at)}
 				</span>
 			</div>
@@ -242,7 +245,7 @@ export function DraftCard({
 					aria-label={tl("Delete draft: {preview}", {
 						preview: draft.preview,
 					})}
-					className="ml-auto"
+					className="ms-auto"
 					onClick={() => onDelete(draft.id)}
 					size="sm"
 					variant="ghost"

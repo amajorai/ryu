@@ -15,7 +15,7 @@ import { z } from "zod";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 
 type AccessLevel = "risk_based" | "read_only" | "write" | "full";
 
@@ -339,7 +339,7 @@ export function ConnectionsPanel({
 				<box flexDirection="column" gap={0}>
 					<text fg={theme.colors.mutedForeground}>
 						{tf("New connection access: {accessLevel} · press v to change", {
-							accessLevel: ACCESS_LABELS[accessLevel],
+							accessLevel: tr(ACCESS_LABELS[accessLevel]),
 						})}
 					</text>
 					<text fg={theme.colors.mutedForeground}>

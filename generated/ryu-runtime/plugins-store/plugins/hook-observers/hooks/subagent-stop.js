@@ -3,15 +3,21 @@
 // host.sideModel / host.storage / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 return {
 	kind: "note",
-	text:
-		"subagent " +
-		((ctx.event && ctx.event.id) || "?") +
-		" finished: " +
-		(ctx.output || "").slice(0, 60),
+	text: await host.t("subagent {id} finished: {output}", {
+		id: (ctx.event && ctx.event.id) || "?",
+		output: (ctx.output || "").slice(0, 60),
+	}),
 };

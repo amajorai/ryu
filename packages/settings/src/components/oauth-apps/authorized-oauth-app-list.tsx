@@ -1,8 +1,8 @@
 import { AppWindowIcon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { formatDistanceToNow } from "date-fns";
 import type { OAuthApp } from "../../utils/api-client.ts";
 import {
 	SETTINGS_ROW_REVEAL_CLASS,
@@ -27,6 +27,7 @@ export function AuthorizedOAuthAppList({
 	onStartRevoke: (clientId: string) => void;
 }) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale ?? activeLocale();
 	if (apps.length === 0) {
 		return (
 			<p className="py-3 text-muted-foreground text-sm">No authorized apps.</p>
@@ -85,9 +86,7 @@ export function AuthorizedOAuthAppList({
 						}
 						description={tl("{scopeList} · Authorized {relativeTime}", {
 							scopeList: scopeList || tl("No scopes"),
-							relativeTime: formatDistanceToNow(new Date(app.grantedAt), {
-								addSuffix: true,
-							}),
+							relativeTime: formatRelativeTime(locale, new Date(app.grantedAt)),
 						})}
 						key={app.clientId}
 						title={

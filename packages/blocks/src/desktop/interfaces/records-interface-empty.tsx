@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -8,7 +9,7 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
-import { RECORDS_OBJECT_LABELS, type RecordsObject } from "./records-model.ts";
+import { type RecordsObject, recordsObjectLabels } from "./records-model.ts";
 import { RECORDS_OBJECT_ICONS } from "./records-nav.tsx";
 
 /** The state shown when an object has no records at all. */
@@ -20,7 +21,7 @@ export function RecordsEmptyState({
 	resetTo: (nextObject: RecordsObject) => void;
 }) {
 	const tl = useLiteralMessages();
-	const labels = RECORDS_OBJECT_LABELS[object];
+	const labels = recordsObjectLabels(object);
 	const Icon = RECORDS_OBJECT_ICONS[object];
 	return (
 		<Empty className="h-full" data-testid="records-empty">
@@ -29,7 +30,7 @@ export function RecordsEmptyState({
 					<Icon aria-hidden="true" />
 				</EmptyMedia>
 				<EmptyTitle className="text-sm">
-					{tl("No {plural} yet", { plural: labels.plural.toLowerCase() })}
+					{tl("No {plural} yet", { plural: sentenceLabel(tl, labels.plural) })}
 				</EmptyTitle>
 				<EmptyDescription className="text-[13px]">
 					{object === "agents"
@@ -69,12 +70,14 @@ export function RecordsNoMatchState({
 	query: string;
 }) {
 	const tl = useLiteralMessages();
-	const labels = RECORDS_OBJECT_LABELS[object];
+	const labels = recordsObjectLabels(object);
 	return (
 		<Empty className="h-full" data-testid="records-no-match">
 			<EmptyHeader>
 				<EmptyTitle className="text-sm">
-					{tl("No {plural} match", { plural: labels.plural.toLowerCase() })}
+					{tl("No {plural} match", {
+						plural: sentenceLabel(tl, labels.plural),
+					})}
 				</EmptyTitle>
 				<EmptyDescription className="text-[13px]">
 					{query

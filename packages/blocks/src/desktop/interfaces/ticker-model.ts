@@ -1,4 +1,10 @@
 import {
+	activeLocale,
+	isEnglishLocale,
+	relativeTimeFormatter,
+	translate as tr,
+} from "@ryu/i18n/lite";
+import {
 	type InterfaceEvent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
@@ -46,8 +52,8 @@ export {
 	formatPrice,
 	formatShortDay,
 	formatWeekdayClock,
-	plural,
 	spokenAge,
+	tickerRangeName,
 } from "./ticker-model-format.ts";
 export {
 	activitySeries,
@@ -287,7 +293,7 @@ export function tapeItems(
 				role: thread.lastMessageRole,
 				symbol: agentId ? (symbols.get(agentId) ?? null) : null,
 				threadId: thread.id,
-				title: thread.title.trim() || "Untitled thread",
+				title: thread.title.trim() || tr("Untitled thread"),
 				updatedAt: thread.updatedAt,
 			};
 		});
@@ -345,20 +351,38 @@ const MINUTE_MS = 60_000;
 const HOUR_MINUTES = 60;
 const DAY_HOURS = 24;
 
-/** "in 5m", "in 3h", "in 2d" (rounded down; "now" under a minute). */
-export function countdown(iso: string, now: number): string {
+/**
+ * "in 5m", "in 3h", "in 2d" (rounded down; "now" under a minute). English keeps
+ * the compact form; other locales use their narrow relative-time phrasing.
+ */
+export function countdown(
+	iso: string,
+	now: number,
+	locale: string = activeLocale()
+): string {
 	const minutes = Math.floor((Date.parse(iso) - now) / MINUTE_MS);
+	const english = isEnglishLocale(locale);
 	if (Number.isNaN(minutes) || minutes < 1) {
-		return "now";
+		return english
+			? "now"
+			: relativeTimeFormatter(locale, "narrow").format(0, "second");
 	}
+	const [value, unit] = countdownUnit(minutes);
+	if (english) {
+		return `in ${value}${unit.charAt(0)}`;
+	}
+	return relativeTimeFormatter(locale, "narrow", "always").format(value, unit);
+}
+
+function countdownUnit(minutes: number): [number, "day" | "hour" | "minute"] {
 	if (minutes < HOUR_MINUTES) {
-		return `in ${minutes}m`;
+		return [minutes, "minute"];
 	}
 	const hours = Math.floor(minutes / HOUR_MINUTES);
 	if (hours < DAY_HOURS) {
-		return `in ${hours}h`;
+		return [hours, "hour"];
 	}
-	return `in ${Math.floor(hours / DAY_HOURS)}d`;
+	return [Math.floor(hours / DAY_HOURS), "day"];
 }
 
 /** The agent's thread that most wants opening: live, failed, your turn, newest. */

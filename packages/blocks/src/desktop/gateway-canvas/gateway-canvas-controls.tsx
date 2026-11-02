@@ -1,10 +1,12 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
 import { Panel, useReactFlow } from "@xyflow/react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { formatDecimal } from "../agent-elements/locale-format.ts";
 import {
 	type CanvasView,
 	FIT_VIEW_OPTIONS,
@@ -14,6 +16,7 @@ import {
 } from "./gateway-canvas-constants.ts";
 import type { CanvasLiveStore } from "./live-store.ts";
 import { type CanvasFeedState, formatCount } from "./model.ts";
+import { requestsPhrase } from "./nodes.tsx";
 
 const FEED_LABEL: Record<CanvasFeedState["status"], string> = {
 	aggregated: "Per-minute totals",
@@ -36,16 +39,21 @@ export function FeedStatus({
 		store.totals,
 		store.totals
 	);
+	const tl = useLiteralMessages();
 	const live = feed.status === "live";
-	const parts = [feed.message ?? FEED_LABEL[feed.status]];
+	const parts = [feed.message ?? tl(FEED_LABEL[feed.status])];
 	if (live || totals.requests > 0) {
 		if (live) {
-			parts.push(
-				`${totals.perSecond.toFixed(totals.perSecond < 10 ? 1 : 0)}/s`
+			const rate = formatDecimal(
+				totals.perSecond,
+				totals.perSecond < 10 ? 1 : 0
 			);
+			parts.push(tl("{rate}/s", { rate }));
 		}
-		parts.push(`${formatCount(totals.requests)} requests`);
-		parts.push(`${formatCount(totals.blocked)} blocked`);
+		parts.push(requestsPhrase(tl, totals.requests));
+		parts.push(
+			tl("{blocked} blocked", { blocked: formatCount(totals.blocked) })
+		);
 	}
 	return (
 		<p

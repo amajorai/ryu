@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Card,
@@ -18,10 +18,24 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
+import { formatCurrency } from "@ryu/ui/lib/number-format.ts";
 import { Cloud, Cpu, Server } from "lucide-react";
 import { usePricingCtaVariant } from "./pricing-appearance.tsx";
 import { noop } from "./pricing-plan-prices.ts";
 import { SubscriptionAgreement } from "./subscription-agreement.tsx";
+
+/** Whole-dollar prices read "$5"; others keep their cents ("$4.50"). */
+const MONTHLY_USD: Intl.NumberFormatOptions = {
+	maximumFractionDigits: 2,
+	minimumFractionDigits: 2,
+	trailingZeroDisplay: "stripIfInteger",
+};
+
+/** The monthly price as text, in the UI language's currency form. The
+ *  animated ticker keeps the raw number; only this label is localized. */
+function monthlyUsdLabel(monthlyUsd: number): string {
+	return formatCurrency(monthlyUsd, "USD", MONTHLY_USD);
+}
 
 /**
  * A single selectable Ryu Cloud instance, priced from the LIVE Hetzner catalog
@@ -86,6 +100,7 @@ export function PricingInstancePicker({
 	onSelectInstance?: (type: string) => void;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const ctaVariant = usePricingCtaVariant();
 	if (instances.length === 0) {
 		return null;
@@ -175,27 +190,39 @@ export function PricingInstancePicker({
 								{isIncluded ? (
 									<div className="mb-6 flex items-baseline">
 										<span className="font-medium text-4xl">Included</span>
-										<span className="ml-2 text-muted-foreground">
+										<span className="ms-2 text-muted-foreground">
 											with your plan
 										</span>
 									</div>
 								) : (
 									<div className="mb-6 flex items-baseline">
-										<NumberTicker
-											prefix="$"
-											value={instance.monthlyUsd}
-											variant="plan-price"
-										/>
-										<span className="ml-1 text-muted-foreground">/mo</span>
+										{tlRich(
+											"<amount>{price}</amount><suffix>/mo</suffix>",
+											{ price: monthlyUsdLabel(instance.monthlyUsd) },
+											{
+												amount: () => (
+													<NumberTicker
+														prefix="$"
+														value={instance.monthlyUsd}
+														variant="plan-price"
+													/>
+												),
+												suffix: (content) => (
+													<span className="ms-1 text-muted-foreground">
+														{content}
+													</span>
+												),
+											}
+										)}
 									</div>
 								)}
 								<ul className="space-y-3">
 									<li className="flex items-center">
-										<Cpu className="mr-2 size-4" />
+										<Cpu className="me-2 size-4" />
 										<span>{instance.cores} vCPU</span>
 									</li>
 									<li className="flex items-center">
-										<Server className="mr-2 size-4" />
+										<Server className="me-2 size-4" />
 										<span>
 											{tl("{memoryGb} GB RAM", {
 												memoryGb: String(instance.memoryGb),
@@ -203,7 +230,7 @@ export function PricingInstancePicker({
 										</span>
 									</li>
 									<li className="flex items-center">
-										<Cloud className="mr-2 size-4" />
+										<Cloud className="me-2 size-4" />
 										<span>
 											{tl("{diskGb} GB SSD", {
 												diskGb: String(instance.diskGb),
@@ -223,7 +250,7 @@ export function PricingInstancePicker({
 										offerKey={`${location}:${instance.type}:${instance.monthlyUsd}`}
 										terms={tl(
 											"Renews automatically at {price} every month, plus applicable taxes, until canceled.",
-											{ price: `US$${instance.monthlyUsd}` }
+											{ price: monthlyUsdLabel(instance.monthlyUsd) }
 										)}
 									>
 										{(canContinue) => (

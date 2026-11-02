@@ -12,6 +12,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { type KeyboardEvent, useMemo, useRef, useState } from "react";
 import { route, type SmartIntent } from "./smart-bar-engine.ts";
@@ -47,7 +48,11 @@ function DestinationPill({
 				active ? "bg-muted text-foreground" : "text-muted-foreground"
 			)}
 		>
-			<HugeiconsIcon icon={INTENT_ICON[intent.kind]} size={14} />
+			<HugeiconsIcon
+				className={intent.kind === "bang" ? DIRECTIONAL_ICON_CLASS : undefined}
+				icon={INTENT_ICON[intent.kind]}
+				size={14}
+			/>
 			{intent.label}
 		</span>
 	);
@@ -196,7 +201,10 @@ export function SmartBar({
 				}
 			>
 				<HugeiconsIcon
-					className="shrink-0 text-muted-foreground"
+					className={cn(
+						"shrink-0 text-muted-foreground",
+						active.kind === "bang" && DIRECTIONAL_ICON_CLASS
+					)}
 					icon={INTENT_ICON[active.kind]}
 					size={16}
 				/>
@@ -239,7 +247,7 @@ export function SmartBar({
 						<button
 							aria-selected={index === activeSuggestionIndex}
 							className={cn(
-								"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm",
+								"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-sm",
 								index === activeSuggestionIndex && "bg-accent"
 							)}
 							id={`${suggestionsId}-${index}`}
@@ -270,7 +278,7 @@ export function SmartBar({
 							key={`${intent.kind}-${intent.label}`}
 						/>
 					))}
-					<span className="ml-auto text-muted-foreground/70 text-xs">
+					<span className="ms-auto text-muted-foreground/70 text-xs">
 						Tab to switch
 					</span>
 				</div>

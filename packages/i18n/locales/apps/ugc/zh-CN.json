@@ -1,0 +1,11 @@
+{
+  "New submission to review": "有新的提交待审核",
+  "Ryu's managed Composio provider is not configured for this node — record metrics manually": "此节点未配置 Ryu 托管的 Composio 提供方——请手动记录指标",
+  "Submitted by {creator} on {platform}": "由 {creator} 在 {platform} 上提交",
+  "approve this payout before marking it paid": "请先批准此付款，再将其标记为已支付",
+  "curated action '{slug}' is not a safe action slug": "精选操作“{slug}”不是安全的操作标识",
+  "no Composio metric source is curated for platform '{platform}' — record metrics manually": "没有为平台“{platform}”精选的 Composio 指标来源 — 请手动记录指标",
+  "this payout has already been paid": "此笔付款已支付",
+  "this post has already been submitted to this campaign": "此帖子已提交到该活动",
+  "this submission's payout is already paid; deleting it would corrupt the campaign's spend": "此提交的付款已支付；删除它会导致活动支出数据错误"
+}

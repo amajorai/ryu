@@ -102,9 +102,13 @@ describe("Electron updater install wiring", () => {
 		expect(run.settled).toBe(true);
 		const installs = run.calls.filter((call) => call[0] === "quitAndInstall");
 		expect(installs).toEqual([["quitAndInstall", true, true]]);
-		// The launch check auto-downloads, and the install decision re-read the
-		// shared preference from Core with the node credential.
-		expect(run.calls).toContainEqual(["checkForUpdatesAndNotify", true]);
+		// The launch check auto-downloads without electron-updater's built-in
+		// English OS notification, and the install decision re-read the shared
+		// preference from Core with the node credential.
+		expect(run.calls).toContainEqual(["checkForUpdates", true]);
+		expect(
+			run.calls.filter((call) => call[0] === "checkForUpdatesAndNotify")
+		).toEqual([]);
 		expect(run.reads).toEqual([authorizedRead, authorizedRead]);
 		expect(run.sent).toEqual([
 			[
@@ -123,10 +127,9 @@ describe("Electron updater install wiring", () => {
 		).toEqual([]);
 		// Disabled: the launch check only surfaces availability.
 		expect(run.beforeControl).toContainEqual(["checkForUpdates", false]);
-		expect(run.beforeControl).not.toContainEqual([
-			"checkForUpdatesAndNotify",
-			true,
-		]);
+		expect(
+			run.calls.filter((call) => call[0] === "checkForUpdatesAndNotify")
+		).toEqual([]);
 		// Positive control in the same runtime: once the preference allows it, the
 		// next download installs exactly once (the refused one never fires late).
 		expect(run.calls.filter((call) => call[0] === "quitAndInstall")).toEqual([

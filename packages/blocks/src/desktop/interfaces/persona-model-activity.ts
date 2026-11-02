@@ -1,3 +1,4 @@
+import { activeLocale, relativeTimeFormatter } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceEvent,
@@ -8,7 +9,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 import { byRecency, statusRank } from "./persona-model-order.ts";
 import { dayLabel } from "./persona-model-time.ts";
 
@@ -150,11 +151,12 @@ export function personaActivity(
 	};
 }
 
-/** "in 45m", "in 3h", "in 2d" for an upcoming run. */
+/** "in 45m", "in 3h", "in 2d" for an upcoming run, in the UI locale. */
 export function untilLabel(
 	iso: string,
 	tl: LiteralMessage,
-	now: number = Date.now()
+	now: number = Date.now(),
+	locale: string = activeLocale()
 ): string {
 	const minutes = Math.round((Date.parse(iso) - now) / 60_000);
 	if (Number.isNaN(minutes)) {
@@ -163,26 +165,18 @@ export function untilLabel(
 	if (minutes < 1) {
 		return tl("now");
 	}
+	const format = relativeTimeFormatter(locale, "narrow", "always");
 	if (minutes < 60) {
-		return tl("in {minutes}m", { minutes });
+		return format.format(minutes, "minute");
 	}
 	const hours = Math.round(minutes / 60);
 	if (hours < 48) {
-		return tl("in {hours}h", { hours });
+		return format.format(hours, "hour");
 	}
-	return tl("in {days}d", { days: String(Math.round(hours / 24)) });
+	return format.format(Math.round(hours / 24), "day");
 }
 
-/** "just now", "5m ago", "3h ago". */
+/** "now", "5m ago", "3h ago", in the UI locale. */
 export function agoLabel(iso: string, now: number = Date.now()): string {
-	const age = compactAge(iso, now);
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "just now" : `${age} ago`;
-}
-
-/** Singular/plural count ("1 message", "4 messages"). */
-export function countLabel(count: number, noun: string): string {
-	return `${count} ${count === 1 ? noun : `${noun}s`}`;
+	return relativeAge(iso, now);
 }

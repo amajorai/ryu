@@ -144,7 +144,7 @@
           "source_id": "conv_9f2c1ab4",
           "kind": "agent",
           "attempts": 2,
-          "note": "It failed after 2 auto-fix attempt(s). Review it manually."
+          "note": "Auto-fix attempts used: 2. Review it manually."
         }
       }
     ]

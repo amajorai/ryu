@@ -6,9 +6,9 @@ import {
 	type TroubleshootCheck,
 } from "@ryuhq/core-client/troubleshoot";
 import { z } from "zod";
+import { formatCliBytes } from "../i18n/format.ts";
 import {
 	CORE_TIMEOUT_MS,
-	GIB,
 	INSTALL_PS1,
 	INSTALL_SH,
 	MAX_LOG_LINE_CHARS,
@@ -137,8 +137,13 @@ export async function probeCore<T>(
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
 
+/** A size in GB with one decimal, in the CLI's number format (`2.1 GB`, `2,1 GB`). */
 export function gib(bytes: number): string {
-	return `${(bytes / GIB).toFixed(1)} GB`;
+	return formatCliBytes(bytes, {
+		fractionDigits: 1,
+		maxUnit: "gigabyte",
+		minUnit: "gigabyte",
+	});
 }
 
 export function majorMinor(version: string): string {

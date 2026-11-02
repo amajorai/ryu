@@ -3,6 +3,7 @@
 import { useDraggable } from "@platejs/dnd";
 import { Image, ImagePlugin, useMediaState } from "@platejs/media/react";
 import { ResizableProvider, useResizableValue } from "@platejs/resizable";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	isNativeNumber,
 	isNativeText,
@@ -30,6 +31,7 @@ export const ImageElement = withHOC(
 	function ImageElement(props: PlateElementProps<TImageElement>) {
 		const { align = "center", focused, readOnly, selected } = useMediaState();
 		const width = useResizableValue("width");
+		const tl = useLiteralMessages();
 
 		const { isDragging, handleRef } = useDraggable({
 			element: props.element,
@@ -88,7 +90,7 @@ export const ImageElement = withHOC(
 								onFocus={(e) => {
 									e.preventDefault();
 								}}
-								placeholder="Write a caption…"
+								placeholder={tl("Write a caption…")}
 								readOnly={readOnly}
 							/>
 						</Caption>

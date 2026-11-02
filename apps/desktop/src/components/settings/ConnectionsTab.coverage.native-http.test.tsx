@@ -345,7 +345,7 @@ async function openRemoteDialog() {
 function remoteFields() {
 	const dialog = remoteDialog();
 	return {
-		name: byPlaceholder("Build server", dialog),
+		name: byPlaceholder("build-server", dialog),
 		submit: button("Add remote", dialog),
 		token: byPlaceholder("Paste a node token when required", dialog),
 		url: byPlaceholder("https://server.example.com:7980", dialog),
@@ -379,7 +379,7 @@ function sshFields() {
 			dialog.querySelector<HTMLInputElement>(
 				'[placeholder="~/.ssh/id_ed25519"]'
 			),
-		name: byPlaceholder("Build server", dialog),
+		name: byPlaceholder("build-server", dialog),
 		port: byPlaceholder("22", dialog),
 		save: button("Save connection", dialog),
 		username: byPlaceholder("Optional", dialog),
@@ -572,7 +572,7 @@ test("a signed-in free plan refuses a second remote node before any native write
 	await openTab("Control other devices", "Remote nodes");
 	await openRemoteDialog();
 	const fields = remoteFields();
-	await typeInto(fields.name, "Second remote");
+	await typeInto(fields.name, "second-remote");
 	await typeInto(fields.url, "https://second.example.test:7980");
 	await click(remoteFields().submit);
 	await settle(
@@ -589,7 +589,7 @@ test("a signed-in free plan refuses a second remote node before any native write
 		"local",
 		"First remote",
 	]);
-	expect(remoteFields().name.value).toBe("Second remote");
+	expect(remoteFields().name.value).toBe("second-remote");
 });
 
 test("SSH fields validate host, port and identity file before anything is stored", async () => {

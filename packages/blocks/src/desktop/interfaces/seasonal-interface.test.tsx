@@ -1023,7 +1023,7 @@ describe("Seasonal useful state", () => {
 			return found;
 		};
 		const copy = SEASON_COPY.advent;
-		expect(doorLabel(doorOf(t.bo), copy)).toEndWith(", needs you");
+		expect(doorLabel(doorOf(t.bo), copy)).toEndWith(", Needs you");
 		expect(doorLabel(doorOf(t.di), copy)).toEndWith(", stopped: Tests failed");
 		expect(doorLabel(doorOf(t.cy), copy)).toEndWith(", working");
 		expect(doorLabel(doorOf(t.gu), copy)).toEndWith(", answer ready");

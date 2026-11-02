@@ -15,7 +15,7 @@ import {
 	it,
 	setSystemTime,
 } from "bun:test";
-import { compactAge } from "./time.ts";
+import { compactAge, compactAgo, presenceAgo } from "./time.ts";
 
 const NOW = new Date("2026-01-15T12:00:00.000Z").getTime();
 const SEC = 1000;
@@ -67,5 +67,45 @@ describe("compactAge", () => {
 	it("switches to years at 365d", () => {
 		expect(ago(365 * DAY)).toBe("1y");
 		expect(ago(2 * 365 * DAY)).toBe("2y");
+	});
+});
+
+describe("compactAge in other UI languages", () => {
+	it("uses the locale's own units instead of Latin suffixes", () => {
+		expect(compactAge(NOW - 5 * MIN, "ja")).toBe("5分");
+		expect(compactAge(NOW - 3 * HOUR, "ja")).toBe("3時間");
+		expect(compactAge(NOW - 5 * MIN, "ru")).toBe("5 мин");
+		expect(compactAge(NOW - 5 * MIN, "ar")).not.toMatch(/[a-z]/u);
+	});
+
+	it("says the locale's word for now, not the English literal", () => {
+		expect(compactAge(NOW, "ja")).toBe("今");
+		expect(compactAge(NOW, "ru")).toBe("сейчас");
+		expect(compactAge(NOW, "ar")).toBe("الآن");
+	});
+});
+
+describe("compactAgo", () => {
+	it("keeps the English compact phrase", () => {
+		expect(compactAgo(NOW, "en")).toBe("just now");
+		expect(compactAgo(NOW - 5 * MIN, "en")).toBe("5m ago");
+		expect(compactAgo(NOW - 30 * DAY, "en")).toBe("1mo ago");
+	});
+
+	it("uses the locale's relative phrase elsewhere", () => {
+		expect(compactAgo(NOW - 5 * MIN, "ja")).toBe("5 分前");
+		expect(compactAgo(NOW - 5 * MIN, "ru")).toBe("5 мин. назад");
+		expect(compactAgo(NOW - 3 * HOUR, "ar")).toBe("قبل 3 ساعات");
+		expect(compactAgo(NOW, "ja")).toBe("今");
+	});
+});
+
+describe("presenceAgo", () => {
+	it("counts seconds before falling back to compactAgo", () => {
+		expect(presenceAgo(NOW - 5 * SEC, "en")).toBe("now");
+		expect(presenceAgo(NOW - 12 * SEC, "en")).toBe("12s ago");
+		expect(presenceAgo(NOW - 5 * MIN, "en")).toBe("5m ago");
+		expect(presenceAgo(NOW - 12 * SEC, "ja")).toBe("12 秒前");
+		expect(presenceAgo(NOW - 5 * SEC, "ja")).toBe("今");
 	});
 });

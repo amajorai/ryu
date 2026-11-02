@@ -6,7 +6,8 @@
 //!   `builtin` evaluator runs the exact patterns the firewall enforces.
 //! * [`custom_regex_match`] runs a user-authored regex evaluator's patterns
 //!   with a compile-size ceiling and a small compiled-pattern cache, so custom
-//!   regex evaluators execute inline instead of being skipped.
+//!   regex evaluators execute inline instead of being skipped. Like the
+//!   firewall, it also scans the Unicode-normalized view of the text.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -101,12 +102,22 @@ fn compile_cached(pattern: &str) -> Option<Regex> {
     compiled
 }
 
-/// First pattern in `patterns` that matches `text`. Invalid or oversized
+/// First pattern in `patterns` that matches `text` or its
+/// [`ryu_gw_firewall::normalize_for_scan`] view, the same folded view the
+/// firewall's curated and custom patterns scan. Zero-width splits, fullwidth
+/// or lookalike characters, dash variants, native-script digits and TAG
+/// characters therefore cannot hide a match; the raw text is still tried so a
+/// pattern written for non-ASCII text keeps matching. Invalid or oversized
 /// patterns are skipped, never fatal.
 pub fn custom_regex_match<'a>(patterns: &'a [String], text: &str) -> Option<&'a str> {
+    let normalized = ryu_gw_firewall::normalize_for_scan(text);
+    let folded = matches!(normalized, std::borrow::Cow::Owned(_)).then_some(normalized.as_ref());
     patterns
         .iter()
-        .find(|pattern| compile_cached(pattern).is_some_and(|re| re.is_match(text)))
+        .find(|pattern| {
+            compile_cached(pattern)
+                .is_some_and(|re| re.is_match(text) || folded.is_some_and(|hay| re.is_match(hay)))
+        })
         .map(String::as_str)
 }
 
@@ -166,5 +177,27 @@ mod tests {
         assert!(validate_custom_patterns(&patterns).is_err());
         assert!(validate_custom_patterns(&patterns[1..]).is_ok());
         assert!(validate_custom_patterns(&["a{1000}{1000}".to_owned()]).is_err());
+    }
+
+    /// Obfuscation the firewall folds cannot hide a custom-pattern match.
+    #[test]
+    fn custom_regex_matches_the_normalized_view() {
+        let patterns = vec![r"\bPROJ-\d{4}\b".to_owned()];
+        for text in [
+            "PROJ\u{200B}-1234",
+            "\u{FF30}\u{FF32}\u{FF2F}\u{FF2A}-\u{FF11}\u{FF12}\u{FF13}\u{FF14}",
+            "PROJ\u{2011}1234",
+            "PROJ-\u{0661}\u{0662}\u{0663}\u{0664}",
+        ] {
+            assert_eq!(
+                custom_regex_match(&patterns, text),
+                Some(r"\bPROJ-\d{4}\b"),
+                "{text}"
+            );
+        }
+        assert_eq!(custom_regex_match(&patterns, "PROJ-12"), None);
+        // A pattern written for non-ASCII text still matches the raw text.
+        let native = vec!["\u{FF30}\u{FF32}\u{FF2F}\u{FF2A}".to_owned()];
+        assert!(custom_regex_match(&native, "\u{FF30}\u{FF32}\u{FF2F}\u{FF2A}").is_some());
     }
 }

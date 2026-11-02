@@ -1,8 +1,9 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
 import { type KeyboardEvent, useState } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import {
-	countLabel,
 	fullDateLabel,
 	type HeatCell,
 	type HeatColumn,
@@ -21,9 +22,10 @@ const HEAT_WEEKDAY_ROWS = new Set([1, 3, 5]);
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
 
 function heatCellLabel(cell: HeatCell): string {
-	return `${fullDateLabel(cell.key)}, ${
-		cell.count === 0 ? "no entries" : countLabel(cell.count, "entry", "entries")
-	}`;
+	return tr(
+		"{day}, {count, plural, =0 {no entries} one {# entry} other {# entries}}",
+		{ count: cell.count, day: fullDateLabel(cell.key) }
+	);
 }
 
 /** Arrow-key steps in days: columns are weeks, rows are weekdays. */
@@ -55,8 +57,9 @@ export function YearHeatmap({
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		const index = keys.indexOf(activeKey);
 		let next = -1;
-		if (event.key in HEAT_STEP) {
-			next = index + (HEAT_STEP[event.key] ?? 0);
+		const arrow = logicalArrowKey(event.key, event.currentTarget);
+		if (arrow in HEAT_STEP) {
+			next = index + (HEAT_STEP[arrow] ?? 0);
 		} else if (event.key === "Home") {
 			next = 0;
 		} else if (event.key === "End") {

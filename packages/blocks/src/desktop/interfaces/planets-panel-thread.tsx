@@ -1,13 +1,10 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceThread,
-	THREAD_STATUS_LABELS,
-	threadStatus,
-} from "@ryuhq/protocol/interfaces";
+import { type InterfaceThread, threadStatus } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft } from "lucide-react";
 import type { ReactNode, Ref } from "react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import type { Planet, PlanetSystem } from "./planets-model.ts";
 import { planetLookIn } from "./planets-palette.ts";
 import { CloseButton, HEADING } from "./planets-panel-parts.tsx";
@@ -83,7 +80,7 @@ export function ThreadPane({
 									)}
 								>
 									<PlanetsStatusDot className="size-1.5" status={status} />
-									{THREAD_STATUS_LABELS[status]}
+									{threadStatusLabel(status)}
 								</span>
 							</>
 						) : null}

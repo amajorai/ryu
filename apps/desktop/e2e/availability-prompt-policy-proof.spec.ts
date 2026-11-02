@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import type { GamingSettings } from "../src/lib/api/presence.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ mode: "serial", timeout: 120_000 });
 
@@ -84,8 +85,9 @@ test.beforeEach(async ({ page }) => {
 
 const STORY_URL = "/availability-prompt-policy-story.html";
 const PROOF_SCREENSHOT = "e2e/artifacts/availability-prompt-policy-proof.png";
-const PRODUCT_PROOF_SCREENSHOT =
-	"../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-availability-controls.png";
+const PRODUCT_PROOF_SCREENSHOT = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence/desktop-availability-controls.png"
+);
 
 async function chooseOption(page: Page, triggerId: string, optionName: string) {
 	const trigger = page.locator(`#${triggerId}`);

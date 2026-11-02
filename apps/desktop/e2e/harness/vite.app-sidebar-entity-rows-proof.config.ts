@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
@@ -6,7 +7,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
 	plugins: [react()],
 	root: import.meta.dirname,
-	cacheDir: "/tmp/ryu-app-sidebar-entity-rows-proof-cache",
+	cacheDir: `${tmpdir()}/ryu-app-sidebar-entity-rows-proof-cache`,
 	css: { postcss: { plugins: [tailwindcss()] } },
 	define: { "process.env": {} },
 	optimizeDeps: {

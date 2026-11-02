@@ -1,8 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { Plus } from "lucide-react";
 import { AnimatePresence, MotionConfig } from "motion/react";
 import {
@@ -17,6 +14,7 @@ import {
 } from "react";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import {
 	SheetGrid,
@@ -284,17 +282,19 @@ export function SheetInterface({
 	const trimmedQuery = query.trim();
 	const total = snapshot.threads.length;
 	const filtered = trimmedQuery !== "" || status !== null;
-	const noun = total === 1 ? "thread" : "threads";
 	const countLabel = filtered
-		? `${rows.length} of ${total} ${noun}`
-		: `${total} ${noun}`;
+		? tl(
+				"{total, plural, one {{shown} of # thread} other {{shown} of # threads}}",
+				{ shown: rows.length, total }
+			)
+		: tl("{total, plural, one {# thread} other {# threads}}", { total });
 	const showEmpty = !loading && rows.length === 0;
 
 	let empty: React.ReactNode = null;
 	if (showEmpty && total === 0) {
 		empty = <span className="text-muted-foreground">No threads yet</span>;
 	} else if (showEmpty) {
-		const statusLabel = status ? THREAD_STATUS_LABELS[status] : "";
+		const statusLabel = status ? threadStatusLabel(status) : "";
 		let message = tl("No threads match “{trimmedQuery}”", { trimmedQuery });
 		let clearLabel = "Clear search";
 		if (status && trimmedQuery) {
@@ -389,7 +389,7 @@ export function SheetInterface({
 								/>
 								{empty ? (
 									<div
-										className="sticky left-0 flex h-8 w-full items-center gap-3 border-border border-b bg-background pe-3 text-[13px]"
+										className="sticky start-0 flex h-8 w-full items-center gap-3 border-border border-b bg-background pe-3 text-[13px]"
 										role="status"
 										style={{ paddingInlineStart: titleInset }}
 									>
@@ -398,14 +398,14 @@ export function SheetInterface({
 								) : null}
 								{showAddRow ? (
 									<button
-										className="sticky left-0 flex h-8 w-full items-center bg-background text-[13px] text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:bg-muted/50 focus-visible:text-foreground"
+										className="sticky start-0 flex h-8 w-full items-center bg-background text-[13px] text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:bg-muted/50 focus-visible:text-foreground"
 										onClick={() => startThread({})}
 										style={{ paddingInlineStart: titleInset }}
 										type="button"
 									>
 										<span
 											aria-hidden="true"
-											className="absolute inset-y-0 left-0 flex items-center justify-center"
+											className="absolute inset-y-0 start-0 flex items-center justify-center"
 											style={{ width: SHEET_GUTTER_WIDTH }}
 										>
 											<Plus className="size-3.5" />
@@ -424,7 +424,7 @@ export function SheetInterface({
 							</div>
 							<span
 								aria-hidden="true"
-								className="pointer-events-none absolute inset-y-0 right-0 w-3 bg-linear-to-l from-foreground/12 to-transparent opacity-0 transition-opacity peer-data-[overflow-right=true]/sheet:opacity-100"
+								className="pointer-events-none absolute inset-y-0 end-0 w-3 bg-linear-to-l from-foreground/12 to-transparent opacity-0 transition-opacity peer-data-[overflow-right=true]/sheet:opacity-100 rtl:bg-linear-to-r"
 							/>
 						</div>
 						<SheetStatusBar

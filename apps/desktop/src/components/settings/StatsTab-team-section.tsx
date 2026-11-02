@@ -11,6 +11,7 @@ import {
 	type AgentProfile as AgentProfileStats,
 	fetchTeamAgents,
 } from "@/src/lib/api/profile.ts";
+import { formatDurationSpan } from "@/src/lib/expiry.ts";
 import { AgentProfile } from "./AgentProfile.tsx";
 import { formatNumber } from "./StatsTab-format.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
@@ -120,7 +121,10 @@ function TeamBadge({ agent, onSelect, stats }: TeamBadgeProps) {
 			stats={[
 				{ label: "Tokens", value: formatNumber(totalTokens) },
 				{ label: "Requests", value: formatNumber(stats.totals.requestCount) },
-				{ label: "Streak", value: `${stats.streak.current}d` },
+				{
+					label: "Streak",
+					value: formatDurationSpan([[stats.streak.current, "day"]]),
+				},
 			]}
 		/>
 	);

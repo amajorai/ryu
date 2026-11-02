@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	Tooltip,
 	TooltipContent,
@@ -5,12 +6,12 @@ import {
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 	type ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { SheetStatusMark } from "./sheet-cells.tsx";
 
 function StatusTab({
@@ -60,7 +61,7 @@ function StatusTab({
 		</>
 	);
 	const buttonProps = {
-		"aria-label": `${label}: ${count}`,
+		"aria-label": tr("{label}: {count}", { count, label }),
 		"aria-pressed": active,
 		className: cn(
 			"relative flex h-6 shrink-0 items-center gap-1.5 rounded-sm text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
@@ -117,7 +118,7 @@ export function SheetStatusBar({
 					active={status === null}
 					count={total}
 					hideCount
-					label="All"
+					label={tr("All")}
 					onSelect={() => onStatus(null)}
 				/>
 				{THREAD_STATUS_ORDER.filter(
@@ -130,7 +131,7 @@ export function SheetStatusBar({
 						compact={compact}
 						count={counts[item]}
 						key={item}
-						label={THREAD_STATUS_LABELS[item]}
+						label={threadStatusLabel(item)}
 						onSelect={() => onStatus(status === item ? null : item)}
 					>
 						<SheetStatusMark status={item} />

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -7,6 +8,13 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+
+import type { SeasonCopy } from "./seasonal-model-copy.ts";
+
+export {
+	SEASON_COPY,
+	type SeasonCopy,
+} from "./seasonal-model-copy.ts";
 
 /** A season the board can be dressed for (`auto` resolved to one of these). */
 export type Season = Exclude<SeasonalParams["season"], "auto">;
@@ -21,47 +29,6 @@ export const SEASONS: readonly Season[] = [
 export const DOOR_COUNT = 24;
 
 /** The words each season uses for its board and its doors. */
-export interface SeasonCopy {
-	/** Header button and composer heading for starting a conversation. */
-	add: string;
-	/** Name of the board in the header. */
-	board: string;
-	/** Singular and plural nouns for one door. */
-	door: string;
-	doors: string;
-	/** Picker label. */
-	label: string;
-	/** Overflow list button and heading. */
-	more: string;
-}
-
-export const SEASON_COPY: Record<Season, SeasonCopy> = {
-	advent: {
-		add: "Add a door",
-		board: "Advent calendar",
-		door: "door",
-		doors: "doors",
-		label: "Advent",
-		more: "More gifts",
-	},
-	halloween: {
-		add: "Add a pumpkin",
-		board: "Pumpkin patch",
-		door: "pumpkin",
-		doors: "pumpkins",
-		label: "Halloween",
-		more: "More pumpkins",
-	},
-	"lunar-new-year": {
-		add: "Add a lantern",
-		board: "Lantern festival",
-		door: "lantern",
-		doors: "lanterns",
-		label: "Lunar New Year",
-		more: "More lanterns",
-	},
-};
-
 export function isSeason(value: unknown): value is Season {
 	return SEASONS.some((season) => season === value);
 }
@@ -311,14 +278,6 @@ export function doorOfThread(
 	return board.doors.find((door) => door.thread?.id === threadId) ?? null;
 }
 
-export function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
-function capitalize(word: string): string {
-	return word.charAt(0).toUpperCase() + word.slice(1);
-}
-
 /**
  * The accessible name of a door: number, whether it is today's and whether
  * it is opened, then the conversation and where it stands.
@@ -328,41 +287,48 @@ export function doorLabel(
 	copy: SeasonCopy,
 	today = false
 ): string {
-	const parts = [`${capitalize(copy.door)} ${door.number}`];
-	if (today) {
-		parts.push("today");
-	}
+	const name = today
+		? tr("{door}, today", { door: copy.numbered(door.number) })
+		: copy.numbered(door.number);
 	if (!door.thread) {
-		return `${parts.join(", ")}, empty. ${copy.add}`;
+		return tr("{name}, empty. {add}", { add: copy.add, name });
 	}
+	const parts = [name];
 	if (door.opened) {
-		parts.push("opened");
+		parts.push(tr("opened"));
 	}
-	parts.push(door.thread.title || "Untitled");
+	parts.push(door.thread.title || tr("Untitled"));
 	if (door.actWords) {
 		parts.push(door.actWords);
 	} else if (door.status) {
-		parts.push(STATUS_SPOKEN[door.status]);
+		parts.push(statusSpoken(door.status));
 	}
 	return parts.join(", ");
 }
 
-const STATUS_SPOKEN: Record<ThreadStatus, string> = {
-	attention: "needs attention",
-	quiet: "not started",
-	waiting: "waiting on agent",
-	working: "working",
-	"your-turn": "your turn",
-};
+function statusSpoken(status: ThreadStatus): string {
+	switch (status) {
+		case "attention":
+			return tr("needs attention");
+		case "quiet":
+			return tr("not started");
+		case "waiting":
+			return tr("waiting on agent");
+		case "working":
+			return tr("working");
+		default:
+			return tr("your turn");
+	}
+}
 
 /** The header's one-line summary. */
 export function boardSummary(board: SeasonBoard, copy: SeasonCopy): string {
-	const parts = [plural(board.totals.threads, copy.door, copy.doors)];
+	const parts = [copy.count(board.totals.threads)];
 	if (board.totals.needsYou > 0) {
-		parts.push(`${board.totals.needsYou} need you`);
+		parts.push(tr("{count} need you", { count: board.totals.needsYou }));
 	}
 	if (board.totals.working > 0) {
-		parts.push(`${board.totals.working} working`);
+		parts.push(tr("{count} working", { count: board.totals.working }));
 	}
 	return parts.join(" · ");
 }
@@ -422,7 +388,7 @@ export function latestLine(thread: InterfaceThread): string | null {
 	if (!text) {
 		return null;
 	}
-	return thread.lastMessageRole === "user" ? `You: ${text}` : text;
+	return thread.lastMessageRole === "user" ? tr("You: {text}", { text }) : text;
 }
 
 /** A door's rectangle on the plain grid, in grid units. */

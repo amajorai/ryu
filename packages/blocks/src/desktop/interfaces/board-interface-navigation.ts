@@ -4,6 +4,11 @@ import {
 	BOARD_LANE_SCROLL_ATTRIBUTE,
 } from "./board-column.tsx";
 import { BOARD_ROW_ATTRIBUTE } from "./board-list.tsx";
+import {
+	logicalArrowKey,
+	logicalScroll,
+	logicalSpan,
+} from "./inline-direction.ts";
 
 const LIST_STEP: Record<string, number> = {
 	ArrowDown: 1,
@@ -15,7 +20,7 @@ const LIST_STEP: Record<string, number> = {
 export const NAV_HINT_ID = "board-nav-hint";
 /** Slightly longer than the lanes' 200ms width transition. */
 export const LANE_RESIZE_MS = 240;
-/** The board's own padding (p-4), kept to the left of a lane scrolled to start. */
+/** The board's own padding (p-4), kept before a lane scrolled to the inline start. */
 const LANE_INSET = 16;
 const ARROW_STEP: Record<string, [column: number, row: number]> = {
 	ArrowDown: [0, 1],
@@ -43,7 +48,8 @@ function lastRowIn(root: HTMLElement, column: number): number {
 
 /**
  * Move focus between cards with the arrow keys: up/down within a lane,
- * left/right to the nearest card in the next non-empty lane.
+ * left/right to the nearest card in the next non-empty lane (mirrored under
+ * `dir="rtl"`, where lane 0 sits on the right).
  */
 export function moveFocus(
 	root: HTMLElement,
@@ -51,7 +57,7 @@ export function moveFocus(
 	key: string,
 	columnCount: number
 ): boolean {
-	const step = ARROW_STEP[key];
+	const step = ARROW_STEP[logicalArrowKey(key, root)];
 	if (!step) {
 		return false;
 	}
@@ -154,20 +160,17 @@ function overflowBy(
 }
 
 /**
- * Scroll offsets at which a lane sits flush at the board's start (its snap
- * points), clamped to the scrollable range.
+ * Logical scroll offsets (from the inline start) at which a lane sits flush
+ * at the board's start (its snap points), clamped to the scrollable range.
  */
 function laneStops(board: HTMLElement): number[] {
-	const boardLeft = board.getBoundingClientRect().left;
-	const max = board.scrollWidth - board.clientWidth;
+	const boardRect = board.getBoundingClientRect();
+	const { max, position, sign } = logicalScroll(board);
 	return Array.from(
 		board.querySelectorAll<HTMLElement>(`[${BOARD_LANE_ATTRIBUTE}]`),
 		(lane) => {
-			const offset =
-				lane.getBoundingClientRect().left -
-				boardLeft +
-				board.scrollLeft -
-				LANE_INSET;
+			const span = logicalSpan(lane.getBoundingClientRect(), boardRect, sign);
+			const offset = span.start + position - LANE_INSET;
 			return Math.min(max, Math.max(0, Math.round(offset)));
 		}
 	);
@@ -175,14 +178,13 @@ function laneStops(board: HTMLElement): number[] {
 
 /**
  * The lane boundary to rest on: the first one at or past `desired` when
- * moving right, the last one at or before it when moving left.
+ * moving toward the inline end, the last one at or before it otherwise.
  */
 function stopFor(board: HTMLElement, desired: number, forward: boolean) {
 	const stops = laneStops(board);
 	if (forward) {
 		return (
-			stops.find((stop) => stop >= desired - 1) ??
-			board.scrollWidth - board.clientWidth
+			stops.find((stop) => stop >= desired - 1) ?? logicalScroll(board).max
 		);
 	}
 	// A reversed copy rather than `findLast`, which the desktop's lib target lacks.
@@ -199,15 +201,17 @@ export const NO_OVERFLOW: LaneOverflow = { end: 0, start: 0 };
 
 export function laneOverflow(board: HTMLElement): LaneOverflow {
 	const boardRect = board.getBoundingClientRect();
+	const { sign } = logicalScroll(board);
+	const width = boardRect.right - boardRect.left;
 	let start = 0;
 	let end = 0;
 	for (const lane of board.querySelectorAll<HTMLElement>(
 		`[${BOARD_LANE_ATTRIBUTE}]`
 	)) {
-		const rect = lane.getBoundingClientRect();
-		if (rect.left < boardRect.left - 1) {
+		const span = logicalSpan(lane.getBoundingClientRect(), boardRect, sign);
+		if (span.start < -1) {
 			start += 1;
-		} else if (rect.right > boardRect.right + 1) {
+		} else if (span.end > width + 1) {
 			end += 1;
 		}
 	}
@@ -217,12 +221,12 @@ export function laneOverflow(board: HTMLElement): LaneOverflow {
 /** Scroll the board one lane boundary toward `forward`. */
 export function stepLanes(board: HTMLElement, forward: boolean) {
 	const stops = laneStops(board);
-	const current = board.scrollLeft;
+	const scroll = logicalScroll(board);
+	const current = scroll.position;
 	const target = forward
-		? (stops.find((stop) => stop > current + 1) ??
-			board.scrollWidth - board.clientWidth)
+		? (stops.find((stop) => stop > current + 1) ?? scroll.max)
 		: ([...stops].reverse().find((stop) => stop < current - 1) ?? 0);
-	board.scrollTo({ left: target });
+	scroll.scrollToLogical(target);
 }
 
 /**
@@ -233,17 +237,17 @@ export function stepLanes(board: HTMLElement, forward: boolean) {
 export function revealCard(board: HTMLElement, card: HTMLElement) {
 	const lane = card.closest<HTMLElement>(`[${BOARD_LANE_ATTRIBUTE}]`) ?? card;
 	const boardRect = board.getBoundingClientRect();
-	const laneRect = lane.getBoundingClientRect();
+	const scroll = logicalScroll(board);
 	const nearest = overflowBy(
-		{ end: laneRect.right, start: laneRect.left },
-		{ end: boardRect.right, start: boardRect.left },
+		logicalSpan(lane.getBoundingClientRect(), boardRect, scroll.sign),
+		{ end: boardRect.right - boardRect.left, start: 0 },
 		LANE_INSET
 	);
 	if (nearest !== 0) {
 		// Move only as far as needed, so earlier lanes stay in view whenever
 		// the card allows it.
-		const target = stopFor(board, board.scrollLeft + nearest, nearest > 0);
-		board.scrollTo({ left: target });
+		const target = stopFor(board, scroll.position + nearest, nearest > 0);
+		scroll.scrollToLogical(target);
 	}
 	const scroller = card.closest<HTMLElement>(
 		`[${BOARD_LANE_SCROLL_ATTRIBUTE}]`

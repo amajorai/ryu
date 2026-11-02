@@ -3,13 +3,11 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { type ProofJsonRecord, parseProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_URL = "/space-scope-menu-proof.html";
 const SPACE_ID = "space-scope-proof";
-const EVIDENCE_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const EVIDENCE_DIR = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 async function openFreshProof(page: Page, scenario?: "restricted" | "system") {
 	const query = scenario ? `?scenario=${scenario}` : "";
@@ -416,20 +414,23 @@ test.describe("Desktop Space scope menu", () => {
 		const blade = confirmDialog.getByRole("slider", {
 			name: "Delete Synthetic Space",
 		});
-		// The confirm is a ticket stub torn downward: ArrowDown advances it one of
-		// five steps (KEY_DELTAS in cut-to-confirm-config.ts, so at 07d403e33).
+		// The confirm is a SlideCommit slide-to-confirm since a9565fe080 (#941):
+		// DestructiveConfirmDialog passes keyboardSteps={5}, so five ArrowRight
+		// presses commit it (ArrowDown/ArrowLeft step back toward the start).
 		await blade.focus();
 		for (let step = 0; step < 5; step += 1) {
-			await blade.press("ArrowDown");
+			await blade.press("ArrowRight");
 		}
 		await expect(page.getByTestId("last-error")).toContainText(
 			"/api/spaces/space-scope-proof failed: 503"
 		);
+		// A failed delete springs the handle home and leaves it enabled for retry.
 		await expect(blade).toHaveAttribute("aria-valuenow", "0");
+		await expect(blade).not.toHaveAttribute("aria-disabled", "true");
 		await expect(confirmDialog).toBeVisible();
 		await blade.focus();
 		for (let step = 0; step < 5; step += 1) {
-			await blade.press("ArrowDown");
+			await blade.press("ArrowRight");
 		}
 		await expect(confirmDialog).toBeHidden();
 		await expect(page.getByTestId("space-name")).toHaveText("deleted");

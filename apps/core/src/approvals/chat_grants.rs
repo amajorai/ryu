@@ -1,6 +1,6 @@
 //! In-chat consent for actions that drive Ryu itself.
 //!
-//! The approval gate ([`super::gate_tool_call_with_engine`]) queues a gated call
+//! The approval gate ([`super::gate::gate_tool_call_with_engine`]) queues a gated call
 //! in the Approvals inbox. That is the right answer for unattended runs, but in a
 //! live chat the user is right there: an agent asking to change a model's launch
 //! settings or switch the interface should ask in the conversation, not park the
@@ -17,7 +17,9 @@
 //!   (expires after [`ONCE_TTL`] if the call never reaches the gate). An argument
 //!   mismatch means no grant, so the call falls back to the inbox.
 //! - **conversation**: this tool, any arguments, for the rest of the conversation
-//!   (in memory, cleared on restart).
+//!   (in memory, cleared on restart). Never for a tool that changes the policy
+//!   that gates agents ([`requires_per_call_consent`]): those are allowed one
+//!   call at a time, whatever the bridge or a forged answer records.
 //!
 //! A transport without a permission channel (the network MCP route, PTC code,
 //! routines) never records a grant, so it keeps the inbox behaviour unchanged.
@@ -79,6 +81,31 @@ pub async fn would_gate(tool_id: &str, agent_approval_tools: &[String]) -> bool 
     .is_some()
 }
 
+/// Self-API route families whose writes change what gates the agent itself:
+/// Gateway and routing configuration, generic preferences (which hold
+/// `approval-mode`, `exec-approval-mode` and `trusted-workspaces`), and the
+/// workspace-trust list.
+const PER_CALL_CONSENT_PREFIXES: &[&str] = &[
+    "/api/gateway/",
+    "/api/routing/",
+    "/api/preferences/",
+    "/api/workspace-trust/",
+];
+
+/// Whether `tool_id` must be approved one call at a time. "Allow for this
+/// chat" covers every later call to the tool whatever its arguments, so one
+/// approved theme change would let a later, injected call switch approval mode
+/// or the command scan off without asking. These keep "Allow once" only.
+pub fn requires_per_call_consent(tool_id: &str) -> bool {
+    let id = canonical(tool_id);
+    crate::self_api::is_mutating(&id)
+        && crate::self_api::route_for(&id).is_some_and(|route| {
+            PER_CALL_CONSENT_PREFIXES
+                .iter()
+                .any(|prefix| route.path_template.starts_with(prefix))
+        })
+}
+
 fn fingerprint(arguments: &Value) -> String {
     // serde_json maps are ordered, so equal argument objects serialize equally.
     arguments.to_string()
@@ -106,9 +133,10 @@ pub fn grant_once(conversation_id: &str, tool_id: &str, arguments: &Value) {
     }
 }
 
-/// Record the user's in-chat "Allow for this chat" for this tool.
+/// Record the user's in-chat "Allow for this chat" for this tool. Ignored for a
+/// tool that [`requires_per_call_consent`].
 pub fn grant_for_conversation(conversation_id: &str, tool_id: &str) {
-    if !chat_confirmable(tool_id) {
+    if !chat_confirmable(tool_id) || requires_per_call_consent(tool_id) {
         return;
     }
     if let Ok(mut grants) = CONVERSATION.lock() {
@@ -122,6 +150,7 @@ pub fn grant_for_conversation(conversation_id: &str, tool_id: &str) {
 /// Whether the user already allowed this tool for the whole conversation.
 pub fn allowed_for_conversation(conversation_id: &str, tool_id: &str) -> bool {
     chat_confirmable(tool_id)
+        && !requires_per_call_consent(tool_id)
         && CONVERSATION
             .lock()
             .map(|grants| grants.contains(&(conversation_id.to_owned(), canonical(tool_id))))
@@ -194,6 +223,30 @@ mod tests {
             &json!({ "key": "approval-mode" })
         ));
         assert!(!take("conv-elsewhere", LAUNCH, &json!({ "id": "a" })));
+    }
+
+    #[test]
+    fn policy_settings_writes_never_get_a_conversation_grant() {
+        const PREFERENCES: &str = "ryu_api.put_api_preferences_key";
+        assert!(chat_confirmable(PREFERENCES));
+        assert!(requires_per_call_consent(PREFERENCES));
+        assert!(!requires_per_call_consent(LAUNCH));
+        assert!(!requires_per_call_consent("ryu_api.get_api_preferences_key"));
+
+        // "Allow for this chat" on a theme change must not let a later call in
+        // the same chat switch approval or the command scan off.
+        grant_for_conversation("conv-policy", PREFERENCES);
+        assert!(!allowed_for_conversation("conv-policy", PREFERENCES));
+        for key in ["approval-mode", "exec-approval-mode", "trusted-workspaces"] {
+            let arguments = json!({ "key": key, "body": { "value": "off" } });
+            assert!(!take("conv-policy", PREFERENCES, &arguments), "{key}");
+        }
+
+        // "Allow once" still covers the one call the person saw.
+        let theme = json!({ "key": "theme", "body": { "value": "dark" } });
+        grant_once("conv-policy", PREFERENCES, &theme);
+        assert!(take("conv-policy", PREFERENCES, &theme));
+        assert!(!take("conv-policy", PREFERENCES, &theme));
     }
 
     #[test]

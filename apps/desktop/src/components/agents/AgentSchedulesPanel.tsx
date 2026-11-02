@@ -292,7 +292,7 @@ export function AgentSchedulesPanel({
 										</p>
 									</div>
 								</div>
-								<span className="ml-auto text-muted-foreground text-xs">
+								<span className="ms-auto text-muted-foreground text-xs">
 									{entry.schedule.kind === "cron" ? "Cron" : "Interval"}
 								</span>
 							</div>

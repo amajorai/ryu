@@ -22,6 +22,7 @@ import {
 // Money is integer cents on the wire and divides once, at `formatValue`. No
 // currency arithmetic happens in floats anywhere above this file.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -265,6 +266,7 @@ export function FieldEditor({
 	onCommit: (next: ValueBag[string]) => void;
 	value: unknown;
 }) {
+	const tl = useLiteralMessages();
 	const canceled = useRef(false);
 	const commit = (next: ValueBag[string]) => {
 		if (!canceled.current) {
@@ -356,7 +358,9 @@ export function FieldEditor({
 								Number.isSafeInteger(Math.round(parsed * 100))
 							)
 						) {
-							event.target.setCustomValidity("Enter a valid currency amount.");
+							event.target.setCustomValidity(
+								tl("Enter a valid currency amount.")
+							);
 							event.target.reportValidity();
 							return;
 						}

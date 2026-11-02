@@ -1,10 +1,9 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/onboarding-skills-story.html";
-const PROOF_PATH = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/onboarding-skills/jakubkrehel-skills-pack.png"
+const PROOF_PATH = proofEvidencePath(
+	"onboarding-skills/jakubkrehel-skills-pack.png"
 );
 
 test.describe("onboarding optional skill selection", () => {

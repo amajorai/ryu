@@ -1,4 +1,6 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -72,7 +74,7 @@ function PanelHeader({
 					size="icon-sm"
 					variant="ghost"
 				>
-					<ArrowLeft aria-hidden="true" className="size-4" />
+					<ArrowLeft aria-hidden="true" className="size-4 rtl:-scale-x-100" />
 				</Button>
 			) : null}
 			{children}
@@ -138,7 +140,7 @@ export function GiftTagPanel({
 						</span>
 					) : null}
 					<h2 className="min-w-0 truncate font-semibold text-sm leading-5">
-						{thread?.title || "New conversation"}
+						{thread?.title || tr("New conversation")}
 					</h2>
 				</PanelHeader>
 			)}
@@ -235,11 +237,17 @@ function AgentPicker({
 						>
 							<BoardAvatar agent={agent} name={agent.name} size={24} />
 							<span className="flex min-w-0 flex-1 flex-col">
-								<span className="truncate font-medium text-sm leading-5">
+								<span
+									className="truncate font-medium text-sm leading-5"
+									data-ryu-i18n="off"
+								>
 									{agent.name}
 								</span>
 								{agent.description ? (
-									<span className="truncate text-muted-foreground text-xs leading-4">
+									<span
+										className="truncate text-muted-foreground text-xs leading-4"
+										data-ryu-i18n="off"
+									>
 										{agent.description}
 									</span>
 								) : null}
@@ -363,10 +371,10 @@ export function DoorRow({
 				{acts ? null : <BoardStatusDot status={status} />}
 				<span className="flex min-w-0 flex-1 flex-col">
 					<span className="truncate font-medium text-sm leading-5">
-						{thread.title || "Untitled"}
+						{thread.title || tr("Untitled")}
 					</span>
 					<span className="truncate text-muted-foreground text-xs leading-4">
-						{agents || "No agent"}
+						{agents || tr("No agent")}
 						{acts && actWords ? ` · ${actWords}` : ""}
 					</span>
 				</span>
@@ -410,7 +418,9 @@ export function OverflowPanel({
 		<>
 			{headless ? null : (
 				<PanelHeader
-					closeLabel={tl("Close {more}", { more: copy.more.toLowerCase() })}
+					closeLabel={tl("Close {more}", {
+						more: sentenceLabel(tl, copy.more),
+					})}
 					onClose={onClose}
 					stacked={stacked}
 				>
@@ -421,9 +431,7 @@ export function OverflowPanel({
 				</PanelHeader>
 			)}
 			<p className="px-4 pt-3 pb-2 text-muted-foreground text-xs leading-4">
-				{tl("Conversations past the 24th {door}, most urgent first.", {
-					door: copy.door,
-				})}
+				{copy.overflow}
 			</p>
 			<ul className="min-h-0 flex-1 overflow-y-auto pb-2">
 				{threads.map((thread, index) => (
@@ -431,7 +439,7 @@ export function OverflowPanel({
 						active={thread.id === activeThreadId}
 						acts={acts}
 						key={thread.id}
-						label={thread.title || "Untitled"}
+						label={thread.title || tr("Untitled")}
 						now={now}
 						number={25 + index}
 						onOpen={() => onOpen(thread.id)}
@@ -452,7 +460,6 @@ export function EmptyNote({
 	copy: SeasonCopy;
 	onAdd: () => void;
 }) {
-	const tl = useLiteralMessages();
 	return (
 		<div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-4">
 			<section
@@ -469,10 +476,7 @@ export function EmptyNote({
 					</h2>
 				</div>
 				<p className="text-muted-foreground text-sm leading-5">
-					{tl(
-						"Each conversation gets a numbered {door}. The ones that need you take the lowest numbers.",
-						{ door: copy.door }
-					)}
+					{copy.emptyHint}
 				</p>
 				<Button className="self-start" onClick={onAdd} size="sm">
 					{copy.add}

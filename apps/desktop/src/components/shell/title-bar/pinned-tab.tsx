@@ -42,7 +42,7 @@ import { NodeSubmenu } from "./tab-submenus.tsx";
 // The vertical bar drawn in the gap beside the hovered tab when the strip cannot
 // preview the landing spot by sliding tabs apart (a drop into another bracket).
 // The host element must be `relative`.
-export function DropIndicator({ side }: { side: "left" | "right" }) {
+export function DropIndicator({ side }: { side: "start" | "end" }) {
 	return (
 		<span
 			aria-hidden
@@ -52,7 +52,7 @@ export function DropIndicator({ side }: { side: "left" | "right" }) {
 					layoutStyles.authored2,
 					layoutStyles.authored3
 				),
-				side === "left" ? "-left-1" : "-right-1"
+				side === "start" ? "-start-1" : "-end-1"
 			)}
 		/>
 	);
@@ -120,8 +120,8 @@ export function PinnedTab({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 										floatingTabs={floatingTabs}
 										isActive={isActive}
 									/>
-									{showBefore && <DropIndicator side="left" />}
-									{showAfter && <DropIndicator side="right" />}
+									{showBefore && <DropIndicator side="start" />}
+									{showAfter && <DropIndicator side="end" />}
 									{/* Color stays on the wrapper (TabGlyph forwards className to
 									    Spinner, which owns its color); the size goes on TabGlyph
 									    itself so the Hugeicons fallback and the busy Spinner, which

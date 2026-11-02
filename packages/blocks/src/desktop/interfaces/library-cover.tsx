@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
@@ -209,9 +210,15 @@ function bylineFor(
 		return first.name;
 	}
 	if (authors.length === 2 && second) {
-		return `${first.name} & ${second.name}`;
+		return tr("{first} & {second}", {
+			first: first.name,
+			second: second.name,
+		});
 	}
-	return `${first.name} & ${(authors.length - 1).toString()} more`;
+	return tr("{first} & {count} more", {
+		count: authors.length - 1,
+		first: first.name,
+	});
 }
 
 /**
@@ -265,11 +272,11 @@ export function BookCover({
 			/>
 			{/* The binding: a shadow ramp into the spine and a pressed crease. */}
 			<div
-				className="pointer-events-none absolute inset-y-0 left-0 w-[9%]"
+				className="pointer-events-none absolute inset-y-0 start-0 w-[9%]"
 				style={{ background: COVER_BINDING.spine }}
 			/>
 			<div
-				className="pointer-events-none absolute inset-y-0 left-[4%] w-px"
+				className="pointer-events-none absolute inset-y-0 start-[4%] w-px"
 				style={{ background: COVER_BINDING.crease }}
 			/>
 			<div

@@ -339,7 +339,7 @@ export function RyuPiConfigView({
 					) : null}
 					{configDir ? (
 						<span
-							className="type-compact ml-auto truncate text-muted-foreground"
+							className="type-compact ms-auto truncate text-muted-foreground"
 							title={configDir}
 						>
 							{configDir}

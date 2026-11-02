@@ -420,6 +420,8 @@ describe("records model", () => {
 		expect(recordsRelativeTime(null, NOW)).toBeNull();
 		expect(recordsRelativeTime(ago(0.2), NOW)).toBe("Just now");
 		expect(recordsRelativeTime(ago(18), NOW)).toBe("18m ago");
+		expect(recordsRelativeTime(ago(18), NOW, "ja")).toBe("18分前");
+		expect(recordsRelativeTime(ago(18), NOW, "de")).toBe("vor 18 m");
 		expect(
 			recordsRelativeTime(new Date(NOW - 9 * 24 * HOUR).toISOString(), NOW)
 		).toMatch(/\d/);

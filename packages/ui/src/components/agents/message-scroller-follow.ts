@@ -1,7 +1,25 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { activeLocale, subscribeLocale, translate as tl } from "@ryu/i18n/lite";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useSyncExternalStore,
+} from "react";
 import { isNativeFunction } from "../../lib/native-primitive-observation.ts";
 import type { useMessageScrollerRail } from "./message-scroller-rail-sync.ts";
 import type { MessageScrollerBaseScope } from "./message-scroller-scope.ts";
+
+/**
+ * The text of the "N new messages" divider, which CSS shows from
+ * `data-unread-label`. It is pluralized and translated in the UI locale here
+ * because the DOM localizer never sees a pseudo-element's `attr()` content.
+ */
+export function unreadDividerLabel(count: number): string {
+	return tl("{count, plural, one {# new message} other {# new messages}}", {
+		count,
+	});
+}
 
 /** How long after the last scroll event the document stops reporting it. */
 const SCROLLING_IDLE_MS = 150;
@@ -179,8 +197,14 @@ export function useMessageScrollerFollow({
 		return () => observer?.disconnect();
 	}, [showUnreadMessages, syncUnreadMessages]);
 
+	// Re-label the divider when the UI language changes.
+	const locale = useSyncExternalStore(
+		subscribeLocale,
+		activeLocale,
+		activeLocale
+	);
 	useEffect(() => {
-		if (!showUnreadMessages) {
+		if (!(showUnreadMessages && locale)) {
 			return;
 		}
 		const content = contentRef.current;
@@ -206,9 +230,9 @@ export function useMessageScrollerFollow({
 		);
 		if (unreadStart) {
 			unreadStart.dataset.unreadStart = "true";
-			unreadStart.dataset.unreadLabel = `${newMessageCount} new messages`;
+			unreadStart.dataset.unreadLabel = unreadDividerLabel(newMessageCount);
 		}
-	}, [newMessageCount, showUnreadMessages, unreadStartId]);
+	}, [locale, newMessageCount, showUnreadMessages, unreadStartId]);
 
 	useEffect(() => {
 		const content = contentRef.current;

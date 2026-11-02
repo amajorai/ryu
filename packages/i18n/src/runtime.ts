@@ -1,63 +1,41 @@
-import { formatMessage, type MessageValuesInput } from "./format.ts";
 import {
-	indexLiteralCatalog,
-	isLiteralMessageId,
-	type LiteralCatalogLoader,
-	literalCatalogLoader,
-	messageIdForLiteral,
-} from "./literal-catalog.ts";
-import { LiteralTemplateIndex } from "./literal-templates.ts";
+	isLocalizedOutput,
+	rememberLocalizedOutput,
+} from "./dom-localizer-outputs.ts";
+import { formatMessage, type MessageValuesInput } from "./format.ts";
+import { isLiteralMessageId, messageIdForLiteral } from "./literal-catalog.ts";
 import {
 	canonicalLocale,
 	directionForLocale,
 	findLanguagePackForLocale,
+	isEnglishLocale,
 	localeLanguageAndScript,
 } from "./locale.ts";
 import {
 	DEFAULT_LOCALE,
-	LANGUAGE_PACK_STORAGE_KEY,
 	type LanguageDirection,
 	type LanguagePack,
-	MAX_MESSAGE_LENGTH,
 	placeholderNames,
 	SOURCE_MESSAGES,
 	trustedBuiltInPack,
 	validateLanguagePack,
 } from "./pack.ts";
+import { readStoredPackId, writeStoredPackId } from "./pack-storage.ts";
+import { I18nFormatting } from "./runtime-format.ts";
+import {
+	type MessageOverlays,
+	RuntimeLiteralCatalogs,
+} from "./runtime-literals.ts";
 
-function readStoredPackId(): string | null {
-	try {
-		return localStorage.getItem(LANGUAGE_PACK_STORAGE_KEY);
-	} catch {
-		return null;
-	}
-}
-
-function writeStoredPackId(value: string | null): void {
-	try {
-		if (value) {
-			localStorage.setItem(LANGUAGE_PACK_STORAGE_KEY, value);
-		} else {
-			localStorage.removeItem(LANGUAGE_PACK_STORAGE_KEY);
-		}
-	} catch {
-		// Private browsing and restricted webviews can deny storage. The in-memory
-		// selection still works for the current session.
-	}
-}
-
-/**
- * App-owned message catalogs layered under the selected language pack:
- * locale (such as `es` or `pt-BR`) → English source literal → translation.
- * A Companion app ships these for its own copy; they never shadow a pack's
- * message and are keyed by the same literal ids the DOM localizer uses.
- */
-export type MessageOverlays = Readonly<
-	Record<string, Readonly<Record<string, string>>>
->;
+export type { MessageOverlays } from "./runtime-literals.ts";
 
 export interface I18nRuntimeOptions {
-	initialLocale?: string | null;
+	/**
+	 * The locale to show while no pack is chosen, or the user's preferred
+	 * locales best first (`navigator.languages`): the first one English or
+	 * an available pack can show wins, so `["nl-NL", "de"]` shows German.
+	 */
+	initialLocale?: string | readonly string[] | null;
 	initialPackId?: string | null;
 	/** App message catalogs consulted after the selected pack. */
 	overlays?: MessageOverlays;
@@ -94,7 +72,7 @@ export interface I18nHostTranslateInput {
 let defaultBuiltInPacks: readonly LanguagePack[] = [];
 
 /** Shared runtime used by the website, desktop, and the browser-hosted webapp. */
-export class I18nRuntime {
+export class I18nRuntime extends I18nFormatting {
 	private builtInPacks: readonly LanguagePack[];
 	private readonly listeners = new Set<() => void>();
 	private packId: string | null;
@@ -104,15 +82,18 @@ export class I18nRuntime {
 	private readonly reservedPackIds: ReadonlySet<string>;
 	private readonly restoreStoredPackId: boolean;
 	private localeOverride: string | null;
-	/** Overlay messages by language-and-script key, then message id. */
-	private overlays = new Map<string, Map<string, string>>();
-	/** Official literal catalogs by language-and-script key; null while loading. */
-	private readonly literalCatalogs = new Map<
-		string,
-		Map<string, string> | null
-	>();
-	/** Simple-argument templates of each loaded literal catalog, built lazily. */
-	private readonly literalTemplates = new Map<string, LiteralTemplateIndex>();
+	/** Preferred locales, best first, re-tried whenever the packs change. */
+	private preferredLocales: readonly string[] = [];
+	/** Whether a pack was chosen (given, saved or picked), not auto-detected. */
+	private explicitSelection = false;
+	/** The regional tag a pack of its language was adopted for (`pt-PT` → pt-BR). */
+	private regionalFormat: { locale: string; packId: string } | null = null;
+	/** App overlays and official literal catalogs, by language and script. */
+	private readonly literals = new RuntimeLiteralCatalogs((key) => {
+		if (localeLanguageAndScript(this.locale) === key) {
+			this.emit();
+		}
+	});
 	private version = 0;
 
 	constructor(
@@ -120,6 +101,7 @@ export class I18nRuntime {
 		options: I18nRuntimeOptions = {},
 		builtIns?: BuiltInLanguagePacks
 	) {
+		super();
 		this.builtInPacks = builtIns?.packs ?? defaultBuiltInPacks;
 		this.reservedPackIds = new Set(builtIns?.reservedIds ?? []);
 		this.restoreStoredPackId = options.initialPackId === undefined;
@@ -127,10 +109,11 @@ export class I18nRuntime {
 			options.initialPackId === undefined
 				? readStoredPackId()
 				: options.initialPackId;
+		// A given or saved pack is a choice languagechange must not override.
+		this.explicitSelection = this.packId !== null;
 		this.persistPackId = options.persistPackId;
-		this.localeOverride = options.initialLocale
-			? canonicalLocale(options.initialLocale, DEFAULT_LOCALE)
-			: null;
+		this.localeOverride = null;
+		this.setPreferredLocales(options.initialLocale);
 		this.packs = [];
 		this.setOverlays(options.overlays ?? {}, false);
 		this.setPacks(packs, false);
@@ -138,22 +121,7 @@ export class I18nRuntime {
 
 	/** Replace the app message overlays (see {@link MessageOverlays}). */
 	setOverlays(overlays: MessageOverlays, notify = true): void {
-		const next = new Map<string, Map<string, string>>();
-		for (const [locale, messages] of Object.entries(overlays)) {
-			const key = localeLanguageAndScript(canonicalLocale(locale, locale));
-			const entries = next.get(key) ?? new Map<string, string>();
-			for (const [source, message] of Object.entries(messages)) {
-				if (
-					source.trim() &&
-					message.trim() &&
-					message.length <= MAX_MESSAGE_LENGTH
-				) {
-					entries.set(messageIdForLiteral(source), message);
-				}
-			}
-			next.set(key, entries);
-		}
-		this.overlays = next;
+		this.literals.setOverlays(overlays);
 		if (notify) {
 			this.emit();
 		}
@@ -165,74 +133,24 @@ export class I18nRuntime {
 	 * and publishes once it arrives, so consumers re-render translated.
 	 */
 	overlayMessage(id: string): string | undefined {
-		const key = localeLanguageAndScript(this.locale);
-		return (
-			this.overlays.get(key)?.get(id) ?? this.literalCatalogMessage(key, id)
-		);
+		return this.literals.overlayMessage(this.locale, id);
 	}
 
 	/**
 	 * Translate dynamic text with no exact catalog entry (`Deleted Q3 plan`)
 	 * through the official literal catalog's simple-argument templates
-	 * (`Deleted {name}`). Captured values are inserted verbatim, never
-	 * re-translated or ICU-parsed. Undefined when no template matches.
+	 * (`Deleted {name}`). Captured values are inserted verbatim and never
+	 * ICU-parsed; only a relayed reason (`{error}`, `{detail}`) that is itself
+	 * catalog copy is translated. Undefined when no template matches, and
+	 * for a recent translated output. A capture that mixes Latin and
+	 * non-Latin letters never fits (`Release notesを選択`), while a value in
+	 * the reader's own script does (`Deleted 田中`).
 	 */
 	templateMessage(text: string): string | undefined {
-		const loader = literalCatalogLoader();
-		if (loader === null || this.locale === DEFAULT_LOCALE) {
+		if (isLocalizedOutput(text)) {
 			return;
 		}
-		const key = localeLanguageAndScript(this.locale);
-		if (!this.literalCatalogs.has(key)) {
-			this.loadLiteralCatalog(key, loader);
-		}
-		return this.literalTemplates.get(key)?.match(text, this.locale);
-	}
-
-	private literalCatalogMessage(key: string, id: string): string | undefined {
-		const loader = literalCatalogLoader();
-		if (loader === null || this.locale === DEFAULT_LOCALE) {
-			return;
-		}
-		const catalog = this.literalCatalogs.get(key);
-		if (catalog === undefined) {
-			return this.loadLiteralCatalog(key, loader)?.get(id);
-		}
-		return catalog?.get(id);
-	}
-
-	/** Index the catalog for `key`; returns it when the loader answered synchronously. */
-	private loadLiteralCatalog(
-		key: string,
-		loader: LiteralCatalogLoader
-	): Map<string, string> | null {
-		let result: ReturnType<LiteralCatalogLoader>;
-		try {
-			result = loader(this.locale);
-		} catch {
-			result = null;
-		}
-		if (!(result instanceof Promise)) {
-			const catalog = indexLiteralCatalog(result ?? {});
-			this.literalCatalogs.set(key, catalog);
-			this.literalTemplates.set(key, new LiteralTemplateIndex(result ?? {}));
-			return catalog;
-		}
-		this.literalCatalogs.set(key, null);
-		result
-			.then((catalog) => {
-				this.literalCatalogs.set(key, indexLiteralCatalog(catalog ?? {}));
-				this.literalTemplates.set(key, new LiteralTemplateIndex(catalog ?? {}));
-				if (catalog && localeLanguageAndScript(this.locale) === key) {
-					this.emit();
-				}
-			})
-			.catch(() => {
-				// A missing chunk leaves the locale on its pack and English fallback;
-				// keep the empty entry so lookups do not retry on every render.
-				this.literalCatalogs.set(key, new Map());
-			});
-		return null;
+		return this.literals.templateMessage(this.locale, text);
 	}
 
 	getVersion = (): number => this.version;
@@ -278,12 +196,8 @@ export class I18nRuntime {
 		}
 		this.packs = [...next.values()];
 		this.readPendingStoredPackId();
-		if (this.packId === null && this.localeOverride) {
-			const localePack = this.findPackForLocale(this.localeOverride);
-			if (localePack) {
-				this.packId = localePack.id;
-				this.localeOverride = null;
-			}
+		if (this.packId === null) {
+			this.adoptPreferredLocale();
 		}
 		if (notify) {
 			this.emit();
@@ -309,6 +223,7 @@ export class I18nRuntime {
 			return false;
 		}
 		this.packId = readStoredPackId();
+		this.explicitSelection ||= this.packId !== null;
 		return this.packId !== null;
 	}
 
@@ -353,6 +268,18 @@ export class I18nRuntime {
 		return this.selectedPack?.locale ?? this.localeOverride ?? DEFAULT_LOCALE;
 	}
 
+	/**
+	 * The tag dates and numbers format in: the user's own regional tag when a
+	 * pack of its language was adopted for it (`pt-PT` reading the pt-BR pack,
+	 * `es-MX` the es pack), otherwise {@link locale}. Never a catalog key.
+	 */
+	get formatLocale(): string {
+		const regional = this.regionalFormat;
+		return regional && regional.packId === this.selectedPack?.id
+			? regional.locale
+			: this.locale;
+	}
+
 	get direction(): LanguageDirection {
 		return this.selectedPack?.direction ?? directionForLocale(this.locale);
 	}
@@ -361,8 +288,15 @@ export class I18nRuntime {
 		if (id !== null && !this.packs.some((pack) => pack.id === id)) {
 			return;
 		}
+		this.explicitSelection = true;
+		this.regionalFormat = null;
+		this.choosePack(id);
+	}
+
+	private choosePack(id: string | null): void {
 		this.packId = id;
 		this.localeOverride = null;
+		this.preferredLocales = [];
 		if (this.persistPackId) {
 			void this.persistPackId(id);
 		} else {
@@ -371,15 +305,82 @@ export class I18nRuntime {
 		this.emit();
 	}
 
-	setLocale(locale: string): void {
-		const canonical = canonicalLocale(locale, DEFAULT_LOCALE);
-		const pack = this.findPackForLocale(canonical);
-		if (pack) {
-			this.selectPack(pack.id);
+	/** Store canonical preferences; the first is shown until a pack is found. */
+	private setPreferredLocales(
+		locales: string | readonly string[] | null | undefined
+	): void {
+		const list = typeof locales === "string" ? [locales] : (locales ?? []);
+		const canonical: string[] = [];
+		for (const locale of list) {
+			const tag = locale ? canonicalLocale(locale, "") : "";
+			if (tag && !canonical.includes(tag)) {
+				canonical.push(tag);
+			}
+		}
+		this.preferredLocales = canonical;
+		this.localeOverride = canonical[0] ?? null;
+		this.regionalFormat = null;
+	}
+
+	/**
+	 * Show the first preferred locale English, a pack or a literal catalog
+	 * can show: English or a catalog keeps that locale (no pack), a pack is
+	 * selected. When none can, the first preference stays the locale.
+	 * Returns the adopted pack id, if any.
+	 */
+	private adoptPreferredLocale(): string | null {
+		for (const locale of this.preferredLocales) {
+			if (isEnglishLocale(locale)) {
+				this.localeOverride = locale;
+				return null;
+			}
+			const pack = this.findPackForLocale(locale);
+			if (pack) {
+				this.regionalFormat =
+					pack.locale === locale ? null : { locale, packId: pack.id };
+				this.packId = pack.id;
+				this.localeOverride = null;
+				this.preferredLocales = [];
+				return pack.id;
+			}
+			// No pack, but an official literal catalog or app overlay can show
+			// it (catalog-only surfaces); a pack installed later still wins.
+			if (this.literals.serves(locale)) {
+				this.localeOverride = locale;
+				return null;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Follow a change of the system's preferred languages (`languagechange`)
+	 * while the language is automatic: nothing is persisted, and a pack the
+	 * user picked with {@link selectPack} is kept. Publishes only on change.
+	 */
+	applySystemLocales(locales: readonly string[]): void {
+		if (this.explicitSelection || locales.length === 0) {
 			return;
 		}
+		const before = `${this.packId}\u0000${this.formatLocale}`;
 		this.packId = null;
-		this.localeOverride = canonical;
+		this.setPreferredLocales(locales);
+		this.adoptPreferredLocale();
+		if (`${this.packId}\u0000${this.formatLocale}` !== before) {
+			this.emit();
+		}
+	}
+
+	/** Show `locale` (or the first of a preference list that can be shown). */
+	setLocale(locale: string | readonly string[]): void {
+		this.packId = null;
+		this.setPreferredLocales(locale);
+		const packId = this.adoptPreferredLocale();
+		if (packId) {
+			this.choosePack(packId);
+			return;
+		}
+		this.localeOverride ??= DEFAULT_LOCALE;
 		if (this.persistPackId) {
 			void this.persistPackId(null);
 		} else {
@@ -427,20 +428,27 @@ export class I18nRuntime {
 			// Dynamic literal text (DOM, host relays): try the catalog templates.
 			const templated = this.templateMessage(fallback);
 			if (templated !== undefined) {
-				return templated;
+				return this.localized(templated);
 			}
 		}
+		// Only a catalog translation that differs from its English is marked
+		// for the DOM localizer; English fallbacks stay open to it.
+		const translated = message !== undefined && message !== source;
 		if (message === undefined) {
 			message = [fallback, SOURCE_MESSAGES.get(id)].find(fits) ?? id;
 			resolvedId = id;
 		}
-		if (
-			isLiteralMessageId(resolvedId) &&
-			Object.keys(values ?? {}).length === 0
-		) {
-			return message;
-		}
-		return formatMessage(message, values, this.locale);
+		const output =
+			isLiteralMessageId(resolvedId) && Object.keys(values ?? {}).length === 0
+				? message
+				: formatMessage(message, values, this.formatLocale);
+		return translated ? this.localized(output) : output;
+	}
+
+	/** Mark `output` as translated, so the DOM localizer leaves it alone. */
+	private localized(output: string): string {
+		rememberLocalizedOutput(this.locale, output);
+		return output;
 	}
 
 	/** Translated messages for `id`: selected pack, overlays/catalog, base pack. */
@@ -460,19 +468,6 @@ export class I18nRuntime {
 			this.overlayMessage(id),
 			base?.messages[id],
 		];
-	}
-
-	formatNumber(value: number, options?: Intl.NumberFormatOptions): string {
-		return new Intl.NumberFormat(this.locale, options).format(value);
-	}
-
-	formatDate(
-		value: Date | number | string,
-		options?: Intl.DateTimeFormatOptions
-	): string {
-		return new Intl.DateTimeFormat(this.locale, options).format(
-			new Date(value)
-		);
 	}
 }
 

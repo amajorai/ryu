@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { parseProofJson } from "./fixture-json.ts";
 import { PreferenceFixtureSchema } from "./onboarding-fixture-contract.ts";
 import {
@@ -9,209 +9,60 @@ import {
 	fixture,
 	localDefault,
 	PROOF_URL,
-	SUGGESTIONS,
-	toProfile,
 } from "./onboarding-setup-page-proof.fixture.ts";
 
-async function toSuggestions(page: Page) {
-	await toProfile(page);
-	await page
-		.getByRole("button", { name: "Build my profile", exact: true })
-		.click();
-	await expect(
-		page.getByText("Your profile and 2 agent drafts are ready", { exact: true })
-	).toBeVisible();
-	await page.getByRole("button", { name: "Continue", exact: true }).click();
-	await expect(
-		page.getByRole("heading", { name: "Suggested agents for your work" })
-	).toBeVisible();
-}
-
-test("production suggested agents require prompt review and retry only the failed persisted draft", async ({
-	page,
-}) => {
-	const f = await fixture(page, {
-		paid: true,
-		suggestions: true,
-		failedAgentCreate: true,
-	});
-	try {
-		await toSuggestions(page);
-		await expect(
-			page.getByRole("button", { name: "Select an agent", exact: true })
-		).toBeDisabled();
-		for (const draft of SUGGESTIONS) {
-			const card = page.getByTestId(`agent-suggestion-${draft.id}`);
-			await card
-				.getByRole("button", { name: `Select ${draft.name}`, exact: true })
-				.click();
-			await expect(card.getByTestId("suggested-prompt")).toHaveText(
-				draft.systemPrompt
-			);
-			await card.locator("summary").click();
-			await expect(card.getByTestId("suggested-prompt")).not.toBeVisible();
-			await card.locator("summary").click();
-		}
-		await expect(
-			page.getByRole("button", {
-				name: "Review 2 selected drafts",
-				exact: true,
-			})
-		).toBeDisabled();
-		expect(
-			f.calls.some((c) => c.method === "POST" && c.path === "/api/agents")
-		).toBe(false);
-		for (const draft of SUGGESTIONS) {
-			await page
-				.getByRole("checkbox", {
-					name: `I reviewed ${draft.name}`,
-					exact: true,
-				})
-				.click();
-		}
-		await page
-			.getByRole("button", { name: "Add 2 agents", exact: true })
-			.click();
-		await expect(page.getByRole("alert")).toHaveText(
-			"Added 1. Couldn't add Research helper. Try again or skip."
-		);
-		expect((await f.read()).agents.map((a) => a.name)).toEqual([
-			"Inbox helper",
-		]);
-		await expect(page.getByTestId("agent-suggestion-draft-0")).toHaveCount(0);
-		await page.screenshot({
-			path: path.join(
-				EVIDENCE,
-				"onboarding-production-agent-partial-retry.png"
-			),
-			fullPage: true,
-		});
-		await page
-			.getByRole("button", { name: "Add 1 agent", exact: true })
-			.click();
-		await expect(
-			page.getByRole("heading", { name: "Choose how you talk to Ryu" })
-		).toBeVisible();
-		const writes = f.calls.filter(
-			(c) => c.method === "POST" && c.path === "/api/agents"
-		);
-		expect(writes).toHaveLength(3);
-		expect((await f.read()).agents.map((a) => a.name)).toEqual([
-			"Inbox helper",
-			"Research helper",
-		]);
-		for (const [index, call] of writes.entries()) {
-			const draft = SUGGESTIONS[index === 0 ? 0 : 1];
-			expect(call.authorization).toBe("Bearer setup-proof-node-token");
-			expect(call.body).toEqual({
-				name: draft.name,
-				title: draft.title,
-				description: draft.description,
-				system_prompt: draft.systemPrompt,
-				engine: "acp:pi",
-				model: "openrouter/auto",
-				chat_model: {
-					engine: "managed-openrouter",
-					model_id: "openrouter/auto",
-				},
-				tools: draft.tools,
-				persona: { display_name: null, tone: null },
-				safety_profile: "read_only",
-			});
-		}
-		await page.screenshot({
-			path: path.join(
-				EVIDENCE,
-				"onboarding-production-suggested-agents-completed.png"
-			),
-			fullPage: true,
-		});
-	} finally {
-		await f.close();
-	}
-});
-
-test("production suggested agent deselection and skip do not create agents", async ({
-	page,
-}) => {
-	const f = await fixture(page, { paid: true, suggestions: true });
-	try {
-		await toSuggestions(page);
-		await page
-			.getByRole("button", { name: "Select Inbox helper", exact: true })
-			.click();
-		await page
-			.getByRole("button", { name: "Deselect Inbox helper", exact: true })
-			.click();
-		await expect(
-			page.getByRole("button", { name: "Select an agent", exact: true })
-		).toBeDisabled();
-		await page
-			.getByRole("button", { name: "Skip for now", exact: true })
-			.click();
-		await expect(
-			page.getByRole("heading", { name: "Choose how you talk to Ryu" })
-		).toBeVisible();
-		expect(
-			f.calls.some((c) => c.method === "POST" && c.path === "/api/agents")
-		).toBe(false);
-		expect((await f.read()).agents).toEqual([]);
-	} finally {
-		await f.close();
-	}
-});
-
+// The activation steps follow privacy (4f7563c79d): the task picker offers app
+// tasks, a task preview asks to connect its app, and the managed task starts
+// once that connection is in place.
 test("production owner activation confirms connection permission, claims reward and retries the first task", async ({
 	page,
 }) => {
 	const f = await fixture(page, { paid: true, failedQuest: true });
 	try {
-		await toProfile(page);
+		await localDefault(page);
+		await chooseOrg(page);
+		await expect(
+			page.getByRole("heading", { name: "Set your cloud default" })
+		).toBeVisible();
 		await page
-			.getByRole("button", { name: "Skip for now", exact: true })
+			.getByRole("button", { name: "Save default", exact: true })
 			.click();
-		await expect(
-			page.getByRole("heading", { name: "Choose how you talk to Ryu" })
-		).toBeVisible();
-		await page.getByRole("button", { name: "Skip", exact: true }).click();
-		await expect(
-			page.getByRole("heading", { name: "Make it yours" })
-		).toBeVisible();
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-		await expect(
-			page.getByRole("heading", { name: "Set your preferences" })
-		).toBeVisible();
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
+		await page
+			.getByRole("button", { name: "Continue to privacy", exact: true })
+			.click();
+		await page.getByRole("button", { name: "Not now", exact: true }).click();
 		await page.getByTestId("onboarding-final-continue").click();
-		await page.getByRole("radio", { name: "Search", exact: true }).click();
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
 		await expect(
-			page.getByRole("heading", { name: "Recommended for you" })
+			page.getByRole("heading", { name: "What would you like Ryu to do?" })
 		).toBeVisible();
-		const notion = page
-			.locator("div.rounded-2xl")
-			.filter({ has: page.getByText("Notion", { exact: true }) })
-			.filter({
-				has: page.getByRole("button", {
-					name: "Connect · +$0.50",
-					exact: true,
-				}),
-			});
-		await notion
-			.getByRole("button", { name: "Connect · +$0.50", exact: true })
+		await page
+			.getByRole("list")
+			.locator(":scope > *")
+			.filter({ hasText: "Find the next task in Notion" })
+			.getByRole("button", { name: "Preview task", exact: true })
 			.click();
+		await expect(
+			page.getByRole("heading", { name: "Find the next task in Notion" })
+		).toBeVisible();
+		const connect = page.getByRole("button", {
+			name: "Connect Notion for this task",
+			exact: true,
+		});
+		await connect.click();
 		const permission = page.getByTestId("connection-permission-dialog");
 		await permission
 			.getByRole("button", { name: "Cancel", exact: true })
 			.click();
 		expect(f.calls.some((c) => c.path.endsWith("/initiate"))).toBe(false);
-		await notion
-			.getByRole("button", { name: "Connect · +$0.50", exact: true })
-			.click();
+		await connect.click();
 		await permission
 			.getByRole("button", { name: "Continue to connect", exact: true })
 			.click();
 		await expect(permission).not.toBeVisible();
+		expect(f.calls.find((c) => c.path.endsWith("/initiate"))).toMatchObject({
+			authorization: "Bearer setup-proof-node-token",
+			body: { access_level: "risk_based", toolkit: "notion" },
+		});
 		expect((await f.read()).rewardClaims).toEqual([
 			{ appSlug: "notion", connectionId: "new-notion" },
 		]);
@@ -221,17 +72,14 @@ test("production owner activation confirms connection permission, claims reward 
 			authorization: "Bearer onboarding-fixture-session",
 			body: { appSlug: "notion", connectionId: "new-notion" },
 		});
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-		await page
-			.getByRole("button", { name: "See your first task", exact: true })
-			.click();
-		await page
-			.getByRole("button", { name: "Continue to task", exact: true })
-			.click();
-		await page.getByRole("button", { name: "Start task", exact: true }).click();
+		const start = page.getByRole("button", {
+			name: "Start managed task",
+			exact: true,
+		});
+		await start.click();
 		await expect(page.getByRole("alert")).toHaveText("/api/quests failed: 503");
 		expect((await f.read()).quests).toEqual([]);
-		await page.getByRole("button", { name: "Start task", exact: true }).click();
+		await start.click();
 		await expect
 			.poll(() =>
 				page.evaluate(() =>
@@ -303,11 +151,10 @@ for (const kind of ["personal", "team"] as const) {
 			);
 			expect((await f.read()).nodeSetup).toBeNull();
 			await continueNodeSetup();
+			// Node setup hands off to the local default (the skills step sits
+			// before node setup's local default only on a fresh flow).
 			await expect(
-				page.getByRole("button", {
-					name: "Continue with no optional packs",
-					exact: true,
-				})
+				page.getByRole("heading", { name: "Set your local default" })
 			).toBeVisible();
 			const writes = f.calls.filter(
 				(c) => c.method === "PUT" && c.path === "/api/onboarding/state"
@@ -343,13 +190,12 @@ for (const lane of ["local", "cloud"] as const) {
 		try {
 			if (lane === "cloud") {
 				await localDefault(page);
+				// A paid plan goes from the organization straight to the cloud
+				// default (4f7563c79d).
 				await chooseOrg(page);
 				await expect(
-					page.getByRole("heading", { name: "Connect your accounts" })
+					page.getByRole("heading", { name: "Set your cloud default" })
 				).toBeVisible();
-				await page
-					.getByRole("button", { name: "Continue", exact: true })
-					.click();
 			} else {
 				await page.goto(PROOF_URL);
 				await page
@@ -414,7 +260,7 @@ for (const lane of ["local", "cloud"] as const) {
 					name:
 						lane === "local"
 							? "Choose your organization"
-							: "Import existing threads",
+							: "A few things to know",
 				})
 			).toBeVisible();
 			await expect(page.getByRole("alert")).toHaveCount(0);

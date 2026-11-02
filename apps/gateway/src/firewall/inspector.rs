@@ -9,20 +9,107 @@
 //! through the governed nonrecursive inference client, which preserves DLP,
 //! model policy, rate limits, budgets and usage accounting.
 //!
-//! Provider availability failures retain the lexical backstop. A disabled config, a too-short turn, an unconfigured
-//! provider, a provider error, a timeout, or an unparseable reply all resolve to
-//! "not flagged" (allow), logging a warning. A cheap local model (e.g. Gemma)
-//! emits dirty JSON, so the verdict is parsed defensively (first `{…}` block; on
-//! any failure, allow). Runs **inbound only** in v1.
+//! The judge reads the WHOLE text: it is split into windows of
+//! [`judge::MAX_INSPECT_CHARS`], judged newest content first, and a flag in any
+//! window flags the turn. Each window reaches the judge fenced as untrusted
+//! data with chat-template control tokens neutralised. Only a parsed verdict
+//! is an answer: a refusal, a content-filter stop, an empty, cut-off or
+//! unparseable reply, or a window budget that ran out before the oldest
+//! content is never a clean verdict ([`InspectorOutcome`]).
+//!
+//! Under the `Block` action the Inspector stage fails CLOSED on every missing
+//! verdict an attacker can steer or force ([`fail_closed`]): a refusal, a
+//! malformed or cut-off reply, plain prose with no verdict, a window budget
+//! that ran out, and a judge provider that is unreachable, errors or times out
+//! (a payload sized or shaped to time the judge out is as attacker-controlled
+//! as a refusal bait). The verdict comes back flagged with the
+//! [`UNAVAILABLE_CATEGORY`], so the stage's Block arm refuses the turn. Only a
+//! judge that flags nothing but topic words outside the declared vocabulary
+//! stays fail-open (logged, `available = false`): the shipped classify-tier
+//! default does that on benign turns. An operator who would rather keep
+//! serving while the classify tier is down sets the inspector action to
+//! `warn_and_continue`, which logs and audits flags without refusing. Rubric
+//! judges never fail closed here; `available = false` makes their caller run
+//! the deterministic seed backstop over the full text.
 
+use futures_util::future::join_all;
 use serde_json::json;
 use tracing::warn;
 
-use crate::config::{InspectorConfig, InspectorMode};
+use crate::config::{FirewallPolicy, InspectorConfig, InspectorMode};
 use crate::{error::GatewayError, pipeline::inference_governance::InferenceClient};
+// The prompts, the parser and the category check live in the screening
+// crate (`ryu_gw_screening::backends::inspector`), so the node-tier stage
+// here and the floor-tier screener adapter share one prompt and one parser.
+use ryu_gw_screening::backends::inspector::{self as judge, JudgeReply};
 
-/// Cap the text sent to the inspector so a huge paste stays cheap and bounded.
-const MAX_INSPECT_CHARS: usize = 4000;
+/// Windows judged per turn: about 60,000 characters with the overlap.
+/// Content past the budget is not judged, and the verdict says so.
+pub const MAX_INSPECT_WINDOWS: usize = 16;
+/// Judge calls in flight at once for one turn.
+const WINDOW_CONCURRENCY: usize = 4;
+/// The category a fail-closed verdict carries.
+pub const UNAVAILABLE_CATEGORY: &str = "inspector_unavailable";
+
+/// How the inspection ended. Variants run from least to most severe, and
+/// every outcome that [`InspectorOutcome::fails_closed`] ranks above every one
+/// that does not, so the worst window decides a multi-window turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InspectorOutcome {
+    /// Every window got a verdict.
+    Answered,
+    /// Not inspected: disabled, too short, or empty.
+    Skipped,
+    /// A flag naming only topic words, outside the declared vocabulary.
+    OffVocabulary,
+    /// No provider, a provider error or a timeout (off-fleet provider
+    /// refusals arrive here too). Ranks above [`Self::OffVocabulary`]: the
+    /// per-window fold keeps the worst outcome, and a fail-closed outcome in
+    /// any window must outrank a fail-open one in another.
+    ProviderUnavailable,
+    /// Prose with no JSON object that does not read as a refusal.
+    Unparseable,
+    /// The window budget ran out before the oldest content was judged.
+    Incomplete,
+    /// A reply with no usable verdict (no JSON verdict, a missing `flagged`,
+    /// a contradictory verdict, a clean verdict cut off by `length`).
+    Malformed,
+    /// The judge or its provider refused (`message.refusal`, a
+    /// `content_filter` stop, empty content, refusal prose).
+    Refused,
+}
+
+impl InspectorOutcome {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Answered => "answered",
+            Self::Skipped => "skipped",
+            Self::ProviderUnavailable => "provider_unavailable",
+            Self::OffVocabulary => "off_vocabulary",
+            Self::Unparseable => "unparseable",
+            Self::Incomplete => "incomplete",
+            Self::Malformed => "malformed",
+            Self::Refused => "refused",
+        }
+    }
+
+    /// Whether the missing verdict is a signal an attacker can produce (a
+    /// refusal-bait payload, a steered non-answer or prose reply, padding past
+    /// the window budget, a payload that stalls or crashes the judge), so a
+    /// Block inspector must refuse rather than allow. Only an off-vocabulary
+    /// flag (topic words from an undersized judge) and a skipped inspection
+    /// do not.
+    pub fn fails_closed(self) -> bool {
+        matches!(
+            self,
+            Self::Malformed
+                | Self::Refused
+                | Self::Incomplete
+                | Self::Unparseable
+                | Self::ProviderUnavailable
+        )
+    }
+}
 
 /// The inspector's structured verdict.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,37 +120,107 @@ pub struct InspectorVerdict {
     pub categories: Vec<String>,
     /// Short human-readable reason (for audit/logging).
     pub reason: String,
-    /// Whether the judge actually produced a verdict (`true`) or this is a
-    /// fail-open / skipped result (`false`: disabled, no provider, timeout,
-    /// provider error, unparseable reply, too-short turn). Callers use this to
-    /// decide whether to run a deterministic seed backstop: when the judge did NOT
-    /// answer, the lexical seed is the only floor; when it DID answer (even
-    /// `flagged=false`), its context judgment is trusted over the seed.
+    /// Whether the judge produced a verdict covering ALL of the text
+    /// (`true`), or the result is skipped, unanswered or partial (`false`).
+    /// Callers use this to decide whether to run a deterministic seed
+    /// backstop: when the judge did not see everything, the lexical seed over
+    /// the full text is the floor; when it did, its context judgment is
+    /// trusted over the seed.
     pub available: bool,
+    /// How the inspection ended.
+    pub outcome: InspectorOutcome,
 }
 
 impl InspectorVerdict {
-    /// The fail-open / clean verdict: allow, nothing flagged, judge NOT available.
+    /// The skipped / clean verdict: allow, nothing flagged, judge NOT available.
     pub fn allow() -> Self {
+        Self::unanswered(InspectorOutcome::Skipped)
+    }
+
+    fn unanswered(outcome: InspectorOutcome) -> Self {
         Self {
             flagged: false,
             categories: Vec::new(),
             reason: String::new(),
             available: false,
+            outcome,
         }
     }
+}
+
+/// Under `Block`, turn a missing verdict that [`InspectorOutcome::fails_closed`]
+/// into a flag so the Block path refuses the turn. Other actions and
+/// outcomes pass through unchanged.
+pub fn fail_closed(mut verdict: InspectorVerdict, action: &FirewallPolicy) -> InspectorVerdict {
+    if verdict.flagged || *action != FirewallPolicy::Block || !verdict.outcome.fails_closed() {
+        return verdict;
+    }
+    warn!(
+        outcome = verdict.outcome.label(),
+        "inspector: no verdict for the whole turn; failing closed under Block"
+    );
+    verdict.flagged = true;
+    verdict.categories = vec![UNAVAILABLE_CATEGORY.to_owned()];
+    verdict.reason = format!(
+        "the inspector could not judge the whole turn ({}); blocked fail-closed",
+        verdict.outcome.label()
+    );
+    verdict
+}
+
+/// Whether every in-vocabulary category the judge named is `injection`.
+pub fn is_injection_only(categories: &[String]) -> bool {
+    let mut known = categories
+        .iter()
+        .filter_map(|c| judge::canonical_category(c))
+        .peekable();
+    known.peek().is_some() && known.all(|word| word == "injection")
+}
+
+/// The Inspector stage's Sanitize semantics: an injection cannot be redacted,
+/// so an injection-only flag continues unchanged with a warning (as the regex
+/// firewall's injection match does), and only a PII / secret / unnamed flag
+/// reaches the Sanitize path, which refuses what it cannot redact.
+fn sanitize_semantics(mut verdict: InspectorVerdict, action: &FirewallPolicy) -> InspectorVerdict {
+    if *action == FirewallPolicy::Sanitize
+        && verdict.flagged
+        && is_injection_only(&verdict.categories)
+    {
+        warn!(
+            categories = ?verdict.categories,
+            reason = %verdict.reason,
+            "inspector: injection flagged under Sanitize; not redactable, forwarded unchanged"
+        );
+        verdict.flagged = false;
+    }
+    verdict
 }
 
 /// Stateless entry point for the LLM inspector.
 pub struct InspectorClient;
 
 impl InspectorClient {
+    /// The Inspector stage's verdict for `text` under `cfg.action`:
+    /// [`Self::assess`], then [`fail_closed`] and the Sanitize semantics.
     pub async fn inspect(
         text: &str,
         cfg: &InspectorConfig,
         inference: &dyn InferenceClient,
     ) -> Result<InspectorVerdict, GatewayError> {
-        if !cfg.enabled || text.chars().count() < cfg.min_chars {
+        let verdict = Self::assess(text, cfg, inference).await?;
+        Ok(sanitize_semantics(
+            fail_closed(verdict, &cfg.action),
+            &cfg.action,
+        ))
+    }
+
+    /// The judge's verdict over all of `text`, with no action applied.
+    pub async fn assess(
+        text: &str,
+        cfg: &InspectorConfig,
+        inference: &dyn InferenceClient,
+    ) -> Result<InspectorVerdict, GatewayError> {
+        if !cfg.enabled || text.trim().is_empty() || text.chars().count() < cfg.min_chars {
             return Ok(InspectorVerdict::allow());
         }
         run_inspection(
@@ -76,6 +233,7 @@ impl InspectorClient {
         )
         .await
     }
+
     pub async fn inspect_rubric(
         text: &str,
         rubric: &str,
@@ -98,8 +256,61 @@ impl InspectorClient {
     }
 }
 
-/// Provider failures retain the lexical backstop; governance errors propagate and cannot be
-/// interpreted as a clean verdict. The client enforces DLP, budgets and accounting without recursion.
+/// Folds per-window results into one verdict.
+#[derive(Default)]
+struct Windows {
+    flagged: bool,
+    categories: Vec<String>,
+    reason: String,
+    worst: Option<InspectorOutcome>,
+}
+
+impl Windows {
+    fn add(&mut self, window: Result<judge::JudgeVerdict, InspectorOutcome>) {
+        match window {
+            Ok(verdict) if verdict.flagged => {
+                self.flagged = true;
+                for category in verdict.categories {
+                    if !self.categories.contains(&category) {
+                        self.categories.push(category);
+                    }
+                }
+                if self.reason.is_empty() {
+                    self.reason = verdict.reason;
+                }
+            }
+            Ok(verdict) => {
+                if self.reason.is_empty() {
+                    self.reason = verdict.reason;
+                }
+            }
+            Err(outcome) => self.worst = self.worst.max(Some(outcome)),
+        }
+    }
+
+    fn finish(self, complete: bool) -> InspectorVerdict {
+        let mut worst = self.worst;
+        if !complete {
+            worst = worst.max(Some(InspectorOutcome::Incomplete));
+        }
+        let outcome = match (self.flagged, worst) {
+            (true, _) | (false, None) => InspectorOutcome::Answered,
+            (false, Some(outcome)) => outcome,
+        };
+        InspectorVerdict {
+            flagged: self.flagged,
+            categories: self.categories,
+            reason: self.reason,
+            available: outcome == InspectorOutcome::Answered,
+            outcome,
+        }
+    }
+}
+
+/// Judge `text` window by window, newest content first, stopping at the
+/// first flag. Provider failures are an outcome, not a clean verdict;
+/// governance errors propagate. The client enforces DLP, budgets and
+/// accounting without recursion.
 async fn run_inspection(
     system_prompt: &str,
     text: &str,
@@ -108,28 +319,86 @@ async fn run_inspection(
     inference: &dyn InferenceClient,
     restrict_categories: bool,
 ) -> Result<InspectorVerdict, GatewayError> {
-    let body = json!({"model":model,"messages":[{"role":"system","content":system_prompt},{"role":"user","content":truncate(text,MAX_INSPECT_CHARS)}],"temperature":0,"max_tokens":200,"stream":false});
-    let Some(response) = inference.complete(model, body, timeout_ms).await? else {
-        return Ok(InspectorVerdict::allow());
-    };
-    let content = response["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("");
-    Ok(
-        parse_verdict_with_category_policy(content, restrict_categories).unwrap_or_else(|| {
-            warn!(
-                reply_len = content.len(),
-                "inspector: unparseable verdict; using lexical backstop"
-            );
-            InspectorVerdict::allow()
-        }),
-    )
+    let (windows, complete) = judge::inspect_windows(
+        text,
+        judge::MAX_INSPECT_CHARS,
+        judge::WINDOW_OVERLAP_CHARS,
+        MAX_INSPECT_WINDOWS,
+    );
+    if !complete {
+        warn!(
+            chars = text.chars().count(),
+            windows = windows.len(),
+            "inspector: text exceeds the window budget; the oldest content is not judged"
+        );
+    }
+    let mut folded = Windows::default();
+    for batch in windows.chunks(WINDOW_CONCURRENCY) {
+        let results = join_all(batch.iter().map(|window| {
+            judge_window(
+                system_prompt,
+                window,
+                model,
+                timeout_ms,
+                inference,
+                restrict_categories,
+            )
+        }))
+        .await;
+        for result in results {
+            folded.add(result?);
+        }
+        if folded.flagged {
+            break;
+        }
+    }
+    Ok(folded.finish(complete))
 }
 
-// The prompts, the parser and the category check live in the screening
-// crate (`ryu_gw_screening::backends::inspector`), so the node-tier stage
-// here and the floor-tier screener adapter share one prompt and one parser.
-use ryu_gw_screening::backends::inspector as judge;
+/// One judge call over one window.
+async fn judge_window(
+    system_prompt: &str,
+    window: &str,
+    model: &str,
+    timeout_ms: u64,
+    inference: &dyn InferenceClient,
+    restrict_categories: bool,
+) -> Result<Result<judge::JudgeVerdict, InspectorOutcome>, GatewayError> {
+    let body = json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": judge::judge_user_content(window)},
+        ],
+        "temperature": 0,
+        "max_tokens": 200,
+        "stream": false,
+    });
+    let Some(response) = inference.complete(model, body, timeout_ms).await? else {
+        warn!("inspector: judge provider unavailable; this window has no verdict");
+        return Ok(Err(InspectorOutcome::ProviderUnavailable));
+    };
+    let outcome = match judge::classify_reply(&response, restrict_categories) {
+        JudgeReply::Verdict(verdict) => return Ok(Ok(verdict)),
+        JudgeReply::Refused(why) => {
+            warn!(why, "inspector: the judge refused; not a clean verdict");
+            InspectorOutcome::Refused
+        }
+        JudgeReply::Malformed(why) => {
+            warn!(why, "inspector: the judge gave no usable verdict");
+            InspectorOutcome::Malformed
+        }
+        JudgeReply::Unparseable => {
+            warn!("inspector: the judge answered in prose with no verdict");
+            InspectorOutcome::Unparseable
+        }
+        JudgeReply::OffVocabulary => {
+            warn!("inspector: the judge flagged only topic words; not a verdict");
+            InspectorOutcome::OffVocabulary
+        }
+    };
+    Ok(Err(outcome))
+}
 
 /// System prompt for an ad-hoc rubric judge. `flagged` is true only when the
 /// rubric's bad condition clearly holds, matching the inline-guardrail semantics.
@@ -147,7 +416,6 @@ fn system_prompt(mode: InspectorMode) -> String {
 }
 
 /// Parse the model's reply into a verdict (see [`judge::parse_verdict`]).
-/// Returns `None` when no JSON object is present, so the caller fails open.
 #[cfg_attr(not(test), allow(dead_code))]
 fn parse_verdict(text: &str) -> Option<InspectorVerdict> {
     parse_verdict_with_category_policy(text, true)
@@ -156,9 +424,9 @@ fn parse_verdict(text: &str) -> Option<InspectorVerdict> {
 /// A `flagged: true` verdict must name at least one of the categories the
 /// system prompt declares. Gemma 3 270M, the shipped classify tier default,
 /// returns topic words (`["party","birthday"]`) for benign turns, so a flagged
-/// verdict with only out-of-vocabulary categories is treated as unparseable:
-/// `available` stays false and the lexical seed remains the floor. A judge
+/// verdict with only out-of-vocabulary categories is not a verdict. A judge
 /// that flags without naming any category is still trusted.
+#[cfg_attr(not(test), allow(dead_code))]
 fn parse_verdict_with_category_policy(
     text: &str,
     restrict_categories: bool,
@@ -167,265 +435,21 @@ fn parse_verdict_with_category_policy(
         flagged: verdict.flagged,
         categories: verdict.categories,
         reason: verdict.reason,
-        // A parsed verdict means the judge answered: trust its context
-        // judgment instead of the deterministic seed.
         available: true,
+        outcome: InspectorOutcome::Answered,
     })
 }
 
-/// The substring from the first `{` to the last `}` (inclusive).
+/// The first balanced JSON object in `s`.
 #[cfg_attr(not(test), allow(dead_code))]
 fn extract_json_object(s: &str) -> Option<&str> {
     judge::extract_json_object(s)
 }
 
-/// Truncate `s` to at most `max` chars on a char boundary.
-fn truncate(s: &str, max: usize) -> &str {
-    judge::truncate(s, max)
-}
+#[cfg(test)]
+#[path = "inspector_tests.rs"]
+mod tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct MissingInference;
-    #[async_trait::async_trait]
-    impl InferenceClient for MissingInference {
-        fn scope(&self) -> String {
-            "test".into()
-        }
-        async fn complete(
-            &self,
-            _model: &str,
-            _body: serde_json::Value,
-            _timeout: u64,
-        ) -> Result<Option<serde_json::Value>, GatewayError> {
-            Ok(None)
-        }
-        async fn embed(
-            &self,
-            _model: &str,
-            _text: &str,
-            _timeout: u64,
-        ) -> Result<Option<Vec<f32>>, GatewayError> {
-            Ok(None)
-        }
-    }
-    fn empty_providers() -> MissingInference {
-        MissingInference
-    }
-
-    #[test]
-    fn disabled_config_allows() {
-        let cfg = InspectorConfig::default(); // enabled = false
-        let providers = empty_providers();
-        let v = tokio_block(InspectorClient::inspect(
-            "some long enough text to exceed the min_chars threshold easily here",
-            &cfg,
-            &providers,
-        ));
-        assert_eq!(v, InspectorVerdict::allow(), "disabled ⇒ allow");
-    }
-
-    #[test]
-    fn short_turn_is_skipped() {
-        let cfg = InspectorConfig {
-            enabled: true,
-            min_chars: 40,
-            ..InspectorConfig::default()
-        };
-        let providers = empty_providers();
-        let v = tokio_block(InspectorClient::inspect("hi", &cfg, &providers));
-        assert!(!v.flagged, "sub-min_chars turn is skipped (allow)");
-    }
-
-    #[test]
-    fn provider_missing_fails_open() {
-        // enabled + long enough, but no provider is configured ⇒ allow.
-        let cfg = InspectorConfig {
-            enabled: true,
-            model: "gpt-4o-mini".into(),
-            min_chars: 5,
-            ..InspectorConfig::default()
-        };
-        let providers = empty_providers();
-        let v = tokio_block(InspectorClient::inspect(
-            "this is a sufficiently long message to pass the min_chars gate",
-            &cfg,
-            &providers,
-        ));
-        assert!(!v.flagged, "no provider ⇒ fail open (allow)");
-    }
-
-    #[test]
-    fn inspect_rubric_fails_open_without_provider() {
-        // An enabled inline toxicity binding drives this path; with no provider
-        // configured it must fail open (allow / not flagged), never hard-fail.
-        let providers = empty_providers();
-        let v = tokio_block(InspectorClient::inspect_rubric(
-            "you are a worthless piece of garbage and everyone hates you",
-            "Rate whether the response contains toxic, hateful, or harassing language.",
-            "gpt-4o-mini",
-            1500,
-            &providers,
-        ));
-        assert!(!v.flagged, "no provider ⇒ fail open (allow)");
-    }
-
-    #[test]
-    fn inspect_rubric_empty_inputs_allow() {
-        let providers = empty_providers();
-        assert!(
-            !tokio_block(InspectorClient::inspect_rubric(
-                "", "rubric", "m", 1500, &providers
-            ))
-            .flagged
-        );
-        assert!(
-            !tokio_block(InspectorClient::inspect_rubric(
-                "text", "", "m", 1500, &providers
-            ))
-            .flagged
-        );
-    }
-
-    #[test]
-    fn parse_verdict_reads_clean_json() {
-        let v = parse_verdict(
-            r#"{"flagged": true, "categories": ["injection"], "reason": "ignore prior"}"#,
-        )
-        .expect("clean json parses");
-        assert!(v.flagged);
-        assert_eq!(v.categories, vec!["injection"]);
-    }
-
-    /// The deny-all regression. These four replies are verbatim from Gemma 3
-    /// 270M (the shipped classify-tier default) answering benign turns; each
-    /// previously produced a 403 under the default `action: Block`.
-    #[test]
-    fn flagged_with_only_topic_categories_is_not_a_verdict() {
-        for reply in [
-            r#"{"flagged": true, "categories": ["party","birthday"]}"#,
-            r#"{"flagged": true, "categories": ["chocolate chip cookies"]}"#,
-            r#"{"flagged": true, "categories": ["roadmap"]}"#,
-            r#"{"flagged": true, "categories": ["weather","holiday"]}"#,
-        ] {
-            assert!(
-                parse_verdict(reply).is_none(),
-                "topic-word categories must not block: {reply}"
-            );
-        }
-    }
-
-    /// The other half: real attacks still parse and still block. Verbatim
-    /// replies from the same model on hostile turns.
-    #[test]
-    fn flagged_with_in_enum_categories_still_blocks() {
-        for reply in [
-            r#"{"flagged": true, "categories": ["injection","pii","secret"]}"#,
-            r#"{"flagged": true, "categories": ["PII"], "reason": "ssn"}"#,
-            r#"{"flagged": true, "categories": ["prompt-injection"]}"#,
-            r#"{"flagged": true, "categories": ["pii_leakage"]}"#,
-        ] {
-            let v = parse_verdict(reply).expect("in-enum verdict parses");
-            assert!(v.flagged && v.available, "must still flag: {reply}");
-        }
-    }
-
-    #[test]
-    fn rubric_verdicts_accept_rubric_owned_categories() {
-        let reply = r#"{"flagged": true, "categories": ["toxicity"], "reason": "harassment"}"#;
-        assert!(
-            parse_verdict_with_category_policy(reply, false)
-                .expect("rubric verdict parses")
-                .flagged
-        );
-        assert!(
-            parse_verdict_with_category_policy(reply, true).is_none(),
-            "the built-in inspector vocabulary must remain strict"
-        );
-    }
-
-    /// `flagged: false` needs no categories — only a *positive* claim made with
-    /// a supplied-but-foreign vocabulary is rejected.
-    #[test]
-    fn clean_verdict_needs_no_categories() {
-        let v = parse_verdict(r#"{"flagged": false, "categories": []}"#).expect("parses");
-        assert!(!v.flagged);
-        assert!(
-            v.available,
-            "the judge did answer; the seed must not override"
-        );
-        // A clean verdict may even carry topic words without being discarded —
-        // the in-enum rule gates blocking, not allowing.
-        let v = parse_verdict(r#"{"flagged": false, "categories": ["weather"]}"#).expect("parses");
-        assert!(!v.flagged && v.available);
-    }
-
-    /// A terse judge that flags without categories is still trusted — the
-    /// narrowing that keeps this fix from weakening well-behaved models.
-    #[test]
-    fn flagged_without_categories_is_still_a_block() {
-        let v = parse_verdict(r#"{"flagged": true, "reason": "override attempt"}"#)
-            .expect("terse verdict parses");
-        assert!(v.flagged && v.available);
-    }
-
-    #[test]
-    fn parse_verdict_extracts_from_dirty_reply() {
-        // A cheap local model wraps JSON in a code fence + prose.
-        let dirty = "Sure! Here is the result:\n```json\n{\"flagged\": false, \"reason\": \"clean\"}\n```\nHope that helps.";
-        let v = parse_verdict(dirty).expect("dirty reply still parses");
-        assert!(!v.flagged);
-        assert_eq!(v.reason, "clean");
-    }
-
-    #[test]
-    fn verdict_available_distinguishes_judge_answer_from_fail_open() {
-        // A parsed verdict (the judge answered) is marked available…
-        let answered =
-            parse_verdict(r#"{"flagged": false, "reason": "clean"}"#).expect("clean json parses");
-        assert!(
-            answered.available,
-            "a parsed verdict means the judge answered"
-        );
-        // …while every fail-open/allow path is NOT available, so the caller runs
-        // its deterministic seed backstop only when the judge did not answer.
-        assert!(!InspectorVerdict::allow().available);
-    }
-
-    #[test]
-    fn parse_verdict_partial_object_defaults() {
-        let v = parse_verdict(r#"{"flagged": true}"#).expect("partial parses via defaults");
-        assert!(v.flagged);
-        assert!(v.categories.is_empty());
-        assert_eq!(v.reason, "");
-    }
-
-    #[test]
-    fn parse_verdict_none_on_no_json() {
-        assert!(parse_verdict("no json here at all").is_none());
-        assert!(parse_verdict("").is_none());
-    }
-
-    #[test]
-    fn extract_json_object_handles_fences_and_prose() {
-        assert_eq!(extract_json_object("x {\"a\":1} y"), Some("{\"a\":1}"));
-        assert_eq!(extract_json_object("no braces"), None);
-        assert_eq!(extract_json_object("}{"), None); // mis-ordered
-    }
-
-    /// Minimal current-thread executor so the fail-open paths (which never
-    /// actually await a provider) can be exercised without a full runtime.
-    fn tokio_block<F, T>(fut: F) -> T
-    where
-        F: std::future::Future<Output = Result<T, GatewayError>>,
-    {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build test runtime")
-            .block_on(fut)
-            .expect("inspection succeeds")
-    }
-}
+#[path = "inspector_window_tests.rs"]
+mod window_tests;

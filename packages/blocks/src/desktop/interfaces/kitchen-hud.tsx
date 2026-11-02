@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { ChefHat, Plus } from "lucide-react";
 import { GameAction, GameTitlePlate } from "./game-hud.tsx";
 import type { HudDensity } from "./kitchen-hud-layout.ts";
@@ -33,9 +34,13 @@ export function KitchenTitle({
 }) {
 	const { totals } = service;
 	const parts = [
-		totals.ready > 0 ? `${totals.ready} ready to serve` : null,
-		totals.cooking > 0 ? `${totals.cooking} cooking` : null,
-		totals.burnt > 0 ? `${totals.burnt} burnt` : null,
+		totals.ready > 0
+			? tr("{count} ready to serve", { count: totals.ready })
+			: null,
+		totals.cooking > 0
+			? tr("{count} cooking", { count: totals.cooking })
+			: null,
+		totals.burnt > 0 ? tr("{count} burnt", { count: totals.burnt }) : null,
 	].filter(Boolean);
 	return (
 		<GameTitlePlate

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -29,6 +30,45 @@ function Stat({ label, value }: { label: string; value: number }) {
 	);
 }
 
+/** A roster card's spoken name: who, how they are, and where they stand. */
+function rosterCardLabel({
+	actLabel,
+	inSquad,
+	leading,
+	level,
+	name,
+	state,
+}: {
+	actLabel: string | undefined;
+	inSquad: boolean;
+	leading: boolean;
+	level: number;
+	name: string;
+	state: string;
+}): string {
+	if (actLabel !== undefined) {
+		if (!inSquad) {
+			return tr(
+				"{act} Level {level}, on the bench: more urgent agents are playing.",
+				{ act: actLabel, level }
+			);
+		}
+		return leading
+			? tr("{act} Level {level}, selected.", { act: actLabel, level })
+			: tr("{act} Level {level}, in squad.", { act: actLabel, level });
+	}
+	if (!inSquad) {
+		return tr("{name}, {state}, level {level}, not in squad.", {
+			level,
+			name,
+			state,
+		});
+	}
+	return leading
+		? tr("{name}, {state}, level {level}, selected.", { level, name, state })
+		: tr("{name}, {state}, level {level}, in squad.", { level, name, state });
+}
+
 function RosterCard({
 	actLabel,
 	inSquad,
@@ -55,14 +95,21 @@ function RosterCard({
 	} else if (inSquad) {
 		role = "In squad";
 	}
-	const placed = inSquad ? role.toLowerCase() : "not in squad";
-	const label =
-		actLabel === undefined
-			? `${agent.name}, ${SQUAD_STATE_DESCRIPTIONS[state]}, level ${level.level}, ${placed}.`
-			: `${actLabel} Level ${level.level}, ${inSquad ? placed : "on the bench: more urgent agents are playing"}.`;
+	const label = rosterCardLabel({
+		actLabel,
+		inSquad,
+		leading,
+		level: level.level,
+		name: agent.name,
+		state: tr(SQUAD_STATE_DESCRIPTIONS[state]),
+	});
 	return (
 		<button
-			aria-label={`${label} ${leading ? "Back to the lobby." : "Select and go to the lobby."}`}
+			aria-label={
+				leading
+					? tr("{label} Back to the lobby.", { label })
+					: tr("{label} Select and go to the lobby.", { label })
+			}
 			className={cn(
 				"group/card relative flex h-full w-full flex-col overflow-hidden rounded-2xl border-(--gk-edge) border-2 bg-(--gk-plate) text-start shadow-[0_3px_0_var(--gk-edge)] outline-none transition-colors hover:bg-(--gk-plate-sunk) focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 			)}
@@ -106,7 +153,7 @@ function RosterCard({
 					)}
 				>
 					{leading ? "Back to lobby" : "Lead squad"}
-					<ArrowRight className="size-3.5" />
+					<ArrowRight className="size-3.5 rtl:-scale-x-100" />
 				</span>
 			</span>
 			<span
@@ -123,6 +170,7 @@ function RosterCard({
 							DISPLAY,
 							"truncate pt-0.5 text-(--gk-ink) text-[26px]"
 						)}
+						data-ryu-i18n="off"
 					>
 						{agent.name}
 					</span>

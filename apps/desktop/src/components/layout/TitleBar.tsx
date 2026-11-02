@@ -7,6 +7,7 @@ import {
 	ContextMenu,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { EdgeScrollChevrons } from "@ryu/ui/components/edge-scroller.tsx";
 import { ProgressiveBlur } from "@ryu/ui/components/progressive-blur.tsx";
 import { useSidebar } from "@ryu/ui/components/sidebar.tsx";
@@ -37,7 +38,9 @@ import {
 	TitleBarDragContextMenu,
 } from "../shell/title-bar/title-bar-menus.tsx";
 import { useTitleBarAutoHide } from "../shell/title-bar/use-title-bar-auto-hide.ts";
+import { inlineWheelDelta } from "./scrollable-tabs-keys.ts";
 import layoutStyles from "./TitleBar.module.css";
+import { TITLEBAR_CLEARANCE_PX } from "./TitlebarPage.tsx";
 
 export { GroupHeaderPill } from "../shell/title-bar/tab-brackets.tsx";
 export { TabGlyph, useTabBusy } from "../shell/title-bar/tab-glyph.tsx";
@@ -61,6 +64,7 @@ export function TitleBar({
 	pageActionsMargin,
 }: TitleBarProps) {
 	const { t } = useI18n();
+	const direction = useDirection();
 	const { open } = useSidebar();
 	const activeSeason = useActiveSeason();
 	// At phone widths the sidebar is never docked, so the strip always has to
@@ -165,7 +169,7 @@ export function TitleBar({
 			return;
 		}
 		if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-			el.scrollLeft += e.deltaY;
+			el.scrollLeft += inlineWheelDelta(e.deltaY, direction);
 		}
 	};
 
@@ -203,9 +207,6 @@ export function TitleBar({
 	useHotkey("nav.forward", goForward);
 	useMouseNavigationButtons(goBack, goForward);
 
-	const cssVariables1: LayoutCssVariables = {
-		"--desktop-inline1-pointer-Events": titleBarVisible ? "none" : "auto",
-	};
 	const cssVariables2: LayoutCssVariables = {
 		"--desktop-inline2-transform": titleBarVisible
 			? "translateY(0)"
@@ -216,18 +217,17 @@ export function TitleBar({
 	return (
 		<>
 			{/* Top-edge hover zone — catches the cursor when the bar is tucked away
-			    so it can slide back in. Always mounted while auto-hide is on; the
-			    bar itself takes over once peeked (pointer-events resume). */}
+			    so it can slide back in. Always mounted while auto-hide is on, and
+			    it keeps taking the pointer while peeked: the bar (later in the DOM,
+			    same z) covers it once it has slid in and then owns the hover. Turning
+			    the zone off on peek left a still cursor over the page while the bar
+			    was sliding in, so the zone's leave hid the bar again and it flickered. */}
 			{effectiveAutoHide && (
 				<div
 					aria-hidden
-					className={cn(
-						"absolute top-0 left-0 z-10 h-4 w-full",
-						layoutStyles.inline1
-					)}
+					className="absolute start-0 top-0 z-10 h-4 w-full"
 					onMouseEnter={showTitleBarPeek}
 					onMouseLeave={scheduleTitleBarHide}
-					style={cssVariables1}
 				/>
 			)}
 			<div
@@ -240,7 +240,7 @@ export function TitleBar({
 				// on this element, so anything above its box would not drag. `pt-2`
 				// keeps the topmost 8px band inside the drag region.
 				className={cn(
-					"absolute top-0 left-0 z-10 flex h-14 w-full items-center px-2 pt-2",
+					"absolute start-0 top-0 z-10 flex h-14 w-full items-center px-2 pt-2",
 					// The auto-hide rule reads variables set only while auto-hide is
 					// on. Without them `pointer-events` is invalid and inherits, so
 					// inside the workbench overlay (`pointer-events-none`) the bar
@@ -253,12 +253,13 @@ export function TitleBar({
 				onMouseLeave={effectiveAutoHide ? scheduleTitleBarHide : undefined}
 				style={effectiveAutoHide ? cssVariables2 : undefined}
 			>
-				{/* The shared page inset includes this short fade below the controls.
+				{/* The glass spans TITLEBAR_CLEARANCE_PX: this h-14 bar plus a short
+				    fade below the controls, the same length every page clears.
 				    Resting content starts clear; scrolling content fades under the glass. */}
 				<ProgressiveBlur
 					backgroundColor="var(--background)"
 					blurAmount="16px"
-					height="calc(100% + var(--spacing) * 6)"
+					height={`${TITLEBAR_CLEARANCE_PX}px`}
 					position="top"
 				/>
 				{/* Seasonal particles drift down the bar on holidays. They sit ABOVE
@@ -362,7 +363,7 @@ export function TitleBar({
 														undefined,
 														"New chat tab"
 													)}
-													className="ml-0.5 shrink-0"
+													className="ms-0.5 shrink-0"
 													data-tauri-drag-region={false}
 													onClick={handleNewTab}
 													size="icon-sm"
@@ -441,7 +442,6 @@ export function TitleBar({
 }
 
 interface LayoutCssVariables extends LayoutCSSProperties {
-	"--desktop-inline1-pointer-Events"?: string | number;
 	"--desktop-inline2-opacity"?: string | number;
 	"--desktop-inline2-pointer-Events"?: string | number;
 	"--desktop-inline2-transform"?: string | number;

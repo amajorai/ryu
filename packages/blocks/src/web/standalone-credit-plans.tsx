@@ -5,7 +5,8 @@ import {
 	type StandaloneCreditTierId,
 	standaloneCreditQuote,
 } from "@ryu/auth/lib/standalone-credit-tiers";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Card,
@@ -31,18 +32,19 @@ import {
 	Zap,
 } from "lucide-react";
 import { useState } from "react";
+import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
 import motionStyles from "./pricing-motion.module.css";
 
 export type StandaloneFundingChoice =
 	| { kind: "topup"; amountCents: number }
 	| { kind: "monthly"; tierId: StandaloneCreditTierId };
-const money = (cents: number) =>
-	new Intl.NumberFormat("en-US", {
+const formatCents = (locale: string | undefined, cents: number) =>
+	formatNumberValue(locale, cents / 100, {
 		style: "currency",
 		currency: "USD",
 		minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
 		maximumFractionDigits: 2,
-	}).format(cents / 100);
+	});
 
 export function StandaloneCreditPlans({
 	onCheckout,
@@ -64,6 +66,9 @@ export function StandaloneCreditPlans({
 	balanceMicroUsd?: number | null;
 }) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
+	const fees = depositFeeAmounts(locale);
+	const money = (cents: number) => formatCents(locale, cents);
 	const [choice, setChoice] = useState<"topup" | StandaloneCreditTierId>(
 		"topup"
 	);
@@ -91,12 +96,12 @@ export function StandaloneCreditPlans({
 			<div className="mb-8">
 				<PageHeader
 					as="h2"
-					className="text-left sm:text-center"
+					className="text-start sm:text-center"
 					subtitle="Use Gateway and eligible metered services without a workspace subscription. Top up when you need credits, or fund your wallet every month."
 					title="Credits for standalone services"
 				/>
 				{typeof balanceMicroUsd === "number" ? (
-					<p className="mt-3 text-left font-medium sm:text-center">
+					<p className="mt-3 text-start font-medium sm:text-center">
 						{tl("Standalone wallet balance: {balance}", {
 							balance: money(Math.floor(balanceMicroUsd / 10_000)),
 						})}
@@ -135,7 +140,7 @@ export function StandaloneCreditPlans({
 									<button
 										aria-checked={choice === option.id}
 										aria-label={option.name}
-										className="flex w-full items-center justify-between rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+										className="flex w-full items-center justify-between rounded-lg text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
 										onClick={() => {
 											setChoice(option.id as typeof choice);
 											setAgreed(false);
@@ -206,7 +211,9 @@ export function StandaloneCreditPlans({
 												: money(option.faceCents)}
 										</span>
 										<span className="text-muted-foreground">
-											{option.faceCents === null ? "/top-up" : "credits/mo"}
+											{option.faceCents === null
+												? tl("/top-up")
+												: tl("credits/mo")}
 										</span>
 									</div>
 									<p className="mb-6 text-muted-foreground text-sm">
@@ -226,7 +233,7 @@ export function StandaloneCreditPlans({
 										<li className="flex items-start">
 											<Globe
 												aria-hidden
-												className="mt-0.5 mr-2 size-4 shrink-0"
+												className="me-2 mt-0.5 size-4 shrink-0"
 											/>
 											<span>
 												Gateway and eligible metered standalone services
@@ -235,21 +242,26 @@ export function StandaloneCreditPlans({
 										<li className="flex items-start">
 											<Repeat
 												aria-hidden
-												className="mt-0.5 mr-2 size-4 shrink-0"
+												className="me-2 mt-0.5 size-4 shrink-0"
 											/>
 											<span>Unused paid credits roll over</span>
 										</li>
 										<li className="flex items-start">
 											<Coins
 												aria-hidden
-												className="mt-0.5 mr-2 size-4 shrink-0"
+												className="me-2 mt-0.5 size-4 shrink-0"
 											/>
-											<span>27% deposit fee ($5 minimum)</span>
+											<span>
+												{tl("{rate} deposit fee ({minimum} minimum)", {
+													minimum: fees.depositFeeMinimum,
+													rate: fees.baseDepositFee,
+												})}
+											</span>
 										</li>
 										<li className="flex items-start">
 											<Ban
 												aria-hidden
-												className="mt-0.5 mr-2 size-4 shrink-0"
+												className="me-2 mt-0.5 size-4 shrink-0"
 											/>
 											<span>
 												No workspace plan, seats, or managed server included
@@ -259,7 +271,7 @@ export function StandaloneCreditPlans({
 											<li className="flex items-start">
 												<CalendarX
 													aria-hidden
-													className="mt-0.5 mr-2 size-4 shrink-0"
+													className="me-2 mt-0.5 size-4 shrink-0"
 												/>
 												<span>Cancel future renewals at any time</span>
 											</li>

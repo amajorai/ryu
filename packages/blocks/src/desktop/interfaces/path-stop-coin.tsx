@@ -33,7 +33,7 @@ export function Coin({
 			{selected && halo ? (
 				<span
 					aria-hidden="true"
-					className="absolute -top-1.5 -left-2.5 size-[84px] rounded-full ring-[3px] ring-primary"
+					className="absolute -start-2.5 -top-1.5 size-[84px] rounded-full ring-[3px] ring-primary"
 				/>
 			) : null}
 			<span
@@ -83,7 +83,7 @@ export function StopRing({
 		<svg
 			aria-hidden="true"
 			className={cn(
-				"pointer-events-none absolute -left-4 size-24",
+				"pointer-events-none absolute -start-4 size-24",
 				selected ? "-top-2" : "-top-4"
 			)}
 			viewBox="0 0 96 96"
@@ -134,8 +134,8 @@ export function PathFlag({ swing }: { swing: number }) {
 			className={cn(
 				"pointer-events-none absolute -top-9 h-[84px] w-14",
 				swing > 0
-					? "@max-[519px]/col:right-full @max-[519px]/col:left-auto left-full @max-[519px]/col:mr-1 @max-[519px]/col:ml-0 ml-1"
-					: "right-full mr-1"
+					? "@max-[519px]/col:start-auto start-full @max-[519px]/col:end-full @max-[519px]/col:ms-0 ms-1 @max-[519px]/col:me-1"
+					: "end-full me-1"
 			)}
 			viewBox="0 0 56 84"
 		>

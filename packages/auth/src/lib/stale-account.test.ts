@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import {
 	boundedLoginDetail,
 	daysSinceLastActive,
-	formatLoginTime,
 	isStaleAccountLogin,
 	STALE_ACCOUNT_DAYS,
 } from "./stale-account.ts";
@@ -37,8 +36,7 @@ describe("stale-account login policy", () => {
 		).toBe(STALE_ACCOUNT_DAYS);
 	});
 
-	it("formats security details with an explicit UTC timezone", () => {
-		expect(formatLoginTime(now)).toBe("Aug 21, 2026 at 12:00 PM UTC");
+	it("bounds request-derived sign-in details", () => {
 		expect(boundedLoginDetail("  Chrome on macOS  ")).toBe("Chrome on macOS");
 		expect(boundedLoginDetail("x".repeat(250))).toHaveLength(200);
 		expect(boundedLoginDetail("   ")).toBeUndefined();

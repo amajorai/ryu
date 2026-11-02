@@ -1,0 +1,4 @@
+{
+  "Recipe “{name}” replay done": "Воспроизведение рецепта «{name}» завершено",
+  "Recipe “{name}” replay failed": "Не удалось воспроизвести рецепт «{name}»"
+}

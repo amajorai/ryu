@@ -19,14 +19,12 @@
 
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Cold Vite compiles the blocks and ui module graphs on first load.
 test.describe.configure({ timeout: 120_000 });
 
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/interfaces"
-);
+const PROOF_DIR = proofEvidencePath("interfaces");
 const AGENT_NAMES = ["Atlas", "Brook", "Cipher", "Delta", "Echo", "Forge"];
 const THREAD_TITLES = [
 	"Rebuild the landing hero",
@@ -95,8 +93,10 @@ test("Card Table: seats and pot from the snapshot, dealing, and playing a card",
 	await expect(page.getByTestId("card-table-summary")).toHaveText(
 		/^6 agents · 2 running · \d+ waiting on you$/
 	);
-	const seats = table.getByRole("list", { name: "Seats" });
-	// Every agent takes a seat; working agents say so before their counts.
+	// The seats sit round the felt in the "Card room" group (no longer a
+	// "Seats" list: f9642916b1, 480b26a0a5, 2c940ae07d). Every agent takes a
+	// seat; working agents say so before their counts.
+	const seats = table.getByRole("group", { name: /^Card room: / });
 	for (const name of AGENT_NAMES) {
 		await expect(
 			seats.getByRole("button", {
@@ -104,6 +104,9 @@ test("Card Table: seats and pot from the snapshot, dealing, and playing a card",
 			})
 		).toBeVisible();
 	}
+	await expect(
+		seats.getByRole("button", { name: "Pot: 2 threads running. Show them" })
+	).toBeVisible();
 	const hand = page.getByTestId("card-table-hand");
 	await expect(hand).toBeVisible();
 

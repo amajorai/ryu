@@ -1,3 +1,4 @@
+import { useOptionalI18n } from "@ryu/i18n/react";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
@@ -21,6 +22,7 @@ import {
 	stabilizeSnapshot,
 	withInterfaceAccount,
 } from "./snapshot.ts";
+import { snapshotTranslator } from "./snapshot-util.ts";
 import { useInterfaceAccount } from "./use-interface-account.ts";
 import { useInterfaceDetail } from "./use-interface-detail.ts";
 import { useInterfaceEvents } from "./use-interface-events.ts";
@@ -173,6 +175,10 @@ export function useInterfaceSnapshot(
 		[conversations, nodeUrl, workspaceProjects, projectNames]
 	);
 
+	// The snapshot writes some copy itself (ask labels, blocker titles); a
+	// language switch hands out a new translator and so rebuilds it.
+	const i18n = useOptionalI18n();
+	const translate = useMemo(() => snapshotTranslator(i18n), [i18n]);
 	const baseSnapshot = useMemo(
 		() =>
 			buildInterfaceSnapshot({
@@ -186,8 +192,20 @@ export function useInterfaceSnapshot(
 				nowMs: live ? Math.max(clock, Date.now()) : undefined,
 				projects,
 				teams,
+				translate,
 			}),
-		[agents, clock, conversations, detail, events, jobs, live, projects, teams]
+		[
+			agents,
+			clock,
+			conversations,
+			detail,
+			events,
+			jobs,
+			live,
+			projects,
+			teams,
+			translate,
+		]
 	);
 	// Spend links to a thread only when the thread is in this snapshot.
 	const threadIds = useMemo(

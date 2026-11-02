@@ -1,15 +1,17 @@
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { defineConfig, devices, type Project } from "@playwright/test";
 
 // Runs the existing browser proofs for the agent models, app updates, entity
 // (Learning), MCP, node and resource permissions, plugin settings fields and
 // provider login settings, plus this item's own coverage specs, with the host
-// Chromium. Screenshots and results go under /tmp so tracked proof images stay
+// Chromium. Screenshots and results go under the OS temp dir so tracked proof images stay
 // untouched. RYU_MODELS_PLUGINS_ONLY (comma-separated project names) limits
 // which harness servers start, since each needs its own Vite. Each project keeps
 // the timeouts of the proof's own config.
 const output =
 	process.env.RYU_MODELS_PLUGINS_OUTPUT ??
-	"/tmp/models-plugins-settings-coverage";
+	path.join(tmpdir(), "models-plugins-settings-coverage");
 process.env.RYU_PROOF_EVIDENCE_DIR ??= `${output}/evidence`;
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 

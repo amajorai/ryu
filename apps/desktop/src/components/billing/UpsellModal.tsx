@@ -17,6 +17,7 @@
 // that one is the checkout surface.
 
 import type { UpsellCard } from "@ryu/auth/lib/upsell";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -28,6 +29,7 @@ import {
 } from "@ryu/ui/components/dialog.tsx";
 import { useEffect, useRef } from "react";
 import { markUpsellConverted, markUpsellShown } from "@/src/lib/api/upsell.ts";
+import { upsellCardCopy } from "./upsell-card-copy.ts";
 
 interface UpsellModalProps {
 	/** The ranked pitch cards to render (guaranteed non-empty by the caller). */
@@ -45,6 +47,7 @@ export function UpsellModal({
 	onOpenChange,
 	onUpgrade,
 }: UpsellModalProps) {
+	const tl = useLiteralMessages();
 	// Stamp `lastUpsellShownAt` once per open transition (not on every render), so
 	// the cadence gap starts the moment the user actually sees the pitch.
 	const stampedRef = useRef(false);
@@ -70,25 +73,29 @@ export function UpsellModal({
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
-					<DialogTitle>You're getting a lot out of Ryu</DialogTitle>
+					<DialogTitle>{tl("You're getting a lot out of Ryu")}</DialogTitle>
 					<DialogDescription>
-						Here's what you've built so far. Upgrade to Pro to keep it growing
-						with cloud sync, parallel runs, and Ryu-managed inference.
+						{tl(
+							"Here's what you've built so far. Upgrade to Pro to keep it growing with cloud sync, parallel runs, and Ryu-managed inference."
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
 				<ul className="flex flex-col">
-					{cards.map((card) => (
-						<li
-							className="flex flex-col gap-0.5 border-border border-b py-3 last:border-b-0"
-							key={card.id}
-						>
-							<span className="font-medium text-sm">{card.headline}</span>
-							<span className="text-(length:--text-detail) text-muted-foreground leading-(--text-detail--line-height)">
-								{card.subtext}
-							</span>
-						</li>
-					))}
+					{cards.map((card) => {
+						const copy = upsellCardCopy(card, tl);
+						return (
+							<li
+								className="flex flex-col gap-0.5 border-border border-b py-3 last:border-b-0"
+								key={card.id}
+							>
+								<span className="font-medium text-sm">{copy.headline}</span>
+								<span className="text-(length:--text-detail) text-muted-foreground leading-(--text-detail--line-height)">
+									{copy.subtext}
+								</span>
+							</li>
+						);
+					})}
 				</ul>
 
 				<DialogFooter>
@@ -97,10 +104,10 @@ export function UpsellModal({
 						type="button"
 						variant="ghost"
 					>
-						Maybe later
+						{tl("Maybe later")}
 					</Button>
 					<Button onClick={handleUpgrade} type="button" variant="mono">
-						Upgrade to Pro
+						{tl("Upgrade to Pro")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

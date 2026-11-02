@@ -93,7 +93,7 @@ export function LiveChat({
 			aria-label="Stream chat"
 			className={cn(
 				"flex h-full min-h-0 flex-col border-border bg-background",
-				overlay ? "absolute inset-0 z-30" : "relative shrink-0 border-l"
+				overlay ? "absolute inset-0 z-30" : "relative shrink-0 border-s"
 			)}
 			data-testid="live-chat"
 			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
@@ -103,7 +103,7 @@ export function LiveChat({
 			<header className="relative flex h-12 shrink-0 items-center justify-center border-border border-b px-12">
 				<Button
 					aria-label={overlay ? "Close chat" : "Collapse chat"}
-					className="absolute left-2 text-muted-foreground hover:text-foreground"
+					className="absolute start-2 text-muted-foreground hover:text-foreground"
 					onClick={onCollapse}
 					size="icon-sm"
 					type="button"
@@ -112,7 +112,10 @@ export function LiveChat({
 					{overlay ? (
 						<X aria-hidden="true" className="size-4" />
 					) : (
-						<ArrowRightToLine aria-hidden="true" className="size-4" />
+						<ArrowRightToLine
+							aria-hidden="true"
+							className="size-4 rtl:-scale-x-100"
+						/>
 					)}
 				</Button>
 				<h2

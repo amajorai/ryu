@@ -1,13 +1,10 @@
 "use client";
 
-import {
-	ArrowDownIcon,
-	ArrowLeftIcon,
-	ArrowRightIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { weekStartForLocale } from "@ryu/i18n/format-intl";
 import { useLocalizedString } from "@ryu/i18n/react";
 import { Button, buttonVariants } from "@ryu/ui/components/button.tsx";
+import { CalendarChevron } from "@ryu/ui/components/calendar-chevron.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { useDisplayDayRevision } from "@ryu/ui/lib/display-day.ts";
 import { displayWallClock, useDisplayLocale } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -21,7 +18,6 @@ import {
 	type Locale,
 	type Modifiers,
 } from "react-day-picker";
-import { z } from "zod";
 
 export interface CalendarLocalization {
 	formatters: Partial<Formatters>;
@@ -54,11 +50,6 @@ const ENGLISH_CALENDAR_WORDS: CalendarWords = {
 	today: "Today",
 };
 
-/** DayPicker's week starts, indexed by Intl's `firstDay` modulo 7 (7 = Sunday). */
-const WEEK_STARTS = [0, 1, 2, 3, 4, 5, 6] as const;
-
-const weekInfoSchema = z.object({ firstDay: z.number().int().min(1).max(7) });
-
 function supportedLocale(code: string | undefined): string | undefined {
 	if (!code) {
 		return;
@@ -70,29 +61,6 @@ function supportedLocale(code: string | undefined): string | undefined {
 	} catch {
 		return;
 	}
-}
-
-/**
- * The locale's first day of the week from Intl week data: `getWeekInfo()` in
- * current engines, the `weekInfo` getter in older ones. An engine with neither
- * (or with malformed data) yields `undefined`, which keeps DayPicker's Sunday.
- */
-function localeWeekStart(
-	locale: string
-): (typeof WEEK_STARTS)[number] | undefined {
-	let weekInfo: unknown;
-	try {
-		const intlLocale = new Intl.Locale(locale);
-		const getWeekInfo: unknown = Reflect.get(intlLocale, "getWeekInfo");
-		weekInfo =
-			typeof getWeekInfo === "function"
-				? Reflect.apply(getWeekInfo, intlLocale, [])
-				: Reflect.get(intlLocale, "weekInfo");
-	} catch {
-		return;
-	}
-	const parsed = weekInfoSchema.safeParse(weekInfo);
-	return parsed.success ? WEEK_STARTS[parsed.data.firstDay % 7] : undefined;
 }
 
 /**
@@ -109,7 +77,7 @@ export function calendarLocalization(
 ): CalendarLocalization {
 	const words = { ...ENGLISH_CALENDAR_WORDS, ...translatedWords };
 	const locale = supportedLocale(code);
-	const weekStartsOn = locale ? localeWeekStart(locale) : undefined;
+	const weekStartsOn = weekStartForLocale(locale);
 	const fullDate = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
 	const monthYear = new Intl.DateTimeFormat(locale, {
 		month: "long",
@@ -259,14 +227,17 @@ function Calendar({
 	});
 
 	const displayToday = useDisplayToday();
+	// DayPicker reads its own `dir` for ArrowLeft/ArrowRight and the month
+	// chevrons; the reading direction comes from the surrounding provider unless
+	// the caller names one.
+	const contextDirection = useDirection();
+	const dir = props.dir ?? contextDirection;
 
 	return (
 		<DayPicker
 			captionLayout={captionLayout}
 			className={cn(
 				"group/calendar bg-background in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent p-3 [--cell-radius:var(--radius-4xl)] [--cell-size:--spacing(8)]",
-				String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
-				String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
 				appearance === "bordered" && "rounded-2xl border border-border",
 				className
 			)}
@@ -370,38 +341,13 @@ function Calendar({
 						/>
 					);
 				},
-				Chevron: ({ className, orientation, ...props }) => {
-					if (orientation === "left") {
-						return (
-							<HugeiconsIcon
-								className={cn("size-4", className)}
-								icon={ArrowLeftIcon}
-								strokeWidth={2}
-								{...props}
-							/>
-						);
-					}
-
-					if (orientation === "right") {
-						return (
-							<HugeiconsIcon
-								className={cn("size-4", className)}
-								icon={ArrowRightIcon}
-								strokeWidth={2}
-								{...props}
-							/>
-						);
-					}
-
-					return (
-						<HugeiconsIcon
-							className={cn("size-4", className)}
-							icon={ArrowDownIcon}
-							strokeWidth={2}
-							{...props}
-						/>
-					);
-				},
+				Chevron: (chevronProps) => (
+					<CalendarChevron
+						dir={dir}
+						navLayout={props.navLayout}
+						{...chevronProps}
+					/>
+				),
 				DayButton: ({ ...props }) => (
 					<CalendarDayButton locale={locale} {...props} />
 				),
@@ -416,6 +362,7 @@ function Calendar({
 				},
 				...components,
 			}}
+			dir={dir}
 			formatters={{
 				formatMonthDropdown: (date) =>
 					date.toLocaleString(locale?.code, { month: "short" }),

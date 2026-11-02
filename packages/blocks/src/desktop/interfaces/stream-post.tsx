@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
@@ -38,10 +39,10 @@ function fullDate(iso: string): string {
 	const date = new Date(iso);
 	return Number.isNaN(date.getTime())
 		? ""
-		: date.toLocaleString(undefined, {
+		: dateFormatter(activeLocale(), {
 				dateStyle: "medium",
 				timeStyle: "short",
-			});
+			}).format(date);
 }
 
 /** The status phrase, colored only when it asks something of the user. */
@@ -84,7 +85,12 @@ function metaParts(
 		parts.push({ key: "replies", node: replyLabel(post.replyCount) });
 	}
 	if (post.participants.length > 1) {
-		parts.push({ key: "agents", node: `${post.participants.length} agents` });
+		parts.push({
+			key: "agents",
+			node: tr("{count, plural, one {# agent} other {# agents}}", {
+				count: post.participants.length,
+			}),
+		});
 	}
 	if (status) {
 		parts.push({ key: "status", node: <StreamStatus line={status} /> });
@@ -137,7 +143,7 @@ function PostMenu({
 				aria-label={tl("More options for {title}", { title: post.title })}
 				className={cn(
 					ICON_BUTTON,
-					"-my-1.5 -mr-2 size-8 text-muted-foreground hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground"
+					"-my-1.5 -me-2 size-8 text-muted-foreground hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground"
 				)}
 			>
 				<Ellipsis aria-hidden="true" className="size-5" />
@@ -186,6 +192,7 @@ function PostHeader({
 						"min-w-0 shrink truncate rounded-sm font-semibold text-foreground hover:underline",
 						STREAM_FOCUS
 					)}
+					data-ryu-i18n="off"
 					onClick={() => actions.onProfile(author.id)}
 					type="button"
 				>
@@ -198,7 +205,7 @@ function PostHeader({
 				<span className="flex min-w-0 items-center gap-1 text-foreground">
 					<ChevronRight
 						aria-hidden="true"
-						className="size-3.5 shrink-0 text-muted-foreground"
+						className="size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100"
 						strokeWidth={2}
 					/>
 					<span className="sr-only">in</span>
@@ -212,7 +219,7 @@ function PostHeader({
 			>
 				{compactAge(post.updatedAt)}
 			</time>
-			<span className="ml-auto flex shrink-0 items-center">
+			<span className="ms-auto flex shrink-0 items-center">
 				<PostMenu actions={actions} page={page} post={post} />
 			</span>
 		</div>
@@ -223,7 +230,10 @@ function PostHeader({
 function PostBody({ page, post }: { page: boolean; post: StreamPost }) {
 	return (
 		<>
-			<span className={cn("block font-semibold text-foreground", STREAM_TEXT)}>
+			<span
+				className={cn("block font-semibold text-foreground", STREAM_TEXT)}
+				data-ryu-i18n="off"
+			>
 				{post.title}
 			</span>
 			{post.body ? (
@@ -237,7 +247,7 @@ function PostBody({ page, post }: { page: boolean; post: StreamPost }) {
 					{post.bodyRole === "user" ? (
 						<span className="text-muted-foreground">You: </span>
 					) : null}
-					{post.body}
+					<span data-ryu-i18n="off">{post.body}</span>
 				</span>
 			) : null}
 		</>
@@ -257,7 +267,7 @@ function ActionRow({
 	const author = post.author;
 	const replies = post.replyCount;
 	return (
-		<div className="-ml-2 flex items-center gap-1">
+		<div className="-ms-2 flex items-center gap-1">
 			<button
 				aria-label={
 					replies > 0
@@ -342,7 +352,7 @@ function PagePost({
 	post: StreamPost;
 }) {
 	const tl = useLiteralMessages();
-	const authorName = post.author?.name ?? "You";
+	const authorName = post.author?.name ?? tr("You");
 	const parts = metaParts(post, false, tl);
 	const date = fullDate(post.updatedAt);
 	return (
@@ -399,7 +409,7 @@ export function StreamPostItem({
 	if (page) {
 		return <PagePost actions={actions} onReply={onReply ?? open} post={post} />;
 	}
-	const authorName = post.author?.name ?? "You";
+	const authorName = post.author?.name ?? tr("You");
 	const parts = metaParts(post, false, tl);
 	// The line runs down to the faces only when there is something to say
 	// beside them; a lone agent's count already sits in the action row.
@@ -411,7 +421,7 @@ export function StreamPostItem({
 			data-thread-id={post.threadId}
 		>
 			{post.pinned ? (
-				<p className="mb-1 flex items-center gap-1.5 pl-12 font-medium text-[13px] text-muted-foreground leading-5">
+				<p className="mb-1 flex items-center gap-1.5 ps-12 font-medium text-[13px] text-muted-foreground leading-5">
 					<Pin aria-hidden="true" className="size-3.5" strokeWidth={2} />
 					Pinned
 				</p>
@@ -433,7 +443,7 @@ export function StreamPostItem({
 					<PostHeader actions={actions} page={false} post={post} />
 					<button
 						className={cn(
-							"mt-0.5 block w-full rounded-md text-left",
+							"mt-0.5 block w-full rounded-md text-start",
 							STREAM_FOCUS
 						)}
 						onClick={open}

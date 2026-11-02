@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Checkbox } from "@ryu/ui/components/checkbox";
 import { cn } from "@ryu/ui/lib/utils";
 import { type ReactNode, useState } from "react";
@@ -47,6 +47,7 @@ function SubscriptionAgreementOffer({
 	terms: string;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [accepted, setAccepted] = useState(false);
 	return (
 		<div className="w-full space-y-3">
@@ -69,10 +70,17 @@ function SubscriptionAgreementOffer({
 						onCheckedChange={(checked) => setAccepted(checked === true)}
 					/>
 					<span>
-						I agree to automatic renewal and the{" "}
-						<a className="underline" href={docsHref("/docs/legal/terms")}>
-							subscription terms
-						</a>
+						{tlRich(
+							"I agree to automatic renewal and the <terms>subscription terms</terms>",
+							{},
+							{
+								terms: (content) => (
+									<a className="underline" href={docsHref("/docs/legal/terms")}>
+										{content}
+									</a>
+								),
+							}
+						)}
 					</span>
 				</label>
 			</div>

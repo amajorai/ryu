@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { MarkdownPlugin } from "@platejs/markdown";
+import { createSlateEditor } from "platejs";
 import {
 	type ComposerMentionItem,
 	mentionMarkdown,
@@ -52,6 +54,18 @@ describe("composer Markdown transport", () => {
 			"\u200B[@Atlas](mention:page-1)\u200B [@Atlas](mention:page-1)\u200B";
 
 		expect(serializeComposerMarkdown(serialized)).toBe("@Atlas @Atlas");
+	});
+
+	test("keeps a workspace file mention verbatim through the editor's Markdown", () => {
+		const draft =
+			"Read @<apps/desktop/src/lib/files.ts> and @<docs/my_notes[1]+x.md> \\<b>";
+		const editor = createSlateEditor({ plugins: [MarkdownPlugin] });
+		const markdown = editor.getApi(MarkdownPlugin).markdown;
+		editor.tf.setValue(markdown.deserialize(mentionMarkdown(draft, items)));
+
+		const serialized = markdown.serialize();
+		expect(serialized).toContain("@\\<apps/desktop/src/lib/files.ts>");
+		expect(serializeComposerMarkdown(serialized).trim()).toBe(draft);
 	});
 
 	test("imports ChatGPT mention links and workspace file references", () => {

@@ -89,7 +89,7 @@ export function OnboardingShell({
 		<PageHeader
 			className={cn(
 				"mx-auto w-full max-w-md text-center",
-				split && "lg:mx-0 lg:text-left"
+				split && "lg:mx-0 lg:text-start"
 			)}
 			stagger={false}
 			subtitle={

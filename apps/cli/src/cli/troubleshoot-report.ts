@@ -13,6 +13,7 @@ import {
 	type TroubleshootReport,
 	troubleshootCounts,
 } from "@ryuhq/core-client/troubleshoot";
+import { tf } from "../i18n/translate.ts";
 import { GITHUB_TIMEOUT_MS } from "./troubleshoot-constants.ts";
 import type { TroubleshootHost } from "./troubleshoot-host.ts";
 import { gib, type TroubleshootOptions } from "./troubleshoot-probes.ts";
@@ -29,7 +30,10 @@ export function machineInfo(
 		["CPU", `${host.cpu.model ?? "unknown"} × ${host.cpu.count}`],
 		[
 			"Memory",
-			`${gib(host.memory.totalBytes)} total, ${gib(host.memory.freeBytes)} free`,
+			tf("{total} total, {free} free", {
+				free: gib(host.memory.freeBytes),
+				total: gib(host.memory.totalBytes),
+			}),
 		],
 		["CLI", `ryu-cli ${VERSION} on ${host.runtime}`],
 		["Profile", ryuProfile(env)],
@@ -103,7 +107,7 @@ export function renderHuman(
 	const shownPath = (path: string) =>
 		redactDiagnosticText(path, { homeDir: host.homeDir });
 	const lines = [
-		`Ryu troubleshooter · ryu-cli ${report.version}`,
+		tf("Ryu troubleshooter · ryu-cli {version}", { version: report.version }),
 		"",
 		"Machine",
 	];
@@ -136,7 +140,10 @@ export function renderHuman(
 	);
 
 	if (report.similarIssues.length > 0) {
-		lines.push("", `Similar issues on ${ISSUE_REPOSITORY}`);
+		lines.push(
+			"",
+			tf("Similar issues on {repository}", { repository: ISSUE_REPOSITORY })
+		);
 		for (const issue of report.similarIssues) {
 			lines.push(
 				`  #${issue.number} [${issue.state}] ${issue.title}`,
@@ -147,13 +154,18 @@ export function renderHuman(
 			"  If one matches, add your report there (a 👍 or a comment) instead of opening a new issue."
 		);
 	} else if (result.similarIssuesError) {
-		lines.push("", `Similar issues: ${result.similarIssuesError}`);
+		lines.push(
+			"",
+			tf("Similar issues: {error}", { error: result.similarIssuesError })
+		);
 	}
 
 	lines.push("");
 	if (result.reportPath) {
 		lines.push(
-			`Full report saved to ${shownPath(result.reportPath)} (secrets and personal paths removed).`
+			tf("Full report saved to {path} (secrets and personal paths removed).", {
+				path: shownPath(result.reportPath),
+			})
 		);
 	}
 	const problems = problemChecks(report.checks);

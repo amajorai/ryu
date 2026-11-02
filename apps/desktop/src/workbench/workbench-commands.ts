@@ -157,7 +157,7 @@ export function workbenchLayoutCommands({
 	const commands: WorkbenchCommand[] = [];
 	for (const region of ["right", "bottom"] as const) {
 		const open = state.openRegions[region];
-		const name = REGION_NAMES[region];
+		const name = tl(REGION_NAMES[region]);
 		commands.push({
 			disabled: !regionHasTabs(state, region),
 			icon: region === "right" ? LayoutRightIcon : LayoutBottomIcon,
@@ -183,7 +183,7 @@ export function workbenchLayoutCommands({
 		if (region === "left") {
 			continue;
 		}
-		const name = REGION_NAMES[region];
+		const name = tl(REGION_NAMES[region]);
 		commands.push({
 			disabled: !activeItemId || focusedGroup?.region === region,
 			icon: region === "bottom" ? LayoutBottomIcon : LayoutRightIcon,

@@ -1,10 +1,10 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceAgent,
-	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
+import type {
+	InterfaceAgent,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import { motion, useIsPresent } from "motion/react";
 import {
@@ -15,7 +15,7 @@ import {
 	useId,
 	useState,
 } from "react";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import { QuizAvatar } from "./quiz-avatar.tsx";
 import { tileLayoutId } from "./quiz-board.tsx";
 import { clueText, type QuizTile, threadTitle } from "./quiz-model.ts";
@@ -159,7 +159,9 @@ export function QuizClueCard({
 	const tl = useLiteralMessages();
 	const agent = agentById(snapshot, tile.agentId);
 	const speaker =
-		tile.thread.lastMessageRole === "user" ? "You" : (agent?.name ?? "Agent");
+		tile.thread.lastMessageRole === "user"
+			? "You"
+			: (agent?.name ?? tr("Agent"));
 	const hasMessage = Boolean(tile.thread.lastMessage?.trim());
 	const headingId = useId();
 	return (
@@ -180,6 +182,7 @@ export function QuizClueCard({
 							"mt-6 line-clamp-6 max-w-[36ch] text-center",
 							CLUE_TYPE
 						)}
+						data-ryu-i18n="off"
 						id={headingId}
 					>
 						{clueText(tile.thread)}
@@ -195,9 +198,7 @@ export function QuizClueCard({
 							</span>
 						</span>
 						<span aria-hidden="true">·</span>
-						<span className="shrink-0">
-							{THREAD_STATUS_LABELS[tile.status]}
-						</span>
+						<span className="shrink-0">{threadStatusLabel(tile.status)}</span>
 					</div>
 					<div className="mt-6 flex flex-wrap items-center justify-center gap-3">
 						<Button

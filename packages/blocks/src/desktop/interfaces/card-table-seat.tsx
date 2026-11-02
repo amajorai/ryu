@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -7,10 +8,10 @@ import {
 	type ReactNode,
 } from "react";
 import {
-	plural,
 	type SeatInfo,
 	type SeatTone,
 	seatTone,
+	tableCount,
 } from "./card-table-model.ts";
 import { SeatAvatar, TimerChip } from "./card-table-pieces.tsx";
 import {
@@ -42,17 +43,24 @@ export {
 } from "./card-table-seat-menu.tsx";
 
 /** The seat's hover hint: what the agent is doing and what waits on you. */
-export function seatTooltip(seat: SeatInfo): string {
+export function seatTooltip(seat: SeatInfo, tl: LiteralMessage = tr): string {
 	const parts: string[] = [];
 	if (seat.agentTurn > 0) {
-		parts.push(`Holding the action on ${plural(seat.agentTurn, "thread")}`);
+		parts.push(
+			tl(
+				"{count, plural, one {Holding the action on # thread} other {Holding the action on # threads}}",
+				{ count: seat.agentTurn }
+			)
+		);
 	}
 	const forYou = seat.attention + seat.yourTurn;
 	if (forYou > 0) {
-		parts.push(`${forYou} waiting on you`);
+		parts.push(
+			tl("{count, plural, other {# waiting on you}}", { count: forYou })
+		);
 	}
 	if (parts.length === 0) {
-		parts.push(plural(seat.threads.length, "thread"));
+		parts.push(tableCount(seat.threads.length, "thread", tl));
 	}
 	return parts.join(" · ");
 }
@@ -131,7 +139,9 @@ function seatLabel(
 	tl: LiteralMessage
 ): string {
 	if (act) {
-		return `${act.sentence} ${act.answer ? "Answer their ask." : "Seat menu."}`;
+		return act.answer
+			? tl("{sentence} Answer their ask.", { sentence: act.sentence })
+			: tl("{sentence} Seat menu.", { sentence: act.sentence });
 	}
 	const working = seatTone(seat) === "working";
 	return tl(
@@ -292,11 +302,14 @@ export function TableSeat({
 	const content = compact ? (
 		<>
 			<SeatAvatar agent={agent} since={since} size={28} tone={tone} />
-			<span className="gk-display max-w-16 truncate pb-px text-[13px] leading-tight">
+			<span
+				className="gk-display max-w-16 truncate pb-px text-[13px] leading-tight"
+				data-ryu-i18n="off"
+			>
 				{agent.name}
 			</span>
 			{act ? null : (
-				<span className="absolute -top-1.5 -right-1">
+				<span className="absolute -end-1 -top-1.5">
 					<TurnBadge seat={seat} />
 				</span>
 			)}
@@ -304,8 +317,11 @@ export function TableSeat({
 	) : (
 		<>
 			<SeatAvatar agent={agent} since={since} size={44} tone={tone} />
-			<span className="flex min-w-0 flex-1 flex-col text-left">
-				<span className="gk-display truncate text-[18px] leading-6">
+			<span className="flex min-w-0 flex-1 flex-col text-start">
+				<span
+					className="gk-display truncate text-[18px] leading-6"
+					data-ryu-i18n="off"
+				>
 					{agent.name}
 				</span>
 				{act ? null : <SeatSubline seat={seat} />}

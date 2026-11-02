@@ -1,12 +1,8 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const evidence = (name: string) =>
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 test("rejects a partial URL/token pair without sending either write", async ({
 	page,

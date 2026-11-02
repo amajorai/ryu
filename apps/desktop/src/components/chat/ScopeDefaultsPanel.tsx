@@ -59,17 +59,17 @@ export function scopeRowsFor(input: {
 }): ScopeRow[] {
 	const rows: ScopeRow[] = [];
 	const agent = input.agentName || input.agentId;
-	const project = input.projectName || "this project";
+	const project = input.projectName || input.tl("this project");
 	if (input.projectId && input.agentId) {
 		rows.push({
-			label: `${agent} in ${project}`,
+			label: input.tl("{agent} in {project}", { agent, project }),
 			level: "project_agent",
 			scope: projectAgentScope(input.projectId, input.agentId),
 		});
 	}
 	if (input.agentId) {
 		rows.push({
-			label: `${agent} everywhere`,
+			label: input.tl("{agent} everywhere", { agent }),
 			level: "agent",
 			scope: agentScope(input.agentId),
 		});

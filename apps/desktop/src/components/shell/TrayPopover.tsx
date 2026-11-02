@@ -88,7 +88,7 @@ export function TrayHeader({
 				)}
 			</div>
 			{actions && (
-				<div className="-mr-1 ml-auto flex shrink-0 items-center gap-0.5">
+				<div className="ms-auto -me-1 flex shrink-0 items-center gap-0.5">
 					{actions}
 				</div>
 			)}
@@ -211,7 +211,7 @@ export function TraySectionLabel({
 				</span>
 			)}
 			{trailing && (
-				<div className="-mr-1 ml-auto flex items-center">{trailing}</div>
+				<div className="ms-auto -me-1 flex items-center">{trailing}</div>
 			)}
 		</div>
 	);
@@ -352,7 +352,7 @@ export function TrayFooter({
 		>
 			<span>{label}</span>
 			<HugeiconsIcon
-				className="ml-auto size-3.5"
+				className="ms-auto size-3.5"
 				icon={ArrowUpRight01Icon}
 				size={14}
 			/>

@@ -1,17 +1,29 @@
 import {
+	activeLocale,
+	dateFormatter,
+	formatRelativeTime,
+	relativeTimeFormatter,
+	translate as tr,
+} from "@ryu/i18n/lite";
+import {
 	type InterfaceAgent,
 	type InterfaceEvent,
 	type InterfaceGroup,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { formatNameList, threadStatusLabel } from "./interface-renderer.ts";
 
 /** The paper's nameplate. Generic on purpose: it is the workspace's paper. */
 export const NEWSPAPER_NAME = "The Daily Brief";
+
+/** The paper's name in the UI language. */
+export function newspaperName(): string {
+	return tr("The Daily Brief");
+}
 
 /** Stories set under the secondary heads in the right-hand front column. */
 export const SECONDARY_COUNT = 3;
@@ -146,20 +158,19 @@ export function glanceCounts(stories: NewspaperStory[]): NewspaperGlance {
 
 /** Names joined the way a byline reads: "Atlas, Echo and Forge". */
 export function joinNames(names: string[]): string {
-	if (names.length <= 1) {
-		return names[0] ?? "";
-	}
-	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+	return formatNameList(names);
 }
 
 /** "By Forge", or who else filed it when no agent is on the story. */
 export function storyByline(story: NewspaperStory): string {
 	if (story.agents.length > 0) {
-		return `By ${joinNames(story.agents.map((agent) => agent.name))}`;
+		return tr("By {names}", {
+			names: joinNames(story.agents.map((agent) => agent.name)),
+		});
 	}
 	return story.thread.lastMessageRole === "user"
-		? "Filed by you"
-		: "No agent assigned";
+		? tr("Filed by you")
+		: tr("No agent assigned");
 }
 
 /** The status line set above a headline. */
@@ -167,16 +178,18 @@ export function storyKicker(story: NewspaperStory): string {
 	switch (story.status) {
 		case "attention":
 			return story.thread.runState === "interrupted"
-				? "Run interrupted"
-				: "Run failed";
+				? tr("Run interrupted")
+				: tr("Run failed");
 		case "working":
-			return "Live";
+			return tr("Live");
 		case "waiting": {
 			const [first] = story.agents;
-			return first ? `Waiting on ${first.name}` : "Waiting on an agent";
+			return first
+				? tr("Waiting on {name}", { name: first.name })
+				: tr("Waiting on an agent");
 		}
 		default:
-			return THREAD_STATUS_LABELS[story.status];
+			return threadStatusLabel(story.status);
 	}
 }
 
@@ -192,76 +205,93 @@ function sameDay(a: Date, b: Date): boolean {
 	);
 }
 
-const SHORT_DATE = new Intl.DateTimeFormat("en-US", {
+const SHORT_DATE: Intl.DateTimeFormatOptions = {
 	day: "numeric",
 	month: "short",
-});
+};
 
-/** Newsroom-style age: "Just now", "12 min ago", "3 hr ago", "Yesterday". */
-export function storyAge(iso: string, now: number): string {
+/** Newsroom-style age: "Just now", "12 min. ago", "3 hr. ago", "Yesterday". */
+export function storyAge(
+	iso: string,
+	now: number,
+	locale: string = activeLocale()
+): string {
 	const then = Date.parse(iso);
 	if (Number.isNaN(then)) {
 		return "";
 	}
 	const elapsed = Math.max(0, now - then);
 	if (elapsed < MINUTE_MS) {
-		return "Just now";
+		return tr("Just now");
 	}
-	if (elapsed < HOUR_MS) {
-		return `${Math.floor(elapsed / MINUTE_MS)} min ago`;
-	}
-	if (elapsed < DAY_MS && sameDay(new Date(then), new Date(now))) {
-		return `${Math.floor(elapsed / HOUR_MS)} hr ago`;
+	if (
+		elapsed < HOUR_MS ||
+		(elapsed < DAY_MS && sameDay(new Date(then), new Date(now)))
+	) {
+		return formatRelativeTime(locale, now - elapsed, {
+			now,
+			numeric: "always",
+			style: "short",
+		});
 	}
 	if (sameDay(new Date(then), new Date(now - DAY_MS))) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
 	if (elapsed < 7 * DAY_MS) {
-		return `${Math.max(2, Math.round(elapsed / DAY_MS))} days ago`;
+		return relativeTimeFormatter(locale, "long", "always").format(
+			-Math.max(2, Math.round(elapsed / DAY_MS)),
+			"day"
+		);
 	}
-	return SHORT_DATE.format(new Date(then));
+	return dateFormatter(locale, SHORT_DATE).format(new Date(then));
 }
 
-const MASTHEAD_DATE = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	month: "long",
-	weekday: "long",
-	year: "numeric",
-});
-
-/** "Tuesday, October 13, 2026". */
-export function mastheadDate(now: number): string {
-	return MASTHEAD_DATE.format(new Date(now));
+/** "Tuesday, October 13, 2026", in the UI locale. */
+export function mastheadDate(
+	now: number,
+	locale: string = activeLocale()
+): string {
+	return dateFormatter(locale, {
+		day: "numeric",
+		month: "long",
+		weekday: "long",
+		year: "numeric",
+	}).format(new Date(now));
 }
-
-const CLOCK = new Intl.DateTimeFormat("en-US", {
-	hour: "numeric",
-	minute: "2-digit",
-});
-const WEEKDAY = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 
 /** When a scheduled run starts: "Today", "Tomorrow", a weekday, or a date. */
-export function eventDay(iso: string, now: number): string {
+export function eventDay(
+	iso: string,
+	now: number,
+	locale: string = activeLocale()
+): string {
 	const start = new Date(iso);
 	if (Number.isNaN(start.getTime())) {
 		return "";
 	}
 	if (sameDay(start, new Date(now))) {
-		return "Today";
+		return tr("Today");
 	}
 	if (sameDay(start, new Date(now + DAY_MS))) {
-		return "Tomorrow";
+		return tr("Tomorrow");
 	}
 	if (start.getTime() - now < 6 * DAY_MS) {
-		return WEEKDAY.format(start);
+		return dateFormatter(locale, { weekday: "short" }).format(start);
 	}
-	return SHORT_DATE.format(start);
+	return dateFormatter(locale, SHORT_DATE).format(start);
 }
 
-/** "3:00 PM". */
-export function eventTime(iso: string): string {
+/** "3:00 PM", in the UI locale. */
+export function eventTime(
+	iso: string,
+	locale: string = activeLocale()
+): string {
 	const start = new Date(iso);
-	return Number.isNaN(start.getTime()) ? "" : CLOCK.format(start);
+	return Number.isNaN(start.getTime())
+		? ""
+		: dateFormatter(locale, { hour: "numeric", minute: "2-digit" }).format(
+				start
+			);
 }
 
 /** Upcoming scheduled runs, soonest first. */
@@ -281,17 +311,16 @@ export function upcomingEvents(
 
 /** "Every hour · 24 runs", "Weekdays at 9 AM". */
 export function eventSchedule(event: InterfaceEvent): string {
-	const runs = event.count && event.count > 1 ? `${event.count} runs` : null;
+	const runs =
+		event.count && event.count > 1
+			? tr("{count} runs", { count: event.count })
+			: null;
 	return [event.label, runs].filter(Boolean).join(" · ");
 }
 
-/** "10 stories", "1 story". */
-export function countLabel(
-	count: number,
-	singular: string,
-	plural = `${singular}s`
-): string {
-	return `${count} ${count === 1 ? singular : plural}`;
+/** "10 messages", "1 message". */
+export function messageCount(count: number): string {
+	return tr("{count, plural, one {# message} other {# messages}}", { count });
 }
 
 /** DOM id of a front-page block, so the section bar can jump to it. */

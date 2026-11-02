@@ -154,7 +154,7 @@ export function SubagentActivityChips({
 					)}
 				</button>
 			))}
-			<span className="truncate pl-1 text-muted-foreground/70 text-xs">
+			<span className="truncate ps-1 text-muted-foreground/70 text-xs">
 				{tl("{count, plural, one {# subagent} other {# subagents}} working", {
 					count: subagents.length,
 				})}

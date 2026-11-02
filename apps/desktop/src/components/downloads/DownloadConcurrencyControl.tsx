@@ -166,7 +166,7 @@ function ScopedDownloadConcurrencyControl({
 	if (!data) {
 		if (query.isError) {
 			return (
-				<div className="text-right">
+				<div className="text-end">
 					<p className="text-destructive text-sm" role="alert">
 						Could not load download settings.
 					</p>

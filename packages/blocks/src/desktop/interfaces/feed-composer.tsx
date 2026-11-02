@@ -230,7 +230,7 @@ export function FeedComposer({
 						>
 							<SelectTrigger
 								aria-label="Send to agent"
-								className="-ml-3 h-8 min-w-0 max-w-[60%] gap-1 rounded-full border-transparent bg-transparent px-3 py-0 font-semibold text-[14px] text-primary shadow-none hover:bg-primary/10 aria-expanded:bg-primary/10 dark:bg-transparent dark:hover:bg-primary/10 [&_svg]:text-primary"
+								className="-ms-3 h-8 min-w-0 max-w-[60%] gap-1 rounded-full border-transparent bg-transparent px-3 py-0 font-semibold text-[14px] text-primary shadow-none hover:bg-primary/10 aria-expanded:bg-primary/10 dark:bg-transparent dark:hover:bg-primary/10 [&_svg]:text-primary"
 							>
 								<span className="shrink-0">To</span>
 								<SelectValue />

@@ -76,7 +76,7 @@ export function QuizContestantPicker({
 							type="radio"
 							value={candidate.id}
 						/>
-						{candidate.name}
+						<span data-ryu-i18n="off">{candidate.name}</span>
 					</label>
 				);
 			})}
@@ -115,7 +115,7 @@ export function QuizContestantPicker({
 						>
 							{others.map((agent) => (
 								<DropdownMenuRadioItem key={agent.id} value={agent.id}>
-									{agent.name}
+									<span data-ryu-i18n="off">{agent.name}</span>
 								</DropdownMenuRadioItem>
 							))}
 						</DropdownMenuRadioGroup>

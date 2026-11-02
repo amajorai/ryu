@@ -62,7 +62,7 @@ export function AppearanceChatPage({ state }: { state: AppearanceTabState }) {
 			>
 				<CollapsibleTrigger
 					appearance="settings-detail"
-					className="flex w-full items-center justify-between text-left"
+					className="flex w-full items-center justify-between text-start"
 				>
 					<span>Advanced detail</span>
 					<HugeiconsIcon

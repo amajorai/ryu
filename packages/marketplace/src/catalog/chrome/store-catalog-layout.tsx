@@ -216,7 +216,7 @@ export default function StoreCatalogLayout({
 					</div>
 
 					{showSidePane ? (
-						<aside className="flex w-[26rem] shrink-0 flex-col border-border border-l bg-sidebar">
+						<aside className="flex w-[26rem] shrink-0 flex-col border-border border-s bg-sidebar">
 							<div className="flex h-10 shrink-0 items-center justify-end px-2">
 								<Button
 									aria-label="Close preview"

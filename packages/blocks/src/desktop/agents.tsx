@@ -275,7 +275,7 @@ export function AgentsView({
 											}}
 										>
 											<HugeiconsIcon
-												className="mr-2 size-3.5"
+												className="me-2 size-3.5"
 												icon={PencilEdit01Icon}
 											/>
 											Edit
@@ -287,7 +287,7 @@ export function AgentsView({
 											}}
 										>
 											<HugeiconsIcon
-												className="mr-2 size-3.5"
+												className="me-2 size-3.5"
 												icon={Download01Icon}
 											/>
 											Export
@@ -301,7 +301,7 @@ export function AgentsView({
 												variant="destructive"
 											>
 												<HugeiconsIcon
-													className="mr-2 size-3.5"
+													className="me-2 size-3.5"
 													icon={Delete01Icon}
 												/>
 												Delete

@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -42,11 +43,21 @@ const MARKER_BY_STATUS: Record<ThreadStatus, PostMarker> = {
 };
 
 export const POST_MARKER_LABELS: Record<PostMarker, string> = {
-	"awaiting-reply": "Waiting for a reply",
-	"feedback-requested": "Feedback requested",
-	"in-progress": "In progress",
-	"needs-attention": "Needs attention",
-	resolved: "Resolved",
+	get "awaiting-reply"() {
+		return tr("Waiting for a reply");
+	},
+	get "feedback-requested"() {
+		return tr("Feedback requested");
+	},
+	get "in-progress"() {
+		return tr("In progress");
+	},
+	get "needs-attention"() {
+		return tr("Needs attention");
+	},
+	get resolved() {
+		return tr("Resolved");
+	},
 };
 
 /**
@@ -264,15 +275,16 @@ export function findSpace(
 	return id ? spaces.find((space) => space.id === id) : undefined;
 }
 
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
+function spaceKindLabel(kind: PostSpace["kind"]): string {
+	switch (kind) {
+		case "general":
+			return tr("Posts not filed under a team or project");
+		case "project":
+			return tr("Project");
+		default:
+			return tr("Team");
+	}
 }
-
-const SPACE_KIND_LABELS: Record<PostSpace["kind"], string> = {
-	general: "Posts not filed under a team or project",
-	project: "Project",
-	team: "Team",
-};
 
 export interface PostsViewHeader {
 	description: string;
@@ -299,38 +311,45 @@ export function viewHeader(
 	switch (view.kind) {
 		case "home":
 			return {
-				description: "Feedback requests and failed runs",
+				description: tr("Feedback requests and failed runs"),
 				members: [],
-				title: "Home",
+				title: tr("Home"),
 			};
 		case "all":
 			return {
-				description: `${plural(snapshot.threads.length, "post", "posts")} across ${plural(spaces.length, "space", "spaces")}`,
+				description: tr(
+					"{posts, plural, one {# post} other {# posts}} across {spaces, plural, one {# space} other {# spaces}}",
+					{ posts: snapshot.threads.length, spaces: spaces.length }
+				),
 				members: [],
-				title: "Posts",
+				title: tr("Posts"),
 			};
 		case "member": {
 			const agent = snapshot.agents.find(
 				(candidate) => candidate.id === view.agentId
 			);
 			return {
-				description: agent?.description || "Agent",
+				description: agent?.description || tr("Agent"),
 				members: agent ? [agent] : [],
-				title: agent?.name ?? "Member",
+				title: agent?.name ?? tr("Member"),
 			};
 		}
 		default: {
 			const space = findSpace(spaces, view.id);
 			if (!space) {
-				return { description: "", members: [], title: "Space" };
+				return { description: "", members: [], title: tr("Space") };
 			}
 			const members = agentsByIds(snapshot, space.memberAgentIds);
 			const parts = [
-				SPACE_KIND_LABELS[space.kind],
+				spaceKindLabel(space.kind),
 				space.kind === "general"
 					? null
-					: plural(members.length, "member", "members"),
-				plural(space.threadIds.length, "post", "posts"),
+					: tr("{count, plural, one {# member} other {# members}}", {
+							count: members.length,
+						}),
+				tr("{count, plural, one {# post} other {# posts}}", {
+					count: space.threadIds.length,
+				}),
 			].filter((part): part is string => part !== null);
 			return { description: parts.join(" · "), members, title: space.name };
 		}
@@ -425,7 +444,9 @@ export function postStartInput(
 
 /** "2 comments", or null when nobody has replied yet. */
 export function commentLabel(count: number): string | null {
-	return count > 0 ? plural(count, "comment", "comments") : null;
+	return count > 0
+		? tr("{count, plural, one {# comment} other {# comments}}", { count })
+		: null;
 }
 
 /** The next post id for j/k and arrow keys, clamped to the list. */
@@ -444,15 +465,18 @@ export function stepPost(
 	return order[Math.min(order.length - 1, Math.max(0, index + delta))];
 }
 
-const DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-	month: "short",
-});
-
-/** "Oct 13, 2:04 PM" for the details rail. */
-export function absoluteTime(iso: string): string {
+/** "Oct 13, 2:04 PM" for the details rail, in the UI locale. */
+export function absoluteTime(
+	iso: string,
+	locale: string = activeLocale()
+): string {
 	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : DATE_FORMAT.format(time);
+	return Number.isNaN(time)
+		? ""
+		: dateFormatter(locale, {
+				day: "numeric",
+				hour: "numeric",
+				minute: "2-digit",
+				month: "short",
+			}).format(time);
 }

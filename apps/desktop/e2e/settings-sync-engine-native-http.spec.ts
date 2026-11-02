@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
 import {
+	activeToken,
 	held,
 	local,
 	pullCount,
 	read,
 	registerNativeHttpLedgerHooks,
 	release,
+	sealedActiveToken,
 	seed,
 	settled,
 } from "./settings-sync-engine-native-http.fixture.ts";
@@ -105,14 +107,13 @@ for (const aba of [false, true]) {
 		await page
 			.getByRole("button", { name: "Switch to saved account B" })
 			.click();
-		await expect.poll(() => local(page, "ryu_session_token")).toBe("account-B");
+		await expect.poll(() => activeToken(page)).toBe("account-B");
+		await expect.poll(() => sealedActiveToken(page)).toBe("account-B");
 		if (aba) {
 			await page
 				.getByRole("button", { name: "Switch to saved account A" })
 				.click();
-			await expect
-				.poll(() => local(page, "ryu_session_token"))
-				.toBe("account-A");
+			await expect.poll(() => activeToken(page)).toBe("account-A");
 		}
 		await release(page, request, id);
 		expect(await local(page, "theme")).toBe(aba ? "dark" : null);
@@ -193,7 +194,7 @@ test("account switch keeps a dirty sidebar value with its author for pagehide fl
 		value: accountAValue,
 	});
 	await page.getByRole("button", { name: "Switch to saved account B" }).click();
-	await expect.poll(() => local(page, "ryu_session_token")).toBe("account-B");
+	await expect.poll(() => activeToken(page)).toBe("account-B");
 	expect(await local(page, key)).toBeNull();
 	await page.evaluate(() =>
 		window.dispatchEvent(new PageTransitionEvent("pagehide"))
@@ -204,7 +205,7 @@ test("account switch keeps a dirty sidebar value with its author for pagehide fl
 	).toEqual([]);
 
 	await page.getByRole("button", { name: "Switch to saved account A" }).click();
-	await expect.poll(() => local(page, "ryu_session_token")).toBe("account-A");
+	await expect.poll(() => activeToken(page)).toBe("account-A");
 	expect(await local(page, key)).toBe(accountAValue);
 	await page.evaluate(() =>
 		window.dispatchEvent(new PageTransitionEvent("pagehide"))
@@ -235,7 +236,7 @@ test("account switch keeps a dirty sidebar value with its author for a fresh syn
 		value: accountAValue,
 	});
 	await page.getByRole("button", { name: "Switch to saved account B" }).click();
-	await expect.poll(() => local(page, "ryu_session_token")).toBe("account-B");
+	await expect.poll(() => activeToken(page)).toBe("account-B");
 	expect(await local(page, key)).toBeNull();
 	const beforeB = await pullCount(page);
 	await page.getByRole("button", { name: "Sync now", exact: true }).click();
@@ -255,7 +256,7 @@ test("account switch keeps a dirty sidebar value with its author for a fresh syn
 	).toBe(false);
 
 	await page.getByRole("button", { name: "Switch to saved account A" }).click();
-	await expect.poll(() => local(page, "ryu_session_token")).toBe("account-A");
+	await expect.poll(() => activeToken(page)).toBe("account-A");
 	expect(await local(page, key)).toBe(accountAValue);
 	const beforeA = await pullCount(page);
 	await page.getByRole("button", { name: "Sync now", exact: true }).click();
@@ -394,9 +395,10 @@ test("a second window that followed another window's switch drops its in-memory 
 	expect(await local(second, key)).toBe(accountAValue);
 
 	// The switch happens in the first window; the second follows it through
-	// real storage events.
+	// the sealed slot's `desktop-secret-changed` event and real storage events.
 	await page.getByRole("button", { name: "Switch to saved account B" }).click();
-	await expect.poll(() => local(second, "ryu_session_token")).toBe("account-B");
+	await expect.poll(() => sealedActiveToken(second)).toBe("account-B");
+	await expect.poll(() => activeToken(second)).toBe("account-B");
 	await expect.poll(() => local(second, key)).toBeNull();
 
 	// A feature in the second window writes its in-memory (A's) value back

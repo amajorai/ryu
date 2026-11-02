@@ -8,7 +8,17 @@
 // rule for todos — the last of which is what makes the dashboard's "what's
 // left" honest rather than a pile of stale plans.
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import {
+	formatMessage,
+	type MessageValuesInput,
+	messageIdForLiteral,
+} from "@ryu/i18n/core";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../../packages/i18n/src/active-locale.ts";
 import {
 	buildMissionDigest,
 	firstString,
@@ -362,4 +372,38 @@ it("tool field projection preserves own prototype keys and live optional transpo
 	]);
 	expect(input.future.nested[0]).toBeUndefined();
 	expect(Object.hasOwn(input, "__proto__")).toBe(true);
+});
+
+describe("buildMissionDigest — headlines in the UI language", () => {
+	const RAN = "ran {count, plural, one {# command} other {# commands}}";
+	const RAN_RU =
+		"{count, plural, one {выполнена # команда} few {выполнены # команды} many {выполнено # команд} other {выполнено # команды}}";
+	const runtime = {
+		direction: "ltr" as const,
+		locale: "ru",
+		translate(id: string, values?: MessageValuesInput, fallback?: string) {
+			const source = id === messageIdForLiteral(RAN) ? RAN_RU : fallback;
+			return formatMessage(source ?? id, values, "ru");
+		},
+	};
+
+	afterEach(() => {
+		unregisterActiveI18nRuntime(runtime);
+	});
+
+	it("uses the locale's plural categories, not an English +s", () => {
+		registerActiveI18nRuntime(runtime);
+		const ran = (count: number) =>
+			buildMissionDigest([
+				user("go"),
+				assistant(
+					"a1",
+					Array.from({ length: count }, () => tool("Bash", { command: "ls" }))
+				),
+			]).turns[0].headline;
+
+		expect(ran(1)).toBe("выполнена 1 команда");
+		expect(ran(3)).toBe("выполнены 3 команды");
+		expect(ran(5)).toBe("выполнено 5 команд");
+	});
 });

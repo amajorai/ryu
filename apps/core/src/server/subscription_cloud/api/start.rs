@@ -145,16 +145,8 @@ pub(crate) async fn start_or_fall_back(
                 .any(|other| store::cooldown_remaining(&other.key(provider), now).is_none());
             if state == Availability::CoolingDown && stand_in {
                 // The owner listed another account to use while this one is limited.
-                let notice = Notice::new(
-                    "subscription_cooling_down",
-                    backend,
-                    format!(
-                        "Your {} plan ({}) hit its usage limit recently, so Ryu uses the next account you listed.",
-                        backend.plan_name(),
-                        account.label
-                    ),
-                )
-                .for_account(&account.id);
+                let notice = Notice::cooling_down_next_account(backend, &account.label)
+                    .for_account(&account.id);
                 let said = early_notices.iter().any(|known| {
                     known.code == notice.code && known.account_id == notice.account_id
                 });

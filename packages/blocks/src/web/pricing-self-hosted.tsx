@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { buttonVariants } from "@ryu/ui/components/button";
 import {
 	CardContent,
@@ -87,29 +88,29 @@ export function SelfHostedOssCard({
 				</p>
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Scale className="mr-2 size-4 shrink-0" />
+						<Scale className="me-2 size-4 shrink-0" />
 						<span>The core uses Apache-2.0 and the gateway uses AGPL-3.0</span>
 					</li>
 					<li className="flex items-center">
-						<Bot className="mr-2 size-4 shrink-0" />
+						<Bot className="me-2 size-4 shrink-0" />
 						<span>
 							Agents, workflows, memory, and tools with no Ryu plan cap
 						</span>
 					</li>
 					<li className="flex items-center">
-						<Shield className="mr-2 size-4 shrink-0" />
+						<Shield className="me-2 size-4 shrink-0" />
 						<span>Gateway routing, firewall rules, and budgets</span>
 					</li>
 					<li className="flex items-center">
-						<Key className="mr-2 size-4 shrink-0" />
+						<Key className="me-2 size-4 shrink-0" />
 						<span>You use your own provider keys</span>
 					</li>
 					<li className="flex items-center">
-						<Server className="mr-2 size-4 shrink-0" />
+						<Server className="me-2 size-4 shrink-0" />
 						<span>Nothing leaves your network</span>
 					</li>
 					<li className="flex items-center">
-						<Users className="mr-2 size-4 shrink-0" />
+						<Users className="me-2 size-4 shrink-0" />
 						<span>Community support</span>
 					</li>
 				</PlanFeatureList>
@@ -132,6 +133,7 @@ export function SelfHostedOssCard({
 
 /** The commercial licence: AGPL relief, plus the controls an enterprise needs. */
 export function SelfHostedLicensedCard() {
+	const tl = useLiteralMessages();
 	const ctaVariant = usePricingCtaVariant();
 	const ctaShape = usePlanCtaShape();
 	const helperText = useHelperTextSize();
@@ -151,30 +153,30 @@ export function SelfHostedLicensedCard() {
 				<p className={`mb-6 text-muted-foreground ${helperText}`}>
 					You pay a flat annual fee with no per-seat or per-token metering
 				</p>
-				<IncludedPlanBanner plan="open source" />
+				<IncludedPlanBanner plan={tl("open source")} />
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Scale className="mr-2 size-4 shrink-0" />
+						<Scale className="me-2 size-4 shrink-0" />
 						<span>Commercial licence with no AGPL obligations</span>
 					</li>
 					<li className="flex items-center">
-						<Key className="mr-2 size-4 shrink-0" />
+						<Key className="me-2 size-4 shrink-0" />
 						<span>SSO and SCIM provisioning</span>
 					</li>
 					<li className="flex items-center">
-						<Shield className="mr-2 size-4 shrink-0" />
+						<Shield className="me-2 size-4 shrink-0" />
 						<span>Audit logs, custom SLA, and DPA</span>
 					</li>
 					<li className="flex items-center">
-						<Cpu className="mr-2 size-4 shrink-0" />
+						<Cpu className="me-2 size-4 shrink-0" />
 						<span>Air-gapped and offline deployment</span>
 					</li>
 					<li className="flex items-center">
-						<Wrench className="mr-2 size-4 shrink-0" />
+						<Wrench className="me-2 size-4 shrink-0" />
 						<span>Named support engineer and onboarding</span>
 					</li>
 					<li className="flex items-center">
-						<Coins className="mr-2 size-4 shrink-0" />
+						<Coins className="me-2 size-4 shrink-0" />
 						<span>Invoicing, purchase orders, and custom terms</span>
 					</li>
 				</PlanFeatureList>

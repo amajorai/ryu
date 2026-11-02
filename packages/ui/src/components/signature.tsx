@@ -80,9 +80,7 @@ async function loadFontFromPaths(fontPaths: string[]): Promise<SignatureFont> {
 		}
 	}
 
-	throw new Error(
-		`Font could not be loaded from the provided path${fontPaths.length === 1 ? "" : "s"}: ${fontPaths.join(", ")}`
-	);
+	throw new Error(`Font could not be loaded from: ${fontPaths.join(", ")}`);
 }
 
 async function buildSignaturePaths({

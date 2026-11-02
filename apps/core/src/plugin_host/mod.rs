@@ -47,6 +47,7 @@
 pub mod action_stream;
 pub mod breaker;
 mod bridge;
+mod hook_program;
 pub(crate) use bridge::node_owner_or_admin;
 
 pub use action_stream::ActionFrameProbe;
@@ -60,6 +61,9 @@ use std::sync::Arc;
 
 use crate::server::ServerState;
 use crate::tool_exec::{self, ExecOutcome, SandboxToolInvoker};
+#[cfg(test)]
+use hook_program::{build_hook_program, build_middleware_hook_program};
+use hook_program::{build_hook_program_in, build_middleware_hook_program_in};
 
 /// One message in the turn context handed to a hook.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1459,7 +1463,8 @@ async fn run_middleware_hook(
     let Some(breaker_permit) = breaker::allow(&hook.plugin_id, &hook.hook_id) else {
         return MiddlewareRun::Failed;
     };
-    let program = build_middleware_hook_program(ctx, &hook.code);
+    let locale = crate::i18n::locale::node_locale().await;
+    let program = build_middleware_hook_program_in(ctx, &hook.code, locale);
     let bridge = Arc::new(
         PluginHookBridge::new_for_request(
             hook.plugin_id.clone(),
@@ -1785,7 +1790,8 @@ pub async fn run_hook(state: &ServerState, hook: &HookPlugin, ctx: &HookContext)
     let Some(breaker_permit) = breaker::allow(&hook.plugin_id, &hook.hook_id) else {
         return HookDirective::None;
     };
-    let program = build_hook_program(ctx, &hook.code);
+    let locale = crate::i18n::locale::node_locale().await;
+    let program = build_hook_program_in(ctx, &hook.code, locale);
     let bridge = Arc::new(
         PluginHookBridge::new_for_request(
             hook.plugin_id.clone(),
@@ -1897,94 +1903,6 @@ fn parse_directive(value: Option<&serde_json::Value>) -> HookDirective {
         return HookDirective::None;
     };
     serde_json::from_value::<HookDirective>(v.clone()).unwrap_or(HookDirective::None)
-}
-
-/// Build the sandbox program: inject `ctx` + define the `host` capability facade
-/// over the sandbox `tools` proxy, then the plugin's hook body (which `return`s a
-/// directive). The body runs inside the substrate's async IIFE, so a bare
-/// `return` reports the directive as the program's final value.
-fn build_hook_program(ctx: &HookContext, entry_code: &str) -> String {
-    build_hook_program_inner(ctx, entry_code, false)
-}
-
-/// Build a middleware hook program. The user function receives a Core-mediated
-/// `next` continuation; the continuation calls back into the bridge, which owns
-/// the remaining hook chain and its per-plugin capability boundaries.
-fn build_middleware_hook_program(ctx: &HookContext, entry_code: &str) -> String {
-    let entry = format!(
-        "const __ryu_function_hook = async (ctx, host, next) => {{ {entry_code} }};\nreturn await __ryu_function_hook(ctx, host, (nextCtx) => tools.host.next({{ context: nextCtx ?? ctx }}));"
-    );
-    build_hook_program_inner(ctx, &entry, true)
-}
-
-fn build_hook_program_inner(ctx: &HookContext, entry_code: &str, freeze_context: bool) -> String {
-    let ctx_json = serde_json::to_string(ctx).unwrap_or_else(|_| "{}".to_string());
-    let ctx_expression = if freeze_context {
-        format!("__ryu_deep_freeze({ctx_json})")
-    } else {
-        ctx_json
-    };
-    format!(
-        r#"const __ryu_deep_freeze = (value) => {{
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {{
-    for (const child of Object.values(value)) __ryu_deep_freeze(child);
-    Object.freeze(value);
-  }}
-  return value;
-}};
-const ctx = {ctx};
-const host = {{
-  sideModel: (a) => tools.host.sideModel(a ?? {{}}),
-  runAgent: (a) => tools.host.runAgent(a ?? {{}}),
-  runFanout: (a) => tools.host.runFanout(a ?? {{}}),
-  reactions: {{
-    add: (a) => tools.host.addMessageReaction(a ?? {{}}),
-  }},
-  notify: (a) => tools.host.notify(a ?? {{}}),
-  setConversationTitle: (a) => tools.host.setConversationTitle(a ?? {{}}),
-  getPreference: (a) => tools.host.getPreference(a ?? {{}}),
-  background: {{
-    list: (a) => tools.host.background_list(a ?? {{}}),
-    stop: (a) => tools.host.background_stop(a ?? {{}}),
-  }},
-  usage: (a) => tools.host.usageSnapshot(a ?? {{}}),
-  subscriptions: {{
-    list: (a) => tools.host.subscriptions_list(a ?? {{}}),
-    usage: (a) => tools.host.subscriptions_usage(a ?? {{}}),
-  }},
-  storage: {{
-    get: (k, ns) => tools.host.storage_get({{ key: String(k), namespace: ns }}),
-    set: (k, v, ns) => tools.host.storage_set({{ key: String(k), value: typeof v === "string" ? v : JSON.stringify(v), namespace: ns }}),
-    delete: (k, ns) => tools.host.storage_delete({{ key: String(k), namespace: ns }}),
-    keys: (ns) => tools.host.storage_keys({{ namespace: ns }}),
-    compareAndSet: (k, expected, v, ns) => tools.host.storage_compare_and_set({{ key: String(k), expected: expected == null ? null : String(expected), value: v == null ? null : (typeof v === "string" ? v : JSON.stringify(v)), namespace: ns }}),
-  }},
-  spaces: {{
-    ensureSpace: (a) => tools.host.spaces_ensure_space(a ?? {{}}),
-    createDoc: (a) => tools.host.spaces_create_doc(a ?? {{}}),
-    getDoc: (a) => tools.host.spaces_get_doc(a ?? {{}}),
-    updateDoc: (a) => tools.host.spaces_update_doc(a ?? {{}}),
-    listDocs: (a) => tools.host.spaces_list_docs(a ?? {{}}),
-    deleteDoc: (a) => tools.host.spaces_delete_doc(a ?? {{}}),
-    createDatabase: (a) => tools.host.spaces_create_database(a ?? {{}}),
-    listDatabases: (a) => tools.host.spaces_list_databases(a ?? {{}}),
-    getDatabase: (a) => tools.host.spaces_get_database(a ?? {{}}),
-    updateDatabase: (a) => tools.host.spaces_update_database(a ?? {{}}),
-    queryDatabase: (a) => tools.host.spaces_query_database(a ?? {{}}),
-    deleteDatabase: (a) => tools.host.spaces_delete_database(a ?? {{}}),
-  }},
-  crypto: {{
-    seal: (v) => tools.host.crypto_seal({{ value: typeof v === "string" ? v : JSON.stringify(v) }}),
-    open: (v) => tools.host.crypto_open({{ value: String(v) }}),
-    status: () => tools.host.crypto_status({{}}),
-  }},
-  log: (...a) => console.log(...a),
-}};
-{entry}
-"#,
-        ctx = ctx_expression,
-        entry = entry_code,
-    )
 }
 
 #[cfg(test)]

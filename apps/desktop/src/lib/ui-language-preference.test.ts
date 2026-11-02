@@ -64,6 +64,34 @@ describe("uiLanguagePreference", () => {
 		expect(uiLanguagePreference("fixed", "x".repeat(129)).packId).toBeNull();
 	});
 
+	it("records a valid shown locale in auto mode only", () => {
+		expect(uiLanguagePreference("auto", null, "de_DE")).toEqual({
+			locale: "de-DE",
+			mode: "auto",
+			packId: null,
+		});
+		expect(uiLanguagePreference("auto", null, "not a tag")).toEqual({
+			mode: "auto",
+			packId: null,
+		});
+		expect(uiLanguagePreference("fixed", "official/ja", "ja")).toEqual({
+			mode: "fixed",
+			packId: "official/ja",
+		});
+		const raw = serializeUiLanguagePreference(
+			uiLanguagePreference("auto", null, "de")
+		);
+		expect(JSON.parse(raw)).toEqual({
+			locale: "de",
+			mode: "auto",
+			packId: null,
+		});
+		expect(parseUiLanguageSelection(raw)).toEqual({
+			mode: "auto",
+			packId: null,
+		});
+	});
+
 	it("serializes the shape the Island parses", () => {
 		const raw = serializeUiLanguagePreference(
 			uiLanguagePreference("fixed", "official/es")
@@ -109,6 +137,40 @@ describe("syncUiLanguagePreference", () => {
 			mode: "fixed",
 			packId: "official/fr",
 		});
+	});
+
+	it("refreshes an auto value with the shown locale, never an Island pack", async () => {
+		stored = serializeUiLanguagePreference(uiLanguagePreference("auto", null));
+		const german = uiLanguagePreference("auto", null, "de");
+		expect(await syncUiLanguagePreference(target, german)).toBe(true);
+		expect(JSON.parse(stored ?? "null")).toEqual({
+			locale: "de",
+			mode: "auto",
+			packId: null,
+		});
+
+		// The OS language changed while the Island had picked a pack meanwhile.
+		stored = serializeUiLanguagePreference(
+			uiLanguagePreference("fixed", "official/ar")
+		);
+		const french = uiLanguagePreference("auto", null, "fr");
+		expect(await syncUiLanguagePreference(target, french)).toBe(false);
+		expect(parseUiLanguageSelection(stored)).toEqual({
+			mode: "fixed",
+			packId: "official/ar",
+		});
+		expect(puts).toHaveLength(1);
+	});
+
+	it("never lets a first fixed sync replace an Island auto value", async () => {
+		stored = serializeUiLanguagePreference(uiLanguagePreference("auto", null));
+		const japanese = uiLanguagePreference("fixed", "official/ja");
+		expect(await syncUiLanguagePreference(target, japanese)).toBe(false);
+		expect(parseUiLanguageSelection(stored)).toEqual({
+			mode: "auto",
+			packId: null,
+		});
+		expect(puts).toHaveLength(0);
 	});
 
 	it("retries after a failed write", async () => {

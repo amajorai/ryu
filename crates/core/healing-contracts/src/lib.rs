@@ -115,7 +115,14 @@ pub enum HealVerdict {
         diagnosis: String,
     },
     /// Queue a terminal "attempts exhausted" review item (no auto-action).
-    QueueExhausted { source_id: String, note: String },
+    /// `attempts` is how many auto-fix attempts were used, which Core words in
+    /// the reader's language; `note` is the English sentence an older Core shows.
+    QueueExhausted {
+        source_id: String,
+        note: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<u32>,
+    },
     /// An `action` this binary does not know — a logged no-op on the receiving side.
     ///
     /// A shared crate stops *source* drift, not *binary* skew: the sidecar ships as
@@ -199,6 +206,12 @@ mod tests {
             HealVerdict::QueueExhausted {
                 source_id: "c2".into(),
                 note: "n".into(),
+                attempts: None,
+            },
+            HealVerdict::QueueExhausted {
+                source_id: "c3".into(),
+                note: "n".into(),
+                attempts: Some(2),
             },
         ];
         for v in all {

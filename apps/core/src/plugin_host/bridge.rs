@@ -95,6 +95,10 @@ const GRANT_STORAGE: &str = "storage:kv";
 const GRANT_CRYPTO: &str = "crypto:seal";
 #[path = "backup_bridge.rs"]
 mod backup_bridge;
+#[path = "hook_text_bridge.rs"]
+mod hook_text_bridge;
+#[path = "notify_bridge.rs"]
+mod notify_bridge;
 #[path = "workflow_script_bridge.rs"]
 mod workflow_script_bridge;
 
@@ -629,6 +633,7 @@ impl PluginHookBridge {
             "runHook" => self.run_own_hook(args).await,
             "next" => self.next(args).await,
             "notify" => self.notify(args).await,
+            "t" => hook_text_bridge::translate(args).await,
             "notifications_send" => self.notifications_send(args).await,
             "navigate" => self.navigate(args),
             other => err(format!("unknown host capability '{other}'")),
@@ -2162,139 +2167,6 @@ impl PluginHookBridge {
         }
     }
 
-    /// `host.notify({ title, body })` — deliver one bounded, informational
-    /// notification for the active user through Core's shared inbox/toast/push
-    /// fan-out. This is intentionally not an app-host RPC or an external-target
-    /// alert primitive: a plugin cannot choose a recipient, channel, or level.
-    async fn notify(&self, args: Value) -> InvokeOutcome {
-        if !self.grants.contains(GRANT_NOTIFY) {
-            return err(format!(
-                "capability '{GRANT_NOTIFY}' not granted to plugin '{}'",
-                self.plugin_id
-            ));
-        }
-        let title = bounded_notification_text(
-            args.get("title").and_then(Value::as_str),
-            MAX_NOTIFICATION_TITLE_CHARS,
-        );
-        if title.is_empty() {
-            return err("host.notify requires a usable 'title'".to_string());
-        }
-        let body = bounded_notification_text(
-            args.get("body").and_then(Value::as_str),
-            MAX_NOTIFICATION_BODY_CHARS,
-        );
-        let Some(store) = crate::notify::global_store() else {
-            return err("host.notify unavailable: notification store is not ready".to_string());
-        };
-        let active_user_id = crate::auth::load_accounts().active_user_id;
-        let user_id = self
-            .verified_caller
-            .as_ref()
-            .map(|caller| caller.user_id.clone())
-            .or_else(|| self.storage_tenant.clone())
-            .or(active_user_id);
-        let Some(user_id) = user_id else {
-            return err("host.notify unavailable: no active user".to_string());
-        };
-        match crate::notify::deliver_app_notification(
-            &store,
-            &self.plugin_id,
-            &user_id,
-            &title,
-            &body,
-            "info",
-        )
-        .await
-        {
-            Ok(notification_id) => {
-                ok(json!({ "queued": true, "notification_id": notification_id }))
-            }
-            Err(error) => err(format!("host.notify failed: {error}")),
-        }
-    }
-
-    /// `host.notifications_send({ target_user_id, title, body })` — deliver one
-    /// bounded informational notification to a member in the node's resolved
-    /// organization/team scope. This is the Inbox app's explicit-recipient
-    /// bridge; the older `host.notify` path remains active-user-only.
-    async fn notifications_send(&self, args: Value) -> InvokeOutcome {
-        if !self.grants.contains(GRANT_NOTIFY_TARGET) {
-            return err(format!(
-                "capability '{GRANT_NOTIFY_TARGET}' not granted to plugin '{}'",
-                self.plugin_id
-            ));
-        }
-        if self
-            .verified_caller
-            .as_ref()
-            .and_then(|caller| caller.org_id.as_ref())
-            .is_none()
-        {
-            return err(
-                "targeted notifications require a verified organization caller".to_string(),
-            );
-        }
-        let target_user_id = bounded_notification_text(
-            args.get("target_user_id").and_then(Value::as_str),
-            MAX_NOTIFICATION_TARGET_CHARS,
-        );
-        if target_user_id.is_empty() {
-            return err("host.notifications_send requires a usable 'target_user_id'".to_string());
-        }
-        let title = bounded_notification_text(
-            args.get("title").and_then(Value::as_str),
-            MAX_NOTIFICATION_TITLE_CHARS,
-        );
-        if title.is_empty() {
-            return err("host.notifications_send requires a usable 'title'".to_string());
-        }
-        let body = bounded_notification_text(
-            args.get("body").and_then(Value::as_str),
-            MAX_NOTIFICATION_BODY_CHARS,
-        );
-        let members =
-            match crate::sidecar::control_plane::resolve_notify_targets(&self.state.client, None)
-                .await
-            {
-                Ok(members) => members,
-                Err(error) => {
-                    return err(format!(
-                        "host.notifications_send could not resolve the recipient roster: {error}"
-                    ));
-                }
-            };
-        if !members
-            .iter()
-            .any(|member| member.user_id == target_user_id)
-        {
-            return err(
-                "notification recipient is not in the resolved organization/team".to_string(),
-            );
-        }
-        let Some(store) = crate::notify::global_store() else {
-            return err(
-                "host.notifications_send unavailable: notification store is not ready".to_string(),
-            );
-        };
-        match crate::notify::deliver_app_notification(
-            &store,
-            &self.plugin_id,
-            &target_user_id,
-            &title,
-            &body,
-            "info",
-        )
-        .await
-        {
-            Ok(notification_id) => ok(json!({
-                "notification_id": notification_id,
-                "target_user_id": target_user_id,
-            })),
-            Err(error) => err(format!("host.notifications_send failed: {error}")),
-        }
-    }
-
     async fn side_model(&self, args: Value) -> InvokeOutcome {
         if !self.grants.contains(GRANT_SIDE_MODEL) {
             return err(format!(
@@ -2302,6 +2174,7 @@ impl PluginHookBridge {
                 self.plugin_id
             ));
         }
+        let args = crate::i18n::reply_language::apply_to_side_model_args(args).await;
         let prompt = args
             .get("prompt")
             .and_then(Value::as_str)

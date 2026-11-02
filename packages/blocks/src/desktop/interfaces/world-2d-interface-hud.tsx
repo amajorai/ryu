@@ -108,7 +108,9 @@ export function World2dHud({
 				<PixelKey>E</PixelKey>
 				<span>
 					{nearbyAsk ? "Answer" : "Talk to"}{" "}
-					<span className="text-(--sv-gold)">{world.nearby.name}</span>
+					<span className="text-(--sv-gold)" data-ryu-i18n="off">
+						{world.nearby.name}
+					</span>
 				</span>
 			</span>
 		);

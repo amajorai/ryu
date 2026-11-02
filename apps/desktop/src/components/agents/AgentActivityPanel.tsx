@@ -149,7 +149,7 @@ function IdentityView({ agent }: { agent: AgentSummary }) {
 								{label}
 							</dt>
 							<dd
-								className={`min-w-0 break-all text-right text-xs ${mono ? "font-mono" : "font-medium"}`}
+								className={`min-w-0 break-all text-end text-xs ${mono ? "font-mono" : "font-medium"}`}
 							>
 								{value}
 							</dd>

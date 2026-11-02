@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "Widgets de agente não estão disponíveis neste nó: atualizá-los exige autoridade delegada de execução do usuário, que os jobs de atualização não têm. Use uma fonte http, composio ou estática.",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "Widgets de monitor ainda não estão disponíveis: nenhuma capacidade do host permite que um app leia resultados de monitores. Use uma fonte http, composio ou estática.",
+  "The Composio action failed: {error}": "A ação do Composio falhou: {error}",
+  "The Composio action returned HTTP {status}.": "A ação do Composio retornou HTTP {status}.",
+  "The web source redirected, and redirects are not allowed.": "A fonte web fez um redirecionamento, e redirecionamentos não são permitidos.",
+  "The web source returned HTTP {status}.": "A fonte web retornou HTTP {status}.",
+  "The web source sent a reply Ryu could not read: {error}": "A fonte web enviou uma resposta que o Ryu não conseguiu ler: {error}",
+  "The widget's agent run failed: {error}": "A execução do agente do widget falhou: {error}",
+  "Widget “{title}” broke": "O widget “{title}” parou de funcionar",
+  "Widget “{title}” recovered": "O widget “{title}” se recuperou",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Widgets de fluxo de trabalho ainda não estão disponíveis: nenhuma capacidade do host permite que um app execute um fluxo de trabalho salvo. Use uma fonte http, composio ou estática.",
+  "dashboard not found": "painel não encontrado",
+  "kind is required": "o tipo é obrigatório",
+  "name is required": "o nome é obrigatório",
+  "not found": "não encontrado"
+}

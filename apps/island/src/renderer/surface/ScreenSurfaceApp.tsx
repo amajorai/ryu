@@ -4,6 +4,7 @@
 // card to the window edge facing the Island, and reports submit/close back.
 
 import { IslandLiveSurface } from "@ryu/blocks/island/chat/live-surface";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { useCallback, useEffect, useState } from "react";
 import type { ScreenSurfaceRenderState } from "../../shared/screen-surface.ts";
@@ -13,6 +14,13 @@ const surfaceApi = window.islandSurface;
 
 export function ScreenSurfaceApp() {
 	useIslandTheme(surfaceApi.theme);
+	const tl = useLiteralMessages();
+	// The window's title (read by screen readers and window lists) follows the
+	// document title; `surface.html` keeps the English one until this mounts.
+	const windowTitle = tl("Ryu · {product}", { product: tl("Screen") });
+	useEffect(() => {
+		document.title = windowTitle;
+	}, [windowTitle]);
 	const [state, setState] = useState<ScreenSurfaceRenderState | null>(null);
 
 	useEffect(() => {

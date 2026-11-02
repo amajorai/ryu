@@ -7,6 +7,7 @@
 //! directly, without a live judge or a constructed request context.
 
 use crate::config::FirewallPolicy;
+use crate::firewall::inspector::InspectorOutcome;
 use crate::firewall::DetectionKind;
 
 /// What an enabled inline evaluator does once it has (or has not) flagged the
@@ -70,8 +71,10 @@ pub(crate) fn llm_judge_backstop_kind(id: &str) -> Option<DetectionKind> {
 
 /// Combine an LLM-judge verdict with its deterministic lexical-seed backstop.
 ///
-/// The seed only counts when the judge did NOT answer (`!available` — no provider /
-/// timeout / unparseable, the common local-only deploy): then it is the sole floor,
+/// The seed only counts when the judge did NOT answer for the whole text
+/// (`!available` — no provider / timeout / refusal / unparseable, the common
+/// local-only deploy, or text past the inspector's window budget): then it is the
+/// sole floor,
 /// closing the "enforced=true but silently no-op" honesty gap. When the judge DID
 /// answer, its context judgment wins outright, so the seed's own false positives
 /// (a quoted/condemned stereotype, casual profanity) never hard-flag. This is the
@@ -79,6 +82,24 @@ pub(crate) fn llm_judge_backstop_kind(id: &str) -> Option<DetectionKind> {
 /// unit-testable without a live judge.
 pub(crate) fn backstop_flag(available: bool, judge_flagged: bool, seed_hit: bool) -> bool {
     (!available && seed_hit) || judge_flagged
+}
+
+/// Whether an LLM-judge binding's missing verdict counts as a flag, so the
+/// binding's own action applies instead of a silent allow. A refusal is a
+/// signal an attacker produces on purpose (GuardBreaker bait), so it flags
+/// every judge. A judge with a lexical seed keeps that seed over the full text
+/// as its floor for the other gaps; a custom judge has no other floor, so any
+/// gap an attacker can produce (a verdict-shaped non-answer, plain prose, text
+/// past the window budget) flags too. A provider outage and topic words never
+/// flag here.
+pub(crate) fn judge_gap_flags(outcome: InspectorOutcome, has_seed: bool) -> bool {
+    match outcome {
+        InspectorOutcome::Refused => true,
+        InspectorOutcome::Malformed
+        | InspectorOutcome::Incomplete
+        | InspectorOutcome::Unparseable => !has_seed,
+        _ => false,
+    }
 }
 
 /// The image [`DetectionKind`] for an image-target evaluator id. These kinds are
@@ -137,6 +158,24 @@ mod tests {
         assert!(backstop_flag(true, true, false));
         // Nothing fires ⇒ allow.
         assert!(!backstop_flag(false, false, false));
+    }
+
+    #[test]
+    fn judge_gaps_flag_refusals_everywhere_and_other_gaps_without_a_seed() {
+        use InspectorOutcome::*;
+        for has_seed in [true, false] {
+            assert!(judge_gap_flags(Refused, has_seed));
+            for open in [Answered, Skipped, ProviderUnavailable, OffVocabulary] {
+                assert!(!judge_gap_flags(open, has_seed), "{open:?}");
+            }
+        }
+        for gap in [Malformed, Incomplete, Unparseable] {
+            assert!(judge_gap_flags(gap, false), "{gap:?} flags a custom judge");
+            assert!(
+                !judge_gap_flags(gap, true),
+                "{gap:?} keeps a seeded judge's floor"
+            );
+        }
     }
 
     #[test]

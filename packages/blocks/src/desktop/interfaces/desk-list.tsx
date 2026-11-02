@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd, KbdGroup } from "@ryu/ui/components/kbd.tsx";
@@ -8,31 +9,33 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type DeskView,
-	THREAD_STATUS_LABELS,
-} from "@ryuhq/protocol/interfaces";
+import type { DeskView } from "@ryuhq/protocol/interfaces";
 import { ArrowDownUp, Pin, SquarePen } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { DeskAvatar } from "./desk-avatar.tsx";
 import {
+	conversationCount,
 	type DeskRow,
 	type DeskSort,
 	deskEmptyCopy,
 	deskStartLabel,
-	pluralize,
+	needsYouCount,
 } from "./desk-model.ts";
 import { DeskRowMark } from "./desk-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import {
+	compactAge,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 /** The one keyboard-focus treatment shared by rail items, rows and links. */
 export const DESK_FOCUS_RING =
 	"outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset";
 
 const ROW_CURSOR =
-	"bg-foreground/5 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary";
+	"bg-foreground/5 before:absolute before:inset-y-0 before:start-0 before:w-0.5 before:bg-primary";
 const ROW_CURSOR_FOCUS =
-	"focus-visible:bg-foreground/5 focus-visible:before:absolute focus-visible:before:inset-y-0 focus-visible:before:left-0 focus-visible:before:w-0.5 focus-visible:before:bg-primary";
+	"focus-visible:bg-foreground/5 focus-visible:before:absolute focus-visible:before:inset-y-0 focus-visible:before:start-0 focus-visible:before:w-0.5 focus-visible:before:bg-primary";
 
 /** Legend chips: a hairline outline so glyphs keep full contrast in dark themes. */
 const LEGEND_KBD =
@@ -43,11 +46,9 @@ const SORT_LABELS: Record<DeskSort, string> = {
 	oldest: "Oldest",
 };
 
-function spokenAge(age: string): string {
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "updated just now" : `updated ${age} ago`;
+function spokenAge(iso: string, now: number): string {
+	const age = relativeAge(iso, now);
+	return age ? tr("updated {age}", { age }) : "";
 }
 
 /** Keys that move the roving cursor, mapped to a step through the list. */
@@ -98,10 +99,10 @@ function DeskListRow({
 	const label = [
 		row.title,
 		row.actorLabel,
-		THREAD_STATUS_LABELS[row.status],
-		row.needsYou ? "needs you" : "",
-		thread.pinned ? "pinned" : "",
-		spokenAge(age),
+		threadStatusLabel(row.status),
+		row.needsYou ? tr("Needs you") : "",
+		thread.pinned ? tr("Pinned") : "",
+		spokenAge(thread.updatedAt, now),
 	]
 		.filter(Boolean)
 		.join(", ");
@@ -151,6 +152,7 @@ function DeskListRow({
 							"min-w-0 flex-1 truncate font-medium text-[13px] leading-5",
 							strong
 						)}
+						data-ryu-i18n="off"
 					>
 						{row.actorLabel}
 					</span>
@@ -177,11 +179,13 @@ function DeskListRow({
 						row.needsYou ? "font-semibold" : "font-normal",
 						strong
 					)}
+					data-ryu-i18n="off"
 				>
 					{row.title}
 				</p>
 				<p
 					className={cn("truncate text-[13px] leading-5", secondary)}
+					data-ryu-i18n="off"
 					id={previewId}
 				>
 					{row.preview}
@@ -315,15 +319,18 @@ export function DeskConversationList({
 	viewSelect,
 }: DeskListProps) {
 	const tl = useLiteralMessages();
-	const label = view?.label ?? "Conversations";
+	const label = view?.label ?? tl("Conversations");
 	const listLabel = tl("{label} conversations", { label });
 	const startLabel = deskStartLabel(view, tl);
 	const needsYou = rows.filter((row) => row.needsYou).length;
 	const empty = deskEmptyCopy(view, tl);
 	const showSkeleton = loading && rows.length === 0;
-	let summary = pluralize(rows.length, "conversation");
+	let summary = conversationCount(rows.length, tl);
 	if (needsYou > 0 && view?.id !== "needs-you") {
-		summary += ` · ${needsYou} need${needsYou === 1 ? "s" : ""} you`;
+		summary = tl("{conversations} · {needsYou}", {
+			conversations: summary,
+			needsYou: needsYouCount(needsYou, tl),
+		});
 	}
 
 	return (
@@ -332,10 +339,13 @@ export function DeskConversationList({
 			className="flex min-h-0 w-full flex-col bg-background"
 			data-testid="desk-list"
 		>
-			<header className="flex h-14 shrink-0 items-center gap-1 border-border border-b pr-2 pl-4">
+			<header className="flex h-14 shrink-0 items-center gap-1 border-border border-b ps-4 pe-2">
 				{viewSelect ?? (
 					<h2 className="flex min-w-0 flex-1 items-baseline gap-2">
-						<span className="truncate font-semibold text-foreground text-sm">
+						<span
+							className="truncate font-semibold text-foreground text-sm"
+							data-ryu-i18n="off"
+						>
 							{label}
 						</span>
 						<span

@@ -1,10 +1,12 @@
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
 	testDir: ".",
 	testMatch: /mcp-performance-proof.spec.ts$/,
 	workers: 1,
 	timeout: 60_000,
-	outputDir: "/tmp/ryu-mcp-proof-results",
+	outputDir: path.join(tmpdir(), "ryu-mcp-proof-results"),
 	reporter: "list",
 	use: {
 		baseURL: "http://127.0.0.1:5211",

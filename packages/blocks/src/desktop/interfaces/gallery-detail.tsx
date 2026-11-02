@@ -1,7 +1,7 @@
+import { activeLocale, numberFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft, MessageCirclePlus } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, RefObject } from "react";
@@ -10,7 +10,7 @@ import { GalleryAvatar } from "./gallery-avatar.tsx";
 import { GalleryCard } from "./gallery-card.tsx";
 import { GalleryCover } from "./gallery-cover.tsx";
 import { type GalleryItem, galleryColumns } from "./gallery-model.ts";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
 
 /** Gutter inside the "More like this" shelf. */
 const SHELF_GAP = 12;
@@ -29,7 +29,11 @@ function BackButton({ label, onBack }: { label: string; onBack: () => void }) {
 			size="sm"
 			variant="ghost"
 		>
-			<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+			<ArrowLeft
+				aria-hidden="true"
+				className="rtl:-scale-x-100"
+				data-icon="inline-start"
+			/>
 			Gallery
 		</Button>
 	);
@@ -43,7 +47,7 @@ function DetailFacts({ item, now }: { item: GalleryItem; now: number }) {
 			value: (
 				<span className="inline-flex items-center gap-2">
 					<BoardStatusDot status={status} />
-					{THREAD_STATUS_LABELS[status]}
+					{threadStatusLabel(status)}
 				</span>
 			),
 		},
@@ -57,14 +61,11 @@ function DetailFacts({ item, now }: { item: GalleryItem; now: number }) {
 	facts.push(
 		{
 			label: "Messages",
-			value: thread.messageCount.toLocaleString(),
+			value: numberFormatter(activeLocale()).format(thread.messageCount),
 		},
 		{
 			label: "Updated",
-			value:
-				compactAge(thread.updatedAt, now) === "now"
-					? "Just now"
-					: `${compactAge(thread.updatedAt, now)} ago`,
+			value: relativeAge(thread.updatedAt, now),
 		}
 	);
 	return (
@@ -129,6 +130,7 @@ export function GalleryDetail({
 					<BackButton label="Back to gallery" onBack={onBack} />
 					<h2
 						className="min-w-0 truncate font-semibold text-foreground text-sm outline-none"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>
@@ -167,6 +169,7 @@ export function GalleryDetail({
 					</div>
 					<h2
 						className="mt-6 text-balance font-semibold text-2xl text-foreground leading-8 tracking-tight outline-none"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>

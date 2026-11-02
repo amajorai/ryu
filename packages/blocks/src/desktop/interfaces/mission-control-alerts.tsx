@@ -19,7 +19,7 @@ export { UpcomingPanel } from "./mission-control-alerts-runs.tsx";
  * on hover or focus, so ages stay flush with the panel's right edge.
  */
 const ALERT_ROW =
-	"grid w-full min-w-0 grid-cols-[0.625rem_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-2 py-1.5 text-left";
+	"grid w-full min-w-0 grid-cols-[0.625rem_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-2 py-1.5 text-start";
 
 /**
  * The age gives way to the row action at once: no crossfade, so a focus ring
@@ -100,10 +100,16 @@ function AlertBody({
 				<Lamp state={warning ? "failure" : "your-turn"} />
 			</span>
 			<span className="flex min-w-0 @min-[420px]/alerts:flex-row flex-col @min-[420px]/alerts:items-baseline @min-[420px]/alerts:gap-3 gap-0.5">
-				<span className="@min-[420px]/alerts:max-w-[55%] shrink-0 truncate font-medium text-[13px] text-foreground leading-5">
+				<span
+					className="@min-[420px]/alerts:max-w-[55%] shrink-0 truncate font-medium text-[13px] text-foreground leading-5"
+					data-ryu-i18n="off"
+				>
 					{alert.title}
 				</span>
-				<span className="min-w-0 truncate text-muted-foreground text-xs leading-4">
+				<span
+					className="min-w-0 truncate text-muted-foreground text-xs leading-4"
+					data-ryu-i18n="off"
+				>
 					{detail}
 				</span>
 			</span>
@@ -112,7 +118,7 @@ function AlertBody({
 					{ageText(alert.at, now)}
 				</span>
 				{action ? (
-					<span className="absolute inset-y-0 right-0 flex items-center">
+					<span className="absolute inset-y-0 end-0 flex items-center">
 						{action}
 					</span>
 				) : null}
@@ -151,7 +157,7 @@ function AlertRow({
 					ROW_ACTION
 				)}
 			>
-				<ChevronRight className="size-3.5" />
+				<ChevronRight className="size-3.5 rtl:-scale-x-100" />
 			</span>
 		);
 	} else if (agent) {

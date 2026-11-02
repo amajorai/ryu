@@ -1,6 +1,7 @@
 "use client";
 
 import { useTocElement, useTocElementState } from "@platejs/toc/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import { cva } from "class-variance-authority";
 import type { PlateElementProps } from "platejs/react";
@@ -24,6 +25,7 @@ const headingItemVariants = cva(
 );
 
 export function TocElement(props: PlateElementProps) {
+	const tl = useLiteralMessages();
 	const state = useTocElementState();
 	const { props: btnProps } = useTocElement(state);
 	const { activeContentId, headingList } = state;
@@ -54,7 +56,8 @@ export function TocElement(props: PlateElementProps) {
 					))
 				) : (
 					<div className="text-muted-foreground text-sm">
-						Create a heading to display the table of contents.
+						{/* Inside the editable, which the DOM localizer skips. */}
+						{tl("Create a heading to display the table of contents.")}
 					</div>
 				)}
 			</div>

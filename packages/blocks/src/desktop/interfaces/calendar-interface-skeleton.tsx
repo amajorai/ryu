@@ -22,7 +22,7 @@ export function CalendarSkeleton() {
 					<Skeleton className="h-9 w-full" radius="row" />
 				</div>
 			</div>
-			<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border lg:border-l">
+			<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border lg:border-s">
 				<div className="grid h-9 shrink-0 grid-cols-7 items-center border-border border-b">
 					{SKELETON_WEEKDAYS.map((day) => (
 						<Skeleton className="mx-auto h-2.5 w-7" key={day} radius="dense" />
@@ -31,7 +31,7 @@ export function CalendarSkeleton() {
 				<div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6">
 					{SKELETON_CELLS.map((cell) => (
 						<div
-							className="flex flex-col gap-1.5 border-border border-r border-b p-1.5 [&:nth-child(7n)]:border-r-0 [&:nth-last-child(-n+7)]:border-b-0"
+							className="flex flex-col gap-1.5 border-border border-e border-b p-1.5 [&:nth-child(7n)]:border-e-0 [&:nth-last-child(-n+7)]:border-b-0"
 							key={cell}
 						>
 							<Skeleton className="mx-auto h-4 w-5" radius="pill" />

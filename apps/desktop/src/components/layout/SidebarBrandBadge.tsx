@@ -1,6 +1,7 @@
 import { ArrowDown01Icon, ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -256,7 +257,7 @@ export function SidebarBrandBadge({
 						})}
 						render={
 							<button
-								className="group/mode flex h-9 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 aria-expanded:bg-sidebar-accent/60"
+								className="group/mode flex h-9 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-start transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 aria-expanded:bg-sidebar-accent/60"
 								data-ryu-bot-terminology="ignore"
 								data-testid="product-mode-trigger"
 								ref={triggerRef}
@@ -267,7 +268,7 @@ export function SidebarBrandBadge({
 					>
 						{lockup}
 						<HugeiconsIcon
-							className="ml-auto size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/mode:opacity-100 group-hover/mode:duration-0 group-aria-expanded/mode:opacity-100"
+							className="ms-auto size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/mode:opacity-100 group-hover/mode:duration-0 group-aria-expanded/mode:opacity-100"
 							icon={ArrowDown01Icon}
 						/>
 					</DropdownMenuTrigger>
@@ -287,7 +288,7 @@ export function SidebarBrandBadge({
 									backToChat(canSwitchToConsole);
 								}}
 							>
-								<HugeiconsIcon
+								<DirectionalIcon
 									aria-hidden="true"
 									icon={ArrowLeft01Icon}
 									size={16}

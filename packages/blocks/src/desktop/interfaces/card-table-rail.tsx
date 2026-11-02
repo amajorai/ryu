@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
@@ -9,10 +10,11 @@ import type { InterfaceThread } from "@ryuhq/protocol/interfaces";
 import { ChevronDown } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import {
-	plural,
 	type SeatInfo,
 	type SeatTone,
 	seatTone,
+	type TableNoun,
+	tableCount,
 } from "./card-table-model.ts";
 import { SeatAvatar } from "./card-table-pieces.tsx";
 import { ThreadRow } from "./card-table-rows.tsx";
@@ -68,12 +70,14 @@ function RailSections({
 								summary: seatSummary(seat),
 							});
 							if (sentence) {
-								label = `${sentence} ${answer ? "Answer their ask." : "Seat menu."}`;
+								label = answer
+									? tl("{sentence} Answer their ask.", { sentence })
+									: tl("{sentence} Seat menu.", { sentence });
 							}
 							const trigger = (
 								<button
 									aria-label={label}
-									className="flex w-full min-w-0 items-center gap-2 rounded-xl p-1 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted"
+									className="flex w-full min-w-0 items-center gap-2 rounded-xl p-1 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted"
 									data-act-agent={sentence ? id : undefined}
 									type="button"
 								/>
@@ -87,12 +91,15 @@ function RailSections({
 										tone={acts ? acts.tone(id) : seatTone(seat)}
 									/>
 									<span className="flex min-w-0 flex-1 flex-col">
-										<span className="truncate font-medium text-sm leading-5">
+										<span
+											className="truncate font-medium text-sm leading-5"
+											data-ryu-i18n="off"
+										>
 											{seat.agent.name}
 										</span>
 										{acts ? null : (
 											<span className="truncate text-muted-foreground text-xs">
-												{plural(seat.threads.length, "thread")}
+												{tableCount(seat.threads.length, "thread", tl)}
 											</span>
 										)}
 									</span>
@@ -167,13 +174,13 @@ function RailSections({
 export function railLabel(
 	seats: number,
 	unseated: number
-): { name: string; unit: string } {
+): { name: string; unit: TableNoun } {
 	if (seats > 0 && unseated > 0) {
-		return { name: "Rail", unit: "item" };
+		return { name: tr("Rail"), unit: "item" };
 	}
 	return seats > 0
-		? { name: "On the rail", unit: "agent" }
-		: { name: "Off the table", unit: "thread" };
+		? { name: tr("On the rail"), unit: "agent" }
+		: { name: tr("Off the table"), unit: "thread" };
 }
 
 /**
@@ -224,7 +231,7 @@ export function CardTableRail({
 							<button
 								aria-label={tl("{name}: {count}. Show them", {
 									name,
-									count: plural(count, unit),
+									count: tableCount(count, unit, tl),
 								})}
 								className={cn(
 									GAME_PLATE,
@@ -275,7 +282,7 @@ export function CardTableRail({
 	return (
 		<nav
 			aria-label="Rail"
-			className="absolute top-3 left-3 z-30 flex w-56 max-w-[calc(100%-1.5rem)] flex-col gap-2 overflow-y-auto rounded-2xl border-(--gk-edge) border-2 bg-background p-1.5 shadow-(--gk-lip)"
+			className="absolute start-3 top-3 z-30 flex w-56 max-w-[calc(100%-1.5rem)] flex-col gap-2 overflow-y-auto rounded-2xl border-(--gk-edge) border-2 bg-background p-1.5 shadow-(--gk-lip)"
 			data-testid="card-table-rail"
 			style={top === undefined ? { maxHeight } : { maxHeight, top }}
 		>

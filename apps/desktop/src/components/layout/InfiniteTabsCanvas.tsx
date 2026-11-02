@@ -1,6 +1,8 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
+import { useReactFlowAriaLabels } from "@ryu/blocks/desktop/react-flow-labels.ts";
+import { translate as tl } from "@ryu/i18n/core";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
@@ -40,6 +42,7 @@ import {
 } from "./tab-canvas-layout.ts";
 
 function CanvasInner() {
+	const ariaLabels = useReactFlowAriaLabels();
 	const { activeTabId, closeTab, focusTab, openTab, tabs, groups, splits } =
 		useTabsContext();
 	const tabLayout = useTabLayout();
@@ -209,7 +212,7 @@ function CanvasInner() {
 						tab,
 						tabLayout,
 					},
-					ariaLabel: `${tab.title} tab`,
+					ariaLabel: tl("{title} tab", { title: tab.title }),
 					selected: tab.id === activeTabId,
 				} satisfies TabCanvasNode;
 			});
@@ -266,6 +269,7 @@ function CanvasInner() {
 			data-testid="infinite-tabs-canvas"
 		>
 			<ReactFlow
+				ariaLabelConfig={ariaLabels}
 				defaultViewport={snapshot.viewport}
 				deleteKeyCode={null}
 				edges={[]}

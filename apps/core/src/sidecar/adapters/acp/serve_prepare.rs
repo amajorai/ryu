@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::messages as m;
 
 /// Values the start-up checks in [`prepare_instance`] resolve for the later phases.
 pub(super) struct InstancePrep {
@@ -18,16 +19,10 @@ pub(super) async fn prepare_instance(
     additional_directories: &Vec<PathBuf>,
     environment: &[(String, String)],
 ) -> anyhow::Result<InstancePrep> {
-    let account_failure = |code: &str, title: &str| {
-        let code = code.to_owned();
-        let title = title.to_owned();
+    let account_failure = |code: &'static str, title: crate::i18n::Template| {
         move |error: anyhow::Error| {
             let message = format!("{error:#}");
-            error.context(AcpFailure {
-                code: code.clone(),
-                title: title.clone(),
-                message,
-            })
+            error.context(AcpFailure::relayed(code, title, message))
         }
     };
     let native = crate::pi_config::native_accounts::for_spawn(&spawn_cmd)?;
@@ -54,7 +49,7 @@ pub(super) async fn prepare_instance(
     .await
     .map_err(account_failure(
         "native_account_required",
-        "Native account unavailable",
+        m::ACP_NATIVE_ACCOUNT_TITLE_MESSAGE,
     ))?;
     // The spawn command is consumed below (`AcpSpawn::from_str` then the move into
     // the session closure), but the bridge decision also needs it — and it must be
@@ -97,7 +92,8 @@ pub(super) async fn prepare_instance(
     // `PiExtension` IS "this is the managed Pi", and one predicate that two call
     // sites read cannot drift the way two copies of it can.
     let is_managed_pi = tool_access == RyuToolAccess::PiExtension;
-    let pi_account_failure = account_failure("pi_account_required", "Pi account unavailable");
+    let pi_account_failure =
+        account_failure("pi_account_required", m::ACP_PI_ACCOUNT_TITLE_MESSAGE);
     let captured_pi_account = environment
         .iter()
         .find(|(name, _)| name == "RYU_PI_ACCOUNT_CAPTURE")

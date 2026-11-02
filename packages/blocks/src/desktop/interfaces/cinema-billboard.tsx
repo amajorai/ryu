@@ -13,7 +13,6 @@ import {
 	cinemaStatusText,
 } from "./cinema-model.ts";
 import { CinemaKicker } from "./cinema-poster.tsx";
-import { compactAge } from "./interface-renderer.ts";
 
 /** The billboard title's type per title style, at each frame size. */
 const HEADLINE: Record<
@@ -88,7 +87,7 @@ export function CinemaBillboard({
 	const facts = [
 		title.agents.length > 1 ? cinemaNames(title.agents) : "",
 		cinemaMessages(thread.messageCount),
-		cinemaAge(compactAge(thread.updatedAt, now)),
+		cinemaAge(thread.updatedAt, now),
 	].filter(Boolean);
 	const infoWidth = size === "compact" ? width - gutter * 2 : width * 0.42;
 	return (
@@ -142,6 +141,7 @@ export function CinemaBillboard({
 							"line-clamp-3 text-balance",
 							HEADLINE[title.art.type][size]
 						)}
+						data-ryu-i18n="off"
 					>
 						{thread.title}
 					</span>
@@ -149,7 +149,7 @@ export function CinemaBillboard({
 				<p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 font-medium text-base text-foreground/80 leading-6">
 					<span
 						className={cn(
-							"mr-1 flex items-center gap-1.5 rounded-xs px-2 py-0.5 font-semibold text-sm leading-5",
+							"me-1 flex items-center gap-1.5 rounded-xs px-2 py-0.5 font-semibold text-sm leading-5",
 							STATUS_CHIP[title.status]
 						)}
 					>
@@ -178,6 +178,7 @@ export function CinemaBillboard({
 							"mt-3 line-clamp-3 text-foreground/90",
 							size === "wide" ? "text-lg leading-7" : "text-base leading-6"
 						)}
+						data-ryu-i18n="off"
 					>
 						{thread.lastMessage}
 					</p>

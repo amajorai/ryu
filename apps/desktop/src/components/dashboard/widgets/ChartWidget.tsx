@@ -13,6 +13,7 @@ import {
 	ChartTooltipContent,
 	chartColorVariableName,
 } from "@ryu/ui/components/chart.tsx";
+import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useId } from "react";
 import {
 	Area,
@@ -69,6 +70,11 @@ function humanizeKey(key: string): string {
 	return key
 		.replaceAll("_", " ")
 		.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+/** A Y-axis tick in the UI language's digits and grouping ("1.234", "1,2 Mio."). */
+export function formatAxisTick(value: unknown): string {
+	return formatCount(Number(value)) ?? String(value);
 }
 
 function EmptyChart() {
@@ -173,7 +179,13 @@ export function ChartBody({
 			tickLine={false}
 			tickMargin={8}
 		/>,
-		<YAxis axisLine={false} key="y-axis" tickLine={false} width={40} />,
+		<YAxis
+			axisLine={false}
+			key="y-axis"
+			tickFormatter={formatAxisTick}
+			tickLine={false}
+			width={40}
+		/>,
 		<ChartTooltip
 			content={<ChartTooltipContent indicator="line" />}
 			cursor={false}

@@ -5,11 +5,6 @@
 // it the newest message page of a thread.
 
 import {
-	answeredQuestionIds,
-	isAsyncQuestionPart,
-	isQuestionPartOpen,
-} from "@ryu/blocks/desktop/agent-elements/question/async-question.ts";
-import {
 	formatToolDisplayName,
 	toolRegistry,
 } from "@ryu/blocks/desktop/agent-elements/tools/tool-registry.ts";
@@ -19,10 +14,6 @@ import { extractWorkflowRun } from "@ryu/blocks/desktop/agent-elements/workflow-
 import {
 	type InterfaceActivity,
 	type InterfaceActivityKind,
-	type InterfaceAsk,
-	type InterfaceAskChoice,
-	type InterfaceBlocker,
-	type InterfaceBlockerKind,
 	type InterfaceOutcome,
 	type InterfaceProgress,
 	stepKindForTool,
@@ -31,76 +22,39 @@ import { extractArtifacts } from "@/src/lib/artifacts.ts";
 import {
 	buildMissionDigest,
 	type MissionStreamMessage,
-	type MissionStreamPart,
 	toolNameOf,
 } from "@/src/lib/mission-control/turn-groups.ts";
 import { deriveTodoProgress } from "@/src/lib/todo-progress.ts";
+import { deriveBlocker } from "./interface-detail-blocker.ts";
+import {
+	basename,
+	clamp,
+	DETAIL_MAX,
+	iso,
+	isTool,
+	LABEL_MAX,
+	lastWhere,
+	partsOf,
+	RECENT_STEPS,
+	stringIn,
+	toolDisplayName,
+} from "./interface-detail-parts.ts";
+import { deriveQuestions } from "./interface-detail-questions.ts";
+import type {
+	DeriveDetailExtras,
+	DetailMessage,
+	ProgressMarks,
+	ThreadDetail,
+} from "./interface-detail-types.ts";
 
-/** Core's question and permission waiters give up after 600 s. */
-export const QUESTION_WAIT_MS = 600_000;
-const LABEL_MAX = 40;
-const TITLE_MAX = 40;
-const DETAIL_MAX = 160;
-const TEXT_MAX = 80;
-const RECENT_STEPS = 5;
-const MAX_CHOICES = 4;
-
-/** The message fields the deriver reads (persisted `Message` satisfies it). */
-export interface DetailMessage {
-	content?: string;
-	id: string;
-	interrupted?: boolean;
-	parts?: readonly unknown[];
-	role: "assistant" | "user";
-	timestamp: number;
-}
-
-export interface DeriveDetailExtras {
-	/** Agent of the conversation that holds the parts. */
-	agentId: string | null;
-	/** Older messages exist before this page (counts at the boundary are absent). */
-	hasOlder: boolean;
-	/** Where this conversation's asks surface: a helper session lifts them to
-	 *  its parent main thread. Defaults to the conversation itself. */
-	liftTo?: { agentId: string | null; threadId: string };
-	nowMs: number;
-	/** The conversation itself is running (questions block only then). */
-	running: boolean;
-	/** Conversation id that holds the parts. */
-	threadId: string;
-}
-
-/** Newest step and message times (ms): over the whole page, and over the
- *  current turn only (after the newest user message), for when the host
- *  knows no run start to floor them by. */
-export interface ProgressMarks {
-	messageAt: number | null;
-	partAt: number | null;
-	turnMessageAt: number | null;
-	turnPartAt: number | null;
-}
-
-export interface ThreadDetail {
-	activity: InterfaceActivity | null;
-	blocker: InterfaceBlocker | null;
-	/** An assistant message exists after the last user message. */
-	hasLaterAssistant: boolean;
-	outcome: InterfaceOutcome | null;
-	progress: InterfaceProgress | null;
-	/** Newest tool timing and newest assistant message time on the page (ms),
-	 *  so the host can floor them by the run start it resolves (spec order:
-	 *  a part timing at or after the start, else a message, else the start). */
-	progressMarks: ProgressMarks;
-	/** Open Question cards, with the conversation each answer posts to. */
-	questionAsks: Array<{
-		ask: InterfaceAsk;
-		holderId: string;
-		toolCallId: string;
-	}>;
-	/** When the last user message was sent (ms), or the earliest tool start
-	 *  after it when the message has no time. Null without a user message. */
-	userStart: number | null;
-}
+export { errorCodeKind } from "./interface-detail-blocker.ts";
+export { QUESTION_WAIT_MS } from "./interface-detail-parts.ts";
+export type {
+	DeriveDetailExtras,
+	DetailMessage,
+	ProgressMarks,
+	ThreadDetail,
+} from "./interface-detail-types.ts";
 
 /** Revision of a conversation as the detail store sees it. */
 export function interfaceDetailRevision(input: {
@@ -109,62 +63,6 @@ export function interfaceDetailRevision(input: {
 	updatedAt: number;
 }): string {
 	return `${input.updatedAt}:${input.messageCount}:${input.runStatus ?? ""}`;
-}
-
-type LoosePart = MissionStreamPart & {
-	data?: unknown;
-	errorText?: unknown;
-	id?: string;
-	code?: unknown;
-	message?: unknown;
-	title?: unknown;
-};
-
-function partsOf(message: DetailMessage | undefined): LoosePart[] {
-	return (message?.parts ?? []).filter(
-		(part): part is LoosePart => typeof part === "object" && part !== null
-	);
-}
-
-function lastWhere<T>(
-	list: readonly T[],
-	test: (item: T) => boolean
-): T | undefined {
-	for (let i = list.length - 1; i >= 0; i -= 1) {
-		const item = list[i];
-		if (item !== undefined && test(item)) {
-			return item;
-		}
-	}
-	return undefined;
-}
-
-type QuestionPart = Parameters<typeof isQuestionPartOpen>[0];
-
-function isTool(part: LoosePart): boolean {
-	return (
-		typeof part.type === "string" &&
-		(part.type.startsWith("tool-") || part.type === "dynamic-tool")
-	);
-}
-
-function clamp(text: string, max: number): string {
-	const flat = text.replace(/\s+/g, " ").trim();
-	return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
-}
-
-const iso = (ms: number) => new Date(ms).toISOString();
-
-function basename(path: string): string {
-	return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-}
-
-function stringIn(source: unknown, key: string): string | null {
-	if (!source || typeof source !== "object") {
-		return null;
-	}
-	const value = (source as Record<string, unknown>)[key];
-	return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 /** A short target from a tool's input: file basename, command head, pattern,
@@ -210,11 +108,6 @@ const KIND_VERBS: Record<InterfaceActivityKind, string> = {
 	web: "Fetching",
 	write: "Writing",
 };
-
-function toolDisplayName(tool: string): string {
-	const tail = tool.split(/__|\./).filter(Boolean).at(-1) ?? tool;
-	return tail.replace(/_/g, " ");
-}
 
 /** "Editing snapshot.ts", "Running bun test", "Using create pull request". */
 export function activityLabel(
@@ -387,100 +280,6 @@ function deriveProgress(
 	return null;
 }
 
-const AUTH_CODES = new Set([
-	"auth_required",
-	"native_account_required",
-	"pi_account_required",
-]);
-const BILLING_CODES = new Set([
-	"insufficient_credits",
-	"provider_payment_required",
-	"provider_usage_unavailable",
-]);
-
-/** Saved error code → blocker kind (spec §3.2). No code maps to rate-limited. */
-export function errorCodeKind(code: string | null): InterfaceBlockerKind {
-	if (code && AUTH_CODES.has(code)) {
-		return "auth";
-	}
-	if (code && BILLING_CODES.has(code)) {
-		return "billing";
-	}
-	return code === "execution_paused" ? "interrupted" : "error";
-}
-
-const SHELL_TOOLS = new Set(["bash", "bashoutput", "execute", "shell.run"]);
-
-function deriveBlocker(
-	turn: readonly DetailMessage[]
-): InterfaceBlocker | null {
-	const assistant = turn.filter((m) => m.role === "assistant");
-	// 1. A saved error card.
-	for (let i = assistant.length - 1; i >= 0; i -= 1) {
-		const message = assistant[i];
-		const error = lastWhere(partsOf(message), (part) => part.type === "error");
-		if (message && error) {
-			const code = typeof error.code === "string" ? error.code : null;
-			const kind = errorCodeKind(code);
-			const message_ = typeof error.message === "string" ? error.message : null;
-			const title =
-				typeof error.title === "string" && error.title.trim()
-					? error.title
-					: (message_ ?? "Run failed");
-			return {
-				at: iso(message.timestamp),
-				atApprox: true,
-				detail: message_ ? clamp(message_, DETAIL_MAX) : null,
-				kind,
-				source: "messages",
-				title: clamp(title, TITLE_MAX),
-			};
-		}
-	}
-	// 2 / 3. The last failed tool; a failed shell command names its command.
-	for (let i = assistant.length - 1; i >= 0; i -= 1) {
-		const message = assistant[i];
-		const failed = lastWhere(
-			partsOf(message),
-			(part) => isTool(part) && part.state === "output-error"
-		);
-		if (message && failed) {
-			const tool = toolNameOf(failed);
-			const timing = readToolTiming(failed);
-			const at = timing?.completedAt;
-			const errorText =
-				typeof failed.errorText === "string" ? failed.errorText : null;
-			const command = stringIn(failed.input, "command");
-			const shell = SHELL_TOOLS.has(tool.toLowerCase()) && command;
-			return {
-				at: iso(at ?? message.timestamp),
-				atApprox: at === undefined,
-				detail: errorText ? clamp(errorText, DETAIL_MAX) : null,
-				kind: shell ? "command-failed" : "tool-failed",
-				source: "messages",
-				title: clamp(
-					shell
-						? `${command.split(/\s+/).slice(0, 2).join(" ")} failed`
-						: `${toolDisplayName(tool)} failed`,
-					TITLE_MAX
-				),
-			};
-		}
-	}
-	// 4. A turn the node died in the middle of.
-	const cut = lastWhere(assistant, (message) => message.interrupted === true);
-	if (cut) {
-		return {
-			at: iso(cut.timestamp),
-			atApprox: true,
-			kind: "interrupted",
-			source: "messages",
-			title: "Interrupted",
-		};
-	}
-	return null;
-}
-
 function firstSentence(text: string): string | null {
 	const flat = text.replace(/\s+/g, " ").trim();
 	if (!flat) {
@@ -537,138 +336,6 @@ function deriveOutcome(
 		turnMessages as Parameters<typeof extractArtifacts>[0]
 	).length;
 	return outcome;
-}
-
-interface QuestionInput {
-	allowCustom?: boolean;
-	description?: string;
-	kind?: string;
-	options?: Array<{ id?: unknown; label?: unknown }>;
-	title?: string;
-}
-
-function questionsOf(input: unknown): QuestionInput[] {
-	if (!input || typeof input !== "object") {
-		return [];
-	}
-	const record = input as {
-		question?: QuestionInput;
-		questions?: QuestionInput[];
-	};
-	if (Array.isArray(record.questions)) {
-		return record.questions;
-	}
-	return record.question ? [record.question] : [];
-}
-
-function choiceLabel(label: string): string {
-	const words = label.trim().split(/\s+/);
-	return words.length <= 2 ? label.trim() : `${words.slice(0, 2).join(" ")}…`;
-}
-
-function singleChoices(
-	questions: QuestionInput[]
-): InterfaceAskChoice[] | null {
-	const [only] = questions;
-	const options = only?.options ?? [];
-	if (
-		questions.length !== 1 ||
-		only?.kind !== "single" ||
-		only.allowCustom ||
-		options.length < 1 ||
-		options.length > MAX_CHOICES
-	) {
-		return null;
-	}
-	const choices: InterfaceAskChoice[] = [];
-	for (const option of options) {
-		if (typeof option.id !== "string" || typeof option.label !== "string") {
-			return null;
-		}
-		choices.push({
-			id: option.id,
-			label: choiceLabel(option.label),
-			tone: "neutral",
-		});
-	}
-	// Cut labels that collide would give two buttons one name: Open only.
-	// Compared without case or the cut mark: "Use the" and "Use the…" collide.
-	const labels = new Set(
-		choices.map((choice) => choice.label.replace(/…$/, "").toLowerCase())
-	);
-	return labels.size === choices.length ? choices : null;
-}
-
-function deriveQuestions(
-	messages: readonly DetailMessage[],
-	extras: DeriveDetailExtras
-): ThreadDetail["questionAsks"] {
-	const asks: ThreadDetail["questionAsks"] = [];
-	const owner = extras.liftTo ?? {
-		agentId: extras.agentId,
-		threadId: extras.threadId,
-	};
-	// Async cards stay open until an answer message for them appears.
-	const answered = answeredQuestionIds(
-		messages as Parameters<typeof answeredQuestionIds>[0]
-	);
-	for (const message of messages) {
-		for (const part of partsOf(message)) {
-			if (part.type !== "tool-Question" || !part.toolCallId) {
-				continue;
-			}
-			if (!isQuestionPartOpen(part as unknown as QuestionPart, answered)) {
-				continue;
-			}
-			const questions = questionsOf(part.input);
-			const first = questions[0];
-			if (!first?.title) {
-				continue;
-			}
-			const asyncPart = isAsyncQuestionPart(part as unknown as QuestionPart);
-			const timing = readToolTiming(part);
-			const since = timing ? timing.startedAt : null;
-			const ask: InterfaceAsk = {
-				agentId: owner.agentId,
-				blocking: !asyncPart,
-				holdsRun: !asyncPart,
-				id: `question:${part.toolCallId}`,
-				kind: "question",
-				reason: first.description ? clamp(first.description, DETAIL_MAX) : null,
-				since: since === null ? null : iso(since),
-				source: "messages",
-				subject: null,
-				target: null,
-				text: clamp(first.title, TEXT_MAX),
-				threadId: owner.threadId,
-			};
-			if (!asyncPart) {
-				// Blocking only while its thread runs and before Core's waiter ends.
-				if (!extras.running) {
-					continue;
-				}
-				const startedMs = since ?? message.timestamp;
-				const expires = startedMs + QUESTION_WAIT_MS;
-				if (extras.nowMs > expires) {
-					continue;
-				}
-				ask.since ??= iso(message.timestamp);
-				ask.sinceApprox = since === null;
-				ask.expiresAt = iso(expires);
-				ask.expiresApprox = true;
-				const choices = singleChoices(questions);
-				if (choices) {
-					ask.choices = choices;
-				}
-			}
-			asks.push({
-				ask,
-				holderId: extras.threadId,
-				toolCallId: part.toolCallId,
-			});
-		}
-	}
-	return asks;
 }
 
 function newestTimes(messages: readonly DetailMessage[]): {

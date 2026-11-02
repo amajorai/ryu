@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { WorldLayout, WorldPoint } from "@ryuhq/protocol/interfaces";
@@ -223,7 +224,7 @@ export function VillageMap({
 						width={layout.width * MAP_TILE}
 					/>
 					{village.houses.map((house) => {
-						const name = names.get(house.agentId) ?? "Villager";
+						const name = names.get(house.agentId) ?? tr("Villager");
 						const status = statuses.get(house.agentId) ?? "idle";
 						return (
 							<button
@@ -248,6 +249,7 @@ export function VillageMap({
 										"absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap text-[16px] leading-5 group-hover:block group-focus-visible:block",
 										HUD_FONT
 									)}
+									data-ryu-i18n="off"
 									style={{ ...frameStyle("plank", 2), ...SV_PLANK_TEXT }}
 								>
 									{name}

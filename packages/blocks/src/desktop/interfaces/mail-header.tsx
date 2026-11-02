@@ -26,11 +26,11 @@ export function MailHeader({
 	searchRef: Ref<HTMLInputElement>;
 }) {
 	return (
-		<header className="flex h-16 shrink-0 items-center pr-4 pl-2">
+		<header className="flex h-16 shrink-0 items-center ps-2 pe-4">
 			<div
 				className={cn(
 					"flex shrink-0 items-center gap-1",
-					compact ? "w-auto pr-2" : "w-62"
+					compact ? "w-auto pe-2" : "w-62"
 				)}
 			>
 				<MailIconButton
@@ -41,7 +41,7 @@ export function MailHeader({
 					<Menu aria-hidden="true" className="size-5" />
 				</MailIconButton>
 				{compact ? null : (
-					<span className="flex items-center gap-2 pl-1 text-foreground/80">
+					<span className="flex items-center gap-2 ps-1 text-foreground/80">
 						<Mail
 							aria-hidden="true"
 							className="size-6 text-primary"
@@ -57,13 +57,13 @@ export function MailHeader({
 			>
 				<Search
 					aria-hidden="true"
-					className="pointer-events-none absolute left-4 size-5 text-foreground/70"
+					className="pointer-events-none absolute start-4 size-5 text-foreground/70"
 				/>
 				<input
 					aria-keyshortcuts="/"
 					aria-label="Search mail"
 					className={cn(
-						"h-full w-full rounded-full bg-foreground/6 pr-12 pl-13 text-base text-foreground outline-none transition-[background-color,box-shadow]",
+						"h-full w-full rounded-full bg-foreground/6 ps-13 pe-12 text-base text-foreground outline-none transition-[background-color,box-shadow]",
 						"placeholder:text-foreground/60 hover:bg-foreground/8",
 						"focus:bg-background focus:shadow-md focus:ring-1 focus:ring-border"
 					)}
@@ -78,7 +78,7 @@ export function MailHeader({
 				{query ? (
 					<button
 						aria-label="Clear search"
-						className="absolute right-2 flex size-9 items-center justify-center rounded-full text-foreground/70 outline-none hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-ring/60"
+						className="absolute end-2 flex size-9 items-center justify-center rounded-full text-foreground/70 outline-none hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-ring/60"
 						onClick={() => onQueryChange("")}
 						type="button"
 					>

@@ -4,6 +4,12 @@
 // This module owns the wire shape, category metadata, and scoring semantics
 // shared by marketplace listings and agent configuration.
 
+import {
+	activeLocale,
+	relativeTimeFormatter,
+	translate as tl,
+} from "@ryu/i18n/lite";
+
 export type CheckStatus = "pass" | "warn" | "fail" | "unknown";
 
 export type ScorecardCategory =
@@ -79,33 +85,80 @@ const CATEGORY_ORDER: ScorecardCategory[] = [
 	"errors",
 ];
 
+// Getters translate on every read so a rendered heading follows the active
+// UI locale instead of the locale that was active when this module loaded.
 export const CATEGORY_LABELS = {
-	capabilities: "Capabilities",
-	configuration: "Configuration",
-	"design-system": "Ryu design system",
-	disclosures: "Disclosures",
-	errors: "Errors",
-	hygiene: "Hygiene",
-	maintenance: "Maintenance",
-	operations: "Operations",
-	review: "Review & provenance",
-	runtime: "Runtime",
-	safety: "Safety",
+	get capabilities() {
+		return tl("Capabilities");
+	},
+	get configuration() {
+		return tl("Configuration");
+	},
+	get "design-system"() {
+		return tl("Ryu design system");
+	},
+	get disclosures() {
+		return tl("Disclosures");
+	},
+	get errors() {
+		return tl("Errors");
+	},
+	get hygiene() {
+		return tl("Hygiene");
+	},
+	get maintenance() {
+		return tl("Maintenance");
+	},
+	get operations() {
+		return tl("Operations");
+	},
+	get review() {
+		return tl("Review & provenance");
+	},
+	get runtime() {
+		return tl("Runtime");
+	},
+	get safety() {
+		return tl("Safety");
+	},
 } satisfies Record<ScorecardCategory, string>;
 
 export const CATEGORY_DESCRIPTIONS = {
-	capabilities: "Whether access, tools, skills, and memory fit the job.",
-	configuration: "Whether the agent has a clear identity and instructions.",
-	"design-system":
-		"Whether rendered UI evidence uses Ryu's shared shell, tokens, controls, and host ownership.",
-	disclosures: "What it tells you about the data and access it wants.",
-	errors: "Problems found while reading the listing itself.",
-	hygiene: "Whether the listing is complete and correctly described.",
-	maintenance: "Whether anyone is still looking after it.",
-	operations: "Whether background work has the prerequisites it needs.",
-	review: "Who published it and who checked it.",
-	runtime: "Whether the selected runtime and model can start.",
-	safety: "Whether execution posture matches the access it has.",
+	get capabilities() {
+		return tl("Whether access, tools, skills, and memory fit the job.");
+	},
+	get configuration() {
+		return tl("Whether the agent has a clear identity and instructions.");
+	},
+	get "design-system"() {
+		return tl(
+			"Whether rendered UI evidence uses Ryu's shared shell, tokens, controls, and host ownership."
+		);
+	},
+	get disclosures() {
+		return tl("What it tells you about the data and access it wants.");
+	},
+	get errors() {
+		return tl("Problems found while reading the listing itself.");
+	},
+	get hygiene() {
+		return tl("Whether the listing is complete and correctly described.");
+	},
+	get maintenance() {
+		return tl("Whether anyone is still looking after it.");
+	},
+	get operations() {
+		return tl("Whether background work has the prerequisites it needs.");
+	},
+	get review() {
+		return tl("Who published it and who checked it.");
+	},
+	get runtime() {
+		return tl("Whether the selected runtime and model can start.");
+	},
+	get safety() {
+		return tl("Whether execution posture matches the access it has.");
+	},
 } satisfies Record<ScorecardCategory, string>;
 
 const STATUS_POINTS = {
@@ -137,22 +190,24 @@ export function daysSince(
 	return Math.floor((now - parsed) / (24 * 60 * 60 * 1000));
 }
 
-/** Format a day count the way the detail rows read best. */
-export function agoLabel(days: number): string {
+/** Format a day count the way the detail rows read best, in the UI locale:
+ * "today", "yesterday", "12 days ago", "3 months ago", "1.5 years ago". The
+ * unit choice is fixed so every locale rounds the same age the same way. */
+export function agoLabel(
+	days: number,
+	locale: string = activeLocale()
+): string {
 	if (days <= 0) {
-		return "today";
-	}
-	if (days === 1) {
-		return "yesterday";
+		return relativeTimeFormatter(locale).format(0, "day");
 	}
 	if (days < 60) {
-		return `${days} days ago`;
+		return relativeTimeFormatter(locale).format(-days, "day");
 	}
+	const counted = relativeTimeFormatter(locale, "long", "always");
 	if (days < 365) {
-		return `${Math.round(days / 30)} months ago`;
+		return counted.format(-Math.round(days / 30), "month");
 	}
-	const years = (days / 365).toFixed(1).replace(/\.0$/, "");
-	return `${years} years ago`;
+	return counted.format(-Number((days / 365).toFixed(1)), "year");
 }
 
 export function check(
@@ -210,18 +265,27 @@ function summaryFor(
 ): string {
 	if (score === null) {
 		return rulesetVersion === "agent-config-1"
-			? "Not enough information to assess this agent yet."
-			: "Not enough information to assess this listing.";
+			? tl("Not enough information to assess this agent yet.")
+			: tl("Not enough information to assess this listing.");
 	}
 	if (failures > 0) {
 		return rulesetVersion === "agent-config-1"
-			? `${failures} failed check${failures === 1 ? "" : "s"} — fix them before running this agent.`
-			: `${failures} failed check${failures === 1 ? "" : "s"} — read them before installing.`;
+			? tl(
+					"{failures, plural, one {# failed check} other {# failed checks}} — fix them before running this agent.",
+					{ failures }
+				)
+			: tl(
+					"{failures, plural, one {# failed check} other {# failed checks}} — read them before installing.",
+					{ failures }
+				);
 	}
 	if (warnings > 0) {
-		return `Passes every critical check, with ${warnings} thing${warnings === 1 ? "" : "s"} worth knowing.`;
+		return tl(
+			"Passes every critical check, with {warnings, plural, one {# thing} other {# things}} worth knowing.",
+			{ warnings }
+		);
 	}
-	return "Passes every automated check.";
+	return tl("Passes every automated check.");
 }
 
 export function buildScorecard(

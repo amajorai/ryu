@@ -13,6 +13,13 @@
  * calls before it creates a user, links a provider account, and signs an
  * existing provider user in. For an SSO source it requires:
  *   - the provider exists and its domain is DNS-verified;
+ *   - the provider's organization STILL holds every provider domain in its
+ *     `verifiedDomains` summary. Better Auth sets `domainVerified` once and
+ *     never clears it, while Ryu moves a domain to whichever org proves DNS
+ *     control last (`claimVerifiedDomain`) and drops a domain whose TXT record
+ *     disappears. Without this check, a former domain holder's IdP would keep
+ *     signing in (and linking) every account on the domain after it changed
+ *     hands;
  *   - the asserted email is on that domain (or a subdomain of it), the same
  *     rule Better Auth uses to decide `isTrustedProvider`;
  *   - on link and sign-in, the STORED account email is on that domain too, so
@@ -25,7 +32,9 @@
 
 import type { GenericEndpointContext } from "@better-auth/core";
 import { getCurrentAdapter } from "@better-auth/core/context";
+import { Organization } from "@ryu/db/models/control-plane.model";
 import { z } from "zod";
+import { organizationIdOf } from "./sso-enterprise-gate.ts";
 
 const SSO_METHODS = new Set(["sso-oidc", "sso-saml"]);
 
@@ -36,12 +45,20 @@ export const SSO_EMAIL_DOMAIN_MISMATCH = "sso_email_domain_mismatch";
 export interface SsoIdentityProviderRecord {
 	domain?: string | null;
 	domainVerified?: boolean | null;
+	organizationId?: string | null;
 }
 
 export interface SsoIdentityStore {
+	/** The domains the organization currently holds (`verifiedDomains`), or
+	 * `null` when the organization does not exist. */
+	findOrganizationDomains(organizationId: string): Promise<string[] | null>;
 	findProvider(providerId: string): Promise<SsoIdentityProviderRecord | null>;
 	findUserEmail(userId: string): Promise<string | null>;
 }
+
+/** Reads an organization's current verified domain names. */
+export type OrganizationDomainsLookup =
+	SsoIdentityStore["findOrganizationDomains"];
 
 export interface SsoIdentityValidationInput {
 	source: {
@@ -93,6 +110,23 @@ export function emailOnProviderDomain(
 	);
 }
 
+/** True when every provider domain is one the organization currently holds. */
+export function organizationHoldsProviderDomains(
+	organizationDomains: readonly string[],
+	providerDomain: string | null | undefined
+): boolean {
+	const held = new Set(
+		organizationDomains.flatMap((entry) => providerDomainList(entry))
+	);
+	const required = providerDomainList(providerDomain);
+	return required.length > 0 && required.every((entry) => held.has(entry));
+}
+
+const UNVERIFIED: SsoIdentityRejection = {
+	error: SSO_DOMAIN_UNVERIFIED,
+	errorDescription: "This sign-in provider's domain is not verified.",
+};
+
 const MISMATCH: SsoIdentityRejection = {
 	error: SSO_EMAIL_DOMAIN_MISMATCH,
 	errorDescription:
@@ -113,10 +147,21 @@ export async function validateSsoIdentityDomain(
 	const providerId = input.source.sso?.providerId;
 	const provider = providerId ? await store.findProvider(providerId) : null;
 	if (!(provider?.domain && provider.domainVerified === true)) {
-		return {
-			error: SSO_DOMAIN_UNVERIFIED,
-			errorDescription: "This sign-in provider's domain is not verified.",
-		};
+		return UNVERIFIED;
+	}
+	// The domain must still belong to the provider's organization: a transfer
+	// to another org or a revoked TXT proof ends this provider's use of it.
+	const organizationId = provider.organizationId?.trim();
+	const organizationDomains = organizationId
+		? await store.findOrganizationDomains(organizationId)
+		: null;
+	if (
+		!(
+			organizationDomains &&
+			organizationHoldsProviderDomains(organizationDomains, provider.domain)
+		)
+	) {
+		return UNVERIFIED;
 	}
 	const assertedEmail =
 		typeof input.user.email === "string" ? input.user.email : null;
@@ -141,6 +186,9 @@ const providerRecordSchema = z
 	.object({
 		domain: z.string().nullish().catch(null),
 		domainVerified: z.boolean().nullish().catch(null),
+		organizationId: z
+			.unknown()
+			.transform((value) => organizationIdOf(value) || null),
 	})
 	.nullable()
 	.catch(null);
@@ -149,13 +197,55 @@ const userRecordSchema = z
 	.nullable()
 	.catch(null);
 
+const organizationDomainsSchema = z
+	.object({
+		verifiedDomains: z
+			.array(z.object({ domain: z.string() }).nullable().catch(null))
+			.nullish()
+			.catch(() => []),
+	})
+	.nullable()
+	.catch(null);
+
+/**
+ * The organization's current `verifiedDomains` names, read through Mongoose:
+ * the field is control-plane owned and not part of Better Auth's organization
+ * schema, so the auth adapter does not return it. A malformed id or a lookup
+ * error fails closed (`null`).
+ */
+export async function findOrganizationVerifiedDomains(
+	organizationId: string
+): Promise<string[] | null> {
+	try {
+		const org = organizationDomainsSchema.parse(
+			await Organization.findById(organizationId)
+				.select("verifiedDomains")
+				.lean()
+		);
+		if (!org) {
+			return null;
+		}
+		const domains: string[] = [];
+		for (const entry of org.verifiedDomains ?? []) {
+			if (entry) {
+				domains.push(entry.domain);
+			}
+		}
+		return domains;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Better Auth `user.validateUserInfo` that applies `validateSsoIdentityDomain`
  * through the request's adapter (the open transaction's, when there is one).
+ * `findOrganizationDomains` defaults to the Mongoose read; tests inject one.
  */
 export async function validateSsoIdentityUserInfo(
 	data: SsoIdentityValidationInput,
-	ctx: GenericEndpointContext
+	ctx: GenericEndpointContext,
+	findOrganizationDomains: OrganizationDomainsLookup = findOrganizationVerifiedDomains
 ): Promise<SsoIdentityRejection | undefined> {
 	const adapter = await getCurrentAdapter(ctx.context.adapter);
 	return await validateSsoIdentityDomain(data, {
@@ -173,5 +263,6 @@ export async function validateSsoIdentityUserInfo(
 					where: [{ field: "id", value: userId }],
 				})
 			)?.email ?? null,
+		findOrganizationDomains,
 	});
 }

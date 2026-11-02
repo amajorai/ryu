@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { GatewayInlineEvaluatorProofPublisher } from "./harness/gateway-inline-evaluator-editor-proof.tsx";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const JUDGE_RUBRIC = "  Penalise replies that talk down to the user.  ";
 
@@ -20,10 +21,7 @@ function evidencePath(name: string): string {
 	if (override) {
 		return path.join(override, `${name}.png`);
 	}
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 async function readProof(page: import("@playwright/test").Page) {

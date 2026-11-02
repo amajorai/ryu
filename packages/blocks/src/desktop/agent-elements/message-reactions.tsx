@@ -202,7 +202,7 @@ export function MessageReactions({
 			className={cn(
 				"absolute z-10 flex w-fit shrink-0 items-center justify-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-sm ring-3 ring-background has-[button]:p-0",
 				side === "top" ? "top-0 -translate-y-3/4" : "bottom-0 translate-y-3/4",
-				align === "start" ? "left-3" : "right-3",
+				align === "start" ? "start-3" : "end-3",
 				className
 			)}
 			data-align={align}

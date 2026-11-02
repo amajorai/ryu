@@ -1,50 +1,39 @@
+import {
+	activeLocale,
+	formatRelativeTime,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
+import { fullTimestamp } from "./interface-renderer.ts";
 
 // ---------------------------------------------------------------------------
 // Time and identity helpers
 // ---------------------------------------------------------------------------
 
-const AGE_STEPS: [number, string][] = [
-	[60, "minute"],
-	[24, "hour"],
-	[7, "day"],
-	[4.345, "week"],
-	[12, "month"],
-	[Number.POSITIVE_INFINITY, "year"],
-];
-
-/** LinkedIn-style age: "Just now", "1 minute ago", "3 days ago". */
-export function jobAge(iso: string, now: number): string {
+/** "1 minute ago", "3 days ago" in the UI locale; null under a minute. */
+function relativeJobAge(iso: string, now: number): string | null {
 	const then = Date.parse(iso);
 	if (Number.isNaN(then)) {
 		return "";
 	}
-	let value = Math.max(0, (now - then) / 60_000);
-	if (value < 1) {
-		return "Just now";
+	if (now - then < 60_000) {
+		return null;
 	}
-	for (const [size, unit] of AGE_STEPS) {
-		if (value < size) {
-			const whole = Math.floor(value);
-			return `${whole} ${unit}${whole === 1 ? "" : "s"} ago`;
-		}
-		value /= size;
-	}
-	return "";
+	return formatRelativeTime(activeLocale(), then, { now, numeric: "always" });
 }
 
-const FULL_TIME = new Intl.DateTimeFormat("en-US", {
-	dateStyle: "medium",
-	timeStyle: "short",
-});
+/** LinkedIn-style age: "Just now", "1 minute ago", "3 days ago". */
+export function jobAge(iso: string, now: number): string {
+	return relativeJobAge(iso, now) ?? tr("Just now");
+}
+
+/** `jobAge` inside a sentence: "just now", "1 minute ago". */
+export function jobAgePhrase(iso: string, now: number): string {
+	return relativeJobAge(iso, now) ?? tr("just now");
+}
 
 export function jobFullTime(iso: string): string {
-	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : FULL_TIME.format(time);
-}
-
-export function pluralize(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
+	return fullTimestamp(iso);
 }
 
 /** Number of logo tints (see `jobs-parts.tsx`). */

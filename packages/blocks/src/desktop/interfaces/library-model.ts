@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -8,6 +9,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { formatNameList } from "./interface-renderer.ts";
 
 /**
  * The Library's read model. Every agent is a book, every project and team is
@@ -384,7 +386,9 @@ export function chapterCountLabel(count: number): string {
 	if (count === 0) {
 		return "No chapters";
 	}
-	return count === 1 ? "1 chapter" : `${count.toString()} chapters`;
+	return tr("{count, plural, one {# chapter} other {# chapters}}", {
+		count,
+	});
 }
 
 export function progressLabel(book: LibraryBook, tl: LiteralMessage): string {
@@ -420,9 +424,12 @@ export function authorList(authors: InterfaceAgent[]): string {
 	const shown = names.length > 4 ? names.slice(0, 3) : names;
 	const rest = names.length - shown.length;
 	if (rest > 0) {
-		return `${shown.join(", ")} and ${rest.toString()} more`;
+		return tr("{names} and {count} more", {
+			count: rest,
+			names: shown.join(", "),
+		});
 	}
-	return `${shown.slice(0, -1).join(", ")} and ${shown.at(-1) ?? ""}`;
+	return formatNameList(shown);
 }
 
 /** The chapter "Continue" or "Read" opens: the most urgent, else the newest. */
@@ -459,21 +466,26 @@ export function readableAge(iso: string, now: number): string {
 	}
 	const minutes = Math.max(0, Math.floor((now - then) / 60_000));
 	if (minutes < 1) {
-		return "Just now";
+		return tr("Just now");
 	}
 	if (minutes < 60) {
-		return `${minutes.toString()} min ago`;
+		return tr("{minutes} min ago", { minutes });
 	}
 	const hours = Math.floor(minutes / 60);
 	if (hours < 24) {
-		return hours === 1 ? "1 hr ago" : `${hours.toString()} hr ago`;
+		return tr("{hours} hr ago", { hours });
 	}
 	const days = Math.floor(hours / 24);
 	if (days < 7) {
-		return days === 1 ? "Yesterday" : `${days.toString()} days ago`;
+		return days === 1
+			? tr("Yesterday")
+			: tr("{count, plural, one {# day ago} other {# days ago}}", {
+					count: days,
+				});
 	}
-	const weeks = Math.floor(days / 7);
-	return weeks === 1 ? "1 week ago" : `${weeks.toString()} weeks ago`;
+	return tr("{count, plural, one {# week ago} other {# weeks ago}}", {
+		count: Math.floor(days / 7),
+	});
 }
 
 export type { CoverLayout, CoverSpec } from "./library-model-covers.ts";

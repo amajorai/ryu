@@ -11,10 +11,18 @@
 // accent hue is derived from the agent so each card is subtly its own, but the
 // card stays quiet and monochrome everywhere else.
 
-import { createQRCodeGeometry } from "@ryu/ui/lib/qr-code.ts";
+import {
+	drawLandingDither,
+	drawLogo,
+	drawQr,
+	drawTracked,
+	ellipsize,
+	fitFontSize,
+	wrapLines,
+} from "./agent-badge-paint.ts";
 
 export interface AgentBadgeInput {
-	/** Built-in agents get a "CORE STAFF" title instead of "AGENT". */
+	/** Built-in agents get a "Core staff" eyebrow instead of the engine. */
 	builtIn: boolean;
 	/** Short description of what the agent does. */
 	description: string | null;
@@ -30,6 +38,48 @@ export interface AgentBadgeInput {
 	version: string;
 }
 
+/**
+ * The card's printed words, in the UI language. Callers pass `tl()`-resolved
+ * copy; English is the default so tests and pre-provider paints stay stable.
+ * Eyebrows are written in sentence case and upper-cased with `locale`, which
+ * leaves scripts without case (Japanese, Arabic) as written.
+ */
+export interface AgentBadgeLabels {
+	/** Eyebrow when the engine is unknown. */
+	agent: string;
+	/** Eyebrow for built-in agents. */
+	coreStaff: string;
+	/** BCP 47 tag the card is painted in; sets case mapping and direction. */
+	locale: string;
+	/** Headline when the agent has no name yet. */
+	newAgent: string;
+	/** The back's sentence under the workspace name. */
+	onBehalf: string;
+	/** The back's eyebrow over the workspace name. */
+	propertyOf: string;
+	/** Subtitle when the agent has no role. */
+	roleFallback: string;
+	/** Text direction of `locale`. */
+	rtl: boolean;
+	/** The back's eyebrow over the serial number. */
+	serial: string;
+	/** Workspace name when none is known. */
+	workspaceFallback: string;
+}
+
+export const ENGLISH_AGENT_BADGE_LABELS: AgentBadgeLabels = {
+	agent: "Agent",
+	coreStaff: "Core staff",
+	locale: "en",
+	newAgent: "New Agent",
+	onBehalf: "Autonomous agent operating on behalf of the workspace above.",
+	propertyOf: "Property of",
+	roleFallback: "Autonomous Agent",
+	rtl: false,
+	serial: "Serial",
+	workspaceFallback: "Ryu Workspace",
+};
+
 export interface AgentBadgeImages {
 	back: string;
 	front: string;
@@ -39,7 +89,6 @@ export interface AgentBadgeImages {
 const CARD_W = 600;
 const CARD_H = 844;
 const MARGIN = 56;
-const QR_QUIET_ZONE = 12;
 
 // Apple-ish neutral palette.
 const INK = "#1d1d1f";
@@ -48,32 +97,11 @@ const FAINT = "#a1a1a6";
 const CARD_TOP = "#ffffff";
 const CARD_BOTTOM = "#f5f5f7";
 const HAIRLINE = "rgba(0,0,0,0.08)";
-const LANDING_DITHER = {
-	color: "#B497CF",
-	edgeFade: 0.5,
-	enableRipples: true,
-	patternDensity: 1,
-	patternScale: 2,
-	pixelSize: 3,
-	rippleIntensityScale: 1,
-	rippleSpeed: 0.3,
-	rippleThickness: 0.1,
-	speed: 0.5,
-	transparent: true,
-	variant: "square",
-} as const;
-
-// The Ryu mark, straight from /assets/logos/ryu_*.svg (viewBox 0 0 24 24).
-const RYU_PATH =
-	"M12,24c9.2,0,12.9-4.8,12.4-14.6C24.1,0.3,12.8-3.7,8.8,5.4c-2.2,5.7,1.1,7.9-2.9,12.6c-0.9,1.1-1.8,2-2.7,3.1c-1.2,1.3,0.7,2.2,1.9,2.2C7.4,23.3,9.7,24,12,24z";
-
-const ROLE_FALLBACK = "Autonomous Agent";
 
 const RE_ENGINE_SPLIT = /[:/]/;
 const RE_SEPARATORS = /[-_]/g;
 const RE_NON_ALNUM = /[^a-z0-9]+/g;
 const RE_EDGE_DASHES = /^-+|-+$/g;
-const RE_WHITESPACE = /\s+/;
 
 function hashString(value: string): number {
 	let hash = 0;
@@ -88,9 +116,17 @@ function accentHue(seed: string): number {
 	return hashString(seed || "ryu") % 360;
 }
 
-function prettyEngine(engine: string | null): string {
+function eyebrow(text: string, labels: AgentBadgeLabels): string {
+	try {
+		return text.toLocaleUpperCase(labels.locale);
+	} catch {
+		return text.toUpperCase();
+	}
+}
+
+function prettyEngine(engine: string | null, labels: AgentBadgeLabels): string {
 	if (!engine) {
-		return "AGENT";
+		return eyebrow(labels.agent, labels);
 	}
 	const raw = engine.startsWith("acp:") ? engine.slice(4) : engine;
 	const base = raw.split(RE_ENGINE_SPLIT).pop() ?? raw;
@@ -107,241 +143,22 @@ function slug(value: string): string {
 	);
 }
 
-/** Shrink a font until the text fits `maxWidth`, returning the chosen px size. */
-function fitFontSize(
-	ctx: CanvasRenderingContext2D,
-	text: string,
-	font: (px: number) => string,
-	startPx: number,
-	minPx: number,
-	maxWidth: number
-): number {
-	let size = startPx;
-	while (size > minPx) {
-		ctx.font = font(size);
-		if (ctx.measureText(text).width <= maxWidth) {
-			break;
-		}
-		size -= 2;
-	}
-	return size;
-}
-
-/** Word-wrap `text` to at most `maxLines`, ellipsizing the final line if needed. */
-function wrapLines(
-	ctx: CanvasRenderingContext2D,
-	text: string,
-	maxWidth: number,
-	maxLines: number
-): string[] {
-	const words = text.trim().split(RE_WHITESPACE).filter(Boolean);
-	const lines: string[] = [];
-	let current = "";
-	for (const word of words) {
-		const candidate = current ? `${current} ${word}` : word;
-		if (ctx.measureText(candidate).width <= maxWidth || !current) {
-			current = candidate;
-		} else {
-			lines.push(current);
-			current = word;
-			if (lines.length === maxLines) {
-				break;
-			}
-		}
-	}
-	if (lines.length < maxLines && current) {
-		lines.push(current);
-	}
-	// If we ran out of lines with text remaining, ellipsize the last line.
-	const consumed = lines.join(" ").split(RE_WHITESPACE).filter(Boolean).length;
-	const lastIndex = lines.length - 1;
-	if (consumed < words.length && lastIndex >= 0) {
-		let last = lines[lastIndex] ?? "";
-		while (ctx.measureText(`${last}…`).width > maxWidth && last.length > 1) {
-			last = last.slice(0, -1).trimEnd();
-		}
-		lines[lastIndex] = `${last}…`;
-	}
-	return lines;
-}
-
 function fillCard(ctx: CanvasRenderingContext2D, accent: string): void {
 	const bg = ctx.createLinearGradient(0, 0, 0, CARD_H);
 	bg.addColorStop(0, CARD_TOP);
 	bg.addColorStop(1, CARD_BOTTOM);
 	ctx.fillStyle = bg;
 	ctx.fillRect(0, 0, CARD_W, CARD_H);
-	drawLandingDither(ctx);
+	drawLandingDither(ctx, CARD_W, CARD_H);
 	// A single thin accent bar at the very top is the only colour on the card.
 	ctx.fillStyle = accent;
 	ctx.fillRect(0, 0, CARD_W, 5);
 }
 
-function drawLandingDither(ctx: CanvasRenderingContext2D): void {
-	const pixel = LANDING_DITHER.pixelSize;
-	const noiseCell = 8 * pixel;
-	const centerX = CARD_W / 2;
-	const centerY = CARD_H / 2;
-	const maxDistance = Math.hypot(centerX, centerY);
-
-	ctx.save();
-	ctx.fillStyle = LANDING_DITHER.color;
-	for (let y = 0; y < CARD_H; y += pixel) {
-		for (let x = 0; x < CARD_W; x += pixel) {
-			const noiseX = Math.floor((x - centerX) / noiseCell);
-			const noiseY = Math.floor((y - centerY) / noiseCell);
-			const grain = hashFloat(
-				noiseX * 127.1 + noiseY * 311.7 + LANDING_DITHER.patternScale * 57.3
-			);
-			const threshold = bayer8(x / pixel, y / pixel);
-			const feed =
-				grain * 0.74 - 0.22 + (LANDING_DITHER.patternDensity - 0.5) * 0.3;
-			if (feed + threshold - 0.5 < 0.5) {
-				continue;
-			}
-			const distance = Math.hypot(x - centerX, y - centerY) / maxDistance;
-			const fade = Math.max(0, 1 - distance * (1 + LANDING_DITHER.edgeFade));
-			const wave =
-				Math.sin(
-					(x + y) * LANDING_DITHER.rippleThickness +
-						LANDING_DITHER.speed * LANDING_DITHER.rippleSpeed * 10
-				) *
-					0.08 *
-					LANDING_DITHER.rippleIntensityScale +
-				0.12;
-			ctx.globalAlpha = Math.max(0, Math.min(0.2, fade * wave));
-			ctx.fillRect(x, y, pixel, pixel);
-		}
-	}
-	ctx.restore();
-}
-
-function hashFloat(value: number): number {
-	return fract(Math.sin(value) * 43_758.5453);
-}
-
-function fract(value: number): number {
-	return value - Math.floor(value);
-}
-
-function bayer2(x: number, y: number): number {
-	const ax = Math.floor(x);
-	const ay = Math.floor(y);
-	return fract(ax / 2 + ay * ay * 0.75);
-}
-
-function bayer4(x: number, y: number): number {
-	return bayer2(0.5 * x, 0.5 * y) * 0.25 + bayer2(x, y);
-}
-
-function bayer8(x: number, y: number): number {
-	return bayer4(0.5 * x, 0.5 * y) * 0.25 + bayer2(x, y);
-}
-
-/** Draw the Ryu mark, centred at `cx`, `height` tall, in `color`. */
-function drawLogo(
-	ctx: CanvasRenderingContext2D,
-	cx: number,
-	topY: number,
-	height: number,
-	color: string
-): void {
-	const scale = height / 24;
-	const width = 24 * scale;
-	ctx.save();
-	ctx.translate(cx - width / 2, topY);
-	ctx.scale(scale, scale);
-	const outline = new Path2D(RYU_PATH);
-	ctx.strokeStyle = color;
-	ctx.lineWidth = 1.5;
-	ctx.lineCap = "round";
-	ctx.lineJoin = "round";
-	ctx.stroke(outline);
-	ctx.fillStyle = color;
-	for (const eyeX of [15, 19]) {
-		ctx.beginPath();
-		ctx.ellipse(eyeX, 10, 1.5, 3, 0, 0, Math.PI * 2);
-		ctx.fill();
-	}
-	ctx.restore();
-}
-
-/** Rasterize a scannable QR for `text`, top-left at `x,y`, `size` px square. */
-function drawQr(
-	ctx: CanvasRenderingContext2D,
-	text: string,
-	x: number,
-	y: number,
-	size: number,
-	color: string
-): void {
-	const codeSize = size - QR_QUIET_ZONE * 2;
-	const codeX = x + QR_QUIET_ZONE;
-	const codeY = y + QR_QUIET_ZONE;
-	const geometry = createQRCodeGeometry(text, codeSize);
-	if (!geometry) {
-		return;
-	}
-
-	const {
-		circleRadius,
-		circles,
-		finderPositions,
-		finderSize,
-		innerBlackSize,
-		innerPadding,
-		innerWhiteSize,
-		moduleSize,
-	} = geometry;
-
-	ctx.fillStyle = CARD_TOP;
-	ctx.beginPath();
-	ctx.roundRect(x, y, size, size, 12);
-	ctx.fill();
-
-	for (const [row, column] of finderPositions) {
-		const finderX = codeX + column * moduleSize;
-		const finderY = codeY + row * moduleSize;
-
-		ctx.fillStyle = color;
-		ctx.beginPath();
-		ctx.roundRect(finderX, finderY, finderSize, finderSize, 12);
-		ctx.fill();
-
-		ctx.fillStyle = CARD_TOP;
-		ctx.beginPath();
-		ctx.roundRect(
-			finderX + innerPadding,
-			finderY + innerPadding,
-			innerWhiteSize,
-			innerWhiteSize,
-			8
-		);
-		ctx.fill();
-
-		ctx.fillStyle = color;
-		ctx.beginPath();
-		ctx.roundRect(
-			finderX + innerPadding * 2,
-			finderY + innerPadding * 2,
-			innerBlackSize,
-			innerBlackSize,
-			3
-		);
-		ctx.fill();
-	}
-
-	ctx.fillStyle = color;
-	for (const { cx, cy } of circles) {
-		ctx.beginPath();
-		ctx.arc(codeX + cx, codeY + cy, circleRadius, 0, Math.PI * 2);
-		ctx.fill();
-	}
-}
-
 function drawFront(
 	ctx: CanvasRenderingContext2D,
-	input: AgentBadgeInput
+	input: AgentBadgeInput,
+	labels: AgentBadgeLabels
 ): void {
 	const { name, role, engine, description, version, builtIn } = input;
 	const hue = accentHue(engine ?? name);
@@ -360,11 +177,13 @@ function drawFront(
 	ctx.textBaseline = "alphabetic";
 	ctx.fillStyle = accent;
 	ctx.font = "500 15px Inter, system-ui, sans-serif";
-	const title = builtIn ? "CORE STAFF" : prettyEngine(engine);
+	const title = builtIn
+		? eyebrow(labels.coreStaff, labels)
+		: prettyEngine(engine, labels);
 	drawTracked(ctx, title, cx, 262, 3);
 
 	// Agent name.
-	const heading = name.trim() || "New Agent";
+	const heading = name.trim() || labels.newAgent;
 	const nameSize = fitFontSize(
 		ctx,
 		heading,
@@ -378,7 +197,7 @@ function drawFront(
 	ctx.fillText(heading, cx, 322);
 
 	// Role / model subtitle.
-	const subtitle = role?.trim() || ROLE_FALLBACK;
+	const subtitle = role?.trim() || labels.roleFallback;
 	ctx.font = "500 21px Inter, system-ui, sans-serif";
 	ctx.fillStyle = MUTED;
 	ctx.fillText(ellipsize(ctx, subtitle, maxTextWidth), cx, 358);
@@ -415,7 +234,11 @@ function drawFront(
 	drawTracked(ctx, `v${version}`, cx, qrY + qrSize + 34, 1);
 }
 
-function drawBack(ctx: CanvasRenderingContext2D, input: AgentBadgeInput): void {
+function drawBack(
+	ctx: CanvasRenderingContext2D,
+	input: AgentBadgeInput,
+	labels: AgentBadgeLabels
+): void {
 	const { engine, name, node, version } = input;
 	const hue = accentHue(engine ?? name);
 	const accent = `hsl(${hue}, 72%, 52%)`;
@@ -430,9 +253,9 @@ function drawBack(ctx: CanvasRenderingContext2D, input: AgentBadgeInput): void {
 
 	ctx.fillStyle = FAINT;
 	ctx.font = "500 14px Inter, system-ui, sans-serif";
-	drawTracked(ctx, "PROPERTY OF", cx, 356, 3);
+	drawTracked(ctx, eyebrow(labels.propertyOf, labels), cx, 356, 3);
 
-	const workspace = node?.trim() || "Ryu Workspace";
+	const workspace = node?.trim() || labels.workspaceFallback;
 	const wsSize = fitFontSize(
 		ctx,
 		workspace,
@@ -447,8 +270,11 @@ function drawBack(ctx: CanvasRenderingContext2D, input: AgentBadgeInput): void {
 
 	ctx.fillStyle = MUTED;
 	ctx.font = "400 18px Inter, system-ui, sans-serif";
-	ctx.fillText("Autonomous agent operating on behalf", cx, 452);
-	ctx.fillText("of the workspace above.", cx, 478);
+	let line = 452;
+	for (const text of wrapLines(ctx, labels.onBehalf, CARD_W - MARGIN * 2, 2)) {
+		ctx.fillText(text, cx, line);
+		line += 26;
+	}
 
 	// Hairline + serial.
 	ctx.strokeStyle = HAIRLINE;
@@ -464,46 +290,10 @@ function drawBack(ctx: CanvasRenderingContext2D, input: AgentBadgeInput): void {
 		.padStart(8, "0");
 	ctx.fillStyle = FAINT;
 	ctx.font = "500 13px Inter, system-ui, sans-serif";
-	drawTracked(ctx, "SERIAL", cx, 606, 3);
+	drawTracked(ctx, eyebrow(labels.serial, labels), cx, 606, 3);
 	ctx.fillStyle = MUTED;
 	ctx.font = "500 20px Inter, system-ui, sans-serif";
 	ctx.fillText(`RYU-${serial}`, cx, 640);
-}
-
-/** Draw `text` with manual letter-spacing (canvas has no letterSpacing here). */
-function drawTracked(
-	ctx: CanvasRenderingContext2D,
-	text: string,
-	cx: number,
-	y: number,
-	tracking: number
-): void {
-	const widths = [...text].map((ch) => ctx.measureText(ch).width + tracking);
-	const total = widths.reduce((a, b) => a + b, 0) - tracking;
-	const prevAlign = ctx.textAlign;
-	ctx.textAlign = "left";
-	let x = cx - total / 2;
-	for (let i = 0; i < text.length; i++) {
-		ctx.fillText(text[i] ?? "", x, y);
-		x += widths[i] ?? 0;
-	}
-	ctx.textAlign = prevAlign;
-}
-
-/** Trim `text` with an ellipsis so it fits `maxWidth` at the current font. */
-function ellipsize(
-	ctx: CanvasRenderingContext2D,
-	text: string,
-	maxWidth: number
-): string {
-	if (ctx.measureText(text).width <= maxWidth) {
-		return text;
-	}
-	let out = text;
-	while (out.length > 1 && ctx.measureText(`${out}…`).width > maxWidth) {
-		out = out.slice(0, -1);
-	}
-	return `${out.trimEnd()}…`;
 }
 
 function newCanvas(): {
@@ -522,15 +312,19 @@ function newCanvas(): {
 
 /** Build the front + back badge images for an agent as PNG data URLs. */
 export function generateAgentBadge(
-	input: AgentBadgeInput
+	input: AgentBadgeInput,
+	labels: AgentBadgeLabels = ENGLISH_AGENT_BADGE_LABELS
 ): AgentBadgeImages | null {
 	const front = newCanvas();
 	const back = newCanvas();
 	if (!(front && back)) {
 		return null;
 	}
-	drawFront(front.ctx, input);
-	drawBack(back.ctx, input);
+	for (const { ctx } of [front, back]) {
+		ctx.direction = labels.rtl ? "rtl" : "ltr";
+	}
+	drawFront(front.ctx, input, labels);
+	drawBack(back.ctx, input, labels);
 	return {
 		front: front.canvas.toDataURL("image/png"),
 		back: back.canvas.toDataURL("image/png"),

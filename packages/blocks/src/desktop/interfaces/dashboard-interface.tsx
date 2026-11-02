@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -38,8 +39,8 @@ import {
 	moveWidget,
 	removeWidget,
 	sameLayout,
-	WIDGET_SIZE_NAMES,
 	type WidgetId,
+	widgetSizeName,
 	widgetSpec,
 } from "./dashboard-model.ts";
 import { DashboardScrim, DashboardThreadPanel } from "./dashboard-panel.tsx";
@@ -182,7 +183,7 @@ export function DashboardInterface({
 			if (next) {
 				setAnnouncement(
 					tl("{title} is now {size}.", {
-						size: WIDGET_SIZE_NAMES[next.size],
+						size: widgetSizeName(next.size),
 						title: widgetSpec(item.id).title,
 					})
 				);
@@ -193,7 +194,9 @@ export function DashboardInterface({
 	const remove = useCallback(
 		(item: LayoutItem, index: number) => {
 			update((current) => removeWidget(current, item.id));
-			setAnnouncement(`${widgetSpec(item.id).title} removed.`);
+			setAnnouncement(
+				tr("{title} removed.", { title: tr(widgetSpec(item.id).title) })
+			);
 			focusHandle(index);
 		},
 		[focusHandle, update]
@@ -201,7 +204,9 @@ export function DashboardInterface({
 	const add = useCallback(
 		(id: WidgetId) => {
 			update((current) => addWidget(current, id));
-			setAnnouncement(`${widgetSpec(id).title} added.`);
+			setAnnouncement(
+				tr("{title} added.", { title: tr(widgetSpec(id).title) })
+			);
 		},
 		[update]
 	);

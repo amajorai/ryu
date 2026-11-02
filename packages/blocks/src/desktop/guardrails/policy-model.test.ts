@@ -172,8 +172,15 @@ describe("labels", () => {
 		expect(formatPreviewValue([])).toBe("No restriction");
 		expect(formatPreviewValue(["<deny-all>"])).toBe("Nothing allowed");
 		expect(formatPreviewValue({ usdMicro: 30_000_000, window: "daily" })).toBe(
-			"$30 daily"
+			"$30 per day"
 		);
+		expect(
+			formatPreviewValue({ usdMicro: 12_500_000, window: "monthly" })
+		).toBe("$12.50 per month");
+		expect(formatPreviewValue({ usdMicro: 5_000_000 })).toBe("$5");
+		expect(
+			formatPreviewValue({ enabled: false, id: "pii", inlineAction: "block" })
+		).toBe("pii: Block (off)");
 		expect(
 			formatPreviewValue({ enabled: true, id: "pii", inlineAction: "block" })
 		).toBe("pii: Block");

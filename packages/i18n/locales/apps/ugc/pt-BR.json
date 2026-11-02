@@ -1,0 +1,11 @@
+{
+  "New submission to review": "Novo envio para revisar",
+  "Ryu's managed Composio provider is not configured for this node — record metrics manually": "O provedor Composio gerenciado pelo Ryu não está configurado para este nó — registre as métricas manualmente",
+  "Submitted by {creator} on {platform}": "Enviado por {creator} em {platform}",
+  "approve this payout before marking it paid": "aprove este pagamento antes de marcá-lo como pago",
+  "curated action '{slug}' is not a safe action slug": "a ação selecionada '{slug}' não é um slug de ação seguro",
+  "no Composio metric source is curated for platform '{platform}' — record metrics manually": "nenhuma fonte de métricas do Composio foi selecionada para a plataforma '{platform}' — registre as métricas manualmente",
+  "this payout has already been paid": "este pagamento já foi efetuado",
+  "this post has already been submitted to this campaign": "esta postagem já foi enviada para esta campanha",
+  "this submission's payout is already paid; deleting it would corrupt the campaign's spend": "o pagamento deste envio já foi efetuado; excluí-lo corromperia os gastos da campanha"
+}

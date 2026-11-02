@@ -195,8 +195,8 @@ function fireRunNotification(
 	const branch = run.branch ?? "";
 	const body = [
 		run.title,
-		folder && `folder: ${folder}`,
-		branch && `branch: ${branch}`,
+		folder && tl("folder: {folder}", { folder }),
+		branch && tl("branch: {branch}", { branch }),
 	]
 		.filter(Boolean)
 		.join(" · ");

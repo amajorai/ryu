@@ -63,14 +63,14 @@ export function AgentPreviewCard({
 	let badge: ReactNode = null;
 	if (builtIn) {
 		badge = (
-			<Badge className="ml-auto shrink-0" variant="secondary">
+			<Badge className="ms-auto shrink-0" variant="secondary">
 				<HugeiconsIcon className="size-3" icon={LockedIcon} />
 				Built-in
 			</Badge>
 		);
 	} else if (locked) {
 		badge = (
-			<Badge className="ml-auto shrink-0" variant="secondary">
+			<Badge className="ms-auto shrink-0" variant="secondary">
 				<HugeiconsIcon className="size-3" icon={LockedIcon} />
 				Locked
 			</Badge>

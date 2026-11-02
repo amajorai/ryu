@@ -1,0 +1,11 @@
+{
+  "New submission to review": "レビュー待ちの新しい提出物",
+  "Ryu's managed Composio provider is not configured for this node — record metrics manually": "Ryu のマネージド Composio プロバイダーがこのノードに設定されていません — メトリクスを手動で記録してください",
+  "Submitted by {creator} on {platform}": "{creator} が {platform} で投稿",
+  "approve this payout before marking it paid": "支払い済みにする前にこの支払いを承認してください",
+  "curated action '{slug}' is not a safe action slug": "選定済みアクション '{slug}' は安全なアクションスラッグではありません",
+  "no Composio metric source is curated for platform '{platform}' — record metrics manually": "プラットフォーム '{platform}' 用に選定された Composio の指標ソースがありません — 指標を手動で記録してください",
+  "this payout has already been paid": "この支払いはすでに完了しています",
+  "this post has already been submitted to this campaign": "この投稿はすでにこのキャンペーンに提出されています",
+  "this submission's payout is already paid; deleting it would corrupt the campaign's spend": "この提出の支払いはすでに完了しています。削除するとキャンペーンの支出が不整合になります"
+}

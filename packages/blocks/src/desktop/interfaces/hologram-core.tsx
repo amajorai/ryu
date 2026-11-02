@@ -1,14 +1,13 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { type CSSProperties, useId } from "react";
 import type { HoloPulse, HoloTotals } from "./hologram-model.ts";
 import { polar } from "./hologram-model.ts";
 import { CORE_FILL_STOPS } from "./hologram-palette.ts";
 import { HUD_LABEL } from "./hologram-parts.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 const TICKS = 72;
 
@@ -98,7 +97,12 @@ export function HoloCore({
 	const working = totals.workingAgents;
 	const shares = distribution
 		.filter((entry) => entry.count > 0)
-		.map((entry) => `${THREAD_STATUS_LABELS[entry.status]} ${entry.count}`)
+		.map((entry) =>
+			tl("{status} {count}", {
+				count: entry.count,
+				status: threadStatusLabel(entry.status, tl),
+			})
+		)
 		.join(", ");
 	const summary = dimmed
 		? "Syncing with your agents"
@@ -172,7 +176,12 @@ export function HoloCore({
 							fill="none"
 							strokeWidth={12}
 						>
-							<title>{`${THREAD_STATUS_LABELS[arc.status]} · ${arc.count}`}</title>
+							<title>
+								{tl("{status} · {count}", {
+									count: arc.count,
+									status: threadStatusLabel(arc.status, tl),
+								})}
+							</title>
 						</path>
 					</g>
 				))}
@@ -220,14 +229,20 @@ export function HoloCore({
 							"@max-[420px]/holo:hidden text-(--holo-ink) tracking-[0.04em]"
 						)}
 					>
-						{working === 1 ? "Agent working" : "Agents working"}
+						{tr("{count, plural, one {Agent working} other {Agents working}}", {
+							count: working,
+						})}
 					</span>
 				) : null}
 				<span
 					aria-hidden="true"
 					className={`${HUD_LABEL} text-(--holo-dim) tabular-nums`}
 				>
-					{dimmed ? "Syncing" : `Of ${String(totals.agents).padStart(2, "0")}`}
+					{dimmed
+						? tl("Syncing")
+						: tl("Of {count}", {
+								count: String(totals.agents).padStart(2, "0"),
+							})}
 				</span>
 			</div>
 		</div>

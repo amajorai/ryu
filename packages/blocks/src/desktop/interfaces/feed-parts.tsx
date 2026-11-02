@@ -1,4 +1,10 @@
 import {
+	activeLocale,
+	dateFormatter,
+	isEnglishLocale,
+	numberFormatter,
+} from "@ryu/i18n/lite";
+import {
 	Avatar,
 	AvatarFallback,
 	AvatarImage,
@@ -211,7 +217,7 @@ export function FeedAvatar({
 			{working ? (
 				<span
 					className={cn(
-						"absolute right-0 bottom-0 size-3 rounded-full bg-success ring-2",
+						"absolute end-0 bottom-0 size-3 rounded-full bg-success ring-2",
 						DOT_RING[surface]
 					)}
 				/>
@@ -230,7 +236,10 @@ export function AuthorName({
 }) {
 	return (
 		<span className={cn("flex min-w-0 items-center gap-1", className)}>
-			<span className="truncate font-semibold text-foreground">
+			<span
+				className="truncate font-semibold text-foreground"
+				data-ryu-i18n="off"
+			>
 				{author.name}
 			</span>
 		</span>
@@ -259,27 +268,35 @@ export function LiveDot({
 	);
 }
 
-const TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
-	hour: "numeric",
-	minute: "2-digit",
-});
-const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	month: "short",
-	year: "numeric",
-});
-
-/** Full post timestamp: "10:42 AM · Oct 12, 2026". */
-export function fullTimestamp(iso: string): string {
+/** Full post timestamp in the UI locale: "10:42 AM · Oct 12, 2026" in English. */
+export function fullTimestamp(
+	iso: string,
+	locale: string = activeLocale()
+): string {
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) {
 		return "";
 	}
-	return `${TIME_FORMAT.format(date)} · ${DATE_FORMAT.format(date)}`;
+	const time = dateFormatter(locale, { hour: "numeric", minute: "2-digit" });
+	const day = dateFormatter(locale, {
+		day: "numeric",
+		month: "short",
+		year: "numeric",
+	});
+	return `${time.format(date)} · ${day.format(date)}`;
 }
 
-/** Compact counts the way a timeline shows them: 950, 1.2K, 3.4M. */
-export function compactCount(value: number): string {
+/** Compact counts the way a timeline shows them: 950, 1.2K, 3.4M (locale-aware elsewhere). */
+export function compactCount(
+	value: number,
+	locale: string = activeLocale()
+): string {
+	if (!isEnglishLocale(locale)) {
+		return numberFormatter(locale, {
+			maximumFractionDigits: 1,
+			notation: "compact",
+		}).format(value);
+	}
 	if (value < 1000) {
 		return String(value);
 	}

@@ -1,9 +1,9 @@
-import { QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { createRoot } from "react-dom/client";
 import { queryClient } from "../../src/lib/query-client.ts";
 import HostedStandaloneAppEntry from "../../src/pages/HostedStandaloneAppEntry.tsx";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
+import { ShellProofProviders } from "./shell-proof-providers.tsx";
 import "@fontsource-variable/geist";
 import "../../src/index.css";
 useNodeStore.setState({
@@ -21,10 +21,12 @@ const root = document.getElementById("root");
 if (!root) {
 	throw new Error("Missing root");
 }
+// SignedInShell mounts the hosted standalone entry under AuthProvider and
+// EntitlementProvider; its TabsProvider reads the entitlement context.
 createRoot(root).render(
-	<QueryClientProvider client={queryClient}>
-		<ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+	<ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+		<ShellProofProviders auth entitlement queryClient={queryClient}>
 			<HostedStandaloneAppEntry appId="@ryu/records" />
-		</ThemeProvider>
-	</QueryClientProvider>
+		</ShellProofProviders>
+	</ThemeProvider>
 );

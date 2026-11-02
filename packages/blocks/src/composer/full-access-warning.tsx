@@ -230,7 +230,7 @@ export function FullAccessWarningDialog({
 						<span>Turn on Full Access?</span>
 					</AlertDialogTitle>
 					<AlertDialogDescription
-						className="text-left"
+						className="text-start"
 						render={<p className={styles.description} />}
 					>
 						{tl(
@@ -259,7 +259,7 @@ export function FullAccessWarningDialog({
 				</div>
 
 				<AlertDialogDescription
-					className="text-left"
+					className="text-start"
 					render={<p className={styles.description} />}
 				>
 					This comes with risks like loss or exposure of sensitive data and

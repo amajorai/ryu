@@ -172,8 +172,10 @@ export function DeepLinkConfirmDialog() {
 				const res = await setActiveModel(target, intent.id).catch(() => null);
 				sileo.success({
 					title: res
-						? `Installed — ${switchTitle(card.name, res, tl).toLowerCase()}`
-						: `Installed ${card.name}`,
+						? tl("Installed — {status}", {
+								status: switchTitle(card.name, res, tl).toLowerCase(),
+							})
+						: tl("Installed {name}", { name: card.name }),
 				});
 			}
 			Promise.resolve(qc.invalidateQueries({ queryKey: ["models"] })).catch(
@@ -204,7 +206,7 @@ export function DeepLinkConfirmDialog() {
 			if (installed === null) {
 				return;
 			}
-			sileo.success({ title: `Installed ${card.name}` });
+			sileo.success({ title: tl("Installed {name}", { name: card.name }) });
 			Promise.resolve(qc.invalidateQueries({ queryKey: ["skills"] })).catch(
 				() => undefined
 			);
@@ -226,7 +228,7 @@ export function DeepLinkConfirmDialog() {
 		setBusy(true);
 		try {
 			await installApp(target, intent.id);
-			sileo.success({ title: `Installed ${name}` });
+			sileo.success({ title: tl("Installed {name}", { name }) });
 			Promise.resolve(qc.invalidateQueries({ queryKey: ["apps"] })).catch(
 				() => undefined
 			);

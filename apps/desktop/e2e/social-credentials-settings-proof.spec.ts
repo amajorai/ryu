@@ -2,10 +2,10 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { SettingsResponse } from "../../../apps-store/social/ui/src/types.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidenceDirectory = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const evidenceDirectory = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 const envOnlyThreadsToken = "fixture-env-only-token-never-valid";
 const firstDummyPassword = "dummy-only-bsky-app-password-001";

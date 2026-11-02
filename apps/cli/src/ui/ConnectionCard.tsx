@@ -17,14 +17,15 @@ import { useCore } from "../core/CoreContext.tsx";
 import { useCoreHealth } from "../core/CoreHealthContext.tsx";
 import { displayHostPort } from "../core/native-errors.ts";
 import { useCliProductMode } from "../core/ProductModeContext.tsx";
+import { tf } from "../i18n/translate.ts";
 
 /** Headline for an unreachable node: local nodes "aren't running", remote ones
  * "aren't reachable". */
 export function connectionHeadline(url: string): string {
 	const where = displayHostPort(url);
 	return isLocal(url)
-		? `Core isn't running at ${where}`
-		: `Core isn't reachable at ${where}`;
+		? tf("Core isn't running at {where}", { where })
+		: tf("Core isn't reachable at {where}", { where });
 }
 
 /** "retrying in Ns…" for a scheduled retry, or "retrying…" when it is due. */

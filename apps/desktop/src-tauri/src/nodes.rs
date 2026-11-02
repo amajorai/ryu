@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+mod discovery;
+mod error;
+
+use discovery::local_ipv4;
+pub use discovery::DiscoveredNode;
+use error::{is_valid_node_name, NodeCommandError, NodeCommandErrorCode};
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Node {
     pub name: String,
@@ -36,24 +43,6 @@ pub struct LocalNodeToken {
     pub source: String,
     pub token: Option<String>,
 }
-
-/// A reachable Core found by the LAN sweep ([`discover_lan_nodes`]).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct DiscoveredNode {
-    pub url: String,
-    pub latency_ms: u64,
-    /// Which profile's Core answered — derived from the PORT it was found on, not
-    /// from anything the node reports. A stable desktop discovering a canary node
-    /// needs to say so, or two entries differing only by port read as duplicates.
-    pub profile: String,
-}
-
-// Port Core listens on (the LAN sweep target). Profile-aware so a dev variant
-// sweeps for dev nodes on :8980; release stays :7980 via `crate::profile`.
-// Bounded sweep: probe at most this many host octets per run to cap latency.
-const MAX_SWEEP_HOSTS: u8 = 254;
-// Per-host connection/response timeout in milliseconds.
-const PROBE_TIMEOUT_MS: u64 = 800;
 
 /// `<data dir>/state/nodes.json` — shared with Core and the CLI.
 fn nodes_path() -> PathBuf {
@@ -314,67 +303,71 @@ pub fn local_node_token() -> LocalNodeToken {
 }
 
 #[tauri::command]
-pub fn add_node(name: String, url: String, token: Option<String>) -> Result<(), String> {
-    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '-') {
-        return Err("node name must be alphanumeric + hyphens only".into());
+pub fn add_node(name: String, url: String, token: Option<String>) -> Result<(), NodeCommandError> {
+    if !is_valid_node_name(&name) {
+        return Err(NodeCommandError::new(
+            NodeCommandErrorCode::InvalidName,
+            name,
+        ));
     }
     let mut config = load();
     if config.nodes.iter().any(|n| n.name == name) {
-        return Err(format!("node '{}' already exists", name));
+        return Err(NodeCommandError::new(
+            NodeCommandErrorCode::DuplicateName,
+            name,
+        ));
     }
     config.nodes.push(Node {
-        name,
+        name: name.clone(),
         url,
         token,
         unopened_token: None,
     });
-    save(&config).map_err(|e| e.to_string())
+    save(&config).map_err(|e| NodeCommandError::save_failed(name, e))
 }
 
 /// Replace the bearer for an existing remote node without changing its name or
 /// URL. Re-entering onboarding with a refreshed token must not keep sending the
 /// stale credential that was captured when the node was first added.
 #[tauri::command]
-pub fn update_node_token(name: String, token: Option<String>) -> Result<(), String> {
+pub fn update_node_token(name: String, token: Option<String>) -> Result<(), NodeCommandError> {
     let mut config = load();
-    let node = config
-        .nodes
-        .iter_mut()
-        .find(|node| node.name == name)
-        .ok_or_else(|| format!("node '{}' not found", name))?;
+    let Some(node) = config.nodes.iter_mut().find(|node| node.name == name) else {
+        return Err(NodeCommandError::new(NodeCommandErrorCode::NotFound, name));
+    };
     node.token = token.and_then(|value| {
         let trimmed = value.trim().to_owned();
         (!trimmed.is_empty()).then_some(trimmed)
     });
     node.unopened_token = None;
-    save(&config).map_err(|e| e.to_string())
+    save(&config).map_err(|e| NodeCommandError::save_failed(name, e))
 }
 
 #[tauri::command]
-pub fn remove_node(name: String) -> Result<(), String> {
+pub fn remove_node(name: String) -> Result<(), NodeCommandError> {
     if name == "local" {
-        return Err("cannot remove the local node".into());
+        return Err(NodeCommandError::new(NodeCommandErrorCode::LocalNode, name));
     }
     let mut config = load();
     let before = config.nodes.len();
     config.nodes.retain(|n| n.name != name);
     if config.nodes.len() == before {
-        return Err(format!("node '{}' not found", name));
+        return Err(NodeCommandError::new(NodeCommandErrorCode::NotFound, name));
     }
     if config.default == name {
         config.default = "local".into();
     }
-    save(&config).map_err(|e| e.to_string())
+    save(&config).map_err(|e| NodeCommandError::save_failed(name, e))
 }
 
 #[tauri::command]
-pub fn set_default_node(name: String) -> Result<(), String> {
+pub fn set_default_node(name: String) -> Result<(), NodeCommandError> {
     let mut config = load();
     if !config.nodes.iter().any(|n| n.name == name) {
-        return Err(format!("node '{}' not found", name));
+        return Err(NodeCommandError::new(NodeCommandErrorCode::NotFound, name));
     }
-    config.default = name;
-    save(&config).map_err(|e| e.to_string())
+    config.default = name.clone();
+    save(&config).map_err(|e| NodeCommandError::save_failed(name, e))
 }
 
 #[tauri::command]
@@ -452,28 +445,6 @@ pub async fn test_all_nodes(
     Ok(futures::future::join_all(futs).await)
 }
 
-/// Parse the local subnet prefix from a dotted-quad address string.
-/// e.g. "192.168.1.42" -> "192.168.1"
-fn subnet_prefix(addr: &str) -> Option<String> {
-    let parts: Vec<&str> = addr.split('.').collect();
-    if parts.len() == 4 {
-        Some(format!("{}.{}.{}", parts[0], parts[1], parts[2]))
-    } else {
-        None
-    }
-}
-
-/// Resolve the default outbound IPv4 address by connecting a UDP socket to a
-/// well-known external address (8.8.8.8:80). No packets are sent — the connect
-/// only picks the route's source address.
-fn local_ipv4() -> Option<String> {
-    use std::net::UdpSocket;
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:80").ok()?;
-    let addr = socket.local_addr().ok()?;
-    Some(addr.ip().to_string())
-}
-
 /// Return this device's primary outbound LAN IPv4 as a dotted-quad string
 /// (e.g. "192.168.1.50"). Used to prefill the "Connect a phone" QR with an
 /// address other devices on the same Wi-Fi can actually reach, instead of a
@@ -484,17 +455,6 @@ pub fn get_lan_ip() -> Result<String, String> {
     local_ipv4().ok_or_else(|| "could not determine this device's Wi-Fi address".to_string())
 }
 
-/// Probe a single `host:port` for a live Core `/api/health` endpoint.
-/// Returns `Some(latency_ms)` when the response is 2xx, `None` otherwise.
-async fn probe(client: &reqwest::Client, host: &str, port: u16) -> Option<u64> {
-    let url = format!("http://{host}:{port}/api/health");
-    let start = std::time::Instant::now();
-    match client.get(&url).send().await {
-        Ok(r) if r.status().is_success() => Some(start.elapsed().as_millis() as u64),
-        _ => None,
-    }
-}
-
 /// Sweep the local /24 subnet for Core nodes advertising on :7980.
 ///
 /// Probes up to `MAX_SWEEP_HOSTS` host octets (1-254) concurrently, each with a
@@ -503,271 +463,8 @@ async fn probe(client: &reqwest::Client, host: &str, port: u16) -> Option<u64> {
 /// (`apps/cli/src/nodes.rs`). NodeSelector-only.
 #[tauri::command]
 pub async fn discover_lan_nodes() -> Result<Vec<DiscoveredNode>, String> {
-    // Resolve our own address once (opens a single UDP socket), then derive the
-    // /24 prefix from it — avoids binding twice.
-    let own_ip = local_ipv4().unwrap_or_default();
-    let prefix = match subnet_prefix(&own_ip) {
-        Some(p) => p,
-        None => return Ok(vec![]),
-    };
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(PROBE_TIMEOUT_MS))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    // EVERY profile's port, not just our own. Sweeping a single port meant a
-    // stable desktop (:7980) could never see a canary node (:9980) — not even on
-    // this machine — so "use a stable app against a canary node" was impossible to
-    // set up without hand-entering the URL.
-    let mut tasks = tokio::task::JoinSet::new();
-    for (profile, offset) in crate::profile::PROFILE_PORT_OFFSETS {
-        let port = crate::profile::CORE_BASE_PORT.saturating_add(*offset);
-        // Localhost first and always: the common case is a second profile running
-        // on THIS machine, which the /24 sweep skips (it excludes our own IP).
-        let c = client.clone();
-        let p = (*profile).to_string();
-        tasks.spawn(async move {
-            let latency = probe(&c, "127.0.0.1", port).await;
-            ("127.0.0.1".to_string(), port, p, latency)
-        });
-        for host_octet in 1u8..=MAX_SWEEP_HOSTS {
-            let host = format!("{prefix}.{host_octet}");
-            if host == own_ip {
-                continue;
-            }
-            let c = client.clone();
-            let p = (*profile).to_string();
-            tasks.spawn(async move {
-                let latency = probe(&c, &host, port).await;
-                (host, port, p, latency)
-            });
-        }
-    }
-
-    let mut found: Vec<DiscoveredNode> = Vec::new();
-    while let Some(Ok((host, port, profile, Some(latency_ms)))) = tasks.join_next().await {
-        found.push(DiscoveredNode {
-            url: format!("http://{host}:{port}"),
-            latency_ms,
-            profile,
-        });
-    }
-
-    // Deduplicate: 127.0.0.1 and this machine's LAN address can both answer for the
-    // same Core, and listing one node twice reads as two nodes.
-    found.sort_by(|a, b| a.url.cmp(&b.url));
-    found.dedup_by(|a, b| a.url == b.url);
-    found.sort_by_key(|n| n.latency_ms);
-    Ok(found)
+    discovery::sweep().await
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Discovery must cover EVERY profile's port. Sweeping only our own meant a
-    /// stable desktop (:7980) could not see a canary node (:9980) even on this
-    /// machine, so "stable app against a canary node" could not be set up without
-    /// hand-entering a URL.
-    #[test]
-    fn every_profile_port_is_swept() {
-        let ports: Vec<u16> = crate::profile::PROFILE_PORT_OFFSETS
-            .iter()
-            .map(|(_, off)| crate::profile::CORE_BASE_PORT.saturating_add(*off))
-            .collect();
-        assert!(ports.contains(&7980), "release");
-        assert!(ports.contains(&8980), "dev");
-        assert!(ports.contains(&9980), "canary");
-        assert!(ports.contains(&10_980), "nightly");
-        assert!(ports.contains(&11_980), "beta");
-        // Distinct, or two profiles would be reported as one node.
-        let mut sorted = ports.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), ports.len());
-    }
-
-    /// The profile is derived from the PORT, never from anything the node claims,
-    /// so a discovered entry can always be labelled.
-    #[test]
-    fn a_port_maps_back_to_exactly_one_profile() {
-        for (profile, offset) in crate::profile::PROFILE_PORT_OFFSETS {
-            let port = crate::profile::CORE_BASE_PORT.saturating_add(*offset);
-            let matches: Vec<&str> = crate::profile::PROFILE_PORT_OFFSETS
-                .iter()
-                .filter(|(_, o)| crate::profile::CORE_BASE_PORT.saturating_add(*o) == port)
-                .map(|(n, _)| *n)
-                .collect();
-            assert_eq!(matches, vec![*profile], "port {port} must name one profile");
-        }
-    }
-
-    #[test]
-    fn subnet_prefix_extracts_24() {
-        assert_eq!(subnet_prefix("192.168.1.42"), Some("192.168.1".to_owned()));
-        assert_eq!(subnet_prefix("10.0.0.5"), Some("10.0.0".to_owned()));
-    }
-
-    #[test]
-    fn subnet_prefix_rejects_malformed() {
-        assert_eq!(subnet_prefix("192.168.1"), None);
-        assert_eq!(subnet_prefix("not-an-ip"), None);
-        assert_eq!(subnet_prefix("1.2.3.4.5"), None);
-    }
-
-    // ── local node auth token ────────────────────────────────────────────────
-
-    #[test]
-    fn local_node_urls_match_regardless_of_trailing_slash_or_case() {
-        let base = crate::profile::core_base_url();
-        assert!(is_local_node_url(&base));
-        assert!(is_local_node_url(&format!("{base}/")));
-        assert!(is_local_node_url(&base.to_uppercase()));
-        // A different host is NOT this machine's Core, so its token file must
-        // never be attached to it.
-        assert!(!is_local_node_url("http://192.168.1.50:7980"));
-        assert!(!is_local_node_url("https://node.example.com"));
-    }
-
-    #[test]
-    fn fill_local_token_never_overrides_an_explicit_token() {
-        // An operator who pinned a token by hand (or a peer's own token) must win
-        // over the on-disk mint, or a hand-configured node silently breaks.
-        let mut config = NodesConfig {
-            default: "local".into(),
-            nodes: vec![
-                Node {
-                    name: "local".into(),
-                    url: crate::profile::core_base_url(),
-                    token: Some("pinned-by-hand".into()),
-                    unopened_token: None,
-                },
-                Node {
-                    name: "remote".into(),
-                    url: "http://192.168.1.50:7980".into(),
-                    token: None,
-                    unopened_token: None,
-                },
-            ],
-        };
-        fill_local_token(&mut config);
-        assert_eq!(config.nodes[0].token.as_deref(), Some("pinned-by-hand"));
-        // A REMOTE node never receives this machine's token: it would be a secret
-        // sent to a third party, and that peer would reject it anyway.
-        assert_eq!(config.nodes[1].token, None);
-    }
-
-    // ── sealed node tokens ───────────────────────────────────────────────────
-
-    const REMOTE_TOKEN: &str = "remote-node-bearer-0123456789";
-
-    fn remote(token: Option<&str>) -> Node {
-        Node {
-            name: "remote".into(),
-            url: "https://node.example".into(),
-            token: token.map(str::to_owned),
-            unopened_token: None,
-        }
-    }
-
-    fn config_with(nodes: Vec<Node>) -> NodesConfig {
-        NodesConfig {
-            default: "remote".into(),
-            nodes,
-        }
-    }
-
-    #[test]
-    fn saved_tokens_stay_readable_by_the_cli_with_owner_only_permissions() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path().join("state");
-        let path = state.join("nodes.json");
-        save_at(&path, &config_with(vec![remote(Some(REMOTE_TOKEN))]), None).unwrap();
-        let raw: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        // The Bun CLI reads this field directly, so it must not be an envelope.
-        assert_eq!(raw["nodes"][0]["token"], REMOTE_TOKEN);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            let mode =
-                |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode(&path), 0o600);
-            assert_eq!(mode(&state), 0o700);
-        }
-        let loaded = load_at(&path, None);
-        assert_eq!(loaded.nodes[0].token.as_deref(), Some(REMOTE_TOKEN));
-    }
-
-    #[test]
-    fn a_plaintext_token_is_never_rewritten_sealed() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nodes.json");
-        let pinned = format!(
-            r#"{{"default":"remote","nodes":[{{"name":"remote","url":"https://node.example","token":"{REMOTE_TOKEN}"}}]}}"#
-        );
-        std::fs::write(&path, &pinned).unwrap();
-        let loaded = load_at(&path, None);
-        assert_eq!(loaded.nodes[0].token.as_deref(), Some(REMOTE_TOKEN));
-        // Untouched: no rewrite, and above all no envelope the CLI cannot open.
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), pinned);
-    }
-
-    #[test]
-    fn a_token_sealed_by_an_earlier_build_is_opened_and_written_back_readable() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nodes.json");
-        let sealed = crate::desktop_seal::seal(REMOTE_TOKEN).unwrap();
-        std::fs::write(
-            &path,
-            format!(
-                r#"{{"default":"remote","nodes":[{{"name":"remote","url":"https://node.example","token":"{sealed}"}}]}}"#
-            ),
-        )
-        .unwrap();
-        let loaded = load_at(&path, None);
-        assert_eq!(loaded.nodes[0].token.as_deref(), Some(REMOTE_TOKEN));
-        let raw: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(raw["nodes"][0]["token"], REMOTE_TOKEN);
-    }
-
-    #[test]
-    fn an_unopenable_token_is_never_used_and_survives_a_save() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nodes.json");
-        let foreign = ryu_crypto::FieldCipher::new(&[9; 32])
-            .seal(REMOTE_TOKEN)
-            .unwrap();
-        std::fs::write(
-            &path,
-            format!(
-                r#"{{"default":"remote","nodes":[{{"name":"remote","url":"https://node.example","token":"{foreign}"}}]}}"#
-            ),
-        )
-        .unwrap();
-        let loaded = load_at(&path, None);
-        assert_eq!(loaded.nodes[0].token, None);
-        // Not sent to the webview either.
-        assert!(!serde_json::to_string(&loaded).unwrap().contains("enc:v1:"));
-        save_at(&path, &loaded, None).unwrap();
-        assert!(std::fs::read_to_string(&path).unwrap().contains(&foreign));
-    }
-
-    #[test]
-    fn the_local_minted_token_is_still_stripped_before_saving() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nodes.json");
-        let local = Node {
-            name: "local".into(),
-            url: crate::profile::core_base_url(),
-            token: Some("minted-local".into()),
-            unopened_token: None,
-        };
-        save_at(&path, &config_with(vec![local]), Some("minted-local")).unwrap();
-        let raw: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(raw["nodes"][0]["token"].is_null());
-    }
-}
+mod tests;

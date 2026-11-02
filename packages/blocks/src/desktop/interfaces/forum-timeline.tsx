@@ -12,6 +12,7 @@ import {
 } from "react";
 import { postFraction, progressPost } from "./forum-model.ts";
 import { ICON_BUTTON } from "./forum-parts.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 
 function isVerticalScroller(element: Element): element is HTMLElement {
 	if (!(element instanceof HTMLElement)) {
@@ -215,7 +216,11 @@ export function TopicTimeline({
 		}
 	};
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		const step = stepFor(event.key, total);
+		// Left and right follow the reading direction (Left is later under RTL).
+		const step = stepFor(
+			logicalArrowKey(event.key, event.currentTarget),
+			total
+		);
 		if (step === null) {
 			return;
 		}
@@ -252,7 +257,7 @@ export function TopicTimeline({
 				aria-valuemin={1}
 				aria-valuenow={post}
 				aria-valuetext={tl("Post {post} of {total}", { post, total })}
-				className="group/track relative ml-[7px] cursor-pointer touch-none rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+				className="group/track relative ms-[7px] cursor-pointer touch-none rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-4 focus-visible:ring-offset-background"
 				onKeyDown={onKeyDown}
 				onPointerCancel={onPointerUp}
 				onPointerDown={onPointerDown}
@@ -265,12 +270,12 @@ export function TopicTimeline({
 			>
 				<span
 					aria-hidden="true"
-					className="absolute inset-y-0 left-0 w-px bg-border"
+					className="absolute inset-y-0 start-0 w-px bg-border"
 				/>
 				<span
 					aria-hidden="true"
 					className={cn(
-						"absolute left-[-1px] w-[3px] rounded-full bg-primary",
+						"absolute start-[-1px] w-[3px] rounded-full bg-primary",
 						!reduceMotion && "transition-[top] duration-150 ease-out"
 					)}
 					style={{ height: HANDLE_HEIGHT, top: offset }}
@@ -278,7 +283,7 @@ export function TopicTimeline({
 				<span
 					aria-hidden="true"
 					className={cn(
-						"absolute left-3 flex h-10 flex-col justify-center",
+						"absolute start-3 flex h-10 flex-col justify-center",
 						!reduceMotion && "transition-[top] duration-150 ease-out"
 					)}
 					style={{ top: offset }}

@@ -21,6 +21,7 @@ import {
 } from "./bank-model.ts";
 import { BankThreadPanel, BankTransactionPanel } from "./bank-panel.tsx";
 import { BankStatements } from "./bank-statements.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
@@ -76,9 +77,10 @@ function BankTabs({
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		const index = TABS.findIndex((candidate) => candidate.id === tab);
 		let next: number | null = null;
-		if (event.key === "ArrowRight") {
+		const key = logicalArrowKey(event.key, event.currentTarget);
+		if (key === "ArrowRight") {
 			next = (index + 1) % TABS.length;
-		} else if (event.key === "ArrowLeft") {
+		} else if (key === "ArrowLeft") {
 			next = (index - 1 + TABS.length) % TABS.length;
 		} else if (event.key === "Home") {
 			next = 0;

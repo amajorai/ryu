@@ -129,3 +129,13 @@ test("formats the time until a projected limit", () => {
 	expect(formatTimeUntil(NOW + 52 * HOUR_MS, NOW)).toBe("2d 4h");
 	expect(formatTimeUntil(NOW - HOUR_MS, NOW)).toBe("1m");
 });
+
+test("formatTimeUntil uses the locale's own units outside English", () => {
+	expect(formatTimeUntil(NOW + 45 * 60_000, NOW, "ja")).toBe("45分");
+	expect(formatTimeUntil(NOW + 1.25 * HOUR_MS, NOW, "ja")).toBe("1時間 15分");
+	expect(formatTimeUntil(NOW + 52 * HOUR_MS, NOW, "ja")).toBe("2日 4時間");
+	expect(formatTimeUntil(NOW + 1.25 * HOUR_MS, NOW, "ar")).not.toMatch(
+		/[a-z]/u
+	);
+	expect(formatTimeUntil(NOW + 1.25 * HOUR_MS, NOW, "en")).toBe("1h 15m");
+});

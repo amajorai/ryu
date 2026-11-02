@@ -10,6 +10,7 @@ import {
 	openImageEditor,
 	startGatewayResize,
 } from "./image-editor-proof.helpers.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("edits a chat image and attaches the exported PNG", async ({ page }) => {
 	const pageErrors: string[] = [];
@@ -82,9 +83,8 @@ test("edits a chat image and attaches the exported PNG", async ({ page }) => {
 		name: /Resize to Widescreen/,
 	});
 	await expect(widescreenPreset).toHaveText(/16:9 · 1,472 × 832 px/);
-	const presetProofPath = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/image-editing/image-ai-resize-presets-proof.png"
+	const presetProofPath = proofEvidencePath(
+		"image-editing/image-ai-resize-presets-proof.png"
 	);
 	await mkdir(path.dirname(presetProofPath), { recursive: true });
 	await page.screenshot({
@@ -152,9 +152,8 @@ test("edits a chat image and attaches the exported PNG", async ({ page }) => {
 		editor.getByRole("status").filter({ hasText: "Comment added." })
 	).toBeVisible();
 
-	const proofPath = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/image-editing/image-editor-chatgpt-toolbar-proof.png"
+	const proofPath = proofEvidencePath(
+		"image-editing/image-editor-chatgpt-toolbar-proof.png"
 	);
 	await mkdir(path.dirname(proofPath), { recursive: true });
 	await page.screenshot({ path: proofPath, fullPage: false });

@@ -78,7 +78,17 @@ export function RunDetails({
 	const tl = useLiteralMessages();
 	let detail = compactTime(item.start);
 	if (count > 0) {
-		detail = `${count} ${event.kind === "upcoming" ? "runs scheduled" : "runs"}`;
+		const countText = String(count);
+		detail =
+			event.kind === "upcoming"
+				? tl(
+						"{count, plural, =1 {{countText} runs scheduled} other {{countText} runs scheduled}}",
+						{ count, countText }
+					)
+				: tl(
+						"{count, plural, =1 {{countText} runs} other {{countText} runs}}",
+						{ count, countText }
+					);
 	} else if (duration) {
 		detail = `${detail} · took ${duration}`;
 	}
@@ -92,7 +102,10 @@ export function RunDetails({
 					/>
 				</span>
 				<div className="flex min-w-0 flex-1 flex-col">
-					<h3 className="font-heading font-semibold text-base text-foreground leading-6">
+					<h3
+						className="font-heading font-semibold text-base text-foreground leading-6"
+						data-ryu-i18n="off"
+					>
 						{event.title}
 					</h3>
 					<p className="truncate text-muted-foreground text-sm">
@@ -135,7 +148,10 @@ export function RunDetails({
 				>
 					{agent ? (
 						<>
-							<span className="truncate text-foreground leading-5">
+							<span
+								className="truncate text-foreground leading-5"
+								data-ryu-i18n="off"
+							>
 								{agent.name}
 							</span>
 							<span className="truncate text-muted-foreground text-xs">

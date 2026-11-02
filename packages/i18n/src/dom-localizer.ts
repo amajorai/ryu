@@ -14,6 +14,10 @@ import {
 	createRemoteTranslator,
 	type RemoteTranslator,
 } from "./dom-localizer-host.ts";
+import {
+	isLocalizedOutput,
+	isWhollyNonLatin,
+} from "./dom-localizer-outputs.ts";
 import { EN_MESSAGES } from "./en-messages.ts";
 import type { MessageValuesInput } from "./format.ts";
 import {
@@ -135,6 +139,14 @@ export function observeDomLocalization(
 			return;
 		}
 		const collapsed = collapseLiteralWhitespace(trimmed);
+		// Text wholly in another script, or a message `tl()` already
+		// translated, is not English source: leave it as written. Mixed text
+		// (`Deleted 田中`) still reaches the templates, which refuse a capture
+		// that mixes scripts (`Release notes を開く`).
+		if (isWhollyNonLatin(collapsed) || isLocalizedOutput(collapsed)) {
+			apply(source);
+			return;
+		}
 		const id = messageIdForLiteral(collapsed);
 		const current = options.state();
 		const knownLiteral =

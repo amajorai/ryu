@@ -174,7 +174,7 @@ export function ShadowSettings() {
 							"Comma-separated app names. Leave empty to capture everything; add entries to capture only those apps."
 						)}
 						{allowlist.length > 0 && (
-							<span className="ml-1 font-medium text-foreground">
+							<span className="ms-1 font-medium text-foreground">
 								{tl("Selected ({count, plural, one {# app} other {# apps}}).", {
 									count: allowlist.length,
 								})}

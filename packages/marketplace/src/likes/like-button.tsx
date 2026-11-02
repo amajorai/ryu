@@ -25,6 +25,7 @@
 // sheet both apps/desktop and apps/web import — alongside every other
 // Transitions.dev animation in the design system. See the block comment there.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount as formatSharedCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -67,6 +68,7 @@ export default function ItemLikeButton({
 	 *  opens the listing); a detail view can pass false. */
 	stopPropagation?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const like = useItemLike(namespace, seed);
 	const [bursting, setBursting] = useState(false);
 	const particlesRef = useRef<HTMLSpanElement | null>(null);
@@ -115,9 +117,10 @@ export default function ItemLikeButton({
 		return null;
 	}
 
+	const count = formatLikeCount(like.count);
 	const label = like.liked
-		? `Unlike (${formatLikeCount(like.count)})`
-		: `Like (${formatLikeCount(like.count)})`;
+		? tl("Unlike ({count})", { count })
+		: tl("Like ({count})", { count });
 
 	return (
 		<button

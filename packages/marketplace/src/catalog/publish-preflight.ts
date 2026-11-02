@@ -2,6 +2,7 @@
 // trust score: it checks the immutable package that is about to enter Ryu's
 // review queue, without requiring a human review signal before that review.
 
+import { translate as tl } from "@ryu/i18n/lite";
 import {
 	type DesignSystemAuditInput,
 	type DesignSystemEvidence,
@@ -40,6 +41,9 @@ export interface MarketplacePublishPreflightInput {
 	immutableSourceVerified: boolean;
 	/** The package-kind reader accepted the declared artifact contents. */
 	kindArtifactsValid: boolean;
+	/** The declared listing id is not reserved, a brand namespace, or a case
+	 *  variant (decided by the publishing service). Omitted: no identity check. */
+	listingIdentity?: { detail: string; passed: boolean } | null;
 	/** Package kind from the parsed portable manifest. */
 	packageKind: string;
 	/** True only after publishability and Gateway permission checks pass. */
@@ -79,63 +83,96 @@ function baseChecks(input: MarketplacePublishPreflightInput): ScorecardCheck[] {
 		check(
 			"package-kind",
 			"configuration",
-			"Uses a supported package profile",
+			tl("Uses a supported package profile"),
 			3,
 			supportedKind ? "pass" : "fail",
 			supportedKind
-				? `The ${input.packageKind} package has a defined Ryu publish profile.`
-				: "This package kind has no publish scorecard profile."
+				? tl("The {packageKind} package has a defined Ryu publish profile.", {
+						packageKind: input.packageKind,
+					})
+				: tl("This package kind has no publish scorecard profile.")
 		),
 		check(
 			"declared-artifacts",
 			"errors",
-			"Includes every declared artifact",
+			tl("Includes every declared artifact"),
 			3,
 			artifactsPresent ? "pass" : "fail",
 			artifactsPresent
-				? `${input.presentArtifactCount} declared artifact(s) are present in the inspected package.`
-				: "The package must declare at least one artifact and include each declared file."
+				? tl(
+						"{count, plural, one {# declared artifact is} other {# declared artifacts are}} present in the inspected package.",
+						{ count: input.presentArtifactCount }
+					)
+				: tl(
+						"The package must declare at least one artifact and include each declared file."
+					)
 		),
 		check(
 			"kind-artifacts",
 			"configuration",
-			"Passes its package-type checks",
+			tl("Passes its package-type checks"),
 			3,
 			input.kindArtifactsValid ? "pass" : "fail",
 			input.kindArtifactsValid
-				? `The declared ${input.packageKind} artifacts passed their format checks.`
-				: `The declared ${input.packageKind} artifacts are incomplete or invalid.`
+				? tl(
+						"The declared {packageKind} artifacts passed their format checks.",
+						{ packageKind: input.packageKind }
+					)
+				: tl(
+						"The declared {packageKind} artifacts are incomplete or invalid.",
+						{ packageKind: input.packageKind }
+					)
 		),
 		check(
 			"immutable-source",
 			"errors",
-			"Matches the immutable release",
+			tl("Matches the immutable release"),
 			4,
 			input.immutableSourceVerified ? "pass" : "fail",
 			input.immutableSourceVerified
-				? "The pinned GitHub package and release asset contain the same bytes."
-				: "The source tree and immutable release asset could not be verified as identical."
+				? tl(
+						"The pinned GitHub package and release asset contain the same bytes."
+					)
+				: tl(
+						"The source tree and immutable release asset could not be verified as identical."
+					)
 		),
 		check(
 			"package-security",
 			"safety",
-			"Passes package security checks",
+			tl("Passes package security checks"),
 			4,
 			input.packageSecurityPassed ? "pass" : "fail",
 			input.packageSecurityPassed
-				? "The package has no declared secrets, private-content flag, or sensitive package path."
-				: "Remove secret-bearing or private content before submitting this package."
+				? tl(
+						"The package has no declared secrets, private-content flag, or sensitive package path."
+					)
+				: tl(
+						"Remove secret-bearing or private content before submitting this package."
+					)
 		),
 		check(
 			"gateway-grants",
 			"capabilities",
-			"Uses Gateway-approved permissions",
+			tl("Uses Gateway-approved permissions"),
 			4,
 			input.gatewayGrantsApproved ? "pass" : "fail",
 			input.gatewayGrantsApproved
-				? "Every requested capability is approved by the Gateway."
-				: "The Gateway did not approve every requested capability."
+				? tl("Every requested capability is approved by the Gateway.")
+				: tl("The Gateway did not approve every requested capability.")
 		),
+		...(input.listingIdentity
+			? [
+					check(
+						"listing-identity",
+						"safety",
+						"Uses its own listing namespace",
+						4,
+						input.listingIdentity.passed ? "pass" : "fail",
+						input.listingIdentity.detail
+					),
+				]
+			: []),
 	];
 }
 
@@ -154,10 +191,13 @@ function uiChecks(
 				check(
 					"ui-applicability",
 					"design-system",
-					"Detects UI applicability",
+					tl("Detects UI applicability"),
 					2,
 					"pass",
-					`No rendered UI was found; the ${input.packageKind} package uses its non-UI publish profile.`
+					tl(
+						"No rendered UI was found; the {packageKind} package uses its non-UI publish profile.",
+						{ packageKind: input.packageKind }
+					)
 				),
 			],
 			grade: null,
@@ -169,26 +209,32 @@ function uiChecks(
 			check(
 				"host-ui-renderer",
 				"design-system",
-				"Uses Ryu-owned host UI renderers",
+				tl("Uses Ryu-owned host UI renderers"),
 				3,
 				"pass",
-				"This manifest declares a host-rendered UI contribution and ships no custom UI source."
+				tl(
+					"This manifest declares a host-rendered UI contribution and ships no custom UI source."
+				)
 			),
 			check(
 				"host-ui-theme-accessibility",
 				"design-system",
-				"Inherits host theme and interaction behavior",
+				tl("Inherits host theme and interaction behavior"),
 				3,
 				"pass",
-				"Ryu's shared renderer owns the contribution's theme, semantic controls, and keyboard behavior."
+				tl(
+					"Ryu's shared renderer owns the contribution's theme, semantic controls, and keyboard behavior."
+				)
 			),
 			check(
 				"ui-evidence-complete",
 				"design-system",
-				"Provides complete UI evidence",
+				tl("Provides complete UI evidence"),
 				4,
 				"pass",
-				"The complete UI is described by supported Ryu host contributions; the package ships no custom UI source."
+				tl(
+					"The complete UI is described by supported Ryu host contributions; the package ships no custom UI source."
+				)
 			),
 		];
 		const scored = buildScorecard(checks, "design-system-1");
@@ -210,12 +256,14 @@ function uiChecks(
 			check(
 				"ui-evidence-complete",
 				"design-system",
-				"Provides complete UI evidence",
+				tl("Provides complete UI evidence"),
 				4,
 				evidenceComplete ? "pass" : "fail",
 				evidenceComplete
-					? "The scorecard evaluated every required UI check."
-					: "The UI surface or source evidence is incomplete, so it cannot receive a publish grade."
+					? tl("The scorecard evaluated every required UI check.")
+					: tl(
+							"The UI surface or source evidence is incomplete, so it cannot receive a publish grade."
+						)
 			),
 		],
 		grade: evidenceComplete ? scored.grade : "F",

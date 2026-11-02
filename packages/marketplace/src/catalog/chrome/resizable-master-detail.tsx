@@ -111,7 +111,7 @@ export default function ResizableMasterDetail({
 				minSize={40}
 			>
 				{/* Flush detail pane: a hairline and the sidebar tone, no floating card. */}
-				<div className="scroll-fade flex size-full flex-col overflow-auto border-border border-l bg-sidebar">
+				<div className="scroll-fade flex size-full flex-col overflow-auto border-border border-s bg-sidebar">
 					{detail}
 				</div>
 			</ResizablePanel>

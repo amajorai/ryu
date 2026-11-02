@@ -31,6 +31,7 @@ pub(crate) mod acp_inference_proxy;
 pub mod acp_tool_broker;
 pub mod activity_api;
 mod agent_routing_cleanup;
+mod app_bundle_guard;
 pub mod agent_sync;
 pub mod annotation_queues_api;
 pub mod approvals_api;
@@ -76,8 +77,10 @@ pub mod native_accounts;
 pub mod qoder_api;
 pub mod recommendations;
 mod sdk_accounts;
+pub(crate) mod security_key_relay;
 pub(crate) mod session_box;
 pub(crate) mod subscription_cloud;
+pub(crate) mod tool_ingress_authority;
 // The device-registry + TRMNL display HTTP surface moved to the extracted
 // `ryu_hardware` crate (`ryu_hardware::api`); the public pairing ingress + the WS
 // link stay Core-side (kernel ingress that forwards to the crate).
@@ -736,7 +739,7 @@ fn route_policy(method: &Method, path: &str) -> crate::authorization::RoutePolic
     if path_has_prefix(path, "/api/cloud-tasks") {
         return RoutePolicy::requires([Capability::GatewayRoute]);
     }
-    if path_has_prefix(path, "/api/session-boxes") {
+    if path_has_prefix(path, "/api/session-boxes") || path_has_prefix(path, "/api/security-key") {
         return RoutePolicy::requires([Capability::GatewayRoute]);
     }
     if path_has_prefix(path, "/api/cloud-environments") {
@@ -7634,6 +7637,7 @@ pub fn create_router(
         .merge(cloud_environments::routes())
         .merge(cloud_tasks::routes())
         .merge(session_box::routes())
+        .merge(security_key_relay::routes())
         .merge(subscription_cloud::routes())
         .route("/api/sandboxes", get(list_sandboxes).post(create_sandbox))
         .route("/api/sandboxes/:run_id/exec", post(exec_sandbox))
@@ -10356,14 +10360,10 @@ async fn post_email_test(
         )
             .into_response();
     };
-    match ryu_email_send::send_email_alert(
-        &cfg,
-        body.to.trim(),
-        "Ryu test email",
-        "This is a test email from your Ryu node. Your SMTP transport is working.",
-    )
-    .await
-    {
+    // Rendered in the node's language, like the real alert emails it previews.
+    let (subject, text) =
+        crate::i18n::messages::email_test_text(crate::i18n::locale::node_locale().await);
+    match ryu_email_send::send_email_alert(&cfg, body.to.trim(), &subject, &text).await {
         Ok(id) => (StatusCode::OK, Json(json!({ "ok": true, "messageId": id }))).into_response(),
         Err(e) => (
             StatusCode::BAD_GATEWAY,
@@ -22462,15 +22462,13 @@ async fn install_app_bundle(
         .get("update")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let lifecycle_permission = if bundle_update {
-        crate::identity_verify::permissions::APP_UPDATE
-    } else {
-        crate::identity_verify::permissions::APP_INSTALL
-    };
-    if let Err(response) =
-        enforce_app_lifecycle_permission(&state, &caller, lifecycle_permission).await
-    {
-        return response;
+    // An update keeps the app's enabled state and approved grants while swapping
+    // its unsigned code, so it also needs install and enable authority.
+    for permission in app_bundle_guard::bundle_lifecycle_permissions(bundle_update) {
+        if let Err(response) = enforce_app_lifecycle_permission(&state, &caller, permission).await
+        {
+            return response;
+        }
     }
 
     // Split the bundle: `ui_code` is carriage, the rest is the manifest.
@@ -37768,6 +37766,7 @@ async fn scan_import_handler(
             "root": scan.root,
             "items": scan.items,
             "warnings": scan.warnings,
+            "warning_notices": scan.warning_notices,
             "source": scan.source,
         }))
         .into_response(),
@@ -41069,10 +41068,18 @@ pub(crate) async fn install_bundle_for_sidecar(
     headers: axum::http::HeaderMap,
     body: serde_json::Value,
 ) -> axum::response::Response {
-    if let Err((status, message)) =
-        crate::sidecar::ext_proxy::authorize_host_call(&state, &headers, "plugins:install").await
+    let caller_plugin_id =
+        match crate::sidecar::ext_proxy::authorize_host_call(&state, &headers, "plugins:install")
+            .await
+        {
+            Ok((plugin_id, _)) => plugin_id,
+            Err((status, message)) => return json_error(status, message.to_owned()),
+        };
+    // Core knows the calling sidecar here, so it enforces the namespace itself:
+    // a sidecar may never install over another app or into another's namespace.
+    if let Some(denial) = app_bundle_guard::sidecar_bundle_namespace_denial(&caller_plugin_id, &body)
     {
-        return json_error(status, message.to_owned());
+        return json_error(StatusCode::FORBIDDEN, denial);
     }
     let caller = verified_caller_from_headers(&headers).await;
     // The installer preserves its managed-user lifecycle permission gate, native
@@ -41307,6 +41314,12 @@ async fn authorize_tool_host_conversation(
     // with the process-local proof Core created before its Gateway forward;
     // otherwise a direct node-token caller could omit the user JWT and select
     // another owner's vault.
+    // A scoped credential (a paired device, say) on an unbound node is held to
+    // the bound-node rule: it may not name the owner's conversation and consume
+    // the owner's in-chat grants without owning it or the forwarder proof.
+    let node_bound = crate::sidecar::control_plane::registered_org().is_some()
+        || crate::sidecar::control_plane::is_managed_node()
+        || tool_ingress_authority::request_admitted_without_owner_token();
     if let Some(caller) = caller {
         let meta = match state.conversations.get_access_meta(raw_id).await {
             Ok(Some(meta)) => meta,
@@ -41323,8 +41336,6 @@ async fn authorize_tool_host_conversation(
                 ));
             }
         };
-        let node_bound = crate::sidecar::control_plane::registered_org().is_some()
-            || crate::sidecar::control_plane::is_managed_node();
         if !caller_owns_host_conversation(caller, &meta)
             && !local_unowned_host_conversation_allowed(&meta, node_bound)
         {
@@ -41334,8 +41345,7 @@ async fn authorize_tool_host_conversation(
             ));
         }
     } else if !anonymous_host_conversation_allowed(
-        crate::sidecar::control_plane::registered_org().is_some()
-            || crate::sidecar::control_plane::is_managed_node(),
+        node_bound,
         host_conversation_proof
             .is_some_and(|proof| host_conversation_proof_is_valid(raw_id, proof)),
     ) {

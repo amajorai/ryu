@@ -1,59 +1,74 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
+import { copyMarker as t } from "./copy-marker.ts";
 import { Reveal } from "./reveal.tsx";
 import { SectionTitle, sectionSubtitleClass } from "./sections.tsx";
 
 const rows = [
 	{
-		feature: "Prompt Injection Protection",
-		bare: "Manual",
-		ryu: "Built-in firewall",
-	},
-	{ feature: "Model Switching", bare: "Hard-coded", ryu: "Dynamic routing" },
-	{
-		feature: "Tool / MCP Access",
-		bare: "Weeks of setup",
-		ryu: "Installed and granted tools",
-	},
-	{ feature: "Long-term Memory", bare: "None", ryu: "Automatic" },
-	{ feature: "Email / Inboxes", bare: "Wire up SMTP", ryu: "Agent inboxes" },
-	{
-		feature: "Meeting Notes",
-		bare: "Paste a transcript",
-		ryu: "Auto-detect + summarize",
+		feature: t("Prompt Injection Protection"),
+		bare: t("Manual"),
+		ryu: t("Built-in firewall"),
 	},
 	{
-		feature: "Website Monitoring",
-		bare: "Cron + scraper",
-		ryu: "Price / stock / uptime alerts",
+		feature: t("Model Switching"),
+		bare: t("Hard-coded"),
+		ryu: t("Dynamic routing"),
 	},
 	{
-		feature: "Voice & Image",
-		bare: "Separate APIs",
-		ryu: "Image, Audio, Voice Recognition built-in",
+		feature: t("Tool / MCP Access"),
+		bare: t("Weeks of setup"),
+		ryu: t("Installed and granted tools"),
+	},
+	{ feature: t("Long-term Memory"), bare: t("None"), ryu: t("Automatic") },
+	{
+		feature: t("Email / Inboxes"),
+		bare: t("Wire up SMTP"),
+		ryu: t("Agent inboxes"),
 	},
 	{
-		feature: "App Connections",
-		bare: "OAuth per app",
-		ryu: "Composio, managed",
-	},
-	{ feature: "Cost Visibility", bare: "Blind", ryu: "Per-agent budgets" },
-	{
-		feature: "Multi-agent Orchestration",
-		bare: "Custom code",
-		ryu: "Visual builder",
+		feature: t("Meeting Notes"),
+		bare: t("Paste a transcript"),
+		ryu: t("Auto-detect + summarize"),
 	},
 	{
-		feature: "Org Hierarchy",
-		bare: "None",
-		ryu: "Org / Team / User",
+		feature: t("Website Monitoring"),
+		bare: t("Cron + scraper"),
+		ryu: t("Price / stock / uptime alerts"),
 	},
-	{ feature: "Audit Logs", bare: "None", ryu: "Full trace" },
-	{ feature: "Self-hostable", bare: "N/A", ryu: "Ryu Gateway" },
+	{
+		feature: t("Voice & Image"),
+		bare: t("Separate APIs"),
+		ryu: t("Image, Audio, Voice Recognition built-in"),
+	},
+	{
+		feature: t("App Connections"),
+		bare: t("OAuth per app"),
+		ryu: t("Composio, managed"),
+	},
+	{
+		feature: t("Cost Visibility"),
+		bare: t("Blind"),
+		ryu: t("Per-agent budgets"),
+	},
+	{
+		feature: t("Multi-agent Orchestration"),
+		bare: t("Custom code"),
+		ryu: t("Visual builder"),
+	},
+	{
+		feature: t("Org Hierarchy"),
+		bare: t("None"),
+		ryu: t("Org / Team / User"),
+	},
+	{ feature: t("Audit Logs"), bare: t("None"), ryu: t("Full trace") },
+	{ feature: t("Self-hostable"), bare: t("N/A"), ryu: t("Ryu Gateway") },
 ];
 
 export default function Features() {
+	const tl = useLiteralMessages();
 	return (
 		<section className="container mx-auto px-4 py-24">
 			<div className="mx-auto max-w-4xl">
@@ -90,12 +105,14 @@ export default function Features() {
 									i % 2 === 0 ? "bg-foreground/[0.02]" : "bg-transparent"
 								)}
 							>
-								<span className="text-foreground text-sm">{row.feature}</span>
+								<span className="text-foreground text-sm">
+									{tl(row.feature)}
+								</span>
 								<span className="text-muted-foreground/70 text-sm line-through decoration-foreground/15">
-									{row.bare}
+									{tl(row.bare)}
 								</span>
 								<span className="font-medium text-foreground text-sm">
-									{row.ryu}
+									{tl(row.ryu)}
 								</span>
 							</div>
 						</Reveal>

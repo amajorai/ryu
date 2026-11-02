@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { GameIconButton } from "./game-hud.tsx";
@@ -105,7 +106,7 @@ export function passportPanel({
 				closeLabel="Close passport"
 				data-passport-booklet=""
 				data-testid="passport-booklet"
-				eyebrow={`No. ${passport.number}`}
+				eyebrow={tr("No. {number}", { number: passport.number })}
 				footer={
 					<nav
 						aria-label="Pages"
@@ -119,7 +120,7 @@ export function passportPanel({
 						>
 							<ChevronLeft
 								aria-hidden="true"
-								className="size-5"
+								className="size-5 rtl:-scale-x-100"
 								strokeWidth={2.75}
 							/>
 						</GameIconButton>
@@ -137,7 +138,7 @@ export function passportPanel({
 						>
 							<ChevronRight
 								aria-hidden="true"
-								className="size-5"
+								className="size-5 rtl:-scale-x-100"
 								strokeWidth={2.75}
 							/>
 						</GameIconButton>

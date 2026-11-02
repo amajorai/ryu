@@ -2,6 +2,7 @@ import {
 	SettingsGroup,
 	SettingsItem,
 } from "@ryu/blocks/desktop/settings-items.tsx";
+import { translate as tl } from "@ryu/i18n/core";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { cn } from "@/lib/utils.ts";
 import {
@@ -33,7 +34,7 @@ function autoSelectSubline(autoSelect: boolean, picked: Node | null): string {
 	if (isLocalNode(picked)) {
 		return "No remote computer reachable — using your computer";
 	}
-	return `Using ${displayName(picked.name)}`;
+	return tl("Using {name}", { name: displayName(picked.name) });
 }
 
 /**

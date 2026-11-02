@@ -1,3 +1,4 @@
+import { dateFormatter } from "@ryu/i18n/format-intl";
 import {
 	formatCurrency,
 	formatCount as formatSharedCount,
@@ -5,11 +6,6 @@ import {
 import type { ProfileFeatureUnlock } from "./profile-settings-types.ts";
 
 export const SECONDS_PER_HOUR = 3600;
-
-const joinedDateFormatter = new Intl.DateTimeFormat("en-US", {
-	month: "long",
-	year: "numeric",
-});
 
 export const formatCompact = (value: number): string =>
 	formatSharedCount(value) ?? "—";
@@ -27,7 +23,10 @@ export const formatCost = (microUsd: number): string => {
 export const formatHourUtc = (hour: string | null | undefined): string =>
 	hour ? `${hour}:00 UTC` : "Not enough data";
 
-export const formatJoined = (joinedAt?: string): string | null => {
+export const formatJoined = (
+	joinedAt: string | undefined,
+	locale: string | null | undefined = "en"
+): string | null => {
 	if (!joinedAt) {
 		return null;
 	}
@@ -35,7 +34,9 @@ export const formatJoined = (joinedAt?: string): string | null => {
 	if (Number.isNaN(parsed.getTime())) {
 		return null;
 	}
-	return joinedDateFormatter.format(parsed);
+	return dateFormatter(locale, { month: "long", year: "numeric" }).format(
+		parsed
+	);
 };
 
 export const tierBadgeVariant = (

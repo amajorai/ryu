@@ -200,17 +200,17 @@ export function Duplicates({
 								<table className="w-full text-sm">
 									<thead>
 										<tr className="text-muted-foreground text-xs">
-											<th className="p-1 text-left font-normal">Keep</th>
-											<th className="p-1 text-left font-normal">Record</th>
+											<th className="p-1 text-start font-normal">Keep</th>
+											<th className="p-1 text-start font-normal">Record</th>
 											{columns.map((field) => (
 												<th
-													className="p-1 text-left font-normal"
+													className="p-1 text-start font-normal"
 													key={field.id}
 												>
 													{field.name}
 												</th>
 											))}
-											<th className="p-1 text-left font-normal">Created</th>
+											<th className="p-1 text-start font-normal">Created</th>
 										</tr>
 									</thead>
 									<tbody>
@@ -243,7 +243,7 @@ export function Duplicates({
 												</td>
 												<td className="p-1">
 													<button
-														className="truncate text-left hover:underline"
+														className="truncate text-start hover:underline"
 														onClick={() => onOpenRecord(record.id)}
 														title={recordTitle(
 															record.title,

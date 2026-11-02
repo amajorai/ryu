@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -111,9 +112,9 @@ export function PostsComposer({
 			onSubmit={submit}
 		>
 			<div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-border border-b px-3 py-2 text-muted-foreground text-sm">
-				<span className="pl-1">Post in</span>
+				<span className="ps-1">Post in</span>
 				<DropdownMenu>
-					<PickerTrigger label="Space" value={space?.name ?? "General"} />
+					<PickerTrigger label="Space" value={space?.name ?? tr("General")} />
 					<DropdownMenuContent className="w-56" drawerLabel="Space">
 						<DropdownMenuGroup>
 							<DropdownMenuLabel>Space</DropdownMenuLabel>
@@ -131,7 +132,7 @@ export function PostsComposer({
 								</DropdownMenuRadioItem>
 								{postable.map((option) => (
 									<DropdownMenuRadioItem key={option.id} value={option.id}>
-										{option.name}
+										<span data-ryu-i18n="off">{option.name}</span>
 									</DropdownMenuRadioItem>
 								))}
 							</DropdownMenuRadioGroup>
@@ -140,9 +141,12 @@ export function PostsComposer({
 				</DropdownMenu>
 				{agents.length > 0 ? (
 					<>
-						<span className="pl-1">for</span>
+						<span className="ps-1">for</span>
 						<DropdownMenu>
-							<PickerTrigger label="Agent" value={agent?.name ?? "Any agent"} />
+							<PickerTrigger
+								label="Agent"
+								value={agent?.name ?? tr("Any agent")}
+							/>
 							<DropdownMenuContent className="w-56" drawerLabel="Agent">
 								<DropdownMenuGroup>
 									<DropdownMenuLabel>Who replies</DropdownMenuLabel>
@@ -161,7 +165,7 @@ export function PostsComposer({
 										{agents.map((option) => (
 											<DropdownMenuRadioItem key={option.id} value={option.id}>
 												<PostsAvatar agent={option} size={16} />
-												{option.name}
+												<span data-ryu-i18n="off">{option.name}</span>
 											</DropdownMenuRadioItem>
 										))}
 									</DropdownMenuRadioGroup>
@@ -199,7 +203,7 @@ export function PostsComposer({
 				/>
 			</div>
 			<div className="flex items-center gap-2 px-3 pb-3">
-				<span className="hidden items-center gap-1.5 pl-1 text-muted-foreground text-xs sm:inline-flex">
+				<span className="hidden items-center gap-1.5 ps-1 text-muted-foreground text-xs sm:inline-flex">
 					<Kbd>⌘↵</Kbd>
 					to post
 				</span>

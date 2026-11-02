@@ -1,3 +1,5 @@
+import { formatMessage } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	formatMinorCurrency,
@@ -173,22 +175,30 @@ export function tallyRefresh(
 	return counts;
 }
 
+/** English formatting for callers without a `tl` (tests, logs). */
+const formatEnglish: LiteralMessage = (source, values) =>
+	formatMessage(source, values, "en");
+
 /** What a refresh run actually did, in words, from the real three-way split.
  *
  *  Never "refreshed 12 submissions" when 4 of those 12 wrote nothing: an
  *  unlinked account and a read that failed are separate outcomes with separate
  *  fixes, so both are named. */
-export function describeRefreshCounts(counts: RefreshCounts): string {
-	const parts = [`${counts.ok} refreshed`];
+export function describeRefreshCounts(
+	counts: RefreshCounts,
+	tl: LiteralMessage = formatEnglish
+): string {
+	const parts = [tl("{count} refreshed", { count: counts.ok })];
 	if (counts.needs_connection > 0) {
 		parts.push(
-			`${counts.needs_connection} need${
-				counts.needs_connection === 1 ? "s" : ""
-			} a connection`
+			tl(
+				"{count, plural, one {# needs a connection} other {# need a connection}}",
+				{ count: counts.needs_connection }
+			)
 		);
 	}
 	if (counts.error > 0) {
-		parts.push(`${counts.error} failed`);
+		parts.push(tl("{count} failed", { count: counts.error }));
 	}
 	return parts.join(" · ");
 }

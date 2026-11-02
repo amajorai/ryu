@@ -357,7 +357,7 @@ describe("Inbox interface", () => {
 			'aria-label="Audit dependencies, Needs attention, Ada, updated 30m ago"'
 		);
 		expect(html).toContain(
-			'aria-label="Release notes, Your turn, Ada, pinned, updated 2h ago"'
+			'aria-label="Release notes, Your turn, Ada, Pinned, updated 2h ago"'
 		);
 	});
 

@@ -1,10 +1,12 @@
 import {
 	ArrowLeft01Icon,
+	ArrowRight01Icon,
 	PlusSignIcon,
 	Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Toggle } from "@ryu/ui/components/toggle.tsx";
 import { CALENDAR_VIEWS, type CalendarView } from "@/src/lib/calendar/views.ts";
 
@@ -45,7 +47,7 @@ export function CalendarToolbar({
 				title="Previous"
 				variant="ghost-muted"
 			>
-				<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+				<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 			</Button>
 			<Button
 				aria-label="Next"
@@ -54,7 +56,7 @@ export function CalendarToolbar({
 				title="Next"
 				variant="ghost-muted"
 			>
-				<HugeiconsIcon className="size-4 rotate-180" icon={ArrowLeft01Icon} />
+				<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
 			</Button>
 			<Button onClick={onToday} size="sm" variant="ghost">
 				Today
@@ -63,7 +65,7 @@ export function CalendarToolbar({
 				{label}
 			</span>
 
-			<div className="ml-auto flex flex-wrap items-center gap-1">
+			<div className="ms-auto flex flex-wrap items-center gap-1">
 				{CALENDAR_VIEWS.map((option) => (
 					<Button
 						aria-pressed={view === option.value}

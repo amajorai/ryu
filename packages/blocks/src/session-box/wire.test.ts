@@ -109,10 +109,10 @@ test("a status with no Box carries the one-time cost notice", () => {
 });
 
 test("hourly rates read as dollars and the notice names the cost", () => {
-	expect(formatHourlyRate(25_000)).toBe("$0.025");
-	expect(formatHourlyRate(40_000)).toBe("$0.04");
-	expect(formatHourlyRate(70_000)).toBe("$0.07");
-	expect(formatHourlyRate(1_500_000)).toBe("$1.50");
+	expect(formatHourlyRate(25_000, "en")).toBe("$0.025");
+	expect(formatHourlyRate(40_000, "en")).toBe("$0.04");
+	expect(formatHourlyRate(70_000, "en")).toBe("$0.07");
+	expect(formatHourlyRate(1_500_000, "en")).toBe("$1.50");
 	const tl = (
 		source: string,
 		values?: Parameters<typeof formatMessage>[1]
@@ -137,7 +137,14 @@ test("hourly rates read as dollars and the notice names the cost", () => {
 	expect(costNoticeHeading({ ...small, ratePerHourMicroUsd: null }, tl)).toBe(
 		"Computer use starts a paid cloud Box"
 	);
-	expect(minimumStartWords(90)).toBe("90-second");
+	expect(minimumStartWords(90, "en")).toBe("90-second");
+	expect(minimumStartWords(300, "en")).toBe("5-minute");
+	expect(
+		costNoticeText({ ...small, minimumSecondsPerStart: 90, size: "large" }, tl)
+	).toContain("large: 8 vCPU, 16 GB");
+	expect(
+		costNoticeText({ ...small, minimumSecondsPerStart: 90, size: "large" }, tl)
+	).toContain("90-second minimum each time the Box starts");
 	expect(sessionBoxRefusalText(COST_NOTICE_REQUIRED_CODE)).toContain(
 		"hourly cost"
 	);
@@ -177,4 +184,51 @@ test("the owner's cost notice state parses, and a malformed one is refused", () 
 	});
 	expect(() => parseSessionBoxCostNoticeState({ size: "small" })).toThrow();
 	expect(() => parseSessionBoxCostNoticeState(null)).toThrow();
+});
+
+test("the rate and the minimum follow the reader's locale", () => {
+	const normalize = (text: string) => text.replace(/[\u00a0\u202f]/g, " ");
+	// German: decimal comma, the currency after the amount.
+	expect(normalize(formatHourlyRate(25_000, "de"))).toBe("0,025 $");
+	expect(normalize(formatHourlyRate(1_500_000, "de"))).toBe("1,50 $");
+	// Japanese: the US dollar sign before the amount, decimal point.
+	expect(formatHourlyRate(25_000, "ja")).toBe("$0.025");
+	// Arabic: the locale's own currency pattern, the symbol after the amount
+	// (digits are Latin or Arabic-Indic depending on the ICU build).
+	const arabic = normalize(formatHourlyRate(25_000, "ar"));
+	expect(arabic).not.toBe("$0.025");
+	expect(arabic).toMatch(/(0\.025|\u0660\u066b\u0660\u0662\u0665)\s?US\$$/u);
+	// No English compound adjective outside English.
+	expect(minimumStartWords(300, "de")).toBe("5 Minuten");
+	expect(minimumStartWords(300, "ja")).toBe("5 分");
+	expect(minimumStartWords(90, "de")).toBe("90 Sekunden");
+	expect(minimumStartWords(300, "ar")).not.toContain("minute");
+});
+
+test("cost notice copy formats its counts in the message's locale", () => {
+	const notice = {
+		minimumSecondsPerStart: 300,
+		ratePerHourMicroUsd: 25_000,
+		size: "default" as const,
+		waiting: false,
+	};
+	const english = (
+		source: string,
+		values?: Parameters<typeof formatMessage>[1]
+	): string => formatMessage(source, values);
+	expect(costNoticeText(notice, english)).toContain("default: 4 vCPU, 8 GB");
+	// The size and minimum are selected inside one whole message, not spliced.
+	let seen = "";
+	const capture = (
+		source: string,
+		values?: Parameters<typeof formatMessage>[1]
+	): string => {
+		seen = source;
+		return formatMessage(source, values);
+	};
+	costNoticeText(notice, capture);
+	expect(seen).toContain("{size, select,");
+	expect(seen).toContain("{count, plural,");
+	costNoticeHeading(notice, capture);
+	expect(seen).toContain("{count, plural,");
 });

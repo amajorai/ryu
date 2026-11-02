@@ -5,8 +5,8 @@
 // the already-ranked cards and its next-page callback.
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Children, type ReactNode } from "react";
 import InfiniteSentinel from "./infinite-sentinel.tsx";
 import { StoreCardGrid } from "./store-catalog-layout.tsx";
@@ -33,12 +33,12 @@ export default function StoreCategoryPage<T>({
 			<nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm">
 				<Button
 					aria-label="Back to categories"
-					className="-ml-2"
+					className="-ms-2"
 					onClick={onBack}
 					size="sm"
 					variant="ghost-muted"
 				>
-					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+					<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 					<span>Categories</span>
 				</Button>
 				<span aria-hidden="true" className="text-muted-foreground/70">

@@ -17,6 +17,10 @@ import type {
 	UsageProviderOption,
 } from "@ryuhq/core-client/monitors";
 import {
+	formatDecimal,
+	formatPercentValue,
+} from "./agent-elements/locale-format.ts";
+import {
 	CHECK_LABELS,
 	safeMonitorUrl,
 	statusColor,
@@ -117,7 +121,7 @@ export function MonitorDetail({
 						<span
 							className={`inline-block size-2 rounded-full ${statusColor(monitor.last_status)}`}
 						/>
-						{formatMonitorValue(monitor, monitor.last_value) ??
+						{formatMonitorValue(monitor, monitor.last_value, tl) ??
 							monitor.last_status}
 					</span>
 				) : null}
@@ -158,7 +162,7 @@ export function MonitorDetail({
 									{s.checked_at}
 								</span>
 								<span className="flex-1 truncate">
-									{formatMonitorValue(monitor, s.value) ?? s.note ?? ""}
+									{formatMonitorValue(monitor, s.value, tl) ?? s.note ?? ""}
 								</span>
 								{s.http_status == null ? null : (
 									<span className="text-muted-foreground text-xs">
@@ -219,7 +223,11 @@ interface ProviderStoredTargetObservation {
 	usedPercent?: AppResponseValue;
 }
 
-function formatMonitorValue(monitor: Monitor, raw: string | null | undefined) {
+function formatMonitorValue(
+	monitor: Monitor,
+	raw: string | null | undefined,
+	tl: LiteralMessage
+) {
 	if (!raw || monitor.check.type !== "provider_usage_reset") {
 		return raw;
 	}
@@ -245,18 +253,27 @@ function formatMonitorValue(monitor: Monitor, raw: string | null | undefined) {
 				| null
 				| undefined;
 			const label = reading!.model
-				? `${reading!.label ?? "Usage"} · ${reading!.model}`
-				: (reading!.label ?? "Usage");
+				? `${reading!.label ?? tl("Usage")} · ${reading!.model}`
+				: (reading!.label ?? tl("Usage"));
 			if (reading!.kind === "window" && isNativeNumber(reading!.usedPercent)) {
-				return `${label}: ${reading!.usedPercent.toFixed(1)}% used`;
+				return tl("{label}: {percent} used", {
+					label,
+					percent: formatPercentValue(reading!.usedPercent, 1),
+				});
 			}
 			if (reading!.kind === "meter" && isNativeNumber(reading!.number)) {
-				return `${label}: ${reading!.number.toFixed(2)} ${reading!.unit ?? ""}`.trim();
+				return tl("{label}: {amount}", {
+					amount:
+						`${formatDecimal(reading!.number, 2)} ${reading!.unit ?? ""}`.trim(),
+					label,
+				});
 			}
 			return label;
 		});
-		return entries.length > 0 ? entries.join(" · ") : "Usage baseline recorded";
+		return entries.length > 0
+			? entries.join(" · ")
+			: tl("Usage baseline recorded");
 	} catch {
-		return "Provider usage checked";
+		return tl("Provider usage checked");
 	}
 }

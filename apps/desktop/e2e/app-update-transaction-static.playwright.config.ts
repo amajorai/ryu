@@ -17,7 +17,10 @@ if (
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 export default defineConfig({
 	testDir: ".",
-	testMatch: "app-update-transaction-proof.spec.ts",
+	testMatch: [
+		"app-update-transaction-proof.spec.ts",
+		"part*-app-update-transaction-proof.spec.ts",
+	],
 	workers: 1,
 	fullyParallel: false,
 	retries: 0,

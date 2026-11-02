@@ -60,7 +60,7 @@ export const TRAY_VIEWPORT_GUTTER = 8;
 
 /**
  * How far the 40px box hangs past the 28px trigger slot on each pinned edge —
- * the `-bottom-1.5 -left-1.5` the box carried while it was an absolutely
+ * the 6px bottom and left overhang the box carried while it was an absolutely
  * positioned child of the slot, now applied to the portaled box's fixed
  * coordinates so it lands in exactly the same place.
  */

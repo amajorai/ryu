@@ -1,5 +1,7 @@
 "use client";
 
+import { formatMessage } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type AvatarConversationState,
 	resolveAvatarConversationState,
@@ -55,6 +57,10 @@ const TOOL_ACTIVITY_LABELS: Readonly<Record<string, string>> = {
 
 const TOOL_KEY_SEPARATOR_RE = /[_\s-]+/g;
 
+/** English formatting for callers outside a translated tree (tests, SSR). */
+const englishMessage: LiteralMessage = (source, values) =>
+	formatMessage(source, values, "en");
+
 interface ToolPartObservation {
 	state?: unknown;
 	toolName?: unknown;
@@ -84,7 +90,10 @@ function toolNameOf(part: ToolPartObservation): string {
 }
 
 /** Status-line copy for one in-flight tool call. */
-export function toolActivityLabel(part: ToolPartObservation): string {
+export function toolActivityLabel(
+	part: ToolPartObservation,
+	tl: LiteralMessage = englishMessage
+): string {
 	const toolName = toolNameOf(part);
 	const displayName = formatToolDisplayName(toolName);
 	const key = displayName.toLowerCase().replace(TOOL_KEY_SEPARATOR_RE, "");
@@ -92,7 +101,9 @@ export function toolActivityLabel(part: ToolPartObservation): string {
 	if (known) {
 		return known;
 	}
-	return displayName ? `Using ${displayName}…` : STATE_LABELS.working;
+	return displayName
+		? tl("Using {tool}…", { tool: displayName })
+		: STATE_LABELS.working;
 }
 
 function isSettledToolPart(part: ToolPartObservation): boolean {
@@ -105,7 +116,8 @@ function isSettledToolPart(part: ToolPartObservation): boolean {
  * "Searching the web…" instead of a generic "Working…".
  */
 export function describeConversationActivity(
-	input: Parameters<typeof resolveAvatarConversationState>[0]
+	input: Parameters<typeof resolveAvatarConversationState>[0],
+	tl: LiteralMessage = englishMessage
 ): ConversationActivity {
 	const state = resolveAvatarConversationState(input);
 	if (state !== "working") {
@@ -123,7 +135,7 @@ export function describeConversationActivity(
 		return {
 			label: isSettledToolPart(part)
 				? STATE_LABELS.working
-				: toolActivityLabel(part),
+				: toolActivityLabel(part, tl),
 			state,
 		};
 	}

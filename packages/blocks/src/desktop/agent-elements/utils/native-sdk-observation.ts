@@ -76,6 +76,9 @@ export const nativeReadbackContentSchema = z.custom<
  * title/code remain opaque until the renderer actually reads them. */
 export interface NativeCoreErrorObservation {
 	code?: NativeSdkValue;
+	/** Core messages (`AlertText` wire) for a localized title and message;
+	 * read by `localizeCoreError`. Absent on rows from an older Core. */
+	i18n?: NativeSdkValue;
 	message: string;
 	title?: NativeSdkValue;
 	type: "error";

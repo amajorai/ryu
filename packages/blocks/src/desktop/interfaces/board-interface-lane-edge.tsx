@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -17,13 +18,23 @@ export function LaneEdge({
 	side: "end" | "start";
 }) {
 	const Icon = side === "start" ? ChevronLeft : ChevronRight;
-	const label = `Show ${count} ${side === "start" ? "earlier" : "later"} ${count === 1 ? "lane" : "lanes"}`;
+	const tl = useLiteralMessages();
+	const label =
+		side === "start"
+			? tl(
+					"{count, plural, one {Show # earlier lane} other {Show # earlier lanes}}",
+					{ count }
+				)
+			: tl(
+					"{count, plural, one {Show # later lane} other {Show # later lanes}}",
+					{ count }
+				);
 	return (
 		<button
 			aria-label={label}
 			className={cn(
 				"flex w-8 shrink-0 flex-col items-center border-border bg-background pt-4 text-muted-foreground outline-none transition-colors duration-100 hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
-				side === "start" ? "border-r" : "border-l"
+				side === "start" ? "border-e" : "border-s"
 			)}
 			data-board-edge={side}
 			onClick={onStep}

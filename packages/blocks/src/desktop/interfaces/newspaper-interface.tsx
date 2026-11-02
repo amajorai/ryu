@@ -248,18 +248,18 @@ export function NewspaperInterface({
 	} else if (!loading && edition.lead) {
 		body = (
 			<div className="mt-6 grid grid-cols-1 lg:grid-cols-12">
-				<div className="lg:col-span-9 lg:pr-6">
+				<div className="lg:col-span-9 lg:pe-6">
 					<section
 						aria-label="Front page"
 						className="grid scroll-mt-4 grid-cols-1 md:grid-cols-3"
 						id={anchor("front")}
 					>
-						<div className="flex flex-col md:col-span-2 md:pr-6">
+						<div className="flex flex-col md:col-span-2 md:pe-6">
 							<LeadStory now={now} onOpen={open} story={edition.lead} />
 							<LeadPackage now={now} onOpen={open} stories={edition.package} />
 						</div>
 						{edition.secondary.length > 0 ? (
-							<div className="max-md:mt-6 max-md:border-border max-md:border-t max-md:pt-6 md:border-border md:border-l md:pl-6">
+							<div className="max-md:mt-6 max-md:border-border max-md:border-t max-md:pt-6 md:border-border md:border-s md:ps-6">
 								<SecondaryColumn
 									now={now}
 									onOpen={open}
@@ -269,9 +269,9 @@ export function NewspaperInterface({
 						) : null}
 					</section>
 					<div className="mt-10 grid grid-cols-1 md:grid-cols-3 [&_section]:scroll-mt-4">
-						<div className="grid grid-cols-1 sm:grid-cols-2 md:col-span-2 md:pr-6">
+						<div className="grid grid-cols-1 sm:grid-cols-2 md:col-span-2 md:pe-6">
 							{hasBriefs ? (
-								<div className={cn(hasSections ? "sm:pr-6" : "sm:col-span-2")}>
+								<div className={cn(hasSections ? "sm:pe-6" : "sm:col-span-2")}>
 									<InBrief
 										id={anchor("briefs")}
 										now={now}
@@ -284,7 +284,7 @@ export function NewspaperInterface({
 								<div
 									className={cn(
 										hasBriefs
-											? "sm:border-border sm:border-l sm:pl-6"
+											? "sm:border-border sm:border-s sm:ps-6"
 											: "sm:col-span-2"
 									)}
 								>
@@ -301,7 +301,7 @@ export function NewspaperInterface({
 								</div>
 							) : null}
 						</div>
-						<div className="md:border-border md:border-l md:pl-6">
+						<div className="md:border-border md:border-s md:ps-6">
 							<StaffBox
 								agents={snapshot.agents}
 								id={anchor("staff")}
@@ -312,7 +312,7 @@ export function NewspaperInterface({
 				</div>
 				<aside
 					aria-label="Sidebar"
-					className="grid content-start gap-x-12 gap-y-10 max-lg:mt-2 max-lg:border-border max-lg:border-t max-lg:pt-8 sm:max-lg:grid-cols-2 lg:col-span-3 lg:border-border lg:border-l lg:pl-6 [&>section]:scroll-mt-4"
+					className="grid content-start gap-x-12 gap-y-10 max-lg:mt-2 max-lg:border-border max-lg:border-t max-lg:pt-8 sm:max-lg:grid-cols-2 lg:col-span-3 lg:border-border lg:border-s lg:ps-6 [&>section]:scroll-mt-4"
 				>
 					<AtAGlance
 						agentCount={snapshot.agents.length}

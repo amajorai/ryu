@@ -309,7 +309,7 @@ export function VirtualChatRowList({
 			{virtualizer.getVirtualItems().map((item) => (
 				<SidebarMenu
 					{...{ [ENTRY_ATTRIBUTE]: "" }}
-					className="absolute top-0 left-0"
+					className="absolute start-0 top-0"
 					data-index={item.index}
 					key={item.key}
 					ref={virtualizer.measureElement}

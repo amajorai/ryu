@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -78,12 +79,41 @@ const STATE_FOR_STATUS: Record<ThreadStatus, MissionAgentState> = {
 };
 
 export const STATION_STATE_LABELS: Record<MissionAgentState, string> = {
-	alert: "Failed",
-	idle: "Idle",
-	waiting: "Queued",
-	working: "Working",
-	"your-turn": "Your turn",
+	get alert() {
+		return tr("Failed");
+	},
+	get idle() {
+		return tr("Idle");
+	},
+	get waiting() {
+		return tr("Queued");
+	},
+	get working() {
+		return tr("Working");
+	},
+	get "your-turn"() {
+		return tr("Your turn");
+	},
 };
+
+/** A station state's label in the UI language. */
+export function stationStateLabel(
+	state: MissionAgentState,
+	tl: LiteralMessage = tr
+): string {
+	switch (state) {
+		case "alert":
+			return tl("Failed");
+		case "idle":
+			return tl("Idle");
+		case "waiting":
+			return tl("Queued");
+		case "working":
+			return tl("Working");
+		default:
+			return tl("Your turn");
+	}
+}
 
 function byNewest(a: InterfaceThread, b: InterfaceThread): number {
 	return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
@@ -95,7 +125,7 @@ function emptyCounts(): Record<ThreadStatus, number> {
 
 /** A thread's display title, never blank. */
 export function missionThreadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }
 
 function activityRuns(
@@ -114,7 +144,7 @@ function activityRuns(
 				hour,
 				id: event.id,
 				outcome: event.outcome,
-				title: event.title.trim() || "Scheduled run",
+				title: event.title.trim() || tr("Scheduled run"),
 			});
 		}
 	}
@@ -213,7 +243,9 @@ function buildAlerts(
 				agentId: thread.agentIds[0] ?? null,
 				at: thread.updatedAt,
 				detail:
-					thread.runState === "interrupted" ? "Run interrupted" : "Run failed",
+					thread.runState === "interrupted"
+						? tr("Run interrupted")
+						: tr("Run failed"),
 				id: `thread:${thread.id}`,
 				severity: "warning",
 				source: "thread",
@@ -225,7 +257,7 @@ function buildAlerts(
 				agentId: thread.agentIds[0] ?? null,
 				at: thread.updatedAt,
 				// The sub-header already says it waits on you: show what it said.
-				detail: thread.lastMessage?.trim() || "No messages yet",
+				detail: thread.lastMessage?.trim() || tr("No messages yet"),
 				id: `thread:${thread.id}`,
 				severity: "advisory",
 				source: "thread",
@@ -244,7 +276,7 @@ function buildAlerts(
 				severity: "warning",
 				source: "run",
 				threadId: null,
-				title: event.title.trim() || "Scheduled run",
+				title: event.title.trim() || tr("Scheduled run"),
 			});
 		}
 	}
@@ -284,11 +316,12 @@ function buildTape(
 		items.push({
 			agentId: event.agentId,
 			at,
-			detail: event.outcome === "failure" ? "Run failed" : "Run completed",
+			detail:
+				event.outcome === "failure" ? tr("Run failed") : tr("Run completed"),
 			id: `run:${event.id}`,
 			mark: event.outcome,
 			threadId: null,
-			title: event.title.trim() || "Scheduled run",
+			title: event.title.trim() || tr("Scheduled run"),
 		});
 	}
 	return items
@@ -351,7 +384,7 @@ export function buildMissionControl(
 	return {
 		activity,
 		alerts,
-		banner: buildBanner(alerts, counts),
+		banner: buildBanner(alerts, counts, tl),
 		counts,
 		kpis: buildKpis({
 			activity,

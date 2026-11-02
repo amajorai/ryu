@@ -126,7 +126,7 @@ export function CalendarHeader({
 					type="button"
 					variant="ghost-muted"
 				>
-					<ChevronLeft aria-hidden="true" />
+					<ChevronLeft aria-hidden="true" className="rtl:-scale-x-100" />
 				</Button>
 				<Button
 					aria-label={scale === "month" ? "Next month" : "Next week"}
@@ -138,7 +138,7 @@ export function CalendarHeader({
 					type="button"
 					variant="ghost-muted"
 				>
-					<ChevronRight aria-hidden="true" />
+					<ChevronRight aria-hidden="true" className="rtl:-scale-x-100" />
 				</Button>
 			</div>
 			<h2
@@ -190,9 +190,10 @@ export function CalendarHeader({
 			{/* A phone has no room for two segments: one menu, like the reference's mobile view. */}
 			<DropdownMenu>
 				<DropdownMenuTrigger
-					aria-label={tl("Calendar scale: {scale}", {
-						scale: SCALE_LABELS[scale],
-					})}
+					aria-label={tl(
+						"{scale, select, month {Calendar scale: Month} other {Calendar scale: Week}}",
+						{ scale }
+					)}
 					disabled={loading}
 					render={
 						<button

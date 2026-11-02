@@ -86,7 +86,7 @@ export function WorkersList({
 								type="button"
 							>
 								<StatusLight state={worker.state} />
-								{worker.name}
+								<span data-ryu-i18n="off">{worker.name}</span>
 							</button>
 							{worker.current || act ? (
 								<button

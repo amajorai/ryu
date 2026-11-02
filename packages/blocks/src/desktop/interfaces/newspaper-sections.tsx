@@ -146,7 +146,7 @@ export function SectionFront({
 				}
 				id={headingId}
 			>
-				{section.group.name}
+				<span data-ryu-i18n="off">{section.group.name}</span>
 			</BoxHead>
 			<p className="-mt-1 mb-3 text-muted-foreground text-xs leading-4">
 				{section.group.kind === "team" ? "Team" : "Project"}
@@ -200,13 +200,16 @@ export function StaffBox({
 					>
 						<button
 							aria-label={tl("New story with {name}", { name: agent.name })}
-							className="group/staff -mx-2 flex w-[calc(100%+1rem)] cursor-pointer rounded-sm px-2 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							className="group/staff -mx-2 flex w-[calc(100%+1rem)] cursor-pointer rounded-sm px-2 py-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={() => onAssign(agent.id)}
 							type="button"
 						>
 							<span className="flex min-w-0 flex-1 flex-col">
 								<span className="flex items-baseline justify-between gap-2">
-									<span className="font-semibold font-serif text-base text-foreground leading-5 decoration-1 underline-offset-[0.2em] group-hover/staff:underline">
+									<span
+										className="font-semibold font-serif text-base text-foreground leading-5 decoration-1 underline-offset-[0.2em] group-hover/staff:underline"
+										data-ryu-i18n="off"
+									>
 										{agent.name}
 									</span>
 									{agent.status === "working" ? (
@@ -215,7 +218,10 @@ export function StaffBox({
 										</span>
 									) : null}
 								</span>
-								<span className="mt-1 truncate text-muted-foreground text-xs leading-4">
+								<span
+									className="mt-1 truncate text-muted-foreground text-xs leading-4"
+									data-ryu-i18n="off"
+								>
 									{agent.description}
 								</span>
 							</span>

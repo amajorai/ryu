@@ -1,5 +1,6 @@
 "use client";
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	Accordion,
 	AccordionContent,
@@ -125,6 +126,7 @@ export default function SignInForm({
 	passwordError,
 	captcha,
 }: SignInFormProps) {
+	const tlRich = useRichLiteralMessages();
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [rememberDevice, setRememberDevice] = useState(false);
@@ -268,7 +270,7 @@ export default function SignInForm({
 						</Button>
 						{lastUsedMethod === "email" && !useMagicLink ? (
 							<Badge
-								className="absolute -top-2 -right-2"
+								className="absolute -end-2 -top-2"
 								size="compact"
 								variant="secondary"
 							>
@@ -277,7 +279,7 @@ export default function SignInForm({
 						) : null}
 						{lastUsedMethod === "magic-link" && useMagicLink ? (
 							<Badge
-								className="absolute -top-2 -right-2"
+								className="absolute -end-2 -top-2"
 								size="compact"
 								variant="secondary"
 							>
@@ -302,7 +304,7 @@ export default function SignInForm({
 						</Button>
 						{lastUsedMethod === "google" ? (
 							<Badge
-								className="absolute -top-2 -right-2"
+								className="absolute -end-2 -top-2"
 								size="compact"
 								variant="secondary"
 							>
@@ -350,7 +352,7 @@ export default function SignInForm({
 											</Button>
 											{lastUsedMethod === "passkey" ? (
 												<Badge
-													className="absolute -top-2 -right-2"
+													className="absolute -end-2 -top-2"
 													size="compact"
 													variant="secondary"
 												>
@@ -406,15 +408,23 @@ export default function SignInForm({
 				</div>
 
 				<div className="text-center text-muted-foreground text-sm">
-					By signing in, you agree to our{" "}
-					<a className="underline" href="/terms">
-						Terms
-					</a>
-					<br />
-					and{" "}
-					<a className="underline" href="/privacy">
-						Privacy Policy
-					</a>
+					{tlRich(
+						"By signing in, you agree to our <terms>Terms</terms><br></br>and <privacy>Privacy Policy</privacy>",
+						{},
+						{
+							br: () => <br />,
+							privacy: (chunks) => (
+								<a className="underline" href="/privacy">
+									{chunks}
+								</a>
+							),
+							terms: (chunks) => (
+								<a className="underline" href="/terms">
+									{chunks}
+								</a>
+							),
+						}
+					)}
 				</div>
 			</StaggerReveal>
 		</div>

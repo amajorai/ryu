@@ -28,8 +28,10 @@
 //! 2. **Grant** — `chat.sendFollowUp`, declared in the app's `sidecars[].host_api.grants`
 //!    AND Gateway-approved. `chat` is a RESERVED namespace, so no app can
 //!    owner-scope its way in by naming itself `com.evil.chat`.
-//! 3. **Firewall / PII-DLP** — the prompt is scanned before it can enter model
-//!    context, exactly as the widget follow-up scans its own.
+//! 3. **Firewall** — the prompt passes the command-risk exec scan (as the widget
+//!    follow-up does) and the Gateway firewall's secret and prompt-injection
+//!    guardrails (`host_chat::ingress`, fail-closed) before it can enter
+//!    model context.
 //! 4. **Approval** — [`ASK_BEFORE_APP_SEND_PREF`], default ON. The send is queued as
 //!    a [`PendingAction::AppSendTurn`] in the Approvals inbox and runs only when the
 //!    user approves it.
@@ -48,6 +50,10 @@ use serde_json::json;
 
 use super::ServerState;
 use crate::approvals::{ApprovalRequest, PendingAction};
+
+/// The content gate (Gateway firewall secret and prompt-injection check) for
+/// app sends and widget follow-ups (`server::widgets`); see the module docs.
+pub(crate) mod ingress;
 
 /// Preference key: ask before an app posts a turn on the user's behalf.
 ///
@@ -169,8 +175,10 @@ pub async fn host_chat_start_turn(
         .filter(|id| !id.trim().is_empty())
         .unwrap_or_else(|| format!("appsend_{}", uuid::Uuid::new_v4().simple()));
 
-    // Firewall / PII-DLP before the text can enter model context, mirroring the
-    // widget follow-up path. An app's prompt is no more trusted than a widget's.
+    // Command-risk gate (the exec scan: hardline commands, deletion, supply
+    // chain), mirroring the widget follow-up path. An app's prompt is no more
+    // trusted than a widget's. The content gate (secrets, prompt injection)
+    // follows it.
     let scan = crate::sidecar::gateway::check_exec_scan(
         "app-send",
         text,
@@ -179,6 +187,28 @@ pub async fn host_chat_start_turn(
     )
     .await;
     if let crate::sidecar::gateway::ExecScanOutcome::Deny(reason) = scan {
+        crate::sidecar::gateway::report_exec_audit_with_attribution(
+            "app-send",
+            "start_turn",
+            0,
+            1,
+            Some(conversation_id.clone()),
+            Some(reason.clone()),
+            crate::sidecar::gateway::ExecAuditAttribution {
+                agent_id: body.agent_id.clone(),
+                feature: Some("agent".to_owned()),
+                ..Default::default()
+            },
+        )
+        .await;
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": reason }))).into_response();
+    }
+
+    // Content gate: the Gateway firewall's secret and prompt-injection
+    // guardrails, fail-closed (a block, an error or an unreachable Gateway all
+    // refuse). Runs before the approval is queued, so a refused send never
+    // reaches the inbox or a turn.
+    if let Err(reason) = ingress::govern_ingress("app-send", text).await {
         crate::sidecar::gateway::report_exec_audit_with_attribution(
             "app-send",
             "start_turn",

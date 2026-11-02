@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { type InterfaceEvent, localDayKey } from "@ryuhq/protocol/interfaces";
 import type { TrackingParcel, TrackingStage } from "./tracking-model.ts";
@@ -14,7 +15,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function courierName(parcel: TrackingParcel): string {
-	return parcel.courier?.name ?? "No courier";
+	return parcel.courier?.name ?? tr("No courier");
 }
 
 /**
@@ -66,36 +67,49 @@ export function expectedLine(
 	switch (parcel.stage) {
 		case "delivered":
 			return valid
-				? `Delivered ${dayPhrase(updated, now)} at ${clockTime(updated)} by ${name}`
-				: `Delivered by ${name}`;
+				? tr("Delivered {day} at {time} by {name}", {
+						day: dayPhrase(updated, now),
+						name,
+						time: clockTime(updated),
+					})
+				: tr("Delivered by {name}", { name });
 		case "out":
-			return `Expected shortly · estimated from ${name}'s activity`;
+			return tr("Expected shortly · estimated from {name}'s activity", {
+				name,
+			});
 		case "transit":
-			return `Expected when ${name} finishes the current run`;
+			return tr("Expected when {name} finishes the current run", { name });
 		case "exception":
 			return valid
-				? `Held in transit · last scan ${relativeAge(parcel.thread.updatedAt, now)}`
-				: "Held in transit";
+				? tr("Held in transit · last scan {age}", {
+						age: relativeAge(parcel.thread.updatedAt, now),
+					})
+				: tr("Held in transit");
 		case "awaiting": {
 			const next = nextCollection(parcel, events, now);
 			if (next) {
 				const start = new Date(next.start);
-				return `Estimated pickup ${dayPhrase(start, now)} at ${clockTime(start)}, when ${name}'s next routine runs`;
+				return tr(
+					"Estimated pickup {day} at {time}, when {name}'s next routine runs",
+					{ day: dayPhrase(start, now), name, time: clockTime(start) }
+				);
 			}
-			return `Waiting for ${name} to pick it up`;
+			return tr("Waiting for {name} to pick it up", { name });
 		}
 		default:
 			return parcel.thread.lastMessageRole
-				? "No courier assigned. Add an agent to the conversation to send it."
-				: "Nothing has been sent yet";
+				? tr(
+						"No courier assigned. Add an agent to the conversation to send it."
+					)
+				: tr("Nothing has been sent yet");
 	}
 }
 
 /** The short reason shown in the exception notice. */
 export function exceptionReason(parcel: TrackingParcel): string {
 	return parcel.thread.runState === "interrupted"
-		? "Last run was interrupted"
-		: "Last run failed";
+		? tr("Last run was interrupted")
+		: tr("Last run failed");
 }
 
 const SCHEDULE_TIME = /\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i;
@@ -152,7 +166,10 @@ export interface HistoryGroup {
  * the courier's activity; your message is quoted as yours, and only where
  * the scan is about it.
  */
-function latestDetail(parcel: TrackingParcel): string | null {
+function latestDetail(
+	parcel: TrackingParcel,
+	tl: LiteralMessage
+): string | null {
 	const { lastMessage, lastMessageRole } = parcel.thread;
 	if (!lastMessage) {
 		return null;
@@ -161,7 +178,7 @@ function latestDetail(parcel: TrackingParcel): string | null {
 		return lastMessage;
 	}
 	if (lastMessageRole === "user" && parcel.stage === "awaiting") {
-		return `You: ${lastMessage}`;
+		return tl("You: {text}", { text: lastMessage });
 	}
 	return null;
 }
@@ -170,7 +187,7 @@ function latestScan(parcel: TrackingParcel, tl: LiteralMessage): HistoryEntry {
 	const name = courierName(parcel);
 	const base = {
 		at: parcel.thread.updatedAt,
-		detail: latestDetail(parcel),
+		detail: latestDetail(parcel, tl),
 		estimated: false,
 		id: "latest",
 		location: null,
@@ -199,23 +216,23 @@ function latestScan(parcel: TrackingParcel, tl: LiteralMessage): HistoryEntry {
 				...base,
 				title:
 					parcel.thread.runState === "interrupted"
-						? "Exception: run interrupted"
-						: "Exception: run failed",
+						? tl("Exception: run interrupted")
+						: tl("Exception: run failed"),
 				tone: "exception",
 			};
 		case "awaiting":
 			return {
 				...base,
-				title: "Order placed: you sent a message",
+				title: tl("Order placed: you sent a message"),
 				tone: "default",
 			};
 		default:
 			return {
 				...base,
 				detail: parcel.thread.lastMessage
-					? `You: ${parcel.thread.lastMessage}`
+					? tl("You: {text}", { text: parcel.thread.lastMessage })
 					: null,
-				title: "Label created: no courier assigned",
+				title: tl("Label created: no courier assigned"),
 				tone: "default",
 			};
 	}
@@ -257,7 +274,7 @@ export function trackingHistory(
 				},
 			],
 			id: "upcoming",
-			label: `Upcoming · ${dayLabel(start, now)}`,
+			label: tl("Upcoming · {day}", { day: dayLabel(start, now) }),
 		});
 	}
 	timed.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
@@ -281,7 +298,7 @@ export function trackingHistory(
 		groups.push({
 			entries: earlier,
 			id: "earlier",
-			label: "Earlier, time not recorded",
+			label: tl("Earlier, time not recorded"),
 		});
 	}
 	return groups;
@@ -314,7 +331,7 @@ function earlierScans(
 			estimated: false,
 			id: "order-placed",
 			location,
-			title: "Order placed: you sent a message",
+			title: tl("Order placed: you sent a message"),
 			tone: "default",
 		});
 	}

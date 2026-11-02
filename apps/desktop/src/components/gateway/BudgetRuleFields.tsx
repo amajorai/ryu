@@ -115,7 +115,7 @@ function AlertTierSelect({
 				{ALERT_TIER_OPTIONS.map((option) => (
 					<SelectItem key={option.value} value={option.value}>
 						<span className="font-medium">{option.label.split(" — ")[0]}</span>
-						<span className="ml-1 text-muted-foreground text-xs">
+						<span className="ms-1 text-muted-foreground text-xs">
 							— {ALERT_TIER_DESCRIPTIONS[option.value]}
 						</span>
 					</SelectItem>
@@ -196,7 +196,7 @@ export function BudgetRuleFields({
 						).map(([value, label]) => (
 							<SelectItem key={value} value={value}>
 								<span className="font-medium">{label}</span>
-								<span className="ml-1 text-muted-foreground text-xs">
+								<span className="ms-1 text-muted-foreground text-xs">
 									— {ACTION_DESCRIPTIONS[value]}
 								</span>
 							</SelectItem>

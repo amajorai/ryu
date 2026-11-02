@@ -90,7 +90,7 @@ export function RidesInterfaceSheet({
 			aria-label="Rides"
 			className={cn(
 				"relative z-30 order-2 @min-[1000px]:m-0 m-2 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-[22px] border-(--gk-edge) border-2 bg-(--gk-plate) text-(--gk-ink) shadow-(--gk-lip)",
-				"@min-[1000px]:absolute @min-[1000px]:inset-y-3 @min-[1000px]:left-3 @min-[1000px]:h-auto",
+				"@min-[1000px]:absolute @min-[1000px]:inset-y-3 @min-[1000px]:start-3 @min-[1000px]:h-auto",
 				// On a phone the open trip is a half sheet, as the
 				// peeking one: the city above keeps room for its words.
 				threadOpen

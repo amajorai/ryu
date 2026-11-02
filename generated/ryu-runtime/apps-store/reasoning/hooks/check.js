@@ -30,6 +30,21 @@
 // own `result` field, and a reply without one is reported as "could not run", never
 // as a finding. A model with no tool cannot fabricate the marker without lying
 // outright, and the failure it does produce is legible.
+//
+// The checked answer is attacker-influenced text, so it is quoted with its tags
+// and any `SOLVER:` neutralised, and only the reply's exact final line counts. A
+// reply with an earlier marker (an echoed claim, an injected line) is reported as
+// ambiguous, never silenced as `valid`.
+
+const KNOWN_VERDICTS = [
+	"valid",
+	"invalid",
+	"satisfiable",
+	"impossible",
+	"no_translations",
+	"translation_ambiguous",
+	"too_complex",
+];
 
 if (!(ctx.flags && ctx.flags["io.ryu.reasoning"])) {
 	return { kind: "none" };
@@ -71,11 +86,11 @@ const task = [
 	"   SOLVER line and do NOT guess a verdict. Reply with one line saying what went wrong.",
 	"",
 	"<question>",
-	lastUser ? lastUser.content : "(no question was recorded)",
+	quoted(lastUser ? lastUser.content : "(no question was recorded)"),
 	"</question>",
 	"",
 	"<answer>",
-	lastAssistant.content,
+	quoted(lastAssistant.content),
 	"</answer>",
 ].join("\n");
 
@@ -95,8 +110,9 @@ try {
 // The bridge hands back the sub-agent's final text; coerce defensively so a
 // non-string never reaches the user as "[object Object]".
 const text = String(report ?? "").trim();
-const marker = text.match(/SOLVER:\s*([a-z_]+)\s*$/im);
-if (!marker) {
+const lines = text.split(/\r?\n/);
+const marker = /^SOLVER:[ \t]*([a-z_]+)$/.exec((lines[lines.length - 1] || "").trim());
+if (!(marker && KNOWN_VERDICTS.includes(marker[1]))) {
 	return {
 		kind: "note",
 		text:
@@ -107,15 +123,40 @@ if (!marker) {
 	};
 }
 
-const verdict = marker[1].toLowerCase();
+const body = lines.slice(0, -1).join("\n").trim();
+if (/SOLVER\s*:/i.test(body)) {
+	return {
+		kind: "note",
+		text:
+			"Policy check result was ambiguous: the verifier's reply carried more than one " +
+			"SOLVER marker, so treat the answer as unverified against the policy.\n" +
+			text,
+	};
+}
+
+const verdict = marker[1];
 // A proven answer, or one the policy has nothing to say about, is not worth
 // interrupting for — the point of the check is the cases where it disagrees.
 if (verdict === "valid" || verdict === "no_translations") {
 	return { kind: "none" };
 }
 
-const body = text.replace(/\s*SOLVER:\s*[a-z_]+\s*$/im, "").trim();
 return {
 	kind: "note",
 	text: `Policy check (${policyId}) — ${verdict}\n${body}`,
 };
+
+// Quote attacker-influenced text for the task: drop chat-template control tokens
+// and neutralise the quoting tags and the SOLVER marker so the quoted text cannot
+// close its block or plant a verdict line.
+function quoted(value) {
+	let out = String(value ?? "");
+	let previous;
+	do {
+		previous = out;
+		out = out.replace(/<\|[A-Za-z_]{1,24}\|>/g, "");
+	} while (out !== previous);
+	return out
+		.replace(/<(\/?)(question|answer)\b/gi, "\u2039$1$2")
+		.replace(/SOLVER(\s*):/gi, "SOLVER$1 (quoted):");
+}

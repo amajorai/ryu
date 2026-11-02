@@ -32,7 +32,7 @@ function WallpaperOption({
 		<button
 			aria-pressed={selected}
 			className={cn(
-				"flex min-w-0 flex-col gap-2 rounded-xl border p-2 text-left transition-colors",
+				"flex min-w-0 flex-col gap-2 rounded-xl border p-2 text-start transition-colors",
 				selected
 					? "border-primary bg-primary/5"
 					: "border-border hover:bg-muted/60",
@@ -133,7 +133,7 @@ export function MarketplaceWallpaperPickerDialog({
 			>
 				<header
 					className={cn(
-						"flex shrink-0 flex-col gap-1.5 text-left",
+						"flex shrink-0 flex-col gap-1.5 text-start",
 						styles.header
 					)}
 					data-slot="dialog-header"
@@ -148,7 +148,7 @@ export function MarketplaceWallpaperPickerDialog({
 					<div className="flex flex-wrap items-center gap-2">
 						<div className="relative min-w-48 flex-1 sm:max-w-sm">
 							<HugeiconsIcon
-								className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+								className="absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 								icon={Search01Icon}
 							/>
 							<Input

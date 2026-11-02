@@ -102,7 +102,7 @@ export function CampaignsView({
 
 	return (
 		<div className="flex min-h-0 flex-1">
-			<aside className="flex w-64 shrink-0 flex-col border-border border-r">
+			<aside className="flex w-64 shrink-0 flex-col border-border border-e">
 				<div className="flex shrink-0 items-center gap-1.5 border-border border-b px-2 py-1.5">
 					<NativeSelect
 						aria-label="Filter campaigns by status"
@@ -145,7 +145,7 @@ export function CampaignsView({
 							<li key={campaign.id}>
 								<button
 									className={cn(
-										"w-full border-border border-b px-2.5 py-2 text-left",
+										"w-full border-border border-b px-2.5 py-2 text-start",
 										campaign.id === selectedId
 											? "bg-accent"
 											: "hover:bg-muted/50"

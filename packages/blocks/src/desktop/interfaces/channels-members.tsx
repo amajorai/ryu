@@ -30,15 +30,19 @@ export function ChannelsMembers({
 	onMessage: (agentId: string) => void;
 }) {
 	const tl = useLiteralMessages();
-	const countLabel =
-		members.length === 1 ? "1 member" : `${members.length} members`;
+	const countLabel = tl("{count, plural, one {# member} other {# members}}", {
+		count: members.length,
+	});
 	return (
 		<Popover>
 			<PopoverTrigger
 				render={
 					<Button
-						aria-label={`${countLabel} of #${channelLabel}`}
-						className="ml-auto h-7 gap-1 rounded-md border border-border pr-2 pl-1 hover:bg-muted aria-expanded:bg-muted"
+						aria-label={tl(
+							"{count, plural, one {# member of #{channel}} other {# members of #{channel}}}",
+							{ channel: channelLabel, count: members.length }
+						)}
+						className="ms-auto h-7 gap-1 rounded-md border border-border ps-1 pe-2 hover:bg-muted aria-expanded:bg-muted"
 						size="sm"
 						variant="ghost"
 					/>
@@ -84,7 +88,10 @@ export function ChannelsMembers({
 									<PresenceDot active={working} ringClassName="bg-popover" />
 								</span>
 								<span className="flex min-w-0 flex-1 flex-col">
-									<span className="truncate font-medium text-foreground text-sm">
+									<span
+										className="truncate font-medium text-foreground text-sm"
+										data-ryu-i18n="off"
+									>
 										{member.name}
 									</span>
 									<span className="truncate text-foreground/70 text-xs">

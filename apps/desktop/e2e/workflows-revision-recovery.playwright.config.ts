@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { workflowsProofBuildCommand } from "./workflows-proof-build.ts";
 
 const baseURL = "http://127.0.0.1:5289/";
 
@@ -16,8 +17,10 @@ export default defineConfig({
 		viewport: { width: 1440, height: 1080 },
 	},
 	webServer: {
-		command:
-			"bunx vite build --config ../../apps-store/workflows/ui/vite.config.ts --outDir /tmp/ryu-workflows-revision-recovery-build && bun e2e/workflows-revision-recovery.host.ts",
+		command: workflowsProofBuildCommand(
+			"revision-recovery",
+			"workflows-revision-recovery.host.ts"
+		),
 		cwd: path.resolve(import.meta.dirname, ".."),
 		url: `${baseURL}__ready`,
 		reuseExistingServer: false,

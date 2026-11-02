@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const desktop = path.resolve(import.meta.dirname, "..");
 export default defineConfig({
@@ -9,7 +10,7 @@ export default defineConfig({
 	retries: 0,
 	timeout: 600_000,
 	reporter: "list",
-	outputDir: "../../../docs/proof/provider-ui-contract-repair/results",
+	outputDir: proofEvidencePath("provider-ui-contract-repair/results"),
 	use: {
 		baseURL: "http://127.0.0.1:5332",
 		viewport: { width: 1440, height: 1100 },

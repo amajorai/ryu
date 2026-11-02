@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -72,7 +73,7 @@ function TaskRow({
 			<button
 				aria-current={active ? "true" : undefined}
 				className={cn(
-					"grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-start gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+					"grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-start gap-3 rounded-lg px-3 py-2.5 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
 					active && "bg-muted"
 				)}
 				data-testid="workers-task"
@@ -84,7 +85,7 @@ function TaskRow({
 				</span>
 				<span className="flex min-w-0 flex-col gap-0.5">
 					<span className="truncate font-medium text-foreground text-sm">
-						{thread.title.trim() || "Untitled"}
+						{thread.title.trim() || tr("Untitled")}
 					</span>
 					<span className="truncate text-[13px] text-muted-foreground">
 						{light ? `${light.label} · ` : null}
@@ -159,7 +160,7 @@ export function WorkersPanel({
 					worker ? tl("{name}'s computer", { name: worker.name }) : "New task"
 				}
 				headingRef={headingRef}
-				label={tl("Task: {title}", { title: thread?.title ?? "New task" })}
+				label={tl("Task: {title}", { title: thread?.title ?? tr("New task") })}
 				leading={
 					worker ? (
 						<BoardAvatar agent={worker.agent} name={worker.name} size={28} />
@@ -176,7 +177,7 @@ export function WorkersPanel({
 						</>
 					) : undefined
 				}
-				title={thread?.title.trim() || "New task"}
+				title={thread?.title.trim() || tr("New task")}
 			>
 				{threadView}
 			</GameSheet>
@@ -218,7 +219,7 @@ export function WorkersPanel({
 								{workers.map((worker) => (
 									<li key={worker.id}>
 										<button
-											className="grid w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+											className="grid w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 											onClick={() => onOpenWorker(worker.id)}
 											type="button"
 										>
@@ -228,12 +229,15 @@ export function WorkersPanel({
 												size={28}
 											/>
 											<span className="flex min-w-0 flex-col gap-0.5">
-												<span className="truncate font-medium text-foreground text-sm">
+												<span
+													className="truncate font-medium text-foreground text-sm"
+													data-ryu-i18n="off"
+												>
 													{worker.name}
 												</span>
 												<span className="truncate text-[13px] text-muted-foreground">
 													{worker.current
-														? worker.current.title.trim() || "Untitled"
+														? worker.current.title.trim() || tr("Untitled")
 														: "No tasks yet"}
 												</span>
 											</span>

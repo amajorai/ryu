@@ -107,9 +107,10 @@ export function BlockerCard({
 	const age = waitLabel(blocker.at ?? null, nowMs, {
 		approx: blocker.atApprox,
 	});
-	const when = age ? `${age} ago` : "time unknown";
+	const when = age ? tl("{age} ago", { age }) : tl("time unknown");
 	const named = redacted ? blockerKindWord(blocker.kind) : blocker.title;
-	const title = blocker.source === "estimate" ? `Likely ${named}` : named;
+	const title =
+		blocker.source === "estimate" ? tl("Likely {named}", { named }) : named;
 	return (
 		<Dialog
 			onOpenChange={(next) => {

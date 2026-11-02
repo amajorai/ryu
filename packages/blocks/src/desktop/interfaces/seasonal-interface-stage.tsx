@@ -15,7 +15,7 @@ import { SeasonalGrid } from "./seasonal-grid.tsx";
 import {
 	ACT_PORTRAIT,
 	ACTS_FILL,
-	DIORAMA_LABEL,
+	dioramaLabel,
 } from "./seasonal-interface-constants.tsx";
 import type {
 	Season,
@@ -149,7 +149,7 @@ export function SeasonalStage({
 								doors={board.doors}
 								giftId={giftId}
 								giftNumber={gift}
-								label={`${copy.board} ${copy.doors}`}
+								label={copy.board}
 								labelOf={labelOf}
 								onActivate={activate}
 								onKeyDown={onDoorKeyDown}
@@ -189,7 +189,7 @@ export function SeasonalStage({
 											className="gk-display px-4 pt-4 pb-2 text-[18px] leading-6"
 											id={`${sceneId}-list`}
 										>
-											{tl("All {doors}", { doors: copy.doors })}
+											{copy.all}
 										</h2>
 										{doorList(false)}
 									</div>
@@ -210,7 +210,7 @@ export function SeasonalStage({
 					insets={insets}
 					label={tl(
 						"{board}: {diorama} Tab or the arrow keys move between them; drag to pan, plus and minus to zoom.",
-						{ board: copy.board, diorama: DIORAMA_LABEL[season] }
+						{ board: copy.board, diorama: dioramaLabel(season) }
 					)}
 					motes={weather && season !== "advent"}
 					night={night}

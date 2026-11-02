@@ -4,6 +4,7 @@ import {
 	cacheReuseRatio,
 	compactUsageTrendPoints,
 	FOREGROUND_PURPOSE_KEY,
+	formatBucketLabel,
 	ledgerProviderLabel,
 	type UsageBucket,
 	type UsageEvent,
@@ -535,5 +536,13 @@ describe("purpose and prompt-cache attribution", () => {
 			{ label: "a – b", ratio: 0.1, read: 1, write: 9 },
 			{ label: "c", ratio: null, read: 0, write: 0 },
 		]);
+	});
+});
+
+describe("formatBucketLabel", () => {
+	it("names months in the UI language it is given", () => {
+		const march = new Date(Date.UTC(2026, 2, 15, 12));
+		expect(formatBucketLabel(march, "monthly", "en")).toBe("Mar 2026");
+		expect(formatBucketLabel(march, "monthly", "de")).toBe("März 2026");
 	});
 });

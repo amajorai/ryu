@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedRequest {
 	body: unknown;
@@ -28,11 +29,7 @@ interface DictationProofWindow {
 const evidence = (name: string) =>
 	process.env.RYU_PROOF_OUTPUT_ROOT
 		? path.resolve(process.env.RYU_PROOF_OUTPUT_ROOT, name)
-		: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-				name
-			);
+		: proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 const emptySelection = {
 	access_mode: "",

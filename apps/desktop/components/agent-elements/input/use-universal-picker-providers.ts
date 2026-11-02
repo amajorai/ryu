@@ -269,7 +269,7 @@ export function buildProviderEntries({
 					}`,
 					description: model.capabilities.actionSupport
 						? tl("Browser actions · {status}", { status: model.status })
-						: `Chat-only · ${model.status}`,
+						: tl("Chat-only · {status}", { status: model.status }),
 				})),
 			});
 		}

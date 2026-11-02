@@ -4,7 +4,6 @@ import {
 	RunStatusTimelineLegend,
 } from "@ryu/ui/components/run-status-timeline.tsx";
 import { formatDateTime } from "@ryu/ui/lib/timezone.ts";
-import { formatDistanceToNow } from "date-fns";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
 import {
 	buildCalendarEvents,
@@ -12,6 +11,7 @@ import {
 	describeSchedule,
 	groupEventsByJob,
 } from "@/src/lib/calendar/events.ts";
+import { relativeTimeAgo } from "@/src/lib/time.ts";
 
 export function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 	const tl = useLiteralMessages();
@@ -87,7 +87,13 @@ export function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 							/>
 							<p className="mt-1 truncate text-muted-foreground text-xs">
 								{last
-									? `${last.outcome === "success" ? "Succeeded" : "Failed"} ${formatDistanceToNow(new Date(last.startedAt), { addSuffix: true })}`
+									? last.outcome === "success"
+										? tl("Succeeded {when}", {
+												when: relativeTimeAgo(last.startedAt),
+											})
+										: tl("Failed {when}", {
+												when: relativeTimeAgo(last.startedAt),
+											})
 									: "No runs yet"}
 							</p>
 						</div>

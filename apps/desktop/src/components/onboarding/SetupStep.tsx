@@ -8,6 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 
 import { cn } from "@/lib/utils.ts";
 
@@ -189,8 +190,10 @@ export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 									aria-checked={state.selected}
 									aria-label={
 										state.selected
-											? tl("Deselect {name}", { name: CATEGORY_LABELS[cat] })
-											: tl("Select {name}", { name: CATEGORY_LABELS[cat] })
+											? tl("Deselect {name}", {
+													name: tl(CATEGORY_LABELS[cat]),
+												})
+											: tl("Select {name}", { name: tl(CATEGORY_LABELS[cat]) })
 									}
 									className={cn(
 										"h-4 w-4 flex-shrink-0 rounded border-2 transition-colors",
@@ -213,8 +216,10 @@ export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 								<button
 									aria-label={
 										state.expanded
-											? tl("Collapse {name}", { name: CATEGORY_LABELS[cat] })
-											: tl("Expand {name}", { name: CATEGORY_LABELS[cat] })
+											? tl("Collapse {name}", {
+													name: tl(CATEGORY_LABELS[cat]),
+												})
+											: tl("Expand {name}", { name: tl(CATEGORY_LABELS[cat]) })
 									}
 									className="text-muted-foreground hover:text-foreground"
 									onClick={() => toggleExpand(cat)}
@@ -223,7 +228,7 @@ export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 									{state.expanded ? (
 										<HugeiconsIcon className="h-4 w-4" icon={ArrowDown01Icon} />
 									) : (
-										<HugeiconsIcon
+										<DirectionalIcon
 											className="h-4 w-4"
 											icon={ArrowRight01Icon}
 										/>

@@ -8,6 +8,8 @@ mod acp_spawn_environment;
 mod capabilities_and_gateway_wrapping;
 #[path = "acp_tests/codex_egress_and_flagship.rs"]
 mod codex_egress_and_flagship;
+#[path = "acp_tests/failure_i18n.rs"]
+mod failure_i18n;
 #[path = "acp_tests/config_write_back_and_ordering.rs"]
 mod config_write_back_and_ordering;
 #[path = "acp_tests/pi_default_and_gateway_opt_out.rs"]

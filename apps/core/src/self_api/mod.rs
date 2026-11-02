@@ -720,14 +720,16 @@ pub fn method_of(tool_id: &str) -> Option<&str> {
 /// filtered, or what is recorded: `egress` proxy credentials can name any
 /// environment variable (a provider key sent to a proxy the agent chose),
 /// `auth` mints API keys, the `firewall` sections switch off DLP and
-/// prompt-injection checks, and `audit` controls the record of what the agent
-/// did. Like provider keys, they stay in Settings.
+/// prompt-injection checks, `audit` controls the record of what the agent
+/// did, and `computer_use` allows locked-session use and the hardware security
+/// key. Like provider keys, they stay in Settings.
 const GATEWAY_CONFIG_SETTINGS_ONLY: &[&str] = &[
     "auth",
     "audit",
     "bind",
     "channels",
     "composio",
+    "computer_use",
     "control_plane",
     "egress",
     "firewall",
@@ -1113,6 +1115,23 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn agents_cannot_allow_the_security_key_or_locked_use() {
+        for body in [
+            json!({ "computer_use": { "security_key": true } }),
+            json!({ "budgets": {}, "computer_use": { "locked_use": true } }),
+        ] {
+            assert_eq!(
+                gateway_config_settings_only_section(
+                    "/api/gateway/config",
+                    "PUT",
+                    &json!({ "body": body })
+                ),
+                Some("computer_use")
+            );
+        }
     }
 
     fn sample_spec() -> Value {

@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 120_000 });
 test("Headroom public guide renders streaming and fail-open behavior", async ({
@@ -38,9 +38,8 @@ test("Headroom public guide renders streaming and fail-open behavior", async ({
 	await page.mouse.move(12, 12);
 	await page.screenshot({
 		fullPage: true,
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/headroom/headroom-guide-completed.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/plugins-runtime/headroom/headroom-guide-completed.png"
 		),
 		animations: "disabled",
 	});

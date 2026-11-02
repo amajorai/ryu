@@ -20,6 +20,7 @@ mod evals;
 mod evaluators;
 mod firewall;
 mod governance;
+mod http_trace;
 mod identity;
 mod jobs;
 mod metrics;
@@ -48,6 +49,7 @@ mod security_contact;
 mod semantic_cache;
 mod skills;
 mod standing;
+mod startup;
 mod state;
 mod telemetry;
 mod tools;
@@ -62,187 +64,27 @@ mod web_pools;
 
 use std::{sync::Arc, time::Duration};
 
-use axum::http::HeaderValue;
-use tower_http::{
-    cors::{Any, CorsLayer},
-    timeout::TimeoutLayer,
-    trace::TraceLayer,
-};
+use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use crate::{config::GatewayConfig, state::AppState};
-
-/// Whether startup must refuse a Gateway whose auth is disabled: on a
-/// non-loopback bind, or with exposure hardening on
-/// ([`custody::exposure_hardened`]), where a loopback listener sits behind a
-/// load balancer and proves nothing.
-fn auth_disabled_startup_rejected(
-    bind_addr: &str,
-    exposure_hardened: bool,
-    require_auth: bool,
-) -> bool {
-    if require_auth {
-        return false;
-    }
-    let is_loopback_bind = bind_addr
-        .parse::<std::net::SocketAddr>()
-        .map(|address| address.ip().is_loopback())
-        .unwrap_or_else(|_| {
-            bind_addr
-                .rsplit_once(':')
-                .is_some_and(|(host, _)| host == "localhost")
-        });
-    !is_loopback_bind || exposure_hardened
-}
-
-/// The startup line naming the gateway.toml this process reads. `Err` (logged
-/// as a warning) when no file is there: `GatewayConfig::load` then runs on
-/// built-in defaults, and a config placed at the wrong path must not be ignored
-/// silently.
-fn config_file_notice(path: Option<&std::path::Path>) -> Result<String, String> {
-    match path {
-        Some(path) if path.is_file() => Ok(format!("configuration file: {}", path.display())),
-        Some(path) => Err(format!(
-            "no configuration file at {}; running on built-in defaults (set GATEWAY_CONFIG \
-             to the path of your gateway.toml)",
-            path.display()
-        )),
-        None => Err(
-            "cannot determine a configuration path; running on built-in defaults (set \
-             GATEWAY_CONFIG to the path of your gateway.toml)"
-                .to_owned(),
-        ),
-    }
-}
-
-/// The hosted Ryu web app's origin. Its editor AI calls the user's local,
-/// Core-managed Gateway from the browser.
-const HOSTED_WEB_ORIGIN: &str = "https://app.ryuhq.com";
-
-/// Whether CORS admits [`HOSTED_WEB_ORIGIN`]. An explicit
-/// `RYU_CORS_ALLOW_HOSTED_WEB` (`1`/`true`/`on` or `0`/`false`/`off`) wins.
-/// Otherwise it is admitted only for a Gateway paired with Ryu: one that holds a
-/// trusted Core relay credential (Core-managed or hosted) or has Fleet custody.
-/// A plain self-hosted Gateway does not trust a Ryu-hosted page by default, even
-/// when it sets the fleet flag for exposure hardening.
-fn hosted_web_origin_allowed(
-    explicit: Option<&str>,
-    core_paired: bool,
-    fleet_custody: bool,
-) -> bool {
-    match explicit
-        .map(|value| value.trim().to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("1" | "true" | "on" | "yes") => true,
-        Some("0" | "false" | "off" | "no") => false,
-        _ => core_paired || fleet_custody,
-    }
-}
-
-/// The CORS origin allowlist: local desktop/webapp dev and Tauri origins, the
-/// hosted web app when [`hosted_web_origin_allowed`], plus comma-separated
-/// `RYU_CORS_ORIGINS` extras.
-/// The CORS layer for an origin allowlist. Exposes the Gateway's response
-/// headers (request id, rate-limit signals, routing) so browser callers can
-/// read them, not only the body.
-fn cors_layer(origins: Vec<HeaderValue>) -> CorsLayer {
-    CorsLayer::new()
-        .allow_origin(origins)
-        .allow_methods(Any)
-        .allow_headers(Any)
-        .expose_headers(api::http_conventions::exposed_headers())
-        .allow_private_network(true)
-}
-
-fn cors_allowed_origins(allow_hosted_web: bool, extra: Option<&str>) -> Vec<HeaderValue> {
-    let mut origins: Vec<&str> = vec![
-        "http://localhost:5173",   // desktop vite dev
-        "http://localhost:5174",   // webapp vite dev
-        "http://127.0.0.1:5173",   // desktop vite dev (127 variant)
-        "http://127.0.0.1:5174",   // webapp vite dev (127 variant)
-        "http://localhost:1420",   // tauri dev
-        "tauri://localhost",       // tauri prod (macOS/Linux)
-        "https://tauri.localhost", // tauri prod (Windows)
-        "http://tauri.localhost",  // tauri prod (Windows alt)
-    ];
-    if allow_hosted_web {
-        origins.push(HOSTED_WEB_ORIGIN);
-    }
-    origins.extend(
-        extra
-            .unwrap_or_default()
-            .split(',')
-            .map(str::trim)
-            .filter(|origin| !origin.is_empty()),
-    );
-    origins
-        .into_iter()
-        .filter_map(|origin| origin.parse::<HeaderValue>().ok())
-        .collect()
-}
-
-/// How this process got the key that seals `gateway.toml` secrets. Logged once
-/// tracing is up; never carries key material.
-enum SealKeyStatus {
-    /// Core derived the Gateway subkey and passed it in the spawn environment.
-    Delivered,
-    /// A standalone Gateway derived it from the master key it resolved itself.
-    Resolved,
-    /// No key: plaintext files still load, sealed ones and new secrets fail.
-    Unavailable(String),
-}
-
-/// Take the `gateway.toml` sealing key into memory and out of the environment.
-///
-/// Runs before the tokio runtime starts any thread (editing the environment
-/// while another thread reads it is unsound). A Core-spawned Gateway receives
-/// only its component subkey (`RYU_SEAL_KEY`); a standalone Gateway resolves
-/// the master key (`RYU_MASTER_KEY`, or the data-dir key file under
-/// `RYU_KEYCHAIN=off`) and derives the same subkey. Either way every
-/// key-carrying variable is then removed, so no MCP server, channel adapter, or
-/// tool the Gateway spawns inherits a key.
-fn capture_seal_key() -> anyhow::Result<SealKeyStatus> {
-    let status = if ryu_crypto::capture_process_seal_key()? {
-        SealKeyStatus::Delivered
-    } else {
-        ryu_crypto::install_standalone_host();
-        match ryu_crypto::component_cipher_for_process(ryu_crypto::components::GATEWAY) {
-            Ok(_) => SealKeyStatus::Resolved,
-            Err(error) => SealKeyStatus::Unavailable(error.to_string()),
-        }
-    };
-    for name in ryu_crypto::SEAL_ENV_VARS {
-        std::env::remove_var(name);
-    }
-    Ok(status)
-}
-
-/// `ryu-gateway print-key admin|relay`: print a generated key from the sealed
-/// `gateway-admin.key` / `gateway-relay.key` beside `gateway.toml`, so an
-/// operator can hand it to a client without the file holding it in plaintext.
-/// Needs the same sealing key the Gateway runs with.
-fn print_generated_key(role: Option<&str>) -> anyhow::Result<()> {
-    let file = match role {
-        Some("admin") => config::ADMIN_KEY_FILE,
-        Some("relay") => config::RELAY_KEY_FILE,
-        _ => anyhow::bail!("usage: ryu-gateway print-key admin|relay"),
-    };
-    let path = GatewayConfig::config_path()
-        .and_then(|path| path.parent().map(|parent| parent.join(file)))
-        .ok_or_else(|| anyhow::anyhow!("cannot determine Gateway credential directory"))?;
-    let sealer = ryu_gw_credentials::sealed_config::config_sealer().map_err(|error| {
-        anyhow::anyhow!(
-            "{error}. Set RYU_MASTER_KEY, or RYU_SEAL_KEY and RYU_SEAL_SCOPE from \
-             `ryu-core gateway-seal-env`, as for the Gateway itself"
-        )
-    })?;
-    let key = ryu_gw_credentials::read_sealed(&path, &*sealer)?;
-    println!("{key}");
-    Ok(())
-}
+use crate::{
+    config::GatewayConfig,
+    http_trace::{http_server_span, record_http_response, shutdown_signal},
+    startup::{
+        auth_disabled_startup_rejected, capture_seal_key, config_file_notice, cors_allowed_origins,
+        cors_layer, hosted_web_origin_allowed, print_generated_key, SealKeyStatus,
+    },
+    state::AppState,
+};
 
 fn main() -> anyhow::Result<()> {
+    // Windows DLL sideloading hardening (the Yoba pattern: a genuine signed
+    // executable beside a planted DLL). Restrict the search order before any
+    // code can load a library by name; the build-time /DEPENDENTLOADFLAG
+    // still covers static imports if Windows refuses.
+    if let Err(error) = ryu_sidecar_runtime::dll_search::harden_dll_search() {
+        eprintln!("ryu-gateway: could not restrict the DLL search order: {error}");
+    }
     if std::env::args().any(|argument| argument == "--version") {
         println!("ryu-gateway {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
@@ -298,19 +140,7 @@ async fn run(seal_key: SealKeyStatus) -> anyhow::Result<()> {
     // `before_send`; never fed `tracing`/log events, so no content reaches Sentry.
     let _crash_guard = crash::init();
 
-    match &seal_key {
-        SealKeyStatus::Delivered => {
-            tracing::info!("gateway.toml secrets: sealing key delivered by Core")
-        }
-        SealKeyStatus::Resolved => {
-            tracing::info!("gateway.toml secrets: sealing key derived from the master key")
-        }
-        SealKeyStatus::Unavailable(reason) => tracing::warn!(
-            "gateway.toml secrets: no sealing key ({reason}); plaintext configuration still \
-             loads, but sealed secrets cannot be read and new secrets cannot be saved. Set \
-             RYU_SEAL_KEY and RYU_SEAL_SCOPE from `ryu-core gateway-seal-env`, or RYU_MASTER_KEY"
-        ),
-    }
+    startup::log_seal_key_status(&seal_key);
     // One-time migration: seal secrets an operator (or an older build) left in
     // plaintext. Comments and layout are kept; without a key the file is left
     // as it is.
@@ -359,30 +189,7 @@ async fn run(seal_key: SealKeyStatus) -> anyhow::Result<()> {
         .and_then(|a| a.strip_prefix("--bind=").map(str::to_string))
         .unwrap_or_else(|| config.bind.clone());
 
-    tracing::info!(
-        bind = %bind_addr,
-        openai = config.providers.openai.is_some(),
-        anthropic = config.providers.anthropic.is_some(),
-        local = config.providers.local.is_some(),
-        openrouter = config.providers.openrouter.is_some(),
-        core = config.providers.core.is_some(),
-        auth_required = config.auth.require_auth,
-        firewall = config.firewall.enabled,
-        cache = config.cache.enabled,
-        circuit_breaker = config.circuit_breaker.enabled,
-        skills = config.skills.skills.len(),
-        audit = config.audit.enabled,
-        evals = config.evals.enabled,
-        composio = config.composio.enabled,
-        semantic_cache = config.semantic_cache.enabled,
-        telegram = config.channels.telegram.is_some(),
-        control_plane = config.control_plane.enabled,
-        slack = config.channels.slack.is_some(),
-        discord = config.channels.discord.is_some(),
-        whatsapp = config.channels.whatsapp.is_some(),
-        bluebubbles = config.channels.bluebubbles.is_some(),
-        "configuration loaded"
-    );
+    startup::log_loaded_configuration(&config, &bind_addr);
 
     // Even an explicit development auth opt-out cannot expose a billable proxy.
     // Custody comes only from the vault signals; the fleet flag is exposure
@@ -535,36 +342,7 @@ async fn run(seal_key: SealKeyStatus) -> anyhow::Result<()> {
         );
     }
 
-    // Background: evict stale rate-limit buckets every 5 minutes
-    {
-        let s = Arc::clone(&state);
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(300));
-            loop {
-                interval.tick().await;
-                s.rate_limiter.evict_stale(Duration::from_secs(600));
-                s.org_rate.evict_stale(Duration::from_secs(600));
-            }
-        });
-    }
-
-    // Background: evict expired cache entries (exact + semantic) every minute
-    {
-        let s = Arc::clone(&state);
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
-            loop {
-                interval.tick().await;
-                s.cache.evict_expired();
-                if let Some(sc) = s.semantic_cache.active() {
-                    sc.evict_expired();
-                }
-                if let Some(embeddings) = &s.embedding_cache {
-                    embeddings.evict_expired();
-                }
-            }
-        });
-    }
+    startup::spawn_eviction_loops(&state);
 
     // Background: push eval/budget/audit aggregates up to the control plane
     reporter::spawn(Arc::clone(&state));
@@ -634,263 +412,4 @@ async fn run(seal_key: SealKeyStatus) -> anyhow::Result<()> {
     served?;
 
     Ok(())
-}
-
-/// Resolves on Ctrl-C or (Unix) SIGTERM.
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        if tokio::signal::ctrl_c().await.is_err() {
-            std::future::pending::<()>().await;
-        }
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(_) => std::future::pending::<()>().await,
-        }
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    tokio::select! {
-        () = ctrl_c => {}
-        () = terminate => {}
-    }
-}
-
-/// Liveness/metrics polling routes: never worth a server span.
-fn is_polling_path(path: &str) -> bool {
-    matches!(
-        path,
-        "/health" | "/healthz" | "/livez" | "/readyz" | "/metrics"
-    )
-}
-
-/// The OTel HTTP server span for one inbound request: named `{method} {route}`
-/// (or just `{method}` when no route matched), `otel.kind = server`, parented
-/// under the caller's W3C `traceparent` when present. INFO so it clears the
-/// OTLP layer's INFO+ filter. Carries no URL query or headers.
-fn http_server_span<B>(request: &axum::http::Request<B>) -> tracing::Span {
-    // Without the consented exporter nothing would leave the process, so build
-    // no span at all (one atomic load), and keep health/metrics polls out of
-    // the export stream entirely.
-    if !telemetry::export_active() || is_polling_path(request.uri().path()) {
-        return tracing::Span::none();
-    }
-    let method = request.method().as_str();
-    let route = request
-        .extensions()
-        .get::<axum::extract::MatchedPath>()
-        .map(axum::extract::MatchedPath::as_str);
-    let name = match route {
-        Some(route) => format!("{method} {route}"),
-        None => method.to_owned(),
-    };
-    let span = tracing::info_span!(
-        "http.server.request",
-        "otel.name" = %name,
-        "otel.kind" = "server",
-        "otel.status_code" = tracing::field::Empty,
-        "http.request.method" = method,
-        "http.route" = route,
-        "url.path" = request.uri().path(),
-        "http.response.status_code" = tracing::field::Empty,
-    );
-    telemetry::propagation::set_parent_from_headers(&span, request.headers());
-    span
-}
-
-/// Record the response status on the server span; 5xx marks it ERROR per the
-/// OTel HTTP server conventions (4xx is the client's error, not the server's).
-fn record_http_response<B>(
-    response: &axum::http::Response<B>,
-    _latency: Duration,
-    span: &tracing::Span,
-) {
-    let status = response.status();
-    span.record("http.response.status_code", status.as_u16());
-    if status.is_server_error() {
-        span.record("otel.status_code", "ERROR");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        auth_disabled_startup_rejected, config_file_notice, cors_allowed_origins, cors_layer,
-        hosted_web_origin_allowed, HOSTED_WEB_ORIGIN,
-    };
-
-    #[tokio::test]
-    async fn cors_exposes_the_request_id_and_rate_limit_headers() {
-        use axum::{body::Body, http::Request};
-        use tower::ServiceExt;
-        let origin = "http://localhost:1420";
-        let app = axum::Router::new()
-            .route("/v1/models", axum::routing::get(|| async { "ok" }))
-            .layer(cors_layer(vec![axum::http::HeaderValue::from_static(
-                origin,
-            )]));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/models")
-                    .header("origin", origin)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            response
-                .headers()
-                .get("access-control-allow-origin")
-                .unwrap(),
-            origin
-        );
-        let exposed = response
-            .headers()
-            .get("access-control-expose-headers")
-            .expect("expose list")
-            .to_str()
-            .unwrap()
-            .to_ascii_lowercase();
-        for name in [
-            "x-request-id",
-            "retry-after",
-            "ratelimit",
-            "ratelimit-policy",
-            "x-provider",
-            "x-routed-model",
-        ] {
-            assert!(
-                exposed.split(',').any(|item| item.trim() == name),
-                "{name} in {exposed}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_missing_config_file_is_reported_not_silently_defaulted() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("gateway.toml");
-        let warning = config_file_notice(Some(&path)).unwrap_err();
-        assert!(warning.contains(&path.display().to_string()), "{warning}");
-        assert!(warning.contains("GATEWAY_CONFIG"), "{warning}");
-        assert!(config_file_notice(None)
-            .unwrap_err()
-            .contains("GATEWAY_CONFIG"));
-
-        std::fs::write(&path, "").unwrap();
-        let notice = config_file_notice(Some(&path)).unwrap();
-        assert!(notice.contains(&path.display().to_string()), "{notice}");
-    }
-
-    #[test]
-    fn hosted_web_origin_is_only_trusted_by_a_ryu_paired_gateway() {
-        // A plain self-hosted gateway does not admit the Ryu-hosted page.
-        assert!(!hosted_web_origin_allowed(None, false, false));
-        // Core-managed (trusted relay) and fleet gateways keep it.
-        assert!(hosted_web_origin_allowed(None, true, false));
-        assert!(hosted_web_origin_allowed(None, false, true));
-        // An explicit operator choice wins either way.
-        assert!(hosted_web_origin_allowed(Some(" On "), false, false));
-        assert!(!hosted_web_origin_allowed(Some("0"), true, true));
-        // Unrecognised values fall back to the pairing rule.
-        assert!(!hosted_web_origin_allowed(Some("maybe"), false, false));
-    }
-
-    #[test]
-    fn cors_allowlist_adds_hosted_origin_and_extras_only_on_request() {
-        let has = |origins: &[axum::http::HeaderValue], origin: &str| {
-            origins.iter().any(|value| value == origin)
-        };
-        let standalone = cors_allowed_origins(false, None);
-        assert!(has(&standalone, "tauri://localhost"));
-        assert!(!has(&standalone, HOSTED_WEB_ORIGIN));
-
-        let paired = cors_allowed_origins(true, Some(" https://a.example , ,https://b.example"));
-        assert!(has(&paired, HOSTED_WEB_ORIGIN));
-        assert!(has(&paired, "https://a.example"));
-        assert!(has(&paired, "https://b.example"));
-    }
-
-    #[test]
-    fn polling_routes_get_no_server_span() {
-        assert!(super::is_polling_path("/health"));
-        assert!(super::is_polling_path("/metrics"));
-        assert!(!super::is_polling_path("/v1/chat/completions"));
-    }
-
-    #[test]
-    fn fleet_mode_rejects_auth_disabled_even_on_loopback() {
-        assert!(auth_disabled_startup_rejected(
-            "127.0.0.1:8981",
-            true,
-            false
-        ));
-        assert!(auth_disabled_startup_rejected("0.0.0.0:8981", false, false));
-        assert!(!auth_disabled_startup_rejected(
-            "127.0.0.1:8981",
-            false,
-            false
-        ));
-        assert!(!auth_disabled_startup_rejected("0.0.0.0:8981", true, true));
-    }
-
-    #[test]
-    fn env_detected_fleet_custody_rejects_auth_disabled_on_loopback() {
-        use crate::custody::{exposure_hardened, GatewayCustody};
-        let vault_pair = GatewayCustody::from_lookup(|name| match name {
-            "CONTROL_PLANE_URL" => Some("https://control.invalid".to_owned()),
-            "RYU_VAULT_INTERNAL_SECRET" => Some("test-only".to_owned()),
-            _ => None,
-        });
-        assert!(auth_disabled_startup_rejected(
-            "127.0.0.1:8981",
-            exposure_hardened(false, vault_pair),
-            false
-        ));
-        let vault_required = GatewayCustody::from_lookup(|name| {
-            (name == "RYU_PROVIDER_VAULT_REQUIRED").then(|| "true".to_owned())
-        });
-        assert!(auth_disabled_startup_rejected(
-            "127.0.0.1:8981",
-            exposure_hardened(false, vault_required),
-            false
-        ));
-        let self_hosted = GatewayCustody::from_lookup(|_| None);
-        assert!(!auth_disabled_startup_rejected(
-            "127.0.0.1:8981",
-            exposure_hardened(false, self_hosted),
-            false
-        ));
-    }
-
-    /// The self-host compose stack sets `RYU_GATEWAY_FLEET=1` with no vault
-    /// signal: custody stays SelfHosted, yet the fleet flag alone still refuses
-    /// an auth-disabled start on a loopback listener.
-    #[test]
-    fn fleet_flag_without_vault_is_self_hosted_but_still_rejects_auth_disabled() {
-        use crate::custody::{exposure_hardened, GatewayCustody};
-        let custody = GatewayCustody::from_lookup(|name| {
-            (name == "RYU_GATEWAY_FLEET").then(|| "1".to_owned())
-        });
-        assert_eq!(custody, GatewayCustody::SelfHosted);
-        assert!(auth_disabled_startup_rejected(
-            "127.0.0.1:8981",
-            exposure_hardened(true, custody),
-            false
-        ));
-        // Fleet flag on, auth on: starts.
-        assert!(!auth_disabled_startup_rejected(
-            "127.0.0.1:8981",
-            exposure_hardened(true, custody),
-            true
-        ));
-        // The hosted web origin follows custody, not the flag.
-        assert!(!hosted_web_origin_allowed(None, false, custody.is_fleet()));
-    }
 }

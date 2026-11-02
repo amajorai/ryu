@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -22,13 +23,15 @@ export interface PersonaIdeaGroup {
 const MAX_RECENT_IDEAS = 4;
 const SKILL_TEMPLATES = [
 	{
-		prompt: (topic: string) => `What changed in ${topic} this week?`,
+		prompt: (topic: string) =>
+			tr("What changed in {topic} this week?", { topic }),
 	},
 	{
-		prompt: (topic: string) => `Draft a plan for ${topic}`,
+		prompt: (topic: string) => tr("Draft a plan for {topic}", { topic }),
 	},
 	{
-		prompt: (topic: string) => `Review ${topic} and flag anything risky`,
+		prompt: (topic: string) =>
+			tr("Review {topic} and flag anything risky", { topic }),
 	},
 ] as const;
 
@@ -78,30 +81,30 @@ function roleIdeas(description: string): PersonaIdea[] {
 }
 
 function threadIdea(thread: InterfaceThread): PersonaIdea | null {
-	const title = thread.title || "Untitled";
+	const title = thread.title || tr("Untitled");
 	switch (threadStatus(thread)) {
 		case "attention":
 			return {
 				id: `retry:${thread.id}`,
-				prompt: `Retry ${title} and tell me what went wrong`,
+				prompt: tr("Retry {title} and tell me what went wrong", { title }),
 				updatedAt: thread.updatedAt,
 			};
 		case "your-turn":
 			return {
 				id: `follow:${thread.id}`,
-				prompt: `Follow up on ${title}`,
+				prompt: tr("Follow up on {title}", { title }),
 				updatedAt: thread.updatedAt,
 			};
 		case "waiting":
 			return {
 				id: `nudge:${thread.id}`,
-				prompt: `Add more detail to ${title}`,
+				prompt: tr("Add more detail to {title}", { title }),
 				updatedAt: thread.updatedAt,
 			};
 		case "working":
 			return {
 				id: `status:${thread.id}`,
-				prompt: `Give me a short status on ${title}`,
+				prompt: tr("Give me a short status on {title}", { title }),
 				updatedAt: thread.updatedAt,
 			};
 		default:

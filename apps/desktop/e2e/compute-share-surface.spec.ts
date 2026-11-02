@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = resolve(import.meta.dirname, "../../../docs/proof");
+const proofDir = proofEvidencePath();
 const artifactDir = resolve(
 	import.meta.dirname,
 	"../artifacts/ui-design-audit/screenshots"

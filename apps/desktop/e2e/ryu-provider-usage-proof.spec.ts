@@ -1,6 +1,8 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { usageSnapshotFor } from "./harness/ryu-provider-usage-proof.snapshots.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -20,6 +22,16 @@ test("shows usage for ACP and Ryu subscription providers in one dialog", async (
 				visible: true,
 			})
 		);
+	});
+	// Core's per-agent usage read, answered from its wire schema.
+	await page.route("**/api/agents/*/usage", (route) => {
+		const match = new URL(route.request().url()).pathname.match(
+			/^\/api\/agents\/([^/]+)\/usage$/
+		);
+		const snapshot = usageSnapshotFor(decodeURIComponent(match?.[1] ?? ""));
+		return snapshot
+			? route.fulfill({ json: snapshot })
+			: route.fulfill({ status: 404, json: { error: "unknown agent" } });
 	});
 	await page.goto("/ryu-provider-usage-proof.html");
 	await page.getByTestId("usage-proof-trigger").click();
@@ -51,17 +63,12 @@ test("shows usage for ACP and Ryu subscription providers in one dialog", async (
 	await expect(page.getByLabel("Weekly: 51% left")).toBeVisible();
 	await expect(page.getByLabel("Session: 65% left")).toBeVisible();
 	await expect(page.getByLabel("Weekly: 88% left")).toBeVisible();
-	const proofPath = path.resolve(
-		process.cwd(),
-		"../../docs/proof/openusage-usage-meters-2026-09-24.png"
+	const proofPath = proofEvidencePath("openusage-usage-meters-2026-09-24.png");
+	const cursorProofPath = proofEvidencePath(
+		"openusage-cursor-meters-2026-09-24.png"
 	);
-	const cursorProofPath = path.resolve(
-		process.cwd(),
-		"../../docs/proof/openusage-cursor-meters-2026-09-24.png"
-	);
-	const bottomProofPath = path.resolve(
-		process.cwd(),
-		"../../docs/proof/openusage-usage-meters-bottom-2026-09-24.png"
+	const bottomProofPath = proofEvidencePath(
+		"openusage-usage-meters-bottom-2026-09-24.png"
 	);
 	mkdirSync(path.dirname(proofPath), { recursive: true });
 	await page.getByRole("dialog").screenshot({ path: proofPath });

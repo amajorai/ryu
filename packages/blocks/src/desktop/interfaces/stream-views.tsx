@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -39,7 +40,7 @@ function ActivityBadge({ failed }: { failed: boolean }) {
 		<span
 			aria-hidden="true"
 			className={cn(
-				"absolute -right-1 -bottom-1 flex size-[18px] items-center justify-center rounded-full ring-2 ring-card",
+				"absolute -end-1 -bottom-1 flex size-[18px] items-center justify-center rounded-full ring-2 ring-card",
 				failed
 					? "bg-destructive text-background"
 					: "bg-foreground text-background"
@@ -57,13 +58,13 @@ function ActivityRow({
 	onOpen: (threadId: string) => void;
 	post: StreamPost;
 }) {
-	const name = post.author?.name ?? "You";
+	const name = post.author?.name ?? tr("You");
 	const failed = post.status === "attention";
 	return (
 		<li>
 			<button
 				className={cn(
-					"group flex w-full gap-3 px-6 pt-3 text-left transition-colors duration-150 hover:bg-muted/50",
+					"group flex w-full gap-3 px-6 pt-3 text-start transition-colors duration-150 hover:bg-muted/50",
 					STREAM_FOCUS,
 					"focus-visible:ring-inset focus-visible:ring-offset-0"
 				)}
@@ -82,7 +83,7 @@ function ActivityRow({
 				>
 					<span className="flex items-center gap-1.5">
 						<span className="truncate font-semibold text-foreground">
-							{name}
+							<span data-ryu-i18n="off">{name}</span>
 						</span>
 						<time
 							className="shrink-0 text-muted-foreground"
@@ -93,12 +94,18 @@ function ActivityRow({
 					</span>
 					<span className="truncate text-muted-foreground">
 						{activityVerb(post)}{" "}
-						<span className={failed ? "text-destructive" : "text-foreground"}>
+						<span
+							className={failed ? "text-destructive" : "text-foreground"}
+							data-ryu-i18n="off"
+						>
 							{post.title}
 						</span>
 					</span>
 					{post.body ? (
-						<span className="mt-1 line-clamp-2 text-foreground">
+						<span
+							className="mt-1 line-clamp-2 text-foreground"
+							data-ryu-i18n="off"
+						>
 							{post.body}
 						</span>
 					) : null}
@@ -187,9 +194,10 @@ function AgentRow({
 				<div className="flex min-w-0 flex-1 flex-col">
 					<button
 						className={cn(
-							"w-fit max-w-full truncate rounded-sm text-left font-semibold text-foreground hover:underline",
+							"w-fit max-w-full truncate rounded-sm text-start font-semibold text-foreground hover:underline",
 							STREAM_FOCUS
 						)}
+						data-ryu-i18n="off"
 						onClick={() => onProfile(agent.id)}
 						type="button"
 					>
@@ -276,7 +284,7 @@ export function StreamSearchView({
 						<button
 							aria-label="Clear search"
 							className={cn(
-								"-mr-1.5 flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground hover:text-foreground",
+								"-me-1.5 flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground hover:text-foreground",
 								STREAM_FOCUS
 							)}
 							onClick={() => onQuery("")}

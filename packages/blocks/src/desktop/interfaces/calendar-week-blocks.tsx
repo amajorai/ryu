@@ -42,7 +42,7 @@ function blockStyle(placed: PlacedItem): CSSProperties {
 	);
 	return {
 		height,
-		left: placed.left,
+		insetInlineStart: placed.left,
 		top,
 		width: Math.max(4, placed.width - BLOCK_GAP_PX),
 	};
@@ -55,7 +55,7 @@ function blockStyle(placed: PlacedItem): CSSProperties {
  */
 function blockClassName(item: CalendarItem, active: boolean): string {
 	return cn(
-		"@container absolute flex items-start overflow-hidden ps-2.5 pe-1.5 text-left text-foreground text-xs leading-4 outline-none ring-1 ring-background transition-colors",
+		"@container absolute flex items-start overflow-hidden ps-2.5 pe-1.5 text-start text-foreground text-xs leading-4 outline-none ring-1 ring-background transition-colors",
 		ITEM_RADIUS_CLASS,
 		"hover:z-[8]! focus-visible:z-[9]! focus-visible:ring-2 focus-visible:ring-ring",
 		blockToneClass(item),
@@ -237,7 +237,7 @@ export function FoldButton({
 			sideOffset={6}
 			style={{
 				height: (CASCADE_MINUTES / 60) * HOUR_PX - BLOCK_GAP_PX,
-				left: fold.left,
+				insetInlineStart: fold.left,
 				top: (fold.topMinute / 60) * HOUR_PX,
 				width: fold.width - BLOCK_GAP_PX,
 			}}

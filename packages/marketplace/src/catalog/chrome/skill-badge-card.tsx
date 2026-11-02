@@ -114,7 +114,7 @@ export default function SkillBadgeCard({
 				</div>
 			</button>
 			{/* The lifecycle control rides the corner, above the card face. */}
-			<div className="absolute top-2 right-2 z-20">
+			<div className="absolute end-2 top-2 z-20">
 				<button
 					aria-label={
 						installed

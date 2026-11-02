@@ -1,3 +1,4 @@
+import { activeLocale } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -6,6 +7,17 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+
+export {
+	moveSheetCell,
+	SHEET_PAGE_ROWS,
+	type SheetCell,
+	type SheetMoveKey,
+} from "./sheet-model-cursor.ts";
+export {
+	sheetAbsoluteTime,
+	sheetRelativeTime,
+} from "./sheet-model-time.ts";
 
 /** Every column the Sheet shows, left to right (the row-number gutter is extra). */
 export type SheetColumnId =
@@ -372,10 +384,22 @@ const STATUS_RANK = new Map(
 	THREAD_STATUS_ORDER.map((status, index) => [status, index])
 );
 
-const collator = new Intl.Collator(undefined, {
-	numeric: true,
-	sensitivity: "base",
-});
+let cachedCollator: { collator: Intl.Collator; locale: string } | null = null;
+
+/** Compares text the way the UI language orders it, not the OS. */
+function collator(): Intl.Collator {
+	const locale = activeLocale();
+	if (cachedCollator?.locale !== locale) {
+		cachedCollator = {
+			collator: new Intl.Collator(locale, {
+				numeric: true,
+				sensitivity: "base",
+			}),
+			locale,
+		};
+	}
+	return cachedCollator.collator;
+}
 
 /**
  * The value a column sorts on. `null` means an empty cell, which sorts last
@@ -414,7 +438,7 @@ function compareValues(a: number | string, b: number | string): number {
 	if (typeof a === "number" && typeof b === "number") {
 		return a - b;
 	}
-	return collator.compare(String(a), String(b));
+	return collator().compare(String(a), String(b));
 }
 
 export function sortSheetRows(
@@ -437,124 +461,4 @@ export function sortSheetRows(
 		}
 		return sign * compareValues(left, right) || a.defaultIndex - b.defaultIndex;
 	});
-}
-
-// ---------------------------------------------------------------------------
-// Cell cursor
-// ---------------------------------------------------------------------------
-
-/** A cell position: `row` -1 is the header row, `col` indexes SHEET_COLUMNS. */
-export interface SheetCell {
-	col: number;
-	row: number;
-}
-
-export interface SheetMoveKey {
-	ctrlKey?: boolean;
-	key: string;
-	metaKey?: boolean;
-}
-
-/** Rows a Page Up / Page Down jumps. */
-export const SHEET_PAGE_ROWS = 10;
-
-/**
- * Where a key moves the cursor, spreadsheet style: arrows step, Home/End go to
- * the row's ends, Ctrl/Cmd+Home/End to the sheet's corners, Page keys jump.
- * Returns null for keys that do not move. The header row is reachable with
- * ArrowUp from the first row (it hosts sort and resize).
- */
-export function moveSheetCell(
-	cell: SheetCell,
-	input: SheetMoveKey,
-	rowCount: number,
-	colCount: number = SHEET_COLUMNS.length
-): SheetCell | null {
-	const lastRow = rowCount - 1;
-	const lastCol = colCount - 1;
-	const corner = input.ctrlKey === true || input.metaKey === true;
-	switch (input.key) {
-		case "ArrowDown":
-			return { col: cell.col, row: Math.min(lastRow, cell.row + 1) };
-		case "ArrowUp":
-			return { col: cell.col, row: Math.max(-1, cell.row - 1) };
-		case "ArrowLeft":
-			return { col: Math.max(0, cell.col - 1), row: cell.row };
-		case "ArrowRight":
-			return { col: Math.min(lastCol, cell.col + 1), row: cell.row };
-		case "Home":
-			return corner
-				? { col: 0, row: Math.min(0, lastRow) }
-				: { col: 0, row: cell.row };
-		case "End":
-			return corner
-				? { col: lastCol, row: lastRow }
-				: { col: lastCol, row: cell.row };
-		case "PageDown":
-			return {
-				col: cell.col,
-				row: Math.min(lastRow, Math.max(0, cell.row + SHEET_PAGE_ROWS)),
-			};
-		case "PageUp":
-			return {
-				col: cell.col,
-				row: Math.max(Math.min(0, lastRow), cell.row - SHEET_PAGE_ROWS),
-			};
-		default:
-			return null;
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Time
-// ---------------------------------------------------------------------------
-
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-const SHORT_DATE = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "short",
-});
-const SHORT_DATE_YEAR = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "short",
-	year: "numeric",
-});
-const FULL_DATE = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "full",
-	timeStyle: "short",
-});
-
-/** "Just now", "4m ago", "3h ago", "Yesterday", "5d ago", then a date. */
-export function sheetRelativeTime(timestamp: number, now: number): string {
-	if (timestamp <= 0) {
-		return "";
-	}
-	const elapsed = Math.max(0, now - timestamp);
-	if (elapsed < MINUTE) {
-		return "Just now";
-	}
-	if (elapsed < HOUR) {
-		return `${Math.floor(elapsed / MINUTE)}m ago`;
-	}
-	if (elapsed < DAY) {
-		return `${Math.floor(elapsed / HOUR)}h ago`;
-	}
-	if (elapsed < 2 * DAY) {
-		return "Yesterday";
-	}
-	if (elapsed < 7 * DAY) {
-		return `${Math.floor(elapsed / DAY)}d ago`;
-	}
-	const date = new Date(timestamp);
-	return date.getFullYear() === new Date(now).getFullYear()
-		? SHORT_DATE.format(date)
-		: SHORT_DATE_YEAR.format(date);
-}
-
-/** The exact time a relative age stands for, for tooltips and `<time>`. */
-export function sheetAbsoluteTime(timestamp: number): string {
-	return timestamp > 0 ? FULL_DATE.format(new Date(timestamp)) : "";
 }

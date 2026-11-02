@@ -1,5 +1,4 @@
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	CHANNEL_LABELS,
 	type ChannelType,
@@ -13,6 +12,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { EmployeeBadge } from "@ryu/ui/components/employee-badge.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { Logo } from "@ryu/ui/components/logo.tsx";
@@ -220,7 +220,7 @@ export function CreateAgentDialog() {
 				autoSetupDiscord ? "discord" : null,
 				autoSetupWhatsApp ? "whatsapp" : null,
 			].filter((value): value is ChannelType => value !== null);
-			toast.success(`${trimmedName} created`);
+			toast.success(tl("{name} created", { name: trimmedName }));
 			reset();
 			setOpen(false);
 			if (advanced) {
@@ -244,10 +244,13 @@ export function CreateAgentDialog() {
 					remainingCount > 0
 						? tl(
 								"{channel} setup is ready. Add the other {remainingCount, plural, one {# selected channel} other {# selected channels}} from Channels.",
-								{ channel: CHANNEL_LABELS[firstChannelType], remainingCount }
+								{
+									channel: tl(CHANNEL_LABELS[firstChannelType]),
+									remainingCount,
+								}
 							)
 						: tl("{channel} setup is ready for {trimmedName}.", {
-								channel: CHANNEL_LABELS[firstChannelType],
+								channel: tl(CHANNEL_LABELS[firstChannelType]),
 								trimmedName,
 							})
 				);
@@ -297,7 +300,7 @@ export function CreateAgentDialog() {
 							<div className="flex items-center gap-1">
 								<Button
 									aria-label="Back"
-									className="-ml-2"
+									className="-ms-2"
 									disabled={submitting}
 									onClick={() => setStep("identity")}
 									size="icon-sm"
@@ -305,7 +308,7 @@ export function CreateAgentDialog() {
 									type="button"
 									variant="ghost-muted"
 								>
-									<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+									<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 								</Button>
 								<DialogTitle>New agent</DialogTitle>
 							</div>
@@ -435,7 +438,7 @@ export function CreateAgentDialog() {
 										Advanced setup
 									</Button>
 									<Button
-										className="sm:ml-auto"
+										className="sm:ms-auto"
 										disabled={!canSubmit}
 										loading={submitting}
 										onClick={() => submit(false)}

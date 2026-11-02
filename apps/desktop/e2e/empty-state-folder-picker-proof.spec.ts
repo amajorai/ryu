@@ -1,15 +1,14 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/empty-state-folder-picker-proof.html";
-const PROOF_SCREENSHOT = resolve(
-	import.meta.dirname,
-	"../../../docs/proof/empty-state-folder-picker-dotted-hover.png"
+const PROOF_SCREENSHOT = proofEvidencePath(
+	"empty-state-folder-picker-dotted-hover.png"
 );
-const PROOF_LOG = resolve(
-	import.meta.dirname,
-	"../../../docs/proof/empty-state-folder-picker-dotted-hover.log.json"
+const PROOF_LOG = proofEvidencePath(
+	"empty-state-folder-picker-dotted-hover.log.json"
 );
 
 test.setTimeout(120_000);

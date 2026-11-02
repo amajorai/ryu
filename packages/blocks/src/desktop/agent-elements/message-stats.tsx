@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
@@ -10,6 +10,11 @@ import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveAcpElapsedMs } from "./acp-elapsed.ts";
 import { ContextRing, deriveCacheMissTokens } from "./context-usage.tsx";
+import {
+	formatDecimal,
+	formatDurationParts,
+	formatPercentValue,
+} from "./locale-format.ts";
 import {
 	extractGenerationStats,
 	extractNativeAcpUsage,
@@ -24,6 +29,22 @@ import {
 	tokenCountLabel,
 } from "./native-token-count.mjs";
 import type { RenderedMessage } from "./utils/native-sdk-observation.ts";
+
+/** "1 token", "1,234 tokens" in the UI language; non-numeric operands as-is. */
+function tokensText(tl: LiteralMessage, value: NativeTokenOperand): string {
+	if (typeof value !== "number") {
+		return tokenCountLabel(value);
+	}
+	return tl(
+		"{count, plural, one {{countText} token} other {{countText} tokens}}",
+		{ count: value, countText: formatCount(value) ?? String(value) }
+	);
+}
+
+/** "123 ms" with the number in the UI language. */
+function millisecondsText(tl: LiteralMessage, value: number): string {
+	return tl("{duration} ms", { duration: formatCount(value) ?? String(value) });
+}
 
 function StatRow({ label, value }: { label: string; value: string }) {
 	return (
@@ -76,32 +97,40 @@ export function MessageStats({
 			>
 				{hasRing ? <ContextRing pct={pct} /> : null}
 				<span className="tabular-nums">
-					{tl("{speed} tok/s", { speed: String(speed) })}
+					{tl("{speed} tok/s", { speed: formatCount(speed) ?? String(speed) })}
 				</span>
 			</HoverCardTrigger>
 			<HoverCardContent className="w-60" typography="compact">
 				<div className="flex flex-col gap-1.5">
 					<StatRow
 						label="Generation"
-						value={`${stats.tokensPerSecond.toFixed(2)} tok/s`}
+						value={tl("{speed} tok/s", {
+							speed: formatDecimal(stats.tokensPerSecond, 2),
+						})}
 					/>
 					{isInferenceNumber(stats.promptPerSecond) ? (
 						<StatRow
 							label="Reading"
-							value={`${stats.promptPerSecond.toFixed(2)} tok/s`}
+							value={tl("{speed} tok/s", {
+								speed: formatDecimal(stats.promptPerSecond, 2),
+							})}
 						/>
 					) : null}
 					<StatRow
 						label="Completion"
-						value={tokenCountLabel(stats.completionTokens)}
+						value={tokensText(tl, stats.completionTokens)}
 					/>
 					{isInferenceNumber(stats.promptTokens) ? (
-						<StatRow label="Prompt" value={`${stats.promptTokens} tokens`} />
+						<StatRow
+							label="Prompt"
+							value={tokensText(tl, stats.promptTokens)}
+						/>
 					) : null}
 					{isInferenceNumber(stats.cacheReadTokens ?? stats.cachedTokens) ? (
 						<StatRow
 							label="Cache hits"
-							value={tokenCountLabel(
+							value={tokensText(
+								tl,
 								stats.cacheReadTokens ?? stats.cachedTokens
 							)}
 						/>
@@ -109,32 +138,39 @@ export function MessageStats({
 					{isInferenceNumber(stats.cacheWriteTokens) ? (
 						<StatRow
 							label="Cache writes"
-							value={`${stats.cacheWriteTokens} tokens`}
+							value={tokensText(tl, stats.cacheWriteTokens)}
 						/>
 					) : null}
 					{isInferenceNumber(stats.cacheMissTokens) ? (
 						<StatRow
 							label="Cache misses"
-							value={`${stats.cacheMissTokens} tokens`}
+							value={tokensText(tl, stats.cacheMissTokens)}
 						/>
 					) : null}
 					{isInferenceNumber(stats.reasoningTokens) ? (
 						<StatRow
 							label="Reasoning"
-							value={`${stats.reasoningTokens} tokens`}
+							value={tokensText(tl, stats.reasoningTokens)}
 						/>
 					) : null}
 					{isInferenceNumber(stats.ttftMs) ? (
-						<StatRow label="First token" value={`${stats.ttftMs} ms`} />
+						<StatRow
+							label="First token"
+							value={millisecondsText(tl, stats.ttftMs)}
+						/>
 					) : null}
 					{hasRing ? (
 						<>
 							<div className="my-0.5 h-px bg-border" />
 							<StatRow
 								label="Context"
-								value={`${used} / ${window} (${Math.round(pct)}%)`}
+								value={tl("{used} / {window} ({percent})", {
+									used: formatCount(used) ?? String(used),
+									window: formatCount(window) ?? String(window),
+									percent: formatPercentValue(Math.round(pct)),
+								})}
 							/>
-							<StatRow label="Remaining" value={`${remaining} tokens`} />
+							<StatRow label="Remaining" value={tokensText(tl, remaining)} />
 						</>
 					) : null}
 				</div>
@@ -158,15 +194,18 @@ const SECONDS_PER_MINUTE = 60;
 /** Format a millisecond duration as "12s" (<60s) or "1m 23s" (>=60s). */
 export function formatDuration(ms: number): string {
 	if (!Number.isFinite(ms) || ms <= 0) {
-		return "0s";
+		return formatDurationParts([[0, "second"]]);
 	}
 	const totalSeconds = Math.round(ms / MS_PER_SECOND);
 	if (totalSeconds < SECONDS_PER_MINUTE) {
-		return `${totalSeconds}s`;
+		return formatDurationParts([[totalSeconds, "second"]]);
 	}
 	const minutes = Math.floor(totalSeconds / SECONDS_PER_MINUTE);
 	const seconds = totalSeconds % SECONDS_PER_MINUTE;
-	return `${minutes}m ${seconds}s`;
+	return formatDurationParts([
+		[minutes, "minute"],
+		[seconds, "second"],
+	]);
 }
 
 /**
@@ -205,7 +244,10 @@ function usageTokenCount(usage: AcpUsage): NativeTokenOperand | null {
  * version, so per-field degradation is the design — an omitted row is correct,
  * a zero-valued row is a lie.
  */
-function acpBreakdownRows(usage: AcpUsage): Array<{
+function acpBreakdownRows(
+	usage: AcpUsage,
+	tl: LiteralMessage
+): Array<{
 	label: string;
 	value: string;
 }> {
@@ -217,15 +259,25 @@ function acpBreakdownRows(usage: AcpUsage): Array<{
 			inferenceNumber(usage.cachedReadTokens),
 			inferenceNumber(usage.cachedWriteTokens)
 		);
-	const push = (label: string, value: NativeTokenOperand, unit: string) => {
+	const push = (
+		label: string,
+		value: NativeTokenOperand,
+		unit: "ms" | "tokens"
+	) => {
 		if (isInferenceNumber(value)) {
-			rows.push({ label, value: `${formatCount(value) ?? "—"} ${unit}` });
+			rows.push({
+				label,
+				value:
+					unit === "ms" ? millisecondsText(tl, value) : tokensText(tl, value),
+			});
 		}
 	};
 	if (isInferenceNumber(usage.tokensPerSecond) && usage.tokensPerSecond > 0) {
 		rows.push({
 			label: "Generation",
-			value: `${usage.tokensPerSecond.toFixed(2)} tok/s`,
+			value: tl("{speed} tok/s", {
+				speed: formatDecimal(usage.tokensPerSecond, 2),
+			}),
 		});
 	}
 	push("Completion", usage.completionTokens, "tokens");
@@ -270,11 +322,15 @@ function acpBreakdownRows(usage: AcpUsage): Array<{
 		const pct = (usage.used / usage.total) * 100;
 		rows.push({
 			label: "Context window",
-			value: `${formatCount(usage.used) ?? "—"} / ${formatCount(usage.total) ?? "—"} (${Math.round(pct)}%)`,
+			value: tl("{used} / {window} ({percent})", {
+				percent: formatPercentValue(Math.round(pct)),
+				used: formatCount(usage.used) ?? "—",
+				window: formatCount(usage.total) ?? "—",
+			}),
 		});
 		rows.push({
 			label: "Remaining",
-			value: `${formatCount(Math.max(0, usage.total - usage.used)) ?? "—"} tokens`,
+			value: tokensText(tl, Math.max(0, usage.total - usage.used)),
 		});
 	}
 	return rows;
@@ -389,19 +445,27 @@ export function AcpUsageStats({
 			{hasContextWindow ? (
 				<>
 					<ContextRing pct={contextPct} />
-					<span>{Math.round(contextPct)}%</span>
+					<span>{formatPercentValue(Math.round(contextPct))}</span>
 				</>
 			) : null}
 			{tokens === null ? null : (
 				<span className="inline-flex items-center gap-1">
 					<NumberTicker startOnView={false} value={tokens} />
-					<span>tokens</span>
+					<span>
+						{tl("{count, plural, one {token} other {tokens}}", {
+							count: Number(tokens),
+						})}
+					</span>
 				</span>
 			)}
 			{showSpeed ? (
 				<>
 					{tokens === null ? null : <span aria-hidden="true">·</span>}
-					<span>{tl("{speed} tok/s", { speed: String(speed) })}</span>
+					<span>
+						{tl("{speed} tok/s", {
+							speed: formatCount(speed) ?? String(speed),
+						})}
+					</span>
 				</>
 			) : null}
 			{duration ? (
@@ -415,7 +479,7 @@ export function AcpUsageStats({
 		</span>
 	);
 
-	const breakdown = acpBreakdownRows(usage);
+	const breakdown = acpBreakdownRows(usage, tl);
 	if (breakdown.length === 0) {
 		return row;
 	}

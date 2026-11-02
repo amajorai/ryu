@@ -13,7 +13,8 @@ import { useNodeStore } from "@/src/store/useNodeStore.ts";
  * `LanguagePackBridge` and `useLanguageMode`) into Core's shared `ui-language`
  * preference so the Island follows it. Render it inside `LanguagePackBridge`.
  * The first sync per node only seeds an unset key; later mode or pack changes
- * are Desktop choices and always write.
+ * are Desktop choices and always write. In auto mode the shown locale rides
+ * along, so Core's own messages match the UI instead of re-probing the OS.
  */
 export function UiLanguagePreferenceSync() {
 	const node = useNodeStore((state) => state.getActiveNode());
@@ -22,12 +23,12 @@ export function UiLanguagePreferenceSync() {
 		[node.token, node.url, node.userJwt]
 	);
 	const [languageMode] = useLanguageMode();
-	const { selectedPackId } = useI18n();
+	const { locale, selectedPackId } = useI18n();
 	useEffect(() => {
 		void syncUiLanguagePreference(
 			target,
-			uiLanguagePreference(languageMode, selectedPackId)
+			uiLanguagePreference(languageMode, selectedPackId, locale)
 		);
-	}, [languageMode, selectedPackId, target]);
+	}, [languageMode, locale, selectedPackId, target]);
 	return null;
 }

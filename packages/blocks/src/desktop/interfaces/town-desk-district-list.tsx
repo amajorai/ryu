@@ -96,7 +96,7 @@ export function DistrictList({
 										),
 									}}
 								/>
-								<span className="truncate text-(--gk-ink)">
+								<span className="truncate text-(--gk-ink)" data-ryu-i18n="off">
 									{district.name}
 								</span>
 							</span>

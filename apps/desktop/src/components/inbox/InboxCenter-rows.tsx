@@ -31,8 +31,10 @@ import {
 	ZapIcon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { activeLocale, formatCompactAge } from "@ryu/i18n/core";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
+import { localizeApproval } from "@ryuhq/core-client/approval-text";
 import { riskTagLabel } from "@ryuhq/protocol/interfaces";
 import { useState } from "react";
 import {
@@ -49,10 +51,6 @@ import type { AppNotification } from "@/src/lib/api/notifications.ts";
 import type { AppInfo } from "@/src/lib/api/plugins.ts";
 import type { Quest } from "@/src/lib/api/quests.ts";
 
-const MINUTE_MS = 60_000;
-const HOUR_MS = 3_600_000;
-const DAY_MS = 86_400_000;
-
 /** A glyph per approval kind so the list scans by shape, not just by text. */
 export const KIND_ICON = {
 	tool_call: Wrench01Icon,
@@ -63,8 +61,14 @@ export const KIND_ICON = {
 	heal_fix: Pulse01Icon,
 } satisfies Record<ApprovalKind, IconSvgElement>;
 
-/** Short "2m"/"3h"/"5d" stamp — the tray has no room for a full timestamp. */
-export function shortAgo(value: string | null | undefined): string | null {
+/**
+ * Short "2m"/"3h"/"5d" stamp — the tray has no room for a full timestamp.
+ * English keeps that compact form; other locales get their own short units.
+ */
+export function shortAgo(
+	value: string | null | undefined,
+	locale: string = activeLocale()
+): string | null {
 	if (!value) {
 		return null;
 	}
@@ -72,17 +76,7 @@ export function shortAgo(value: string | null | undefined): string | null {
 	if (Number.isNaN(at)) {
 		return null;
 	}
-	const delta = Date.now() - at;
-	if (delta < MINUTE_MS) {
-		return "now";
-	}
-	if (delta < HOUR_MS) {
-		return `${Math.floor(delta / MINUTE_MS)}m`;
-	}
-	if (delta < DAY_MS) {
-		return `${Math.floor(delta / HOUR_MS)}h`;
-	}
-	return `${Math.floor(delta / DAY_MS)}d`;
+	return formatCompactAge(locale, at) || null;
 }
 
 export function ApprovalRow({
@@ -100,6 +94,8 @@ export function ApprovalRow({
 }) {
 	const tl = useLiteralMessages();
 	const risky = approval.risk_tags.length > 0;
+	// Core sends the card wording as messages; render them in this locale.
+	const text = localizeApproval(approval, tl);
 	return (
 		<TrayRow
 			actions={
@@ -120,11 +116,11 @@ export function ApprovalRow({
 			// list into a wall of pink.
 			meta={trayMeta(
 				...approval.risk_tags.slice(0, 2).map(riskTagLabel),
-				approval.summary
+				text.summary
 			)}
 			onOpen={onOpen}
-			openLabel={tl("Open {title} in the inbox", { title: approval.title })}
-			title={approval.title}
+			openLabel={tl("Open {title} in the inbox", { title: text.title })}
+			title={text.title}
 			tone={risky ? "danger" : "default"}
 			trailing={shortAgo(approval.created_at)}
 		/>

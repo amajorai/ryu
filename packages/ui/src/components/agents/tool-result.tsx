@@ -321,7 +321,7 @@ export function ToolResult({
 			<button
 				aria-controls={contentId}
 				aria-expanded={currentOpen}
-				className="group flex min-h-9 w-full items-center gap-2 rounded-lg py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+				className="group flex min-h-9 w-full items-center gap-2 rounded-lg py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 				id={triggerId}
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
@@ -370,7 +370,7 @@ export function ToolResult({
 				open={currentOpen}
 				role="region"
 			>
-				<div className="pt-1.5 pl-6">
+				<div className="ps-6 pt-1.5">
 					<div className="overflow-hidden rounded-xl bg-muted">
 						<div
 							aria-live="polite"
@@ -404,7 +404,7 @@ export function ToolResult({
 										<HugeiconsIcon className="size-3.5" icon={RefreshIcon} />
 									</ToolResultAction>
 								) : null}
-								<span className="ml-auto text-muted-foreground text-xs">
+								<span className="ms-auto text-muted-foreground text-xs">
 									<ActionSwapRollText value={status}>
 										{statusLabel}
 									</ActionSwapRollText>

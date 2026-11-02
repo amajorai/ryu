@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { motion, useAnimationFrame, useMotionValue } from "motion/react";
@@ -36,14 +37,14 @@ function TapeEntry({
 	quote: TickerQuote | undefined;
 }) {
 	const age = compactAge(item.updatedAt, now);
-	const speaker = item.role === "user" ? "You" : quote?.agent.name;
+	const speaker = item.role === "user" ? tr("You") : quote?.agent.name;
 	return (
 		<li className="flex shrink-0 items-center">
 			<button
 				aria-label={
 					copy
 						? undefined
-						: [item.title, quote?.agent.name, spokenAge(age)]
+						: [item.title, quote?.agent.name, spokenAge(item.updatedAt, now)]
 								.filter(Boolean)
 								.join(", ")
 				}
@@ -65,12 +66,17 @@ function TapeEntry({
 						{formatChange(quote.change)}
 					</span>
 				) : null}
-				<span className="max-w-[28ch] truncate text-foreground">
+				<span
+					className="max-w-[28ch] truncate text-foreground"
+					data-ryu-i18n="off"
+				>
 					{item.title}
 				</span>
 				<span className="max-w-[32ch] truncate text-muted-foreground">
-					{speaker ? `${speaker}: ` : null}
-					{item.message}
+					{speaker ? (
+						<span data-ryu-i18n="off">{tr("{speaker}:", { speaker })} </span>
+					) : null}
+					<span data-ryu-i18n="off">{item.message}</span>
 				</span>
 				<span className="text-muted-foreground tabular-nums">{age}</span>
 			</button>

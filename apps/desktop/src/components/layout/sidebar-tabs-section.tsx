@@ -138,7 +138,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 						{inSplit && (
 							<span
 								aria-hidden
-								className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary/60"
+								className="absolute inset-y-1.5 start-0 w-0.5 rounded-full bg-primary/60"
 							/>
 						)}
 						{/* Icon zone — page icon morphs to close X on row hover */}
@@ -325,7 +325,7 @@ function VerticalSplitBlock({
 								: `${label} · ${formatCount(members.length) ?? "—"}`}
 						</span>
 						<button
-							className="ml-auto rounded-lg px-1 text-muted-foreground text-xs hover:text-foreground"
+							className="ms-auto rounded-lg px-1 text-muted-foreground text-xs hover:text-foreground"
 							onClick={() => unsplit(members[0]?.id ?? "")}
 							type="button"
 						>

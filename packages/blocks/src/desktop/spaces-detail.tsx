@@ -6,6 +6,7 @@ import {
 	Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -191,7 +192,10 @@ export function SpaceDetail(props: SpacesDetailProps) {
 										: "Rebuilding this space's entity graph…"}
 									{retrievalModeProgress &&
 									retrievalModeProgress.totalChunks > 0
-										? ` ${retrievalModeProgress.processedChunks}/${retrievalModeProgress.totalChunks} chunks`
+										? ` ${tl("{processed}/{total} chunks", {
+												processed: retrievalModeProgress.processedChunks,
+												total: retrievalModeProgress.totalChunks,
+											})}`
 										: null}
 								</p>
 								{onCancelRetrievalMode ? (

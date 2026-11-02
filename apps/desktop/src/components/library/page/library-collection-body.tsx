@@ -12,6 +12,7 @@ import type {
 	ViewMode,
 } from "@ryu/blocks/desktop/view-toggle.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -204,7 +205,7 @@ export function LibraryCollectionBody({
 										? "No results"
 										: sectionMeta
 											? tl("No {label} yet", {
-													label: sectionMeta.label.toLowerCase(),
+													label: sentenceLabel(tl, sectionMeta.label),
 												})
 											: tl("No items yet")
 								}

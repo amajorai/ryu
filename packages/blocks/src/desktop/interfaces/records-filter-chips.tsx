@@ -1,7 +1,7 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import type { RecordsFilter } from "./records-model.ts";
 
 function Chip({
@@ -47,7 +47,7 @@ export function FilterChips({
 					<span className="text-muted-foreground">Status</span>
 					<span className="max-w-48 truncate font-medium">
 						{filter.statuses
-							.map((status) => THREAD_STATUS_LABELS[status])
+							.map((status) => threadStatusLabel(status))
 							.join(", ")}
 					</span>
 				</Chip>

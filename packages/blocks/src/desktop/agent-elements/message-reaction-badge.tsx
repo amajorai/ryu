@@ -1,6 +1,8 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 
+import { formatList } from "./locale-format.ts";
 import type { MessageReactionBucket } from "./message-reactions.tsx";
 
 /** How many distinct emoji the corner badge shows before it summarises. */
@@ -28,14 +30,17 @@ export function MessageReactionBadge({
 	buckets,
 	className,
 }: MessageReactionBadgeProps) {
+	const tl = useLiteralMessages();
 	if (buckets.length === 0) {
 		return null;
 	}
 	const shown = buckets.slice(0, BADGE_MAX_EMOJI);
 	const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
-	const label = `Reactions: ${buckets
-		.map((bucket) => `${bucket.emoji} ${formatNumber(bucket.count)}`)
-		.join(", ")}`;
+	const label = tl("Reactions: {reactions}", {
+		reactions: formatList(
+			buckets.map((bucket) => `${bucket.emoji} ${formatNumber(bucket.count)}`)
+		),
+	});
 	return (
 		<span
 			aria-label={label}
@@ -43,9 +48,9 @@ export function MessageReactionBadge({
 				// `ring-background`, not `ring-card`: see the dark-mode halo note in
 				// `message-reactions.tsx`.
 				"absolute -top-3 z-10 flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-sm leading-none ring-3 ring-background",
-				// A message on the right carries its badge on the left corner and
-				// vice versa, so the badge faces the conversation, not the gutter.
-				align === "end" ? "-left-2" : "-right-2",
+				// An end-aligned message carries its badge on its start corner and
+				// vice versa (mirrored in right-to-left layouts), so the badge faces the conversation, not the gutter.
+				align === "end" ? "-start-2" : "-end-2",
 				className
 			)}
 			data-align={align}
@@ -61,7 +66,7 @@ export function MessageReactionBadge({
 			{total > shown.length ? (
 				<span
 					aria-hidden="true"
-					className="pl-0.5 text-muted-foreground text-xs tabular-nums"
+					className="ps-0.5 text-muted-foreground text-xs tabular-nums"
 				>
 					{formatNumber(total)}
 				</span>

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { formatCliNumber } from "../../i18n/format.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 
 export const KEYS = {
 	autoRecall: "auto-recall-enabled",
@@ -153,9 +155,13 @@ export function contextBudgetValue(budget: ContextBudget): string {
 
 export function displayBudget(budget: ContextBudget): string {
 	if (budget === "off" || budget === "auto") {
-		return budget === "off" ? "Off" : "Auto";
+		return budget === "off" ? tr("Off") : tr("Auto");
 	}
-	return `${Number.parseInt(budget.slice("tokens:".length), 10).toLocaleString()} tokens`;
+	const tokens = Number.parseInt(budget.slice("tokens:".length), 10);
+	return tf("{count, plural, one {{tokens} token} other {{tokens} tokens}}", {
+		count: tokens,
+		tokens: formatCliNumber(tokens),
+	});
 }
 
 export function parseWholeNumber(value: string): number | null {

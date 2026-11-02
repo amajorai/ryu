@@ -23,7 +23,7 @@ describe("Business plan badge", () => {
 	test("renders the Business label, title, and requested palette", () => {
 		const html = renderToStaticMarkup(<PlanBadge plan="business" size="md" />);
 
-		expect(html).toContain("BUSINESS");
+		expect(html).toContain(">Business</span>");
 		expect(html).toContain('title="Ryu Business"');
 		expect(html).toContain("var(--plan-tier-business-gradient)");
 		expect(html).toContain("t-plan-badge-gradient");
@@ -61,7 +61,7 @@ describe("Plus plan badge", () => {
 	test("renders the private companion label, title, and palette", () => {
 		const html = renderToStaticMarkup(<PlanBadge plan="plus" size="md" />);
 
-		expect(html).toContain("PLUS");
+		expect(html).toContain(">Plus</span>");
 		expect(html).toContain('title="Ryu Plus"');
 		expect(planTierGradient("plus")).toContain("#56faf7");
 		expect(planTierGradient("plus")).toContain("#a162ff");
@@ -80,7 +80,7 @@ describe("Teams Lite plan badge", () => {
 			<PlanBadge plan="teams-lite" size="md" />
 		);
 
-		expect(html).toContain("TEAMS LITE");
+		expect(html).toContain(">Teams Lite</span>");
 		expect(html).toContain('title="Ryu Teams Lite"');
 		expect(planTierGradient("teams-lite")).toBe(TEAMS_GRADIENT);
 		expect(planTierColors("teams-lite")).toEqual([
@@ -149,7 +149,7 @@ describe("A Major Pass plan badge", () => {
 			<PlanBadge plan="marketplace-membership" size="md" />
 		);
 
-		expect(html).toContain("A MAJOR PASS");
+		expect(html).toContain(">A Major Pass</span>");
 		expect(html).toContain('title="Ryu A Major Pass"');
 		expect(planTierGradient("marketplace-membership")).toBe(
 			A_MAJOR_PASS_GRADIENT
@@ -215,7 +215,7 @@ describe("Enterprise plan badge", () => {
 			<PlanBadge plan="enterprise" size="md" />
 		);
 
-		expect(html).toContain("ENTERPRISE");
+		expect(html).toContain(">Enterprise</span>");
 		expect(html).toContain("var(--plan-tier-enterprise-gradient)");
 		expect(planTierColors("enterprise")).toEqual([
 			"#0f766e",

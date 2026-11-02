@@ -119,25 +119,25 @@ describe("the reaction badge inside UserMessage", () => {
 		]);
 	});
 
-	test("an own message carries the badge on the left corner", () => {
+	test("an own message carries the badge on its start corner", () => {
 		const container = mount(textMessage({ author: OWN }), [
 			{ count: 1, emoji: "👍", reactedByMe: false },
 		]);
 		const badge = badges(container)[0] as HTMLElement;
 		expect(badge.getAttribute("data-align")).toBe("end");
-		expect(badge.classList.contains("-left-2")).toBe(true);
-		expect(badge.classList.contains("-right-2")).toBe(false);
+		expect(badge.classList.contains("-start-2")).toBe(true);
+		expect(badge.classList.contains("-end-2")).toBe(false);
 	});
 
-	test("a teammate's message carries the badge on the right corner", () => {
+	test("a teammate's message carries the badge on its end corner", () => {
 		const container = mount(
 			textMessage({ author: { id: "teammate", name: "Mia Tan" } }),
 			[{ count: 1, emoji: "🎉", reactedByMe: false }]
 		);
 		const badge = badges(container)[0] as HTMLElement;
 		expect(badge.getAttribute("data-align")).toBe("start");
-		expect(badge.classList.contains("-right-2")).toBe(true);
-		expect(badge.classList.contains("-left-2")).toBe(false);
+		expect(badge.classList.contains("-end-2")).toBe(true);
+		expect(badge.classList.contains("-start-2")).toBe(false);
 	});
 
 	test("no reactions means no badge and no extra room above the bubble", () => {

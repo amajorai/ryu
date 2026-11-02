@@ -25,6 +25,10 @@ import {
 	type UsageSelectionChange,
 	unavailableUsageMessage,
 } from "./monitors-usage-accounts.ts";
+import {
+	usageMeterDetail,
+	usageWindowDetail,
+} from "./monitors-usage-format.ts";
 
 function UsageAccountSelect({
 	accountId,
@@ -95,13 +99,18 @@ export function CheckTypeFields({
 	if (form.checkType === "provider_usage_reset") {
 		const usageTargets = [
 			...(usageSnapshot?.windows ?? []).map((window) => ({
-				detail: `${window.usedPercent.toFixed(1)}% used${window.resetsAt ? ` · resets ${window.resetsAt}` : ""}`,
+				detail: usageWindowDetail(window.usedPercent, window.resetsAt, tl),
 				label: `${window.label}${window.model ? ` · ${window.model}` : ""}`,
 				targetId: window.targetId,
 			})),
 			...(usageSnapshot?.meters ?? []).flatMap((meter) =>
 				meter.values.map((value) => ({
-					detail: `${value.number.toFixed(2)} ${value.unit ?? value.kind}${value.resetsAt ? ` · resets ${value.resetsAt}` : meter.resetsAt ? ` · resets ${meter.resetsAt}` : ""}`,
+					detail: usageMeterDetail(
+						value.number,
+						value.unit ?? value.kind,
+						value.resetsAt || meter.resetsAt,
+						tl
+					),
 					label: meter.label,
 					targetId: value.targetId,
 				}))

@@ -2,7 +2,7 @@ import {
 	OnboardingActions,
 	OnboardingCta,
 } from "@ryu/blocks/desktop/onboarding-shell.tsx";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { TextMorph } from "@ryu/ui/components/text-morph.tsx";
 import { useEffect, useState } from "react";
@@ -12,13 +12,17 @@ import type {
 } from "@/src/lib/api/onboarding-profile.ts";
 import { ContinueRow } from "./OnboardingSetupStep.parts.tsx";
 
-export const PROFILE_LINES = [
-	"Reviewing your connected sources",
-	"Looking for patterns in what you do",
-	"Learning how your agent group fits together",
-	"Drafting useful memories",
-	"Checking recommendations before sharing them",
-];
+/** The progress lines, translated before render: TextMorph animates each
+ *  character, so the DOM localizer cannot translate them afterwards. */
+export function profileLines(tl: LiteralMessage): string[] {
+	return [
+		tl("Reviewing your connected sources"),
+		tl("Looking for patterns in what you do"),
+		tl("Learning how your agent group fits together"),
+		tl("Drafting useful memories"),
+		tl("Checking recommendations before sharing them"),
+	];
+}
 
 export function ProfileSetup({
 	alreadyBuilt,
@@ -42,6 +46,7 @@ export function ProfileSetup({
 	startedAt: number | null;
 }) {
 	const tl = useLiteralMessages();
+	const lines = profileLines(tl);
 	const [lineIndex, setLineIndex] = useState(0);
 	const [now, setNow] = useState(Date.now());
 	useEffect(() => {
@@ -49,7 +54,7 @@ export function ProfileSetup({
 			return;
 		}
 		const interval = window.setInterval(() => {
-			setLineIndex((current) => (current + 1) % PROFILE_LINES.length);
+			setLineIndex((current) => current + 1);
 			setNow(Date.now());
 		}, 1800);
 		return () => window.clearInterval(interval);
@@ -157,7 +162,7 @@ export function ProfileSetup({
 				role="status"
 			>
 				<TextMorph duration={320} numbers={false}>
-					{PROFILE_LINES[lineIndex]}
+					{lines[lineIndex % lines.length]}
 				</TextMorph>
 			</div>
 			<p className="text-detail text-muted-foreground">

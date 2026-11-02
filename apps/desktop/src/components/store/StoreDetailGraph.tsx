@@ -12,6 +12,7 @@
 // picture, not an editor. React Flow's base CSS is imported globally in index.css.
 
 import type { StoreGraphEdge, StoreGraphNode } from "@ryu/app-host/views";
+import { useReactFlowAriaLabels } from "@ryu/blocks/desktop/react-flow-labels.ts";
 import {
 	Background,
 	type Edge,
@@ -110,6 +111,7 @@ export default function StoreDetailGraph({
 }) {
 	const flowNodes = useMemo(() => layoutNodes(nodes, edges), [nodes, edges]);
 	const flowEdges = useMemo(() => toFlowEdges(edges), [edges]);
+	const ariaLabels = useReactFlowAriaLabels();
 
 	if (nodes.length === 0) {
 		return null;
@@ -118,6 +120,7 @@ export default function StoreDetailGraph({
 	return (
 		<div className="h-56 w-full overflow-hidden rounded-xl border border-border bg-muted/20">
 			<ReactFlow
+				ariaLabelConfig={ariaLabels}
 				edges={flowEdges}
 				edgesFocusable={false}
 				elementsSelectable={false}

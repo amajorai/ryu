@@ -1,5 +1,5 @@
-import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const base =
 	"/gateway-dialog-shell-proof.html?runtimeProof=true&gatewayDown=true&freezeStatusPoll=true";
@@ -43,11 +43,8 @@ const evidenceOverride = process.env.RYU_PROOF_EVIDENCE_DIR;
 const evidence = (name: string) =>
 	evidenceOverride
 		? `${evidenceOverride}/${name}.png`
-		: fileURLToPath(
-				new URL(
-					`../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/${name}.png`,
-					import.meta.url
-				)
+		: proofEvidencePath(
+				`test-coverage-sweep-20260924/parallel/desktop-gateway/${name}.png`
 			);
 test.use({ viewport: { width: 1440, height: 1100 } });
 test.setTimeout(180_000);

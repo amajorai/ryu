@@ -1,5 +1,6 @@
 "use client";
 
+import { useOptionalI18n } from "@ryu/i18n/react";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { Route } from "next";
@@ -111,6 +112,7 @@ function FeaturedUpdateImage({
 }
 
 function FeaturedUpdateMeta({ item }: { item: FeaturedUpdateData }) {
+	const locale = useOptionalI18n()?.locale;
 	return (
 		<p className="flex items-center gap-2 text-muted-foreground text-sm">
 			{item.label ? (
@@ -120,7 +122,7 @@ function FeaturedUpdateMeta({ item }: { item: FeaturedUpdateData }) {
 				</>
 			) : null}
 			<time className="tabular-nums" dateTime={item.date}>
-				{formatPublicationDate(item.date, "short")}
+				{formatPublicationDate(item.date, "short", locale)}
 			</time>
 		</p>
 	);

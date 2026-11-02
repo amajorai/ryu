@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -79,11 +80,11 @@ function moveFocus(event: KeyboardEvent<HTMLElement>) {
 function previewText(entry: MessengerEntry): string {
 	if (!entry.lastMessage) {
 		return entry.threadIds.length > 0
-			? "No messages yet"
-			: entry.description || "Start a conversation";
+			? tr("No messages yet")
+			: entry.description || tr("Start a conversation");
 	}
 	return entry.lastMessageRole === "user"
-		? `You: ${entry.lastMessage}`
+		? tr("You: {message}", { message: entry.lastMessage })
 		: entry.lastMessage;
 }
 
@@ -94,27 +95,34 @@ function previewText(entry: MessengerEntry): string {
 function rowLabel(entry: MessengerEntry, hitTitle: string | null): string {
 	let name = entry.name;
 	if (entry.kind === "team") {
-		name = `${entry.name} (team)`;
+		name = tr("{name} (team)", { name: entry.name });
 	} else if (entry.kind === "other") {
-		name = `${entry.name} (conversations without an agent)`;
+		name = tr("{name} (conversations without an agent)", { name: entry.name });
 	}
 	const parts = [name];
 	if (entry.pinned) {
-		parts.push("pinned");
+		parts.push(tr("Pinned"));
 	}
 	if (entry.running) {
-		parts.push("typing");
+		parts.push(tr("typing"));
 	}
 	if (entry.unread > 0) {
 		parts.push(
-			`${entry.unread} ${entry.unread === 1 ? "reply" : "replies"} waiting on you`
+			tr(
+				"{count, plural, one {# reply waiting on you} other {# replies waiting on you}}",
+				{ count: entry.unread }
+			)
 		);
 	}
 	if (entry.attention > 0) {
-		parts.push("needs attention");
+		parts.push(tr("needs attention"));
 	}
 	if (hitTitle !== null) {
-		parts.push(`matching conversation: ${hitTitle || "Untitled"}`);
+		parts.push(
+			tr("matching conversation: {title}", {
+				title: hitTitle || tr("Untitled"),
+			})
+		);
 	}
 	return parts.join(", ");
 }
@@ -165,7 +173,7 @@ function ContactRow({
 		preview = (
 			<span className="inline-flex max-w-full items-center gap-1">
 				<MessagesSquare aria-hidden="true" className="size-3.5 shrink-0" />
-				<span className="truncate">{hit.title || "Untitled"}</span>
+				<span className="truncate">{hit.title || tr("Untitled")}</span>
 			</span>
 		);
 	} else if (entry.running) {
@@ -175,10 +183,12 @@ function ContactRow({
 		preview = (
 			<>
 				<span className="flex h-[18px] items-center gap-1.5">
-					typing
+					{tr("typing")}
 					<TypingDots />
 				</span>
-				<span className="truncate">{previewText(entry)}</span>
+				<span className="truncate" data-ryu-i18n="off">
+					{previewText(entry)}
+				</span>
 			</>
 		);
 	}
@@ -189,7 +199,7 @@ function ContactRow({
 				aria-describedby={previewId}
 				aria-label={rowLabel(entry, hit?.title ?? null)}
 				className={cn(
-					"relative flex w-full items-center gap-2 rounded-lg py-2 pr-3 pl-1 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+					"relative flex w-full items-center gap-2 rounded-lg py-2 ps-1 pe-3 text-start outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 					selected
 						? "text-sidebar-primary-foreground"
 						: "text-sidebar-foreground hover:bg-sidebar-accent"
@@ -223,13 +233,14 @@ function ContactRow({
 					ringClassName={selected ? "ring-sidebar-primary" : "ring-sidebar"}
 					size="list"
 				/>
-				<span className="relative ml-1 flex min-w-0 flex-1 flex-col gap-0.5">
+				<span className="relative ms-1 flex min-w-0 flex-1 flex-col gap-0.5">
 					<span className="flex items-baseline gap-2">
 						<span
 							className={cn(
 								"min-w-0 flex-1 truncate text-sm",
 								unread ? "font-semibold" : "font-medium"
 							)}
+							data-ryu-i18n="off"
 						>
 							{entry.name}
 						</span>
@@ -243,6 +254,7 @@ function ContactRow({
 								clamp,
 								previewTone
 							)}
+							data-ryu-i18n="off"
 							id={previewId}
 						>
 							{preview}
@@ -269,10 +281,10 @@ function ListSkeleton() {
 	return (
 		<ul aria-hidden="true" className="flex flex-col gap-0.5 px-3">
 			{["a", "b", "c", "d", "e"].map((key) => (
-				<li className="flex items-center gap-2 py-2 pr-3 pl-1" key={key}>
+				<li className="flex items-center gap-2 py-2 ps-1 pe-3" key={key}>
 					<span className="w-2.5 shrink-0" />
 					<Skeleton className="size-11 shrink-0" radius="pill" />
-					<span className="ml-1 flex flex-1 flex-col gap-2">
+					<span className="ms-1 flex flex-1 flex-col gap-2">
 						<Skeleton className="h-3.5 w-1/2" radius="dense" />
 						<Skeleton className="h-3 w-5/6" radius="dense" />
 					</span>

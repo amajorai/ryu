@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import type { CrmRecord, Field, SchemaResponse } from "@/src/lib/api/crm.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const timestamp = "2026-10-02T00:00:00.000Z";
 const queryPath = "/api/crm/objects/deal/records/query";
@@ -496,9 +497,8 @@ test("selection, denied bulk deletion, retry, full-view CSV export, and record c
 	await expect(
 		page.getByRole("heading", { name: "Untitled deal" })
 	).toBeVisible();
-	const proof = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-crm-record-table-created-readback.png"
+	const proof = proofEvidencePath(
+		"test-coverage-sweep-20260924/evidence/desktop-crm-record-table-created-readback.png"
 	);
 	expect(
 		fixture.requests.filter(

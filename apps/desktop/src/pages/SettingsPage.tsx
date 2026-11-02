@@ -214,7 +214,7 @@ export default function SettingsPage() {
 							</div>
 						);
 						const className =
-							"group flex min-h-12 w-full items-center justify-between border-border border-b py-3 text-left transition-colors last:border-b-0 hover:text-foreground";
+							"group flex min-h-12 w-full items-center justify-between border-border border-b py-3 text-start transition-colors last:border-b-0 hover:text-foreground";
 						// Entries with an onClick (e.g. Channels) open a dialog rather
 						// than navigate to a route.
 						return onClick ? (

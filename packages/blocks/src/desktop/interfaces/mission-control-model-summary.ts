@@ -19,13 +19,10 @@ import {
 	ONLINE_WINDOW_MS,
 } from "./mission-control-model-types.ts";
 
-function plural(count: number, one: string, many = `${one}s`): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
 export function buildBanner(
 	alerts: readonly MissionAlert[],
-	counts: Record<ThreadStatus, number>
+	counts: Record<ThreadStatus, number>,
+	tl: LiteralMessage
 ): MissionBanner {
 	const failedThreads = alerts.filter(
 		(alert) => alert.severity === "warning" && alert.source === "thread"
@@ -37,24 +34,34 @@ export function buildBanner(
 	if (warnings > 0) {
 		const parts: string[] = [];
 		if (failedThreads > 0) {
-			parts.push(plural(failedThreads, "thread"));
+			parts.push(
+				tl("{count, plural, one {# thread} other {# threads}}", {
+					count: failedThreads,
+				})
+			);
 		}
 		if (failedRuns > 0) {
-			parts.push(plural(failedRuns, "scheduled run"));
+			parts.push(
+				tl("{count, plural, one {# scheduled run} other {# scheduled runs}}", {
+					count: failedRuns,
+				})
+			);
 		}
 		return {
 			detail: parts.join(" · "),
-			headline: plural(warnings, "failure"),
+			headline: tl("{count, plural, one {# failure} other {# failures}}", {
+				count: warnings,
+			}),
 			tone: "attention",
 		};
 	}
-	const parts = [`${counts.working} working`];
+	const parts = [tl("{count} working", { count: counts.working })];
 	if (counts["your-turn"] > 0) {
-		parts.push(`${counts["your-turn"]} your turn`);
+		parts.push(tl("{count} your turn", { count: counts["your-turn"] }));
 	}
 	return {
 		detail: parts.join(" · "),
-		headline: "All systems nominal",
+		headline: tl("All systems nominal"),
 		tone: "nominal",
 	};
 }
@@ -124,43 +131,44 @@ export function buildKpis(input: {
 	}
 	return [
 		{
-			caption: "running now",
+			caption: tl("running now"),
 			id: "working",
-			label: "Working",
+			label: tl("Working"),
 			tone: statusTone(counts.working, "live"),
 			trend: trendFor("working"),
-			trendLabel: "live threads by last update",
-			trendNote: "24h · by last update",
+			trendLabel: tl("live threads by last update"),
+			trendNote: tl("24h · by last update"),
 			value: counts.working,
 		},
 		{
-			caption: failures > 0 ? "failed" : "no failures",
+			caption: failures > 0 ? tl("failed") : tl("no failures"),
 			id: "attention",
-			label: "Needs attention",
+			label: tl("Needs attention"),
 			tone: statusTone(failures, "attention"),
 			trend: failureTrend,
-			trendLabel: "failed threads and scheduled runs",
-			trendNote: "24h · by last update",
+			trendLabel: tl("failed threads and scheduled runs"),
+			trendNote: tl("24h · by last update"),
 			value: failures,
 		},
 		{
-			caption: counts["your-turn"] > 0 ? "replies to read" : "all caught up",
+			caption:
+				counts["your-turn"] > 0 ? tl("replies to read") : tl("all caught up"),
 			id: "your-turn",
-			label: "Your turn",
+			label: tl("Your turn"),
 			tone: statusTone(counts["your-turn"], "advisory"),
 			trend: trendFor("your-turn"),
-			trendLabel: "threads awaiting you by last update",
-			trendNote: "24h · by last update",
+			trendLabel: tl("threads awaiting you by last update"),
+			trendNote: tl("24h · by last update"),
 			value: counts["your-turn"],
 		},
 		{
-			caption: "awaiting reply",
+			caption: tl("awaiting reply"),
 			id: "waiting",
-			label: "Waiting on agent",
+			label: tl("Waiting on agent"),
 			tone: "neutral",
 			trend: trendFor("waiting"),
-			trendLabel: "threads waiting on an agent by last update",
-			trendNote: "24h · by last update",
+			trendLabel: tl("threads waiting on an agent by last update"),
+			trendNote: tl("24h · by last update"),
 			value: counts.waiting,
 		},
 		{
@@ -168,21 +176,23 @@ export function buildKpis(input: {
 				agentCount: String(stations.length),
 			}),
 			id: "online",
-			label: "Agents active",
+			label: tl("Agents active"),
 			tone: statusTone(online, "live"),
 			trend: agentsPerHour.map((agents) => agents.size),
-			trendLabel: "active agents",
-			trendNote: "24h · agents active",
+			trendLabel: tl("active agents"),
+			trendNote: tl("24h · agents active"),
 			value: online,
 		},
 		{
-			caption: `of ${plural(total, "thread")}`,
+			caption: tl("{count, plural, one {of # thread} other {of # threads}}", {
+				count: total,
+			}),
 			id: "today",
-			label: "Updated today",
+			label: tl("Updated today"),
 			tone: "neutral",
 			trend: activity.buckets.map((bucket) => bucket.count),
-			trendLabel: "threads updated",
-			trendNote: "24h · updates",
+			trendLabel: tl("threads updated"),
+			trendNote: tl("24h · updates"),
 			value: updatedToday,
 		},
 	];

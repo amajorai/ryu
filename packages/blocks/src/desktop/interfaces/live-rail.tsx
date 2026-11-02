@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Tooltip,
@@ -18,10 +19,14 @@ const RAIL_GROUPS = [
 /** What a rail row says to a screen reader. */
 export function liveRailLabel(channel: LiveChannel): string {
 	if (!channel.live) {
-		return `${channel.agent.name}, offline`;
+		return tr("{name}, offline", { name: channel.agent.name });
 	}
-	const on = channel.current ? `: ${channel.current.title}` : "";
-	return `${channel.agent.name}, live${on}`;
+	return channel.current
+		? tr("{name}, live: {title}", {
+				name: channel.agent.name,
+				title: channel.current.title,
+			})
+		: tr("{name}, live", { name: channel.agent.name });
 }
 
 function RailRow({
@@ -40,7 +45,7 @@ function RailRow({
 				aria-current={selected ? "page" : undefined}
 				aria-label={liveRailLabel(channel)}
 				className={cn(
-					"flex w-full items-center gap-3 px-3 py-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-inset",
+					"flex w-full items-center gap-3 px-3 py-1.5 text-start outline-none transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-inset",
 					selected && "bg-sidebar-accent"
 				)}
 				onClick={() => onSelect(agent.id)}
@@ -53,11 +58,15 @@ function RailRow({
 							"truncate font-semibold text-sm leading-5",
 							channel.live ? "text-sidebar-foreground" : "text-muted-foreground"
 						)}
+						data-ryu-i18n="off"
 					>
 						{agent.name}
 					</span>
 					{channel.live && channel.current ? (
-						<span className="truncate text-[13px] text-muted-foreground leading-4">
+						<span
+							className="truncate text-[13px] text-muted-foreground leading-4"
+							data-ryu-i18n="off"
+						>
 							{channel.current.title}
 						</span>
 					) : null}
@@ -103,7 +112,7 @@ function CollapsedRow({
 					<span className="relative">
 						<LiveAvatar agent={agent} offline={!channel.live} size={32} />
 						{channel.live ? (
-							<span className="absolute -right-0.5 -bottom-0.5 flex rounded-full ring-2 ring-sidebar">
+							<span className="absolute -end-0.5 -bottom-0.5 flex rounded-full ring-2 ring-sidebar">
 								<LiveDot />
 							</span>
 						) : null}
@@ -147,7 +156,7 @@ export function LiveRail({
 		<nav
 			aria-label="Followed channels"
 			className={cn(
-				"flex h-full shrink-0 flex-col border-sidebar-border border-r bg-sidebar text-sidebar-foreground",
+				"flex h-full shrink-0 flex-col border-sidebar-border border-e bg-sidebar text-sidebar-foreground",
 				collapsed ? "w-14" : "w-60"
 			)}
 			data-collapsed={collapsed ? "true" : undefined}
@@ -155,7 +164,7 @@ export function LiveRail({
 			<div
 				className={cn(
 					"flex h-12 shrink-0 items-center",
-					collapsed ? "justify-center" : "justify-between pr-2 pl-3"
+					collapsed ? "justify-center" : "justify-between ps-3 pe-2"
 				)}
 			>
 				{collapsed ? null : (
@@ -176,9 +185,15 @@ export function LiveRail({
 					variant="ghost"
 				>
 					{collapsed ? (
-						<ArrowRightToLine aria-hidden="true" className="size-4" />
+						<ArrowRightToLine
+							aria-hidden="true"
+							className="size-4 rtl:-scale-x-100"
+						/>
 					) : (
-						<ArrowLeftToLine aria-hidden="true" className="size-4" />
+						<ArrowLeftToLine
+							aria-hidden="true"
+							className="size-4 rtl:-scale-x-100"
+						/>
 					)}
 				</Button>
 			</div>

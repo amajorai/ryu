@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, type Route, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // `fetchGatewayConfig` validates the whole served document, and a Gateway
 // always serves `auth` and `providers`; a bare `{ acp }` body is rejected as an
@@ -68,9 +68,8 @@ test("ACP settings share pending reads only within their credential scope", asyn
 	await expect(switches.nth(0)).not.toBeChecked();
 	await expect(switches.nth(1)).not.toBeChecked();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/acp-settings-scope-completed.png"
+		path: proofEvidencePath(
+			"performance-sweep/acp-settings-scope-completed.png"
 		),
 		fullPage: true,
 		animations: "disabled",

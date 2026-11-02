@@ -31,7 +31,7 @@ export function CommunityNavDrawer({
 					/>
 					<motion.div
 						animate={{ x: 0 }}
-						className="absolute inset-y-0 left-0 z-30 flex @[860px]/community:hidden w-[272px] max-w-[85%] flex-col border-border border-r bg-background shadow-lg"
+						className="absolute inset-y-0 start-0 z-30 flex @[860px]/community:hidden w-[272px] max-w-[85%] flex-col border-border border-e bg-background shadow-lg"
 						data-testid="community-nav-drawer"
 						exit={reduceMotion ? { opacity: 0 } : { x: "-100%" }}
 						initial={reduceMotion ? false : { x: "-100%" }}

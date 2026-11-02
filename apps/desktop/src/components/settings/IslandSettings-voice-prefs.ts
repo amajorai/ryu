@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { useEffect, useMemo, useState } from "react";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import {
@@ -192,7 +193,9 @@ export function useIslandVoicePrefs(
 		if (ttsEngines.length > 0) {
 			return ttsEngines.map((e) => ({
 				value: e.id,
-				label: `${e.display_name}${e.installed ? "" : " (not installed)"}`,
+				label: e.installed
+					? e.display_name
+					: tl("{name} (not installed)", { name: e.display_name }),
 			}));
 		}
 		// Engines not loaded yet: label the current engine from its id (the default

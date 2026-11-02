@@ -12,17 +12,16 @@
 // The bug: `hasSelection={selectedId != null}` with a close that sets `""`. The
 // dialog reopened itself on close and could not be dismissed at all.
 
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // The story pulls the shared marketplace module graph; vite compiles it on first
 // navigation, so allow headroom over the 30s default for cold-start CI runs.
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/skills-catalog-story.html";
-const PACK_PROOF_PATH = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/marketplace-skill-packs/jakubkrehel-featured.png"
+const PACK_PROOF_PATH = proofEvidencePath(
+	"marketplace-skill-packs/jakubkrehel-featured.png"
 );
 
 const dialog = (page: import("@playwright/test").Page) =>

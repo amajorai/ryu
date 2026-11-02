@@ -1,3 +1,5 @@
+import { translate as tr } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type GraphEdge,
 	type GraphNode,
@@ -5,10 +7,10 @@ import {
 	type InterfaceGroup,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { formatNameList, threadStatusLabel } from "./interface-renderer.ts";
 
 /** Fixed node footprints (px), so React Flow never has to measure them. */
 export const GRAPH_NODE_SIZE: Record<
@@ -210,21 +212,11 @@ export function settleGroups(graph: InterfaceGraph): InterfaceGraph {
 	};
 }
 
-function listNames(names: string[]): string {
-	if (names.length <= 1) {
-		return names[0] ?? "";
-	}
-	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-}
-
-function plural(count: number, one: string, many = `${one}s`): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
 /** The whole map in sentences, for screen readers (the canvas is visual). */
 export function graphSummary(
 	snapshot: InterfaceSnapshot,
-	graph: InterfaceGraph
+	graph: InterfaceGraph,
+	tl: LiteralMessage = tr
 ): string[] {
 	const label = new Map(graph.nodes.map((node) => [node.id, node.label]));
 	const teams = snapshot.groups.filter((group) => group.kind === "team");
@@ -233,21 +225,34 @@ export function graphSummary(
 		.filter((agent) => agent.status === "working")
 		.map((agent) => agent.name);
 	const lines = [
-		`Map of ${plural(snapshot.agents.length, "agent")}, ${plural(teams.length, "team")} and ${plural(projects.length, "project")}, with ${plural(snapshot.threads.length, "thread")} in all.`,
+		tl(
+			"Map of {agents, plural, one {# agent} other {# agents}}, {teams, plural, one {# team} other {# teams}} and {projects, plural, one {# project} other {# projects}}, with {threads, plural, one {# thread} other {# threads}} in all.",
+			{
+				agents: snapshot.agents.length,
+				projects: projects.length,
+				teams: teams.length,
+				threads: snapshot.threads.length,
+			}
+		),
 	];
 	const talks = graph.edges
 		.filter((edge) => edge.kind === "talks")
-		.map(
-			(edge) =>
-				`${label.get(edge.target) ?? "an agent"} (${plural(edge.weight, "thread")})`
+		.map((edge) =>
+			tl("{name} ({count, plural, one {# thread} other {# threads}})", {
+				count: edge.weight,
+				name: label.get(edge.target) ?? tl("an agent"),
+			})
 		);
 	if (talks.length > 0) {
-		lines.push(`You talk with ${listNames(talks)}.`);
+		lines.push(tl("You talk with {names}.", { names: formatNameList(talks) }));
 	}
 	lines.push(
 		working.length > 0
-			? `${listNames(working)} ${working.length === 1 ? "is" : "are"} working now.`
-			: "No agent is working right now."
+			? tl(
+					"{count, plural, one {{names} is working now.} other {{names} are working now.}}",
+					{ count: working.length, names: formatNameList(working) }
+				)
+			: tl("No agent is working right now.")
 	);
 	for (const status of ["attention", "your-turn"] as const) {
 		const names = graph.nodes
@@ -262,13 +267,25 @@ export function graphSummary(
 			})
 			.map((node) => node.label);
 		if (names.length > 0) {
-			lines.push(`${THREAD_STATUS_LABELS[status]}: ${listNames(names)}.`);
+			lines.push(
+				tl("{status}: {names}.", {
+					names: formatNameList(names),
+					status: threadStatusLabel(status, tl),
+				})
+			);
 		}
 	}
 	for (const edge of graph.edges) {
 		if (edge.kind === "collaborates") {
 			lines.push(
-				`${label.get(edge.source)} and ${label.get(edge.target)} work together in ${plural(edge.weight, "thread")}.`
+				tl(
+					"{first} and {second} work together in {count, plural, one {# thread} other {# threads}}.",
+					{
+						count: edge.weight,
+						first: label.get(edge.source) ?? "",
+						second: label.get(edge.target) ?? "",
+					}
+				)
 			);
 		}
 	}
@@ -276,10 +293,21 @@ export function graphSummary(
 		const members = linkedAgentIds(graph, `${group.kind}:${group.id}`)
 			.map((id) => label.get(`agent:${id}`))
 			.filter((name): name is string => Boolean(name));
+		const values = {
+			kind: group.kind,
+			members: formatNameList(members),
+			name: group.name,
+		};
 		lines.push(
 			members.length > 0
-				? `${group.kind === "team" ? "Team" : "Project"} ${group.name}: ${listNames(members)}.`
-				: `${group.kind === "team" ? "Team" : "Project"} ${group.name} has no agents yet.`
+				? tl(
+						"{kind, select, team {Team} other {Project}} {name}: {members}.",
+						values
+					)
+				: tl(
+						"{kind, select, team {Team} other {Project}} {name} has no agents yet.",
+						values
+					)
 		);
 	}
 	return lines;

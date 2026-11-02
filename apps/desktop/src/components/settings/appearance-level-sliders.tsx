@@ -63,8 +63,8 @@ export function ToolDetailSlider({
 					<span
 						className={cn(
 							"flex-1 truncate text-xs leading-none",
-							i === 0 && "text-left",
-							i === TOOL_DETAIL_STEPS.length - 1 && "text-right",
+							i === 0 && "text-start",
+							i === TOOL_DETAIL_STEPS.length - 1 && "text-end",
 							i > 0 && i < TOOL_DETAIL_STEPS.length - 1 && "text-center",
 							preset !== "custom" && i === step
 								? "text-foreground"
@@ -115,8 +115,8 @@ export function NotificationLayoutSlider({
 					<span
 						className={cn(
 							"flex-1 truncate text-xs leading-none",
-							index === 0 && "text-left",
-							index === NOTIFICATION_LAYOUT_STEPS.length - 1 && "text-right",
+							index === 0 && "text-start",
+							index === NOTIFICATION_LAYOUT_STEPS.length - 1 && "text-end",
 							index > 0 &&
 								index < NOTIFICATION_LAYOUT_STEPS.length - 1 &&
 								"text-center",

@@ -1,17 +1,14 @@
 import { copyFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const REPO_ROOT = path.resolve(HERE, "../../..");
 const FIXTURE_PATH = path.resolve(
 	HERE,
 	"../../core/src/plugin_manifest/fixtures/help-center.ui.html"
 );
-const HOST_PROOF_ARTIFACT = path.resolve(
-	REPO_ROOT,
-	"docs/proof/help-center-host-proof.png"
-);
+const HOST_PROOF_ARTIFACT = proofEvidencePath("help-center-host-proof.png");
 
 declare global {
 	interface Window {

@@ -81,13 +81,10 @@ export function ProviderSetup({
 				data-testid="onboarding-provider-check"
 			>
 				{configuredCount > 0
-					? [
-							"Provider connections already set up — ",
-							configuredCount,
-							" configured provider",
-							configuredCount === 1 ? "" : "s",
-							" found on this node.",
-						].join("")
+					? tl(
+							"Provider connections already set up — {count, plural, one {# configured provider} other {# configured providers}} found on this node.",
+							{ count: configuredCount }
+						)
 					: "Provider connections are optional. Sign in to a subscription provider or add an API key for cloud chats; local chats keep working if you skip this step."}
 			</div>
 			{visible.map((provider) => {
@@ -134,7 +131,7 @@ export function ProviderSetup({
 								</Button>
 							</div>
 						) : oauthUnavailable ? (
-							<p className="text-right text-muted-foreground text-xs">
+							<p className="text-end text-muted-foreground text-xs">
 								Add this provider from Settings → Providers.
 							</p>
 						) : (

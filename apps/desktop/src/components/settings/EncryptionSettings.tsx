@@ -12,9 +12,11 @@
 // token are only partly sealed — so a single
 // "Encrypted ✓" badge would misreport the node. Every store gets its own row,
 // and the file-fallback key (key stored next to the data it protects) is called
-// out as the degraded custody it is.
+// out as the degraded custody it is. Each row's name and explanation come from
+// `encryption-store-copy.ts`, keyed by store id, so they render in the
+// reader's language; Core's English text is only the fallback.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
@@ -33,6 +35,7 @@ import {
 	type KeyCustody,
 	type StoreCoverage,
 } from "@/src/lib/api/encryption.ts";
+import { storeRowCopy } from "./encryption-store-copy.ts";
 
 /** Human copy for each custody path, worst case spelled out. */
 const KEY_SOURCE_COPY = {
@@ -69,7 +72,7 @@ const STORE_BADGE = {
 >;
 
 /** "412 of 480 rows" — only when Core could actually measure the store. */
-function coverageLine(store: StoreCoverage): string | null {
+function coverageLine(store: StoreCoverage, tl: LiteralMessage): string | null {
 	if (store.total === null || store.total === 0) {
 		return null;
 	}
@@ -77,9 +80,14 @@ function coverageLine(store: StoreCoverage): string | null {
 		return null;
 	}
 	if (store.sealed === store.total) {
-		return `All ${formatNumber(store.total)} stored items encrypted`;
+		return tl("All {total} stored items encrypted", {
+			total: formatNumber(store.total),
+		});
 	}
-	return `${formatNumber(store.sealed)} of ${formatNumber(store.total)} stored items encrypted`;
+	return tl("{sealed} of {total} stored items encrypted", {
+		sealed: formatNumber(store.sealed),
+		total: formatNumber(store.total),
+	});
 }
 
 function KeySection({ custody }: { custody: KeyCustody }) {
@@ -276,15 +284,19 @@ function ScopedEncryptionSettings({
 				<SettingsGroup>
 					{status.stores.map((store) => {
 						const badge = STORE_BADGE[store.status];
-						const coverage = coverageLine(store);
+						const coverage = coverageLine(store, tl);
+						const copy = storeRowCopy(store, tl);
 						return (
 							<SettingsItem
 								actions={<Badge variant={badge.variant}>{badge.text}</Badge>}
 								key={store.id}
-								title={store.label}
+								title={copy.label}
 							>
 								<div className="flex flex-col gap-0.5 text-muted-foreground text-xs">
-									<span>{store.detail}</span>
+									<span>{copy.detail}</span>
+									{copy.notes.map((note) => (
+										<span key={note}>{note}</span>
+									))}
 									{coverage ? <span>{coverage}</span> : null}
 								</div>
 							</SettingsItem>

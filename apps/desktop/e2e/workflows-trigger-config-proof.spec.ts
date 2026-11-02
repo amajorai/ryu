@@ -2,12 +2,14 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 
-const evidenceDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
+// the tracked proof ledger, as the other proof specs do.
+const evidenceDir =
+	process.env.RYU_PROOF_EVIDENCE_DIR ??
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 import type { ProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 import {
 	type FixtureReset,
 	parseWorkflowFixtureSnapshot,

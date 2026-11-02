@@ -23,6 +23,7 @@ import {
 	TerminalSquare,
 } from "lucide-react";
 import { type ComponentType, useEffect, useMemo, useState } from "react";
+import { useReactFlowAriaLabels } from "../desktop/react-flow-labels.ts";
 import { ArchitectureStacked } from "./architecture.tsx";
 
 /**
@@ -288,6 +289,7 @@ const initialEdges: Edge[] = [
 ];
 
 export default function ArchitectureFlow() {
+	const ariaLabels = useReactFlowAriaLabels();
 	// React Flow measures the DOM, so only render once mounted on the client to
 	// avoid a hydration mismatch and a zero-height first paint.
 	const [mounted, setMounted] = useState(false);
@@ -306,6 +308,7 @@ export default function ArchitectureFlow() {
 				<div className="h-[560px] w-full overflow-hidden rounded-2xl border border-border/60 bg-muted/20">
 					{mounted ? (
 						<ReactFlow
+							ariaLabelConfig={ariaLabels}
 							className="!bg-transparent"
 							edges={edges}
 							fitView

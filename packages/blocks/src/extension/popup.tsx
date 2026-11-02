@@ -7,6 +7,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
 
@@ -74,7 +75,7 @@ export function PopupRow({
 	return (
 		<button
 			aria-busy={disabled || undefined}
-			className="group/row flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors duration-150 hover:bg-muted hover:duration-0 focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
+			className="group/row flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-sm transition-colors duration-150 hover:bg-muted hover:duration-0 focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
 			disabled={disabled}
 			onClick={onClick}
 			title={title}
@@ -121,7 +122,7 @@ export function ExtensionPopup({
 
 	return (
 		<div className="flex h-full flex-col bg-background text-foreground">
-			<header className="flex h-10 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
+			<header className="flex h-10 shrink-0 items-center justify-between gap-2 ps-4 pe-2">
 				<div className="flex min-w-0 items-center gap-2">
 					<span
 						aria-hidden="true"
@@ -141,7 +142,7 @@ export function ExtensionPopup({
 						title="Open Ryu"
 						variant="ghost-muted"
 					>
-						<HugeiconsIcon icon={ArrowUpRight01Icon} size={16} />
+						<DirectionalIcon icon={ArrowUpRight01Icon} size={16} />
 					</Button>
 					{user
 						? (userMenu ?? (

@@ -160,6 +160,7 @@ function databaseCounts(
 }
 
 function DatabasePreview({ source }: { source: string }) {
+	const tl = useLiteralMessages();
 	const counts = databaseCounts(source);
 
 	return (
@@ -170,8 +171,10 @@ function DatabasePreview({ source }: { source: string }) {
 			</div>
 			{counts ? (
 				<p className="text-muted-foreground text-xs">
-					{counts.columns} {counts.columns === 1 ? "column" : "columns"} ·{" "}
-					{counts.rows} {counts.rows === 1 ? "row" : "rows"}
+					{tl(
+						"{columns, plural, one {# column} other {# columns}} · {rows, plural, one {# row} other {# rows}}",
+						{ columns: counts.columns, rows: counts.rows }
+					)}
 				</p>
 			) : (
 				<p className="text-muted-foreground text-xs">Empty database</p>
@@ -246,6 +249,7 @@ export function SpaceProjectFolder({
 		getDocument,
 		listDocuments,
 	} = useSpacesContext();
+	const tl = useLiteralMessages();
 	const folderRef = useRef<HTMLDivElement>(null);
 	const nearViewport = useInView(folderRef, {
 		once: true,
@@ -377,7 +381,7 @@ export function SpaceProjectFolder({
 			</div>
 		),
 		id: document.id,
-		label: `Open ${document.title || "Untitled"}`,
+		label: tl("Open {title}", { title: document.title || tl("Untitled") }),
 		onClick: () =>
 			openTab(spaceDocumentPath(space.id, document), {
 				title: document.title,
@@ -454,7 +458,7 @@ export function SpaceProjectFolder({
 				title={space.name}
 			/>
 			<FavoriteStar
-				className="absolute top-2 right-2"
+				className="absolute end-2 top-2"
 				favorited={favorited}
 				onToggle={onToggleFavorite}
 			/>

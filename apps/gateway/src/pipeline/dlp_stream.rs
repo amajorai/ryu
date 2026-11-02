@@ -59,16 +59,16 @@ pub(super) fn rewrite_sse_for_dlp(
             collect_sse_payload_lanes(frame, "", &mut remaining_lanes);
         }
     }
+    // `sanitize_pending` also reads the normalized view, so a match that only
+    // the fold reveals (a zero-width split, fullwidth `＠`) masks the payload
+    // instead of passing the raw-text check unchanged.
+    let sanitizing = violation.is_some() && matches!(policy, FirewallPolicy::Sanitize);
     if scanner.redact_outbound(&remaining).0 != remaining
         || remaining_lanes.values().any(|text| {
             scanner.redact_outbound(text).0 != *text
-                || (violation.is_some()
-                    && matches!(policy, FirewallPolicy::Sanitize)
-                    && scanner.sanitize(text) != *text)
+                || (sanitizing && sanitize_pending(text, scanner))
         })
-        || (violation.is_some()
-            && matches!(policy, FirewallPolicy::Sanitize)
-            && scanner.sanitize(&remaining) != remaining)
+        || (sanitizing && sanitize_pending(&remaining, scanner))
     {
         mask_sse_payload_text(&mut payload);
     }
@@ -77,9 +77,16 @@ pub(super) fn rewrite_sse_for_dlp(
         collect_json_strings_compact(&payload, &mut text);
         text
     };
-    if violation.is_some() && matches!(policy, FirewallPolicy::Sanitize) {
+    if sanitizing {
         sanitize_json_strings(&mut payload, scanner);
         drop_choice_logprobs(&mut payload);
+        // Fail closed: the caller replaces the stream with a block notice.
+        if let Some(survivor) = sse_sanitize_survivor(&payload, scanner) {
+            return Err(format!(
+                "provider stream could not be redacted: {}",
+                survivor.pattern_name
+            ));
+        }
         // Values only: the assembled text is what an output evaluator judges
         // and what an evaluator Sanitize replays, so no object keys.
         assembled = String::new();
@@ -261,13 +268,39 @@ pub(super) async fn apply_outbound_firewall_stream(
                 );
             }
             InlineOutcome::Sanitize => {
+                let model = ctx.agent_id.as_deref().unwrap_or("unknown");
+                let sanitized = sanitize_text_or_survivor(&assembled, resolved.as_ref())
+                    .unwrap_or_else(|_| SANITIZE_MASK.to_owned());
+                // Fail closed: a Sanitize evaluator whose detector still
+                // matches the redacted text blocks instead of replaying it, and
+                // so does a flag (a judge's) that redaction rewrote nothing for.
+                let unredacted = (sanitized == assembled)
+                    .then(|| format!("{reason}: flagged content could not be redacted"));
+                if let Some(survivor) = unredacted
+                    .or_else(|| output_sanitize_survivor(&state, resolved.as_ref(), &sanitized))
+                {
+                    warn!(
+                        request_id = %request_id,
+                        %survivor,
+                        "inline evaluator: match survived Sanitize; blocked (streaming)"
+                    );
+                    state.metrics.inc_firewall_blocked();
+                    audit_inline_evaluator(&state, &ctx, model, "output", "blocked", &survivor);
+                    return (
+                        Body::from(sse_content_frames(&format!(
+                            "[Ryu firewall] Response blocked by evaluator: {survivor}."
+                        ))),
+                        crate::concurrency::AdmissionPermit::none(),
+                    );
+                }
                 warn!(
                     request_id = %request_id,
                     %reason,
                     "inline evaluator: sanitized outbound response (streaming)"
                 );
+                audit_inline_evaluator(&state, &ctx, model, "output", "sanitized", &reason);
                 return (
-                    Body::from(sse_content_frames(&resolved.sanitize(&assembled))),
+                    Body::from(sse_content_frames(&sanitized)),
                     crate::concurrency::AdmissionPermit::none(),
                 );
             }

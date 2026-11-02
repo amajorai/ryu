@@ -13,6 +13,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { imageViewerControlClasses } from "@ryu/ui/components/button-variants.ts";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -40,6 +42,7 @@ import {
 } from "./image-lightbox-stage-effects.ts";
 import type { ImageLightboxProps } from "./image-lightbox-types.ts";
 import { useLightbox } from "./image-lightbox-use-lightbox.ts";
+import { formatDecimal } from "./locale-format.ts";
 
 interface Landing {
 	dx: number;
@@ -59,6 +62,9 @@ export function Stage({
 	className = "",
 }: ImageLightboxProps) {
 	const tl = useLiteralMessages();
+	// Previous sits at the inline start, so in right-to-left layouts it is on
+	// the right and the → key reaches it (see `useStageKeyboard`).
+	const rtl = useDirection() === "rtl";
 	const reduced = useReducedMotion();
 	const titleId = useId();
 	const hintId = useId();
@@ -438,27 +444,29 @@ export function Stage({
 				<>
 					<Button
 						appearance="image-viewer"
-						aria-label="Previous image (←)"
-						className="pointer-events-auto absolute top-1/2 left-3 z-10 -translate-y-1/2 sm:left-4"
+						aria-label={
+							rtl ? tl("Previous image (→)") : tl("Previous image (←)")
+						}
+						className="pointer-events-auto absolute start-3 top-1/2 z-10 -translate-y-1/2 sm:start-4"
 						data-lightbox-focus="1"
 						onClick={goToPrevious}
 						size="icon"
 						type="button"
 						variant="ghost"
 					>
-						<HugeiconsIcon className="size-5" icon={ArrowLeft01Icon} />
+						<DirectionalIcon className="size-5" icon={ArrowLeft01Icon} />
 					</Button>
 					<Button
 						appearance="image-viewer"
-						aria-label="Next image (→)"
-						className="pointer-events-auto absolute top-1/2 right-3 z-10 -translate-y-1/2 sm:right-4"
+						aria-label={rtl ? tl("Next image (←)") : tl("Next image (→)")}
+						className="pointer-events-auto absolute end-3 top-1/2 z-10 -translate-y-1/2 sm:end-4"
 						data-lightbox-focus="1"
 						onClick={goToNext}
 						size="icon"
 						type="button"
 						variant="ghost"
 					>
-						<HugeiconsIcon className="size-5" icon={ArrowRight01Icon} />
+						<DirectionalIcon className="size-5" icon={ArrowRight01Icon} />
 					</Button>
 				</>
 			)}
@@ -469,7 +477,7 @@ export function Stage({
 				home first, then closes.
 			</p>
 			<p className="sr-only" role="status">
-				{tl("Zoom {zoom} times", { zoom: settledZoom.toFixed(1) })}
+				{tl("Zoom {zoom} times", { zoom: formatDecimal(settledZoom, 1) })}
 			</p>
 		</div>
 	);

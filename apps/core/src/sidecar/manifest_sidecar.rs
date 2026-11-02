@@ -31,9 +31,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::plugin_manifest::schema::{
-    BinarySpec, ProviderRegistrationSpec, SidecarProcess, SidecarSpec,
-};
+#[cfg(test)]
+use crate::plugin_manifest::schema::BinarySpec;
+use crate::plugin_manifest::schema::{ProviderRegistrationSpec, SidecarProcess, SidecarSpec};
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 
 /// The Gateway grant a Community-tier plugin must hold (approved) before Core will
@@ -1437,13 +1437,6 @@ fn url_filename(url: &str) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("cannot derive a safe filename from '{url}'"))
 }
 
-/// The per-version install directory for a binary sidecar:
-/// `<plugin_dir>/bin/<version>`. Namespacing by version means bumping `version`
-/// re-downloads/re-extracts into a fresh path.
-fn version_dir(plugin_dir: &Path, bin: &BinarySpec) -> PathBuf {
-    plugin_dir.join("bin").join(&bin.version)
-}
-
 /// SSRF-screen a plugin-controlled URL and require https. Shared by the raw-binary
 /// and archive download paths.
 async fn screen_https(url: &str) -> anyhow::Result<()> {
@@ -1459,126 +1452,13 @@ async fn screen_https(url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Download (checksum-verified, idempotent) the binary — raw executable or archive
-/// — into its versioned install dir, extract if archived, make the executable
-/// runnable, and return the path to run.
-///
-/// **Integrity gate (fail-closed):** a Community-tier plugin's binary sidecar MUST
-/// declare a non-empty `sha256` — an arbitrary https URL with no checksum is
-/// unverifiable native code, so the spawn is refused, mirroring how
-/// [`prepare_node_backend`] refuses a `backend_sha256` mismatch. Core-tier
-/// (first-party built-in) manifests keep the historical optional-checksum
-/// behavior — they are compiled into this binary and reviewed in-repo.
-async fn ensure_binary(
-    plugin_id: &str,
-    bin: &BinarySpec,
-    plugin_dir: &Path,
-    downloads: &crate::downloads::DownloadCenter,
-) -> anyhow::Result<PathBuf> {
-    let dir = version_dir(plugin_dir, bin);
-    let sha = bin.sha256.clone().filter(|s| !s.is_empty());
-    let community = owning_manifest(plugin_id)
-        .map(|manifest| crate::plugins::builtins::tier_for_manifest(&manifest))
-        .unwrap_or(crate::plugin_manifest::PluginTier::Community)
-        == crate::plugin_manifest::PluginTier::Community;
-    if community && sha.is_none() {
-        return Err(anyhow::anyhow!(
-            "binary sidecar for community plugin '{plugin_id}' declares no sha256 for '{}'; \
-             refusing to download/run an unverifiable binary (add a sha256 to the manifest)",
-            bin.url
-        ));
-    }
-
-    let exe = match &bin.archive {
-        // ── Raw executable ────────────────────────────────────────────────────
-        None => {
-            let dest = dir.join(url_filename(&bin.url)?);
-            // Idempotency: without a checksum an already-present binary is trusted;
-            // with one, DownloadCenter verifies the on-disk file (skip / re-fetch).
-            if !(sha.is_none() && dest.exists()) {
-                screen_https(&bin.url).await?;
-                downloads
-                    .download_blocking(crate::downloads::DownloadSpec {
-                        kind: crate::downloads::DownloadKind::Other,
-                        role: crate::downloads::DownloadRole::Plugin,
-                        label: format!("plugin sidecar binary: {}", bin.url),
-                        url: bin.url.clone(),
-                        dest: dest.clone(),
-                        sha256: sha,
-                        version_record: None,
-                    })
-                    .await?;
-            }
-            dest
-        }
-        // ── Archive (extract the whole tree so sibling libs stay co-located) ───
-        Some(fmt) => {
-            let root = dir.join("root");
-            // `binary_name` is required + validated for archives; unwrap is safe
-            // post-validation but guard anyway (fail-closed, no panic).
-            let binary_name = bin
-                .binary_name
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("archive sidecar is missing 'binary_name'"))?;
-            let exe = root.join(binary_name);
-            // Idempotency: once extracted, reuse it — re-reading a multi-hundred-MB
-            // archive on every start is not worth it. The checksum guarantee is
-            // enforced at install time (below), not on every boot.
-            if !exe.exists() {
-                let archive_path = dir.join(url_filename(&bin.url)?);
-                if !(sha.is_none() && archive_path.exists()) {
-                    screen_https(&bin.url).await?;
-                    downloads
-                        .download_blocking(crate::downloads::DownloadSpec {
-                            kind: crate::downloads::DownloadKind::Other,
-                            role: crate::downloads::DownloadRole::Plugin,
-                            label: format!("plugin sidecar archive: {}", bin.url),
-                            url: bin.url.clone(),
-                            dest: archive_path.clone(),
-                            sha256: sha,
-                            version_record: None,
-                        })
-                        .await?;
-                }
-                extract_archive(fmt, &archive_path, &root).await?;
-                if !exe.exists() {
-                    return Err(anyhow::anyhow!(
-                        "archive did not contain the declared binary '{binary_name}'"
-                    ));
-                }
-            }
-            exe
-        }
-    };
-
-    make_executable(&exe).await;
-    Ok(exe)
-}
-
-/// Extract `archive_path` (format `fmt`) into `dest_dir` on a blocking thread
-/// (the extractors are synchronous + CPU-bound). Preserves the archive's internal
-/// directory structure so an executable's sibling libraries land next to it.
-async fn extract_archive(fmt: &str, archive_path: &Path, dest_dir: &Path) -> anyhow::Result<()> {
-    let fmt = fmt.to_owned();
-    let archive_path = archive_path.to_owned();
-    let dest_dir = dest_dir.to_owned();
-    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-        let data = std::fs::read(&archive_path)
-            .map_err(|e| anyhow::anyhow!("reading archive {}: {e}", archive_path.display()))?;
-        use crate::sidecar::download_manager::{
-            extract_tar_bz2_to_dir, extract_tar_gz_to_dir, extract_zip_to_dir,
-        };
-        match fmt.as_str() {
-            "tar.gz" => extract_tar_gz_to_dir(&data, &dest_dir, None)?,
-            "tar.bz2" => extract_tar_bz2_to_dir(&data, &dest_dir, None)?,
-            "zip" => extract_zip_to_dir(&data, &dest_dir, None)?,
-            other => return Err(anyhow::anyhow!("unsupported archive format '{other}'")),
-        };
-        Ok(())
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("archive extraction task panicked: {e}"))?
-}
+// Binary install (version dir, download, confined extraction) lives in
+// `manifest_sidecar_binary.rs`; re-exported so callers and tests keep the paths.
+#[path = "manifest_sidecar_binary.rs"]
+mod binary;
+use binary::ensure_binary;
+#[cfg(test)]
+use binary::version_dir;
 
 /// Best-effort `chmod 755` on Unix so a freshly downloaded binary can be spawned.
 /// A no-op on Windows (executability is not a permission bit there).

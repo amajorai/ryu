@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -38,7 +39,7 @@ export {
 function ClockWidget({ now }: { now: number }) {
 	const date = new Date(now);
 	const clock = glanceClock(date);
-	const day = new Intl.DateTimeFormat(undefined, {
+	const day = dateFormatter(activeLocale(), {
 		day: "numeric",
 		month: "short",
 		weekday: "short",
@@ -78,12 +79,14 @@ function WaitingWidget({
 	const waiting = useMemo(() => glanceWaitingOnAgent(snapshot), [snapshot]);
 	const first = waiting[0];
 	const near = distance === "near";
-	let subtitle = "No threads";
+	let subtitle = tl("No threads");
 	if (first) {
 		subtitle =
 			near || waiting.length === 1
 				? glanceThreadTitle(first)
-				: `${waiting.length} threads`;
+				: tl("{count, plural, one {# thread} other {# threads}}", {
+						count: waiting.length,
+					});
 	}
 	const face = (
 		<SmallFace
@@ -101,7 +104,7 @@ function WaitingWidget({
 						count: String(waiting.length),
 						title: glanceThreadTitle(first),
 					})}
-					className="-m-[3.4cqw] @max-[32rem]:-m-4 flex @max-[32rem]:w-[calc(100%+2rem)] w-[calc(100%+6.8cqw)] min-w-0 flex-1 flex-col @max-[32rem]:p-4 p-[3.4cqw] text-left outline-none transition-colors hover:bg-foreground/[0.03] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+					className="-m-[3.4cqw] @max-[32rem]:-m-4 flex @max-[32rem]:w-[calc(100%+2rem)] w-[calc(100%+6.8cqw)] min-w-0 flex-1 flex-col @max-[32rem]:p-4 p-[3.4cqw] text-start outline-none transition-colors hover:bg-foreground/[0.03] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 					onClick={() => onOpenThread(first.id)}
 					title="Threads where you wrote last and the agent has not replied"
 					type="button"
@@ -135,6 +138,7 @@ function UpcomingWidget({ distance, now, snapshot }: GlanceHomeProps) {
 							<li className="flex min-w-0 flex-col py-[1cqw]" key={event.id}>
 								<span
 									className={cn("truncate font-medium text-foreground", W.row)}
+									data-ryu-i18n="off"
 								>
 									{event.title}
 								</span>
@@ -203,7 +207,7 @@ function AgentsWidget({
 										className="size-[clamp(2rem,8cqw,3.75rem)]"
 									/>
 									<GlanceMark
-										className="absolute right-0 bottom-0 size-[clamp(0.5rem,1.8cqw,0.875rem)] ring-[0.5cqw] ring-muted"
+										className="absolute end-0 bottom-0 size-[clamp(0.5rem,1.8cqw,0.875rem)] ring-[0.5cqw] ring-muted"
 										state={tile.state}
 									/>
 								</span>
@@ -212,6 +216,7 @@ function AgentsWidget({
 										"max-w-full truncate font-medium text-foreground",
 										W.sub
 									)}
+									data-ryu-i18n="off"
 								>
 									{tile.agent.name}
 								</span>

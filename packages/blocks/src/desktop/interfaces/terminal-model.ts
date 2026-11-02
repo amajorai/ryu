@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	channelHandle,
@@ -24,11 +25,21 @@ import { agentById, agentHandle } from "./interface-renderer.ts";
  * names, so whatever a listing prints can be typed back as a filter.
  */
 export const TERMINAL_STATUS_WORDS: Record<ThreadStatus, string> = {
-	attention: "attention",
-	quiet: "quiet",
-	waiting: "waiting",
-	working: "working",
-	"your-turn": "your-turn",
+	get attention() {
+		return tr("attention");
+	},
+	get quiet() {
+		return tr("quiet");
+	},
+	get waiting() {
+		return tr("waiting");
+	},
+	get working() {
+		return tr("working");
+	},
+	get "your-turn"() {
+		return tr("your-turn");
+	},
 };
 
 /**
@@ -94,7 +105,7 @@ export interface TerminalCounts {
 }
 
 export function threadTitle(thread: InterfaceThread | undefined): string {
-	return thread?.title.trim() || "Untitled thread";
+	return thread?.title.trim() || tr("Untitled thread");
 }
 
 /** Who a thread belongs to, as a terminal would print it. */

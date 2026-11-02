@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("agent profile shows only its own recent activity and opens the matching transcript", async ({
 	page,
@@ -54,9 +54,8 @@ test("agent profile shows only its own recent activity and opens the matching tr
 
 	await page.screenshot({
 		fullPage: true,
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/agent-activity-profile/agent-activity-profile-proof.png"
+		path: proofEvidencePath(
+			"agent-activity-profile/agent-activity-profile-proof.png"
 		),
 	});
 

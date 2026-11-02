@@ -15,7 +15,7 @@ import {
 	statusPhrase,
 } from "./hologram-model.ts";
 import { PANEL_TEXTURE } from "./hologram-palette.ts";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, relativeAge } from "./interface-renderer.ts";
 
 /** Tiny uppercase HUD label. */
 export const HUD_LABEL =
@@ -272,7 +272,11 @@ export function ThreadRow({
 							{who}
 						</span>
 						<span className="font-mono text-[12px]">{" · "}</span>
-						{item.thread.lastMessage ?? statusPhrase(item.thread)}
+						{item.thread.lastMessage ? (
+							<span data-ryu-i18n="off">{item.thread.lastMessage}</span>
+						) : (
+							statusPhrase(item.thread)
+						)}
 					</span>
 				) : (
 					<span className="col-span-2 col-start-2 truncate font-mono text-(--holo-dim) text-[12px] leading-4">
@@ -319,11 +323,16 @@ export function EventRow({
 	const tl = useLiteralMessages();
 	const start = Date.parse(event.start);
 	const past = event.kind === "past";
-	const runs = event.count && event.count > 1 ? `${event.count} runs` : null;
+	const runs =
+		event.count && event.count > 1
+			? tl("{count, plural, one {# run} other {# runs}}", {
+					count: event.count,
+				})
+			: null;
 	const meta = [agentName, event.label ? shortCadence(event.label) : null]
 		.filter(Boolean)
 		.join(" · ");
-	const age = past ? compactAge(event.end ?? event.start, now) : "";
+	const age = past ? relativeAge(event.end ?? event.start, now) : "";
 	const day = dayTag(start, now);
 	const recurring = Boolean(event.label);
 	let primary = clock(start);
@@ -351,7 +360,10 @@ export function EventRow({
 				) : null}
 			</time>
 			<span className="flex min-w-0 flex-col">
-				<span className="truncate text-(--holo-text) text-[14px] leading-5">
+				<span
+					className="truncate text-(--holo-text) text-[14px] leading-5"
+					data-ryu-i18n="off"
+				>
 					{event.title}
 				</span>
 				{meta ? (
@@ -373,7 +385,7 @@ export function EventRow({
 						{outcomeLabel(event.outcome)}
 					</span>
 					<span className="font-mono text-(--holo-dim) text-[12px] tabular-nums leading-4">
-						{age === "now" ? "now" : tl("{age} ago", { age })}
+						{age}
 					</span>
 				</span>
 			) : (

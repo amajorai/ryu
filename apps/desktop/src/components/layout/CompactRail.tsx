@@ -161,7 +161,7 @@ export function CompactRail({
 					<nav
 						aria-label="Agents"
 						className={cn(
-							"fixed inset-y-0 left-0 z-40 flex w-[var(--ryu-compact-rail-width,4.5rem)] flex-col items-center pb-2",
+							"fixed inset-y-0 start-0 z-40 flex w-[var(--ryu-compact-rail-width,4.5rem)] flex-col items-center pb-2",
 							clearsTrafficLights ? "pt-11" : "pt-2"
 						)}
 						data-tauri-drag-region

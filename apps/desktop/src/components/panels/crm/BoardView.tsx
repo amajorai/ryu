@@ -316,7 +316,7 @@ export function BoardView({
 											onDragStart={() => setDragging(record.id)}
 										>
 											<button
-												className="w-full text-left"
+												className="w-full text-start"
 												onClick={() => onOpenRecord(record.id)}
 												type="button"
 											>

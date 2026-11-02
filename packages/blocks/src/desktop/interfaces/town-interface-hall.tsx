@@ -3,7 +3,7 @@ import { Landmark } from "lucide-react";
 import { GameSheet } from "./game-shell.tsx";
 import { TownDeskBody } from "./town-desk.tsx";
 import type { TownInterfaceHudProps } from "./town-interface-hud.tsx";
-import { plural, upcomingRuns } from "./town-model.ts";
+import { upcomingRuns } from "./town-model.ts";
 
 /** City Hall as the kit sheet: the petitions (or the asks) and the town. */
 export function TownHallSheet({
@@ -62,7 +62,9 @@ export function TownHallSheet({
 			subtitle={
 				actsOn
 					? tl("{needYou} need you", { needYou: String(tally.needYou) })
-					: plural(town.petitions.length, "petition")
+					: tl("{count, plural, one {# petition} other {# petitions}}", {
+							count: town.petitions.length,
+						})
 			}
 			title="City Hall"
 		>

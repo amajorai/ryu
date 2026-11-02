@@ -317,7 +317,8 @@ export function SpacesSection({
 					overflow={{
 						getSearchText: (space) => space.name ?? "",
 						items: groupPaged.items,
-						label: `${visibilityLabel(group).toLowerCase()} spaces`,
+						label:
+							group === "private" ? tl("private spaces") : tl("team spaces"),
 						renderList: (list) => (
 							<SidebarMenu>{renderSpaceRows(list)}</SidebarMenu>
 						),

@@ -6,11 +6,12 @@ import {
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { ChevronLeft, ChevronRight, List } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type LibraryBook,
 	type LibraryChapter,
@@ -62,7 +63,10 @@ function ContentsMenu({
 				sideOffset={6}
 				spacing="dense-menu"
 			>
-				<p className="px-2.5 pt-1.5 pb-2 font-serif text-base text-foreground">
+				<p
+					className="px-2.5 pt-1.5 pb-2 font-serif text-base text-foreground"
+					data-ryu-i18n="off"
+				>
 					{book.title}
 				</p>
 				<ol className="flex max-h-80 flex-col gap-px overflow-y-auto">
@@ -73,7 +77,7 @@ function ContentsMenu({
 								<button
 									aria-current={current ? "page" : undefined}
 									className={cn(
-										"grid w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm outline-none transition-colors duration-150 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+										"grid w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2.5 py-2 text-start text-sm outline-none transition-colors duration-150 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
 										current && "bg-muted"
 									)}
 									onClick={() => {
@@ -92,6 +96,7 @@ function ContentsMenu({
 												? "font-medium text-foreground"
 												: "text-foreground"
 										)}
+										data-ryu-i18n="off"
 									>
 										{chapter.thread.title}
 									</span>
@@ -158,14 +163,17 @@ function TurnButton({
 			<span
 				className={cn(
 					"flex min-w-0 flex-col leading-tight",
-					direction === "next" ? "items-end text-right" : "items-start"
+					direction === "next" ? "items-end text-end" : "items-start"
 				)}
 			>
 				<span className="text-[11px] text-muted-foreground uppercase tracking-[0.1em]">
 					{label}
 				</span>
 				{chapter ? (
-					<span className="@2xl/library:block hidden max-w-56 truncate font-serif text-sm">
+					<span
+						className="@2xl/library:block hidden max-w-56 truncate font-serif text-sm"
+						data-ryu-i18n="off"
+					>
 						{chapter.thread.title}
 					</span>
 				) : null}
@@ -219,10 +227,14 @@ export function ChapterReader({
 			if (event.key === "Escape") {
 				event.preventDefault();
 				onBack();
-			} else if (event.key === "ArrowLeft" && previous) {
+				return;
+			}
+			// Left and right turn pages along the reading direction.
+			const key = logicalArrowKey(event.key, rootRef.current);
+			if (key === "ArrowLeft" && previous) {
 				event.preventDefault();
 				onOpenChapter(previous.thread.id);
-			} else if (event.key === "ArrowRight" && next) {
+			} else if (key === "ArrowRight" && next) {
 				event.preventDefault();
 				onOpenChapter(next.thread.id);
 			}
@@ -231,14 +243,20 @@ export function ChapterReader({
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [next, onBack, onOpenChapter, previous]);
 
-	const title = current?.thread.title ?? "New chapter";
+	const title = current?.thread.title ?? tl("New chapter");
 	const meta = current
-		? `${THREAD_STATUS_LABELS[current.status]} · ${readableAge(current.thread.updatedAt, now)}`
-		: "Just started";
+		? tl("{status} · {age}", {
+				age: readableAge(current.thread.updatedAt, now),
+				status: threadStatusLabel(current.status, tl),
+			})
+		: tl("Just started");
 
 	return (
 		<article
-			aria-label={`${book?.title ?? "Library"}, ${title}`}
+			aria-label={tl("{book}, {title}", {
+				book: book?.title ?? tl("Library"),
+				title,
+			})}
 			className="flex size-full min-h-0 flex-col bg-background"
 			data-testid="library-reader"
 			ref={rootRef}
@@ -256,7 +274,7 @@ export function ChapterReader({
 						size="icon-sm"
 						variant="ghost"
 					>
-						<ChevronLeft aria-hidden="true" />
+						<ChevronLeft aria-hidden="true" className="rtl:-scale-x-100" />
 					</Button>
 					{book && book.chapters.length > 0 ? (
 						<ContentsMenu
@@ -276,7 +294,10 @@ export function ChapterReader({
 					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
 						{tl("Chapter {position}", { position: position.toString() })}
 					</p>
-					<h1 className="mt-3 text-balance font-serif @3xl/library:text-[1.75rem] text-2xl text-foreground leading-tight">
+					<h1
+						className="mt-3 text-balance font-serif @3xl/library:text-[1.75rem] text-2xl text-foreground leading-tight"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</h1>
 					<p className="mt-2 text-muted-foreground text-sm">{meta}</p>

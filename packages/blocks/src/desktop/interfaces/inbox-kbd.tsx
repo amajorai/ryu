@@ -39,7 +39,7 @@ export function InboxTooltipKbd({ children }: { children: ReactNode }) {
 /** A key cap inside an outline button, on the button's own surface. */
 export function InboxButtonKbd({ children }: { children: ReactNode }) {
 	return (
-		<Kbd className={cn(KEY_CAP, "-mr-1 bg-muted text-muted-foreground")}>
+		<Kbd className={cn(KEY_CAP, "-me-1 bg-muted text-muted-foreground")}>
 			<KeyFace>{children}</KeyFace>
 		</Kbd>
 	);
@@ -51,7 +51,7 @@ export function InboxPrimaryKbd({ children }: { children: ReactNode }) {
 		<Kbd
 			className={cn(
 				KEY_CAP,
-				"-mr-1 bg-primary-foreground/15 text-primary-foreground"
+				"-me-1 bg-primary-foreground/15 text-primary-foreground"
 			)}
 		>
 			<KeyFace>{children}</KeyFace>

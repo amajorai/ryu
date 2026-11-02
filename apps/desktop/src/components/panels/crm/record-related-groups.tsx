@@ -56,7 +56,7 @@ export function renderRelatedGroups({
 								{group.records.map((linked) => (
 									<li className="flex items-center gap-1" key={linked.id}>
 										<button
-											className="min-w-0 flex-1 truncate rounded-lg px-1 py-0.5 text-left text-sm hover:bg-muted"
+											className="min-w-0 flex-1 truncate rounded-lg px-1 py-0.5 text-start text-sm hover:bg-muted"
 											onClick={() => onOpenRecord(linked.id, group.object_slug)}
 											type="button"
 										>

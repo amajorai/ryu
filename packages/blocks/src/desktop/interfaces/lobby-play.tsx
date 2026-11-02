@@ -127,7 +127,10 @@ export function LobbyPlay({
 				className="size-6"
 				state={acted ? "ready" : member.state}
 			/>
-			<span className="min-w-0 flex-1 truncate font-semibold text-[13px]">
+			<span
+				className="min-w-0 flex-1 truncate font-semibold text-[13px]"
+				data-ryu-i18n="off"
+			>
 				{member.agent.name}
 			</span>
 			{acted ? null : <LobbyStateChip state={member.state} />}

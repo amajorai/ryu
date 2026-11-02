@@ -8,7 +8,9 @@
 //   (`ui_format:"html"`); no sidecar, backend, MCP server, hook, tool, route or
 //   contribution, so building an app can never start a local process;
 // - namespaced: the id must be `com.local.<caller-segment>.<slug>`, so an app may
-//   install or update only the apps it created and never replace another app;
+//   install or update only the apps it created and never replace another app.
+//   Only a first-party `@ryu/<name>` caller has a segment (its full name), so a
+//   third-party id that merely ends in the same name cannot reach that namespace;
 //   its one runnable is `<caller-segment>-<slug>`, so its companion route cannot
 //   collide with another app's;
 // - low-privilege: only the reviewed companion grants below may be requested.
@@ -116,9 +118,23 @@ export type AppBundleInstallResult = z.output<
 	typeof appBundleInstallResultSchema
 >;
 
-/** The last segment of a caller id: `@ryu/app-studio` → `app-studio`. */
+/** The first-party scope whose app names are unique and Ryu-published. */
+const FIRST_PARTY_SCOPE = "@ryu/";
+
+/**
+ * The namespace segment of a caller: `@ryu/app-studio` → `app-studio`.
+ *
+ * Only a first-party `@ryu/<name>` caller has one. The segment is the whole
+ * name, so no two installed callers can share a namespace. Any other id
+ * (`@acme/app-studio`, `com.acme.app-studio`) returns null and cannot install
+ * apps: its last segment alone would let it replace apps another builder
+ * created and inherit their grants, enabled state and data.
+ */
 export function callerSegment(callerPluginId: string): string | null {
-	const segment = callerPluginId.split(/[/.]/).at(-1)?.toLowerCase() ?? "";
+	if (!callerPluginId.startsWith(FIRST_PARTY_SCOPE)) {
+		return null;
+	}
+	const segment = callerPluginId.slice(FIRST_PARTY_SCOPE.length);
 	return SLUG.test(segment) ? segment : null;
 }
 

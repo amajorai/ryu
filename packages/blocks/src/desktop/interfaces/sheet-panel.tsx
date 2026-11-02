@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd, KbdGroup } from "@ryu/ui/components/kbd.tsx";
@@ -91,7 +92,7 @@ export function SheetThreadPanel({
 	total: number;
 }) {
 	const tl = useLiteralMessages();
-	const title = row?.title ?? "New thread";
+	const title = row?.title ?? tr("New thread");
 	const lead = row?.agents[0];
 	const where = [
 		{ kind: "team", name: row?.team },
@@ -129,7 +130,7 @@ export function SheetThreadPanel({
 				"flex min-h-0 flex-col bg-background",
 				overlay
 					? "absolute inset-0 z-40"
-					: "relative w-[clamp(340px,40%,680px)] shrink-0 border-border border-l"
+					: "relative w-[clamp(340px,40%,680px)] shrink-0 border-border border-s"
 			)}
 			data-testid="sheet-thread-panel"
 			exit={{ opacity: 0, x: 24 }}
@@ -189,7 +190,11 @@ export function SheetThreadPanel({
 							</span>
 						) : null}
 						{where.map((item) => (
-							<span className="min-w-0 truncate" key={item.kind}>
+							<span
+								className="min-w-0 truncate"
+								data-ryu-i18n="off"
+								key={item.kind}
+							>
 								{item.name}
 							</span>
 						))}

@@ -112,7 +112,7 @@ export function DeleteAllChatsMenu({
 						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 						{itemLabel}
 						{count > 0 && (
-							<span className="ml-auto pl-2 text-muted-foreground/70">
+							<span className="ms-auto ps-2 text-muted-foreground/70">
 								{count}
 							</span>
 						)}
@@ -445,7 +445,7 @@ export function BotModeChatSectionsBody({
 			>
 				{childKeys.length > 0 && (
 					<div
-						className="ml-3 space-y-0.5 border-border border-l pl-1"
+						className="ms-3 space-y-0.5 border-border border-s ps-1"
 						data-testid={`bot-chat-section-children-${sectionId}`}
 					>
 						{childKeys.map(renderSection)}

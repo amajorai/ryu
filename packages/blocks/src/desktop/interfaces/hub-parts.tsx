@@ -1,15 +1,17 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
 	AvatarImage,
 } from "@ryu/ui/components/avatar.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft, Workflow } from "lucide-react";
@@ -24,6 +26,7 @@ import {
 } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
 import { hubAgentNames, hubThreadAgents, hubThreadTitle } from "./hub-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /** Material's emphasized-decelerate curve, for cards, sheets, and the scrim. */
@@ -175,9 +178,12 @@ export function HubThreadSheet({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
+	// The sheet sits at the inline end, so it slides in from that side.
+	const offscreen = useDirection() === "rtl" ? "-100%" : "100%";
 	const titleId = useId();
-	const title = thread ? hubThreadTitle(thread) : "New conversation";
+	const title = thread ? hubThreadTitle(thread) : tl("New conversation");
 	const agents = thread ? hubThreadAgents(snapshot, thread) : [];
 	const status = thread ? threadStatus(thread) : null;
 	return (
@@ -196,10 +202,10 @@ export function HubThreadSheet({
 				animate={{ x: 0 }}
 				aria-labelledby={titleId}
 				aria-modal="true"
-				className="absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col overflow-hidden bg-background outline-none md:w-[min(48rem,62%)] md:rounded-l-[28px] md:border-border/60 md:border-l"
+				className="absolute inset-y-0 end-0 z-30 flex w-full min-w-0 flex-col overflow-hidden bg-background outline-none md:w-[min(48rem,62%)] md:rounded-s-[28px] md:border-border/60 md:border-s"
 				data-testid="hub-thread-sheet"
-				exit={reduceMotion ? { opacity: 0 } : { x: "100%" }}
-				initial={reduceMotion ? false : { x: "100%" }}
+				exit={reduceMotion ? { opacity: 0 } : { x: offscreen }}
+				initial={reduceMotion ? false : { x: offscreen }}
 				onKeyDown={trapTab}
 				ref={sheetRef}
 				role="dialog"
@@ -217,11 +223,15 @@ export function HubThreadSheet({
 						type="button"
 						variant="ghost"
 					>
-						<ArrowLeft aria-hidden="true" className="size-5" />
+						<ArrowLeft
+							aria-hidden="true"
+							className={cn("size-5", DIRECTIONAL_ICON_CLASS)}
+						/>
 					</Button>
 					<div className="flex min-w-0 flex-1 flex-col">
 						<h2
 							className="truncate font-medium text-[17px] text-foreground leading-6"
+							data-ryu-i18n="off"
 							id={titleId}
 						>
 							{title}
@@ -229,8 +239,11 @@ export function HubThreadSheet({
 						{status ? (
 							<p className="flex min-w-0 items-center gap-2 text-muted-foreground text-sm leading-5">
 								<BoardStatusDot status={status} />
-								<span className="truncate">
-									{`${THREAD_STATUS_LABELS[status]} · ${hubAgentNames(agents)}`}
+								<span className="truncate" data-ryu-i18n="off">
+									{tl("{status} · {agents}", {
+										agents: hubAgentNames(agents),
+										status: threadStatusLabel(status, tl),
+									})}
 								</span>
 							</p>
 						) : null}

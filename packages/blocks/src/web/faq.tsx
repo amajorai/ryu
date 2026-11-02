@@ -4,6 +4,7 @@ import {
 } from "@ryu/ui/components/bouncy-accordion";
 
 import { landingSectionClass } from "./landing-typography.ts";
+import { LiteralText } from "./literal-text.tsx";
 import { SectionTitle } from "./section-title.tsx";
 
 export interface FAQItem {
@@ -112,7 +113,9 @@ function faqAnswer(content: FAQItem["content"]) {
 	return (
 		<div className="space-y-3">
 			{paragraphs.map((paragraph, index) => (
-				<p key={index}>{paragraph}</p>
+				<p key={index}>
+					<LiteralText text={paragraph} />
+				</p>
 			))}
 		</div>
 	);
@@ -124,7 +127,7 @@ export default function FAQ({
 }: FAQProps) {
 	const accordionItems: BouncyAccordionItem[] = items.map((item) => ({
 		id: item.id,
-		title: item.title,
+		title: <LiteralText text={item.title} />,
 		description: faqAnswer(item.content),
 	}));
 

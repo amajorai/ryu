@@ -1,14 +1,52 @@
 use super::*;
+use crate::i18n::{messages as m, AlertText, Join, Message, Template};
 
 /// Stable failed-turn information carried from the ACP boundary to Core's
 /// stream and persistence layers. Keeping the code, title, and recovery copy
 /// together prevents the live error frame and reloaded transcript from
 /// disagreeing about what failed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `title` and `message` are the English copy (logs, failover, older
+/// clients); `i18n` carries the same copy as Core messages so the chat error
+/// card renders it in the reader's locale. Build one with
+/// [`AcpFailure::localized`] or [`AcpFailure::relayed`] so the two never drift.
+#[derive(Debug, Clone, PartialEq)]
 pub struct AcpFailure {
     pub code: String,
     pub title: String,
     pub message: String,
+    pub i18n: Option<AlertText>,
+}
+
+impl AcpFailure {
+    /// A failure whose title and body are both Core messages.
+    pub(crate) fn localized(code: &str, title: Template, body: Vec<Message>) -> Self {
+        let text = AlertText::new(Message::new(title), body, Join::Sentences);
+        let (title, message) = text.render("en");
+        Self {
+            code: code.to_owned(),
+            title,
+            message,
+            i18n: Some(text),
+        }
+    }
+
+    /// A failure with a Core-message title whose body relays a raw error
+    /// verbatim (the card keeps `message` for it).
+    pub(crate) fn relayed(code: &str, title: Template, message: impl Into<String>) -> Self {
+        let text = AlertText::new(Message::new(title), Vec::new(), Join::Sentences);
+        Self {
+            code: code.to_owned(),
+            title: text.title.render("en"),
+            message: message.into(),
+            i18n: Some(text),
+        }
+    }
+
+    /// The `i18n` object the persisted error part and legacy chunks carry.
+    pub(crate) fn i18n_wire(&self) -> Option<serde_json::Value> {
+        self.i18n.as_ref().map(AlertText::to_wire)
+    }
 }
 
 /// Lets a start-up step attach its classified failure as `anyhow` context, so
@@ -47,36 +85,31 @@ pub(super) fn classify_prompt_failure(active_provider: Option<&str>, detail: &st
         && lower_detail.contains("third-party apps")
         && lower_detail.contains("extra usage")
     {
-        return AcpFailure {
-            code: "provider_usage_unavailable".to_owned(),
-            title: "Claude usage unavailable".to_owned(),
-            message: "Your Claude account is connected, but Anthropic rejected this third-party request. Check your Claude Usage settings and any required usage credits, or choose another connected provider."
-                .to_owned(),
-        };
+        return AcpFailure::localized(
+            "provider_usage_unavailable",
+            m::ACP_CLAUDE_USAGE_TITLE_MESSAGE,
+            vec![Message::new(m::ACP_CLAUDE_USAGE_MESSAGE)],
+        );
     }
     if active_provider == Some(crate::pi_config::MANAGED_OPENROUTER_ID) && payment_required {
-        return AcpFailure {
-            code: "insufficient_credits".to_owned(),
-            title: "Ryu credits exhausted".to_owned(),
-            message: "Your organization's Ryu credits are exhausted. Open Settings > Credits to top up, or choose a BYOK or local model, then retry."
-                .to_owned(),
-        };
+        return AcpFailure::localized(
+            "insufficient_credits",
+            m::ACP_RYU_CREDITS_TITLE_MESSAGE,
+            vec![Message::new(m::ACP_RYU_CREDITS_MESSAGE)],
+        );
     }
     if active_provider == Some("openrouter") && payment_required {
-        return AcpFailure {
-            code: "provider_payment_required".to_owned(),
-            title: "OpenRouter credits exhausted".to_owned(),
-            message: "The OpenRouter API key on this node has no prepaid credits left. Add credits to your OpenRouter account or choose another provider, then retry."
-                .to_owned(),
-        };
+        return AcpFailure::localized(
+            "provider_payment_required",
+            m::ACP_OPENROUTER_CREDITS_TITLE_MESSAGE,
+            vec![Message::new(m::ACP_OPENROUTER_CREDITS_MESSAGE)],
+        );
     }
-    AcpFailure {
-        code: "agent_error".to_owned(),
-        title: "Request failed".to_owned(),
-        message: format!(
-            "The agent could not complete the turn because its model provider is unavailable or misconfigured. Check Settings > Engines, then retry. (details: {detail})"
-        ),
-    }
+    AcpFailure::localized(
+        "agent_error",
+        m::ACP_REQUEST_FAILED_TITLE_MESSAGE,
+        vec![Message::new(m::ACP_REQUEST_FAILED_MESSAGE).text("detail", detail)],
+    )
 }
 
 /// A snapshot of ACP's `PromptResponse.usage` counters for ONE turn (feature

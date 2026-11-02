@@ -1,3 +1,4 @@
+import { activeLocale, numberFormatter, translate as tl } from "@ryu/i18n/core";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useEffect } from "react";
 import { abortableDelay } from "@/src/lib/abortable-delay.ts";
@@ -20,13 +21,39 @@ const MAX_BACKOFF_MS = 10_000;
  */
 const TERMINAL_RETRY_MS = 300_000;
 
+const MICRO_USD_PER_DOLLAR = 1_000_000;
+
+/**
+ * The alert's title in the UI language: the server sends an English sentence
+ * with an en-US amount, so it is rebuilt here from `balanceMicroUsd` with the
+ * locale's own currency format ("4,20 $" in German). The server title stays
+ * the fallback when the payload has no usable balance.
+ */
+export function creditAlertTitle(
+	event: CreditAlertEvent,
+	locale: string = activeLocale()
+): string {
+	if (!Number.isFinite(event.balanceMicroUsd)) {
+		return event.title || tl("Your Ryu credit balance is low");
+	}
+	const balance = numberFormatter(locale, {
+		currency: "USD",
+		style: "currency",
+	}).format(event.balanceMicroUsd / MICRO_USD_PER_DOLLAR);
+	return tl("Your Ryu credit balance is low ({balance})", { balance });
+}
+
+function creditAlertBody(): string {
+	return tl("Top up your Ryu credits to keep managed work running.");
+}
+
 function osNotify(event: CreditAlertEvent, signal: AbortSignal): void {
 	if (signal.aborted) {
 		return;
 	}
 	showOsNotification({
-		title: event.title,
-		body: "Top up your Ryu credits to keep managed work running.",
+		title: creditAlertTitle(event),
+		body: creditAlertBody(),
 		tag: "ryu-credit-alert",
 	}).catch(() => undefined);
 }
@@ -76,8 +103,8 @@ export function useCreditAlertEvents(): void {
 		const controller = new AbortController();
 		runCreditAlertStream(controller.signal, (event) => {
 			toast.warning({
-				title: event.title,
-				description: "Top up your Ryu credits to keep managed work running.",
+				title: creditAlertTitle(event),
+				description: creditAlertBody(),
 			});
 			playSound("credit-alert", { source: "stream" });
 			osNotify(event, controller.signal);

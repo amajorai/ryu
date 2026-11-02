@@ -152,7 +152,7 @@ export function AlertTierSelect({
 				{ALERT_TIER_OPTIONS.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
 						<span className="font-medium">{ALERT_TIER_LABELS[opt.value]}</span>
-						<span className="ml-1 text-muted-foreground text-xs">
+						<span className="ms-1 text-muted-foreground text-xs">
 							— {ALERT_TIER_DESCRIPTIONS[opt.value]}
 						</span>
 					</SelectItem>

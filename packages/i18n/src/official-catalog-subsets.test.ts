@@ -7,17 +7,20 @@ import {
 	messageIdForLiteral,
 	registerLiteralCatalogLoader,
 } from "./literal-catalog.ts";
+import { officialBotLiteralCatalog } from "./official-catalog-bot.ts";
 import { officialCliLiteralCatalog } from "./official-catalog-cli.ts";
 import { officialEmailLiteralCatalog } from "./official-catalog-email.ts";
+import { officialExtensionLiteralCatalog } from "./official-catalog-extension.ts";
 
 afterEach(() => {
 	registerLiteralCatalogLoader(null);
 });
 
-/** The statically bundled subsets the CLI and server-rendered email use. */
+/** The statically bundled subsets the CLI, the chat bot and email use. */
 const SUBSETS: ReadonlyArray<
 	readonly [string, (locale: string) => LiteralCatalog | null]
 > = [
+	["bot", officialBotLiteralCatalog],
 	["cli", officialCliLiteralCatalog],
 	["email", officialEmailLiteralCatalog],
 ];
@@ -54,6 +57,31 @@ describe.each(SUBSETS)("the official %s subset", (_name, loadCatalog) => {
 					continue;
 				}
 				expect(runtime.translate(id, undefined, source)).toBe(translation);
+			}
+		}
+	});
+});
+
+/** Labels the extension's MV3 worker renders from `@ryu/blocks` (omnibox). */
+const OMNIBOX_LABELS = [
+	"Go to {host}",
+	"Search {engine}",
+	"Run /{name}",
+	"Pick a skill",
+	"Ask Ryu with {mentions}",
+];
+
+describe("the official extension subset", () => {
+	test("carries the shared omnibox labels the full catalog translates", async () => {
+		for (const locale of OFFICIAL_CATALOG_LOCALES) {
+			const full: LiteralCatalog = (
+				await import(`../locales/${locale}.json`, { with: { type: "json" } })
+			).default;
+			const subset = officialExtensionLiteralCatalog(locale) ?? {};
+			for (const label of OMNIBOX_LABELS) {
+				if (Object.hasOwn(full, label)) {
+					expect(subset[label]).toBe(full[label]);
+				}
 			}
 		}
 	});

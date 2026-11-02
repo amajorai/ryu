@@ -1,4 +1,6 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { cn } from "@ryu/ui/lib/utils";
 import { motion } from "motion/react";
 import { type KeyboardEvent, useId, useState } from "react";
@@ -9,17 +11,16 @@ import {
 	formatPrice,
 	formatShortDay,
 	formatWeekdayClock,
-	plural,
 	seriesDirection,
 	seriesPeriod,
 	shownPercent,
 	TICKER_RANGE_LABELS,
-	TICKER_RANGE_NAMES,
 	TICKER_RANGES,
 	type TickerDay,
 	type TickerDirection,
 	type TickerRange,
 	type TickerSeries,
+	tickerRangeName,
 } from "./ticker-model.ts";
 import {
 	ChangeText,
@@ -121,7 +122,14 @@ function axisLabel(
 }
 
 function bucketText(bucket: TickerDay, unit: TickerSeries["unit"]): string {
-	return `${bucketLabel(bucket, unit)}: ${plural(bucket.close, "message")}, ${plural(bucket.threads, "thread")} active`;
+	return tr(
+		"{label}: {messages, plural, one {# message} other {# messages}}, {threads, plural, one {# thread} other {# threads}} active",
+		{
+			label: bucketLabel(bucket, unit),
+			messages: bucket.close,
+			threads: bucket.threads,
+		}
+	);
 }
 
 /**
@@ -225,7 +233,7 @@ export function TickerPriceHistory({
 			</p>
 			<div
 				aria-label={tl("{symbol} price, {period}", {
-					period: drawnPeriod.toLowerCase(),
+					period: sentenceLabel(tl, drawnPeriod),
 					symbol,
 				})}
 				aria-orientation="horizontal"
@@ -356,7 +364,7 @@ export function TickerPriceHistory({
 						const active = option === range;
 						return (
 							<button
-								aria-label={TICKER_RANGE_NAMES[option]}
+								aria-label={tickerRangeName(option)}
 								aria-pressed={active}
 								className={cn(
 									"relative h-9 rounded-md px-2 font-medium text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",

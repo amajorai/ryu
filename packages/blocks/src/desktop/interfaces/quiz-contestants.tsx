@@ -75,7 +75,10 @@ export function QuizContestants({
 							>
 								<QuizAvatar agent={agent} className="size-8" />
 								<span className="flex min-w-0 flex-1 flex-col">
-									<span className="gk-display truncate text-[16px] leading-5">
+									<span
+										className="gk-display truncate text-[16px] leading-5"
+										data-ryu-i18n="off"
+									>
 										{agent.name}
 									</span>
 									{/* With acts the status line below says what they are doing. */}

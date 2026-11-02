@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -29,10 +30,18 @@ export function rowValue(row: number, double: boolean): number {
 export type QuizCategoryKind = "agent" | "project" | "team" | "unassigned";
 
 export const CATEGORY_KIND_LABELS: Record<QuizCategoryKind, string> = {
-	agent: "Agent",
-	project: "Project",
-	team: "Team",
-	unassigned: "Unassigned",
+	get agent() {
+		return tr("Agent");
+	},
+	get project() {
+		return tr("Project");
+	},
+	get team() {
+		return tr("Team");
+	},
+	get unassigned() {
+		return tr("Unassigned");
+	},
 };
 
 export interface QuizTile {
@@ -216,7 +225,7 @@ export function buildQuizBoard(
 		columns,
 		double,
 		offBoard: threadCount - onBoard,
-		round: double ? "Double Round" : "Round 1",
+		round: double ? tr("Double Round") : tr("Round 1"),
 		rows: QUIZ_ROWS,
 		threadCount,
 	};
@@ -361,7 +370,7 @@ export function moveOnBoard(
 export function clueText(thread: InterfaceThread): string {
 	const text = (thread.lastMessage ?? "").replace(/\s+/g, " ").trim();
 	if (!text) {
-		return thread.title.trim() || "Untitled conversation";
+		return thread.title.trim() || tr("Untitled conversation");
 	}
 	if (text.length <= CLUE_LIMIT) {
 		return text;
@@ -372,7 +381,7 @@ export function clueText(thread: InterfaceThread): string {
 }
 
 export function threadTitle(thread: InterfaceThread | undefined): string {
-	return thread?.title.trim() || "Untitled conversation";
+	return thread?.title.trim() || tr("Untitled conversation");
 }
 
 export interface Contestant {
@@ -461,8 +470,4 @@ export function pruneRevealed(
 		}
 	}
 	return result;
-}
-
-export function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
 }

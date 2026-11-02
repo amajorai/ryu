@@ -10,16 +10,31 @@
  * instant and keeps the reader's zone.
  */
 
+import { dateFormatter } from "@ryu/i18n/format-intl";
+
 const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/u;
 
+/** `date` in the reader's UI `locale` ("Mar 15, 2026", "15. März 2026"). */
 export function formatPublicationDate(
 	date: string,
-	month: "long" | "short"
+	month: "long" | "short",
+	locale: string | null | undefined = "en"
 ): string {
-	return new Date(date).toLocaleDateString("en-US", {
+	const options: Intl.DateTimeFormatOptions = {
 		year: "numeric",
 		month,
 		day: "numeric",
-		...(CALENDAR_DAY.test(date) ? { timeZone: "UTC" } : {}),
-	});
+	};
+	if (CALENDAR_DAY.test(date)) {
+		return dateFormatter(locale, { ...options, timeZone: "UTC" }).format(
+			new Date(date)
+		);
+	}
+	// An instant is shown in the reader's current zone. A cached formatter
+	// would keep the zone it was built in, so this one is made per call.
+	try {
+		return new Date(date).toLocaleDateString(locale || "en", options);
+	} catch {
+		return new Date(date).toLocaleDateString("en", options);
+	}
 }

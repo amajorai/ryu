@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import type {
 	InterfaceAgent,
 	InterfaceSnapshot,
@@ -16,8 +17,8 @@ import {
 	groupLead,
 	groupSections,
 	pageCategories,
-	plural,
 	wikiAgo,
+	wikiCount,
 	wikiGroupArticle,
 	wikiStamp,
 } from "./wiki-model.ts";
@@ -111,7 +112,7 @@ export function GroupArticle({
 					)}
 				</InfoboxRow>
 				<InfoboxRow label="Threads">
-					{threads.length.toLocaleString("en")}
+					{countWord(threads.length)}
 					{counts.working > 0 ? (
 						<span className="text-muted-foreground">
 							{" "}
@@ -119,12 +120,10 @@ export function GroupArticle({
 						</span>
 					) : null}
 				</InfoboxRow>
-				<InfoboxRow label="Messages">
-					{article.messages.toLocaleString("en")}
-				</InfoboxRow>
+				<InfoboxRow label="Messages">{countWord(article.messages)}</InfoboxRow>
 				{counts.attention + counts["your-turn"] > 0 ? (
 					<InfoboxRow label="Needs you">
-						{plural(counts.attention + counts["your-turn"], "thread")}
+						{wikiCount(counts.attention + counts["your-turn"], "thread")}
 					</InfoboxRow>
 				) : null}
 				<InfoboxRow label="Last active">
@@ -154,7 +153,7 @@ export function GroupArticle({
 			) : (
 				<p className={NOTE}>
 					{tl("No agents are assigned to this {noun}.", {
-						noun: noun.toLowerCase(),
+						noun: sentenceLabel(tl, noun),
 					})}
 				</p>
 			)}
@@ -176,7 +175,7 @@ export function GroupArticle({
 				<p className={NOTE}>
 					{tl(
 						"No threads are filed under this {noun} yet. Start one from its talk page.",
-						{ noun: noun.toLowerCase() }
+						{ noun: sentenceLabel(tl, noun) }
 					)}
 				</p>
 			)}

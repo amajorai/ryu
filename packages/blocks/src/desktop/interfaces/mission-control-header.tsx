@@ -1,7 +1,8 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { Plus } from "lucide-react";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 import { useNow } from "./mission-control-hooks.ts";
 import {
 	clockDate,
@@ -32,10 +33,6 @@ function MissionClock() {
 	);
 }
 
-function plural(count: number, one: string): string {
-	return `${count} ${one}${count === 1 ? "" : "s"}`;
-}
-
 /**
  * The top strip: what the wall is, the live clock, and a one-line status
  * readout (lamp, headline, detail) with a jump to the alerts when anything
@@ -60,12 +57,10 @@ export function MissionHeader({
 	onReview: () => void;
 	threadCount: number;
 }) {
+	const tl = useLiteralMessages();
 	const attention = banner.tone === "attention";
-	const age = lastUpdate ? compactAge(lastUpdate, now) : "";
-	let freshness = "No activity yet";
-	if (age) {
-		freshness = age === "now" ? "Updated just now" : `Updated ${age} ago`;
-	}
+	const age = lastUpdate ? relativeAge(lastUpdate, now) : "";
+	const freshness = age ? tl("Updated {age}", { age }) : tl("No activity yet");
 	return (
 		<header className="grid shrink-0 @min-[1200px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 border-border border-b @min-[1000px]:px-4 px-3 py-3">
 			<div className="flex min-w-0 flex-col gap-0.5">
@@ -74,8 +69,11 @@ export function MissionHeader({
 				</h1>
 				<p className="truncate text-muted-foreground text-xs tabular-nums leading-4">
 					{loading
-						? "Connecting…"
-						: `${plural(agentCount, "agent")} · ${plural(threadCount, "thread")} · ${freshness}`}
+						? tl("Connecting…")
+						: tl(
+								"{agents, plural, one {# agent} other {# agents}} · {threads, plural, one {# thread} other {# threads}} · {freshness}",
+								{ agents: agentCount, freshness, threads: threadCount }
+							)}
 				</p>
 			</div>
 			<MissionClock />
@@ -118,7 +116,7 @@ export function MissionHeader({
 				</div>
 				<Button
 					aria-label="New thread"
-					className="ml-auto shrink-0"
+					className="ms-auto shrink-0"
 					onClick={onNewThread}
 					size="sm"
 					title="Start a new thread"

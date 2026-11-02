@@ -7,30 +7,34 @@
 // opens the approval inbox.
 
 import type { LiveActivity } from "@ryu/app-host/live-activity";
+import { translate as tl } from "@ryu/i18n/core";
+import { localizeApproval } from "@ryuhq/core-client/approval-text";
 import { useEffect } from "react";
 import { useApprovals } from "@/src/hooks/useApprovals.ts";
 import type { ApprovalRequest } from "@/src/lib/api/approvals.ts";
 import { useLiveActivityStore } from "@/src/store/useLiveActivityStore.ts";
 
-const KIND_LABELS = new Map<string, string>([
-	["tool_call", "Tool call"],
-	["workflow_gate", "Workflow gate"],
-	["scheduled_run", "Scheduled run"],
-	["trigger_run", "Trigger run"],
-	["skill_synthesis", "Skill synthesis"],
-	["heal_fix", "Heal fix"],
+/** Each approval kind's label, read at render time so it follows the locale. */
+const KIND_LABELS = new Map<string, () => string>([
+	["tool_call", () => tl("Tool call")],
+	["workflow_gate", () => tl("Workflow gate")],
+	["scheduled_run", () => tl("Scheduled run")],
+	["trigger_run", () => tl("Trigger run")],
+	["skill_synthesis", () => tl("Skill synthesis")],
+	["heal_fix", () => tl("Heal fix")],
 ]);
 
 function approvalToActivity(request: ApprovalRequest): LiveActivity {
-	const kindLabel = KIND_LABELS.get(request.kind) ?? request.kind;
-	const detail =
-		request.summary || (request.title === kindLabel ? "" : request.title);
+	const kindLabel = KIND_LABELS.get(request.kind)?.() ?? request.kind;
+	// Core sends the card wording as messages; render them in this locale.
+	const text = localizeApproval(request);
+	const detail = text.summary || (text.title === kindLabel ? "" : text.title);
 	return {
 		id: `approval:${request.id}`,
 		appId: "shell",
 		kind: "approval",
-		title: `${kindLabel} · ${request.title}`,
-		detail: detail || "Waiting for your decision",
+		title: `${kindLabel} · ${text.title}`,
+		detail: detail || tl("Waiting for your decision"),
 		status: "waiting",
 		icon: "message-circle-question",
 		startedAt: new Date(request.created_at).getTime(),

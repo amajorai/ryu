@@ -175,7 +175,7 @@ const TranscriptTurnRow = memo(function TranscriptTurnRow({
 					</div>
 				)}
 				{isLastTurn && answerNow ? (
-					<div className={cn("flex", planningLeading ? "pl-6" : undefined)}>
+					<div className={cn("flex", planningLeading ? "ps-6" : undefined)}>
 						<AnswerNowButton control={answerNow} />
 					</div>
 				) : null}

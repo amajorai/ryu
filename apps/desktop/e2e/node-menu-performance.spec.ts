@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("closed node menu does not fetch details and closing cancels pending details", async ({
 	page,
@@ -37,10 +37,7 @@ test("closed node menu does not fetch details and closing cancels pending detail
 	).toBeVisible();
 	expect(errors).toEqual([]);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/node-menu-completed.png"
-		),
+		path: proofEvidencePath("performance-sweep/node-menu-completed.png"),
 		fullPage: true,
 	});
 });

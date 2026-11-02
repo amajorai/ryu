@@ -14,9 +14,9 @@ import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import {
 	emptyHandRect,
-	plural,
 	type StageSize,
 	type TableGeometry,
+	tableCount,
 } from "./card-table-model.ts";
 import { ThreadRow } from "./card-table-rows.tsx";
 import type { SeatActions } from "./card-table-seat.tsx";
@@ -59,7 +59,7 @@ function handCountLabel(
 	tl: LiteralMessage
 ): string {
 	return acts
-		? plural(count + held, "card")
+		? tableCount(count + held, "card", tl)
 		: tl("{waitingCount} waiting on you", { waitingCount: count + held });
 }
 
@@ -214,7 +214,7 @@ export function HandLabel({
 	}
 	return (
 		<div
-			className="pointer-events-none absolute z-10 flex flex-col items-end gap-2 rounded-2xl border-(--gk-edge) border-2 bg-(--gk-plate) px-3.5 py-2.5 text-right text-(--gk-ink) shadow-(--gk-lip)"
+			className="pointer-events-none absolute z-10 flex flex-col items-end gap-2 rounded-2xl border-(--gk-edge) border-2 bg-(--gk-plate) px-3.5 py-2.5 text-end text-(--gk-ink) shadow-(--gk-lip)"
 			data-testid="card-table-hand-label"
 			style={{ right: placement.right, top: placement.top }}
 		>

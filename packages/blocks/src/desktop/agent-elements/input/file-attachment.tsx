@@ -7,6 +7,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { useRef, useState } from "react";
 import { FileTypeIcon } from "../file-type-icon.tsx";
 import { ImageLightbox, type LightboxImage } from "../image-lightbox.tsx";
+import { formatByteSize } from "../locale-format.ts";
 
 export interface FileAttachmentProps {
 	className?: string;
@@ -23,16 +24,6 @@ export interface FileAttachmentProps {
 	onRemove?: () => void;
 	size?: number;
 	url?: string;
-}
-
-function formatFileSize(bytes: number): string {
-	if (bytes < 1024) {
-		return `${bytes} B`;
-	}
-	if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)} KB`;
-	}
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -103,7 +94,7 @@ export function FileAttachment({
 				"relative rounded-lg bg-muted",
 				isImageOnly
 					? "flex size-24 shrink-0 items-center justify-center rounded-xl p-1"
-					: "flex min-w-[120px] max-w-[200px] items-center gap-2 py-1 pr-2 pl-1",
+					: "flex min-w-[120px] max-w-[200px] items-center gap-2 py-1 ps-1 pe-2",
 				className
 			)}
 			onMouseEnter={() => setIsHovered(true)}
@@ -152,7 +143,7 @@ export function FileAttachment({
 						</span>
 						{size !== undefined && (
 							<span className="text-muted-foreground text-xs">
-								{formatFileSize(size)}
+								{formatByteSize(size)}
 							</span>
 						)}
 					</div>
@@ -165,7 +156,7 @@ export function FileAttachment({
 						isHovered ? "attachment-remove-visible" : "attachment-remove-hidden"
 					}
 					aria-label={tl("Remove {filename}", { filename })}
-					className="absolute -top-1.5 -right-1.5 z-10 focus-visible:opacity-100"
+					className="absolute -end-1.5 -top-1.5 z-10 focus-visible:opacity-100"
 					onClick={(e) => {
 						e.stopPropagation();
 						onRemove();

@@ -6,7 +6,6 @@ import {
 	type ArcadeFloor,
 	meterDigits,
 	paytable,
-	plural,
 	threadTitle,
 	type WallCabinet,
 	wallCabinetLabel,
@@ -42,12 +41,18 @@ export function ArcadeTitle({
 	/** The act layer's summary line, kept visible on compact stages. */
 	status?: string;
 }) {
+	const tl = useLiteralMessages();
 	const { totals } = floor;
 	const parts = [
 		totals.jackpots > 0
-			? `${plural(totals.jackpots, "jackpot")} waiting on you`
+			? tl(
+					"{count, plural, one {# jackpot waiting on you} other {# jackpots waiting on you}}",
+					{ count: totals.jackpots }
+				)
 			: null,
-		totals.running > 0 ? `${totals.running} running` : null,
+		totals.running > 0
+			? tl("{count} running", { count: totals.running })
+			: null,
 	].filter(Boolean);
 	return (
 		<GameTitlePlate
@@ -56,7 +61,7 @@ export function ArcadeTitle({
 			keepStatus={status !== undefined}
 			status={
 				status ??
-				(parts.length > 0 ? parts.join(" · ") : "Every machine is idle")
+				(parts.length > 0 ? parts.join(" · ") : tl("Every machine is idle"))
 			}
 			title="Arcade"
 		/>
@@ -259,7 +264,7 @@ export function ArcadeFilters({
 						onClick={() => onToggle(cabinet.group.id)}
 						type="button"
 					>
-						{cabinet.group.name}
+						<span data-ryu-i18n="off">{cabinet.group.name}</span>
 						<span className="grid h-6 min-w-6 place-items-center rounded-full bg-(--gk-plate-sunk) px-1.5 text-(--gk-ink-muted) text-[13px] tabular-nums">
 							{cabinet.machines}
 						</span>

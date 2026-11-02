@@ -13,14 +13,13 @@ import {
 	Children,
 	type ReactNode,
 	type RefObject,
-	useCallback,
-	useEffect,
 	useId,
 	useLayoutEffect,
 	useRef,
 	useState,
 } from "react";
 import { BoardStatusLabel } from "./board-status.tsx";
+import { scrollInlineBy } from "./inline-direction.ts";
 import { BookCover } from "./library-cover.tsx";
 import {
 	type ContinueItem,
@@ -33,6 +32,7 @@ import {
 	progressPercent,
 	readableAge,
 } from "./library-model.ts";
+import { useScrollEdges } from "./library-shelf-scroll.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /** Marks the control that opens a book, so focus can return to it. */
@@ -62,7 +62,7 @@ export function ProgressTrack({
 			)}
 		>
 			<span
-				className="absolute inset-y-0 left-0 rounded-full bg-primary"
+				className="absolute inset-y-0 start-0 rounded-full bg-primary"
 				style={{ width: `${Math.min(100, Math.max(0, value)).toString()}%` }}
 			/>
 		</span>
@@ -85,7 +85,10 @@ export function BookTile({
 			<button
 				{...{ [LIBRARY_BOOK_ATTRIBUTE]: book.id }}
 				aria-label={`${book.title}. ${progressLabel(book, tl)}`}
-				className={cn("group block w-full rounded-[3px] text-left", FOCUS_RING)}
+				className={cn(
+					"group block w-full rounded-[3px] text-start",
+					FOCUS_RING
+				)}
 				onClick={() => onOpen(book.id)}
 				type="button"
 			>
@@ -254,7 +257,7 @@ function ContinueCard({
 					}
 				)}
 				className={cn(
-					"group flex h-full w-full gap-5 rounded-xl bg-muted/60 p-4 text-left transition-colors duration-150 hover:bg-muted motion-reduce:transition-none",
+					"group flex h-full w-full gap-5 rounded-xl bg-muted/60 p-4 text-start transition-colors duration-150 hover:bg-muted motion-reduce:transition-none",
 					// Inset, because the sideways scroller clips anything outside it.
 					"outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 				)}
@@ -273,7 +276,10 @@ function ContinueCard({
 				</div>
 				<span className="flex min-w-0 flex-1 flex-col py-0.5">
 					<BoardStatusLabel status={chapter.status} />
-					<span className="mt-2 line-clamp-2 font-semibold text-base text-foreground leading-snug tracking-tight">
+					<span
+						className="mt-2 line-clamp-2 font-semibold text-base text-foreground leading-snug tracking-tight"
+						data-ryu-i18n="off"
+					>
 						{chapter.thread.title}
 					</span>
 					<span className="mt-1 truncate text-[13px] text-muted-foreground">
@@ -295,7 +301,10 @@ function ContinueCard({
 							</span>
 							<span className="flex shrink-0 items-center gap-0.5 font-medium text-foreground transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none">
 								Resume
-								<ChevronRight aria-hidden="true" className="size-3.5" />
+								<ChevronRight
+									aria-hidden="true"
+									className="size-3.5 rtl:-scale-x-100"
+								/>
 							</span>
 						</span>
 					</span>
@@ -303,40 +312,6 @@ function ContinueCard({
 			</button>
 		</li>
 	);
-}
-
-/** Scroll state for a horizontal shelf, so the arrows know when to rest. */
-function useScrollEdges(ref: RefObject<HTMLElement | null>, itemCount: number) {
-	const [edges, setEdges] = useState({ end: true, start: true });
-	const measure = useCallback(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		const max = element.scrollWidth - element.clientWidth;
-		setEdges({
-			end: element.scrollLeft >= max - 1,
-			start: element.scrollLeft <= 1,
-		});
-	}, [ref]);
-	useEffect(() => {
-		const element = ref.current;
-		if (!element || itemCount === 0) {
-			return;
-		}
-		measure();
-		element.addEventListener("scroll", measure, { passive: true });
-		const observer =
-			typeof ResizeObserver === "undefined"
-				? null
-				: new ResizeObserver(measure);
-		observer?.observe(element);
-		return () => {
-			element.removeEventListener("scroll", measure);
-			observer?.disconnect();
-		};
-	}, [ref, measure, itemCount]);
-	return edges;
 }
 
 /**
@@ -358,10 +333,13 @@ export function ContinueShelf({
 	// Cards are sized so a page holds whole cards; one press turns one page.
 	const page = (direction: 1 | -1) => {
 		const element = listRef.current;
-		element?.scrollBy({
-			behavior: reduceMotion ? "auto" : "smooth",
-			left: direction * element.clientWidth,
-		});
+		if (element) {
+			scrollInlineBy(
+				element,
+				direction * element.clientWidth,
+				reduceMotion ? "auto" : "smooth"
+			);
+		}
 	};
 	const scrollable = !(edges.start && edges.end);
 	return (
@@ -376,7 +354,7 @@ export function ContinueShelf({
 							size="icon-sm"
 							variant="ghost"
 						>
-							<ChevronLeft aria-hidden="true" />
+							<ChevronLeft aria-hidden="true" className="rtl:-scale-x-100" />
 						</Button>
 						<Button
 							aria-label="Scroll Continue Reading forward"
@@ -385,7 +363,7 @@ export function ContinueShelf({
 							size="icon-sm"
 							variant="ghost"
 						>
-							<ChevronRight aria-hidden="true" />
+							<ChevronRight aria-hidden="true" className="rtl:-scale-x-100" />
 						</Button>
 					</div>
 				) : null

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -53,7 +54,10 @@ function AddWidgetMenu({
 								onClick={() => onAdd(spec.id)}
 							>
 								<span className="text-foreground">{spec.title}</span>
-								<span className="font-normal text-muted-foreground text-xs">
+								<span
+									className="font-normal text-muted-foreground text-xs"
+									data-ryu-i18n="off"
+								>
 									{spec.description}
 								</span>
 							</DropdownMenuItem>
@@ -90,6 +94,7 @@ export function DashboardHeader({
 	onReset: () => void;
 	threadCount: number;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<header className="flex h-12 shrink-0 items-center gap-3 border-border border-b @min-[640px]/dash:px-6 px-4">
 			<div className="flex min-w-0 flex-1 items-baseline gap-3">
@@ -101,8 +106,11 @@ export function DashboardHeader({
 					className="min-w-0 truncate text-[13px] text-muted-foreground max-sm:hidden"
 				>
 					{editing
-						? "Drag widgets to rearrange. Changes save as you go."
-						: `${threadCount} ${threadCount === 1 ? "thread" : "threads"} · ${agentCount} ${agentCount === 1 ? "agent" : "agents"}`}
+						? tl("Drag widgets to rearrange. Changes save as you go.")
+						: tl(
+								"{threads, plural, one {# thread} other {# threads}} · {agents, plural, one {# agent} other {# agents}}",
+								{ agents: agentCount, threads: threadCount }
+							)}
 				</p>
 			</div>
 			{editing ? (

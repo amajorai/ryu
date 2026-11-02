@@ -23,7 +23,6 @@ import {
 	ToggleGroup,
 	ToggleGroupItem,
 } from "@ryu/ui/components/toggle-group.tsx";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import {
 	ArrowDownWideNarrow,
 	ArrowUpNarrowWide,
@@ -38,12 +37,11 @@ import {
 } from "lucide-react";
 import type { KeyboardEvent, RefObject } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { FilterChips } from "./records-filter-chips.tsx";
 import {
-	RECORDS_OBJECT_LABELS,
 	RECORDS_OBJECTS,
 	RECORDS_SORT_KEYS,
-	RECORDS_SORT_LABELS,
 	RECORDS_STATUS_ORDER,
 	RECORDS_VIEWS,
 	type RecordsFilter,
@@ -51,6 +49,8 @@ import {
 	type RecordsSort,
 	type RecordsView,
 	recordsFilterCount,
+	recordsObjectLabels,
+	recordsSortLabel,
 } from "./records-model.ts";
 import { RECORDS_OBJECT_ICONS } from "./records-nav.tsx";
 
@@ -85,7 +85,7 @@ export function RecordsHeader({
 }) {
 	const tl = useLiteralMessages();
 	const Icon = RECORDS_OBJECT_ICONS[object];
-	const objectLabel = RECORDS_OBJECT_LABELS[object].plural;
+	const objectLabel = recordsObjectLabels(object).plural;
 	const title = (
 		<span className="flex min-w-0 items-center gap-2">
 			<Icon aria-hidden="true" className="size-4 shrink-0 text-foreground/70" />
@@ -96,7 +96,7 @@ export function RecordsHeader({
 				<>
 					<ChevronRight
 						aria-hidden="true"
-						className="size-3.5 shrink-0 text-muted-foreground"
+						className="size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100"
 					/>
 					<span className="truncate font-semibold text-foreground text-sm">
 						{view.label}
@@ -160,7 +160,7 @@ export function RecordsHeader({
 											onClick={() => onSelectObject(option)}
 										>
 											<OptionIcon aria-hidden="true" />
-											{RECORDS_OBJECT_LABELS[option].plural}
+											{recordsObjectLabels(option).plural}
 										</DropdownMenuItem>
 									);
 								})}
@@ -288,7 +288,7 @@ export function RecordsToolbar({
 								"Sort: {sortLabel}, {direction, select, asc {ascending} other {descending}}",
 								{
 									direction: sort.direction,
-									sortLabel: RECORDS_SORT_LABELS[sort.key],
+									sortLabel: recordsSortLabel(sort.key),
 								}
 							)}
 							className="text-foreground/80"
@@ -299,7 +299,7 @@ export function RecordsToolbar({
 					}
 				>
 					<SortIcon aria-hidden="true" data-icon="inline-start" />
-					<span className="max-md:hidden">{RECORDS_SORT_LABELS[sort.key]}</span>
+					<span className="max-md:hidden">{recordsSortLabel(sort.key)}</span>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start" className="w-52" drawerLabel="Sort">
 					<DropdownMenuGroup>
@@ -321,7 +321,7 @@ export function RecordsToolbar({
 									key={key}
 									value={key}
 								>
-									{RECORDS_SORT_LABELS[key]}
+									{recordsSortLabel(key)}
 								</DropdownMenuRadioItem>
 							))}
 						</DropdownMenuRadioGroup>
@@ -383,7 +383,7 @@ export function RecordsToolbar({
 								onCheckedChange={() => toggleStatus(status)}
 							>
 								<BoardStatusDot className="mx-1" status={status} />
-								{THREAD_STATUS_LABELS[status]}
+								{threadStatusLabel(status)}
 							</DropdownMenuCheckboxItem>
 						))}
 					</DropdownMenuGroup>

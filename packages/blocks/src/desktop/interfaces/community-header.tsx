@@ -18,7 +18,11 @@ import {
 	X,
 } from "lucide-react";
 import type { KeyboardEvent, Ref } from "react";
-import { type Community, communityLabel, plural } from "./community-model.ts";
+import {
+	type Community,
+	communityLabel,
+	threadCountLabel,
+} from "./community-model.ts";
 import { AgentFace, CommunityIcon } from "./community-parts.tsx";
 
 export interface TopBarProps {
@@ -71,12 +75,12 @@ export function TopBar({
 			<div className="relative flex items-center" role="search">
 				<Search
 					aria-hidden="true"
-					className="pointer-events-none absolute left-4 size-4 text-muted-foreground"
+					className="pointer-events-none absolute start-4 size-4 text-muted-foreground"
 					strokeWidth={2}
 				/>
 				<input
 					aria-label="Search posts and communities"
-					className="h-10 w-full rounded-full border border-transparent bg-secondary pr-10 pl-11 text-foreground text-sm outline-none transition-colors duration-100 placeholder:text-muted-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/30"
+					className="h-10 w-full rounded-full border border-transparent bg-secondary ps-11 pe-10 text-foreground text-sm outline-none transition-colors duration-100 placeholder:text-muted-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/30"
 					onChange={(event) => onQueryChange(event.target.value)}
 					onKeyDown={onKeyDown}
 					placeholder="Search Community"
@@ -87,7 +91,7 @@ export function TopBar({
 				{query ? (
 					<button
 						aria-label="Clear search"
-						className="absolute right-2 flex size-7 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors duration-100 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+						className="absolute end-2 flex size-7 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors duration-100 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
 						onClick={() => onQueryChange("")}
 						type="button"
 					>
@@ -251,7 +255,8 @@ export function CommunityHeader({
 						{communityLabel(community)}
 					</h1>
 					<p className="truncate text-muted-foreground text-sm leading-5">
-						{community.name} · {plural(community.threadCount, "thread")}
+						<span data-ryu-i18n="off">{community.name}</span> ·{" "}
+						{threadCountLabel(community.threadCount)}
 					</p>
 				</div>
 				<div className="flex items-center gap-2 pb-1">

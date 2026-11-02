@@ -279,7 +279,11 @@ describe("moments model", () => {
 		expect(momentsUpdatedLabel(new Date(NOW).toISOString(), NOW, tl)).toBe(
 			"Updated just now"
 		);
-		expect(momentsUpdatedLabel(ago(18), NOW, tl)).toBe("Updated 18 min ago");
+		expect(momentsUpdatedLabel(ago(18), NOW, tl, "en")).toBe(
+			"Updated 18 min. ago"
+		);
+		expect(momentsUpdatedLabel(ago(18), NOW, tl, "ja")).toBe("Updated 18 分前");
+		expect(momentsDayLabel("2026-03-02", NOW, "de")).toContain("März");
 		expect(momentsNameList(["Ada", "Grace", "Linus"])).toBe(
 			"Ada, Grace, and Linus"
 		);

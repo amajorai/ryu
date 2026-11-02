@@ -52,7 +52,7 @@ function ProductName({ product }: { product: Product }) {
 			<span className="font-heading font-medium text-base text-foreground underline-offset-4 group-hover:underline">
 				{product.name}
 			</span>
-			<LinkArrow className="ml-1 text-muted-foreground transition-colors group-hover:text-foreground" />
+			<LinkArrow className="ms-1 text-muted-foreground transition-colors group-hover:text-foreground" />
 		</>
 	);
 }

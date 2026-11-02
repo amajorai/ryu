@@ -164,7 +164,7 @@ export function GlyphPicker({
 				<DialogDescription className="sr-only">
 					{description ?? title}
 				</DialogDescription>
-				<DialogHeader className="contents space-y-0 text-left">
+				<DialogHeader className="contents space-y-0 text-start">
 					<DialogTitle className="border-b px-4 py-3 text-base">
 						{title}
 						{description ? (
@@ -230,7 +230,7 @@ export function GlyphPicker({
 				<DialogFooter className="shrink-0 border-t px-4 py-3">
 					{clearable && value ? (
 						<Button
-							className="mr-auto"
+							className="me-auto"
 							onClick={() => {
 								onChange(null);
 								setIsDialogOpen(false);

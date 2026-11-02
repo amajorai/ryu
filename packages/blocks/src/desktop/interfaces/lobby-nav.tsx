@@ -4,6 +4,7 @@ import { Gamepad2 } from "lucide-react";
 import { type KeyboardEvent, useRef } from "react";
 import { GAME_PLATE } from "./game-hud.tsx";
 import { GameHudSlot } from "./game-shell.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 import {
 	formatXp,
 	LOBBY_TAB_LABELS,
@@ -49,15 +50,15 @@ export function LobbyNav({
 	const listRef = useRef<HTMLDivElement>(null);
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		const index = LOBBY_TABS.indexOf(tab);
+		// Left and right follow the tab row's reading direction.
+		const key = logicalArrowKey(event.key, event.currentTarget);
 		let next: number | undefined;
 		if (event.key === "Home") {
 			next = 0;
 		} else if (event.key === "End") {
 			next = LOBBY_TABS.length - 1;
-		} else if (STEP[event.key] !== undefined) {
-			next =
-				(index + (STEP[event.key] ?? 0) + LOBBY_TABS.length) %
-				LOBBY_TABS.length;
+		} else if (STEP[key] !== undefined) {
+			next = (index + (STEP[key] ?? 0) + LOBBY_TABS.length) % LOBBY_TABS.length;
 		}
 		const target = next === undefined ? undefined : LOBBY_TABS[next];
 		if (!target) {

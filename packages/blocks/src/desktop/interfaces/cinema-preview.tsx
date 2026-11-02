@@ -9,7 +9,6 @@ import {
 	cinemaStatusText,
 } from "./cinema-model.ts";
 import { CinemaBoxart } from "./cinema-poster.tsx";
-import { compactAge } from "./interface-renderer.ts";
 
 /** A poster's box, in the catalogue frame's coordinates. */
 export interface CinemaRect {
@@ -163,7 +162,7 @@ export function CinemaPreview({
 						aria-label={tl("More info: {title}", { title: thread.title })}
 						className={cn(
 							circle,
-							"ml-auto border-2 border-foreground/40 text-foreground hover:border-foreground"
+							"ms-auto border-2 border-foreground/40 text-foreground hover:border-foreground"
 						)}
 						onClick={(event) => onMore(thread.id, event.currentTarget)}
 						title="More info"
@@ -180,7 +179,7 @@ export function CinemaPreview({
 						{cinemaMessages(thread.messageCount)}
 					</span>
 					<span className="text-foreground/80">
-						{cinemaAge(compactAge(thread.updatedAt, now))}
+						{cinemaAge(thread.updatedAt, now)}
 					</span>
 				</p>
 				<p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm leading-5">

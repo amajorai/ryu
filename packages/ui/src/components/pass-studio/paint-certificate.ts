@@ -21,6 +21,7 @@ import {
 	NAME_MAX_PX,
 	NAME_MIN_PX,
 } from "../waitlist-pass.tsx";
+import { englishPassTranslate, type PassTranslate } from "./labels.ts";
 import {
 	BLOCK_GAP_PX,
 	ellipsize,
@@ -36,6 +37,7 @@ import {
 	STAT_VALUE_PX,
 	setTracking,
 } from "./paint.ts";
+import { passInline, withPassDirection } from "./paint-direction.ts";
 
 /** `gap-3` between the grid's columns and rows, at the app's 16px root. */
 const STAT_GAP_PX = 12;
@@ -65,9 +67,17 @@ export function certificateScoreLabel(
 	return `${Math.round(score)}/${SCORE_MAX}`;
 }
 
-/** The header kicker: who stands behind the credential. */
-export function certificateKicker(content: CertificateFaceContent): string {
-	return content.official ? "RYU ACADEMY" : "VERIFIED ON RYU";
+/**
+ * The header kicker: who stands behind the credential. Certificates are public
+ * records and stay English unless a caller passes its own `tl`.
+ */
+export function certificateKicker(
+	content: CertificateFaceContent,
+	tl: PassTranslate = englishPassTranslate
+): string {
+	return (
+		content.official ? tl("Ryu Academy") : tl("Verified on Ryu")
+	).toUpperCase();
 }
 
 /**
@@ -76,45 +86,53 @@ export function certificateKicker(content: CertificateFaceContent): string {
  * date is dropped rather than printed as a placeholder.
  */
 export function certificateStats(
-	content: CertificateFaceContent
+	content: CertificateFaceContent,
+	tl: PassTranslate = englishPassTranslate
 ): readonly [string, string][] {
 	const stats: [string, string][] = [];
 	const score = certificateScoreLabel(content.score);
 	if (score) {
-		stats.push(["Score", score]);
+		stats.push([tl("Score"), score]);
 	}
 	const issued = content.issued?.trim();
 	if (issued) {
-		stats.push(["Issued", issued]);
+		stats.push([tl("Issued"), issued]);
 	}
-	stats.push(["Issued by", content.issuerName.trim() || "Community author"]);
+	stats.push([
+		tl("Issued by"),
+		content.issuerName.trim() || tl("Community author"),
+	]);
 	return stats;
 }
 
 /** The certificate card, as a painter. Memoise it: it is half the scene's identity. */
 export function certificateFacePainter(
-	content: CertificateFaceContent
+	content: CertificateFaceContent,
+	tl: PassTranslate = englishPassTranslate
 ): PassFacePainter {
 	return {
-		front: (ctx, env) => paintCertificateFront(ctx, content, env),
+		front: (ctx, env) =>
+			paintCertificateFront(ctx, content, withPassDirection(ctx, env, tl), tl),
 	};
 }
 
 function paintCertificateFront(
 	ctx: CanvasRenderingContext2D,
 	content: CertificateFaceContent,
-	env: PassFaceEnv
+	env: PassFaceEnv,
+	tl: PassTranslate
 ): void {
 	const { family, palette, scale } = env;
 	const { available, bottom, left } = passFaceBox(scale);
+	const inline = passInline(env);
 
-	paintPassHeader(ctx, env, certificateKicker(content));
+	paintPassHeader(ctx, env, certificateKicker(content, tl));
 
 	// Footer first, bottom row up: the issuer alone on the floor, then score and
 	// date side by side above it.
 	const gap = STAT_GAP_PX * scale;
 	const column = (available - gap) / 2;
-	const stats = certificateStats(content);
+	const stats = certificateStats(content, tl);
 	const issuer = stats.at(-1);
 	const upper = stats.slice(0, -1);
 	const stat = (
@@ -144,7 +162,7 @@ function paintCertificateFront(
 	let cursor = top - BLOCK_GAP_PX * scale;
 
 	// Hero, built upward: the credential name, then the holder above it.
-	ctx.textAlign = "left";
+	ctx.textAlign = inline.start;
 	ctx.textBaseline = "alphabetic";
 	const level = content.levelName.trim();
 	const { size: levelSize } = fitFontSize(ctx, {
@@ -160,7 +178,7 @@ function paintCertificateFront(
 	ctx.font = font(family, 400, levelSize, scale);
 	setTracking(ctx, 0);
 	ctx.fillStyle = palette.mutedForeground;
-	ctx.fillText(ellipsize(ctx, level, available), left, cursor);
+	ctx.fillText(ellipsize(ctx, level, available), inline.x(left), cursor);
 	cursor -= levelSize * scale + HERO_GAP_PX * scale;
 
 	const name = content.holderName.trim();
@@ -178,6 +196,6 @@ function paintCertificateFront(
 	ctx.font = font(family, 500, nameSize, scale);
 	setTracking(ctx, nameSize * NAME_TRACKING_EM * scale);
 	ctx.fillStyle = palette.cardForeground;
-	ctx.fillText(ellipsize(ctx, name, available), left, cursor);
+	ctx.fillText(ellipsize(ctx, name, available), inline.x(left), cursor);
 	setTracking(ctx, 0);
 }

@@ -1,10 +1,12 @@
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
 	testDir: ".",
 	testMatch: /node-menu-performance\.spec\.ts$/,
 	workers: 1,
 	timeout: 60_000,
-	outputDir: "/tmp/ryu-node-menu-performance-results",
+	outputDir: path.join(tmpdir(), "ryu-node-menu-performance-results"),
 	reporter: "list",
 	use: {
 		baseURL: "http://127.0.0.1:5214",

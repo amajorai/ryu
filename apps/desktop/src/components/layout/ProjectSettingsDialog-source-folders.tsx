@@ -111,7 +111,7 @@ export function ProjectSourceFoldersSection({
 						Add folder
 					</button>
 					<button
-						className="flex flex-1 items-center gap-3 border-l px-3 py-2 text-muted-foreground text-sm transition-colors hover:bg-muted/40 hover:text-foreground"
+						className="flex flex-1 items-center gap-3 border-s px-3 py-2 text-muted-foreground text-sm transition-colors hover:bg-muted/40 hover:text-foreground"
 						onClick={() => setCloneOpen(true)}
 						type="button"
 					>

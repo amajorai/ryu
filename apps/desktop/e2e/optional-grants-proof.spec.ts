@@ -6,6 +6,7 @@ import {
 	type PluginDocument,
 	pluginDocumentSchema,
 } from "../src/lib/api/plugin-wire-values.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const grantsRequestFieldsSchema = z.object({ grants: z.array(z.string()) });
 const grantsRequestSchema = z.custom<
@@ -19,10 +20,7 @@ const grantsRequestSchema = z.custom<
 test("optional administrative access starts off and changes only after explicit consent", async ({
 	page,
 }) => {
-	const proof = path.resolve(
-		process.cwd(),
-		"../../docs/proof/security-optional-audit-2026-10-04"
-	);
+	const proof = proofEvidencePath("security-optional-audit-2026-10-04");
 	mkdirSync(proof, { recursive: true });
 	let grants = ["usage:read"];
 	const requests: PluginDocument[] = [];

@@ -22,6 +22,16 @@
 	font-weight: 500;
 }
 
+/* Source code, keyboard input and sample output read left to right even in a
+   right-to-left locale. Isolation keeps inline code from reordering the
+   surrounding prose. Zero specificity, so a surface can still override it, and
+   an explicit dir attribute (dir="auto" for user prose shown in a <pre>) wins:
+   an author rule would otherwise beat the browser's own [dir] mapping. */
+:where(pre, code, kbd, samp):where(:not([dir])) {
+	direction: ltr;
+	unicode-bidi: isolate;
+}
+
 /* Sileo's bundled title rule capitalizes every word. Toast titles are sentence
    copy, so the shared toaster opts into this more-specific rule to preserve the
    casing supplied by each caller across web and desktop. */
@@ -111,26 +121,6 @@ body:has(
 	background-clip: text;
 	background-size: 240% 100%;
 	animation: ryu-welcome-wordmark-sweep 5s ease-in-out both;
-}
-
-/* Match the Google switch in decosmicweb: the Code mode uses the same four
-   Google colours, 300% moving canvas, and three-second background loop. */
-@keyframes ryu-interface-mode-gradient {
-	0%,
-	100% {
-		background-position: 0% 50%;
-	}
-	50% {
-		background-position: 100% 50%;
-	}
-}
-
-.ryu-interface-mode-switch[data-checked] {
-	background-image: linear-gradient(45deg, #db4437, #f4b400, #0f9d58, #4285f4);
-	background-repeat: no-repeat;
-	background-position: 0% 50%;
-	background-size: 300% 100%;
-	animation: ryu-interface-mode-gradient 3s ease infinite;
 }
 
 /* A subtree pinned to light (`.ryu-color-scheme-light`) opts out of `dark:`. */

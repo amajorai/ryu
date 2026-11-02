@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -126,9 +127,9 @@ function TownDate({ speed }: { speed: number }) {
 	return (
 		<span className="tabular-nums">
 			<time dateTime={date.toISOString()}>
-				{date.toLocaleDateString(undefined, DATE_FORMAT)}
+				{dateFormatter(activeLocale(), DATE_FORMAT).format(date)}
 				<span aria-hidden="true"> · </span>
-				{date.toLocaleTimeString(undefined, TIME_FORMAT)}
+				{dateFormatter(activeLocale(), TIME_FORMAT).format(date)}
 			</time>
 			<span aria-hidden="true"> · </span>
 			<output aria-live="polite">
@@ -307,9 +308,15 @@ export function CityHallButton({
 }
 
 const VIEW_LABELS: Record<TownDataView, string> = {
-	activity: "Activity",
-	needs: "Needs you",
-	none: "Districts",
+	get activity() {
+		return tr("Activity");
+	},
+	get needs() {
+		return tr("Needs you");
+	},
+	get none() {
+		return tr("Districts");
+	},
 };
 
 const VIEW_SCALE: Record<Exclude<TownDataView, "none">, [string, string]> = {
@@ -319,16 +326,28 @@ const VIEW_SCALE: Record<Exclude<TownDataView, "none">, [string, string]> = {
 
 /** With acts the "Needs you" view counts asks and stopped runs. */
 const ACT_VIEW_HINTS: Record<TownDataView, string> = {
-	activity: "Running and recently active conversations",
-	needs: "Agents asking you or stopped",
-	none: "Each district in its own ground colour",
+	get activity() {
+		return tr("Running and recently active conversations");
+	},
+	get needs() {
+		return tr("Agents asking you or stopped");
+	},
+	get none() {
+		return tr("Each district in its own ground colour");
+	},
 };
 
 /** What each data view measures, on its button and over its legend. */
 export const VIEW_HINTS: Record<TownDataView, string> = {
-	activity: "Running and recently active conversations",
-	needs: "Replies and failed runs waiting on you",
-	none: "Each district in its own ground colour",
+	get activity() {
+		return tr("Running and recently active conversations");
+	},
+	get needs() {
+		return tr("Replies and failed runs waiting on you");
+	},
+	get none() {
+		return tr("Each district in its own ground colour");
+	},
 };
 
 /** Data views: tint the districts by activity or by what waits on you. */

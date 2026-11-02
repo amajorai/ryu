@@ -140,7 +140,7 @@ function JobStatusRow({
 					</p>
 				</div>
 				<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-					{count} {count === 1 ? "run" : "runs"}
+					{tl("{count, plural, one {# run} other {# runs}}", { count })}
 				</span>
 			</div>
 			<RunStatusTimeline
@@ -251,7 +251,7 @@ function DayRunTimeline({
 					24h run status
 				</span>
 				<span className="text-muted-foreground/70 text-xs tabular-nums">
-					{runCount} {runCount === 1 ? "run" : "runs"}
+					{tl("{runCount, plural, one {# run} other {# runs}}", { runCount })}
 				</span>
 			</div>
 			<RunStatusTimeline
@@ -317,7 +317,7 @@ export function AgendaView({
 								{formatCalendarDate(day, "longDate", locale)}
 							</span>
 							{isDisplayToday(day) && (
-								<span className="ml-auto font-medium text-primary text-xs">
+								<span className="ms-auto font-medium text-primary text-xs">
 									Today
 								</span>
 							)}

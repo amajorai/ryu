@@ -1,5 +1,9 @@
 import "@ryu/i18n/official-catalog";
-import { LANGUAGE_PACK_STORAGE_KEY, type LanguagePack } from "@ryu/i18n/core";
+import {
+	LANGUAGE_PACK_STORAGE_KEY,
+	type LanguagePack,
+	systemLocales,
+} from "@ryu/i18n/core";
 import { I18nProvider } from "@ryu/i18n/react";
 import { I18nDirectionProvider } from "@ryu/ui/components/direction.tsx";
 import { useEffect, useState } from "react";
@@ -47,7 +51,8 @@ function sameSelection(
  * and a main-process catalog read rather than inheriting Desktop's context.
  * The main process also serves the saved UI language (Core's `ui-language`
  * preference, written today only by the Island picker), so both Island
- * windows follow one choice. The on-screen
+ * windows follow one choice. Without a fixed choice the provider follows the
+ * OS's preferred languages (`languagechange`). The on-screen
  * generative UI window passes its own `languagePacks` bridge. */
 export function IslandI18nProvider({
 	children,
@@ -71,8 +76,6 @@ export function IslandI18nProvider({
 		[languagePacks]
 	);
 
-	const systemLocale =
-		"navigator" in globalThis ? navigator.language : undefined;
 	const fixed = selection?.mode === "fixed";
 	let initialPackId: string | null | undefined;
 	if (selection) {
@@ -81,7 +84,10 @@ export function IslandI18nProvider({
 
 	return (
 		<I18nProvider
-			initialLocale={fixed ? null : systemLocale}
+			// Automatic mode walks every OS preference (`nl-NL, de` answers `de`)
+			// and follows a later OS language change without a relaunch.
+			followSystemLocale={!fixed}
+			initialLocale={fixed ? null : systemLocales()}
 			// Until the main process answers, the local cache restores the last
 			// choice; afterwards its selection wins and a change rebuilds the runtime.
 			initialPackId={initialPackId}

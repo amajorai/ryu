@@ -1,10 +1,11 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "motion/react";
 import { type ReactNode, type Ref, useId } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { QaFacepile } from "./qa-avatar.tsx";
 import {
 	type QaQuestion,
@@ -37,7 +38,7 @@ export function QaRelated({ onOpen, questions }: QaRelatedProps) {
 	return (
 		<aside
 			aria-labelledby={headingId}
-			className="@[1000px]/qa:block hidden w-[288px] shrink-0 overflow-y-auto border-border border-l py-6 pl-6"
+			className="@[1000px]/qa:block hidden w-[288px] shrink-0 overflow-y-auto border-border border-s py-6 ps-6"
 			data-testid="qa-related"
 		>
 			<h2
@@ -56,7 +57,8 @@ export function QaRelated({ onOpen, questions }: QaRelatedProps) {
 						<li className="flex items-start gap-2.5" key={question.thread.id}>
 							<QaAnswerBox compact question={question} />
 							<button
-								className="min-w-0 rounded-sm text-left text-primary text-sm leading-6 outline-none transition-colors duration-100 hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring/50"
+								className="min-w-0 rounded-sm text-start text-primary text-sm leading-6 outline-none transition-colors duration-100 hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring/50"
+								data-ryu-i18n="off"
 								onClick={() => onOpen(question.thread.id)}
 								type="button"
 							>
@@ -115,19 +117,23 @@ export function QaQuestionPage({
 			<div className="mx-auto flex min-h-0 w-full max-w-[1120px] flex-1 flex-col @[640px]/qa:px-6 px-4">
 				<header className="shrink-0 border-border border-b pt-4 pb-4">
 					<Button
-						className="-ml-2"
+						className="-ms-2"
 						onClick={onBack}
 						size="dense"
 						variant="ghost-muted"
 					>
-						<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+						<ArrowLeft
+							aria-hidden="true"
+							className="rtl:-scale-x-100"
+							data-icon="inline-start"
+						/>
 						All questions
 					</Button>
 					<h1
 						className="mt-2 font-semibold! text-foreground text-xl leading-7 tracking-tight"
 						id={headingId}
 					>
-						{thread?.title ?? "New question"}
+						{thread?.title ?? tr("New question")}
 					</h1>
 					{question && thread ? (
 						<dl className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
@@ -160,7 +166,7 @@ export function QaQuestionPage({
 												"text-status-destructive"
 										)}
 									>
-										{THREAD_STATUS_LABELS[question.status]}
+										{threadStatusLabel(question.status)}
 									</span>
 								</Meta>
 							) : null}

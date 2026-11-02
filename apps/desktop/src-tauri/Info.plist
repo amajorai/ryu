@@ -13,9 +13,36 @@
   intentionally omitted so we never request a permission we do not use. On
   Windows the equivalent prompt remains a browser-mediated consent flow; the
   production window does not use a fake-media flag.
+
+  CFBundleDevelopmentRegion and CFBundleLocalizations tell macOS which
+  languages the app ships, so the permission prompt and AppKit-drawn chrome
+  (file panels, standard buttons) follow the system language instead of
+  falling back to English. The translated microphone prompt lives in the
+  generated locales/<lproj>.lproj/InfoPlist.strings, copied into the bundle by
+  bundle.macOS.files. The check mode of
+  scripts/sync-desktop-infoplist-strings.mjs (run by test:tools) verifies the
+  list and the English string below; the English source is
+  apps/desktop/src/lib/native-bundle-copy.ts.
 -->
 <plist version="1.0">
   <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+      <string>en</string>
+      <string>ar</string>
+      <string>de</string>
+      <string>es</string>
+      <string>fr</string>
+      <string>hi</string>
+      <string>it</string>
+      <string>ja</string>
+      <string>ko</string>
+      <string>pt-BR</string>
+      <string>ru</string>
+      <string>zh-Hans</string>
+    </array>
     <key>NSMicrophoneUsageDescription</key>
     <string>Ryu uses your microphone for voice input so you can speak to your agents instead of typing.</string>
   </dict>

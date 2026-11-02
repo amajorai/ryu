@@ -192,7 +192,7 @@ function BouncyAccordionRow({
 						aria-controls={contentId}
 						aria-expanded={open}
 						className={cn(
-							"flex min-h-[40px] min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left outline-none transition-colors",
+							"flex min-h-[40px] min-w-0 flex-1 items-center gap-3 px-3 py-2 text-start outline-none transition-colors",
 							"focus-visible:bg-muted/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 							"disabled:pointer-events-none",
 							appearance === "faq" && "px-4 py-3",

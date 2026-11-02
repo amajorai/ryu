@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
+import { translate as tl } from "@ryu/i18n/core";
 import { z } from "zod";
 import { buildAssistantSystemPrompt, findRelevantDocs } from "./docs.ts";
 import {
@@ -621,7 +622,9 @@ export async function handleGuestChatPost(
 	}
 	if (!parsed.success) {
 		return failure(
-			`Ask a question under ${MAX_GUEST_QUESTION_CHARS} characters.`,
+			tl("Ask a question under {maxChars} characters.", {
+				maxChars: String(MAX_GUEST_QUESTION_CHARS),
+			}),
 			400
 		);
 	}

@@ -9,6 +9,7 @@
  * skills that change, and decides when nothing changes.
  */
 
+import { translate as tl } from "@ryu/i18n/core";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type InstalledSkill, listSkills } from "@/src/lib/api/skills.ts";
 
@@ -34,13 +35,18 @@ export function skillSetChangeLabels(names: readonly string[]): string[] {
 		return [];
 	}
 	if (unique.length === 1) {
-		return [`The ${unique[0]} skill`];
+		return [tl("The {name} skill", { name: unique[0] ?? "" })];
 	}
 	if (unique.length <= MAX_LISTED_SKILLS + 1) {
 		return unique;
 	}
 	const rest = unique.length - MAX_LISTED_SKILLS;
-	return [...unique.slice(0, MAX_LISTED_SKILLS), `${rest} more skills`];
+	return [
+		...unique.slice(0, MAX_LISTED_SKILLS),
+		tl("{count, plural, one {# more skill} other {# more skills}}", {
+			count: rest,
+		}),
+	];
 }
 
 /**

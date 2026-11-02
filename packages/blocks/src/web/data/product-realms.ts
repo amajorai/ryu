@@ -1,201 +1,16 @@
-import type { LucideIcon } from "lucide-react";
 import {
-	Bell,
-	Bot,
-	Box,
-	Cable,
-	Cpu,
-	Globe,
-	Key,
-	Mail,
-	Monitor,
-	Settings2,
-	Share2,
-	Shield,
-	Zap,
-} from "lucide-react";
+	PRODUCT_REALMS,
+	type ProductRealmId,
+	productRealm,
+} from "./product-realm-list.ts";
 
-/**
- * The small, public product vocabulary shared by the landing page and the
- * marketing header. The larger product catalogue remains in `products.tsx`;
- * this list is intentionally limited to the products people can choose.
- */
-export type ProductRealmId =
-	| "os"
-	| "bot"
-	| "console"
-	| "gateway"
-	| "connect"
-	| "passport"
-	| "box"
-	| "mail"
-	| "notify"
-	| "sites"
-	| "hire"
-	| "compute"
-	| "share";
-
-export interface ProductRealm {
-	description: string;
-	href: string;
-	icon: LucideIcon;
-	id: ProductRealmId;
-	label: string;
-	shortLabel: string;
-	type: "workspace" | "service";
-}
-
-export const PRODUCT_REALMS: readonly [ProductRealm, ...ProductRealm[]] = [
-	{
-		description: "A calm desktop workspace where your tools become windows.",
-		href: "/products/os",
-		icon: Monitor,
-		id: "os",
-		label: "OS",
-		shortLabel: "OS",
-		type: "workspace",
-	},
-	{
-		description: "Managed AI you can ask for work without setting up a stack.",
-		href: "/bot",
-		icon: Bot,
-		id: "bot",
-		label: "Bot",
-		shortLabel: "Bot",
-		type: "workspace",
-	},
-	{
-		description:
-			"The operator surface for servers, models, permissions, and Apps.",
-		href: "/agent",
-		icon: Settings2,
-		id: "console",
-		label: "Agent",
-		shortLabel: "Agent",
-		type: "workspace",
-	},
-	{
-		description:
-			"Programmatic, governed calls to tools and Skills from any system.",
-		href: "/products/gateway",
-		icon: Shield,
-		id: "gateway",
-		label: "Ryu Gateway",
-		shortLabel: "Gateway",
-		type: "service",
-	},
-	{
-		description:
-			"MCP hosting, Skills, governed tools, and Composio behind one edge.",
-		href: "/products/connect",
-		icon: Cable,
-		id: "connect",
-		label: "Ryu Connect",
-		shortLabel: "Connect",
-		type: "service",
-	},
-	{
-		description:
-			"Encrypted identity connections for agents and their allowed sessions.",
-		href: "/products/passport",
-		icon: Key,
-		id: "passport",
-		label: "Ryu Passport",
-		shortLabel: "Passport",
-		type: "service",
-	},
-	{
-		description:
-			"A persistent, isolated workspace for agent runs and previews.",
-		href: "/products/box",
-		icon: Box,
-		id: "box",
-		label: "Ryu Box",
-		shortLabel: "Box",
-		type: "service",
-	},
-	{
-		description:
-			"API-first email inboxes for agents, with signed inbound mail.",
-		href: "/products/mail",
-		icon: Mail,
-		id: "mail",
-		label: "Ryu Mail",
-		shortLabel: "Mail",
-		type: "service",
-	},
-	{
-		description:
-			"Durable events, live activities, and channel delivery over HTTP.",
-		href: "/products/notify",
-		icon: Bell,
-		id: "notify",
-		label: "Ryu Notify",
-		shortLabel: "Notify",
-		type: "service",
-	},
-	{
-		description:
-			"Saved versions, secret-scanned deploys, and a separate visitor origin.",
-		href: "/products/sites",
-		icon: Globe,
-		id: "sites",
-		label: "Ryu Sites",
-		shortLabel: "Sites",
-		type: "service",
-	},
-	{
-		description:
-			"Early access: recruit a specialist for one run without installing it.",
-		href: "/products/hire",
-		icon: Zap,
-		id: "hire",
-		label: "Ryu Hire",
-		shortLabel: "Hire",
-		type: "service",
-	},
-	{
-		description: "Rent governed CPU or GPU capacity for a bounded run.",
-		href: "/products/compute",
-		icon: Cpu,
-		id: "compute",
-		label: "Ryu Compute",
-		shortLabel: "Compute",
-		type: "service",
-	},
-	{
-		description: "Share idle Ryu capacity without giving up your machine.",
-		href: "/products/share",
-		icon: Share2,
-		id: "share",
-		label: "Ryu Share",
-		shortLabel: "Share",
-		type: "service",
-	},
-] as const satisfies readonly ProductRealm[];
-
-/**
- * The realms for `ids`, in order. `hiddenIds` drops realms the host has not
- * rolled out (a standalone service whose rollout flag is off) without editing
- * the shared realm data.
- */
-export function productRealmsFor(
-	ids: readonly ProductRealmId[],
-	hiddenIds: readonly string[] = []
-): ProductRealm[] {
-	const hidden = new Set(hiddenIds);
-	return ids.flatMap((id) => {
-		if (hidden.has(id)) {
-			return [];
-		}
-		const realm = PRODUCT_REALMS.find((candidate) => candidate.id === id);
-		return realm ? [realm] : [];
-	});
-}
-
-export function productRealm(id: ProductRealmId): ProductRealm {
-	return PRODUCT_REALMS.find((realm) => realm.id === id) ?? PRODUCT_REALMS[0];
-}
+export {
+	PRODUCT_REALMS,
+	type ProductRealm,
+	type ProductRealmId,
+	productRealm,
+	productRealmsFor,
+} from "./product-realm-list.ts";
 
 export type ProductNavStatus = "Early access" | "Coming soon";
 
@@ -226,18 +41,26 @@ function navLabel(name: string): string {
 	return name.replace(/^Ryu /, "");
 }
 
-function realmItem(id: ProductRealmId, description: string): ProductNavItem {
+function realmItem(
+	id: ProductRealmId,
+	{ description }: { description: string }
+): ProductNavItem {
 	const realm = productRealm(id);
 	return { description, href: realm.href, id, label: navLabel(realm.label) };
 }
 
 /** A pre-release product: listed by its short catalogue nav label with its status. */
-function upcomingItem(
-	slug: string,
-	label: string,
-	status: ProductNavStatus,
-	description: string
-): ProductNavItem {
+function upcomingItem({
+	description,
+	label,
+	slug,
+	status,
+}: {
+	description: string;
+	label: string;
+	slug: string;
+	status: ProductNavStatus;
+}): ProductNavItem {
 	// Realm-backed products keep their id so a closed rollout flag still drops
 	// them from the nav data (`productNavGroupsFor`).
 	const realm = PRODUCT_REALMS.find((candidate) => candidate.id === slug);
@@ -262,8 +85,12 @@ export const PRODUCT_NAV_GROUPS: readonly ProductNavGroup[] = [
 	{
 		title: "Workspaces",
 		items: [
-			realmItem("bot", "Managed AI without setting up a stack."),
-			realmItem("console", "Operate servers, models, permissions, and Apps."),
+			realmItem("bot", {
+				description: "Managed AI without setting up a stack.",
+			}),
+			realmItem("console", {
+				description: "Operate servers, models, permissions, and Apps.",
+			}),
 			{
 				description: "The easiest way to get started with agents.",
 				href: "/products/desktop",
@@ -271,36 +98,36 @@ export const PRODUCT_NAV_GROUPS: readonly ProductNavGroup[] = [
 			},
 		],
 		upcoming: [
-			upcomingItem(
-				"os",
-				"OS",
-				"Early access",
-				"A desktop workspace for agents and apps."
-			),
-			upcomingItem(
-				"chrome-extension",
-				"Chrome",
-				"Early access",
-				"A page-aware companion in your browser."
-			),
-			upcomingItem(
-				"island",
-				"Island",
-				"Coming soon",
-				"A screen-aware companion for the next step."
-			),
-			upcomingItem(
-				"mobile",
-				"Mobile",
-				"Coming soon",
-				"Chat with your agents from your phone."
-			),
-			upcomingItem(
-				"devices",
-				"Devices",
-				"Coming soon",
-				"Hardware companions for your Ryu server."
-			),
+			upcomingItem({
+				slug: "os",
+				label: "OS",
+				status: "Early access",
+				description: "A desktop workspace for agents and apps.",
+			}),
+			upcomingItem({
+				slug: "chrome-extension",
+				label: "Chrome",
+				status: "Early access",
+				description: "A page-aware companion in your browser.",
+			}),
+			upcomingItem({
+				slug: "island",
+				label: "Island",
+				status: "Coming soon",
+				description: "A screen-aware companion for the next step.",
+			}),
+			upcomingItem({
+				slug: "mobile",
+				label: "Mobile",
+				status: "Coming soon",
+				description: "Chat with your agents from your phone.",
+			}),
+			upcomingItem({
+				slug: "devices",
+				label: "Devices",
+				status: "Coming soon",
+				description: "Hardware companions for your Ryu server.",
+			}),
 		],
 	},
 	{
@@ -341,7 +168,9 @@ export const PRODUCT_NAV_GROUPS: readonly ProductNavGroup[] = [
 				href: "/products/core",
 				label: "Core",
 			},
-			realmItem("gateway", "Governed calls to tools and Skills."),
+			realmItem("gateway", {
+				description: "Governed calls to tools and Skills.",
+			}),
 			{
 				description: "We build, host, and run your agents.",
 				href: "/products/cloud",
@@ -361,62 +190,64 @@ export const PRODUCT_NAV_GROUPS: readonly ProductNavGroup[] = [
 	},
 	{
 		title: "Agent APIs",
-		items: [realmItem("mail", "API-first email inboxes for agents.")],
+		items: [
+			realmItem("mail", { description: "API-first email inboxes for agents." }),
+		],
 		upcoming: [
-			upcomingItem(
-				"connect",
-				"Connect",
-				"Early access",
-				"Hosted tools and Skills behind one API."
-			),
-			upcomingItem(
-				"passport",
-				"Passport",
-				"Early access",
-				"An encrypted identity vault for agents."
-			),
-			upcomingItem(
-				"box",
-				"Box",
-				"Early access",
-				"Isolated workspaces for agent runs."
-			),
-			upcomingItem(
-				"notify",
-				"Notify",
-				"Early access",
-				"Durable events and delivery over HTTP."
-			),
-			upcomingItem(
-				"sites",
-				"Sites",
-				"Early access",
-				"Save, review, and deploy websites."
-			),
-			upcomingItem(
-				"hire",
-				"Hire",
-				"Early access",
-				"A specialist agent for one task."
-			),
-			upcomingItem(
-				"messaging",
-				"Messaging",
-				"Early access",
-				"SMS, WhatsApp, and phone numbers for agents."
-			),
-			upcomingItem(
-				"compute",
-				"Compute",
-				"Coming soon",
-				"Rent compute for a bounded run."
-			),
-			upcomingItem(
-				"share",
-				"Share",
-				"Coming soon",
-				"Share idle capacity from your machine."
-			),
+			upcomingItem({
+				slug: "connect",
+				label: "Connect",
+				status: "Early access",
+				description: "Hosted tools and Skills behind one API.",
+			}),
+			upcomingItem({
+				slug: "passport",
+				label: "Passport",
+				status: "Early access",
+				description: "An encrypted identity vault for agents.",
+			}),
+			upcomingItem({
+				slug: "box",
+				label: "Box",
+				status: "Early access",
+				description: "Isolated workspaces for agent runs.",
+			}),
+			upcomingItem({
+				slug: "notify",
+				label: "Notify",
+				status: "Early access",
+				description: "Durable events and delivery over HTTP.",
+			}),
+			upcomingItem({
+				slug: "sites",
+				label: "Sites",
+				status: "Early access",
+				description: "Save, review, and deploy websites.",
+			}),
+			upcomingItem({
+				slug: "hire",
+				label: "Hire",
+				status: "Early access",
+				description: "A specialist agent for one task.",
+			}),
+			upcomingItem({
+				slug: "messaging",
+				label: "Messaging",
+				status: "Early access",
+				description: "SMS, WhatsApp, and phone numbers for agents.",
+			}),
+			upcomingItem({
+				slug: "compute",
+				label: "Compute",
+				status: "Coming soon",
+				description: "Rent compute for a bounded run.",
+			}),
+			upcomingItem({
+				slug: "share",
+				label: "Share",
+				status: "Coming soon",
+				description: "Share idle capacity from your machine.",
+			}),
 		],
 	},
 ];

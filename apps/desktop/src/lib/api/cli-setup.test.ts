@@ -32,10 +32,17 @@ test("CLI projection invokes the three registered native commands with the selec
 		{ command: "apply_gateway_cli_setup", input },
 		{ command: "reset_gateway_cli_setup", input: { tool: input.tool } },
 	]);
-	const registered = await readFile(
-		new URL("../../../src-tauri/src/lib.rs", import.meta.url),
-		"utf8"
+	// `lib.rs` declares the module; `commands.rs` holds the `generate_handler!` list.
+	const nativeSources = await Promise.all(
+		["lib.rs", "commands.rs"].map((file) =>
+			readFile(
+				new URL(`../../../src-tauri/src/${file}`, import.meta.url),
+				"utf8"
+			)
+		)
 	);
+	expect(nativeSources[0]).toContain("mod cli_setup;");
+	const registered = nativeSources[1];
 	for (const call of calls) {
 		expect(registered).toContain(`cli_setup::${call.command},`);
 	}

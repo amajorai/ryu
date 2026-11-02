@@ -371,7 +371,7 @@ async function sendStepUpChallengeEmail(
 			react: StepUpMagicLinkEmail({
 				actionLabel: stepUpActionLabel(input.scope),
 				magicLinkUrl: verificationUrl,
-				userName: input.user.name || "there",
+				userName: input.user.name || undefined,
 			}),
 			subject: "Confirm your Ryu account change",
 			to: input.user.email,
@@ -382,7 +382,7 @@ async function sendStepUpChallengeEmail(
 		react: StepUpOTPEmail({
 			actionLabel: stepUpActionLabel(input.scope),
 			otpCode: secret,
-			userName: input.user.name || "there",
+			userName: input.user.name || undefined,
 		}),
 		subject: `Your confirmation code is ${secret}`,
 		to: input.user.email,

@@ -60,7 +60,11 @@ proofWindow.__TAURI_INTERNALS__ = {
 		fixture.calls.push({ command, args });
 		if (failures.delete(command)) {
 			if (command === "list_workspace_files") {
-				throw new Error("Fixture repository read denied");
+				// The coded rejection `fs_command_error.rs` sends.
+				throw Object.assign(new Error("Fixture repository read denied"), {
+					code: "list_failed",
+					detail: "Fixture repository read denied",
+				});
 			}
 			throw new Error("Fixture workspace item unavailable");
 		}
@@ -81,7 +85,11 @@ proofWindow.__TAURI_INTERNALS__ = {
 			}
 			if (params.has("failure")) {
 				params.delete("failure");
-				throw new Error("Fixture repository read denied");
+				// The coded rejection `fs_command_error.rs` sends.
+				throw Object.assign(new Error("Fixture repository read denied"), {
+					code: "list_failed",
+					detail: "Fixture repository read denied",
+				});
 			}
 			if (args?.root === "/tmp/ryu-new-project-fixture") {
 				return ["new-project.ts"];

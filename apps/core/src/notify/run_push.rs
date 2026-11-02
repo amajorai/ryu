@@ -158,17 +158,21 @@ pub fn sender_image_url(agent_id: &str, name: &str, persona: Option<&PersonaSlot
     )
 }
 
-/// The push for a finished run. Pure, so the payload is unit-tested.
+/// The push for a finished run, its body in `locale`. Pure, so the payload is
+/// unit-tested.
 pub fn run_finished_push(
     run: &ConversationSummary,
     sender: &PushSender,
+    locale: &str,
 ) -> (String, String, serde_json::Value) {
+    use crate::i18n::{messages, Message};
     let failed = run.run_status.as_deref() == Some("failed");
-    let body = if failed {
-        "The run failed. Tap to see what happened."
+    let body = Message::new(if failed {
+        messages::RUN_FAILED_BODY_MESSAGE
     } else {
-        "Finished replying. Tap to read it."
-    };
+        messages::RUN_FINISHED_BODY_MESSAGE
+    })
+    .render(locale);
     let data = serde_json::json!({
         "kind": "agent-done",
         "conversationId": run.id,
@@ -180,7 +184,7 @@ pub fn run_finished_push(
             "image": sender.image_url,
         },
     });
-    (sender.name.clone(), body.to_owned(), data)
+    (sender.name.clone(), body, data)
 }
 
 async fn resolve_sender(state: &ServerState, agent_id: Option<&str>) -> PushSender {
@@ -228,8 +232,8 @@ async fn push_run_finished(state: ServerState, run: ConversationSummary) {
             return;
         }
     };
-    let tokens = match store.run_finished_push_tokens(owner.as_deref()).await {
-        Ok(tokens) if !tokens.is_empty() => tokens,
+    let devices = match store.run_finished_push_targets(owner.as_deref()).await {
+        Ok(devices) if !devices.is_empty() => devices,
         Ok(_) => return,
         Err(e) => {
             tracing::warn!("notify: run push could not read push tokens: {e:#}");
@@ -237,20 +241,25 @@ async fn push_run_finished(state: ServerState, run: ConversationSummary) {
         }
     };
     let sender = resolve_sender(&state, run.agent_id.as_deref()).await;
-    let (title, body, data) = run_finished_push(&run, &sender);
-    ryu_notify::push_expo_rich_message(
-        &state.client,
-        &tokens,
-        &title,
-        &body,
-        data,
-        ryu_notify::ExpoRichContent {
-            channel_id: Some(AGENT_DONE_CHANNEL),
-            image_url: Some(&sender.image_url),
-            thread_id: Some(&run.id),
-        },
-    )
-    .await;
+    // One push per language: each device reads the body in the locale it
+    // registered with, else the node's.
+    let node_locale = crate::i18n::locale::node_locale().await;
+    for (locale, tokens) in super::tokens_by_locale(&devices, node_locale) {
+        let (title, body, data) = run_finished_push(&run, &sender, locale);
+        ryu_notify::push_expo_rich_message(
+            &state.client,
+            &tokens,
+            &title,
+            &body,
+            data,
+            ryu_notify::ExpoRichContent {
+                channel_id: Some(AGENT_DONE_CHANNEL),
+                image_url: Some(&sender.image_url),
+                thread_id: Some(&run.id),
+            },
+        )
+        .await;
+    }
 }
 
 /// Subscribe to the run-status bus and push each finished run to its owner's
@@ -396,7 +405,7 @@ mod tests {
             image_url: "https://img/nova.png".into(),
             name: "Nova".into(),
         };
-        let (title, body, data) = run_finished_push(&run, &sender);
+        let (title, body, data) = run_finished_push(&run, &sender, "en");
         assert_eq!(title, "Nova");
         assert!(!body.contains("Quarterly"));
         assert_eq!(data["kind"], "agent-done");
@@ -404,8 +413,13 @@ mod tests {
         assert_eq!(data["sender"]["image"], "https://img/nova.png");
         assert_eq!(data["status"], "completed");
 
-        let (_, body, data) = run_finished_push(&summary("failed"), &sender);
-        assert!(body.contains("failed"));
+        let (_, body, data) = run_finished_push(&summary("failed"), &sender, "en");
+        assert_eq!(body, "The run failed. Tap to see what happened.");
         assert_eq!(data["status"], "failed");
+
+        // The body follows the device's locale; the agent's name stays as is.
+        let (title, body, _) = run_finished_push(&run, &sender, "ja");
+        assert_eq!(title, "Nova");
+        assert_ne!(body, "Finished replying. Tap to read it.");
     }
 }

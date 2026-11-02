@@ -4,18 +4,16 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, type FrameLocator, type Page } from "@playwright/test";
+import { proofEvidencePath } from "../proof-evidence-path.ts";
 import type {
 	SitesCall,
 	SitesProofApi,
 } from "./sites-companion-proof.types.ts";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 const appHtmlPath = `${tmpdir()}/ryu-sites-companion-ui-build/index.html`;
-export const evidenceDirectory = path.resolve(
-	here,
-	"../../../../docs/proof/test-coverage-sweep-20260924/evidence"
+export const evidenceDirectory = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 interface SiteVersion {

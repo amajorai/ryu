@@ -14,6 +14,7 @@
 // Used by two surfaces: inline on the Store's installed plugin card (the
 // per-plugin "Settings" disclosure) and the App Settings "Plugins" section.
 
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useMemo, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -24,6 +25,7 @@ import {
 	TextField,
 	ToggleField,
 } from "./PluginSettingsFields-basic-fields.tsx";
+import { localizeSettingsTab } from "./PluginSettingsFields-localize.ts";
 import { NumberField } from "./PluginSettingsFields-number-field.tsx";
 import {
 	AgentPickerField,
@@ -149,15 +151,24 @@ interface PluginSettingsFieldsProps {
  * default set in the Gateway dialog, so "blank" is a real choice, not an
  * oversight.
  */
-function defaultFieldDescription(type: string): string | undefined {
+function defaultFieldDescription(
+	tl: LiteralMessage,
+	type: string
+): string | undefined {
 	if (type === "model_picker") {
-		return "Any model the Gateway can route. Leave blank to use the node's default.";
+		return tl(
+			"Any model the Gateway can route. Leave blank to use the node's default."
+		);
 	}
 	if (type === "agent_picker") {
-		return "An agent, or a provider and model. Leave blank to use the node's default.";
+		return tl(
+			"An agent, or a provider and model. Leave blank to use the node's default."
+		);
 	}
 	if (type === "secret") {
-		return "Stored on this node and never shown again. Enter a new value to replace it.";
+		return tl(
+			"Stored on this node and never shown again. Enter a new value to replace it."
+		);
 	}
 	return undefined;
 }
@@ -174,6 +185,12 @@ export function PluginSettingsFields({
 	const targetUrl = target.url;
 	const targetToken = target.token;
 	const targetUserJwt = target.userJwt ?? null;
+	const tl = useLiteralMessages();
+	// Manifest copy (titles, labels, descriptions, options) in the active locale.
+	const localizedTabs = useMemo(
+		() => tabs.map((tab) => localizeSettingsTab(tl, tab)),
+		[tabs, tl]
+	);
 	// Callers may reconstruct ApiTarget during unrelated parent renders. Keep
 	// reads and write-only metadata tied to its identity, not its object reference.
 	const stableTarget = useMemo(
@@ -182,7 +199,7 @@ export function PluginSettingsFields({
 	);
 	return (
 		<div className="space-y-4">
-			{tabs.map((tab) => (
+			{localizedTabs.map((tab) => (
 				<SettingsSection
 					key={tab.id}
 					title={hideTabTitles ? undefined : tab.title}
@@ -192,7 +209,7 @@ export function PluginSettingsFields({
 							<FieldControl
 								bare={field.type === "textarea"}
 								description={
-									field.description ?? defaultFieldDescription(field.type)
+									field.description ?? defaultFieldDescription(tl, field.type)
 								}
 								field={field}
 								key={`${target.url}:${tab.plugin}:${field.prefKey}`}

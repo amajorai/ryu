@@ -1,6 +1,7 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { useFormatLocale } from "@ryu/ui/hooks/use-format-locale.ts";
 import { useRef, useState } from "react";
 import type { CatalogScanResult } from "../host.tsx";
 
@@ -13,6 +14,7 @@ export function AgentAuditPanel({
 	runAudit: () => Promise<CatalogScanResult>;
 }) {
 	const tl = useLiteralMessages();
+	const formatLocale = useFormatLocale();
 	const [result, setResult] = useState<CatalogScanResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [running, setRunning] = useState(false);
@@ -117,7 +119,7 @@ export function AgentAuditPanel({
 								result.model ? ` · ${result.model}` : ""
 							}${
 								result.auditedAt
-									? ` · ${new Date(result.auditedAt).toLocaleString()}`
+									? ` · ${new Date(result.auditedAt).toLocaleString(formatLocale)}`
 									: ""
 							}`,
 						})}
@@ -128,7 +130,7 @@ export function AgentAuditPanel({
 								{assessment.summary}
 							</p>
 							<h4 className="font-medium text-xs">Evidence</h4>
-							<ul className="list-disc space-y-1 pl-4 text-muted-foreground text-xs">
+							<ul className="list-disc space-y-1 ps-4 text-muted-foreground text-xs">
 								{assessment.evidence.map((item, index) => (
 									<li key={`${index}:${item}`}>{item}</li>
 								))}
@@ -157,7 +159,7 @@ export function AgentAuditPanel({
 							{assessment.limitations.length ? (
 								<>
 									<h4 className="font-medium text-xs">Limitations</h4>
-									<ul className="list-disc space-y-1 pl-4 text-muted-foreground text-xs">
+									<ul className="list-disc space-y-1 ps-4 text-muted-foreground text-xs">
 										{assessment.limitations.map((item, index) => (
 											<li key={`${index}:${item}`}>{item}</li>
 										))}

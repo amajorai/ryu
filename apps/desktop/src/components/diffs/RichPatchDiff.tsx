@@ -9,6 +9,7 @@ import type {
 import { parseDiffFromFile } from "@pierre/diffs";
 import { Editor, type EditorOptions } from "@pierre/diffs/edit";
 import { EditProvider, FileDiff, PatchDiff } from "@pierre/diffs/react";
+import { usePierreShadowLocalizer } from "@ryu/blocks/desktop/agent-elements/use-pierre-shadow-localizer.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -112,6 +113,7 @@ export function RichPatchDiff({
 	style,
 }: RichPatchDiffProps) {
 	const tl = useLiteralMessages();
+	const localizeDiffCopy = usePierreShadowLocalizer();
 	const [comments, setComments] = useState<
 		DiffLineAnnotation<ReviewCommentMetadata>[]
 	>([]);
@@ -212,7 +214,7 @@ export function RichPatchDiff({
 						</span>
 						<button
 							aria-label="Remove review comment"
-							className="ml-auto rounded px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="ms-auto rounded px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 							onClick={() => removeComment(metadata.id)}
 							type="button"
 						>
@@ -313,7 +315,11 @@ export function RichPatchDiff({
 
 	return (
 		<EditProvider<ReviewCommentMetadata> createEditor={createEditor}>
-			<div className={cn("min-w-0", className)} style={style}>
+			<div
+				className={cn("min-w-0", className)}
+				ref={localizeDiffCopy}
+				style={style}
+			>
 				{editMode && showSave && onSave && (
 					<div className="flex items-center gap-2 border-border/60 border-b bg-muted/30 px-2 py-1">
 						<span className="text-muted-foreground text-xs">
@@ -321,7 +327,7 @@ export function RichPatchDiff({
 						</span>
 						{dirty && (
 							<button
-								className="ml-auto inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground text-xs hover:bg-primary/90 disabled:opacity-50"
+								className="ms-auto inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground text-xs hover:bg-primary/90 disabled:opacity-50"
 								disabled={saving}
 								onClick={() => {
 									void save();

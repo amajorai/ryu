@@ -1,6 +1,6 @@
 import {
 	BUNDLED_MARKETPLACE_BACKGROUNDS,
-	backdropByAvailableId,
+	backdropByAvailableId as backdropFromBackgrounds,
 	getAvailableBackdrops,
 	getMarketplaceBackdrops,
 	isMarketplaceBackdropId,
@@ -65,7 +65,8 @@ function includeMarketplaceDefaults(
 
 function readCachedBackgrounds(): PluginBackground[] {
 	if (!globalThis.localStorage) {
-		return MARKETPLACE_DEFAULTS;
+		// No storage (a headless runtime): the in-memory table is the cache.
+		return cachedBackgrounds;
 	}
 	const raw = localStorage.getItem(PLUGIN_BACKGROUNDS_STORAGE_KEY);
 	if (raw === cachedRaw) {
@@ -157,9 +158,17 @@ export function isPluginBackgroundId(value: string): boolean {
 	return isMarketplaceBackdropId(value);
 }
 
+/**
+ * Resolve a built-in or Marketplace backdrop id. Without an explicit table it
+ * reads the cached plugin contributions (which include the bundled defaults),
+ * so a wallpaper a plugin contributed keeps its renderer wherever it is shown.
+ */
+export function backdropByAvailableId(
+	id: string,
+	backgrounds: readonly PluginBackground[] = loadPluginBackgrounds()
+): RenderableBackdrop | undefined {
+	return backdropFromBackgrounds(id, backgrounds);
+}
+
 export type { RenderableBackdrop };
-export {
-	backdropByAvailableId,
-	getAvailableBackdrops,
-	getMarketplaceBackdrops,
-};
+export { getAvailableBackdrops, getMarketplaceBackdrops };

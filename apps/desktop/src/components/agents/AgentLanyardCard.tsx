@@ -15,6 +15,7 @@ import {
 	type AgentBadgeInput,
 	generateAgentBadge,
 } from "@/src/lib/agent-badge.ts";
+import { useAgentBadgeLabels } from "@/src/lib/agent-badge-labels.ts";
 
 interface LanyardFillStyle extends CSSProperties {
 	"--lanyard-height": string;
@@ -112,9 +113,10 @@ export function AgentLanyardCard({
 		return () => clearTimeout(id);
 	}, [name, role, engine, version, node, builtIn, description]);
 
+	const badgeLabels = useAgentBadgeLabels();
 	const images: AgentBadgeImages | null = useMemo(
-		() => generateAgentBadge(badgeInput),
-		[badgeInput]
+		() => generateAgentBadge(badgeInput, badgeLabels),
+		[badgeInput, badgeLabels]
 	);
 
 	const hostRef = useRef<HTMLDivElement>(null);

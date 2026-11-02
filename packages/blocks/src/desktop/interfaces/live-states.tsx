@@ -12,8 +12,8 @@ export function LiveRailSkeleton({ collapsed }: { collapsed: boolean }) {
 			aria-hidden="true"
 			className={
 				collapsed
-					? "flex h-full w-14 shrink-0 flex-col items-center gap-3 border-sidebar-border border-r bg-sidebar pt-14"
-					: "flex h-full w-60 shrink-0 flex-col gap-3 border-sidebar-border border-r bg-sidebar px-3 pt-14"
+					? "flex h-full w-14 shrink-0 flex-col items-center gap-3 border-sidebar-border border-e bg-sidebar pt-14"
+					: "flex h-full w-60 shrink-0 flex-col gap-3 border-sidebar-border border-e bg-sidebar px-3 pt-14"
 			}
 		>
 			{ROW_KEYS.map((key) => (

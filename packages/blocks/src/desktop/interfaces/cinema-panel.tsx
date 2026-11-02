@@ -48,14 +48,14 @@ export function CinemaPanel({
 				"flex h-full min-h-0 flex-col bg-background",
 				overlay
 					? "absolute inset-0 z-40"
-					: "relative shrink-0 border-border border-l"
+					: "relative shrink-0 border-border border-s"
 			)}
 			data-testid="cinema-thread-panel"
 			initial={reduceMotion ? false : { opacity: 0, x: 24 }}
 			style={overlay ? undefined : { width }}
 			transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
 		>
-			<header className="flex h-16 shrink-0 items-center gap-3 border-border border-b pr-3 pl-4">
+			<header className="flex h-16 shrink-0 items-center gap-3 border-border border-b ps-4 pe-3">
 				<div className="flex min-w-0 flex-1 flex-col">
 					<h2
 						className="truncate font-semibold text-foreground text-sm leading-5 outline-none"

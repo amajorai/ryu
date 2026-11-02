@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -12,7 +13,6 @@ import {
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronDown, SquarePen, X } from "lucide-react";
@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot, BoardStatusLabel } from "./board-status.tsx";
 import { InterfaceComposer } from "./interface-composer.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	recentThreads,
 	threadAgents,
@@ -44,13 +44,13 @@ function Switcher({
 }) {
 	const tl = useLiteralMessages();
 	const lead = thread ? threadAgents(snapshot, thread)[0] : undefined;
-	const title = thread?.title ?? "New chat";
+	const title = thread?.title ?? tr("New chat");
 	const recent = recentThreads(snapshot, SWITCHER_LIMIT);
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				aria-label={tl("Conversation: {title}. Switch conversation", { title })}
-				className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-muted"
+				className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md px-2 text-start outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-muted"
 			>
 				{lead ? <BoardAvatar agent={lead} name={lead.name} size={20} /> : null}
 				<span className="truncate font-medium text-foreground text-sm">
@@ -75,7 +75,9 @@ function Switcher({
 							selected={item.id === thread?.id}
 						>
 							<BoardStatusDot status={threadStatus(item)} />
-							<span className="min-w-0 flex-1 truncate">{item.title}</span>
+							<span className="min-w-0 flex-1 truncate" data-ryu-i18n="off">
+								{item.title}
+							</span>
 							<span className="text-muted-foreground text-xs tabular-nums">
 								{compactAge(item.updatedAt, now)}
 							</span>
@@ -117,7 +119,7 @@ export function PanelsChatOpen({
 	return (
 		<section
 			aria-label={tl("Conversation: {title}", {
-				title: thread?.title ?? "New chat",
+				title: thread?.title ?? tr("New chat"),
 			})}
 			className="flex size-full min-h-0 flex-col"
 			data-testid="panels-chat"
@@ -211,7 +213,7 @@ export function PanelsChatEmpty({
 							return (
 								<li key={thread.id}>
 									<button
-										className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+										className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-2.5 text-start outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 										onClick={() => onOpenThread(thread.id)}
 										type="button"
 									>
@@ -219,11 +221,14 @@ export function PanelsChatEmpty({
 											<BoardStatusDot status={status} />
 										</span>
 										<span className="flex min-w-0 flex-1 flex-col">
-											<span className="truncate font-medium text-foreground text-sm">
+											<span
+												className="truncate font-medium text-foreground text-sm"
+												data-ryu-i18n="off"
+											>
 												{thread.title}
 											</span>
 											<span className="truncate text-muted-foreground text-xs">
-												{[who, THREAD_STATUS_LABELS[status]]
+												{[who, threadStatusLabel(status)]
 													.filter(Boolean)
 													.join(" · ")}
 											</span>

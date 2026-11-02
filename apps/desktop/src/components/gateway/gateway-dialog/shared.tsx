@@ -1,5 +1,6 @@
 import { SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale, numberFormatter } from "@ryu/i18n/core";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { formatNumber as formatSharedNumber } from "@ryu/ui/lib/number-format.ts";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
@@ -26,8 +27,16 @@ export function formatNumber(value: number): string {
 	return formatSharedNumber(value);
 }
 
-export function formatPercent(rate: number): string {
-	return `${(rate * 100).toFixed(1)}%`;
+/** "12.5%" in English; the locale's own decimal and percent form elsewhere. */
+export function formatPercent(
+	rate: number,
+	locale: string = activeLocale()
+): string {
+	return numberFormatter(locale, {
+		maximumFractionDigits: 1,
+		minimumFractionDigits: 1,
+		style: "percent",
+	}).format(rate);
 }
 
 /**

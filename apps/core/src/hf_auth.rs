@@ -9,7 +9,8 @@
 //!
 //! Placement note (Core vs Gateway): this is a user-supplied credential for
 //! fetching weights — *what the user picked*, not org policy — so it lives in
-//! Core. The token is never logged and is attached only to Hugging Face hosts.
+//! Core. The token is never logged and is attached only to Hugging Face hosts,
+//! over HTTPS.
 
 use std::sync::RwLock;
 
@@ -44,12 +45,14 @@ pub fn token() -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
-/// True when `url` targets the Hugging Face Hub host. The host is parsed (not
-/// substring-matched) so look-alikes like `huggingface.co.evil.com` do not
-/// receive the bearer token.
+/// True when `url` targets the Hugging Face Hub host over HTTPS. The host is
+/// parsed (not substring-matched) so look-alikes like `huggingface.co.evil.com`
+/// do not receive the bearer token, and a plain `http://` URL (including a
+/// redirect hop) never does either, so the token is never sent in cleartext.
 pub fn is_hf_url(url: &str) -> bool {
     reqwest::Url::parse(url)
         .ok()
+        .filter(|u| u.scheme() == "https")
         .and_then(|u| u.host_str().map(str::to_string))
         .map(|h| h == "huggingface.co" || h.ends_with(".huggingface.co"))
         .unwrap_or(false)
@@ -83,6 +86,35 @@ mod tests {
         assert!(!is_hf_url("https://huggingface.co.evil.com/x"));
         assert!(!is_hf_url("https://example.com/x.gguf"));
         assert!(!is_hf_url("not a url"));
+    }
+
+    #[test]
+    fn cleartext_hub_urls_are_not_hub_urls() {
+        assert!(!is_hf_url(
+            "http://huggingface.co/foo/bar/resolve/main/x.gguf"
+        ));
+        assert!(!is_hf_url("http://cdn-lfs.huggingface.co/repos/x"));
+        assert!(!is_hf_url("ws://huggingface.co/x"));
+    }
+
+    #[test]
+    fn authorize_never_sends_the_token_over_http() {
+        let _guard = TOKEN_TEST_LOCK.lock().unwrap();
+        let previous = token();
+        set_token("hf-test-token");
+        let client = reqwest::Client::new();
+
+        let cleartext = "http://huggingface.co/owner/model/resolve/main/model.gguf";
+        let request = authorize(cleartext, client.get(cleartext)).build().unwrap();
+        assert!(request
+            .headers()
+            .get(reqwest::header::AUTHORIZATION)
+            .is_none());
+
+        match previous {
+            Some(token) => set_token(&token),
+            None => set_token(""),
+        }
     }
 
     #[test]

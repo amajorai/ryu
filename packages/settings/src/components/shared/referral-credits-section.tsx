@@ -1,6 +1,7 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, dateFormatter, numberFormatter } from "@ryu/i18n/lite";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Progress } from "@ryu/ui/components/progress.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
@@ -35,15 +36,10 @@ const MICRO_USD_PER_USD = 1_000_000;
  * as $0.15, which looks like a real (and much worse) reward rather than a bug.
  */
 function formatCredits(microUsd: number): string {
-	const dollars = microUsd / MICRO_USD_PER_USD;
-	try {
-		return new Intl.NumberFormat(undefined, {
-			style: "currency",
-			currency: "USD",
-		}).format(dollars);
-	} catch {
-		return `$${dollars.toFixed(2)}`;
-	}
+	return numberFormatter(activeLocale(), {
+		style: "currency",
+		currency: "USD",
+	}).format(microUsd / MICRO_USD_PER_USD);
 }
 
 function formatDate(iso: string): string {
@@ -51,7 +47,7 @@ function formatDate(iso: string): string {
 	if (Number.isNaN(date.getTime())) {
 		return "";
 	}
-	return new Intl.DateTimeFormat(undefined, {
+	return dateFormatter(activeLocale(), {
 		month: "short",
 		day: "numeric",
 		year: "numeric",
@@ -88,11 +84,14 @@ function deniedText(reason: string | null): string {
 	return "This referral wasn't eligible for credits.";
 }
 
-function stateDetail(referee: CreditReferralReferee): string {
+function stateDetail(
+	referee: CreditReferralReferee,
+	tl: LiteralMessage
+): string {
 	switch (referee.state) {
 		case "paid":
 			return referee.paidAt
-				? `Paid ${formatDate(referee.paidAt)}`
+				? tl("Paid {paidDate}", { paidDate: formatDate(referee.paidAt) })
 				: "Credits added to your balance";
 		case "activated":
 			return "They're a paying customer — your credits are being added.";
@@ -121,7 +120,7 @@ function RefereeRow({ referee }: { referee: CreditReferralReferee }) {
 			}
 			description={
 				<>
-					{stateDetail(referee)}
+					{stateDetail(referee, tl)}
 					{referee.joinedAt
 						? ` · ${tl("Joined {joinedDate}", { joinedDate: formatDate(referee.joinedAt) })}`
 						: ""}
@@ -133,16 +132,24 @@ function RefereeRow({ referee }: { referee: CreditReferralReferee }) {
 }
 
 /** The reward terms, phrased from the campaign rows so a closed side goes quiet. */
-function rewardTermsText(reward: CreditReferralDashboard["reward"]): string {
+function rewardTermsText(
+	reward: CreditReferralDashboard["reward"],
+	tl: LiteralMessage
+): string {
 	const parts: string[] = [];
 	if (reward.referrerMicroUsd !== null) {
 		parts.push(
-			`You earn ${formatCredits(reward.referrerMicroUsd)} in Ryu credits each time someone who signed up with your link becomes a paying customer.`
+			tl(
+				"You earn {referrerReward} in Ryu credits each time someone who signed up with your link becomes a paying customer.",
+				{ referrerReward: formatCredits(reward.referrerMicroUsd) }
+			)
 		);
 	}
 	if (reward.refereeMicroUsd !== null) {
 		parts.push(
-			`Their new account starts with ${formatCredits(reward.refereeMicroUsd)} in credits.`
+			tl("Their new account starts with {refereeReward} in credits.", {
+				refereeReward: formatCredits(reward.refereeMicroUsd),
+			})
 		);
 	}
 	return parts.length > 0
@@ -202,6 +209,7 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 }
 
 export function ReferralCreditsSection() {
+	const tl = useLiteralMessages();
 	const { data, isError, isLoading } = useQuery({
 		queryKey: CREDITS_KEY,
 		queryFn: settingsApi.referrals.credits,
@@ -212,7 +220,7 @@ export function ReferralCreditsSection() {
 			caption={
 				isLoading || isError || !data
 					? "Ryu credits for the friends you bring, on the same link as your cash commission."
-					: rewardTermsText(data.reward)
+					: rewardTermsText(data.reward, tl)
 			}
 			title="Credit rewards"
 		>

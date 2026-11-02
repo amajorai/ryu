@@ -142,7 +142,7 @@ export function TargetSub({
 				{trailing}
 				{isActive && (
 					<HugeiconsIcon
-						className="mr-1 shrink-0 text-muted-foreground"
+						className="me-1 shrink-0 text-muted-foreground"
 						icon={Tick02Icon}
 						size={15}
 						strokeWidth={2}

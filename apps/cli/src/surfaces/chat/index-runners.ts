@@ -225,7 +225,7 @@ export function useChatRunners(deps: UseChatRunnersDeps) {
 			}
 			setSelectedTeam(arg);
 			setSelectedAgent(null);
-			notify(`Group: ${arg}`, "info");
+			notify(tf("Group: {arg}", { arg }), "info");
 		},
 		[notify, simpleInterface]
 	);
@@ -272,7 +272,12 @@ export function useChatRunners(deps: UseChatRunnersDeps) {
 			setConversationPinned(target, conversationIdRef.current, pinned)
 				.then(() => notify(pinned ? "Chat pinned" : "Chat unpinned", "info"))
 				.catch((err) =>
-					notify(`${pinned ? "pin" : "unpin"} failed: ${errText(err)}`, "error")
+					notify(
+						pinned
+							? tf("pin failed: {error}", { error: errText(err) })
+							: tf("unpin failed: {error}", { error: errText(err) }),
+						"error"
+					)
 				);
 		},
 		[target, notify]
@@ -317,7 +322,7 @@ export function useChatRunners(deps: UseChatRunnersDeps) {
 					setOverlay({ kind: "none" });
 					notify(
 						conversation.title
-							? `Resumed: ${conversation.title}`
+							? tf("Resumed: {title}", { title: conversation.title })
 							: tf("Resumed chat: {id}", { id: conversation.id }),
 						"info"
 					);
@@ -351,7 +356,7 @@ export function useChatRunners(deps: UseChatRunnersDeps) {
 					if (conversationIdRef.current === conversationId) {
 						setConversationTitle(nextTitle);
 					}
-					notify(`Renamed: ${nextTitle}`, "info");
+					notify(tf("Renamed: {nextTitle}", { nextTitle }), "info");
 				})
 				.catch((err) =>
 					notify(tf("rename failed: {0}", { 0: errText(err) }), "error")

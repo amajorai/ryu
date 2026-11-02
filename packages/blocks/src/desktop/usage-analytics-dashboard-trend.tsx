@@ -1,6 +1,7 @@
 "use client";
 
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import {
 	type ChartConfig,
 	ChartContainer,
@@ -125,13 +126,18 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 								{
 									horizon: model.horizonLabel,
 									metric: metricDefinition.label,
-									resolution:
-										GRANULARITY_LABELS[data.granularity].toLowerCase(),
+									resolution: sentenceLabel(
+										tl,
+										GRANULARITY_LABELS[data.granularity]
+									),
 								}
 							)
 						: tl("{metric} at {resolution} resolution.", {
 								metric: metricDefinition.label,
-								resolution: GRANULARITY_LABELS[data.granularity].toLowerCase(),
+								resolution: sentenceLabel(
+									tl,
+									GRANULARITY_LABELS[data.granularity]
+								),
 							})
 				}
 				headerAction={
@@ -146,7 +152,7 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 						</span>
 						<span className="text-muted-foreground">
 							{tl("{metric} in range", {
-								metric: metricDefinition.label.toLowerCase(),
+								metric: sentenceLabel(tl, metricDefinition.label),
 							})}
 						</span>
 					</span>
@@ -183,7 +189,7 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 									<UsageMarker
 										aria-hidden="true"
 										backgroundColor={metric.color}
-										className="mr-1.5 size-1.5 rounded-full"
+										className="me-1.5 size-1.5 rounded-full"
 									/>
 									{metric.label}
 								</ToggleGroupItem>
@@ -351,7 +357,7 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 					) : (
 						<div className="flex h-[280px] items-center justify-center text-muted-foreground text-sm">
 							{tl("No {metric} in this range.", {
-								metric: metricDefinition.label.toLowerCase(),
+								metric: sentenceLabel(tl, metricDefinition.label),
 							})}
 						</div>
 					)}

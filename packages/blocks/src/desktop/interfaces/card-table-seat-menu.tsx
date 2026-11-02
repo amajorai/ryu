@@ -1,4 +1,5 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { translate as tr } from "@ryu/i18n/lite";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Popover,
@@ -18,10 +19,10 @@ import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { Plus } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import {
-	plural,
 	type SeatInfo,
 	type SeatTone,
 	seatTone,
+	tableCount,
 } from "./card-table-model.ts";
 import { SeatAvatar } from "./card-table-pieces.tsx";
 import { ThreadRow } from "./card-table-rows.tsx";
@@ -41,14 +42,20 @@ export interface SeatActions {
 }
 
 /** What a seat says about itself, for its accessible name and its status line. */
-export function seatSummary(seat: SeatInfo): string {
-	const parts = [plural(seat.threads.length, "thread")];
+export function seatSummary(seat: SeatInfo, tl: LiteralMessage = tr): string {
+	const parts = [tableCount(seat.threads.length, "thread", tl)];
 	if (seat.running.length > 0) {
-		parts.push(`${seat.running.length} running`);
+		parts.push(
+			tl("{count, plural, other {# running}}", {
+				count: seat.running.length,
+			})
+		);
 	}
 	const forYou = seat.attention + seat.yourTurn;
 	if (forYou > 0) {
-		parts.push(`${forYou} waiting on you`);
+		parts.push(
+			tl("{count, plural, other {# waiting on you}}", { count: forYou })
+		);
 	}
 	return parts.join(", ");
 }
@@ -150,6 +157,7 @@ export function SeatMenu({
 	trigger: ReactElement;
 	triggerContent: ReactNode;
 }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const { agent } = seat;
 	const popover = (
@@ -184,8 +192,9 @@ export function SeatMenu({
 								"text-xs",
 								actSentence ? "line-clamp-4" : "line-clamp-2"
 							)}
+							data-ryu-i18n="off"
 						>
-							{actSentence || agent.description || seatSummary(seat)}
+							{actSentence || agent.description || seatSummary(seat, tl)}
 						</PopoverDescription>
 					</div>
 				</PopoverHeader>

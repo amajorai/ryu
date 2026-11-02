@@ -121,7 +121,13 @@ function isItemKind(kind: string): kind is ItemKind {
 }
 
 function renderPlan(scan: Scan, selected: ScanItem[]): string {
-	const lines = [`Found ${sourceLabel(scan.source)} setup at ${scan.root}`, ""];
+	const lines = [
+		tf("Found {source} setup at {root}", {
+			source: sourceLabel(scan.source),
+			root: scan.root,
+		}),
+		"",
+	];
 	const selectedIds = new Set(
 		selected.map((item) => `${item.kind}:${item.id}`)
 	);
@@ -157,7 +163,14 @@ function renderReport(outcomes: Outcome[]): string {
 	const count = (status: string) =>
 		outcomes.filter((outcome) => outcome.status === status).length;
 	const lines = [
-		`Migration complete: ${count("imported")} imported, ${count("skipped")} skipped, ${count("failed")} failed.`,
+		tf(
+			"Migration complete: {imported} imported, {skipped} skipped, {failed} failed.",
+			{
+				imported: String(count("imported")),
+				skipped: String(count("skipped")),
+				failed: String(count("failed")),
+			}
+		),
 	];
 	for (const outcome of outcomes) {
 		if (outcome.status === "imported" && !outcome.detail) {
@@ -385,7 +398,7 @@ export const migrateCommand: Command = {
 		}
 		if (ctx.flags.dryRun) {
 			ctx.io.out(
-				`\n${tf("Dry run: {count} item(s) would be imported. Nothing was changed.", { count: String(selected.length) })}\n`
+				`\n${tf("Dry run: {count, plural, one {# item} other {# items}} would be imported. Nothing was changed.", { count: selected.length })}\n`
 			);
 			return 0;
 		}
@@ -405,11 +418,11 @@ export const migrateCommand: Command = {
 					`\n${
 						args.secrets
 							? tf(
-									"Import {count} item(s) and move credentials into the Secret Vault?",
-									{ count: String(selected.length) }
+									"Import {count, plural, one {# item} other {# items}} and move credentials into the Secret Vault?",
+									{ count: selected.length }
 								)
-							: tf("Import {count} item(s)?", {
-									count: String(selected.length),
+							: tf("Import {count, plural, one {# item} other {# items}}?", {
+									count: selected.length,
 								})
 					}`
 				))

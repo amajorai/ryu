@@ -1,3 +1,9 @@
+import {
+	activeLocale,
+	dateFormatter,
+	relativeTimeFormatter,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	DAY,
@@ -42,14 +48,14 @@ export function ticketActivity(
 		items.push({
 			at: ticket.updatedAt,
 			id: "run",
-			label: "The last run failed",
+			label: tl("The last run failed"),
 			tone: "destructive",
 		});
 	} else if (ticket.thread.runState === "interrupted") {
 		items.push({
 			at: ticket.updatedAt,
 			id: "run",
-			label: "The last run was stopped",
+			label: tl("The last run was stopped"),
 			tone: "destructive",
 		});
 	}
@@ -68,7 +74,8 @@ export function ticketActivity(
 		items.unshift({
 			at: ticket.sla.dueAt,
 			id: "sla",
-			label: ticket.sla.state === "breached" ? "Reply overdue" : "Reply due",
+			label:
+				ticket.sla.state === "breached" ? tl("Reply overdue") : tl("Reply due"),
 			tone: ticket.sla.state === "breached" ? "destructive" : "muted",
 		});
 	}
@@ -76,7 +83,7 @@ export function ticketActivity(
 		items.unshift({
 			at: ticket.updatedAt + TICKET_SOLVE_AFTER_MS,
 			id: "solved",
-			label: "Solved after a day without follow-up",
+			label: tl("Solved after a day without follow-up"),
 			tone: "muted",
 		});
 	}
@@ -106,23 +113,14 @@ function sameLocalDay(a: Date, b: Date): boolean {
 	);
 }
 
-const CLOCK = new Intl.DateTimeFormat(undefined, {
+const CLOCK: Intl.DateTimeFormatOptions = {
 	hour: "numeric",
 	minute: "2-digit",
-});
-const MONTH_DAY = new Intl.DateTimeFormat(undefined, {
+};
+const MONTH_DAY: Intl.DateTimeFormatOptions = {
 	day: "numeric",
 	month: "short",
-});
-const MONTH_DAY_YEAR = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "short",
-	year: "numeric",
-});
-const FULL = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "medium",
-	timeStyle: "short",
-});
+};
 
 /**
  * The "Updated" column, the way help desks print it: minutes for the last
@@ -131,7 +129,8 @@ const FULL = new Intl.DateTimeFormat(undefined, {
 export function ticketTimeLabel(
 	at: number,
 	now: number,
-	tl: LiteralMessage
+	tl: LiteralMessage,
+	locale: string = activeLocale()
 ): string {
 	if (at === 0) {
 		return "";
@@ -141,30 +140,44 @@ export function ticketTimeLabel(
 		return tl("Just now");
 	}
 	if (delta >= 0 && delta < HOUR) {
-		return tl("{minutes} min ago", { minutes: Math.floor(delta / MINUTE) });
+		return relativeTimeFormatter(locale, "short", "always").format(
+			-Math.floor(delta / MINUTE),
+			"minute"
+		);
 	}
 	const date = new Date(at);
+	const time = dateFormatter(locale, CLOCK).format(date);
 	const today = new Date(now);
 	if (sameLocalDay(date, today)) {
-		return tl("Today {time}", { time: CLOCK.format(date) });
+		return tl("Today {time}", { time });
 	}
 	const yesterday = new Date(now - DAY);
 	if (sameLocalDay(date, yesterday)) {
-		return tl("Yesterday {time}", { time: CLOCK.format(date) });
+		return tl("Yesterday {time}", { time });
 	}
 	const tomorrow = new Date(now + DAY);
 	if (sameLocalDay(date, tomorrow)) {
-		return tl("Tomorrow {time}", { time: CLOCK.format(date) });
+		return tl("Tomorrow {time}", { time });
 	}
-	return date.getFullYear() === today.getFullYear()
-		? MONTH_DAY.format(date)
-		: MONTH_DAY_YEAR.format(date);
+	return dateFormatter(
+		locale,
+		date.getFullYear() === today.getFullYear()
+			? MONTH_DAY
+			: { ...MONTH_DAY, year: "numeric" }
+	).format(date);
 }
 
-export function ticketFullTime(at: number): string {
-	return at === 0 ? "" : FULL.format(new Date(at));
+export function ticketFullTime(
+	at: number,
+	locale: string = activeLocale()
+): string {
+	return at === 0
+		? ""
+		: dateFormatter(locale, { dateStyle: "medium", timeStyle: "short" }).format(
+				new Date(at)
+			);
 }
 
 export function ticketCountLabel(count: number): string {
-	return `${count} ticket${count === 1 ? "" : "s"}`;
+	return tr("{count, plural, one {# ticket} other {# tickets}}", { count });
 }

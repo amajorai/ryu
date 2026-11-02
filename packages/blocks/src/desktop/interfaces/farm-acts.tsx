@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 /* eslint-disable react/no-unknown-property */
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
@@ -202,7 +203,7 @@ export interface FarmActHandlers {
  * "Likely " for an inferred limit), "Resting" with no reset time.
  */
 export const farmLimitText: LimitText = (_act, at) =>
-	at ? `Back ${at}` : "Resting";
+	at ? tr("Back {time}", { time: at }) : tr("Resting");
 
 /**
  * Where a bed's act props sit, from its farmer (who stands at the bed's

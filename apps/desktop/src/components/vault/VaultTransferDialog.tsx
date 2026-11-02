@@ -255,7 +255,7 @@ function ImportBody({
 					</Label>
 					<input
 						accept=".env,.json,.txt,text/plain,application/json"
-						className="max-w-56 text-xs file:mr-2 file:rounded-full file:border-0 file:bg-muted file:px-3 file:py-1 file:text-xs"
+						className="max-w-56 text-xs file:me-2 file:rounded-full file:border-0 file:bg-muted file:px-3 file:py-1 file:text-xs"
 						id="vault-import-file"
 						onChange={readFile}
 						type="file"
@@ -412,7 +412,7 @@ function ExportBody({
 			{content === null ? null : (
 				<div className="space-y-1.5">
 					<Label htmlFor="vault-export-content">
-						{count} {count === 1 ? "value" : "values"}
+						{tl("{count, plural, one {# value} other {# values}}", { count })}
 					</Label>
 					{sharedError ? (
 						<p className="text-status-destructive text-xs">

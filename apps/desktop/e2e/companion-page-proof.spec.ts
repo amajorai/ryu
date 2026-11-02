@@ -3,15 +3,15 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import type { CompanionNativeProofPublisher } from "./harness/companion-page-proof.tsx";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare const window: Window & {
 	__COMPANION_NATIVE__: CompanionNativeProofPublisher;
 	__COMPANION_REFUSE_SIZE__?: boolean;
 };
 
-const proof = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-companion-page"
+const proof = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/coordinator-companion-page"
 );
 mkdirSync(proof, { recursive: true });
 

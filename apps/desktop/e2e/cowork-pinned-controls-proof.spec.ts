@@ -1,9 +1,11 @@
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
-const proofRoot =
-	"../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-panels/cowork-pinned";
+const proofRoot = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-panels/cowork-pinned"
+);
 const cwd = "/fixture/pinned-project";
 const repository = {
 	nameWithOwner: "fixture/reviewed",

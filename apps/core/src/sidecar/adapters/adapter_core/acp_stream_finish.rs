@@ -39,8 +39,12 @@ impl AcpTurnState {
         // never happened.
         let will_retry = watch.retryable().is_some();
         if !will_retry {
-            self.acc
-                .error(&failure.code, &failure.title, &failure.message);
+            self.acc.error(
+                &failure.code,
+                &failure.title,
+                &failure.message,
+                failure.i18n_wire(),
+            );
         }
         // Close any still-open spans with an error on agent failure.
         for (_tool_id, span_id) in self.open_spans.drain() {

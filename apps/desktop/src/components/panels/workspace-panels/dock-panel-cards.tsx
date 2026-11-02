@@ -166,7 +166,7 @@ export function renderRightDockCard(
 			className={cn(
 				panelChrome,
 				"min-w-0",
-				floatingChrome ? "my-2 mr-2" : null
+				floatingChrome ? "my-2 me-2" : null
 			)}
 		>
 			<PanelTabBar

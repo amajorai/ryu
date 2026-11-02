@@ -94,7 +94,7 @@ function ImportViz() {
 								{shown ? (
 									<motion.span
 										animate={{ scale: 1 }}
-										className="ml-auto text-foreground/40 text-xs"
+										className="ms-auto text-foreground/40 text-xs"
 										initial={{ scale: 0 }}
 									>
 										✓

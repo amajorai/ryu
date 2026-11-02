@@ -33,6 +33,7 @@ import {
 } from "./departures-model.ts";
 import { BOARD_PALETTE } from "./departures-palette.ts";
 import { DeparturesPanel } from "./departures-panel.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 
@@ -318,7 +319,11 @@ export function DeparturesInterface({
 		// moves on to the panel and the host's UI.
 		if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
 			event.preventDefault();
-			const target = event.key === "ArrowLeft" ? "departures" : "arrivals";
+			// Departures sits at the inline start, so the keys follow the reading direction.
+			const target =
+				logicalArrowKey(event.key, event.currentTarget) === "ArrowLeft"
+					? "departures"
+					: "arrivals";
 			if (target !== board) {
 				switchBoard(target);
 			}
@@ -355,7 +360,11 @@ export function DeparturesInterface({
 				<div className="flex min-h-0 flex-1 flex-col p-2 sm:p-3">
 					<section
 						aria-busy={loading}
-						aria-label={tl("{board} board", { board: BOARD_LABELS[board] })}
+						aria-label={
+							board === "arrivals"
+								? tl("Arrivals board")
+								: tl("Departures board")
+						}
 						className={cn(
 							BOARD_PALETTE,
 							"@container flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-(--dep-board) text-(--dep-ink) shadow-[0_0_0_1px_var(--dep-edge)]"

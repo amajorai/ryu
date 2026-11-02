@@ -187,7 +187,7 @@ function FileEditActions({
 	}
 
 	return (
-		<div className="ml-auto flex shrink-0 items-center gap-2">
+		<div className="ms-auto flex shrink-0 items-center gap-2">
 			{onUndo || undoUnavailable ? (
 				<span title={undoUnavailable}>
 					<Button
@@ -374,7 +374,7 @@ export function FileEditsCard({
 				<div className="border-border border-t">
 					{files.map((file) => (
 						<button
-							className="flex h-10 w-full items-center gap-3 border-border border-b px-4 text-left transition-colors duration-150 last:border-b-0 hover:bg-muted hover:duration-0 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+							className="flex h-10 w-full items-center gap-3 border-border border-b px-4 text-start transition-colors duration-150 last:border-b-0 hover:bg-muted hover:duration-0 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 							key={file.path}
 							onClick={() => onOpenFile?.(file.path)}
 							type="button"
@@ -392,7 +392,7 @@ export function FileEditsCard({
 					{remaining > 0 ? (
 						<button
 							aria-expanded={expanded}
-							className="flex h-10 w-full items-center gap-2 px-4 text-left text-muted-foreground text-sm transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+							className="flex h-10 w-full items-center gap-2 px-4 text-start text-muted-foreground text-sm transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 							onClick={() => setExpanded(true)}
 							type="button"
 						>
@@ -411,7 +411,7 @@ export function FileEditsCard({
 					) : expanded && card.files.length > MAX_COLLAPSED_FILES ? (
 						<button
 							aria-expanded={expanded}
-							className="flex h-10 w-full items-center gap-2 px-4 text-left text-muted-foreground text-sm transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+							className="flex h-10 w-full items-center gap-2 px-4 text-start text-muted-foreground text-sm transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 							onClick={() => setExpanded(false)}
 							type="button"
 						>

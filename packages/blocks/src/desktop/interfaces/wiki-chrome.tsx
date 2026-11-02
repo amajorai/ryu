@@ -144,7 +144,7 @@ function MenuDropdown({
 	return (
 		<motion.div
 			animate={{ opacity: 1, y: 0 }}
-			className="absolute top-full left-0 z-40 mt-1 w-52 border border-border bg-popover px-3 pt-2 pb-3 text-popover-foreground shadow-md"
+			className="absolute start-0 top-full z-40 mt-1 w-52 border border-border bg-popover px-3 pt-2 pb-3 text-popover-foreground shadow-md"
 			exit={{ opacity: 0, y: -4 }}
 			initial={{ opacity: 0, y: -4 }}
 			onKeyDown={onKeyDown}
@@ -206,7 +206,7 @@ export function WikiHeader({
 						<button
 							aria-expanded={menuOpen}
 							aria-label="Main menu"
-							className={cn(QUIET_BUTTON, "-ml-1.5")}
+							className={cn(QUIET_BUTTON, "-ms-1.5")}
 							onClick={() => onMenuOpenChange(!menuOpen)}
 							ref={triggerRef}
 							type="button"
@@ -384,7 +384,7 @@ function WikiSearch({
 			<div className="relative min-w-0 flex-1">
 				<Search
 					aria-hidden="true"
-					className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+					className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 					strokeWidth={1.75}
 				/>
 				<input
@@ -396,7 +396,7 @@ function WikiSearch({
 					aria-expanded={expanded}
 					aria-label="Search the wiki"
 					autoComplete="off"
-					className="h-8 w-full rounded-r-none rounded-l-[2px] border border-input bg-background pr-2 pl-8 text-foreground text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-ring/60 focus:border-ring focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:appearance-none"
+					className="h-8 w-full rounded-s-[2px] rounded-e-none border border-input bg-background ps-8 pe-2 text-foreground text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-ring/60 focus:border-ring focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:appearance-none"
 					onChange={(event) => {
 						setQuery(event.target.value);
 						setOpen(true);
@@ -413,7 +413,7 @@ function WikiSearch({
 				/>
 			</div>
 			<button
-				className="-ml-px h-8 shrink-0 cursor-pointer rounded-r-[2px] border border-input bg-muted/60 px-3 font-medium text-foreground text-sm outline-none transition-colors hover:bg-muted focus-visible:z-10 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring active:bg-accent"
+				className="-ms-px h-8 shrink-0 cursor-pointer rounded-e-[2px] border border-input bg-muted/60 px-3 font-medium text-foreground text-sm outline-none transition-colors hover:bg-muted focus-visible:z-10 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring active:bg-accent"
 				type="submit"
 			>
 				Search
@@ -423,7 +423,7 @@ function WikiSearch({
 					<motion.div
 						animate={{ opacity: 1 }}
 						aria-label="Search suggestions"
-						className="absolute top-full right-0 left-0 z-40 mt-1 border border-border bg-popover py-1 text-popover-foreground shadow-md"
+						className="absolute start-0 end-0 top-full z-40 mt-1 border border-border bg-popover py-1 text-popover-foreground shadow-md"
 						exit={{ opacity: 0 }}
 						id={listId}
 						initial={{ opacity: 0 }}
@@ -449,7 +449,10 @@ function WikiSearch({
 									<span className="truncate text-foreground text-sm leading-5">
 										<Marked query={trimmed} value={hit.entry.title} />
 									</span>
-									<span className="truncate text-muted-foreground text-xs leading-4">
+									<span
+										className="truncate text-muted-foreground text-xs leading-4"
+										data-ryu-i18n="off"
+									>
 										{hit.entry.description}
 									</span>
 								</span>

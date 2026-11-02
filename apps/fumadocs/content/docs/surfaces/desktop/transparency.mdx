@@ -107,7 +107,9 @@ that task; review its own terms and privacy policy before connecting it.
 
 - **Default:** on (opt-out), as a separate consent tier from product analytics.
 - **What it collects:** scrubbed crash and error stacks (desktop renderer and Rust panics) to fix what
-  breaks.
+  breaks. Before a Core panic is sent, its message loses your home folder path, any text it quotes
+  from the string being processed, email addresses, phone and card numbers, and credentials, and is
+  cut to a short length.
 - **What it never collects:** prompt or agent content. The install ID is the same random,
   account-unlinked identifier used by analytics.
 - **When the renderer cannot recover:** Desktop shows the message **Something broke** with

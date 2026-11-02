@@ -4,6 +4,7 @@ import { useDraggable } from "@platejs/dnd";
 import { parseTwitterUrl, parseVideoUrl } from "@platejs/media";
 import { useMediaState } from "@platejs/media/react";
 import { ResizableProvider, useResizableValue } from "@platejs/resizable";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -43,6 +44,7 @@ export const VideoElement = withHOC(
 			urlParsers: [parseTwitterUrl, parseVideoUrl],
 		});
 		const width = useResizableValue("width");
+		const tl = useLiteralMessages();
 		const safeUrl = safeMediaUrl(unsafeUrl);
 
 		const isEditorMounted = useEditorMounted();
@@ -88,8 +90,9 @@ export const VideoElement = withHOC(
 							{!isUpload && isYoutube && (
 								<div ref={handleRef}>
 									<LiteYouTubeEmbed
+										announce={tl("Watch")}
 										id={requireMediaEmbedId(embed?.id)}
-										title="youtube"
+										title={tl("YouTube video")}
 										wrapperClass={cn(
 											"aspect-video rounded-sm",
 											"relative block cursor-pointer bg-black bg-center bg-cover [contain:content]",
@@ -139,7 +142,7 @@ export const VideoElement = withHOC(
 						style={editormediaVideoNode1Style}
 					>
 						<CaptionTextarea
-							placeholder="Write a caption…"
+							placeholder={tl("Write a caption…")}
 							readOnly={readOnly}
 						/>
 					</Caption>

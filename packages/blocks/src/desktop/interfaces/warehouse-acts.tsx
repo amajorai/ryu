@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	blockerKindWord,
@@ -155,7 +156,9 @@ export function cageReason(
 		snapshot.privacy === "redacted"
 			? blockerKindWord(blocker.kind)
 			: blocker.title;
-	return blocker.source === "estimate" ? `Likely ${words}` : words;
+	return blocker.source === "estimate"
+		? tr("Likely {text}", { text: words })
+		: words;
 }
 
 /** What the act layer says about each thread, for its order's stage. */

@@ -140,7 +140,10 @@ async function createAgentCommand(
 		output(
 			ctx,
 			{ dry_run: true, request: body },
-			`Would create '${name}': ${identityModeLabel(identityMode)}, account access: no limit. Nothing was saved (--dry-run).`
+			tf(
+				"Would create '{name}': {mode}, account access: no limit. Nothing was saved (--dry-run).",
+				{ name, mode: identityModeLabel(identityMode) }
+			)
 		);
 		return 0;
 	}
@@ -201,7 +204,10 @@ async function identityCommand(
 			ctx,
 			view,
 			{ dismissPendingIdentityMode: true, engine: engineFlag(args) },
-			`Dismissed the app's request. '${view.name}' keeps working as: ${identityModeLabel(view.identityMode)}.`
+			tf("Dismissed the app's request. '{name}' keeps working as: {mode}.", {
+				name: view.name,
+				mode: identityModeLabel(view.identityMode),
+			})
 		);
 	}
 	const mode = parseIdentityMode(requested);
@@ -330,7 +336,10 @@ async function accessCommand(
 			accountAccess: removeAccountKeys(view.accountAccess, keys),
 			engine: engineFlag(args),
 		},
-		`Removed ${keys.length} ${keys.length === 1 ? "account" : "accounts"} from '${view.name}'.`
+		tf(
+			"Removed {count, plural, one {# account} other {# accounts}} from '{name}'.",
+			{ count: keys.length, name: view.name }
+		)
 	);
 }
 

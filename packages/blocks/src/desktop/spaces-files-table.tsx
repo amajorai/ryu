@@ -84,7 +84,7 @@ export function FilesTableSection({
 					<div className="relative w-full sm:w-64">
 						<HugeiconsIcon
 							aria-hidden="true"
-							className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+							className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 							icon={Search01Icon}
 						/>
 						<Input
@@ -146,7 +146,7 @@ export function FilesTableSection({
 											<TableCell className="min-w-[19rem]" inset="wide">
 												<button
 													aria-label={tl("Open {title}", { title })}
-													className="flex min-w-0 items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+													className="flex min-w-0 items-center gap-3 rounded-lg text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
 													onClick={() => onOpenDoc?.(document.id, title)}
 													type="button"
 												>
@@ -191,7 +191,10 @@ export function FilesTableSection({
 																		countText: String(document.chunkCount),
 																	}
 																)
-															: `${document.chunkCount} ${document.chunkCount === 1 ? "chunk" : "chunks"}`}
+															: tl(
+																	"{count, plural, one {# chunk} other {# chunks}}",
+																	{ count: document.chunkCount }
+																)}
 													</span>
 												)}
 											</TableCell>

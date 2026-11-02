@@ -27,7 +27,7 @@ export function AgentSettingsSearchBox({
 	return (
 		<div className="relative w-full shrink-0 sm:w-56">
 			<HugeiconsIcon
-				className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+				className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
 				icon={Search01Icon}
 			/>
 			<Input
@@ -51,7 +51,7 @@ export function AgentSettingsSearchBox({
 				value={settingsQuery}
 			/>
 			{settingsQuery.trim() ? (
-				<div className="absolute top-9 right-0 z-30 max-h-80 w-full min-w-64 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md">
+				<div className="absolute end-0 top-9 z-30 max-h-80 w-full min-w-64 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md">
 					{visibleHits.length === 0 ? (
 						<p className="px-2.5 py-2 text-muted-foreground text-sm">
 							{tl("No settings match “{query}”.", {
@@ -61,7 +61,7 @@ export function AgentSettingsSearchBox({
 					) : (
 						visibleHits.map((hit) => (
 							<button
-								className="flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-accent"
+								className="flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-start hover:bg-accent"
 								key={hit.id}
 								onClick={() => handleSelectSetting(hit)}
 								type="button"

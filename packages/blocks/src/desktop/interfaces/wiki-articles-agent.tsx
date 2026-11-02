@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { BoardStatusDot } from "./board-status.tsx";
@@ -16,9 +17,9 @@ import {
 	agentSections,
 	countWord,
 	pageCategories,
-	plural,
 	wikiAgentArticle,
 	wikiAgo,
+	wikiCount,
 	wikiStamp,
 } from "./wiki-model.ts";
 import {
@@ -73,7 +74,7 @@ export function AgentArticle({
 					</span>
 				</InfoboxRow>
 				<InfoboxRow label="Threads">
-					{threads.length.toLocaleString("en")}
+					{countWord(threads.length)}
 					{counts.working > 0 ? (
 						<span className="text-muted-foreground">
 							{" "}
@@ -81,11 +82,13 @@ export function AgentArticle({
 						</span>
 					) : null}
 				</InfoboxRow>
-				<InfoboxRow label="Messages">
-					{article.messages.toLocaleString("en")}
-				</InfoboxRow>
+				<InfoboxRow label="Messages">{countWord(article.messages)}</InfoboxRow>
 				{teams.length > 0 ? (
-					<InfoboxRow label={teams.length === 1 ? "Team" : "Teams"}>
+					<InfoboxRow
+						label={tr("{count, plural, one {Team} other {Teams}}", {
+							count: teams.length,
+						})}
+					>
 						<Comma
 							items={teams.map((group) => (
 								<WikiLink
@@ -99,7 +102,11 @@ export function AgentArticle({
 					</InfoboxRow>
 				) : null}
 				{projects.length > 0 ? (
-					<InfoboxRow label={projects.length === 1 ? "Project" : "Projects"}>
+					<InfoboxRow
+						label={tr("{count, plural, one {Project} other {Projects}}", {
+							count: projects.length,
+						})}
+					>
 						<Comma
 							items={projects.map((group) => (
 								<WikiLink
@@ -181,14 +188,10 @@ export function AgentArticle({
 									&ndash;{" "}
 									{[
 										entry.shared > 0
-											? plural(entry.shared, "shared thread")
+											? wikiCount(entry.shared, "shared thread")
 											: null,
 										entry.sharedGroups > 0
-											? plural(
-													entry.sharedGroups,
-													"shared team or project",
-													"shared teams or projects"
-												)
+											? wikiCount(entry.sharedGroups, "shared group")
 											: null,
 									]
 										.filter(Boolean)

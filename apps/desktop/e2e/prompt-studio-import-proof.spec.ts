@@ -389,3 +389,34 @@ test("Prompt Studio gates editing and execution for locked, agentless, model-les
 		page.getByRole("button", { name: "Preview prompt" })
 	).toBeDisabled();
 });
+
+test("a prompt edit made before the durable suite loads is kept", async ({
+	page,
+}) => {
+	await page.goto("/prompt-studio-proof.html?reset=true");
+	await page.getByLabel("Suite name").fill("Late load proof");
+	await page.getByRole("button", { name: "Save suite" }).click();
+	await expect(page.getByText("1 versions")).toBeVisible();
+
+	// Reopen with the suite list held: the editor is live before the durable
+	// suite (carrying its own copy of the prompt) arrives.
+	await page.goto("/prompt-studio-proof.html?holdSuiteList=true");
+	await expect(page.getByText("Loading durable suite…")).toBeVisible();
+	const editor = page
+		.locator("#prompt-studio-editor [contenteditable='true']")
+		.first();
+	await editor.getByText("Use {{topic}}.").click();
+	await page.keyboard.press("End");
+	await page.keyboard.type(" Draft edit.");
+	await expect
+		.poll(async () => (await readProof(page)).draft)
+		.toContain("Use {{topic}}. Draft edit.");
+
+	await page.evaluate(() =>
+		window.__promptStudioProof.releaseInitialSuiteList()
+	);
+	await expect(page.getByText("Loading durable suite…")).toHaveCount(0);
+	await expect(page.getByLabel("Suite name")).toHaveValue("Late load proof");
+	await expect(editor).toContainText("Use {{topic}}. Draft edit.");
+	expect((await readProof(page)).draft).toContain("Use {{topic}}. Draft edit.");
+});

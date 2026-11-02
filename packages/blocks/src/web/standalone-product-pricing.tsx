@@ -1,6 +1,10 @@
 "use client";
 
-import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
+import {
+	useLiteralMessages,
+	useOptionalI18n,
+	useRichLiteralMessages,
+} from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import {
 	Card,
@@ -15,9 +19,8 @@ import type { Route } from "next";
 import Link from "next/link";
 import {
 	getStandaloneProductPricing,
-	PRICING_COPY,
-	STANDALONE_PRODUCT_PRICING,
 	type StandaloneProductPricing,
+	standaloneProductPricing,
 } from "./data/standalone-pricing.ts";
 import {
 	landingContainerClass,
@@ -25,6 +28,7 @@ import {
 	landingSubheadlineBodyClass,
 } from "./landing-typography.ts";
 import { LinkArrow } from "./link-arrow.tsx";
+import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
 import motionStyles from "./pricing-motion.module.css";
 import { SectionHeading } from "./sections.tsx";
 
@@ -32,7 +36,9 @@ import { SectionHeading } from "./sections.tsx";
 // into "Usage details" so the lead stays one short muted line.
 const LEAD_MAX_CHARS = 140;
 const LEAD_BREAK = /[.;]\s+(?=\S)/;
-const DOLLAR_FIGURE = /\$[\d.,]+/;
+// "$0.025" in English; "0,025 $" or "US$0.025" where the locale places the
+// symbol after the figure or spells the currency out.
+const DOLLAR_FIGURE = /(?:US)?\$[\d.,]+|[\d.,]+[\s\u00a0\u202f]?(?:US)?\$/u;
 
 function splitPriceLead(price: string): { lead: string; rest: string | null } {
 	if (price.length <= LEAD_MAX_CHARS) {
@@ -134,7 +140,8 @@ function StandaloneProductPricingCard({
 
 export function StandaloneProductPricingSection({ slug }: { slug: string }) {
 	const tl = useLiteralMessages();
-	const entry = getStandaloneProductPricing(slug);
+	const locale = useOptionalI18n()?.locale;
+	const entry = getStandaloneProductPricing(slug, tl, locale);
 	if (!entry) {
 		return null;
 	}
@@ -209,8 +216,10 @@ export function StandaloneProductPricingCatalog({
 	hiddenSlugs?: readonly string[];
 }) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
+	const fees = depositFeeAmounts(locale);
 	const hidden = new Set(hiddenSlugs);
-	const entries = STANDALONE_PRODUCT_PRICING.filter(
+	const entries = standaloneProductPricing(tl, locale).filter(
 		(entry) => !hidden.has(entry.slug)
 	);
 	return (
@@ -259,10 +268,10 @@ export function StandaloneProductPricingCatalog({
 						{tl(
 							"Manual no-plan top-ups use a {baseDepositFee} deposit fee with a {depositFeeMinimum} minimum. Active plans receive lower rates: {proDepositFee} on Pro and {teamDepositFee} on Max, Teams, and Business. Enterprise rates are contracted. A prepaid balance enables managed Gateway; other product access and metering remain separate.",
 							{
-								baseDepositFee: PRICING_COPY.baseDepositFee,
-								depositFeeMinimum: PRICING_COPY.depositFeeMinimum,
-								proDepositFee: PRICING_COPY.proDepositFee,
-								teamDepositFee: PRICING_COPY.teamDepositFee,
+								baseDepositFee: fees.baseDepositFee,
+								depositFeeMinimum: fees.depositFeeMinimum,
+								proDepositFee: fees.proDepositFee,
+								teamDepositFee: fees.teamDepositFee,
 							}
 						)}
 					</p>

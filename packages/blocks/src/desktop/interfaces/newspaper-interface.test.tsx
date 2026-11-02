@@ -294,7 +294,9 @@ describe("newspaper model", () => {
 		expect(storyByline(byId("thread-joint"))).toBe("By Ada and Grace");
 		expect(storyByline(byId("thread-loose"))).toBe("Filed by you");
 		expect(storyByline(byId("thread-blank"))).toBe("No agent assigned");
-		expect(joinNames(["Atlas", "Echo", "Forge"])).toBe("Atlas, Echo and Forge");
+		expect(joinNames(["Atlas", "Echo", "Forge"])).toBe(
+			"Atlas, Echo, and Forge"
+		);
 	});
 
 	test("counts the paper by status", () => {
@@ -312,8 +314,9 @@ describe("newspaper model", () => {
 		const at = (hours: number, minutes = 0) =>
 			new Date(noon - hours * HOUR - minutes * MINUTE).toISOString();
 		expect(storyAge(at(0, 0), noon)).toBe("Just now");
-		expect(storyAge(at(0, 12), noon)).toBe("12 min ago");
-		expect(storyAge(at(3), noon)).toBe("3 hr ago");
+		expect(storyAge(at(0, 12), noon)).toBe("12 min. ago");
+		expect(storyAge(at(0, 12), noon, "ja")).toBe("12 分前");
+		expect(storyAge(at(3), noon)).toBe("3 hr. ago");
 		expect(storyAge(at(20), noon)).toBe("Yesterday");
 		expect(storyAge(at(24 * 3), noon)).toBe("3 days ago");
 		expect(storyAge("not a date", noon)).toBe("");

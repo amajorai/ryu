@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	InterfacePort,
 	InterfaceSnapshot,
@@ -15,11 +16,7 @@ import {
 } from "react";
 import { KnowledgeFlat } from "./knowledge-flat.tsx";
 import type { useKnowledgeInteractions } from "./knowledge-interface-interactions.ts";
-import {
-	type KnowledgeGraph,
-	type KnowledgeNode,
-	plural,
-} from "./knowledge-model.ts";
+import type { KnowledgeGraph, KnowledgeNode } from "./knowledge-model.ts";
 import { cssColor, type KnowledgePalette } from "./knowledge-palette.ts";
 import { KnowledgePanel, type KnowledgePanelView } from "./knowledge-panel.tsx";
 import {
@@ -133,6 +130,7 @@ export function KnowledgeInterfaceView({
 	view,
 	visible,
 }: KnowledgeInterfaceViewProps) {
+	const tl = useLiteralMessages();
 	const {
 		back,
 		close,
@@ -224,8 +222,14 @@ export function KnowledgeInterfaceView({
 							</h2>
 							<p className="text-[13px] text-muted-foreground tabular-nums leading-5">
 								{loading
-									? "Loading workspace"
-									: `${plural(visible.nodes.length, "node")} · ${plural(visible.links.length, "link")}`}
+									? tl("Loading workspace")
+									: tl(
+											"{nodes, plural, one {# node} other {# nodes}} · {links, plural, one {# link} other {# links}}",
+											{
+												links: visible.links.length,
+												nodes: visible.nodes.length,
+											}
+										)}
 							</p>
 						</header>
 						{settingsControl}

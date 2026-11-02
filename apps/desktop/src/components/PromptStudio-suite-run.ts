@@ -7,6 +7,7 @@ import {
 	runGatewayEvals,
 } from "@/src/lib/api/gateway.ts";
 import { savePromptRun } from "@/src/lib/api/prompt-suites.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 import {
 	gatewayAssertion,
 	isBoolean,
@@ -147,7 +148,7 @@ export function usePromptSuiteRun(
 			setComparisonRunId(null);
 			if (suite) {
 				const saved = await savePromptRun(target, suite.id, {
-					name: `${suiteName} · ${new Date().toLocaleString()}`,
+					name: `${suiteName} · ${formatLocalDateTime(Date.now())}`,
 					request: {
 						dataset,
 						judge_model: judgeModel,

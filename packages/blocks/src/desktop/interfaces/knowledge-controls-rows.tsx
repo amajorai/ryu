@@ -25,15 +25,15 @@ export function Section({
 				<button
 					aria-controls={contentId}
 					aria-expanded={open}
-					className="flex h-9 w-full items-center gap-1.5 px-3 text-left font-medium text-foreground text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+					className="flex h-9 w-full items-center gap-1.5 px-3 text-start font-medium text-foreground text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 					onClick={onToggle}
 					type="button"
 				>
 					<ChevronRight
 						aria-hidden="true"
 						className={cn(
-							"size-3.5 text-foreground/55 transition-transform duration-150 motion-reduce:transition-none",
-							open && "rotate-90"
+							"size-3.5 text-foreground/55 transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100",
+							open && "rotate-90 rtl:-rotate-90"
 						)}
 					/>
 					{title}
@@ -49,17 +49,18 @@ export function Section({
 }
 
 export function ToggleRow({
+	accessibleLabel,
 	checked,
 	inset = false,
 	label,
-	name,
 	onChange,
 }: {
+	/** The switch's accessible name, already in the UI language. */
+	accessibleLabel: string;
 	checked: boolean;
 	/** A sub-option of the row above it. */
 	inset?: boolean;
 	label: string;
-	name: string;
 	onChange: (checked: boolean) => void;
 }) {
 	const id = useId();
@@ -74,7 +75,7 @@ export function ToggleRow({
 				{label}
 			</label>
 			<Switch
-				aria-label={name}
+				aria-label={accessibleLabel}
 				checked={checked}
 				className="data-unchecked:bg-foreground/20"
 				id={id}

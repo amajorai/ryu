@@ -1,6 +1,13 @@
 // Observer hook for `observer-agents.review`.
 // This is a sandbox fragment: `ctx` and `host` are injected by Core.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 const MAX_ENTRY_CHARS = 2000;
 const MAX_DIGEST_CHARS = 12000;
 
@@ -46,7 +53,7 @@ const text = parsePrimitiveText(report) !== undefined ? report.trim() : "";
 if (!text || text.toUpperCase() === "SILENT") return { kind: "none" };
 return {
 	kind: "note",
-	text: `Background observer report (advisory only): ${text.slice(0, 1000)}`,
+	text: await host.t("Background observer report (advisory only): {report}", { report: text.slice(0, 1000) }),
 };
 
 // Decode with the native String internal-slot check; boxed strings remain

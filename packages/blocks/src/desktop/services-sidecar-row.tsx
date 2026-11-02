@@ -134,7 +134,7 @@ export function SidecarRowView({
 						variant="ghost"
 					>
 						<HugeiconsIcon
-							className="mr-1 h-3.5 w-3.5"
+							className="me-1 h-3.5 w-3.5"
 							icon={AlertCircleIcon}
 						/>
 						Retry
@@ -151,7 +151,7 @@ export function SidecarRowView({
 									variant="ghost"
 								>
 									<HugeiconsIcon
-										className="mr-1 h-3.5 w-3.5"
+										className="me-1 h-3.5 w-3.5"
 										icon={CircleArrowUp01Icon}
 									/>
 									Update
@@ -167,7 +167,7 @@ export function SidecarRowView({
 										variant="ghost"
 									>
 										<HugeiconsIcon
-											className="mr-1 h-3.5 w-3.5"
+											className="me-1 h-3.5 w-3.5"
 											icon={Square01Icon}
 										/>
 										Stop
@@ -180,7 +180,7 @@ export function SidecarRowView({
 										variant="ghost"
 									>
 										<HugeiconsIcon
-											className="mr-1 h-3.5 w-3.5"
+											className="me-1 h-3.5 w-3.5"
 											icon={RotateClockwiseIcon}
 										/>
 										Restart
@@ -194,7 +194,7 @@ export function SidecarRowView({
 									size="sm"
 									variant="ghost"
 								>
-									<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={PlayIcon} />
+									<HugeiconsIcon className="me-1 h-3.5 w-3.5" icon={PlayIcon} />
 									Start
 								</Button>
 							)}
@@ -208,7 +208,7 @@ export function SidecarRowView({
 						size="sm"
 						variant="ghost"
 					>
-						<HugeiconsIcon className="mr-1 h-3.5 w-3.5" icon={Download01Icon} />
+						<HugeiconsIcon className="me-1 h-3.5 w-3.5" icon={Download01Icon} />
 						Install
 					</Button>
 				)}

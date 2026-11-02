@@ -3,7 +3,7 @@
 // host.sideModel / host.spaces / host.storage / host.getPreference / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -35,6 +35,13 @@
 //      `match` that can express "this message reads like a complaint" (the pre-gate
 //      grammar is flag / commands / stateful / tools), so the cheap gate has to live
 //      here — and it is why this plugin is install-on-demand rather than pre-installed.
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const MAX_ANSWER_CHARS = 6000;
 const MAX_CORRECTION_CHARS = 2000;
@@ -167,12 +174,10 @@ if (existingRules.some((r) => sameRule(r, rule))) {
 // durable instruction through this hook.
 return {
 	kind: "note",
-	text:
-		"[No More Mistakes] Proposed standing rule: " +
-		rule +
-		". Nothing was saved. Confirm it explicitly with `/mistakes add " +
-		rule +
-		"` if you want it applied in future chats.",
+	text: await host.t(
+		"[No More Mistakes] Proposed standing rule: {rule}. Nothing was saved. Confirm it explicitly with `/mistakes add {rule}` if you want it applied in future chats.",
+		{ rule }
+	),
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────

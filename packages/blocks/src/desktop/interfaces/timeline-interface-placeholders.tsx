@@ -95,7 +95,7 @@ export function TimelineEmptyRail({
 							Threads show up here by their latest activity.
 						</p>
 						<Button
-							className="mt-2 -ml-2 h-7 rounded-md px-2 text-xs"
+							className="-ms-2 mt-2 h-7 rounded-md px-2 text-xs"
 							onClick={onStart}
 							size="sm"
 							type="button"

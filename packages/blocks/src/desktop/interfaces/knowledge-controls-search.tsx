@@ -85,7 +85,7 @@ export function SearchResults({
 			{results.slice(0, MAX_RESULTS).map((node) => (
 				<li key={node.id}>
 					<button
-						className="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+						className="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-start outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 						onClick={() => onPick(node.id)}
 						onKeyDown={(event) => {
 							if (event.key === "ArrowDown") {

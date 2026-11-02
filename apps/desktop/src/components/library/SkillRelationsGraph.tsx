@@ -2,6 +2,7 @@ import "./SkillRelationsGraph.css";
 import { HierarchyIcon, PotionIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { LibraryEmpty, LibraryLoading } from "@ryu/blocks/desktop/library.tsx";
+import { useReactFlowAriaLabels } from "@ryu/blocks/desktop/react-flow-labels.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -48,6 +49,7 @@ export default function SkillRelationsGraph({
 	usage,
 	usageAvailable,
 }: SkillRelationsGraphProps) {
+	const ariaLabels = useReactFlowAriaLabels();
 	const tl = useLiteralMessages();
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -199,6 +201,7 @@ export default function SkillRelationsGraph({
 			<div className="flex h-[540px] min-h-[460px] overflow-hidden rounded-2xl border border-border bg-muted/15 max-sm:h-auto max-sm:flex-col max-sm:overflow-x-auto">
 				<div className="relative min-w-0 flex-1 max-sm:h-[460px] max-sm:min-h-[460px] max-sm:min-w-[700px]">
 					<ReactFlow
+						ariaLabelConfig={ariaLabels}
 						className="!bg-transparent"
 						edges={flowEdges}
 						edgesFocusable={false}
@@ -222,7 +225,7 @@ export default function SkillRelationsGraph({
 						<Controls showInteractive={false} />
 					</ReactFlow>
 				</div>
-				<div className="flex w-64 max-w-[40%] shrink-0 flex-col overflow-hidden border-border border-l bg-background/95 max-sm:w-full max-sm:max-w-none max-sm:border-t max-sm:border-l-0">
+				<div className="flex w-64 max-w-[40%] shrink-0 flex-col overflow-hidden border-border border-s bg-background/95 max-sm:w-full max-sm:max-w-none max-sm:border-s-0 max-sm:border-t">
 					{selectedNode ? (
 						<div
 							className="flex min-h-0 flex-1 flex-col overflow-hidden"

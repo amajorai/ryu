@@ -69,10 +69,17 @@ describe("fitBlockReason", () => {
 		);
 		expect(
 			fitBlockReason("no_space", "No room", { diskFreeHuman: "3 GB" }, tl)
-		).toBe("No room. Only 3 GB is free on the models drive.");
+		).toBe(
+			"Not enough free disk space to download it. Only 3 GB is free on the models drive."
+		);
 	});
 
-	test("never doubles the period of a sentence-style label", () => {
+	test("words the verdict itself, never Core's English label", () => {
+		const translated: string[] = [];
+		const recordingTl: LiteralMessage = (source, values) => {
+			translated.push(source);
+			return formatMessage(source, values ?? {});
+		};
 		expect(
 			fitBlockReason(
 				"too_big",
@@ -80,9 +87,13 @@ describe("fitBlockReason", () => {
 				{
 					ramHuman: "8 GB",
 				},
-				tl
+				recordingTl
 			)
-		).toBe("This 20 GB model may not fit. This device has 8 GB of RAM.");
+		).toBe("Too large for your device's memory. This device has 8 GB of RAM.");
+		expect(translated).toContain("Too large for your device's memory");
+		expect(fitBlockReason("no_space", "", null, tl)).toBe(
+			"Not enough free disk space to download it."
+		);
 	});
 
 	test("returns null for verdicts that do not block", () => {

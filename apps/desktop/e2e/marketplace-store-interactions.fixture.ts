@@ -1,7 +1,7 @@
-import { resolve } from "node:path";
 import type { Page, Route } from "@playwright/test";
 import type { z } from "zod";
 import type { marketplaceDetailWireSchema } from "../src/lib/api/marketplace-response-contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare global {
 	interface Window {
@@ -19,9 +19,8 @@ export const MOCK_BACKEND_ORIGIN = "http://127.0.0.1:5189";
  *  read here would go unrouted. */
 export const STORE_ORIGIN =
 	process.env.RYU_STORE_TEST_API_ORIGIN ?? MOCK_BACKEND_ORIGIN;
-export const EVIDENCE_DIR = resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+export const EVIDENCE_DIR = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 export interface RequestRecord {

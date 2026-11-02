@@ -66,7 +66,11 @@ export function JobsStackedDetail({
 					type="button"
 					variant="ghost"
 				>
-					<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+					<ArrowLeft
+						aria-hidden="true"
+						className="rtl:-scale-x-100"
+						data-icon="inline-start"
+					/>
 					Freelancers
 				</Button>
 			</div>
@@ -89,7 +93,7 @@ export function JobsSplitPanes({
 		<>
 			<div
 				className={cn(
-					"flex min-h-0 shrink-0 border-border border-r",
+					"flex min-h-0 shrink-0 border-border border-e",
 					railMode ? "w-[400px]" : "w-[360px]"
 				)}
 			>

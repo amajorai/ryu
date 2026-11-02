@@ -311,7 +311,7 @@ export function NodeLayerMenu({
 					)}
 					{triggerRight ? (
 						<AutoScrollText
-							className="min-w-0 text-right text-muted-foreground/70"
+							className="min-w-0 text-end text-muted-foreground/70"
 							title={triggerRight}
 						>
 							{triggerRight}

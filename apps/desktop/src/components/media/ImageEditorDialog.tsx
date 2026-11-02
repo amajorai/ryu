@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
 import "./ImageEditorDialog.css";
 
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -220,24 +221,24 @@ export function ImageEditorDialog({
 								<span role="status">Loading image…</span>
 							) : dimensions ? (
 								<span className="text-muted-foreground">
-									{dimensions.width.toLocaleString()} ×{" "}
-									{dimensions.height.toLocaleString()} px
+									{formatLocalNumber(dimensions.width)} ×{" "}
+									{formatLocalNumber(dimensions.height)} px
 								</span>
 							) : (
 								<span className="text-muted-foreground">Image unavailable</span>
 							)}
 							{busyLabel && (
-								<span className="ml-3 text-muted-foreground" role="status">
+								<span className="ms-3 text-muted-foreground" role="status">
 									{busyLabel}
 								</span>
 							)}
 							{editorNotice && !busyLabel && (
-								<span className="ml-3 text-muted-foreground" role="status">
+								<span className="ms-3 text-muted-foreground" role="status">
 									{editorNotice}
 								</span>
 							)}
 							{statusMessage && !busyLabel && !editorNotice && (
-								<span className="ml-3 text-muted-foreground" role="status">
+								<span className="ms-3 text-muted-foreground" role="status">
 									{statusMessage}
 								</span>
 							)}

@@ -10,6 +10,7 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import type { CapabilityLayerEntry } from "@/src/hooks/useCapabilityLayers.ts";
 import type { CapabilityProvider } from "@/src/lib/api/capability-layers.ts";
 
@@ -103,7 +104,9 @@ export function capabilityLabel(
 	fallbackLabel?: string
 ): string {
 	const label =
-		entry.title ?? fallbackLabel ?? humanizeCapability(entry.capability);
+		entry.title ??
+		(fallbackLabel === undefined ? undefined : tl(fallbackLabel)) ??
+		humanizeCapability(entry.capability);
 	return label.length > MAX_LAYER_LABEL
 		? `${label.slice(0, MAX_LAYER_LABEL - 1)}…`
 		: label;
@@ -161,7 +164,9 @@ function providerTargetLabel(
 	if (distinct.size < 2) {
 		return null;
 	}
-	return provider.target === "local-machine" ? "this device" : "remote desktop";
+	return provider.target === "local-machine"
+		? tl("this device")
+		: tl("remote desktop");
 }
 
 /**
@@ -185,10 +190,10 @@ export function providerDetail(
 	const parts: string[] = [];
 	if (provider.servesVerbs) {
 		const count = provider.verbs.length;
-		parts.push(`${count} verb${count === 1 ? "" : "s"}`);
+		parts.push(tl("{count, plural, one {# verb} other {# verbs}}", { count }));
 	}
 	if (provider.isDefault) {
-		parts.unshift("default");
+		parts.unshift(tl("default"));
 	}
 	// Leads the detail line: which device this types on outranks how many verbs
 	// it exposes when the two candidates are not the same machine.
@@ -202,11 +207,18 @@ export function providerDetail(
 /** "Pinned · 2 providers enabled" — where the current pick came from. */
 export function layerCaption(entry: CapabilityLayerEntry): string {
 	if (!entry.boundProvider) {
-		return "No provider bound";
+		return tl("No provider bound");
 	}
 	const count = entry.providers.length;
-	const origin = entry.overridden ? "Pinned" : "Auto-picked";
-	const base = `${origin} · ${count} provider${count === 1 ? "" : "s"} enabled`;
+	const base = entry.overridden
+		? tl(
+				"Pinned · {count, plural, one {# provider enabled} other {# providers enabled}}",
+				{ count }
+			)
+		: tl(
+				"Auto-picked · {count, plural, one {# provider enabled} other {# providers enabled}}",
+				{ count }
+			);
 	// When the candidates drive DIFFERENT machines, the caption is the only thing
 	// visible without opening the submenu — and "2 providers enabled" alone reads
 	// as "two ways to do the same thing", which is the misreading this exists to

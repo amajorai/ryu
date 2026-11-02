@@ -47,6 +47,8 @@ interface SettingsSearchResultsProps {
 interface ResultGroup {
 	entries: SettingsEntry[];
 	key: string;
+	/** Where the section lives when it is in the other dialog, else null. */
+	place: "app" | "node" | null;
 	title: string;
 }
 
@@ -64,10 +66,13 @@ function groupResults(
 				key,
 				// Results from the other dialog are labelled with where they live, so
 				// clicking one is never a surprise jump into a different modal.
-				title:
+				place:
 					entry.dialog === currentDialog
-						? sectionLabel(entry)
-						: `${sectionLabel(entry)} · ${entry.dialog === "gateway" ? "Node" : "App"}`,
+						? null
+						: entry.dialog === "gateway"
+							? "node"
+							: "app",
+				title: sectionLabel(entry),
 				entries: [],
 			};
 			byKey.set(key, group);
@@ -114,7 +119,14 @@ export function SettingsSearchResults({
 		<>
 			{groups.map((group) => (
 				<SidebarGroup key={group.key} spacing="compact">
-					<SidebarGroupLabel>{group.title}</SidebarGroupLabel>
+					<SidebarGroupLabel>
+						{group.place === null
+							? group.title
+							: tl("{section} · {place}", {
+									place: group.place === "node" ? tl("Node") : tl("App"),
+									section: group.title,
+								})}
+					</SidebarGroupLabel>
 					<SidebarMenu>
 						{group.entries.map((entry) => (
 							<SidebarMenuItem key={entry.id}>

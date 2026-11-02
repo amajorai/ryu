@@ -1,5 +1,11 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { ensureOwnedDir, ensureOwnedIconMap } from "./owned-icon-map.ts";
+
+// The time/date harness requires an absolute owned Vite cache and icon map;
+// create both under the temp dir unless the caller supplied them.
+ensureOwnedDir("RYU_TIME_DATES_VITE_CACHE", "ryu-time-dates-vite-");
+ensureOwnedIconMap();
 
 const port = Number(process.env.RYU_E2E_PORT ?? "5183");
 const baseURL = `http://127.0.0.1:${port}`;

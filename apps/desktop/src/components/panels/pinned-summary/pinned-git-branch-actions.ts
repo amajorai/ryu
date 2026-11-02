@@ -201,7 +201,9 @@ export function pinnedGitBranchActions(
 			}
 			setRepositoryOperation({
 				status: "done",
-				label: `Published ${repository.nameWithOwner}`,
+				label: tl("Published {nameWithOwner}", {
+					nameWithOwner: repository.nameWithOwner,
+				}),
 				url: repository.url,
 			});
 			setRepositoryDialogOpen(false);

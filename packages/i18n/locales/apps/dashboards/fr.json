@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "Les widgets d’agent ne sont pas disponibles sur ce nœud : leur actualisation nécessite une autorité d’exécution déléguée par l’utilisateur que les tâches d’actualisation ne possèdent pas. Utilisez plutôt une source http, composio ou statique.",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "Les widgets de surveillance ne sont pas encore disponibles : aucune capacité de l’hôte ne permet à une app de lire les résultats de surveillance. Utilisez plutôt une source http, composio ou statique.",
+  "The Composio action failed: {error}": "L’action Composio a échoué : {error}",
+  "The Composio action returned HTTP {status}.": "L’action Composio a renvoyé HTTP {status}.",
+  "The web source redirected, and redirects are not allowed.": "La source web a effectué une redirection, ce qui n’est pas autorisé.",
+  "The web source returned HTTP {status}.": "La source web a renvoyé HTTP {status}.",
+  "The web source sent a reply Ryu could not read: {error}": "La source web a envoyé une réponse illisible pour Ryu : {error}",
+  "The widget's agent run failed: {error}": "L’exécution de l’agent du widget a échoué : {error}",
+  "Widget “{title}” broke": "Le widget « {title} » est en panne",
+  "Widget “{title}” recovered": "Le widget « {title} » est rétabli",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Les widgets de workflow ne sont pas encore disponibles : aucune capacité de l’hôte ne permet à une app d’exécuter un workflow enregistré. Utilisez plutôt une source http, composio ou statique.",
+  "dashboard not found": "tableau de bord introuvable",
+  "kind is required": "le type est requis",
+  "name is required": "le nom est requis",
+  "not found": "introuvable"
+}

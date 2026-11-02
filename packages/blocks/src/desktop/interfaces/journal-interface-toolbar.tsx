@@ -74,7 +74,7 @@ export function JournalToolbar({
 				<Button onClick={() => setPane("list")} size="sm" variant="ghost">
 					<ChevronLeft
 						aria-hidden="true"
-						className="size-4"
+						className="size-4 rtl:-scale-x-100"
 						data-icon="inline-start"
 					/>
 					Entries
@@ -90,7 +90,7 @@ export function JournalToolbar({
 						>
 							<ChevronLeft
 								aria-hidden="true"
-								className="size-4"
+								className="size-4 rtl:-scale-x-100"
 								data-icon="inline-start"
 							/>
 							{mediumDateLabel(activeEntry?.day ?? todayKey)}
@@ -99,8 +99,7 @@ export function JournalToolbar({
 					<div className="ms-auto flex items-center gap-1">
 						{neighbors.position > 0 ? (
 							<span className="pe-2 text-muted-foreground text-xs tabular-nums">
-								{neighbors.position} of{" "}
-								{countLabel(neighbors.total, "entry", "entries")}
+								{neighbors.position} of {countLabel(neighbors.total, "entry")}
 							</span>
 						) : null}
 						<JournalIconButton
@@ -169,7 +168,10 @@ export function JournalToolbar({
 								onClick={() => pager.onStep(-1)}
 								shortcut={pager.previousShortcut}
 							>
-								<ChevronLeft aria-hidden="true" className="size-4" />
+								<ChevronLeft
+									aria-hidden="true"
+									className="size-4 rtl:-scale-x-100"
+								/>
 							</JournalIconButton>
 							<Button
 								aria-disabled={pager.atToday || undefined}
@@ -189,7 +191,10 @@ export function JournalToolbar({
 								onClick={() => pager.onStep(1)}
 								shortcut={pager.nextShortcut}
 							>
-								<ChevronRight aria-hidden="true" className="size-4" />
+								<ChevronRight
+									aria-hidden="true"
+									className="size-4 rtl:-scale-x-100"
+								/>
 							</JournalIconButton>
 						</div>
 					) : null}

@@ -3,9 +3,11 @@ import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { pluginValueSchema } from "../src/lib/api/plugin-wire-values.ts";
 import { createScrollableTabsCoreFixture } from "./harness/scrollable-tabs-core-fixture.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidence =
-	"../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-tabs";
+const evidence = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/coordinator-tabs"
+);
 const browserFailures = new WeakMap<Page, string[]>();
 const unexpectedApiCalls = new WeakMap<Page, string[]>();
 declare global {

@@ -36,7 +36,10 @@ export default defineConfig({
 	},
 	root: harnessDir,
 	optimizeDeps: {
-		entries: ["os-desktop-surface-proof.html"],
+		// The PlateJS editor story pulls in dozens of editor packages. Scan it up
+		// front so its first visit does not trigger a dependency re-optimize and a
+		// full page reload while the lazy editor chunk is still loading.
+		entries: ["os-desktop-surface-proof.html", "editor-toolbar-proof.html"],
 		include: ["react", "react-dom", "react-dom/client"],
 		noDiscovery: false,
 		// Match the app's target for dependencies that ship top-level await.
@@ -51,6 +54,9 @@ export default defineConfig({
 		dedupe: ["react", "react-dom"],
 		alias: {
 			"@": desktopRoot,
+			// Extension modules the stories render (the in-page Copilot) import
+			// their siblings through the extension's own `@extension/*` alias.
+			"@extension": path.resolve(desktopRoot, "../extension"),
 		},
 	},
 	server: {

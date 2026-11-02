@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -5,6 +6,7 @@ import type {
 	InterfaceThread,
 } from "@ryuhq/protocol/interfaces";
 import { frameStyle, SV_PLANK_TEXT, SV_TEXT } from "./world-2d-frame.ts";
+import { busyLine } from "./world-2d-panel-lines.ts";
 import { PixelPortrait } from "./world-2d-portrait.tsx";
 import { WorkingDots } from "./world-agent-panel-icons.tsx";
 import { UI_FONT } from "./world-agent-panel-styles.ts";
@@ -50,6 +52,7 @@ function PortraitCard({
 					"max-w-[120px] truncate text-center text-[13px] leading-none",
 					UI_FONT
 				)}
+				data-ryu-i18n="off"
 				style={{ ...frameStyle("plank", 2), ...SV_PLANK_TEXT }}
 			>
 				{agent.name}
@@ -73,19 +76,19 @@ function villagerLine(
 ): string {
 	if (agent.status === "working") {
 		const busy = threads.find((thread) => thread.running);
-		const line = busy?.title
-			? `Hang on, I'm deep in “${busy.title}”.`
-			: "Hang on, I'm in the middle of something.";
-		return brief ? line : `${line} Leave me a note and I'll get to it.`;
+		return busyLine(busy?.title, brief);
 	}
 	let hash = 0;
 	for (const char of agent.id) {
 		hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 997;
 	}
-	const greeting = GREETINGS[hash % GREETINGS.length] ?? GREETINGS[0];
+	const greeting = tr(GREETINGS[hash % GREETINGS.length] ?? GREETINGS[0]);
 	return threads.length > 0
-		? `Hey, it's ${agent.name} again! ${greeting}`
-		: `Hey! I'm ${agent.name}. First time stopping by? ${greeting}`;
+		? tr("Hey, it's {name} again! {greeting}", { greeting, name: agent.name })
+		: tr("Hey! I'm {name}. First time stopping by? {greeting}", {
+				greeting,
+				name: agent.name,
+			});
 }
 
 /** The dialogue box: the villager's line beside the portrait. */
@@ -125,7 +128,7 @@ export function DialogueBox({
 						)}
 					>
 						<span className="sr-only">Role: </span>
-						{agent.description}
+						<span data-ryu-i18n="off">{agent.description}</span>
 					</p>
 				) : null}
 				<p

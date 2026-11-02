@@ -5,10 +5,28 @@
 // and imports `@ryu/i18n/messages` lazily for the rest.
 
 export {
+	activeDirection,
+	activeLocale,
+	subscribeLocale,
+	translate,
+} from "./active-locale.ts";
+export {
 	BUILT_IN_LANGUAGE_PACK_INFO,
 	type LanguagePackInfo,
 } from "./built-in-pack-info.ts";
 export { formatMessage, type MessageValuesInput } from "./format.ts";
+export {
+	type CompactAgeOptions,
+	type DateInput,
+	dateFormatter,
+	formatCompactAge,
+	formatRelativeTime,
+	numberFormatter,
+	type RelativeTimeOptions,
+	type RelativeTimeUnit,
+	relativeTimeFormatter,
+	unitFormatter,
+} from "./format-intl.ts";
 export {
 	type LiteralCatalog,
 	type LiteralCatalogLoader,
@@ -16,9 +34,13 @@ export {
 	registerLiteralCatalogLoader,
 } from "./literal-catalog.ts";
 export {
+	acceptLanguageLocales,
 	directionForLocale,
 	findLanguagePackForLocale,
+	isEnglishLocale,
 	localeFromAcceptLanguage,
+	preferredOfficialLocale,
+	systemLocales,
 } from "./locale.ts";
 export { literalMessageId } from "./message-id.ts";
 export {

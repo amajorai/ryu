@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	Avatar,
 	AvatarFallback,
@@ -33,7 +34,7 @@ const DOT: Record<PersonaAvatarSize, string> = {
 	32: "size-2.5 border-2 ring-2",
 	40: "size-3 border-2 ring-2",
 	48: "size-3 border-2 ring-2",
-	72: "size-4 border-[3px] ring-3 bottom-0.5 right-0.5 @max-[639px]:right-0 @max-[639px]:bottom-0 @max-[639px]:size-3 @max-[639px]:border-2 @max-[639px]:ring-2",
+	72: "size-4 border-[3px] ring-3 bottom-0.5 end-0.5 @max-[639px]:end-0 @max-[639px]:bottom-0 @max-[639px]:size-3 @max-[639px]:border-2 @max-[639px]:ring-2",
 };
 
 /** The surface behind an avatar: the ring and the ring's hole take its colour. */
@@ -68,7 +69,7 @@ export function PersonaAvatar({
 }) {
 	const seed = ditherAvatarSeed({
 		id: agent?.id,
-		name: agent?.name ?? name ?? "Agent",
+		name: agent?.name ?? name ?? tr("Agent"),
 	});
 	const working = showPresence && agent?.status === "working";
 	return (
@@ -88,7 +89,7 @@ export function PersonaAvatar({
 			{working ? (
 				<span
 					className={cn(
-						"absolute right-0 bottom-0 rounded-full border-success",
+						"absolute end-0 bottom-0 rounded-full border-success",
 						DOT[size],
 						SURFACE[surface]
 					)}

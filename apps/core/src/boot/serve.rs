@@ -12,10 +12,17 @@ pub(super) async fn build_router_and_listener(
     let router_manifests = crate::plugin_manifest::PluginManifestLoader::for_router(
         &server_state.app_manifests.read().await,
     );
+    let ingress_kind = crate::webhook_ingress::configured_kind(&server_state.preferences).await;
     let cloudflared_ingress_enabled = matches!(
-        crate::webhook_ingress::configured_kind(&server_state.preferences).await,
+        ingress_kind,
         crate::webhook_ingress::IngressKind::Cloudflared
     );
+    // Own-relay means the operator exposes Core publicly, possibly through a
+    // same-host reverse proxy that re-originates internet requests over
+    // loopback. Arm the distrust before the listener accepts anything.
+    if ingress_kind == crate::webhook_ingress::IngressKind::OwnRelay {
+        crate::webhook_ingress::OwnRelaySource::arm_forwarding();
+    }
     let router = server::create_router(
         server_state.clone(),
         auth_token,

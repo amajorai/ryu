@@ -92,7 +92,7 @@ function DropdownMenuItem({
 				tone === "foreground" && "text-foreground",
 				layout === "detail-stack" && "flex flex-col items-start gap-1",
 				purpose === "composer-model" && [
-					"h-auto w-full items-center justify-start gap-1.5 rounded-lg px-1.5 py-1 text-left font-medium text-sm",
+					"h-auto w-full items-center justify-start gap-1.5 rounded-lg px-1.5 py-1 text-start font-medium text-sm",
 					"flex-col items-start gap-0.5",
 				],
 				purpose === "app-version" && "py-1.5",

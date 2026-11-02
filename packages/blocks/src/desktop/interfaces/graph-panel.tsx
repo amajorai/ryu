@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -38,14 +39,14 @@ const TOOLTIP_KBD =
 
 /** Side panels sit beside the map, and cover it on narrow canvases. */
 const PANEL_CLASS =
-	"flex min-h-0 shrink-0 flex-col border-border border-l bg-background @max-[767px]:absolute @max-[767px]:inset-0 @max-[767px]:z-20 @max-[767px]:w-full @max-[767px]:border-l-0";
+	"flex min-h-0 shrink-0 flex-col border-border border-s bg-background @max-[767px]:absolute @max-[767px]:inset-0 @max-[767px]:z-20 @max-[767px]:w-full @max-[767px]:border-s-0";
 
 /**
  * The open thread needs the width a chat reads at, so below 960px it covers
  * the map rather than squeezing it into a sliver; Back returns to the map.
  */
 const THREAD_PANEL_CLASS =
-	"flex min-h-0 shrink-0 flex-col border-border border-l bg-background @max-[959px]:absolute @max-[959px]:inset-0 @max-[959px]:z-20 @max-[959px]:w-full @max-[959px]:min-w-0 @max-[959px]:border-l-0";
+	"flex min-h-0 shrink-0 flex-col border-border border-s bg-background @max-[959px]:absolute @max-[959px]:inset-0 @max-[959px]:z-20 @max-[959px]:w-full @max-[959px]:min-w-0 @max-[959px]:border-s-0";
 
 /** Both panel headers share one height, so switching panels never jumps. */
 const PANEL_HEADER =
@@ -162,7 +163,7 @@ function ThreadRow({
 			<button
 				aria-current={active ? "true" : undefined}
 				className={cn(
-					"flex w-full flex-col gap-1 rounded-md px-2 py-2 text-left outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring",
+					"flex w-full flex-col gap-1 rounded-md px-2 py-2 text-start outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring",
 					active && "bg-accent text-accent-foreground"
 				)}
 				onClick={onOpen}
@@ -174,6 +175,7 @@ function ThreadRow({
 							"min-w-0 flex-1 truncate font-medium text-foreground",
 							TEXT_BODY
 						)}
+						data-ryu-i18n="off"
 					>
 						{title}
 					</span>
@@ -251,15 +253,15 @@ export function GraphNodePanel({
 	).length;
 	let workingNote: string | null = null;
 	if (node.kind === "agent" && node.status === "working") {
-		workingNote = "Working now";
+		workingNote = tr("Working now");
 	} else if (
 		(node.kind === "team" || node.kind === "project") &&
 		workingCount > 0
 	) {
-		workingNote = `${workingCount} working`;
+		workingNote = tr("{count} working", { count: workingCount });
 	}
-	const name = node.kind === "you" ? "Your threads" : node.label;
-	const recipient = node.kind === "you" ? "an agent" : node.label;
+	const name = node.kind === "you" ? tr("Your threads") : node.label;
+	const recipient = node.kind === "you" ? tr("an agent") : node.label;
 	return (
 		<aside
 			aria-label={tl("{name} details", { name })}
@@ -328,7 +330,7 @@ export function GraphNodePanel({
 												: "ring-1 ring-border"
 										)}
 									/>
-									{linked.name}
+									<span data-ryu-i18n="off">{linked.name}</span>
 									<span className="sr-only">
 										{tl(
 											"{status, select, working {, working} other {}}. Show on map",
@@ -429,7 +431,7 @@ export function GraphThreadPanel({
 							/>
 						}
 					>
-						<ArrowLeft aria-hidden="true" />
+						<ArrowLeft aria-hidden="true" className="rtl:-scale-x-100" />
 					</TooltipTrigger>
 					<TooltipContent align="start" side="bottom">
 						{backLabel} <Kbd className={TOOLTIP_KBD}>Esc</Kbd>
@@ -444,6 +446,7 @@ export function GraphThreadPanel({
 							"truncate font-semibold text-foreground outline-none",
 							TEXT_TITLE
 						)}
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>

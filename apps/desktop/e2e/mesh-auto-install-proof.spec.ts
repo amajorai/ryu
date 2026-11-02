@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/mesh-auto-install-proof.html";
 
@@ -9,7 +10,7 @@ function proofPath(relative: string): string {
 	const override = process.env.RYU_PROOF_EVIDENCE_DIR;
 	return override
 		? path.join(override, path.basename(relative))
-		: path.resolve(import.meta.dirname, "../../../docs/proof", relative);
+		: proofEvidencePath(relative);
 }
 
 test.describe.configure({ timeout: 120_000 });

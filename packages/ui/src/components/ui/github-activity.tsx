@@ -1,644 +1,59 @@
 "use client";
 
-import { safeHttpUrl } from "@ryu/ui/lib/safe-url.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { MotionStyle } from "motion/react";
-import {
-	AnimatePresence,
-	motion,
-	type Transition,
-	useReducedMotion,
-} from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { CSSProperties } from "react";
 import * as React from "react";
-import { createPortal } from "react-dom";
-import {
-	isNativeNumber,
-	isNativeText,
-} from "../../lib/native-primitive-observation.ts";
 import drawingStyles from "./github-activity.drawing.module.css";
+import { ContributionGrid, drawingLength } from "./github-activity-grid.tsx";
+import {
+	type Contribution,
+	type ContributionUnit,
+	contributionHeading,
+	DEFAULT_UNIT,
+	emptyDays,
+	gapFor,
+	type RepoContribution,
+	toScale,
+	weeksFor,
+} from "./github-activity-model.ts";
+import {
+	Avatar,
+	Chevron,
+	RepoRow,
+	STACK_LIMIT,
+	useGitHubUser,
+} from "./github-activity-repos.tsx";
 
-interface ContributionLevelStyle extends CSSProperties {
-	"--contribution-color"?: string;
-	"--contribution-opacity"?: number;
-}
-interface TooltipPositionStyle extends CSSProperties {
-	"--github-activity-1-left"?: string | undefined;
-	"--github-activity-1-top"?: string | undefined;
-	"--github-activity-1-transform"?: CSSProperties["transform"];
-}
-interface MonthRowStyle extends MotionStyle {
-	"--github-activity-2-gap"?: string | undefined;
-	"--github-activity-2-margin-bottom"?: string | undefined;
-}
-interface MonthCellStyle extends CSSProperties {
-	"--github-activity-3-width"?: string | undefined;
-}
-interface ContributionGridStyle extends CSSProperties {
-	"--github-activity-4-gap"?: string | undefined;
-}
-interface ContributionWeekStyle extends CSSProperties {
-	"--github-activity-5-gap"?: string | undefined;
-}
-interface ContributionCellStyle extends MotionStyle {
-	"--github-activity-6-height"?: string | undefined;
-	"--github-activity-6-width"?: string | undefined;
-}
 interface ActivityCardStyle extends CSSProperties {
 	"--github-activity-7-width"?: string | undefined;
 }
 interface ActivityPanelStyle extends MotionStyle {
 	"--github-activity-8-border-radius"?: string | undefined;
 }
-function drawingLength(value: CSSProperties["width"]): string | undefined {
-	return isNativeNumber(value) ? `${value}px` : value;
-}
 
-export type ContributionLevel = 0 | 1 | 2 | 3 | 4;
-
-export interface Contribution {
-	count: number;
-	date: string;
-	level: ContributionLevel;
-}
-
-export interface RepoContribution {
-	count: number;
-	href?: string;
-	logo?: React.ReactNode;
-	name: string;
-}
+export type {
+	Contribution,
+	ContributionLevel,
+	ContributionUnit,
+	RepoContribution,
+} from "./github-activity-model.ts";
 
 const DEFAULT_ACCENT = "var(--primary)";
 const DEFAULT_CELL_SIZE = 11;
 const DEFAULT_LABEL = "Top contributions in:";
 const DEFAULT_MONTHS = 12;
-const WEEKS_PER_MONTH = 365.25 / 12 / 7;
-const STACK_LIMIT = 3;
 const MIN_CARD_WIDTH = 320;
-const MIN_LABEL_WEEKS = 3;
 // the p-4 on the card, both sides; the width math below has to add it back
 const CARD_PADDING = 32;
 const ACTIVITY_PANEL_RADIUS = 18;
 
-export interface ContributionUnit {
-	plural: string;
-	singular: string;
-}
-
-const DEFAULT_UNIT = {
-	plural: "contributions",
-	singular: "contribution",
-} as const satisfies ContributionUnit;
-
-const gapFor = (cellSize: number) => Math.max(2, Math.round(cellSize / 4));
-// never zero: weeks.slice(-0) would hand back the whole history instead of nothing
-const weeksFor = (months: number) =>
-	Math.max(1, Math.ceil(months * WEEKS_PER_MONTH));
-
-const useIsoLayoutEffect =
-	globalThis.window === undefined ? React.useEffect : React.useLayoutEffect;
-
-const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 const SPRING = { type: "spring", bounce: 0.2, duration: 0.62 } as const;
 const HEADER_SPRING = { ...SPRING, bounce: 0.45 } as const;
 const ROW_SPRING = { ...SPRING, bounce: 0.26, delay: 0.08 } as const;
 const ROW_OFFSET = 16;
-const CELL_FADE = { duration: 0.2, ease: EASE_OUT } as const;
-const TOOLTIP_FADE = { duration: 0.14, ease: EASE_OUT } as const;
-const TOOLTIP_EDGE = 8;
-const COLUMN_STAGGER = 0.012;
-const LABEL_BLUR = 6;
-const LABEL_REVEAL = { duration: 0.45, ease: EASE_OUT } as const;
-
-const LEVELS = [0, 1, 2, 3, 4] as const;
-
-const MONTH_NAMES = [
-	"Jan",
-	"Feb",
-	"Mar",
-	"Apr",
-	"May",
-	"Jun",
-	"Jul",
-	"Aug",
-	"Sep",
-	"Oct",
-	"Nov",
-	"Dec",
-];
-
-function toMonthLabels(weeks: Contribution[][]) {
-	const labels: (string | null)[] = weeks.map(() => null);
-	const monthAt = (index: number) => weeks[index]?.[0]?.date.slice(5, 7);
-
-	let start = 0;
-	for (let i = 1; i <= weeks.length; i++) {
-		if (i < weeks.length && monthAt(i) === monthAt(start)) {
-			continue;
-		}
-		// a shorter run is narrower than the label itself, so it would sit under the next month
-		if (i - start >= MIN_LABEL_WEEKS) {
-			labels[start] = MONTH_NAMES[Number(monthAt(start)) - 1] ?? null;
-		}
-		start = i;
-	}
-
-	return labels;
-}
-
-const LEVEL_OPACITY = {
-	0: 0,
-	1: 0.3,
-	2: 0.52,
-	3: 0.76,
-	4: 1,
-} satisfies Record<ContributionLevel, number>;
-
-interface LevelStyle {
-	backgroundColor: string;
-	opacity: number;
-}
-
-interface HoveredDay {
-	day: Contribution;
-	x: number;
-	y: number;
-}
-
-const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
-	month: "short",
-	day: "numeric",
-	year: "numeric",
-});
-
-function describeDay({ count, date }: Contribution, unit: ContributionUnit) {
-	const label = count === 1 ? unit.singular : unit.plural;
-	return `${count} ${label} on ${DATE_FORMAT.format(new Date(`${date}T00:00:00`))}`;
-}
-
-const CALENDAR_API = "https://github-contributions-api.jogruber.de/v4";
-const EVENTS_API = "https://api.github.com/users";
-
-interface ApiDay {
-	count: number;
-	date: string;
-	level: number;
-}
-
-/** Decode the closed display domain; invalid levels already use level-zero paint. */
-function normalizedContributionLevel(
-	value: ApiDay["level"]
-): ContributionLevel {
-	const bounded = Math.min(4, Math.max(0, value));
-	return LEVELS.find((level) => level === bounded) ?? 0;
-}
-
-interface PushEvent {
-	payload?: { commits?: unknown[] };
-	repo?: { name: string };
-	type: string;
-}
-
-async function fetchCalendar(login: string) {
-	const res = await fetch(`${CALENDAR_API}/${login}?y=last`);
-	if (!res.ok) {
-		return null;
-	}
-
-	const days: ApiDay[] = (await res.json())?.contributions ?? [];
-	if (!days.length) {
-		return null;
-	}
-
-	// columns are weeks, so the first day has to be a sunday or every column shears
-	const start = days.findIndex(
-		(day) => new Date(`${day.date}T00:00:00Z`).getUTCDay() === 0
-	);
-
-	return days.slice(start < 0 ? 0 : start).map<Contribution>((day) => ({
-		date: day.date,
-		count: day.count,
-		level: normalizedContributionLevel(day.level),
-	}));
-}
-
-async function fetchRepos(login: string): Promise<RepoContribution[]> {
-	const res = await fetch(`${EVENTS_API}/${login}/events/public?per_page=100`);
-	if (!res.ok) {
-		return [];
-	}
-
-	const events: PushEvent[] = await res.json();
-	const counts = new Map<string, number>();
-
-	for (const event of events) {
-		if (event.type !== "PushEvent" || !event.repo) {
-			continue;
-		}
-		const commits = event.payload?.commits?.length ?? 1;
-		counts.set(event.repo.name, (counts.get(event.repo.name) ?? 0) + commits);
-	}
-
-	return [...counts.entries()]
-		.sort(([, a], [, b]) => b - a)
-		.slice(0, STACK_LIMIT)
-		.map(([fullName, count]) => {
-			const separator = fullName.indexOf("/");
-			const owner = separator >= 0 ? fullName.slice(0, separator) : "";
-			const name = separator >= 0 ? fullName.slice(separator + 1) : fullName;
-			return {
-				name,
-				count,
-				href: `https://github.com/${fullName}`,
-				// github has no repo logo, only an owner avatar, so own repos use the initial
-				logo:
-					owner.toLowerCase() === login.toLowerCase() ? undefined : (
-						// eslint-disable-next-line @next/next/no-img-element
-						<img alt="" src={`https://github.com/${owner}.png?size=64`} />
-					),
-			};
-		});
-}
-
-function useGitHubUser(login?: string) {
-	const [data, setData] = React.useState<{
-		contributions: Contribution[];
-		repos: RepoContribution[];
-	}>();
-
-	React.useEffect(() => {
-		if (!login) {
-			return;
-		}
-		let active = true;
-
-		Promise.all([fetchCalendar(login), fetchRepos(login)])
-			.then(([contributions, repos]) => {
-				if (active && contributions) {
-					setData({ contributions, repos });
-				}
-			})
-			.catch(() => {});
-
-		return () => {
-			active = false;
-		};
-	}, [login]);
-
-	return data;
-}
-
-function emptyDays(weeks: number): Contribution[] {
-	const today = new Date();
-	return Array.from({ length: weeks * 7 }, (_, i) => {
-		const date = new Date(today);
-		date.setDate(date.getDate() - (weeks * 7 - 1 - i));
-		return {
-			date: date.toISOString().slice(0, 10),
-			count: 0,
-			level: 0,
-		} satisfies Contribution;
-	});
-}
-
-function toScale(accent: string | string[]): LevelStyle[] {
-	if (isNativeText(accent)) {
-		return LEVELS.map((level) => ({
-			backgroundColor: accent,
-			opacity: LEVEL_OPACITY[level],
-		}));
-	}
-
-	const colors = accent.length > 4 ? accent : ["transparent", ...accent];
-	return LEVELS.map((level) => {
-		const color = colors[level] ?? colors.at(-1) ?? "transparent";
-		return { backgroundColor: color, opacity: color === "transparent" ? 0 : 1 };
-	});
-}
-
-function toWeeks(contributions: Contribution[]) {
-	const weeks: Contribution[][] = [];
-	for (let i = 0; i < contributions.length; i += 7) {
-		weeks.push(contributions.slice(i, i + 7));
-	}
-	return weeks;
-}
-
-function useFittedColumns(cellSize: number, gap: number) {
-	const ref = React.useRef<HTMLDivElement>(null);
-	const [columns, setColumns] = React.useState<number>();
-
-	useIsoLayoutEffect(() => {
-		const el = ref.current;
-		if (!el) {
-			return;
-		}
-
-		const measure = () =>
-			setColumns(
-				Math.max(1, Math.floor((el.clientWidth + gap) / (cellSize + gap)))
-			);
-
-		measure();
-		const observer = new ResizeObserver(measure);
-		observer.observe(el);
-		return () => observer.disconnect();
-	}, [cellSize, gap]);
-
-	return [ref, columns] as const;
-}
-
-const Tooltip = ({
-	hovered,
-	reduceMotion,
-	unit,
-}: {
-	hovered: HoveredDay;
-	reduceMotion: boolean | null;
-	unit: ContributionUnit;
-}) => {
-	const ref = React.useRef<HTMLDivElement>(null);
-	const [left, setLeft] = React.useState(hovered.x);
-
-	useIsoLayoutEffect(() => {
-		const half = (ref.current?.offsetWidth ?? 0) / 2;
-		const edge = TOOLTIP_EDGE + half;
-		setLeft(Math.min(Math.max(hovered.x, edge), window.innerWidth - edge));
-	}, [hovered]);
-
-	const tooltipPositionStyle: TooltipPositionStyle = {
-		"--github-activity-1-left": drawingLength(left),
-		"--github-activity-1-top": drawingLength(hovered.y),
-		"--github-activity-1-transform": "translate(-50%, calc(-100% - 8px))",
-	};
-	return createPortal(
-		<div
-			className={cn(
-				"pointer-events-none fixed z-50",
-				drawingStyles.tooltipPosition
-			)}
-			style={tooltipPositionStyle}
-		>
-			<motion.div
-				animate={{ opacity: 1, scale: 1 }}
-				className="type-caption whitespace-nowrap rounded-lg bg-foreground px-2 py-1 font-medium text-background shadow-md"
-				exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.94 }}
-				initial={reduceMotion ? false : { opacity: 0, scale: 0.94 }}
-				ref={ref}
-				transition={reduceMotion ? { duration: 0 } : TOOLTIP_FADE}
-			>
-				{describeDay(hovered.day, unit)}
-			</motion.div>
-		</div>,
-		document.body
-	);
-};
-
-const ContributionGrid = ({
-	contributions,
-	scale,
-	cellSize,
-	months,
-	showMonths,
-	label,
-	reduceMotion,
-	unit,
-}: {
-	contributions: Contribution[];
-	scale: LevelStyle[];
-	cellSize: number;
-	months: number;
-	showMonths: boolean;
-	label: string;
-	reduceMotion: boolean | null;
-	unit: ContributionUnit;
-}) => {
-	const weeks = React.useMemo(() => toWeeks(contributions), [contributions]);
-	const gap = gapFor(cellSize);
-	const [ref, columns] = useFittedColumns(cellSize, gap);
-	const [hovered, setHovered] = React.useState<HoveredDay>();
-
-	const cap = Math.min(weeks.length, weeksFor(months));
-	const visible = weeks.slice(-Math.min(cap, columns ?? cap));
-	const sweepEnd = (visible.length - 1) * COLUMN_STAGGER + CELL_FADE.duration;
-
-	const hover = (day: Contribution) => (event: React.PointerEvent) => {
-		const cell = event.currentTarget.getBoundingClientRect();
-		setHovered({ day, x: cell.left + cell.width / 2, y: cell.top });
-	};
-
-	const monthRowStyle: MonthRowStyle = {
-		"--github-activity-2-gap": drawingLength(gap),
-		"--github-activity-2-margin-bottom": drawingLength(gap),
-	};
-	const contributionGridStyle: ContributionGridStyle = {
-		"--github-activity-4-gap": drawingLength(gap),
-	};
-	return (
-		<div
-			aria-label={label}
-			className="relative"
-			data-slot="github-activity-grid"
-			ref={ref}
-			role="img"
-		>
-			{showMonths && (
-				<motion.div
-					animate={{ opacity: 1, filter: "blur(0px)" }}
-					className={cn("flex justify-center", drawingStyles.monthRow)}
-					initial={
-						reduceMotion
-							? false
-							: { opacity: 0, filter: `blur(${LABEL_BLUR}px)` }
-					}
-					style={monthRowStyle}
-					transition={{
-						...LABEL_REVEAL,
-						delay: reduceMotion ? 0 : sweepEnd,
-					}}
-				>
-					{toMonthLabels(visible).map((month, index) => {
-						const monthCellStyle: MonthCellStyle = {
-							"--github-activity-3-width": drawingLength(cellSize),
-						};
-						return (
-							<div
-								className={cn("relative h-3 shrink-0", drawingStyles.monthCell)}
-								key={index}
-								style={monthCellStyle}
-							>
-								{month && (
-									<span className="type-compact absolute top-0 left-0 text-foreground/40 leading-none">
-										{month}
-									</span>
-								)}
-							</div>
-						);
-					})}
-				</motion.div>
-			)}
-
-			<div
-				className={cn(
-					"flex justify-center overflow-hidden",
-					drawingStyles.contributionGrid
-				)}
-				onPointerLeave={() => setHovered(undefined)}
-				style={contributionGridStyle}
-			>
-				{visible.map((week, weekIndex) => {
-					const contributionWeekStyle: ContributionWeekStyle = {
-						"--github-activity-5-gap": drawingLength(gap),
-					};
-					return (
-						<div
-							className={cn("flex flex-col", drawingStyles.contributionWeek)}
-							key={weekIndex}
-							style={contributionWeekStyle}
-						>
-							{week.map((day) => {
-								const level = scale[day.level] ?? scale[0];
-								const levelStyle: ContributionLevelStyle = {
-									"--contribution-color": level?.backgroundColor,
-									"--contribution-opacity": level?.opacity,
-								};
-								const contributionCellStyle: ContributionCellStyle = {
-									"--github-activity-6-width": drawingLength(cellSize),
-									"--github-activity-6-height": drawingLength(cellSize),
-								};
-								return (
-									<motion.div
-										animate={{ opacity: 1, scale: 1 }}
-										className={cn(
-											"shrink-0 rounded-[3px] bg-foreground/[0.08]",
-											drawingStyles.contributionCell
-										)}
-										initial={reduceMotion ? false : { opacity: 0, scale: 0.4 }}
-										key={day.date}
-										onPointerEnter={hover(day)}
-										style={contributionCellStyle}
-										transition={{
-											...CELL_FADE,
-											delay: reduceMotion ? 0 : weekIndex * COLUMN_STAGGER,
-										}}
-									>
-										<div
-											className={cn(
-												"h-full w-full rounded-[3px]",
-												drawingStyles.level
-											)}
-											style={levelStyle}
-										/>
-									</motion.div>
-								);
-							})}
-						</div>
-					);
-				})}
-			</div>
-
-			<AnimatePresence>
-				{hovered && (
-					<Tooltip
-						hovered={hovered}
-						key="tooltip"
-						reduceMotion={reduceMotion}
-						unit={unit}
-					/>
-				)}
-			</AnimatePresence>
-		</div>
-	);
-};
-
-const Avatar = ({
-	repo,
-	layoutId,
-	transition,
-	className,
-}: {
-	repo: RepoContribution;
-	layoutId: string;
-	transition: Transition;
-	className?: string;
-}) => (
-	<motion.span
-		className={cn(
-			"type-caption grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted font-medium text-muted-foreground uppercase",
-			"[&_img]:size-full [&_img]:object-cover [&_svg]:size-full",
-			className
-		)}
-		layoutId={layoutId}
-		transition={transition}
-	>
-		{repo.logo ?? repo.name.charAt(0)}
-	</motion.span>
-);
-
-const RepoRow = ({
-	repo,
-	layoutId,
-	transition,
-}: {
-	repo: RepoContribution;
-	layoutId: string;
-	transition: Transition;
-}) => {
-	const safeHref = safeHttpUrl(repo.href);
-	const className =
-		"flex items-center gap-3 rounded-xl mx-2 px-2 py-2 transition-colors hover:bg-foreground/5";
-
-	const content = (
-		<>
-			<Avatar layoutId={layoutId} repo={repo} transition={transition} />
-			<span className="flex-1 truncate text-foreground text-sm">
-				{repo.name}
-			</span>
-			<span className="text-foreground/70 text-sm tabular-nums">
-				{repo.count}
-			</span>
-		</>
-	);
-
-	return safeHref ? (
-		<a
-			className={className}
-			href={safeHref}
-			rel="noopener noreferrer"
-			target="_blank"
-		>
-			{content}
-		</a>
-	) : (
-		<div className={className}>{content}</div>
-	);
-};
-
-const Chevron = ({
-	open,
-	transition,
-}: {
-	open: boolean;
-	transition: Transition;
-}) => (
-	<motion.svg
-		animate={{ rotate: open ? 180 : 0 }}
-		aria-hidden
-		className="size-7 text-muted-foreground"
-		fill="none"
-		initial={false}
-		stroke="currentColor"
-		strokeLinecap="round"
-		strokeLinejoin="round"
-		strokeWidth="1.5"
-		transition={transition}
-		viewBox="0 0 24 24"
-	>
-		<circle cx="12" cy="12" r="10" />
-		<path d="m16 10-4 4-4-4" />
-	</motion.svg>
-);
 
 export type GitHubActivityProps = React.ComponentProps<"div"> & {
 	username?: string;
@@ -675,6 +90,7 @@ const GitHubActivity = ({
 	...props
 }: GitHubActivityProps) => {
 	const reduceMotion = useReducedMotion();
+	const tl = useLiteralMessages();
 	const uid = React.useId();
 	const [openState, setOpenState] = React.useState(defaultOpen);
 
@@ -718,7 +134,7 @@ const GitHubActivity = ({
 
 	const parsedYear = Number(contributions.at(-1)?.date.slice(0, 4));
 	const displayYear = year ?? (Number.isFinite(parsedYear) ? parsedYear : null);
-	const heading = `${total} ${unit.plural}${displayYear ? ` in ${displayYear}` : ""}`;
+	const heading = contributionHeading(total, unit, displayYear, tl);
 
 	const gap = gapFor(cellSize);
 	const columns = Math.min(
@@ -801,7 +217,7 @@ const GitHubActivity = ({
 								>
 									{repos.slice(0, STACK_LIMIT).map((repo, index) => (
 										<Avatar
-											className="-ml-2 first:ml-0"
+											className="-ms-2 first:ms-0"
 											key={index}
 											layoutId={`${uid}-${index}`}
 											repo={repo}

@@ -247,7 +247,7 @@ function SuggestionCard({
 							: tl("Select {name}", { name: suggestion.name })
 					}
 					aria-pressed={selected}
-					className="flex min-w-0 flex-1 items-center gap-3 text-left"
+					className="flex min-w-0 flex-1 items-center gap-3 text-start"
 					disabled={disabled}
 					onClick={onToggle}
 					type="button"
@@ -292,7 +292,7 @@ function SuggestionCard({
 			</div>
 
 			{open ? (
-				<div className="mt-3 ml-18 flex flex-col gap-3 text-detail">
+				<div className="ms-18 mt-3 flex flex-col gap-3 text-detail">
 					<div>
 						<p className="text-muted-foreground">Why this showed up</p>
 						<p className="text-pretty">{suggestion.reason}</p>

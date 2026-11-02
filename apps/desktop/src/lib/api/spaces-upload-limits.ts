@@ -3,6 +3,8 @@
 // Upload ceilings mirrored from Core, and the byte formatter that prints them. Split out of `spaces.ts`, which re-exports
 // everything public here so its import path stays stable.
 
+import { formatByteSize } from "@ryu/i18n/format-intl";
+
 /**
  * The ceiling **every upload from this app actually hits**, in bytes.
  *
@@ -52,20 +54,14 @@ export const NODE_UPLOAD_MAX_BYTES = 32 * 1024 * 1024;
  */
 export const SPACE_UPLOAD_MAX_BYTES = NODE_UPLOAD_MAX_BYTES;
 
-/** Byte counts as a person reads them (`200 MB`, `1.5 GB`). Binary units, one
- *  decimal only where it carries information. */
+/** Byte counts as a person reads them (`200 MB`, `1.5 GB`; the UI locale's
+ *  separators and unit names elsewhere). Binary units, one decimal only where
+ *  it carries information. */
 export function formatBytes(bytes: number): string {
-	if (!Number.isFinite(bytes) || bytes <= 0) {
-		return "0 B";
-	}
-	const units = ["B", "KB", "MB", "GB", "TB"];
-	let value = bytes;
-	let unit = 0;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit += 1;
-	}
-	const rounded =
-		value >= 10 || Number.isInteger(value) ? Math.round(value) : value;
-	return `${Number(rounded.toFixed(1))} ${units[unit]}`;
+	const count = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+	return formatByteSize(count, undefined, {
+		fractionDigits: (value) => (value >= 10 ? 0 : 1),
+		maxUnit: "terabyte",
+		trimZeros: true,
+	});
 }

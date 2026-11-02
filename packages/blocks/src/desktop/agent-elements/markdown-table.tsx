@@ -1,6 +1,7 @@
 "use client";
 import { ExpandIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -37,6 +38,7 @@ export function ExpandableMarkdownTable({
 	tone?: MarkdownTone;
 	wide?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const tableRef = useRef<HTMLTableElement>(null);
 	const tableClassName = (tableTone: MarkdownTone) =>
@@ -102,7 +104,7 @@ export function ExpandableMarkdownTable({
 
 	const copyMenu = (testId?: string) => (
 		<CopyFormatMenu
-			ariaLabel="Copy table"
+			ariaLabel={tl("Copy table")}
 			dataTestId={testId}
 			onCopy={handleCopy}
 			options={[
@@ -126,18 +128,18 @@ export function ExpandableMarkdownTable({
 				<div className="scroll-fade-x overflow-x-auto rounded-(--radius)">
 					{table(undefined, tableRef)}
 				</div>
-				<div className="pointer-events-none absolute top-1 right-1 z-10 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/an-md-table:opacity-100">
+				<div className="pointer-events-none absolute end-1 top-1 z-10 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/an-md-table:opacity-100">
 					<div className="pointer-events-auto">
 						{copyMenu("markdown-table-copy")}
 					</div>
 					<Button
 						appearance="markdown-table-expand"
-						aria-label="Expand table"
+						aria-label={tl("Expand table")}
 						className="pointer-events-auto size-7"
 						data-testid="markdown-table-expand"
 						onClick={() => setOpen(true)}
 						size="icon-xs"
-						title="Expand table"
+						title={tl("Expand table")}
 						variant="ghost-muted"
 					>
 						<HugeiconsIcon icon={ExpandIcon} size={14} />
@@ -161,9 +163,11 @@ export function ExpandableMarkdownTable({
 						data-slot="dialog-header"
 					>
 						<div className="min-w-0">
-							<DialogTitle>Expanded markdown table</DialogTitle>
+							<DialogTitle>{tl("Expanded markdown table")}</DialogTitle>
 							<DialogDescription>
-								Scroll horizontally or vertically to inspect the full table.
+								{tl(
+									"Scroll horizontally or vertically to inspect the full table."
+								)}
 							</DialogDescription>
 						</div>
 						{copyMenu("markdown-table-dialog-copy")}

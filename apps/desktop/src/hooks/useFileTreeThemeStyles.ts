@@ -27,8 +27,11 @@ function toStyle(styles: ReturnType<typeof themeToTreeStyles>): CSSProperties {
 }
 
 /**
- * Inline styles for the `<FileTree>` host. Inherit uses the app's color scheme
- * so the library's light-dark colors follow the selected app mode.
+ * Inline styles for the `<FileTree>` host (pass them as its `style`: the
+ * library merges them onto the host). The host's shadow `:host` declares
+ * `color-scheme: light dark`, which follows the OS, so every state pins a
+ * scheme: inherit, a theme still loading, and an unknown theme use the app's
+ * mode; a resolved theme brings its own scheme with its `--trees-theme-*`.
  */
 export function useFileTreeThemeStyles(
 	prefs: FileTreePrefs
@@ -40,8 +43,9 @@ export function useFileTreeThemeStyles(
 	const appColorScheme = resolvedTheme === "dark" ? "dark" : "light";
 
 	useLayoutEffect(() => {
+		const inherit: CSSProperties = { colorScheme: appColorScheme };
 		if (themeName === TREE_THEME_INHERIT) {
-			setStyles({ colorScheme: appColorScheme });
+			setStyles(inherit);
 			return;
 		}
 		const resolved = getResolvedOrResolveTheme(themeName);
@@ -53,7 +57,7 @@ export function useFileTreeThemeStyles(
 		// while the theme JSON was loading, and fall back to inheriting if the
 		// name turns out to be unknown to Shiki.
 		let cancelled = false;
-		setStyles(undefined);
+		setStyles(inherit);
 		resolved
 			.then((theme) => {
 				if (!cancelled) {
@@ -62,7 +66,7 @@ export function useFileTreeThemeStyles(
 			})
 			.catch(() => {
 				if (!cancelled) {
-					setStyles(undefined);
+					setStyles(inherit);
 				}
 			});
 		return () => {

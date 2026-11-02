@@ -14,6 +14,7 @@ import {
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { proofEvidencePath } from "../proof-evidence-path.ts";
 import {
 	proofClientCapability,
 	proofProxyAuthorization,
@@ -35,7 +36,7 @@ if (core !== "http://127.0.0.1:54541" || !token) {
 }
 const seams = path.join(import.meta.dirname, "qoder-provider-proof-seams.ts");
 const hashes = new Map<string, string>();
-const proof = path.join(root, "docs/proof/qoder-provider-proof");
+const proof = proofEvidencePath("qoder-provider-proof");
 mkdirSync(proof, { recursive: true });
 const record = () =>
 	writeFileSync(

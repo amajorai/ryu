@@ -211,10 +211,10 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 
 	return (
 		<div className="@container overflow-hidden rounded-xl border border-border bg-background text-sm">
-			<div className="flex h-10 items-center gap-1 pr-2">
+			<div className="flex h-10 items-center gap-1 pe-2">
 				<button
 					aria-expanded={expanded}
-					className="flex h-10 min-w-0 flex-1 items-center gap-2 px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+					className="flex h-10 min-w-0 flex-1 items-center gap-2 px-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 					onClick={() => setExpanded((prev) => !prev)}
 					type="button"
 				>
@@ -222,7 +222,7 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 						aria-hidden
 						className={cn(
 							"size-4 shrink-0 text-muted-foreground transition-transform duration-(--duration-base) ease-move",
-							expanded ? "rotate-0" : "-rotate-90"
+							expanded ? "rotate-0" : "-rotate-90 rtl:rotate-90"
 						)}
 						icon={ArrowDown01Icon}
 					/>
@@ -235,7 +235,7 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 							}
 						)}
 					</span>
-					<span className="ml-auto flex items-center gap-2 text-muted-foreground text-xs tabular-nums">
+					<span className="ms-auto flex items-center gap-2 text-muted-foreground text-xs tabular-nums">
 						{totalAdditions > 0 && (
 							<span className="text-status-success">
 								+{formatCount(totalAdditions)}
@@ -262,7 +262,7 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 			{expanded && (
 				<div className="border-border border-t">
 					<div className="grid min-h-72 @4xl:grid-cols-[minmax(0,1fr)_15rem]">
-						<div className="min-w-0 overflow-hidden border-border @4xl:border-r">
+						<div className="min-w-0 overflow-hidden border-border @4xl:border-e">
 							<div className="flex h-10 items-center gap-2 border-border border-b px-3 text-xs">
 								<HugeiconsIcon
 									aria-hidden
@@ -302,12 +302,12 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 							<div className="relative mb-2">
 								<HugeiconsIcon
 									aria-hidden
-									className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+									className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
 									icon={Search01Icon}
 								/>
 								<Input
 									aria-label="Filter changed files"
-									className="pl-8 text-xs"
+									className="ps-8 text-xs"
 									onChange={(event) => setFilter(event.target.value)}
 									placeholder="Filter files…"
 									size="settings-search"
@@ -316,7 +316,7 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 							</div>
 							<div className="flex h-8 items-center gap-2 px-2 text-muted-foreground text-xs">
 								<span>Changed files</span>
-								<span className="ml-auto text-muted-foreground/70 tabular-nums">
+								<span className="ms-auto text-muted-foreground/70 tabular-nums">
 									{formatCount(visibleFiles.length) ?? "—"}
 								</span>
 							</div>

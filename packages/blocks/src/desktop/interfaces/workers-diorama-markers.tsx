@@ -33,8 +33,8 @@ import {
 	DESK_DEPTH,
 	type OfficeDesk,
 	type OfficePlan,
-	WORKER_STATE_LABELS,
 	type WorkerView,
+	workerStateLabel,
 } from "./workers-model.ts";
 import { deskLabel, StatusLight, screenTitle } from "./workers-status.tsx";
 
@@ -70,6 +70,22 @@ export function actScreenLabel(
 		name: worker.name,
 		screenWords: actScreenWords(worker, act, words) ?? tl("dark"),
 	});
+}
+
+/** A screen marker's accessible name with acts: the screen, then its action. */
+function actMarkerLabel(
+	worker: WorkerView,
+	act: InterfaceAgentAct,
+	tl: LiteralMessage,
+	words: "step" | "title" = "step"
+): string {
+	const values = {
+		name: worker.name,
+		screenWords: actScreenWords(worker, act, words) ?? tl("dark"),
+	};
+	return worker.current
+		? tl("{name}'s screen: {screenWords}. Open the task", values)
+		: tl("{name}'s screen: {screenWords}. Open their desk", values);
 }
 
 /**
@@ -184,7 +200,7 @@ export function WorkerMarkers({
 						key={worker.id}
 						label={
 							act
-								? `${actScreenLabel(worker, act, tl, actScene?.screenWords)}. ${worker.current ? "Open the task" : "Open their desk"}`
+								? actMarkerLabel(worker, act, tl, actScene?.screenWords)
 								: screenLabel(worker, tl)
 						}
 						onSelect={() => onOpenScreen(worker.id)}
@@ -211,7 +227,7 @@ export function WorkerMarkers({
 							pressed={selectedId === worker.id}
 						>
 							<StatusLight className="size-2" state={worker.state} />
-							{worker.name}
+							<span data-ryu-i18n="off">{worker.name}</span>
 						</IsoMarker>
 					);
 				}
@@ -303,7 +319,7 @@ function FigureProbe({
 export function screenLabel(worker: WorkerView, tl: LiteralMessage): string {
 	return tl("{name}'s screen: {taskTitle}, {state}. Open the task", {
 		name: worker.name,
-		state: WORKER_STATE_LABELS[worker.state],
+		state: workerStateLabel(worker.state),
 		taskTitle: screenTitle(worker),
 	});
 }

@@ -99,7 +99,7 @@ export function DeskAvatar({
 			{presence && agent.status === "working" ? (
 				<span
 					className={cn(
-						"absolute -right-0.5 -bottom-0.5 rounded-full",
+						"absolute -end-0.5 -bottom-0.5 rounded-full",
 						// Too small for a hollow ring at 16px: a solid dot with a
 						// hairline notch, beside a label that already names the agent.
 						size === 16

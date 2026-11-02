@@ -1,4 +1,6 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -29,7 +31,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Fragment, type ReactNode, useId } from "react";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 import { notebookEditedLabel, notebookTimestamp } from "./notebook-model.ts";
 import {
 	NOTEBOOK_FAINT,
@@ -47,6 +49,8 @@ export interface NotebookCrumb {
 	label: string;
 	/** Reveal this crumb's row in the sidebar; absent on the current page. */
 	onSelect?: () => void;
+	/** The label is a user-chosen name (a page title, a project), not UI copy. */
+	userData?: boolean;
 }
 
 /**
@@ -166,7 +170,12 @@ export function NotebookTopbar({
 											type="button"
 										>
 											{crumb.icon}
-											<span className="truncate">{crumb.label}</span>
+											<span
+												className="truncate"
+												data-ryu-i18n={crumb.userData ? "off" : undefined}
+											>
+												{crumb.label}
+											</span>
 										</button>
 									) : (
 										<span
@@ -174,7 +183,12 @@ export function NotebookTopbar({
 											className="flex h-7 min-w-0 items-center gap-1.5 px-1.5 text-foreground"
 										>
 											{crumb.icon}
-											<span className="truncate">{crumb.label}</span>
+											<span
+												className="truncate"
+												data-ryu-i18n={crumb.userData ? "off" : undefined}
+											>
+												{crumb.label}
+											</span>
 										</span>
 									)}
 								</li>
@@ -190,7 +204,7 @@ export function NotebookTopbar({
 					title={notebookTimestamp(edited.iso)}
 				>
 					{tl("Edited {editedLabel}", {
-						editedLabel: edited.label.toLowerCase(),
+						editedLabel: sentenceLabel(tl, edited.label),
 					})}
 				</time>
 			) : null}
@@ -239,10 +253,18 @@ function PropertyRow({
 }
 
 const RUN_LABELS: Record<ThreadRunState, string> = {
-	completed: "Completed",
-	failed: "Failed",
-	interrupted: "Interrupted",
-	running: "Running",
+	get completed() {
+		return tr("Completed");
+	},
+	get failed() {
+		return tr("Failed");
+	},
+	get interrupted() {
+		return tr("Interrupted");
+	},
+	get running() {
+		return tr("Running");
+	},
 };
 
 const RUN_INK: Record<ThreadRunState, string> = {
@@ -262,12 +284,8 @@ function LastRunValue({
 	runState: ThreadRunState;
 	updatedAt: string;
 }) {
-	const age = compactAge(updatedAt, now);
-	let when = "";
 	// A run still in flight has no settled time to report.
-	if (runState !== "running" && age) {
-		when = age === "now" ? "just now" : `${age} ago`;
-	}
+	const when = runState === "running" ? "" : relativeAge(updatedAt, now);
 	return (
 		<span className="inline-flex items-center gap-1.5">
 			<span className={cn("font-medium", RUN_INK[runState])}>
@@ -345,7 +363,7 @@ export function NotebookThreadPage({
 							key={agent.id}
 						>
 							<NotebookAgentArt agent={agent} />
-							{agent.name}
+							<span data-ryu-i18n="off">{agent.name}</span>
 						</span>
 					))
 				) : (
@@ -397,7 +415,7 @@ export function NotebookThreadPage({
 		<div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
 			<motion.article
 				animate={{ opacity: 1, y: 0 }}
-				aria-label={title || "Untitled"}
+				aria-label={title || tr("Untitled")}
 				className="flex min-h-full flex-col"
 				initial={reduceMotion ? false : { opacity: 0, y: 6 }}
 				key={thread?.id ?? "new-page"}
@@ -410,8 +428,9 @@ export function NotebookThreadPage({
 							"text-balance break-words font-bold @xl/notebook:text-[2.5rem] text-[2rem] leading-[1.15] tracking-tight",
 							!title && "text-muted-foreground/45"
 						)}
+						data-ryu-i18n={title ? "off" : undefined}
 					>
-						{title || "Untitled"}
+						{title || tr("Untitled")}
 					</h1>
 					<div className="mt-5">
 						{propertiesOpen ? properties : null}
@@ -425,7 +444,10 @@ export function NotebookThreadPage({
 							{propertiesOpen ? (
 								<ChevronDown aria-hidden="true" className="size-4" />
 							) : (
-								<ChevronRight aria-hidden="true" className="size-4" />
+								<ChevronRight
+									aria-hidden="true"
+									className="size-4 rtl:-scale-x-100"
+								/>
 							)}
 							{propertiesOpen
 								? "Hide properties"

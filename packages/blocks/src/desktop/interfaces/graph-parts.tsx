@@ -8,12 +8,9 @@ import {
 	ditherAvatarSeed,
 } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceAgent, ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { FolderKanban, type LucideIcon, Users } from "lucide-react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * An agent's picture, or the generative dither tile the rest of Ryu falls back
@@ -93,7 +90,7 @@ export function GraphStatusLabel({
 			)}
 		>
 			<GraphStatusDot status={status} />
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }

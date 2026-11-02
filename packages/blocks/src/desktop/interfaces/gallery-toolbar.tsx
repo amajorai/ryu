@@ -7,10 +7,7 @@ import {
 } from "@ryu/ui/components/input-group.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { Plus, Search, X } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { GalleryAvatar } from "./gallery-avatar.tsx";
@@ -19,6 +16,7 @@ import {
 	type GalleryFilter,
 	type GalleryStatusFilter,
 } from "./gallery-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 function Chip({
 	children,
@@ -141,7 +139,7 @@ export function GalleryToolbar({
 						onClick={() => onStatus(filter.status === status ? null : status)}
 						pressed={filter.status === status}
 					>
-						{THREAD_STATUS_LABELS[status]}
+						{threadStatusLabel(status)}
 					</Chip>
 				))}
 				{agents.length > 0 ? (
@@ -160,7 +158,7 @@ export function GalleryToolbar({
 						pressed={filter.agentId === agent.id}
 					>
 						<GalleryAvatar agent={agent} size={24} />
-						{agent.name}
+						<span data-ryu-i18n="off">{agent.name}</span>
 					</Chip>
 				))}
 			</div>

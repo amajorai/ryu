@@ -2,6 +2,7 @@
 
 import { TextInput } from "@/components/ui/text-input.tsx";
 import type { useTheme } from "@/components/ui/theme-provider.tsx";
+import { tf } from "../../i18n/translate.ts";
 import { type PrivacyPreferences, ROWS } from "./privacy-preferences.ts";
 
 /** One row per privacy preference, with the selected row's description. */
@@ -76,7 +77,9 @@ export function PrivacyRows({
 							: "Spans carry models, tokens, timings, and errors; never prompts.";
 				} else if (row === "supportDuration") {
 					label = "Support-access duration";
-					value = `${supportDurationHours} ${supportDurationHours === 1 ? "hour" : "hours"}`;
+					value = tf("{count, plural, one {# hour} other {# hours}}", {
+						count: supportDurationHours,
+					});
 					description = preferences.supportAccess
 						? "End the active grant before changing duration."
 						: "Grant expiry is written before access is enabled.";

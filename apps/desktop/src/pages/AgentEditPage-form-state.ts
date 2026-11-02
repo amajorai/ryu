@@ -1,4 +1,5 @@
 import type { SlotOption } from "@ryu/blocks/desktop/agent-edit.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { useMemo, useRef, useState } from "react";
 import type { PromptCacheConfirmation } from "@/src/components/chat/PromptCacheConfirmDialog.tsx";
@@ -99,6 +100,7 @@ export function useAgentEditFormState(ctx: AgentEditBase) {
 	const [personalityProfileId, setPersonalityProfileId] = useState(
 		AGENT_OWN_VOICE_PROFILE
 	);
+	const tl = useLiteralMessages();
 	const personalityProfileOptions = useMemo<SlotOption[]>(() => {
 		const options: SlotOption[] = [
 			{ id: AGENT_OWN_VOICE_PROFILE, label: "Agent's own voice" },
@@ -116,11 +118,13 @@ export function useAgentEditFormState(ctx: AgentEditBase) {
 			// unavailable; saving must not silently clear an agent's configuration.
 			options.push({
 				id: personalityProfileId,
-				label: `Unavailable (${personalityProfileId})`,
+				label: tl("Unavailable ({personalityProfileId})", {
+					personalityProfileId,
+				}),
 			});
 		}
 		return options;
-	}, [personalityProfileId, personalityProfilesQuery.data?.styles]);
+	}, [personalityProfileId, personalityProfilesQuery.data?.styles, tl]);
 	// Custom agent avatar — single GlyphValue covering avatar/icon/emoji/
 	// dicebear/expressive/dither. Null = use the engine logo.
 	const [avatarGlyph, setAvatarGlyph] = useState<GlyphValue>(null);

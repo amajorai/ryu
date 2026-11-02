@@ -8,10 +8,14 @@ import {
 	readAuthVaultSlot,
 	type SlotStorage,
 } from "./harness/desktop-secret-slots.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-startup"
+// The device grant declares the Desktop surface (packages/auth device-surface.ts),
+// so the per-surface device limit counts it as a Desktop sign-in.
+const DESKTOP_DEVICE_SCOPE = "openid profile email ryu:surface:desktop";
+
+const proofDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/coordinator-startup"
 );
 
 // The sealed `auth-vault` / `license-key` slots, kept per test across reloads.
@@ -422,13 +426,19 @@ test("Add account retries real device authorization and preserves both existing 
 		{
 			path: "/api/auth/device/code",
 			method: "POST",
-			body: { client_id: "ryu-desktop", scope: "openid profile email" },
+			body: {
+				client_id: "ryu-desktop",
+				scope: DESKTOP_DEVICE_SCOPE,
+			},
 			authorization: undefined,
 		},
 		{
 			path: "/api/auth/device/code",
 			method: "POST",
-			body: { client_id: "ryu-desktop", scope: "openid profile email" },
+			body: {
+				client_id: "ryu-desktop",
+				scope: DESKTOP_DEVICE_SCOPE,
+			},
 			authorization: undefined,
 		},
 		{
@@ -441,12 +451,24 @@ test("Add account retries real device authorization and preserves both existing 
 			},
 			authorization: undefined,
 		},
+		// addAccount resolves the new token's profile...
 		{
 			path: "/api/auth/get-session",
 			method: "GET",
 			body: null,
 			authorization: "Bearer token-third",
 		},
+		// ...and, the new account now being active, the shell revalidates it
+		// once per consumer (none is a remount): the Better Auth session cache
+		// refresh and the live-session check (use-session-validation.ts), the
+		// bearer-only profile fill, and the active-organization lookup
+		// (api/orgs.ts).
+		...Array.from({ length: 4 }, () => ({
+			path: "/api/auth/get-session",
+			method: "GET",
+			body: null,
+			authorization: "Bearer token-third",
+		})),
 	]);
 	await expect(
 		page.getByText("Couldn't add account", { exact: true })

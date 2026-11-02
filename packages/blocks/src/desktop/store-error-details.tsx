@@ -17,7 +17,7 @@ export function StoreErrorDetails({ message }: { message?: string | null }) {
 			data-slot="store-error-details"
 		>
 			<summary className="cursor-pointer select-none">{detailsLabel}</summary>
-			<p className="mt-1 break-words text-left">{message}</p>
+			<p className="mt-1 break-words text-start">{message}</p>
 		</details>
 	);
 }

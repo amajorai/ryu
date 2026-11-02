@@ -305,7 +305,7 @@ export function BotProfileContent({
 					</h4>
 					{liveActivities.slice(0, 2).map((activity) => (
 						<Item
-							className="gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted"
+							className="gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-muted"
 							key={activity.id}
 							onClick={() => {
 								if (activity.action?.kind === "route") {
@@ -384,7 +384,7 @@ export function BotProfileContent({
 				variant="ghost"
 			>
 				<HugeiconsIcon className="size-4" icon={Radar01Icon} />
-				<span className="flex-1 text-left">Mission Control</span>
+				<span className="flex-1 text-start">Mission Control</span>
 				<HugeiconsIcon className="size-3.5" icon={ArrowUpRight01Icon} />
 			</Button>
 		</div>

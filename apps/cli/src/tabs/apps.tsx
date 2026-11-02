@@ -226,10 +226,10 @@ export function AppsTab({ active }: TabProps) {
 				return;
 			}
 			setBusy(item.name);
-			setNotice(`Installing ${item.name}…`);
+			setNotice(tf("Installing {name}…", { name: item.name }));
 			installSidecar(target, item.name)
 				.then(() => {
-					setNotice(`Installed ${item.name}`);
+					setNotice(tf("Installed {name}", { name: item.name }));
 					runLoad();
 				})
 				.catch((err) => {
@@ -254,10 +254,10 @@ export function AppsTab({ active }: TabProps) {
 				return;
 			}
 			setBusy(item.name);
-			setNotice(`Uninstalling ${item.name}…`);
+			setNotice(tf("Uninstalling {name}…", { name: item.name }));
 			uninstallSidecar(target, item.name)
 				.then(() => {
-					setNotice(`Uninstalled ${item.name}`);
+					setNotice(tf("Uninstalled {name}", { name: item.name }));
 					runLoad();
 				})
 				.catch((err) => {

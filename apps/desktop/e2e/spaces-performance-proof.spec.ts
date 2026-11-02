@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("Spaces retains rows during refresh and restores a recently used node", async ({
 	page,
@@ -85,10 +86,7 @@ test("Spaces retains rows during refresh and restores a recently used node", asy
 	expect(calls.alpha).toBe(2);
 	expect(calls.beta).toBe(1);
 	expect(errors).toEqual([]);
-	const dir = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep"
-	);
+	const dir = proofEvidencePath("performance-sweep");
 	await mkdir(dir, { recursive: true });
 	await page.screenshot({
 		path: path.join(dir, "spaces-completed.png"),
@@ -173,10 +171,7 @@ test("folder preview content is never reused across nodes with identical documen
 		page.getByText("Only alpha content", { exact: true })
 	).toHaveCount(0);
 	expect(errors).toEqual([]);
-	const dir = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep"
-	);
+	const dir = proofEvidencePath("performance-sweep");
 	await mkdir(dir, { recursive: true });
 	await page.screenshot({
 		path: path.join(dir, "space-preview-cache-completed.png"),
@@ -306,10 +301,7 @@ test("backup reads do not overlap or leak across target switches", async ({
 		).toHaveCount(0);
 		await expect(page.getByRole("alert")).toHaveCount(0);
 		await expect(page.getByText("Completed", { exact: true })).toBeVisible();
-		const dir = path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep"
-		);
+		const dir = proofEvidencePath("performance-sweep");
 		await page.screenshot({
 			path: path.join(dir, "backup-scope-completed.png"),
 			fullPage: true,
@@ -405,10 +397,7 @@ test("offscreen folders defer document reads until approached", async ({
 	expect(lists).toBe(1);
 	expect(reads.alpha).toBe(1);
 	expect(errors).toEqual([]);
-	const dir = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep"
-	);
+	const dir = proofEvidencePath("performance-sweep");
 	await mkdir(dir, { recursive: true });
 	await expect(page.getByRole("dialog")).toHaveCSS("transform", "none");
 	await expect
@@ -521,10 +510,7 @@ test("folder and chat mentions share an in-flight document list", async ({
 			.toBe("1");
 		expect(lists).toBe(1);
 		expect(errors).toEqual([]);
-		const dir = path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep"
-		);
+		const dir = proofEvidencePath("performance-sweep");
 		await mkdir(dir, { recursive: true });
 		await page.screenshot({
 			path: path.join(dir, "space-document-list-shared-completed.png"),

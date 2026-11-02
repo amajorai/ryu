@@ -39,9 +39,22 @@ function bundle(overrides: Record<string, unknown> = {}) {
 }
 
 describe("callerSegment", () => {
-	it("takes the last id segment", () => {
+	it("takes the full name of a first-party caller", () => {
 		expect(callerSegment("@ryu/app-studio")).toBe("app-studio");
-		expect(callerSegment("com.example.builder")).toBe("builder");
+		expect(callerSegment("@ryu/sites")).toBe("sites");
+	});
+
+	it("gives a non-first-party caller no namespace", () => {
+		for (const caller of [
+			"com.example.builder",
+			"@acme/app-studio",
+			"com.acme.app-studio",
+			"@ryu/acme.app-studio",
+			"@ryu/acme/app-studio",
+		]) {
+			expect(callerSegment(caller)).toBeNull();
+			expect(appBundleIdPrefix(caller)).toBeNull();
+		}
 	});
 
 	it("refuses a segment that is not a slug", () => {
@@ -55,6 +68,17 @@ describe("checkAppBundle", () => {
 	it("accepts a companion-only bundle in the caller's namespace", () => {
 		const result = checkAppBundle(CALLER, bundle());
 		expect(result.ok).toBe(true);
+	});
+
+	it("refuses another publisher's app whose id ends in the same name", () => {
+		for (const caller of ["@acme/app-studio", "com.acme.app-studio"]) {
+			const result = checkAppBundle(caller, bundle({ update: true }));
+			expect(result).toEqual({
+				ok: false,
+				error: "This app cannot install other apps",
+			});
+		}
+		expect(checkAppBundle(CALLER, bundle({ update: true })).ok).toBe(true);
 	});
 
 	it("accepts an update flag for the same namespace", () => {

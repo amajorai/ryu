@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type { JobRow, JobStatus } from "./jobs-model-core.ts";
 
@@ -55,7 +56,8 @@ export function nameList(names: readonly string[]): string {
 	if (names.length <= 1) {
 		return names[0] ?? "";
 	}
-	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+	const head = names.slice(0, -1).join(", ");
+	return tr("{names} and {last}", { last: names.at(-1), names: head });
 }
 
 /** Who was hired, in words, for the posting step. */
@@ -63,7 +65,9 @@ function hiredDetail(row: JobRow): string {
 	if (row.agents.length === 0) {
 		return "No freelancer hired";
 	}
-	return `Hired ${nameList(row.agents.map((agent) => agent.name))}`;
+	return tr("Hired {names}", {
+		names: nameList(row.agents.map((agent) => agent.name)),
+	});
 }
 
 /**

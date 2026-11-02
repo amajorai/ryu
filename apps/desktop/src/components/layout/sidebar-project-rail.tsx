@@ -52,7 +52,7 @@ function RailButton({
 			<span
 				aria-hidden
 				className={cn(
-					"absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-foreground transition-[height,opacity] duration-(--duration-base)",
+					"absolute start-0 top-1/2 w-1 -translate-y-1/2 rounded-e-full bg-foreground transition-[height,opacity] duration-(--duration-base)",
 					active ? "h-8 opacity-100" : "h-2 opacity-0"
 				)}
 			/>
@@ -132,7 +132,7 @@ export function SidebarProjectRail({
 	return (
 		<nav
 			aria-label="Projects"
-			className="scroll-fade flex w-14 shrink-0 flex-col items-center gap-2 overflow-y-auto overscroll-contain border-sidebar-border border-r py-2 [scrollbar-width:none]"
+			className="scroll-fade flex w-14 shrink-0 flex-col items-center gap-2 overflow-y-auto overscroll-contain border-sidebar-border border-e py-2 [scrollbar-width:none]"
 			data-testid="sidebar-project-rail"
 		>
 			<RailButton

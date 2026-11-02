@@ -37,9 +37,21 @@ const contextResponseResponseCodec: z.ZodType<ContextResponse> = z
 						segments: z.array(
 							z
 								.object({
+									counts: z
+										.object({
+											images: z.number().optional(),
+											messages: z.number().optional(),
+											servers: z.number().optional(),
+											skills: z.number().optional(),
+											tools: z.number().optional(),
+										})
+										.passthrough()
+										.optional(),
 									detail: z.string().optional(),
+									detailKey: z.string().optional(),
 									kind: z.string(),
 									label: z.string(),
+									labelKey: z.string().optional(),
 									tokens: z.number(),
 								})
 								.passthrough()

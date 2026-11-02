@@ -7,7 +7,6 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { LocateFixed, X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
@@ -15,6 +14,7 @@ import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import { isTypingTarget } from "./canvas-hooks.ts";
 import type { CanvasCardModel } from "./canvas-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 function PanelButton({
@@ -83,7 +83,7 @@ export function CanvasThreadPanel({
 				"flex min-h-0 flex-col bg-background outline-none",
 				overlay
 					? "absolute inset-0 z-40"
-					: "relative w-[clamp(360px,40%,720px)] shrink-0 border-border border-l shadow-[-16px_0_32px_-24px] shadow-foreground/30"
+					: "relative w-[clamp(360px,40%,720px)] shrink-0 border-border border-s shadow-[-16px_0_32px_-24px] shadow-foreground/30"
 			)}
 			data-canvas-keeps-selection=""
 			data-testid="canvas-thread-panel"
@@ -116,7 +116,7 @@ export function CanvasThreadPanel({
 						<span className="flex min-w-0 items-center gap-1.5 text-foreground/75 text-xs leading-tight">
 							<span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-foreground">
 								<BoardStatusDot status={card.status} />
-								{THREAD_STATUS_LABELS[card.status]}
+								{threadStatusLabel(card.status)}
 							</span>
 							{card.agents.length > 0 ? (
 								<>

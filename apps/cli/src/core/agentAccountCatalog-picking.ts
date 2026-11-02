@@ -88,7 +88,10 @@ export function accountLimitStartBlocked(
 		return null;
 	}
 	const names = failed.map((entry) => entry.title).join(", ");
-	return `Couldn't load ${names}, so a limit started now would also take those accounts away. Nothing was changed; try again once they load.`;
+	return tf(
+		"Couldn't load {names}, so a limit started now would also take those accounts away. Nothing was changed; try again once they load.",
+		{ names }
+	);
 }
 
 /** The list a fresh limit starts from: every listed account, Treg included. */

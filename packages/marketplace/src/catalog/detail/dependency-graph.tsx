@@ -18,6 +18,7 @@
 
 import { Link01Icon, PackageIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
@@ -199,39 +200,56 @@ export function formatMinVersion(minVersion: string): string {
 	return bare ? `≥ ${trimmed}` : trimmed;
 }
 
-/** English plural without a formatting dependency ("1 app", "3 apps"). */
-function plural(count: number, one: string, many: string): string {
-	return `${formatNumber(count)} ${count === 1 ? one : many}`;
-}
-
 /** The one-line consequence of pressing Enable, in plain terms. Says only what the
  *  host can actually know: with no lookup it states the auto-enable rule and stops
  *  short of counting anything. */
 function summarize(
+	tl: LiteralMessage,
 	subjectName: string,
 	tally: DependencyTally,
 	resolved: boolean
 ): string {
 	if (!resolved) {
-		return `Enabling ${subjectName} turns these on automatically, dependencies first.`;
+		return tl(
+			"Enabling {subjectName} turns these on automatically, dependencies first.",
+			{ subjectName }
+		);
 	}
 	if (tally.toInstall === 0 && tally.toEnable === 0) {
-		return `Everything ${subjectName} needs is already added and enabled on this node.`;
+		return tl(
+			"Everything {subjectName} needs is already added and enabled on this node.",
+			{ subjectName }
+		);
 	}
 	// Noun phrases rather than clauses: a tally reads the same at one as at ten,
 	// and nothing in it has to agree with a verb.
 	const clauses: string[] = [];
 	if (tally.toInstall > 0) {
-		clauses.push(`${tally.toInstall} added alongside it`);
+		clauses.push(
+			tl("{count} added alongside it", { count: formatNumber(tally.toInstall) })
+		);
 	}
 	if (tally.toEnable > 0) {
-		clauses.push(`${tally.toEnable} already added, switched on with it`);
+		clauses.push(
+			tl("{count} already added, switched on with it", {
+				count: formatNumber(tally.toEnable),
+			})
+		);
 	}
 	if (tally.alreadyEnabled > 0) {
-		clauses.push(`${tally.alreadyEnabled} already running`);
+		clauses.push(
+			tl("{count} already running", {
+				count: formatNumber(tally.alreadyEnabled),
+			})
+		);
 	}
-	const head = `Enabling ${subjectName} also enables ${plural(tally.total, "plugin", "plugins")}, automatically and in dependency order.`;
-	return clauses.length > 0 ? `${head} Of those, ${clauses.join("; ")}.` : head;
+	const head = tl(
+		"Enabling {subjectName} also enables {total, plural, one {# plugin} other {# plugins}}, automatically and in dependency order.",
+		{ subjectName, total: tally.total }
+	);
+	return clauses.length > 0
+		? tl("{head} Of those, {clauses}.", { clauses: clauses.join("; "), head })
+		: head;
 }
 
 /** Per-row state pill. Nothing is rendered when there is no lookup — a surface
@@ -308,7 +326,7 @@ function DependencyRows({
 						// "Spaces needs Retrieval" is a different statement from "this app
 						// needs Retrieval", and the install closure treats them differently
 						// if Spaces is already present.
-						<div className="mt-1.5 ml-3 border-l pl-3">
+						<div className="ms-3 mt-1.5 border-s ps-3">
 							<DependencyRows nodes={node.children} resolved={resolved} />
 						</div>
 					) : null}
@@ -340,6 +358,7 @@ export function RequiredPluginsSection({
 	subjectId?: string | null;
 	subjectName: string;
 }) {
+	const tl = useLiteralMessages();
 	const lookup = useDependencyLookup();
 	const tree = useMemo(
 		() => resolveDependencyTree(apps, lookup, subjectId),
@@ -367,7 +386,7 @@ export function RequiredPluginsSection({
 				<DependencyRows nodes={tree} resolved={resolved} />
 			) : null}
 			<p className="text-muted-foreground text-xs leading-relaxed">
-				{summarize(subjectName, tally, resolved)}
+				{summarize(tl, subjectName, tally, resolved)}
 			</p>
 			{hasNested && showTechnical ? (
 				<p className="text-muted-foreground text-xs leading-relaxed">

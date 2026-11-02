@@ -170,11 +170,11 @@ fn start_up_errors_keep_a_stable_code() {
     let (failure, auth) = instance_start_failure(&signed_out);
     assert_eq!(failure.code, "auth_required");
     assert!(auth.is_some_and(|message| message.contains("Authentication required")));
-    let classified = anyhow::anyhow!("refresh revoked").context(AcpFailure {
-        code: "pi_account_required".to_owned(),
-        title: "Pi account unavailable".to_owned(),
-        message: "refresh revoked".to_owned(),
-    });
+    let classified = anyhow::anyhow!("refresh revoked").context(AcpFailure::relayed(
+        "pi_account_required",
+        crate::i18n::messages::ACP_PI_ACCOUNT_TITLE_MESSAGE,
+        "refresh revoked",
+    ));
     assert_eq!(
         instance_start_failure(&classified).0.code,
         "pi_account_required"

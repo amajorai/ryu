@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Line, Solid } from "../../kit/react/draw.tsx";
 import { DECK_ART, DECK_CART, SHELF_ART, SHELF_CARTS } from "./geometry.ts";
 import { CoreEnginesLive } from "./live.tsx";
@@ -37,16 +37,16 @@ const DECK = (
 
 const CARRIED = <Solid crease="none" lit paths={DECK_CART} tone="hi" />;
 
-const ALONGSIDE_NAMES = ALONGSIDE.map(
-	(slot) => `${slot.name.toLowerCase()} (${slot.detail})`
-).join(", ");
-
 export function CoreEnginesArt() {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
+	const alongsideNames = new Intl.ListFormat(locale ?? "en", {
+		type: "conjunction",
+	}).format(ALONGSIDE.map((slot) => slot.spoken(tl)));
 	const description = tl(
 		"A shelf of cartridges standing for the {engineCount} local chat engines Ryu Core supports (a few are drawn), and beside it a player holding the one engine that is loaded, {defaultEngineName} by default. Core keeps at most one local chat engine loaded: choosing another first takes the loaded one back to its slot, then brings the new one to the player. Engines for {alongsideNames} run alongside the chat engine and are never swapped, so they are not on the shelf. A faint ring on the player pulses once per health check; Core checks every {healthIntervalSeconds} seconds, shown {sweepSpeedup} times faster. Arrow keys choose an engine and Enter loads it.",
 		{
-			alongsideNames: ALONGSIDE_NAMES,
+			alongsideNames,
 			defaultEngineName: engineAt(DEFAULT_ENGINE).name,
 			engineCount: String(ENGINE_COUNT),
 			healthIntervalSeconds: String(HEALTH_INTERVAL_S),

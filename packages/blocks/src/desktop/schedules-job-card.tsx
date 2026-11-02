@@ -56,7 +56,6 @@ export function JobCard({
 	const startAt = endAt - 24 * 60 * 60 * 1000;
 	const runs = job.recentRuns ?? [];
 	const runCount = runs.length;
-	const runWord = runCount === 1 ? "run" : "runs";
 
 	return (
 		<Card>
@@ -94,7 +93,9 @@ export function JobCard({
 							Last 24 hours
 						</span>
 						<span className="text-muted-foreground text-xs tabular-nums">
-							{runCount} {runWord}
+							{tl("{runCount, plural, one {# run} other {# runs}}", {
+								runCount,
+							})}
 						</span>
 					</div>
 					<RunStatusTimeline

@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "此节点上不可使用智能体小组件:刷新它们需要委托的用户执行权限,而刷新任务不具备该权限。请改用 http、composio 或静态来源。",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "监控小组件暂不可用:没有允许应用读取监控结果的主机能力。请改用 http、composio 或静态来源。",
+  "The Composio action failed: {error}": "Composio 操作失败:{error}",
+  "The Composio action returned HTTP {status}.": "Composio 操作返回了 HTTP {status}。",
+  "The web source redirected, and redirects are not allowed.": "Web 来源发生了重定向,但不允许重定向。",
+  "The web source returned HTTP {status}.": "Web 来源返回了 HTTP {status}。",
+  "The web source sent a reply Ryu could not read: {error}": "Web 来源发送了 Ryu 无法读取的响应:{error}",
+  "The widget's agent run failed: {error}": "小组件的智能体运行失败:{error}",
+  "Widget “{title}” broke": "小组件“{title}”出现故障",
+  "Widget “{title}” recovered": "小组件“{title}”已恢复",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "工作流小组件暂不可用:没有允许应用运行已保存工作流的主机能力。请改用 http、composio 或静态来源。",
+  "dashboard not found": "未找到仪表板",
+  "kind is required": "类型为必填项",
+  "name is required": "名称为必填项",
+  "not found": "未找到"
+}

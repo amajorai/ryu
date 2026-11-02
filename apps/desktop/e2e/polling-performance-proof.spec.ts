@@ -2,11 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { PluginValue } from "../src/lib/api/plugin-wire-values.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/performance-sweep"
-);
+const proofDir = proofEvidencePath("performance-sweep");
 test("polls avoid overlap, pause when hidden and discard stale context", async ({
 	page,
 }) => {

@@ -34,6 +34,7 @@ import {
 	type SessionBoxCostNoticeState,
 	sessionBoxErrorMessage,
 } from "@/src/lib/api/session-box.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 
 /** Core preference: where a conversation's computer and browser actions run. */
 export const SESSION_BOX_COMPUTER_TARGET_PREF = "session-box-computer-target";
@@ -170,7 +171,7 @@ function allowedText(
 	state: SessionBoxCostNoticeState
 ): string {
 	const day = state.acknowledgedAt
-		? new Date(state.acknowledgedAt).toLocaleDateString(undefined, {
+		? formatLocalDateTime(state.acknowledgedAt, {
 				day: "numeric",
 				month: "short",
 				year: "numeric",
@@ -463,7 +464,7 @@ export function ComputerUseSettings({
 					description={
 						config !== null && !securityKeySupported
 							? "This device's Gateway is too old to store this setting. Update Ryu on the device to change it."
-							: "Records whether features that use a security key connected to this device may do so. No current feature uses a security key, and the key always requires its own touch or PIN."
+							: "Lets browsers on your remote devices and virtual machines use the security key connected to this device to sign in. Each request asks you first and still needs a touch of the key."
 					}
 					title={
 						<span className="flex items-center gap-2">

@@ -31,7 +31,7 @@ export function OsWindowCard({
 	const isVisible = active && !minimized;
 	const frameClassName = maximized
 		? "inset-3 bottom-5"
-		: "inset-3 bottom-5 sm:top-8 sm:right-[14%] sm:bottom-24 sm:left-[14%]";
+		: "inset-3 bottom-5 sm:top-8 sm:end-[14%] sm:bottom-24 sm:start-[14%]";
 	const controlClassName =
 		"flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 	const stopAnd = (action: () => void) => (event: ReactMouseEvent) => {
@@ -60,7 +60,7 @@ export function OsWindowCard({
 				>
 					{window.title}
 				</span>
-				<div className="relative z-10 ml-auto flex items-center gap-0.5">
+				<div className="relative z-10 ms-auto flex items-center gap-0.5">
 					<button
 						aria-label={tl("Minimize {title}", { title: window.title })}
 						className={controlClassName}
@@ -75,7 +75,11 @@ export function OsWindowCard({
 						/>
 					</button>
 					<button
-						aria-label={`${maximized ? "Restore" : "Maximize"} ${window.title}`}
+						aria-label={
+							maximized
+								? tl("Restore {title}", { title: window.title })
+								: tl("Maximize {title}", { title: window.title })
+						}
 						className={controlClassName}
 						data-testid={`os-window-${window.id}-maximize`}
 						onClick={stopAnd(() => setMaximized((value) => !value))}

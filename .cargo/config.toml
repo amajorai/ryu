@@ -4,9 +4,9 @@
 # audio codec) builds vendored libopus through CMake (`opusic-sys`; previously
 # `audiopus_sys`, whose bundled CMakeLists declared a `cmake_minimum_required`
 # floor below 3.5). CMake 4.x removed compatibility with policies < 3.5 and
-# aborts the configure step unless this minimum is supplied, so it is kept as a
-# guard for vendored CMake builds. Setting it here lets the
-# vendored build configure on modern CMake. It is read only by CMake's policy
+# aborts the configure step unless this minimum is supplied. `opusic-sys`'s
+# CMakeLists requires CMake >= 3.16, so opus itself no longer needs it; it is kept
+# only as a guard for other vendored CMake builds. It is read only by CMake's policy
 # engine, so it is harmless for every other crate and a no-op on older CMake.
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"

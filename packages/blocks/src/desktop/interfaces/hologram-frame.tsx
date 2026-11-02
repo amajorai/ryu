@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
@@ -15,7 +16,11 @@ import {
 	HUD_LABEL,
 	StatusMark,
 } from "./hologram-parts.tsx";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	formatNameList,
+	relativeAge,
+} from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 const EASE = [0.2, 0, 0, 1] as const;
@@ -65,15 +70,15 @@ export function ThreadFrame({
 }) {
 	const reduceMotion = useReducedMotion();
 	const titleId = useId();
-	const title = thread ? holoThreadTitle(thread) : "New thread";
+	const title = thread ? holoThreadTitle(thread) : tr("New thread");
 	const names = (thread?.agentIds ?? [])
 		.map((id) => agentById(snapshot, id)?.name)
 		.filter((name): name is string => name !== undefined);
 	const status = thread ? threadStatus(thread) : null;
-	const age = thread ? compactAge(thread.updatedAt, now) : "";
+	const age = thread ? relativeAge(thread.updatedAt, now) : "";
 	const meta = [
-		names.length > 0 ? names.join(", ") : "No agent",
-		age ? (age === "now" ? "just now" : `${age} ago`) : null,
+		names.length > 0 ? formatNameList(names) : tr("No agent"),
+		age || null,
 	]
 		.filter(Boolean)
 		.join(" · ");
@@ -117,6 +122,7 @@ export function ThreadFrame({
 					</p>
 					<h2
 						className="truncate font-medium text-(--holo-text) text-[15px] leading-5 outline-none"
+						data-ryu-i18n="off"
 						id={titleId}
 						ref={headingRef}
 						tabIndex={-1}

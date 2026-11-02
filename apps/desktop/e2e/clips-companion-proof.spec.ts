@@ -2,13 +2,11 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { ProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const EVIDENCE = process.env.RYU_APPS_STORE_PROOF_DIR
 	? path.resolve(process.env.RYU_APPS_STORE_PROOF_DIR)
-	: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-		);
+	: proofEvidencePath("test-coverage-sweep-20260924/evidence");
 // A VP9 copy of the bundled demo clip: Playwright's Chromium cannot decode
 // H.264, unlike Chrome and the desktop webviews.
 const VIDEO_FIXTURE = path.resolve(

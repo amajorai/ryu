@@ -185,6 +185,16 @@
 	transform-origin: right center;
 	translate: var(--toggle-travel) 0;
 }
+/* Right to left the thumb rests at the inline-start (right) edge and travels
+   left, so the travel and both stretch origins mirror. `:where` keeps these at
+   the specificity of the rules above, which they follow and so override. */
+.t-toggle:where([dir="rtl"], [dir="rtl"] *) .t-toggle-thumb {
+	transform-origin: right center;
+}
+.t-toggle:where([dir="rtl"], [dir="rtl"] *)[data-checked] .t-toggle-thumb {
+	transform-origin: left center;
+	translate: calc(var(--toggle-travel) * -1) 0;
+}
 /* While held, stretch the thumb toward the side it will travel to. `scale`
    (not width) so the percentage travel above never overshoots the track; the
    origin anchors the edge the thumb is leaving. Release snaps back fast. */

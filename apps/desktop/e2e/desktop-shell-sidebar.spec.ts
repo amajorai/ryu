@@ -1,8 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proof =
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-shell-flows/sidebar";
+// Resolved from the repository root, not the runner's working directory, and
+// redirected by RYU_PROOF_EVIDENCE_DIR so revalidation leaves tracked evidence alone.
+const proof = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-shell-flows/sidebar"
+);
 const registry = "ryu:standalone-apps:v1:http://127.0.0.1:5493";
 const diagnostics = new WeakMap<
 	Page,
@@ -43,30 +47,101 @@ test.afterEach(async ({ page }, testInfo) => {
 	});
 	expect(state.pageErrors).toEqual([]);
 	expect(state.unexpectedHttp).toEqual([]);
-	expect(
-		state.native.filter(
-			(entry) =>
-				entry.command !== "close_current_window" ||
-				(entry.args !== null &&
-					(typeof entry.args !== "object" ||
-						Object.keys(entry.args).length > 0))
-		)
-	).toEqual([]);
+	expect(state.native.filter((entry) => !isExpectedNativeCall(entry))).toEqual(
+		[]
+	);
 });
+/** The native calls the hosted shell makes under SignedInShell's providers:
+ *  AuthProvider reads the sealed account vault, EntitlementProvider its store and
+ *  licence slot, TabsProvider registers the window's tabs and listens for entity
+ *  activation. `close_current_window` is the removal under test. */
+function isExpectedNativeCall({
+	command,
+	args,
+}: {
+	command: string;
+	args: unknown;
+}) {
+	const fields: Record<string, unknown> =
+		args !== null && typeof args === "object" ? { ...args } : {};
+	switch (command) {
+		case "close_current_window":
+			return Object.keys(fields).length === 0;
+		case "desktop_secret_get":
+			return ["auth-vault", "license-key"].includes(String(fields.name));
+		case "desktop_content_key":
+			return fields.store === "local-storage";
+		case "plugin:event|listen":
+			return ["desktop-secret-changed", "ryu:activate-entity"].includes(
+				String(fields.event)
+			);
+		case "register_window_tabs":
+			return Array.isArray(fields.tabs);
+		case "plugin:store|load":
+			return ["auth.bin", "entitlement.bin"].includes(String(fields.path));
+		case "plugin:store|get":
+			return ["accounts", "lastGoodEntitlement", "licenseKey"].includes(
+				String(fields.key)
+			);
+		default:
+			return false;
+	}
+}
+/** Requests other than the fixture GETs that the shell's providers send: the
+ *  plugin-contributions live refresh asks for a realtime ticket (left
+ *  unavailable here), and EntitlementProvider pushes the beta verdict and the
+ *  managed-inference capability to Core. */
+const EXPECTED_WRITES: ReadonlyArray<{
+	method: string;
+	path: string;
+	body: string;
+	status: number;
+	json: object;
+}> = [
+	{
+		method: "POST",
+		path: "/api/ws/ticket",
+		body: JSON.stringify({
+			kind: "conversation",
+			roomId: "system:plugins",
+			route: "realtime",
+		}),
+		status: 503,
+		json: { error: "Realtime is not part of this fixture" },
+	},
+	{
+		method: "PUT",
+		path: "/api/preferences/managed-inference-entitled",
+		body: JSON.stringify({ value: "false" }),
+		status: 200,
+		json: { ok: true },
+	},
+	{
+		method: "PUT",
+		path: "/api/preferences/entitlement-active",
+		body: JSON.stringify({ value: "true" }),
+		status: 200,
+		json: { ok: true },
+	},
+];
 async function setup(page: Page) {
 	const requests: string[] = [];
 	await page.addInitScript(
 		({ registry }) => {
 			if (!sessionStorage.getItem("sidebar-seeded")) {
+				// The versioned registry shape @ryu/app-host serializes.
 				localStorage.setItem(
 					registry,
-					JSON.stringify([
-						{
-							appId: "@ryu/records",
-							installedAt: "2026-10-04T00:00:00Z",
-							version: "1.0.0",
-						},
-					])
+					JSON.stringify({
+						apps: [
+							{
+								appId: "@ryu/records",
+								installedAt: "2026-10-04T00:00:00Z",
+								version: "1.0.0",
+							},
+						],
+						schemaVersion: 1,
+					})
 				);
 			}
 			sessionStorage.setItem("sidebar-seeded", "true");
@@ -120,6 +195,20 @@ async function setup(page: Page) {
 			body: request.postData(),
 		};
 		state.http.push(entry);
+		const write = EXPECTED_WRITES.find(
+			(candidate) =>
+				candidate.method === request.method() &&
+				candidate.path === path &&
+				candidate.body === request.postData()
+		);
+		if (
+			write &&
+			!url.search &&
+			url.origin === "http://127.0.0.1:5493" &&
+			request.headers().authorization === "Bearer sidebar-test-token"
+		) {
+			return route.fulfill({ status: write.status, json: write.json });
+		}
 		if (
 			request.method() !== "GET" ||
 			url.search ||
@@ -230,8 +319,10 @@ test("shipping hosted sidebar forwards encoded targets, contexts and permission-
 	expect(requests).not.toContain("/api/proof/private");
 	await page.getByRole("button", { name: "Design review" }).focus();
 	await page.keyboard.press("Enter");
+	// The tab keeps the Companion's base route (TabsProvider drops the query from
+	// a seeded tab); the encoded record id arrives decoded as the mount context.
 	await expect(page.getByTestId("navigation-path")).toHaveText(
-		"/plugin/app__records?record=a%2Fb%20%3F%26"
+		"/plugin/app__records"
 	);
 	await expect(page.getByTestId("navigation-context")).toHaveText(
 		JSON.stringify({ recordId: "a/b ?&", owner: "Jiawei" })
@@ -258,22 +349,27 @@ test("removal cancel retains registry; native failure stays visible and retries 
 	page,
 }) => {
 	const requests = await setup(page);
-	await page.getByRole("button", { name: "Remove standalone app" }).click();
+	// The sidebar trigger, not the dialog's same-named action (which stays mounted
+	// while the dialog animates closed).
+	const removeTrigger = page
+		.locator('[data-slot="sidebar"]')
+		.getByRole("button", { name: "Remove standalone app" });
+	await removeTrigger.click();
 	await page.getByRole("button", { name: "Cancel", exact: true }).click();
 	expect(
 		await page.evaluate(
-			(key) => JSON.parse(localStorage.getItem(key) ?? "[]"),
+			(key) => JSON.parse(localStorage.getItem(key) ?? "{}").apps,
 			registry
 		)
 	).toHaveLength(1);
-	await page.getByRole("button", { name: "Remove standalone app" }).click();
+	await removeTrigger.click();
 	const dialog = page.getByRole("alertdialog");
 	await dialog.getByRole("button", { name: "Remove standalone app" }).click();
 	await expect(dialog.getByRole("alert")).toContainText("Window close denied");
 	await expect(dialog).toBeVisible();
 	expect(
 		await page.evaluate(
-			(key) => JSON.parse(localStorage.getItem(key) ?? "[]"),
+			(key) => JSON.parse(localStorage.getItem(key) ?? "{}").apps,
 			registry
 		)
 	).toHaveLength(0);
@@ -305,7 +401,7 @@ test("removal cancel retains registry; native failure stays visible and retries 
 	).toBeVisible();
 	expect(
 		await page.evaluate(
-			(key) => JSON.parse(localStorage.getItem(key) ?? "[]"),
+			(key) => JSON.parse(localStorage.getItem(key) ?? "{}").apps,
 			registry
 		)
 	).toHaveLength(0);

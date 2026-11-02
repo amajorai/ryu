@@ -83,7 +83,9 @@ export function ServerDetail({
 					items={[
 						{
 							label: "Tools",
-							sub: tools.length === 1 ? "tool" : "tools",
+							sub: tl("{count, plural, one {tool} other {tools}}", {
+								count: tools.length,
+							}),
 							value: toolsStatus ? "—" : `${tools.length}`,
 						},
 						{

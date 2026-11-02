@@ -189,7 +189,7 @@ export function PreviewRail({
 								"block bg-current",
 								isHorizontal
 									? "h-12 w-0.5 origin-bottom"
-									: "h-0.5 w-12 origin-left",
+									: "h-0.5 w-12 origin-left rtl:origin-right",
 								highlighted ? "text-foreground" : undefined
 							)}
 							data-slot="preview-rail-tick"

@@ -31,7 +31,7 @@ export function FeedAside({
 	return (
 		<aside
 			aria-label="Search and trends"
-			className="@min-[1080px]:ml-[30px] ml-6 @min-[1000px]:flex hidden h-full @min-[1080px]:w-[350px] w-[290px] shrink-0 flex-col @max-[1079px]:pr-4"
+			className="@min-[1080px]:ms-[30px] ms-6 @min-[1000px]:flex hidden h-full @min-[1080px]:w-[350px] w-[290px] shrink-0 flex-col @max-[1079px]:pe-4"
 		>
 			{/* The search box stays put; the cards scroll beneath it. */}
 			<div className="flex h-[53px] shrink-0 items-center">

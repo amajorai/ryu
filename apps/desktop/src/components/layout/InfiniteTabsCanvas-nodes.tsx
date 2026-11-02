@@ -28,6 +28,7 @@ import {
 } from "./tab-canvas-layout.ts";
 
 function CanvasRegionNodeView({ data }: NodeProps<RegionCanvasNode>) {
+	const tl = useLiteralMessages();
 	return (
 		<div
 			className={cn(
@@ -49,7 +50,9 @@ function CanvasRegionNodeView({ data }: NodeProps<RegionCanvasNode>) {
 					</p>
 				</div>
 				<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
-					{data.memberCount} {data.memberCount === 1 ? "tab" : "tabs"}
+					{tl("{count, plural, one {# tab} other {# tabs}}", {
+						count: data.memberCount,
+					})}
 				</span>
 			</div>
 		</div>
@@ -96,7 +99,7 @@ function CanvasTabHeader({
 						</span>
 						<button
 							className={cn(
-								"min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+								"min-w-0 flex-1 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 								focused ? "text-foreground" : "text-muted-foreground"
 							)}
 							onClick={onFocus}

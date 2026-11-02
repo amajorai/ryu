@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -149,7 +150,7 @@ export function LibraryItemDialogs({
 				title={
 					deleting
 						? tl("Delete {type}?", {
-								type: TYPE_META[deleting.type].label.toLowerCase(),
+								type: sentenceLabel(tl, TYPE_META[deleting.type].label),
 							})
 						: tl("Delete item?")
 				}

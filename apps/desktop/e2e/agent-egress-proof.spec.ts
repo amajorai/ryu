@@ -4,10 +4,10 @@ import {
 	type AgentEgressSnapshot,
 	agentEgressSnapshotSchema,
 } from "./agent-egress-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const PROOF_DIRECTORY = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const PROOF_DIRECTORY = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 function screenshotPath(name: string): string {

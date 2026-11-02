@@ -1,12 +1,11 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { parsePresets } from "../src/lib/splitPresets.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
-const PRESET_EDITOR_SCREENSHOT = path.resolve(
-	process.cwd(),
-	"../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-pane-presets.png"
+const PRESET_EDITOR_SCREENSHOT = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence/desktop-pane-presets.png"
 );
 
 test("double-click opens and commits the inline rename editors", async ({

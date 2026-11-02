@@ -64,12 +64,13 @@ export const MARKETPLACE_TO_RED_TEAM: Product[] = [
 		},
 		faq: [
 			{
-				q: "What's in an app?",
-				a: "Agents, tools or skills, an optional screen, and the permissions it needs.",
+				question: "What's in an app?",
+				answer:
+					"Agents, tools or skills, an optional screen, and the permissions it needs.",
 			},
 			{
-				q: "Can I build my own app?",
-				a: "Yes. Build an app with the Ryu SDK and pack it for install.",
+				question: "Can I build my own app?",
+				answer: "Yes. Build an app with the Ryu SDK and pack it for install.",
 			},
 		],
 		cta: {

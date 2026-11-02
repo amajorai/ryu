@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import {
 	Avatar,
 	AvatarFallback,
@@ -207,7 +208,9 @@ export function Fulfiller({
 			)}
 		>
 			<FulfillerAvatar agent={agent} className={avatar} />
-			<span className="truncate">{agent.name}</span>
+			<span className="truncate" data-ryu-i18n="off">
+				{agent.name}
+			</span>
 		</span>
 	);
 }
@@ -353,7 +356,7 @@ export function StatsStrip({
 								)}
 								disabled={loading}
 								onClick={() => onPick(tab)}
-								title={tl("Show {label}", { label: label.toLowerCase() })}
+								title={tl("Show {label}", { label: sentenceLabel(tl, label) })}
 								type="button"
 							>
 								{body}

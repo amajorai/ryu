@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { ProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface CapturedRequest {
 	body?: unknown;
@@ -36,10 +37,7 @@ interface BillingSnapshot {
 // the tracked proof ledger; without it the committed evidence is refreshed.
 const EVIDENCE_DIR =
 	process.env.RYU_PROOF_EVIDENCE_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 function evidencePath(name: string): string {
 	return path.join(EVIDENCE_DIR, `${name}.png`);

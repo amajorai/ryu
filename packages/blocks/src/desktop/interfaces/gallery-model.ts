@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	ditherAvatarHue,
@@ -399,7 +400,7 @@ export function galleryRelated(
 export function galleryByline(agents: readonly InterfaceAgent[]): string {
 	const [first] = agents;
 	if (!first) {
-		return "No agent";
+		return tr("No agent");
 	}
 	return agents.length > 1 ? `${first.name} +${agents.length - 1}` : first.name;
 }

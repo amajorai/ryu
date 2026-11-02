@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Command,
@@ -10,6 +9,7 @@ import {
 	CommandItem,
 	CommandList,
 } from "@ryu/ui/components/command.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	cloneElement,
 	createContext,
@@ -88,7 +88,7 @@ export function ProviderCommandDialog({
 								onSelect={navigation.pop}
 								value={`back to ${pages.at(-2)?.title ?? title}`}
 							>
-								<HugeiconsIcon
+								<DirectionalIcon
 									icon={ArrowLeft01Icon}
 									size={16}
 									strokeWidth={2}

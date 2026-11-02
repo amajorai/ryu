@@ -1,14 +1,17 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { TerminalCounts } from "./terminal-model.ts";
 
 /** Footer key hints; esc is shown only while a thread is open. */
-const KEY_HINTS = [
-	{ keys: "↑↓", label: "history" },
-	{ keys: "tab", label: "complete" },
-	{ keys: "ctrl-l", label: "clear" },
-	{ keys: "esc", label: "close" },
-] as const;
+const KEY_HINTS: readonly {
+	keys: string;
+	label: (tl: LiteralMessage) => string;
+}[] = [
+	{ keys: "↑↓", label: (tl) => tl("history") },
+	{ keys: "tab", label: (tl) => tl("complete") },
+	{ keys: "ctrl-l", label: (tl) => tl("clear") },
+	{ keys: "esc", label: (tl) => tl("close") },
+];
 
 /** The status line: cwd, live counts, and the key hints. */
 export function TerminalFooter({
@@ -27,13 +30,13 @@ export function TerminalFooter({
 		<footer
 			aria-label="Terminal status"
 			className={cn(
-				"flex h-7 shrink-0 items-center gap-4 border-border border-t bg-muted/50 @3xl/terminal:pr-6 pr-4 text-muted-foreground text-xs"
+				"flex h-7 shrink-0 items-center gap-4 border-border border-t bg-muted/50 @3xl/terminal:pe-6 pe-4 text-muted-foreground text-xs"
 			)}
 		>
 			<p className="flex h-full shrink-0 items-center gap-2 bg-foreground px-3 font-medium text-background">
 				ryu
 			</p>
-			<p className="@md/terminal:flex hidden h-full shrink-0 items-center border-border border-r pr-4 text-foreground">
+			<p className="@md/terminal:flex hidden h-full shrink-0 items-center border-border border-e pe-4 text-foreground">
 				{cwd}
 			</p>
 			{loading ? (
@@ -67,11 +70,14 @@ export function TerminalFooter({
 					</span>
 				</p>
 			)}
-			<p className="ml-auto @3xl/terminal:flex hidden shrink-0 gap-4 whitespace-nowrap">
+			<p className="ms-auto @3xl/terminal:flex hidden shrink-0 gap-4 whitespace-nowrap">
 				{KEY_HINTS.filter((hint) => threadOpen || hint.keys !== "esc").map(
 					(hint) => (
 						<span key={hint.keys}>
-							<span className="text-foreground">{hint.keys}</span> {hint.label}
+							<span className="text-foreground" data-ryu-i18n="off">
+								{hint.keys}
+							</span>{" "}
+							{hint.label(tl)}
 						</span>
 					)
 				)}

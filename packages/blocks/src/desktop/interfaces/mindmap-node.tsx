@@ -1,9 +1,6 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { Minus, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import type {
@@ -14,6 +11,7 @@ import type {
 } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	groupKindLabel,
 	MINDMAP_HEIGHT,
@@ -21,7 +19,6 @@ import {
 	type MindmapNode,
 	type MindmapPlaced,
 	type MindmapPoint,
-	plural,
 } from "./mindmap-model.ts";
 import { mindmapBranchColor } from "./mindmap-palette.ts";
 
@@ -42,17 +39,37 @@ function nodeLabel(
 	age: string,
 	tl: LiteralMessage
 ): string {
+	const threads = tl("{count, plural, one {# thread} other {# threads}}", {
+		count: node.threadCount,
+	});
+	const urgent =
+		node.urgentCount > 0
+			? tl(", {count} need you", { count: node.urgentCount })
+			: "";
 	switch (node.kind) {
 		case "root":
-			return `You, ${plural(node.threadCount, "thread")}${node.urgentCount > 0 ? `, ${node.urgentCount} need you` : ""}`;
+			return tl("You, {threads}{urgent}", { threads, urgent });
 		case "group":
-			return `${node.label}, ${groupKindLabel(node.groupKind)}, ${plural(node.threadCount, "thread")}${node.urgentCount > 0 ? `, ${node.urgentCount} need you` : ""}`;
-		case "agent": {
-			const state = agent?.status === "working" ? ", working" : "";
-			return `${node.label}${state}, ${plural(node.threadCount, "thread")}${node.urgentCount > 0 ? `, ${node.urgentCount} need you` : ""}`;
-		}
+			return tl("{label}, {kind}, {threads}{urgent}", {
+				kind: groupKindLabel(node.groupKind, tl),
+				label: node.label,
+				threads,
+				urgent,
+			});
+		case "agent":
+			return agent?.status === "working"
+				? tl("{label}, working, {threads}{urgent}", {
+						label: node.label,
+						threads,
+						urgent,
+					})
+				: tl("{label}, {threads}{urgent}", {
+						label: node.label,
+						threads,
+						urgent,
+					});
 		case "thread": {
-			const status = node.status ? THREAD_STATUS_LABELS[node.status] : "";
+			const status = node.status ? threadStatusLabel(node.status, tl) : "";
 			return [node.label, status, age].filter(Boolean).join(", ");
 		}
 		default:
@@ -65,7 +82,7 @@ const BASE =
 
 const KIND_CLASS: Record<MindmapNode["kind"], string> = {
 	agent:
-		"h-7 gap-2 rounded-md bg-foreground/[0.06] pr-2.5 pl-1 font-medium text-foreground text-sm leading-5 hover:bg-foreground/10",
+		"h-7 gap-2 rounded-md bg-foreground/[0.06] pe-2.5 ps-1 font-medium text-foreground text-sm leading-5 hover:bg-foreground/10",
 	group:
 		"h-8 items-end rounded-md px-1 pb-1.5 font-semibold text-base text-foreground leading-5 hover:bg-foreground/[0.06]",
 	more: "h-6 cursor-pointer items-start rounded-md px-1 pt-0.5 text-[13px] text-muted-foreground leading-5 hover:bg-foreground/[0.06] hover:text-foreground",
@@ -176,7 +193,10 @@ export function MindmapNodeView({
 			{marked && node.status ? (
 				<BoardStatusDot className="mt-1.5" status={node.status} />
 			) : null}
-			<span className={cn(node.kind === "thread" && "min-w-0 truncate")}>
+			<span
+				className={cn(node.kind === "thread" && "min-w-0 truncate")}
+				data-ryu-i18n={node.kind === "more" ? undefined : "off"}
+			>
 				{node.label}
 			</span>
 			{node.kind === "agent" && node.working ? (

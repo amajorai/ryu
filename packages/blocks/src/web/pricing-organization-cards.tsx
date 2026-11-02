@@ -23,16 +23,13 @@ import {
 	Users,
 	Wrench,
 } from "lucide-react";
-import {
-	formatCount,
-	PRICING_COPY,
-	PUBLISHED_PRICING,
-} from "./data/standalone-pricing.ts";
+import { PUBLISHED_PRICING } from "./data/standalone-pricing.ts";
 import {
 	useHelperTextSize,
 	usePlanCtaShape,
 	usePricingCtaVariant,
 } from "./pricing-appearance.tsx";
+import { MonthlyAiAllowance, usePricingFormat } from "./pricing-card-copy.tsx";
 import {
 	DepositFeeFeature,
 	IncludedPlanBanner,
@@ -77,6 +74,7 @@ export function TeamsPlanCard({
 	soldOut = false,
 }: SeatPlanCardProps) {
 	const tl = useLiteralMessages();
+	const format = usePricingFormat();
 	const isCurrent = currentPlan === "teams";
 	const isLoading =
 		loadingPlan === "teams-monthly" || loadingPlan === "teams-yearly";
@@ -100,40 +98,40 @@ export function TeamsPlanCard({
 				/>
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Bot className="mr-2 size-4" />
+						<Bot className="me-2 size-4" />
 						<span>5 seats included</span>
 					</li>
 					<li className="flex items-center">
-						<Coins className="mr-2 size-4" />
-						<span>${TEAMS_INCLUDED_USD}/month shared AI credits</span>
+						<Coins className="me-2 size-4" />
+						<MonthlyAiAllowance amountUsd={TEAMS_INCLUDED_USD} shared />
 					</li>
 					<li className="flex items-center">
-						<Shield className="mr-2 size-4" />
+						<Shield className="me-2 size-4" />
 						<span>Access controls, spend controls, and audit history</span>
 					</li>
 					<li className="flex items-center">
-						<CreditCard className="mr-2 size-4" />
+						<CreditCard className="me-2 size-4" />
 						<span>Centralized team billing and settings</span>
 					</li>
 					<li className="flex items-center">
-						<Store className="mr-2 size-4" />
+						<Store className="me-2 size-4" />
 						<span>Team marketplace for skills and plugins</span>
 					</li>
 					<li className="flex items-center">
-						<BarChart3 className="mr-2 size-4" />
+						<BarChart3 className="me-2 size-4" />
 						<span>Shared usage analytics</span>
 					</li>
 					<li className="flex items-center">
-						<Wrench className="mr-2 size-4" />
+						<Wrench className="me-2 size-4" />
 						<span>Guided setup for agent workflows</span>
 					</li>
 					<li className="flex items-center">
-						<Mail className="mr-2 size-4" />
+						<Mail className="me-2 size-4" />
 						<span>
 							{tl(
 								"{monthlyEmails} monthly emails and {storageGib} GiB mail storage",
 								{
-									monthlyEmails: formatCount(
+									monthlyEmails: format.count(
 										PUBLISHED_PRICING.mail.organization.monthlyEmails
 									),
 									storageGib: String(
@@ -144,10 +142,10 @@ export function TeamsPlanCard({
 						</span>
 					</li>
 					<li className="flex items-center">
-						<Server className="mr-2 size-4" />
+						<Server className="me-2 size-4" />
 						<span>{ALWAYS_ON_SERVER_COPY}</span>
 					</li>
-					<DepositFeeFeature fee={PRICING_COPY.teamDepositFee} />
+					<DepositFeeFeature tier="team" />
 				</PlanFeatureList>
 				<CloudUpgradePanel
 					loadingPlan={loadingPlan}
@@ -231,7 +229,7 @@ export function HostedAgentPlanCard({
 		planId,
 		displayAgentCount
 	);
-	const planName = HOSTED_PLAN_NAMES[planId];
+	const planName = tl(HOSTED_PLAN_NAMES[planId]);
 
 	return (
 		<PricingCardBorder
@@ -256,7 +254,7 @@ export function HostedAgentPlanCard({
 				{isBusiness ? <IncludedPlanBanner plan="Teams" /> : null}
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Bot className="mr-2 size-4" />
+						<Bot className="me-2 size-4" />
 						<span>
 							{tl("{seatCount} seats included", {
 								seatCount: String(displayAgentCount),
@@ -264,39 +262,34 @@ export function HostedAgentPlanCard({
 						</span>
 					</li>
 					<li className="flex items-center">
-						<Coins className="mr-2 size-4" />
-						<span>
-							<span className="font-heading tabular-nums">
-								${includedCredits}
-							</span>
-							/month shared AI credits
-						</span>
+						<Coins className="me-2 size-4" />
+						<MonthlyAiAllowance amountUsd={includedCredits} shared />
 					</li>
 					<li className="flex items-center">
-						<Server className="mr-2 size-4" />
+						<Server className="me-2 size-4" />
 						<span>{ALWAYS_ON_SERVER_COPY}</span>
 					</li>
 					<li className="flex items-center">
-						<Shield className="mr-2 size-4" />
+						<Shield className="me-2 size-4" />
 						<span>Access controls, spend controls, and audit history</span>
 					</li>
 					<li className="flex items-center">
-						<CreditCard className="mr-2 size-4" />
+						<CreditCard className="me-2 size-4" />
 						<span>Centralized team billing and settings</span>
 					</li>
 					<li className="flex items-center">
-						<Store className="mr-2 size-4" />
+						<Store className="me-2 size-4" />
 						<span>Team marketplace for skills and plugins</span>
 					</li>
 					<li className="flex items-center">
-						<BarChart3 className="mr-2 size-4" />
+						<BarChart3 className="me-2 size-4" />
 						<span>Shared usage analytics</span>
 					</li>
 					<li className="flex items-center">
-						<Wrench className="mr-2 size-4" />
+						<Wrench className="me-2 size-4" />
 						<span>Guided setup for agent workflows</span>
 					</li>
-					<DepositFeeFeature fee={PRICING_COPY.teamDepositFee} />
+					<DepositFeeFeature tier="team" />
 					<ProductAccessFeature productCount={productCount} />
 				</PlanFeatureList>
 			</CardContent>
@@ -371,27 +364,27 @@ export function EnterprisePlanCard({
 				<IncludedPlanBanner plan="Business" />
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Key className="mr-2 size-4" />
+						<Key className="me-2 size-4" />
 						<span>SSO and SCIM provisioning</span>
 					</li>
 					<li className="flex items-center">
-						<Shield className="mr-2 size-4" />
+						<Shield className="me-2 size-4" />
 						<span>Audit logs, custom SLA, and DPA</span>
 					</li>
 					<li className="flex items-center">
-						<Server className="mr-2 size-4" />
+						<Server className="me-2 size-4" />
 						<span>Dedicated or self-hosted deployment</span>
 					</li>
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>Choose your data region</span>
 					</li>
 					<li className="flex items-center">
-						<Users className="mr-2 size-4" />
+						<Users className="me-2 size-4" />
 						<span>Named contact and onboarding</span>
 					</li>
 					<li className="flex items-center">
-						<Wrench className="mr-2 size-4" />
+						<Wrench className="me-2 size-4" />
 						<span>Invoicing, purchase orders, and custom terms</span>
 					</li>
 					<ProductAccessFeature productCount={productCount} />

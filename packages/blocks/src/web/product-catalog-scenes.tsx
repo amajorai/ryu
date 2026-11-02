@@ -50,7 +50,7 @@ const PROGRESS = "text-realm-progress dark:text-realm-progress-dark";
 /** The amber note under a scene, as on the Compute scene. */
 function Marker({ children }: { children: string }) {
 	return (
-		<div className="type-compact mt-5 border-realm-review-marker/45 border-l-2 bg-realm-review-marker/10 px-3 py-2 font-sans">
+		<div className="type-compact mt-5 border-realm-review-marker/45 border-s-2 bg-realm-review-marker/10 px-3 py-2 font-sans">
 			{children}
 		</div>
 	);

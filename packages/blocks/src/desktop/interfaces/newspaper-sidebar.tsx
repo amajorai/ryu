@@ -2,10 +2,10 @@ import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 } from "@ryuhq/protocol/interfaces";
 import { useId } from "react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	eventDay,
 	eventSchedule,
@@ -29,7 +29,7 @@ export function AtAGlance({
 	const headingId = useId();
 	const rows: { label: string; value: number }[] = [
 		...THREAD_STATUS_ORDER.map((status) => ({
-			label: THREAD_STATUS_LABELS[status],
+			label: threadStatusLabel(status),
 			value: counts[status],
 		})),
 	];
@@ -105,7 +105,10 @@ export function UpcomingRuns({
 									</span>
 								</time>
 								<div className="min-w-0">
-									<p className="font-semibold font-serif text-[15px] text-foreground leading-5">
+									<p
+										className="font-semibold font-serif text-[15px] text-foreground leading-5"
+										data-ryu-i18n="off"
+									>
 										{event.title}
 									</p>
 									<p className="mt-1 text-muted-foreground text-xs leading-4">

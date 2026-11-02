@@ -11,6 +11,7 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
@@ -74,6 +75,7 @@ export function GoalBar({
 	onResume,
 	onCancelDraft,
 }: GoalBarProps) {
+	const tl = useLiteralMessages();
 	const [editing, setEditing] = useState(Boolean(startInEdit));
 	const [draft, setDraft] = useState(text);
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -163,7 +165,7 @@ export function GoalBar({
 					/>
 				) : (
 					<button
-						className="min-w-0 flex-1 truncate text-left text-foreground text-sm"
+						className="min-w-0 flex-1 truncate text-start text-foreground text-sm"
 						onClick={() => setEditing(true)}
 						title="Click to edit the goal"
 						type="button"
@@ -171,18 +173,21 @@ export function GoalBar({
 						<span className="font-medium">
 							{achieved ? "Goal achieved" : paused ? "Goal paused" : "Goal"}
 						</span>
-						<span className="ml-1.5 text-muted-foreground">{text}</span>
+						<span className="ms-1.5 text-muted-foreground">{text}</span>
 					</button>
 				)}
 
 				<div className="flex shrink-0 items-center gap-0.5">
 					{!editing && elapsed && (
-						<span className="mr-1 inline-flex items-center gap-1 text-muted-foreground text-xs">
+						<span className="me-1 inline-flex items-center gap-1 text-muted-foreground text-xs">
 							<HugeiconsIcon className="size-3" icon={Clock01Icon} />
 							{elapsed}
 							{isNativeNumber(turns) && turns > 0 && (
 								<span className="text-muted-foreground/70">
-									· {turns} {turns === 1 ? "turn" : "turns"}
+									·{" "}
+									{tl("{count, plural, one {# turn} other {# turns}}", {
+										count: turns,
+									})}
 								</span>
 							)}
 						</span>
@@ -254,7 +259,7 @@ export function GoalBar({
 
 			{/* The judge's latest reason / live status, shown under the goal line. */}
 			{!editing && (judging || reason) && (
-				<p className="truncate pl-6 text-muted-foreground/70 text-xs">
+				<p className="truncate ps-6 text-muted-foreground/70 text-xs">
 					{judging ? "Judging progress…" : reason}
 				</p>
 			)}

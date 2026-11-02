@@ -92,7 +92,7 @@ export function PresenceDot({
 		<span
 			aria-hidden="true"
 			className={cn(
-				"absolute -right-0.5 -bottom-0.5 flex size-3 items-center justify-center rounded-full",
+				"absolute -end-0.5 -bottom-0.5 flex size-3 items-center justify-center rounded-full",
 				ringClassName,
 				className
 			)}

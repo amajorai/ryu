@@ -1,6 +1,7 @@
 "use client";
 import { ExpandIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { isNativeFunction } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
@@ -55,6 +56,7 @@ export function MermaidBlock({
 	isIncomplete,
 	wideBlocks,
 }: CustomRendererProps & { wideBlocks: boolean }) {
+	const tl = useLiteralMessages();
 	const id = useId();
 	const [svg, setSvg] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -97,7 +99,9 @@ export function MermaidBlock({
 		renderDiagram().catch((reason) => {
 			if (!cancelled) {
 				setError(
-					reason instanceof Error ? reason.message : "Failed to render diagram"
+					reason instanceof Error
+						? reason.message
+						: tl("Failed to render diagram")
 				);
 			}
 		});
@@ -105,7 +109,7 @@ export function MermaidBlock({
 		return () => {
 			cancelled = true;
 		};
-	}, [code, id, isIncomplete]);
+	}, [code, id, isIncomplete, tl]);
 
 	// The lightbox only shows media URLs the shared policy admits, and that
 	// policy refuses `data:image/svg+xml`. Hand it a browser-created object URL
@@ -152,7 +156,7 @@ export function MermaidBlock({
 				<div className="flex items-center justify-between px-1 text-xs">
 					<span className="font-mono text-muted-foreground">Mermaid</span>
 					<CopyFormatMenu
-						ariaLabel="Copy diagram"
+						ariaLabel={tl("Copy diagram")}
 						dataTestId="mermaid-copy"
 						onCopy={handleCopy}
 						options={DIAGRAM_COPY_OPTIONS}
@@ -171,7 +175,7 @@ export function MermaidBlock({
 			<div className={surfaceClassName} data-streamdown="mermaid-block">
 				<div className="flex items-center justify-between px-1 text-xs">
 					<span className="font-mono text-muted-foreground">Mermaid</span>
-					<span className="text-muted-foreground">Rendering…</span>
+					<span className="text-muted-foreground">{tl("Rendering…")}</span>
 				</div>
 				<pre className="max-h-56 overflow-auto rounded-lg bg-background/70 p-3 text-xs">
 					<code>{code}</code>
@@ -186,19 +190,19 @@ export function MermaidBlock({
 				<span className="font-mono text-muted-foreground">Mermaid</span>
 				<div className="flex items-center gap-1 opacity-70 transition-opacity group-focus-within/mermaid-block:opacity-100 group-hover/mermaid-block:opacity-100">
 					<CopyFormatMenu
-						ariaLabel="Copy diagram"
+						ariaLabel={tl("Copy diagram")}
 						dataTestId="mermaid-copy"
 						onCopy={handleCopy}
 						options={DIAGRAM_COPY_OPTIONS}
 					/>
 					<Button
 						appearance="markdown-diagram-expand"
-						aria-label="Expand diagram"
+						aria-label={tl("Expand diagram")}
 						className="size-7"
 						data-testid="mermaid-expand"
 						onClick={() => setLightboxOpen(true)}
 						size="icon"
-						title="Expand diagram"
+						title={tl("Expand diagram")}
 						type="button"
 						variant="ghost-muted"
 					>
@@ -207,7 +211,7 @@ export function MermaidBlock({
 				</div>
 			</div>
 			<button
-				aria-label="Open Mermaid diagram"
+				aria-label={tl("Open Mermaid diagram")}
 				className="flex max-h-[32rem] min-h-28 w-full cursor-zoom-in items-center justify-center overflow-auto rounded-lg bg-background/70 p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				onClick={(event) => {
 					originRef.current = event.currentTarget;

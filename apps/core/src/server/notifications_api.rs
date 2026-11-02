@@ -30,23 +30,38 @@ fn is_connect_suggestion(source_app_id: Option<&str>) -> bool {
     source_app_id == Some(crate::notify::ISLAND_CONNECT_SUGGESTION_SOURCE)
 }
 
-fn redact_connect_suggestion_fields(title: &mut String, body: &mut Option<String>) {
-    *title = crate::notify::CONNECT_SUGGESTION_PRIVACY_TITLE.to_owned();
-    *body = Some(crate::notify::CONNECT_SUGGESTION_PRIVACY_BODY.to_owned());
+/// Replace a connected-app suggestion's text with the Streaming placeholder in `locale`.
+fn redact_connect_suggestion_fields(title: &mut String, body: &mut Option<String>, locale: &str) {
+    let (placeholder_title, placeholder_body) = crate::notify::privacy_placeholder(locale);
+    *title = placeholder_title;
+    *body = Some(placeholder_body);
 }
 
+/// Mask connected-app suggestions while Streaming is on. Rows persisted with the
+/// English placeholder are shown in `locale` either way.
 fn project_streaming_private_notifications(
     mut notifications: Vec<crate::notify::store::NotificationRow>,
     streaming_active: bool,
+    locale: &str,
 ) -> Vec<crate::notify::store::NotificationRow> {
-    if !streaming_active {
-        return notifications;
-    }
     for notification in &mut notifications {
-        if is_connect_suggestion(notification.source_app_id.as_deref()) {
-            redact_connect_suggestion_fields(&mut notification.title, &mut notification.body);
+        if !is_connect_suggestion(notification.source_app_id.as_deref()) {
+            continue;
+        }
+        if streaming_active {
+            redact_connect_suggestion_fields(
+                &mut notification.title,
+                &mut notification.body,
+                locale,
+            );
             notification.workflow_run_id = None;
             notification.node_id = None;
+        } else {
+            crate::notify::localize_privacy_placeholder(
+                &mut notification.title,
+                &mut notification.body,
+                locale,
+            );
         }
     }
     notifications
@@ -191,9 +206,19 @@ pub async fn list_notifications(
         .await
     {
         Ok(items) => {
+            // Reading the preference costs a store read; only connected-app rows need it.
+            let locale = if items
+                .iter()
+                .any(|item| is_connect_suggestion(item.source_app_id.as_deref()))
+            {
+                crate::i18n::locale::node_locale().await
+            } else {
+                "en"
+            };
             let items = project_streaming_private_notifications(
                 items,
                 crate::presence::streaming_privacy_active(),
+                locale,
             );
             (StatusCode::OK, Json(json!({ "notifications": items })))
         }
@@ -202,63 +227,7 @@ pub async fn list_notifications(
 }
 
 #[cfg(test)]
-mod streaming_privacy_tests {
-    use super::project_streaming_private_notifications;
-    use crate::notify::store::NotificationRow;
-
-    fn notification(source_app_id: Option<&str>) -> NotificationRow {
-        NotificationRow {
-            id: "ntf_connect_sensitive-event".to_owned(),
-            user_id: Some("user-1".to_owned()),
-            title: "Password reset requested".to_owned(),
-            body: Some("Code 683474 is valid for 30 minutes".to_owned()),
-            level: "info".to_owned(),
-            workflow_run_id: Some("run-sensitive".to_owned()),
-            node_id: Some("private-node".to_owned()),
-            ack_required: false,
-            acked: false,
-            read_at: None,
-            created_at: "2026-09-29T00:00:00Z".to_owned(),
-            source_app_id: source_app_id.map(str::to_owned),
-            archived_at: None,
-        }
-    }
-
-    #[test]
-    fn streaming_masks_queued_connect_details_and_run_references() {
-        let projected = project_streaming_private_notifications(
-            vec![notification(Some(
-                crate::notify::ISLAND_CONNECT_SUGGESTION_SOURCE,
-            ))],
-            true,
-        );
-        let projected = &projected[0];
-        assert_eq!(
-            projected.title,
-            crate::notify::CONNECT_SUGGESTION_PRIVACY_TITLE
-        );
-        assert_eq!(
-            projected.body.as_deref(),
-            Some(crate::notify::CONNECT_SUGGESTION_PRIVACY_BODY)
-        );
-        assert_eq!(projected.workflow_run_id, None);
-        assert_eq!(projected.node_id, None);
-    }
-
-    #[test]
-    fn streaming_leaves_other_notifications_and_inactive_suggestions_unchanged() {
-        let connect = notification(Some(crate::notify::ISLAND_CONNECT_SUGGESTION_SOURCE));
-        let other = notification(Some("@ryu/approvals"));
-        let projected =
-            project_streaming_private_notifications(vec![connect.clone(), other.clone()], true);
-        assert_eq!(projected[1].title, other.title);
-        assert_eq!(projected[1].body, other.body);
-        assert_eq!(
-            project_streaming_private_notifications(vec![connect.clone()], false)[0].title,
-            connect.title
-        );
-    }
-}
+mod streaming_privacy_tests;
 
 /// `GET /api/notifications/mention-targets` — the human rows the active Inbox
 /// app may expose in the chat `@` picker. Core resolves the organization/team
@@ -468,10 +437,18 @@ pub async fn notifications_stream(
                             continue;
                         }
                     }
-                    if crate::presence::streaming_privacy_active()
-                        && is_connect_suggestion(n.source_app_id.as_deref())
-                    {
-                        redact_connect_suggestion_fields(&mut n.title, &mut n.body);
+                    if is_connect_suggestion(n.source_app_id.as_deref()) {
+                        let locale = crate::i18n::locale::node_locale().await;
+                        if crate::presence::streaming_privacy_active() {
+                            redact_connect_suggestion_fields(&mut n.title, &mut n.body, locale);
+                        } else {
+                            // A row saved with the placeholder after Streaming ended.
+                            crate::notify::localize_privacy_placeholder(
+                                &mut n.title,
+                                &mut n.body,
+                                locale,
+                            );
+                        }
                     }
                     let data = serde_json::to_string(&n).unwrap_or_default();
                     return Some((Ok(Event::default().data(data)), (rx, user_id)));
@@ -484,248 +461,11 @@ pub async fn notifications_stream(
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-// -- Mobile push-token registration ------------------------------------------
-//
-// Expo push tokens are kernel notification-delivery state (used by the app-inbox
-// deliver, monitor alerts, and approval pings), so registration is served here on
-// the notify surface — NOT on the monitors router (which is moving out-of-process).
-// Relocated from `/api/monitors/push-tokens`.
+mod push_tokens;
 
-/// Request body for `POST /api/notifications/push-tokens`.
-#[derive(Debug, Deserialize)]
-pub struct PushTokenBody {
-    pub token: String,
-    #[serde(default)]
-    pub platform: Option<String>,
-    /// The member registering this device, so notifications can be pushed to a
-    /// specific person's phones. Omitted by anonymous / single-user nodes.
-    #[serde(default)]
-    pub user_id: Option<String>,
-    /// Whether this device wants an "agent finished" push when one of its
-    /// owner's conversations completes. Omitted by older app builds, which
-    /// leaves the stored choice unchanged (new rows default to off).
-    #[serde(default)]
-    pub run_finished: Option<bool>,
-}
-
-/// `POST /api/notifications/push-tokens` — register a mobile Expo push token.
-#[utoipa::path(
-    post,
-    path = "/api/notifications/push-tokens",
-    tag = "Notifications",
-    summary = "register a mobile Expo push token.",
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-pub async fn register_push_token(
-    State(_state): State<ServerState>,
-    Extension(caller): Extension<Option<VerifiedCaller>>,
-    Json(body): Json<PushTokenBody>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(store) = crate::notify::global_store() else {
-        return store_not_ready();
-    };
-    let user_id = match resolve_push_token_owner(caller, body.user_id.as_deref()) {
-        Ok(user_id) => user_id,
-        Err(code) => return error_reply(code, "unauthorized"),
-    };
-    match store
-        .register_push_token(&body.token, body.platform.as_deref(), user_id.as_deref())
-        .await
-    {
-        Ok(true) => match body.run_finished {
-            None => (StatusCode::OK, Json(json!({ "ok": true }))),
-            Some(enabled) => match store
-                .set_push_token_run_finished(&body.token, user_id.as_deref(), enabled)
-                .await
-            {
-                // Echoing the stored choice tells the app this node sends
-                // "agent finished" pushes, so it can skip its own local alert.
-                Ok(_) => (
-                    StatusCode::OK,
-                    Json(json!({ "ok": true, "run_finished": enabled })),
-                ),
-                Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-            },
-        },
-        Ok(false) => error_reply(StatusCode::CONFLICT, "push token belongs to another member"),
-        Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-    }
-}
-
-/// `DELETE /api/notifications/push-tokens/:token` — unregister a push token.
-#[utoipa::path(
-    delete,
-    path = "/api/notifications/push-tokens/{token}",
-    tag = "Notifications",
-    summary = "unregister a push token.",
-    params(("token" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-pub async fn remove_push_token(
-    State(_state): State<ServerState>,
-    Extension(caller): Extension<Option<VerifiedCaller>>,
-    Path(token): Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(store) = crate::notify::global_store() else {
-        return store_not_ready();
-    };
-    let result = if let Some(caller) = caller {
-        match resolve_viewer(Some(caller), None) {
-            Ok(user_id) => store.remove_push_token_for_user(&token, &user_id).await,
-            Err(code) => return error_reply(code, "unauthorized"),
-        }
-    } else if crate::sidecar::control_plane::registered_org().is_some() {
-        return error_reply(StatusCode::UNAUTHORIZED, "verified caller required");
-    } else {
-        // An unbound node is the legacy single-user/local flow. There is no
-        // second member whose token could be deleted there, so retain the
-        // node-level operation for anonymous local clients.
-        store.remove_push_token(&token).await
-    };
-    match result {
-        Ok(true) => (StatusCode::OK, Json(json!({ "ok": true }))),
-        Ok(false) => error_reply(StatusCode::NOT_FOUND, "token not found"),
-        Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-    }
-}
-
-/// Resolve the owner stamped on a push-token row. On an org-bound node this
-/// always uses the verified caller and rejects a body-supplied other member;
-/// on an unbound local node, anonymous registration may retain its legacy
-/// node-wide (`NULL`) owner.
-fn resolve_push_token_owner(
-    caller: Option<VerifiedCaller>,
-    requested: Option<&str>,
-) -> Result<Option<String>, StatusCode> {
-    match resolve_viewer(caller, requested) {
-        Ok(user_id) => Ok(Some(user_id)),
-        Err(StatusCode::BAD_REQUEST)
-            if crate::sidecar::control_plane::registered_org().is_none()
-                && requested.map(str::trim).unwrap_or("").is_empty() =>
-        {
-            Ok(None)
-        }
-        Err(code) => Err(code),
-    }
-}
+pub use push_tokens::{
+    __path_register_push_token, __path_remove_push_token, register_push_token, remove_push_token,
+};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::identity_verify::OrgRole;
-
-    fn caller(user_id: &str) -> VerifiedCaller {
-        VerifiedCaller {
-            user_id: user_id.to_owned(),
-            email: None,
-            email_verified: false,
-            org_id: None,
-            role: OrgRole::Member,
-            teams: Vec::new(),
-        }
-    }
-
-    /// The deterministic security core (independent of node binding): with a verified
-    /// caller, the effective viewer is ALWAYS the caller's own id, and a `requested`
-    /// id that names a DIFFERENT member is a 403 — one teammate can never read
-    /// another's inbox by passing their user_id.
-    #[test]
-    fn verified_caller_is_pinned_to_own_id() {
-        // Matching requested id → OK, resolves to the caller.
-        assert_eq!(
-            resolve_viewer(Some(caller("alice")), Some("alice")),
-            Ok("alice".to_owned())
-        );
-        // No requested id → still the caller's own id (never anonymous).
-        assert_eq!(
-            resolve_viewer(Some(caller("alice")), None),
-            Ok("alice".to_owned())
-        );
-        // Empty requested id is ignored (filtered) → the caller's own id.
-        assert_eq!(
-            resolve_viewer(Some(caller("alice")), Some("")),
-            Ok("alice".to_owned())
-        );
-    }
-
-    #[test]
-    fn verified_caller_reading_another_member_is_forbidden() {
-        // Bob presents a valid JWT but asks for Alice's feed → 403, no data leak.
-        assert_eq!(
-            resolve_viewer(Some(caller("bob")), Some("alice")),
-            Err(StatusCode::FORBIDDEN)
-        );
-    }
-
-    #[test]
-    fn push_token_owner_uses_verified_caller_not_requested_member() {
-        assert_eq!(
-            resolve_push_token_owner(Some(caller("alice")), Some("alice")),
-            Ok(Some("alice".to_owned()))
-        );
-        assert_eq!(
-            resolve_push_token_owner(Some(caller("alice")), Some("bob")),
-            Err(StatusCode::FORBIDDEN)
-        );
-    }
-
-    /// The anonymous branch depends on the node's org-binding — a process-global read
-    /// that a sibling test (`control_plane`) mutates. Assert only against the binding
-    /// state observed at call time so this stays deterministic under parallel runs.
-    #[test]
-    fn anonymous_viewer_matches_node_binding() {
-        let bound = crate::sidecar::control_plane::registered_org().is_some();
-        let with_id = resolve_viewer(None, Some("alice"));
-        let without_id = resolve_viewer(None, None);
-        if bound {
-            // Org-bound node: a member feed is never readable unauthenticated.
-            assert_eq!(with_id, Err(StatusCode::UNAUTHORIZED));
-            assert_eq!(without_id, Err(StatusCode::UNAUTHORIZED));
-        } else {
-            // Unbound local (single-user) node: trust the requested id, but an absent
-            // id is a 400 (the surface must name whose feed it wants).
-            assert_eq!(with_id, Ok("alice".to_owned()));
-            assert_eq!(without_id, Err(StatusCode::BAD_REQUEST));
-        }
-    }
-
-    /// The list query defaults an absent `limit`/`user_id` and the handler clamps
-    /// `limit` into `[1, MAX_LIMIT]` — a caller cannot request an unbounded page.
-    #[test]
-    fn list_query_defaults_and_limit_clamps() {
-        let q: ListQuery = serde_json::from_value(json!({})).unwrap();
-        assert!(q.user_id.is_none());
-        assert!(q.limit.is_none());
-
-        // The handler's clamp: `q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)`.
-        assert_eq!(0i64.clamp(1, MAX_LIMIT), 1);
-        assert_eq!(10_000i64.clamp(1, MAX_LIMIT), MAX_LIMIT);
-        assert_eq!((-5i64).clamp(1, MAX_LIMIT), 1);
-        assert_eq!(DEFAULT_LIMIT.clamp(1, MAX_LIMIT), DEFAULT_LIMIT);
-    }
-
-    #[test]
-    fn mention_targets_payload_preserves_member_avatar_data() {
-        let payload =
-            mention_targets_payload(vec![crate::sidecar::control_plane::NotifyTargetUser {
-                email: Some("ada@example.test".to_owned()),
-                image: Some("https://cdn.example.test/ada.webp".to_owned()),
-                name: Some("Ada Lovelace".to_owned()),
-                role: Some("member".to_owned()),
-                user_id: "user-ada".to_owned(),
-            }]);
-        assert_eq!(
-            payload,
-            json!({
-                "users": [{
-                    "email": "ada@example.test",
-                    "image": "https://cdn.example.test/ada.webp",
-                    "name": "Ada Lovelace",
-                    "role": "member",
-                    "userId": "user-ada",
-                }]
-            })
-        );
-    }
-}
+mod tests;

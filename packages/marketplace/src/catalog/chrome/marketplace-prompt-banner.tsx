@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { ditherAvatarHue } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { ShaderBackground } from "@ryu/ui/components/motion/shader-background.tsx";
 import {
@@ -118,7 +118,7 @@ export function MarketplacePromptBanner({
 				{visiblePrompts.map((prompt) => (
 					<button
 						className={cn(
-							"group flex w-[min(34rem,100%)] min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm backdrop-blur-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80",
+							"group flex w-[min(34rem,100%)] min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-start text-sm backdrop-blur-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80",
 							rowClass
 						)}
 						key={prompt}
@@ -134,9 +134,9 @@ export function MarketplacePromptBanner({
 						</span>
 						<span
 							aria-hidden="true"
-							className="flex size-6 shrink-0 items-center justify-center rounded-full bg-white/15 transition-transform motion-safe:group-hover:translate-x-0.5"
+							className="flex size-6 shrink-0 items-center justify-center rounded-full bg-white/15 transition-transform motion-safe:group-hover:translate-x-0.5 rtl:motion-safe:group-hover:-translate-x-0.5"
 						>
-							<HugeiconsIcon className="size-3.5" icon={ArrowRight02Icon} />
+							<DirectionalIcon className="size-3.5" icon={ArrowRight02Icon} />
 						</span>
 					</button>
 				))}

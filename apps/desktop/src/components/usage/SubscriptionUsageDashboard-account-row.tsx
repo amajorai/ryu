@@ -2,6 +2,7 @@
 
 import { Timer02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale, numberFormatter } from "@ryu/i18n/core";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { Badge } from "@ryu/ui/components/badge.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
@@ -19,7 +20,11 @@ import type {
 	UsageValue,
 	UsageWindow,
 } from "@/src/lib/api/usage.ts";
-import { formatCountdown, formatExpiryDate } from "@/src/lib/expiry.ts";
+import {
+	COUNTDOWN_EXPIRED,
+	formatCountdown,
+	formatExpiryDate,
+} from "@/src/lib/expiry.ts";
 import {
 	forecastAccountQuota,
 	formatTimeUntil,
@@ -29,15 +34,21 @@ import {
 import usageVisualStyles from "./usage-visual-indicators.module.css";
 import type { UsageVisualStyle } from "./usage-visual-style.ts";
 
-function formatReset(resetAt: string | null): string | null {
+function formatReset(
+	resetAt: string | null,
+	now: number,
+	tl: ReturnType<typeof useLiteralMessages>
+): string | null {
 	if (!resetAt) {
 		return null;
 	}
-	const countdown = formatCountdown(resetAt);
+	const countdown = formatCountdown(resetAt, now);
 	if (!countdown) {
 		return null;
 	}
-	return countdown === "expired" ? "resets soon" : `resets in ${countdown}`;
+	return countdown === COUNTDOWN_EXPIRED
+		? tl("Resets soon")
+		: tl("Resets in {duration}", { duration: countdown });
 }
 
 function formatValue(value: UsageValue): string {
@@ -48,7 +59,10 @@ function formatValue(value: UsageValue): string {
 		});
 	}
 	if (value.kind === "percent") {
-		return `${Math.round(value.number)}%`;
+		return numberFormatter(activeLocale(), {
+			maximumFractionDigits: 0,
+			style: "percent",
+		}).format(value.number / 100);
 	}
 	const count = formatCount(value.number) ?? "—";
 	return value.unit ? `${count} ${value.unit}` : count;
@@ -195,7 +209,7 @@ function WindowRow({ now, window }: { now: number; window: UsageWindow }) {
 	const tl = useLiteralMessages();
 	const used = usedPercent(window);
 	const remaining = Math.round(100 - used);
-	const reset = formatReset(window.resetsAt);
+	const reset = formatReset(window.resetsAt, now, tl);
 	const projection = projectWindow(window, now);
 	const remainingAtReset =
 		projection.remainingAtReset === null

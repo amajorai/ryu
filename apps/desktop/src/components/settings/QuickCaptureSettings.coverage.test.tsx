@@ -37,17 +37,21 @@ interface ConfigFile {
 	enabled: boolean;
 }
 
-const TAP_ERROR =
-	"couldn't create the keyboard event tap — grant Input Monitoring to Ryu in System Settings › Privacy & Security, then restart the app";
-const QUESTS_OFF_ERROR =
-	"the Quests app is turned off — enable it from the Store and try again";
+// The coded failures `quick_capture/native_error.rs` serializes, and the
+// sentences the webview words them as.
+const TAP_ERROR = { code: "input_monitoring_denied" };
+const TAP_SENTENCE =
+	"Grant Input Monitoring to Ryu in System Settings › Privacy & Security, then restart Ryu.";
+const QUESTS_OFF_ERROR = { code: "quests_disabled" };
+const QUESTS_OFF_SENTENCE =
+	"The Quests app is turned off. Enable it from the Store and try again.";
 const SWITCH = "Keep The Selection With A Double-Tap Of Shift";
 
 const native = {
 	accessibility: false,
 	calls: [] as NativeCall[],
 	disk: { binding: "either", enabled: false } as ConfigFile,
-	error: null as string | null,
+	error: null as { code: string } | null,
 	failNextSave: false,
 	held: null as null | (() => void),
 	holdNextEnable: false,
@@ -98,7 +102,7 @@ async function nativeInvoke(
 			if (enabled) {
 				// Rust starts the tap FIRST and persists only on success.
 				if (!native.inputMonitoring) {
-					throw new Error(TAP_ERROR);
+					throw TAP_ERROR;
 				}
 				native.listening = true;
 				native.error = null;
@@ -257,9 +261,12 @@ function row(title: string): HTMLElement {
 }
 
 /** The muted caption the settings group prints under the row with this title. */
+// A row's description renders inside the row, right under its title.
 function captionFor(title: string) {
-	const card = row(title).closest('[data-slot="item-group"]');
-	return text(card?.nextElementSibling);
+	const heading = [
+		...row(title).querySelectorAll('[data-slot="item-title"]'),
+	].find((candidate) => text(candidate) === title);
+	return text(heading?.nextElementSibling);
 }
 
 function gestureSwitch(): HTMLElement {
@@ -390,7 +397,7 @@ test("a refused start keeps the switch off, explains why, persists nothing, and 
 		() => text(document.body).includes("Quick Capture couldn't start"),
 		"start failure toast"
 	);
-	expect(text(document.body)).toContain(TAP_ERROR);
+	expect(text(document.body)).toContain(TAP_SENTENCE);
 	expect(isChecked(gestureSwitch())).toBe(false);
 	expect(isDisabled(gestureSwitch())).toBe(false);
 	expect(native.disk).toEqual({ binding: "either", enabled: false });
@@ -545,7 +552,7 @@ test("Last Capture Failed shows the native error and disappears once the listene
 	await mount();
 
 	expect(rowTitles()).toContain("Last Capture Failed");
-	expect(captionFor("Last Capture Failed")).toBe(QUESTS_OFF_ERROR);
+	expect(captionFor("Last Capture Failed")).toBe(QUESTS_OFF_SENTENCE);
 
 	await click(gestureSwitch());
 	await until(
@@ -554,7 +561,7 @@ test("Last Capture Failed shows the native error and disappears once the listene
 	);
 	expect(native.error).toBeNull();
 	expect(native.disk).toEqual({ binding: "either", enabled: false });
-	expect(text(container)).not.toContain(QUESTS_OFF_ERROR);
+	expect(text(container)).not.toContain(QUESTS_OFF_SENTENCE);
 });
 
 test("Quests App reports Off with the Store hint and On after Quests is enabled", async () => {

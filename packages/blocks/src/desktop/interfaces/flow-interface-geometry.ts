@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import type { FlowView } from "./flow-hooks.ts";
@@ -56,7 +57,9 @@ export function subjectFor(
 	}
 	if (node?.kind === "team") {
 		return {
-			description: `${node.group.memberAgentIds.length} members`,
+			description: tr("{count, plural, one {# member} other {# members}}", {
+				count: node.group.memberAgentIds.length,
+			}),
 			glyph: "team",
 			name: node.group.name,
 			scope: { kind: "team", teamId: node.group.id },

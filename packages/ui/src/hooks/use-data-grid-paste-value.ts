@@ -12,6 +12,7 @@ import {
 	clipboardTextValueSchema,
 	describeClipboardTextValue,
 } from "@ryu/ui/lib/data-grid-clipboard.ts";
+import { getDisplayLocale } from "@ryu/ui/lib/timezone.ts";
 import type { CellOpts, FileCellData } from "@ryu/ui/types/data-grid.ts";
 
 /** Convert one pasted clipboard string into a value for a column configured as `cellOpts`. */
@@ -173,7 +174,7 @@ function convertPastedCellValue(
 			if (ISO_DATE_REGEX.test(pastedValue)) {
 				const date = new Date(pastedValue);
 				if (!Number.isNaN(date.getTime())) {
-					processedValue = date.toLocaleDateString();
+					processedValue = date.toLocaleDateString(getDisplayLocale());
 					break;
 				}
 			}

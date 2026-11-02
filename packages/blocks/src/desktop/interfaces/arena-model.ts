@@ -41,6 +41,23 @@ export const ARENA_STATE_LABELS: Record<ArenaAgentState, string> = {
 	working: "Working",
 };
 
+/** A filter chip's label in the UI language, for copy that interpolates it. */
+export function arenaFilterLabel(
+	filter: ArenaFilter,
+	tl: LiteralMessage
+): string {
+	switch (filter) {
+		case "all":
+			return tl("All");
+		case "idle":
+			return tl("Idle");
+		case "needs-you":
+			return tl("Needs you");
+		default:
+			return tl("Working");
+	}
+}
+
 export function isArenaFilter(value: unknown): value is ArenaFilter {
 	return ARENA_FILTERS.some((filter) => filter === value);
 }

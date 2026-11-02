@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAct,
 	InterfaceAgentAct,
@@ -35,7 +36,9 @@ export function RidesCounters({
 			/>
 			<GameCounter
 				icon={<UserRound strokeWidth={2.5} />}
-				label={free === 1 ? "driver free" : "drivers free"}
+				label={tr("{count, plural, one {driver free} other {drivers free}}", {
+					count: free,
+				})}
 				tone="good"
 				value={free}
 			/>
@@ -76,13 +79,17 @@ export function RidesActCounters({
 			/>
 			<GameCounter
 				icon={<Package strokeWidth={2.5} />}
-				label={parcels === 1 ? "answer" : "answers"}
+				label={tr("{count, plural, one {answer} other {answers}}", {
+					count: parcels,
+				})}
 				tone={parcels > 0 ? "warn" : "good"}
 				value={parcels}
 			/>
 			<GameCounter
 				icon={<UserRound strokeWidth={2.5} />}
-				label={free === 1 ? "driver free" : "drivers free"}
+				label={tr("{count, plural, one {driver free} other {drivers free}}", {
+					count: free,
+				})}
 				tone="good"
 				value={free}
 			/>

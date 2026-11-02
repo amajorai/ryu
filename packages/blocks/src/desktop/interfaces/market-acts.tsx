@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceActivityKind,
@@ -123,12 +124,12 @@ export function shopSign(
 	const keepers = shop.agents.map((agent) => acts.get(agent.id));
 	const states = new Set(keepers.map((act) => act?.act));
 	if (keepers.some(worksLive)) {
-		return "Busy";
+		return tr("Busy");
 	}
 	if (states.has("blocked")) {
-		return "Stopped";
+		return tr("Stopped");
 	}
-	return states.has("limited") ? "Closed for now" : "Open";
+	return states.has("limited") ? tr("Closed for now") : tr("Open");
 }
 
 /**
@@ -170,24 +171,57 @@ export function actOrderStatuses(
 }
 
 /** A keeper's state in the sheet's words, from its act. */
-export function keeperWords(act: InterfaceAgentAct | undefined): string {
+export function keeperWords(
+	act: InterfaceAgentAct | undefined,
+	tl: LiteralMessage = tr
+): string {
 	if (!act) {
-		return "idle";
+		return tl("idle");
 	}
-	return act.act === "working" && act.stalled
-		? "may have stopped"
-		: KEEPER_ACT_WORDS[act.act];
+	if (act.act === "working" && act.stalled) {
+		return tl("may have stopped");
+	}
+	switch (act.act) {
+		case "asking":
+			return tl("asking you");
+		case "blocked":
+			return tl("stopped");
+		case "delivering":
+			return tl("has an answer ready");
+		case "limited":
+			return tl("closed for now");
+		case "waiting":
+			return tl("waiting to start");
+		case "working":
+			return tl("working");
+		default:
+			return tl("idle");
+	}
 }
 
 /** Each act in the sheet's words (a stalled one: `keeperWords`). */
 export const KEEPER_ACT_WORDS: Record<InterfaceAgentAct["act"], string> = {
-	asking: "asking you",
-	blocked: "stopped",
-	delivering: "has an answer ready",
-	idle: "idle",
-	limited: "closed for now",
-	waiting: "waiting to start",
-	working: "working",
+	get asking() {
+		return tr("asking you");
+	},
+	get blocked() {
+		return tr("stopped");
+	},
+	get delivering() {
+		return tr("has an answer ready");
+	},
+	get idle() {
+		return tr("idle");
+	},
+	get limited() {
+		return tr("closed for now");
+	},
+	get waiting() {
+		return tr("waiting to start");
+	},
+	get working() {
+		return tr("working");
+	},
 };
 
 export {

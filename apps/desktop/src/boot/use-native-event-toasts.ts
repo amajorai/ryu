@@ -10,6 +10,7 @@ import {
 	type InstallerProgress,
 	installerComponentLabel,
 } from "../lib/installer-progress.ts";
+import { formatNativeCaptureError } from "../lib/native-capture-error.ts";
 import { isOnboardingActive } from "../lib/onboarding-active.ts";
 
 /** Terminates a `listenWhenReady(...).then(...)` chain. Outside Tauri the gate
@@ -105,25 +106,33 @@ export function useNativeEventToasts(botProduct: boolean): void {
 		// frontmost, so the toast is the ONLY feedback that it worked — without it
 		// the user has no way to tell a capture from a missed tap.
 		const unlisteners: (() => void)[] = [];
-		listenWhenReady<{ title?: string; source?: { app?: string | null } }>(
-			"quick-capture:kept",
-			({ payload }) => {
-				toast.success({
-					title: "Kept",
-					description: payload.source?.app
-						? `${payload.title ?? "Selection"} · from ${payload.source.app}`
-						: (payload.title ?? "Selection"),
-				});
-			}
-		)
+		listenWhenReady<{
+			title?: string | null;
+			source?: { app?: string | null };
+		}>("quick-capture:kept", ({ payload }) => {
+			const tl = tlRef.current;
+			const title = payload.title || tl("Selection");
+			toast.success({
+				title: tl("Kept"),
+				description: payload.source?.app
+					? tl("{title} · from {app}", { app: payload.source.app, title })
+					: title,
+			});
+		})
 			.then((fn) => unlisteners.push(fn))
 			.catch(ignoreSubscribeFailure);
-		listenWhenReady<{ error?: string }>(
+		listenWhenReady<{ error?: unknown }>(
 			"quick-capture:failed",
 			({ payload }) => {
+				const tl = tlRef.current;
 				toast.error({
-					title: "Couldn't keep that",
-					description: payload.error ?? "The capture didn't reach Ryu.",
+					title: tl("Couldn't keep that"),
+					// `error` is a coded failure; the code picks the sentence.
+					description: formatNativeCaptureError(
+						payload.error,
+						tl,
+						tl("The capture didn't reach Ryu.")
+					),
 				});
 			}
 		)

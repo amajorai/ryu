@@ -1,3 +1,5 @@
+import { activeLocale } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Progress } from "@ryu/ui/components/progress.tsx";
@@ -59,14 +61,9 @@ export function selectedUntrackedBytes(
 	return total;
 }
 
+/** "512 B" / "1.5 KB" in English; the locale's own separators and units elsewhere. */
 function formatBytes(bytes: number): string {
-	if (bytes < 1024) {
-		return `${bytes} B`;
-	}
-	if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)} KiB`;
-	}
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+	return formatByteSize(bytes, activeLocale(), { maxUnit: "megabyte" });
 }
 
 function renderCode(chunks: ReactNode): ReactNode {
@@ -211,7 +208,7 @@ export function ContinueOnNodeWorkspace({
 												type="checkbox"
 											/>
 											<span className="break-all">{candidate.path}</span>
-											<span className="ml-auto shrink-0 text-muted-foreground">
+											<span className="ms-auto shrink-0 text-muted-foreground">
 												{candidate.selectable
 													? formatBytes(candidate.bytes)
 													: OMISSION_LABELS[candidate.reason ?? "not-selected"]}

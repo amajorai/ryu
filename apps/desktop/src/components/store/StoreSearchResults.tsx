@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
 import { StoreCardGrid } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -84,7 +85,7 @@ function ResultSection({
 	return (
 		<section>
 			<button
-				className="group mb-2 flex items-center gap-2 text-left"
+				className="group mb-2 flex items-center gap-2 text-start"
 				onClick={() => onOpen(group.realm)}
 				type="button"
 			>
@@ -92,8 +93,8 @@ function ResultSection({
 				<span className="text-muted-foreground/70 text-xs tabular-nums">
 					{formatCount(group.items.length) ?? "—"}
 				</span>
-				<HugeiconsIcon
-					className="size-4 text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5"
+				<DirectionalIcon
+					className="size-4 text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
 					icon={ArrowRight01Icon}
 				/>
 			</button>

@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { InvokeArgs } from "@tauri-apps/api/core";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface RequestRecord {
 	body: unknown;
@@ -31,10 +32,7 @@ interface TeamsBillingSnapshot {
 // the tracked proof ledger; without it the committed evidence is refreshed.
 const evidenceDir =
 	process.env.RYU_PROOF_EVIDENCE_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 mkdirSync(evidenceDir, { recursive: true });
 

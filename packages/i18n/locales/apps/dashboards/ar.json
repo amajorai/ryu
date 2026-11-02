@@ -1,0 +1,17 @@
+{
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "أدوات الوكيل غير متاحة على هذه العقدة: يتطلب تحديثها صلاحية تنفيذ مفوَّضة من المستخدم لا تمتلكها مهام التحديث. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك.",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "أدوات المراقبة غير متاحة بعد: لا توجد قدرة في المضيف تتيح لتطبيق قراءة نتائج المراقبة. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك.",
+  "The Composio action failed: {error}": "فشل إجراء Composio: {error}",
+  "The Composio action returned HTTP {status}.": "أعاد إجراء Composio الرمز HTTP {status}.",
+  "The web source redirected, and redirects are not allowed.": "أعاد مصدر الويب التوجيه، وإعادة التوجيه غير مسموح بها.",
+  "The web source returned HTTP {status}.": "أعاد مصدر الويب الرمز HTTP {status}.",
+  "The web source sent a reply Ryu could not read: {error}": "أرسل مصدر الويب ردًا تعذّر على Ryu قراءته: {error}",
+  "The widget's agent run failed: {error}": "فشل تشغيل الوكيل الخاص بالأداة: {error}",
+  "Widget “{title}” broke": "تعطلت الأداة «{title}»",
+  "Widget “{title}” recovered": "استعادت الأداة «{title}» عملها",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "أدوات سير العمل غير متاحة بعد: لا توجد قدرة في المضيف تتيح لتطبيق تشغيل سير عمل محفوظ. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك.",
+  "dashboard not found": "لم يتم العثور على لوحة المعلومات",
+  "kind is required": "النوع مطلوب",
+  "name is required": "الاسم مطلوب",
+  "not found": "غير موجود"
+}

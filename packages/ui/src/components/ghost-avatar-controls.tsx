@@ -1,5 +1,6 @@
 "use client";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import type { CSSProperties } from "react";
 
 import { useAvatarContributions } from "./avatar-contributions.tsx";
@@ -141,7 +142,7 @@ export function GhostAvatarControls({
 								{label}
 								<NativeSelect
 									aria-label={tl("Costume {part}", {
-										part: label.toLowerCase(),
+										part: sentenceLabel(tl, label),
 									})}
 									className="w-full"
 									onChange={(event) =>

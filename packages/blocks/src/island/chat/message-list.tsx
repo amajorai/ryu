@@ -55,7 +55,7 @@ export function MessageList({
 						<span className="text-muted-foreground">…</span>
 					) : null}
 					{message.streaming && message.content.length > 0 ? (
-						<span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-muted-foreground align-middle" />
+						<span className="ms-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-muted-foreground align-middle" />
 					) : null}
 				</p>
 			))}

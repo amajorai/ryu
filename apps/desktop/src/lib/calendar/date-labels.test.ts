@@ -1,12 +1,19 @@
 import { expect, test } from "bun:test";
 import {
 	calendarViewLabel,
+	calendarWeekStart,
 	formatCalendarDate,
 	weekdayLabels,
 } from "./date-labels.ts";
+import { viewDays } from "./views.ts";
+
+const hasWeekData = Boolean(
+	typeof Reflect.get(new Intl.Locale("de"), "getWeekInfo") === "function" ||
+		Reflect.get(new Intl.Locale("de"), "weekInfo")
+);
 
 test("weekday labels follow the locale, Sunday first", () => {
-	expect(weekdayLabels("en-US")).toEqual([
+	expect(weekdayLabels("en-US", 0)).toEqual([
 		"Sun",
 		"Mon",
 		"Tue",
@@ -15,7 +22,7 @@ test("weekday labels follow the locale, Sunday first", () => {
 		"Fri",
 		"Sat",
 	]);
-	const french = weekdayLabels("fr");
+	const french = weekdayLabels("fr", 0);
 	expect(french).toHaveLength(7);
 	expect(french[0]).toBe("dim.");
 });
@@ -36,4 +43,32 @@ test("view labels localize month names", () => {
 
 test("an invalid locale falls back to the runtime default", () => {
 	expect(weekdayLabels("not a locale!")).toHaveLength(7);
+});
+
+test("weeks start on the locale's first day", () => {
+	if (!hasWeekData) {
+		expect(calendarWeekStart("de")).toBe(0);
+		return;
+	}
+	expect(calendarWeekStart("de")).toBe(1);
+	expect(calendarWeekStart("ar")).toBe(6);
+	expect(calendarWeekStart("en-US")).toBe(0);
+	expect(weekdayLabels("de", calendarWeekStart("de"))[0]).toBe(
+		formatCalendarDate(new Date(2026, 5, 8), "weekdayShort", "de")
+	);
+	expect(weekdayLabels("en-US", calendarWeekStart("en-US"))[0]).toBe("Sun");
+});
+
+test("month and week grids begin on the given week start", () => {
+	const cursor = new Date(2026, 5, 11); // Thursday June 11, 2026
+	const monday = viewDays("month", cursor, 1);
+	expect(monday[0]?.getDay()).toBe(1);
+	expect(monday.length % 7).toBe(0);
+	expect(monday[0]?.getDate()).toBe(1); // June 1 is a Monday
+	const saturday = viewDays("week", cursor, 6);
+	expect(saturday).toHaveLength(7);
+	expect(saturday[0]?.getDay()).toBe(6);
+	expect(saturday[0]?.getDate()).toBe(6);
+	expect(viewDays("week", cursor, 0)[0]?.getDay()).toBe(0);
+	expect(calendarViewLabel("week", cursor, 30, "en-US", 1)).toContain("Jun 8");
 });

@@ -1,6 +1,7 @@
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { type PointerEvent, useRef, useState } from "react";
+import { inlineSign } from "./inline-direction.ts";
 import {
 	ALIGN,
 	CELL,
@@ -37,7 +38,11 @@ function ResizeHandle({
 	onResize: (id: SheetColumnId, width: number) => void;
 	width: number;
 }) {
-	const drag = useRef<{ startWidth: number; startX: number } | null>(null);
+	const drag = useRef<{
+		sign: 1 | -1;
+		startWidth: number;
+		startX: number;
+	} | null>(null);
 	// While dragging, the guide runs the full visible height of the sheet so the
 	// edge can be lined up against the cells below, as in a spreadsheet.
 	const [guideHeight, setGuideHeight] = useState<number | null>(null);
@@ -45,7 +50,11 @@ function ResizeHandle({
 		event.preventDefault();
 		event.stopPropagation();
 		event.currentTarget.setPointerCapture(event.pointerId);
-		drag.current = { startWidth: width, startX: event.clientX };
+		drag.current = {
+			sign: inlineSign(event.currentTarget),
+			startWidth: width,
+			startX: event.clientX,
+		};
 		event.currentTarget.dataset.dragging = "true";
 		const scroller = event.currentTarget.closest<HTMLElement>(
 			"[data-sheet-scroll]"
@@ -61,7 +70,7 @@ function ResizeHandle({
 			column.id,
 			clampColumnWidth(
 				column.id,
-				start.startWidth + event.clientX - start.startX
+				start.startWidth + (event.clientX - start.startX) * start.sign
 			)
 		);
 	};
@@ -76,7 +85,7 @@ function ResizeHandle({
 	return (
 		<span
 			aria-hidden="true"
-			className="group/resize absolute inset-y-0 right-0 z-10 flex w-2 translate-x-1/2 cursor-col-resize touch-none justify-center"
+			className="group/resize absolute inset-y-0 end-0 z-10 flex w-2 translate-x-1/2 cursor-col-resize touch-none justify-center rtl:-translate-x-1/2"
 			data-sheet-resize=""
 			onClick={(event) => event.stopPropagation()}
 			onDoubleClick={(event) => {
@@ -134,14 +143,14 @@ export function HeaderCell({
 				HEADER_FOCUS,
 				"sticky top-0 z-20 cursor-pointer select-none bg-muted font-normal text-foreground/85 text-xs transition-colors hover:bg-[color-mix(in_oklab,var(--foreground)_5%,var(--muted))] hover:text-foreground",
 				active && "text-foreground",
-				index === SHEET_COLUMNS.length - 1 && "border-r-0",
+				index === SHEET_COLUMNS.length - 1 && "border-e-0",
 				frozen && cn("z-30", FROZEN_EDGE)
 			)}
 			data-sheet-col={index}
 			data-sheet-row={-1}
 			onClick={() => onSort(column.id)}
 			scope="col"
-			style={frozen ? { left: SHEET_GUTTER_WIDTH } : undefined}
+			style={frozen ? { insetInlineStart: SHEET_GUTTER_WIDTH } : undefined}
 			tabIndex={cursor ? 0 : -1}
 		>
 			<div

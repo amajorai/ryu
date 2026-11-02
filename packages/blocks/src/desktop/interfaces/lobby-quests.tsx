@@ -6,6 +6,7 @@ import {
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { createContext, type KeyboardEvent, useContext, useRef } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { agentById, compactAge } from "./interface-renderer.ts";
 import {
 	claimableCount,
@@ -211,7 +212,10 @@ function QuestRow({
 			<QuestFaces quest={quest} snapshot={snapshot} />
 			<div className="flex min-w-0 flex-1 flex-col gap-1.5">
 				<div className="flex min-w-0 items-center gap-3">
-					<h3 className="truncate font-semibold! text-(--gk-ink) text-[15px] leading-5">
+					<h3
+						className="truncate font-semibold! text-(--gk-ink) text-[15px] leading-5"
+						data-ryu-i18n="off"
+					>
 						{quest.title}
 					</h3>
 					<LobbyXpChip xp={formatXp(quest.xp)} />
@@ -312,7 +316,7 @@ export function LobbyQuests({
 		0
 	);
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		const step = STEP[event.key];
+		const step = STEP[logicalArrowKey(event.key, event.currentTarget)];
 		if (step === undefined) {
 			return;
 		}

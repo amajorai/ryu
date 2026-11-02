@@ -109,7 +109,9 @@ export function VoiceAndSandboxSection({
 				title:
 					e instanceof Error
 						? e.message
-						: `Couldn't ${next ? "start" : "stop"} ${label}`,
+						: next
+							? tl("Couldn't start {label}", { label })
+							: tl("Couldn't stop {label}", { label }),
 			});
 		}
 		await refresh();
@@ -130,7 +132,7 @@ export function VoiceAndSandboxSection({
 		if (item.installState !== "installed") {
 			return {
 				id: `install-${name}`,
-				label: `Install ${label}`,
+				label: tl("Install {label}", { label }),
 				busyLabel: "Installing…",
 				icon: Download04Icon,
 				run: async () => {
@@ -142,7 +144,7 @@ export function VoiceAndSandboxSection({
 		if (!details[name]?.running) {
 			return {
 				id: `start-${name}`,
-				label: `Start ${label}`,
+				label: tl("Start {label}", { label }),
 				busyLabel: "Starting…",
 				run: () => toggleSidecar(name, label, true),
 			};
@@ -257,7 +259,9 @@ export function VoiceAndSandboxSection({
 	const installSpeechProcessing = async () => {
 		try {
 			await installSpeechProcessingModel(target, speechProcessingPrefs.engine);
-			sileo.success({ title: `Installing ${selectedSpeechMeta.label}` });
+			sileo.success({
+				title: tl("Installing {label}", { label: selectedSpeechMeta.label }),
+			});
 		} catch (e) {
 			sileo.error({
 				title:
@@ -275,7 +279,7 @@ export function VoiceAndSandboxSection({
 		? null
 		: {
 				id: "install-speech-processing",
-				label: `Install ${selectedSpeechMeta.label}`,
+				label: tl("Install {label}", { label: selectedSpeechMeta.label }),
 				busyLabel: "Installing…",
 				icon: Download04Icon,
 				run: installSpeechProcessing,
@@ -300,7 +304,7 @@ export function VoiceAndSandboxSection({
 	const pickBackend = async (name: string, label: string) => {
 		try {
 			await setSandboxBackend(target, name);
-			sileo.success({ title: `Sandbox → ${label}` });
+			sileo.success({ title: tl("Sandbox → {label}", { label }) });
 		} catch (e) {
 			sileo.error({
 				title:
@@ -341,7 +345,9 @@ export function VoiceAndSandboxSection({
 							label: engine.display_name,
 							active: engine.id === ttsPrefs.engine,
 							detail: engine.installed
-								? `${engine.voices.length} voices`
+								? tl("{count, plural, one {# voice} other {# voices}}", {
+										count: engine.voices.length,
+									})
 								: "not installed",
 							select: () => pickTtsEngine(engine),
 						})

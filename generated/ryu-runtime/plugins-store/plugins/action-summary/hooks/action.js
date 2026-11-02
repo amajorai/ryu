@@ -4,6 +4,13 @@
 // This is a FRAGMENT, not an ES module. Core splices it into an async IIFE, so
 // top-level return is intentional.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 const action = ctx.action;
 if (!action || !action.id) {
 	return { kind: "none" };
@@ -45,14 +52,14 @@ try {
 	host.log("action-summary: side model failed", error);
 }
 
-const summary = normalize(raw, budget) || fallback(safeAction, budget);
+const summary = normalize(raw, budget) || (await fallback(safeAction, budget));
 if (!summary) {
 	return { kind: "none" };
 }
 if (safeAction.kind === "tool") {
 	return {
 		kind: "tool_approval",
-		question: `Can I run ${friendlyName(safeAction.name)} now?`,
+		question: await host.t("Can I run {tool} now?", { tool: friendlyName(safeAction.name) }),
 		summary,
 	};
 }
@@ -82,6 +89,9 @@ function systemPrompt(level, maxChars) {
 			: level === "full"
 				? "Say what happened and the safest useful purpose or result."
 				: "Say what happened and its immediate purpose.") +
+		(ctx.locale && ctx.locale !== "en"
+			? " Write the sentence in the language with the BCP 47 tag " + ctx.locale + "."
+			: "") +
 		" Keep the sentence under " +
 		maxChars +
 		" characters. For a thinking action, explain the high-level intent rather than " +
@@ -151,13 +161,13 @@ function normalize(value, maxChars) {
 		: text;
 }
 
-function fallback(item, maxChars) {
+async function fallback(item, maxChars) {
 	const name = friendlyName(item.name);
 	if (item.kind === "thinking") {
 		return clip(
 			item.status === "failed"
-				? "Planning the next step was interrupted."
-				: "Planning the next step.",
+				? await host.t("Planning the next step was interrupted.")
+				: await host.t("Planning the next step."),
 			maxChars
 		);
 	}
@@ -171,15 +181,23 @@ function fallback(item, maxChars) {
 		input.query ||
 		input.url ||
 		input.description;
-	const action = subject
-		? name + " " + String(subject)
-		: "Used " + name;
-	const sentence =
-		item.status === "failed" || item.status === "error"
-			? action + " failed."
-			: item.status === "interrupted"
-				? action + " was interrupted."
-				: action + ".";
+	const values = { tool: name, subject: String(subject || "") };
+	const failed = item.status === "failed" || item.status === "error";
+	const interrupted = item.status === "interrupted";
+	let sentence;
+	if (subject) {
+		sentence = failed
+			? await host.t("{tool} {subject} failed.", values)
+			: interrupted
+				? await host.t("{tool} {subject} was interrupted.", values)
+				: await host.t("{tool} {subject}.", values);
+	} else {
+		sentence = failed
+			? await host.t("Used {tool} failed.", values)
+			: interrupted
+				? await host.t("Used {tool} was interrupted.", values)
+				: await host.t("Used {tool}.", values);
+	}
 	return clip(sentence, maxChars);
 }
 

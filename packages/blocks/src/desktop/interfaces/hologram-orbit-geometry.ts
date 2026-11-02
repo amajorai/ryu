@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type HoloAgent,
 	type MenuItemPlacement,
@@ -34,7 +35,9 @@ export const META_LINE = 18;
 
 /** A node's count line, e.g. "2 threads". */
 export function threadCountLabel(count: number): string {
-	return `${count} ${count === 1 ? "thread" : "threads"}`;
+	return tr("{count, plural, one {# thread} other {# threads}}", {
+		count,
+	});
 }
 
 /**
@@ -137,15 +140,17 @@ export function anchorTransform(slot: RingSlot, radius: number): string {
 export function nodeLabel(agent: HoloAgent): string {
 	const parts = [
 		agent.name,
-		agent.status === "working" ? "working" : "idle",
-		`${agent.threadCount} ${agent.threadCount === 1 ? "thread" : "threads"}`,
+		agent.status === "working" ? tr("working") : tr("idle"),
+		threadCountLabel(agent.threadCount),
 	];
 	if (agent.failed > 0) {
-		parts.push(`${agent.failed} failed`);
+		parts.push(tr("{count} failed", { count: agent.failed }));
 	}
 	if (agent.needsYou > 0) {
 		parts.push(
-			`${agent.needsYou} ${agent.needsYou === 1 ? "needs" : "need"} you`
+			tr("{count, plural, one {# needs you} other {# need you}}", {
+				count: agent.needsYou,
+			})
 		);
 	}
 	return parts.join(", ");

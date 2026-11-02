@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("long transcripts defer offscreen layout while the newest turn stays live", async ({
 	page,
@@ -48,10 +49,7 @@ test("long transcripts defer offscreen layout while the newest turn stays live",
 		page.getByText("Question 39 about the codebase", { exact: true })
 	).toBeVisible();
 	expect(errors).toEqual([]);
-	const directory = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-hunt-2026-09-22"
-	);
+	const directory = proofEvidencePath("performance-hunt-2026-09-22");
 	await mkdir(directory, { recursive: true });
 	await page.screenshot({
 		path: path.join(directory, "chat-layout-completed.png"),
@@ -108,10 +106,7 @@ test("real chat renders streaming chunks without recreating settled decorations"
 	).toBeVisible();
 	await expect(page.getByTestId("stream-reply")).toBeEnabled();
 	expect(errors).toEqual([]);
-	const directory = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-hunt-2026-09-22"
-	);
+	const directory = proofEvidencePath("performance-hunt-2026-09-22");
 	await mkdir(directory, { recursive: true });
 	await page.screenshot({
 		path: path.join(directory, "chat-streaming-completed.png"),

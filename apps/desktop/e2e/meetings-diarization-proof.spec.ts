@@ -1,15 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Verification runs set RYU_PROOF_OUTPUT_ROOT so the screenshot lands in
 // scratch space instead of rewriting the tracked proof image.
 const PROOF_PATH = process.env.RYU_PROOF_OUTPUT_ROOT
 	? resolve(process.env.RYU_PROOF_OUTPUT_ROOT, "meetings-settings-nemotron.png")
-	: resolve(
-			import.meta.dirname,
-			"../../../docs/proof/diarization-primitive/meetings-settings-nemotron.png"
-		);
+	: proofEvidencePath("diarization-primitive/meetings-settings-nemotron.png");
 
 test("selects and persists a local speaker model", async ({
 	page,

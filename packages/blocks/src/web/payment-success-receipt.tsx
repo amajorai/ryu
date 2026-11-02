@@ -1,5 +1,7 @@
 "use client";
 
+import { dateFormatter, numberFormatter } from "@ryu/i18n/format-intl";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { SuccessCheck } from "@ryu/ui/components/success-check";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useReducedMotion } from "motion/react";
@@ -122,9 +124,13 @@ function receiptNumberFor(value: string): string {
 	return `RYU-${encoded.padStart(7, "0").slice(-7)}`;
 }
 
-function formatAmount(amount: number, currency: string): string {
+function formatAmount(
+	amount: number,
+	currency: string,
+	locale: string | undefined
+): string {
 	try {
-		return new Intl.NumberFormat("en-US", {
+		return numberFormatter(locale, {
 			currency: currency.toUpperCase(),
 			style: "currency",
 		}).format(amount);
@@ -133,11 +139,11 @@ function formatAmount(amount: number, currency: string): string {
 	}
 }
 
-function formatDate(date: Date): string | null {
+function formatDate(date: Date, locale: string | undefined): string | null {
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
-	return new Intl.DateTimeFormat("en-GB", {
+	return dateFormatter(locale, {
 		day: "numeric",
 		hour: "2-digit",
 		minute: "2-digit",
@@ -261,25 +267,27 @@ export function PaymentSuccessReceipt({
 	className,
 	...props
 }: PaymentSuccessReceiptProps) {
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const copy = PAYMENT_SUCCESS_COPY[kind];
 	const seedValue = checkoutId ?? ticketId ?? barcodeValue ?? "ryu-payment";
 	const receiptNumber = useMemo(() => receiptNumberFor(seedValue), [seedValue]);
 	const barcodeSeed = barcodeValue ?? checkoutId ?? receiptNumber;
 	const amountLabel =
-		amount === undefined ? null : formatAmount(amount, currency);
+		amount === undefined ? null : formatAmount(amount, currency, locale);
 	const dateMs = date?.getTime();
 	const [issuedLabel, setIssuedLabel] = useState<string | null>(null);
 
 	useEffect(() => {
 		const issuedAt = dateMs === undefined ? new Date() : new Date(dateMs);
-		setIssuedLabel(formatDate(issuedAt));
-	}, [dateMs]);
+		setIssuedLabel(formatDate(issuedAt, locale));
+	}, [dateMs, locale]);
 
 	const paymentMethod = cardHolder
 		? `${cardHolder}${last4Digits ? ` · •••• ${last4Digits}` : ""}`
 		: last4Digits
-			? `Card ending ${last4Digits}`
-			: "Secure checkout";
+			? tl("Card ending {last4Digits}", { last4Digits })
+			: tl("Secure checkout");
 
 	return (
 		<div
@@ -343,7 +351,7 @@ function ReceiptDetail({ label, value }: { label: string; value: string }) {
 	return (
 		<div className={styles.detail}>
 			<dt className="text-muted-foreground">{label}</dt>
-			<dd className="text-right font-medium">{value}</dd>
+			<dd className="text-end font-medium">{value}</dd>
 		</div>
 	);
 }

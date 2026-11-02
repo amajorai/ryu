@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -34,6 +35,7 @@ export {
 	WIDGET_SIZE_ORDER,
 	WIDGET_SIZE_SHORT,
 	WIDGETS,
+	widgetSizeName,
 	widgetSpec,
 } from "./dashboard-model-layout.ts";
 
@@ -244,7 +246,7 @@ export function buildDashboard(
 
 /** A thread title that is never blank. */
 export function threadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }
 
 /** "in 45m", "in 3h", "in 2d" for a future time; "now" once it is due. */
@@ -264,35 +266,39 @@ export function untilLabel(
 	if (delta < DAY_MS) {
 		return tl("in {hours}h", { hours: Math.floor(delta / HOUR_MS) });
 	}
-	return tl("in {days}d", { days: String(Math.floor(delta / DAY_MS)) });
+	return tl("in {days}d", { days: Math.floor(delta / DAY_MS) });
 }
 
-const HOUR_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric" });
-const TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
-	hour: "numeric",
-	minute: "2-digit",
-});
-const FULL_FORMAT = new Intl.DateTimeFormat(undefined, {
-	dateStyle: "medium",
-	timeStyle: "short",
-});
+const HOUR_FORMAT = (locale: string = activeLocale()) =>
+	dateFormatter(locale, { hour: "numeric" });
+const TIME_FORMAT = (locale: string = activeLocale()) =>
+	dateFormatter(locale, {
+		hour: "numeric",
+		minute: "2-digit",
+	});
+const FULL_FORMAT = (locale: string = activeLocale()) =>
+	dateFormatter(locale, {
+		dateStyle: "medium",
+		timeStyle: "short",
+	});
 
 /** "3 PM" in the viewer's locale. */
 export function hourLabel(time: number): string {
-	return HOUR_FORMAT.format(time);
+	return HOUR_FORMAT().format(time);
 }
 
 /** "3:05 PM" in the viewer's locale. */
 export function clockLabel(time: number): string {
-	return TIME_FORMAT.format(time);
+	return TIME_FORMAT().format(time);
 }
 
 /** A full local date and time, for titles and screen readers. */
 export function fullDateLabel(iso: string): string {
 	const time = timeOf(iso);
-	return time ? FULL_FORMAT.format(time) : "";
+	return time ? FULL_FORMAT().format(time) : "";
 }
 
-export function plural(count: number, one: string, many = `${one}s`): string {
-	return `${count} ${count === 1 ? one : many}`;
+/** "3 threads": a thread count as an ICU message. */
+export function threadCount(count: number, tl: LiteralMessage = tr): string {
+	return tl("{count, plural, one {# thread} other {# threads}}", { count });
 }

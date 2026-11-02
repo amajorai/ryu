@@ -7,6 +7,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
+import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type React from "react";
 import { useRef, useState } from "react";
@@ -93,7 +95,7 @@ function ReplyButton({ onReply }: { onReply: () => void }) {
 			type="button"
 			variant="ghost"
 		>
-			<HugeiconsIcon
+			<DirectionalIcon
 				className="size-4 text-muted-foreground"
 				icon={ArrowTurnBackwardIcon}
 			/>
@@ -142,10 +144,10 @@ export function VersionPager({
 				type="button"
 				variant="ghost"
 			>
-				<HugeiconsIcon className="size-3.5" icon={ArrowLeft01Icon} />
+				<DirectionalIcon className="size-3.5" icon={ArrowLeft01Icon} />
 			</Button>
 			<span className="tabular-nums">
-				{index + 1}/{count}
+				{formatNumber(index + 1)}/{formatNumber(count)}
 			</span>
 			<Button
 				appearance="transcript-version"
@@ -157,7 +159,7 @@ export function VersionPager({
 				type="button"
 				variant="ghost"
 			>
-				<HugeiconsIcon className="size-3.5" icon={ArrowRight01Icon} />
+				<DirectionalIcon className="size-3.5" icon={ArrowRight01Icon} />
 			</Button>
 		</div>
 	);
@@ -268,7 +270,7 @@ export function MessageToolbar({
 				onSpeak={onSpeak}
 			/>
 			{goalCompletion ? goalCompletion : null}
-			{meta ? <span className="ml-1 tabular-nums">{meta}</span> : null}
+			{meta ? <span className="ms-1 tabular-nums">{meta}</span> : null}
 		</div>
 	);
 }

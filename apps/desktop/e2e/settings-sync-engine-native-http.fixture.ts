@@ -84,7 +84,21 @@ export async function seed(
 	} = {}
 ) {
 	const remote = options.remote ?? [];
+	const activeSlot = options.activeSlot ?? "A";
 	await action(request, "reset", {
+		// Both saved accounts, sealed in the desktop's `auth-vault` slot as a
+		// current install keeps them (the auth client holds the active one in
+		// memory; nothing of the vault is in localStorage).
+		vault: {
+			accounts: ["A", "B"].map((slot) => ({
+				userId: `owned-account-${slot}`,
+				token: `account-${slot}`,
+				email: `${slot}@example.invalid`,
+				name: slot,
+				image: null,
+			})),
+			activeUserId: `owned-account-${activeSlot}`,
+		},
 		state: {
 			accounts: {
 				A: {
@@ -115,20 +129,6 @@ export async function seed(
 			}
 			localStorage.clear();
 			const activeSlot = options.activeSlot ?? "A";
-			localStorage.setItem("ryu_session_token", `account-${activeSlot}`);
-			localStorage.setItem(
-				"ryu_accounts",
-				JSON.stringify(
-					["A", "B"].map((slot) => ({
-						userId: `owned-account-${slot}`,
-						token: `account-${slot}`,
-						email: `${slot}@example.invalid`,
-						name: slot,
-						image: null,
-					}))
-				)
-			);
-			localStorage.setItem("ryu_active_user_id", `owned-account-${activeSlot}`);
 			if (!options.preScoping) {
 				localStorage.setItem(
 					"ryu:settings-sync-visible-owner",
@@ -204,6 +204,20 @@ export async function settled(page: Page, before = 0) {
 		)
 		.not.toBe("syncing");
 }
+/**
+ * The active account's bearer, read where the auth client keeps it: its
+ * in-memory vault (the sealed `auth-vault` slot persists it). The account
+ * switch no longer touches localStorage `ryu_session_token`.
+ */
+export async function activeToken(page: Page) {
+	return page.evaluate(() => Reflect.get(window, "__syncProof").activeToken());
+}
+/** The active bearer the sealed `auth-vault` slot holds (shared by every window). */
+export async function sealedActiveToken(page: Page) {
+	return page.evaluate(() =>
+		Reflect.get(window, "__nativeSecretProof").sealedActiveToken()
+	);
+}
 export async function local(page: Page, key: string) {
 	return page.evaluate((key) => localStorage.getItem(key), key);
 }
@@ -258,6 +272,21 @@ export function registerNativeHttpLedgerHooks(): void {
 		});
 		if (!page.isClosed() && (await stop.count())) {
 			await stop.click();
+		}
+		// A test that failed while it held a response would leave it held, and
+		// every later test's reset would then be refused. Release it so only the
+		// failing test reports; a passing test must still leave nothing held.
+		if (info.status !== info.expectedStatus) {
+			for (const id of (await read(request)).pending) {
+				await action(request, "release", { id });
+			}
+		}
+		if (!page.isClosed()) {
+			expect(
+				await page.evaluate(() =>
+					Reflect.get(window, "__nativeSecretProof").undeclared()
+				)
+			).toEqual([]);
 		}
 		await expect
 			.poll(async () => {

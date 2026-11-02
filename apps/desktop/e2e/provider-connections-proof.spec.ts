@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -65,10 +65,7 @@ test("ChatGPT OAuth account routing saves strategy and priority", async ({
 		.locator("xpath=../..");
 	await routingPanel.scrollIntoViewIfNeeded();
 	await routingPanel.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-connections/chatgpt-oauth-routing.png"
-		),
+		path: proofEvidencePath("provider-connections/chatgpt-oauth-routing.png"),
 	});
 	await page.reload();
 	await page.getByRole("button", { name: CHATGPT_CONNECTED }).click();
@@ -132,10 +129,7 @@ test("provider connection groups and account actions render without errors", asy
 	expect(pageErrors).toEqual([]);
 
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-connections/provider-connections.png"
-		),
+		path: proofEvidencePath("provider-connections/provider-connections.png"),
 		fullPage: true,
 	});
 });
@@ -151,10 +145,7 @@ test("custom provider shows saved model discovery after its endpoint goes offlin
 	await expect(page.getByText("local-a", { exact: true })).toBeVisible();
 	await expect(page.getByText("local-b", { exact: true })).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-connections/custom-model-discovery.png"
-		),
+		path: proofEvidencePath("provider-connections/custom-model-discovery.png"),
 		fullPage: true,
 	});
 });
@@ -182,9 +173,8 @@ test("custom provider saves a replacement key from its existing card", async ({
 	await expect(keyInput).toHaveValue("");
 	await expect(page.getByText("local-a", { exact: true })).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-connections/custom-provider-key-save.png"
+		path: proofEvidencePath(
+			"provider-connections/custom-provider-key-save.png"
 		),
 		fullPage: true,
 	});
@@ -238,9 +228,8 @@ test("official ChatGPT plan reuses a saved registration for explicit plan consen
 		.getByRole("button", { name: /ChatGPT plan \(self-hosted\)/ })
 		.locator("xpath=../..")
 		.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/provider-connections/chatgpt-plan-connected.png"
+			path: proofEvidencePath(
+				"provider-connections/chatgpt-plan-connected.png"
 			),
 		});
 });

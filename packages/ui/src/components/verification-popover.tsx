@@ -1,5 +1,6 @@
 "use client";
 
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
@@ -18,6 +19,7 @@ import {
 	MailCheck,
 	ShieldCheck,
 } from "lucide-react";
+import { useFormatLocale } from "../hooks/use-format-locale.ts";
 import { isNativeText } from "../lib/native-primitive-observation.ts";
 
 export type VerificationMethodKind =
@@ -47,8 +49,11 @@ const METHOD_ICONS = {
 	platform: BadgeIcon,
 } satisfies Record<VerificationMethodKind, LucideIcon>;
 
-/** Format a server-provided ISO date with a stable UTC calendar date. */
-export function formatVerificationDate(value?: string | null): string | null {
+/** Format a server-provided ISO date as a stable UTC calendar date in `locale`. */
+export function formatVerificationDate(
+	value?: string | null,
+	locale: string = activeLocale()
+): string | null {
 	if (!value) {
 		return null;
 	}
@@ -56,7 +61,7 @@ export function formatVerificationDate(value?: string | null): string | null {
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
-	return new Intl.DateTimeFormat("en-US", {
+	return dateFormatter(locale, {
 		day: "numeric",
 		month: "short",
 		timeZone: "UTC",
@@ -140,11 +145,15 @@ export function VerificationPopover({
 	variant: "badge" | "shield";
 }) {
 	const tl = useLiteralMessages();
+	const formatLocale = useFormatLocale();
 	const markClassName =
 		appearance === "default"
 			? className
 			: cn(publisherAppearanceClasses[appearance], className);
-	const verifiedSince = formatVerificationDate(details?.verifiedSince);
+	const verifiedSince = formatVerificationDate(
+		details?.verifiedSince,
+		formatLocale
+	);
 	const methods = (details?.methods ?? []).filter(
 		(method) =>
 			method && isNativeText(method.label) && method.label.trim().length > 0

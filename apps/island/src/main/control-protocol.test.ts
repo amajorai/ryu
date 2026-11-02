@@ -175,6 +175,7 @@ describe("parseGhostCursorEvent", () => {
 		expect(event).toEqual({
 			agent: "0",
 			intent: "Working",
+			kind: "working",
 			phase: "down",
 			seq: 0,
 			tool: "",
@@ -190,6 +191,7 @@ describe("parseGhostCursorEvent", () => {
 			"0"
 		);
 		expect(fallback?.intent).toBe("Clicking");
+		expect(fallback?.kind).toBe("clicking");
 
 		const longIntent = parseGhostCursorEvent(
 			JSON.stringify({
@@ -202,6 +204,46 @@ describe("parseGhostCursorEvent", () => {
 		);
 		expect(longIntent?.intent).toHaveLength(72);
 		expect(longIntent?.intent.endsWith("…")).toBe(true);
+	});
+
+	it("reads Ghost's intent kind and click target for the translated label", () => {
+		const click = parseGhostCursorEvent(
+			JSON.stringify({
+				phase: "down",
+				x: 1,
+				y: 2,
+				tool: "ghost_click",
+				intent: "Click “Save”",
+				kind: "click",
+				target: " Save ",
+			}),
+			"0"
+		);
+		expect(click?.kind).toBe("click");
+		expect(click?.target).toBe("Save");
+		expect(click?.intent).toBe("Click “Save”");
+
+		const unknown = parseGhostCursorEvent(
+			JSON.stringify({
+				phase: "move",
+				x: 1,
+				y: 2,
+				tool: "ghost_type",
+				intent: "Typing",
+				kind: "teleporting",
+				target: "ignored",
+			}),
+			"0"
+		);
+		// An unknown kind falls back to the tool default; only clicks keep a target.
+		expect(unknown?.kind).toBe("typing");
+		expect(unknown?.target).toBeUndefined();
+
+		const legacyProse = parseGhostCursorEvent(
+			JSON.stringify({ phase: "down", x: 1, y: 2, intent: "Click “Save”" }),
+			"0"
+		);
+		expect(legacyProse?.kind).toBeUndefined();
 	});
 
 	it("preserves bounded agent/session identity and accepts safe avatar images", () => {

@@ -297,7 +297,7 @@ function SimulatorSidecarPanel() {
 
 			<div className="flex min-h-0 flex-1">
 				{/* Device list */}
-				<div className="w-52 shrink-0 overflow-y-auto border-border border-r p-1 text-sm">
+				<div className="w-52 shrink-0 overflow-y-auto border-border border-e p-1 text-sm">
 					<SimDeviceList
 						caps={caps}
 						devices={devices}
@@ -379,7 +379,7 @@ function SimDeviceList({
 							list.map((d) => (
 								<Item
 									className={cn(
-										"h-8 flex-nowrap gap-2 rounded-lg px-2 py-0 text-left",
+										"h-8 flex-nowrap gap-2 rounded-lg px-2 py-0 text-start",
 										d.id === selectedId ? "bg-accent" : "hover:bg-muted"
 									)}
 									key={d.id}

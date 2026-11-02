@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{messages as m, Message};
 
 /// Answer the turn(s) waiting on an instance whose agent Ryu refused to start
 /// with `failure`, preceded by `warning` (a `workspace_trust` config warning,
@@ -32,21 +33,21 @@ pub(super) async fn refuse_turns(
 /// with. Shared by `session/new` and `session/prompt`: both follow an
 /// [`AcpEvent::AuthNeeded`] that carries the recovery.
 pub(super) fn auth_required_failure() -> AcpFailure {
-    AcpFailure {
-        code: "auth_required".to_owned(),
-        title: "Agent login expired".to_owned(),
-        message: "Your agent login expired. Log in again, then re-send your message.".to_owned(),
-    }
+    AcpFailure::localized(
+        "auth_required",
+        m::ACP_LOGIN_EXPIRED_TITLE_MESSAGE,
+        vec![Message::new(m::ACP_LOGIN_EXPIRED_MESSAGE)],
+    )
 }
 
 /// The failure for an instance whose agent could not be started or whose
 /// session could not be opened, for an error no earlier step classified.
 pub(super) fn agent_start_failure(detail: impl std::fmt::Display) -> AcpFailure {
-    AcpFailure {
-        code: "agent_start_failed".to_owned(),
-        title: "Agent failed to start".to_owned(),
-        message: format!("The agent could not start, so the message was not sent. Send it again to retry. (details: {detail})"),
-    }
+    AcpFailure::localized(
+        "agent_start_failed",
+        m::ACP_START_FAILED_TITLE_MESSAGE,
+        vec![Message::new(m::ACP_START_FAILED_MESSAGE).text("detail", detail.to_string())],
+    )
 }
 
 /// Classify an agent's JSON-RPC refusal to start: `auth_required` (-32000)
@@ -68,11 +69,11 @@ pub(super) fn instance_start_failure(error: &anyhow::Error) -> (AcpFailure, Opti
         return (failure.clone(), None);
     }
     if error.downcast_ref::<GatewayStartupPending>().is_some() {
-        let failure = AcpFailure {
-            code: "gateway_starting".to_owned(),
-            title: "Gateway still starting".to_owned(),
-            message: GatewayStartupPending.to_string(),
-        };
+        let failure = AcpFailure::localized(
+            "gateway_starting",
+            m::ACP_GATEWAY_STARTING_TITLE_MESSAGE,
+            vec![Message::new(m::ACP_GATEWAY_STARTING_MESSAGE)],
+        );
         return (failure, None);
     }
     if let Some(error) = error.downcast_ref::<agent_client_protocol::Error>() {
@@ -153,21 +154,16 @@ pub(crate) fn account_sandbox_failure(
     confinement: crate::agent_access::AccountConfinement,
 ) -> AcpFailure {
     let advice = if confinement == crate::agent_access::AccountConfinement::CoreStateAndProviders {
-        "Ryu's own engine can still run it here, without its shell and file tools; or set the \
-         agent's Identity to Acts as you with Limit to selected accounts off."
+        m::ACP_SANDBOX_ADVICE_PROVIDERS_MESSAGE
     } else {
-        "To run it here, set the agent's Identity to Acts as you, or turn on Limit to selected \
-         accounts so that Ryu's own engine can run it without its shell and file tools."
+        m::ACP_SANDBOX_ADVICE_OTHER_MESSAGE
     };
-    AcpFailure {
-        code: super::super::LAUNCH_REFUSED_SANDBOX.to_owned(),
-        title: "Agent not started: its account access needs a sandbox".to_owned(),
-        message: format!(
-            "This agent's account access is limited, or it has accounts of its own (Its own \
-             identity or Both), so Ryu runs its engine in a sandbox that hides your saved \
-             provider keys and sign-ins and Ryu's own tokens and databases. Ryu could not set \
-             that sandbox up on this computer ({reason}), so it did not start the agent. \
-             {advice}"
-        ),
-    }
+    AcpFailure::localized(
+        super::super::LAUNCH_REFUSED_SANDBOX,
+        m::ACP_SANDBOX_REQUIRED_TITLE_MESSAGE,
+        vec![
+            Message::new(m::ACP_SANDBOX_REQUIRED_MESSAGE).text("reason", reason),
+            Message::new(advice),
+        ],
+    )
 }

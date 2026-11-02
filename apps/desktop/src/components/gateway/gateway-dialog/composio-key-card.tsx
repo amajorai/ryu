@@ -186,7 +186,7 @@ export function ComposioKeyCard({
 								/>
 								<button
 									aria-label={showKey ? "Hide key" : "Show key"}
-									className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+									className="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 									onClick={() => setShowKey((v) => !v)}
 									type="button"
 								>

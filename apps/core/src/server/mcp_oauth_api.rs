@@ -1,15 +1,20 @@
 //! Metadata-only HTTP API for Core-owned remote MCP OAuth connections.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{Html, IntoResponse},
     Extension, Json,
 };
+use ryu_vault::mcp_oauth::{render_callback_page, set_callback_page_copy, CallbackPageCopy};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::ServerState;
+use crate::i18n::{locale, messages, Message};
 use crate::identity::ConnectionAccessLevel;
 use crate::identity_verify::VerifiedCaller;
 use crate::mcp_oauth::{CallbackMode, ConnectSpec};
@@ -24,35 +29,98 @@ pub struct HostedCallbackQuery {
 
 /// Public OAuth redirect target for remote/headless nodes. Authorization codes
 /// are immediately exchanged by Core with its local PKCE verifier; no token is
-/// reflected into the browser response.
-pub async fn hosted_callback(Query(query): Query<HostedCallbackQuery>) -> impl IntoResponse {
+/// reflected into the browser response. The page is in the user's fixed app
+/// language, else the browser's.
+pub async fn hosted_callback(
+    headers: HeaderMap,
+    Query(query): Query<HostedCallbackQuery>,
+) -> impl IntoResponse {
     let completion = crate::mcp_oauth::global()
         .complete_hosted_callback(query.code, query.state, query.iss, query.error)
         .await;
-    let (status, heading, detail) = match completion {
-        Ok(()) => (
-            StatusCode::OK,
-            "Connected",
-            "You can close this window and return to Ryu.",
-        ),
-        Err(_) => (
-            StatusCode::BAD_REQUEST,
-            "Connection failed",
-            "Return to Ryu for details and try connecting again.",
-        ),
+    let status = match completion {
+        Ok(()) => StatusCode::OK,
+        Err(_) => StatusCode::BAD_REQUEST,
     };
-    let body = format!(
-        "<!doctype html><meta name=\"referrer\" content=\"no-referrer\"><title>{heading}</title><h1>{heading}</h1><p>{detail}</p>"
-    );
+    let accept_language = headers
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let copy = callback_page_copy(accept_language, completion.is_ok()).await;
+    callback_page_response(status, &copy)
+}
+
+fn callback_page_response(status: StatusCode, copy: &CallbackPageCopy) -> axum::response::Response {
+    let content_language =
+        HeaderValue::from_str(&copy.lang).unwrap_or(HeaderValue::from_static("en"));
     (
         status,
         [
-            ("cache-control", "no-store"),
-            ("referrer-policy", "no-referrer"),
-            ("x-content-type-options", "nosniff"),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            (
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            ),
+            (
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ),
+            (header::CONTENT_LANGUAGE, content_language),
         ],
-        Html(body),
+        Html(render_callback_page(copy)),
     )
+        .into_response()
+}
+
+/// Copy for an OAuth callback page: the language the user fixed in the node's
+/// `ui-language` preference, else (in `auto` mode) the browser's
+/// `Accept-Language`, else the node's locale. Registered with the vault for
+/// the desktop loopback page too (see [`install_callback_page_copy`]).
+async fn callback_page_copy(accept_language: Option<String>, connected: bool) -> CallbackPageCopy {
+    let locale = match locale::fixed_node_locale().await {
+        Some(locale) => locale,
+        None => match accept_language
+            .as_deref()
+            .and_then(locale::from_accept_language)
+        {
+            Some(locale) => locale,
+            None => locale::node_locale().await,
+        },
+    };
+    callback_page_copy_for(locale, connected)
+}
+
+fn callback_page_copy_for(locale: &'static str, connected: bool) -> CallbackPageCopy {
+    let (title, detail) = if connected {
+        (
+            messages::OAUTH_CONNECTED_TITLE_MESSAGE,
+            messages::OAUTH_CONNECTED_DETAIL_MESSAGE,
+        )
+    } else {
+        (
+            messages::OAUTH_FAILED_TITLE_MESSAGE,
+            messages::OAUTH_FAILED_DETAIL_MESSAGE,
+        )
+    };
+    CallbackPageCopy {
+        lang: locale.to_owned(),
+        dir: locale::text_direction(locale).to_owned(),
+        title: Message::new(title).render(locale),
+        detail: Message::new(detail).render(locale),
+    }
+}
+
+fn boxed_callback_page_copy(
+    accept_language: Option<String>,
+    connected: bool,
+) -> Pin<Box<dyn Future<Output = CallbackPageCopy> + Send>> {
+    Box::pin(callback_page_copy(accept_language, connected))
+}
+
+/// Let the vault's desktop loopback listener render its page from Core's
+/// catalog. Idempotent; called before any browser flow starts.
+pub fn install_callback_page_copy() {
+    set_callback_page_copy(boxed_callback_page_copy);
 }
 
 /// Public OAuth Client ID Metadata Document for this node. It exists only when
@@ -259,6 +327,7 @@ pub async fn connect(
     let Some(resource_url) = declaration.url.clone() else {
         return error(StatusCode::CONFLICT, "OAuth MCP server has no remote URL");
     };
+    install_callback_page_copy();
     let started = crate::mcp_oauth::global()
         .start_connect(ConnectSpec {
             owner_user_id,
@@ -344,5 +413,70 @@ pub async fn disconnect(
         )
             .into_response(),
         Err(message) => error(StatusCode::INTERNAL_SERVER_ERROR, message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn page(accept_language: &str, connected: bool) -> (StatusCode, String, String) {
+        let copy = callback_page_copy(Some(accept_language.to_owned()), connected).await;
+        let status = if connected {
+            StatusCode::OK
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        let response = callback_page_response(status, &copy);
+        let language = response.headers()[header::CONTENT_LANGUAGE]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, language, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn the_callback_page_follows_the_browser_language() {
+        let (_, language, body) = page("ar-EG,ar;q=0.9,en;q=0.5", true).await;
+        assert_eq!(language, "ar");
+        assert!(body.contains("<html lang=\"ar\" dir=\"rtl\">"), "{body}");
+
+        let (_, language, body) = page("en-US,en;q=0.9", true).await;
+        assert_eq!(language, "en");
+        assert!(body.contains("<html lang=\"en\" dir=\"ltr\">"));
+        assert!(body.contains("<h1>Connection complete</h1>"));
+        assert!(body.contains("You can close this window and return to Ryu."));
+
+        let (status, _, body) = page("en", false).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("<title>Connection failed</title>"));
+
+        // Traditional Chinese has no catalog; the next listed tag is used.
+        let (_, language, _) = page("zh-TW,zh;q=0.9", true).await;
+        assert_eq!(language, "zh-CN");
+        let (_, language, _) = page("zh-TW", true).await;
+        assert_eq!(language, "en");
+    }
+
+    #[test]
+    fn the_callback_copy_is_rendered_from_the_catalog() {
+        let english = callback_page_copy_for("en", true);
+        assert_eq!(english, CallbackPageCopy::english(true));
+        assert_eq!(
+            callback_page_copy_for("en", false),
+            CallbackPageCopy::english(false)
+        );
+        let japanese = callback_page_copy_for("ja", true);
+        assert_eq!(
+            (japanese.lang.as_str(), japanese.dir.as_str()),
+            ("ja", "ltr")
+        );
+        assert_eq!(
+            japanese.title,
+            Message::new(messages::OAUTH_CONNECTED_TITLE_MESSAGE).render("ja")
+        );
     }
 }

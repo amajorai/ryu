@@ -84,7 +84,7 @@ function allCopy(product: Product): string[] {
 		product.cta.secondaryCta?.label ?? "",
 		...(product.splits ?? []).map((split) => split.cta?.label ?? ""),
 		...marketingCopy(product),
-		...(product.faq ?? []).flatMap((item) => [item.q, item.a]),
+		...(product.faq ?? []).flatMap((item) => [item.question, item.answer]),
 	].filter(Boolean);
 }
 
@@ -377,7 +377,7 @@ test("Ryu Hire is early access with no live run, price, or metering claims", () 
 		expect(html).not.toMatch(claim);
 	}
 	for (const item of hire.faq ?? []) {
-		expect(item.a).not.toMatch(/pay per run|paid per run|run receipt/i);
+		expect(item.answer).not.toMatch(/pay per run|paid per run|run receipt/i);
 	}
 });
 
@@ -395,10 +395,10 @@ test("Ryu Messaging is early access, passes AWS prices through, and owns SMS", (
 	expect(html).not.toMatch(/\$\d/);
 
 	const notifyFaq = getProduct("notify")?.faq?.find((item) =>
-		item.q.includes("SMS")
+		item.question.includes("SMS")
 	);
-	expect(notifyFaq?.a).toContain("Ryu Messaging");
-	expect(notifyFaq?.a).not.toContain("owned by Core or Mail");
+	expect(notifyFaq?.answer).toContain("Ryu Messaging");
+	expect(notifyFaq?.answer).not.toContain("owned by Core or Mail");
 });
 
 test("unreleased workspaces never offer a Download button", () => {
@@ -414,8 +414,8 @@ test("unreleased workspaces never offer a Download button", () => {
 	}
 	expect(
 		getProduct("island")?.faq?.find(
-			(item) => item.q === "Can I use Island today?"
-		)?.a
+			(item) => item.question === "Can I use Island today?"
+		)?.answer
 	).toContain("Not yet");
 });
 

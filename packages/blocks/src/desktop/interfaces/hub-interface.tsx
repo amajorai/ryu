@@ -324,7 +324,7 @@ export function HubInterface({
 							<button
 								aria-keyshortcuts="Escape"
 								aria-label={tl("{clockText}, ambient screen", { clockText })}
-								className="-mt-1.5 -mr-3 inline-flex h-12 shrink-0 items-baseline gap-1.5 rounded-full px-3 pt-1.5 text-[28px] text-foreground tabular-nums leading-9 tracking-[-0.01em] outline-none transition-colors duration-150 hover:bg-foreground/5 focus-visible:ring-3 focus-visible:ring-ring/40 active:bg-foreground/10"
+								className="-me-3 -mt-1.5 inline-flex h-12 shrink-0 items-baseline gap-1.5 rounded-full px-3 pt-1.5 text-[28px] text-foreground tabular-nums leading-9 tracking-[-0.01em] outline-none transition-colors duration-150 hover:bg-foreground/5 focus-visible:ring-3 focus-visible:ring-ring/40 active:bg-foreground/10"
 								data-testid="hub-header-clock"
 								onClick={sleep}
 								title="Ambient screen (Esc)"
@@ -340,7 +340,7 @@ export function HubInterface({
 						</header>
 						<motion.div
 							animate={{ opacity: 1, x: 0 }}
-							className="data-[edge-end=true]:mask-r-from-[calc(100%-var(--hub-gutter))] data-[edge-start=true]:mask-l-from-[calc(100%-var(--hub-gutter))] -my-1 flex shrink-0 cursor-default select-none snap-x snap-mandatory items-stretch gap-4 overflow-x-auto overflow-y-hidden px-(--hub-gutter) py-1 [scrollbar-width:none] motion-reduce:scroll-auto [&::-webkit-scrollbar]:hidden"
+							className="data-[edge-right=true]:mask-r-from-[calc(100%-var(--hub-gutter))] data-[edge-left=true]:mask-l-from-[calc(100%-var(--hub-gutter))] -my-1 flex shrink-0 cursor-default select-none snap-x snap-mandatory items-stretch gap-4 overflow-x-auto overflow-y-hidden px-(--hub-gutter) py-1 [scrollbar-width:none] motion-reduce:scroll-auto [&::-webkit-scrollbar]:hidden"
 							data-testid="hub-track"
 							initial={{ opacity: 0, x: slide }}
 							onClickCapture={(event) => {

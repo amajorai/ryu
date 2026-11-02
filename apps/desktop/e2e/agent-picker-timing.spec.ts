@@ -1,8 +1,8 @@
 declare const window: Window;
 
 import { writeFile } from "node:fs/promises";
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 interface PickerPaintWindow extends Window {
 	__pickerPaintSamples: number[];
@@ -191,17 +191,15 @@ test("measure populated picker input-to-frame time independently of click waits"
 		triggerBox!.y + triggerBox!.height - 1
 	);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			`../../../docs/proof/performance-sweep/agent-picker-placement${browserName === "chromium" ? "" : `-${browserName}`}-completed.png`
+		path: proofEvidencePath(
+			`performance-sweep/agent-picker-placement${browserName === "chromium" ? "" : `-${browserName}`}-completed.png`
 		),
 		fullPage: true,
 		animations: "disabled",
 	});
 	await writeFile(
-		path.resolve(
-			import.meta.dirname,
-			`../../../docs/proof/performance-sweep/agent-picker-frame-${agentCount}${deferOffscreen ? "-deferred" : ""}${browserName === "chromium" ? "" : `-${browserName}`}.json`
+		proofEvidencePath(
+			`performance-sweep/agent-picker-frame-${agentCount}${deferOffscreen ? "-deferred" : ""}${browserName === "chromium" ? "" : `-${browserName}`}.json`
 		),
 		`${JSON.stringify({ scope: "Actual Tools Library with controlled agents; pointerdown to two animation frames after popup presence", browserName, agentCount, samples }, null, 2)}\n`
 	);

@@ -1,5 +1,6 @@
 "use client";
 
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable.ts";
 import { SPRING_LAYOUT, SPRING_PRESS } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -22,6 +23,26 @@ import {
 import { createPortal } from "react-dom";
 import { isNativeFunction } from "../lib/native-primitive-observation.ts";
 import drawingStyles from "./project-folder.drawing.module.css";
+
+/** "3 documents": a whole ICU plural per known noun, so every locale can inflect it. */
+function folderItemCount(
+	tl: LiteralMessage,
+	count: number,
+	itemLabel: string
+): string {
+	if (itemLabel === "item") {
+		return tl("{count, plural, one {# item} other {# items}}", { count });
+	}
+	if (itemLabel === "document") {
+		return tl("{count, plural, one {# document} other {# documents}}", {
+			count,
+		});
+	}
+	return tl("{count, plural, one {# {itemLabel}} other {# {itemLabel}s}}", {
+		count,
+		itemLabel,
+	});
+}
 
 interface FolderLayerStyle extends MotionStyle {
 	"--project-folder-1-z-index"?: MotionStyle["zIndex"];
@@ -56,6 +77,7 @@ export interface ProjectFolderProps {
 	disabled?: boolean;
 	emptyContent?: ReactNode | ((closeBeforeNavigation: () => void) => ReactNode);
 	expanded?: boolean;
+	/** Singular noun for the count line ("3 documents"); "item" and "document" are translated. */
 	itemLabel?: string;
 	onClick?: () => void;
 	onExpandedChange?: (expanded: boolean) => void;
@@ -152,7 +174,8 @@ export function ProjectFolder({
 		() => previews.slice(0, MAX_PREVIEWS),
 		[previews]
 	);
-	const itemText = `${count} ${itemLabel}${count === 1 ? "" : "s"}`;
+	const tl = useLiteralMessages();
+	const itemText = folderItemCount(tl, count, itemLabel);
 	const transition = reduceMotion ? { duration: 0 } : SPRING_LAYOUT;
 
 	const close = useCallback(() => {
@@ -253,7 +276,7 @@ export function ProjectFolder({
 	};
 
 	const folderContent = (
-		<div className="relative flex min-h-28 min-w-48 flex-col justify-between p-4 text-left">
+		<div className="relative flex min-h-28 min-w-48 flex-col justify-between p-4 text-start">
 			<div>
 				<p className="font-medium text-sm">{title}</p>
 				{description ? (
@@ -353,7 +376,7 @@ export function ProjectFolder({
 												{preview.onClick ? (
 													<button
 														aria-label={preview.label}
-														className="absolute inset-0 rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+														className="absolute inset-0 rounded-2xl text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 														onClick={() => {
 															closeBeforeNavigation();
 															preview.onClick?.();

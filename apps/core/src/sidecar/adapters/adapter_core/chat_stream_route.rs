@@ -59,8 +59,10 @@ pub(super) async fn resolve_turn_route(
         ) {
             Some(r) => r,
             None => {
-                let msg = match effective_agent_id.as_deref() {
-                    None => "No agent selected. Please pick an agent.".to_owned(),
+                // Each branch calls `error_stream` with its literal so the
+                // i18n extractor sees every message.
+                let refusal = match effective_agent_id.as_deref() {
+                    None => error_stream("No agent selected. Please pick an agent.".to_owned()),
                     // The agent exists (its record set this limit), so the route
                     // builders refused it. Name the engine's own reason when it
                     // calls its provider itself; otherwise (Ryu's engine, or a
@@ -73,15 +75,17 @@ pub(super) async fn resolve_turn_route(
                             registry,
                             provider_access.as_deref(),
                         ) {
-                            Some(reason) => format!("Ryu could not start {id}: {reason}"),
-                            None => format!(
+                            Some(reason) => {
+                                error_stream(format!("Ryu could not start {id}: {reason}"))
+                            }
+                            None => error_stream(format!(
                                 "Ryu could not start {id}: its account access limits which model providers it may use, and that is only enforced when its models go through Ryu's own Gateway. Turn on Gateway routing (and use the Gateway Ryu manages), or change the agent's account access."
-                            ),
+                            )),
                         }
                     }
-                    Some(id) => format!("Unknown agent: {id}"),
+                    Some(id) => error_stream(format!("Unknown agent: {id}")),
                 };
-                return Err(error_stream(msg));
+                return Err(refusal);
             }
         }
     };

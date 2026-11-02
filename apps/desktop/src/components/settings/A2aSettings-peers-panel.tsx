@@ -310,7 +310,11 @@ export function PeersPanel({
 								: "Add to Agents"}
 						</Button>
 						<Button
-							aria-label={`${peer.trust === "trusted" ? "Revoke trust from" : "Trust"} ${peer.name}`}
+							aria-label={
+								peer.trust === "trusted"
+									? tl("Revoke trust from {name}", { name: peer.name })
+									: tl("Trust {name}", { name: peer.name })
+							}
 							disabled={trust.isPending}
 							onClick={() =>
 								trust.mutate({

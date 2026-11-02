@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { cn } from "@ryu/ui/lib/utils";
 import { type ReactNode, useId, useState } from "react";
 
@@ -314,8 +315,8 @@ export function GameLegend({
 				aria-expanded={open}
 				aria-label={
 					open
-						? tl("Hide {legend}", { legend: label.toLowerCase() })
-						: tl("Show {legend}", { legend: label.toLowerCase() })
+						? tl("Hide {legend}", { legend: sentenceLabel(tl, label) })
+						: tl("Show {legend}", { legend: sentenceLabel(tl, label) })
 				}
 				className={cn(
 					GAME_PLATE,

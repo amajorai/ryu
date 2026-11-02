@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const patch = (name: string) =>
 	`diff --git a/src/${name}.ts b/src/${name}.ts\nindex 1111111..2222222 100644\n--- a/src/${name}.ts\n+++ b/src/${name}.ts\n@@ -1 +1 @@\n-export const ${name} = 'before';\n+export const ${name} = 'after';`;
@@ -166,11 +167,13 @@ test("merge denial remains retryable and successful retry refreshes authoritativ
 		}))
 	);
 	await mkdir(
-		"../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-diff",
+		proofEvidencePath("test-coverage-sweep-20260924/parallel/coordinator-diff"),
 		{ recursive: true }
 	);
 	await page.screenshot({
-		path: "../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-diff/merged.png",
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/coordinator-diff/merged.png"
+		),
 		fullPage: true,
 	});
 });
@@ -289,7 +292,9 @@ test("failed file save preserves draft and retries exact selected working file w
 		.toBeGreaterThan(1);
 	await expect(page.getByText("Unsaved edits")).toHaveCount(0);
 	await page.screenshot({
-		path: "../../docs/proof/test-coverage-sweep-20260924/parallel/coordinator-diff/saved-readback.png",
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/coordinator-diff/saved-readback.png"
+		),
 		fullPage: true,
 	});
 });

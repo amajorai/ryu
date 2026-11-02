@@ -7,6 +7,7 @@ import {
 	prepareUpdate,
 } from "@/src/components/updater/AutoUpdater-source.ts";
 import { notifyUpdateOutsideWindow } from "@/src/components/updater/AutoUpdater-window-notices.ts";
+import { updateErrorSentence } from "@/src/components/updater/app-update-error.ts";
 import {
 	updateToastBody,
 	updateToastId,
@@ -96,31 +97,6 @@ export async function prepareAndPrompt(
 	}
 }
 
-const RAW_ERROR_SHAPE = /[{}[\]<>]|\b(?:[45]\d\d|ECONN\w+|ENOTFOUND)\b/;
-const MAX_ERROR_SENTENCE = 160;
-
-/**
- * One readable sentence for an updater failure. A message that is already a
- * sentence (the node's own copy) passes through; raw shapes — JSON, markup,
- * status codes, socket errors, stack-length text — map to `fallback`.
- */
-export function updateErrorSentence<TError>(
-	error: TError,
-	fallback: string
-): string {
-	const message = (
-		error instanceof Error ? error.message : String(error ?? "")
-	).trim();
-	if (
-		!message ||
-		message.length > MAX_ERROR_SENTENCE ||
-		RAW_ERROR_SHAPE.test(message)
-	) {
-		return fallback;
-	}
-	return message;
-}
-
 export function showPreparationFailure<TError>(
 	verdict: UpdateCheck,
 	tl: LiteralMessage,
@@ -131,7 +107,8 @@ export function showPreparationFailure<TError>(
 		title: "Update download failed",
 		description: updateErrorSentence(
 			error,
-			"Check your connection and try again."
+			tl,
+			tl("Check your connection and try again.")
 		),
 		duration: null,
 		button: {
@@ -247,7 +224,8 @@ export async function installUpdate(
 					title: "Couldn't restart Ryu",
 					description: updateErrorSentence(
 						error,
-						"Close and reopen Ryu to finish loading the update."
+						tl,
+						tl("Close and reopen Ryu to finish loading the update.")
 					),
 					duration: null,
 				});
@@ -264,7 +242,8 @@ export async function installUpdate(
 			title: "Update failed",
 			description: updateErrorSentence(
 				error,
-				"Ryu couldn't install the update. Try again."
+				tl,
+				tl("Ryu couldn't install the update. Try again.")
 			),
 			duration: null,
 			button: {

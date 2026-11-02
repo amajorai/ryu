@@ -212,7 +212,7 @@ export function BotProfileCard({
 				</span>
 				<p className="min-w-0 flex-1 truncate text-sm" title={statusText}>
 					<span className="font-medium">Bot</span>
-					<span className="ml-2 text-detail text-muted-foreground">
+					<span className="ms-2 text-detail text-muted-foreground">
 						{statusText}
 					</span>
 				</p>

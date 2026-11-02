@@ -6,6 +6,7 @@ import type {
 	ObjectWithFields,
 	SchemaResponse,
 } from "@/src/lib/api/crm.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export const PROOF_PAGE = "/crm-schema-fieldform-proof.html";
 export const TIMESTAMP = "2026-10-01T00:00:00.000Z";
@@ -24,14 +25,17 @@ export interface CapturedRequest extends CapturedWrite {
 
 export const evidenceDir =
 	process.env.RYU_CRM_SCHEMA_FIELDFORM_PROOF_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 export function screenshotPath(defaultRelativePath: string): string {
 	return process.env.RYU_CRM_SCHEMA_FIELDFORM_PROOF_DIR
 		? path.resolve(evidenceDir, path.basename(defaultRelativePath))
 		: path.resolve(import.meta.dirname, defaultRelativePath);
+}
+// Like screenshotPath, for evidence committed under the repository's docs/proof.
+export function proofScreenshotPath(proofRelativePath: string): string {
+	return process.env.RYU_CRM_SCHEMA_FIELDFORM_PROOF_DIR
+		? path.resolve(evidenceDir, path.basename(proofRelativePath))
+		: proofEvidencePath(proofRelativePath);
 }
 export const proofStates = new WeakMap<
 	Page,

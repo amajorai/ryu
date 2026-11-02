@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -7,7 +8,10 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	relativeAge as relativeAgeNarrow,
+} from "./interface-renderer.ts";
 import { nextCollection } from "./tracking-model-copy.ts";
 import { STAGE_STEP } from "./tracking-model-stages.ts";
 import { clockTime, dayLabel } from "./tracking-model-time.ts";
@@ -62,11 +66,32 @@ export type TrackingStage =
 
 export type TrackingTab = "all" | "delivered" | "exceptions" | "on-the-way";
 
+/** The list tabs; each label reads in the UI language when it is shown. */
 export const TRACKING_TABS: readonly { id: TrackingTab; label: string }[] = [
-	{ id: "on-the-way", label: "On the way" },
-	{ id: "delivered", label: "Delivered" },
-	{ id: "exceptions", label: "Exceptions" },
-	{ id: "all", label: "All" },
+	{
+		id: "on-the-way",
+		get label() {
+			return tr("On the way");
+		},
+	},
+	{
+		id: "delivered",
+		get label() {
+			return tr("Delivered");
+		},
+	},
+	{
+		id: "exceptions",
+		get label() {
+			return tr("Exceptions");
+		},
+	},
+	{
+		id: "all",
+		get label() {
+			return tr("All");
+		},
+	},
 ];
 
 /** The classic five scans, left to right. */
@@ -79,12 +104,24 @@ export const TRACKING_STEPS = [
 ] as const;
 
 export const TRACKING_STAGE_LABELS: Record<TrackingStage, string> = {
-	awaiting: "Awaiting pickup",
-	delivered: "Delivered",
-	exception: "Delivery exception",
-	label: "Label created",
-	out: "Out for delivery",
-	transit: "In transit",
+	get awaiting() {
+		return tr("Awaiting pickup");
+	},
+	get delivered() {
+		return tr("Delivered");
+	},
+	get exception() {
+		return tr("Delivery exception");
+	},
+	get label() {
+		return tr("Label created");
+	},
+	get out() {
+		return tr("Out for delivery");
+	},
+	get transit() {
+		return tr("In transit");
+	},
 };
 
 export type StepState = "current" | "done" | "exception" | "upcoming";
@@ -309,13 +346,9 @@ export function defaultTab(
 // Time formatting
 // ---------------------------------------------------------------------------
 
-/** "5m ago", or "just now" when the update is under a minute old. */
+/** "5m ago", or "now" when the update is under a minute old. */
 function agoText(iso: string, now: number): string {
-	const age = compactAge(iso, now);
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "just now" : `${age} ago`;
+	return relativeAgeNarrow(iso, now);
 }
 
 /**
@@ -330,23 +363,25 @@ export function rowWhen(
 	const ago = agoText(parcel.thread.updatedAt, now);
 	switch (parcel.stage) {
 		case "delivered":
-			return ago ? `Delivered ${ago}` : "Delivered";
+			return ago ? tr("Delivered {ago}", { ago }) : tr("Delivered");
 		case "out":
-			return "Arriving soon";
+			return tr("Arriving soon");
 		case "transit":
-			return ago ? `Moved ${ago}` : "Moving";
+			return ago ? tr("Moved {ago}", { ago }) : tr("Moving");
 		case "exception":
-			return ago ? `Held ${ago}` : "Held";
+			return ago ? tr("Held {ago}", { ago }) : tr("Held");
 		case "awaiting": {
 			const next = nextCollection(parcel, events, now);
 			if (next) {
 				const start = new Date(next.start);
 				const today = localDayKey(start) === localDayKey(new Date(now));
-				return `Pickup ${today ? clockTime(start) : dayLabel(start, now)} est.`;
+				return tr("Pickup {when} est.", {
+					when: today ? clockTime(start) : dayLabel(start, now),
+				});
 			}
-			return ago ? `Sent ${ago}` : "Sent";
+			return ago ? tr("Sent {ago}", { ago }) : tr("Sent");
 		}
 		default:
-			return ago ? `Created ${ago}` : "";
+			return ago ? tr("Created {ago}", { ago }) : "";
 	}
 }

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
@@ -37,9 +38,11 @@ function Participant({ agent }: { agent: InterfaceAgent }) {
 	return (
 		<li className="flex h-6 min-w-0 items-center gap-2">
 			<PostsAvatar agent={agent} size={20} />
-			<span className="truncate">{agent.name}</span>
+			<span className="truncate" data-ryu-i18n="off">
+				{agent.name}
+			</span>
 			{agent.status === "working" ? (
-				<span className="ml-auto shrink-0 text-status-success text-xs">
+				<span className="ms-auto shrink-0 text-status-success text-xs">
 					Working
 				</span>
 			) : null}
@@ -69,8 +72,8 @@ export function PostDetails({
 		<aside
 			aria-labelledby={headingId}
 			className={cn(
-				"flex w-[288px] shrink-0 flex-col overflow-y-auto border-border border-l bg-background",
-				onClose && "absolute inset-y-0 right-0 z-20 shadow-lg"
+				"flex w-[288px] shrink-0 flex-col overflow-y-auto border-border border-s bg-background",
+				onClose && "absolute inset-y-0 end-0 z-20 shadow-lg"
 			)}
 			data-testid="posts-details"
 		>
@@ -81,7 +84,7 @@ export function PostDetails({
 				{onClose ? (
 					<button
 						aria-label="Close details"
-						className={cn(ICON_BUTTON, "-mr-2")}
+						className={cn(ICON_BUTTON, "-me-2")}
 						onClick={onClose}
 						type="button"
 					>
@@ -100,7 +103,8 @@ export function PostDetails({
 				<DetailRow label="Space">
 					{space ? (
 						<button
-							className="max-w-full truncate rounded-sm text-left underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+							className="max-w-full truncate rounded-sm text-start underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+							data-ryu-i18n="off"
 							onClick={() => onSelectSpace(space)}
 							type="button"
 						>
@@ -113,7 +117,7 @@ export function PostDetails({
 				<DetailRow label="Author">
 					<span className="flex h-6 min-w-0 items-center gap-2">
 						<PostsAvatar agent={item.author} size={20} />
-						<span className="truncate">{item.author?.name ?? "You"}</span>
+						<span className="truncate">{item.author?.name ?? tr("You")}</span>
 					</span>
 				</DetailRow>
 				<DetailRow label="Comments">
@@ -140,7 +144,7 @@ export function PostDetails({
 				>
 					<h3 className="pb-2 text-muted-foreground text-sm">
 						Participants
-						<span className="pl-1.5 tabular-nums">
+						<span className="ps-1.5 tabular-nums">
 							{item.commenters.length}
 						</span>
 					</h3>
@@ -206,7 +210,7 @@ function Breadcrumb({
 					aria-current="page"
 					className="min-w-0 truncate px-2 font-medium text-foreground"
 				>
-					{item?.thread.title || "New post"}
+					{item?.thread.title || tr("New post")}
 				</li>
 			</ol>
 		</nav>
@@ -276,7 +280,7 @@ export function PostPage({
 								<div className="flex min-w-0 items-center gap-2 text-sm leading-6">
 									<PostsAvatar agent={item.author} size={24} />
 									<span className="truncate font-medium text-foreground">
-										{item.author?.name ?? "You"}
+										{item.author?.name ?? tr("You")}
 									</span>
 									<span aria-hidden="true" className="text-muted-foreground">
 										·
@@ -290,7 +294,7 @@ export function PostPage({
 									</time>
 									{detailsOpen ? null : (
 										<PostMarkerLabel
-											className="ml-auto shrink-0 pl-3 text-sm"
+											className="ms-auto shrink-0 ps-3 text-sm"
 											label={markerLabel(item, tl)}
 											marker={item.marker}
 										/>
@@ -301,7 +305,7 @@ export function PostPage({
 									id={titleId}
 								>
 									<span className="font-semibold">
-										{thread.title || "Untitled post"}
+										{thread.title || tr("Untitled post")}
 									</span>
 								</h1>
 							</>

@@ -1,5 +1,4 @@
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -11,6 +10,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@ryu/ui/components/card.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	ToggleGroup,
 	ToggleGroupItem,
@@ -109,7 +109,7 @@ export function ComputeFinder() {
 			<CardFooter appearance="exchange-actions">
 				<Button disabled>
 					Find capacity
-					<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
+					<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
 				</Button>
 				<span className="text-muted-foreground text-xs">
 					Provider network is not enabled.

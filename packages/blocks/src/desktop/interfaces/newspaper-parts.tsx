@@ -121,7 +121,8 @@ export function StoryHeadline({
 	return (
 		<Heading className={cn("font-serif text-foreground", className)}>
 			<button
-				className="cursor-pointer text-balance text-left font-semibold font-serif decoration-1 underline-offset-[0.2em] outline-none after:absolute after:-inset-x-2 after:-inset-y-1.5 after:rounded-sm after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring group-hover/story:underline"
+				className="cursor-pointer text-balance text-start font-semibold font-serif decoration-1 underline-offset-[0.2em] outline-none after:absolute after:-inset-x-2 after:-inset-y-1.5 after:rounded-sm after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring group-hover/story:underline"
+				data-ryu-i18n="off"
 				data-thread-id={story.thread.id}
 				onClick={() => onOpen(story.thread.id)}
 				type="button"
@@ -159,7 +160,7 @@ export function StoryDeck({
 					You{" "}
 				</span>
 			) : null}
-			{message}
+			<span data-ryu-i18n="off">{message}</span>
 		</p>
 	);
 }

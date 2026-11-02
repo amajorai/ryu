@@ -43,14 +43,22 @@ const WINDOWS_UA =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36";
 const SWITCH = "Attach recent activity to a chat";
 const DESTINATION = "Clips destination";
-const HOOK_ERROR =
-	"couldn't create the keyboard event tap — grant Input Monitoring to Ryu in System Settings › Privacy & Security, then restart the app";
-const CAPTURE_ERROR = "Open a chat before using the Current chat destination.";
+// The coded failures `quick_capture/native_error.rs` serializes, and the
+// sentences the webview words them as.
+const HOOK_ERROR = { code: "input_monitoring_denied" };
+const HOOK_SENTENCE =
+	"Grant Input Monitoring to Ryu in System Settings › Privacy & Security, then restart Ryu.";
+const CAPTURE_ERROR = {
+	code: "worker_failed",
+	detail: "couldn't find Ryu module: 126",
+};
+const CAPTURE_SENTENCE =
+	"Ryu couldn't start the keyboard listener. Restart Ryu and try again. Details: couldn't find Ryu module: 126";
 
 const native = {
 	calls: [] as NativeCall[],
 	disk: { destination: "automatic", enabled: false } as ConfigFile,
-	error: null as string | null,
+	error: null as { code: string; detail?: string } | null,
 	failNextSave: false,
 	held: null as null | (() => void),
 	holdNextDestination: false,
@@ -92,7 +100,7 @@ async function nativeInvoke(
 			if (enabled) {
 				// Rust starts the listener first; only a live listener is saved.
 				if (navigator.userAgent.includes("Mac") && !native.inputMonitoring) {
-					throw new Error(HOOK_ERROR);
+					throw HOOK_ERROR;
 				}
 				native.listening = true;
 			} else {
@@ -263,9 +271,12 @@ function row(title: string): HTMLElement {
 	return item;
 }
 
+// A row's description renders inside the row, right under its title.
 function captionFor(title: string) {
-	const card = row(title).closest('[data-slot="item-group"]');
-	return text(card?.nextElementSibling);
+	const heading = [
+		...row(title).querySelectorAll('[data-slot="item-title"]'),
+	].find((candidate) => text(candidate) === title);
+	return text(heading?.nextElementSibling);
 }
 
 function labelled(label: string): HTMLElement {
@@ -558,7 +569,7 @@ test("Last Capture Failed shows the native error and disappears once quick attac
 	await mount();
 
 	expect(rowTitles()).toContain("Last Capture Failed");
-	expect(captionFor("Last Capture Failed")).toBe(CAPTURE_ERROR);
+	expect(captionFor("Last Capture Failed")).toBe(CAPTURE_SENTENCE);
 
 	await click(labelled(SWITCH));
 	await until(
@@ -567,7 +578,7 @@ test("Last Capture Failed shows the native error and disappears once quick attac
 	);
 	expect(native.error).toBeNull();
 	expect(native.disk).toEqual({ destination: "current_chat", enabled: false });
-	expect(text(container)).not.toContain(CAPTURE_ERROR);
+	expect(text(container)).not.toContain(CAPTURE_SENTENCE);
 });
 
 test("a refused start keeps the switch off, explains why and persists nothing", async () => {
@@ -579,7 +590,7 @@ test("a refused start keeps the switch off, explains why and persists nothing", 
 		() => text(document.body).includes("Clips quick attach couldn't start"),
 		"start failure toast"
 	);
-	expect(text(document.body)).toContain(HOOK_ERROR);
+	expect(text(document.body)).toContain(HOOK_SENTENCE);
 	expect(isChecked(labelled(SWITCH))).toBe(false);
 	expect(isDisabled(labelled(SWITCH))).toBe(false);
 	expect(native.disk).toEqual({ destination: "new_chat", enabled: false });

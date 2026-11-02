@@ -24,7 +24,7 @@ export default function ExtensionChat({
 }: ExtensionChatProps) {
 	return (
 		<div className="flex h-full overflow-hidden">
-			<div className="w-56 shrink-0 border-r">{sidebar}</div>
+			<div className="w-56 shrink-0 border-e">{sidebar}</div>
 
 			<div className="flex flex-1 flex-col overflow-hidden">
 				<div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">

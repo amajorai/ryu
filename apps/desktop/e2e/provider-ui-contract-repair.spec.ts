@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const compatible = [
 	{ id: "huggingface", label: "Hugging Face" },
@@ -410,9 +410,8 @@ test("selected production provider UI preserves catalog, named-account writes, p
 	expect(errors).toEqual([]);
 	const sources = JSON.parse(
 		await readFile(
-			path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/provider-ui-contract-repair/selected-source-hashes.json"
+			proofEvidencePath(
+				"provider-ui-contract-repair/selected-source-hashes.json"
 			),
 			"utf8"
 		)

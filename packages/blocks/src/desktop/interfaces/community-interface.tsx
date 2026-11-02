@@ -393,7 +393,7 @@ export function CommunityInterface({
 				searchRef={searchRef}
 			/>
 			<div className="relative flex min-h-0 flex-1">
-				<div className="@[860px]/community:flex hidden @[1200px]/community:w-[272px] w-[248px] shrink-0 flex-col border-border border-r">
+				<div className="@[860px]/community:flex hidden @[1200px]/community:w-[272px] w-[248px] shrink-0 flex-col border-border border-e">
 					{nav}
 				</div>
 				<CommunityNavDrawer

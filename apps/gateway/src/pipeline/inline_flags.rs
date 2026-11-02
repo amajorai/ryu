@@ -165,15 +165,17 @@ pub(super) async fn flag_inline_binding(
                 Ok(verdict) => verdict,
                 Err(error) => return InlineFlag::Denied(error),
             };
-            // Deterministic floor: when the judge did NOT answer (no provider /
-            // timeout / unparseable — the common local-only deploy), consult the
-            // lexical seed so obvious slurs/threats/blanket-generalizations are still
-            // caught instead of silently passing under an "enforced" detector. The
-            // seed runs on the FULL untruncated `text`, also covering the judge's
-            // 4000-char head-only truncation on the fail-open path. When the judge
-            // DID answer we trust its context (the `backstop_flag` seam discards the
-            // seed), avoiding the condemned/quoted-stereotype and casual-profanity
-            // false positives a bare seed would hard-flag.
+            // Deterministic floor: whenever the judge did NOT give a verdict over
+            // ALL of `text` (no provider / timeout / refusal / unparseable reply,
+            // or a text longer than the inspector's window budget, so the oldest
+            // part went unjudged), consult the lexical seed over the FULL text so
+            // obvious slurs/threats/blanket-generalizations are still caught instead
+            // of silently passing under an "enforced" detector. The judge reads the
+            // text in windows, newest first, so `available` is true only when every
+            // window answered. Then we trust its context (the `backstop_flag` seam
+            // discards the seed), avoiding the condemned/quoted-stereotype and
+            // casual-profanity false positives a bare seed would hard-flag.
+            let has_seed = llm_judge_backstop_kind(&ev.id).is_some();
             let (seed_hit, seed_reason) = if verdict.available {
                 (false, String::new())
             } else {
@@ -185,9 +187,21 @@ pub(super) async fn flag_inline_binding(
                     None => (false, String::new()),
                 }
             };
-            let flagged = backstop_flag(verdict.available, verdict.flagged, seed_hit);
+            // A refusal (and, for a judge with no seed, any gap an attacker can
+            // produce) is never a clean answer: it flags, and the binding's
+            // action decides what happens (`judge_gap_flags`).
+            let gap = !verdict.flagged
+                && !seed_hit
+                && super::inline_eval::judge_gap_flags(verdict.outcome, has_seed);
+            let flagged = backstop_flag(verdict.available, verdict.flagged, seed_hit) || gap;
             let reason = if seed_hit {
                 seed_reason
+            } else if gap {
+                format!(
+                    "llm judge '{}' gave no verdict ({})",
+                    ev.id,
+                    verdict.outcome.label()
+                )
             } else {
                 verdict.reason
             };
@@ -338,3 +352,7 @@ pub(super) fn audit_inline_evaluator(
     };
     state.log_audit_with(record, crate::traffic::TrafficOutcome::verdict(verdict));
 }
+
+#[cfg(test)]
+#[path = "inline_judge_gap_tests.rs"]
+mod inline_judge_gap_tests;

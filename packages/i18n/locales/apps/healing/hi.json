@@ -1,0 +1,7 @@
+{
+  "A failed run was diagnosed": "एक विफल रन का निदान किया गया",
+  "Auto-fix attempts used: {count}. Review it manually.": "उपयोग किए गए ऑटो-फ़िक्स प्रयास: {count}। इसकी मैन्युअल समीक्षा करें।",
+  "Auto-fix gave up": "ऑटो-फ़िक्स ने हार मान ली",
+  "Fix waiting in your inbox: {diagnosis}": "आपके इनबॉक्स में सुधार प्रतीक्षा में है: {diagnosis}",
+  "heal engine unavailable": "हील इंजन उपलब्ध नहीं है"
+}

@@ -1,6 +1,7 @@
 import type { MessageReadReceiptState } from "@ryu/blocks/desktop/agent-elements/message-read-receipt.tsx";
 import type { MessageActionRuntimeState } from "@ryu/blocks/desktop/agent-elements/types.ts";
 import { nativeSdkSchemaAdmits } from "@ryu/blocks/desktop/agent-elements/utils/native-sdk-admission.ts";
+import { activeLocale, numberFormatter } from "@ryu/i18n/core";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	isNativeObjectLike,
@@ -198,31 +199,60 @@ export function mergeContextHandoffs(
 	);
 }
 
-/** "1M", "256K", "8K": a context window as people say it. */
+/**
+ * "1M", "256K", "8K": a context window as people say it, in the UI locale.
+ * Whole thousands below a million (8,192 reads "8K", not "8.2K"); one
+ * decimal from a million up ("1.5M").
+ */
 export function formatContextWindow(tokens: number): string {
-	if (tokens >= 1_000_000) {
-		return `${Number((tokens / 1_000_000).toFixed(1))}M`;
-	}
-	return `${Math.round(tokens / 1000)}K`;
+	return numberFormatter(activeLocale(), {
+		maximumFractionDigits: tokens >= 1_000_000 ? 1 : 0,
+		notation: "compact",
+	}).format(tokens);
 }
 
+/**
+ * The context-handoff notice as one whole sentence. Each optional part (the
+ * target model, the window sizes) picks its own message so translators see
+ * the full sentence and RTL catalogs can mirror the arrow.
+ */
 export function describeContextHandoff(
 	handoff: ConversationContextHandoff,
 	tl: LiteralMessage
 ): string {
-	const messages = tl(
-		"{summarizedCount} earlier {count, plural, one {message} other {messages}} summarized",
-		{
-			count: handoff.summarizedCount,
-			summarizedCount: String(handoff.summarizedCount),
-		}
-	);
-	const target = handoff.toModel ? ` for ${handoff.toModel}` : "";
+	const count = handoff.summarizedCount;
+	const summarizedCount = numberFormatter(activeLocale()).format(count);
+	const model = handoff.toModel || null;
+	const { fromContext, toContext } = handoff;
 	const windows =
-		handoff.fromContext !== null && handoff.toContext !== null
-			? ` · ${formatContextWindow(handoff.fromContext)} → ${formatContextWindow(handoff.toContext)} context`
-			: "";
-	return `${messages}${target}${windows}`;
+		fromContext !== null && toContext !== null
+			? {
+					from: formatContextWindow(fromContext),
+					to: formatContextWindow(toContext),
+				}
+			: null;
+	if (model && windows) {
+		return tl(
+			"{summarizedCount} earlier {count, plural, one {message} other {messages}} summarized for {model} · {from} → {to} context",
+			{ count, model, summarizedCount, ...windows }
+		);
+	}
+	if (model) {
+		return tl(
+			"{summarizedCount} earlier {count, plural, one {message} other {messages}} summarized for {model}",
+			{ count, model, summarizedCount }
+		);
+	}
+	if (windows) {
+		return tl(
+			"{summarizedCount} earlier {count, plural, one {message} other {messages}} summarized · {from} → {to} context",
+			{ count, summarizedCount, ...windows }
+		);
+	}
+	return tl(
+		"{summarizedCount} earlier {count, plural, one {message} other {messages}} summarized",
+		{ count, summarizedCount }
+	);
 }
 
 export function mergeConversationModelChanges(

@@ -10,11 +10,7 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceAgent, ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import {
 	type FormEvent,
@@ -26,6 +22,7 @@ import {
 	useState,
 } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { agentNames } from "./journal-model.ts";
 
 /** Title face: Day One's serif option, or the app's heading face. */
@@ -85,10 +82,10 @@ export function JournalStatusMark({
 	return (
 		<span
 			className={cn("inline-flex items-center", className)}
-			title={THREAD_STATUS_LABELS[status]}
+			title={threadStatusLabel(status)}
 		>
 			<JournalStatusDot status={status} />
-			<span className="sr-only">{THREAD_STATUS_LABELS[status]}</span>
+			<span className="sr-only">{threadStatusLabel(status)}</span>
 		</span>
 	);
 }
@@ -110,7 +107,7 @@ export function JournalStatusText({
 			)}
 		>
 			<JournalStatusDot live={live} status={status} />
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }

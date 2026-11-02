@@ -64,7 +64,7 @@ test("Major Pass uses the shared palette and whole-dollar annual pricing", () =>
 	const yearly = renderToStaticMarkup(<MarketplacePassPlanCard isYearly />);
 
 	expect(monthly).toContain('title="Ryu A Major Pass"');
-	expect(monthly).toContain("A MAJOR PASS");
+	expect(monthly).toContain(">A Major Pass</span>");
 	expect(monthly).toContain("One individual user is included");
 	expect(monthly).toContain(
 		"One pass gives one individual user access to supported paid Marketplace apps"
@@ -142,7 +142,7 @@ test("the public business shelf exposes the shared seat selector when wired", ()
 test("the private Plus offer keeps its lower usage contract", () => {
 	const html = renderToStaticMarkup(<PlusPlanCard isYearly />);
 
-	expect(html).toContain("PLUS");
+	expect(html).toContain(">Plus</span>");
 	expect(html).toContain("Private offer");
 	expect(html).toContain("$10");
 	expect(html).toContain("$390");
@@ -154,7 +154,7 @@ test("the public Plus card drops the private-offer framing", () => {
 		<PlusPlanCard availability="public" isYearly />
 	);
 
-	expect(html).toContain("PLUS");
+	expect(html).toContain(">Plus</span>");
 	expect(html).not.toContain("Private offer");
 	expect(html).not.toContain("A private");
 	expect(html).toContain("$10");

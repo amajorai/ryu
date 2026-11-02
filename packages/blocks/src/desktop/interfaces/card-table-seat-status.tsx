@@ -1,6 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import { plural, type SeatInfo, seatTone } from "./card-table-model.ts";
+import { type SeatInfo, seatTone, tableCount } from "./card-table-model.ts";
 import { SuitGlyph } from "./card-table-pieces.tsx";
 import { compactAge } from "./interface-renderer.ts";
 
@@ -73,7 +73,9 @@ export function SeatSubline({ seat }: { seat: SeatInfo }) {
 	const forYou = seat.attention + seat.yourTurn;
 	return (
 		<span className="flex min-w-0 items-baseline gap-1 font-semibold text-(--gk-ink-muted) text-[13px] tabular-nums leading-5">
-			<span className="shrink-0">{plural(seat.threads.length, "thread")}</span>
+			<span className="shrink-0">
+				{tableCount(seat.threads.length, "thread", tl)}
+			</span>
 			{forYou > 0 ? (
 				<>
 					<span aria-hidden="true">·</span>

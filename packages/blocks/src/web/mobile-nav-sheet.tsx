@@ -105,7 +105,7 @@ function SheetSection({
 	return (
 		<Accordion.Item data-sheet-group={group.title} value={group.title}>
 			<Accordion.Header className="flex">
-				<Accordion.Trigger className="group flex min-h-11 flex-1 items-center justify-between gap-4 rounded-xl px-2 text-left font-medium text-muted-foreground text-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:text-foreground">
+				<Accordion.Trigger className="group flex min-h-11 flex-1 items-center justify-between gap-4 rounded-xl px-2 text-start font-medium text-muted-foreground text-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:text-foreground">
 					<LocalizedCopy value={group.title} />
 					<ChevronDown
 						aria-hidden="true"
@@ -167,7 +167,7 @@ function Sheet({
 			role="dialog"
 			tabIndex={-1}
 		>
-			<div className="mb-1 flex items-center justify-between pl-2">
+			<div className="mb-1 flex items-center justify-between ps-2">
 				<p
 					className="font-semibold text-xl tracking-tight"
 					id={`${kind}-mobile-nav-title`}
@@ -176,7 +176,7 @@ function Sheet({
 				</p>
 				<button
 					aria-label={tl("Close {menuName} menu", {
-						menuName: SHEET_TITLES[kind],
+						menuName: tl(SHEET_TITLES[kind]),
 					})}
 					className="grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 					onClick={onClose}
@@ -251,7 +251,7 @@ export default function MobileNavSheets({
 				{open ? (
 					<motion.div
 						animate={{ opacity: 1, y: 0 }}
-						className="absolute right-3 bottom-full left-3 z-50 mb-8"
+						className="absolute start-3 end-3 bottom-full z-50 mb-8"
 						exit={{ opacity: 0, y: 24 }}
 						initial={{ opacity: 0, y: 24 }}
 						key="sheet"

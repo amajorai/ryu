@@ -97,7 +97,7 @@ export function ChatRowDisclosureButton({
 				(latestAgent || groupConversation ? (
 					<span
 						aria-label={runStatusDescription}
-						className={`absolute -top-0.5 -right-0.5 size-1.5 rounded-full ${dotRingClass} ${runStatus.dotClass}`}
+						className={`absolute -end-0.5 -top-0.5 size-1.5 rounded-full ${dotRingClass} ${runStatus.dotClass}`}
 						role="img"
 						title={runStatusDescription}
 					/>
@@ -119,7 +119,7 @@ export function ChatRowDisclosureButton({
 				className={`size-3 transition-[opacity,rotate] motion-reduce:transition-opacity ${
 					rowExpanded
 						? "opacity-100"
-						: "-rotate-90 opacity-0 group-hover/row:opacity-100"
+						: "-rotate-90 opacity-0 group-hover/row:opacity-100 rtl:rotate-90"
 				}`}
 				icon={ArrowDown01Icon}
 			/>

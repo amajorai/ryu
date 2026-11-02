@@ -8,41 +8,16 @@ import { productHref } from "../product-href.ts";
 import { NumberedSteps, SectionHeading } from "../sections.tsx";
 import type { ProductAudience, ProductExplainer } from "./explainer-types.ts";
 
+// The statement translates its whole paragraph at render, so it is a client
+// component of its own; re-exported to keep this module the sections' entry.
+export { ProductStatement } from "./product-statement.tsx";
+
 // The explainer sections a product page carries around its capabilities, each
 // rendered only when the product's explainer sets it (see ./explainers.ts).
 
 const itemTitleClass = "font-heading font-medium text-base text-foreground";
 const itemDescriptionClass =
 	"text-muted-foreground text-[15px] leading-relaxed";
-
-/** Splits a paragraph after its first sentence, so the lead can stand out. */
-function leadSentence(statement: string): [string, string] {
-	const match = statement.match(/^(.+?[.!?:])\s+(.*)$/s);
-	return match ? [match[1] ?? statement, match[2] ?? ""] : [statement, ""];
-}
-
-/** "What it is": one large paragraph, its first sentence in the foreground. */
-export function ProductStatement({ statement }: { statement: string }) {
-	const [lead, rest] = leadSentence(statement);
-	return (
-		<section
-			aria-labelledby="product-statement-heading"
-			className={landingSectionClass}
-			data-testid="product-statement"
-		>
-			<h2
-				className="font-medium text-muted-foreground text-sm"
-				id="product-statement-heading"
-			>
-				What it is
-			</h2>
-			<p className="mt-6 max-w-4xl text-balance font-heading font-medium text-2xl text-foreground leading-snug tracking-[-0.02em] md:text-3xl md:leading-snug">
-				{lead}
-				{rest ? <span className="text-muted-foreground"> {rest}</span> : null}
-			</p>
-		</section>
-	);
-}
 
 export function ProductHowItWorks({
 	steps,
@@ -108,7 +83,7 @@ export function ProductWorksWith({ slugs }: { slugs: readonly string[] }) {
 						>
 							<span className={itemTitleClass}>{product.name}</span>
 							<span className={itemDescriptionClass}>{product.tagline}</span>
-							<LinkArrow className="hidden text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground sm:inline-block" />
+							<LinkArrow className="hidden text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground sm:inline-block group-hover:rtl:-translate-x-0.5" />
 						</Link>
 					</li>
 				))}

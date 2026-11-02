@@ -161,8 +161,13 @@ export function WaitlistShareStep({
 				<Progress className="mt-4 gap-2" value={referralGoal.progressPercent}>
 					<ProgressLabel className="text-xs">
 						<span>
-							{formatCount(referralGoal.current) ?? "—"}{" "}
-							{referralGoal.current === 1 ? "referral" : "referrals"}
+							{tl(
+								"{count, plural, one {{formatted} referral} other {{formatted} referrals}}",
+								{
+									count: referralGoal.current,
+									formatted: formatCount(referralGoal.current) ?? "—",
+								}
+							)}
 						</span>
 						<span className="text-muted-foreground">
 							{referralGoal.target === null
@@ -187,7 +192,7 @@ export function WaitlistShareStep({
 				theme={metalTheme === "auto" ? "auto" : metalTheme}
 			>
 				<button
-					className="flex h-16 w-full items-center justify-between gap-3 rounded-[23px] bg-muted px-5 text-left transition-colors hover:bg-[color-mix(in_oklab,var(--muted),var(--foreground)_5%)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring"
+					className="flex h-16 w-full items-center justify-between gap-3 rounded-[23px] bg-muted px-5 text-start transition-colors hover:bg-[color-mix(in_oklab,var(--muted),var(--foreground)_5%)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring"
 					onClick={onCopyReferral}
 					type="button"
 				>

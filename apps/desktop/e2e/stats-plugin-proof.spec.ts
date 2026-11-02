@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/stats-plugin-proof.html";
 
@@ -70,9 +70,6 @@ test("opens the full stats breakdown and settings controls", async ({
 
 	await page.setViewportSize({ width: 1280, height: 1200 });
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/prompt-cache/session-stats.png"
-		),
+		path: proofEvidencePath("prompt-cache/session-stats.png"),
 	});
 });

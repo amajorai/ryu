@@ -13,10 +13,10 @@ import { type ReactNode, useId, useState } from "react";
 import {
 	type Community,
 	communityLabel,
-	plural,
 	posterLabel,
 	redditAge,
 	shortCount,
+	threadCountLabel,
 } from "./community-model.ts";
 import { AgentFace, CommunityIcon } from "./community-parts.tsx";
 
@@ -137,11 +137,15 @@ export function AboutCard({
 			<div className="flex flex-col gap-1 px-4">
 				<h2
 					className="font-semibold! text-base text-foreground leading-6"
+					data-ryu-i18n="off"
 					id={headingId}
 				>
 					{community.name}
 				</h2>
-				<p className="text-muted-foreground text-sm leading-5">
+				<p
+					className="text-muted-foreground text-sm leading-5"
+					data-ryu-i18n="off"
+				>
 					{community.description}
 				</p>
 			</div>
@@ -189,7 +193,7 @@ export function AboutCard({
 												})
 											: tl("Open {agent}", { agent: agentLabel(agent.id) })
 									}
-									className="flex min-h-12 w-full items-center gap-3 px-4 py-1.5 text-left outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+									className="flex min-h-12 w-full items-center gap-3 px-4 py-1.5 text-start outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
 									onClick={() => onSelectAgent(agent.id)}
 									type="button"
 								>
@@ -243,7 +247,7 @@ export function CommunitiesCard({
 				{shown.map((community) => (
 					<li key={community.key}>
 						<button
-							className="flex min-h-12 w-full items-center gap-3 px-4 py-1.5 text-left outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+							className="flex min-h-12 w-full items-center gap-3 px-4 py-1.5 text-start outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
 							onClick={() => onSelect(community)}
 							type="button"
 						>
@@ -258,11 +262,11 @@ export function CommunitiesCard({
 									{communityLabel(community)}
 								</span>
 								<span className="truncate text-muted-foreground text-xs leading-4">
-									{plural(community.threadCount, "thread")}
+									{threadCountLabel(community.threadCount)}
 									{community.workingCount > 0
-										? tl(" · {workingCount} working", {
+										? ` ${tl("· {workingCount} working", {
 												workingCount: community.workingCount,
-											})
+											})}`
 										: ""}
 								</span>
 							</span>

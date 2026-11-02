@@ -1,6 +1,7 @@
 import { Delete01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -57,7 +58,7 @@ export function McpKeyValueRows({
 					/>
 					<Button
 						aria-label={tl("Remove {label} {index}", {
-							label: label.toLowerCase(),
+							label: sentenceLabel(tl, label),
 							index: String(index + 1),
 						})}
 						onClick={() => onRemove(index)}

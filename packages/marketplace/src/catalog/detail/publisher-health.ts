@@ -17,10 +17,40 @@ export interface PublisherHealthInput {
 	signatureStatus?: PublisherSignatureStatus;
 }
 
+/** Which disclosure row a signal fills; the card owns each row's label. */
+export type PublisherHealthSignalId =
+	| "identity"
+	| "signature"
+	| "review"
+	| "integrity"
+	| "capabilities"
+	| "ratings";
+
+/**
+ * A signal's verdict as a message id, never English text: the card renders it
+ * with `tl()` so the safety-relevant words translate with the labels beside
+ * them. `capabilities` and `rating` carry raw numbers the card formats for the
+ * UI locale.
+ */
+export type PublisherHealthValue =
+	| { id: "staff-verified" }
+	| { id: "identity-verified" }
+	| { id: "not-verified" }
+	| { id: "signature-verified" }
+	| { id: "signature-invalid" }
+	| { id: "unsigned" }
+	| { id: "not-reported" }
+	| { id: "reviewed" }
+	| { id: "not-reviewed" }
+	| { id: "checksum-recorded" }
+	| { id: "checksum-missing" }
+	| { count: number; id: "capabilities" }
+	| { average: number; count: number; id: "rating" };
+
 export interface PublisherHealthSignal {
-	label: string;
+	id: PublisherHealthSignalId;
 	status: "good" | "neutral" | "warning";
-	value: string;
+	value: PublisherHealthValue;
 }
 
 export interface PublisherHealth {
@@ -58,60 +88,66 @@ export function calculatePublisherHealth(
 	);
 	const signals: PublisherHealthSignal[] = [
 		{
-			label: "Publisher identity",
+			id: "identity",
 			status: input.publisherTrust === "dotted" ? "warning" : "good",
-			value:
-				input.publisherTrust === "gold"
-					? "Ryu staff verified"
-					: input.publisherTrust === "blue"
-						? "Stripe identity verified"
-						: "Not verified",
+			value: {
+				id:
+					input.publisherTrust === "gold"
+						? "staff-verified"
+						: input.publisherTrust === "blue"
+							? "identity-verified"
+							: "not-verified",
+			},
 		},
 		{
-			label: "Release signature",
+			id: "signature",
 			status:
 				signatureStatus === "verified"
 					? "good"
 					: signatureStatus === "invalid"
 						? "warning"
 						: "neutral",
-			value:
-				signatureStatus === "verified"
-					? "Verified"
-					: signatureStatus === "invalid"
-						? "Invalid"
-						: signatureStatus === "unsigned"
-							? "Unsigned"
-							: "Not reported",
+			value: {
+				id:
+					signatureStatus === "verified"
+						? "signature-verified"
+						: signatureStatus === "invalid"
+							? "signature-invalid"
+							: signatureStatus === "unsigned"
+								? "unsigned"
+								: "not-reported",
+			},
 		},
 		{
-			label: "Ryu code review",
+			id: "review",
 			status:
 				input.reviewed === true
 					? "good"
 					: input.reviewed === false
 						? "warning"
 						: "neutral",
-			value:
-				input.reviewed === true
-					? "Reviewed"
-					: input.reviewed === false
-						? "Not reviewed"
-						: "Not reported",
+			value: {
+				id:
+					input.reviewed === true
+						? "reviewed"
+						: input.reviewed === false
+							? "not-reviewed"
+							: "not-reported",
+			},
 		},
 		{
-			label: "Package integrity",
+			id: "integrity",
 			status: input.packageChecksum ? "good" : "neutral",
-			value: input.packageChecksum
-				? "SHA-256 recorded"
-				: "Checksum not reported",
+			value: {
+				id: input.packageChecksum ? "checksum-recorded" : "checksum-missing",
+			},
 		},
 	];
 	if (input.capabilities && input.capabilities.length > 0) {
 		signals.push({
-			label: "Declared capabilities",
+			id: "capabilities",
 			status: input.capabilities.length > 4 ? "warning" : "neutral",
-			value: `${input.capabilities.length} requested`,
+			value: { count: input.capabilities.length, id: "capabilities" },
 		});
 	}
 	if (
@@ -120,9 +156,13 @@ export function calculatePublisherHealth(
 		isNativeNumber(input.ratingAverage)
 	) {
 		signals.push({
-			label: "Community ratings",
+			id: "ratings",
 			status: input.ratingAverage >= 4 ? "good" : "neutral",
-			value: `${input.ratingAverage.toFixed(1)} / 5 (${input.ratingCount})`,
+			value: {
+				average: input.ratingAverage,
+				count: input.ratingCount,
+				id: "rating",
+			},
 		});
 	}
 	return { score, signals };

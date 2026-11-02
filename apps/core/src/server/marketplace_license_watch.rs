@@ -20,6 +20,7 @@ use rand::Rng;
 
 use super::ServerState;
 use crate::catalog_source::license::{LicenseRevocation, LicensedItem, RevalidationPass};
+use crate::i18n::{messages, AlertText, Join, Message};
 
 /// Delay before the first pass, so startup is not slowed by license probes.
 const FIRST_PASS_DELAY: Duration = Duration::from_secs(5 * 60);
@@ -215,25 +216,18 @@ async fn disable_plugin(state: &ServerState, id: &str) -> Result<(), String> {
 }
 
 /// Record why the item stopped on the activity feed and in the signed-in
-/// member's inbox (which also raises the desktop toast).
+/// member's inbox (which also raises the desktop toast and the push). The feed
+/// and inbox are rendered in the node's language, each push in its device's;
+/// the metadata keeps the English reason.
 async fn record_revocation(
     state: &ServerState,
     revocation: &LicenseRevocation,
     disable_error: Option<&String>,
 ) {
     let LicensedItem { kind, id } = &revocation.item;
-    let title = if disable_error.is_some() {
-        format!("Marketplace license revoked for {id}")
-    } else {
-        format!("{id} was disabled: Marketplace license revoked")
-    };
-    let body = match disable_error {
-        Some(error) => format!(
-            "{} It could not be disabled automatically ({error}); disable it from Settings.",
-            revocation.reason
-        ),
-        None => revocation.reason.clone(),
-    };
+    let locale = crate::i18n::locale::node_locale().await;
+    let text = revocation_text(revocation, disable_error);
+    let (title, body) = text.render(locale);
     let item = ryu_activity::ActivityItem::new(
         LICENSE_REVOKED_ACTIVITY_KIND,
         "marketplace",
@@ -256,13 +250,38 @@ async fn record_revocation(
     let Some(user_id) = crate::auth::load_accounts().active_user_id else {
         return;
     };
-    if let Err(error) = crate::notify::deliver_user_notification(
-        &store, &user_id, &title, &body, "warning", None, None, false, None,
+    // The inbox row and toast are in the node's language; each device's push
+    // is rendered in the locale it registered with.
+    if let Err(error) = crate::notify::deliver_localized_user_notification(
+        &store,
+        &user_id,
+        &text,
+        "warning",
+        None,
+        |title, body| (title, body),
     )
     .await
     {
         tracing::warn!("license watch: failed to notify: {error}");
     }
+}
+
+/// The notification for one revocation: the title says whether the item was
+/// disabled, the body gives the reason (and the disable failure, if any).
+fn revocation_text(revocation: &LicenseRevocation, disable_error: Option<&String>) -> AlertText {
+    let id = &revocation.item.id;
+    let title = match disable_error {
+        Some(_) => Message::new(messages::LICENSE_REVOKED_TITLE_MESSAGE),
+        None => Message::new(messages::LICENSE_DISABLED_TITLE_MESSAGE),
+    }
+    .text("item", id.clone());
+    let mut body = vec![revocation.message.clone()];
+    if let Some(error) = disable_error {
+        body.push(
+            Message::new(messages::LICENSE_DISABLE_FAILED_MESSAGE).text("error", error.clone()),
+        );
+    }
+    AlertText::new(title, body, Join::Sentences)
 }
 
 #[cfg(test)]
@@ -324,10 +343,10 @@ mod tests {
             }]
         );
 
-        let revocation = LicenseRevocation {
-            item: watched[0].clone(),
-            reason: "`plugin/acme.paid`: this Marketplace purchase was refunded".to_owned(),
-        };
+        let revocation = LicenseRevocation::new(
+            watched[0].clone(),
+            Message::new(messages::LICENSE_REFUNDED_MESSAGE).text("item", "plugin/acme.paid"),
+        );
         enforce_revocation(&state, &InstalledVia::PluginStore, &revocation).await;
 
         let record = state.app_store.get_record("acme.paid").await.unwrap();
@@ -344,9 +363,45 @@ mod tests {
             .expect("revocation recorded on the activity feed");
         assert_eq!(entry.metadata["id"], "acme.paid");
         assert_eq!(entry.metadata["disabled"], true);
+        // The feed text follows the node's language; the metadata keeps the
+        // English reason.
+        assert!(entry.metadata["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("refunded")));
         assert!(entry
             .body
             .as_deref()
-            .is_some_and(|body| body.contains("refunded")));
+            .is_some_and(|body| body.contains("plugin/acme.paid")));
+    }
+
+    #[test]
+    fn the_revocation_notification_renders_per_locale() {
+        let revocation = LicenseRevocation::new(
+            LicensedItem {
+                kind: "plugin".to_owned(),
+                id: "acme.paid".to_owned(),
+            },
+            Message::new(messages::LICENSE_DISPUTED_MESSAGE).text("item", "plugin/acme.paid"),
+        );
+        let (title, body) = revocation_text(&revocation, None).render("en");
+        assert_eq!(
+            title,
+            "Disabled acme.paid because its Marketplace license was revoked"
+        );
+        assert_eq!(body, revocation.reason);
+        let error = "store locked".to_owned();
+        let (title, body) = revocation_text(&revocation, Some(&error)).render("en");
+        assert_eq!(title, "Marketplace license revoked for acme.paid");
+        assert!(body.ends_with(
+            "It could not be disabled automatically (store locked). Disable it from Settings."
+        ));
+        // Japanese: the catalog translation once it lands, else English; the
+        // item id and the relayed error are inserted verbatim either way.
+        let (title, body) = revocation_text(&revocation, Some(&error)).render("ja");
+        assert!(title.contains("acme.paid"), "{title}");
+        assert!(
+            body.contains("plugin/acme.paid") && body.contains("store locked"),
+            "{body}"
+        );
     }
 }

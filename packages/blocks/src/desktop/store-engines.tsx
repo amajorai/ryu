@@ -1,4 +1,5 @@
 "use client";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import type { CatalogItem } from "@ryuhq/core-client/catalog";
 
 // Presentational layer of the desktop Store → Engines section. The live app
@@ -108,7 +109,7 @@ export function EmptyGroupHint({ label }: { label: string }) {
 	return (
 		<p className="text-muted-foreground text-sm">
 			{tl("No {engineGroup} engines available yet.", {
-				engineGroup: label.toLowerCase(),
+				engineGroup: sentenceLabel(tl, label),
 			})}
 		</p>
 	);

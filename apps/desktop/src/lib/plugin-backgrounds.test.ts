@@ -6,6 +6,7 @@ import {
 	getMarketplaceBackdrops,
 	isPluginBackgroundId,
 	loadPluginBackgrounds,
+	savePluginBackgrounds,
 } from "./plugin-backgrounds.ts";
 
 const background: PluginBackground = {
@@ -99,6 +100,33 @@ describe("marketplace backdrop resolution", () => {
 				{ ...contribution, params: { patternId: "untrusted-css" } },
 			])
 		).toEqual([]);
+	});
+
+	test("resolves a contributed PatternCraft wallpaper by its scoped id", () => {
+		const id = "@example/wallpapers:patterncraft-grid";
+		expect(backdropByAvailableId(id)).toBeUndefined();
+		savePluginBackgrounds([
+			{
+				...background,
+				backdropId: "patterncraft-css",
+				id,
+				label: "PatternCraft Adapter Grid",
+				params: { patternId: "grid-quad-purple-glow" },
+			},
+		]);
+		try {
+			const resolved = backdropByAvailableId(id);
+			expect(resolved?.id).toBe(id);
+			expect(resolved?.origin).toBe("marketplace");
+			expect(resolved?.render.kind).toBe("css");
+			// The bundled defaults stay resolvable beside the contribution.
+			expect(
+				backdropByAvailableId("com.ryu.patterncraft:top-gradient-radial")?.id
+			).toBe("com.ryu.patterncraft:top-gradient-radial");
+		} finally {
+			savePluginBackgrounds([]);
+		}
+		expect(backdropByAvailableId(id)).toBeUndefined();
 	});
 
 	test("recognizes only stable namespaced contribution ids", () => {

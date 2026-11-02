@@ -399,7 +399,13 @@ export function AppList({
 				<div className="flex flex-col gap-6">
 					{sections.map((section) => (
 						<StoreShelf
-							description={`${formatCount(section.items.length) ?? "—"} ${section.items.length === 1 ? "listing" : "listings"}`}
+							description={tl(
+								"{count, plural, one {{formatted} listing} other {{formatted} listings}}",
+								{
+									count: section.items.length,
+									formatted: formatCount(section.items.length) ?? "—",
+								}
+							)}
 							items={section.items}
 							key={section.label}
 							onOpenCategory={() => setOpenCategory(section.label)}

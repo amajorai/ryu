@@ -38,7 +38,7 @@ export function PromptRunHistory({
 	}
 	return (
 		<div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/20 p-2">
-			<span className="type-caption mr-1 font-medium">Runs</span>
+			<span className="type-caption me-1 font-medium">Runs</span>
 			{runs.slice(0, 8).map((run) => (
 				<div className="flex items-center gap-0.5" key={run.id}>
 					{editingId === run.id ? (

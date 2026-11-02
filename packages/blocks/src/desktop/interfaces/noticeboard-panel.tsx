@@ -1,10 +1,10 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, RefObject } from "react";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import { type NoticeboardNote, noteByline } from "./noticeboard-model.ts";
 import { PinDot } from "./noticeboard-paper.tsx";
 
@@ -53,14 +53,12 @@ export function NoticeboardPanel({
 						ref={headingRef}
 						tabIndex={-1}
 					>
-						{note?.thread.title || "New note"}
+						{note?.thread.title || tr("New note")}
 					</h2>
 					{note ? (
 						<p className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs leading-4">
 							<PinDot className="size-1.5" halo={false} status={note.status} />
-							<span className="shrink-0">
-								{THREAD_STATUS_LABELS[note.status]}
-							</span>
+							<span className="shrink-0">{threadStatusLabel(note.status)}</span>
 							<span aria-hidden="true">·</span>
 							<span className="truncate">{noteByline(note)}</span>
 							{age ? (

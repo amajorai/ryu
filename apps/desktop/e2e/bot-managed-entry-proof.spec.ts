@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { AgentSelection } from "../src/lib/api/preferences.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const cloudPreferenceKey = "default-cloud-agent-selection";
 // Independent expected wire contract; the browser runs the real preference client.
@@ -16,10 +17,7 @@ const autoCloudSelection: AgentSelection = {
 const path = `/api/preferences/${cloudPreferenceKey}`;
 const proofDir = resolve(
 	process.env.RYU_BOT_ENTRY_PROOF_DIR ??
-		resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-bot-entry"
-		)
+		proofEvidencePath("test-coverage-sweep-20260924/parallel/desktop-bot-entry")
 );
 interface Call {
 	auth?: string;

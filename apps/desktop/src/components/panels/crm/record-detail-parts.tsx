@@ -180,7 +180,7 @@ export function RelationPicker({
 					{hits.map((hit) => (
 						<li key={hit.id}>
 							<button
-								className="w-full truncate rounded-lg px-1 py-0.5 text-left text-sm hover:bg-muted"
+								className="w-full truncate rounded-lg px-1 py-0.5 text-start text-sm hover:bg-muted"
 								onClick={() => {
 									onPick(hit.id);
 									setQuery("");

@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const code = {
 	device_code: "fixture-device",
@@ -113,10 +113,7 @@ test("closing device sign-in cancels its delay and held token request", async ({
 		).toBeVisible();
 		await page.clock.runFor(1000);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/device-cancel-completed.png"
-			),
+			path: proofEvidencePath("performance-sweep/device-cancel-completed.png"),
 			fullPage: true,
 			animations: "disabled",
 		});

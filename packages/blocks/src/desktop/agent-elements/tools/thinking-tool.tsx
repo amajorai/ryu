@@ -1,8 +1,10 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { AgentActivity } from "@ryu/ui/components/agents/agent-activity";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { memo, useMemo } from "react";
 import { useToolComplete } from "../hooks/use-tool-complete.ts";
+import { formatDurationParts } from "../locale-format.ts";
 import type { StepState, TimelineStep } from "../types/timeline.ts";
 import type { NativeSdkValue } from "../utils/native-sdk-observation.ts";
 import {
@@ -15,11 +17,18 @@ import { resolveThinkingStepState } from "./thinking-state.ts";
 function formatDuration(ms: number): string {
 	const totalSec = Math.max(0, Math.round(ms / 1000));
 	if (totalSec < 60) {
-		return `${totalSec}s`;
+		return formatDurationParts([[totalSec, "second"]]);
 	}
 	const minutes = Math.floor(totalSec / 60);
 	const seconds = totalSec % 60;
-	return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+	return formatDurationParts(
+		seconds > 0
+			? [
+					[minutes, "minute"],
+					[seconds, "second"],
+				]
+			: [[minutes, "minute"]]
+	);
 }
 
 export interface ThinkingCollapsedProps {
@@ -61,14 +70,22 @@ export function ThinkingCollapsed({
 
 	const sizeHint = useMemo(() => {
 		if (isNativeNumber(tokenCount) && tokenCount > 0) {
-			return `${tokenCount} tokens`;
+			return tl(
+				"{count, plural, one {{countText} token} other {{countText} tokens}}",
+				{
+					count: tokenCount,
+					countText: formatCount(tokenCount) ?? String(tokenCount),
+				}
+			);
 		}
 		const trimmed = reasoningText.trim();
 		if (!trimmed) {
 			return null;
 		}
-		return `${trimmed.split(/\s+/).filter(Boolean).length} words`;
-	}, [reasoningText, tokenCount]);
+		return tl("{count, plural, one {# word} other {# words}}", {
+			count: trimmed.split(/\s+/).filter(Boolean).length,
+		});
+	}, [reasoningText, tokenCount, tl]);
 
 	const summary = durationLabel
 		? tl("Thought for {durationLabel}", { durationLabel })

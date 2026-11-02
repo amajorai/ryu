@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { Menu, Plus } from "lucide-react";
@@ -51,7 +52,13 @@ export function PostsHeader({
 					<span className="hidden md:flex">
 						<PostsFacepile
 							agents={members}
-							label={`${members.length} ${members.length === 1 ? "member" : "members"}: ${members.map((agent) => agent.name).join(", ")}`}
+							label={tr(
+								"{count, plural, one {# member} other {# members}}: {names}",
+								{
+									count: members.length,
+									names: members.map((agent) => agent.name).join(", "),
+								}
+							)}
 							size={24}
 						/>
 					</span>

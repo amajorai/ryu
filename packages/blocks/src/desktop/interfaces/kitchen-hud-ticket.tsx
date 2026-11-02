@@ -134,7 +134,7 @@ export function TicketCard({
 				aria-current={active ? "true" : undefined}
 				aria-label={ticketLabel(ticket, now, act)}
 				className={cn(
-					"relative flex w-(--ticket-width) flex-col rounded-t-md bg-(--gk-paper) pb-2.5 text-left text-(--gk-paper-ink)",
+					"relative flex w-(--ticket-width) flex-col rounded-t-md bg-(--gk-paper) pb-2.5 text-start text-(--gk-paper-ink)",
 					TORN,
 					GAME_FOCUS
 				)}
@@ -161,7 +161,7 @@ export function TicketCard({
 				>
 					<span
 						className={cn(
-							"absolute inset-y-0 left-0 transition-[width] duration-700 ease-linear motion-reduce:transition-none",
+							"absolute inset-y-0 start-0 transition-[width] duration-700 ease-linear motion-reduce:transition-none",
 							STATE_TONE[state]
 						)}
 						style={{ width: `${bar * 100}%` }}
@@ -197,7 +197,10 @@ export function TicketCard({
 							{timer}
 						</span>
 					</span>
-					<span className="line-clamp-2 font-semibold text-[15px] leading-5">
+					<span
+						className="line-clamp-2 font-semibold text-[15px] leading-5"
+						data-ryu-i18n="off"
+					>
 						{ticket.title}
 					</span>
 					<span className="mt-auto flex items-center gap-1.5 font-bold text-[12px] uppercase leading-4 tracking-wide">

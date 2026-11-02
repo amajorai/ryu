@@ -77,7 +77,7 @@ function RemoteThreadRow({
 		<button
 			aria-disabled={disabled || undefined}
 			className={cn(
-				"flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+				"flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-start text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring",
 				disabled
 					? "cursor-default opacity-60"
 					: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"

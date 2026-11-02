@@ -1,0 +1,160 @@
+name: images
+
+# Builds the hosted Core and Gateway container images and pushes them to GHCR, so
+# the production host only PULLS them instead of compiling Rust next to the live
+# services. This runs here, in the public hub, because Actions minutes are free on
+# public repositories; the private monorepo builds only images whose source is
+# not published.
+#
+# The binaries are compiled on the runner with a persistent cargo cache, then
+# packaged by the `prebuilt` target of the root Dockerfile and
+# apps/gateway/Dockerfile. A change therefore recompiles incrementally, instead
+# of the ~34-minute cold in-Docker compile the default target does. Gateway is
+# compiled once and goes into both images.
+#
+# Published:
+#   ghcr.io/<owner>/ryu-core:latest     and :<commit sha>
+#   ghcr.io/<owner>/ryu-gateway:latest  and :<commit sha>
+#
+# Optional redeploy: set the repository secrets CORE_DEPLOY_HOOK_URL and/or
+# GATEWAY_DEPLOY_HOOK_URL to the Dokploy app's deploy webhook URL (plus
+# CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET when Cloudflare Access fronts it).
+# A webhook redeploys only its own app, so no general deploy credential is stored
+# here. Without them the images are still pushed and nothing is redeployed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/core/**"
+      - "apps/gateway/**"
+      - "crates/**"
+      - "vendor/**"
+      - "generated/**"
+      - "Dockerfile"
+      - "docker-entrypoint.sh"
+      - "config/node-config.example.json"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and push Core + Gateway images
+    # Never from a fork: this job pushes images and may trigger a redeploy.
+    if: github.repository_owner == 'amajorai'
+    runs-on: ubuntu-latest
+    env:
+      # Same guard as canary.yml for vendored CMake builds on CMake >= 4.0.
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+      # Keep in step with the root Dockerfile's `builder` stage and canary.yml.
+      CORE_FEATURES: sandbox-wasmtime,voice-parakeet,voice-vad
+      # Optional compile-time Marketplace verifying key (see the root Dockerfile).
+      RYU_MARKETPLACE_PUBLIC_KEY: ${{ vars.RYU_MARKETPLACE_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # ubuntu-latest's glibc is older than debian:trixie-slim's (2.41), which the
+      # runtime images use, so these binaries start there.
+      - name: Linux build deps
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+
+      - name: Install protoc (prost-build)
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            apps/core
+            apps/gateway
+          cache-on-failure: true
+
+      - name: Build Gateway
+        run: cargo build --locked --release --manifest-path apps/gateway/Cargo.toml
+
+      - name: Build Core
+        run: cargo build --locked --release --manifest-path apps/core/Cargo.toml --features "$CORE_FEATURES"
+
+      # Asserts what cargo actually BUILT, as canary.yml does: a Core missing a
+      # shipped feature degrades silently at runtime.
+      - name: Assert Core's shipped feature set was built
+        env:
+          TARGET_DIR: apps/core
+          TARGET_BIN: ryu-core
+          FEATURES: ${{ env.CORE_FEATURES }}
+        run: bash .github/scripts/assert-feature-set.sh
+
+      - name: Stage binaries for the prebuilt image targets
+        run: |
+          mkdir -p .docker-prebuilt
+          cp apps/core/target/release/ryu-core .docker-prebuilt/ryu-core
+          cp apps/gateway/target/release/ryu-gateway .docker-prebuilt/ryu-gateway
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ryu-core
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          target: prebuilt
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ryu-core:latest
+            ghcr.io/${{ github.repository_owner }}/ryu-core:${{ github.sha }}
+          cache-from: type=gha,scope=image-core
+          cache-to: type=gha,mode=max,scope=image-core
+
+      - name: Build and push ryu-gateway
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/gateway/Dockerfile
+          target: prebuilt
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ryu-gateway:latest
+            ghcr.io/${{ github.repository_owner }}/ryu-gateway:${{ github.sha }}
+          cache-from: type=gha,scope=image-gateway
+          cache-to: type=gha,mode=max,scope=image-gateway
+
+      - name: Redeploy Core and Gateway
+        env:
+          CORE_DEPLOY_HOOK_URL: ${{ secrets.CORE_DEPLOY_HOOK_URL }}
+          GATEWAY_DEPLOY_HOOK_URL: ${{ secrets.GATEWAY_DEPLOY_HOOK_URL }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          deploy() {
+            local name="$1" url="$2"
+            if [ -z "$url" ]; then
+              echo "::notice::$name: no deploy hook secret set; image pushed, nothing redeployed."
+              return 0
+            fi
+            local headers=()
+            if [ -n "$CF_ACCESS_CLIENT_ID" ]; then
+              headers+=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+            fi
+            curl -sf -X POST "${headers[@]}" "$url" >/dev/null
+            echo "$name: redeploy triggered."
+          }
+          deploy core "$CORE_DEPLOY_HOOK_URL"
+          deploy gateway "$GATEWAY_DEPLOY_HOOK_URL"

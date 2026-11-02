@@ -3,7 +3,6 @@ import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
@@ -14,7 +13,12 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import { inlineScrollOffset, scrollInlineBy } from "./inline-direction.ts";
+import {
+	agentById,
+	compactAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import { notebookEditedLabel, notebookPageTitle } from "./notebook-model.ts";
 import { NotebookPageGlyph, NotebookStatusMark } from "./notebook-parts.tsx";
 
@@ -28,7 +32,7 @@ export const SLOT =
 export const CARD_HEIGHT = "h-36";
 
 const CARD = cn(
-	"group/card relative flex w-full flex-col overflow-hidden rounded-lg bg-card text-left outline-none ring-1 ring-border/70 transition-colors duration-100 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/60 active:bg-muted/60 dark:ring-border/50",
+	"group/card relative flex w-full flex-col overflow-hidden rounded-lg bg-card text-start outline-none ring-1 ring-border/70 transition-colors duration-100 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/60 active:bg-muted/60 dark:ring-border/50",
 	CARD_HEIGHT
 );
 
@@ -52,8 +56,8 @@ export function PageCard({
 		<li className={SLOT}>
 			<button
 				aria-label={tl("{title}, {status}, edited {edited}", {
-					edited: notebookEditedLabel(thread.updatedAt, now).toLowerCase(),
-					status: THREAD_STATUS_LABELS[status],
+					edited: notebookEditedLabel(thread.updatedAt, now),
+					status: threadStatusLabel(status),
 					title,
 				})}
 				className={CARD}
@@ -67,7 +71,10 @@ export function PageCard({
 						<NotebookPageGlyph className="size-5" />
 					</span>
 				</span>
-				<span className="line-clamp-2 px-4 pt-2 font-medium text-sm leading-5">
+				<span
+					className="line-clamp-2 px-4 pt-2 font-medium text-sm leading-5"
+					data-ryu-i18n="off"
+				>
 					{title}
 				</span>
 				<span className="mt-auto flex items-center gap-1.5 px-4 pb-3 text-muted-foreground text-xs">
@@ -118,8 +125,9 @@ export function Gallery({
 		if (!list) {
 			return;
 		}
-		const start = list.scrollLeft > 6;
-		const end = list.scrollLeft + list.clientWidth < list.scrollWidth - 6;
+		const offset = inlineScrollOffset(list);
+		const start = offset > 6;
+		const end = offset + list.clientWidth < list.scrollWidth - 6;
 		setEdges((previous) =>
 			previous.start === start && previous.end === end
 				? previous
@@ -138,10 +146,9 @@ export function Gallery({
 	}, [measure]);
 	const page = (direction: 1 | -1) => {
 		const list = listRef.current;
-		list?.scrollBy({
-			behavior: "smooth",
-			left: direction * list.clientWidth * 0.8,
-		});
+		if (list) {
+			scrollInlineBy(list, direction * list.clientWidth * 0.8);
+		}
 	};
 	// Whole cards fill the column and the row ends flush on a card edge; the
 	// arrow on that edge, faint until hover, says there is more. The list
@@ -161,21 +168,24 @@ export function Gallery({
 			{edges.start ? (
 				<button
 					aria-label="Scroll recent pages back"
-					className={cn(arrow, "-left-2")}
+					className={cn(arrow, "-start-2")}
 					onClick={() => page(-1)}
 					type="button"
 				>
-					<ChevronLeft aria-hidden="true" className="size-4" />
+					<ChevronLeft aria-hidden="true" className="size-4 rtl:-scale-x-100" />
 				</button>
 			) : null}
 			{edges.end ? (
 				<button
 					aria-label="Scroll recent pages forward"
-					className={cn(arrow, "-right-2")}
+					className={cn(arrow, "-end-2")}
 					onClick={() => page(1)}
 					type="button"
 				>
-					<ChevronRight aria-hidden="true" className="size-4" />
+					<ChevronRight
+						aria-hidden="true"
+						className="size-4 rtl:-scale-x-100"
+					/>
 				</button>
 			) : null}
 		</div>

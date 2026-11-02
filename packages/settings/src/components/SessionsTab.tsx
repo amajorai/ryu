@@ -1,6 +1,7 @@
 import { ComputerIcon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -14,7 +15,6 @@ import {
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../utils/api-client.ts";
@@ -34,6 +34,7 @@ import {
 export function SessionsTab() {
 	const queryClient = useQueryClient();
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale ?? activeLocale();
 
 	const { data, isLoading } = useQuery({
 		queryKey: ["sessions"],
@@ -180,9 +181,9 @@ export function SessionsTab() {
 													`${localizedDeviceSurfaceLabel(tl, surface)} · `}
 												{session.ipAddress && `${session.ipAddress} · `}
 												{tl("Created {relativeTime}", {
-													relativeTime: formatDistanceToNow(
-														new Date(session.createdAt),
-														{ addSuffix: true }
+													relativeTime: formatRelativeTime(
+														locale,
+														new Date(session.createdAt)
 													),
 												})}
 											</>

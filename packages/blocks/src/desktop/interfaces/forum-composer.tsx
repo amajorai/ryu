@@ -55,7 +55,7 @@ function PickerTrigger({
 				<button
 					className={cn(
 						FIELD,
-						"flex items-center gap-2 px-3.5 text-left aria-expanded:border-ring",
+						"flex items-center gap-2 px-3.5 text-start aria-expanded:border-ring",
 						className
 					)}
 					type="button"
@@ -140,7 +140,7 @@ export function ForumComposer({
 		return (
 			<div className={cn(FORUM_WRAP, "flex h-12 items-center gap-2")}>
 				<button
-					className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
+					className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-start text-sm outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
 					onClick={() => onMinimize(false)}
 					type="button"
 				>

@@ -1,7 +1,11 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { pluginDocumentSchema } from "../src/lib/api/plugin-wire-values.ts";
 import type { SubscriptionCostAccountUsage } from "../src/lib/api/subscription-costs.ts";
+import type {
+	ProviderUsageReading,
+	SubscriptionsSnapshot,
+} from "../src/lib/api/usage.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 function pricedAccount({
 	accountId,
@@ -74,6 +78,91 @@ const costAccounts: SubscriptionCostAccountUsage[] = [
 	}),
 ];
 
+/** The usage reading Core reports for one saved account. */
+function sessionReading(
+	providerId: string,
+	accountId: string
+): ProviderUsageReading {
+	return {
+		accountId,
+		agentId: providerId,
+		available: true,
+		engine: providerId,
+		meters: [],
+		plan: "Pro",
+		providerId,
+		reason: null,
+		windows: [
+			{
+				label: "Session",
+				remainingPercent: 75,
+				scope: "account",
+				targetId: "window:Session::18000",
+				usedPercent: 25,
+				window: "5h",
+				windowSeconds: 18_000,
+			},
+		],
+	};
+}
+
+const savedAccounts = [
+	{ accountId: "personal", label: "Personal", providerId: "codex" },
+	{ accountId: "work", label: "Work", providerId: "codex" },
+	{ accountId: "team", label: "Work", providerId: "claude" },
+] as const;
+
+/**
+ * Core's one `GET /api/usage/subscriptions` snapshot (266b70433f replaced the
+ * per-account `/accounts/<id>/usage` fan-out with it): every saved account of
+ * the proof catalog, each with the reading `readingFor` returns.
+ */
+function subscriptionsSnapshot(
+	readingFor: (providerId: string, accountId: string) => ProviderUsageReading
+): SubscriptionsSnapshot {
+	const providers = [
+		{ label: "ChatGPT", providerId: "codex" },
+		{ label: "Claude", providerId: "claude" },
+	];
+	return {
+		generatedAt: "2026-09-24T12:00:00Z",
+		providers: providers.map(({ label, providerId }) => ({
+			accounts: savedAccounts
+				.filter((account) => account.providerId === providerId)
+				.map((account) => ({
+					accountId: account.accountId,
+					active: true,
+					gatewayActive: false,
+					kind: "oauth",
+					label: account.label,
+					needsReauth: false,
+					poolEnabled: true,
+					state: "ok" as const,
+					updatedAt: 1_758_710_400_000,
+					usage: readingFor(providerId, account.accountId),
+				})),
+			activeAccountId: null,
+			capabilities: {
+				accountPing: false,
+				accountPinning: "none" as const,
+				accountUsage: true,
+				poolStrategies: ["manual" as const],
+				quotaObservations: false,
+			},
+			kind: "subscription" as const,
+			label,
+			managed: false,
+			providerId,
+		})),
+		version: 1,
+	};
+}
+
+/** Whether a request is the subscriptions snapshot (not a per-provider reading). */
+function isSubscriptionsSnapshot(pathname: string): boolean {
+	return pathname.endsWith("/api/usage/subscriptions");
+}
+
 test("retained usage page stays quiet while hidden and reuses fresh account data", async ({
 	page,
 }) => {
@@ -104,22 +193,11 @@ test("retained usage page stays quiet while hidden and reuses fresh account data
 				},
 			});
 		}
-		if (!(pathname.includes("/accounts/") && pathname.endsWith("/usage"))) {
+		if (!isSubscriptionsSnapshot(pathname)) {
 			return route.fulfill({ json: {} });
 		}
 		reads += 1;
-		await route.fulfill({
-			json: {
-				agent_id: "codex",
-				available: true,
-				engine: "codex",
-				plan: "Pro",
-				windows: [
-					{ label: "Session", used_percent: 25, window_seconds: 18_000 },
-				],
-				meters: [],
-			},
-		});
+		await route.fulfill({ json: subscriptionsSnapshot(sessionReading) });
 	});
 	await page.goto("/subscription-visibility-proof.html");
 	await expect(
@@ -135,7 +213,8 @@ test("retained usage page stays quiet while hidden and reuses fresh account data
 			.getByTestId("subscription-usage-account-personal")
 			.getByText("Personal", { exact: true })
 	).toBeVisible();
-	await expect.poll(() => reads).toBe(3);
+	// One snapshot read covers all three saved accounts.
+	await expect.poll(() => reads).toBe(1);
 	await expect.poll(() => costReads).toBe(1);
 	await expect(
 		page
@@ -187,14 +266,12 @@ test("retained usage page stays quiet while hidden and reuses fresh account data
 			.getByTestId("subscription-usage-account-personal")
 			.getByRole("progressbar", { name: "Session: 75% left" })
 	).toBeVisible();
-	expect(reads).toBe(3);
+	// Showing the retained page again reuses the fresh snapshot: no new read.
+	expect(reads).toBe(1);
 	expect(costReads).toBe(2);
 	expect(errors).toEqual([]);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/subscription-api-equivalent-usage-2026-09-24.png"
-		),
+		path: proofEvidencePath("subscription-api-equivalent-usage-2026-09-24.png"),
 		fullPage: true,
 		animations: "disabled",
 	});
@@ -219,23 +296,22 @@ test("a sealed-account read failure shows an unavailable usage state", async ({
 				json: { enabled: false, month: "2026-09", accounts: [] },
 			});
 		}
-		if (pathname.includes("/accounts/") && pathname.endsWith("/usage")) {
-			const failed = pathname.includes("/accounts/personal/");
+		if (isSubscriptionsSnapshot(pathname)) {
 			return route.fulfill({
-				json: failed
-					? {
-							agent_id: "codex",
-							available: false,
-							engine: "codex",
-							reason: "error",
-							windows: [],
-						}
-					: {
-							agent_id: "codex",
-							available: true,
-							engine: "codex",
-							windows: [{ label: "Session", used_percent: 25 }],
-						},
+				json: subscriptionsSnapshot((providerId, accountId) =>
+					accountId === "personal"
+						? {
+								accountId,
+								agentId: providerId,
+								available: false,
+								engine: providerId,
+								meters: [],
+								providerId,
+								reason: "error",
+								windows: [],
+							}
+						: sessionReading(providerId, accountId)
+				),
 			});
 		}
 		return route.fulfill({ json: {} });
@@ -251,10 +327,7 @@ test("a sealed-account read failure shows an unavailable usage state", async ({
 	await expect(account).not.toContainText("Start or sign in");
 	expect(errors).toEqual([]);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/subscription-usage-credential-error.png"
-		),
+		path: proofEvidencePath("subscription-usage-credential-error.png"),
 		fullPage: true,
 		animations: "disabled",
 	});

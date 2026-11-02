@@ -408,20 +408,20 @@ export function useChatMessagePipeline({
 			if (!inboxEnabled || mentions.length === 0) {
 				return;
 			}
+			const tl = tlRef.current;
 			const senderName =
-				oidcUser?.name?.trim() || oidcUser?.email?.trim() || "Someone";
-			const title = `${senderName} mentioned you`.slice(0, 120);
-			const body =
-				`${senderName} mentioned you in chat:\n${content.trim()}`.slice(
-					0,
-					1800
-				);
+				oidcUser?.name?.trim() || oidcUser?.email?.trim() || tl("Someone");
+			const title = tl("{senderName} mentioned you", { senderName });
+			const body = tl("{senderName} mentioned you in chat:\n{content}", {
+				content: content.trim(),
+				senderName,
+			});
 			void Promise.allSettled(
 				mentions.map((mention) =>
 					pluginHostInvoke(chatTarget, "@ryu/approvals", "notifications.send", {
-						body,
+						body: body.slice(0, 1800),
 						target_user_id: mention.id,
-						title,
+						title: title.slice(0, 120),
 					})
 				)
 			).then((results) => {
@@ -432,7 +432,11 @@ export function useChatMessagePipeline({
 				);
 				if (failedNames.length > 0) {
 					toast.error({
-						title: `Couldn't notify ${failedNames.join(", ")}`.slice(0, 180),
+						title: tlRef
+							.current("Couldn't notify {names}", {
+								names: failedNames.join(", "),
+							})
+							.slice(0, 180),
 					});
 				}
 			});

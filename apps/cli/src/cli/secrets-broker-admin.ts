@@ -145,9 +145,11 @@ async function brokerProposalsCommand(
 		if (ctx.flags.json) {
 			printJson(ctx, result);
 		} else {
-			ctx.io.out(
-				`${action === "approve" ? "Approved" : "Rejected"} proposal ${id}.\n`
-			);
+			const decided =
+				action === "approve"
+					? tf("Approved proposal {id}.", { id })
+					: tf("Rejected proposal {id}.", { id });
+			ctx.io.out(`${decided}\n`);
 		}
 		return 0;
 	}

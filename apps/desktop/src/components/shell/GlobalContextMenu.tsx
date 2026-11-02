@@ -339,7 +339,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 									<HugeiconsIcon className="h-4 w-4" icon={SunIcon} />
 									Light
 									{theme === "light" ? (
-										<span className="ml-auto text-muted-foreground text-xs">
+										<span className="ms-auto text-muted-foreground text-xs">
 											Current
 										</span>
 									) : null}
@@ -348,7 +348,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 									<HugeiconsIcon className="h-4 w-4" icon={MoonIcon} />
 									Dark
 									{theme === "dark" ? (
-										<span className="ml-auto text-muted-foreground text-xs">
+										<span className="ms-auto text-muted-foreground text-xs">
 											Current
 										</span>
 									) : null}
@@ -357,7 +357,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 									<HugeiconsIcon className="h-4 w-4" icon={LaptopIcon} />
 									System
 									{theme === "system" ? (
-										<span className="ml-auto text-muted-foreground text-xs">
+										<span className="ms-auto text-muted-foreground text-xs">
 											Current
 										</span>
 									) : null}

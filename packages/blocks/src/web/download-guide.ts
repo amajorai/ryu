@@ -9,6 +9,7 @@
 // extra confirmation from Gatekeeper or SmartScreen. The steps say so plainly
 // instead of leaving the visitor stuck at a warning dialog.
 
+import { translate as tl } from "@ryu/i18n/lite";
 import type { DownloadOS } from "./download-platform.ts";
 
 export type GuideBrowser =
@@ -272,7 +273,9 @@ export function installGuide(
 				steps: [
 					{
 						title: "Open the disk image",
-						description: `Open ${fileName ?? "the Ryu .dmg file"} from your downloads.`,
+						description: fileName
+							? tl("Open {fileName} from your downloads.", { fileName })
+							: tl("Open the Ryu .dmg file from your downloads."),
 					},
 					{
 						title: "Drag Ryu to Applications",
@@ -295,7 +298,9 @@ export function installGuide(
 				steps: [
 					{
 						title: "Run the installer",
-						description: `Open ${fileName ?? "the Ryu installer"} from your downloads.`,
+						description: fileName
+							? tl("Open {fileName} from your downloads.", { fileName })
+							: tl("Open the Ryu installer from your downloads."),
 					},
 					{
 						title: "Follow the setup",

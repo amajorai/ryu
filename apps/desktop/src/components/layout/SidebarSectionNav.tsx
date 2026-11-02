@@ -67,7 +67,7 @@ export function SidebarSectionNav({
 	return (
 		// Wrapper widens the hover hit-area so the thin peek sliver is easy to grab.
 		<div
-			className="absolute top-1/2 left-0 z-30 flex -translate-y-1/2 items-center pr-3"
+			className="absolute start-0 top-1/2 z-30 flex -translate-y-1/2 items-center pe-3"
 			onMouseEnter={() => setOpen(true)}
 			onMouseLeave={() => setOpen(false)}
 		>
@@ -99,7 +99,7 @@ export function SidebarSectionNav({
 				>
 					{items.map((item) => (
 						<button
-							className="truncate rounded-lg px-2 py-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
+							className="truncate rounded-lg px-2 py-1 text-start text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
 							key={item.key}
 							onClick={() => scrollToSection(item.key)}
 							type="button"

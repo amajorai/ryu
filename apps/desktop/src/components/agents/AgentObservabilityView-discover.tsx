@@ -1,6 +1,7 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -111,7 +112,7 @@ export function ObservabilityDiscoverSection({
 						<span className="text-muted-foreground/70 text-xs tabular-nums">
 							{tl("{count} events in {window}", {
 								count: String(entries.length),
-								window: windowLabel(timeRange).toLowerCase(),
+								window: sentenceLabel(tl, windowLabel(timeRange)),
 							})}
 						</span>
 					</div>

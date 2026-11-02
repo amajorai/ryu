@@ -198,9 +198,9 @@ export function ModelSpendCard() {
 					<SettingsCard className="overflow-x-auto py-2">
 						<table className="w-full text-sm">
 							<thead>
-								<tr className="border-border border-b text-left text-muted-foreground text-xs">
-									<th className="pr-3 pb-2 font-medium">Model</th>
-									<th className="pb-2 text-right font-medium">Requests</th>
+								<tr className="border-border border-b text-start text-muted-foreground text-xs">
+									<th className="pe-3 pb-2 font-medium">Model</th>
+									<th className="pb-2 text-end font-medium">Requests</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -209,8 +209,8 @@ export function ModelSpendCard() {
 										className="border-border border-b last:border-0"
 										key={m.id}
 									>
-										<td className="py-2 pr-3 font-mono text-xs">{m.id}</td>
-										<td className="py-2 text-right text-xs tabular-nums">
+										<td className="py-2 pe-3 font-mono text-xs">{m.id}</td>
+										<td className="py-2 text-end text-xs tabular-nums">
 											{formatNumber(m.count)}
 										</td>
 									</tr>

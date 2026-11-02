@@ -1,11 +1,18 @@
 import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
+// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
+// the tracked proof tree.
 const proof =
-	process.env.RYU_MERGE_PROOF_DIR ?? "../../docs/proof/merge-recovery-20261006";
+	process.env.RYU_MERGE_PROOF_DIR ??
+	process.env.RYU_PROOF_EVIDENCE_DIR ??
+	proofEvidencePath("merge-recovery-20261006");
 test("actual Desktop shell overlays side panes in a narrow window and restores them when wide", async ({
 	page,
 }) => {
+	// Run alone it also pays the dev server's cold compile of the whole shell.
+	test.setTimeout(120_000);
 	await page.emulateMedia({ reducedMotion: "reduce" });
 	await page.route("**/api/**", (route) => {
 		const path = new URL(route.request().url()).pathname;
@@ -57,7 +64,35 @@ test("actual Desktop shell overlays side panes in a narrow window and restores t
 
 	// cd5fcb4e28 folds the docked sidebar into the compact rail below 1024px,
 	// which gives Center room for a docked Right at 900px; 800px still leaves
-	// Center under its 400px minimum beside the 360px Right pane.
+	// Center under its 400px minimum beside the 360px Right pane. The fold lands
+	// in the same frame as the width change, so crossing to 900px never mounts
+	// the overlay sheet, not even for a frame.
+	await page.evaluate(() => {
+		const proofWindow = window as Window & { __overlayScrimMounts?: number };
+		proofWindow.__overlayScrimMounts = 0;
+		new MutationObserver(() => {
+			if (document.querySelector("[data-workbench-overlay-scrim]")) {
+				proofWindow.__overlayScrimMounts =
+					(proofWindow.__overlayScrimMounts ?? 0) + 1;
+			}
+		}).observe(document.body, { childList: true, subtree: true });
+	});
+	await page.setViewportSize({ width: 900, height: 900 });
+	await expect(
+		page.locator("[data-slot='sidebar'][data-state='collapsed']")
+	).toBeAttached();
+	await expect(right).toBeVisible();
+	await expect(page.locator("[data-narrow]")).toHaveAttribute(
+		"data-narrow",
+		"false"
+	);
+	expect(
+		await page.evaluate(
+			() =>
+				(window as Window & { __overlayScrimMounts?: number })
+					.__overlayScrimMounts
+		)
+	).toBe(0);
 	await page.setViewportSize({ width: 800, height: 900 });
 	await expect(page.locator("[data-narrow]")).toHaveAttribute(
 		"data-narrow",
@@ -168,6 +203,8 @@ test("actual Desktop shell moves Navigation to the Right pane and back", async (
 test("actual sidebar auto-rename updates its title and preserves it when the model refuses", async ({
 	page,
 }) => {
+	// Run alone it also pays the dev server's cold compile of the whole shell.
+	test.setTimeout(120_000);
 	await page.emulateMedia({ reducedMotion: "reduce" });
 	let title = "Plan the week";
 	let refuse = false;

@@ -15,9 +15,9 @@ import {
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { sileo } from "sileo";
+import { relativeTimeAgo } from "@/src/lib/time.ts";
 import { fetchDeviceLimitSummary } from "./device-limits-api.ts";
 import {
 	deviceSurfaceLabels,
@@ -204,12 +204,7 @@ export function SessionsTab() {
 										{surface && `${surfaceLabels[surface]} · `}
 										{session.ipAddress && `${session.ipAddress} · `}
 										{tl("Created {timeAgo}", {
-											timeAgo: formatDistanceToNow(
-												new Date(session.createdAt),
-												{
-													addSuffix: true,
-												}
-											),
+											timeAgo: relativeTimeAgo(session.createdAt),
 										})}
 									</p>
 								</SettingsItem>

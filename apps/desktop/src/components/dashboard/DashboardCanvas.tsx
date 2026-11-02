@@ -12,6 +12,7 @@
 import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
+import { useReactFlowAriaLabels } from "@ryu/blocks/desktop/react-flow-labels.ts";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Background,
@@ -138,6 +139,7 @@ function CanvasInner({
 	onAddWidget,
 	onViewportCenterChange,
 }: DashboardCanvasProps) {
+	const ariaLabels = useReactFlowAriaLabels();
 	const [nodes, setNodes, onNodesChange] = useNodesState<WidgetNode>([]);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const rf = useReactFlow();
@@ -250,6 +252,7 @@ function CanvasInner({
 	return (
 		<div className="h-full w-full" ref={containerRef}>
 			<ReactFlow
+				ariaLabelConfig={ariaLabels}
 				deleteKeyCode={null}
 				fitView
 				fitViewOptions={{ padding: 0.2, maxZoom: 1 }}

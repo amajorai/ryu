@@ -72,7 +72,9 @@ export function MailLabelChip({
 			)}
 			data-label-id={label.id}
 		>
-			<span className="truncate">{label.name}</span>
+			<span className="truncate" data-ryu-i18n="off">
+				{label.name}
+			</span>
 		</span>
 	);
 }

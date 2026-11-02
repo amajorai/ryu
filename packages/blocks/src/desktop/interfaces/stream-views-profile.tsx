@@ -70,7 +70,11 @@ function ProfileName({
 	onProfile: (agentId: string) => void;
 }) {
 	const tl = useLiteralMessages();
-	const name = <span className="truncate font-bold">{agent.name}</span>;
+	const name = (
+		<span className="truncate font-bold" data-ryu-i18n="off">
+			{agent.name}
+		</span>
+	);
 	return (
 		<h2 className="flex min-w-0 text-2xl text-foreground leading-8 tracking-tight">
 			{agents.length > 1 ? (
@@ -82,7 +86,7 @@ function ProfileName({
 							STREAM_FOCUS
 						)}
 					>
-						{name}
+						<span data-ryu-i18n="off">{name}</span>
 						<ChevronDown
 							aria-hidden="true"
 							className="mt-0.5 size-5 shrink-0 text-muted-foreground"
@@ -111,7 +115,9 @@ function ProfileName({
 									value={item.id}
 								>
 									<StreamAvatar agent={item} name={item.name} size={20} />
-									<span className="truncate">{item.name}</span>
+									<span className="truncate" data-ryu-i18n="off">
+										{item.name}
+									</span>
 								</DropdownMenuRadioItem>
 							))}
 						</DropdownMenuRadioGroup>
@@ -175,7 +181,10 @@ export function StreamProfileView({
 					<StreamAvatar agent={agent} name={agent.name} size={84} />
 				</div>
 				{agent.description ? (
-					<p className={cn("mt-4 text-foreground", STREAM_TEXT)}>
+					<p
+						className={cn("mt-4 text-foreground", STREAM_TEXT)}
+						data-ryu-i18n="off"
+					>
 						{agent.description}
 					</p>
 				) : null}

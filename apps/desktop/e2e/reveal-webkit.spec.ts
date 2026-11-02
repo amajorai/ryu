@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare global {
 	interface Window {
@@ -60,9 +60,8 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 			}
 		}
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				`../../../docs/proof/performance-sweep/reveal-webkit-${reducedMotion}-completed.png`
+			path: proofEvidencePath(
+				`performance-sweep/reveal-webkit-${reducedMotion}-completed.png`
 			),
 			fullPage: true,
 			animations: "disabled",

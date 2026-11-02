@@ -324,6 +324,14 @@ describe("mail model", () => {
 		expect(mailPageRange(0, 0)).toBe("0 of 0");
 	});
 
+	test("dates follow the UI locale, not the OS locale", () => {
+		const now = BASE;
+		expect(mailListDate(ago(60 * 24 * 3), now, "de")).toBe("9. Okt.");
+		expect(mailListDate(ago(60 * 24 * 3), now, "ja")).toBe("10月9日");
+		expect(mailLongDate(ago(18), now, "de")).toMatch(/\(vor 18 Minuten\)$/);
+		expect(mailLongDate(ago(18), now, "ja")).toMatch(/18 分前/);
+	});
+
 	test("compose turns subject and body into one prompt, filed by label", () => {
 		expect(mailComposePrompt(" Hello ", "")).toBe("Hello");
 		expect(mailComposePrompt("Plan", "Draft it")).toBe("Plan\n\nDraft it");

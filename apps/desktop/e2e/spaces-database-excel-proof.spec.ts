@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Drives the real SpaceDatabaseEditorPage (local, non-collaborative path) through
 // the spreadsheet features: formula columns, conditional formatting, the fill
@@ -260,10 +261,7 @@ test("Space database table behaves like a spreadsheet", async ({ page }) => {
 	}
 	expect(errors).toEqual([]);
 
-	const proofPath = path.join(
-		import.meta.dirname,
-		"../../../docs/proof/spaces-database-excel.png"
-	);
+	const proofPath = proofEvidencePath("spaces-database-excel.png");
 	await mkdir(path.dirname(proofPath), { recursive: true });
 	await page.screenshot({
 		path: proofPath,

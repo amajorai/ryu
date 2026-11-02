@@ -30,7 +30,7 @@ export interface ProviderProofSnapshot {
 	preferences: Record<string, string>;
 	requests: Array<{ body: unknown; method: string; path: string }>;
 	settingsNavigation: Array<{ open: boolean; section: string }>;
-	tauriCalls: Array<{ args: unknown; command: string; failed: boolean }>;
+	tauriCalls: Array<{ args?: unknown; command: string; failed: boolean }>;
 }
 
 // Screenshots are run output, not tracked proof: they go to this run's

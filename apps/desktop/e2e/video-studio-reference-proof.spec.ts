@@ -3,11 +3,9 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import type { ReferenceProfile } from "../../../apps-store/video-studio/shared/reference.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidenceDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
+const evidenceDir = proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 interface StudioRequest {
 	body?: unknown;

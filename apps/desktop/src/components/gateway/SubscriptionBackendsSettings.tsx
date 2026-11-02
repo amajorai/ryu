@@ -40,13 +40,13 @@ import {
 	CLOUD_TASK_BACKEND_LABELS,
 	type CloudTaskBackendId,
 	type CloudTaskBackendsView,
-	type CloudTaskBackendView,
 	type CloudTaskRoutingSettings,
 	clearCloudTaskBackendCooldown,
 	fetchCloudTaskBackends,
 	saveCloudTaskRouting,
 	startCloudTaskBackendSignIn,
 } from "@/src/lib/api/cloud-task-backends.ts";
+import { subscriptionBackendDescription } from "./subscription-backend-description.ts";
 
 interface EnvironmentOption {
 	id: string;
@@ -85,20 +85,6 @@ const presetIndex = (order: readonly CloudTaskBackendId[]): number => {
 	);
 	return index === -1 ? 0 : index;
 };
-
-function signInLabel(backend: CloudTaskBackendView): string {
-	if (!backend.installed) {
-		return "Not installed on this node";
-	}
-	switch (backend.signIn) {
-		case "subscription":
-			return "Signed in with your plan";
-		case "other_method":
-			return "Signed in with an API key, not your plan";
-		default:
-			return "Not signed in";
-	}
-}
 
 const errorText = (failure: unknown): string => {
 	if (failure instanceof ApiError) {
@@ -279,11 +265,7 @@ export function SubscriptionBackendsSettings({
 										) : null}
 									</div>
 								}
-								description={`${signInLabel(backend)}${
-									backend.cooldownSecondsRemaining
-										? ` · Usage limit reached; skipped for ${Math.ceil(backend.cooldownSecondsRemaining / 60)} min`
-										: ""
-								}${backend.installed ? "" : ` · Install it, then run \`${backend.signInCommand ?? ""}\``}`}
+								description={subscriptionBackendDescription(backend, tl)}
 								key={backend.backend}
 								title={CLOUD_TASK_BACKEND_LABELS[backend.backend]}
 							/>

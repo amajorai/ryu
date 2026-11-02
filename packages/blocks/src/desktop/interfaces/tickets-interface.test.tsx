@@ -451,7 +451,7 @@ describe("tickets model", () => {
 	test("time labels read like a help desk", () => {
 		expect(ticketTimeLabel(NOW - 20 * 1000, NOW, passthrough)).toBe("Just now");
 		expect(ticketTimeLabel(NOW - 18 * MINUTE, NOW, passthrough)).toBe(
-			"18 min ago"
+			"18 min. ago"
 		);
 		expect(ticketTimeLabel(0, NOW, passthrough)).toBe("");
 		const noon = new Date(2026, 9, 14, 12, 0).getTime();

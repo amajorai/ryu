@@ -1,11 +1,9 @@
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/extension-parity"
-);
+const proofDir = proofEvidencePath("extension-parity");
 test("standard app context, stable PiP, filesystem save, rich form and completed product proof", async ({
 	page,
 }) => {

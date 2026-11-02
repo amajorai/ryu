@@ -1,12 +1,9 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	type InterfaceThread,
-	THREAD_STATUS_LABELS,
-	threadStatus,
-} from "@ryuhq/protocol/interfaces";
+import { type InterfaceThread, threadStatus } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import { fullTime } from "./persona-model.ts";
 
 /**
@@ -126,13 +123,13 @@ export function ThreadLine({
 	return (
 		<li>
 			<button
-				className="-mx-2 flex h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+				className="-mx-2 flex h-9 w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 				onClick={() => onOpen(thread.id)}
 				type="button"
 			>
 				<BoardStatusDot status={status} />
 				<span className="min-w-0 flex-1 truncate text-sm">
-					{thread.title || "Untitled"}
+					{thread.title || tr("Untitled")}
 				</span>
 				<span
 					className={cn(
@@ -142,10 +139,10 @@ export function ThreadLine({
 							: "text-muted-foreground"
 					)}
 				>
-					{meta ?? THREAD_STATUS_LABELS[status]}
+					{meta ?? threadStatusLabel(status)}
 				</span>
 				<time
-					className="w-8 shrink-0 text-right text-muted-foreground text-xs tabular-nums"
+					className="w-8 shrink-0 text-end text-muted-foreground text-xs tabular-nums"
 					dateTime={thread.updatedAt}
 					title={fullTime(thread.updatedAt)}
 				>

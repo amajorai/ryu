@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export default defineConfig({
 	testDir: ".",
@@ -7,7 +8,7 @@ export default defineConfig({
 	timeout: 90_000,
 	retries: 0,
 	reporter: "list",
-	outputDir: "../../../docs/proof/sticky-tabs-2026-09-22",
+	outputDir: proofEvidencePath("sticky-tabs-2026-09-22"),
 	use: { baseURL: "http://127.0.0.1:5197", trace: "retain-on-failure" },
 	projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 	webServer: {

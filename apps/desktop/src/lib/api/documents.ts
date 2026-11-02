@@ -34,6 +34,7 @@
 // and writes, and which is what the removed doc comment already claimed these routes
 // were "a thin view of".
 
+import { translate as tl } from "@ryu/i18n/core";
 import { z } from "zod";
 import {
 	CapabilityBindingConflictError,
@@ -102,7 +103,7 @@ async function errorOf(res: Response): Promise<string> {
 	} catch {
 		// Body was not JSON — fall through to the status line.
 	}
-	return `Request failed (${res.status})`;
+	return tl("Request failed ({status})", { status: res.status });
 }
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
@@ -437,11 +438,13 @@ export function describeParseFailure(raw: string | null | undefined): string {
 		case "no_provider":
 			return "No document parser is installed. Get one from the Store, then re-parse.";
 		case "unsupported_format":
-			return `Nothing on this node reads this format. ${detail}`.trim();
+			return tl("Nothing on this node reads this format. {detail}", {
+				detail,
+			}).trim();
 		case "provider_timeout":
 			return "The parser ran out of time on this file. Try again.";
 		case "too_large":
-			return `Too large to read. ${detail}`.trim();
+			return tl("Too large to read. {detail}", { detail }).trim();
 		case "provider_error":
 			return detail || "The parser failed on this file.";
 		default:

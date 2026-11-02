@@ -242,7 +242,7 @@ export const SettingsItem = ({
 				>
 					<ItemTitle typography="settings-label">{localizedTitle}</ItemTitle>
 					{actions ? (
-						<ItemActions className="ml-auto shrink-0">{actions}</ItemActions>
+						<ItemActions className="ms-auto shrink-0">{actions}</ItemActions>
 					) : null}
 				</div>
 				{children}
@@ -287,7 +287,7 @@ export const SettingsItem = ({
 					// Capped at the row so a wide control (a segmented scope switcher)
 					// that wrapped under the title scrolls inside the row instead of
 					// widening the page.
-					<ItemActions className="ml-auto min-w-0 max-w-full shrink-0">
+					<ItemActions className="ms-auto min-w-0 max-w-full shrink-0">
 						{actions}
 					</ItemActions>
 				) : null}

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
 // the tracked proof ledger; without it the committed evidence is refreshed.
@@ -7,11 +8,7 @@ const evidenceOverride = process.env.RYU_PROOF_EVIDENCE_DIR;
 const evidence = (name: string) =>
 	evidenceOverride
 		? path.join(evidenceOverride, name)
-		: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-				name
-			);
+		: proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 /** A client key's row title in the key list. The CLI setup panel names the
  * same tools (Claude Code, Gemini CLI) and, since the Ryu Quiet flat-row pass

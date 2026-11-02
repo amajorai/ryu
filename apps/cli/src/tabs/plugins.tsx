@@ -218,10 +218,13 @@ export function PluginsTab({ active }: TabProps) {
 					if (r.externallyManaged && r.notice) {
 						notify(r.notice, "warning");
 					} else {
-						const also = r.disabled?.length
-							? ` (disabled ${r.disabled.join(", ")})`
-							: "";
-						notify(`Uninstalled ${app.name}${also}`, "success");
+						const message = r.disabled?.length
+							? tf("Uninstalled {name} (disabled {disabled})", {
+									name: app.name,
+									disabled: r.disabled.join(", "),
+								})
+							: tf("Uninstalled {name}", { name: app.name });
+						notify(message, "success");
 					}
 				},
 			});
@@ -294,7 +297,7 @@ export function PluginsTab({ active }: TabProps) {
 		}
 		const app = selected;
 		setConfirm({
-			title: `Uninstall ${app.name}?`,
+			title: tf("Uninstall {name}?", { name: app.name }),
 			consequence: `${app.name} will be removed from this node; reinstall it to use it again.`,
 			confirmLabel: "Uninstall",
 			run: () => doUninstall(app),
@@ -311,17 +314,28 @@ export function PluginsTab({ active }: TabProps) {
 			return;
 		}
 		const verb = pending.kind === "disable" ? "Disable" : "Uninstall";
-		const verbs = pending.kind === "disable" ? "disables" : "uninstalls";
-		const who =
-			pending.dependents.length > 0
-				? pending.dependents.join(", ")
-				: `every plugin that depends on ${pending.name}`;
+		const disabling = pending.kind === "disable";
+		const dependents = pending.dependents.join(", ");
+		let consequence: string;
+		if (pending.dependents.length > 0) {
+			consequence = disabling
+				? tf("Also disables {dependents}.", { dependents })
+				: tf("Also uninstalls {dependents}.", { dependents });
+		} else {
+			consequence = disabling
+				? tf("Also disables every plugin that depends on {name}.", {
+						name: pending.name,
+					})
+				: tf("Also uninstalls every plugin that depends on {name}.", {
+						name: pending.name,
+					});
+		}
 		setConfirm({
 			title: tf("{verb} {name} and its dependents?", {
 				verb,
 				name: pending.name,
 			}),
-			consequence: `Also ${verbs} ${who}.`,
+			consequence,
 			confirmLabel: `${verb} all`,
 			run: doCascade,
 		});

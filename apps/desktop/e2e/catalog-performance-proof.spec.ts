@@ -1,11 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/performance-sweep"
-);
+const proofDir = proofEvidencePath("performance-sweep");
 test.setTimeout(90_000);
 test("shares catalog requests, propagates changes, isolates nodes, and pauses background polling", async ({
 	page,

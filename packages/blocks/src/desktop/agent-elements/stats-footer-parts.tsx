@@ -1,9 +1,11 @@
 import { cn } from "@ryu/ui/lib/utils";
 import styles from "./elements-one.module.css";
 import type { AgentGeometryStyle } from "./elements-one-style.ts";
+import { formatDecimal } from "./locale-format.ts";
 import {
 	formatUsageReset,
 	usagePercent,
+	usagePercentValue,
 	usageTimeCursor,
 } from "./stats-footer-format.ts";
 import type {
@@ -71,6 +73,7 @@ function UsageBar({
 	}
 	const cursor = usageTimeCursor(metric, now);
 	const percent = usagePercent(metric.percent, preferences.usagePercentMode);
+	const width = usagePercentValue(metric.percent, preferences.usagePercentMode);
 	return (
 		<div className="mt-1.5" data-testid={testId}>
 			<div className="mb-1 flex items-center justify-between gap-3">
@@ -87,7 +90,7 @@ function UsageBar({
 					)}
 					style={
 						{
-							"--agent-width": `${percent ? Number.parseInt(percent, 10) : 0}%`,
+							"--agent-width": `${width ?? 0}%`,
 						} satisfies AgentGeometryStyle as AgentGeometryStyle
 					}
 				/>
@@ -182,7 +185,7 @@ export function UsageDetails({
 				value={
 					usage.extraRemaining === undefined
 						? null
-						: `${usage.extraRemaining.toFixed(2)}${usage.extraCurrency ? ` ${usage.extraCurrency}` : ""}`
+						: `${formatDecimal(usage.extraRemaining, 2)}${usage.extraCurrency ? ` ${usage.extraCurrency}` : ""}`
 				}
 			/>
 			<DetailRow
@@ -190,7 +193,7 @@ export function UsageDetails({
 				value={
 					usage.extraUsed === undefined
 						? null
-						: `${usage.extraUsed.toFixed(2)}${usage.extraCurrency ? ` ${usage.extraCurrency}` : ""}`
+						: `${formatDecimal(usage.extraUsed, 2)}${usage.extraCurrency ? ` ${usage.extraCurrency}` : ""}`
 				}
 			/>
 			<DetailRow

@@ -120,23 +120,20 @@ function memoryReason(
 
 /**
  * Why an install is disabled, in one sentence with the device's numbers, or
- * `null` when the verdict does not block. `label` is Core's `fit_label`; the
- * built-in label is used when it is empty.
+ * `null` when the verdict does not block. The verdict is worded from the
+ * built-in label in the UI language, keyed by `fit`: Core's `fit_label`
+ * (`_label`) is English and would otherwise lead a translated sentence.
  */
 export function fitBlockReason(
 	fit: string,
-	label: string | null | undefined,
+	_label: string | null | undefined,
 	device: FitDeviceNumbers | null | undefined,
 	tl: LiteralMessage
 ): string | null {
-	if (!isBlockedFit(fit)) {
+	if (!(isBlockedFit(fit) && isKnownFit(fit))) {
 		return null;
 	}
-	// Core's snapshot labels are full sentences; drop their final period so the
-	// joined sentence never reads "…memory.. This device has …".
-	const verdictLabel = (
-		label?.trim() || (isKnownFit(fit) ? FIT_LABELS[fit] : "")
-	).replace(/\.+$/, "");
+	const verdictLabel = tl(FIT_LABELS[fit]);
 	let reason: string | null = null;
 	if (fit === "no_space" && device?.diskFreeHuman) {
 		reason = tl(
@@ -146,7 +143,7 @@ export function fitBlockReason(
 	} else if (fit === "too_big" && device) {
 		reason = memoryReason(verdictLabel, device, tl);
 	}
-	return reason ?? `${verdictLabel}.`;
+	return reason ?? tl("{verdictLabel}.", { verdictLabel });
 }
 
 /** The minimal file shape the recommendation ranking reads. */

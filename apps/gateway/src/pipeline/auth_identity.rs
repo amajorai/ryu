@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "box_governance.rs"]
+pub(super) mod box_governance;
+#[path = "org_admission.rs"]
+mod org_admission;
+
 pub(super) async fn authenticate_identity(
     state: &AppState,
     inputs: AuthInputs<'_>,
@@ -109,6 +114,32 @@ pub(super) async fn authenticate_identity(
         }
     };
 
+    // A context with no key config, credit or org policy of its own.
+    let plain_ctx = |is_master_key: bool,
+                     api_key: String,
+                     org_id: Option<String>,
+                     user_name: Option<String>,
+                     eff_user_id: Option<String>,
+                     eff_agent_id: Option<String>| {
+        let no_pools = std::collections::HashMap::new();
+        build_ctx(
+            is_master_key,
+            api_key,
+            org_id,
+            None,
+            None,
+            user_name,
+            eff_user_id,
+            eff_agent_id,
+            None,
+            false,
+            None,
+            None,
+            no_pools,
+            None,
+        )
+    };
+
     // Outcome of the synchronous match under the auth lock. The dynamic `rgw_`
     // resolve is async and MUST NOT hold the `auth` read guard across an await, so
     // it is deferred to after the lock is released.
@@ -138,39 +169,23 @@ pub(super) async fn authenticate_identity(
             if let (Some(master), Some(raw)) = (&auth.master_key, raw_api_key) {
                 let key = raw.strip_prefix("Bearer ").unwrap_or(raw);
                 if ct_eq(key, master.as_str()) {
-                    return StaticOutcome::Matched(build_ctx(
+                    return StaticOutcome::Matched(plain_ctx(
                         true,
                         key.to_string(),
-                        None,
-                        None,
                         None,
                         Some("master".to_string()),
                         user_id.clone(),
                         agent_id.clone(),
-                        None,
-                        false,
-                        None,
-                        None,
-                        std::collections::HashMap::new(),
-                        None,
                     ));
                 }
             }
-            return StaticOutcome::Matched(build_ctx(
+            return StaticOutcome::Matched(plain_ctx(
                 false,
                 raw_api_key.unwrap_or("anonymous").to_string(),
                 None,
                 None,
-                None,
-                None,
                 user_id.clone(),
                 agent_id.clone(),
-                None,
-                false,
-                None,
-                None,
-                std::collections::HashMap::new(),
-                None,
             ));
         }
 
@@ -190,44 +205,24 @@ pub(super) async fn authenticate_identity(
                     "Scoped inference credentials do not authorize web services".to_owned(),
                 ));
             }
-            let scope = auth
-                .api_keys
-                .iter()
-                .filter(|entry| entry.name == "local-core" && entry.trusted_forwarder)
-                .find_map(|entry| ryu_gw_credentials::InferenceScope::verify(key, &entry.key).ok());
-            let Some(scope) = scope else {
-                return StaticOutcome::Reject(GatewayError::Unauthorized(
-                    "Invalid scoped inference credential".to_owned(),
-                ));
+            let scope = match super::auth::verify_scoped_inference(
+                &auth.api_keys,
+                key,
+                agent_id.as_deref(),
+                user_id.as_deref(),
+                session_id.as_deref(),
+            ) {
+                Ok(scope) => scope,
+                Err(error) => return StaticOutcome::Reject(error),
             };
-            if agent_id.as_deref().is_some_and(|id| id != scope.agent_id)
-                || user_id
-                    .as_deref()
-                    .is_some_and(|id| Some(id) != scope.user_id.as_deref())
-                || session_id
-                    .as_deref()
-                    .is_some_and(|id| Some(id) != scope.session_id.as_deref())
-            {
-                return StaticOutcome::Reject(GatewayError::Unauthorized(
-                    "Inference identity does not match the issued scope".to_owned(),
-                ));
-            }
             let owner_binding = scoped_inference_owner_binding(&scope);
-            let mut context = build_ctx(
+            let mut context = plain_ctx(
                 false,
                 key.to_owned(),
-                None,
-                None,
                 None,
                 Some(format!("agent:{}", scope.agent_id)),
                 scope.user_id,
                 Some(scope.agent_id),
-                None,
-                false,
-                None,
-                None,
-                std::collections::HashMap::new(),
-                None,
             );
             // Bind stored responses and cache entries to the scope, not to one
             // bearer string: Core remints the bearer under a long-lived agent,
@@ -251,45 +246,23 @@ pub(super) async fn authenticate_identity(
                 ));
             }
             // A local Gateway: Core signs with its `local-core` forwarder key.
-            let local = auth
-                .api_keys
-                .iter()
-                .filter(|entry| entry.name == "local-core" && entry.trusted_forwarder)
-                .find_map(|entry| {
-                    ryu_gw_credentials::BoxInferenceScope::verify(key, &entry.key)
-                        .ok()
-                        .map(|scope| (scope, entry.org_id.clone()))
-                });
-            let Some((scope, forwarder_org)) = local else {
-                return StaticOutcome::TryBoxHosted(key.to_owned());
+            let local = box_governance::verify_local_box(
+                &auth.api_keys,
+                key,
+                user_id.as_deref(),
+                session_id.as_deref(),
+            );
+            let (scope, forwarder_org) = match local {
+                None => return StaticOutcome::TryBoxHosted(key.to_owned()),
+                Some(Err(error)) => return StaticOutcome::Reject(error),
+                Some(Ok(verified)) => verified,
             };
-            if forwarder_org
-                .as_deref()
-                .is_some_and(|org| org != scope.org_id)
-            {
-                return StaticOutcome::Reject(GatewayError::Unauthorized(
-                    "The Box credential names another organization".to_owned(),
-                ));
-            }
-            if let Err(error) =
-                check_box_identity(&scope, user_id.as_deref(), session_id.as_deref())
-            {
-                return StaticOutcome::Reject(error);
-            }
-            let mut context = build_ctx(
+            let mut context = plain_ctx(
                 false,
                 box_api_key_label(&scope),
                 forwarder_org,
-                None,
-                None,
                 Some(format!("box:{}", scope.box_id)),
                 scope.user_id.clone(),
-                None,
-                None,
-                false,
-                None,
-                None,
-                std::collections::HashMap::new(),
                 None,
             );
             context.owner_binding = ryu_gw_credentials::fingerprint(key);
@@ -300,21 +273,13 @@ pub(super) async fn authenticate_identity(
 
         if let Some(master) = &auth.master_key {
             if ct_eq(key, master.as_str()) {
-                return StaticOutcome::Matched(build_ctx(
+                return StaticOutcome::Matched(plain_ctx(
                     true,
                     key.to_string(),
-                    None,
-                    None,
                     None,
                     Some("master".to_string()),
                     user_id.clone(),
                     agent_id.clone(),
-                    None,
-                    false,
-                    None,
-                    None,
-                    std::collections::HashMap::new(),
-                    None,
                 ));
             }
         }
@@ -378,62 +343,17 @@ pub(super) async fn authenticate_identity(
         StaticOutcome::Matched(ctx) => Ok(ctx),
         StaticOutcome::Reject(err) => Err(err),
         StaticOutcome::TryBoxHosted(token) => {
-            let invalid =
-                || GatewayError::Unauthorized("Invalid Box inference credential".to_owned());
-            let org_hint = box_token_org_hint(&token).ok_or_else(invalid)?;
-            let scope = box_hosted_proof_keys(&org_hint)
-                .iter()
-                .find_map(|core_key| {
-                    ryu_gw_credentials::BoxInferenceScope::verify(&token, core_key).ok()
-                })
-                .filter(|scope| scope.org_id == org_hint)
-                .ok_or_else(invalid)?;
-            check_box_identity(&scope, user_id.as_deref(), session_id.as_deref())?;
-            let bills_tenants = state.config.credits.is_active();
-            let (credit, resolved_at, openrouter_routing_enabled) =
-                match box_org_budget(&state.http, &state.config.credits, &scope.org_id).await {
-                    Ok((budget, fetched_at)) => (
-                        box_tenant_credit(&budget, bills_tenants),
-                        Some(fetched_at),
-                        budget.openrouter_routing_enabled,
-                    ),
-                    Err(BoxBudgetError::UnknownOrg) => return Err(invalid()),
-                    Err(BoxBudgetError::NotConfigured) if !bills_tenants => (
-                        box_tenant_credit(&BoxOrgBudget::default(), false),
-                        None,
-                        false,
-                    ),
-                    Err(error) => {
-                        warn!(
-                            org_id = %scope.org_id,
-                            error = ?error,
-                            "gwb1: org budget unavailable; refusing metered spend until it recovers"
-                        );
-                        (box_accounting_unavailable(), None, false)
-                    }
-                };
-            let mut context = build_ctx(
+            let (user, session) = (user_id.as_deref(), session_id.as_deref());
+            let hosted = box_governance::resolve_hosted_box(state, &token, user, session).await?;
+            let mut context = plain_ctx(
                 false,
-                box_api_key_label(&scope),
-                Some(scope.org_id.clone()),
-                None,
-                None,
-                Some(format!("box:{}", scope.box_id)),
-                scope.user_id.clone(),
-                None,
-                None,
-                credit.managed_inference,
-                credit.remaining_budget_micro_usd,
-                credit.unrestricted_budget_micro_usd,
-                credit.pool_budgets_micro_usd,
+                box_api_key_label(&hosted.scope),
+                Some(hosted.scope.org_id.clone()),
+                Some(format!("box:{}", hosted.scope.box_id)),
+                hosted.scope.user_id.clone(),
                 None,
             );
-            context.credit_accounting_unavailable = credit.accounting_unavailable;
-            context.openrouter_routing_enabled = openrouter_routing_enabled;
-            context.budget_resolved_at = resolved_at;
-            context.owner_binding = ryu_gw_credentials::fingerprint(&token);
-            context.session_id = Some(scope.session_id);
-            context.feature = Some(BOX_FEATURE.to_owned());
+            box_governance::finish_hosted_context(state, &mut context, hosted, &token)?;
             Ok(context)
         }
         StaticOutcome::TryDynamic(token) => {
@@ -442,11 +362,7 @@ pub(super) async fn authenticate_identity(
                 .resolve_cache
                 .as_ref()
                 .expect("TryDynamic implies resolve_cache is Some");
-            let credential_use = match operation {
-                ApiKeyOperation::Inference => crate::policy::CredentialUse::GatewayRelay,
-                ApiKeyOperation::WebSearch => crate::policy::CredentialUse::GatewayWebSearch,
-                ApiKeyOperation::WebFetch => crate::policy::CredentialUse::GatewayWebFetch,
-            };
+            let credential_use = org_admission::credential_use_for(operation);
             match cache.resolve_cached_for(&token, credential_use).await {
                 Ok(resolved) => {
                     // Platform standing first (spec 05.5): a suspended or
@@ -456,11 +372,8 @@ pub(super) async fn authenticate_identity(
                     // Keep the platform floor this resolve carried when it is
                     // newer than the one held (spec 02.3).
                     state.observe_platform_floor(&resolved);
-                    // A resolved `rgw_` token: bill/attribute to its org. Do NOT
-                    // store the raw bearer in `api_key` (it is written verbatim
-                    // into every audit row) — use a redacted org-scoped label.
-                    // Proof keys only: the request still authenticates and
-                    // resolves its organization through the `rgw_` bearer.
+                    // Bill/attribute to the org under a redacted label: the raw
+                    // bearer would be written verbatim into every audit row.
                     let dynamic_agent_id = resolved_dynamic_agent_id(
                         raw_api_key,
                         agent_id.as_deref(),
@@ -514,53 +427,14 @@ pub(super) async fn authenticate_identity(
                         credit.pool_budgets_micro_usd,
                         Some(resolved.policy.clone()),
                     );
-                    context.openrouter_routing_enabled = resolved.openrouter_routing_enabled;
-                    context.credit_accounting_unavailable = credit.accounting_unavailable;
-                    state.pool_allowances.observe(&resolved.pool_allowances);
-                    context.org_limits =
-                        Some(Arc::new(crate::org_limits::OrgLimitContext::from_resolved(
-                            &resolved,
-                            bills_tenants,
-                            crate::org_limits::ResolvedSubject {
-                                bound_user_id,
-                                team_ids,
-                                configured_project_id: None,
-                                // Core-proven above (`dynamic_agent_id`).
-                                verified_bot_id: context.agent_id.clone(),
-                            },
-                        )));
-                    // `api_key` intentionally stays an org label for audit and
-                    // org-level accounting. Job ownership must still distinguish
-                    // two valid bearers in the same organization.
-                    context.owner_binding = ryu_gw_credentials::fingerprint(&token);
-                    // The resolved credential travels with the request so
-                    // audit rows, events and the upstream subject name it.
-                    context.identity =
-                        Some(Arc::new(crate::identity::RequestIdentity::from_credential(
-                            resolved.credential.clone(),
-                            resolved.identity_salt_epoch,
-                        )));
-                    // Dates this request's budget figures, so the credit gate
-                    // can prefer a newer debit report (see
-                    // `credit_headroom_micro_usd`).
-                    context.budget_resolved_at = Some(resolved.fetched_at);
-                    // Lets tool loops and streams check standing again when an
-                    // enforcement push names this credential mid-request.
-                    context.standing = Some(Arc::new(crate::standing::StandingGuard::new(
-                        token.clone(),
-                        credential_use,
-                        &resolved,
-                    )));
-                    // Ladder L2 and L3 and the new-key limit on the fleet
-                    // (spec 04.8.1): the posture this request is served
-                    // under, and the in-flight slots it holds until its last
-                    // clone (a stream body included) drops. `user` entries
-                    // bind only to the JWT-verified user set above, never to
-                    // the forwarded header.
-                    context.enforcement = crate::enforcement::Enforcement::admit(
+                    org_admission::finish_dynamic_context(
                         state,
+                        &mut context,
                         &resolved,
-                        context.user_id.as_deref(),
+                        &token,
+                        credential_use,
+                        bound_user_id,
+                        team_ids,
                     )?;
                     Ok(context)
                 }

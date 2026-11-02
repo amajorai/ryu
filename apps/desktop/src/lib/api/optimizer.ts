@@ -5,7 +5,9 @@
 // through the Gateway eval runner, and records recommendations. Applying one goes
 // through the normal agent update path, so agent version history can undo it.
 
+import { translate as tl } from "@ryu/i18n/core";
 import { z } from "zod";
+import { formatLocalNumber, formatUsd } from "@/src/lib/locale-format.ts";
 
 import { ApiError, type ApiTarget, request } from "./client.ts";
 
@@ -162,17 +164,20 @@ export async function dismissAgentOptimization(
 /** Format a micro-USD amount for display (e.g. 1_234 → "$0.0012"). */
 export function formatMicroUsd(value: number | null | undefined): string {
 	if (value === null || value === undefined) {
-		return "unpriced";
+		return tl("unpriced");
 	}
 	const usd = value / 1_000_000;
-	return usd >= 1 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`;
+	return formatUsd(usd);
 }
 
 export function formatShare(value: number | null | undefined): string {
 	if (value === null || value === undefined) {
-		return "not scored";
+		return tl("not scored");
 	}
-	return `${Math.round(value * 100)}%`;
+	return formatLocalNumber(value, {
+		maximumFractionDigits: 0,
+		style: "percent",
+	});
 }
 
 const optimizerAnalysisResponseSchema = z

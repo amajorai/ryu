@@ -7,7 +7,7 @@
 // allowlist, and the tab lists exactly what travels so the user does not have to
 // take that on faith.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -58,6 +58,7 @@ import {
 	SYNCABLE_KEYS,
 	type SyncGroup,
 } from "@/src/lib/settings-sync/keys.ts";
+import { compactAgo } from "@/src/lib/time.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
 import {
 	SettingsGroup,
@@ -87,19 +88,15 @@ const STATUS_TEXT = {
 	conflict: "Needs your decision",
 } satisfies Record<ReturnType<typeof getSyncStatus>, string>;
 
-function relativeTime(at: number): string {
+const SECONDS_PER_DAY = 86_400;
+
+/** "never", "just now", "5m ago" / "5 分前" within a day, else the date. */
+function relativeTime(at: number, tl: LiteralMessage): string {
 	if (at === 0) {
-		return "never";
+		return tl("never");
 	}
-	const seconds = Math.round((Date.now() - at) / 1000);
-	if (seconds < 60) {
-		return "just now";
-	}
-	if (seconds < 3600) {
-		return `${Math.round(seconds / 60)} min ago`;
-	}
-	if (seconds < 86_400) {
-		return `${Math.round(seconds / 3600)} h ago`;
+	if ((Date.now() - at) / 1000 < SECONDS_PER_DAY) {
+		return compactAgo(at);
 	}
 	return formatDate(at);
 }
@@ -225,10 +222,10 @@ export function SettingsSyncTab() {
 							pending > 0
 								? tl(
 										"{pending, plural, one {# change} other {# changes}} waiting to upload. Last synced {lastSynced}.",
-										{ pending, lastSynced: relativeTime(lastSyncAt()) }
+										{ pending, lastSynced: relativeTime(lastSyncAt(), tl) }
 									)
 								: tl("Last synced {lastSynced}.", {
-										lastSynced: relativeTime(lastSyncAt()),
+										lastSynced: relativeTime(lastSyncAt(), tl),
 									})
 						}
 						title="Last Sync"
@@ -310,9 +307,9 @@ export function SettingsSyncTab() {
 										<span className="text-muted-foreground text-xs">
 											{side === "local"
 												? tl("This machine · {when}", {
-														when: relativeTime(at),
+														when: relativeTime(at, tl),
 													})
-												: tl("Cloud · {when}", { when: relativeTime(at) })}
+												: tl("Cloud · {when}", { when: relativeTime(at, tl) })}
 										</span>
 										<span className="break-all font-mono text-xs">
 											{preview(value)}

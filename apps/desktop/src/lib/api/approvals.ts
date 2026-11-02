@@ -1,3 +1,4 @@
+import type { ApprovalI18n } from "@ryuhq/core-client/approval-text";
 import {
 	approvalRequestSchema,
 	type PendingAction,
@@ -42,6 +43,9 @@ export interface ApprovalRequest {
 	decided_at?: string | null;
 	error?: string | null;
 	expires_at?: string | null;
+	/** The title, question and summary as Core messages; render them with
+	 *  `localizeApproval` (`@ryuhq/core-client/approval-text`). */
+	i18n?: ApprovalI18n | null;
 	id: string;
 	kind: ApprovalKind;
 	note?: string | null;

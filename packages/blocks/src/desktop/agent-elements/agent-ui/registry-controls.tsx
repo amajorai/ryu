@@ -71,7 +71,7 @@ export const StatRenderer: Render<{
 			<span className={cn("text-xs", TREND_CLASS[props.trend ?? "neutral"])}>
 				{props.trend && (
 					<>
-						<span aria-hidden className="mr-0.5">
+						<span aria-hidden className="me-0.5">
 							{TREND_GLYPH[props.trend]}
 						</span>
 						<span className="sr-only">{TREND_LABEL[props.trend]}: </span>
@@ -271,7 +271,7 @@ export const OptionListRenderer: Render<{
 						<button
 							aria-checked={selected}
 							className={cn(
-								"rounded-lg border px-3 py-2 text-left transition-colors",
+								"rounded-lg border px-3 py-2 text-start transition-colors",
 								selected
 									? "border-primary bg-primary/10"
 									: "border-border hover:bg-muted/60"

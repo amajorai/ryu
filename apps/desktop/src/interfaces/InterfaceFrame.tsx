@@ -97,7 +97,7 @@ export function InterfaceFrame({
 				{notice}
 				<nav
 					aria-label="Workspace"
-					className="ml-auto flex shrink-0 items-center gap-1"
+					className="ms-auto flex shrink-0 items-center gap-1"
 					data-tauri-drag-region={false}
 				>
 					<Button

@@ -1,3 +1,4 @@
+import { activeLocale } from "@ryu/i18n/lite";
 import { formatCount as formatSharedCount } from "@ryu/ui/lib/number-format.ts";
 import type { ListingStat } from "./detail/listing-detail-shell.tsx";
 import type { CatalogHost } from "./host.tsx";
@@ -43,7 +44,10 @@ export function resolveSkillKey(
 	return null;
 }
 
-export function formatDateLabel(value: string | null): string | null {
+export function formatDateLabel(
+	value: string | null,
+	locale: string = activeLocale()
+): string | null {
 	if (!value) {
 		return null;
 	}
@@ -51,7 +55,7 @@ export function formatDateLabel(value: string | null): string | null {
 	if (Number.isNaN(parsed.getTime())) {
 		return value;
 	}
-	return parsed.toLocaleDateString(undefined, {
+	return parsed.toLocaleDateString(locale, {
 		day: "numeric",
 		month: "short",
 		year: "numeric",

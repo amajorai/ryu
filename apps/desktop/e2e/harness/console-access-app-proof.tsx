@@ -14,13 +14,21 @@ queryClient.setDefaultOptions({
 // Read-only diagnostics supplement assertions on the actual product controls.
 Object.defineProperty(window, "consoleAccessProof", {
 	value: {
-		snapshot: () => ({
-			node: useNodeStore.getState().getActiveNode(),
-			defaultNode: useNodeStore.getState().defaultNode,
-			requestedMode: useProductModeStore.getState().requestedMode,
-			consoleAccess: useProductModeStore.getState().consoleAccess,
-			organizationQuery: queryClient.getQueryState(["settings", "orgs"]),
-		}),
+		snapshot: () => {
+			const node = useNodeStore.getState().getActiveNode();
+			return {
+				node,
+				defaultNode: useNodeStore.getState().defaultNode,
+				requestedMode: useProductModeStore.getState().requestedMode,
+				consoleAccess: useProductModeStore.getState().consoleAccess,
+				// useConsoleAccess gates Console on the caller's effective
+				// permissions in the active node's organization.
+				permissionsQuery: queryClient.getQueryState([
+					"workspace-my-permissions",
+					node.orgId ?? null,
+				]),
+			};
+		},
 	},
 });
 const root = document.getElementById("root");

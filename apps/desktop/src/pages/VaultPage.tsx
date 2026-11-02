@@ -5,6 +5,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -298,7 +299,7 @@ export default function VaultPage() {
 								{
 									name: deleteTarget?.name ?? "",
 									scope: deleteTarget
-										? scopeLabel(deleteTarget.scope).toLowerCase()
+										? sentenceLabel(tl, scopeLabel(deleteTarget.scope))
 										: "",
 								}
 							)}

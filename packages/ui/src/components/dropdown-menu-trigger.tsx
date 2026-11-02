@@ -63,7 +63,7 @@ function DropdownMenuTrigger({
 }) {
 	const desktopTriggerClasses =
 		variant === "account-row"
-			? "rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/50"
+			? "rounded-md px-2 py-1.5 text-start text-sm hover:bg-muted/50"
 			: variant === "sidebar-options"
 				? "inline-flex h-6 w-6 items-center justify-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
 				: variant === "rounded-control"
@@ -77,7 +77,7 @@ function DropdownMenuTrigger({
 								: variant === "conversation-options"
 									? "hidden h-5 w-5 shrink-0 items-center justify-center rounded outline-none hover:bg-accent focus-visible:inline-flex focus-visible:ring-2 focus-visible:ring-ring aria-expanded:inline-flex group-focus-within/row:inline-flex group-hover/row:inline-flex data-[popup-open]:inline-flex"
 									: variant === "organization-picker"
-										? "flex w-full items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-60"
+										? "flex w-full items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-start text-sm hover:bg-accent disabled:opacity-60"
 										: undefined;
 	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
@@ -107,7 +107,7 @@ function DropdownMenuTrigger({
 									: variant === "account-picker"
 										? mergeNavigationTriggerClasses(
 												className,
-												"flex w-full items-center gap-3 rounded-lg bg-muted/30 px-3 py-2 text-left transition-colors hover:bg-muted/50"
+												"flex w-full items-center gap-3 rounded-lg bg-muted/30 px-3 py-2 text-start transition-colors hover:bg-muted/50"
 											)
 										: variant === "navigation"
 											? mergeNavigationTriggerClasses(

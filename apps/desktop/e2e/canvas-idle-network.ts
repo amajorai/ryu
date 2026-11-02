@@ -1,6 +1,63 @@
 import type { Page } from "@playwright/test";
 import { createChatControlBackground } from "./harness/chat-page-control-background.ts";
 import type { UnexpectedChatProofRequest } from "./harness/chat-page-proof-http.ts";
+import {
+	type ShellBootstrapPath,
+	shellBootstrapResponse,
+} from "./harness/shell-bootstrap-routes.ts";
+
+/** The Layout bootstrap GETs this proof expects on the fixture node: the plugin
+ *  contributions and meetings reads, and the Settings tab's voice, embeddings
+ *  and A2A pages. Answered with empty-node DTOs; any other path stays unexpected. */
+const CANVAS_BOOTSTRAP_GETS: readonly ShellBootstrapPath[] = [
+	"/api/plugins/contributions",
+	"/api/meetings",
+	"/api/voice/tts-engines",
+	"/api/voice/tts-models",
+	"/api/embeddings/model",
+	"/api/embeddings/reindex/status",
+	"/api/a2a/settings",
+	"/api/a2a/peers",
+	"/api/a2a/principals",
+	"/api/a2a/published-agents",
+	"/api/a2a/tasks",
+];
+
+/** The launchpad composer's send opens a chat whose id is `conv-${Date.now()}`;
+ *  the spec fixes the page clock to this instant before sending so that id, and
+ *  every per-conversation read the chat makes, has a finite contract. */
+export const LAUNCHPAD_SEND_TIME = 1_793_600_000_000;
+const LAUNCHPAD_CONVERSATION_ID = `conv-${LAUNCHPAD_SEND_TIME}`;
+export const LAUNCHPAD_DRAFT = "Launchpad draft persists into a new chat";
+
+/** The one chat turn the launchpad send starts: exactly the draft, as a user
+ *  message on the fixed conversation with the composer's defaults. */
+function isLaunchpadTurn(body: string | null) {
+	const input: unknown = JSON.parse(body ?? "null");
+	if (!input || typeof input !== "object") {
+		return false;
+	}
+	const { messages, ...options } = { ...input } as Record<string, unknown>;
+	const [message, ...rest] = Array.isArray(messages) ? messages : [];
+	return (
+		JSON.stringify(options) ===
+			JSON.stringify({
+				agent_id: null,
+				response_mode: "everyday",
+				conversation_id: LAUNCHPAD_CONVERSATION_ID,
+				enable_long_term: false,
+				worktree_isolation: false,
+			}) &&
+		rest.length === 0 &&
+		typeof message?.id === "string" &&
+		JSON.stringify({ ...message, id: "" }) ===
+			JSON.stringify({
+				parts: [{ type: "text", text: LAUNCHPAD_DRAFT }],
+				id: "",
+				role: "user",
+			})
+	);
+}
 
 // Geometry proof only: typed idle dependencies, never Core/provider execution.
 export async function installCanvasIdleNetwork(
@@ -15,7 +72,7 @@ export async function installCanvasIdleNetwork(
 		{
 			coreUrl: origin,
 			backendUrl: backend,
-			conversationIds: ["canvas-idle-fixture"],
+			conversationIds: ["canvas-idle-fixture", LAUNCHPAD_CONVERSATION_ID],
 			ownerId: "canvas-idle-owner",
 		},
 		unexpected
@@ -96,6 +153,52 @@ export async function installCanvasIdleNetwork(
 				record(200);
 				return route.fulfill({ json: { key: "auto-updates", value: null } });
 			}
+			const bootstrap = url.search
+				? undefined
+				: shellBootstrapResponse(CANVAS_BOOTSTRAP_GETS, url.pathname);
+			if (bootstrap) {
+				record(200);
+				return route.fulfill(bootstrap);
+			}
+		}
+		// The turn is answered as an idle stream that ends at once: the proof covers
+		// the canvas taking the new chat tab, not provider execution.
+		if (
+			request.method() === "POST" &&
+			url.pathname === "/api/chat/stream" &&
+			!url.search &&
+			isLaunchpadTurn(rawBody)
+		) {
+			record(200);
+			return route.fulfill({
+				status: 200,
+				contentType: "text/event-stream",
+				body: ": owned idle EOF\n\n",
+			});
+		}
+		// After that idle turn Core has persisted nothing: the conversation reads
+		// answer 404, which ChatHistory treats as "never persisted" (an empty
+		// thread), and the follow-up prediction is empty.
+		if (
+			request.method() === "GET" &&
+			rawBody === null &&
+			url.pathname === `/api/conversations/${LAUNCHPAD_CONVERSATION_ID}` &&
+			["", "?limit=40"].includes(url.search)
+		) {
+			record(404);
+			return route.fulfill({
+				status: 404,
+				json: { error: "conversation not found" },
+			});
+		}
+		if (
+			request.method() === "POST" &&
+			url.pathname === "/api/chat/prediction" &&
+			!url.search &&
+			rawBody === JSON.stringify({ conversation_id: LAUNCHPAD_CONVERSATION_ID })
+		) {
+			record(200);
+			return route.fulfill({ json: { prediction: null } });
 		}
 		const effective = new Request(request.url(), {
 			method: request.method(),

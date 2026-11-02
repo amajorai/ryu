@@ -46,7 +46,7 @@ export function FileSummaryRow({
 	const row = (
 		<button
 			className={cn(
-				"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors duration-150 hover:bg-muted hover:duration-0",
+				"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-xs transition-colors duration-150 hover:bg-muted hover:duration-0",
 				selected && "bg-muted text-foreground"
 			)}
 			onClick={onSelect}
@@ -71,7 +71,7 @@ export function FileSummaryRow({
 				<TooltipContent>{file.path}</TooltipContent>
 			</Tooltip>
 			{(file.additions > 0 || file.deletions > 0) && (
-				<span className="ml-auto flex shrink-0 items-center gap-1.5 text-muted-foreground tabular-nums">
+				<span className="ms-auto flex shrink-0 items-center gap-1.5 text-muted-foreground tabular-nums">
 					{file.additions > 0 && (
 						<span className="text-status-success">
 							+{formatCount(file.additions)}

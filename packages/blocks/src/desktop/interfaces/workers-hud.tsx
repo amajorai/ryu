@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { BellRing, Monitor, MonitorX, MoonStar, Plus, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -30,11 +31,11 @@ function status(totals: WorkerTotals, loading: boolean): string | undefined {
 		return;
 	}
 	if (totals.workers === 0) {
-		return "No workers yet";
+		return tr("No workers yet");
 	}
-	const parts = [`${totals.working} working`];
+	const parts = [tr("{count} working", { count: totals.working })];
 	if (totals.waitingOnYou > 0) {
-		parts.push(`${totals.waitingOnYou} waiting on you`);
+		parts.push(tr("{count} waiting on you", { count: totals.waitingOnYou }));
 	}
 	return parts.join(" · ");
 }

@@ -17,3 +17,8 @@
 # Rust / desktop / native build outputs not needed for server or web images.
 apps/desktop/src-tauri/target
 apps/*/build
+# Internal docs and their proof/evidence captures are ~1.9 GB of the ~2.6 GB
+# tracked tree and no image reads them. Shipping them made every image build
+# upload and `COPY . .` the whole lot. (Only the repo-root docs/: the docs site
+# lives in apps/fumadocs and is unaffected.)
+/docs

@@ -1,7 +1,8 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowLeft, PenLine } from "lucide-react";
-import { mastheadDate, NEWSPAPER_NAME } from "./newspaper-model.ts";
+import { mastheadDate, newspaperName } from "./newspaper-model.ts";
 import { SMALL_CAPS } from "./newspaper-parts.tsx";
 
 export interface NewspaperNavItem {
@@ -33,11 +34,19 @@ export function NewspaperMasthead({
 	onSubmit: () => void;
 	storyCount: number;
 }) {
-	const stories = `${storyCount} ${storyCount === 1 ? "story" : "stories"}`;
+	const stories = tr("{count, plural, one {# story} other {# stories}}", {
+		count: storyCount,
+	});
 	const live =
 		liveCount > 0
-			? `${liveCount} of ${agentCount} agents at work`
-			: `${agentCount} ${agentCount === 1 ? "agent" : "agents"}, none at work`;
+			? tr(
+					"{agentCount, plural, one {{liveCount} of # agent at work} other {{liveCount} of # agents at work}}",
+					{ agentCount, liveCount }
+				)
+			: tr(
+					"{count, plural, one {# agent, none at work} other {# agents, none at work}}",
+					{ count: agentCount }
+				);
 	return (
 		<header>
 			<div className="flex h-12 items-center justify-between gap-4">
@@ -58,7 +67,7 @@ export function NewspaperMasthead({
 				</Button>
 			</div>
 			<h1 className="pt-2 pb-4 text-center text-[2.5rem] text-foreground leading-none tracking-[-0.02em] sm:text-6xl lg:text-7xl">
-				<span className="font-bold font-serif">{NEWSPAPER_NAME}</span>
+				<span className="font-bold font-serif">{newspaperName()}</span>
 			</h1>
 			<div
 				className={cn(
@@ -68,7 +77,7 @@ export function NewspaperMasthead({
 			>
 				<span className="truncate max-sm:hidden">{loading ? "" : stories}</span>
 				<span>Today’s paper</span>
-				<span className="truncate text-right max-sm:hidden">
+				<span className="truncate text-end max-sm:hidden">
 					{loading ? "" : live}
 				</span>
 			</div>
@@ -111,14 +120,18 @@ export function NewspaperArticleMasthead({
 					type="button"
 					variant="ghost-muted"
 				>
-					<ArrowLeft aria-hidden="true" data-icon="inline-start" />
+					<ArrowLeft
+						aria-hidden="true"
+						className="rtl:-scale-x-100"
+						data-icon="inline-start"
+					/>
 					<span className="max-sm:sr-only">Front page</span>
 				</Button>
 			</div>
 			<p className="truncate font-bold font-serif text-foreground text-xl leading-none tracking-[-0.01em]">
-				{NEWSPAPER_NAME}
+				{newspaperName()}
 			</p>
-			<p className="truncate text-right font-medium text-muted-foreground text-xs max-sm:hidden">
+			<p className="truncate text-end font-medium text-muted-foreground text-xs max-sm:hidden">
 				<time dateTime={new Date(now).toISOString()}>{mastheadDate(now)}</time>
 			</p>
 		</header>

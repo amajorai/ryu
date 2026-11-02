@@ -88,7 +88,7 @@ function LiveActivityRow({
 	);
 	if (!clickable) {
 		return (
-			<div className="group/act relative flex gap-2.5 rounded-lg border border-border border-l-2 bg-muted/40 p-2.5">
+			<div className="group/act relative flex gap-2.5 rounded-lg border border-border border-s-2 bg-muted/40 p-2.5">
 				{row}
 			</div>
 		);
@@ -98,7 +98,7 @@ function LiveActivityRow({
 	} = { "--live-activity-tint": tone };
 	return (
 		<button
-			className="group/act relative flex w-full gap-2.5 rounded-lg border border-border border-l-2 bg-muted/40 p-2.5 text-left transition-colors hover:bg-muted/70"
+			className="group/act relative flex w-full gap-2.5 rounded-lg border border-border border-s-2 bg-muted/40 p-2.5 text-start transition-colors hover:bg-muted/70"
 			data-live-activity-border=""
 			onClick={() => onOpen(activity)}
 			style={activityTintVariables4}

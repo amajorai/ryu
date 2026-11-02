@@ -1,3 +1,5 @@
+import { activeLocale } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import type {
 	CellOpts,
 	CellPosition,
@@ -5,7 +7,7 @@ import type {
 	FileCellData,
 	RowHeightValue,
 } from "@ryu/ui/types/data-grid.ts";
-import type { Column, Table } from "@tanstack/react-table";
+import type { Column } from "@tanstack/react-table";
 import {
 	BaselineIcon,
 	CalendarIcon,
@@ -29,10 +31,7 @@ import {
 import type * as React from "react";
 import { z } from "zod";
 
-import { getDisplayLocale } from "./timezone.ts";
-
 const cellTextSchema = z.string();
-const localDateInputSchema = z.union([z.instanceof(Date), cellTextSchema]);
 const popoverElementSchema = z.custom<Element>(
 	(value) => value instanceof Element
 );
@@ -75,7 +74,6 @@ interface SelectOptionPalette {
 	[color: string]: string;
 }
 
-const TRAILING_CR_REGEX = /\r$/;
 export function flexRender<TProps extends object>(
 	Comp: CellRenderSource<TProps>,
 	props: TProps
@@ -247,241 +245,6 @@ function getPinnedColumnBoxShadow({
 	return;
 }
 
-export function getScrollDirection(
-	direction: string
-): "left" | "right" | "home" | "end" | undefined {
-	if (
-		direction === "left" ||
-		direction === "right" ||
-		direction === "home" ||
-		direction === "end"
-	) {
-		return direction;
-	}
-	if (direction === "pageleft" || direction === "ctrl+left") {
-		return "left";
-	}
-	if (direction === "pageright" || direction === "ctrl+right") {
-		return "right";
-	}
-	return undefined;
-}
-
-export function scrollCellIntoView<TData>(params: {
-	container: HTMLDivElement;
-	targetCell: HTMLDivElement;
-	tableRef: React.RefObject<Table<TData> | null>;
-	viewportOffset: number;
-	direction?: "left" | "right" | "home" | "end";
-	isRtl: boolean;
-}): void {
-	const { container, targetCell, tableRef, direction, viewportOffset, isRtl } =
-		params;
-
-	const containerRect = container.getBoundingClientRect();
-	const cellRect = targetCell.getBoundingClientRect();
-
-	const hasNegativeScroll = container.scrollLeft < 0;
-	const isActuallyRtl = isRtl || hasNegativeScroll;
-
-	const currentTable = tableRef.current;
-	const leftPinnedColumns = currentTable?.getLeftVisibleLeafColumns() ?? [];
-	const rightPinnedColumns = currentTable?.getRightVisibleLeafColumns() ?? [];
-
-	const leftPinnedWidth = leftPinnedColumns.reduce(
-		(sum, c) => sum + c.getSize(),
-		0
-	);
-	const rightPinnedWidth = rightPinnedColumns.reduce(
-		(sum, c) => sum + c.getSize(),
-		0
-	);
-
-	const viewportLeft = isActuallyRtl
-		? containerRect.left + rightPinnedWidth + viewportOffset
-		: containerRect.left + leftPinnedWidth + viewportOffset;
-	const viewportRight = isActuallyRtl
-		? containerRect.right - leftPinnedWidth - viewportOffset
-		: containerRect.right - rightPinnedWidth - viewportOffset;
-
-	const isFullyVisible =
-		cellRect.left >= viewportLeft && cellRect.right <= viewportRight;
-
-	if (isFullyVisible) {
-		return;
-	}
-
-	const isClippedLeft = cellRect.left < viewportLeft;
-	const isClippedRight = cellRect.right > viewportRight;
-
-	let scrollDelta = 0;
-
-	if (direction) {
-		const shouldScrollRight = isActuallyRtl
-			? direction === "right" || direction === "home"
-			: direction === "right" || direction === "end";
-
-		if (shouldScrollRight) {
-			scrollDelta = cellRect.right - viewportRight;
-		} else {
-			scrollDelta = -(viewportLeft - cellRect.left);
-		}
-	} else if (isClippedRight) {
-		scrollDelta = cellRect.right - viewportRight;
-	} else if (isClippedLeft) {
-		scrollDelta = -(viewportLeft - cellRect.left);
-	}
-
-	container.scrollLeft += scrollDelta;
-}
-
-function countTabs(s: string): number {
-	let n = 0;
-	for (const char of s) {
-		if (char === "\t") {
-			n++;
-		}
-	}
-	return n;
-}
-
-function shouldKeepTsvRow(row: string[]): boolean {
-	return row.length > 1 || row.some((field) => field.length > 0);
-}
-
-function pushTsvRow(rows: string[][], row: string[]): void {
-	if (shouldKeepTsvRow(row)) {
-		rows.push(row);
-	}
-}
-
-function isQuotedTsvLineBreak(
-	char: string | undefined,
-	nextChar: string | undefined
-): boolean {
-	return char === "\n" || (char === "\r" && nextChar === "\n");
-}
-
-function parseQuotedTsv(text: string): string[][] {
-	const rows: string[][] = [];
-	let currentRow: string[] = [];
-	let currentField = "";
-	let inQuotes = false;
-	let i = 0;
-
-	while (i < text.length) {
-		const char = text[i];
-		const nextChar = text[i + 1];
-
-		if (inQuotes && char === '"' && nextChar === '"') {
-			currentField += '"';
-			i += 2;
-			continue;
-		}
-		if (inQuotes && char === '"') {
-			inQuotes = false;
-			i++;
-			continue;
-		}
-		if (inQuotes) {
-			currentField += char;
-			i++;
-			continue;
-		}
-		if (char === '"' && currentField === "") {
-			inQuotes = true;
-			i++;
-			continue;
-		}
-		if (char === "\t") {
-			currentRow.push(currentField);
-			currentField = "";
-			i++;
-			continue;
-		}
-		if (isQuotedTsvLineBreak(char, nextChar)) {
-			currentRow.push(currentField);
-			pushTsvRow(rows, currentRow);
-			currentRow = [];
-			currentField = "";
-			i += char === "\r" ? 2 : 1;
-			continue;
-		}
-
-		currentField += char;
-		i++;
-	}
-
-	currentRow.push(currentField);
-	pushTsvRow(rows, currentRow);
-	return rows;
-}
-
-function tsvColumnCount(lines: string[], fallbackColumnCount: number): number {
-	let maxTabCount = 0;
-	for (const line of lines) {
-		const n = countTabs(line);
-		if (n > maxTabCount) {
-			maxTabCount = n;
-		}
-	}
-	return maxTabCount > 0 ? maxTabCount + 1 : fallbackColumnCount;
-}
-
-function parsePlainTsv(text: string, fallbackColumnCount: number): string[][] {
-	const lines = text
-		.split("\n")
-		.map((line) => line.replace(TRAILING_CR_REGEX, ""));
-	const columnCount = tsvColumnCount(lines, fallbackColumnCount);
-	if (columnCount <= 0) {
-		return [];
-	}
-
-	const expectedTabCount = columnCount - 1;
-	const rows: string[][] = [];
-	let buf = "";
-	let bufTabCount = 0;
-
-	for (const line of lines) {
-		const tc = countTabs(line);
-
-		if (tc === expectedTabCount) {
-			if (buf && bufTabCount === expectedTabCount) {
-				rows.push(buf.split("\t"));
-			}
-			buf = "";
-			bufTabCount = 0;
-			rows.push(line.split("\t"));
-		} else {
-			buf = buf ? `${buf}\n${line}` : line;
-			bufTabCount += tc;
-			if (bufTabCount === expectedTabCount) {
-				rows.push(buf.split("\t"));
-				buf = "";
-				bufTabCount = 0;
-			}
-		}
-	}
-
-	if (buf && bufTabCount === expectedTabCount) {
-		rows.push(buf.split("\t"));
-	}
-
-	return rows.length > 0
-		? rows
-		: lines.filter((l) => l.length > 0).map((l) => l.split("\t"));
-}
-
-export function parseTsv(
-	text: string,
-	fallbackColumnCount: number
-): string[][] {
-	if (text.startsWith('"') || text.includes('\t"')) {
-		return parseQuotedTsv(text);
-	}
-	return parsePlainTsv(text, fallbackColumnCount);
-}
-
 export function getIsInPopover(
 	element: Parameters<typeof popoverElementSchema.safeParse>[0]
 ): boolean {
@@ -606,90 +369,13 @@ export function getUrlHref(urlString: string): string {
 	return candidate;
 }
 
-export function parseLocalDate(
-	dateStr: Parameters<typeof localDateInputSchema.safeParse>[0]
-): Date | null {
-	const parsed = localDateInputSchema.safeParse(dateStr);
-	if (!parsed.success) {
-		return null;
-	}
-	if (parsed.data instanceof Date) {
-		return parsed.data;
-	}
-	const [year, month, day] = parsed.data.split("-").map(Number);
-	if (!(year && month && day)) {
-		return null;
-	}
-	const date = new Date(year, month - 1, day);
-	// Verify date wasn't auto-corrected (e.g. Feb 30 -> Mar 1)
-	if (
-		date.getFullYear() !== year ||
-		date.getMonth() !== month - 1 ||
-		date.getDate() !== day
-	) {
-		return null;
-	}
-	return date;
-}
-
-export function formatDateToString(date: Date): string {
-	const year = date.getFullYear();
-	const month = String(date.getMonth() + 1).padStart(2, "0");
-	const day = String(date.getDate()).padStart(2, "0");
-	return `${year}-${month}-${day}`;
-}
-
-const ISO_DATE_PREFIX = /^(\d{4}-\d{2}-\d{2})(?:$|T)/;
-
-/**
- * Normalize pasted text to the local `YYYY-MM-DD` string a date column stores.
- * `new Date("2024-03-05")` is UTC midnight (the previous day west of UTC), so
- * date-only and ISO-timestamp input keep the calendar day as written; other
- * formats fall back to `Date` parsing read in local time.
- */
-export function parsePastedDate(text: string): string | null {
-	const trimmed = text.trim();
-	const isoDate = ISO_DATE_PREFIX.exec(trimmed)?.[1];
-	const local = parseLocalDate(isoDate ?? trimmed);
-	if (local) {
-		return formatDateToString(local);
-	}
-	if (isoDate) {
-		return null;
-	}
-	const date = new Date(trimmed);
-	return Number.isNaN(date.getTime()) ? null : formatDateToString(date);
-}
-
-export function formatDateForDisplay(
-	dateStr: Parameters<typeof parseLocalDate>[0]
-): string {
-	if (!dateStr) {
-		return "";
-	}
-	const date = parseLocalDate(dateStr);
-	if (!date) {
-		const parsed = cellTextSchema.safeParse(dateStr);
-		return parsed.success ? parsed.data : "";
-	}
-	try {
-		return date.toLocaleDateString(getDisplayLocale());
-	} catch {
-		return date.toLocaleDateString();
-	}
-}
-
 export function formatFileSize(bytes: number): string {
-	if (bytes <= 0 || !Number.isFinite(bytes)) {
-		return "0 B";
-	}
-	const k = 1024;
-	const sizes = ["B", "KB", "MB", "GB"];
-	const i = Math.min(
-		sizes.length - 1,
-		Math.floor(Math.log(bytes) / Math.log(k))
-	);
-	return `${Number.parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
+	const count = bytes > 0 && Number.isFinite(bytes) ? bytes : 0;
+	return formatByteSize(count, activeLocale(), {
+		fractionDigits: 1,
+		maxUnit: "gigabyte",
+		trimZeros: true,
+	});
 }
 
 export function getFileIcon(
@@ -733,3 +419,15 @@ export function getFileIcon(
 	}
 	return File;
 }
+
+export {
+	formatDateForDisplay,
+	formatDateToString,
+	parseLocalDate,
+	parsePastedDate,
+} from "./data-grid-date.ts";
+export {
+	getScrollDirection,
+	scrollCellIntoView,
+} from "./data-grid-scroll.ts";
+export { parseTsv } from "./data-grid-tsv.ts";

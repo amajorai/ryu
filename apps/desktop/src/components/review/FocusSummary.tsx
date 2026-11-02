@@ -6,16 +6,25 @@ import "./FocusSummary.css";
 // both the Timeline work-journal pane and the Weekly Review page so the headline
 // metric reads identically everywhere.
 
+import { formatDurationParts } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { FocusStats } from "@/src/lib/api/shadow.ts";
 
+/** "45m", "2h", "2h 10m" in English; the locale's own units elsewhere. */
 function formatMinutesLabel(minutes: number): string {
 	if (minutes < 60) {
-		return `${minutes}m`;
+		return formatDurationParts([[minutes, "minute"]]);
 	}
 	const hours = Math.floor(minutes / 60);
 	const rest = minutes % 60;
-	return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+	return formatDurationParts(
+		rest === 0
+			? [[hours, "hour"]]
+			: [
+					[hours, "hour"],
+					[rest, "minute"],
+				]
+	);
 }
 
 /** A thin stacked focus/distraction bar with the focus ratio as a headline. */

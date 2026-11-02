@@ -352,7 +352,7 @@ export function CreatureList({
 			{ordered.map((creature) => {
 				const act = actLayer?.acts.get(creature.id);
 				const ask = act?.act === "asking" ? act.ask : null;
-				let label = creatureDescription(creature);
+				let label = creatureDescription(creature, tl);
 				if (act) {
 					label = ask
 						? tl("{actLabel} Answer their ask.", { actLabel: act.ariaLabel })
@@ -407,7 +407,7 @@ export function CreatureList({
 									size={26}
 								/>
 							) : null}
-							{creature.name}
+							<span data-ryu-i18n="off">{creature.name}</span>
 							<span className={cn(webglMissing ? "sr-only" : undefined)}>
 								{" "}
 								({CREATURE_LABELS[creature.kind]})

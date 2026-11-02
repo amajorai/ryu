@@ -69,7 +69,7 @@ export function GetRyuAppsSubmenu({
 								icon={SURFACE_ICONS[surface.id]}
 							/>
 							<span className="flex-1">{surface.label}</span>
-							<span className="ml-3 text-muted-foreground text-xs">
+							<span className="ms-3 text-muted-foreground text-xs">
 								{surface.description}
 							</span>
 						</DropdownMenuItem>

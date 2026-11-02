@@ -1,9 +1,9 @@
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type WikiAgentArticle,
 	type WikiGroupArticle,
@@ -63,7 +63,7 @@ export function threadSections(article: WikiThreadArticle): WikiSection[] {
 
 /** Status label for infoboxes and tables. */
 export function statusLabel(thread: InterfaceThread): string {
-	return THREAD_STATUS_LABELS[threadStatus(thread)];
+	return threadStatusLabel(threadStatus(thread));
 }
 
 /** The categories a page sits in, for the catlinks box at the foot. */

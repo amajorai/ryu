@@ -1,3 +1,4 @@
+import { activeLocale, translate as tr, unitFormatter } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -30,18 +31,34 @@ export const TICKET_STATUS_ORDER: readonly TicketStatus[] = [
 ];
 
 export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
-	new: "New",
-	open: "Open",
-	pending: "Pending",
-	solved: "Solved",
+	get new() {
+		return tr("New");
+	},
+	get open() {
+		return tr("Open");
+	},
+	get pending() {
+		return tr("Pending");
+	},
+	get solved() {
+		return tr("Solved");
+	},
 };
 
 /** What each status means here, for tooltips and screen readers. */
 export const TICKET_STATUS_HINTS: Record<TicketStatus, string> = {
-	new: "Nothing has been said yet",
-	open: "The agent answered. Your reply is next",
-	pending: "Waiting on the agent",
-	solved: "No follow-up for a day after the agent answered",
+	get new() {
+		return tr("Nothing has been said yet");
+	},
+	get open() {
+		return tr("The agent answered. Your reply is next");
+	},
+	get pending() {
+		return tr("Waiting on the agent");
+	},
+	get solved() {
+		return tr("No follow-up for a day after the agent answered");
+	},
 };
 
 /** Hint for an open ticket whose last run failed or stopped. */
@@ -68,10 +85,18 @@ export const TICKET_PRIORITY_ORDER: readonly TicketPriority[] = [
 ];
 
 export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {
-	high: "High",
-	low: "Low",
-	normal: "Normal",
-	urgent: "Urgent",
+	get high() {
+		return tr("High");
+	},
+	get low() {
+		return tr("Low");
+	},
+	get normal() {
+		return tr("Normal");
+	},
+	get urgent() {
+		return tr("Urgent");
+	},
 };
 
 /** An agent's answer left this long without a follow-up counts as solved. */
@@ -164,16 +189,19 @@ export function ticketPriorityOf(
 }
 
 /** "35m", "3h", "2d": the largest whole unit, at least one. */
-export function compactDuration(ms: number): string {
+export function compactDuration(
+	ms: number,
+	locale: string = activeLocale()
+): string {
 	const minutes = Math.max(1, Math.floor(Math.abs(ms) / MINUTE));
 	if (minutes < 60) {
-		return `${minutes}m`;
+		return unitFormatter(locale, "minute").format(minutes);
 	}
 	const hours = Math.floor(minutes / 60);
 	if (hours < 24) {
-		return `${hours}h`;
+		return unitFormatter(locale, "hour").format(hours);
 	}
-	return `${Math.floor(hours / 24)}d`;
+	return unitFormatter(locale, "day").format(Math.floor(hours / 24));
 }
 
 /** The spoken SLA sentence, one whole message per unit and direction. */

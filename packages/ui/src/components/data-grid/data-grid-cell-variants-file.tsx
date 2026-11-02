@@ -341,7 +341,9 @@ export function FileCell<TData>({
 								<div className="flex flex-col gap-2">
 									<div className="flex items-center justify-between">
 										<p className="font-medium text-muted-foreground text-xs">
-											{files.length} {files.length === 1 ? "file" : "files"}
+											{tl("{count, plural, one {# file} other {# files}}", {
+												count: files.length,
+											})}
 										</p>
 										<Button
 											className="h-6 text-muted-foreground text-xs"

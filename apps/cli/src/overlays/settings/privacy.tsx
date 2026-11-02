@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { formatCliDateTime } from "../../i18n/format.ts";
 import { tf } from "../../i18n/translate.ts";
 import {
 	DEFAULTS,
@@ -453,7 +454,9 @@ export function PrivacyPanel({
 	const supportState = supportIsActive
 		? preferences.supportExpiry === 0
 			? "ON · no expiry"
-			: `ON until ${new Date(preferences.supportExpiry).toLocaleString()}`
+			: tf("ON until {date}", {
+					date: formatCliDateTime(preferences.supportExpiry) ?? "",
+				})
 		: preferences.supportAccess
 			? "Expired"
 			: "OFF";

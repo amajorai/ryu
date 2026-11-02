@@ -1,13 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PRO_ORG_ID = "507f1f77bcf86cd799439011";
 const ENTERPRISE_ORG_ID = "507f1f77bcf86cd799439012";
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/node-billing"
-);
+const proofDir = proofEvidencePath("node-billing");
 
 test.setTimeout(120_000);
 

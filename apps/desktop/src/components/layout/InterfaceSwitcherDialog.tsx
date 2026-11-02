@@ -11,6 +11,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import {
 	type InterfaceDescriptor,
@@ -33,7 +34,7 @@ import { useInterfacePrefs } from "@/src/interfaces/use-interface-prefs.ts";
 import { useProductModeStore } from "@/src/lib/product-mode.ts";
 
 const ROW =
-	"flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none";
+	"flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none";
 
 function Choice({
 	active,
@@ -139,7 +140,7 @@ export function InterfaceSwitcherDialog({
 						}}
 						type="button"
 					>
-						<HugeiconsIcon
+						<DirectionalIcon
 							aria-hidden="true"
 							className="shrink-0 text-muted-foreground"
 							icon={ArrowLeft01Icon}

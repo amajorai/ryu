@@ -8,6 +8,12 @@
 	counter-reset: none !important;
 }
 
+/* Source code reads left to right even inside a right-to-left reply. */
+.markdown pre {
+	text-align: left;
+	direction: ltr;
+}
+
 .markdown pre code > span::before {
 	display: none !important;
 	content: none !important;
@@ -29,7 +35,8 @@
 	position: relative;
 	height: auto;
 	height: 28px;
-	padding: 0px 10px 0px 8px;
+	padding-block: 0;
+	padding-inline: 8px 10px;
 	font-size: 12px;
 	background: transparent;
 	background-color: var(--muted);
@@ -38,11 +45,11 @@
 
 .markdown div:has(> [data-streamdown="code-block-actions"]) {
 	position: absolute;
+	inset-inline-end: 0;
 	top: 0;
-	right: 0;
 	height: auto;
 	height: 28px;
-	padding-right: 8px;
+	padding-inline-end: 8px;
 	margin: 0;
 }
 

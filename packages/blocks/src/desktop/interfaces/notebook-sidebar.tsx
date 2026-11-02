@@ -72,7 +72,7 @@ function NavRow({
 				badge ? tl("{label}, {badge} need you", { badge, label }) : undefined
 			}
 			className={cn(
-				"flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left font-medium text-sm outline-none transition-colors duration-100 focus-visible:ring-2 focus-visible:ring-ring/50",
+				"flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-start font-medium text-sm outline-none transition-colors duration-100 focus-visible:ring-2 focus-visible:ring-ring/50",
 				active
 					? "bg-sidebar-accent text-sidebar-accent-foreground"
 					: "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground"
@@ -221,7 +221,7 @@ export function NotebookSidebar({
 					onClick={onClose}
 					shortcut={overlay ? "Escape" : "Control+\\"}
 				>
-					{overlay ? <X /> : <ChevronsLeft />}
+					{overlay ? <X /> : <ChevronsLeft className="rtl:-scale-x-100" />}
 				</NotebookIconButton>
 				<NotebookIconButton label="New page" onClick={onNewPage}>
 					<SquarePen />

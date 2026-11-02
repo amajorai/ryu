@@ -11,6 +11,7 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Card, CardContent, CardHeader } from "@ryu/ui/components/card.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
 	EmptyDescription,
@@ -35,15 +36,13 @@ import {
 	runDreamReview,
 	updateDreamSettings,
 } from "@/src/lib/api/memory.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 
 function formatReviewDate(timestamp: number): string {
 	if (!timestamp) {
 		return "Not run yet";
 	}
-	return new Intl.DateTimeFormat(undefined, {
-		dateStyle: "medium",
-		timeStyle: "short",
-	}).format(timestamp);
+	return formatLocalDateTime(timestamp);
 }
 
 function ProposalDiff({ proposal }: { proposal: MemoryProposal }) {
@@ -54,7 +53,7 @@ function ProposalDiff({ proposal }: { proposal: MemoryProposal }) {
 		<div className="flex flex-col gap-2">
 			<div className="flex items-center gap-2 text-muted-foreground text-xs">
 				<span>{previous ? "Update" : "New memory"}</span>
-				<HugeiconsIcon className="size-3.5" icon={ArrowRight02Icon} />
+				<DirectionalIcon className="size-3.5" icon={ArrowRight02Icon} />
 				<span>{proposal.proposed.category.replaceAll("_", " ")}</span>
 			</div>
 			{previous ? (

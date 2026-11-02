@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Avatar,
@@ -107,7 +108,7 @@ export function AgentFace({
 			{showWorking && agent.status === "working" ? (
 				<span
 					className={cn(
-						"absolute right-0 bottom-0 rounded-full bg-success",
+						"absolute end-0 bottom-0 rounded-full bg-success",
 						DOT_SIZE[size],
 						ring
 					)}
@@ -270,7 +271,9 @@ export interface VoteProps {
 }
 
 function voteLabel(direction: "Downvote" | "Upvote", title: string) {
-	return `${direction} “${title}”`;
+	return direction === "Upvote"
+		? tr("Upvote “{title}”", { title })
+		: tr("Downvote “{title}”", { title });
 }
 
 /**

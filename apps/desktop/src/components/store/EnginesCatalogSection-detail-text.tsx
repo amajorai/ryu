@@ -99,7 +99,7 @@ export function TextEngineDetail({
 						}
 						pending={state.pending}
 					/>
-					<div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
+					<div className="ms-auto flex shrink-0 items-center gap-2 text-sm">
 						{engine.running &&
 						RESTARTABLE_CORE_CHAT_ENGINES.has(engine.name) ? (
 							<Button

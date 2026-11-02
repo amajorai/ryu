@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const API_PATH = "/api/quests/detection-config";
 const PROOF_ORIGIN = "http://127.0.0.1:5286";
@@ -15,10 +16,7 @@ const DEFAULT_CONFIG: DetectionConfig = {
 // space instead of rewriting the tracked sweep evidence.
 const EVIDENCE_DIR = process.env.RYU_PROOF_OUTPUT_ROOT
 	? path.resolve(process.env.RYU_PROOF_OUTPUT_ROOT)
-	: path.resolve(
-			process.cwd(),
-			"../../docs/proof/test-coverage-sweep-20260924/evidence"
-		);
+	: proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 interface DetectionConfig {
 	effort: string;

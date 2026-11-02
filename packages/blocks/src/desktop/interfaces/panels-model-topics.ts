@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfaceAgent,
 	InterfaceGroup,
@@ -62,7 +63,7 @@ export function buildTopics(snapshot: InterfaceSnapshot): PanelsTopic[] {
 			group: null,
 			id: "other",
 			members: [],
-			name: "Other conversations",
+			name: tr("Other conversations"),
 			threads: loose,
 		});
 	}

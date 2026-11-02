@@ -208,7 +208,7 @@ describe("focus model", () => {
 		expect(ada && grace ? focusAgentLine([ada, grace, ada]) : "").toBe(
 			"Ada +2"
 		);
-		expect(focusAge(ago(0), NOW)).toBe("just now");
+		expect(focusAge(ago(0), NOW)).toBe("now");
 		expect(focusAge(ago(18), NOW)).toBe("18m ago");
 		expect(queue[0] ? focusReason(queue[0], passthrough) : "").toContain(
 			"failed"

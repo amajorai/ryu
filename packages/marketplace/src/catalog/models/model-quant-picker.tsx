@@ -163,7 +163,7 @@ export function QuantizationPicker({
 												{f.quant}
 											</span>
 										)}
-										<span className="ml-auto shrink-0 text-muted-foreground text-xs">
+										<span className="ms-auto shrink-0 text-muted-foreground text-xs">
 											{isBlockedFit(f.fit)
 												? tl("{fileSize} · won't fit", {
 														fileSize: f.sizeHuman,

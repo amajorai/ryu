@@ -195,8 +195,16 @@ pub(crate) enum ApprovalRequestBody {
         source_id: String,
         diagnosis: String,
     },
-    /// A terminal review notice with no action.
-    HealExhausted { source_id: String, note: String },
+    /// A terminal review notice with no action. A newer healer sends the
+    /// `attempts` it used, which Core words itself; `note` is its English
+    /// sentence for an older Core.
+    HealExhausted {
+        source_id: String,
+        #[serde(default)]
+        note: String,
+        #[serde(default)]
+        attempts: Option<u32>,
+    },
 }
 
 /// Body of `runs.rerunAgent`.
@@ -262,10 +270,17 @@ fn approval_for(body: ApprovalRequestBody) -> Result<ApprovalRequest, RunOpError
             check_text("diagnosis", &diagnosis)?;
             Ok(ApprovalRequest::for_heal_workflow(&source_id, &diagnosis))
         }
-        ApprovalRequestBody::HealExhausted { source_id, note } => {
+        ApprovalRequestBody::HealExhausted {
+            source_id,
+            note,
+            attempts,
+        } => {
             check_id("source_id", &source_id)?;
             check_text("note", &note)?;
-            Ok(ApprovalRequest::for_heal_exhausted(&source_id, &note))
+            Ok(match attempts {
+                Some(attempts) => ApprovalRequest::for_heal_exhausted_after(&source_id, attempts),
+                None => ApprovalRequest::for_heal_exhausted(&source_id, &note),
+            })
         }
     }
 }
@@ -381,6 +396,15 @@ mod tests {
             exhausted.source_ref.as_deref(),
             Some("heal-exhausted:conv-2")
         );
+
+        let counted = approval_for(
+            parse(json!({ "kind": "heal_exhausted", "source_id": "conv-3",
+                          "note": "It failed.", "attempts": 2 }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(counted.summary.contains("Auto-fix attempts used: 2."));
+        assert!(!counted.summary.contains("It failed."));
     }
 
     #[test]

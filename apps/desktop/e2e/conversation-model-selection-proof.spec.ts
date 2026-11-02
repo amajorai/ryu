@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("a provider/model marker loads for a second participant", async ({
 	page,
@@ -42,9 +43,8 @@ test("a provider/model marker loads for a second participant", async ({
 		page.getByText("OpenRouter · openai/gpt-5-mini").first()
 	).toBeVisible();
 
-	const proofPath = path.resolve(
-		process.cwd(),
-		"../../docs/proof/conversation-model-selection/shared-model-marker.png"
+	const proofPath = proofEvidencePath(
+		"conversation-model-selection/shared-model-marker.png"
 	);
 	await mkdir(path.dirname(proofPath), { recursive: true });
 	await page.screenshot({ fullPage: true, path: proofPath });

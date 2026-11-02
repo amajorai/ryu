@@ -35,7 +35,7 @@ export function TrayBadge({
 		<span
 			aria-hidden={!open}
 			aria-label={open ? `${count} ${label}` : undefined}
-			className="t-badge -top-0.5 -right-0.5"
+			className="t-badge -end-0.5 -top-0.5"
 			data-open={open}
 		>
 			<span

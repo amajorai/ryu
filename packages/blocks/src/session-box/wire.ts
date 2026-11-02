@@ -12,8 +12,15 @@
 // still an error. Screen grants are strict: a direct grant must be an absolute
 // WebSocket URL (a relative one is never resolved against the page), and a
 // relay grant must name a session-box relay path.
+//
+// The cost notice's copy lives in `cost-notice-copy.ts` and is re-exported here.
 
-import type { LiteralMessage } from "@ryu/i18n/react";
+export {
+	costNoticeHeading,
+	costNoticeText,
+	formatHourlyRate,
+	minimumStartWords,
+} from "./cost-notice-copy.ts";
 
 export type SessionBoxSize = "small" | "default" | "large";
 export type SessionBoxState =
@@ -266,64 +273,6 @@ export function parseSessionBoxCostNotice(
 		size: optOneOf(value.size, SIZES),
 		waiting: value.waiting === true,
 	};
-}
-
-/**
- * An hourly rate in micro-USD as dollars with at least cents and no trailing
- * zeros past them: `25000` is `$0.025`, `40000` is `$0.04`.
- */
-export function formatHourlyRate(microUsd: number): string {
-	const whole = Math.floor(microUsd / 1_000_000);
-	const fraction = String(microUsd % 1_000_000)
-		.padStart(6, "0")
-		.replace(/0+$/, "")
-		.padEnd(2, "0");
-	return `$${whole}.${fraction}`;
-}
-
-const SIZE_SPECS: Record<SessionBoxSize, string> = {
-	small: "2 vCPU, 4 GB",
-	default: "4 vCPU, 8 GB",
-	large: "8 vCPU, 16 GB",
-};
-
-/** `5-minute`, `90-second`: a per-start minimum as a compound adjective. */
-export function minimumStartWords(seconds: number): string {
-	return seconds % 60 === 0 && seconds > 0
-		? `${seconds / 60}-minute`
-		: `${seconds}-second`;
-}
-
-/** The notice's heading: what starts, at what rate, with the minimum. */
-export function costNoticeHeading(
-	notice: SessionBoxCostNotice,
-	tl: LiteralMessage
-): string {
-	const minimum = minimumStartWords(notice.minimumSecondsPerStart);
-	return notice.ratePerHourMicroUsd === null
-		? tl("Computer use starts a paid cloud Box")
-		: tl(
-				"Computer use starts a cloud Box at {hourlyRate}/hour, {minimum} minimum per start",
-				{ hourlyRate: formatHourlyRate(notice.ratePerHourMicroUsd), minimum }
-			);
-}
-
-/** The notice's sentence about what starts and what it costs. */
-export function costNoticeText(
-	notice: SessionBoxCostNotice,
-	tl: LiteralMessage
-): string {
-	const size = notice.size ?? "small";
-	const box = `a cloud Box of its own (${size}: ${SIZE_SPECS[size]})`;
-	const cost =
-		notice.ratePerHourMicroUsd === null
-			? "Ryu could not read its hourly rate right now"
-			: `it costs ${formatHourlyRate(notice.ratePerHourMicroUsd)} an hour while it runs, from your credits`;
-	const minimum = minimumStartWords(notice.minimumSecondsPerStart);
-	return tl(
-		"Computer use and the browser run on {box}, and {cost}. Time is billed in whole minutes with a {minimum} minimum each time the Box starts; a resume within the hour already paid owes no new minimum. It parks when idle and stops when credits run out. Ryu asks once.",
-		{ box, cost, minimum }
-	);
 }
 
 /**

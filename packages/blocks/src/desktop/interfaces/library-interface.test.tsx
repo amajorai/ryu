@@ -421,7 +421,7 @@ describe("library model", () => {
 		expect(authorList([])).toBe("No agent yet");
 		expect(authorList([ada])).toBe("Ada");
 		expect(authorList([ada, grace])).toBe("Ada and Grace");
-		expect(authorList([ada, grace, linus])).toBe("Ada, Grace and Linus");
+		expect(authorList([ada, grace, linus])).toBe("Ada, Grace, and Linus");
 		expect(authorList([ada, grace, linus, ada, grace])).toBe(
 			"Ada, Grace, Linus and 2 more"
 		);

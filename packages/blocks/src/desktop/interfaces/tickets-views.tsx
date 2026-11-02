@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	NativeSelect,
 	NativeSelectOption,
@@ -53,7 +54,7 @@ export function TicketsViewsPanel({
 	return (
 		<nav
 			aria-label="Ticket views"
-			className="flex w-60 shrink-0 flex-col border-border border-r bg-sidebar text-sidebar-foreground"
+			className="flex w-60 shrink-0 flex-col border-border border-e bg-sidebar text-sidebar-foreground"
 			data-testid="tickets-views"
 		>
 			<div className="flex h-12 shrink-0 items-center px-4">
@@ -67,9 +68,12 @@ export function TicketsViewsPanel({
 						<li key={view.id}>
 							<button
 								aria-current={selected ? "page" : undefined}
-								aria-label={`${view.label}, ${ticketCountLabel(count)}`}
+								aria-label={tr("{view}, {count}", {
+									count: ticketCountLabel(count),
+									view: view.label,
+								})}
 								className={cn(
-									"flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm outline-none transition-colors",
+									"flex h-8 w-full items-center gap-2 rounded-md px-2 text-start text-sm outline-none transition-colors",
 									"hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring",
 									selected &&
 										"bg-sidebar-accent font-medium text-sidebar-accent-foreground"

@@ -1,11 +1,12 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type FeedPost,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * The quiet text marker a post carries in its meta line: a short form for the
@@ -44,20 +45,24 @@ export function feedStatusMarker(
 	if (status === "attention") {
 		const stopped = thread?.runState === "interrupted";
 		return {
-			long: stopped ? "Run stopped" : "Run failed",
-			short: stopped ? "Stopped" : "Failed",
+			long: stopped ? tr("Run stopped") : tr("Run failed"),
+			short: stopped ? tr("Stopped") : tr("Failed"),
 			status,
 		};
 	}
 	if (status === "your-turn") {
 		return {
-			long: THREAD_STATUS_LABELS["your-turn"],
-			short: THREAD_STATUS_LABELS["your-turn"],
+			long: threadStatusLabel("your-turn"),
+			short: threadStatusLabel("your-turn"),
 			status,
 		};
 	}
 	if (status === "waiting") {
-		return { long: THREAD_STATUS_LABELS.waiting, short: "Waiting", status };
+		return {
+			long: threadStatusLabel("waiting"),
+			short: tr("Waiting"),
+			status,
+		};
 	}
 	return null;
 }

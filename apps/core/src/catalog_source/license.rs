@@ -36,6 +36,8 @@ use anyhow::{bail, Result};
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{messages, Message};
+
 /// How long a remembered `active` answer keeps a paid item enable-able while the
 /// control plane cannot be reached.
 pub const LICENSE_OFFLINE_GRACE_SECS: u64 = 7 * 24 * 60 * 60;
@@ -71,22 +73,21 @@ impl LicenseState {
         matches!(self, Self::Refunded | Self::Disputed | Self::Expired)
     }
 
-    fn refusal(self, kind: &str, id: &str) -> String {
-        match self {
-            Self::Refunded => format!(
-                "`{kind}/{id}`: this Marketplace purchase was refunded, so the license is revoked; buy it again to enable it"
-            ),
-            Self::Disputed => format!(
-                "`{kind}/{id}`: this Marketplace purchase is disputed, so the license is suspended"
-            ),
-            Self::Expired => format!(
-                "`{kind}/{id}`: this Marketplace license has expired; renew it to enable the item"
-            ),
-            Self::Free | Self::Active | Self::None => {
-                format!("`{kind}/{id}`: Marketplace license refused")
-            }
-        }
+    /// Why an item in this state may not run, as a localizable message.
+    fn refusal(self, kind: &str, id: &str) -> Message {
+        let template = match self {
+            Self::Refunded => messages::LICENSE_REFUNDED_MESSAGE,
+            Self::Disputed => messages::LICENSE_DISPUTED_MESSAGE,
+            Self::Expired => messages::LICENSE_EXPIRED_MESSAGE,
+            Self::Free | Self::Active | Self::None => messages::LICENSE_REFUSED_MESSAGE,
+        };
+        Message::new(template).text("item", item_label(kind, id))
     }
+}
+
+/// How a refusal names the item: `plugin/acme.paid`.
+fn item_label(kind: &str, id: &str) -> String {
+    format!("{kind}/{id}")
 }
 
 /// The last answer the control plane gave for one item.
@@ -104,14 +105,15 @@ pub enum LicenseProbe {
 }
 
 /// Pure enable decision. `Ok(Some(cache))` asks the caller to persist that
-/// answer; `Ok(None)` allows without touching the cache; `Err` refuses.
+/// answer; `Ok(None)` allows without touching the cache; `Err` refuses with
+/// the reason, rendered per reader (English for the HTTP error and logs).
 pub fn decide_enable(
     kind: &str,
     id: &str,
     probe: &LicenseProbe,
     cached: Option<CachedLicense>,
     now: u64,
-) -> std::result::Result<Option<CachedLicense>, String> {
+) -> std::result::Result<Option<CachedLicense>, Message> {
     match probe {
         LicenseProbe::Answer(LicenseState::None) => Ok(None),
         LicenseProbe::Answer(state) => {
@@ -133,9 +135,11 @@ pub fn decide_enable(
             Some(CachedLicense {
                 state: LicenseState::Active,
                 checked_at,
-            }) if now.saturating_sub(checked_at) > LICENSE_OFFLINE_GRACE_SECS => Err(format!(
-                "`{kind}/{id}`: the Marketplace license could not be re-checked ({reason}) and the offline grace period has ended; reconnect and sign in to enable this paid item"
-            )),
+            }) if now.saturating_sub(checked_at) > LICENSE_OFFLINE_GRACE_SECS => {
+                Err(Message::new(messages::LICENSE_OFFLINE_GRACE_ENDED_MESSAGE)
+                    .text("item", item_label(kind, id))
+                    .text("reason", reason.clone()))
+            }
             Some(_) => Ok(None),
         },
     }
@@ -291,7 +295,7 @@ pub fn apply_license_probe(
     id: &str,
     probe: &LicenseProbe,
     now: u64,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), Message> {
     let cached = cache.read(kind, id);
     if let LicenseProbe::Answer(state) = probe {
         if state.is_revoked() {
@@ -323,7 +327,7 @@ pub async fn require_enable_license(client: &reqwest::Client, kind: &str, id: &s
     if let Err(reason) =
         apply_license_probe(&DiskLicenseCache, kind, id, &probe, now_unix_seconds())
     {
-        bail!(reason);
+        bail!(reason.render("en"));
     }
     Ok(())
 }
@@ -338,15 +342,27 @@ pub struct LicensedItem {
 }
 
 /// An enabled item whose license no longer allows it to run, with the same
-/// user-facing reason the enable-time check would have given.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// reason the enable-time check would have given: `message` renders it for
+/// the reader, `reason` is its English text for logs and activity metadata.
+#[derive(Debug, Clone, PartialEq)]
 pub struct LicenseRevocation {
     pub item: LicensedItem,
     pub reason: String,
+    pub message: Message,
+}
+
+impl LicenseRevocation {
+    pub fn new(item: LicensedItem, message: Message) -> Self {
+        Self {
+            item,
+            reason: message.render("en"),
+            message,
+        }
+    }
 }
 
 /// What one background pass found.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RevalidationPass {
     /// Items probed (free items with a remembered `free` answer are skipped).
     pub checked: usize,
@@ -398,7 +414,7 @@ pub async fn revalidate_items(
             pass.unreachable = true;
         }
         if let Err(reason) = apply_license_probe(cache, &item.kind, &item.id, &probe, now) {
-            pass.revoked.push(LicenseRevocation { item, reason });
+            pass.revoked.push(LicenseRevocation::new(item, reason));
         }
     }
     pass.revoked
@@ -438,263 +454,4 @@ pub async fn revalidate_enabled_items(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const NOW: u64 = 1_800_000_000;
-
-    fn cached(state: LicenseState, age: u64) -> Option<CachedLicense> {
-        Some(CachedLicense {
-            state,
-            checked_at: NOW - age,
-        })
-    }
-
-    #[test]
-    fn online_answers_allow_or_revoke() {
-        for state in [LicenseState::Free, LicenseState::Active] {
-            assert_eq!(
-                decide_enable("plugin", "a", &LicenseProbe::Answer(state), None, NOW),
-                Ok(Some(CachedLicense {
-                    state,
-                    checked_at: NOW
-                }))
-            );
-        }
-        for state in [
-            LicenseState::Refunded,
-            LicenseState::Disputed,
-            LicenseState::Expired,
-        ] {
-            let refusal = decide_enable(
-                "plugin",
-                "a",
-                &LicenseProbe::Answer(state),
-                cached(LicenseState::Active, 0),
-                NOW,
-            )
-            .expect_err("a revoked license must refuse even with a fresh active cache");
-            assert!(refusal.contains("plugin/a"));
-        }
-        // No license row (e.g. a publisher-granted share-code install) is not a
-        // revocation and does not overwrite the last-good answer.
-        assert_eq!(
-            decide_enable(
-                "plugin",
-                "a",
-                &LicenseProbe::Answer(LicenseState::None),
-                None,
-                NOW
-            ),
-            Ok(None)
-        );
-    }
-
-    #[test]
-    fn offline_falls_back_to_a_bounded_last_good_answer() {
-        let offline = LicenseProbe::Unavailable("unreachable".to_owned());
-        // Never observed as paid: allow.
-        assert_eq!(decide_enable("app", "a", &offline, None, NOW), Ok(None));
-        // Free never expires.
-        assert_eq!(
-            decide_enable(
-                "app",
-                "a",
-                &offline,
-                cached(LicenseState::Free, 10 * LICENSE_OFFLINE_GRACE_SECS),
-                NOW
-            ),
-            Ok(None)
-        );
-        // Active within the grace window: allow.
-        assert_eq!(
-            decide_enable(
-                "app",
-                "a",
-                &offline,
-                cached(LicenseState::Active, LICENSE_OFFLINE_GRACE_SECS),
-                NOW
-            ),
-            Ok(None)
-        );
-        // Active past the grace window: refuse until re-checked.
-        let stale = decide_enable(
-            "app",
-            "a",
-            &offline,
-            cached(LicenseState::Active, LICENSE_OFFLINE_GRACE_SECS + 1),
-            NOW,
-        )
-        .expect_err("stale active license must not enable forever offline");
-        assert!(stale.contains("offline grace"));
-        // A remembered refund stays refused offline.
-        assert!(
-            decide_enable("app", "a", &offline, cached(LicenseState::Refunded, 0), NOW).is_err()
-        );
-    }
-
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    /// A scripted control plane: one answer per `kind/id`, recording each probe.
-    #[derive(Default)]
-    struct FakeOracle {
-        answers: HashMap<String, LicenseProbe>,
-        probed: Mutex<Vec<String>>,
-    }
-
-    impl FakeOracle {
-        fn with(mut self, id: &str, probe: LicenseProbe) -> Self {
-            self.answers.insert(format!("plugin/{id}"), probe);
-            self
-        }
-    }
-
-    impl LicenseOracle for FakeOracle {
-        fn probe<'a>(&'a self, kind: &'a str, id: &'a str) -> BoxFuture<'a, LicenseProbe> {
-            let key = format!("{kind}/{id}");
-            self.probed.lock().unwrap().push(key.clone());
-            let answer = self
-                .answers
-                .get(&key)
-                .cloned()
-                .unwrap_or_else(|| LicenseProbe::Unavailable("unscripted".to_owned()));
-            Box::pin(async move { answer })
-        }
-    }
-
-    #[derive(Default)]
-    struct MemoryCache(Mutex<HashMap<String, CachedLicense>>);
-
-    impl MemoryCache {
-        fn seeded(id: &str, state: LicenseState, age: u64) -> Self {
-            let cache = Self::default();
-            cache.write("plugin", id, cached(state, age).unwrap());
-            cache
-        }
-    }
-
-    impl LicenseCache for MemoryCache {
-        fn read(&self, kind: &str, id: &str) -> Option<CachedLicense> {
-            self.0.lock().unwrap().get(&format!("{kind}/{id}")).copied()
-        }
-        fn write(&self, kind: &str, id: &str, record: CachedLicense) {
-            self.0
-                .lock()
-                .unwrap()
-                .insert(format!("{kind}/{id}"), record);
-        }
-    }
-
-    fn item(id: &str) -> LicensedItem {
-        LicensedItem {
-            kind: "plugin".to_owned(),
-            id: id.to_owned(),
-        }
-    }
-
-    async fn pass(oracle: &FakeOracle, cache: &MemoryCache, id: &str) -> RevalidationPass {
-        revalidate_items(oracle, cache, vec![item(id)], NOW, 4).await
-    }
-
-    #[tokio::test]
-    async fn background_pass_leaves_a_still_active_license_running() {
-        let oracle = FakeOracle::default().with("a", LicenseProbe::Answer(LicenseState::Active));
-        let cache = MemoryCache::seeded("a", LicenseState::Active, 3 * 24 * 60 * 60);
-        let result = pass(&oracle, &cache, "a").await;
-        assert_eq!(result.checked, 1);
-        assert!(result.revoked.is_empty());
-        assert!(!result.unreachable);
-        // The fresh online answer becomes the new last-good answer.
-        assert_eq!(cache.read("plugin", "a"), cached(LicenseState::Active, 0));
-    }
-
-    #[tokio::test]
-    async fn background_pass_revokes_a_refunded_license_with_its_reason() {
-        let oracle = FakeOracle::default().with("a", LicenseProbe::Answer(LicenseState::Refunded));
-        let cache = MemoryCache::seeded("a", LicenseState::Active, 60);
-        let result = pass(&oracle, &cache, "a").await;
-        assert_eq!(result.revoked.len(), 1);
-        assert_eq!(result.revoked[0].item, item("a"));
-        assert!(result.revoked[0].reason.contains("refunded"));
-        // The revocation is persisted so an offline enable cannot undo it.
-        assert_eq!(
-            cache.read("plugin", "a").map(|record| record.state),
-            Some(LicenseState::Refunded)
-        );
-    }
-
-    #[tokio::test]
-    async fn background_pass_tolerates_a_network_error_inside_the_grace_window() {
-        let oracle = FakeOracle::default().with(
-            "a",
-            LicenseProbe::Unavailable("unreachable: connection reset".to_owned()),
-        );
-        let cache = MemoryCache::seeded("a", LicenseState::Active, LICENSE_OFFLINE_GRACE_SECS);
-        let result = pass(&oracle, &cache, "a").await;
-        assert!(result.revoked.is_empty());
-        assert!(result.unreachable);
-        // The last-good answer is not refreshed by an offline pass.
-        assert_eq!(
-            cache.read("plugin", "a"),
-            cached(LicenseState::Active, LICENSE_OFFLINE_GRACE_SECS)
-        );
-    }
-
-    #[tokio::test]
-    async fn background_pass_revokes_once_the_offline_grace_has_ended() {
-        let oracle = FakeOracle::default().with(
-            "a",
-            LicenseProbe::Unavailable("unreachable: timed out".to_owned()),
-        );
-        let cache = MemoryCache::seeded("a", LicenseState::Active, LICENSE_OFFLINE_GRACE_SECS + 1);
-        let result = pass(&oracle, &cache, "a").await;
-        assert_eq!(result.revoked.len(), 1);
-        assert!(result.revoked[0].reason.contains("offline grace"));
-        assert!(result.unreachable);
-    }
-
-    #[tokio::test]
-    async fn background_pass_skips_free_items_and_probes_unknown_ones_once() {
-        let oracle = FakeOracle::default()
-            .with("free", LicenseProbe::Answer(LicenseState::Free))
-            .with("legacy", LicenseProbe::Answer(LicenseState::Free))
-            .with("gone", LicenseProbe::Answer(LicenseState::Disputed));
-        let cache = MemoryCache::seeded("free", LicenseState::Free, 0);
-        let result = revalidate_items(
-            &oracle,
-            &cache,
-            vec![item("free"), item("legacy"), item("gone")],
-            NOW,
-            2,
-        )
-        .await;
-        let mut probed = oracle.probed.lock().unwrap().clone();
-        probed.sort();
-        assert_eq!(probed, vec!["plugin/gone", "plugin/legacy"]);
-        assert_eq!(result.checked, 2);
-        assert_eq!(result.revoked.len(), 1);
-        assert_eq!(result.revoked[0].item, item("gone"));
-        assert!(result.revoked[0].reason.contains("disputed"));
-        // An item installed before the cache existed is remembered after one probe.
-        assert_eq!(
-            cache.read("plugin", "legacy").map(|record| record.state),
-            Some(LicenseState::Free)
-        );
-    }
-
-    #[test]
-    fn status_vocabulary_matches_the_control_plane() {
-        for (raw, state) in [
-            ("free", LicenseState::Free),
-            ("active", LicenseState::Active),
-            ("refunded", LicenseState::Refunded),
-            ("disputed", LicenseState::Disputed),
-            ("expired", LicenseState::Expired),
-            ("none", LicenseState::None),
-        ] {
-            assert_eq!(LicenseState::parse(raw), Some(state));
-        }
-        assert_eq!(LicenseState::parse("revoked"), None);
-    }
-}
+mod tests;

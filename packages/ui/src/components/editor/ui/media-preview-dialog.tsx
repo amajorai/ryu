@@ -102,7 +102,7 @@ export function MediaPreviewDialog() {
 								)}
 								type="button"
 							>
-								<ArrowLeft />
+								<ArrowLeft className="rtl:-scale-x-100" />
 							</button>
 							{(currentUrlIndex ?? 0) + 1}
 							<button
@@ -114,7 +114,7 @@ export function MediaPreviewDialog() {
 								)}
 								type="button"
 							>
-								<ArrowRight />
+								<ArrowRight className="rtl:-scale-x-100" />
 							</button>
 						</div>
 						<div className="flex">

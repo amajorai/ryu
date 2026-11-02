@@ -4,10 +4,8 @@
 // not about the quality of the model's answers. It catches setup contradictions
 // and risky defaults without pretending that a static scan is a runtime test.
 
-import type {
-	AgentHealthInput,
-	AgentLifecycleStatus,
-} from "./agent-scorecard-types.ts";
+import { translate as tl } from "@ryu/i18n/lite";
+import type { AgentHealthInput } from "./agent-scorecard-types.ts";
 import {
 	buildScorecard,
 	check,
@@ -29,18 +27,18 @@ function configurationChecks(input: AgentHealthInput): ScorecardCheck[] {
 			? check(
 					"name",
 					"configuration",
-					"Has an agent name",
+					tl("Has an agent name"),
 					3,
 					"pass",
-					`The agent is named “${name}”.`
+					tl("The agent is named “{name}”.", { name })
 				)
 			: check(
 					"name",
 					"configuration",
-					"Has an agent name",
+					tl("Has an agent name"),
 					3,
 					"fail",
-					"Give the agent a name before saving it."
+					tl("Give the agent a name before saving it.")
 				)
 	);
 
@@ -49,10 +47,10 @@ function configurationChecks(input: AgentHealthInput): ScorecardCheck[] {
 			check(
 				"instructions",
 				"configuration",
-				"Explains how it should behave",
+				tl("Explains how it should behave"),
 				2,
 				"pass",
-				"The instructions give the agent a usable behavioral brief."
+				tl("The instructions give the agent a usable behavioral brief.")
 			)
 		);
 	} else if (instructions) {
@@ -60,10 +58,12 @@ function configurationChecks(input: AgentHealthInput): ScorecardCheck[] {
 			check(
 				"instructions",
 				"configuration",
-				"Explains how it should behave",
+				tl("Explains how it should behave"),
 				2,
 				"warn",
-				"The instructions are short. Add its job, boundaries, and preferred answer style."
+				tl(
+					"The instructions are short. Add its job, boundaries, and preferred answer style."
+				)
 			)
 		);
 	} else {
@@ -71,10 +71,12 @@ function configurationChecks(input: AgentHealthInput): ScorecardCheck[] {
 			check(
 				"instructions",
 				"configuration",
-				"Explains how it should behave",
+				tl("Explains how it should behave"),
 				2,
 				"warn",
-				"No instructions yet; the runtime will have to rely on its own defaults."
+				tl(
+					"No instructions yet; the runtime will have to rely on its own defaults."
+				)
 			)
 		);
 	}
@@ -84,10 +86,10 @@ function configurationChecks(input: AgentHealthInput): ScorecardCheck[] {
 			check(
 				"description",
 				"configuration",
-				"Describes its job",
+				tl("Describes its job"),
 				1,
 				"pass",
-				"The description is long enough to identify the agent in a list."
+				tl("The description is long enough to identify the agent in a list.")
 			)
 		);
 	} else {
@@ -95,12 +97,16 @@ function configurationChecks(input: AgentHealthInput): ScorecardCheck[] {
 			check(
 				"description",
 				"configuration",
-				"Describes its job",
+				tl("Describes its job"),
 				1,
 				"warn",
 				description
-					? "The description is brief; add enough context to recognize this agent later."
-					: "No description yet. This is optional, but it helps distinguish agents in the sidebar."
+					? tl(
+							"The description is brief; add enough context to recognize this agent later."
+						)
+					: tl(
+							"No description yet. This is optional, but it helps distinguish agents in the sidebar."
+						)
 			)
 		);
 	}
@@ -117,10 +123,10 @@ function runtimeChecks(input: AgentHealthInput): ScorecardCheck[] {
 			check(
 				"runtime",
 				"runtime",
-				"Has a runtime selected",
+				tl("Has a runtime selected"),
 				3,
 				"fail",
-				"Choose the agent runtime that should handle chat turns."
+				tl("Choose the agent runtime that should handle chat turns.")
 			)
 		);
 	} else {
@@ -128,12 +134,12 @@ function runtimeChecks(input: AgentHealthInput): ScorecardCheck[] {
 			check(
 				"runtime",
 				"runtime",
-				"Has a runtime selected",
+				tl("Has a runtime selected"),
 				3,
 				"pass",
 				input.runtime.label
-					? `Chat turns use ${input.runtime.label}.`
-					: "A chat runtime is selected."
+					? tl("Chat turns use {label}.", { label: input.runtime.label })
+					: tl("A chat runtime is selected.")
 			)
 		);
 	}
@@ -143,36 +149,40 @@ function runtimeChecks(input: AgentHealthInput): ScorecardCheck[] {
 			? check(
 					"runtime-availability",
 					"runtime",
-					"Runtime is available",
+					tl("Runtime is available"),
 					3,
 					"fail",
-					"This runtime is not installed on the active node. Add it from the Agents catalog first."
+					tl(
+						"This runtime is not installed on the active node. Add it from the Agents catalog first."
+					)
 				)
 			: runtimeStatus === "missing"
 				? check(
 						"runtime-availability",
 						"runtime",
-						"Runtime is available",
+						tl("Runtime is available"),
 						3,
 						"unknown",
-						"Availability is checked after a runtime is selected."
+						tl("Availability is checked after a runtime is selected.")
 					)
 				: runtimeStatus === "custom"
 					? check(
 							"runtime-availability",
 							"runtime",
-							"Runtime is available",
+							tl("Runtime is available"),
 							3,
 							"pass",
-							"The custom ACP command is present and can be checked by the node when it runs."
+							tl(
+								"The custom ACP command is present and can be checked by the node when it runs."
+							)
 						)
 					: check(
 							"runtime-availability",
 							"runtime",
-							"Runtime is available",
+							tl("Runtime is available"),
 							3,
 							"pass",
-							"The selected runtime is installed on the active node."
+							tl("The selected runtime is installed on the active node.")
 						)
 	);
 
@@ -181,53 +191,56 @@ function runtimeChecks(input: AgentHealthInput): ScorecardCheck[] {
 			? check(
 					"model",
 					"runtime",
-					"Has a model choice",
+					tl("Has a model choice"),
 					1,
 					"pass",
-					"A model is pinned for this agent's chat slot."
+					tl("A model is pinned for this agent's chat slot.")
 				)
 			: check(
 					"model",
 					"runtime",
-					"Has a model choice",
+					tl("Has a model choice"),
 					1,
 					"warn",
 					input.model.required
-						? "No model is selected; this runtime may fall back to a provider default."
-						: "No model is pinned; the selected runtime will choose its own default."
+						? tl(
+								"No model is selected; this runtime may fall back to a provider default."
+							)
+						: tl(
+								"No model is pinned; the selected runtime will choose its own default."
+							)
 				)
 	);
 
 	return checks;
 }
 
-function postureLabel(status: AgentLifecycleStatus): string {
-	return status === "draft" ? "Draft" : status === "trial" ? "Trial" : "Active";
-}
-
 function safetyChecks(input: AgentHealthInput): ScorecardCheck[] {
 	const effectiveSafety =
 		input.lifecycleStatus === "trial" ? "read_only" : input.safetyProfile;
 	const highImpact = input.access.highImpactCount;
-	const highImpactDetail =
-		highImpact === 1
-			? "1 high-impact capability is available to an autonomous agent; review the access before relying on it."
-			: `${highImpact} high-impact capabilities are available to an autonomous agent; review the access before relying on it.`;
+	const highImpactDetail = tl(
+		"{count, plural, one {# high-impact capability is} other {# high-impact capabilities are}} available to an autonomous agent; review the access before relying on it.",
+		{ count: highImpact }
+	);
 	return [
 		check(
 			"lifecycle",
 			"safety",
-			"Has a deliberate lifecycle",
+			tl("Has a deliberate lifecycle"),
 			2,
 			input.lifecycleStatus === "draft" ? "warn" : "pass",
 			input.lifecycleStatus === "draft"
-				? "Draft is authoring-only and cannot run until you promote it."
-				: `${postureLabel(input.lifecycleStatus)} can be tested under Core's lifecycle rules.`
+				? tl("Draft is authoring-only and cannot run until you promote it.")
+				: tl(
+						"{status, select, trial {Trial} other {Active}} can be tested under Core's lifecycle rules.",
+						{ status: input.lifecycleStatus }
+					)
 		),
 		check(
 			"high-impact-access",
 			"safety",
-			"High-impact access is guarded",
+			tl("High-impact access is guarded"),
 			3,
 			input.lifecycleStatus !== "active" || effectiveSafety !== "autonomous"
 				? "pass"
@@ -237,8 +250,10 @@ function safetyChecks(input: AgentHealthInput): ScorecardCheck[] {
 			input.lifecycleStatus === "active"
 				? effectiveSafety === "autonomous" && highImpact > 0
 					? highImpactDetail
-					: "The selected safety profile covers the capabilities currently configured."
-				: "Trial and Draft keep high-impact paths from running."
+					: tl(
+							"The selected safety profile covers the capabilities currently configured."
+						)
+				: tl("Trial and Draft keep high-impact paths from running.")
 		),
 	];
 }
@@ -256,7 +271,10 @@ function scopeCheck(
 			label,
 			2,
 			"unknown",
-			`The available ${kind} list is still loading.`
+			tl(
+				"The available {kind, select, skills {skills} other {tools}} list is still loading.",
+				{ kind }
+			)
 		);
 	}
 	if (capability.availableCount === 0) {
@@ -266,7 +284,12 @@ function scopeCheck(
 			label,
 			2,
 			"pass",
-			`No ${kind} are available to grant on this node.`
+			tl(
+				"No {kind, select, skills {skills} other {tools}} are available to grant on this node.",
+				{
+					kind,
+				}
+			)
 		);
 	}
 	if (capability.allSelected) {
@@ -276,7 +299,10 @@ function scopeCheck(
 			label,
 			2,
 			"warn",
-			`All ${capability.availableCount} available ${kind} are enabled; narrow this access if the agent does not need everything.`
+			tl(
+				"All {availableCount} available {kind, select, skills {skills} other {tools}} are enabled; narrow this access if the agent does not need everything.",
+				{ availableCount: String(capability.availableCount), kind }
+			)
 		);
 	}
 	if (capability.selectedCount === 0) {
@@ -286,7 +312,10 @@ function scopeCheck(
 			label,
 			2,
 			"pass",
-			`No ${kind} are enabled for this agent.`
+			tl(
+				"No {kind, select, skills {skills} other {tools}} are enabled for this agent.",
+				{ kind }
+			)
 		);
 	}
 	if (capability.selectedCount > capability.availableCount) {
@@ -296,7 +325,14 @@ function scopeCheck(
 			label,
 			2,
 			"warn",
-			`The agent references ${capability.selectedCount} ${kind}, but only ${capability.availableCount} are currently available.`
+			tl(
+				"The agent references {selectedCount} {kind, select, skills {skills} other {tools}}, but only {availableCount} are currently available.",
+				{
+					availableCount: String(capability.availableCount),
+					kind,
+					selectedCount: String(capability.selectedCount),
+				}
+			)
 		);
 	}
 	return check(
@@ -305,7 +341,14 @@ function scopeCheck(
 		label,
 		2,
 		"pass",
-		`Uses a scoped allowlist: ${capability.selectedCount} of ${capability.availableCount} ${kind}.`
+		tl(
+			"Uses a scoped allowlist: {selectedCount} of {availableCount} {kind, select, skills {skills} other {tools}}.",
+			{
+				availableCount: String(capability.availableCount),
+				kind,
+				selectedCount: String(capability.selectedCount),
+			}
+		)
 	);
 }
 
@@ -313,27 +356,35 @@ function capabilityChecks(input: AgentHealthInput): ScorecardCheck[] {
 	const connectionCount =
 		input.access.composioActionCount + input.access.identityProfileCount;
 	return [
-		scopeCheck("tools-scope", "Tool access is scoped", "tools", input.tools),
+		scopeCheck(
+			"tools-scope",
+			tl("Tool access is scoped"),
+			"tools",
+			input.tools
+		),
 		scopeCheck(
 			"skills-scope",
-			"Skill access is scoped",
+			tl("Skill access is scoped"),
 			"skills",
 			input.skills
 		),
 		check(
 			"external-connections",
 			"capabilities",
-			"External connections are intentional",
+			tl("External connections are intentional"),
 			1,
 			connectionCount > 0 ? "warn" : "pass",
 			connectionCount > 0
-				? `${connectionCount} external connection${connectionCount === 1 ? " is" : "s are"} bound; review them before promoting the agent.`
-				: "No external accounts or identity profiles are bound."
+				? tl(
+						"{count, plural, one {# external connection is} other {# external connections are}} bound; review them before promoting the agent.",
+						{ count: connectionCount }
+					)
+				: tl("No external accounts or identity profiles are bound.")
 		),
 		check(
 			"memory-write",
 			"capabilities",
-			"Memory writes are guarded",
+			tl("Memory writes are guarded"),
 			2,
 			input.memoryWriteEnabled &&
 				input.lifecycleStatus === "active" &&
@@ -342,12 +393,16 @@ function capabilityChecks(input: AgentHealthInput): ScorecardCheck[] {
 				: "pass",
 			input.memoryWriteEnabled
 				? input.lifecycleStatus === "trial"
-					? "Trial blocks memory writes until the agent is promoted."
+					? tl("Trial blocks memory writes until the agent is promoted.")
 					: input.lifecycleStatus === "active" &&
 							input.safetyProfile === "autonomous"
-						? "This autonomous agent may write long-term memory without an approval step."
-						: "Memory writes are enabled under a guarded lifecycle or safety profile."
-				: "The agent can recall memory but cannot record new memories."
+						? tl(
+								"This autonomous agent may write long-term memory without an approval step."
+							)
+						: tl(
+								"Memory writes are enabled under a guarded lifecycle or safety profile."
+							)
+				: tl("The agent can recall memory but cannot record new memories.")
 		),
 	];
 }
@@ -359,16 +414,21 @@ function operationChecks(input: AgentHealthInput): ScorecardCheck[] {
 		check(
 			"automation",
 			"operations",
-			"Background work has a runnable lifecycle",
+			tl("Background work has a runnable lifecycle"),
 			3,
 			backgroundCount > 0 && input.lifecycleStatus !== "active"
 				? "fail"
 				: "pass",
 			backgroundCount === 0
-				? "No schedule or event trigger is configured."
+				? tl("No schedule or event trigger is configured.")
 				: input.lifecycleStatus === "active"
-					? `${backgroundCount} background path${backgroundCount === 1 ? " is" : "s are"} attached to an Active agent.`
-					: "Background work is configured on a non-Active agent; promote it before relying on these paths."
+					? tl(
+							"{count, plural, one {# background path is} other {# background paths are}} attached to an Active agent.",
+							{ count: backgroundCount }
+						)
+					: tl(
+							"Background work is configured on a non-Active agent; promote it before relying on these paths."
+						)
 		),
 	];
 }

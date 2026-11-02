@@ -83,7 +83,7 @@ export function ChatSearchBar({
 	return (
 		<div
 			aria-label="Chat search"
-			className="pointer-events-auto absolute top-2 right-4 z-30 flex max-w-[calc(100%-2rem)] items-center gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-lg"
+			className="pointer-events-auto absolute end-4 top-2 z-30 flex max-w-[calc(100%-2rem)] items-center gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-lg"
 			data-testid="chat-search-bar"
 			role="search"
 		>

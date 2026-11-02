@@ -160,7 +160,11 @@ export function CloudEnvironmentsList({
 											) : null}
 										</div>
 									}
-									description={`${item.repositories.join(", ") || "No repositories"} · ${item.privacy === "private" ? "Private" : "Shared"} · ${item.published ? "Published" : "Draft"}`}
+									description={[
+										item.repositories.join(", ") || tl("No repositories"),
+										item.privacy === "private" ? tl("Private") : tl("Shared"),
+										item.published ? tl("Published") : tl("Draft"),
+									].join(" · ")}
 									key={item.id}
 									title={item.name}
 								/>
@@ -199,7 +203,14 @@ export function CloudEnvironmentsList({
 											</Button>
 										</div>
 									}
-									description={`${item.kind === "variable" ? "Environment variable" : "Network secret"} · ${item.environmentIds.length ? "Selected environments" : "All environments"}`}
+									description={[
+										item.kind === "variable"
+											? tl("Environment variable")
+											: tl("Network secret"),
+										item.environmentIds.length
+											? tl("Selected environments")
+											: tl("All environments"),
+									].join(" · ")}
 									key={item.id}
 									title={item.key}
 								/>

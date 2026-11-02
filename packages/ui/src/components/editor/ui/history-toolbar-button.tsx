@@ -23,7 +23,7 @@ export function RedoToolbarButton(
 			onMouseDown={(e) => e.preventDefault()}
 			tooltip="Redo"
 		>
-			<Redo2Icon />
+			<Redo2Icon className="rtl:-scale-x-100" />
 		</ToolbarButton>
 	);
 }
@@ -45,7 +45,7 @@ export function UndoToolbarButton(
 			onMouseDown={(e) => e.preventDefault()}
 			tooltip="Undo"
 		>
-			<Undo2Icon />
+			<Undo2Icon className="rtl:-scale-x-100" />
 		</ToolbarButton>
 	);
 }

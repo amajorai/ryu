@@ -180,7 +180,7 @@
 			<div id="label">
 				<span id="label-avatar" aria-hidden="true"></span>
 				<span id="label-copy">
-					<span id="label-title">Working</span>
+					<span id="label-title"></span>
 					<span id="label-subtitle"></span>
 				</span>
 			</div>
@@ -283,7 +283,7 @@
 			const title =
 				identity &&
 				(identity.sessionTitle || identity.agentTitle || identity.agentName);
-			labelTitle.textContent = title || intent || "Working";
+			labelTitle.textContent = title || intent || "";
 			labelTitle.classList.toggle(
 				"has-overflow",
 				labelTitle.scrollWidth > labelTitle.clientWidth
@@ -307,7 +307,7 @@
 		}
 		function ghost(phase, x, y, hue, intent, identity) {
 			setCursorColor(hue);
-			setLabel(intent || "Working", identity || null);
+			setLabel(intent || "", identity || null);
 			// Reposition for pointer-bearing phases. A typed event may carry a real
 			// target, while legacy sidecars use (0, 0) and should keep the last point.
 			const hasTarget =
@@ -340,7 +340,14 @@
 				cursor.classList.remove("pressing");
 			}, 2400);
 		}
+		// The main process labels each event in the UI language; this sets the
+		// chip's language and text direction to match.
+		function ghostLocale(lang, dir) {
+			document.documentElement.lang = lang || "en";
+			label.dir = dir === "rtl" ? "rtl" : "ltr";
+		}
 		window.__ghost = ghost;
+		window.__ghostLocale = ghostLocale;
 		</script>
 	</body>
 </html>

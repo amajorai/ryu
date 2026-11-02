@@ -1,19 +1,17 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, type FrameLocator, type Page, test } from "@playwright/test";
 import type {
 	TuitionProofApi,
 	TuitionProofCall,
 	TuitionProofState,
 } from "./harness/tuition-companion-proof.types.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 const appHtmlPath = `${tmpdir()}/ryu-tuition-companion-ui-build/index.html`;
-const evidenceDirectory = path.resolve(
-	here,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const evidenceDirectory = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 declare global {

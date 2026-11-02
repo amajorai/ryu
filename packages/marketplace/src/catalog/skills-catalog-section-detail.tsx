@@ -202,7 +202,7 @@ export function SkillDetailPanel({
 						skillEnabled={skillEnabled}
 						skillKey={skillKey}
 					/>
-					<span className="ml-auto flex shrink-0 items-center gap-2">
+					<span className="ms-auto flex shrink-0 items-center gap-2">
 						{owner ? (
 							<Tooltip>
 								<TooltipTrigger
@@ -270,7 +270,7 @@ export function SkillDetailPanel({
 			{readme ? (
 				<ListingSection title="README">
 					<div className="prose prose-sm dark:prose-invert max-w-none text-sm">
-						<Markdown className="[&_ol]:pl-10 [&_ul]:pl-9" content={readme} />
+						<Markdown className="[&_ol]:ps-10 [&_ul]:ps-9" content={readme} />
 					</div>
 				</ListingSection>
 			) : (

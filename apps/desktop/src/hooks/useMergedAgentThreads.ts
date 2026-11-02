@@ -16,6 +16,7 @@
 // (`droppedThreads` / `truncatedThreads`) so the UI can say what it left out
 // rather than implying the scroll is complete.
 
+import { translate as tl } from "@ryu/i18n/core";
 import { useEffect, useMemo, useState } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { conversationParticipantIds } from "@/src/lib/agent-conversation-groups.ts";
@@ -110,11 +111,14 @@ function threadHeading({
 	const notes: string[] = [];
 	if (droppedThreads > 0) {
 		notes.push(
-			`${droppedThreads} older thread${droppedThreads === 1 ? "" : "s"} not shown`
+			tl(
+				"{count, plural, one {# older thread not shown} other {# older threads not shown}}",
+				{ count: droppedThreads }
+			)
 		);
 	}
 	if (truncated) {
-		notes.push("earlier messages in this thread not shown");
+		notes.push(tl("earlier messages in this thread not shown"));
 	}
 	return notes.length > 0
 		? `**${title}** · _${notes.join(" · ")}_`

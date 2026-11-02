@@ -7,6 +7,8 @@ node_modules
 dist
 # Codespaces playground webapp build (apps/webapp `build:playground`)
 dist-playground
+# Binaries CI stages for the Dockerfiles' `prebuilt` targets (images.yml)
+.docker-prebuilt
 build
 *.tsbuildinfo
 

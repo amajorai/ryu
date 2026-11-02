@@ -1,8 +1,10 @@
 "use client";
 
+import { dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { KeyboardEvent, ReactNode } from "react";
+import { useFormatLocale } from "../hooks/use-format-locale.ts";
 import { Logo } from "./logo.tsx";
 import { PassCardShell } from "./pass-card-shell.tsx";
 
@@ -100,8 +102,11 @@ export const formatEmployeeId = (employeeId: string): string => {
 		.padEnd(SHORT_ID_LENGTH, "0");
 };
 
-/** Format a hire date as "Jan 5, 2026, 07:30 PM"; null for missing/invalid input. */
-const formatHiredAt = (hiredAt: string | undefined): string | null => {
+/** Format a hire date as "Jan 5, 2026, 07:30 PM" in `locale`; null for missing/invalid input. */
+const formatHiredAt = (
+	hiredAt: string | undefined,
+	locale: string
+): string | null => {
 	if (!hiredAt) {
 		return null;
 	}
@@ -109,14 +114,13 @@ const formatHiredAt = (hiredAt: string | undefined): string | null => {
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
-	return `${date.toLocaleDateString("en-US", {
-		year: "numeric",
-		month: "short",
+	return dateFormatter(locale, {
 		day: "numeric",
-	})}, ${date.toLocaleTimeString("en-US", {
 		hour: "2-digit",
 		minute: "2-digit",
-	})}`;
+		month: "short",
+		year: "numeric",
+	}).format(date);
 };
 
 export function EmployeeBadge({
@@ -134,7 +138,8 @@ export function EmployeeBadge({
 	still = false,
 }: EmployeeBadgeProps) {
 	const tl = useLiteralMessages();
-	const hiredLabel = formatHiredAt(hiredAt);
+	const locale = useFormatLocale();
+	const hiredLabel = formatHiredAt(hiredAt, locale);
 	const badgeId = formatEmployeeId(employeeId);
 	// Level sits in the header, not in the footer row. Prepending it there pushed
 	// a caller-supplied stat off the end of the slice — a silent data loss, since

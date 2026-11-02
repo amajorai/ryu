@@ -183,6 +183,10 @@ fn reserved_namespaces() -> Vec<String> {
         // receive one agent-account field to type into a page; reserved so an
         // app such as `com.evil.vault` cannot self-approve it.
         "vault",
+        // Security-key relay is a Core-owned host primitive: `security-key:relay`
+        // asks the user's desktop key to sign for a page; reserved so an app
+        // such as `com.evil.security-key` cannot self-approve it.
+        "security-key",
         // Turn-hook phases, host-shell integration, the app KV store, the
         // follow-up-message verb, sandboxed widget promotion, media engines,
         // native-desktop capture/replay, and Core's own listing verbs.
@@ -906,6 +910,8 @@ struct OwnerExclusiveGrant {
 /// - `hook:run-agent:write` — mutating sub-agent presets (autopilot, sites).
 /// - `vault:fill` — an agent's own website login or TOTP code, released in
 ///   plaintext to the Browser sidecar that types it into the page.
+/// - `security-key:relay` — a WebAuthn ceremony relayed from the Browser
+///   sidecar to the user's own hardware security key.
 /// - `chat:project-guidance` — a project's standing goal and instructions, which
 ///   Core puts in the system prompt of every turn in that project.
 const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
@@ -952,6 +958,13 @@ const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
     OwnerExclusiveGrant {
         owner_ids: &["@ryu/browser", "com.ryu.browser"],
         grants: &["vault:fill"],
+    },
+    // Security-key relay: `securityKey.request` asks the user's desktop key to
+    // sign a WebAuthn challenge for the page origin the sidecar reports. Only
+    // the reviewed Browser app, which builds that origin itself, may hold it.
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/browser", "com.ryu.browser"],
+        grants: &["security-key:relay"],
     },
     // Project guidance: `scopeGuidance.set` writes text that every turn in the
     // project carries in its system prompt, user-started turns included. Only

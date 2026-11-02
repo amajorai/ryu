@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -74,10 +75,7 @@ test("creates a Gateway client key and applies and resets local CLI setup", asyn
 		// tracked proof ledger; without it the committed evidence is refreshed.
 		path: process.env.RYU_PROOF_EVIDENCE_DIR
 			? path.join(process.env.RYU_PROOF_EVIDENCE_DIR, "gateway-cli-setup.png")
-			: path.resolve(
-					import.meta.dirname,
-					"../../../docs/proof/gateway-cli-setup/gateway-cli-setup.png"
-				),
+			: proofEvidencePath("gateway-cli-setup/gateway-cli-setup.png"),
 		fullPage: true,
 	});
 });

@@ -328,7 +328,7 @@ export function TwoFactorDialog({
 											<MorphIconSwap
 												a={Copy01Icon}
 												b={Tick01Icon}
-												className="mr-2 size-4"
+												className="me-2 size-4"
 												state={copiedAll ? "b" : "a"}
 											/>
 											<TextSwap>

@@ -84,8 +84,8 @@ function AcpOptionRow({ section }: { section: ComposerSettingsSection }) {
 						<span
 							className={cn(
 								"flex-1 truncate text-xs leading-none",
-								i === 0 && "text-left",
-								i === section.items.length - 1 && "text-right",
+								i === 0 && "text-start",
+								i === section.items.length - 1 && "text-end",
 								i > 0 && i < section.items.length - 1 && "text-center",
 								i === activeIndex
 									? "text-foreground"

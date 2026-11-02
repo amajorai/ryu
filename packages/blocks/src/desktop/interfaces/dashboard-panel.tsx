@@ -11,7 +11,7 @@ import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
 import { BoardStatusLabel } from "./board-status.tsx";
 import { threadTitle } from "./dashboard-model.ts";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import { agentById, relativeAge } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 const EASE = [0.2, 0, 0, 1] as const;
@@ -55,17 +55,16 @@ export function DashboardThreadPanel({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
-	const title = thread ? threadTitle(thread) : "New thread";
+	const title = thread ? threadTitle(thread) : tl("New thread");
 	const names = (thread?.agentIds ?? [])
 		.map((id) => agentById(snapshot, id)?.name)
 		.filter((name) => name !== undefined);
-	const age = thread ? compactAge(thread.updatedAt, now) : "";
-	const ageText = age === "now" ? "just now" : `${age} ago`;
+	const age = thread ? relativeAge(thread.updatedAt, now) : "";
 	return (
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={tl("Thread: {title}", { title })}
-			className="absolute inset-y-0 right-0 z-30 flex @min-[760px]/dash:w-[min(720px,56%)] w-full flex-col border-border @min-[760px]/dash:border-l bg-background shadow-2xl shadow-foreground/10"
+			className="absolute inset-y-0 end-0 z-30 flex @min-[760px]/dash:w-[min(720px,56%)] w-full flex-col border-border @min-[760px]/dash:border-s bg-background shadow-2xl shadow-foreground/10"
 			data-testid="dashboard-thread-panel"
 			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 40 }}
 			initial={reduceMotion ? false : { opacity: 0, x: 40 }}
@@ -75,6 +74,7 @@ export function DashboardThreadPanel({
 				<div className="flex min-w-0 flex-1 items-baseline gap-3">
 					<h2
 						className="min-w-0 truncate rounded-sm font-medium text-foreground text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>
@@ -85,7 +85,7 @@ export function DashboardThreadPanel({
 							<BoardStatusLabel status={threadStatus(thread)} />
 							<span className="truncate max-sm:hidden">
 								{names.length > 0 ? names.join(", ") : "No agent"}
-								{age ? ` · ${ageText}` : ""}
+								{age ? ` · ${age}` : ""}
 							</span>
 						</span>
 					) : null}

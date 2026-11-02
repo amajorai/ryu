@@ -1,3 +1,5 @@
+import { translate as tl } from "@ryu/i18n/lite";
+
 /** Shared presentation guard for connected-app suggestions cached by a host or app. */
 export interface CachedNotification {
 	body?: string | null;
@@ -7,9 +9,13 @@ export interface CachedNotification {
 	workflow_run_id?: string | null;
 }
 
-const PRIVATE_TITLE = "Private connected-app activity";
-const PRIVATE_BODY =
-	"A connected-app event was hidden during Streaming. Review it in the source app when you’re ready.";
+// Core sends the same placeholder (apps/core/src/notify/streaming_privacy.rs);
+// both render in the reader's language at the moment they are shown.
+const privateTitle = (): string => tl("Private connected-app activity");
+const privateBody = (): string =>
+	tl(
+		"A connected-app event was hidden during Streaming. Review it in the source app when you’re ready."
+	);
 
 export function redactConnectSuggestionNotifications<
 	T extends CachedNotification,
@@ -21,8 +27,8 @@ export function redactConnectSuggestionNotifications<
 		notification.id.startsWith("ntf_connect_")
 			? {
 					...notification,
-					body: PRIVATE_BODY,
-					title: PRIVATE_TITLE,
+					body: privateBody(),
+					title: privateTitle(),
 					workflow_run_id: null,
 					node_id: null,
 				}
@@ -40,7 +46,7 @@ export function redactConnectSuggestionEvent<
 	if (!(streamingActive && event.notification_id?.startsWith("ntf_connect_"))) {
 		return event;
 	}
-	return { ...event, body: PRIVATE_BODY, title: PRIVATE_TITLE };
+	return { ...event, body: privateBody(), title: privateTitle() };
 }
 
 export interface CompanionPrivacyBridge {

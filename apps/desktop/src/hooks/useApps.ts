@@ -96,9 +96,12 @@ function surfaceExternallyManaged(result: {
 /** Core acknowledged a lifecycle request with another app's record. Nothing about
  *  the requested app is confirmed, so callers must not report success. */
 class WrongAppCompletionError extends Error {
-	constructor(acknowledgedId: string) {
+	constructor(acknowledgedId: string, tl: LiteralMessage) {
 		super(
-			`Core confirmed a different app (${acknowledgedId}); the app list was reloaded.`
+			tl(
+				"Core confirmed a different app ({acknowledgedId}); the app list was reloaded.",
+				{ acknowledgedId }
+			)
 		);
 		this.name = "WrongAppCompletionError";
 	}
@@ -204,7 +207,7 @@ export function useApps(): UseAppsResult {
 					? await apiEnableApp(node, id)
 					: await apiDisableApp(node, id);
 				if (record.id !== id) {
-					throw new WrongAppCompletionError(record.id);
+					throw new WrongAppCompletionError(record.id, tlRef.current);
 				}
 
 				// Confirm with the server's authoritative enabled state.
@@ -326,7 +329,7 @@ export function useApps(): UseAppsResult {
 			const record = await apiInstallApp(node, id);
 			if (record.id !== id) {
 				await reload();
-				throw new WrongAppCompletionError(record.id);
+				throw new WrongAppCompletionError(record.id, tlRef.current);
 			}
 			// Mark app as installed (disabled) in local state.
 			setApps((prev) =>

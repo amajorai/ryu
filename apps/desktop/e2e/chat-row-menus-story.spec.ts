@@ -14,6 +14,7 @@ import {
 	STORY_URL,
 	UNREAD_COUNT_PROOF,
 } from "./chat-row-menus-story.fixture.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // The story pulls the full AppSidebar module graph; vite compiles it on first
 // navigation, so allow headroom over the 30s default for cold-start CI runs.
@@ -408,7 +409,9 @@ test.describe("sidebar chat row — contributed rows on both menus", () => {
 		}
 		await page.screenshot({
 			clip: proofBounds,
-			path: "../../docs/proof/test-coverage-sweep-20260924/sidebar-conversation-row-proof.png",
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/sidebar-conversation-row-proof.png"
+			),
 		});
 		await row(page)
 			.getByRole("button", { name: "Collapse chat details" })

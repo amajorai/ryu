@@ -3,7 +3,6 @@
 import { useKeyboard } from "@opentui/react";
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
-import { passwordValidationMessage } from "@ryuhq/protocol/password-policy";
 import { useEffect, useRef, useState } from "react";
 import { tf } from "../../i18n/translate.ts";
 import {
@@ -29,6 +28,7 @@ import {
 	type UnloadedSecuritySession,
 } from "./account-security-types.ts";
 import { AccountSecurityView } from "./account-security-view.tsx";
+import { passwordProblem } from "./password-issue.ts";
 
 export function AccountSecurity({
 	active,
@@ -239,9 +239,9 @@ export function AccountSecurity({
 			}
 			if (operation === "password") {
 				// The rules sign-up and the set-password route hold a password to.
-				const reason = passwordValidationMessage(value);
-				if (reason) {
-					throw new Error(`${reason}.`);
+				const problem = passwordProblem(value);
+				if (problem) {
+					throw new Error(`${problem}.`);
 				}
 				const result = await request(
 					authTarget,

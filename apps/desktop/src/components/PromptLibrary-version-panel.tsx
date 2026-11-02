@@ -75,7 +75,10 @@ export function PromptLibraryVersionPanel({
 					) : null}
 				</div>
 			) : (
-				<pre className="type-caption max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono leading-relaxed">
+				<pre
+					className="type-caption max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono leading-relaxed"
+					dir="auto"
+				>
 					{versionBody(current)}
 				</pre>
 			)}

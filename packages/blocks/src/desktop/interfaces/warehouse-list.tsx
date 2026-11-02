@@ -105,6 +105,7 @@ export function WarehouseList({
 										)}
 										data-act-agent={sentence ? picker.agent.id : undefined}
 										data-picker-tag={picker.agent.id}
+										data-ryu-i18n="off"
 										onClick={() => onSelectPicker(picker.agent.id)}
 										type="button"
 									>
@@ -168,7 +169,10 @@ export function WarehouseList({
 											<span className="font-semibold tabular-nums">
 												{order.number}
 											</span>
-											<span className="max-w-48 truncate text-(--gk-ink-muted)">
+											<span
+												className="max-w-48 truncate text-(--gk-ink-muted)"
+												data-ryu-i18n="off"
+											>
 												{order.thread.title}
 											</span>
 										</button>

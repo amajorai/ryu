@@ -31,7 +31,7 @@ import {
 	InputBar,
 	type InputBarProps,
 } from "@ryu/blocks/desktop/agent-elements/input-bar";
-import { useI18n } from "@ryu/i18n/react";
+import { useI18n, useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { useIslandComposerContext } from "../../context/island-composer-context.tsx";
@@ -87,6 +87,7 @@ export function IslandChat() {
 	const attachAndOpen = useIslandState((store) => store.attachAndOpen);
 	const [reachability, setReachability] = useState<Reachability>("checking");
 	const { t } = useI18n();
+	const tl = useLiteralMessages();
 
 	const hasHistory = messages.length > 0;
 
@@ -117,11 +118,12 @@ export function IslandChat() {
 		[sections, composerShortcuts]
 	);
 	const onAttach = useCallback(() => {
+		// The picker is drawn by the main process, which has no translator.
 		void window.island.system
-			.attachFiles()
+			.attachFiles({ title: tl("Attach images"), filterName: tl("Images") })
 			.then(attachAndOpen)
 			.catch(() => undefined);
-	}, [attachAndOpen]);
+	}, [attachAndOpen, tl]);
 	// Retry resends the thread's last question; the raw failure stays behind
 	// "Copy details" instead of printing in the transcript.
 	const lastQuestion = useMemo(() => {

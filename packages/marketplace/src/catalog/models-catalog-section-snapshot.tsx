@@ -8,6 +8,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { isBlockedRepoFit } from "@ryu/blocks/desktop/model-fit.ts";
+import { activeLocale, translate as tl } from "@ryu/i18n/core";
+import { formatByteSize, formatDurationUnit } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatCurrency } from "@ryu/ui/lib/number-format.ts";
@@ -69,7 +71,7 @@ export function StatsBlock({
 			value:
 				stats.timeToFirstTokenS === null
 					? null
-					: `${stats.timeToFirstTokenS.toFixed(2)}s`,
+					: formatDurationUnit(stats.timeToFirstTokenS, "second", 2),
 		},
 		{
 			icon: DollarCircleIcon,
@@ -119,13 +121,15 @@ export function StatsBlock({
 /** GB string for a snapshot repo's total size. */
 function formatRepoSize(bytes: number | null): string {
 	if (!bytes || bytes <= 0) {
-		return "Size unknown";
+		return tl("Size unknown");
 	}
-	const gb = bytes / 1_000_000_000;
-	if (gb >= 1) {
-		return `${gb.toFixed(1)} GB`;
-	}
-	return `${Math.round(bytes / 1_000_000)} MB`;
+	// Decimal units: whole MB below 1 GB, one decimal from there ("4.7 GB").
+	return formatByteSize(bytes, activeLocale(), {
+		base: 1000,
+		fractionDigits: (_value, unit) => (unit === "gigabyte" ? 1 : 0),
+		maxUnit: "gigabyte",
+		minUnit: "megabyte",
+	});
 }
 
 /**

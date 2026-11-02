@@ -1,4 +1,5 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { translate as tr } from "@ryu/i18n/lite";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -34,9 +35,9 @@ export interface MailReaderModel {
 	thread: InterfaceThread;
 }
 
-function recipientsLine(model: MailReaderModel): string {
+function recipientsLine(model: MailReaderModel, tl: LiteralMessage): string {
 	const others = model.cc.map((agent) => agent.name);
-	return ["me", ...others].join(", ");
+	return [tl("me"), ...others].join(", ");
 }
 
 /**
@@ -64,7 +65,7 @@ export function MailReader({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
-	const subject = model?.subject ?? "New message";
+	const subject = model?.subject ?? tr("New message");
 	return (
 		<motion.section
 			animate={{ opacity: 1 }}
@@ -83,10 +84,10 @@ export function MailReader({
 				role="toolbar"
 			>
 				<MailIconButton label={backLabel} onClick={onBack} shortcut="u">
-					<ArrowLeft aria-hidden="true" className="size-4.5" />
+					<ArrowLeft aria-hidden="true" className="size-4.5 rtl:-scale-x-100" />
 				</MailIconButton>
 				{model?.position ? (
-					<span className="ml-auto flex items-center gap-1">
+					<span className="ms-auto flex items-center gap-1">
 						<span
 							className="px-2 text-muted-foreground text-xs tabular-nums"
 							data-testid="mail-reader-position"
@@ -99,7 +100,10 @@ export function MailReader({
 							onClick={onNewer ?? undefined}
 							shortcut="k"
 						>
-							<ChevronLeft aria-hidden="true" className="size-4.5" />
+							<ChevronLeft
+								aria-hidden="true"
+								className="size-4.5 rtl:-scale-x-100"
+							/>
 						</MailIconButton>
 						<MailIconButton
 							disabled={!onOlder}
@@ -107,7 +111,10 @@ export function MailReader({
 							onClick={onOlder ?? undefined}
 							shortcut="j"
 						>
-							<ChevronRight aria-hidden="true" className="size-4.5" />
+							<ChevronRight
+								aria-hidden="true"
+								className="size-4.5 rtl:-scale-x-100"
+							/>
 						</MailIconButton>
 					</span>
 				) : null}
@@ -131,12 +138,14 @@ function MailReaderHeading({
 	model: MailReaderModel | null;
 	subject: string;
 }) {
+	const tl = useLiteralMessages();
 	const sender = model?.sender ?? null;
 	return (
 		<header className="flex shrink-0 flex-col gap-4 px-6 pt-3 pb-3">
 			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
 				<h2
 					className="min-w-0 text-pretty font-normal text-[22px] text-foreground leading-7"
+					data-ryu-i18n="off"
 					data-testid="mail-reader-subject"
 				>
 					{subject}
@@ -169,9 +178,16 @@ function MailReaderHeading({
 					)}
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5">
 						<p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-sm">
-							<span className="font-semibold text-foreground">
-								{sender?.name ?? "me"}
-							</span>
+							{sender ? (
+								<span
+									className="font-semibold text-foreground"
+									data-ryu-i18n="off"
+								>
+									{sender.name}
+								</span>
+							) : (
+								<span className="font-semibold text-foreground">me</span>
+							)}
 							{sender ? (
 								<span className="truncate text-muted-foreground text-xs">
 									{`<${agentHandle(sender.name).slice(1)}>`}
@@ -179,7 +195,7 @@ function MailReaderHeading({
 							) : null}
 						</p>
 						<p className="truncate text-muted-foreground text-xs">
-							to {recipientsLine(model)}
+							{tl("to {recipients}", { recipients: recipientsLine(model, tl) })}
 						</p>
 					</div>
 					<div className="flex shrink-0 items-center gap-3 pt-0.5">
@@ -237,7 +253,10 @@ export function MailPreview({
 						{fromMe ? (
 							<p className="text-muted-foreground text-xs">You wrote</p>
 						) : null}
-						<p className="max-w-[68ch] whitespace-pre-line text-[15px] text-foreground leading-7">
+						<p
+							className="max-w-[68ch] whitespace-pre-line text-[15px] text-foreground leading-7"
+							data-ryu-i18n="off"
+						>
 							{message}
 						</p>
 					</div>
@@ -251,7 +270,7 @@ export function MailPreview({
 						onClick={onOpen}
 						variant="outline"
 					>
-						<Reply aria-hidden="true" />
+						<Reply aria-hidden="true" className="rtl:-scale-x-100" />
 						Open conversation
 					</Button>
 					<p className="text-muted-foreground text-sm tabular-nums">

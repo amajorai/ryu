@@ -1,4 +1,10 @@
 import {
+	activeLocale,
+	dateFormatter,
+	formatRelativeTime,
+	translate as tr,
+} from "@ryu/i18n/lite";
+import {
 	type InterfaceGroup,
 	type InterfaceSnapshot,
 	type InterfaceThread,
@@ -215,7 +221,9 @@ export function mailViewLabel(
 	if (view.kind === "folder") {
 		return findMailFolder(view.id).label;
 	}
-	return snapshot.groups.find((group) => group.id === view.id)?.name ?? "Label";
+	return (
+		snapshot.groups.find((group) => group.id === view.id)?.name ?? tr("Label")
+	);
 }
 
 const MAX_SENDER_NAMES = 3;
@@ -235,27 +243,29 @@ export function mailSenders(
 		)
 		.filter((name): name is string => Boolean(name));
 	if (folder === "sent") {
-		return names.length > 0 ? `To: ${names.join(", ")}` : "To: (no agent)";
+		return names.length > 0
+			? tr("To: {names}", { names: names.join(", ") })
+			: tr("To: (no agent)");
 	}
 	if (names.length === 0) {
-		return "me";
+		return tr("me");
 	}
 	const shown =
 		names.length > MAX_SENDER_NAMES
 			? [names[0], "..", names.at(-1)]
 			: [...names];
 	if (thread.lastMessageRole === "user") {
-		shown.push("me");
+		shown.push(tr("me"));
 	}
 	return shown.join(", ");
 }
 
 export function mailSubject(thread: InterfaceThread): string {
-	return thread.title.trim() || "(no subject)";
+	return thread.title.trim() || tr("(no subject)");
 }
 
 export function mailSnippet(thread: InterfaceThread): string {
-	return thread.lastMessage?.trim() || "No messages yet";
+	return thread.lastMessage?.trim() || tr("No messages yet");
 }
 
 /** The system chip a row carries: only for states the user must notice. */
@@ -278,16 +288,14 @@ export function mailStatusChip(thread: InterfaceThread): MailStatusChip | null {
 	return null;
 }
 
-const DAY = 24 * 60 * 60 * 1000;
-
 /**
- * Gmail's list date: the time today, "Oct 12" this year, "10/12/25" before.
- * `locale` is for tests; the UI uses the user's locale.
+ * Gmail's list date: the time today, "Oct 12" this year, "10/12/25" before,
+ * in the UI locale (`locale` is for tests).
  */
 export function mailListDate(
 	iso: string,
 	now: number,
-	locale?: string
+	locale: string = activeLocale()
 ): string {
 	const then = new Date(iso);
 	if (Number.isNaN(then.getTime())) {
@@ -295,55 +303,47 @@ export function mailListDate(
 	}
 	const today = new Date(now);
 	if (then.toDateString() === today.toDateString()) {
-		return then.toLocaleTimeString(locale, {
+		return dateFormatter(locale, {
 			hour: "numeric",
 			minute: "2-digit",
-		});
+		}).format(then);
 	}
 	if (then.getFullYear() === today.getFullYear()) {
-		return then.toLocaleDateString(locale, { day: "numeric", month: "short" });
+		return dateFormatter(locale, { day: "numeric", month: "short" }).format(
+			then
+		);
 	}
-	return then.toLocaleDateString(locale, {
+	return dateFormatter(locale, {
 		day: "numeric",
 		month: "numeric",
 		year: "2-digit",
-	});
+	}).format(then);
 }
 
-function relativeAge(then: number, now: number): string {
-	const minutes = Math.max(0, Math.round((now - then) / 60_000));
-	if (minutes < 1) {
-		return "just now";
-	}
-	if (minutes < 60) {
-		return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-	}
-	const hours = Math.round(minutes / 60);
-	if (hours < 24) {
-		return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-	}
-	const days = Math.round((now - then) / DAY);
-	return `${days} day${days === 1 ? "" : "s"} ago`;
-}
-
-/** Gmail's message header date: "Oct 14, 2026, 2:31 PM (18 minutes ago)". */
+/**
+ * Gmail's message header date: "Oct 14, 2026, 2:31 PM (18 minutes ago)",
+ * in the UI locale.
+ */
 export function mailLongDate(
 	iso: string,
 	now: number,
-	locale?: string
+	locale: string = activeLocale()
 ): string {
 	const then = Date.parse(iso);
 	if (Number.isNaN(then)) {
 		return "";
 	}
-	const date = new Date(then).toLocaleString(locale, {
+	const date = dateFormatter(locale, {
 		day: "numeric",
 		hour: "numeric",
 		minute: "2-digit",
 		month: "short",
 		year: "numeric",
+	}).format(new Date(then));
+	return tr("{date} ({age})", {
+		age: formatRelativeTime(locale, Math.min(then, now), { now }),
+		date,
 	});
-	return `${date} (${relativeAge(then, now)})`;
 }
 
 /** "1–10 of 24" for a page of the list; "0 of 0" when empty. */
@@ -353,11 +353,11 @@ export function mailPageRange(
 	size: number = MAIL_PAGE_SIZE
 ): string {
 	if (total === 0) {
-		return "0 of 0";
+		return tr("0 of 0");
 	}
 	const first = page * size + 1;
 	const last = Math.min(total, (page + 1) * size);
-	return `${first}–${last} of ${total}`;
+	return tr("{first}–{last} of {total}", { first, last, total });
 }
 
 export function mailPageCount(

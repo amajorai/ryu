@@ -14,6 +14,7 @@
 //! ```toml
 //! [screening]
 //! node_classifiers = false
+//! node_fail_mode = "closed"
 //!
 //! [screening.backends.decision_local]
 //! kind = "decision_local"
@@ -50,6 +51,11 @@ pub struct ScreeningConfig {
     /// on this replica. The first request always passes.
     #[serde(default = "default_degraded_rpm")]
     pub degraded_rpm: u32,
+    /// Node tier only: what a hard code the node's own screener could not
+    /// decide on a request does. Ignored on the fleet, where the platform
+    /// floor's section 6 fail rules apply.
+    #[serde(default, skip_serializing_if = "NodeFailMode::is_default")]
+    pub node_fail_mode: NodeFailMode,
     /// Backend endpoints by id. The floor's roles name these ids.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub backends: BTreeMap<String, ScreeningBackendConfig>,
@@ -60,6 +66,7 @@ impl Default for ScreeningConfig {
         Self {
             node_classifiers: false,
             degraded_rpm: DEFAULT_DEGRADED_RPM,
+            node_fail_mode: NodeFailMode::default(),
             backends: BTreeMap::new(),
         }
     }
@@ -70,6 +77,33 @@ impl ScreeningConfig {
     /// byte-identical when nobody authored it.
     pub fn is_default(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// Whether the node tier refuses a hard code its screener left
+    /// undecided for anything but an engine outage (`node_fail_mode`).
+    pub fn node_fails_closed(&self) -> bool {
+        self.node_fail_mode == NodeFailMode::Closed
+    }
+}
+
+/// `[screening] node_fail_mode`: the node tier's rule for a hard code (S4,
+/// S9, S12) its screener left undecided on a request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeFailMode {
+    /// Refuse with 503 `screening_unavailable` when a screener that was
+    /// healthy did not answer for the request (a reply outside its grammar,
+    /// a refusal, a timeout, an item too large to send). Only an engine
+    /// outage (unreachable, or its breaker open) runs the degraded row.
+    #[default]
+    Closed,
+    /// Forward under the regex firewall and mark the verdict degraded.
+    Degraded,
+}
+
+impl NodeFailMode {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 }
 
@@ -233,6 +267,31 @@ mod tests {
         );
         assert!(unknown.is_err());
         assert!(ScreeningConfig::default().is_default());
+    }
+
+    /// A node fails closed unless its operator opts into the degraded row.
+    #[test]
+    fn node_fail_mode_defaults_to_closed_and_parses_both_values() {
+        let parsed: ScreeningConfig = toml::from_str("node_classifiers = true").expect("parses");
+        assert_eq!(parsed.node_fail_mode, NodeFailMode::Closed);
+        for (raw, mode) in [
+            ("closed", NodeFailMode::Closed),
+            ("degraded", NodeFailMode::Degraded),
+        ] {
+            let parsed: ScreeningConfig =
+                toml::from_str(&format!("node_fail_mode = \"{raw}\"")).expect("parses");
+            assert_eq!(parsed.node_fail_mode, mode);
+        }
+        assert!(toml::from_str::<ScreeningConfig>("node_fail_mode = \"open\"").is_err());
+        let degraded = ScreeningConfig {
+            node_fail_mode: NodeFailMode::Degraded,
+            ..ScreeningConfig::default()
+        };
+        assert!(!degraded.is_default());
+        assert!(!degraded.node_fails_closed());
+        assert!(ScreeningConfig::default().node_fails_closed());
+        let saved = toml::to_string(&ScreeningConfig::default()).expect("serializes");
+        assert!(!saved.contains("node_fail_mode"), "{saved}");
     }
 
     #[test]

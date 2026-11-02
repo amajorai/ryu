@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { ProofJsonRecord } from "./fixture-json.ts";
 import {
 	parseWorkflowFixtureArgs,
@@ -6,11 +7,12 @@ import {
 	parseWorkflowFixtureSave,
 	type WorkflowCatalogFixtureState,
 } from "./workflow-fixture-contract.ts";
+import { workflowsProofBuildDir } from "./workflows-proof-build.ts";
 
 type FixtureState = WorkflowCatalogFixtureState;
 
 const appHtml = await readFile(
-	"/tmp/ryu-workflows-agent-coverage-build/index.html",
+	path.join(workflowsProofBuildDir("agent-coverage"), "index.html"),
 	"utf8"
 );
 const bridgeScript = `<script>

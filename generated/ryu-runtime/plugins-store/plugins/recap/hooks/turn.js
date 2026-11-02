@@ -3,7 +3,7 @@
 // host.sideModel / host.storage / host.getPreference / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -23,6 +23,13 @@
 //   2. Short turns are skipped on a character count, before the model call. A
 //      three-line answer is already its own recap; recapping it would cost a
 //      round-trip to say the same thing twice.
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const MAX_TURN_CHARS = 24000;
 const MAX_STORED_ENTRIES = 30;
@@ -99,7 +106,7 @@ try {
 	host.log("recap: storing the turn recap failed", e);
 }
 
-return { kind: "note", text: "Recap\n\n" + recap };
+return { kind: "note", text: (await host.t("Recap")) + "\n\n" + recap };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

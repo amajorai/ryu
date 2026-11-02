@@ -1,27 +1,38 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronRight, Plus, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import type { PersonaGoal, PersonaIdea, PersonaTab } from "./persona-model.ts";
 
 /** How many rows each section previews before "See all". */
 const PREVIEW_ROWS = 3;
 
 /** Statuses that suggest a next step, most urgent first, with its verb. */
-const NEXT_STEP: Partial<Record<ThreadStatus, { rank: number; verb: string }>> =
-	{
-		attention: { rank: 0, verb: "Check what stopped in" },
-		"your-turn": { rank: 1, verb: "Reply in" },
-		working: { rank: 2, verb: "Follow" },
-	};
+const NEXT_RANK: Partial<Record<ThreadStatus, number>> = {
+	attention: 0,
+	"your-turn": 1,
+	working: 2,
+};
+
+/** "Reply in Release notes": what to do next in a thread, in the UI language. */
+function nextStepLabel(status: ThreadStatus, title: string): string {
+	switch (status) {
+		case "attention":
+			return tr("Check what stopped in {title}", { title });
+		case "your-turn":
+			return tr("Reply in {title}", { title });
+		default:
+			return tr("Follow {title}", { title });
+	}
+}
 
 interface NextAction {
 	key: string;
@@ -43,15 +54,12 @@ export function personaNextActions(
 	const ranked = threads
 		.filter((thread) => thread.id !== activeThreadId)
 		.map((thread) => ({ status: threadStatus(thread), thread }))
-		.filter(({ status }) => NEXT_STEP[status] !== undefined)
-		.sort(
-			(a, b) =>
-				(NEXT_STEP[a.status]?.rank ?? 9) - (NEXT_STEP[b.status]?.rank ?? 9)
-		);
+		.filter(({ status }) => NEXT_RANK[status] !== undefined)
+		.sort((a, b) => (NEXT_RANK[a.status] ?? 9) - (NEXT_RANK[b.status] ?? 9));
 	for (const { status, thread } of ranked.slice(0, PREVIEW_ROWS)) {
 		actions.push({
 			key: thread.id,
-			label: `${NEXT_STEP[status]?.verb} ${thread.title || "Untitled"}`,
+			label: nextStepLabel(status, thread.title || tr("Untitled")),
 			status,
 			threadId: thread.id,
 		});
@@ -68,7 +76,7 @@ export function personaNextActions(
 }
 
 const ROW =
-	"flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
+	"flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-start text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
 function Section({
 	action,
@@ -141,7 +149,7 @@ export function PersonaContext({
 	return (
 		<aside
 			aria-label="Context"
-			className="@min-[1280px]:flex hidden w-80 shrink-0 flex-col gap-6 overflow-y-auto border-border border-l px-3 py-5"
+			className="@min-[1280px]:flex hidden w-80 shrink-0 flex-col gap-6 overflow-y-auto border-border border-s px-3 py-5"
 			data-testid="persona-context"
 		>
 			<Section id="persona-context-next" title="Suggested next">
@@ -149,7 +157,7 @@ export function PersonaContext({
 					{actions.map((action) => (
 						<li key={action.key}>
 							<button
-								className="flex w-full min-w-0 items-start gap-2.5 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+								className="flex w-full min-w-0 items-start gap-2.5 rounded-xl border border-border bg-background px-3 py-2.5 text-start text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 								onClick={() =>
 									action.threadId ? onOpen(action.threadId) : onNewSideChat()
 								}
@@ -170,7 +178,7 @@ export function PersonaContext({
 								</span>
 								<ChevronRight
 									aria-hidden="true"
-									className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+									className="mt-0.5 size-4 shrink-0 text-muted-foreground rtl:-scale-x-100"
 								/>
 							</button>
 						</li>
@@ -187,14 +195,14 @@ export function PersonaContext({
 								<li key={thread.id}>
 									<button
 										aria-current={selected ? "true" : undefined}
-										aria-label={`${thread.title || "Untitled"}, ${THREAD_STATUS_LABELS[status]}`}
+										aria-label={`${thread.title || tr("Untitled")}, ${threadStatusLabel(status)}`}
 										className={cn(ROW, selected && "bg-muted font-medium")}
 										onClick={() => onOpen(thread.id)}
 										type="button"
 									>
 										<BoardStatusDot status={status} />
 										<span className="min-w-0 flex-1 truncate">
-											{thread.title || "Untitled"}
+											{thread.title || tr("Untitled")}
 										</span>
 										<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 											{compactAge(thread.updatedAt, now)}
@@ -231,7 +239,10 @@ export function PersonaContext({
 										aria-hidden="true"
 										className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
 									/>
-									<span className="line-clamp-2 min-w-0 flex-1">
+									<span
+										className="line-clamp-2 min-w-0 flex-1"
+										data-ryu-i18n="off"
+									>
 										{idea.prompt}
 									</span>
 								</button>
@@ -276,7 +287,10 @@ export function PersonaContext({
 										type="button"
 									>
 										<span className="flex min-w-0 items-baseline gap-2">
-											<span className="min-w-0 flex-1 truncate font-medium">
+											<span
+												className="min-w-0 flex-1 truncate font-medium"
+												data-ryu-i18n="off"
+											>
 												{goal.group.name}
 											</span>
 											<span className="shrink-0 text-muted-foreground text-xs tabular-nums">

@@ -20,6 +20,8 @@ import {
 	PauseIcon,
 	PlayIcon,
 } from "@hugeicons/core-free-icons";
+import { activeLocale, translate as tl } from "@ryu/i18n/core";
+import { formatByteSize, formatDurationUnit } from "@ryu/i18n/format-intl";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo";
 import { useEffect, useState } from "react";
@@ -54,30 +56,37 @@ import { kindIcon } from "./kindIcons.ts";
  * longer knowing the task (it restarted) or refusing the caller; swallowing it
  * leaves a button that silently does nothing.
  */
-function reportControlFailure(tl: LiteralMessage, action: string) {
-	return (error: unknown) => {
-		toast.error({
-			title: tl("Couldn't {action} the download", { action }),
-			description: error instanceof Error ? error.message : String(error),
-		});
-	};
+function reportControlFailure(title: string, error: unknown) {
+	toast.error({
+		title,
+		description: error instanceof Error ? error.message : String(error),
+	});
 }
 
+/** "512 B", "4.7 GB", "120 MB" in English; the UI locale's separators and
+ *  unit names elsewhere. One decimal below 10 units, none above. */
 export function formatBytes(n: number): string {
-	if (n < 1024) {
-		return `${n} B`;
-	}
-	const units = ["KB", "MB", "GB", "TB"];
-	let value = n / 1024;
-	let unit = 0;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit += 1;
-	}
-	return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+	return formatByteSize(n, undefined, {
+		fractionDigits: (value, unit) => (unit === "byte" || value >= 10 ? 0 : 1),
+		maxUnit: "terabyte",
+	});
 }
 
-export function formatEta(task: DownloadTask): string | null {
+/** "12 MB/s" in English; the UI locale's separators and rate unit elsewhere. */
+export function formatRate(bytesPerSecond: number, locale?: string): string {
+	return formatByteSize(bytesPerSecond, locale, {
+		fractionDigits: (value, unit) => (unit === "byte" || value >= 10 ? 0 : 1),
+		maxUnit: "terabyte",
+		perSecond: true,
+	});
+}
+
+/** "5m left" in English, "noch 5 Min." style wording in the UI language
+ *  elsewhere; `null` without a known size and a positive speed. */
+export function formatEta(
+	task: DownloadTask,
+	locale: string = activeLocale()
+): string | null {
 	if (!(task.total_bytes && task.speed_bps) || task.speed_bps <= 0) {
 		return null;
 	}
@@ -86,34 +95,38 @@ export function formatEta(task: DownloadTask): string | null {
 		return null;
 	}
 	const secs = Math.round(remaining / task.speed_bps);
+	let duration: string;
 	if (secs < 60) {
-		return `${secs}s left`;
+		duration = formatDurationUnit(secs, "second", 0, locale);
+	} else if (secs < 3600) {
+		duration = formatDurationUnit(Math.round(secs / 60), "minute", 0, locale);
+	} else {
+		duration = formatDurationUnit(secs / 3600, "hour", 1, locale);
 	}
-	if (secs < 3600) {
-		return `${Math.round(secs / 60)}m left`;
-	}
-	return `${(secs / 3600).toFixed(1)}h left`;
+	return tl("{remaining} left", { remaining: duration });
 }
 
-export function stateLabel(task: DownloadTask): string {
+export function stateLabel(task: DownloadTask, tl: LiteralMessage): string {
 	switch (task.state) {
 		case "queued":
-			return "Queued";
+			return tl("Queued");
 		case "active": {
-			const speed = task.speed_bps ? `${formatBytes(task.speed_bps)}/s` : null;
+			const speed = task.speed_bps ? formatRate(task.speed_bps) : null;
 			const eta = formatEta(task);
-			return [speed, eta].filter(Boolean).join(" · ") || "Downloading";
+			return [speed, eta].filter(Boolean).join(" · ") || tl("Downloading");
 		}
 		case "paused":
-			return "Paused";
+			return tl("Paused");
 		case "verifying":
-			return "Verifying";
+			return tl("Verifying");
 		case "completed":
-			return "Done";
+			return tl("Done");
 		case "failed":
-			return task.error ? `Failed: ${task.error}` : "Failed";
+			return task.error
+				? tl("Failed: {error}", { error: task.error })
+				: tl("Failed");
 		case "cancelled":
-			return "Cancelled";
+			return tl("Cancelled");
 		default:
 			return task.state;
 	}
@@ -131,12 +144,15 @@ export function DownloadRow({
 	const target = toTarget(getNode());
 	const [busy, setBusy] = useState(false);
 	const tl = useLiteralMessages();
-	async function runAction(label: string, action: () => Promise<unknown>) {
+	async function runAction(
+		failureTitle: string,
+		action: () => Promise<unknown>
+	) {
 		setBusy(true);
 		try {
 			await action();
 		} catch (error) {
-			reportControlFailure(tl, label.toLowerCase())(error);
+			reportControlFailure(failureTitle, error);
 		} finally {
 			setBusy(false);
 		}
@@ -150,7 +166,10 @@ export function DownloadRow({
 	);
 
 	const sizeText = task.total_bytes
-		? `${formatBytes(task.received_bytes)} of ${formatBytes(task.total_bytes)}`
+		? tl("{current} of {total}", {
+				current: formatBytes(task.received_bytes),
+				total: formatBytes(task.total_bytes),
+			})
 		: formatBytes(task.received_bytes);
 	const percent =
 		task.total_bytes && task.total_bytes > 0
@@ -178,11 +197,11 @@ export function DownloadRow({
 
 	let meta: string;
 	if (failed) {
-		meta = stateLabel(task);
+		meta = stateLabel(task, tl);
 	} else if (terminal) {
-		meta = trayMeta(done ? "Installed" : "Cancelled", sizeText);
+		meta = trayMeta(done ? tl("Installed") : tl("Cancelled"), sizeText);
 	} else {
-		meta = trayMeta(sizeText, stateLabel(task));
+		meta = trayMeta(sizeText, stateLabel(task, tl));
 	}
 
 	return (
@@ -194,7 +213,9 @@ export function DownloadRow({
 							icon={PauseIcon}
 							label="Pause"
 							onClick={() =>
-								runAction("Pause", () => pauseDownload(target, task.id))
+								runAction(tl("Couldn't pause the download"), () =>
+									pauseDownload(target, task.id)
+								)
 							}
 						/>
 					)}
@@ -203,7 +224,9 @@ export function DownloadRow({
 							icon={PlayIcon}
 							label="Resume"
 							onClick={() =>
-								runAction("Resume", () => resumeDownload(target, task.id))
+								runAction(tl("Couldn't resume the download"), () =>
+									resumeDownload(target, task.id)
+								)
 							}
 						/>
 					)}
@@ -212,7 +235,9 @@ export function DownloadRow({
 							icon={Cancel01Icon}
 							label="Cancel"
 							onClick={() =>
-								runAction("Cancel", () => cancelDownload(target, task.id))
+								runAction(tl("Couldn't cancel the download"), () =>
+									cancelDownload(target, task.id)
+								)
 							}
 							tone="danger"
 						/>
@@ -221,7 +246,7 @@ export function DownloadRow({
 							icon={Delete02Icon}
 							label="Dismiss"
 							onClick={() =>
-								runAction("Dismiss", async () => {
+								runAction(tl("Couldn't dismiss the download"), async () => {
 									await clearDownload(target, task.id);
 									useDownloadsStore.getState().removeTask(task.id);
 								})
@@ -232,7 +257,9 @@ export function DownloadRow({
 						<TrayAction
 							label="Retry"
 							onClick={() =>
-								runAction("Retry", () => retryDownload(target, task.id))
+								runAction(tl("Couldn't retry the download"), () =>
+									retryDownload(target, task.id)
+								)
 							}
 						/>
 					)}

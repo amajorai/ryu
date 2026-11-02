@@ -206,7 +206,7 @@ export function ComposerMenu({
 									aria-label={item.label}
 									aria-selected={index === active}
 									className={cn(
-										"flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors duration-150 hover:bg-accent hover:duration-0",
+										"flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-start text-sm transition-colors duration-150 hover:bg-accent hover:duration-0",
 										index === active && "bg-accent",
 										item.disabled && "cursor-not-allowed opacity-50"
 									)}

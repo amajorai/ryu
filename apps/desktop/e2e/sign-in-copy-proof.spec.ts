@@ -1,11 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDirectory = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/sign-in-copy"
-);
+const proofDirectory = proofEvidencePath("sign-in-copy");
 
 function watchForBrowserErrors(page: Page) {
 	const errors: string[] = [];

@@ -3,6 +3,7 @@
 
 import { Alert01Icon, Target01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ListingAsideCard,
 	ListingDetailShell,
@@ -43,6 +44,7 @@ export function AgentDetailPanel({
 	onInstall: () => void;
 	onUninstall: () => void;
 }) {
+	const tl = useLiteralMessages();
 	if (!entry) {
 		return (
 			<Empty className="h-full">
@@ -74,7 +76,7 @@ export function AgentDetailPanel({
 						onUninstall={onUninstall}
 					/>
 					{error && (
-						<span className="ml-auto flex items-center gap-1.5 text-sm text-status-destructive">
+						<span className="ms-auto flex items-center gap-1.5 text-sm text-status-destructive">
 							<HugeiconsIcon className="size-4 shrink-0" icon={Alert01Icon} />
 							{error}
 						</span>
@@ -126,7 +128,9 @@ export function AgentDetailPanel({
 						{
 							label: "Agent",
 							sub: entry.latestVersion
-								? `Latest v${entry.latestVersion}`
+								? tl("Latest v{latestVersion}", {
+										latestVersion: entry.latestVersion,
+									})
 								: undefined,
 							value: entry.installedVersion
 								? `v${entry.installedVersion}`
@@ -135,7 +139,9 @@ export function AgentDetailPanel({
 						{
 							label: "Bridge",
 							sub: entry.latestBridgeVersion
-								? `Latest v${entry.latestBridgeVersion}`
+								? tl("Latest v{latestBridgeVersion}", {
+										latestBridgeVersion: entry.latestBridgeVersion,
+									})
 								: undefined,
 							value: entry.installedBridgeVersion
 								? `v${entry.installedBridgeVersion}`

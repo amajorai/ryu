@@ -14,17 +14,10 @@ import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useState } from "react";
 import { sileo } from "sileo";
 import { type SellerReportsState, useMarketplaceHost } from "./host.tsx";
-
-const REASON_LABEL = new Map(
-	Object.entries({
-		broken: "Not working",
-		other: "Other",
-		malicious: "Malicious",
-		spam: "Spam",
-		inappropriate: "Inappropriate",
-		ip: "IP / copyright",
-	})
-);
+import {
+	marketplaceKindLabel,
+	sellerReportReasonLabel,
+} from "./license-labels.ts";
 
 function useMissingSellerReports(): SellerReportsState {
 	return {
@@ -130,10 +123,10 @@ export function SellerReportsPanel({
 										{report.itemName ?? report.itemId}
 									</span>
 									<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-										{report.itemKind}
+										{marketplaceKindLabel(report.itemKind)}
 									</span>
 									<span className="rounded-full bg-warning/15 px-2 py-0.5 text-status-warning text-xs">
-										{REASON_LABEL.get(report.reason) ?? report.reason}
+										{sellerReportReasonLabel(report.reason)}
 									</span>
 								</div>
 								{report.details ? (

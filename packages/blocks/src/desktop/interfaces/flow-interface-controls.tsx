@@ -76,7 +76,7 @@ export function FlowNewConversation({
 				{startOpen ? (
 					<motion.div
 						animate={{ opacity: 1, y: 0 }}
-						className="absolute top-10 right-0 w-[22rem] max-w-[calc(100vw-2rem)]"
+						className="absolute end-0 top-10 w-[22rem] max-w-[calc(100vw-2rem)]"
 						data-flow-start=""
 						exit={{ opacity: 0, y: -4 }}
 						initial={reduceMotion ? false : { opacity: 0, y: -4 }}
@@ -117,7 +117,7 @@ export function FlowZoomToolbar({
 	return (
 		<div
 			aria-label="Zoom"
-			className="absolute bottom-4 left-4 z-10 flex h-8 items-center rounded-lg border border-border bg-background shadow-xs"
+			className="absolute start-4 bottom-4 z-10 flex h-8 items-center rounded-lg border border-border bg-background shadow-xs"
 			role="toolbar"
 		>
 			<button
@@ -190,7 +190,7 @@ export function FlowCornerLogo() {
 	return (
 		<span
 			aria-hidden="true"
-			className="pointer-events-none absolute top-4 left-4 text-foreground"
+			className="pointer-events-none absolute start-4 top-4 text-foreground"
 		>
 			<RyuLogo animated={false} size="20px" tone="inherit" variant="outline" />
 		</span>

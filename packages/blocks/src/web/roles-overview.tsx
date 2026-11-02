@@ -2,6 +2,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { solutions } from "./data/solutions.ts";
+import { LiteralText } from "./literal-text.tsx";
 import { Reveal } from "./reveal.tsx";
 import { iconFor } from "./solutions-sections.tsx";
 
@@ -25,7 +26,7 @@ export function RolesOverview() {
 									className="size-4 text-foreground/60 transition-colors group-hover:text-foreground"
 									strokeWidth={1.5}
 								/>
-								{s.name}
+								<LiteralText text={s.name} />
 							</Link>
 						</Reveal>
 					);
@@ -37,7 +38,7 @@ export function RolesOverview() {
 					href="/for"
 				>
 					See every role
-					<ArrowRight className="size-4" />
+					<ArrowRight className="size-4 rtl:-scale-x-100" />
 				</Link>
 			</div>
 		</div>

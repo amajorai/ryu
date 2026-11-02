@@ -191,7 +191,7 @@ export function GitHistoryDialog({
 								{entries.map((entry) => (
 									<button
 										aria-pressed={selectedId === entry.checkpointId}
-										className={`w-full rounded-lg px-3 py-2 text-left transition-colors duration-150 hover:duration-0 ${
+										className={`w-full rounded-lg px-3 py-2 text-start transition-colors duration-150 hover:duration-0 ${
 											selectedId === entry.checkpointId
 												? "bg-accent"
 												: "hover:bg-muted"
@@ -267,7 +267,7 @@ export function GitHistoryDialog({
 						disabled={!transcript || reading || working}
 						onClick={() => void restore()}
 					>
-						{working ? <Spinner className="mr-2" /> : null}
+						{working ? <Spinner className="me-2" /> : null}
 						Restore conversation
 					</Button>
 				</DialogFooter>

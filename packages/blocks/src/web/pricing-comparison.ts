@@ -1,12 +1,7 @@
 import { formatMessage } from "@ryu/i18n/core";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { BUSINESS_INCLUDED_SEATS } from "./business-pricing.ts";
-import {
-	formatBps,
-	formatCount,
-	PRICING_COPY,
-	PUBLISHED_PRICING,
-} from "./data/standalone-pricing.ts";
+import { PUBLISHED_PRICING, pricingFormat } from "./data/standalone-pricing.ts";
 import { MAX_FAMILY_SHARING_MEMBERS } from "./pricing.tsx";
 import {
 	CONTRACTED,
@@ -20,6 +15,7 @@ import {
 	SPACE_STORAGE_GB_BY_PLAN,
 } from "./pricing-comparison-plans.ts";
 import {
+	type ComparisonFormat,
 	catalogRow,
 	creditsRow,
 	DEPOSIT_FEE_BPS_BY_PLAN,
@@ -31,6 +27,7 @@ import {
 	onlyRow,
 	priceRow,
 } from "./pricing-comparison-rows.ts";
+import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
 import {
 	normalizeTeamsSeatCount,
 	TEAMS_MAX_SEATS,
@@ -116,8 +113,12 @@ const englishLiteral: LiteralMessage = (source, values) =>
  */
 export function comparisonSections(
 	options: ComparisonOptions,
-	tl: LiteralMessage = englishLiteral
+	tl: LiteralMessage = englishLiteral,
+	locale = "en"
 ): readonly ComparisonSection[] {
+	const fees = depositFeeAmounts(locale);
+	const format = pricingFormat(locale);
+	const fmt: ComparisonFormat = { format, tl };
 	const isYearly = options.isYearly ?? false;
 	const seats = comparisonSeats(options.seats);
 	const plans = comparisonPlans(options);
@@ -127,20 +128,20 @@ export function comparisonSections(
 			id: "price-and-credits",
 			title: "Price and credits",
 			rows: [
-				priceRow(isYearly, seats),
-				creditsRow(seats),
+				priceRow(isYearly, seats, fmt),
+				creditsRow(seats, fmt),
 				{
 					id: "deposit-fee",
 					label: "Credit top-up deposit fee",
 					hint: tl(
 						"{depositFeeMinimum} minimum; Ryu keeps at most {depositFeeCap} per top-up",
 						{
-							depositFeeMinimum: PRICING_COPY.depositFeeMinimum,
-							depositFeeCap: PRICING_COPY.depositFeeCap,
+							depositFeeMinimum: fees.depositFeeMinimum,
+							depositFeeCap: fees.depositFeeCap,
 						}
 					),
 					values: catalogRow(
-						(plan) => formatBps(DEPOSIT_FEE_BPS_BY_PLAN[plan]),
+						(plan) => format.bps(DEPOSIT_FEE_BPS_BY_PLAN[plan]),
 						CONTRACTED
 					),
 				},
@@ -173,7 +174,7 @@ export function comparisonSections(
 					label: "Ryu Boxes running at once",
 					hint: "Per organization",
 					values: catalogRow(
-						(plan) => formatCount(RUNNING_BOXES_BY_PLAN[plan]),
+						(plan) => format.count(RUNNING_BOXES_BY_PLAN[plan]),
 						CONTRACTED
 					),
 				},
@@ -185,7 +186,8 @@ export function comparisonSections(
 							gib(
 								hasManagedServer(plan)
 									? PUBLISHED_PRICING.box.includedStorageGib.paid
-									: PUBLISHED_PRICING.box.includedStorageGib.trial
+									: PUBLISHED_PRICING.box.includedStorageGib.trial,
+								fmt
 							),
 						CONTRACTED
 					),
@@ -203,7 +205,7 @@ export function comparisonSections(
 						(plan) =>
 							PLAN_CAPABILITIES[plan].managedAi
 								? "Unlimited"
-								: formatCount(mail.free.inboxes),
+								: format.count(mail.free.inboxes),
 						CONTRACTED
 					),
 				},
@@ -212,7 +214,7 @@ export function comparisonSections(
 					label: "Emails sent per month",
 					hint: "Counted per recipient",
 					values: catalogRow(
-						(plan) => formatCount(MAIL_BY_PLAN[plan].monthlyEmails),
+						(plan) => format.count(MAIL_BY_PLAN[plan].monthlyEmails),
 						CONTRACTED
 					),
 				},
@@ -220,7 +222,7 @@ export function comparisonSections(
 					id: "stored-mail",
 					label: "Stored mail",
 					values: catalogRow(
-						(plan) => gib(MAIL_BY_PLAN[plan].storageGib),
+						(plan) => gib(MAIL_BY_PLAN[plan].storageGib, fmt),
 						CONTRACTED
 					),
 				},
@@ -236,7 +238,7 @@ export function comparisonSections(
 					id: "space-storage",
 					label: "Space storage",
 					values: catalogRow(
-						(plan) => gb(SPACE_STORAGE_GB_BY_PLAN[plan]),
+						(plan) => gb(SPACE_STORAGE_GB_BY_PLAN[plan], fmt),
 						CONTRACTED
 					),
 				},
@@ -284,7 +286,9 @@ export function comparisonSections(
 								label: "Family sharing",
 								values: {
 									...onlyRow([]),
-									max: `Up to ${MAX_FAMILY_SHARING_MEMBERS - 1} family members`,
+									max: tl("Up to {count} family members", {
+										count: MAX_FAMILY_SHARING_MEMBERS - 1,
+									}),
 								},
 							},
 						]
@@ -349,7 +353,7 @@ export function comparisonSections(
 					id: "billing-terms",
 					label: "Billing",
 					values: {
-						...catalogRow(() => "Monthly or yearly", "Annual contract"),
+						...catalogRow(() => tl("Monthly or yearly"), tl("Annual contract")),
 						"desktop-license": "One-time",
 					},
 				},

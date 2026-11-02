@@ -6,6 +6,7 @@ import {
 	StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatDurationParts } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -39,10 +40,12 @@ export function repositoryUrlFromName(
 function formatBackgroundElapsed(elapsedMs: number): string {
 	const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
 	if (seconds < 60) {
-		return `${seconds}s`;
+		return formatDurationParts([[seconds, "second"]]);
 	}
-	const minutes = Math.floor(seconds / 60);
-	return `${minutes}m${seconds % 60}s`;
+	return formatDurationParts([
+		[Math.floor(seconds / 60), "minute"],
+		[seconds % 60, "second"],
+	]);
 }
 
 /** The provider-facing compare action shown only when the current branch can be compared. */

@@ -1,6 +1,7 @@
 import { copyFile, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("automatic scans stay single-flight and dialog selections survive parent repaint", async ({
 	page,
@@ -91,9 +92,8 @@ test("automatic scans stay single-flight and dialog selections survive parent re
 		path: screenshotPath,
 		fullPage: true,
 	});
-	const proofPath = resolve(
-		testInfo.config.rootDir,
-		"../../../docs/proof/thread-import-performance/thread-import-completed.png"
+	const proofPath = proofEvidencePath(
+		"thread-import-performance/thread-import-completed.png"
 	);
 	await mkdir(dirname(proofPath), { recursive: true });
 	await copyFile(screenshotPath, proofPath);

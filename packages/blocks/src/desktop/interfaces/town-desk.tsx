@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
@@ -46,10 +47,17 @@ export function petitionLabel(
 	now: number,
 	actMode = false
 ): string {
-	const from = petition.agent ? `from ${petition.agent.name}` : "unassigned";
+	const from = petition.agent
+		? tr("from {name}", { name: petition.agent.name })
+		: tr("unassigned");
 	const state =
-		petition.status === "attention" ? "Run failed" : "Reply waiting";
-	const base = `Hear petition: ${petition.thread.title}. ${state}, ${from}, ${petition.districtName}`;
+		petition.status === "attention" ? tr("Run failed") : tr("Reply waiting");
+	const base = tr("Hear petition: {title}. {state}, {from}, {district}", {
+		district: petition.districtName,
+		from,
+		state,
+		title: petition.thread.title,
+	});
 	return actMode
 		? base
 		: `${base}, ${spokenAge(petition.thread.updatedAt, now)}`;
@@ -147,7 +155,10 @@ export function PetitionList({
 								>
 									<span className="flex items-center gap-2">
 										<BoardStatusDot status={petition.status} />
-										<span className="min-w-0 flex-1 truncate font-semibold text-(--gk-ink) text-[15px]">
+										<span
+											className="min-w-0 flex-1 truncate font-semibold text-(--gk-ink) text-[15px]"
+											data-ryu-i18n="off"
+										>
 											{petition.thread.title}
 										</span>
 										{/* One fixed slot: Hear takes the age's place, so the title never reflows. */}
@@ -172,8 +183,8 @@ export function PetitionList({
 												Run failed ·
 											</span>
 										) : null}
-										<span className="truncate">
-											{petition.agent?.name ?? "Unassigned"} ·{" "}
+										<span className="truncate" data-ryu-i18n="off">
+											{petition.agent?.name ?? tr("Unassigned")} ·{" "}
 											{petition.districtName}
 										</span>
 									</span>
@@ -226,11 +237,17 @@ export function UpcomingRuns({
 					const content = (
 						<>
 							<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-								<span className="truncate text-(--gk-ink) text-sm">
+								<span
+									className="truncate text-(--gk-ink) text-sm"
+									data-ryu-i18n="off"
+								>
 									{event.title}
 								</span>
-								<span className="truncate text-(--gk-ink-muted) text-[13px]">
-									{[agent?.name ?? "Any agent", event.label]
+								<span
+									className="truncate text-(--gk-ink-muted) text-[13px]"
+									data-ryu-i18n="off"
+								>
+									{[agent?.name ?? tr("Any agent"), event.label]
 										.filter(Boolean)
 										.join(" · ")}
 								</span>

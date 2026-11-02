@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { buttonVariants } from "@ryu/ui/components/button";
 import {
@@ -80,6 +80,7 @@ export function ProfileStatsPanel({
 	errorMessage = null,
 }: ProfileStatsPanelProps) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	if (errorMessage) {
 		return (
 			<SettingsCard>
@@ -101,7 +102,7 @@ export function ProfileStatsPanel({
 	const totals = summary?.totals;
 	const totalTokens = (totals?.inputTokens ?? 0) + (totals?.outputTokens ?? 0);
 	const agentHours = (totals?.agentSeconds ?? 0) / SECONDS_PER_HOUR;
-	const joined = formatJoined(summary?.joinedAt);
+	const joined = formatJoined(summary?.joinedAt, locale);
 	const balance = pointsBalance ?? summary?.pointsBalance ?? 0;
 	const unlocked = new Set(unlockedKeys);
 
@@ -245,7 +246,7 @@ export function ProfileStatsPanel({
 				<StatCard
 					className={STAT_TILE_CLASS}
 					icon={<Coins className="size-4" />}
-					sub="lifetime"
+					sub={tl("lifetime")}
 					title="Requests"
 					value={formatCompact(totals?.requestCount ?? 0)}
 				/>

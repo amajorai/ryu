@@ -5,6 +5,7 @@ import {
 	HoverCardContent,
 	HoverCardTrigger,
 } from "@ryu/ui/components/hover-card";
+import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type React from "react";
 
@@ -85,7 +86,8 @@ export function InlineCitationCardTrigger({
 	className,
 }: InlineCitationCardTriggerProps) {
 	const primary = sources[0] ? hostnameOf(sources[0]) : "source";
-	const extra = sources.length > 1 ? ` +${sources.length - 1}` : "";
+	const extra =
+		sources.length > 1 ? ` +${formatNumber(sources.length - 1)}` : "";
 	return (
 		<HoverCardTrigger
 			appearance="citation-pill"
@@ -266,7 +268,7 @@ export function CitationSources({ citations }: { citations: Citation[] }) {
 						</span>
 						<span
 							aria-hidden
-							className="ml-[-2px] inline-flex flex-none text-muted-foreground/70 opacity-0 transition-opacity group-hover/cite-ref:opacity-100 group-focus-visible/cite-ref:opacity-100"
+							className="-ms-[2px] inline-flex flex-none text-muted-foreground/70 opacity-0 transition-opacity group-hover/cite-ref:opacity-100 group-focus-visible/cite-ref:opacity-100"
 						>
 							<HugeiconsIcon className="size-2.5" icon={ArrowUpRight01Icon} />
 						</span>

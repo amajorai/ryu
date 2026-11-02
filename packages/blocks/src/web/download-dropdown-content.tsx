@@ -97,7 +97,7 @@ function DownloadItem({
 			{icon}
 			{label}
 			{trailing ? (
-				<span className="ml-auto text-muted-foreground text-xs">
+				<span className="ms-auto text-muted-foreground text-xs">
 					{trailing}
 				</span>
 			) : null}
@@ -304,7 +304,7 @@ export function DownloadDropdownContent({
 								{ primaryNote },
 								{
 									note: (chunks) => (
-										<span className="ml-1 font-normal tabular-nums">
+										<span className="ms-1 font-normal tabular-nums">
 											{chunks}
 										</span>
 									),
@@ -353,7 +353,7 @@ export function DownloadDropdownContent({
 				>
 					<History className="size-4" />
 					All versions
-					<ArrowUpRight className="ml-auto size-3.5 text-muted-foreground" />
+					<ArrowUpRight className="ms-auto size-3.5 text-muted-foreground rtl:-scale-x-100" />
 				</DropdownMenuItem>
 			</DropdownMenuGroup>
 
@@ -366,7 +366,7 @@ export function DownloadDropdownContent({
 				>
 					<SvglIcon spec={GITHUB_SVGL} />
 					Self-host
-					<ArrowUpRight className="ml-auto size-3.5 text-muted-foreground" />
+					<ArrowUpRight className="ms-auto size-3.5 text-muted-foreground rtl:-scale-x-100" />
 				</DropdownMenuItem>
 				<DropdownMenuItem
 					render={
@@ -375,7 +375,7 @@ export function DownloadDropdownContent({
 				>
 					<BookOpen className="size-4" />
 					Documentation
-					<ArrowUpRight className="ml-auto size-3.5 text-muted-foreground" />
+					<ArrowUpRight className="ms-auto size-3.5 text-muted-foreground rtl:-scale-x-100" />
 				</DropdownMenuItem>
 				{PRERELEASE_CHANNELS.map(({ id, label }) => (
 					<DropdownMenuSub key={id}>
@@ -401,14 +401,14 @@ export function DownloadDropdownContent({
 				<DropdownMenuItem disabled>
 					<SvglIcon spec={MOBILE_SVGL.ios} />
 					iOS
-					<span className="ml-auto text-muted-foreground text-xs">
+					<span className="ms-auto text-muted-foreground text-xs">
 						Coming soon
 					</span>
 				</DropdownMenuItem>
 				<DropdownMenuItem disabled>
 					<SvglIcon spec={MOBILE_SVGL.android} />
 					Android
-					<span className="ml-auto text-muted-foreground text-xs">
+					<span className="ms-auto text-muted-foreground text-xs">
 						Coming soon
 					</span>
 				</DropdownMenuItem>

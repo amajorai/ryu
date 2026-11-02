@@ -1,4 +1,5 @@
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
+import type { IslandAttachDialogLabels } from "../shared/attach-dialog.ts";
 import {
 	type AcpConfigResult,
 	type AgentsResult,
@@ -294,8 +295,10 @@ const api: IslandApi = {
 	system: {
 		openExternal: (url: string): Promise<void> =>
 			ipcRenderer.invoke(IPC.system.openExternal, url),
-		attachFiles: (): Promise<IslandAttachment[]> =>
-			ipcRenderer.invoke(IPC.system.attachFiles),
+		attachFiles: (
+			labels?: IslandAttachDialogLabels
+		): Promise<IslandAttachment[]> =>
+			ipcRenderer.invoke(IPC.system.attachFiles, labels),
 	},
 	consent: {
 		get: (): Promise<ConsentState> => ipcRenderer.invoke(IPC.consent.get),

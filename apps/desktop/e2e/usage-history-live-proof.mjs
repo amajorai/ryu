@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 await test("live retained usage history controls and responsive proof", async () => {
-	const proofDir = new URL(
-		"../../../docs/proof/usage-history/",
-		import.meta.url
-	);
+	const proofDir = pathToFileURL(`${proofEvidencePath("usage-history")}/`);
 	await mkdir(proofDir, { recursive: true });
 	const proofCapability = process.env.RYU_PROOF_CLIENT_TOKEN;
 	if (!proofCapability) {

@@ -37,22 +37,30 @@
  * remaining steps live in the description only.
  */
 
+import { formatNumberValue } from "@ryu/i18n/format-intl";
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 export const MAX_STATE_KIB = 512;
-export const SWEEP_EVERY = "hourly";
 export const FAILURE_LIMIT = 30;
 export const FAILURE_WINDOW_S = 60;
 export const MAX_BLOCK_MIN = 15;
 export const LOCKOUT_STATUS = 429;
 
 /** The short name assistive tech hears for the drawing. */
-export const LABEL = "Ryu Passport drawn as a cabinet of keys";
+export function passportLabel(tl: LiteralMessage): string {
+	return tl("Ryu Passport drawn as a cabinet of keys");
+}
 
 /** The drawing's accessible description: the whole lifecycle, in plain sentences. */
-export const DESCRIPTION = [
-	"Ryu Passport drawn as a cabinet of keys: each box holds one connection's sign-in, a session of at most " +
-		`${MAX_STATE_KIB} KiB sealed with its tenant's own key and bound to its box, so a copy moved elsewhere will not open.`,
-	"One key leaves its box and Passport carries it to the site itself; only the fetched page comes back down to the agent's tray, with any echoed credential blacked out, so the agent never holds the key.",
-	`A health sweep runs ${SWEEP_EVERY} and sends a missing or stale session back to needs sign-in.`,
-	`${FAILURE_LIMIT} unknown tokens from one address within ${FAILURE_WINDOW_S} seconds are refused with ${LOCKOUT_STATUS}, the block doubling up to ${MAX_BLOCK_MIN} minutes.`,
-	"The motion is a simulation, shown slower than a real fetch; the other keys are decoration.",
-].join(" ");
+export function describePassport(tl: LiteralMessage, locale?: string): string {
+	return tl(
+		"Ryu Passport drawn as a cabinet of keys: each box holds one connection's sign-in, a session of at most {maxStateKib} KiB sealed with its tenant's own key and bound to its box, so a copy moved elsewhere will not open. One key leaves its box and Passport carries it to the site itself; only the fetched page comes back down to the agent's tray, with any echoed credential blacked out, so the agent never holds the key. A health sweep runs hourly and sends a missing or stale session back to needs sign-in. {failureLimit} unknown tokens from one address within {failureWindowSeconds} seconds are refused with {lockoutStatus}, the block doubling up to {maxBlockMinutes} minutes. The motion is a simulation, shown slower than a real fetch; the other keys are decoration.",
+		{
+			failureLimit: formatNumberValue(locale, FAILURE_LIMIT),
+			failureWindowSeconds: formatNumberValue(locale, FAILURE_WINDOW_S),
+			lockoutStatus: String(LOCKOUT_STATUS),
+			maxBlockMinutes: formatNumberValue(locale, MAX_BLOCK_MIN),
+			maxStateKib: formatNumberValue(locale, MAX_STATE_KIB),
+		}
+	);
+}

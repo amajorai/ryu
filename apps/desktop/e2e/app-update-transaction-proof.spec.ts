@@ -1,25 +1,12 @@
-import path from "node:path";
-import { expect, type Page, type Request, test } from "@playwright/test";
-
-// RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
-// the tracked proof ledger; without it the committed evidence is refreshed.
-function proofPath(relative: string): string {
-	const override = process.env.RYU_PROOF_EVIDENCE_DIR;
-	return override
-		? path.join(override, relative)
-		: `../../docs/proof/${relative}`;
-}
-
-interface TransactionNetworkReceipt {
-	errors: string[];
-	pending: Set<Request>;
-	reads: { url: string; method: string; headers: Record<string, string> }[];
-	unknown: string[];
-}
-const browserReceipts = new WeakMap<Page, TransactionNetworkReceipt>();
-// The static build explicitly selects this tokenless local Core authority.
-// The real useNodeStore fallback and API client still construct every request.
-const coreOrigin = "http://127.0.0.1:7980";
+import { expect, test } from "@playwright/test";
+import {
+	browserReceipts,
+	coreOrigin,
+	preferenceOpen,
+	preferenceWrites,
+	proofPath,
+	type TransactionNetworkReceipt,
+} from "./app-update-transaction-proof.helpers.ts";
 
 test.afterEach(async ({ page }, testInfo) => {
 	const receipt = browserReceipts.get(page);
@@ -519,22 +506,6 @@ for (const retryAction of ["Settings", "notification"] as const) {
 		});
 	});
 }
-
-// Shipping AppUpdatesSettings and native preparation coordinator run unchanged.
-// Preference storage below is the isolated native IPC fixture, not an OS-disk claim.
-async function preferenceOpen(page: import("@playwright/test").Page) {
-	await page.goto("/app-update-transaction-proof.html?preference=1");
-	await expect(
-		page.getByRole("switch", { name: "Download app updates automatically" })
-	).toBeChecked();
-}
-async function preferenceWrites(page: import("@playwright/test").Page) {
-	return page.evaluate(() =>
-		window.updateProofIpcRequests.filter(
-			(call) => call.command === "set_app_update_download_preference"
-		)
-	);
-}
 test("automatic app downloads: exact Boolean native save survives a fresh renderer read", async ({
 	page,
 }) => {
@@ -680,70 +651,4 @@ test("automatic app downloads: a held older write cannot leave displayed choice 
 	);
 	await page.reload();
 	await expect(control).toBeChecked({ checked: displayed });
-});
-test("automatic app downloads: queued refused writes leave the switch on the last saved choice", async ({
-	page,
-}) => {
-	await preferenceOpen(page);
-	const control = page.getByRole("switch", {
-		name: "Download app updates automatically",
-	});
-	const pending = () =>
-		page.evaluate(() => window.updateProofDownloadPreference.pending());
-	const persisted = () =>
-		page.evaluate(() => window.updateProofDownloadPreference.persisted());
-	// Two quick changes that the native store both refuses. The older write is
-	// held, so the newer one queues behind it and is refused after it.
-	await page.evaluate(() => {
-		window.updateProofDownloadPreference.holdNext();
-		window.updateProofDownloadPreference.failNext(2);
-	});
-	await control.click();
-	await expect.poll(pending).toBe(1);
-	await expect(control).not.toBeChecked();
-	await control.click();
-	await expect(control).toBeChecked();
-	await page.evaluate(() => window.updateProofDownloadPreference.release());
-	await expect.poll(() => preferenceWrites(page)).toHaveLength(2);
-	await expect.poll(pending).toBe(0);
-	await expect(
-		page.getByText("Could not save the automatic-download setting", {
-			exact: true,
-		})
-	).toBeVisible();
-	// Nothing was saved, so the switch must show the saved `true`, not the
-	// stale optimistic value captured when the newer change was made.
-	expect(await persisted()).toBe(true);
-	await expect(control).toBeChecked();
-
-	// Three quick changes: the first two are refused and the last is accepted.
-	// The switch must end on the accepted choice, not on a rollback target.
-	await page.evaluate(() => {
-		window.updateProofDownloadPreference.holdNext();
-		window.updateProofDownloadPreference.failNext(2);
-	});
-	await control.click();
-	await expect.poll(pending).toBe(1);
-	await control.click();
-	await control.click();
-	await expect(control).not.toBeChecked();
-	await page.evaluate(() => window.updateProofDownloadPreference.release());
-	await expect.poll(() => preferenceWrites(page)).toHaveLength(5);
-	await expect.poll(pending).toBe(0);
-	expect(await persisted()).toBe(false);
-	await expect(control).not.toBeChecked();
-	expect(await preferenceWrites(page)).toEqual(
-		[false, true, false, true, false].map((enabled) => ({
-			command: "set_app_update_download_preference",
-			args: { enabled },
-		}))
-	);
-	expect(
-		await page.evaluate(() => window.updateProofDownloadPreference.accepted)
-	).toEqual([false]);
-	expect(await page.evaluate(() => window.updateProofUnknownCommands)).toEqual(
-		[]
-	);
-	await page.reload();
-	await expect(control).not.toBeChecked();
 });

@@ -20,7 +20,6 @@ import {
 	type QaTab,
 	type QaTopic,
 	qaAllQuestions,
-	qaCount,
 	qaFeed,
 	qaHeading,
 	qaRelated,
@@ -298,8 +297,13 @@ export function QaInterface({
 		description = agent.description || null;
 	}
 	const countLabel = query
-		? `${qaCount(feed.length, "result")} for “${query}”`
-		: qaCount(feed.length, "question");
+		? tl(
+				"{count, plural, one {# result for “{query}”} other {# results for “{query}”}}",
+				{ count: feed.length, query }
+			)
+		: tl("{count, plural, one {# question} other {# questions}}", {
+				count: feed.length,
+			});
 
 	let empty: EmptyCopy | null = null;
 	if (feed.length === 0) {

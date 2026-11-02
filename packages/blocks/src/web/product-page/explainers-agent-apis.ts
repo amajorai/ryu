@@ -1,10 +1,14 @@
-import type { ProductExplainer } from "./explainer-types.ts";
+import {
+	type ProductExplainer,
+	statementSource as tl,
+} from "./explainer-types.ts";
 
 /** Agent APIs: the standalone services a product can give its agents. */
 export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 	passport: {
-		statement:
-			"Ryu Passport is an encrypted identity vault for agents. It keeps the sessions your agents are allowed to use, makes the upstream fetch itself, and redacts any credential echoed back, so only content reaches the agent.",
+		statement: tl(
+			"Ryu Passport is an encrypted identity vault for agents. It keeps the sessions your agents are allowed to use, makes the upstream fetch itself, and redacts any credential echoed back, so only content reaches the agent."
+		),
 		steps: [
 			{
 				title: "Import a session",
@@ -25,8 +29,9 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["core", "gateway", "connections"],
 	},
 	connect: {
-		statement:
-			"Ryu Connect serves MCP servers, Skills, and hosted tools behind one API, for products with many customers. You choose which tools each customer can discover and call, and provider secrets stay out of your app.",
+		statement: tl(
+			"Ryu Connect serves MCP servers, Skills, and hosted tools behind one API, for products with many customers. You choose which tools each customer can discover and call, and provider secrets stay out of your app."
+		),
 		steps: [
 			{
 				title: "Host your tools",
@@ -58,8 +63,9 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["connections", "mcp", "skills", "gateway"],
 	},
 	box: {
-		statement:
-			"Ryu Box is an isolated, forkable Linux workspace for agent runs and previews. Files last through stop, resume, and fork for up to 7 days, and you choose how far each Box can reach the network.",
+		statement: tl(
+			"Ryu Box is an isolated, forkable Linux workspace for agent runs and previews. Files last through stop, resume, and fork for up to 7 days, and you choose how far each Box can reach the network."
+		),
 		steps: [
 			{
 				title: "Create a Box",
@@ -92,8 +98,9 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["core", "notify"],
 	},
 	notify: {
-		statement:
-			"Ryu Notify is one API for durable events, live progress, and approvals. Each event keeps its source, type, recipient, and JSON data together, survives restarts, and reaches signed webhooks with retries.",
+		statement: tl(
+			"Ryu Notify is one API for durable events, live progress, and approvals. Each event keeps its source, type, recipient, and JSON data together, survives restarts, and reaches signed webhooks with retries."
+		),
 		steps: [
 			{
 				title: "Publish an event",
@@ -114,8 +121,9 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["box", "mail"],
 	},
 	mail: {
-		statement:
-			"Ryu Mail gives each agent an email inbox it can send from and receive into over an API. Run it with Ryu or on its own.",
+		statement: tl(
+			"Ryu Mail gives each agent an email inbox it can send from and receive into over an API. Run it with Ryu or on its own."
+		),
 		steps: [
 			{
 				title: "Create an inbox",
@@ -136,8 +144,9 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["notify"],
 	},
 	messaging: {
-		statement:
-			"Ryu Messaging lets agents lease phone numbers and send SMS, MMS, WhatsApp, and voice messages through one API, billed at the AWS price with no markup.",
+		statement: tl(
+			"Ryu Messaging lets agents lease phone numbers and send SMS, MMS, WhatsApp, and voice messages through one API, billed at the AWS price with no markup."
+		),
 		steps: [
 			{
 				title: "Lease a number",
@@ -157,8 +166,9 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		],
 	},
 	sites: {
-		statement:
-			"Ryu Sites saves each website build and deploys only the version you approve. Every deploy rescans that exact version, and a detected credential stops it.",
+		statement: tl(
+			"Ryu Sites saves each website build and deploys only the version you approve. Every deploy rescans that exact version, and a detected credential stops it."
+		),
 		steps: [
 			{
 				title: "Save a version",
@@ -178,8 +188,9 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["desktop"],
 	},
 	hire: {
-		statement:
-			"Ryu Hire brings in a specialist agent for one task, with nothing to install. It is in early access; today you can install Marketplace apps and run them in Ryu Desktop.",
+		statement: tl(
+			"Ryu Hire brings in a specialist agent for one task, with nothing to install. It is in early access; today you can install Marketplace apps and run them in Ryu Desktop."
+		),
 		stepsTitle: "How it is planned to work",
 		steps: [
 			{
@@ -200,11 +211,13 @@ export const AGENT_API_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["marketplace", "desktop"],
 	},
 	compute: {
-		statement:
-			"Ryu Compute is planned: rent CPU or GPU capacity for one bounded job, in a fresh workspace with no login to the host, ending with a receipt for its duration and cost.",
+		statement: tl(
+			"Ryu Compute is planned: rent CPU or GPU capacity for one bounded job, in a fresh workspace with no login to the host, ending with a receipt for its duration and cost."
+		),
 	},
 	share: {
-		statement:
-			"Ryu Share is planned: offer your computer's spare CPU or GPU capacity during hours you publish, only while it is idle, with payouts that follow verified usage.",
+		statement: tl(
+			"Ryu Share is planned: offer your computer's spare CPU or GPU capacity during hours you publish, only while it is idle, with payouts that follow verified usage."
+		),
 	},
 };

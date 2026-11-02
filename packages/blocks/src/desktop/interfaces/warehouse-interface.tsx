@@ -4,72 +4,32 @@ import {
 	type InterfaceParamsByRenderer,
 	resolveInterfaceParams,
 } from "@ryuhq/protocol/interfaces";
-import { Pause, Play, Plus, Warehouse } from "lucide-react";
 import { motion } from "motion/react";
-import {
-	type KeyboardEvent,
-	type ReactNode,
-	type RefObject,
-	useEffect,
-	useId,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import { keepsActOverlay } from "./act-settings.ts";
-import { GameAction, GameIconButton, GameTitlePlate } from "./game-hud.tsx";
-import { GameHudSlot, GameShell } from "./game-shell.tsx";
-import {
-	actOverlays,
-	actSummaryLine,
-	actTotals,
-	blockerEntries,
-	overlayBudget,
-	youSpotSlots,
-} from "./game3d-acts.ts";
-import { islandFor } from "./game3d-ground.tsx";
+import { type KeyboardEvent, useId, useMemo, useRef, useState } from "react";
+import { GameShell } from "./game-shell.tsx";
 import { useGameKitSettings } from "./game3d-settings.tsx";
-import {
-	IsoStage,
-	IsoZoomControls,
-	useGameNight,
-	useIsoView,
-} from "./game3d-stage.tsx";
+import { useGameNight, useIsoView } from "./game3d-stage.tsx";
 import { useVillagerLooks } from "./game3d-villager.tsx";
-import {
-	ActAnnouncer,
-	ActStatus,
-	AskQueueList,
-	askOwners,
-	BlindSpotCaption,
-	NeedYouButton,
-	openQueue,
-	QueueButton,
-	useActCards,
-} from "./interface-ask-card.tsx";
+import { ActAnnouncer, AskQueueList } from "./interface-ask-card.tsx";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import { useActAnnouncement, useActClockOptions, useActs } from "./use-acts.ts";
 import { useInterfaceSetting } from "./use-interface-setting.ts";
+import { orderActs } from "./warehouse-acts.tsx";
+import { useWarehouseActs } from "./warehouse-interface-acts.tsx";
+import { WarehouseFloor } from "./warehouse-interface-floor.tsx";
 import {
-	actPickers,
-	CAGE_REASON_ID,
-	cageReason,
-	floorAgents,
-	orderActs,
-	pickerStations,
-	shelfLabels,
-	WarehouseActProps,
-	warehouseActPaths,
-} from "./warehouse-acts.tsx";
+	CREATE_TARGET,
+	escapeIsFree,
+	useClock,
+	useElementSize,
+	useViewFocus,
+} from "./warehouse-interface-hooks.ts";
+import { WarehouseHud } from "./warehouse-interface-hud.tsx";
 import {
-	TILE,
-	WAREHOUSE_BOUNDS,
-	type WarehouseActors,
-	WarehouseDioramaScene,
-} from "./warehouse-diorama.tsx";
-import { WarehouseList } from "./warehouse-list.tsx";
+	type PanelView,
+	WarehousePanel,
+} from "./warehouse-interface-panel.tsx";
 import {
 	buildOrders,
 	buildPickers,
@@ -77,93 +37,19 @@ import {
 	floorStats,
 	type OrderTab,
 	placeOrders,
-	plural,
 	tabCounts,
 } from "./warehouse-model.ts";
-import {
-	CreateOrder,
-	OrderConversation,
-	OrderDetail,
-} from "./warehouse-order.tsx";
-import { OrdersList } from "./warehouse-orders.tsx";
 import { WAREHOUSE_SCENE_CSS, warehouseArt } from "./warehouse-palette.ts";
-import {
-	Clipboard,
-	StatsStrip,
-	WarehouseActsContext,
-} from "./warehouse-parts.tsx";
+import { Clipboard, WarehouseActsContext } from "./warehouse-parts.tsx";
 
 /** Below this stage width the clipboard sits under the floor. */
 const NARROW_BELOW = 900;
 
-/** Stages move with time (packing, then shipped), so the clock ticks. */
-const CLOCK_MS = 30_000;
 /**
  * The floor's fill beside an open thread (the clipboard widens to 560, so
  * the floor narrows): a closer look, so its plates keep their spacing.
  */
 const OPEN_FILL = 1.3;
-
-type PanelView = "create" | "detail" | "list" | "thread";
-
-/** Where focus returns after Create order closes. */
-const CREATE_TARGET = "create";
-
-/** Escape inside a text field belongs to the field unless the field is empty. */
-function escapeIsFree(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return true;
-	}
-	if (target.closest("[data-testid='warehouse-thread']")) {
-		return false;
-	}
-	const field = target.closest("input:not([type='radio']), textarea, select");
-	if (target.isContentEditable) {
-		return false;
-	}
-	if (
-		field instanceof HTMLTextAreaElement ||
-		field instanceof HTMLInputElement
-	) {
-		return field.value.trim() === "";
-	}
-	return field === null;
-}
-
-/** The element's size, kept current; zero until measured. */
-function useElementSize(ref: RefObject<HTMLElement | null>) {
-	const [size, setSize] = useState({ height: 0, width: 0 });
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		const measure = () =>
-			setSize((current) =>
-				current.width === element.clientWidth &&
-				current.height === element.clientHeight
-					? current
-					: { height: element.clientHeight, width: element.clientWidth }
-			);
-		measure();
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver(measure);
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return size;
-}
-
-function useClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = setInterval(() => setNow(Date.now()), CLOCK_MS);
-		return () => clearInterval(timer);
-	}, []);
-	return now;
-}
 
 type WarehouseSettings = Required<InterfaceParamsByRenderer["warehouse"]>;
 
@@ -261,15 +147,6 @@ export function WarehouseInterface({
 		[snapshot.agents]
 	);
 	const { looks } = useVillagerLooks(agentIds, night);
-	const shape = useMemo(
-		() =>
-			islandFor(
-				WAREHOUSE_BOUNDS.maxX - WAREHOUSE_BOUNDS.minX,
-				WAREHOUSE_BOUNDS.maxZ - WAREHOUSE_BOUNDS.minZ,
-				TILE * 2.4
-			),
-		[]
-	);
 	const stats = useMemo(() => floorStats(orders, now), [now, orders]);
 	const fulfiller = snapshot.agents.find((agent) => agent.id === fulfillerId);
 	const activeFulfillerId = fulfiller ? fulfiller.id : null;
@@ -325,28 +202,7 @@ export function WarehouseInterface({
 		view === "thread" ? (openOrder?.id ?? null) : (selectedOrder?.id ?? null);
 	const viewKey = `${view}:${highlightedOrderId ?? ""}`;
 
-	useLayoutEffect(() => {
-		if (!moveFocus.current) {
-			return;
-		}
-		moveFocus.current = false;
-		if (!viewKey.startsWith("list")) {
-			headingRef.current?.focus();
-			return;
-		}
-		const root = rootRef.current;
-		const target = returnTo.current;
-		const row =
-			target && target !== CREATE_TARGET
-				? root?.querySelector<HTMLElement>(
-						`[data-order-row="${CSS.escape(target)}"]`
-					)
-				: null;
-		(
-			row ??
-			root?.querySelector<HTMLElement>('button[aria-label="Create order"]')
-		)?.focus();
-	}, [viewKey]);
+	useViewFocus({ headingRef, moveFocus, returnTo, rootRef, viewKey });
 
 	const showList = () => {
 		if (threadOpen) {
@@ -434,64 +290,6 @@ export function WarehouseInterface({
 	};
 
 	const wide = view === "thread";
-	const pickerCount = snapshot.agents.length;
-	let panel: ReactNode;
-	if (view === "thread") {
-		panel = (
-			<OrderConversation
-				agents={snapshot.agents}
-				headingRef={headingRef}
-				now={now}
-				onBack={backFromThread}
-				order={openOrder}
-				threadView={threadView}
-			/>
-		);
-	} else if (view === "create") {
-		panel = (
-			<CreateOrder
-				agentId={createAgentId}
-				agents={snapshot.agents}
-				headingRef={headingRef}
-				loadByAgent={loadByAgent}
-				onBack={backToList}
-				onPick={setCreatePick}
-				onSubmit={submitOrder}
-			/>
-		);
-	} else if (view === "detail" && selectedOrder) {
-		panel = (
-			<OrderDetail
-				agents={snapshot.agents}
-				headingRef={headingRef}
-				now={now}
-				onBack={backToList}
-				onFulfil={fulfil}
-				order={selectedOrder}
-			/>
-		);
-	} else {
-		panel = (
-			<OrdersList
-				counts={counts}
-				fulfiller={fulfiller}
-				hoveredOrderId={hoveredOrderId}
-				loading={loading}
-				now={now}
-				onClearFulfiller={() => setFulfillerId(null)}
-				onCreate={startCreate}
-				onHover={setHoveredOrderId}
-				onSelect={selectOrder}
-				onTab={setTab}
-				orders={visibleOrders}
-				selectedOrderId={selectedOrderId}
-				shownOrders={counts.all}
-				tab={tab}
-				totalOrders={orders.length}
-			/>
-		);
-	}
-
 	const floorAgentId =
 		view === "create" ? (createAgentId ?? null) : activeFulfillerId;
 	const panelWidth = wide ? 560 : 440;
@@ -499,247 +297,43 @@ export function WarehouseInterface({
 	const compact = size.width - panelCover < 720;
 	// With the act layer a narrow floor keeps more room for its cues.
 	const clipboardShare = actsOn ? 0.4 : 0.56;
-	const cards = useActCards({
-		acts,
+	const warehouseActs = useWarehouseActs({
+		actsView,
 		clock,
-		fallbackFocus: hudHeadingRef,
-		nowMs,
+		floorWidth: size.width - panelCover,
+		headingRef: hudHeadingRef,
+		kitSettings,
+		looks,
+		pickers,
 		port,
+		reduceMotion,
 		snapshot,
+		tl,
 	});
-	const queueOpener = useRef<(() => void) | null>(null);
-	const totals = actTotals(snapshot, acts);
-	const stations = useMemo(() => pickerStations(pickers), [pickers]);
-	const { offStage, onStage } = useMemo(
-		() =>
-			floorAgents(
-				acts,
-				snapshot.agents.map((agent) => agent.id)
-			),
-		[acts, snapshot.agents]
-	);
-	const slots = useMemo(
-		() =>
-			youSpotSlots(
-				acts,
-				unowned,
-				onStage.map((act) => act.agentId)
-			),
-		[acts, onStage, unowned]
-	);
-	const owners = useMemo(() => askOwners(acts), [acts]);
-	const cageLit = blockerEntries(snapshot, acts).length > 0;
-	// The floor's own width: the clipboard covers the rest.
-	const budget = overlayBudget(Math.max(0, size.width - panelCover), {
-		domTargets: true,
-	});
-	const shownKey = [
-		...budget.fill([
-			...actOverlays(
-				onStage,
-				slots,
-				offStage,
-				onStage.find((act) => act.act === "working")?.agentId ?? null,
-				{ reduced: reduceMotion }
-			).filter((item) => keepsActOverlay(item, kitSettings)),
-			// The cage's reason tag competes last, after every picker's words.
-			...(cageLit ? [{ id: CAGE_REASON_ID, kind: "text" as const }] : []),
-		]),
-	]
-		.sort()
-		.join("|");
-	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the chosen ids, not the set's identity.
-	const shown = useMemo(() => new Set(shownKey.split("|")), [shownKey]);
-	const actPaths = useMemo(
-		() => warehouseActPaths(stations, budget.narrow),
-		[budget.narrow, stations]
-	);
-	const openAsk = cards.openAsk;
-	const pickerCast = useMemo(
-		() =>
-			actPickers({
-				acts,
-				looks,
-				nowMs,
-				onAsk: (askId) => openAsk(askId),
-				paths: actPaths,
-				reduced: reduceMotion,
-				shown,
-				slots: slots.slots,
-				stations,
-				tl,
-			}),
-		[
-			acts,
-			actPaths,
-			looks,
-			nowMs,
-			openAsk,
-			reduceMotion,
-			shown,
-			slots,
-			stations,
-			tl,
-		]
-	);
-	// A shelf label says what its picker is working on: off with work bubbles.
-	const shelvesOn = !budget.narrow && kitSettings.workBubbles;
-	const shelves = useMemo(
-		() =>
-			shelvesOn ? shelfLabels(stations, acts, snapshot.threads, shown) : [],
-		[acts, shelvesOn, shown, snapshot.threads, stations]
-	);
-	const onAsk = (askId: string, opener?: HTMLElement) =>
-		cards.openAsk(askId, opener);
-	const onBlocker = (
-		threadId: string,
-		agentName: string,
-		opener?: HTMLElement
-	) => cards.openBlocker(threadId, agentName, opener);
-	const actors: WarehouseActors | undefined = actsOn
-		? {
-				iconOnly: budget.iconOnly,
-				paths: actPaths,
-				pickers: pickerCast,
-				props: (
-					<WarehouseActProps
-						acts={acts}
-						clock={clock}
-						iconOnly={budget.iconOnly}
-						narrow={budget.narrow}
-						nowMs={nowMs}
-						offStage={offStage}
-						onAsk={(askId) => cards.openAsk(askId)}
-						onBlocker={(threadId, agentName) =>
-							cards.openBlocker(threadId, agentName)
-						}
-						onQueue={() => openQueue(queueOpener)}
-						onStage={onStage}
-						owners={owners}
-						reduced={reduceMotion}
-						shown={shown}
-						slots={slots}
-						snapshot={snapshot}
-						stations={stations}
-					/>
-				),
-				cageLit,
-				cageReason: cageReason(snapshot, acts, {
-					iconOnly: budget.iconOnly,
-					shown,
-				}),
-				shelves,
-			}
-		: undefined;
-	const titlePlate = (
-		<GameTitlePlate
-			compact={compact}
-			icon={<Warehouse strokeWidth={2.25} />}
-			keepStatus={actsOn}
-			status={
-				actsOn && !loading ? (
-					actSummaryLine(totals)
-				) : (
-					<>
-						<span className="dark:hidden">Day shift</span>
-						<span className="hidden dark:inline">Night shift</span>
-						{loading ? null : ` · ${plural(pickerCount, "picker")}`}
-					</>
-				)
-			}
-			title="Warehouse"
-		/>
-	);
+	const { cards, onAsk, onBlocker } = warehouseActs;
 	const hud = (
-		<div
-			className="absolute top-0 left-0"
-			style={{
-				bottom: narrow ? `${clipboardShare * 100}%` : 0,
-				right: panelCover,
-			}}
-		>
-			<GameHudSlot
-				at="top-left"
-				className={actsOn ? "right-0 flex-wrap" : "right-0"}
-			>
-				{actsOn ? (
-					<div className="flex min-w-0 flex-col items-start gap-2">
-						{titlePlate}
-						<div className="flex flex-wrap items-center gap-2">
-							<NeedYouButton
-								onAsk={onAsk}
-								snapshot={snapshot}
-								totals={totals}
-							/>
-							<QueueButton
-								acts={acts}
-								clock={clock}
-								narrow={budget.narrow}
-								nowMs={nowMs}
-								onAsk={onAsk}
-								onBlocker={onBlocker}
-								openRef={queueOpener}
-								snapshot={snapshot}
-								totals={totals}
-								unowned={unowned}
-							/>
-						</div>
-						<BlindSpotCaption snapshot={snapshot} />
-					</div>
-				) : (
-					titlePlate
-				)}
-				<div className="ms-auto flex items-start gap-2">
-					{reduceMotion || loading ? null : (
-						<span className="pointer-events-auto mt-1">
-							<GameIconButton
-								label={paused ? "Resume" : "Pause"}
-								onClick={() => setPaused((value) => !value)}
-								title={paused ? "Resume the floor" : "Pause the floor"}
-							>
-								{paused ? (
-									<Play
-										aria-hidden="true"
-										className="size-5"
-										strokeWidth={2.5}
-									/>
-								) : (
-									<Pause
-										aria-hidden="true"
-										className="size-5"
-										strokeWidth={2.5}
-									/>
-								)}
-								<span className="sr-only">{paused ? "Resume" : "Pause"}</span>
-							</GameIconButton>
-						</span>
-					)}
-					<GameAction
-						compact={compact}
-						disabled={loading}
-						icon={<Plus strokeWidth={2.75} />}
-						label="Create order"
-						onClick={startCreate}
-					/>
-				</div>
-			</GameHudSlot>
-			{narrow ? null : (
-				<GameHudSlot at="bottom-left">
-					<StatsStrip
-						activeTab={tab}
-						compact={compact}
-						loading={loading}
-						onPick={pickTab}
-						stats={stats}
-					/>
-				</GameHudSlot>
-			)}
-			{narrow || loading ? null : (
-				<GameHudSlot at="bottom-right">
-					<IsoZoomControls view={isoView} />
-				</GameHudSlot>
-			)}
-		</div>
+		<WarehouseHud
+			acts={acts}
+			actsOn={actsOn}
+			clipboardShare={clipboardShare}
+			clock={clock}
+			compact={compact}
+			isoView={isoView}
+			loading={loading}
+			narrow={narrow}
+			nowMs={nowMs}
+			onCreate={startCreate}
+			onPickTab={pickTab}
+			onTogglePaused={() => setPaused((value) => !value)}
+			panelCover={panelCover}
+			paused={paused}
+			reduceMotion={reduceMotion}
+			snapshot={snapshot}
+			stats={stats}
+			tab={tab}
+			unowned={unowned}
+			warehouseActs={warehouseActs}
+		/>
 	);
 
 	return (
@@ -783,43 +377,12 @@ export function WarehouseInterface({
 							/>
 						)}
 						{loading ? null : (
-							<IsoStage
-								animate={!paused}
-								bounds={{ ...WAREHOUSE_BOUNDS, top: 2.7 }}
-								fallback={
-									<WarehouseList
-										acts={
-											actsOn
-												? {
-														sentence: (agentId) =>
-															acts.get(agentId)?.ariaLabel ?? null,
-														status: (agentId) => {
-															const act = acts.get(agentId);
-															return act ? (
-																<ActStatus
-																	act={act}
-																	clock={clock}
-																	nowMs={nowMs}
-																	onAsk={onAsk}
-																	onBlocker={onBlocker}
-																	snapshot={snapshot}
-																/>
-															) : null;
-														},
-													}
-												: undefined
-										}
-										fadedIds={fadedIds}
-										onPickTab={pickTab}
-										onSelectOrder={selectOrder}
-										onSelectPicker={togglePicker}
-										orders={orders}
-										pickers={pickers}
-										selectedAgentId={floorAgentId}
-										selectedOrderId={highlightedOrderId}
-									/>
-								}
+							<WarehouseFloor
+								actors={warehouseActs.actors}
+								art={art}
+								fadedIds={fadedIds}
 								fill={actsOn && wide ? OPEN_FILL : 1.1}
+								highlightedOrderId={highlightedOrderId}
 								insets={{
 									bottom: narrow ? size.height * clipboardShare + 8 : 88,
 									left: 16,
@@ -828,35 +391,20 @@ export function WarehouseInterface({
 									right: 16 + panelCover + (actsOn && !narrow ? 64 : 0),
 									top: (narrow ? 64 : 88) + (actsOn ? 96 : 0),
 								}}
-								label="Warehouse diorama: pickers in their aisles and an order box per conversation. Tab or the arrow keys move between pickers and zones; drag to pan, plus and minus to zoom."
+								isoView={isoView}
+								listActs={warehouseActs.listActs}
+								looks={looks}
 								night={night}
-								reducedMotion={reduceMotion}
-								view={isoView}
-							>
-								{({ quality, theme }) => (
-									<WarehouseDioramaScene
-										actors={actors}
-										art={art}
-										fadedIds={fadedIds}
-										looks={looks}
-										night={night}
-										onPickTab={pickTab}
-										onSelectPicker={togglePicker}
-										orders={orders}
-										pickers={pickers}
-										placement={placement}
-										quality={quality}
-										reducedMotion={reduceMotion}
-										running={!paused}
-										selectedAgentId={floorAgentId}
-										selectedOrder={orders.find(
-											(order) => order.id === highlightedOrderId
-										)}
-										shape={shape}
-										theme={theme}
-									/>
-								)}
-							</IsoStage>
+								onPickTab={pickTab}
+								onSelectOrder={selectOrder}
+								onSelectPicker={togglePicker}
+								orders={orders}
+								paused={paused}
+								pickers={pickers}
+								placement={placement}
+								reduceMotion={reduceMotion}
+								selectedAgentId={floorAgentId}
+							/>
 						)}
 						{!loading && snapshot.agents.length === 0 ? (
 							<p className="absolute inset-x-0 bottom-24 flex justify-center">
@@ -874,7 +422,7 @@ export function WarehouseInterface({
 										"inset-x-2 bottom-2",
 										actsOn ? "h-[calc(40%-12px)]" : "h-[calc(56%-12px)]"
 									)
-								: "inset-y-3 right-3"
+								: "inset-y-3 end-3"
 						)}
 						style={narrow ? undefined : { width: panelCover - 24 }}
 					>
@@ -889,7 +437,35 @@ export function WarehouseInterface({
 									ease: "easeOut",
 								}}
 							>
-								{panel}
+								<WarehousePanel
+									agents={snapshot.agents}
+									counts={counts}
+									createAgentId={createAgentId}
+									fulfiller={fulfiller}
+									headingRef={headingRef}
+									hoveredOrderId={hoveredOrderId}
+									loadByAgent={loadByAgent}
+									loading={loading}
+									now={now}
+									onBack={backToList}
+									onBackFromThread={backFromThread}
+									onClearFulfiller={() => setFulfillerId(null)}
+									onCreate={startCreate}
+									onFulfil={fulfil}
+									onHover={setHoveredOrderId}
+									onPick={setCreatePick}
+									onSelect={selectOrder}
+									onSubmit={submitOrder}
+									onTab={setTab}
+									openOrder={openOrder}
+									selectedOrder={selectedOrder}
+									selectedOrderId={selectedOrderId}
+									tab={tab}
+									threadView={threadView}
+									totalOrders={orders.length}
+									view={view}
+									visibleOrders={visibleOrders}
+								/>
 							</motion.div>
 						</Clipboard>
 					</div>

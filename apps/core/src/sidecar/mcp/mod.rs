@@ -7408,7 +7408,16 @@ impl McpRegistry {
                 ToolPrincipal::resolve_optional(self.conversations.as_ref(), host_conversation_id)
                     .await;
             let acting_user = match principal {
-                ToolPrincipal::Unrestricted => None,
+                // The loopback carries the owner token: refused for a request a
+                // scoped credential (a paired device, say) made.
+                ToolPrincipal::Unrestricted => {
+                    if let Some(reason) =
+                        crate::server::tool_ingress_authority::owner_loopback_refusal(tool_id)
+                    {
+                        return Err(anyhow!("{reason}"));
+                    }
+                    None
+                }
                 // On an org-bound node the loopback acts as the person in the
                 // chat, after their role is checked for this route.
                 ToolPrincipal::Owned { user_id, org_id } => {
@@ -7526,6 +7535,11 @@ impl McpRegistry {
                      permission for '{}' cannot be evaluated. Use them on a personal node.",
                     route.plugin_id
                 ));
+            }
+            if let Some(reason) =
+                crate::server::tool_ingress_authority::owner_loopback_refusal(tool_id)
+            {
+                return Err(anyhow!("{reason}"));
             }
             // The owning plugin's effective grants — the RECORD's Gateway-approved
             // set for a Community-tier app, the manifest's declaration for a

@@ -27,6 +27,7 @@ import {
 	type SelectedHumanMention,
 	selectHumanNotificationTargets,
 } from "../../core/humanMentions.ts";
+import { tf } from "../../i18n/translate.ts";
 import {
 	EMPTY_APPS,
 	EMPTY_MENTION_USERS,
@@ -346,17 +347,19 @@ export function useChatMentions(deps: UseChatMentionsDeps) {
 				.then(({ failedNames }) => {
 					if (failedNames.length > 0) {
 						notify(
-							`Couldn't notify ${failedNames.join(", ")}`.slice(0, 180),
+							tf("Couldn't notify {0}", { 0: failedNames.join(", ") }).slice(
+								0,
+								180
+							),
 							"error"
 						);
 					}
 				})
 				.catch(() => {
 					notify(
-						`Couldn't notify ${mentions.map((mention) => mention.label).join(", ")}`.slice(
-							0,
-							180
-						),
+						tf("Couldn't notify {0}", {
+							0: mentions.map((mention) => mention.label).join(", "),
+						}).slice(0, 180),
 						"error"
 					);
 				});

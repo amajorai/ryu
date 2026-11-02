@@ -55,6 +55,23 @@ describe("translatable attributes", () => {
 		);
 		expect(DOM_ATTRIBUTE_SELECTOR).not.toContain(",[value]");
 	});
+
+	test("treat label as copy only on optgroup, option and track", () => {
+		for (const name of ["optgroup", "option", "track"]) {
+			expect(isTranslatableAttribute(fakeElement(name, null), "label")).toBe(
+				true
+			);
+			expect(DOM_ATTRIBUTE_SELECTOR).toContain(`${name}[label]`);
+		}
+		expect(isTranslatableAttribute(fakeElement("input", null), "label")).toBe(
+			false
+		);
+		expect(isTranslatableAttribute(fakeElement("my-chip", null), "label")).toBe(
+			false
+		);
+		expect(DOM_ATTRIBUTE_SELECTOR).not.toContain(",[label]");
+		expect(DOM_OBSERVED_ATTRIBUTES).toContain("label");
+	});
 });
 
 describe("document titles", () => {

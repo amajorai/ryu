@@ -6,7 +6,6 @@
 // loaded, so changes take effect the next time the model is served, not live.
 
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -14,6 +13,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@ryu/ui/components/collapsible.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -297,7 +297,7 @@ export function ModelLaunchConfigSection({
 				onOpenChange={setOpen}
 				open={open}
 			>
-				<CollapsibleTrigger className="group/disclosure flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left outline-none transition-colors duration-150 hover:bg-muted hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring">
+				<CollapsibleTrigger className="group/disclosure flex h-10 w-full items-center gap-2 rounded-lg px-2 text-start outline-none transition-colors duration-150 hover:bg-muted hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring">
 					<span className="font-semibold text-sm">
 						{isEngineScope ? "Engine launch settings" : "Engine / Hardware"}
 					</span>
@@ -309,9 +309,9 @@ export function ModelLaunchConfigSection({
 							{subtitle}
 						</span>
 					) : null}
-					<span className="ml-auto text-muted-foreground">
-						<HugeiconsIcon
-							className="size-4 transition-transform duration-(--duration-fast) ease-move group-data-[panel-open]/disclosure:rotate-90"
+					<span className="ms-auto text-muted-foreground">
+						<DirectionalIcon
+							className="size-4 transition-transform duration-(--duration-fast) ease-move group-data-[panel-open]/disclosure:rotate-90 rtl:group-data-[panel-open]/disclosure:-rotate-90"
 							icon={ArrowRight01Icon}
 						/>
 					</span>

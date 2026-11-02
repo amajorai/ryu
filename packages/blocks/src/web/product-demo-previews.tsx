@@ -144,7 +144,7 @@ export function DeploymentPreview({ compact = false }: PreviewProps) {
 					</div>
 					<ArrowRight
 						aria-hidden="true"
-						className="size-4 text-muted-foreground"
+						className="size-4 text-muted-foreground rtl:-scale-x-100"
 					/>
 					<div className="flex min-w-0 items-center gap-2">
 						<Server
@@ -208,7 +208,7 @@ export function DeploymentPreview({ compact = false }: PreviewProps) {
 				</div>
 				<ArrowRight
 					aria-hidden="true"
-					className="size-4 shrink-0 text-muted-foreground"
+					className="size-4 shrink-0 text-muted-foreground rtl:-scale-x-100"
 				/>
 				<div
 					className={cn(

@@ -63,8 +63,9 @@ impl RyuMcpHandler {
                 chat_grants::grant_once(conversation_id, gate_id, args);
                 Ok(())
             }
-            // Never offered for a Gateway or routing change; refuse a forged answer.
-            Some("allow_session") if !is_gateway_settings_change(gate_id) => {
+            // Never offered for a per-call change (Gateway, routing, preferences,
+            // workspace trust); refuse a forged answer.
+            Some("allow_session") if !requires_per_call_consent(gate_id) => {
                 chat_grants::grant_for_conversation(conversation_id, gate_id);
                 Ok(())
             }

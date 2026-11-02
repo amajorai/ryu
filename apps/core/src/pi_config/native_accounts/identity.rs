@@ -13,17 +13,13 @@ pub fn parse_identity(bytes: &[u8]) -> Result<NativeIdentity> {
         .or_else(|| value.get("subject"))
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty() && value.len() <= 2048)
-        .ok_or_else(|| {
-            anyhow!("Native CLI identity format is not verified; account remains disconnected")
-        })?;
+        .ok_or(NativeAccountError::IdentityUnverified)?;
     let issuer = value
         .get("issuer")
         .or_else(|| value.get("identityProvider"))
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty() && value.len() <= 2048)
-        .ok_or_else(|| {
-            anyhow!("Native CLI identity issuer is unavailable; account remains disconnected")
-        })?;
+        .ok_or(NativeAccountError::IdentityUnverified)?;
     Ok(NativeIdentity {
         subject: subject.to_owned(),
         issuer: issuer.to_owned(),

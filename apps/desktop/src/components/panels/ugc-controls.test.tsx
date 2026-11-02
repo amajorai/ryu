@@ -17,6 +17,19 @@ import originalMarkup from "./ugc-controls.fixture.json" with { type: "json" };
 const RETIRED_CORNER_UTILITY =
 	/(?:^|:)corner-(?:[a-z]{1,2}-)?(?:squircle|round)$/;
 
+// The archive also predates the shared table's move to logical edges for
+// right-to-left layouts; the same edges are named by their logical utilities.
+const LOGICAL_EDGE_UTILITIES: Readonly<Record<string, string>> = {
+	"pr-0": "pe-0",
+	"text-left": "text-start",
+};
+
+function logicalEdge(value: string) {
+	const colon = value.lastIndexOf(":");
+	const logical = LOGICAL_EDGE_UTILITIES[value.slice(colon + 1)];
+	return logical ? `${value.slice(0, colon + 1)}${logical}` : value;
+}
+
 function normalizeClasses(markup: string) {
 	return markup.replace(
 		/class="([^"]*)"/g,
@@ -24,6 +37,7 @@ function normalizeClasses(markup: string) {
 			`class="${classes
 				.split(" ")
 				.filter((value) => !RETIRED_CORNER_UTILITY.test(value))
+				.map(logicalEdge)
 				.sort()
 				.join(" ")}"`
 	);

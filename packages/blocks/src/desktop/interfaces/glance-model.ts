@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -7,7 +8,14 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { MINUTE_MS } from "./glance-model-time.ts";
 import { agentHue } from "./interface-renderer.ts";
+
+export {
+	type GlanceClock,
+	glanceClock,
+	glanceRunWhen,
+} from "./glance-model-time.ts";
 
 // ---------------------------------------------------------------------------
 // Faces, distance, and views
@@ -150,9 +158,12 @@ export const GLANCE_NEEDS_YOU_LABEL = "Needs you";
 /** The one line the clock face carries. */
 export function glanceWaitingLine(count: number): string {
 	if (count <= 0) {
-		return "Nothing needs you";
+		return tr("Nothing needs you");
 	}
-	return count === 1 ? "1 thread needs you" : `${count} threads need you`;
+	return tr(
+		"{count, plural, one {# thread needs you} other {# threads need you}}",
+		{ count }
+	);
 }
 
 /**
@@ -173,7 +184,7 @@ export function glanceListWindow(
 
 /** A thread's title, falling back to its opening words. */
 export function glanceThreadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }
 
 /**
@@ -206,6 +217,22 @@ export type GlanceAgentState =
 	| "waiting"
 	| "working"
 	| "your-turn";
+
+/** The label in the UI language, for copy that interpolates it. */
+export function glanceAgentStateLabel(value: GlanceAgentState): string {
+	switch (value) {
+		case "attention":
+			return tr("Needs attention");
+		case "idle":
+			return tr("Idle");
+		case "waiting":
+			return tr("Waiting");
+		case "working":
+			return tr("Working");
+		default:
+			return tr("Your turn");
+	}
+}
 
 export const GLANCE_AGENT_STATE_LABELS: Record<GlanceAgentState, string> = {
 	attention: "Needs attention",
@@ -279,98 +306,6 @@ export function glanceTileColumns(count: number): 2 | 3 {
 // ---------------------------------------------------------------------------
 // Time
 // ---------------------------------------------------------------------------
-
-export interface GlanceClock {
-	/** "Tuesday, October 13" */
-	date: string;
-	/** "AM"/"PM" in 12-hour locales, null in 24-hour ones. */
-	period: string | null;
-	/** "9:41" */
-	time: string;
-}
-
-export function glanceClock(now: Date, locale?: string): GlanceClock {
-	const parts = new Intl.DateTimeFormat(locale, {
-		hour: "numeric",
-		minute: "2-digit",
-	}).formatToParts(now);
-	let time = "";
-	let period: string | null = null;
-	for (const part of parts) {
-		if (part.type === "dayPeriod") {
-			period = part.value.trim();
-		} else if (part.type !== "literal" || time !== "") {
-			time += part.value;
-		}
-	}
-	return {
-		date: new Intl.DateTimeFormat(locale, {
-			day: "numeric",
-			month: "long",
-			weekday: "long",
-		}).format(now),
-		period,
-		time: time.trim(),
-	};
-}
-
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
-function startOfDay(date: Date): number {
-	return new Date(
-		date.getFullYear(),
-		date.getMonth(),
-		date.getDate()
-	).getTime();
-}
-
-/** When an upcoming run starts, phrased for a glance in the same units as thread ages: "in 40m", "Tomorrow 9 AM". */
-export function glanceRunWhen(
-	iso: string,
-	now: number,
-	locale?: string
-): string {
-	const start = Date.parse(iso);
-	if (Number.isNaN(start)) {
-		return "";
-	}
-	const until = start - now;
-	if (until < MINUTE_MS) {
-		return "Now";
-	}
-	const minutes = Math.round(until / MINUTE_MS);
-	if (minutes < 60) {
-		return `in ${minutes}m`;
-	}
-	const date = new Date(start);
-	const days = Math.round(
-		(startOfDay(date) - startOfDay(new Date(now))) / DAY_MS
-	);
-	const time = new Intl.DateTimeFormat(locale, {
-		hour: "numeric",
-		minute: date.getMinutes() === 0 ? undefined : "2-digit",
-	}).format(date);
-	if (days <= 0) {
-		return until < 6 * HOUR_MS
-			? `in ${Math.round(until / HOUR_MS)}h`
-			: `Today ${time}`;
-	}
-	if (days === 1) {
-		return `Tomorrow ${time}`;
-	}
-	if (days < 7) {
-		const weekday = new Intl.DateTimeFormat(locale, {
-			weekday: "short",
-		}).format(date);
-		return `${weekday} ${time}`;
-	}
-	return new Intl.DateTimeFormat(locale, {
-		day: "numeric",
-		month: "short",
-	}).format(date);
-}
 
 /** Scheduled runs still ahead, soonest first. */
 export function glanceUpcoming(
@@ -485,7 +420,9 @@ export function buildGlanceFlow(snapshot: InterfaceSnapshot): GlanceFlowBlob[] {
 /** "2 agents working", the flow face's caption. */
 export function glanceWorkingLine(count: number): string {
 	if (count <= 0) {
-		return "No agents working";
+		return tr("No agents working");
 	}
-	return count === 1 ? "1 agent working" : `${count} agents working`;
+	return tr("{count, plural, one {# agent working} other {# agents working}}", {
+		count,
+	});
 }

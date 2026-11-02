@@ -37,9 +37,9 @@ export function TerminalThreadPane({
 	return (
 		<section
 			aria-label={tl("Thread: {title}", { title: threadTitle(activeThread) })}
-			className="flex @3xl/terminal:h-auto @md/terminal:h-1/2 h-2/3 min-h-0 @3xl/terminal:w-[min(58%,56rem)] shrink-0 flex-col border-border border-t @3xl/terminal:border-t-0 @3xl/terminal:border-l"
+			className="flex @3xl/terminal:h-auto @md/terminal:h-1/2 h-2/3 min-h-0 @3xl/terminal:w-[min(58%,56rem)] shrink-0 flex-col border-border @3xl/terminal:border-s border-t @3xl/terminal:border-t-0"
 		>
-			<header className="flex h-10 shrink-0 items-center gap-3 border-border border-b bg-background pr-2 pl-4">
+			<header className="flex h-10 shrink-0 items-center gap-3 border-border border-b bg-background ps-4 pe-2">
 				<h2 className="min-w-0 truncate font-medium">
 					{threadTitle(activeThread)}
 				</h2>
@@ -56,7 +56,7 @@ export function TerminalThreadPane({
 						render={
 							<Button
 								aria-label="Close thread"
-								className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+								className="ms-auto shrink-0 text-muted-foreground hover:text-foreground"
 								onClick={() => {
 									closeThread(false);
 									focusInput();

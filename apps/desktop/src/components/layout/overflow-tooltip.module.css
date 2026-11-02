@@ -10,3 +10,13 @@
 	);
 	mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
 }
+
+/* Right to left the label's trailing edge is on the left. */
+.fade:where([dir="rtl"], [dir="rtl"] *) {
+	-webkit-mask-image: linear-gradient(
+		to left,
+		#000 calc(100% - 2.5rem),
+		transparent
+	);
+	mask-image: linear-gradient(to left, #000 calc(100% - 2.5rem), transparent);
+}

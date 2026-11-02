@@ -1,16 +1,13 @@
-mod app_events;
 mod app_icons;
-mod app_info;
-mod app_plugins;
 mod app_setup;
 mod app_update;
-mod app_windows;
 mod aux_windows;
+mod build_info;
 mod cli_setup;
 mod clips_quick_attach;
 mod cloud_environment_import;
+mod commands;
 mod core;
-mod core_autostart;
 mod core_lifecycle;
 mod data_folder;
 mod deep_link_profile;
@@ -18,15 +15,16 @@ mod desktop_seal;
 mod distribution;
 mod editors;
 mod external_links;
+mod fs_command_error;
 mod hardware;
 mod hardware_acceleration;
 mod identifier_migration;
 mod installer_retention;
 mod keep_awake;
+mod link_preview;
 mod macos_glass;
-#[cfg(target_os = "macos")]
-mod macos_window;
 mod midnight_wipe;
+mod native_copy;
 mod nodes;
 mod notification_identity;
 mod os_notifications;
@@ -37,24 +35,37 @@ mod project_files;
 mod projectless_task_folder;
 mod quick_capture;
 mod secrets;
+mod security_key_commands;
 mod shadow_auth;
 mod shell_exec;
 mod standalone;
 mod startup;
 mod tab_transfer;
+mod tab_windows;
 mod tray;
 mod update_handoff;
 mod update_install_worker;
 mod update_recovery;
 mod update_schedule;
+mod webview_locale;
 mod win_process;
+mod window_chrome;
+mod window_events;
 mod window_registry;
 mod workspace_items;
 mod workspace_move;
 
 use std::sync::Mutex;
 
-pub(crate) use core_lifecycle::{resolve_core_binary, stop_managed_core, CoreState, HttpClient};
+use tauri::Manager;
+
+#[cfg(target_os = "macos")]
+use crate::window_chrome::macos_titlebar_plugin;
+
+// Crate-root paths other modules reach through `crate::…`.
+pub(crate) use crate::core_lifecycle::{
+    resolve_core_binary, stop_managed_core, CoreState, HttpClient,
+};
 
 /// Release gate for Island, the Electron companion overlay (loopback :7989).
 ///
@@ -94,11 +105,12 @@ pub fn run() {
     // resolve their keychain-held key through this host: this profile's data dir
     // and keychain suffix. Before the builder, so no command can race it.
     desktop_seal::install_crypto_host(profile::ryu_home_dir(), profile::suffix());
-    // Before the builder: the webview engines read their GPU switches when the
-    // first webview starts, so a later toggle would have no effect.
+    // Before the builder: the webview engines read their GPU switches (and, on
+    // Windows, the saved UI language) when the first webview starts, so a later
+    // change would have no effect.
     hardware_acceleration::apply_before_webview();
 
-    let builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .manage(update_startup)
         .manage(CoreState {
             process: Mutex::new(None),
@@ -113,133 +125,68 @@ pub fn run() {
         .manage(keep_awake::KeepAwakeState::default())
         .manage(window_registry::WindowRegistry::default())
         .manage(tab_transfer::TabTransfers::default())
-        .manage(app_update::AppUpdateState::default());
-    let builder = app_plugins::register(builder);
+        .manage(app_update::AppUpdateState::default())
+        // Single-instance MUST be the first plugin. On Windows/Linux a `ryu://`
+        // link spawns a second process; this forwards the URL to the live
+        // instance (the deep-link plugin's `onOpenUrl` fires there) and the
+        // callback just surfaces the existing window. We do not hand-parse argv.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .max_file_size(1_048_576)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_store::Builder::new().build());
+
+    // macOS only: restore native traffic-light buttons for the transparent
+    // shell. The macOS build deliberately does not load decorum; native AppKit
+    // controls are the complete titlebar on this platform.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(macos_titlebar_plugin());
+        // Tauri's default app menu with the standard roles, relabelled in the UI language.
+        builder = builder.menu(|handle| native_copy::app_menu(handle));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.plugin(tauri_plugin_decorum::init());
+    }
+
+    builder = builder
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // App updates are downloaded and signature-verified by the native
+        // prepared-update cache, then installed only after an explicit frontend
+        // action. plugin-process provides `relaunch()` after a successful install.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        // Launch at login. The registration carries `--autostart` so a
+        // login-launched instance is distinguishable from a user-opened one —
+        // that is what gates the "start hidden" preference (see `startup.rs`).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![startup::AUTOSTART_ARG]),
+        ));
 
     builder
         .setup(app_setup::setup)
-        .invoke_handler(tauri::generate_handler![
-            core_lifecycle::start_ryu_core,
-            core_lifecycle::stop_ryu_core,
-            core_lifecycle::ensure_core_installed,
-            core_lifecycle::install_and_launch_island,
-            projectless_task_folder::get_default_projectless_task_folder,
-            cloud_environment_import::cloud_environment_variable_names,
-            cloud_environment_import::cloud_environment_selected_variables,
-            core_lifecycle::get_ryu_status,
-            core_lifecycle::get_safe_mode_sentinel,
-            core_lifecycle::set_safe_mode_sentinel,
-            hardware_acceleration::get_hardware_acceleration,
-            hardware_acceleration::set_hardware_acceleration,
-            core_lifecycle::get_ryu_core_url,
-            app_info::get_build_profile,
-            app_info::interface_reset_requested,
-            standalone::get_standalone_app_bundle,
-            standalone::bootstrap_standalone_app,
-            app_icons::resolve_timeline_app_icons,
-            app_update::get_app_update_download_preference,
-            app_update::set_app_update_download_preference,
-            app_update::get_prepared_app_update,
-            app_update::prepare_app_update,
-            app_update::install_prepared_app_update,
-            update_recovery::get_update_startup_health,
-            update_recovery::acknowledge_update_startup,
-            app_update::clear_prepared_app_update,
-            data_folder::copy_data_folder_to_profile,
-            data_folder::deep_clean_node,
-            midnight_wipe::get_midnight_wipe,
-            midnight_wipe::set_midnight_wipe,
-            update_schedule::get_pending_app_update,
-            update_schedule::set_pending_app_update,
-            update_schedule::clear_pending_app_update,
-            update_schedule::due_app_update,
-            data_folder::migrate_data_folder,
-            data_folder::import_data_folder,
-            external_links::open_external,
-            external_links::preview_link_metadata,
-            editors::get_editor_availability,
-            editors::open_in_editor,
-            workspace_items::open_workspace_item,
-            workspace_items::move_workspace_item,
-            workspace_items::list_workspace_files,
-            workspace_items::reveal_workspace_item,
-            aux_windows::open_media_pip,
-            aux_windows::close_media_pip,
-            aux_windows::agent_browser_stream_status,
-            app_windows::open_standalone_app_window,
-            app_windows::close_current_window,
-            app_windows::open_tab_window,
-            tab_transfer::tab_transfer_ready,
-            tab_transfer::claim_tab_transfer,
-            tab_transfer::watch_tab_drag,
-            window_registry::register_window_tabs,
-            window_registry::route_entity_open,
-            tray::get_hide_tray_icon,
-            tray::set_hide_tray_icon,
-            tray::get_island_visibility,
-            tray::set_island_visibility,
-            tray::get_close_to_tray,
-            tray::set_close_to_tray,
-            startup::get_start_hidden,
-            startup::set_start_hidden,
-            shell_exec::shell_execute,
-            app_windows::toggle_devtools,
-            app_windows::toggle_fullscreen,
-            app_windows::is_fullscreen,
-            project_files::read_project_file,
-            project_files::read_project_file_binary,
-            project_files::read_git_project_file,
-            project_files::write_project_file,
-            project_files::write_project_file_binary,
-            project_files::write_project_markdown,
-            project_files::list_project_markdown,
-            hardware::get_hardware_info,
-            hardware::get_system_usage,
-            keep_awake::set_keep_awake,
-            nodes::list_nodes,
-            nodes::add_node,
-            nodes::update_node_token,
-            nodes::local_node_token,
-            nodes::remove_node,
-            nodes::set_default_node,
-            nodes::test_node,
-            nodes::test_all_nodes,
-            nodes::discover_lan_nodes,
-            nodes::get_lan_ip,
-            secrets::set_provider_key,
-            secrets::get_provider_key,
-            secrets::delete_provider_key,
-            secrets::desktop_secret_get,
-            secrets::desktop_secret_set,
-            secrets::desktop_secret_delete,
-            app_info::desktop_content_key,
-            cli_setup::apply_gateway_cli_setup,
-            cli_setup::reset_gateway_cli_setup,
-            cli_setup::gateway_cli_setup_status,
-            permissions::check_accessibility_permission,
-            permissions::request_accessibility_permission,
-            permissions::check_screen_recording_permission,
-            permissions::request_screen_recording_permission,
-            permissions::check_input_monitoring_permission,
-            permissions::request_input_monitoring_permission,
-            permissions::automation_permissions_required,
-            permissions::open_privacy_settings,
-            os_notifications::show_os_notification,
-            // Quick Capture: the double-Shift keep gesture (macOS; no-ops elsewhere).
-            macos_glass::set_window_corner_radius,
-            macos_glass::set_liquid_glass,
-            quick_capture::quick_capture_status,
-            quick_capture::quick_capture_set_enabled,
-            quick_capture::quick_capture_set_binding,
-            clips_quick_attach::clips_quick_attach_status,
-            clips_quick_attach::clips_quick_attach_set_enabled,
-            clips_quick_attach::clips_quick_attach_set_destination,
-            clips_quick_attach::clips_quick_attach_focus,
-        ])
-        .on_window_event(app_events::on_window_event)
+        .invoke_handler(commands::invoke_handler())
+        .on_window_event(window_events::on_window_event)
         .build(context)
         .expect("error while running tauri application")
-        .run(app_events::on_run_event);
+        .run(window_events::on_run_event);
 }
 
 /// Recovery copies this known-good executable under a distinct filename and

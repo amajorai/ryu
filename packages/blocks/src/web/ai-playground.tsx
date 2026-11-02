@@ -72,8 +72,8 @@ export default function AiPlayground({
 						<div
 							className={`rounded-lg p-3 ${
 								message.role === "user"
-									? "ml-8 bg-primary/10"
-									: "mr-8 bg-secondary/20"
+									? "ms-8 bg-primary/10"
+									: "me-8 bg-secondary/20"
 							}`}
 							key={message.id}
 						>

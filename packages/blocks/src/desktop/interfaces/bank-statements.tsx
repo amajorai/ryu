@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Tooltip,
@@ -16,7 +17,8 @@ import {
 	transactionCountLabel,
 } from "./bank-model.ts";
 
-const MONTH_ONLY = new Intl.DateTimeFormat(undefined, { month: "long" });
+const MONTH_ONLY = (locale: string = activeLocale()) =>
+	dateFormatter(locale, { month: "long" });
 
 interface StatementYear {
 	statements: BankStatement[];
@@ -44,7 +46,7 @@ function monthName(key: string): string {
 	if (year === undefined || month === undefined) {
 		return key;
 	}
-	return MONTH_ONLY.format(new Date(year, month - 1, 1));
+	return MONTH_ONLY().format(new Date(year, month - 1, 1));
 }
 
 const RECONCILE_NOTE =
@@ -131,24 +133,24 @@ export function BankStatements({
 			) : (
 				<table className="mt-8 w-full border-collapse text-sm">
 					<thead>
-						<tr className="border-border border-b text-left text-muted-foreground text-xs">
+						<tr className="border-border border-b text-start text-muted-foreground text-xs">
 							<th className="pb-3 font-medium" scope="col">
 								Month
 							</th>
 							<th
-								className="w-32 pb-3 text-right font-medium max-md:hidden"
+								className="w-32 pb-3 text-end font-medium max-md:hidden"
 								scope="col"
 							>
 								Opening
 							</th>
-							<th className="w-32 pb-3 text-right font-medium" scope="col">
+							<th className="w-32 pb-3 text-end font-medium" scope="col">
 								Money in
 							</th>
-							<th className="w-32 pb-3 text-right font-medium" scope="col">
+							<th className="w-32 pb-3 text-end font-medium" scope="col">
 								Money out
 							</th>
 							<th
-								className="w-32 pb-3 text-right font-medium max-sm:hidden"
+								className="w-32 pb-3 text-end font-medium max-sm:hidden"
 								scope="col"
 							>
 								Closing
@@ -162,7 +164,7 @@ export function BankStatements({
 						<tbody key={group.year}>
 							<tr>
 								<th
-									className="pt-6 pb-2 text-left font-semibold text-foreground text-sm"
+									className="pt-6 pb-2 text-start font-semibold text-foreground text-sm"
 									colSpan={6}
 									scope="rowgroup"
 								>
@@ -177,7 +179,10 @@ export function BankStatements({
 										onOpenMonth({ key: statement.key, label: statement.label })
 									}
 								>
-									<th className="py-3.5 pe-4 text-left font-normal" scope="row">
+									<th
+										className="py-3.5 pe-4 text-start font-normal"
+										scope="row"
+									>
 										<button
 											className="block rounded-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 											data-statement-month={statement.key}
@@ -210,10 +215,10 @@ export function BankStatements({
 											</span>
 										)}
 									</th>
-									<td className="py-3.5 text-right text-muted-foreground tabular-nums max-md:hidden">
+									<td className="py-3.5 text-end text-muted-foreground tabular-nums max-md:hidden">
 										{money(statement.opening)}
 									</td>
-									<td className="py-3.5 text-right tabular-nums">
+									<td className="py-3.5 text-end tabular-nums">
 										{statement.credited > 0 ? (
 											<span className="text-status-success">
 												{formatMoney(statement.credited, account.currency, {
@@ -226,14 +231,14 @@ export function BankStatements({
 											</span>
 										)}
 									</td>
-									<td className="py-3.5 text-right text-foreground tabular-nums">
+									<td className="py-3.5 text-end text-foreground tabular-nums">
 										{formatMoney(statement.spent, account.currency)}
 									</td>
-									<td className="py-3.5 text-right font-medium text-foreground tabular-nums max-sm:hidden">
+									<td className="py-3.5 text-end font-medium text-foreground tabular-nums max-sm:hidden">
 										{money(statement.closing)}
 									</td>
-									<td aria-hidden="true" className="py-3.5 text-right">
-										<ChevronRight className="ms-auto size-4 text-muted-foreground transition-colors group-hover/statement:text-foreground" />
+									<td aria-hidden="true" className="py-3.5 text-end">
+										<ChevronRight className="ms-auto size-4 text-muted-foreground transition-colors group-hover/statement:text-foreground rtl:-scale-x-100" />
 									</td>
 								</tr>
 							))}

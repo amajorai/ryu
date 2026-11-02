@@ -2,6 +2,7 @@
 
 import { useMediaState } from "@platejs/media/react";
 import { ResizableProvider } from "@platejs/resizable";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import type { TAudioElement } from "platejs";
 import type { PlateElementProps } from "platejs/react";
@@ -14,6 +15,7 @@ export const AudioElement = withHOC(
 	function AudioElement(props: PlateElementProps<TAudioElement>) {
 		const { align = "center", readOnly, unsafeUrl } = useMediaState();
 		const safeUrl = safeMediaUrl(unsafeUrl);
+		const tl = useLiteralMessages();
 
 		return (
 			<PlateElement {...props} className="mb-1">
@@ -28,7 +30,7 @@ export const AudioElement = withHOC(
 					<Caption align={align} className={editorStyles.editormediaAudioNode1}>
 						<CaptionTextarea
 							className="h-20"
-							placeholder="Write a caption…"
+							placeholder={tl("Write a caption…")}
 							readOnly={readOnly}
 						/>
 					</Caption>

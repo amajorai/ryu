@@ -3,9 +3,16 @@
 // host.sideModel / host.storage / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const convId = ctx.conversation_id;
 if (!convId) {
@@ -17,7 +24,7 @@ if (lastUser) {
 	const t = (lastUser.content || "").trim();
 	if (t === "/proof clear" || t === "/proof stop") {
 		await host.storage.delete(convId);
-		return { kind: "note", text: "Proof goal cleared." };
+		return { kind: "note", text: await host.t("Proof goal cleared.") };
 	}
 	if (t.indexOf("/proof ") === 0) {
 		const condition = t.slice(7).trim();
@@ -52,7 +59,7 @@ if (turns >= 12) {
 	await host.storage.delete(convId);
 	return {
 		kind: "note",
-		text: "Proof goal stopped after 12 verification rounds.",
+		text: await host.t("Proof goal stopped after {count} verification rounds.", { count: 12 }),
 	};
 }
 const transcript = ctx.transcript
@@ -83,9 +90,9 @@ if (proven) {
 	await host.storage.delete(convId);
 	return {
 		kind: "note",
-		text:
-			"Proof of work confirmed by an independent verifier agent. " +
-			(verdict || ""),
+		text: await host.t("Proof of work confirmed by an independent verifier agent. {verdict}", {
+			verdict: verdict || "",
+		}),
 	};
 }
 await host.storage.set(convId, goal);

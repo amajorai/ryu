@@ -26,6 +26,7 @@ import {
 	FEED_SOURCE_LABELS,
 	FEED_SOURCE_OPTIONS,
 	relativeAge,
+	relativeAgo,
 	sourceIcon,
 	sourceLabel,
 } from "./BotProfileCard-model.ts";
@@ -61,7 +62,7 @@ export function FeedPreferences({
 						<label className="flex items-start gap-2" key={option.id}>
 							<Checkbox
 								aria-label={tl("Show {source}", {
-									source: FEED_SOURCE_LABELS[option.id],
+									source: tl(FEED_SOURCE_LABELS[option.id]),
 								})}
 								checked={preferences.sources.includes(option.id)}
 								onCheckedChange={(checked) =>
@@ -93,7 +94,7 @@ export function ActivityPreview({
 }) {
 	return (
 		<button
-			className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-muted hover:duration-0"
+			className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-start transition-colors duration-150 hover:bg-muted hover:duration-0"
 			onClick={onOpen}
 			type="button"
 		>
@@ -153,7 +154,7 @@ export function FeedPost({
 					{tl("Bot · {source}", { source: sourceLabel(item) })}
 				</span>
 				<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
-					{tl("{age} ago", { age: relativeAge(item.created_at) })}
+					{relativeAgo(item.created_at)}
 				</span>
 			</header>
 			<h4 className="mt-1 font-medium text-sm">{item.title}</h4>
@@ -190,7 +191,7 @@ export function FeedPost({
 				</Button>
 				<Button
 					appearance="bot-feed-action"
-					className="ml-auto"
+					className="ms-auto"
 					onClick={onReply}
 					size="sm"
 					variant="ghost"

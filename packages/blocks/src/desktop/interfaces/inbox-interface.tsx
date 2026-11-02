@@ -311,7 +311,7 @@ export function InboxInterface({
 		>
 			<div
 				className={cn(
-					"@min-[900px]:flex min-h-0 @min-[900px]:w-[400px] w-full shrink-0 flex-col border-border @min-[900px]:border-r bg-sidebar text-sidebar-foreground",
+					"@min-[900px]:flex min-h-0 @min-[900px]:w-[400px] w-full shrink-0 flex-col border-border @min-[900px]:border-e bg-sidebar text-sidebar-foreground",
 					detailOpen ? "hidden" : "flex"
 				)}
 				ref={listPane}
@@ -386,7 +386,7 @@ export function InboxInterface({
 										<div
 											aria-hidden="true"
 											className={cn(
-												"sticky top-0 z-10 flex items-center gap-3 bg-sidebar pr-4 pl-5 text-xs",
+												"sticky top-0 z-10 flex items-center gap-3 bg-sidebar ps-5 pe-4 text-xs",
 												// Later groups get a 8px break above, so a header
 												// never reads as part of the row before it.
 												sectionIndex === 0 ? "h-8" : "h-10 pt-2"

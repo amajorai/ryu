@@ -179,8 +179,8 @@ export const connectCommand: Command = {
 		}
 		const done =
 			action === "unchanged"
-				? `${agent.label} is already connected to Ryu`
-				: `Connected ${agent.label} to Ryu`;
+				? tf("{label} is already connected to Ryu", { label: agent.label })
+				: tf("Connected {label} to Ryu", { label: agent.label });
 		ctx.io.out(
 			`${tf(
 				"{done}: MCP server '{MCP_SERVER_NAME}' → {mcpUrl}\nConfig: {configPath}\n{reloadHint}",

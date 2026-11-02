@@ -5,8 +5,8 @@ import proofStyles from "./interface-level-story.module.css";
 //
 // Two things need a browser to be true, and neither is typecheckable:
 //
-//   1. The Google gradient is painted and animated on the checked switch, not
-//      merely present as a class name.
+//   1. The checked switch paints a different track with no animated
+//      decoration (the Ryu Quiet direction keeps one accent).
 //   2. A switch hosted in the account menu stays open after a click, so changing
 //      the mode does not dismiss the menu before the user can inspect it.
 //

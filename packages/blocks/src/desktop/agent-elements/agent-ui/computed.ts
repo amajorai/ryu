@@ -10,6 +10,7 @@
 // list the same names and descriptions the renderer registers.
 
 import type { ComputedFunction } from "@json-render/core";
+import { activeLocale } from "@ryu/i18n/core";
 import { z } from "zod";
 
 type ComputedArgs = Parameters<ComputedFunction>[0];
@@ -121,7 +122,8 @@ function formatValue(args: ComputedArgs): string {
 		options.notation = "compact";
 	}
 	try {
-		return new Intl.NumberFormat(undefined, options).format(value);
+		// The language the UI shows, not the OS default.
+		return new Intl.NumberFormat(activeLocale(), options).format(value);
 	} catch {
 		return String(value);
 	}

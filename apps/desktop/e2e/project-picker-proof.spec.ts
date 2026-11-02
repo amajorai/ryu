@@ -1,40 +1,18 @@
-import { mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
-import { z } from "zod";
-
-const STORY_URL = "/project-picker-proof.html";
-const EVIDENCE_DIR = fileURLToPath(
-	new URL(
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/",
-		import.meta.url
-	)
-);
-const HOME_PATH = "/fixture/home";
-const PROJECTS_PATH = `${HOME_PATH}/Projects`;
-const ALPHA_PATH = `${PROJECTS_PATH}/alpha`;
-const BETA_PATH = `${PROJECTS_PATH}/beta`;
-
-const REQUESTS_KEY = "proof:project-picker:requests";
-
-interface FixtureRequest {
-	body: unknown;
-	hasAuthorization: boolean;
-	method: string;
-	origin: string;
-	path: string;
-	status: number;
-}
-
-declare global {
-	interface Window {
-		__projectPickerProof?: { requests: () => FixtureRequest[] };
-	}
-}
+import { expect, test } from "@playwright/test";
+import {
+	ALPHA_PATH,
+	apiRequests,
+	BETA_PATH,
+	browserErrors,
+	capture,
+	HOME_PATH,
+	openPage,
+	openProjectMenu,
+	requests,
+	storedValue,
+} from "./project-picker-proof.helpers.ts";
 
 test.describe.configure({ timeout: 90_000 });
-
-const browserErrors = new WeakMap<Page, string[]>();
 
 test.beforeEach(({ page }) => {
 	const errors: string[] = [];
@@ -50,87 +28,6 @@ test.beforeEach(({ page }) => {
 test.afterEach(({ page }) => {
 	expect(browserErrors.get(page) ?? []).toEqual([]);
 });
-
-async function openPage(
-	page: Page,
-	options: { active?: "alpha"; empty?: boolean; remote?: boolean } = {}
-) {
-	const query = new URLSearchParams({ reset: "1" });
-	if (options.active) {
-		query.set("active", options.active);
-	}
-	if (options.empty) {
-		query.set("empty", "1");
-	}
-	if (options.remote) {
-		query.set("node", "remote");
-	}
-	await page.setViewportSize({ height: 900, width: 1440 });
-	await page.goto(`${STORY_URL}?${query.toString()}`);
-	await expect(page).toHaveURL(/project-picker-proof\.html/);
-	await expect(page).toHaveTitle("Project picker proof");
-	await expect(page.getByTestId("project-picker-proof")).toBeVisible();
-	await expect(
-		page.getByRole("dialog", { name: "Choose a project to edit" })
-	).toBeVisible();
-}
-
-async function openProjectMenu(page: Page) {
-	const trigger = page.getByRole("button", {
-		name: "Select project folder",
-	});
-	await trigger.click();
-	const menu = page.getByRole("dialog", {
-		name: "Choose a project",
-		exact: true,
-	});
-	await expect(menu).toBeVisible();
-	return { menu, trigger };
-}
-
-async function requests(page: Page): Promise<FixtureRequest[]> {
-	const raw = await page.evaluate(
-		(key) => localStorage.getItem(key),
-		REQUESTS_KEY
-	);
-	return z
-		.array(
-			z.object({
-				body: z.json(),
-				hasAuthorization: z.boolean(),
-				method: z.string(),
-				origin: z.string(),
-				path: z.string(),
-				status: z.number(),
-			})
-		)
-		.parse(raw ? JSON.parse(raw) : []);
-}
-
-async function storedValue(page: Page, key: string): Promise<string | null> {
-	return page.evaluate((storageKey) => localStorage.getItem(storageKey), key);
-}
-
-function apiRequests(
-	items: FixtureRequest[],
-	method: string,
-	path: string
-): FixtureRequest[] {
-	return items.filter((item) => item.method === method && item.path === path);
-}
-
-async function capture(page: Page, testInfo: TestInfo, filename: string) {
-	await mkdir(EVIDENCE_DIR, { recursive: true });
-	const screenshot = await page.screenshot({
-		animations: "disabled",
-		fullPage: true,
-		path: `${EVIDENCE_DIR}${filename}`,
-	});
-	await testInfo.attach(filename, {
-		body: screenshot,
-		contentType: "image/png",
-	});
-}
 
 test("ChatPage workspace prompt searches, handles denied selection, and persists the exact retry", async ({
 	page,

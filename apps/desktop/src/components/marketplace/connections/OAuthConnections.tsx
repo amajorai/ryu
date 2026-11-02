@@ -99,6 +99,7 @@ export function OAuthServerCard({
 	const connected = connection?.status === "connected";
 	const pending = connect.isPending || flow.data?.status === "pending";
 	const failedTitle = tl("{name} connection failed", { name: app.name });
+	const connectedTitle = tl("{name} connected", { name: app.name });
 
 	useEffect(() => {
 		if (!flowId) {
@@ -107,7 +108,7 @@ export function OAuthServerCard({
 		if (flow.data?.status === "connected") {
 			setFlowId(null);
 			status.refetch();
-			sileo.success({ title: `${app.name} connected` });
+			sileo.success({ title: connectedTitle });
 			return;
 		}
 		if (flow.data?.status === "failed") {
@@ -117,7 +118,7 @@ export function OAuthServerCard({
 				title: failedTitle,
 			});
 		}
-	}, [app.name, failedTitle, flow.data, flowId, status.refetch]);
+	}, [connectedTitle, failedTitle, flow.data, flowId, status.refetch]);
 
 	const handleConnect = async (accessLevel: ConnectionAccessLevel) => {
 		const started = await connect.mutateAsync({
@@ -129,7 +130,7 @@ export function OAuthServerCard({
 		await openExternal(started.authorizationUrl);
 		sileo.success({
 			description: "Authorize in your browser, then return to Ryu.",
-			title: `Connecting ${app.name}…`,
+			title: tl("Connecting {name}…", { name: app.name }),
 		});
 	};
 
@@ -144,7 +145,7 @@ export function OAuthServerCard({
 					result.revocation === "confirmed"
 						? "The provider token was revoked."
 						: "Local credentials were removed; provider revocation could not be confirmed.",
-				title: `${app.name} disconnected`,
+				title: tl("{name} disconnected", { name: app.name }),
 			});
 		} catch (error) {
 			sileo.error({
@@ -206,7 +207,7 @@ export function OAuthServerCard({
 			</Badge>
 			<div className="mt-3 flex justify-end gap-2">
 				{app.enabled ? null : (
-					<span className="mr-auto self-center text-muted-foreground text-xs">
+					<span className="me-auto self-center text-muted-foreground text-xs">
 						Enable to connect
 					</span>
 				)}

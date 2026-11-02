@@ -114,7 +114,7 @@ function SkeletonRows({
 				inset === "catalog" && "p-8",
 				inset === "workflow-row" && "px-2",
 				inset === "panel-horizontal" && "px-3",
-				inset === "navigation" && "pl-8",
+				inset === "navigation" && "ps-8",
 				spacing === "compact-panel" && "px-3 py-2",
 				spacing === "comfortable" && "py-2",
 				spacing === "panel" && "px-3",

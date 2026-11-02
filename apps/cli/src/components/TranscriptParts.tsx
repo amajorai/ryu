@@ -5,6 +5,10 @@ import { useTheme, useUnicode } from "@/components/ui/theme-provider.tsx";
 import { ToolCall } from "@/components/ui/tool-call.tsx";
 import { type ChatPart, isSettledToolStatus } from "../core/chatTranscript.ts";
 import {
+	type LocalizableCoreError,
+	localizeCoreError,
+} from "../core/coreErrorText.ts";
+import {
 	boundTerminalText,
 	completedTodoCount,
 	formatToolOutput,
@@ -16,7 +20,7 @@ import {
 	toolPendingLabel,
 	toolSummary,
 } from "../core/transcriptPresentation.ts";
-import { tf } from "../i18n/translate.ts";
+import { CLI_LOCALE, tf, tr } from "../i18n/translate.ts";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { ReasoningRow } from "./ReasoningRow.tsx";
 
@@ -114,7 +118,7 @@ export const TranscriptParts = memo(function TranscriptParts({
 							<ErrorPart
 								hint={recoveryHint && index === parts.length - 1}
 								key={`error-${index}`}
-								message={part.message}
+								part={part}
 							/>
 						);
 				}
@@ -124,12 +128,20 @@ export const TranscriptParts = memo(function TranscriptParts({
 });
 
 /** Recovery hint under a failed turn: up-arrow recalls the prompt to resend. */
-const ERROR_PART_HINT = "↑ edit & resend · /model switch";
-const ERROR_PART_HINT_ASCII = "up edit & resend - /model switch";
+const ERROR_PART_HINT = tr("↑ edit & resend · /model switch");
+const ERROR_PART_HINT_ASCII = tr("up edit & resend - /model switch");
+const CORE_ERROR_TRANSLATOR = { locale: CLI_LOCALE, tf, tr };
 
-function ErrorPart({ hint, message }: { hint: boolean; message: string }) {
+function ErrorPart({
+	hint,
+	part,
+}: {
+	hint: boolean;
+	part: LocalizableCoreError;
+}) {
 	const theme = useTheme();
 	const unicode = useUnicode();
+	const { message } = localizeCoreError(part, CORE_ERROR_TRANSLATOR);
 	const bounded = boundTerminalText(message, {
 		label: "error",
 		maxChars: TRANSCRIPT_LIMITS.errorChars,
@@ -168,7 +180,10 @@ function TodoPart({ todos }: { todos: { content: string; status: string }[] }) {
 					<b>Plan</b>
 				</text>
 				<text fg={theme.colors.mutedForeground}>
-					{`${completed}/${todos.length} complete`}
+					{tf("{completed}/{total} complete", {
+						completed,
+						total: todos.length,
+					})}
 				</text>
 			</box>
 			{todos.length === 0 ? (

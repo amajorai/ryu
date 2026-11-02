@@ -22,12 +22,9 @@ import {
 	Users,
 	Zap,
 } from "lucide-react";
-import {
-	formatCount,
-	PRICING_COPY,
-	PUBLISHED_PRICING,
-} from "./data/standalone-pricing.ts";
+import { PUBLISHED_PRICING } from "./data/standalone-pricing.ts";
 import { useHelperTextSize } from "./pricing-appearance.tsx";
+import { MonthlyAiAllowance, usePricingFormat } from "./pricing-card-copy.tsx";
 import {
 	DepositFeeFeature,
 	IncludedPlanBanner,
@@ -63,6 +60,7 @@ export function ProPlanCard({
 	soldOut = false,
 }: PlanCardProps) {
 	const tl = useLiteralMessages();
+	const format = usePricingFormat();
 	const isCurrent = currentPlan === "pro";
 	const isLoading =
 		loadingPlan === "pro-monthly" || loadingPlan === "pro-yearly";
@@ -82,45 +80,40 @@ export function ProPlanCard({
 				<PriceBlock isYearly={isYearly} monthly={PRO_MONTHLY_USD} />
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Users className="mr-2 size-4" />
+						<Users className="me-2 size-4" />
 						<span>1 personal workspace</span>
 					</li>
 					<li className="flex items-center">
-						<Download className="mr-2 size-4" />
+						<Download className="me-2 size-4" />
 						<span>Full app on all your devices</span>
 					</li>
 					<li className="flex items-center">
-						<Bot className="mr-2 size-4" />
+						<Bot className="me-2 size-4" />
 						<span>Personal chats, agents, and spaces</span>
 					</li>
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>300+ cloud AI models</span>
 					</li>
 					<li className="flex items-center">
-						<Coins className="mr-2 size-4" />
-						<span>
-							<span className="font-heading tabular-nums">
-								${PRO_INCLUDED_USD}
-							</span>
-							/month AI usage included
-						</span>
+						<Coins className="me-2 size-4" />
+						<MonthlyAiAllowance amountUsd={PRO_INCLUDED_USD} />
 					</li>
 					<li className="flex items-center">
-						<Zap className="mr-2 size-4" />
+						<Zap className="me-2 size-4" />
 						<span>Guided setup for your personal workspace</span>
 					</li>
 					<li className="flex items-center">
-						<Monitor className="mr-2 size-4" />
+						<Monitor className="me-2 size-4" />
 						<span>Run AI on your computer</span>
 					</li>
 					<li className="flex items-center">
-						<Mail className="mr-2 size-4" />
+						<Mail className="me-2 size-4" />
 						<span>
 							{tl(
 								"Agent Inboxes, {monthlyEmails} monthly emails, and {storageGib} GiB mail storage",
 								{
-									monthlyEmails: formatCount(
+									monthlyEmails: format.count(
 										PUBLISHED_PRICING.mail.pro.monthlyEmails
 									),
 									storageGib: String(PUBLISHED_PRICING.mail.pro.storageGib),
@@ -128,9 +121,9 @@ export function ProPlanCard({
 							)}
 						</span>
 					</li>
-					<DepositFeeFeature fee={PRICING_COPY.proDepositFee} />
+					<DepositFeeFeature tier="pro" />
 					<li className="flex items-center">
-						<Server className="mr-2 size-4" />
+						<Server className="me-2 size-4" />
 						<span>
 							{tl("{storageGb} GB of space storage", {
 								storageGb: String(PUBLISHED_PRICING.spaceStorageGb.pro),
@@ -140,15 +133,15 @@ export function ProPlanCard({
 					{/* A qualifying hosted plan receives one always-on server. The
 					    server is the authority for its shape and region. */}
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>{ALWAYS_ON_SERVER_COPY}</span>
 					</li>
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>{SINGAPORE_SERVER_COPY}</span>
 					</li>
 					<li className="flex items-center">
-						<Key className="mr-2 size-4" />
+						<Key className="me-2 size-4" />
 						<span>Bring your own API keys</span>
 					</li>
 					<ProductAccessFeature productCount={productCount} />
@@ -187,6 +180,7 @@ export function PlusPlanCard({
 	soldOut = false,
 }: PlusPlanCardProps) {
 	const tl = useLiteralMessages();
+	const format = usePricingFormat();
 	const isPrivate = availability === "private";
 	const isCurrent = currentPlan === "plus";
 	const isLoading =
@@ -218,37 +212,32 @@ export function PlusPlanCard({
 				</div>
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Users className="mr-2 size-4" />
+						<Users className="me-2 size-4" />
 						<span>1 personal workspace</span>
 					</li>
 					<li className="flex items-center">
-						<Download className="mr-2 size-4" />
+						<Download className="me-2 size-4" />
 						<span>Full app on all your devices</span>
 					</li>
 					<li className="flex items-center">
-						<Bot className="mr-2 size-4" />
+						<Bot className="me-2 size-4" />
 						<span>Personal chats, agents, and spaces</span>
 					</li>
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>300+ cloud AI models</span>
 					</li>
 					<li className="flex items-center">
-						<Coins className="mr-2 size-4" />
-						<span>
-							<span className="font-heading tabular-nums">
-								${PLUS_INCLUDED_USD}
-							</span>
-							/month AI usage included
-						</span>
+						<Coins className="me-2 size-4" />
+						<MonthlyAiAllowance amountUsd={PLUS_INCLUDED_USD} />
 					</li>
 					<li className="flex items-center">
-						<Mail className="mr-2 size-4" />
+						<Mail className="me-2 size-4" />
 						<span>
 							{tl(
 								"Agent Inboxes, {monthlyEmails} monthly emails, and {storageGib} GiB mail storage",
 								{
-									monthlyEmails: formatCount(
+									monthlyEmails: format.count(
 										PUBLISHED_PRICING.mail.pro.monthlyEmails
 									),
 									storageGib: String(PUBLISHED_PRICING.mail.pro.storageGib),
@@ -256,9 +245,9 @@ export function PlusPlanCard({
 							)}
 						</span>
 					</li>
-					<DepositFeeFeature fee={PRICING_COPY.proDepositFee} />
+					<DepositFeeFeature tier="pro" />
 					<li className="flex items-center">
-						<Server className="mr-2 size-4" />
+						<Server className="me-2 size-4" />
 						<span>
 							{tl("{storageGb} GB of space storage", {
 								storageGb: String(PUBLISHED_PRICING.spaceStorageGb.pro),
@@ -266,11 +255,11 @@ export function PlusPlanCard({
 						</span>
 					</li>
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>{ALWAYS_ON_SERVER_COPY}</span>
 					</li>
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>{SINGAPORE_SERVER_COPY}</span>
 					</li>
 					<ProductAccessFeature productCount={productCount} />
@@ -325,6 +314,7 @@ export function MaxPlanCard({
 	soldOut = false,
 }: MaxPlanCardProps) {
 	const tl = useLiteralMessages();
+	const format = usePricingFormat();
 	const isCurrent = currentPlan === "max";
 	const isLoading =
 		loadingPlan === "max-monthly" || loadingPlan === "max-yearly";
@@ -349,12 +339,12 @@ export function MaxPlanCard({
 				<IncludedPlanBanner plan="Pro" />
 				<PlanFeatureList>
 					<li className="flex items-center">
-						<Users className="mr-2 size-4" />
+						<Users className="me-2 size-4" />
 						<span>1 personal workspace</span>
 					</li>
 					{familySharing ? (
 						<li className="flex items-center">
-							<Heart className="mr-2 size-4" />
+							<Heart className="me-2 size-4" />
 							<span>
 								{tl("Share with up to {memberCount} family members", {
 									memberCount: String(MAX_FAMILY_SHARING_MEMBERS - 1),
@@ -363,34 +353,29 @@ export function MaxPlanCard({
 						</li>
 					) : null}
 					<li className="flex items-center">
-						<Server className="mr-2 size-4" />
+						<Server className="me-2 size-4" />
 						<span>{ALWAYS_ON_SERVER_COPY}</span>
 					</li>
 					<li className="flex items-center">
-						<Cloud className="mr-2 size-4" />
+						<Cloud className="me-2 size-4" />
 						<span>{SINGAPORE_SERVER_COPY}</span>
 					</li>
-					<DepositFeeFeature fee={PRICING_COPY.teamDepositFee} />
+					<DepositFeeFeature tier="team" />
 					<li className="flex items-center">
-						<Bot className="mr-2 size-4" />
+						<Bot className="me-2 size-4" />
 						<span>Higher throughput for personal agents and workflows</span>
 					</li>
 					<li className="flex items-center">
-						<Coins className="mr-2 size-4" />
-						<span>
-							<span className="font-heading tabular-nums">
-								${MAX_INCLUDED_USD}
-							</span>
-							/month AI usage included
-						</span>
+						<Coins className="me-2 size-4" />
+						<MonthlyAiAllowance amountUsd={MAX_INCLUDED_USD} />
 					</li>
 					<li className="flex items-center">
-						<Mail className="mr-2 size-4" />
+						<Mail className="me-2 size-4" />
 						<span>
 							{tl(
 								"Agent Inboxes, {monthlyEmails} monthly emails, and {storageGib} GiB mail storage",
 								{
-									monthlyEmails: formatCount(
+									monthlyEmails: format.count(
 										PUBLISHED_PRICING.mail.max.monthlyEmails
 									),
 									storageGib: String(PUBLISHED_PRICING.mail.max.storageGib),
@@ -399,7 +384,7 @@ export function MaxPlanCard({
 						</span>
 					</li>
 					<li className="flex items-center">
-						<Shield className="mr-2 size-4" />
+						<Shield className="me-2 size-4" />
 						<span>Priority support</span>
 					</li>
 					<ProductAccessFeature productCount={productCount} />

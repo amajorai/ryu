@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -49,21 +50,21 @@ export function expiryText(
 /** The card's age line: "Waited 14m", "Waited ~7m". */
 export function ageText(ask: InterfaceAsk, nowMs: number): string | null {
 	const age = waitLabel(ask.since, nowMs, { approx: ask.sinceApprox });
-	return age ? `Waited ${age}` : null;
+	return age ? tr("Waited {age}", { age }) : null;
 }
 
 /** The card's first line: who asks, offers an answer, or suggests. */
 export function askerLine(ask: InterfaceAsk, owner: string | null): string {
-	const who = owner ?? "Inbox";
+	const who = owner ?? tr("Inbox");
 	if (ask.kind === "reply") {
-		return `${who} has an answer ready`;
+		return tr("{who} has an answer ready", { who });
 	}
 	if (isSuggestion(ask)) {
 		return ask.kind === "question"
-			? `${who} has a question when you have time`
-			: `${who} suggests`;
+			? tr("{who} has a question when you have time", { who })
+			: tr("{who} suggests", { who });
 	}
-	return `${who} asks`;
+	return tr("{who} asks", { who });
 }
 
 /** What makes an ask "changed in place" (cancels a pending confirm). */

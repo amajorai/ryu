@@ -7,6 +7,7 @@ import {
 	SensitiveRevealButton,
 	useSensitiveValue,
 } from "@ryu/ui/components/sensitive-value.tsx";
+import { useFormatLocale } from "../hooks/use-format-locale.ts";
 import { Logo } from "./logo.tsx";
 import { PassCardShell } from "./pass-card-shell.tsx";
 import { PassQrBack } from "./pass-qr-back.tsx";
@@ -40,6 +41,7 @@ export function InvitePass({
 	used,
 }: InvitePassProps) {
 	const { revealed, toggle } = useSensitiveValue(code);
+	const formatLocale = useFormatLocale();
 	return (
 		<TearTicket
 			onTearComplete={onTearComplete}
@@ -110,7 +112,7 @@ export function InvitePass({
 							<span className="tabular-nums">
 								{used
 									? "Your friend has access"
-									: new Date(expiresAt).toLocaleString(undefined, {
+									: new Date(expiresAt).toLocaleString(formatLocale, {
 											month: "short",
 											day: "numeric",
 											hour: "numeric",

@@ -1,15 +1,14 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { Pin } from "lucide-react";
 import { InboxAgentAvatar } from "./inbox-avatar.tsx";
 import type { InboxItem } from "./inbox-model.ts";
 import { INBOX_STATUS_META, inboxStatusLabel } from "./inbox-status.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, relativeAge } from "./interface-renderer.ts";
 
-function spokenAge(age: string): string {
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "updated just now" : `updated ${age} ago`;
+function spokenAge(iso: string, now: number): string {
+	const age = relativeAge(iso, now);
+	return age ? tr("updated {age}", { age }) : "";
 }
 
 /**
@@ -50,7 +49,7 @@ function UnreadDot({ status }: { status: InboxItem["status"] }) {
 		<span
 			aria-hidden="true"
 			className={cn(
-				"absolute top-1/2 left-2 size-1.5 -translate-y-1/2 rounded-full",
+				"absolute start-2 top-1/2 size-1.5 -translate-y-1/2 rounded-full",
 				status === "attention" ? "bg-status-destructive" : "bg-primary"
 			)}
 			data-slot="inbox-unread"
@@ -87,13 +86,13 @@ export function InboxRow({
 	const meta = INBOX_STATUS_META[status];
 	const age = compactAge(thread.updatedAt, now);
 	const previewId = `inbox-preview-${thread.id}`;
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tr("Untitled thread");
 	const label = [
 		title,
 		inboxStatusLabel(status, unassigned),
 		unassigned ? "" : item.actorLabel,
-		thread.pinned ? "pinned" : "",
-		spokenAge(age),
+		thread.pinned ? tr("Pinned") : "",
+		spokenAge(thread.updatedAt, now),
 	]
 		.filter(Boolean)
 		.join(", ");
@@ -115,9 +114,9 @@ export function InboxRow({
 			aria-label={label}
 			aria-selected={open}
 			className={cn(
-				"relative flex cursor-default scroll-mt-10 scroll-mb-2 items-center gap-3 py-2.5 pr-4 pl-5 outline-none focus-visible:before:absolute focus-visible:before:inset-y-0 focus-visible:before:left-0 focus-visible:before:w-0.5 focus-visible:before:bg-ring",
+				"relative flex cursor-default scroll-mt-10 scroll-mb-2 items-center gap-3 py-2.5 ps-5 pe-4 outline-none focus-visible:before:absolute focus-visible:before:inset-y-0 focus-visible:before:start-0 focus-visible:before:w-0.5 focus-visible:before:bg-ring",
 				open
-					? "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary"
+					? "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:inset-y-0 before:start-0 before:w-0.5 before:bg-primary"
 					: "hover:bg-sidebar-accent/40 focus-visible:bg-sidebar-accent/70"
 			)}
 			data-inbox-row={thread.id}
@@ -140,6 +139,7 @@ export function InboxRow({
 							"min-w-0 flex-1 truncate text-sm leading-5",
 							titleTone
 						)}
+						data-ryu-i18n="off"
 					>
 						{title}
 					</span>
@@ -165,7 +165,7 @@ export function InboxRow({
 				>
 					<span className={actorTone}>{item.actorLabel}</span>
 					<span aria-hidden="true"> · </span>
-					{item.preview}
+					<span data-ryu-i18n="off">{item.preview}</span>
 				</span>
 			</span>
 		</div>

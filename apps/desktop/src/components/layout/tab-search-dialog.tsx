@@ -78,7 +78,7 @@ export function TabSearchRow({
 					<HugeiconsIcon className="size-4" icon={Message01Icon} />
 				)}
 			</span>
-			<span className="min-w-0 flex-1 text-left">
+			<span className="min-w-0 flex-1 text-start">
 				<span className="block truncate text-sm">
 					<AnimatedTitle text={tab.title} />
 				</span>
@@ -134,7 +134,7 @@ export function TabSearchDialog({
 					<button
 						aria-label="Search open tabs"
 						className={cn(
-							"ml-0.5 flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0",
+							"ms-0.5 flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground hover:duration-0",
 							floatingTabs ? "rounded-full" : "rounded-t-lg"
 						)}
 						data-tab-search-trigger

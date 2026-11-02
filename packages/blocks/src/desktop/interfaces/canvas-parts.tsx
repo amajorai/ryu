@@ -62,11 +62,14 @@ export function CanvasHeader({
 					<Skeleton className="h-3 w-16 self-center" />
 				) : (
 					<p className="truncate text-[13px] text-foreground/60 tabular-nums">
-						{`${summary.threads} ${summary.threads === 1 ? "thread" : "threads"}`}
+						{tl("{count, plural, one {# thread} other {# threads}}", {
+							count: summary.threads,
+						})}
 						{summary.attention > 0 ? (
 							<span className="max-sm:hidden">
+								{" "}
 								{tl(
-									" · {attention, plural, one {{attentionCount} needs} other {{attentionCount} need}} attention",
+									"· {attention, plural, one {{attentionCount} needs} other {{attentionCount} need}} attention",
 									{
 										attention: summary.attention,
 										attentionCount: String(summary.attention),
@@ -200,32 +203,27 @@ const EDGE_HINTS: {
 	className: string;
 	edge: CanvasEdge;
 	Icon: typeof ChevronRight;
-	words: string;
 }[] = [
 	{
 		className: "top-1/2 right-3 -translate-y-1/2 flex-row-reverse",
 		edge: "right",
 		Icon: ChevronRight,
-		words: "to the right",
 	},
 	{
 		className: "top-1/2 left-3 -translate-y-1/2",
 		edge: "left",
 		Icon: ChevronLeft,
-		words: "to the left",
 	},
 	{
 		className: "top-[72px] left-1/2 -translate-x-1/2",
 		edge: "top",
 		Icon: ChevronUp,
-		words: "above",
 	},
 	{
 		// Drawn in the dock's row (see `inline`), never over the stickies.
 		className: "",
 		edge: "bottom",
 		Icon: ChevronDown,
-		words: "below",
 	},
 ];
 
@@ -249,12 +247,19 @@ export function CanvasEdgeHints({
 	const tl = useLiteralMessages();
 	return (
 		<>
-			{EDGE_HINTS.map(({ className, edge, Icon, words }) => {
+			{EDGE_HINTS.map(({ className, edge, Icon }) => {
 				const { count, nearest } = offscreen[edge];
 				if (count === 0 || !nearest || !edges.includes(edge)) {
 					return null;
 				}
-				const label = `${count} ${count === 1 ? "thread" : "threads"} ${words}`;
+				const label = tl(
+					"{edge, select, right {{count, plural, one {# thread to the right} other {# threads to the right}}} left {{count, plural, one {# thread to the left} other {# threads to the left}}} top {{count, plural, one {# thread above} other {# threads above}}} other {{count, plural, one {# thread below} other {# threads below}}}}",
+					{ count, edge }
+				);
+				const short = tl(
+					"{edge, select, right {{count} to the right} left {{count} to the left} top {{count} above} other {{count} below}}",
+					{ count, edge }
+				);
 				return (
 					<button
 						aria-label={tl("Show {label}", { label })}
@@ -275,7 +280,7 @@ export function CanvasEdgeHints({
 						type="button"
 					>
 						<Icon aria-hidden="true" className="size-3.5" />
-						{inline ? `${count} ${words}` : count}
+						{inline ? short : count}
 					</button>
 				);
 			})}

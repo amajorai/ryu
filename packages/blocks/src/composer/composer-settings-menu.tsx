@@ -176,7 +176,7 @@ function ComposerSettingsMenuContent({
 						) : null}
 					</span>
 					{item.description ? (
-						<span className="w-full truncate text-left font-normal text-muted-foreground text-xs">
+						<span className="w-full truncate text-start font-normal text-muted-foreground text-xs">
 							{item.description}
 						</span>
 					) : null}

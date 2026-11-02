@@ -17,6 +17,7 @@
 // callers without edit access 403.
 
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -437,7 +438,9 @@ export function AcpAgentSettingsPanel({
 								/>
 							}
 							key={option.id}
-							title={tl("Default {name}", { name: option.name.toLowerCase() })}
+							title={tl("Default {name}", {
+								name: sentenceLabel(tl, option.name),
+							})}
 						/>
 					))}
 				</SettingsGroup>

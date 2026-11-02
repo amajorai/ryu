@@ -1,8 +1,6 @@
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 const DOT: Record<ThreadStatus, string> = {
 	attention: "bg-destructive",
@@ -65,7 +63,7 @@ export function BoardStatusLabel({
 			)}
 		>
 			<BoardStatusDot pulse={pulse} status={status} />
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }

@@ -1,4 +1,5 @@
 import { usageProviderLabel } from "@ryu/blocks/desktop/usage-analytics.ts";
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import {
 	isNativeNumber,
 	isNativeText,
@@ -6,6 +7,7 @@ import {
 import { z } from "zod";
 import type { AuditEntry } from "@/src/lib/api/gateway.ts";
 import type { RunSpan } from "@/src/lib/api/runs.ts";
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
 
 export type ObservabilityFilter = "all" | "errors" | "slow" | "model" | "tool";
 export type ObservabilityWindow = "1h" | "24h" | "7d" | "all";
@@ -227,14 +229,18 @@ export function filterAuditEntries(
 }
 
 export function formatNumber(value: number): string {
-	return new Intl.NumberFormat().format(value);
+	return formatLocalNumber(value);
 }
 
+/** "$0.00" for nothing spent, else four decimals, in the UI locale's digits. */
 export function formatCost(microUsd: number): string {
-	if (microUsd === 0) {
-		return "$0.00";
-	}
-	return `$${(microUsd / 1_000_000).toFixed(4)}`;
+	const digits = microUsd === 0 ? 2 : 4;
+	return formatLocalNumber(microUsd / 1_000_000, {
+		currency: "USD",
+		maximumFractionDigits: digits,
+		minimumFractionDigits: digits,
+		style: "currency",
+	});
 }
 
 export function formatScore(value: number | null): string {
@@ -303,5 +309,7 @@ export function spanDuration(span: RunSpan): string {
 		return "in flight";
 	}
 	const duration = Math.max(0, span.endedAt - span.startedAt);
-	return duration < 1000 ? `${duration}ms` : `${(duration / 1000).toFixed(1)}s`;
+	return duration < 1000
+		? formatDurationUnit(duration, "millisecond")
+		: formatDurationUnit(duration / 1000, "second", 1);
 }

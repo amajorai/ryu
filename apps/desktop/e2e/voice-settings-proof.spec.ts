@@ -3,114 +3,13 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { z } from "zod";
-
-const STORY_URL = "/voice-settings-proof.html";
-
-interface VoiceProofCall {
-	body: unknown;
-	method: string;
-	path: string;
-}
-
-interface VoiceProofBrowserState {
-	calls: VoiceProofCall[];
-	completePlayback: () => void;
-	microphoneGranted: boolean;
-	openExternalUrls: string[];
-	permissionRequests: number;
-	playbackPending: boolean;
-	privacySettingsCalls: {
-		args: { capability: "microphone" };
-		command: "open_privacy_settings";
-	}[];
-	setMicrophoneGranted: (granted: boolean) => void;
-	sinkIds: string[];
-	stoppedTracks: number;
-}
-
-declare global {
-	interface Window {
-		__voiceProof?: VoiceProofBrowserState;
-	}
-}
-
-async function selectOption(
-	page: import("@playwright/test").Page,
-	control: import("@playwright/test").Locator,
-	label: string
-) {
-	await control.click();
-	const listbox = page.locator('[role="listbox"]:visible').last();
-	await expect(listbox).toBeVisible();
-	await listbox.getByRole("option", { exact: true, name: label }).click();
-	await expect(page.locator('[role="listbox"]:visible')).toHaveCount(0);
-}
-
-async function seedTtsPrefs(
-	page: import("@playwright/test").Page,
-	engine = "gateway",
-	voice = "alloy",
-	engineOptions?: Record<
-		string,
-		{
-			language?: string;
-			referenceAudio?: string;
-			speed?: number;
-			voice?: string;
-		}
-	>
-) {
-	await page.addInitScript(
-		({ initialEngine, initialVoice, initialEngineOptions }) => {
-			if (localStorage.getItem("ryu.tts.engine") === null) {
-				localStorage.setItem("ryu.tts.engine", initialEngine);
-			}
-			if (localStorage.getItem("ryu.tts.voice") === null) {
-				localStorage.setItem("ryu.tts.voice", initialVoice);
-			}
-			if (
-				initialEngineOptions &&
-				localStorage.getItem("ryu.tts.engine-options") === null
-			) {
-				localStorage.setItem(
-					"ryu.tts.engine-options",
-					JSON.stringify(initialEngineOptions)
-				);
-			}
-		},
-		{
-			initialEngine: engine,
-			initialVoice: voice,
-			initialEngineOptions: engineOptions,
-		}
-	);
-}
-
-async function openVoiceSettings(
-	page: import("@playwright/test").Page,
-	scenario?: string
-) {
-	page.setDefaultTimeout(8000);
-	page.setDefaultNavigationTimeout(30_000);
-	await page.setViewportSize({ height: 1100, width: 1440 });
-	await page.goto(scenario ? `${STORY_URL}?scenario=${scenario}` : STORY_URL);
-	await expect(page.getByTestId("voice-settings-proof")).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "Audio devices" })
-	).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "Voice mode display" })
-	).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "Voice Recognition" })
-	).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "Read back responses" })
-	).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "Audio", exact: true })
-	).toBeVisible();
-}
+import { proofEvidencePath } from "./proof-evidence-path.ts";
+import {
+	openVoiceSettings,
+	STORY_URL,
+	seedTtsPrefs,
+	selectOption,
+} from "./voice-settings-proof.helpers.ts";
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -169,7 +68,9 @@ test("chooses microphone and speaker devices and persists system-default resets"
 		process.env.RYU_PROOF_OUTPUT_ROOT ?? process.cwd(),
 		process.env.RYU_PROOF_OUTPUT_ROOT
 			? "desktop-voice-settings.png"
-			: "../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-voice-settings.png"
+			: proofEvidencePath(
+					"test-coverage-sweep-20260924/evidence/desktop-voice-settings.png"
+				)
 	);
 	await mkdir(path.dirname(evidencePath), { recursive: true });
 	await page.screenshot({ fullPage: true, path: evidencePath });
@@ -442,7 +343,9 @@ test("changes speech engine and voice, tests spoken output, and retries failed l
 		process.env.RYU_PROOF_OUTPUT_ROOT ?? process.cwd(),
 		process.env.RYU_PROOF_OUTPUT_ROOT
 			? "desktop-voice-settings-readback.png"
-			: "../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-voice-settings.png"
+			: proofEvidencePath(
+					"test-coverage-sweep-20260924/evidence/desktop-voice-settings.png"
+				)
 	);
 	await mkdir(path.dirname(evidencePath), { recursive: true });
 	await page.screenshot({
@@ -527,7 +430,9 @@ test("saves per-engine generation defaults, validates speed, and previews the ex
 		process.env.RYU_PROOF_OUTPUT_ROOT ?? process.cwd(),
 		process.env.RYU_PROOF_OUTPUT_ROOT
 			? "desktop-tts-engine-settings-validation.png"
-			: "../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-tts-engine-settings-validation.png"
+			: proofEvidencePath(
+					"test-coverage-sweep-20260924/evidence/desktop-tts-engine-settings-validation.png"
+				)
 	);
 	await mkdir(path.dirname(validationEvidence), { recursive: true });
 	await page.screenshot({ fullPage: true, path: validationEvidence });
@@ -626,252 +531,10 @@ test("saves per-engine generation defaults, validates speed, and previews the ex
 		process.env.RYU_PROOF_OUTPUT_ROOT ?? process.cwd(),
 		process.env.RYU_PROOF_OUTPUT_ROOT
 			? "desktop-tts-engine-settings-config.png"
-			: "../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-tts-engine-settings-config.png"
+			: proofEvidencePath(
+					"test-coverage-sweep-20260924/evidence/desktop-tts-engine-settings-config.png"
+				)
 	);
 	await mkdir(path.dirname(evidencePath), { recursive: true });
 	await page.screenshot({ fullPage: true, path: evidencePath });
-});
-
-test("surfaces engine loading and speech synthesis errors with a working retry", async ({
-	page,
-}) => {
-	await seedTtsPrefs(page);
-	page.setDefaultTimeout(8000);
-	await page.setViewportSize({ height: 1050, width: 1440 });
-	await page.goto(`${STORY_URL}?scenario=tts-load-error`);
-	await expect(page.getByTestId("voice-settings-proof")).toBeVisible();
-	await expect(
-		page.getByText("Couldn’t load the voice engines", { exact: false })
-	).toBeVisible();
-	await page.getByRole("button", { name: "Retry", exact: true }).click();
-	await expect(
-		page.getByText("Couldn’t load the voice engines", { exact: false })
-	).toHaveCount(0);
-	await expect(
-		page.getByRole("combobox", { name: "Audio engine" })
-	).toContainText("Cloud (via gateway)");
-
-	await page.goto(`${STORY_URL}?scenario=tts-speak-error`);
-	await expect(
-		page.getByRole("combobox", { name: "Audio engine" })
-	).toContainText("Cloud (via gateway)");
-	await page.getByRole("button", { name: "Test voice", exact: true }).click();
-	await expect(
-		page.getByText("Couldn’t play the test audio", { exact: false })
-	).toBeVisible();
-});
-
-test("installs and starts both optional voice runtimes and installs every curated model", async ({
-	page,
-}) => {
-	await seedTtsPrefs(page, "kokoro", "");
-	await openVoiceSettings(page);
-
-	await page
-		.getByRole("button", { name: "Install Ryu Audio engine", exact: true })
-		.click();
-	await expect(
-		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
-	).toBeVisible();
-	await page
-		.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
-		.click();
-	await expect(
-		page.getByRole("button", { name: "Start Ryu Audio engine", exact: true })
-	).toHaveCount(0);
-	await expect
-		.poll(async () => {
-			const calls = await page.evaluate(() => window.__voiceProof?.calls ?? []);
-			return (
-				calls.some((call) => call.path === "/api/setup/ryutts/install") &&
-				calls.some((call) => call.path === "/api/sidecar/ryutts/start")
-			);
-		})
-		.toBe(true);
-
-	const engine = page.getByRole("combobox", { name: "Audio engine" });
-	await expect(engine).toContainText("Kokoro 82M");
-	const voice = page.getByRole("combobox", { name: "Voice", exact: true });
-	await expect(voice).toBeVisible();
-	await expect(voice).toContainText("af_heart");
-	const installButtons = page.getByRole("button", {
-		name: "Install",
-		exact: true,
-	});
-	await expect(installButtons).toHaveCount(5);
-
-	await page
-		.getByRole("button", { name: "Install", exact: true })
-		.first()
-		.click();
-	await expect(page.getByText("Installed", { exact: true })).toHaveCount(1);
-	await expect(installButtons).toHaveCount(4);
-	await expect
-		.poll(async () => {
-			const calls = await page.evaluate(() => window.__voiceProof?.calls ?? []);
-			return calls.some(
-				(call) =>
-					call.path === "/api/voice/tts-models/install" &&
-					call.method === "POST"
-			);
-		})
-		.toBe(true);
-
-	for (const installedModelCount of [2, 3, 4, 5]) {
-		await page
-			.getByRole("button", { name: "Install", exact: true })
-			.first()
-			.click();
-		await expect(page.getByText("Installed", { exact: true })).toHaveCount(
-			installedModelCount
-		);
-	}
-	await expect
-		.poll(async () => {
-			const calls = await page.evaluate(() => window.__voiceProof?.calls ?? []);
-			return calls
-				.filter(
-					(call) =>
-						call.path === "/api/voice/tts-models/install" &&
-						call.method === "POST"
-				)
-				.map(
-					(call) =>
-						/* SAFETY: The mounted TtsEngineSettings install callback passes the model_name from this private harness curated model rows to actual installTtsModel, whose JSON serializer constructs that string field. */ (
-							call.body as { model_name?: string }
-						).model_name
-				)
-				.sort();
-		})
-		.toEqual([
-			"kitten-tts-mini-0.8",
-			"kitten-tts-nano-0.1",
-			"kokoro-82m-v1.0",
-			"pocket-tts",
-			"pocket_tts_english_q8_0",
-		]);
-	await expect(voice).toContainText("af_heart");
-	for (const kokoroVoice of [
-		"af_heart",
-		"af_alloy",
-		"af_aoede",
-		"af_bella",
-		"af_jessica",
-		"af_kore",
-		"af_nicole",
-		"af_nova",
-		"af_river",
-		"af_sarah",
-		"af_sky",
-		"am_adam",
-		"am_echo",
-		"am_eric",
-		"am_fenrir",
-		"am_liam",
-		"am_michael",
-		"am_onyx",
-		"am_puck",
-		"am_santa",
-		"bf_alice",
-		"bf_emma",
-		"bf_isabella",
-		"bf_lily",
-		"bm_daniel",
-		"bm_fable",
-		"bm_george",
-		"bm_lewis",
-	]) {
-		await selectOption(page, voice, kokoroVoice);
-		await expect
-			.poll(() => page.evaluate(() => localStorage.getItem("ryu.tts.voice")))
-			.toBe(kokoroVoice);
-	}
-	await selectOption(page, engine, "KittenTTS");
-	await expect(voice).toContainText("Jasper");
-	for (const kittenVoice of [
-		"Bella",
-		"Jasper",
-		"Luna",
-		"Bruno",
-		"Rosie",
-		"Hugo",
-		"Kiki",
-		"Leo",
-	]) {
-		await selectOption(page, voice, kittenVoice);
-		await expect
-			.poll(() => page.evaluate(() => localStorage.getItem("ryu.tts.voice")))
-			.toBe(kittenVoice);
-	}
-	await selectOption(page, engine, "Pocket TTS (Kyutai)");
-	await expect(voice).toContainText("alba");
-	for (const pocketVoice of [
-		"alba",
-		"giovanni",
-		"lola",
-		"juergen",
-		"rafael",
-		"estelle",
-		"anna",
-		"azelma",
-		"charles",
-		"cosette",
-		"eve",
-		"fantine",
-		"george",
-		"jane",
-		"jean",
-		"javert",
-		"marius",
-		"mary",
-		"michael",
-		"paul",
-		"vera",
-	]) {
-		await selectOption(page, voice, pocketVoice);
-		await expect
-			.poll(() => page.evaluate(() => localStorage.getItem("ryu.tts.voice")))
-			.toBe(pocketVoice);
-	}
-	await selectOption(page, engine, "Kokoro 82M");
-	await expect(voice).toContainText("bm_lewis");
-
-	await selectOption(page, engine, "audio.cpp (not installed)");
-	await expect(
-		page.getByRole("button", {
-			name: "Install audio.cpp runtime",
-			exact: true,
-		})
-	).toBeVisible();
-	await page
-		.getByRole("button", { name: "Install audio.cpp runtime", exact: true })
-		.click();
-	await expect(
-		page.getByRole("button", { name: "Start audio.cpp runtime", exact: true })
-	).toBeVisible();
-	await page
-		.getByRole("button", { name: "Start audio.cpp runtime", exact: true })
-		.click();
-	await expect(
-		page.getByRole("button", { name: "Start audio.cpp runtime", exact: true })
-	).toHaveCount(0);
-	await expect
-		.poll(async () => {
-			const calls = await page.evaluate(() => window.__voiceProof?.calls ?? []);
-			return (
-				calls.some((call) => call.path === "/api/setup/audiocpp/install") &&
-				calls.some((call) => call.path === "/api/sidecar/audiocpp/start")
-			);
-		})
-		.toBe(true);
-	await expect(engine).toContainText("audio.cpp");
-	await expect(
-		page.getByRole("combobox", { name: "Audio engine" })
-	).not.toContainText("not installed");
-	await expect(
-		page.getByRole("button", {
-			name: "Install audio.cpp runtime",
-			exact: true,
-		})
-	).toHaveCount(0);
 });

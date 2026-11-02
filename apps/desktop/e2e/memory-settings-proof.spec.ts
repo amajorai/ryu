@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 import { preferenceValueProofSchema } from "./settings-domain-proof.contracts.ts";
 
 interface CapturedRequest {
@@ -36,11 +37,7 @@ interface MemoryProofWindow extends Window {
 const evidence = (name: string) =>
 	process.env.RYU_PROOF_EVIDENCE_DIR
 		? path.join(process.env.RYU_PROOF_EVIDENCE_DIR, name)
-		: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-				name
-			);
+		: proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 async function readSnapshot(page: Page): Promise<MemoryProofSnapshot> {
 	return await page.evaluate(() =>

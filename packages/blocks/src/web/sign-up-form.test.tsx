@@ -23,3 +23,11 @@ test("sign-up asks for explicit agreement to the Terms and Privacy Policy before
 	// The box starts unticked: agreement is an action, never a default.
 	expect(html).not.toMatch(/id="accept-terms"[^>]*aria-checked="true"/);
 });
+
+test("the sign-up agreement is one sentence with both legal links inside", () => {
+	const html = renderToStaticMarkup(<SignUpForm />);
+
+	expect(html).toMatch(
+		/<span>I agree to the <a class="underline" href="[^"]*\/docs\/legal\/terms" rel="noopener" target="_blank">Terms of Service<\/a> and <a class="underline" href="[^"]*\/docs\/legal\/privacy" rel="noopener" target="_blank">Privacy Policy<\/a><\/span>/
+	);
+});

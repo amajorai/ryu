@@ -249,7 +249,7 @@ export function AccountList({
 											</span>
 										) : null}
 									</span>
-									<span className="relative ml-1 flex size-5 shrink-0 items-center justify-center">
+									<span className="relative ms-1 flex size-5 shrink-0 items-center justify-center">
 										{isActive ? (
 											<span className="absolute transition-[opacity,scale] duration-150 group-hover/item:scale-50 group-hover/item:opacity-0 motion-reduce:transition-opacity">
 												<HugeiconsIcon

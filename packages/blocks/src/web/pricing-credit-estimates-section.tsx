@@ -1,10 +1,18 @@
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
+import { BUSINESS_CREDIT_BUNDLE_SIZE } from "./business-pricing.ts";
 import { landingContainerClass } from "./landing-typography.ts";
+import { TEAMS_INCLUDED_CREDIT_BUNDLE_SIZE } from "./pricing.tsx";
 import {
 	AGENT_STEP_MODEL,
 	agentStepCostUsd,
 	approximateCount,
+	approximateValue,
 	type PlanCreditEstimate,
 	planCreditEstimates,
 	SMALL_BOX,
@@ -14,50 +22,109 @@ import {
 import { SectionHeading } from "./sections.tsx";
 
 interface UsageMeasure {
+	/** "~9,700 steps": the approximate amount with its unit, in one message. */
+	amount: (count: number, countText: string) => string;
 	description: string;
 	id: string;
 	read: (plan: PlanCreditEstimate) => number;
 	title: string;
-	unit: string;
 }
 
-const usd = (amount: number, fractionDigits: number): string =>
-	`$${amount.toFixed(fractionDigits)}`;
+const usd = (
+	locale: string | undefined,
+	amount: number,
+	fractionDigits: number
+): string =>
+	formatNumberValue(locale, amount, {
+		currency: "USD",
+		maximumFractionDigits: fractionDigits,
+		minimumFractionDigits: fractionDigits,
+		style: "currency",
+	});
 
-function usageMeasures(tl: LiteralMessage): UsageMeasure[] {
+/** "$20 a month", "$100 per 5 seats a month", in the reader's language. */
+function planCadence(
+	plan: PlanCreditEstimate,
+	tl: LiteralMessage,
+	locale: string | undefined
+): string {
+	const price = usd(locale, plan.poolUsd, 0);
+	if (plan.id === "teams") {
+		return tl("{price} per {seats} seats a month", {
+			price,
+			seats: TEAMS_INCLUDED_CREDIT_BUNDLE_SIZE,
+		});
+	}
+	if (plan.id === "business") {
+		return tl("{price} per full {seats} seats a month", {
+			price,
+			seats: BUSINESS_CREDIT_BUNDLE_SIZE,
+		});
+	}
+	return tl("{price} a month", { price });
+}
+
+function usageMeasures(
+	tl: LiteralMessage,
+	locale: string | undefined
+): UsageMeasure[] {
 	return [
 		{
 			description: tl(
 				"On {name}, at about {stepCost} a step: 20k input tokens, mostly cached, and 1k output.",
-				{ name: AGENT_STEP_MODEL.name, stepCost: usd(agentStepCostUsd(), 4) }
+				{
+					name: AGENT_STEP_MODEL.name,
+					stepCost: usd(locale, agentStepCostUsd(), 4),
+				}
 			),
 			id: "agent-steps",
 			read: (plan) => plan.agentSteps,
-			title: "Agent steps",
-			unit: "steps",
+			title: tl("Agent steps"),
+			amount: (count, countText) =>
+				tl(
+					"{count, plural, one {~{countText} step} other {~{countText} steps}}",
+					{
+						count,
+						countText,
+					}
+				),
 		},
 		{
 			description: tl(
 				"A small Box ({vcpu} vCPU, {memoryGib} GiB) running at {hourCost} an hour.",
 				{
-					hourCost: usd(smallBoxHourUsd(), 4),
+					hourCost: usd(locale, smallBoxHourUsd(), 4),
 					memoryGib: String(SMALL_BOX.memoryGib),
 					vcpu: String(SMALL_BOX.vcpu),
 				}
 			),
 			id: "box-hours",
 			read: (plan) => plan.boxHours,
-			title: "Box hours",
-			unit: "hours",
+			title: tl("Box hours"),
+			amount: (count, countText) =>
+				tl(
+					"{count, plural, one {~{countText} hour} other {~{countText} hours}}",
+					{
+						count,
+						countText,
+					}
+				),
 		},
 		{
 			description: tl("Composio managed-app tool calls at {callCost} a call.", {
-				callCost: usd(toolCallUsd(), 4),
+				callCost: usd(locale, toolCallUsd(), 4),
 			}),
 			id: "tool-calls",
 			read: (plan) => plan.toolCalls,
-			title: "Tool calls",
-			unit: "calls",
+			title: tl("Tool calls"),
+			amount: (count, countText) =>
+				tl(
+					"{count, plural, one {~{countText} call} other {~{countText} calls}}",
+					{
+						count,
+						countText,
+					}
+				),
 		},
 	];
 }
@@ -69,6 +136,8 @@ function UsageMeasureCard({
 	measure: UsageMeasure;
 	plans: PlanCreditEstimate[];
 }) {
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const largest = Math.max(1, ...plans.map((plan) => measure.read(plan)));
 	const headingId = `credit-estimate-${measure.id}`;
 	return (
@@ -93,11 +162,14 @@ function UsageMeasureCard({
 								<dt>
 									<span className="font-medium">{plan.name}</span>{" "}
 									<span className="text-muted-foreground text-xs">
-										${plan.poolUsd} {plan.cadence}
+										{planCadence(plan, tl, locale)}
 									</span>
 								</dt>
 								<dd className="shrink-0 tabular-nums">
-									~{approximateCount(value)} {measure.unit}
+									{measure.amount(
+										approximateValue(value),
+										approximateCount(value, locale)
+									)}
 								</dd>
 							</div>
 							<div
@@ -123,21 +195,24 @@ function UsageMeasureCard({
  */
 export function PricingCreditEstimatesSection() {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const plans = planCreditEstimates();
 	return (
 		<section
-			aria-label="What your credits buy"
+			aria-label={tl("What your credits buy")}
 			className={cn(landingContainerClass, "py-12 md:py-16")}
 			data-testid="pricing-credit-estimates"
 			id="what-credits-buy"
 		>
 			<SectionHeading
 				className="mb-8 md:mb-10"
-				subtitle="Each plan includes monthly AI credits. Here is roughly how far they go if you spend them all on one kind of usage."
-				title="What your credits buy"
+				subtitle={tl(
+					"Each plan includes monthly AI credits. Here is roughly how far they go if you spend them all on one kind of usage."
+				)}
+				title={tl("What your credits buy")}
 			/>
 			<div className="grid gap-4 md:grid-cols-3">
-				{usageMeasures(tl).map((measure) => (
+				{usageMeasures(tl, locale).map((measure) => (
 					<UsageMeasureCard key={measure.id} measure={measure} plans={plans} />
 				))}
 			</div>

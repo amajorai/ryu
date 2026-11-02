@@ -1,3 +1,5 @@
+import { translate as tl } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import type { Badge } from "@ryu/ui/components/badge.tsx";
 import type { ComponentProps } from "react";
 import { z } from "zod";
@@ -6,6 +8,7 @@ import type {
 	ComposioInputProperty,
 } from "@/src/lib/api/composio.ts";
 import type { SpaceImportRecord } from "@/src/lib/api/space-imports.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 
 export const DOCUMENT_ACCEPT =
 	".txt,.text,.md,.markdown,.mdown,.mkdn,.mkd,.rmd,.html,.htm,.docx,.pdf,.epub,.opml";
@@ -19,27 +22,18 @@ export function errorMessage<TError>(error: TError): string {
 }
 
 export function openResultLabel(title: string): string {
-	return /^open\b/i.test(title.trim()) ? title : `Open ${title}`;
+	return /^open\b/i.test(title.trim()) ? title : tl("Open {title}", { title });
 }
 
 export function formatBytes(bytes: number): string {
 	if (bytes <= 0) {
 		return "";
 	}
-	if (bytes < 1024) {
-		return `${bytes} B`;
-	}
-	if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)} KB`;
-	}
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	return formatByteSize(bytes, undefined, { maxUnit: "megabyte" });
 }
 
 export function formatWhen(timestamp: number): string {
-	return new Intl.DateTimeFormat(undefined, {
-		dateStyle: "medium",
-		timeStyle: "short",
-	}).format(new Date(timestamp));
+	return formatLocalDateTime(timestamp);
 }
 
 export const CONNECTOR_LABELS: Record<string, string> = {
@@ -52,7 +46,7 @@ export const CONNECTOR_LABELS: Record<string, string> = {
 
 export function importSourceLabel(item: SpaceImportRecord): string {
 	if (item.sourceType === "composio") {
-		return `Composio · ${item.sourceFormat}`;
+		return tl("Composio · {sourceFormat}", { sourceFormat: item.sourceFormat });
 	}
 	if (item.sourceType === "connector") {
 		return CONNECTOR_LABELS[item.sourceFormat] ?? item.sourceFormat;

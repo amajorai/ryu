@@ -6,6 +6,7 @@
 // template's real field ids and stay under the URL budget.
 
 import { describe, expect, test } from "bun:test";
+import * as facade from "./troubleshoot.ts";
 import {
 	buildIssueTitle,
 	buildIssueUrl,
@@ -20,6 +21,10 @@ import {
 	type TroubleshootReport,
 	troubleshootCounts,
 } from "./troubleshoot.ts";
+import * as issue from "./troubleshoot-issue.ts";
+import * as model from "./troubleshoot-model.ts";
+import * as redaction from "./troubleshoot-redaction.ts";
+import * as search from "./troubleshoot-search.ts";
 
 function report(
 	overrides: Partial<TroubleshootReport> = {}
@@ -308,4 +313,18 @@ test("markdown report keeps every check and the issue link", () => {
 	expect(md).toContain("[#7](https://github.com/amajorai/ryu/issues/7) (open)");
 	expect(md).toContain("ERROR boot failed");
 	expect(md).toContain("issues/new?x=1");
+});
+
+test("the stable import path re-exports every split module's runtime API", () => {
+	const modules = { issue, model, redaction, search };
+	const exported = Object.entries(modules).flatMap(([name, module]) =>
+		Object.entries(module).map(([key, value]) => ({ key, name, value }))
+	);
+	const facadeExports = new Map<string, unknown>(Object.entries(facade));
+	expect(exported.length).toBe(facadeExports.size);
+	for (const { key, name, value } of exported) {
+		expect(`${name}.${key}:${facadeExports.get(key) === value}`).toBe(
+			`${name}.${key}:true`
+		);
+	}
 });

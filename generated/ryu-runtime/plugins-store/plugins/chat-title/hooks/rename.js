@@ -3,10 +3,16 @@
 // host.sideModel / host.storage / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 const convId = ctx.conversation_id;
 if (!convId) {
 	return { kind: "none" };
@@ -98,4 +104,4 @@ try {
 // happened — every early return above lands on the error copy instead. The
 // automatic pass stays silent: a `note` is surfaced to the user out-of-band, and
 // nobody wants a notification every fifth turn saying their chat was renamed.
-return forced ? { kind: "note", text: 'Renamed to "' + title + '"' } : { kind: "none" };
+return forced ? { kind: "note", text: await host.t('Renamed to "{title}"', { title }) } : { kind: "none" };

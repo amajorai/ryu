@@ -378,7 +378,7 @@ function ConnectionStatusFloating({
 						<motion.div
 							aria-live="polite"
 							className={cn(
-								"relative flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full bg-connection-toast-surface/65 py-1.5 pr-4 pl-2 text-white shadow-[0_14px_35px_-16px_rgba(0,0,0,0.72)] backdrop-blur-2xl backdrop-saturate-150",
+								"relative flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full bg-connection-toast-surface/65 py-1.5 ps-2 pe-4 text-white shadow-[0_14px_35px_-16px_rgba(0,0,0,0.72)] backdrop-blur-2xl backdrop-saturate-150",
 								styles.surface
 							)}
 							data-slot="connection-status-surface"

@@ -1,7 +1,13 @@
+// First: the sealed vault slots must exist before the auth client hydrates.
+import "./settings-sync-native-secrets.ts";
 import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { switchAccount } from "@/lib/auth-client.ts";
+import {
+	getActiveToken,
+	switchAccount,
+	vaultHydrated,
+} from "@/lib/auth-client.ts";
 import { SettingsSyncTab } from "@/src/components/settings/SettingsSyncTab.tsx";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { getKeybindings } from "@/src/lib/api/preferences.ts";
@@ -16,6 +22,8 @@ import {
 } from "@/src/lib/settings-sync/keys.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import "../../src/index.css";
+import { otherProofNode, proofNode } from "./settings-sync-proof-nodes.ts";
+
 // Passive exact native body consumption, used as a settlement barrier rather
 // than an oracle for successful persistence. The original Response is returned.
 const nativeFetch = window.fetch.bind(window);
@@ -26,7 +34,7 @@ window.fetch = async (...args: Parameters<typeof fetch>) => {
 	const url =
 		typeof raw === "string" ? raw : raw instanceof URL ? raw.href : raw.url;
 	if (new URL(url, location.href).origin !== "http://127.0.0.1:5607") {
-		throw new Error("Unowned shipping egress");
+		throw new Error(`Unowned shipping egress: ${url}`);
 	}
 	const method =
 		args[1]?.method ??
@@ -48,18 +56,8 @@ window.fetch = async (...args: Parameters<typeof fetch>) => {
 	};
 	return response;
 };
-const node = {
-	name: "Owned Core",
-	url: "http://127.0.0.1:5607/core",
-	token: "owned-core",
-	userJwt: null,
-};
-const otherNode = {
-	name: "Other Core",
-	url: "http://127.0.0.1:5607/other-core",
-	token: "owned-core-B",
-	userJwt: null,
-};
+const node = proofNode;
+const otherNode = otherProofNode;
 useNodeStore.setState({
 	nodes: [node, otherNode],
 	localNodes: [node, otherNode],
@@ -76,6 +74,9 @@ Object.assign(window, {
 		issued,
 		readCloud: () => pullSettings(0),
 		status: () => getSyncStatus(),
+		// The account switch lives in the auth client's in-memory vault and the
+		// sealed `auth-vault` slot, not in localStorage.
+		activeToken: () => getActiveToken(),
 		readShortcuts: () =>
 			getKeybindings(toTarget(useNodeStore.getState().getActiveNode())),
 	},
@@ -122,4 +123,6 @@ const root = document.getElementById("root");
 if (!root) {
 	throw new Error("Missing owned root");
 }
-createRoot(root).render(<Proof />);
+// As src/main.tsx: the first render waits for the sealed vault, so the engine
+// never starts under a signed-out session.
+vaultHydrated.then(() => createRoot(root).render(<Proof />));

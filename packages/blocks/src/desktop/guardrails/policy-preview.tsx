@@ -26,16 +26,24 @@ import {
 
 function sourceLabel(source: PolicyPreviewSource, tl: LiteralMessage): string {
 	if (source.layer === "platform") {
-		return PLATFORM_POLICY_LABEL;
+		return tl(PLATFORM_POLICY_LABEL);
 	}
-	const layer = POLICY_LAYER_LABELS[source.layer];
+	const layer = tl(POLICY_LAYER_LABELS[source.layer]);
 	if (source.policyName) {
-		const version =
-			source.policyVersion === undefined ? "" : ` v${source.policyVersion}`;
-		return `${layer}: ${source.policyName}${version}`;
+		if (source.policyVersion === undefined) {
+			return tl("{layer}: {policyName}", {
+				layer,
+				policyName: source.policyName,
+			});
+		}
+		return tl("{layer}: {policyName} v{version}", {
+			layer,
+			policyName: source.policyName,
+			version: String(source.policyVersion),
+		});
 	}
 	if (source.origin === "limits") {
-		return `${layer} limits`;
+		return tl("{layer} limits", { layer });
 	}
 	if (
 		source.origin === "policy_layer" ||
@@ -102,6 +110,7 @@ export function PolicyPreview({
 	hideUnset?: boolean;
 	preview: PolicyPreviewView;
 }) {
+	const tl = useLiteralMessages();
 	const fields = hideUnset
 		? preview.fields.filter((field) => field.sources.length > 0)
 		: preview.fields;
@@ -175,8 +184,8 @@ export function PolicyPreview({
 						{fields.map((field) => (
 							<SettingsItem
 								actions={
-									<span className="max-w-64 break-words text-right text-sm">
-										{formatPreviewValue(field.value)}
+									<span className="max-w-64 break-words text-end text-sm">
+										{formatPreviewValue(field.value, tl)}
 									</span>
 								}
 								key={field.field}
@@ -190,7 +199,7 @@ export function PolicyPreview({
 			</SettingsSection>
 
 			{preview.notes.length > 0 ? (
-				<ul className="flex list-disc flex-col gap-1 px-3.5 pl-8 text-muted-foreground text-xs">
+				<ul className="flex list-disc flex-col gap-1 px-3.5 ps-8 text-muted-foreground text-xs">
 					{preview.notes.map((note) => (
 						<li key={note}>{note}</li>
 					))}

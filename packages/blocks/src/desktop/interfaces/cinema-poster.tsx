@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { memo, type PointerEvent } from "react";
 import { CinemaArt } from "./cinema-art.tsx";
@@ -78,6 +79,7 @@ export function CinemaTitleMark({
 					size === "tall" ? "line-clamp-4" : "line-clamp-2",
 					TITLE_TYPE[title.art.type][size]
 				)}
+				data-ryu-i18n="off"
 			>
 				{title.thread.title}
 			</span>
@@ -140,7 +142,7 @@ export function CinemaBoxart({
 			</span>
 			<CinemaTitleMark
 				className={cn(
-					"absolute inset-x-0 bottom-0 text-left",
+					"absolute inset-x-0 bottom-0 text-start",
 					inset,
 					size === "large" ? "pb-4" : "pb-3"
 				)}
@@ -206,7 +208,7 @@ export const CinemaPoster = memo(function CinemaPoster({
 	const description = [
 		cinemaStatusText(title),
 		names || "No agent",
-		rank ? `Number ${rank.toString()}` : "",
+		rank ? tr("Number {rank}", { rank: rank.toString() }) : "",
 	]
 		.filter(Boolean)
 		.join(", ");
@@ -219,7 +221,7 @@ export const CinemaPoster = memo(function CinemaPoster({
 		<button
 			aria-current={current ? "true" : undefined}
 			className={cn(
-				"group/poster relative block w-full cursor-pointer rounded-sm text-left outline-none",
+				"group/poster relative block w-full cursor-pointer rounded-sm text-start outline-none",
 				"focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
 				layout === "top" && "flex aspect-[4/3] items-end"
 			)}
@@ -285,7 +287,7 @@ export const CinemaFeature = memo(function CinemaFeature({
 		<button
 			aria-current={current ? "true" : undefined}
 			className={cn(
-				"group/poster flex w-full cursor-pointer overflow-hidden rounded-sm bg-card text-left outline-none ring-1 ring-border transition-colors duration-200 hover:bg-muted",
+				"group/poster flex w-full cursor-pointer overflow-hidden rounded-sm bg-card text-start outline-none ring-1 ring-border transition-colors duration-200 hover:bg-muted",
 				"focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
 				current && "ring-2 ring-primary"
 			)}
@@ -304,7 +306,10 @@ export const CinemaFeature = memo(function CinemaFeature({
 					{names ? ` · ${names}` : ""}
 				</span>
 				{thread.lastMessage ? (
-					<span className="line-clamp-4 text-base text-foreground/90 leading-6">
+					<span
+						className="line-clamp-4 text-base text-foreground/90 leading-6"
+						data-ryu-i18n="off"
+					>
 						{thread.lastMessage}
 					</span>
 				) : (
@@ -313,7 +318,10 @@ export const CinemaFeature = memo(function CinemaFeature({
 					</span>
 				)}
 				{title.group ? (
-					<span className="mt-auto text-muted-foreground text-sm leading-5">
+					<span
+						className="mt-auto text-muted-foreground text-sm leading-5"
+						data-ryu-i18n="off"
+					>
 						{title.group.name}
 					</span>
 				) : null}

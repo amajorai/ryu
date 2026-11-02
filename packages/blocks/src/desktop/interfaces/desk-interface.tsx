@@ -1,7 +1,6 @@
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
-	type DeskView,
 	type InterfaceParamsByRenderer,
 	projectDeskViews,
 	type ThreadStatus,
@@ -37,9 +36,13 @@ import {
 	findDeskView,
 } from "./desk-model.ts";
 import { DeskViewSelect, DeskViewsRail } from "./desk-rail.tsx";
+import { noSelectionViewLabel } from "./desk-view-labels.ts";
 import { useAutoOpenFirstThread } from "./interface-auto-open.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
-import type { InterfaceRendererProps } from "./interface-renderer.ts";
+import {
+	type InterfaceRendererProps,
+	localizeDeskSections,
+} from "./interface-renderer.ts";
 
 /** At or above this width the views rail shows; below it, a select. */
 const RAIL_MIN_WIDTH = 1080;
@@ -47,19 +50,6 @@ const RAIL_MIN_WIDTH = 1080;
 const DETAILS_INLINE_MIN_WIDTH = 1320;
 /** Below this width the list and the conversation take turns. */
 const STACKED_MAX_WIDTH = 720;
-
-/** How the empty pane names a scoped view: "Atlas's inbox", "Launch Crew". */
-function noSelectionViewLabel(
-	view: DeskView | undefined,
-	tl: LiteralMessage
-): string | null {
-	if (!view || view.kind === "all" || view.id === DESK_NEEDS_YOU_VIEW_ID) {
-		return null;
-	}
-	return view.kind === "agent"
-		? tl("{label}'s inbox", { label: view.label })
-		: view.label;
-}
 
 /**
  * Desk interface: a three-pane help-desk inbox. A views rail (shared views,
@@ -84,7 +74,10 @@ export function DeskInterface({
 	const width = useElementWidth(rootRef);
 	const now = useMinuteClock();
 
-	const sections = useMemo(() => projectDeskViews(snapshot), [snapshot]);
+	const sections = useMemo(
+		() => localizeDeskSections(projectDeskViews(snapshot), tl),
+		[snapshot, tl]
+	);
 	const [chosenViewId, setChosenViewId] = useState<string | null>(null);
 	const [sort, setSort] = useState<DeskSort>("newest");
 	const [cursorId, setCursorId] = useState<string | null>(null);
@@ -457,7 +450,7 @@ export function DeskInterface({
 				<div
 					className={cn(
 						"flex min-h-0 shrink-0",
-						stacked ? "w-full" : "border-border border-r",
+						stacked ? "w-full" : "border-border border-e",
 						!stacked && (railMode ? "w-[360px]" : "w-[340px]")
 					)}
 				>

@@ -211,7 +211,7 @@ export function CodePane({
 				<code>
 					{lines.map((line, i) => (
 						<div className="flex gap-4" key={i}>
-							<span className="w-4 shrink-0 select-none text-right text-foreground/25">
+							<span className="w-4 shrink-0 select-none text-end text-foreground/25">
 								{i + 1}
 							</span>
 							<span className="whitespace-pre">{line || " "}</span>
@@ -307,7 +307,7 @@ export function Wire({
 			{delays.map((delay, i) => (
 				<div
 					className={cn(
-						"absolute left-0 size-1.5 rounded-full bg-foreground/60",
+						"absolute start-0 size-1.5 rounded-full bg-foreground/60",
 						styles.flow_right,
 						styles.dynamic1
 					)}

@@ -7,10 +7,10 @@ import type {
 	ScheduledPost,
 	SocialAccount,
 } from "../../../apps-store/social/ui/src/types.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidenceDirectory = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const evidenceDirectory = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 const initialDraftText =
 	"A fixture-backed Social draft with its selected target.";

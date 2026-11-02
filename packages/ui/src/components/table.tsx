@@ -105,14 +105,14 @@ function TableHead({
 	return (
 		<th
 			className={cn(
-				"h-12 whitespace-nowrap in-data-[slot=frame]:px-2.5 px-3 text-left align-middle font-medium in-data-[slot=frame]:text-muted-foreground text-foreground in-data-[slot=frame]:leading-none [&:has([role=checkbox])]:pr-0",
+				"h-12 whitespace-nowrap in-data-[slot=frame]:px-2.5 px-3 text-start align-middle font-medium in-data-[slot=frame]:text-muted-foreground text-foreground in-data-[slot=frame]:leading-none [&:has([role=checkbox])]:pe-0",
 				presentation === "permission" && "bg-background",
 				presentation === "widget-label" &&
 					"type-caption font-medium text-muted-foreground uppercase tracking-wide",
 				presentation === "file-label" &&
 					"type-compact h-10 uppercase tracking-table-label",
 				inset === "wide" && "px-6",
-				inset === "end" && "pr-6",
+				inset === "end" && "pe-6",
 				size === "compact" && "h-8 px-2 text-xs",
 				className
 			)}
@@ -157,7 +157,7 @@ function TableCell({
 	return (
 		<td
 			className={cn(
-				"whitespace-nowrap in-data-[slot=frame]:p-2.5 p-3 align-middle in-data-[slot=frame]:leading-none in-data-[slot=frame]:first:p-[calc(--spacing(2.5)-1px)] in-data-[slot=frame]:last:p-[calc(--spacing(2.5)-1px)] [&:has([role=checkbox])]:pr-0",
+				"whitespace-nowrap in-data-[slot=frame]:p-2.5 p-3 align-middle in-data-[slot=frame]:leading-none in-data-[slot=frame]:first:p-[calc(--spacing(2.5)-1px)] in-data-[slot=frame]:last:p-[calc(--spacing(2.5)-1px)] [&:has([role=checkbox])]:pe-0",
 				(presentation === "metadata" || presentation === "numeric-metadata") &&
 					"text-muted-foreground text-xs",
 				presentation === "numeric-metadata" && "font-mono",
@@ -173,7 +173,7 @@ function TableCell({
 				presentation === "permission" &&
 					"bg-background font-mono text-muted-foreground text-xs",
 				inset === "wide" && "px-6",
-				inset === "end" && "pr-6",
+				inset === "end" && "pe-6",
 				spacing === "compact" && "p-2",
 				presentation === "usage-time" &&
 					"whitespace-nowrap text-muted-foreground text-xs",
@@ -181,12 +181,12 @@ function TableCell({
 					"max-w-[14rem] truncate text-xs",
 				presentation === "usage-model" && "max-w-[16rem] truncate text-xs",
 				presentation === "usage-provider" && "text-xs",
-				presentation === "usage-counter" && "text-right text-xs tabular-nums",
+				presentation === "usage-counter" && "text-end text-xs tabular-nums",
 				presentation === "usage-credit" &&
-					"text-right font-mono text-status-success tabular-nums",
-				presentation === "usage-debit" && "text-right font-mono tabular-nums",
+					"text-end font-mono text-status-success tabular-nums",
+				presentation === "usage-debit" && "text-end font-mono tabular-nums",
 				presentation === "usage-balance" &&
-					"text-right font-mono text-muted-foreground text-xs tabular-nums",
+					"text-end font-mono text-muted-foreground text-xs tabular-nums",
 				className
 			)}
 			data-slot="table-cell"

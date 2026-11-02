@@ -23,7 +23,6 @@ import { Separator } from "@ryu/ui/components/separator.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
 	THREAD_STATUS_ORDER,
 	type ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
@@ -42,6 +41,7 @@ import {
 } from "lucide-react";
 import type { KeyboardEvent, RefObject } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { SheetStatusMark } from "./sheet-cells.tsx";
 import { SHEET_COLUMN_ICON } from "./sheet-grid.tsx";
 import {
@@ -222,7 +222,7 @@ function FilterMenu({
 					{status ? "1 filter" : "Filter"}
 				</span>
 				{status ? (
-					<span className="sr-only">{`: ${THREAD_STATUS_LABELS[status]}`}</span>
+					<span className="sr-only">{`: ${threadStatusLabel(status)}`}</span>
 				) : null}
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="start" className="w-56" drawerLabel="Filter">
@@ -251,7 +251,7 @@ function FilterMenu({
 								<span className="flex size-2.5 shrink-0 items-center justify-center">
 									<SheetStatusMark status={item} />
 								</span>
-								<span className="flex-1">{THREAD_STATUS_LABELS[item]}</span>
+								<span className="flex-1">{threadStatusLabel(item)}</span>
 								<span className="text-muted-foreground text-xs tabular-nums">
 									{counts[item]}
 								</span>
@@ -324,7 +324,7 @@ export function SheetToolbar({
 				total={total}
 			/>
 			<SortMenu onSort={onSort} sort={sort} />
-			<div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
+			<div className="ms-auto flex min-w-0 flex-1 items-center justify-end gap-2">
 				<InputGroup className="h-8 min-w-28 max-w-64 flex-1 rounded-md">
 					<InputGroupAddon>
 						<Search aria-hidden="true" />
@@ -371,7 +371,7 @@ export function SheetToolbar({
 							render={
 								<Button
 									aria-label="New thread with…"
-									className="border-primary-foreground/20 border-l px-2"
+									className="border-primary-foreground/20 border-s px-2"
 									size="sm"
 									type="button"
 								/>
@@ -408,7 +408,9 @@ export function SheetToolbar({
 													name={agent.name}
 													size={20}
 												/>
-												<span className="truncate">{agent.name}</span>
+												<span className="truncate" data-ryu-i18n="off">
+													{agent.name}
+												</span>
 											</DropdownMenuItem>
 										))}
 									</DropdownMenuGroup>
@@ -426,7 +428,9 @@ export function SheetToolbar({
 												onClick={() => onStart({ teamId: team.id })}
 											>
 												<UsersRound aria-hidden="true" />
-												<span className="truncate">{team.name}</span>
+												<span className="truncate" data-ryu-i18n="off">
+													{team.name}
+												</span>
 											</DropdownMenuItem>
 										))}
 									</DropdownMenuGroup>
@@ -444,7 +448,9 @@ export function SheetToolbar({
 												onClick={() => onStart({ projectId: project.id })}
 											>
 												<FolderKanban aria-hidden="true" />
-												<span className="truncate">{project.name}</span>
+												<span className="truncate" data-ryu-i18n="off">
+													{project.name}
+												</span>
 											</DropdownMenuItem>
 										))}
 									</DropdownMenuGroup>

@@ -175,7 +175,13 @@ export function ContextMeter({
 					<BreakdownRow
 						label="Remaining"
 						muted
-						value={`${formatCount(remaining)} tokens`}
+						value={tl(
+							"{count, plural, one {{countText} token} other {{countText} tokens}}",
+							{
+								count: remaining,
+								countText: formatCount(remaining) ?? "—",
+							}
+						)}
 					/>
 					<PromptCacheSummary
 						className="mt-1 border-border border-t pt-2"

@@ -6,6 +6,7 @@
 //! ports—in one place.
 
 pub mod branding;
+pub mod dll_search;
 #[cfg(feature = "handoff")]
 pub mod handoff;
 pub mod layout;

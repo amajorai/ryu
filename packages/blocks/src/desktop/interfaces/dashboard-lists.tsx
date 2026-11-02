@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -5,7 +6,6 @@ import {
 	type InterfaceEvent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
@@ -15,11 +15,14 @@ import {
 	type DashboardAgentRow,
 	fullDateLabel,
 	HOUR_MS,
-	plural,
 	threadTitle,
 	untilLabel,
 } from "./dashboard-model.ts";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	compactAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 /** How a thread list leads each row and what its second line says. */
 export type ThreadListVariant = "attention" | "mixed" | "working" | "your-turn";
@@ -27,7 +30,7 @@ export type ThreadListVariant = "attention" | "mixed" | "working" | "your-turn";
 /** Rows sit 8px in from the frame so their text lines up with the title. */
 const LIST = "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2";
 const ROW =
-	"group/row flex w-full min-w-0 items-start gap-3 rounded-md px-2 py-2 text-left outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-[current=true]:bg-muted";
+	"group/row flex w-full min-w-0 items-start gap-3 rounded-md px-2 py-2 text-start outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-[current=true]:bg-muted";
 
 function agentNames(snapshot: InterfaceSnapshot, thread: InterfaceThread) {
 	const agents = thread.agentIds
@@ -45,9 +48,12 @@ function detailLine(
 	thread: InterfaceThread,
 	names: string
 ): ReactNode {
-	const who = names || "No agent";
+	const who = names || tr("No agent");
 	if (variant === "mixed") {
-		return `${THREAD_STATUS_LABELS[threadStatus(thread)]} · ${who}`;
+		return tr("{status} · {who}", {
+			status: threadStatusLabel(threadStatus(thread)),
+			who,
+		});
 	}
 	if (variant === "attention") {
 		return (
@@ -59,7 +65,15 @@ function detailLine(
 			</>
 		);
 	}
-	return thread.lastMessage ? `${who} · ${thread.lastMessage}` : who;
+	if (!thread.lastMessage) {
+		return who;
+	}
+	return (
+		<>
+			{`${who} · `}
+			<span data-ryu-i18n="off">{thread.lastMessage}</span>
+		</>
+	);
 }
 
 /** A centered single line where a widget has nothing to list. */
@@ -110,7 +124,10 @@ function ThreadRow({
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<span className="flex min-w-0 items-baseline gap-3">
-						<span className="min-w-0 flex-1 truncate text-foreground text-sm leading-5">
+						<span
+							className="min-w-0 flex-1 truncate text-foreground text-sm leading-5"
+							data-ryu-i18n="off"
+						>
 							{threadTitle(thread)}
 						</span>
 						<time
@@ -195,7 +212,10 @@ function FailedRunRow({
 			<RunLead agent={agent} />
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<span className="flex min-w-0 items-baseline gap-3">
-					<span className="min-w-0 flex-1 truncate text-foreground text-sm leading-5">
+					<span
+						className="min-w-0 flex-1 truncate text-foreground text-sm leading-5"
+						data-ryu-i18n="off"
+					>
 						{run.title}
 					</span>
 					<time
@@ -262,6 +282,7 @@ export function AgentList({
 	onStart: (agentId: string) => void;
 	rows: readonly DashboardAgentRow[];
 }) {
+	const tl = useLiteralMessages();
 	if (rows.length === 0) {
 		return <WidgetEmpty>No agents yet.</WidgetEmpty>;
 	}
@@ -269,15 +290,25 @@ export function AgentList({
 		<ul aria-label="Agents" className={LIST}>
 			{rows.map(({ agent, latest, threadCount }) => {
 				const action = latest
-					? `${agent.name}: open ${threadTitle(latest)}`
-					: `${agent.name}: start a thread`;
+					? tl("{name}: open {title}", {
+							name: agent.name,
+							title: threadTitle(latest),
+						})
+					: tl("{name}: start a thread", { name: agent.name });
 				return (
 					<li key={agent.id}>
 						<button
 							aria-current={
 								latest && latest.id === activeThreadId ? "true" : undefined
 							}
-							aria-label={`${action}. ${agent.status === "working" ? "Working" : "Idle"}, ${plural(threadCount, "thread")}.`}
+							aria-label={tl(
+								"{action}. {working, select, yes {Working} other {Idle}}, {count, plural, one {# thread} other {# threads}}.",
+								{
+									action,
+									count: threadCount,
+									working: agent.status === "working" ? "yes" : "no",
+								}
+							)}
 							className={ROW}
 							onClick={() => (latest ? onOpen(latest.id) : onStart(agent.id))}
 							type="button"
@@ -285,7 +316,10 @@ export function AgentList({
 							<BoardAvatar agent={agent} name={agent.name} size={20} />
 							<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 								<span className="flex min-w-0 items-baseline gap-3">
-									<span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm leading-5">
+									<span
+										className="min-w-0 flex-1 truncate font-medium text-foreground text-sm leading-5"
+										data-ryu-i18n="off"
+									>
 										{agent.name}
 									</span>
 									<AgentState agent={agent} />
@@ -293,7 +327,7 @@ export function AgentList({
 								<span className="flex min-w-0 gap-1 text-[13px] text-muted-foreground leading-[18px]">
 									{latest ? (
 										<>
-											<span className="min-w-0 truncate">
+											<span className="min-w-0 truncate" data-ryu-i18n="off">
 												{threadTitle(latest)}
 											</span>
 											<span className="shrink-0 tabular-nums">
@@ -346,7 +380,10 @@ export function UpcomingList({
 						<RunLead agent={agent} />
 						<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 							<span className="flex min-w-0 items-baseline gap-3">
-								<span className="min-w-0 flex-1 truncate text-foreground text-sm leading-5">
+								<span
+									className="min-w-0 flex-1 truncate text-foreground text-sm leading-5"
+									data-ryu-i18n="off"
+								>
 									{event.title}
 								</span>
 								<time

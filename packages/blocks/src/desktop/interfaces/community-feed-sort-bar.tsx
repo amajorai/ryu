@@ -11,6 +11,7 @@ import {
 	type CommunitySort,
 	type CommunityViewMode,
 } from "./community-model.ts";
+import { inlineArrowStep } from "./inline-direction.ts";
 
 export interface SortBarProps {
 	mode: CommunityViewMode;
@@ -41,9 +42,14 @@ export function SortBar({
 }: SortBarProps) {
 	const tabs = useRef(new Map<CommunitySort, HTMLButtonElement>());
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		// Left and right follow the row's reading direction.
+		const arrow = inlineArrowStep(event.key, event.currentTarget);
 		const step =
-			{ ArrowLeft: -1, ArrowRight: 1 }[event.key] ??
-			(event.key === "Home" || event.key === "End" ? 0 : null);
+			arrow === 0
+				? event.key === "Home" || event.key === "End"
+					? 0
+					: null
+				: arrow;
 		if (step === null) {
 			return;
 		}

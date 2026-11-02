@@ -2,7 +2,10 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: import.meta.dirname,
-	testMatch: "titlebar-actions-proof.spec.ts",
+	testMatch: [
+		"titlebar-actions-proof.spec.ts",
+		"part*-titlebar-actions-proof.spec.ts",
+	],
 	workers: 1,
 	timeout: 90_000,
 	expect: { timeout: 6000 },

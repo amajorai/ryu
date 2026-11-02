@@ -65,7 +65,7 @@ function SoundEventRow({
 			actions={
 				<div className="flex items-center gap-2">
 					<Button
-						aria-label={tl("Preview {sound}", { sound: title })}
+						aria-label={tl("Preview {sound}", { sound: tl(title) })}
 						disabled={disabled}
 						onClick={() => previewSound(row.ids[0])}
 						size="sm"

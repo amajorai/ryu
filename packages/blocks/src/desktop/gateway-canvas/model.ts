@@ -480,16 +480,5 @@ export const HEALTH_LABELS: Record<CanvasHealth, string> = {
 	ok: "Healthy",
 };
 
-/** Compact counts: 980, 1.2k, 34k, 1.1M. */
-export function formatCount(value: number): string {
-	if (value < 1000) {
-		return String(value);
-	}
-	if (value < 10_000) {
-		return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-	}
-	if (value < 1_000_000) {
-		return `${Math.round(value / 1000)}k`;
-	}
-	return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-}
+// Compact counts live beside the model so hosts keep importing them from here.
+export { formatCount } from "./format-count.ts";

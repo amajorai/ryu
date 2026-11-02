@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -9,12 +10,10 @@ import {
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft, MessageSquare } from "lucide-react";
-import { type ReactNode, type Ref, useContext, useId } from "react";
-import { compactAge } from "./interface-renderer.ts";
-import { OrderItemsComposer } from "./warehouse-composer.tsx";
+import { type ReactNode, type Ref, useContext } from "react";
+import { relativeAge } from "./interface-renderer.ts";
 import {
 	aisleLabel,
-	plural,
 	STAGE_MEANING,
 	STAGE_PIPELINE,
 	stageLabel,
@@ -22,12 +21,13 @@ import {
 } from "./warehouse-model.ts";
 import {
 	Fulfiller,
-	FulfillerAvatar,
 	StagePill,
 	WarehouseActsContext,
 } from "./warehouse-parts.tsx";
 
-function PanelHeader({
+export { CreateOrder } from "./warehouse-order-create.tsx";
+
+export function PanelHeader({
 	backLabel,
 	children,
 	headingRef,
@@ -55,7 +55,7 @@ function PanelHeader({
 						/>
 					}
 				>
-					<ArrowLeft aria-hidden="true" />
+					<ArrowLeft aria-hidden="true" className="rtl:-scale-x-100" />
 				</TooltipTrigger>
 				<TooltipContent className="flex items-center gap-2" side="bottom">
 					{backLabel}
@@ -176,7 +176,9 @@ export function OrderDetail({
 	const tl = useLiteralMessages();
 	const { thread } = order;
 	const noteAuthor =
-		thread.lastMessageRole === "user" ? "You" : (order.agent?.name ?? "Agent");
+		thread.lastMessageRole === "user"
+			? "You"
+			: (order.agent?.name ?? tr("Agent"));
 	const earlier = Math.max(
 		0,
 		thread.messageCount - (thread.lastMessage ? 1 : 0)
@@ -204,6 +206,7 @@ export function OrderDetail({
 				>
 					<h3
 						className="text-pretty font-semibold text-base text-foreground leading-6"
+						data-ryu-i18n="off"
 						id={`${order.id}-items`}
 					>
 						{thread.title}
@@ -254,7 +257,10 @@ export function OrderDetail({
 									</span>
 								)}
 							</figcaption>
-							<blockquote className="line-clamp-4 text-pretty text-foreground text-sm leading-relaxed">
+							<blockquote
+								className="line-clamp-4 text-pretty text-foreground text-sm leading-relaxed"
+								data-ryu-i18n="off"
+							>
 								{thread.lastMessage}
 							</blockquote>
 						</figure>
@@ -283,8 +289,7 @@ export function OrderDetail({
 
 /** How fresh an order is; nothing under the act layer (never `updatedAt`, spec 5.2). */
 function updatedAgo(updatedAt: string, now: number): string {
-	const age = compactAge(updatedAt, now);
-	return age === "now" ? "Just now" : `${age} ago`;
+	return relativeAge(updatedAt, now);
 }
 
 /**
@@ -326,7 +331,9 @@ function OrderFacts({
 				{/* No aisle letters on the floor under acts: the stage instead. */}
 				<dt className={term}>{acts ? "Stage" : "Location"}</dt>
 				<dd className={value}>
-					{acts ? stageLabel(order.stage, acts) : (location ?? "Unassigned")}
+					{acts
+						? stageLabel(order.stage, acts)
+						: (location ?? tr("Unassigned"))}
 				</dd>
 			</div>
 			<div className={cn(cell, "max-sm:hidden")}>
@@ -377,7 +384,10 @@ export function OrderConversation({
 				{order ? (
 					<>
 						<span className="shrink-0 tabular-nums">{order.number}</span>
-						<span className="truncate font-normal text-muted-foreground">
+						<span
+							className="truncate font-normal text-muted-foreground"
+							data-ryu-i18n="off"
+						>
 							{order.thread.title}
 						</span>
 						<StagePill className="max-sm:hidden" stage={order.stage} />
@@ -392,108 +402,6 @@ export function OrderConversation({
 				data-testid="warehouse-thread"
 			>
 				{threadView}
-			</div>
-		</div>
-	);
-}
-
-/**
- * Create order: pick who fulfils it, describe the items, submit. Submitting
- * is the user's explicit send, so the host may start the thread at once.
- */
-export function CreateOrder({
-	agentId,
-	agents,
-	headingRef,
-	loadByAgent,
-	onBack,
-	onPick,
-	onSubmit,
-}: {
-	/** The chosen fulfiller (the root owns it, so the floor can mark them). */
-	agentId: string | undefined;
-	agents: readonly InterfaceAgent[];
-	headingRef: Ref<HTMLHeadingElement>;
-	loadByAgent: ReadonlyMap<string, number>;
-	onBack: () => void;
-	onPick: (agentId: string) => void;
-	onSubmit: (input: { agentId?: string; prompt: string }) => void;
-}) {
-	const acts = useContext(WarehouseActsContext);
-	const groupId = useId();
-	return (
-		<div className="flex min-h-0 flex-1 flex-col">
-			<PanelHeader
-				backLabel="Back to orders"
-				headingRef={headingRef}
-				onBack={onBack}
-			>
-				Create order
-			</PanelHeader>
-			<div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 py-5">
-				{agents.length > 0 ? (
-					<fieldset className="flex flex-col gap-2">
-						<legend className="mb-2 text-muted-foreground text-xs" id={groupId}>
-							Fulfiller
-						</legend>
-						<div className="flex flex-col divide-y divide-border rounded-lg border border-border">
-							{agents.map((agent) => {
-								const checked = agent.id === agentId;
-								const load = loadByAgent.get(agent.id) ?? 0;
-								return (
-									<label
-										className={cn(
-											"flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors first:rounded-t-lg last:rounded-b-lg has-focus-visible:ring-2 has-focus-visible:ring-ring has-focus-visible:ring-inset",
-											checked ? "bg-muted" : "hover:bg-muted/50"
-										)}
-										key={agent.id}
-									>
-										<input
-											checked={checked}
-											className="sr-only"
-											name={groupId}
-											onChange={() => onPick(agent.id)}
-											type="radio"
-											value={agent.id}
-										/>
-										<FulfillerAvatar
-											agent={agent}
-											className="size-7 [&_[data-slot=avatar-fallback]]:text-xs"
-										/>
-										<span className="flex min-w-0 flex-1 flex-col">
-											<span className="truncate font-medium text-foreground text-sm">
-												{agent.name}
-											</span>
-											<span className="truncate text-muted-foreground text-xs">
-												{acts ? null : <>{aisleLabel(agent.id, agents)} · </>}
-												{load === 0
-													? "No open orders"
-													: plural(load, "open order")}
-											</span>
-										</span>
-										<span
-											aria-hidden="true"
-											className={cn(
-												"flex size-4 shrink-0 items-center justify-center rounded-full border",
-												checked
-													? "border-primary bg-primary"
-													: "border-muted-foreground/50"
-											)}
-										>
-											{checked ? (
-												<span className="size-1.5 rounded-full bg-primary-foreground" />
-											) : null}
-										</span>
-									</label>
-								);
-							})}
-						</div>
-					</fieldset>
-				) : null}
-				<OrderItemsComposer
-					fulfillerName={agents.find((agent) => agent.id === agentId)?.name}
-					onSubmit={(prompt) => onSubmit({ agentId, prompt })}
-				/>
 			</div>
 		</div>
 	);

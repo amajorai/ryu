@@ -1,6 +1,10 @@
 "use client";
 
-import { useLocalizedText } from "@ryu/i18n/react";
+import {
+	useLiteralMessages,
+	useLocalizedText,
+	useRichLiteralMessages,
+} from "@ryu/i18n/react";
 import { Heart } from "lucide-react";
 import type { ReactNode } from "react";
 import { BackToTop } from "./back-to-top.tsx";
@@ -104,6 +108,29 @@ export function footerColumnsFor(hiddenProductIds: readonly string[] = []) {
 
 function LocalizedFooterCopy({ value }: { value: string }) {
 	return <>{useLocalizedText(value, { literal: true })}</>;
+}
+
+/** "Designed with ♥ & powered by Ryu" as one sentence, so translators can move the heart. */
+function FooterCredit() {
+	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
+	return (
+		<span className="inline-flex items-center gap-1">
+			{tlRich(
+				"Designed with <heart></heart> & powered by Ryu",
+				{},
+				{
+					heart: () => (
+						<Heart
+							aria-label={tl("love")}
+							className="size-3 fill-red-400 text-red-400 dark:fill-red-400/90 dark:text-red-400/90"
+							role="img"
+						/>
+					),
+				}
+			)}
+		</span>
+	);
 }
 
 export default function Footer({
@@ -220,15 +247,7 @@ export default function Footer({
 									githubStargazersCount={githubStargazersCount}
 								/>
 							</div>
-							<span className="inline-flex items-center gap-1">
-								<LocalizedFooterCopy value="Designed with" />
-								<Heart
-									aria-label="love"
-									className="size-3 fill-red-400 text-red-400 dark:fill-red-400/90 dark:text-red-400/90"
-									role="img"
-								/>
-								<LocalizedFooterCopy value="& powered by Ryu" />
-							</span>
+							<FooterCredit />
 						</div>
 					</div>
 				</div>

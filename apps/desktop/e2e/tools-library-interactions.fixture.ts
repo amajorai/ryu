@@ -3,6 +3,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 import {
 	type ToolsProofJson,
 	toolsCallSchema,
@@ -352,9 +353,8 @@ export async function installFixture(page: Page, state: FixtureState) {
 	});
 }
 
-export const evidenceDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence/tools-library"
+export const evidenceDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence/tools-library"
 );
 
 export async function capture(page: Page, name: string) {

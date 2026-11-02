@@ -1,4 +1,5 @@
 import type { LiteralMessage } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import type { HookInventoryItem, HookSource } from "@/src/lib/api/hooks.ts";
 
 export interface HookPhaseCopy {
@@ -81,7 +82,7 @@ export const hookPhaseCopy = (
 	const title = humanizePhase(phase);
 	return {
 		description: tl("When {phaseName} runs", {
-			phaseName: title.toLowerCase(),
+			phaseName: sentenceLabel(tl, title),
 		}),
 		title,
 	};

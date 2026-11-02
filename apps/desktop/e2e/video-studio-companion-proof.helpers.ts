@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
-import path from "node:path";
 import { expect, type Page } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-export const evidenceDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+export const evidenceDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 export function uniqueTitle(prefix: string) {

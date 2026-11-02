@@ -132,7 +132,7 @@ export function ModelList({
 					return (
 						<li key={m.id}>
 							<button
-								className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${
+								className={`w-full rounded-lg px-3 py-2 text-start transition-colors ${
 									isSelected ? "bg-accent" : "hover:bg-accent/50"
 								}`}
 								onClick={() => onSelect(m.id)}
@@ -163,7 +163,7 @@ export function ModelList({
 										</div>
 									</div>
 									{(updatedAgo || publishedAgo) && (
-										<div className="flex shrink-0 flex-col items-end justify-center gap-0.5 text-right text-muted-foreground text-xs leading-4">
+										<div className="flex shrink-0 flex-col items-end justify-center gap-0.5 text-end text-muted-foreground text-xs leading-4">
 											{publishedAgo && (
 												<ModelDateLine
 													date={formatDate(m.createdAt)}

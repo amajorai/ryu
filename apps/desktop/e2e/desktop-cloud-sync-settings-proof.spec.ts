@@ -1,6 +1,6 @@
-import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { CloudSyncProofState } from "./harness/desktop-cloud-sync-settings-proof.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare global {
 	interface Window {
@@ -9,11 +9,7 @@ declare global {
 }
 
 const evidence = (name: string) =>
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 async function openProof(page: Page, query = ""): Promise<void> {
 	await page.goto(`/desktop-cloud-sync-settings-proof.html${query}`);

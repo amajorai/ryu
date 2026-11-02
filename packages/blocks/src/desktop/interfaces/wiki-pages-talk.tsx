@@ -1,10 +1,10 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import {
@@ -15,7 +15,13 @@ import {
 	useState,
 } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
-import { plural, wikiAgent, wikiAgo, wikiThreadTitle } from "./wiki-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
+import {
+	wikiAgent,
+	wikiAgo,
+	wikiCount,
+	wikiThreadTitle,
+} from "./wiki-model.ts";
 import { Dot } from "./wiki-pages-marks.tsx";
 import { LINK, WikiFooter } from "./wiki-parts.tsx";
 
@@ -100,7 +106,7 @@ export function TopicForm({
 						>
 							<option value="">Any agent</option>
 							{agents.map((agent) => (
-								<option key={agent.id} value={agent.id}>
+								<option data-ryu-i18n="off" key={agent.id} value={agent.id}>
 									{agent.name}
 								</option>
 							))}
@@ -193,12 +199,12 @@ function TopicItem({
 	const author =
 		thread.lastMessageRole === "user"
 			? "You"
-			: (wikiAgent(snapshot, thread.agentIds[0])?.name ?? "Agent");
+			: (wikiAgent(snapshot, thread.agentIds[0])?.name ?? tr("Agent"));
 	return (
 		<li className="pt-4">
 			<h2 className="border-border border-b pb-1 font-normal font-serif text-[22px] leading-8">
 				<button
-					className={cn(LINK, "cursor-pointer text-left")}
+					className={cn(LINK, "cursor-pointer text-start")}
 					onClick={onOpen}
 					type="button"
 				>
@@ -210,16 +216,16 @@ function TopicItem({
 					{tl("Latest comment: {ago}", { ago: wikiAgo(thread.updatedAt, now) })}
 				</span>
 				<Dot />
-				<span>{plural(thread.messageCount, "comment")}</span>
+				<span>{wikiCount(thread.messageCount, "comment")}</span>
 				<Dot />
 				<span className="inline-flex items-center gap-1.5">
 					<BoardStatusDot status={status} />
-					{THREAD_STATUS_LABELS[status]}
+					{threadStatusLabel(status)}
 				</span>
 			</p>
 			{thread.lastMessage ? (
 				<p className="mt-2 line-clamp-2 text-sm leading-6">
-					{thread.lastMessage}{" "}
+					<span data-ryu-i18n="off">{thread.lastMessage}</span>{" "}
 					<span className="text-muted-foreground">
 						&mdash; {author}, {wikiAgo(thread.updatedAt, now)}
 					</span>

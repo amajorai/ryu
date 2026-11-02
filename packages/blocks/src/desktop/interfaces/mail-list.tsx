@@ -32,19 +32,19 @@ function ListSkeleton({ density }: { density: MailDensity }) {
 			{SKELETON_ROWS.map(([sender, subject]) => (
 				<div
 					className={cn(
-						"flex items-center gap-3 border-border/70 border-b pr-4 pl-4",
+						"flex items-center gap-3 border-border/70 border-b ps-4 pe-4",
 						density === "line" ? "h-10" : "h-[76px]"
 					)}
 					key={`${sender}-${subject}`}
 				>
 					<Skeleton className="size-4" radius="block" />
 					<Skeleton className="size-4" radius="block" />
-					<Skeleton className={cn("ml-1 h-3", sender)} radius="pill" />
+					<Skeleton className={cn("ms-1 h-3", sender)} radius="pill" />
 					<Skeleton
-						className={cn("ml-4 h-3 max-w-[50%]", subject)}
+						className={cn("ms-4 h-3 max-w-[50%]", subject)}
 						radius="pill"
 					/>
-					<Skeleton className="ml-auto h-3 w-12" radius="pill" />
+					<Skeleton className="ms-auto h-3 w-12" radius="pill" />
 				</div>
 			))}
 		</div>
@@ -201,7 +201,7 @@ export function MailList({
 		>
 			<div
 				aria-label="List actions"
-				className="flex h-12 shrink-0 items-center gap-1 pr-2 pl-1.5"
+				className="flex h-12 shrink-0 items-center gap-1 ps-1.5 pe-2"
 				role="toolbar"
 			>
 				<span className="flex size-9 items-center justify-center">
@@ -227,7 +227,7 @@ export function MailList({
 						<RotateCw aria-hidden="true" className="size-4" />
 					</MailIconButton>
 				)}
-				<span className="ml-auto flex items-center gap-1">
+				<span className="ms-auto flex items-center gap-1">
 					<span
 						className="px-2 text-muted-foreground text-xs tabular-nums"
 						data-testid="mail-page-range"
@@ -239,14 +239,20 @@ export function MailList({
 						label="Newer"
 						onClick={onPreviousPage}
 					>
-						<ChevronLeft aria-hidden="true" className="size-4.5" />
+						<ChevronLeft
+							aria-hidden="true"
+							className="size-4.5 rtl:-scale-x-100"
+						/>
 					</MailIconButton>
 					<MailIconButton
 						disabled={page >= pageCount - 1}
 						label="Older"
 						onClick={onNextPage}
 					>
-						<ChevronRight aria-hidden="true" className="size-4.5" />
+						<ChevronRight
+							aria-hidden="true"
+							className="size-4.5 rtl:-scale-x-100"
+						/>
 					</MailIconButton>
 				</span>
 			</div>

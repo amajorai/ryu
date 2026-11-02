@@ -1,3 +1,4 @@
+import { useReactFlowAriaLabels } from "@ryu/blocks/desktop/react-flow-labels.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
@@ -53,6 +54,7 @@ function nodeStyle(
  */
 export function MemoryGraph({ graph }: { graph: MemoryGraphSnapshot }) {
 	const tl = useLiteralMessages();
+	const ariaLabels = useReactFlowAriaLabels();
 	const positions = layoutForceGraph(
 		graph.nodes,
 		graph.edges.map((edge) => ({ source: edge.source, target: edge.target }))
@@ -99,7 +101,7 @@ export function MemoryGraph({ graph }: { graph: MemoryGraphSnapshot }) {
 
 	return (
 		<div className="relative h-full w-full">
-			<div className="pointer-events-none absolute top-3 left-3 z-10 flex flex-wrap gap-1.5 rounded-lg border border-border bg-background p-2">
+			<div className="pointer-events-none absolute start-3 top-3 z-10 flex flex-wrap gap-1.5 rounded-lg border border-border bg-background p-2">
 				<Badge variant="secondary">
 					{tl("{memoryCount} memories", {
 						memoryCount: String(graph.memoryCount),
@@ -117,6 +119,7 @@ export function MemoryGraph({ graph }: { graph: MemoryGraphSnapshot }) {
 				) : null}
 			</div>
 			<ReactFlow
+				ariaLabelConfig={ariaLabels}
 				edges={edges}
 				fitView
 				fitViewOptions={{ padding: 0.16 }}

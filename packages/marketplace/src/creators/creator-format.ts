@@ -4,6 +4,7 @@
 // are unit-testable without rendering.
 
 import type { LiteralMessage } from "@ryu/i18n";
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { marketplaceBrowseKindLabel } from "../catalog/chrome/marketplace-sections.ts";
 import type { MarketplaceCreator } from "./creator-types.ts";
 
@@ -35,7 +36,7 @@ export function creatorKindSummary(kinds: string[], max = 2): string {
 export function creatorSinceLabel(
 	tl: LiteralMessage,
 	iso: string | null,
-	locale?: string
+	locale: string = activeLocale()
 ): string | null {
 	if (!iso) {
 		return null;
@@ -44,7 +45,7 @@ export function creatorSinceLabel(
 	if (Number.isNaN(date.getTime())) {
 		return null;
 	}
-	const month = new Intl.DateTimeFormat(locale, {
+	const month = dateFormatter(locale, {
 		month: "short",
 		timeZone: "UTC",
 		year: "numeric",
@@ -52,10 +53,12 @@ export function creatorSinceLabel(
 	return tl("Publishing since {month}", { month });
 }
 
-/** "1 listing" / "3 listings", and the same for followers. */
-export function pluralCount(count: number, singular: string): string {
+/** "Rating (1 review)" / "Rating (3 reviews)"; a bad count reads as 0. */
+export function ratingStatLabel(tl: LiteralMessage, count: number): string {
 	const safe = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-	return `${safe.toLocaleString()} ${safe === 1 ? singular : `${singular}s`}`;
+	return tl("Rating ({count, plural, one {# review} other {# reviews}})", {
+		count: safe,
+	});
 }
 
 export interface CreatorLink {

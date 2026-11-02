@@ -8,6 +8,8 @@
 // haystacks). Nothing here hits the network or React.
 
 import type { LiteralMessage } from "@ryu/i18n";
+import { activeLocale } from "@ryu/i18n/core";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
 import { type BadgeTone, CATALOG_TOKENS } from "./friendly-tokens.ts";
 import type { SkillCard } from "./types.ts";
 
@@ -166,8 +168,6 @@ function describeSizeToken(
 	unit: string,
 	tl: LiteralMessage
 ): string {
-	const count =
-		unit.toLowerCase() === "m" ? `${num} million` : `${num} billion`;
 	if (prefix.toLowerCase() === "a") {
 		return tl("{num}{unit} active parameters (Mixture-of-Experts)", {
 			num,
@@ -180,7 +180,14 @@ function describeSizeToken(
 			unit: unit.toUpperCase(),
 		});
 	}
-	return `${count} parameters`;
+	// "7 billion", "7 Milliarden", "70億": the scale word in the UI language.
+	const scale = unit.toLowerCase() === "m" ? 1e6 : 1e9;
+	const size = formatNumberValue(
+		activeLocale(),
+		Number.parseFloat(num) * scale,
+		{ compactDisplay: "long", maximumFractionDigits: 3, notation: "compact" }
+	);
+	return tl("{size} parameters", { size });
 }
 
 /** Billions-equivalent magnitude of a size token, for tier comparison. */

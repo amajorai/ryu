@@ -21,6 +21,7 @@ import {
 	connectionDisplayName,
 	connectionSurfaceMeta,
 } from "@/src/lib/connection-surface.ts";
+import { presenceAgo } from "@/src/lib/time.ts";
 import { AutoScrollText } from "./AutoScrollText.tsx";
 
 /**
@@ -55,7 +56,7 @@ function MeshPeerRow({
 			<div className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs opacity-70">
 				{dot}
 				<span
-					className="flex-1 truncate text-left text-muted-foreground"
+					className="flex-1 truncate text-start text-muted-foreground"
 					title={label}
 				>
 					{label}
@@ -75,7 +76,7 @@ function MeshPeerRow({
 		>
 			{dot}
 			<span
-				className="flex-1 truncate text-left text-muted-foreground"
+				className="flex-1 truncate text-start text-muted-foreground"
 				title={label}
 			>
 				{label}
@@ -209,16 +210,9 @@ export function MeshSection({
 	);
 }
 
-/** "active 5s ago" / "now" from a unix-seconds last-seen stamp. */
+/** "now" / "12s ago" / "5 分前" from a unix-seconds last-seen stamp. */
 function relativeAge(lastSeen: number): string {
-	const secs = Math.max(0, Math.floor(Date.now() / 1000) - lastSeen);
-	if (secs < 10) {
-		return "now";
-	}
-	if (secs < 60) {
-		return `${secs}s ago`;
-	}
-	return `${Math.floor(secs / 60)}m ago`;
+	return presenceAgo(lastSeen * 1000);
 }
 
 /**
@@ -264,7 +258,11 @@ export function ConnectedSection({
 						/>
 						<AutoScrollText
 							className="flex-1 text-muted-foreground"
-							title={`${displayName}${c.clientId === selfClientId ? " (you)" : ""}`}
+							title={
+								c.clientId === selfClientId
+									? tl("{name} (you)", { name: displayName })
+									: displayName
+							}
 						>
 							{displayName}
 							{c.clientId === selfClientId && (

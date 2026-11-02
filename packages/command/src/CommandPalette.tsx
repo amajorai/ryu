@@ -19,6 +19,7 @@ import {
 	CommandSeparator,
 	CommandShortcut,
 } from "@ryu/ui/components/command.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Fragment,
@@ -28,6 +29,7 @@ import {
 	useId,
 	useState,
 } from "react";
+import { isDirectionalIcon } from "./directional-icons.ts";
 import { PaletteFilters } from "./palette-filters.tsx";
 import { PaletteModeSwitch } from "./palette-mode-switch.tsx";
 import { actionSearchValue, groupActions } from "./registry.ts";
@@ -96,7 +98,13 @@ function ActionRow({ action }: { action: CommandAction }) {
 			value={actionSearchValue(action)}
 		>
 			{action.icon ? (
-				<HugeiconsIcon className="size-4 shrink-0" icon={action.icon} />
+				<HugeiconsIcon
+					className={cn(
+						"size-4 shrink-0",
+						isDirectionalIcon(action.icon) && DIRECTIONAL_ICON_CLASS
+					)}
+					icon={action.icon}
+				/>
 			) : null}
 			<span className="min-w-0 flex-1 truncate" title={localizedTitle}>
 				{localizedTitle}

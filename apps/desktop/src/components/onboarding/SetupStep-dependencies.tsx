@@ -3,6 +3,7 @@
 import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@/lib/utils.ts";
 import type { DepCategoryState } from "./SetupStep.model.ts";
 
@@ -59,7 +60,7 @@ export function SetupStepDependencyCategory({
 					{depCategoryState.expanded ? (
 						<HugeiconsIcon className="h-4 w-4" icon={ArrowDown01Icon} />
 					) : (
-						<HugeiconsIcon className="h-4 w-4" icon={ArrowRight01Icon} />
+						<DirectionalIcon className="h-4 w-4" icon={ArrowRight01Icon} />
 					)}
 				</button>
 			</div>

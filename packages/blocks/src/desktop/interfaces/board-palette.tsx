@@ -33,7 +33,7 @@ import { BoardAvatar } from "./board-avatar.tsx";
 import type { BoardStartInput } from "./board-column.tsx";
 import type { BoardFilterField } from "./board-filter.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 
 /**
  * Every typed word must appear somewhere in the item's text. cmdk's default
@@ -62,12 +62,6 @@ function Lead({ children }: { children: ReactNode }) {
 
 /** Threads shown before the user types; typing searches all of them. */
 const RECENT_LIMIT = 6;
-
-const GROUP_LABELS: Record<BoardParams["groupBy"], string> = {
-	agent: "Agent",
-	project: "Project",
-	status: "Status",
-};
 
 export interface BoardPaletteActions {
 	clearFilters: () => void;
@@ -254,9 +248,10 @@ export function BoardCommandPalette({
 								<Lead>
 									<Rows3 />
 								</Lead>
-								{tl("Group by {groupLabel}", {
-									groupLabel: GROUP_LABELS[option].toLowerCase(),
-								})}
+								{tl(
+									"{group, select, agent {Group by agent} project {Group by project} other {Group by status}}",
+									{ group: option }
+								)}
 							</CommandItem>
 						))}
 					</CommandGroup>
@@ -275,7 +270,7 @@ export function BoardCommandPalette({
 									<BoardStatusDot pulse={false} status={status} />
 								</Lead>
 								{tl("Status: {status}", {
-									status: THREAD_STATUS_LABELS[status],
+									status: threadStatusLabel(status, tl),
 								})}
 							</CommandItem>
 						))}

@@ -95,7 +95,7 @@ export const turnIntoItems = [
 		value: KEYS.listTodo,
 	},
 	{
-		icon: <ChevronRightIcon />,
+		icon: <ChevronRightIcon className="rtl:-scale-x-100" />,
 		keywords: ["collapsible", "expandable"],
 		label: "Toggle list",
 		value: KEYS.toggle,

@@ -115,7 +115,11 @@ export function PushDialog({
 			} else if (finish.pushed && finish.pullRequestError) {
 				toast.error(pullRequestFailure(finish.pullRequestError));
 			} else if (finish.pushed) {
-				toast.success(`Pushed ${finish.branch ?? "branch"}`);
+				toast.success(
+					finish.branch
+						? tl("Pushed {branch}", { branch: finish.branch })
+						: tl("Pushed branch")
+				);
 			} else {
 				toast.error(
 					tl("Push failed ({error}). The box was kept.", {
@@ -279,7 +283,12 @@ export function PushDialog({
 														),
 													}
 												)
-											: `${characterCount.format(pullRequestBodyLength)} / ${characterCount.format(MAX_PULL_REQUEST_BODY_CHARS)} characters`}
+											: tl("{length} / {max} characters", {
+													length: characterCount.format(pullRequestBodyLength),
+													max: characterCount.format(
+														MAX_PULL_REQUEST_BODY_CHARS
+													),
+												})}
 									</p>
 								</div>
 								<div className="flex items-center gap-2">

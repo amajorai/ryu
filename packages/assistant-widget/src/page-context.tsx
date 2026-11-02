@@ -3,6 +3,7 @@
 import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import {
 	Popover,
 	PopoverContent,
@@ -69,7 +70,7 @@ function ContextChip({
 					render={
 						<button
 							aria-label={tl("Review {previewName}", {
-								previewName: previewTitle.toLowerCase(),
+								previewName: sentenceLabel(tl, previewTitle),
 							})}
 							className="min-w-0 truncate rounded-full hover:text-foreground"
 							type="button"
@@ -106,7 +107,7 @@ function ContextChip({
 			</Popover>
 			<button
 				aria-label={tl("Remove {previewName} from context", {
-					previewName: previewTitle.toLowerCase(),
+					previewName: sentenceLabel(tl, previewTitle),
 				})}
 				className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-background hover:text-foreground"
 				onClick={() => onChange(false)}

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	InterfaceSnapshot,
@@ -40,7 +41,7 @@ export function QuizAnswerBooth({
 	const lockup =
 		[agent?.name, category === agent?.name ? undefined : category]
 			.filter(Boolean)
-			.join(" · ") || "Final question";
+			.join(" · ") || tr("Final question");
 	return (
 		<GameSheet
 			closeLabel="Close answer booth"

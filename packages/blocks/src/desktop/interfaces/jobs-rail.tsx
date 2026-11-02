@@ -58,7 +58,7 @@ export function onTabsKeyDown(
 }
 
 const ITEM =
-	"flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
+	"flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-start text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 const ITEM_ACTIVE =
 	"bg-accent font-medium text-accent-foreground hover:bg-accent";
 /**
@@ -70,7 +70,7 @@ const TAB_ACTIVE = "font-semibold text-foreground hover:bg-muted";
 
 function Count({ value }: { value: number }) {
 	return (
-		<span className="ml-auto text-muted-foreground text-xs tabular-nums">
+		<span className="ms-auto text-muted-foreground text-xs tabular-nums">
 			{value}
 		</span>
 	);
@@ -122,7 +122,7 @@ export function JobsRail({
 	return (
 		<nav
 			aria-label="Jobs navigation"
-			className="flex w-64 shrink-0 flex-col gap-6 overflow-y-auto border-border border-r bg-background px-3 py-4"
+			className="flex w-64 shrink-0 flex-col gap-6 overflow-y-auto border-border border-e bg-background px-3 py-4"
 			data-testid="jobs-rail"
 		>
 			<div
@@ -302,7 +302,7 @@ export function JobsInlineTabs({
 				})}
 			</div>
 			{trailing ? (
-				<div className="ml-auto flex items-center">{trailing}</div>
+				<div className="ms-auto flex items-center">{trailing}</div>
 			) : null}
 		</div>
 	);
@@ -335,7 +335,7 @@ export function SavedSearchMenu({
 								? tl("Saved searches: {label}", { label: active.label })
 								: tl("Saved searches")
 						}
-						className="-mr-2 font-normal"
+						className="-me-2 font-normal"
 						size="xs"
 						type="button"
 						variant="ghost"

@@ -8,6 +8,7 @@
 // for main threads. Core resolves the cascade at turn time; these helpers only
 // shape values for the pickers and label what a blank picker inherits.
 
+import { translate as tl } from "@ryu/i18n/core";
 import type {
 	DefaultsRole,
 	EffectiveDefaults,
@@ -178,7 +179,7 @@ function inheritedFrom(
 
 /** "Default (Opus 5.5)", or plain "Default" when nothing below is set. */
 export function defaultLabel(inherited: string): string {
-	return inherited ? `Default (${inherited})` : "Default";
+	return inherited ? tl("Default ({inherited})", { inherited }) : tl("Default");
 }
 
 /** "medium" → "Medium". */

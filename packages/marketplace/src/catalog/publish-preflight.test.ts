@@ -115,4 +115,41 @@ describe("Marketplace publish preflight", () => {
 		expect(report.grade).not.toBe("A");
 		expect(report.passed).toBe(false);
 	});
+
+	test("a refused listing identity blocks an otherwise perfect package", () => {
+		const report = runMarketplacePublishPreflight({
+			...baseInput,
+			listingIdentity: {
+				detail: "`@ryu/claude-opus` cannot be published.",
+				passed: false,
+			},
+			packageKind: "app",
+			presentArtifactCount: 1,
+		});
+
+		expect(report.passed).toBe(false);
+		expect(report.grade).not.toBe("A");
+		expect(
+			report.checks.find((check) => check.id === "listing-identity")
+		).toMatchObject({
+			category: "safety",
+			detail: "`@ryu/claude-opus` cannot be published.",
+			status: "fail",
+		});
+	});
+
+	test("an accepted listing identity is reported as a passing check", () => {
+		const report = runMarketplacePublishPreflight({
+			...baseInput,
+			listingIdentity: { detail: "ok", passed: true },
+			packageKind: "app",
+			presentArtifactCount: 1,
+		});
+
+		expect(report.passed).toBe(true);
+		expect(report.grade).toBe("A");
+		expect(
+			report.checks.find((check) => check.id === "listing-identity")?.status
+		).toBe("pass");
+	});
 });

@@ -1,6 +1,7 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
@@ -220,10 +221,15 @@ export function DiffReviewVisual() {
 
 /** The three network modes a Box can run with. */
 export function BoxNetworkVisual() {
+	const tl = useLiteralMessages();
 	const modes = [
-		{ label: "No network", value: "Offline", on: false },
-		{ label: "Allowlist", value: "Up to 64 hosts", on: true },
-		{ label: "Filtered public access", value: "No private ranges", on: false },
+		{ label: tl("No network"), value: tl("Offline"), on: false },
+		{ label: tl("Allowlist"), value: tl("Up to 64 hosts"), on: true },
+		{
+			label: tl("Filtered public access"),
+			value: tl("No private ranges"),
+			on: false,
+		},
 	];
 	return (
 		<div className="w-full space-y-2 px-1 py-2">
@@ -258,11 +264,19 @@ export function BoxNetworkVisual() {
  */
 export function RetryTimelineVisual() {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale ?? "en";
+	const after = (value: number, unit: "minute" | "second") =>
+		formatNumberValue(locale, value, {
+			signDisplay: "always",
+			style: "unit",
+			unit,
+			unitDisplay: "short",
+		});
 	const attempts = [
-		{ at: "Now", result: "Failed" },
-		{ at: "+30 s", result: "Failed" },
-		{ at: "+3 min", result: "Failed" },
-		{ at: "+15.5 min", result: "Delivered" },
+		{ at: tl("Now"), result: "Failed" },
+		{ at: after(30, "second"), result: "Failed" },
+		{ at: after(3, "minute"), result: "Failed" },
+		{ at: after(15.5, "minute"), result: "Delivered" },
 	];
 	return (
 		<ol className="w-full space-y-2 px-1 py-2">
@@ -274,7 +288,9 @@ export function RetryTimelineVisual() {
 							attemptNumber: index + 1,
 						})}
 						strong={attempt.result === "Delivered"}
-						value={attempt.result}
+						value={
+							attempt.result === "Delivered" ? tl("Delivered") : tl("Failed")
+						}
 					/>
 				</li>
 			))}
@@ -287,7 +303,7 @@ export function CouncilVisual() {
 	const agents = ["Research", "Finance"];
 	return (
 		<div className="w-full space-y-3 px-1 py-2">
-			<p className="ml-auto w-fit rounded-lg bg-foreground/5 px-3 py-2 text-foreground/80 text-sm">
+			<p className="ms-auto w-fit rounded-lg bg-foreground/5 px-3 py-2 text-foreground/80 text-sm">
 				@Research @Finance
 			</p>
 			{/* One reply after another, as the thread shows them. */}
@@ -311,10 +327,12 @@ export function CouncilVisual() {
 
 /** Island's three consent switches (apps/island/src/shared/consent.ts). */
 export function IslandConsentVisual() {
+	const tl = useLiteralMessages();
+	const askFirst = tl("Ask first");
 	const switches = [
-		{ label: "Chat", value: "On", on: true },
-		{ label: "Screen reading", value: "Ask first", on: false },
-		{ label: "Suggestions", value: "Ask first", on: false },
+		{ label: tl("Chat"), value: tl("On"), on: true },
+		{ label: tl("Screen reading"), value: askFirst, on: false },
+		{ label: tl("Suggestions"), value: askFirst, on: false },
 	];
 	return (
 		<div className="w-full space-y-2 px-1 py-2">
@@ -327,38 +345,13 @@ export function IslandConsentVisual() {
 	);
 }
 
-/** The browser extension's quick actions on the current page. */
-export function PageActionsVisual() {
-	const actions = [
-		"Summarize this page",
-		"Ask about selection",
-		"Save to a Space",
-	];
-	return (
-		<div className="w-full space-y-3 px-1 py-2">
-			<div className="space-y-2 rounded-lg border border-border p-3">
-				<span className="block h-2 w-2/3 rounded-full bg-foreground/15" />
-				<span className="block h-2 w-full rounded-full bg-foreground/10" />
-				<span className="block h-2 w-5/6 rounded-full bg-foreground/30" />
-				<span className="block h-2 w-3/4 rounded-full bg-foreground/10" />
-			</div>
-			<div className="flex flex-wrap gap-2">
-				{actions.map((action, index) => (
-					<ButtonMock key={action} primary={index === 0}>
-						{action}
-					</ButtonMock>
-				))}
-			</div>
-		</div>
-	);
-}
-
 /** The permission sheet shown before an app is installed. */
 export function PermissionGrantVisual() {
+	const tl = useLiteralMessages();
 	const grants = [
-		"Open web pages",
-		"Read files you share",
-		"Call allowed tools",
+		tl("Open web pages"),
+		tl("Read files you share"),
+		tl("Call allowed tools"),
 	];
 	return (
 		<div className="mx-auto w-full max-w-sm space-y-4 self-center px-1 py-4">

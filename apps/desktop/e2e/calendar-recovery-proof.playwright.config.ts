@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_URL = "http://127.0.0.1:5392/";
 
@@ -7,16 +8,18 @@ export default defineConfig({
 	testMatch: /calendar-recovery-proof\.spec\.ts$/,
 	fullyParallel: false,
 	workers: 1,
-	outputDir:
-		"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/evidence/calendar-recovery-results",
+	outputDir: proofEvidencePath(
+		"test-coverage-sweep-20260924/parallel/desktop-gateway/evidence/calendar-recovery-results"
+	),
 	retries: 0,
 	reporter: [
 		["list"],
 		[
 			"json",
 			{
-				outputFile:
-					"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/evidence/calendar-recovery-results.json",
+				outputFile: proofEvidencePath(
+					"test-coverage-sweep-20260924/parallel/desktop-gateway/evidence/calendar-recovery-results.json"
+				),
 			},
 		],
 	],

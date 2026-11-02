@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("project files sends the exact scoped listing and persists density and search", async ({
 	page,
@@ -126,9 +126,8 @@ test("completed project file search is shown in the shipped route", async ({
 		)
 		.toMatchObject({ density: "relaxed", showSearch: true });
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-project-files-search-readback.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/evidence/desktop-project-files-search-readback.png"
 		),
 	});
 });
@@ -200,7 +199,9 @@ test("a failed file listing is visible and retries without pretending the folder
 }) => {
 	await page.goto("/project-files-route-proof.html?failure=1");
 	await expect(
-		page.getByText("Fixture repository read denied", { exact: true })
+		page.getByText("Ryu couldn't list the files in this project.", {
+			exact: true,
+		})
 	).toBeVisible();
 	await expect(
 		page.getByText(
@@ -212,7 +213,9 @@ test("a failed file listing is visible and retries without pretending the folder
 		page.getByRole("treeitem", { name: "README.md", exact: true })
 	).toBeVisible();
 	await expect(
-		page.getByText("Fixture repository read denied", { exact: true })
+		page.getByText("Ryu couldn't list the files in this project.", {
+			exact: true,
+		})
 	).toHaveCount(0);
 });
 

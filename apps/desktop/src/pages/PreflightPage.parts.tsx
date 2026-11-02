@@ -41,7 +41,7 @@ export function ComponentRow({
 			<button
 				aria-controls={`${id}-panel`}
 				aria-expanded={open}
-				className="flex min-h-12 w-full min-w-0 items-center gap-3 py-3 text-left text-sm outline-none focus-visible:bg-muted"
+				className="flex min-h-12 w-full min-w-0 items-center gap-3 py-3 text-start text-sm outline-none focus-visible:bg-muted"
 				id={`${id}-trigger`}
 				onClick={onToggle}
 				type="button"

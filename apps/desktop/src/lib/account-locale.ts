@@ -2,10 +2,10 @@ import { createAccountLocaleSync } from "@ryu/i18n/account-locale";
 import { authClient } from "@/lib/auth-client.ts";
 
 /**
- * Save a language the person picked in Desktop on their cloud account, so
- * email from Ryu uses it (`AccountLocaleSync` decides when). Desktop
- * authenticates with a bearer token, so there is no `locale` cookie to
- * write. Debounced and fire-and-forget (`@ryu/i18n/account-locale`).
+ * Save a language the person picked in Desktop (or the web app, which shares
+ * this module) on their cloud account, so email from Ryu uses it
+ * (`AccountLocaleSync` decides when). Both authenticate with a bearer token,
+ * so there is no `locale` cookie to write. Debounced and fire-and-forget (`@ryu/i18n/account-locale`).
  */
 export const saveAccountLocale = createAccountLocaleSync({
 	isSignedIn: async () => {

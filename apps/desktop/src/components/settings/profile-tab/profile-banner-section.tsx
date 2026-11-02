@@ -45,7 +45,7 @@ export function ProfileBannerSection({
 					) : null}
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
-					<span className="mr-auto min-w-0 truncate text-muted-foreground text-sm">
+					<span className="me-auto min-w-0 truncate text-muted-foreground text-sm">
 						{banner?.label ??
 							(loading ? "Loading banner…" : "No banner selected")}
 					</span>

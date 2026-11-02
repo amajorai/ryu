@@ -1,4 +1,11 @@
 // Turn-hook fragment for Effort Escalator. `ctx` and `host` are injected by Core.
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 const id = ctx.conversation_id;
 if (!id) return { kind: "none" };
 const enabled = String(await host.getPreference({ key: "effort-escalator-enabled" }) ?? "false") === "true";
@@ -49,4 +56,10 @@ if (!stuck || state.escalations >= maxEscalations) {
 state.escalations += 1;
 state.reason = String(verdict ?? "").slice(0, 500);
 await host.storage.set(key, state);
-return { kind: "note", text: `Effort Escalator detected stalled work; the next turn will use escalation ${state.escalations}. ${state.reason}` };
+return {
+  kind: "note",
+  text: await host.t("Effort Escalator detected stalled work; the next turn will use escalation {level}. {reason}", {
+    level: state.escalations,
+    reason: state.reason,
+  }),
+};

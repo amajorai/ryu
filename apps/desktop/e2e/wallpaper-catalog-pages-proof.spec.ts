@@ -2,11 +2,9 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { PATTERNCRAFT_WALLPAPERS } from "@ryu/ui/components/backdrop/patterncraft-wallpapers.generated.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/wallpaper-backgrounds/store-library-tabs"
-);
+const PROOF_DIR = proofEvidencePath("wallpaper-backgrounds/store-library-tabs");
 const MESH_GRADIENT_ID = "com.ryu.marketplace-defaults:mesh-gradient";
 
 test("Marketplace and Library install and apply host-rendered wallpapers", async ({

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Tooltip,
@@ -5,7 +6,7 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import {
-	MARKING_LABELS,
+	markingName,
 	type PassportCountry,
 	type PassportStamp,
 	type StampPlacement,
@@ -15,8 +16,8 @@ import {
 	stampLabel,
 	stampTime,
 	UNASSIGNED_CODE,
-	UNASSIGNED_LABEL,
 	UNASSIGNED_STYLE,
+	unassignedLabel,
 } from "./passport-model.ts";
 import { EntryStamp, STAMP_HEIGHT, STAMP_WIDTH } from "./passport-stamp.tsx";
 
@@ -51,12 +52,6 @@ function PaperClip({ shape }: { shape: StampShape }) {
 	);
 }
 
-/** "Visa processing" for the tooltip, from the stamp's capitals. */
-function sentenceCase(text: string): string {
-	const lower = text.toLowerCase();
-	return lower.charAt(0).toUpperCase() + lower.slice(1);
-}
-
 /** What a stamp says in full: hover or focus shows it beside the stamp. */
 function StampDetails({
 	countryName,
@@ -73,10 +68,10 @@ function StampDetails({
 	return (
 		<span className="flex min-w-0 flex-col items-start gap-0.5 text-start">
 			<span className="font-medium text-foreground text-xs leading-4">
-				{stamp.thread.title || "Untitled conversation"}
+				{stamp.thread.title || tr("Untitled conversation")}
 			</span>
 			<span className="text-muted-foreground text-xs leading-4">
-				{countryName} · {sentenceCase(MARKING_LABELS[stamp.marking])}
+				{countryName} · {markingName(stamp.marking)}
 			</span>
 			<span className="font-mono text-[11px] text-muted-foreground tabular-nums leading-4">
 				{tl("Entered {entered} · Last {last}", {
@@ -130,7 +125,7 @@ export function StampButton({
 					>
 						<EntryStamp
 							code={country?.code ?? UNASSIGNED_CODE}
-							name={country?.agent.name ?? UNASSIGNED_LABEL}
+							name={country?.agent.name ?? unassignedLabel()}
 							selected={active}
 							stamp={stamp}
 							style={style}
@@ -142,7 +137,7 @@ export function StampButton({
 						sideOffset={10}
 					>
 						<StampDetails
-							countryName={country?.agent.name ?? UNASSIGNED_LABEL}
+							countryName={country?.agent.name ?? unassignedLabel()}
 							stamp={stamp}
 						/>
 					</TooltipContent>

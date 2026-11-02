@@ -1,3 +1,10 @@
+import {
+	activeLocale,
+	dateFormatter,
+	numberFormatter,
+	relativeTimeFormatter,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 
 // ---------------------------------------------------------------------------
@@ -5,11 +12,18 @@ import type { LiteralMessage } from "@ryu/i18n/react";
 // ---------------------------------------------------------------------------
 
 const MINUS = "−";
-const integerFormat = new Intl.NumberFormat("en-US");
-const percentFormat = new Intl.NumberFormat("en-US", {
-	maximumFractionDigits: 1,
-	minimumFractionDigits: 1,
-});
+/** Whole numbers in the UI locale. */
+const integerFormat = {
+	format: (value: number) => numberFormatter(activeLocale()).format(value),
+};
+/** One-decimal percentages in the UI locale. */
+const percentFormat = {
+	format: (value: number) =>
+		numberFormatter(activeLocale(), {
+			maximumFractionDigits: 1,
+			minimumFractionDigits: 1,
+		}).format(value),
+};
 
 export function formatPrice(value: number): string {
 	return integerFormat.format(value);
@@ -71,61 +85,77 @@ export function describeChange(
 	);
 }
 
-const dayFormat = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	month: "short",
-	weekday: "short",
-});
-const shortDayFormat = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	month: "short",
-});
-
+/** "Wed, Oct 14", in the UI locale. */
 export function formatDay(date: number): string {
-	return dayFormat.format(new Date(date));
+	return dateFormatter(activeLocale(), {
+		day: "numeric",
+		month: "short",
+		weekday: "short",
+	}).format(new Date(date));
 }
 
+/** "Oct 14", in the UI locale. */
 export function formatShortDay(date: number): string {
-	return shortDayFormat.format(new Date(date));
+	return dateFormatter(activeLocale(), {
+		day: "numeric",
+		month: "short",
+	}).format(new Date(date));
 }
 
-const clockFormat = new Intl.DateTimeFormat("en-US", {
+const CLOCK: Intl.DateTimeFormatOptions = {
 	hour: "2-digit",
 	hour12: false,
 	minute: "2-digit",
-});
-const weekdayFormat = new Intl.DateTimeFormat("en-US", { weekday: "short" });
+};
 
 /** "22:15", 24-hour. */
 export function formatClock(date: number): string {
-	return clockFormat.format(new Date(date));
+	return dateFormatter(activeLocale(), CLOCK).format(new Date(date));
 }
 
 /** "Wed 22:15". */
 export function formatWeekdayClock(date: number): string {
 	const value = new Date(date);
-	return `${weekdayFormat.format(value)} ${clockFormat.format(value)}`;
+	return tr("{weekday} {time}", {
+		time: formatClock(date),
+		weekday: dateFormatter(activeLocale(), { weekday: "short" }).format(value),
+	});
 }
 
-const SPOKEN_UNITS: Record<string, string> = {
-	d: "day",
-	h: "hour",
-	m: "minute",
-	s: "second",
-	w: "week",
-};
-
-/** A compact age ("5m") read aloud: "5 minutes ago"; "now" is "just now". */
-export function spokenAge(age: string): string {
-	const match = age.match(/^(\d+)([smhdw])$/);
-	if (!match) {
-		return age === "now" ? "just now" : age;
+/**
+ * An age read aloud, in the UI locale: "just now", "5 minutes ago",
+ * "3 hours ago". An unparsable time reads as "".
+ */
+export function spokenAge(
+	iso: string,
+	now: number,
+	locale: string = activeLocale()
+): string {
+	const then = Date.parse(iso);
+	if (Number.isNaN(then)) {
+		return "";
 	}
-	const count = Number(match[1]);
-	const unit = SPOKEN_UNITS[match[2] ?? ""] ?? "";
-	return `${count} ${count === 1 ? unit : `${unit}s`} ago`;
+	const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+	if (minutes < 1) {
+		return tr("just now");
+	}
+	const ago = relativeTimeFormatter(locale, "long", "always");
+	if (minutes < 60) {
+		return ago.format(-minutes, "minute");
+	}
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) {
+		return ago.format(-hours, "hour");
+	}
+	const days = Math.floor(hours / 24);
+	return days < 7
+		? ago.format(-days, "day")
+		: ago.format(-Math.floor(days / 7), "week");
 }
 
-export function plural(count: number, noun: string): string {
-	return `${integerFormat.format(count)} ${count === 1 ? noun : `${noun}s`}`;
+/** A ticker range's name ("2 weeks"), in the UI language. */
+export function tickerRangeName(range: 7 | 14 | 30): string {
+	return tr("{count, plural, =7 {1 week} =14 {2 weeks} other {1 month}}", {
+		count: range,
+	});
 }

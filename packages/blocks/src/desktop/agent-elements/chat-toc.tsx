@@ -125,7 +125,7 @@ export const ChatToc = memo(function ChatToc({
 						>
 							<motion.span
 								animate={{ width: getLineWidth(distance, isActive) }}
-								className="block h-px shrink-0 origin-left rounded-full bg-foreground/25 transition-colors group-hover/toc-item:bg-foreground group-hover/toc:bg-foreground/40 group-aria-[current=true]/toc-item:bg-foreground"
+								className="block h-px shrink-0 origin-left rounded-full bg-foreground/25 transition-colors group-hover/toc-item:bg-foreground group-hover/toc:bg-foreground/40 group-aria-[current=true]/toc-item:bg-foreground rtl:origin-right"
 								initial={false}
 								transition={
 									reduceMotion
@@ -140,7 +140,7 @@ export const ChatToc = memo(function ChatToc({
 						<HoverCardContent
 							align="start"
 							className="w-72 max-w-[min(18rem,calc(100vw-2rem))]"
-							side="right"
+							side="inline-end"
 							sideOffset={10}
 							spacing="rail"
 						>

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	JOB_STATUS_LABELS,
 	JOB_STATUS_ORDER,
@@ -20,16 +21,18 @@ export const JOB_UPDATED_LABELS: Record<JobUpdatedWithin, string> = {
 };
 
 /** Whole phrases, so each reads as one sentence in every language. */
-const JOB_UPDATED_PHRASES: Record<JobUpdatedWithin, string> = {
-	any: "Updated",
-	day: "Updated in the past 24 hours",
-	month: "Updated in the past month",
-	week: "Updated in the past week",
-};
-
 /** The phrase on an applied pill and its saved search: one wording for both. */
 export function jobUpdatedPhrase(within: JobUpdatedWithin): string {
-	return JOB_UPDATED_PHRASES[within];
+	switch (within) {
+		case "day":
+			return tr("Updated in the past 24 hours");
+		case "month":
+			return tr("Updated in the past month");
+		case "week":
+			return tr("Updated in the past week");
+		default:
+			return tr("Updated");
+	}
 }
 
 const DAY = 86_400_000;
@@ -182,6 +185,11 @@ export function jobFacetCounts(
 }
 
 export type JobSort = "recent" | "status";
+
+/** A sort's label in the UI language, for copy that interpolates it. */
+export function jobSortLabel(sort: JobSort): string {
+	return sort === "recent" ? tr("Most recent") : tr("Status");
+}
 
 export const JOB_SORT_LABELS: Record<JobSort, string> = {
 	recent: "Most recent",

@@ -200,3 +200,44 @@ describe("selectUpsellCards — clock guard", () => {
 		).toThrow();
 	});
 });
+
+describe("selectUpsellCards — clients localize from id, metric and value", () => {
+	it("gives every lever a stable id, a metric and the raw value", () => {
+		const snapshot: UsageSnapshot = {
+			...EMPTY,
+			sessionCount: 1200,
+			agentSeconds: 7200,
+			requestCount: 1100,
+			capHits: { maxOpenTabs: 3 },
+			gatedAttempts: { "managed-inference": 4 },
+		};
+		const weights = { ...UPSELL_WEIGHTS, maxCards: 10 };
+		const cards = selectUpsellCards(snapshot, weights, NOW);
+		const byId = new Map(cards.map((c) => [c.id, c]));
+		expect(byId.get("investment-conversations")).toMatchObject({
+			metric: "conversations",
+			value: 1200,
+		});
+		expect(byId.get("investment-agent-time")).toMatchObject({
+			metric: "agent-time",
+			value: 2,
+		});
+		expect(byId.get("investment-requests")).toMatchObject({
+			metric: "requests",
+			value: 1100,
+		});
+		for (const card of cards) {
+			expect(card.id).toBe(`${card.lever}-${card.metric}`);
+			expect(Number.isFinite(card.value)).toBe(true);
+		}
+	});
+
+	it("formats the English fallback headline independently of the host locale", () => {
+		const cards = selectUpsellCards(
+			{ ...EMPTY, sessionCount: 1200 },
+			UPSELL_WEIGHTS,
+			NOW
+		);
+		expect(cards[0]?.headline).toBe("You've started 1,200 conversations");
+	});
+});

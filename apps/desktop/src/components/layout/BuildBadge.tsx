@@ -2,6 +2,7 @@
 // "Nightly"), not a chip in the footer. Selecting it opens Gateway → Updates.
 // Hidden on a plain Stable release.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
 import { useBuildProfile } from "@/src/lib/build-profile.ts";
 import { channelLabel } from "@/src/lib/channel-brand.ts";
@@ -10,6 +11,7 @@ import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 
 /** Build-identity row for the account menu. Renders nothing on Stable. */
 export function BuildBadge() {
+	const tl = useLiteralMessages();
 	const { dev } = useBuildProfile();
 	const [channel] = useReleaseChannel();
 	const openGateway = useGatewayDialog((s) => s.openGateway);
@@ -29,7 +31,7 @@ export function BuildBadge() {
 		.map((label) =>
 			label === "Dev"
 				? "Dev build — isolated from your release install"
-				: `Release channel: ${label}`
+				: tl("Release channel: {label}", { label })
 		)
 		.join(" · ");
 

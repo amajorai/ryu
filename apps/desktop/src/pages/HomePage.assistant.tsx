@@ -9,6 +9,7 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { translate as tl } from "@ryu/i18n/core";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -112,7 +113,7 @@ export function useHomeAssistantSurface({
 		builderOpen
 			? {
 					kind: "dashboard",
-					label: `Build ${dashboardName}`,
+					label: tl("Build {dashboardName}", { dashboardName }),
 					description:
 						"Say what you want to see and I'll assemble the widgets on this board.",
 					preamble: [
@@ -134,10 +135,11 @@ export function useHomeAssistantSurface({
 						"dashboard_builder.configure_dashboard",
 						"dashboard_builder.get_dashboard",
 					],
+					// Chips send their text as the user's prompt, in the UI language.
 					prompts: [
-						"Chart a public JSON API",
-						"Show my unread email",
-						"Tidy the layout",
+						tl("Chart a public JSON API"),
+						tl("Show my unread email"),
+						tl("Tidy the layout"),
 					],
 					// The live board travels as the removable page context below.
 					snapshot: "",

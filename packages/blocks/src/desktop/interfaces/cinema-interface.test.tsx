@@ -296,7 +296,7 @@ describe("cinema model", () => {
 		expect(cinemaCardWidth(1344, 6)).toBe(217);
 		expect(cinemaPages(10, 4, 0, 900)).toEqual({ count: 3, current: 0 });
 		expect(cinemaPages(10, 4, 1800, 900)).toEqual({ count: 3, current: 2 });
-		expect(cinemaNames(SNAPSHOT.agents)).toBe("Ada, Grace and Linus");
+		expect(cinemaNames(SNAPSHOT.agents)).toBe("Ada, Grace, and Linus");
 	});
 
 	test("the preview grows over its poster and stays inside the gutters", () => {

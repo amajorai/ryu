@@ -32,6 +32,7 @@ import {
 	type ParseCapability,
 } from "@/src/lib/api/documents.ts";
 import { formatBytes, NODE_UPLOAD_MAX_BYTES } from "@/src/lib/api/spaces.ts";
+import { fsCommandErrorText } from "@/src/lib/fs-command-error.ts";
 import { listenWhenReady } from "@/src/lib/tauri-ready.ts";
 import { NodeBackupSettings } from "./BackupSettings.tsx";
 import { DataFolderSection } from "./StorageSettings-data-folder-section.tsx";
@@ -235,9 +236,18 @@ export function StorageSettings() {
 		} catch (e) {
 			setBusy(false);
 			setProgress(null);
-			sileo.error({ title: "Relocation failed", description: String(e) });
+			sileo.error({
+				title: "Relocation failed",
+				description: fsCommandErrorText(
+					e,
+					tl,
+					tl(
+						"Ryu couldn't copy the data folder. Your current data folder is still in use."
+					)
+				),
+			});
 		}
-	}, [picked]);
+	}, [picked, tl]);
 
 	const doSwitch = useCallback(async () => {
 		if (!picked) {
@@ -293,7 +303,11 @@ export function StorageSettings() {
 			} catch (e) {
 				sileo.error({
 					title: "Could not copy to that profile",
-					description: String(e),
+					description: fsCommandErrorText(
+						e,
+						tl,
+						tl("Ryu couldn't copy the data to that profile.")
+					),
 				});
 			} finally {
 				if (coreWasRunning) {
@@ -308,7 +322,9 @@ export function StorageSettings() {
 
 	const exportPassphraseError = (() => {
 		if ([...exportPassphrase].length < MIN_BACKUP_PASSPHRASE_CHARS) {
-			return `Use at least ${MIN_BACKUP_PASSPHRASE_CHARS} characters.`;
+			return tl("Use at least {count} characters.", {
+				count: MIN_BACKUP_PASSPHRASE_CHARS,
+			});
 		}
 		if (exportPassphrase !== exportConfirm) {
 			return "The passphrases do not match.";
@@ -328,7 +344,7 @@ export function StorageSettings() {
 		closeExportDialog();
 		const dest = await save({
 			defaultPath: "ryu-data-backup.zip",
-			filters: [{ name: "Zip archive", extensions: ["zip"] }],
+			filters: [{ name: tl("Zip archive"), extensions: ["zip"] }],
 		});
 		// The destination was chosen for the node selected when Export was
 		// clicked. If another node was selected while the dialog was open, the
@@ -359,14 +375,14 @@ export function StorageSettings() {
 	const doImport = useCallback(async () => {
 		const archive = await open({
 			multiple: false,
-			filters: [{ name: "Zip archive", extensions: ["zip"] }],
+			filters: [{ name: tl("Zip archive"), extensions: ["zip"] }],
 		});
 		if (!isNativeText(archive)) {
 			return;
 		}
 		// Confirm before wiping current data — the actual restore runs in runImport.
 		setPendingRestore(archive);
-	}, []);
+	}, [tl]);
 
 	const runImport = useCallback(async () => {
 		if (!pendingRestore) {
@@ -388,9 +404,16 @@ export function StorageSettings() {
 		} catch (e) {
 			setBusy(false);
 			setProgress(null);
-			sileo.error({ title: "Restore failed", description: String(e) });
+			sileo.error({
+				title: "Restore failed",
+				description: fsCommandErrorText(
+					e,
+					tl,
+					tl("Ryu couldn't restore that backup.")
+				),
+			});
 		}
-	}, [pendingRestore, restorePassphrase]);
+	}, [pendingRestore, restorePassphrase, tl]);
 
 	const changeLocationBody = renderChangeLocationBody({
 		busy,

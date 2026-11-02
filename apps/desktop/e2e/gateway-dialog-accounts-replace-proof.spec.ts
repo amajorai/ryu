@@ -8,6 +8,7 @@ import {
 } from "../src/lib/api/plugin-wire-values.ts";
 import { clientKeyInputSchema } from "./gateway-account-proof.contracts.ts";
 import { sdkAccountProviders } from "./harness/sdk-accounts-fixture.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
 // the tracked proof ledger; without it the committed evidence is refreshed.
@@ -15,7 +16,7 @@ function evidencePath(ledgerPath: string): string {
 	const override = process.env.RYU_PROOF_EVIDENCE_DIR;
 	return override
 		? path.join(override, ledgerPath)
-		: path.resolve(import.meta.dirname, "../../../docs/proof", ledgerPath);
+		: proofEvidencePath(ledgerPath);
 }
 
 // Replacing a credential needs the spending-limit acknowledgement

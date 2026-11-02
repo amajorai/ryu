@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test";
 
 const sent: { subject: string; to: string }[] = [];
 const inbox: { dedupeKey: string; userId: string }[] = [];
+const rows: Record<string, unknown>[] = [];
+const emails: Record<string, unknown>[] = [];
 const claimed = new Set<string>();
 const delivered = new Set<string>();
 let enabled = true;
@@ -55,8 +57,12 @@ beforeAll(() => {
 	}));
 	mock.module("@ryu/db/models/inbox-notification.model", () => ({
 		PlatformInboxNotification: {
-			updateOne: async (filter: { dedupeKey: string; userId: string }) => {
+			updateOne: async (
+				filter: { dedupeKey: string; userId: string },
+				update: { $set: Record<string, unknown> }
+			) => {
 				inbox.push(filter);
+				rows.push(update.$set);
 				return { upsertedCount: 1 };
 			},
 		},
@@ -74,7 +80,9 @@ beforeAll(() => {
 			dedupeKey: string;
 			email?: string;
 			organizationKind?: string;
+			react?: unknown;
 		}) => {
+			emails.push(input as Record<string, unknown>);
 			if (
 				input.organizationKind &&
 				enabled &&
@@ -166,5 +174,72 @@ describe("organization lifecycle notification delivery", () => {
 		expect(sent).toHaveLength(beforeSent);
 		expect(inbox.length).toBe(beforeInbox + 3);
 		enabled = true;
+	});
+
+	it("stores message parts as copy and renders the email from them", async () => {
+		const { notifyOrganizationEvent } = await import(
+			"./organization-notifications.ts"
+		);
+		rows.length = 0;
+		emails.length = 0;
+		const body = {
+			source:
+				"{amountMicroUsd} in Ryu credit moved between your organization and another organization you manage.",
+			values: { amountMicroUsd: 2_500_000 },
+		};
+		await notifyOrganizationEvent({
+			actionLabel: { source: "View organization billing" },
+			body,
+			dedupeKey: "credit-transfer:transfer-3",
+			kind: "organization-activity",
+			organizationIds: ["org-target"],
+			sourceId: "transfer-3",
+			sourceType: "credit-transfer",
+			subject: "Organization credit transfer completed",
+			title: "Organization credit transfer completed",
+		});
+
+		expect(rows[0]).toMatchObject({
+			actionLabel: "View organization billing",
+			body: "$2.50 in Ryu credit moved between your organization and another organization you manage.",
+			copy: {
+				actionLabel: [{ source: "View organization billing", values: {} }],
+				body: [body],
+				title: [
+					{ source: "Organization credit transfer completed", values: {} },
+				],
+			},
+		});
+		expect(emails[0]).toMatchObject({
+			actionLabel: "View organization billing",
+			body: "$2.50 in Ryu credit moved between your organization and another organization you manage.",
+			react: { body, actionLabel: { source: "View organization billing" } },
+		});
+	});
+
+	it("recognises a lifecycle hook's finished English for the row's copy", async () => {
+		const { notifyOrganizationEvent } = await import(
+			"./organization-notifications.ts"
+		);
+		rows.length = 0;
+		await notifyOrganizationEvent({
+			actionLabel: "Manage organization members",
+			body: "ana@acme.dev accepted the organization invitation.",
+			dedupeKey: "organization-invitation:inv-1:accepted",
+			kind: "organization-activity",
+			organizationIds: ["org-target"],
+			sourceId: "inv-1",
+			sourceType: "organization-invitation",
+			subject: "Organization invitation accepted",
+			title: "Organization invitation accepted",
+		});
+		expect(rows[0]?.copy).toMatchObject({
+			body: [
+				{
+					source: "{email} accepted the organization invitation.",
+					values: { email: "ana@acme.dev" },
+				},
+			],
+		});
 	});
 });

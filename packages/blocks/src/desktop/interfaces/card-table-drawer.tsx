@@ -112,7 +112,7 @@ export function CardTableDrawer({
 			animate={shown}
 			className={cn(
 				"relative h-full shrink-0 overflow-hidden",
-				overlay && "absolute inset-y-0 right-0 z-40 w-full"
+				overlay && "absolute inset-y-0 end-0 z-40 w-full"
 			)}
 			data-card-table-drawer=""
 			exit={reduceMotion ? { opacity: 0, transition: { duration: 0 } } : closed}
@@ -125,7 +125,7 @@ export function CardTableDrawer({
 		>
 			<aside
 				aria-label={tl("Thread: {title}", { title })}
-				className="absolute inset-y-0 left-0 flex min-h-0 flex-col p-2 sm:p-3"
+				className="absolute inset-y-0 start-0 flex min-h-0 flex-col p-2 sm:p-3"
 				data-testid="card-table-drawer"
 				style={overlay ? { width: "100%" } : { width }}
 			>
@@ -151,6 +151,7 @@ export function CardTableDrawer({
 									"gk-display truncate rounded-md text-[20px] leading-7",
 									GAME_FOCUS
 								)}
+								data-ryu-i18n="off"
 							>
 								{title}
 							</h2>

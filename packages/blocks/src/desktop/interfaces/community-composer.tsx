@@ -54,7 +54,10 @@ function Option({
 			<span className="flex min-w-0 flex-1 flex-col">
 				<span className="truncate text-sm">{communityLabel(community)}</span>
 				{community.kind === "profile" ? null : (
-					<span className="truncate text-muted-foreground text-xs">
+					<span
+						className="truncate text-muted-foreground text-xs"
+						data-ryu-i18n="off"
+					>
 						{community.name}
 					</span>
 				)}
@@ -101,7 +104,7 @@ function CommunityPicker({
 									})
 								: "Select a community"
 						}
-						className="flex h-10 items-center gap-2 self-start rounded-full bg-secondary pr-3 pl-1 font-semibold text-secondary-foreground text-sm outline-none transition-colors duration-100 hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_8%)] focus-visible:ring-2 focus-visible:ring-ring/50 data-[popup-open]:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_8%)]"
+						className="flex h-10 items-center gap-2 self-start rounded-full bg-secondary ps-1 pe-3 font-semibold text-secondary-foreground text-sm outline-none transition-colors duration-100 hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_8%)] focus-visible:ring-2 focus-visible:ring-ring/50 data-[popup-open]:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_8%)]"
 						data-testid="community-picker"
 						type="button"
 					/>
@@ -263,7 +266,7 @@ export function Composer({
 					value={draft.title}
 				/>
 				<p
-					className="self-end pr-2 text-muted-foreground text-xs tabular-nums"
+					className="self-end pe-2 text-muted-foreground text-xs tabular-nums"
 					id={counterId}
 				>
 					{length}/{TITLE_LIMIT}

@@ -70,7 +70,7 @@ function RouteEnd({
 		<div
 			className={cn(
 				"flex min-w-0 max-w-[40%] shrink-0 flex-col gap-1",
-				align === "end" && "items-end text-right"
+				align === "end" && "items-end text-end"
 			)}
 		>
 			<span className="font-medium text-muted-foreground text-xs uppercase leading-4 tracking-[0.08em]">
@@ -222,7 +222,8 @@ function GateFlights({
 		return null;
 	}
 	const gate =
-		snapshot.agents.find((agent) => agent.id === agentId)?.name ?? "this gate";
+		snapshot.agents.find((agent) => agent.id === agentId)?.name ??
+		tl("this gate");
 	const listed = flights
 		.filter((flight) => flight.gateAgentId === agentId)
 		.sort((a, b) => b.time - a.time)
@@ -249,14 +250,17 @@ function GateFlights({
 					{listed.map((flight) => (
 						<li key={flight.key}>
 							<button
-								className="flex h-10 w-full items-center gap-3 px-4 text-left outline-none transition-colors duration-100 hover:bg-muted focus-visible:bg-muted focus-visible:shadow-[inset_0_0_0_2px_var(--ring)]"
+								className="flex h-10 w-full items-center gap-3 px-4 text-start outline-none transition-colors duration-100 hover:bg-muted focus-visible:bg-muted focus-visible:shadow-[inset_0_0_0_2px_var(--ring)]"
 								onClick={() => onOpen(flight)}
 								type="button"
 							>
 								<span className="w-16 shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
 									{flight.flightNumber}
 								</span>
-								<span className="min-w-0 flex-1 truncate text-foreground text-sm">
+								<span
+									className="min-w-0 flex-1 truncate text-foreground text-sm"
+									data-ryu-i18n="off"
+								>
 									{flight.title}
 								</span>
 								<span
@@ -323,7 +327,12 @@ export function DeparturesPanel({
 	const title = booking ? "Book a flight" : (flight?.title ?? "Flight");
 	const subtitle = booking
 		? "Starts a conversation with the gate you pick"
-		: [flight?.gateLabel ? `Gate ${flight.gateLabel}` : null, flight?.terminal]
+		: [
+				flight?.gateLabel
+					? tl("Gate {gate}", { gate: flight.gateLabel })
+					: null,
+				flight?.terminal,
+			]
 				.filter(Boolean)
 				.join(" · ");
 	const showThread = !booking && threadView !== null;
@@ -332,7 +341,7 @@ export function DeparturesPanel({
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={booking ? title : tl("Flight details: {title}", { title })}
 			className={cn(
-				"absolute inset-0 z-20 flex min-h-0 flex-col bg-background md:static md:w-88 md:shrink-0 md:border-border md:border-l lg:w-[clamp(24rem,34vw,34rem)]",
+				"absolute inset-0 z-20 flex min-h-0 flex-col bg-background md:static md:w-88 md:shrink-0 md:border-border md:border-s lg:w-[clamp(24rem,34vw,34rem)]",
 				PANEL_LAMPS
 			)}
 			data-testid="departures-panel"
@@ -370,6 +379,7 @@ export function DeparturesPanel({
 					</p>
 					<h2
 						className="truncate font-semibold text-base text-foreground leading-6 outline-none"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>

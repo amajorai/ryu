@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { TicketState } from "./kitchen-model.ts";
 
@@ -136,8 +137,8 @@ export function CookRing({
 
 /** `14:05` in the viewer's locale (24 or 12 hour as they prefer). */
 export function clockTime(now: number): string {
-	return new Date(now).toLocaleTimeString(undefined, {
+	return dateFormatter(activeLocale(), {
 		hour: "numeric",
 		minute: "2-digit",
-	});
+	}).format(new Date(now));
 }

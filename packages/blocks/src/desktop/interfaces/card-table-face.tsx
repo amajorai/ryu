@@ -182,7 +182,7 @@ export function CardFace({
 	return (
 		<span
 			className={cn(
-				"relative flex size-full overflow-hidden rounded-xl border bg-card text-left text-card-foreground shadow-[0_14px_28px_-14px] shadow-black/50 transition-[box-shadow,border-color] duration-200 group-hover/card:shadow-[0_22px_36px_-16px] group-focus-visible/card:border-ring",
+				"relative flex size-full overflow-hidden rounded-xl border bg-card text-start text-card-foreground shadow-[0_14px_28px_-14px] shadow-black/50 transition-[box-shadow,border-color] duration-200 group-hover/card:shadow-[0_22px_36px_-16px] group-focus-visible/card:border-ring",
 				cardBorder(active, status === "attention")
 			)}
 			style={CARD_STOCK as CSSProperties}
@@ -240,6 +240,7 @@ export function CardFace({
 							TITLE_CLAMP[titleLines]
 						)}
 						data-card-title=""
+						data-ryu-i18n="off"
 					>
 						{title}
 					</span>

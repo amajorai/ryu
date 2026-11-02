@@ -1,13 +1,21 @@
+import { activeLocale, translate } from "@ryu/i18n/core";
 import { z } from "zod";
+import {
+	formatDecimal,
+	formatDurationParts,
+	formatPercentValue,
+} from "./locale-format.ts";
+import { formatStatsCount, formatStatsDuration } from "./stats-count-format.ts";
 import {
 	DEFAULT_STATS_PREFERENCES,
 	type deriveSessionStats,
-	formatStatsCount,
-	formatStatsDuration,
 	type StatsPreferences,
 	type StatsUsageMetric,
 	statsPreferenceFields,
 } from "./stats-model.ts";
+
+// Model code has no `useLiteralMessages()`; the active runtime translates.
+const tl = translate;
 
 export const STORAGE_KEY = "ryu:stats-plugin-preferences";
 const authoredStoredPreferences = z.object(statsPreferenceFields).partial();
@@ -37,14 +45,16 @@ export function formatSpeed(value: number | undefined): string | null {
 	if (value === undefined || !Number.isFinite(value) || value <= 0) {
 		return null;
 	}
-	return `${value.toFixed(value >= 100 ? 0 : 1)} tok/s`;
+	return tl("{rate} tok/s", {
+		rate: formatDecimal(value, value >= 100 ? 0 : 1),
+	});
 }
 
 export function formatPercent(value: number | undefined): string | null {
 	if (value === undefined || !Number.isFinite(value)) {
 		return null;
 	}
-	return `${Math.round(value * 100)}%`;
+	return formatPercentValue(Math.round(value * 100));
 }
 
 export function formatPercentagePoints(
@@ -53,7 +63,9 @@ export function formatPercentagePoints(
 	if (value === undefined || !Number.isFinite(value)) {
 		return null;
 	}
-	return `${value < 1 ? value.toFixed(1) : Math.round(value)}%`;
+	return value < 1
+		? formatPercentValue(value, 1)
+		: formatPercentValue(Math.round(value));
 }
 
 export function formatCost(
@@ -64,14 +76,14 @@ export function formatCost(
 		return null;
 	}
 	try {
-		return new Intl.NumberFormat(undefined, {
+		return new Intl.NumberFormat(activeLocale(), {
 			currency: currency ?? "USD",
 			maximumFractionDigits: 4,
 			minimumFractionDigits: 2,
 			style: "currency",
 		}).format(amount);
 	} catch {
-		return `${amount.toFixed(2)} ${currency ?? "USD"}`;
+		return `${formatDecimal(amount, 2)} ${currency ?? "USD"}`;
 	}
 }
 
@@ -88,24 +100,36 @@ function formatResetRemaining(
 	}
 	const seconds = Math.max(0, Math.ceil((resetMs - now) / 1000));
 	if (seconds < 60) {
-		return `${seconds}s`;
+		return formatDurationParts([[seconds, "second"]]);
 	}
 	const minutes = Math.floor(seconds / 60);
 	if (minutes < 60) {
-		return `${minutes}m`;
+		return formatDurationParts([[minutes, "minute"]]);
 	}
-	return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+	return formatDurationParts([
+		[Math.floor(minutes / 60), "hour"],
+		[minutes % 60, "minute"],
+	]);
+}
+
+/** The whole 0-100 percentage a usage readout shows, or null without data. */
+export function usagePercentValue(
+	percent: number | undefined,
+	mode: StatsPreferences["usagePercentMode"]
+): number | null {
+	if (percent === undefined || !Number.isFinite(percent)) {
+		return null;
+	}
+	const value = mode === "remaining" ? 100 - percent : percent;
+	return Math.round(Math.max(0, Math.min(100, value)));
 }
 
 export function usagePercent(
 	percent: number | undefined,
 	mode: StatsPreferences["usagePercentMode"]
 ): string | null {
-	if (percent === undefined || !Number.isFinite(percent)) {
-		return null;
-	}
-	const value = mode === "remaining" ? 100 - percent : percent;
-	return `${Math.round(Math.max(0, Math.min(100, value)))}%`;
+	const value = usagePercentValue(percent, mode);
+	return value === null ? null : formatPercentValue(value);
 }
 
 export function usageTimeCursor(
@@ -138,7 +162,9 @@ export function formatUsageReset(
 		const cursor = usageTimeCursor(metric, now);
 		return cursor === undefined
 			? formatResetRemaining(metric.resetAt, now)
-			: `${Math.round(cursor)}% elapsed`;
+			: tl("{percent} elapsed", {
+					percent: formatPercentValue(Math.round(cursor)),
+				});
 	}
 	if (preferences.resetTimerMode === "exact") {
 		const resetMs = Date.parse(metric.resetAt);
@@ -148,7 +174,7 @@ export function formatUsageReset(
 		const locale =
 			preferences.resetTimerLocale === "system" ||
 			preferences.resetTimerLocale.trim() === ""
-				? undefined
+				? activeLocale()
 				: preferences.resetTimerLocale.trim();
 		try {
 			return new Intl.DateTimeFormat(locale, {
@@ -157,7 +183,7 @@ export function formatUsageReset(
 				timeZone: preferences.resetTimerTimezone === "utc" ? "UTC" : undefined,
 			}).format(resetMs);
 		} catch {
-			return new Date(resetMs).toLocaleString();
+			return new Date(resetMs).toLocaleString(activeLocale());
 		}
 	}
 	return formatResetRemaining(metric.resetAt, now);
@@ -182,7 +208,10 @@ export function compactionValue(
 		return null;
 	}
 	if (preferences.compactionValue === "reclaimed") {
-		return `${formatStatsCount(selected) ?? "0"} tokens`;
+		return tl(
+			"{count, plural, one {{countText} token} other {{countText} tokens}}",
+			{ count: selected, countText: formatStatsCount(selected) ?? "0" }
+		);
 	}
 	if (
 		preferences.compactionValue === "total" &&
@@ -191,7 +220,11 @@ export function compactionValue(
 		const details: string[] = [];
 		if (preferences.compactionShowTriggers) {
 			details.push(
-				`${compactions.auto} auto, ${compactions.manual} manual, ${compactions.unknown} unknown`
+				tl("{auto} auto, {manual} manual, {unknown} unknown", {
+					auto: formatStatsCount(compactions.auto) ?? "0",
+					manual: formatStatsCount(compactions.manual) ?? "0",
+					unknown: formatStatsCount(compactions.unknown) ?? "0",
+				})
 			);
 		}
 		if (
@@ -214,10 +247,10 @@ export function timerLabel(
 		return null;
 	}
 	if (timer.state === "hot") {
-		return `${preferences.cacheHotGlyph} HOT`;
+		return `${preferences.cacheHotGlyph} ${tl("HOT")}`;
 	}
 	if (timer.state === "cold") {
-		return `${preferences.cacheColdGlyph} COLD`;
+		return `${preferences.cacheColdGlyph} ${tl("COLD")}`;
 	}
 	return `${preferences.cacheCountdownGlyph} ${formatStatsDuration(timer.remainingMs ?? 0)}`;
 }

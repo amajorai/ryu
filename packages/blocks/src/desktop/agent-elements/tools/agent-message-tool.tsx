@@ -1,6 +1,13 @@
 import { BubbleChatIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLocalizedText } from "@ryu/i18n/react";
+import {
+	type LiteralMessage,
+	type RichLiteralMessage,
+	type RichTags,
+	useLiteralMessages,
+	useLocalizedText,
+	useRichLiteralMessages,
+} from "@ryu/i18n/react";
 import { badgeVariants } from "@ryu/ui/components/badge";
 import { Bubble, BubbleContent } from "@ryu/ui/components/bubble";
 import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar";
@@ -12,7 +19,7 @@ import {
 	MessageHeader,
 } from "@ryu/ui/components/message";
 import { cn } from "@ryu/ui/lib/utils";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import type { AgentMessageContext, AgentMessageIdentity } from "../types.ts";
 import { getToolStatus } from "../utils/format-tool.ts";
 import {
@@ -178,6 +185,80 @@ export function AgentMessageExchange({
 	);
 }
 
+type ActivityPhase = "done" | "failed" | "pending";
+
+interface ActivityNames {
+	recipient: string;
+	sender: string;
+}
+
+/**
+ * "<from>Ada</from> asked <to>Bo</to>" as one translated sentence, so each
+ * locale orders the two agents and the verb itself.
+ */
+function activityMessage(
+	tlRich: RichLiteralMessage,
+	kind: string,
+	phase: ActivityPhase,
+	names: ActivityNames,
+	tags: RichTags
+): ReactNode {
+	const ask = kind === "ask";
+	if (phase === "failed") {
+		return ask
+			? tlRich(
+					"<from>{sender}</from> couldn't ask <to>{recipient}</to>",
+					names,
+					tags
+				)
+			: tlRich(
+					"<from>{sender}</from> couldn't send a message to <to>{recipient}</to>",
+					names,
+					tags
+				);
+	}
+	if (phase === "pending") {
+		return ask
+			? tlRich(
+					"<from>{sender}</from> is asking <to>{recipient}</to>",
+					names,
+					tags
+				)
+			: tlRich(
+					"<from>{sender}</from> is sending a message to <to>{recipient}</to>",
+					names,
+					tags
+				);
+	}
+	return ask
+		? tlRich("<from>{sender}</from> asked <to>{recipient}</to>", names, tags)
+		: tlRich(
+				"<from>{sender}</from> sent a message to <to>{recipient}</to>",
+				names,
+				tags
+			);
+}
+
+/** The same sentence as plain text, for the activity's accessible name. */
+function activityLabel(
+	tl: LiteralMessage,
+	kind: string,
+	phase: ActivityPhase,
+	names: ActivityNames
+): string {
+	// `tl` returns the message with its tags as text; the label drops them.
+	const text = activityMessage(
+		(source, values) => tl(source, values),
+		kind,
+		phase,
+		names,
+		{}
+	);
+	return String(text).replace(ACTIVITY_TAG, "");
+}
+
+const ACTIVITY_TAG = /<\/?(?:from|to)>/gu;
+
 export const AgentMessageTool = memo(function AgentMessageTool({
 	chatStatus,
 	context,
@@ -189,6 +270,8 @@ export const AgentMessageTool = memo(function AgentMessageTool({
 }) {
 	const payload = readAgentMessagePayload(part);
 	const { isError, isInterrupted, isPending } = getToolStatus(part, chatStatus);
+	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	if (!payload) {
 		return (
 			<GenericTool
@@ -211,21 +294,12 @@ export const AgentMessageTool = memo(function AgentMessageTool({
 	);
 	const recipient = identityFor(payload.to, context);
 	const failed = isError || isInterrupted || isAgentMessageRefused(part);
-	const activityVerb = failed
-		? payload.kind === "ask"
-			? "couldn't ask"
-			: "couldn't send a message to"
-		: isPending
-			? payload.kind === "ask"
-				? "is asking"
-				: "is sending a message to"
-			: payload.kind === "ask"
-				? "asked"
-				: "sent a message to";
+	const phase = failed ? "failed" : isPending ? "pending" : "done";
+	const names = { recipient: recipient.name, sender: sender.name };
 
 	return (
 		<div
-			aria-label={`${sender.name} ${activityVerb} ${recipient.name}`}
+			aria-label={activityLabel(tl, payload.kind, phase, names)}
 			className="flex min-w-0 flex-col gap-1.5"
 			data-testid="agent-message-activity"
 		>
@@ -237,9 +311,10 @@ export const AgentMessageTool = memo(function AgentMessageTool({
 					className="flex min-w-0 flex-wrap items-center"
 					spacing="compact"
 				>
-					<AgentChip identity={sender} />
-					<span>{activityVerb}</span>
-					<AgentChip identity={recipient} />
+					{activityMessage(tlRich, payload.kind, phase, names, {
+						from: () => <AgentChip identity={sender} />,
+						to: () => <AgentChip identity={recipient} />,
+					})}
 				</MarkerContent>
 			</Marker>
 

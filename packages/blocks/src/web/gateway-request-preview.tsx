@@ -1,41 +1,44 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowRight, Check, LockKeyhole, UserRoundCheck } from "lucide-react";
 import { useState } from "react";
+import { copyMarker as t } from "./copy-marker.ts";
 import styles from "./gateway-request-preview.module.css";
 
 const EXAMPLES = {
 	read: {
-		label: "Read",
-		request: "Summarize the notes in the project folder.",
-		tool: "Read project files",
-		access: "Project folder only",
-		review: "Not required for reading",
-		decision: "Allowed",
-		detail: "The agent can read the approved folder and prepare a summary.",
+		label: t("Read"),
+		request: t("Summarize the notes in the project folder."),
+		tool: t("Read project files"),
+		access: t("Project folder only"),
+		review: t("Not required for reading"),
+		decision: t("Allowed"),
+		detail: t("The agent can read the approved folder and prepare a summary."),
 		Icon: Check,
 	},
 	send: {
-		label: "Send",
-		request: "Email the project update to the client.",
-		tool: "Send email",
-		access: "Drafting is allowed",
-		review: "Required before sending",
-		decision: "Needs your approval",
-		detail:
-			"The draft is ready. Sending waits for someone on your team to approve it.",
+		label: t("Send"),
+		request: t("Email the project update to the client."),
+		tool: t("Send email"),
+		access: t("Drafting is allowed"),
+		review: t("Required before sending"),
+		decision: t("Needs your approval"),
+		detail: t(
+			"The draft is ready. Sending waits for someone on your team to approve it."
+		),
 		Icon: UserRoundCheck,
 	},
 	delete: {
-		label: "Delete",
-		request: "Delete the source files after writing the summary.",
-		tool: "Delete files",
-		access: "Read-only project access",
-		review: "Cannot override this access rule",
-		decision: "Blocked",
-		detail: "This agent has no permission to delete the source files.",
+		label: t("Delete"),
+		request: t("Delete the source files after writing the summary."),
+		tool: t("Delete files"),
+		access: t("Read-only project access"),
+		review: t("Cannot override this access rule"),
+		decision: t("Blocked"),
+		detail: t("This agent has no permission to delete the source files."),
 		Icon: LockKeyhole,
 	},
 } as const;
@@ -47,6 +50,7 @@ export function GatewayRequestPreview({
 }: {
 	compact?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [selected, setSelected] = useState<ExampleKey>("send");
 	const example = EXAMPLES[selected];
 
@@ -67,7 +71,7 @@ export function GatewayRequestPreview({
 					<TabsList manageLayout={false}>
 						{Object.entries(EXAMPLES).map(([value, item]) => (
 							<TabsTrigger key={value} value={value}>
-								{item.label}
+								{tl(item.label)}
 							</TabsTrigger>
 						))}
 					</TabsList>
@@ -84,7 +88,7 @@ export function GatewayRequestPreview({
 						/>
 						<div className="min-w-0">
 							<p className="font-heading font-medium text-xl tracking-tight">
-								{example.decision}
+								{tl(example.decision)}
 							</p>
 							<p className="mt-1 text-muted-foreground text-xs">
 								{selected === "read"
@@ -96,12 +100,12 @@ export function GatewayRequestPreview({
 						</div>
 					</div>
 				</div>
-				<div className="type-compact absolute right-5 bottom-16 left-5 flex items-center gap-2 border-foreground/10 border-t pt-3 text-muted-foreground">
+				<div className="type-compact absolute start-5 end-5 bottom-16 flex items-center gap-2 border-foreground/10 border-t pt-3 text-muted-foreground">
 					<span>Agent</span>
-					<ArrowRight aria-hidden="true" className="size-3" />
+					<ArrowRight aria-hidden="true" className="size-3 rtl:-scale-x-100" />
 					<span>Gateway</span>
-					<ArrowRight aria-hidden="true" className="size-3" />
-					<span className="truncate">{example.tool}</span>
+					<ArrowRight aria-hidden="true" className="size-3 rtl:-scale-x-100" />
+					<span className="truncate">{tl(example.tool)}</span>
 				</div>
 			</div>
 		);
@@ -131,7 +135,7 @@ export function GatewayRequestPreview({
 					<TabsList manageLayout={!compact}>
 						{Object.entries(EXAMPLES).map(([value, item]) => (
 							<TabsTrigger key={value} value={value}>
-								{item.label}
+								{tl(item.label)}
 							</TabsTrigger>
 						))}
 					</TabsList>
@@ -148,7 +152,7 @@ export function GatewayRequestPreview({
 									: "mt-3 font-medium text-lg leading-relaxed"
 							}
 						>
-							{example.request}
+							{tl(example.request)}
 						</p>
 					</div>
 					<dl
@@ -160,15 +164,15 @@ export function GatewayRequestPreview({
 					>
 						<div className="min-w-0">
 							<dt className="text-muted-foreground">Tool</dt>
-							<dd className="mt-1 break-words">{example.tool}</dd>
+							<dd className="mt-1 break-words">{tl(example.tool)}</dd>
 						</div>
 						<div className="min-w-0">
 							<dt className="text-muted-foreground">Access rule</dt>
-							<dd className="mt-1 break-words">{example.access}</dd>
+							<dd className="mt-1 break-words">{tl(example.access)}</dd>
 						</div>
 						<div className={compact ? "col-span-2 min-w-0" : "min-w-0"}>
 							<dt className="text-muted-foreground">Human review</dt>
-							<dd className="mt-1 break-words">{example.review}</dd>
+							<dd className="mt-1 break-words">{tl(example.review)}</dd>
 						</div>
 					</dl>
 				</div>
@@ -197,7 +201,7 @@ export function GatewayRequestPreview({
 									: "font-heading font-medium text-2xl tracking-tight"
 							}
 						>
-							{example.decision}
+							{tl(example.decision)}
 						</p>
 						<p
 							className={
@@ -206,7 +210,7 @@ export function GatewayRequestPreview({
 									: "mt-4 text-muted-foreground text-sm leading-relaxed"
 							}
 						>
-							{example.detail}
+							{tl(example.detail)}
 						</p>
 					</div>
 				</div>

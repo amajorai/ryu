@@ -1,10 +1,10 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { ChevronLeft } from "lucide-react";
 import { type RefObject, useId, useRef } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import { ChapterComposer } from "./library-composer.tsx";
 import { BookCover } from "./library-cover.tsx";
 import {
@@ -21,7 +21,7 @@ import { ProgressTrack } from "./library-shelf.tsx";
 
 function Fact({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="flex min-w-0 flex-col gap-1 px-4 first:pl-0 last:pr-0">
+		<div className="flex min-w-0 flex-col gap-1 px-4 first:ps-0 last:pe-0">
 			<dt className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.1em]">
 				{label}
 			</dt>
@@ -57,7 +57,7 @@ function ContentsRow({
 }) {
 	const tl = useLiteralMessages();
 	const { thread } = chapter;
-	const status = THREAD_STATUS_LABELS[chapter.status];
+	const status = threadStatusLabel(chapter.status, tl);
 	const age = readableAge(thread.updatedAt, now);
 	return (
 		<li className="border-border border-b last:border-b-0">
@@ -68,7 +68,7 @@ function ContentsRow({
 					status,
 					title: thread.title,
 				})}
-				className="group -mx-3 grid w-[calc(100%+1.5rem)] grid-cols-[2rem_minmax(0,1fr)_auto] items-baseline gap-x-3 rounded-md px-3 py-3 text-left outline-none transition-colors duration-150 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+				className="group -mx-3 grid w-[calc(100%+1.5rem)] grid-cols-[2rem_minmax(0,1fr)_auto] items-baseline gap-x-3 rounded-md px-3 py-3 text-start outline-none transition-colors duration-150 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
 				data-thread-id={thread.id}
 				onClick={() => onOpen(thread.id)}
 				type="button"
@@ -77,7 +77,10 @@ function ContentsRow({
 					{chapter.number}
 				</span>
 				<span className="flex min-w-0 items-baseline gap-3">
-					<span className="truncate font-medium text-[15px] text-foreground">
+					<span
+						className="truncate font-medium text-[15px] text-foreground"
+						data-ryu-i18n="off"
+					>
 						{thread.title}
 					</span>
 					<span
@@ -99,7 +102,7 @@ function ContentsRow({
 						className="@2xl/library:hidden"
 						status={chapter.status}
 					/>
-					<span className="w-24 text-right text-muted-foreground tabular-nums">
+					<span className="w-24 text-end text-muted-foreground tabular-nums">
 						{age}
 					</span>
 				</span>
@@ -110,23 +113,30 @@ function ContentsRow({
 
 /** The one line of state beside the author: a failure, a live run, or a turn. */
 function authorStatus(
-	book: LibraryBook
+	book: LibraryBook,
+	tl: LiteralMessage
 ): { text: string; tone: string } | null {
 	const failed = book.waiting.filter(
 		(chapter) => chapter.status === "attention"
 	).length;
 	if (failed > 0) {
 		return {
-			text: `${THREAD_STATUS_LABELS.attention} in ${chapterCountLabel(failed).toLowerCase()}`,
+			text: tl(
+				"{count, plural, one {Needs attention in # chapter} other {Needs attention in # chapters}}",
+				{ count: failed }
+			),
 			tone: "text-destructive",
 		};
 	}
 	if (book.working) {
-		return { text: "Writing now", tone: "text-foreground" };
+		return { text: tl("Writing now"), tone: "text-foreground" };
 	}
 	if (book.waiting.length > 0) {
 		return {
-			text: `${THREAD_STATUS_LABELS["your-turn"]} in ${chapterCountLabel(book.waiting.length).toLowerCase()}`,
+			text: tl(
+				"{count, plural, one {Your turn in # chapter} other {Your turn in # chapters}}",
+				{ count: book.waiting.length }
+			),
 			tone: "text-primary",
 		};
 	}
@@ -160,7 +170,7 @@ export function BookDetail({
 	const tl = useLiteralMessages();
 	const resume = resumeChapter(book);
 	const percent = progressPercent(book);
-	const status = authorStatus(book);
+	const status = authorStatus(book, tl);
 	const subject =
 		book.kind === "agent"
 			? book.title
@@ -173,12 +183,16 @@ export function BookDetail({
 	return (
 		<div className="mx-auto w-full max-w-[60rem] @3xl/library:px-10 px-4 @3xl/library:pt-4 pt-3 pb-16">
 			<Button
-				className="-ml-2 text-muted-foreground"
+				className="-ms-2 text-muted-foreground"
 				onClick={onBack}
 				size="sm"
 				variant="ghost"
 			>
-				<ChevronLeft aria-hidden="true" data-icon="inline-start" />
+				<ChevronLeft
+					aria-hidden="true"
+					className="rtl:-scale-x-100"
+					data-icon="inline-start"
+				/>
 				{backLabel}
 			</Button>
 			<div className="mt-4 flex @2xl/library:flex-row flex-col @2xl/library:items-start items-center @3xl/library:gap-12 gap-8">
@@ -197,6 +211,7 @@ export function BookDetail({
 					</p>
 					<h1
 						className="mt-2 text-balance font-serif text-4xl text-foreground leading-[1.1] outline-none"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>
@@ -210,7 +225,7 @@ export function BookDetail({
 						{status ? (
 							<span
 								className={cn(
-									"ml-2 inline-flex items-center gap-2 text-sm",
+									"ms-2 inline-flex items-center gap-2 text-sm",
 									status.tone
 								)}
 							>
@@ -222,7 +237,10 @@ export function BookDetail({
 						) : null}
 					</p>
 					{book.description ? (
-						<p className="mt-4 max-w-prose text-[15px] text-foreground/80 leading-relaxed">
+						<p
+							className="mt-4 max-w-prose text-[15px] text-foreground/80 leading-relaxed"
+							data-ryu-i18n="off"
+						>
 							{book.description}
 						</p>
 					) : null}

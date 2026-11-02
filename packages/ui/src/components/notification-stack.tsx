@@ -1,8 +1,9 @@
 "use client";
 
 import { ArrowUpRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable.ts";
 import { SPRING_LAYOUT } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -392,17 +393,17 @@ export function NotificationStack({
 										expandedLabel,
 									})
 								: tl("{count} notifications. Expand {collapsedLabel}.", {
-										collapsedLabel: collapsedLabel.toLowerCase(),
+										collapsedLabel: sentenceLabel(tl, collapsedLabel),
 										count: String(items.length),
 									})
 						}
-						className="flex items-center gap-1 rounded-lg px-1 py-1 text-left font-medium text-foreground text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						className="flex items-center gap-1 rounded-lg px-1 py-1 text-start font-medium text-foreground text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={handleFooterClick}
 						type="button"
 					>
 						{isExpanded ? expandedLabel : collapsedLabel}
 						{isExpanded && (
-							<HugeiconsIcon className="size-4" icon={ArrowUpRight01Icon} />
+							<DirectionalIcon className="size-4" icon={ArrowUpRight01Icon} />
 						)}
 					</button>
 				</motion.div>

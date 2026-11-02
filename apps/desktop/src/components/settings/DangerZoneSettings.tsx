@@ -47,6 +47,7 @@ import {
 } from "@/src/hooks/useActiveNode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { resetNode } from "@/src/lib/api/data-admin.ts";
+import { fsCommandErrorText } from "@/src/lib/fs-command-error.ts";
 import { isLocalNode } from "@/src/store/useNodeStore.ts";
 
 export function DangerZoneSettings() {
@@ -122,7 +123,11 @@ export function DangerZoneSettings() {
 		} catch (e) {
 			sileo.error({
 				title: "Could not deep clean",
-				description: String(e),
+				description: fsCommandErrorText(
+					e,
+					tl,
+					tl("Ryu couldn't finish the deep clean.")
+				),
 			});
 			// The failed invoke (or an earlier one in the set) has usually stopped
 			// Core already, and nothing else brings it back. Start the local Core
@@ -134,7 +139,7 @@ export function DangerZoneSettings() {
 			setDeepCleaning(false);
 			setDeepCleanOpen(false);
 		}
-	}, [getNode, cleanProfiles, cleanDepth]);
+	}, [getNode, cleanProfiles, cleanDepth, tl]);
 	const [resetOpen, setResetOpen] = useState(false);
 	const [resetTyped, setResetTyped] = useState("");
 
@@ -213,7 +218,10 @@ export function DangerZoneSettings() {
 			await queryClient.invalidateQueries({ queryKey: ["data-counts"] });
 			sileo.success({
 				title: "Deleted",
-				description: `${removed} ${active.noun} deleted.`,
+				description: tl("{count} {noun} deleted.", {
+					count: removed,
+					noun: active.noun,
+				}),
 			});
 			setActive(null);
 		} catch (e) {
@@ -273,7 +281,7 @@ export function DangerZoneSettings() {
 									}
 									description={
 										def.count === 0
-											? `No ${def.noun}`
+											? tl("No {noun}", { noun: def.noun })
 											: `${formatCount(def.count) ?? "—"} ${def.noun}`
 									}
 									key={def.id}

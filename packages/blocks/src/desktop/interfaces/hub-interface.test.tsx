@@ -380,7 +380,7 @@ describe("hub model", () => {
 		}
 		expect(hubNameList([ada])).toBe("Ada");
 		expect(hubNameList([ada, grace])).toBe("Ada and Grace");
-		expect(hubNameList([ada, grace, linus])).toBe("Ada, Grace and Linus");
+		expect(hubNameList([ada, grace, linus])).toBe("Ada, Grace, and Linus");
 		expect(hubNameList([ada, grace, linus, { ...ada, id: "x" }])).toBe(
 			"Ada, Grace and 2 more"
 		);
@@ -431,20 +431,18 @@ describe("hub model", () => {
 		expect(hubRunWhen(ahead(9 * 24 * 60), BASE, "en-US")).toBe(
 			"Oct 23, 10:00 AM"
 		);
-		expect(hubNextRunHeadline("In 40 min")).toBe("Next run in 40 min");
-		expect(hubNextRunHeadline("Tomorrow, 9:00 AM")).toBe(
-			"Next run tomorrow at 9:00\u00a0AM"
+		expect(hubNextRunHeadline(ahead(40), BASE, "en-US")).toBe(
+			"Next run in 40 min"
 		);
-		expect(hubNextRunHeadline("Today, 6:00 PM")).toBe(
-			"Next run at 6:00\u00a0PM"
-		);
-		expect(hubNextRunHeadline("Fri, 5:00 PM")).toBe(
-			"Next run Fri at 5:00\u00a0PM"
-		);
-		expect(hubNextRunHeadline("Oct 23, 10:00 AM")).toBe(
+		expect(hubNextRunHeadline(ahead(9 * 24 * 60), BASE, "en-US")).toBe(
 			"Next run Oct 23 at 10:00\u00a0AM"
 		);
-		expect(hubNextRunHeadline("Now")).toBe("A run is starting now");
+		expect(hubNextRunHeadline(ahead(0), BASE, "en-US")).toBe(
+			"A run is starting now"
+		);
+		expect(hubNextRunHeadline(null, BASE)).toBe("Next run soon");
+		// Other locales use their own clock and date, never English ones.
+		expect(hubRunWhen(ahead(9 * 24 * 60), BASE, "de")).toBe("23. Okt., 10:00");
 	});
 
 	test("an agent with a running thread is live, whatever its status says", () => {

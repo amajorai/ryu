@@ -29,7 +29,7 @@ export const SHEET_COLUMN_ICON: Record<SheetColumnId, LucideIcon> = {
 	updated: Clock3,
 };
 
-/** Left offset that centres the 24px expand button in the gutter, from the Title cell. */
+/** Inline-start offset that centres the 24px expand button in the gutter, from the Title cell. */
 export const EXPAND_OFFSET = -(SHEET_GUTTER_WIDTH + 24) / 2;
 /** Header row height; the body rows match it. */
 export const ROW_HEIGHT = 32;
@@ -60,7 +60,7 @@ export const SKELETON_WIDTHS = [
 ] as const;
 
 export const CELL =
-	"h-8 whitespace-nowrap border-border border-r border-b px-2.5 text-[13px]";
+	"h-8 whitespace-nowrap border-border border-e border-b px-2.5 text-[13px]";
 /**
  * Row fills are mixed against the background, so they stay opaque: the frozen
  * gutter and Title cells tint without showing what scrolls under them.
@@ -81,14 +81,14 @@ export const HEADER_FOCUS =
 	"focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary";
 /** The freeze line: a firmer divider always, plus a cast shadow once the body scrolls under it. */
 export const FROZEN_EDGE =
-	"border-r-foreground/15 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-3 after:translate-x-full after:bg-linear-to-r after:from-foreground/16 after:to-transparent after:opacity-0 after:transition-opacity group-data-[scrolled-x=true]/sheet:border-r-foreground/25 group-data-[scrolled-x=true]/sheet:after:opacity-100";
+	"border-e-foreground/15 after:pointer-events-none after:absolute after:inset-y-0 after:end-0 after:w-3 after:translate-x-full after:bg-linear-to-r rtl:after:-translate-x-full rtl:after:bg-linear-to-l after:from-foreground/16 after:to-transparent after:opacity-0 after:transition-opacity group-data-[scrolled-x=true]/sheet:border-e-foreground/25 group-data-[scrolled-x=true]/sheet:after:opacity-100";
 export const HEADER_EDGE =
 	"before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 before:h-2.5 before:translate-y-full before:bg-linear-to-b before:from-foreground/12 before:to-transparent before:opacity-0 before:transition-opacity group-data-[scrolled-y=true]/sheet:before:opacity-100";
 
 export const ALIGN: Record<SheetColumn["align"], string> = {
 	center: "justify-center text-center",
-	end: "justify-end text-right",
-	start: "justify-start text-left",
+	end: "justify-end text-end",
+	start: "justify-start text-start",
 };
 
 export function rowTint(selected: boolean, open: boolean): string {

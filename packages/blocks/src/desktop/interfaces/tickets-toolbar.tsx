@@ -1,4 +1,6 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -44,9 +46,15 @@ import {
 const MENU_ITEM = "text-[13px] font-normal";
 
 const GROUP_LABELS: Record<TicketGroupBy, string> = {
-	none: "None",
-	priority: "Priority",
-	status: "Status",
+	get none() {
+		return tr("None");
+	},
+	get priority() {
+		return tr("Priority");
+	},
+	get status() {
+		return tr("Status");
+	},
 };
 
 /** The view's title row: name, count, and Zendesk's Play button. */
@@ -124,7 +132,7 @@ function FilterChip({
 			<span className="truncate font-medium">{value}</span>
 			<button
 				aria-label={tl("Remove {filterLabel} filter", {
-					filterLabel: label.toLowerCase(),
+					filterLabel: sentenceLabel(tl, label),
 				})}
 				className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 				onClick={onClear}
@@ -367,7 +375,7 @@ export function TicketsToolbar({
 					render={
 						<Button
 							aria-label={tl("Group by {groupLabel}", {
-								groupLabel: GROUP_LABELS[groupBy].toLowerCase(),
+								groupLabel: sentenceLabel(tl, GROUP_LABELS[groupBy]),
 							})}
 							className="ms-auto"
 							size="sm"

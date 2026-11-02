@@ -20,6 +20,7 @@ import {
 	readTheDocs,
 	SharePackageVisual,
 	SKILLS_GITHUB,
+	catalogCopy as t,
 	WorkflowResumeVisual,
 } from "./shared.tsx";
 
@@ -254,8 +255,8 @@ export const COMPUTE_TO_MCP: Product[] = [
 				description:
 					"A separate set of Agent Skills teaches Cursor, Claude Code, and other agents to set up a Ryu server and control it over MCP.",
 				bullets: [
-					"Build agents and run local models",
-					"Write new skills of your own",
+					t("Build agents and run local models"),
+					t("Write new skills of your own"),
 				],
 				cta: SKILLS_GITHUB,
 				visual: <CodingAgentSkillsVisual />,
@@ -338,13 +339,15 @@ export const COMPUTE_TO_MCP: Product[] = [
 		},
 		faq: [
 			{
-				q: "What is MCP?",
-				a: "The Model Context Protocol, an open standard for connecting AI models to external tools and data. Ryu agents can use the MCP servers you add.",
+				question: "What is MCP?",
+				answer:
+					"The Model Context Protocol, an open standard for connecting AI models to external tools and data. Ryu agents can use the MCP servers you add.",
 			},
 			{
-				q: "Does ryu-mcp need its own sign-in?",
+				question: "Does ryu-mcp need its own sign-in?",
 				// gateway.md M7: apps/mcp/README.md "Authentication".
-				a: "Yes, once. Run ryu-mcp login with the same Ryu account you use in Ryu Desktop and the CLI; ryu-mcp keeps its own session.",
+				answer:
+					"Yes, once. Run ryu-mcp login with the same Ryu account you use in Ryu Desktop and the CLI; ryu-mcp keeps its own session.",
 			},
 		],
 		cta: {

@@ -69,7 +69,7 @@ export function PageHeader({
 				)}
 			>
 				<nav aria-label="Namespaces">
-					<ul className="-ml-2 flex">
+					<ul className="-ms-2 flex">
 						{leftTabs.map((tab) => (
 							<TabButton key={tab.id} tab={tab} />
 						))}
@@ -77,7 +77,7 @@ export function PageHeader({
 				</nav>
 				{rightTabs.length > 0 ? (
 					<nav aria-label="Views">
-						<ul className="-mr-2 flex">
+						<ul className="-me-2 flex">
 							{rightTabs.map((tab) => (
 								<TabButton key={tab.id} tab={tab} />
 							))}

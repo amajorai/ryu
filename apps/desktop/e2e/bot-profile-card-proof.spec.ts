@@ -1,11 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_NODE_URL = "http://proof.local";
-const proofDirectory = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const proofDirectory = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 interface ProofRequest {

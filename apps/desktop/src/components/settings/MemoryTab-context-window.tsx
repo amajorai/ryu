@@ -36,8 +36,8 @@ import {
 import {
 	BUDGET_AUTO,
 	BUDGET_CUSTOM,
-	BUDGET_ITEMS,
 	BUDGET_OFF,
+	budgetItems,
 	CONTEXT_PRESETS,
 	CUSTOM_SEED_TOKENS,
 	scopedOverrideEffect,
@@ -302,6 +302,7 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 		}
 		return budget.kind === "auto" ? BUDGET_AUTO : BUDGET_OFF;
 	})();
+	const budgetOptions = budgetItems();
 	const historyCeiling =
 		budget.kind === "tokens"
 			? contextHistoryBudget(budget.tokens, reserve)
@@ -316,7 +317,7 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 				<div className="space-y-1.5">
 					<Label htmlFor="context-budget">Context budget</Label>
 					<Select
-						items={BUDGET_ITEMS}
+						items={budgetOptions}
 						onValueChange={handleBudgetSelect}
 						value={selectValue}
 					>
@@ -324,7 +325,7 @@ export function ContextWindowSection({ target }: { target: ApiTarget }) {
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							{BUDGET_ITEMS.map((item) => (
+							{budgetOptions.map((item) => (
 								<SelectItem key={item.value} value={item.value}>
 									{item.label}
 								</SelectItem>

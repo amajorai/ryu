@@ -60,7 +60,7 @@ export function SectionActionButton({
 // PANEL_ROW_BADGE is the section title's own count, reused here so the trailing
 // slot has ONE treatment: plain tertiary text, never a pill for a normal count.
 export const PANEL_ROW =
-	"flex min-h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-sm transition-colors duration-150 hover:bg-muted hover:duration-0";
+	"flex min-h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-start text-sm transition-colors duration-150 hover:bg-muted hover:duration-0";
 const PANEL_ROW_STATIC =
 	"flex min-h-8 w-full min-w-0 items-center gap-2 px-2 py-1 text-sm";
 export const PANEL_ROW_ICON =
@@ -112,7 +112,7 @@ export function OverflowRow({
 				type="button"
 			>
 				<span>{copy}</span>
-				<span className="ml-auto text-xs">View all</span>
+				<span className="ms-auto text-xs">View all</span>
 			</button>
 		</li>
 	);
@@ -332,7 +332,7 @@ function SourceGroup({
 			</button>
 			{open && (
 				<ul
-					className="mt-0.5 mb-1 ml-4 flex flex-col gap-0.5 border-border border-l pl-2"
+					className="ms-4 mt-0.5 mb-1 flex flex-col gap-0.5 border-border border-s ps-2"
 					id={contentId}
 				>
 					{shown.map((item) => (

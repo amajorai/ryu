@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
@@ -22,7 +23,6 @@ import { agentHandle, compactAge } from "./interface-renderer.ts";
 import { PersonaAvatar } from "./persona-avatar.tsx";
 import {
 	agoLabel,
-	countLabel,
 	dayTime,
 	fullTime,
 	type PersonaStatus,
@@ -73,8 +73,8 @@ function StepDetail({ thread }: { thread: InterfaceThread }) {
 			</span>
 			{thread.lastMessage ? (
 				<span className="line-clamp-2 text-foreground/80">
-					{thread.lastMessageRole === "user" ? "You: " : ""}
-					{thread.lastMessage}
+					{thread.lastMessageRole === "user" ? `${tr("You:")} ` : ""}
+					<span data-ryu-i18n="off">{thread.lastMessage}</span>
 				</span>
 			) : null}
 		</span>
@@ -94,7 +94,7 @@ function StepRow({
 	return (
 		<li>
 			<button
-				className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+				className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 				onClick={() => onOpen(thread.id)}
 				type="button"
 			>
@@ -104,7 +104,7 @@ function StepRow({
 				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<span className="flex min-w-0 items-baseline text-sm">
 						<span className="min-w-0 truncate">
-							{thread.title || "Untitled"}
+							{thread.title || tr("Untitled")}
 						</span>
 						<span
 							className={cn(
@@ -163,7 +163,7 @@ function StatusLine({
 			<button
 				aria-controls={expandable ? stepsId : undefined}
 				aria-expanded={expandable ? depth > 0 : undefined}
-				className="-mx-2 flex h-8 max-w-[calc(100%+1rem)] items-center gap-2 self-start rounded-md px-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring enabled:hover:bg-muted disabled:cursor-default"
+				className="-mx-2 flex h-8 max-w-[calc(100%+1rem)] items-center gap-2 self-start rounded-md px-2 text-start text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring enabled:hover:bg-muted disabled:cursor-default"
 				disabled={!expandable}
 				onClick={() => onDepthChange(depth === 0 ? 1 : 0)}
 				type="button"
@@ -171,7 +171,7 @@ function StatusLine({
 				<StatusMark status={status.status} />
 				<span className="flex min-w-0 items-baseline">
 					<span className="min-w-0 truncate">
-						{lead ? lead.title || "Untitled" : status.headline}
+						{lead ? lead.title || tr("Untitled") : status.headline}
 					</span>
 					{status.label ? (
 						<span
@@ -187,7 +187,7 @@ function StatusLine({
 					) : null}
 					{others.length > 0 ? (
 						<span className="@max-[639px]:hidden shrink-0 whitespace-pre text-muted-foreground">
-							{tl(" · {count} more", { count: others.length })}
+							{` · ${tl("{count} more", { count: others.length })}`}
 						</span>
 					) : null}
 				</span>
@@ -240,11 +240,19 @@ function StatusLine({
 							<div className="flex flex-wrap items-center gap-x-1.5 px-2 pb-1 text-muted-foreground text-xs">
 								{depth === 2 ? (
 									<span className="tabular-nums">
-										{countLabel(threads, "chat")} ·{" "}
-										{countLabel(messages, "message")}
 										{lastActiveAt
-											? tl(" · active {ago}", { ago: agoLabel(lastActiveAt) })
-											: ""}
+											? tl(
+													"{chats, plural, one {# chat} other {# chats}} · {messages, plural, one {# message} other {# messages}} · active {ago}",
+													{
+														ago: agoLabel(lastActiveAt),
+														chats: threads,
+														messages,
+													}
+												)
+											: tl(
+													"{chats, plural, one {# chat} other {# chats}} · {messages, plural, one {# message} other {# messages}}",
+													{ chats: threads, messages }
+												)}
 									</span>
 								) : null}
 								{depth !== 2 && hidden > 0 ? (
@@ -305,7 +313,9 @@ function PersonaSwitcher({
 						{agents.map((item) => (
 							<DropdownMenuRadioItem key={item.id} value={item.id}>
 								<PersonaAvatar agent={item} size={20} />
-								<span className="min-w-0 flex-1 truncate">{item.name}</span>
+								<span className="min-w-0 flex-1 truncate" data-ryu-i18n="off">
+									{item.name}
+								</span>
 							</DropdownMenuRadioItem>
 						))}
 					</DropdownMenuRadioGroup>
@@ -373,6 +383,7 @@ export function PersonaHeader({
 										"truncate font-semibold tracking-tight",
 										compact ? "text-lg" : "@min-[640px]:text-2xl text-xl"
 									)}
+									data-ryu-i18n="off"
 								>
 									{agent.name}
 								</h1>

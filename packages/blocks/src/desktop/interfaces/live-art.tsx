@@ -59,6 +59,7 @@ function LiveCam({
 			</span>
 			<span
 				className="mt-[1.2cqw] truncate rounded-[0.8cqw] px-[1.4cqw] py-[0.9cqw] text-center font-bold text-[clamp(8px,2.4cqw,16px)] uppercase leading-none tracking-wider"
+				data-ryu-i18n="off"
 				style={{ background: colors.frame, color: colors.frameText }}
 			>
 				{agent.name}
@@ -95,7 +96,7 @@ export const LiveScene = memo(function LiveSceneImpl({
 		<span
 			aria-hidden="true"
 			className={cn(
-				"absolute inset-0 block overflow-hidden text-left",
+				"absolute inset-0 block overflow-hidden text-start",
 				className
 			)}
 			data-art={spec.kind}
@@ -116,7 +117,10 @@ export const LiveScene = memo(function LiveSceneImpl({
 				</span>
 				{quote ? (
 					<>
-						<span className="mt-[2.4cqw] line-clamp-3 text-pretty font-semibold text-[clamp(11px,5cqw,30px)] leading-[1.22] tracking-tight">
+						<span
+							className="mt-[2.4cqw] line-clamp-3 text-pretty font-semibold text-[clamp(11px,5cqw,30px)] leading-[1.22] tracking-tight"
+							data-ryu-i18n="off"
+						>
 							{spec.excerpt}
 						</span>
 						<span
@@ -134,6 +138,7 @@ export const LiveScene = memo(function LiveSceneImpl({
 								? "text-[clamp(18px,4.6cqw,44px)]"
 								: "text-[clamp(12px,6cqw,32px)]"
 						)}
+						data-ryu-i18n="off"
 					>
 						{spec.title}
 					</span>

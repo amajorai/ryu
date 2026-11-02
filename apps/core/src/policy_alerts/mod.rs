@@ -74,46 +74,13 @@ pub struct PolicyAlert {
     pub org_id: String,
 }
 
+mod text;
+
 impl PolicyAlert {
-    /// A human-readable alert title for the notification surfaces.
-    fn title(&self) -> String {
-        match self.source.as_str() {
-            "budget" => "Budget limit reached".to_string(),
-            "session_budget" => "Session budget limit reached".to_string(),
-            "wallet_empty" => "Wallet balance depleted".to_string(),
-            "firewall" => "Firewall policy triggered".to_string(),
-            other if other.is_empty() => "Policy alert".to_string(),
-            other => format!("Policy alert: {other}"),
-        }
-    }
-
-    /// A human-readable alert body.
-    fn message(&self) -> String {
-        let scope = if self.subject_key.is_empty() {
-            self.scope.clone()
-        } else {
-            format!("{} {}", self.scope, self.subject_key)
-        };
-        let enforcement = if self.enforcement.is_empty() {
-            String::new()
-        } else {
-            format!(" Enforcement: {}.", self.enforcement)
-        };
-        if self.limit > 0 {
-            format!(
-                "Used {} of {} ({}).{}",
-                self.used,
-                self.limit,
-                scope.trim(),
-                enforcement
-            )
-        } else {
-            format!("Triggered for {}.{}", scope.trim(), enforcement)
-        }
-    }
-
     /// Build the transient [`FanoutAlert`] this policy alert fans out as. Nothing
-    /// is persisted — it is a carrier for the notify fan-out only.
+    /// is persisted — it is a carrier for the notify fan-out only. `title` and
+    /// `message` are the English rendering; `hook_event.i18n` carries the
+    /// messages the notify kernel renders per recipient locale.
     fn to_fanout(&self) -> FanoutAlert {
         let kind = format!(
             "policy_{}",
@@ -123,8 +90,8 @@ impl PolicyAlert {
                 self.source.as_str()
             }
         );
-        let title = self.title();
-        let message = self.message();
+        let text = self.text();
+        let (title, message) = text.render("en");
         let hook_event = serde_json::json!({
             "monitor_id": format!("policy:{}", self.source),
             "monitor_name": title,
@@ -132,6 +99,7 @@ impl PolicyAlert {
             "title": title,
             "message": message,
             "kind": kind,
+            "i18n": text.to_wire(),
         });
         FanoutAlert {
             title,
@@ -213,9 +181,13 @@ pub async fn dispatch(alert: PolicyAlert, http: reqwest::Client, store: NotifySt
         "restrict" | "downgrade" => "warning",
         _ => "warning",
     };
+    // The toast is drawn by this node's desktop, so it reads the node's language.
+    let (toast_title, toast_body) = alert
+        .text()
+        .render(crate::i18n::locale::node_locale().await);
     crate::events::publish(crate::events::DesktopNotification {
-        title: carrier.title.clone(),
-        body: Some(carrier.message.clone()),
+        title: toast_title,
+        body: Some(toast_body),
         level: level.to_string(),
         target_user_id: None,
         notification_id: None,
@@ -306,42 +278,94 @@ mod tests {
         a
     }
 
-    #[test]
-    fn title_maps_each_known_source() {
-        assert_eq!(alert("budget").title(), "Budget limit reached");
-        assert_eq!(
-            alert("session_budget").title(),
-            "Session budget limit reached"
-        );
-        assert_eq!(alert("wallet_empty").title(), "Wallet balance depleted");
-        assert_eq!(alert("firewall").title(), "Firewall policy triggered");
-        // Empty source → generic title; unknown source → labelled fallback.
-        assert_eq!(alert("").title(), "Policy alert");
-        assert_eq!(alert("mystery").title(), "Policy alert: mystery");
+    fn title(alert: &PolicyAlert) -> String {
+        alert.text().render("en").0
+    }
+
+    fn message(alert: &PolicyAlert) -> String {
+        alert.text().render("en").1
     }
 
     #[test]
-    fn message_uses_limit_and_scope_and_enforcement() {
+    fn title_maps_each_known_source() {
+        assert_eq!(title(&alert("budget")), "Budget limit reached");
+        assert_eq!(
+            title(&alert("session_budget")),
+            "Session budget limit reached"
+        );
+        assert_eq!(title(&alert("wallet_empty")), "Wallet balance depleted");
+        assert_eq!(title(&alert("firewall")), "Firewall policy triggered");
+        // Empty source → generic title; unknown source → labelled fallback.
+        assert_eq!(title(&alert("")), "Policy alert");
+        assert_eq!(title(&alert("mystery")), "Policy alert: mystery");
+    }
+
+    #[test]
+    fn message_is_whole_sentences_per_scope_and_enforcement() {
         let mut a = alert("budget");
         a.scope = "user".into();
         a.subject_key = "u_9".into();
         a.enforcement = "stop".into();
         a.used = 5;
         a.limit = 10;
-        assert_eq!(a.message(), "Used 5 of 10 (user u_9). Enforcement: stop.");
+        assert_eq!(
+            message(&a),
+            "Used 5 of 10 for user u_9. Action: requests were stopped."
+        );
 
-        // No limit → the "Triggered for" shape; no subject_key → scope alone; no
-        // enforcement → no trailing enforcement clause.
+        // Large numbers are grouped for the reader's locale.
+        a.used = 12_500;
+        a.limit = 10_000;
+        a.enforcement = String::new();
+        assert_eq!(message(&a), "Used 12,500 of 10,000 for user u_9.");
+        let (_, de) = a.text().render("de");
+        assert!(de.contains("12.500") && de.contains("10.000"), "{de}");
+
+        // No limit → the "Triggered for" shape; no subject_key → the scope alone.
         let mut b = alert("firewall");
         b.scope = "request".into();
         b.limit = 0;
-        assert_eq!(b.message(), "Triggered for request.");
+        assert_eq!(message(&b), "Triggered for this request.");
+
+        // An unknown scope or enforcement is shown as the Gateway named it.
+        b.scope = "tenant".into();
+        b.subject_key = "t1".into();
+        b.enforcement = "quarantine".into();
+        assert_eq!(
+            message(&b),
+            "Triggered for tenant t1. Action taken: quarantine."
+        );
+        b.scope = String::new();
+        b.subject_key = String::new();
+        b.enforcement = String::new();
+        assert_eq!(message(&b), "Policy triggered.");
+    }
+
+    #[test]
+    fn localized_title_and_sentence_join_follow_the_locale() {
+        let mut a = alert("budget");
+        a.scope = "agent".into();
+        a.enforcement = "block".into();
+        a.used = 3;
+        a.limit = 2;
+        let (title, ja) = a.text().render("ja");
+        let (_, en) = a.text().render("en");
+        // Each sentence is its own message, joined per locale: translated
+        // Japanese runs on without a space, English that is not translated
+        // yet keeps one, so the body is never two sentences glued together.
+        assert!(!ja.contains(".A"), "{ja}");
+        assert!(!title.is_empty() && !en.is_empty());
     }
 
     #[test]
     fn to_fanout_derives_kind_and_carries_title_message() {
         let carrier = alert("budget").to_fanout();
         assert_eq!(carrier.title, "Budget limit reached");
+        assert_eq!(carrier.hook_event["title"], "Budget limit reached");
+        // The localizable form rides along for the notify kernel.
+        let text =
+            crate::i18n::AlertText::from_wire(&carrier.hook_event["i18n"]).expect("i18n parses");
+        assert_eq!(text.render("en").0, carrier.title);
         assert_eq!(carrier.data["kind"], "policy_budget");
         assert_eq!(carrier.hook_event["kind"], "policy_budget");
         assert_eq!(carrier.hook_event["monitor_id"], "policy:budget");

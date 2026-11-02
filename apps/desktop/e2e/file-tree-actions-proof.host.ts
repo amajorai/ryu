@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const desktop = path.resolve(import.meta.dirname, "..");
 const buildDirectory = path.join(tmpdir(), "ryu-file-tree-actions-proof-build");
@@ -14,9 +15,8 @@ const authStoreRid = 4217;
 let authStoreLoaded = false;
 const authStoreKeys = new Set(["accounts", "activeUserId", "token"]);
 const repository = path.resolve(desktop, "../..");
-const bridgeManifest = path.join(
-	repository,
-	"docs/proof/test-coverage-sweep-20261008/central-pending-patches/file-tree-native/native-proof/Cargo.toml"
+const bridgeManifest = proofEvidencePath(
+	"test-coverage-sweep-20261008/central-pending-patches/file-tree-native/native-proof/Cargo.toml"
 );
 const bridgeTarget = path.join(tmpdir(), "ryu-file-tree-native-proof-target");
 const bridgeExecutable = path.join(
@@ -28,6 +28,7 @@ const bridgeExecutable = path.join(
 );
 const bridgeSourceInputs = [
 	path.join(repository, "apps/desktop/src-tauri/src/workspace_move.rs"),
+	path.join(repository, "apps/desktop/src-tauri/src/fs_command_error.rs"),
 	path.join(repository, "apps/desktop/src-tauri/src/lib.rs"),
 	path.join(repository, "apps/desktop/src-tauri/Cargo.toml"),
 	path.join(repository, "apps/desktop/src-tauri/Cargo.lock"),
@@ -105,6 +106,15 @@ async function native(args: string[]) {
 		process.exited,
 	]);
 	return { stdout, stderr, code };
+}
+// The bridge prints the coded `FsCommandError` as JSON on stderr; anything
+// else (a usage error) stays a string.
+function nativeError(stderr: string): unknown {
+	try {
+		return JSON.parse(stderr);
+	} catch {
+		return stderr.trim();
+	}
 }
 let holdMove = false;
 let heldMove: (() => void) | null = null;
@@ -312,12 +322,20 @@ const server = Bun.serve({
 					if (refuseList) {
 						refuseList = false;
 						call.outcome = "refused";
-						return json({ error: "Fixture project listing refused" }, 503);
+						return json(
+							{
+								error: {
+									code: "list_failed",
+									detail: "Fixture project listing refused",
+								},
+							},
+							503
+						);
 					}
 					const result = await native(["--list", args.root as string]);
 					if (result.code) {
 						call.outcome = "refused";
-						return json({ error: result.stderr.trim() }, 503);
+						return json({ error: nativeError(result.stderr) }, 503);
 					}
 					return json({ result: JSON.parse(result.stdout) });
 				}
@@ -344,7 +362,7 @@ const server = Bun.serve({
 					]);
 					if (result.code) {
 						call.outcome = "refused";
-						return json({ error: result.stderr.trim() }, 409);
+						return json({ error: nativeError(result.stderr) }, 409);
 					}
 					call.outcome = "accepted";
 					return json({ result: null });

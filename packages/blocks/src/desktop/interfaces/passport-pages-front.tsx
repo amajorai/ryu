@@ -5,9 +5,9 @@ import type {
 } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
 import {
-	MARKING_LABELS,
-	MARKING_MEANINGS,
 	MARKING_ORDER,
+	markingLabel,
+	markingMeaning,
 	mrzLines,
 	type Passport,
 	stampDate,
@@ -88,7 +88,7 @@ function MarkingSample({
 				marking === "exited" && "opacity-80"
 			)}
 		>
-			{MARKING_LABELS[marking]}
+			{markingLabel(marking)}
 		</span>
 	);
 }
@@ -121,7 +121,7 @@ export function NotesPage({
 							<MarkingSample marking={marking} />
 						</dt>
 						<dd className="text-(--pp-ink-muted) text-xs leading-4">
-							{MARKING_MEANINGS[marking]}
+							{markingMeaning(marking)}
 						</dd>
 					</div>
 				))}
@@ -143,7 +143,10 @@ export function NotesPage({
 									{stampDayMonth(start)} {stampTime(start)}
 								</span>
 								<span className="min-w-0">
-									<span className="block truncate font-medium text-[13px] leading-4">
+									<span
+										className="block truncate font-medium text-[13px] leading-4"
+										data-ryu-i18n="off"
+									>
 										{event.title}
 									</span>
 									<span className="block truncate text-(--pp-ink-muted) text-[11px] leading-4">

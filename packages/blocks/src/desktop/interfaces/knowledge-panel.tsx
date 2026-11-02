@@ -1,25 +1,25 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ArrowLeft, SquarePen, X } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import {
+	countOf,
 	displayLabel,
-	KIND_LABELS,
 	type KnowledgeGraph,
 	type KnowledgeNode,
 	type KnowledgeNodeKind,
+	kindLabel,
 	linkedEntities,
 	linkedThreads,
 	messageMentions,
-	plural,
 	statusCounts,
 } from "./knowledge-model.ts";
 import type { KnowledgePalette } from "./knowledge-palette.ts";
@@ -114,11 +114,12 @@ export function KnowledgePanel({
 						type="button"
 						variant="ghost"
 					>
-						<ArrowLeft aria-hidden="true" className="size-4" />
+						<ArrowLeft aria-hidden="true" className="size-4 rtl:-scale-x-100" />
 					</Button>
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
 						<h3
 							className="truncate font-semibold text-foreground text-sm leading-5 outline-none"
+							data-ryu-i18n="off"
 							ref={headingRef}
 							tabIndex={-1}
 						>
@@ -131,7 +132,7 @@ export function KnowledgePanel({
 										palette={palette}
 										status={threadStatus(thread)}
 									/>
-									{THREAD_STATUS_LABELS[threadStatus(thread)]}
+									{threadStatusLabel(threadStatus(thread))}
 								</span>
 							) : null}
 							{agents.length > 0 ? (
@@ -168,17 +169,22 @@ export function KnowledgePanel({
 		node.kind === "agent" ? agentById(snapshot, node.refId) : undefined;
 	const counts = statusCounts(threads);
 	const summary = [
-		KIND_LABELS[node.kind],
-		plural(threads.length, "conversation"),
-		...STATUS_SUMMARY.filter((status) => counts[status] > 0).map(
-			(status) =>
-				`${counts[status]} ${THREAD_STATUS_LABELS[status].toLowerCase()}`
+		kindLabel(node.kind),
+		countOf(threads.length, "conversation"),
+		...STATUS_SUMMARY.filter((status) => counts[status] > 0).map((status) =>
+			tl(
+				"{count} {status, select, attention {needs attention} quiet {not started} waiting {waiting on agent} working {working} other {your turn}}",
+				{ count: counts[status], status }
+			)
 		),
 	].join(" · ");
 	const canStart = node.kind !== "topic";
 	return (
 		<PanelFrame
-			label={`${KIND_LABELS[node.kind]}: ${node.label}`}
+			label={tl("{kind}: {label}", {
+				kind: kindLabel(node.kind),
+				label: node.label,
+			})}
 			testId="knowledge-node-panel"
 			wide={false}
 		>
@@ -209,7 +215,10 @@ export function KnowledgePanel({
 					</Button>
 				</div>
 				{agent?.description ? (
-					<p className="text-pretty text-foreground/80 text-sm leading-5">
+					<p
+						className="text-pretty text-foreground/80 text-sm leading-5"
+						data-ryu-i18n="off"
+					>
 						{agent.description}
 					</p>
 				) : null}
@@ -259,7 +268,9 @@ export function KnowledgePanel({
 					}
 					return (
 						<section
-							aria-label={tl("Linked {kind}", { kind: title.toLowerCase() })}
+							aria-label={tl("Linked {kind}", {
+								kind: sentenceLabel(tl, title),
+							})}
 							className="mt-2"
 							key={kind}
 						>
@@ -268,11 +279,11 @@ export function KnowledgePanel({
 								{items.map((item) => (
 									<li key={item.id}>
 										<button
-											aria-label={tl("Go to {label}, {kind}", {
-												label: displayLabel(item),
-												kind: KIND_LABELS[item.kind].toLowerCase(),
-											})}
-											className="flex h-9 w-full items-center gap-2.5 px-4 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+											aria-label={tl(
+												"Go to {label}, {kind, select, agent {agent} conversation {conversation} project {project} team {team} other {topic}}",
+												{ kind: item.kind, label: displayLabel(item) }
+											)}
+											className="flex h-9 w-full items-center gap-2.5 px-4 text-start outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 											onClick={() => onSelect(item.id)}
 											type="button"
 										>
@@ -310,7 +321,10 @@ function linkDetail(
 ): string {
 	if (node.kind === "team") {
 		const team = snapshot.groups.find((group) => group.id === node.refId);
-		return plural(team?.memberAgentIds.length ?? 0, "member");
+		return countOf(team?.memberAgentIds.length ?? 0, "member");
 	}
-	return plural(linkedThreads(snapshot, graph, node.id).length, "conversation");
+	return countOf(
+		linkedThreads(snapshot, graph, node.id).length,
+		"conversation"
+	);
 }

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -34,7 +35,9 @@ import {
 } from "./timeline-parts.tsx";
 import { TIMELINE_STATUS_BAR, TimelineStatusDot } from "./timeline-status.tsx";
 import {
+	countHiddenDays,
 	type HiddenDays,
+	scrollWeekTo,
 	TimelineWeekReveal,
 } from "./timeline-week-reveal.tsx";
 
@@ -46,8 +49,8 @@ export function timelineWeekHeadingId(key: string): string {
 /** Attribute on today's "now" line, so "Today" can scroll it into view. */
 export const TIMELINE_NOW_ATTRIBUTE = "data-timeline-now";
 
-/** Room kept free at the grid's right edge, so today's chips never meet the viewport. */
-const LAST_COLUMN_INSET = "right-3";
+/** Room kept free at the grid's end edge, so today's chips never meet the viewport. */
+const LAST_COLUMN_INSET = "end-3";
 
 function WeekChip({
 	active,
@@ -74,7 +77,7 @@ function WeekChip({
 			aria-current={active ? "true" : undefined}
 			aria-label={threadAccessibleName(snapshot, thread)}
 			className={cn(
-				"@container absolute inset-x-0 z-[1] flex items-center gap-2 overflow-hidden rounded-sm bg-muted pr-2 pl-2.5 text-left text-foreground outline-none transition-colors duration-150 motion-reduce:transition-none",
+				"@container absolute inset-x-0 z-[1] flex items-center gap-2 overflow-hidden rounded-sm bg-muted ps-2.5 pe-2 text-start text-foreground outline-none transition-colors duration-150 motion-reduce:transition-none",
 				"hover:bg-accent focus-visible:z-[3] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 				// The same selected treatment as a Day row: accent, plus a primary edge.
 				active &&
@@ -90,11 +93,11 @@ function WeekChip({
 			title={`${threadTitle(thread)} · ${timeOfDay(thread.updatedAt)}`}
 			type="button"
 		>
-			{/* The status is the chip's left edge, clipped by its radius. */}
+			{/* The status is the chip's start edge, clipped by its radius. */}
 			<span
 				aria-hidden="true"
 				className={cn(
-					"absolute inset-y-0 left-0 w-0.5",
+					"absolute inset-y-0 start-0 w-0.5",
 					TIMELINE_STATUS_BAR[status]
 				)}
 			/>
@@ -134,7 +137,7 @@ function NowLine({ top }: { top: number }) {
 			/>
 			<span
 				aria-hidden="true"
-				className="pointer-events-none absolute left-0 z-[3] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary"
+				className="pointer-events-none absolute start-0 z-[3] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary rtl:translate-x-1/2"
 				style={{ top }}
 			/>
 		</>
@@ -160,22 +163,10 @@ function useHiddenDays(compact: boolean) {
 		const head = scroller.querySelector<HTMLElement>("[data-week-head]");
 		const free = Math.max(0, scroller.clientHeight - (head?.offsetHeight ?? 0));
 		setFillPx((current) => (current === free ? current : free));
-		const view = scroller.getBoundingClientRect();
-		const left = view.left + (gutter?.offsetWidth ?? 0);
-		const right = view.left + scroller.clientWidth;
-		let before = 0;
-		let after = 0;
-		for (const heading of scroller.querySelectorAll<HTMLElement>(
-			"[data-week-day-heading]"
-		)) {
-			// A day counts as hidden once any of it is cut off.
-			const rect = heading.getBoundingClientRect();
-			if (rect.left < left - 1) {
-				before += 1;
-			} else if (rect.right > right + 1) {
-				after += 1;
-			}
-		}
+		const { after, before } = countHiddenDays(
+			scroller,
+			gutter?.offsetWidth ?? 0
+		);
 		setHidden((current) =>
 			current.before === before && current.after === after
 				? current
@@ -189,7 +180,7 @@ function useHiddenDays(compact: boolean) {
 	useLayoutEffect(() => {
 		const scroller = scrollerRef.current;
 		if (scroller) {
-			scroller.scrollLeft = scroller.scrollWidth;
+			scrollWeekTo(scroller, "after");
 		}
 		measure();
 	}, [compact, measure]);
@@ -207,7 +198,7 @@ function useHiddenDays(compact: boolean) {
 	const reveal = (side: "before" | "after") => {
 		const scroller = scrollerRef.current;
 		if (scroller) {
-			scroller.scrollLeft = side === "before" ? 0 : scroller.scrollWidth;
+			scrollWeekTo(scroller, side);
 		}
 	};
 
@@ -217,12 +208,12 @@ function useHiddenDays(compact: boolean) {
 /** Gutter labels and rules for the hour rows, shared by every day column. */
 function WeekHourGutter({ rows }: { rows: readonly WeekRow[] }) {
 	return (
-		<div aria-hidden="true" className="sticky left-0 z-[4] bg-background">
+		<div aria-hidden="true" className="sticky start-0 z-[4] bg-background">
 			{rows.map((row, index) => {
 				if (row.quiet) {
 					return (
 						<span
-							className="absolute right-2 flex items-center whitespace-nowrap text-[11px] text-muted-foreground tabular-nums leading-4"
+							className="absolute end-2 flex items-center whitespace-nowrap text-[11px] text-muted-foreground tabular-nums leading-4"
 							key={row.fromHour}
 							style={{ height: row.height, top: row.top }}
 						>
@@ -237,7 +228,7 @@ function WeekHourGutter({ rows }: { rows: readonly WeekRow[] }) {
 				return (
 					<span
 						className={cn(
-							"absolute right-2 whitespace-nowrap text-[11px] text-muted-foreground tabular-nums leading-4",
+							"absolute end-2 whitespace-nowrap text-[11px] text-muted-foreground tabular-nums leading-4",
 							// The first label hangs under its line instead of under the header.
 							index === 0 ? "translate-y-0.5" : "-translate-y-1/2"
 						)}
@@ -257,8 +248,8 @@ function WeekHourRules({ rows }: { rows: readonly WeekRow[] }) {
 	return (
 		<div
 			aria-hidden="true"
-			className="pointer-events-none absolute inset-y-0 right-0"
-			style={{ left: `${WEEK_GUTTER_REM}rem` }}
+			className="pointer-events-none absolute inset-y-0 end-0"
+			style={{ insetInlineStart: `${WEEK_GUTTER_REM}rem` }}
 		>
 			{rows.map((row, index) => {
 				// The grid's top edge is the header's rule.
@@ -283,7 +274,7 @@ function WeekHourRules({ rows }: { rows: readonly WeekRow[] }) {
 }
 
 /**
- * Week scale: the seven days ending today, oldest on the left, with an hour
+ * Week scale: the seven days ending today, oldest at the start (the left in a left-to-right UI), with an hour
  * gutter fitted to the data. Threads sit in the hour of their latest
  * activity; threads in the same hour stack full width, in time order.
  */
@@ -359,7 +350,7 @@ export function TimelineWeekGrid({
 						style={gridStyle}
 					>
 						<div
-							className="sticky left-0 z-[1] flex flex-col items-center justify-center gap-1 bg-background"
+							className="sticky start-0 z-[1] flex flex-col items-center justify-center gap-1 bg-background"
 							data-week-gutter=""
 						>
 							<TimelineWeekReveal hidden={hidden} onReveal={reveal} />
@@ -371,11 +362,19 @@ export function TimelineWeekGrid({
 							const highlighted = day.key === highlightKey;
 							return (
 								<h3
-									aria-label={`${isToday ? "Today, " : ""}${label.full}, ${count} ${
-										count === 1 ? "thread" : "threads"
-									}`}
+									aria-label={
+										isToday
+											? tr(
+													"Today, {day}, {count, plural, one {# thread} other {# threads}}",
+													{ count, day: label.full }
+												)
+											: tr(
+													"{day}, {count, plural, one {# thread} other {# threads}}",
+													{ count, day: label.full }
+												)
+									}
 									className={cn(
-										"@container relative flex min-w-0 flex-col items-center justify-center gap-0.5 border-border border-l outline-none transition-colors duration-500 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
+										"@container relative flex min-w-0 flex-col items-center justify-center gap-0.5 border-border border-s outline-none transition-colors duration-500 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
 										highlighted && "bg-primary/10"
 									)}
 									data-highlight={highlighted ? "" : undefined}
@@ -431,7 +430,7 @@ export function TimelineWeekGrid({
 											: label.full
 									}
 									className={cn(
-										"relative min-w-0 border-border border-l transition-colors duration-500 motion-reduce:transition-none",
+										"relative min-w-0 border-border border-s transition-colors duration-500 motion-reduce:transition-none",
 										highlighted && "bg-primary/5"
 									)}
 									data-day-key={day.key}
@@ -440,8 +439,8 @@ export function TimelineWeekGrid({
 								>
 									<div
 										className={cn(
-											"absolute inset-y-0 left-1",
-											isLast ? LAST_COLUMN_INSET : "right-1"
+											"absolute inset-y-0 start-1",
+											isLast ? LAST_COLUMN_INSET : "end-1"
 										)}
 									>
 										{chips.map((chip, row) => (

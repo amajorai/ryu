@@ -1,29 +1,41 @@
-//! File-tree item commands: list, move, open, and reveal workspace items.
+//! File-tree item commands confined beneath a workspace root.
 
 use crate::editors::open_in_editor;
+use crate::fs_command_error::{FsCommandError, FsCommandErrorCode};
 use crate::workspace_move;
 
 /// Resolve a file-tree item beneath its workspace root. Both paths must already
 /// exist: canonicalization is what closes symlink and `..` traversal escapes.
-fn resolve_workspace_item_path(
+pub(crate) fn resolve_workspace_item_path(
     workspace_root: &std::path::Path,
     relative_path: &std::path::Path,
-) -> Result<std::path::PathBuf, String> {
+) -> Result<std::path::PathBuf, FsCommandError> {
     if relative_path.is_absolute() {
-        return Err("Workspace item path must be relative".to_string());
+        return Err(FsCommandError::with_detail(
+            FsCommandErrorCode::InvalidPath,
+            "workspace item path must be relative",
+        ));
     }
 
     let canonical_root = std::fs::canonicalize(workspace_root)
-        .map_err(|e| format!("Invalid workspace root: {e}"))?;
+        .map_err(|e| FsCommandError::with_detail(FsCommandErrorCode::WorkspaceUnavailable, e))?;
     let canonical_item = std::fs::canonicalize(canonical_root.join(relative_path))
-        .map_err(|e| format!("Workspace item not found: {e}"))?;
+        .map_err(|e| FsCommandError::with_detail(FsCommandErrorCode::ItemUnavailable, e))?;
     if !canonical_item.starts_with(&canonical_root) {
-        return Err("Workspace item escapes the project folder".to_string());
+        return Err(FsCommandError::new(FsCommandErrorCode::OutsideProject));
     }
     Ok(canonical_item)
 }
 
-fn launch_default_app(app: &tauri::AppHandle, path: &std::path::Path) -> Result<(), String> {
+/// A launcher that would not start: the OS text stays the technical detail.
+fn launch_failed(error: impl ToString) -> FsCommandError {
+    FsCommandError::with_detail(FsCommandErrorCode::LaunchFailed, error)
+}
+
+pub(crate) fn launch_default_app(
+    app: &tauri::AppHandle,
+    path: &std::path::Path,
+) -> Result<(), FsCommandError> {
     use tauri_plugin_shell::ShellExt;
 
     let path = path.to_string_lossy().into_owned();
@@ -34,12 +46,12 @@ fn launch_default_app(app: &tauri::AppHandle, path: &std::path::Path) -> Result<
     } else {
         app.shell().command("xdg-open").args([path]).spawn()
     };
-    result.map(|_| ()).map_err(|e| e.to_string())
+    result.map(|_| ()).map_err(launch_failed)
 }
 
 /// List existing workspace paths with Git ignore rules and without stale index entries.
 #[tauri::command]
-pub(crate) async fn list_workspace_files(root: String) -> Result<Vec<String>, String> {
+pub(crate) async fn list_workspace_files(root: String) -> Result<Vec<String>, FsCommandError> {
     workspace_move::list_files(std::path::Path::new(&root))
 }
 
@@ -50,7 +62,7 @@ pub(crate) async fn move_workspace_item(
     root: String,
     source_path: String,
     destination_path: String,
-) -> Result<(), String> {
+) -> Result<(), FsCommandError> {
     workspace_move::move_item(
         std::path::Path::new(&root),
         std::path::Path::new(&source_path),
@@ -66,7 +78,7 @@ pub(crate) async fn open_workspace_item(
     root: String,
     path: String,
     editor: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), FsCommandError> {
     let item =
         resolve_workspace_item_path(std::path::Path::new(&root), std::path::Path::new(&path))?;
     let Some(editor) = editor else {
@@ -91,7 +103,7 @@ pub(crate) async fn reveal_workspace_item(
     app: tauri::AppHandle,
     root: String,
     path: String,
-) -> Result<(), String> {
+) -> Result<(), FsCommandError> {
     use tauri_plugin_shell::ShellExt;
 
     let item =
@@ -118,12 +130,13 @@ pub(crate) async fn reveal_workspace_item(
             .args([target.to_string_lossy().into_owned()])
             .spawn()
     };
-    result.map(|_| ()).map_err(|e| e.to_string())
+    result.map(|_| ()).map_err(launch_failed)
 }
 
 #[cfg(test)]
 mod workspace_item_path_tests {
     use super::resolve_workspace_item_path;
+    use crate::fs_command_error::FsCommandErrorCode;
 
     fn test_root(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("ryu-{name}-{}", std::process::id()))
@@ -156,7 +169,36 @@ mod workspace_item_path_tests {
         let error =
             resolve_workspace_item_path(&root, std::path::Path::new("../outside.txt")).unwrap_err();
 
-        assert_eq!(error, "Workspace item escapes the project folder");
+        assert_eq!(error.code, FsCommandErrorCode::OutsideProject);
         std::fs::remove_dir_all(container).unwrap();
+    }
+
+    #[test]
+    fn a_vanished_item_is_coded_unavailable_with_the_os_text_as_detail() {
+        let root = test_root("workspace-item-missing");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let error =
+            resolve_workspace_item_path(&root, std::path::Path::new("gone.txt")).unwrap_err();
+
+        assert_eq!(error.code, FsCommandErrorCode::ItemUnavailable);
+        assert!(error.detail.is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn absolute_and_rootless_paths_get_their_own_codes() {
+        let root = test_root("workspace-item-absolute");
+        std::fs::create_dir_all(&root).unwrap();
+        let absolute = std::fs::canonicalize(&root).unwrap().join("x.txt");
+
+        let error = resolve_workspace_item_path(&root, &absolute).unwrap_err();
+        assert_eq!(error.code, FsCommandErrorCode::InvalidPath);
+
+        let missing_root = root.join("not-here");
+        let error =
+            resolve_workspace_item_path(&missing_root, std::path::Path::new("x.txt")).unwrap_err();
+        assert_eq!(error.code, FsCommandErrorCode::WorkspaceUnavailable);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

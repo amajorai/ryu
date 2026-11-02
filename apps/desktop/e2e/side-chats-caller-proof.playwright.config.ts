@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
@@ -8,10 +9,9 @@ export default defineConfig({
 	workers: 1,
 	retries: 0,
 	reporter: "list",
-	outputDir: path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/side-chats/results"
-	),
+	// Playwright empties its output dir on start, so keep it off the tracked
+	// docs/proof tree.
+	outputDir: path.join(tmpdir(), "ryu-side-chats-caller-proof-results"),
 	use: { baseURL, viewport: { width: 1440, height: 1100 }, trace: "off" },
 	webServer: process.env.RYU_SIDE_CHATS_BASE_URL
 		? undefined

@@ -1,9 +1,11 @@
 "use client";
 
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type { CSSProperties } from "react";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { useFormatLocale } from "../hooks/use-format-locale.ts";
 import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import { passBackdropSeed } from "../lib/pass-share.ts";
 import { cn } from "../lib/utils.ts";
@@ -136,9 +138,13 @@ export const formatPassSerial = (seed: string | null | undefined): string => {
 		.padEnd(SERIAL_LENGTH, "0");
 };
 
-/** "Jan 5, 2026" from an ISO stamp; null for missing or unparseable input. */
+/**
+ * "Jan 5, 2026, 07:30 PM" from an ISO stamp, in `locale` (the UI's language by
+ * default); null for missing or unparseable input.
+ */
 export const formatPassDate = (
-	iso: string | null | undefined
+	iso: string | null | undefined,
+	locale: string = activeLocale()
 ): string | null => {
 	if (!iso) {
 		return null;
@@ -149,14 +155,13 @@ export const formatPassDate = (
 	}
 	// Date AND time. A pass is a record of a moment, and on an early-access queue
 	// the minute you joined is the part worth bragging about.
-	return `${date.toLocaleDateString("en-US", {
-		year: "numeric",
-		month: "short",
+	return dateFormatter(locale, {
 		day: "numeric",
-	})}, ${date.toLocaleTimeString("en-US", {
 		hour: "2-digit",
 		minute: "2-digit",
-	})}`;
+		month: "short",
+		year: "numeric",
+	}).format(date);
 };
 
 /**
@@ -321,8 +326,9 @@ export function WaitlistPass({
 	// like a rendering fault, and it is reachable on the live queue too, for the
 	// window where the session's name has not arrived yet. Suppress the handle
 	// line exactly when the hero already IS the handle.
+	const formatLocale = useFormatLocale();
 	const showHandle = Boolean(username) && displayName !== `@${username}`;
-	const memberSince = formatPassDate(joinedAt);
+	const memberSince = formatPassDate(joinedAt, formatLocale);
 	const showPosition =
 		isNativeNumber(totalWaiting) && totalWaiting > QUEUE_STATS_MIN;
 	// TWO seeds, deliberately, because the two things they colour answer

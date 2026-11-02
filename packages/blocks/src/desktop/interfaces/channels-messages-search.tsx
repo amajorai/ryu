@@ -183,7 +183,7 @@ export function SearchEmpty({
 					{hits.map((hit) => (
 						<li key={hit.channel.id}>
 							<button
-								className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-foreground text-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+								className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-start text-foreground text-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 								onClick={() => onSelectChannel(hit.channel)}
 								type="button"
 							>

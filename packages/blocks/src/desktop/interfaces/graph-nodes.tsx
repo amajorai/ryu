@@ -1,17 +1,14 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type GraphEdge,
-	type GraphNode,
-	type InterfaceAgent,
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
+import type {
+	GraphEdge,
+	GraphNode,
+	InterfaceAgent,
+	ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
 import {
-	BaseEdge,
 	type Edge,
-	type EdgeProps,
-	type EdgeTypes,
 	Handle,
 	type Node,
 	type NodeProps,
@@ -27,14 +24,8 @@ import {
 	type KeyboardEvent,
 	type MouseEvent,
 	useContext,
-	useEffect,
-	useState,
 } from "react";
-import {
-	GRAPH_NODE_SIZE,
-	type GraphEmphasis,
-	stepToward,
-} from "./graph-model.ts";
+import type { GraphEmphasis } from "./graph-model.ts";
 import {
 	GROUP_ICON,
 	GraphAvatar,
@@ -43,6 +34,8 @@ import {
 	TEXT_META,
 } from "./graph-parts.tsx";
 import { agentSubLabel, labelScale, labelTransform } from "./graph-view.ts";
+
+export { GRAPH_EDGE_TYPES } from "./graph-edges.tsx";
 
 export interface GraphMapContextValue {
 	emphasis: (nodeId: string) => GraphEmphasis;
@@ -87,7 +80,7 @@ export type GraphFlowEdge = Edge<{
 	motion: boolean;
 	weight: number;
 }>;
-type GraphEdgeData = NonNullable<GraphFlowEdge["data"]>;
+export type GraphEdgeData = NonNullable<GraphFlowEdge["data"]>;
 
 /** Edges meet at node centers: one invisible source and target per node. */
 const CENTER_HANDLE: CSSProperties = {
@@ -131,8 +124,10 @@ function CenterHandles() {
 const DIMMED_MARK = "opacity-60 grayscale";
 const DIMMED_TEXT = "text-muted-foreground";
 
-function plural(count: number, one: string): string {
-	return `${count} ${one}${count === 1 ? "" : "s"}`;
+function threadCount(count: number): string {
+	return tr("{count, plural, one {# thread} other {# threads}}", {
+		count,
+	});
 }
 
 /** Statuses worth calling out on the map itself (they need the user). */
@@ -143,7 +138,10 @@ function callout(urgent: ThreadStatus | null): ThreadStatus | null {
 /** ", needs attention" / ", your turn" for a node's accessible name. */
 function urgentPhrase(urgent: ThreadStatus | null): string {
 	const status = callout(urgent);
-	return status ? `, ${THREAD_STATUS_LABELS[status].toLowerCase()}` : "";
+	if (!status) {
+		return "";
+	}
+	return status === "attention" ? tr(", needs attention") : tr(", your turn");
 }
 
 /** Shared button behavior: pointer vs keyboard selection, focus follow. */
@@ -198,7 +196,7 @@ function YouNode({ data }: NodeProps<GraphFlowNode>) {
 				</span>
 				{compact ? null : (
 					<span className={cn("tabular-nums opacity-80", TEXT_META)}>
-						{plural(node.threadCount, "thread")}
+						{threadCount(node.threadCount)}
 					</span>
 				)}
 			</button>
@@ -239,7 +237,11 @@ function AgentNode({ data }: NodeProps<GraphFlowNode>) {
 			<CenterHandles />
 			<button
 				{...button}
-				aria-label={`${node.label}: ${plural(node.threadCount, "thread")}${sub ? `, ${sub.spoken}` : ""}`}
+				aria-label={tr("{name}: {threads}{sub}", {
+					name: node.label,
+					sub: sub ? `, ${sub.spoken}` : "",
+					threads: threadCount(node.threadCount),
+				})}
 				className={cn(
 					"nodrag group/agent relative flex size-full cursor-pointer items-center justify-center rounded-full",
 					FOCUS_RING
@@ -305,7 +307,6 @@ function GroupNode({ data }: NodeProps<GraphFlowNode>) {
 	const { node, urgent } = data;
 	const kind = node.kind === "project" ? "project" : "team";
 	const Icon = GROUP_ICON[kind];
-	const kindLabel = kind === "project" ? "Project" : "Team";
 	const focused = emphasis === "focus";
 	const dimmed = emphasis === "dimmed";
 	return (
@@ -314,9 +315,17 @@ function GroupNode({ data }: NodeProps<GraphFlowNode>) {
 			<div className="flex size-full items-center justify-center">
 				<button
 					{...button}
-					aria-label={`${kindLabel} ${node.label}: ${plural(node.threadCount, "thread")}${urgentPhrase(urgent)}`}
+					aria-label={tr(
+						"{kind, select, project {Project} other {Team}} {name}: {threads}{urgent}",
+						{
+							kind,
+							name: node.label,
+							threads: threadCount(node.threadCount),
+							urgent: urgentPhrase(urgent),
+						}
+					)}
 					className={cn(
-						"nodrag flex h-8 w-max max-w-full shrink-0 cursor-pointer items-center gap-2 rounded-md px-2.5 text-left",
+						"nodrag flex h-8 w-max max-w-full shrink-0 cursor-pointer items-center gap-2 rounded-md px-2.5 text-start",
 						"bg-muted text-foreground hover:bg-accent hover:text-accent-foreground",
 						focused &&
 							"ring-2 ring-primary ring-offset-2 ring-offset-background",
@@ -366,130 +375,3 @@ export const GRAPH_NODE_TYPES: NodeTypes = {
 	team: GroupNode,
 	you: YouNode,
 };
-
-const EDGE_OPACITY: Record<GraphEmphasis, number> = {
-	dimmed: 0.15,
-	focus: 1,
-	normal: 1,
-	related: 1,
-};
-
-/**
- * Every line is straight and neutral; the selection's lines take the
- * theme's primary. Spokes to you grow heavier with more threads together,
- * links between agents stay hairlines, and memberships are dashed.
- */
-function edgeStyle(data: GraphEdgeData): CSSProperties {
-	const weight = Math.max(1, data.weight);
-	const focus = data.emphasis === "focus";
-	const stroke = focus ? "var(--primary)" : "var(--muted-foreground)";
-	const base: CSSProperties = {
-		opacity: EDGE_OPACITY[data.emphasis],
-		stroke,
-		strokeLinecap: "round",
-	};
-	switch (data.kind) {
-		case "talks":
-			return {
-				...base,
-				strokeOpacity: focus ? 1 : Math.min(0.7, 0.35 + 0.1 * weight),
-				strokeWidth: Math.min(3, 1 + (weight - 1) * 0.5),
-			};
-		case "collaborates":
-			return { ...base, strokeOpacity: focus ? 0.7 : 0.35, strokeWidth: 1 };
-		default:
-			return {
-				...base,
-				strokeDasharray: "3 3",
-				strokeOpacity: focus ? 0.7 : 0.35,
-				strokeWidth: 1,
-			};
-	}
-}
-
-/** The live dot makes a few trips toward you, then the line goes still. */
-const LIVE_LOOPS = 3;
-const LIVE_LOOP_SECONDS = 2.4;
-
-/**
- * A live spoke carries one dot toward you a few times, then leaves the
- * avatar's working ring to say "working". Nothing with reduced motion.
- */
-function LiveMark({ data, path }: { data: GraphEdgeData; path: string }) {
-	const [moving, setMoving] = useState(data.motion);
-	useEffect(() => {
-		if (!data.motion) {
-			setMoving(false);
-			return;
-		}
-		setMoving(true);
-		const timer = window.setTimeout(
-			() => setMoving(false),
-			LIVE_LOOPS * LIVE_LOOP_SECONDS * 1000
-		);
-		return () => window.clearTimeout(timer);
-	}, [data.motion]);
-	if (!moving) {
-		return null;
-	}
-	return (
-		<circle
-			className="pointer-events-none"
-			r={3}
-			style={{
-				fill: "var(--success)",
-				opacity: EDGE_OPACITY[data.emphasis],
-				stroke: "var(--background)",
-				strokeWidth: 1.5,
-			}}
-		>
-			<animateMotion
-				calcMode="linear"
-				dur={`${LIVE_LOOP_SECONDS}s`}
-				keyPoints="1;0"
-				keyTimes="0;1"
-				path={path}
-				repeatCount={LIVE_LOOPS}
-			/>
-		</circle>
-	);
-}
-
-/** Lines stop this far outside a round node's edge. */
-const EDGE_CLEARANCE = 3;
-const AGENT_REACH = GRAPH_NODE_SIZE.agent.width / 2 + EDGE_CLEARANCE;
-const YOU_REACH = GRAPH_NODE_SIZE.you.width / 2 + EDGE_CLEARANCE;
-
-/** Straight lines between node edges; group ends tuck under their pill. */
-function GraphMapEdge({
-	data,
-	source: sourceId,
-	sourceX,
-	sourceY,
-	targetX,
-	targetY,
-}: EdgeProps<GraphFlowEdge>) {
-	if (!data) {
-		return null;
-	}
-	const source = { x: sourceX, y: sourceY };
-	const target = { x: targetX, y: targetY };
-	let start = source;
-	if (sourceId === "you") {
-		start = stepToward(source, target, YOU_REACH);
-	} else if (sourceId.startsWith("agent:")) {
-		start = stepToward(source, target, AGENT_REACH);
-	}
-	// Every line reaches the avatar's edge; a name's halo keeps a line that
-	// passes behind it legible.
-	const end = stepToward(target, source, AGENT_REACH);
-	const path = `M ${start.x},${start.y} L ${end.x},${end.y}`;
-	return (
-		<>
-			<BaseEdge interactionWidth={0} path={path} style={edgeStyle(data)} />
-			{data.live ? <LiveMark data={data} path={path} /> : null}
-		</>
-	);
-}
-
-export const GRAPH_EDGE_TYPES: EdgeTypes = { graph: GraphMapEdge };

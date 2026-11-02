@@ -1,159 +1,46 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceThread } from "@ryuhq/protocol/interfaces";
-import { FolderClosed, House, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
 	type KeyboardEvent,
-	type PointerEvent,
-	type ReactNode,
 	useCallback,
 	useEffect,
-	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
-import { isInterfaceCovered } from "./interface-keys.ts";
-import {
-	agentById,
-	type InterfaceRendererProps,
-} from "./interface-renderer.ts";
+import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { NotebookHome } from "./notebook-home.tsx";
+import {
+	SIDEBAR_WIDTH,
+	SidebarResizeHandle,
+	useElementSize,
+	useMinuteClock,
+	useNotebookChords,
+} from "./notebook-interface-chrome.tsx";
+import {
+	type NotebookStartInput,
+	notebookPageFrame,
+} from "./notebook-interface-crumbs.tsx";
 import {
 	allExpandableIds,
 	ancestorIdsOf,
 	buildNotebookTree,
-	groupNodeId,
 	initialNotebookExpanded,
 	type NotebookGroup,
 	notebookEditedLabel,
 	notebookNeedsYou,
 	notebookPageTitle,
-	notebookPlacement,
 	notebookStartInput,
-	sectionNodeId,
 } from "./notebook-model.ts";
-import {
-	type NotebookCrumb,
-	type NotebookPageContext,
-	NotebookThreadPage,
-	NotebookTopbar,
-} from "./notebook-page.tsx";
-import { NotebookAgentArt, NotebookPageGlyph } from "./notebook-parts.tsx";
+import { NotebookThreadPage, NotebookTopbar } from "./notebook-page.tsx";
 import { NotebookSidebar } from "./notebook-sidebar.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
 
-const MINUTE = 60_000;
 /** Below this width the sidebar floats over the page instead of beside it. */
 const OVERLAY_BELOW = 760;
 /** Below this height the properties block starts folded, to keep the chat tall. */
 const PROPERTIES_FOLD_BELOW = 720;
-const SIDEBAR_WIDTH = 248;
-const SIDEBAR_MIN = 200;
-const SIDEBAR_MAX = 380;
-
-function clampSidebar(width: number): number {
-	return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(width)));
-}
-
-/**
- * Notion's sidebar edge: drag to resize, double-click to reset. Pointer only
- * (like the Sheet's column handles); the fold button covers keyboard users.
- */
-function SidebarResizeHandle({
-	onResize,
-	onResizingChange,
-	width,
-}: {
-	onResize: (width: number) => void;
-	onResizingChange: (resizing: boolean) => void;
-	width: number;
-}) {
-	const origin = useRef<{ width: number; x: number } | null>(null);
-	const onPointerDown = (event: PointerEvent<HTMLSpanElement>) => {
-		if (event.button !== 0) {
-			return;
-		}
-		event.preventDefault();
-		event.currentTarget.setPointerCapture(event.pointerId);
-		origin.current = { width, x: event.clientX };
-		onResizingChange(true);
-	};
-	const onPointerMove = (event: PointerEvent<HTMLSpanElement>) => {
-		const start = origin.current;
-		if (start) {
-			onResize(clampSidebar(start.width + event.clientX - start.x));
-		}
-	};
-	const onPointerEnd = (event: PointerEvent<HTMLSpanElement>) => {
-		if (!origin.current) {
-			return;
-		}
-		origin.current = null;
-		if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-			event.currentTarget.releasePointerCapture(event.pointerId);
-		}
-		onResizingChange(false);
-	};
-	return (
-		<span
-			aria-hidden="true"
-			className="group/resize absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize touch-none"
-			onDoubleClick={() => onResize(SIDEBAR_WIDTH)}
-			onPointerCancel={onPointerEnd}
-			onPointerDown={onPointerDown}
-			onPointerMove={onPointerMove}
-			onPointerUp={onPointerEnd}
-		>
-			<span className="absolute inset-y-0 right-0 w-0.5 bg-transparent transition-colors duration-150 group-hover/resize:bg-ring/50 group-active/resize:bg-ring" />
-		</span>
-	);
-}
-
-interface StartInput {
-	agentId?: string;
-	projectId?: string;
-	teamId?: string;
-}
-
-/** Wall clock that ticks once a minute so relative times stay honest. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), MINUTE);
-		return () => window.clearInterval(timer);
-	}, []);
-	return now;
-}
-
-/** The element's size, kept current with a ResizeObserver. */
-function useElementSize(ref: { current: HTMLElement | null }): {
-	height: number;
-	width: number;
-} {
-	const [size, setSize] = useState({ height: 0, width: 0 });
-	useLayoutEffect(() => {
-		const element = ref.current;
-		if (!element) {
-			return;
-		}
-		const box = element.getBoundingClientRect();
-		setSize({ height: box.height, width: box.width });
-		if (typeof ResizeObserver === "undefined") {
-			return;
-		}
-		const observer = new ResizeObserver((entries) => {
-			const rect = entries[0]?.contentRect;
-			if (rect) {
-				setSize({ height: rect.height, width: rect.width });
-			}
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [ref]);
-	return size;
-}
-
-const ICON = "size-4 shrink-0 text-muted-foreground";
 
 /**
  * Notebook: threads as pages in a Notion-style workspace. The sidebar files
@@ -168,6 +55,7 @@ export function NotebookInterface({
 	snapshot,
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const size = useElementSize(rootRef);
 	const now = useMinuteClock();
@@ -187,7 +75,7 @@ export function NotebookInterface({
 	const [propertiesChoice, setPropertiesChoice] = useState<boolean | null>(
 		null
 	);
-	const [draft, setDraft] = useState<StartInput>({});
+	const [draft, setDraft] = useState<NotebookStartInput>({});
 	const [focusRequest, setFocusRequest] = useState<{
 		id: string;
 		token: number;
@@ -323,7 +211,7 @@ export function NotebookInterface({
 		[closeOverlay, port]
 	);
 	const startPage = useCallback(
-		(input: StartInput) => {
+		(input: NotebookStartInput) => {
 			closeOverlay();
 			setDraft(input);
 			port.startThread(input);
@@ -400,39 +288,7 @@ export function NotebookInterface({
 		};
 	}, [searchRequest, sidebarVisible]);
 
-	// Ctrl+\ and Ctrl+Shift+F work from anywhere in the window, as the
-	// tooltips promise, but leave other apps' text fields alone.
-	useEffect(() => {
-		const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
-			if (isInterfaceCovered(rootRef.current)) {
-				return;
-			}
-			const key = event.key.toLowerCase();
-			const isSidebarChord = key === "\\" && !event.shiftKey;
-			const isSearchChord = key === "f" && event.shiftKey;
-			if (
-				event.defaultPrevented ||
-				!(isSidebarChord || isSearchChord) ||
-				!(event.metaKey || event.ctrlKey) ||
-				event.altKey
-			) {
-				return;
-			}
-			const target = event.target instanceof HTMLElement ? event.target : null;
-			const inside = target ? rootRef.current?.contains(target) : false;
-			if (!inside && target?.closest("input, textarea, [contenteditable]")) {
-				return;
-			}
-			event.preventDefault();
-			if (isSearchChord) {
-				focusSearch();
-			} else {
-				toggleSidebar();
-			}
-		};
-		window.addEventListener("keydown", onWindowKeyDown);
-		return () => window.removeEventListener("keydown", onWindowKeyDown);
-	}, [focusSearch, toggleSidebar]);
+	useNotebookChords(rootRef, focusSearch, toggleSidebar);
 
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		if (event.key === "Escape" && overlay && overlayOpen) {
@@ -450,81 +306,14 @@ export function NotebookInterface({
 		propertiesChoice ??
 		(size.height === 0 || size.height >= PROPERTIES_FOLD_BELOW);
 
-	// The page's place in the tree: from the thread, or from how a new page
-	// was started (its project, team, or agent).
-	const placementSource = thread ?? {
-		agentIds: draft.agentId ? [draft.agentId] : [],
-		projectId: draft.projectId ?? null,
-		teamId: draft.teamId ?? null,
-	};
-	const placement = notebookPlacement(snapshot, placementSource);
-	const context: NotebookPageContext = {
-		agents: placementSource.agentIds
-			.map((id) => agentById(snapshot, id))
-			.filter((agent) => agent !== undefined),
-		project:
-			snapshot.groups.find(
-				(group) =>
-					group.kind === "project" && group.id === placementSource.projectId
-			)?.name ?? null,
-		team:
-			snapshot.groups.find(
-				(group) => group.kind === "team" && group.id === placementSource.teamId
-			)?.name ?? null,
-	};
-	if (!thread && context.agents.length === 0 && placement.group) {
-		const members =
-			snapshot.groups.find((group) => group.id === placement.group?.id)
-				?.memberAgentIds ?? [];
-		context.agents = members
-			.map((id) => agentById(snapshot, id))
-			.filter((agent) => agent !== undefined);
-	}
-
-	let crumbs: NotebookCrumb[];
-	if (pageOpen) {
-		// Notion's crumbs start at the top-level page: the sidebar section is a
-		// heading, not a page, so it is not a crumb.
-		const sectionId = sectionNodeId(placement.section);
-		crumbs = [];
-		const group = placement.group;
-		if (group) {
-			const groupId = groupNodeId(group.kind, group.id);
-			let icon: ReactNode;
-			if (group.kind === "agent") {
-				icon = (
-					<NotebookAgentArt
-						agent={agentById(snapshot, group.id)}
-						className="size-4"
-						shape="tile"
-					/>
-				);
-			} else if (group.kind === "team") {
-				icon = <Users aria-hidden="true" className={ICON} />;
-			} else {
-				icon = <FolderClosed aria-hidden="true" className={ICON} />;
-			}
-			crumbs.push({
-				icon,
-				id: groupId,
-				label: group.label,
-				onSelect: () => reveal([sectionId, groupId]),
-			});
-		}
-		crumbs.push({
-			icon: <NotebookPageGlyph />,
-			id: "page",
-			label: thread ? notebookPageTitle(thread) : "Untitled",
-		});
-	} else {
-		crumbs = [
-			{
-				icon: <House aria-hidden="true" className={ICON} />,
-				id: "home",
-				label: "Home",
-			},
-		];
-	}
+	const { context, crumbs } = notebookPageFrame({
+		draft,
+		pageOpen,
+		reveal,
+		snapshot,
+		thread,
+		tl,
+	});
 
 	const needsYouCount = notebookNeedsYou(
 		snapshot,
@@ -582,7 +371,7 @@ export function NotebookInterface({
 							/>
 							<motion.aside
 								animate={{ x: 0 }}
-								className="absolute inset-y-0 left-0 z-30 w-[min(17rem,86%)] overflow-hidden border-sidebar-border border-r shadow-2xl"
+								className="absolute inset-y-0 start-0 z-30 w-[min(17rem,86%)] overflow-hidden border-sidebar-border border-e shadow-2xl"
 								exit={{ x: "-100%" }}
 								initial={{ x: "-100%" }}
 								key="drawer"
@@ -602,7 +391,7 @@ export function NotebookInterface({
 					{sidebarVisible ? (
 						<motion.aside
 							animate={{ width: sidebarWidth }}
-							className="relative h-full shrink-0 overflow-hidden border-sidebar-border border-r"
+							className="relative h-full shrink-0 overflow-hidden border-sidebar-border border-e"
 							exit={{ width: 0 }}
 							initial={{ width: 0 }}
 							key="sidebar"
@@ -623,7 +412,11 @@ export function NotebookInterface({
 
 			<main
 				aria-label={
-					pageOpen ? (thread ? notebookPageTitle(thread) : "Untitled") : "Home"
+					pageOpen
+						? thread
+							? notebookPageTitle(thread)
+							: tl("Untitled")
+						: tl("Home")
 				}
 				className="@container/notebook flex min-w-0 flex-1 flex-col"
 			>

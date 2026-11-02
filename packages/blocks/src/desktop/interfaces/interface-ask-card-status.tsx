@@ -14,7 +14,7 @@ import {
 import { type ReactNode, useId, useMemo } from "react";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
 import { type BlockerEntry, blockerEntries } from "./game3d-acts.ts";
-import { isolateKeys, plural } from "./interface-ask-card-core.ts";
+import { isolateKeys } from "./interface-ask-card-core.ts";
 
 // ---------------------------------------------------------------------------
 // Per-agent status
@@ -150,13 +150,21 @@ export function ActStatus({
 			const pending = act.pending;
 			const notes = [
 				pending.unread > 0
-					? plural(pending.unread, "unread answer", "unread answers")
+					? tl(
+							"{count, plural, one {# unread answer} other {# unread answers}}",
+							{ count: pending.unread }
+						)
 					: null,
 				pending.suggestions > 0
-					? plural(pending.suggestions, "suggestion", "suggestions")
+					? tl("{count, plural, one {# suggestion} other {# suggestions}}", {
+							count: pending.suggestions,
+						})
 					: null,
 				pending.old > 0
-					? plural(pending.old, "older failure", "older failures")
+					? tl(
+							"{count, plural, one {# older failure} other {# older failures}}",
+							{ count: pending.old }
+						)
 					: null,
 			].filter(Boolean);
 			if (notes.length > 0) {

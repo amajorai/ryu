@@ -6,6 +6,7 @@ import {
 	evidenceDir,
 	installCrmApi,
 	openSchema,
+	proofScreenshotPath,
 	proofStates,
 	screenshotPath,
 } from "./crm-schema-fieldform-proof.fixture.ts";
@@ -476,8 +477,8 @@ test("object form validates and cancels, retains a denied draft, persists creati
 				write.method === "DELETE" && write.path === "/api/crm/objects/investor"
 		)
 	).toHaveLength(2);
-	const proofPath = screenshotPath(
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-crm-schema-object-delete-readback.png"
+	const proofPath = proofScreenshotPath(
+		"test-coverage-sweep-20260924/evidence/desktop-crm-schema-object-delete-readback.png"
 	);
 	await mkdir(path.dirname(proofPath), { recursive: true });
 	await page.screenshot({ animations: "disabled", path: proofPath });

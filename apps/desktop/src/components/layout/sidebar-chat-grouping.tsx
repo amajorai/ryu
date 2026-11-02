@@ -205,7 +205,7 @@ export function ChatViewMenuItems({
 					<DropdownMenuSub>
 						<DropdownMenuSubTrigger>
 							{tl("Activity: {activity}", {
-								activity: CHAT_ACTIVITY_LABELS[filters.activity],
+								activity: tl(CHAT_ACTIVITY_LABELS[filters.activity]),
 							})}
 						</DropdownMenuSubTrigger>
 						<DropdownMenuSubContent>

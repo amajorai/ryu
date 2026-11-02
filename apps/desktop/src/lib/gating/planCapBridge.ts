@@ -22,6 +22,7 @@ import {
 	type PlanLimitField,
 	planLimit,
 } from "@ryu/auth/lib/plans";
+import { translate as tl } from "@ryu/i18n/core";
 import { hasBillingAuth } from "@/src/lib/api/billing.ts";
 
 /**
@@ -101,7 +102,12 @@ export class PlanCapError extends Error {
 	readonly field: PlanLimitField;
 	readonly limit: number;
 	constructor(field: PlanLimitField, limit: number) {
-		super(`Plan limit reached for ${field} (${limit}).`);
+		super(
+			tl("Plan limit reached for {field} ({limit}).", {
+				field,
+				limit: String(limit),
+			})
+		);
 		this.name = "PlanCapError";
 		this.field = field;
 		this.limit = limit;

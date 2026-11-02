@@ -3,6 +3,7 @@ import {
 	type ComposerMenuGroup,
 	type ComposerMenuItem,
 } from "@ryu/blocks/desktop/agent-elements/input/composer-menu.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useMemo } from "react";
 import type {
 	SlashCommand,
@@ -93,7 +94,7 @@ function SlashCommandList({
 	return (
 		<ComposerMenu
 			anchorRef={anchorRef}
-			className="absolute bottom-full left-0 z-50 mb-2"
+			className="absolute start-0 bottom-full z-50 mb-2"
 			groups={groups}
 			onDismiss={onDismiss}
 			onSelect={(item) => {
@@ -113,6 +114,7 @@ function SlashArgumentAutocomplete({
 	onDismiss,
 	onSelectArgument,
 }: Extract<SlashCommandAutocompleteProps, { mode: "arguments" }>) {
+	const tl = useLiteralMessages();
 	const selections = useMemo<Map<string, SlashCommandOptionSelection>>(() => {
 		const entries: [string, SlashCommandOptionSelection][] =
 			menu.argument.options.map((option, index) => [
@@ -128,7 +130,7 @@ function SlashArgumentAutocomplete({
 					option: {
 						description: menu.argument.custom.description,
 						label: customValue
-							? `Use "${customValue}"`
+							? tl('Use "{customValue}"', { customValue })
 							: menu.argument.custom.label,
 						value: customValue,
 					},
@@ -136,7 +138,7 @@ function SlashArgumentAutocomplete({
 			]);
 		}
 		return new Map(entries);
-	}, [menu.argument.custom, menu.argument.options, menu.query]);
+	}, [menu.argument.custom, menu.argument.options, menu.query, tl]);
 	const groups = useMemo<ComposerMenuGroup[]>(() => {
 		const items: ComposerMenuItem[] = menu.argument.options.map(
 			(option, index) => ({
@@ -154,7 +156,7 @@ function SlashArgumentAutocomplete({
 				id: "custom",
 				keywords: customValue ? [customValue] : [],
 				label: customValue
-					? `Use "${customValue}"`
+					? tl('Use "{customValue}"', { customValue })
 					: menu.argument.custom.label,
 			});
 		}
@@ -162,15 +164,15 @@ function SlashArgumentAutocomplete({
 			{
 				id: `arguments:${menu.command.name}:${menu.argumentIndex}`,
 				items,
-				label: `Next: ${menu.argument.name}`,
+				label: tl("Next: {name}", { name: menu.argument.name }),
 			},
 		];
-	}, [menu]);
+	}, [menu, tl]);
 
 	return (
 		<ComposerMenu
 			anchorRef={anchorRef}
-			className="absolute bottom-full left-0 z-50 mb-2"
+			className="absolute start-0 bottom-full z-50 mb-2"
 			groups={groups}
 			onDismiss={onDismiss}
 			onSelect={(item) => {

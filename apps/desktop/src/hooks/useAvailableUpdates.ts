@@ -348,7 +348,7 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 									name: update.name,
 									installedVersion: res.installedVersion,
 								})
-							: `${update.name} updated.`,
+							: tl("{name} updated.", { name: update.name }),
 						silent: false,
 					};
 				}
@@ -360,7 +360,7 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 									name: update.name,
 									version: res.version,
 								})
-							: `${update.name} updated.`,
+							: tl("{name} updated.", { name: update.name }),
 						silent: false,
 					};
 				}
@@ -410,12 +410,18 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 				case "skill": {
 					// Apply on the source that found the update, not the active one.
 					await installSkill(target, update.id, update.source);
-					return { detail: `${update.name} updated.`, silent: false };
+					return {
+						detail: tl("{name} updated.", { name: update.name }),
+						silent: false,
+					};
 				}
 				case "mcp": {
 					// Apply on the registry the check ran against, not the active one.
 					await installMcpServer(target, update.id, true, update.source);
-					return { detail: `${update.name} updated.`, silent: false };
+					return {
+						detail: tl("{name} updated.", { name: update.name }),
+						silent: false,
+					};
 				}
 				default:
 					throw new Error(`Updating ${update.kind} is not supported yet`);
@@ -429,7 +435,7 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 				return;
 			}
 			sileo.success({
-				title: `Updating ${update.name}`,
+				title: tl("Updating {name}", { name: update.name }),
 				description: outcome.detail ?? undefined,
 				duration: 4000,
 			});

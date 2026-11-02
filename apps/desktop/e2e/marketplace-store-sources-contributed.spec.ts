@@ -6,13 +6,13 @@ import type {
 	PluginContributions,
 	PluginStoreTab,
 } from "../src/lib/api/plugins.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY = "/marketplace-store-sources-contributed.html";
 const evidence = resolve(
 	process.env.RYU_STORE_TEST_PROOF_DIR ??
-		resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/parallel/marketplace-assets/store-sources-contributed"
+		proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/marketplace-assets/store-sources-contributed"
 		)
 );
 const diagnostics = new WeakMap<

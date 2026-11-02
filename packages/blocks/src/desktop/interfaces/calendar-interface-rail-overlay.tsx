@@ -66,7 +66,7 @@ export function CalendarRailOverlay({
 				>
 					<motion.div
 						animate={{ x: 0 }}
-						className="flex h-full shrink-0 border-border border-r bg-background shadow-xl"
+						className="flex h-full shrink-0 border-border border-e bg-background shadow-xl"
 						exit={reduceMotion ? {} : { x: -16 }}
 						initial={reduceMotion ? false : { x: -16 }}
 						ref={railOverlayRef}

@@ -1,7 +1,14 @@
 // Editor transform for dragging a mention chip to a new spot in the composer.
 // Kept free of React so it can run against a headless Slate editor in tests.
 
-import type { Path, Point, SlateEditor, TMentionElement, TText } from "platejs";
+import type {
+	Path,
+	Point,
+	PointRef,
+	SlateEditor,
+	TMentionElement,
+	TText,
+} from "platejs";
 import {
 	mentionDropPadding,
 	shouldTrimGapAfterRemovedMention,
@@ -18,7 +25,32 @@ export function moveMention(
 	from: Path,
 	dropPoint: Point
 ): Path | undefined {
+	// Slate inserts the empty text an inline void needs on either side only when
+	// it normalizes. A draft set from Markdown can skip that, so the first edit
+	// below would normalize mid-move and shift `from` onto a fresh empty text:
+	// the chip would then be copied instead of moved. Normalize once, carrying
+	// the source and drop point across through refs.
+	const source = editor.api.pathRef(from);
 	const target = editor.api.pointRef(dropPoint);
+	editor.tf.normalize({ force: true });
+	const sourcePath = source.unref();
+	if (!sourcePath) {
+		target.unref();
+		return;
+	}
+	const moved = { ...mention };
+	editor.tf.withoutNormalizing(() =>
+		placeMention(editor, moved, sourcePath, target)
+	);
+	return editor.api.node({ at: [], match: (node) => node === moved })?.[1];
+}
+
+function placeMention(
+	editor: SlateEditor,
+	mention: TMentionElement,
+	from: Path,
+	target: PointRef
+): void {
 	// Drop the space the chip leaves behind when it was the line's first word
 	// or sat between two spaces, so moving it doesn't strand a double gap.
 	const position = from.at(-1) ?? 0;
@@ -50,8 +82,13 @@ export function moveMention(
 	const index = at.path.at(-1) ?? 0;
 	const before = at.offset > 0 ? text[at.offset - 1] : undefined;
 	const after = at.offset < text.length ? text[at.offset] : undefined;
-	const hasPrevious = before !== undefined || index > 0;
-	const hasNext = after !== undefined || index < parent[0].children.length - 1;
+	// Empty texts left by the removal are not content: a chip dropped at the
+	// line's edge needs no pad there.
+	const siblings = parent[0].children;
+	const hasPrevious =
+		before !== undefined || siblings.slice(0, index).some(isContent);
+	const hasNext =
+		after !== undefined || siblings.slice(index + 1).some(isContent);
 	const { lead, trail } = mentionDropPadding({
 		after,
 		before,
@@ -66,8 +103,8 @@ export function moveMention(
 		],
 		{ at }
 	);
-	return editor.api.node({
-		at: [],
-		match: (node) => "id" in node && node.id === mention.id,
-	})?.[1];
+}
+
+function isContent(node: object): boolean {
+	return !("text" in node) || node.text !== "";
 }

@@ -105,6 +105,7 @@ pub(super) async fn fit_openai_history(
     if !matches!(route, AgentRoute::Acp { .. }) {
         if let Some(handoff) = req.context_handoff.as_ref() {
             if let Some(summary) = context_handoff::apply_openai(&mut req.messages, handoff) {
+                let summary = untrusted_summary_block(summary);
                 breakdown.add_text("compact", "Handoff summary", Some(&summary));
                 *long_term_system = append_system_suffix(long_term_system.take(), Some(summary));
             }
@@ -130,6 +131,7 @@ pub(super) async fn fit_openai_history(
             if let Some(summary) =
                 context_window::apply_openai(&mut req.messages, system_tokens, cfg).await
             {
+                let summary = untrusted_summary_block(summary);
                 breakdown.add_text("compact", "Compacted summary", Some(&summary));
                 *long_term_system = append_system_suffix(long_term_system.take(), Some(summary));
             }
@@ -161,7 +163,7 @@ pub(super) async fn fit_openai_history(
                 "skills",
                 "Skills",
                 context_window::estimate_tokens(&header),
-                Some(format!("{} enabled", ids.len())),
+                Some(context_breakdown::SegmentDetail::Skills(ids.len())),
             );
         }
         plane_breakdown.add_text("instructions", "Output style", style_prefix.as_deref());
@@ -177,3 +179,37 @@ pub(super) async fn fit_openai_history(
         );
     }
 }
+
+/// Fence a compaction or handoff summary before it joins the system prompt.
+///
+/// The summary is model-derived text about turns that can carry pasted web or
+/// email content and quoted tool output, so it must not reach system rank as
+/// trusted instructions (the same reasoning as recalled memory facts in
+/// `long_term_memory`). Ryu's own label line stays outside the fence; anything
+/// else, including a label-shaped first line the model or a hook wrote, is
+/// token-stripped and wrapped. Applied after the `session_compact` hooks, so a
+/// plugin rewrite is fenced too, and outside the summary memo.
+pub(super) fn untrusted_summary_block(summary: String) -> String {
+    const RYU_SUMMARY_LABELS: &[&str] = &[
+        "[Earlier conversation summary]",
+        "[Handoff summary of the conversation before the model change]",
+    ];
+    if !crate::sidecar::untrusted::is_enabled() {
+        return summary;
+    }
+    let (label, body) = match summary.split_once('\n') {
+        Some((first, rest)) if RYU_SUMMARY_LABELS.contains(&first.trim_end()) => {
+            (Some(first.trim_end()), rest)
+        }
+        _ => (None, summary.as_str()),
+    };
+    let fenced = crate::sidecar::untrusted::neutralize(body.trim());
+    match label {
+        Some(label) => format!("{label}\n{fenced}"),
+        None => fenced,
+    }
+}
+
+#[cfg(test)]
+#[path = "chat_stream_history_test.rs"]
+mod chat_stream_history_test;

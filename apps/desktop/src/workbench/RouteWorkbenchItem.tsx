@@ -1,14 +1,16 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { WorkbenchItem } from "@ryu/workbench/model";
 import { CrashBoundary } from "@/src/components/CrashBoundary.tsx";
-import { TitlebarPage } from "@/src/components/layout/TitlebarPage.tsx";
+import {
+	TITLEBAR_CLEARANCE_PX,
+	TitlebarPage,
+} from "@/src/components/layout/TitlebarPage.tsx";
 import {
 	CurrentTabIdProvider,
 	IsActiveTabProvider,
 	useTabsContext,
 } from "@/src/contexts/TabsContext.tsx";
 import { RouteOutlet } from "@/src/contributions/RouteOutlet.tsx";
-import { useSidebarVariant } from "@/src/hooks/useSidebarVariant.ts";
 import { useTitleBarClearsContent } from "@/src/hooks/useTitleBarClearsContent.ts";
 import { useDesktopWorkbench } from "./DesktopWorkbenchContext.tsx";
 
@@ -16,7 +18,6 @@ export function RouteWorkbenchItem({ item }: { item: WorkbenchItem }) {
 	const { dispatch, state } = useDesktopWorkbench();
 	const { closeTab, tabs } = useTabsContext();
 	const titleBarClearsContent = useTitleBarClearsContent();
-	const [sidebarVariant] = useSidebarVariant();
 	if (item.source.kind !== "route") {
 		return null;
 	}
@@ -48,9 +49,7 @@ export function RouteWorkbenchItem({ item }: { item: WorkbenchItem }) {
 					}
 				>
 					<TitlebarPage
-						inset={
-							needsClearance ? (sidebarVariant === "floating" ? 80 : 72) : 0
-						}
+						inset={needsClearance ? TITLEBAR_CLEARANCE_PX : 0}
 						selfInset={tab.path === "/chat" || tab.path.startsWith("/chat/")}
 					>
 						<CrashBoundary resetKeys={[tab.path, tab.navToken ?? 0]}>

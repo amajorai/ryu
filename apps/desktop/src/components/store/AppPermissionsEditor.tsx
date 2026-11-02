@@ -77,7 +77,7 @@ export function AppPermissionsEditor({
 								<div className="font-medium text-sm">
 									{grantLabel(grant)}
 									{optional.has(grant) ? (
-										<span className="ml-2 font-normal text-muted-foreground text-xs">
+										<span className="ms-2 font-normal text-muted-foreground text-xs">
 											Optional
 										</span>
 									) : null}

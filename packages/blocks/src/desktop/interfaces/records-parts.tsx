@@ -5,7 +5,6 @@ import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
@@ -14,7 +13,7 @@ import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
-import { initials } from "./interface-renderer.ts";
+import { initials, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type RecordsRow,
 	recordsStatusLabel,
@@ -107,7 +106,7 @@ export function RecordsStatus({
 			)}
 		>
 			{dot ? <BoardStatusDot status={status} /> : null}
-			<span className="truncate">{label ?? THREAD_STATUS_LABELS[status]}</span>
+			<span className="truncate">{label ?? threadStatusLabel(status)}</span>
 		</span>
 	);
 }
@@ -186,9 +185,9 @@ export function RecordsThreadPanel({
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={tl("Thread: {title}", { title })}
 			className={cn(
-				"flex min-h-0 shrink-0 flex-col border-border border-l bg-background",
+				"flex min-h-0 shrink-0 flex-col border-border border-s bg-background",
 				floating
-					? "absolute inset-y-0 right-0 z-30 w-[min(480px,100%)] shadow-xl"
+					? "absolute inset-y-0 end-0 z-30 w-[min(480px,100%)] shadow-xl"
 					: "w-[clamp(380px,40%,560px)]"
 			)}
 			data-testid="records-thread-panel"

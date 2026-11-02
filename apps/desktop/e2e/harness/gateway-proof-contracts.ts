@@ -112,7 +112,12 @@ const accountProofSchema = z
 				"unavailable",
 			])
 			.optional(),
-		gatewayActive: z.boolean().optional(),
+		// As pi-config.ts parses it: absent from older Core means not installed
+		// in the Gateway.
+		gatewayActive: z
+			.boolean()
+			.optional()
+			.transform((active) => active ?? false),
 		kind: z.string(),
 		label: z.string(),
 		needsReauth: z.boolean().optional(),

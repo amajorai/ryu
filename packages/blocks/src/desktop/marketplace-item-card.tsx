@@ -188,7 +188,7 @@ export function MarketplaceItemCard({
 				: null;
 
 	const headingContent = (
-		<div className="flex min-w-0 items-center gap-3 text-left">
+		<div className="flex min-w-0 items-center gap-3 text-start">
 			<MarketplaceCardLogo
 				iconUrl={card.iconUrl}
 				id={card.id}

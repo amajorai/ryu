@@ -1,3 +1,5 @@
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
+import { cn } from "@ryu/ui/lib/utils";
 import type React from "react";
 
 type IconProps = React.SVGProps<SVGSVGElement> & {
@@ -56,9 +58,17 @@ export function CheckIcon(props: IconProps) {
 	);
 }
 
-export function IconArrowRight(props: IconProps) {
+/** Points toward the inline end, so it mirrors in right-to-left layouts. */
+export function IconArrowRight({ className, ...props }: IconProps) {
 	return (
-		<svg fill="none" height="24" viewBox="0 0 24 24" width="24" {...props}>
+		<svg
+			className={cn(DIRECTIONAL_ICON_CLASS, className)}
+			fill="none"
+			height="24"
+			viewBox="0 0 24 24"
+			width="24"
+			{...props}
+		>
 			<path
 				d="M14 6L20 12L14 18"
 				stroke="currentColor"
@@ -76,9 +86,17 @@ export function IconArrowRight(props: IconProps) {
 	);
 }
 
-export function IconDoubleChevronRight(props: IconProps) {
+/** Points toward the inline end, so it mirrors in right-to-left layouts. */
+export function IconDoubleChevronRight({ className, ...props }: IconProps) {
 	return (
-		<svg fill="none" height="16" viewBox="0 0 24 24" width="16" {...props}>
+		<svg
+			className={cn(DIRECTIONAL_ICON_CLASS, className)}
+			fill="none"
+			height="16"
+			viewBox="0 0 24 24"
+			width="16"
+			{...props}
+		>
 			<path
 				d="M6 17L11 12L6 7M13 17L18 12L13 7"
 				stroke="currentColor"

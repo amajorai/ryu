@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -55,7 +56,8 @@ export function joinNames(names: readonly string[]): string {
 	if (names.length <= 1) {
 		return names[0] ?? "";
 	}
-	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+	const head = names.slice(0, -1).join(", ");
+	return tr("{names} and {last}", { last: names.at(-1), names: head });
 }
 
 function groupDescription(
@@ -65,7 +67,9 @@ function groupDescription(
 	const names = memberIds
 		.map((id) => snapshot.agents.find((agent) => agent.id === id)?.name)
 		.filter((name): name is string => Boolean(name));
-	return names.length > 0 ? `With ${joinNames(names)}` : "No members yet";
+	return names.length > 0
+		? tr("With {names}", { names: joinNames(names) })
+		: tr("No members yet");
 }
 
 /**
@@ -471,31 +475,26 @@ export function composerCategories(
 // Formatting
 // ---------------------------------------------------------------------------
 
-export function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
-const MONTH_DAY = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	month: "short",
-});
-
-const FULL_DATE = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-	month: "short",
-	year: "numeric",
-});
-
-/** "Oct 12", as Discourse labels dates in its timeline. */
+/** "Oct 12", as Discourse labels dates in its timeline, in the UI locale. */
 export function monthDay(iso: string): string {
 	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : MONTH_DAY.format(time);
+	return Number.isNaN(time)
+		? ""
+		: dateFormatter(activeLocale(), { day: "numeric", month: "short" }).format(
+				time
+			);
 }
 
-/** "Oct 12, 2026, 9:41 AM" for tooltips and titles. */
+/** "Oct 12, 2026, 9:41 AM" for tooltips and titles, in the UI locale. */
 export function fullDate(iso: string): string {
 	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : FULL_DATE.format(time);
+	return Number.isNaN(time)
+		? ""
+		: dateFormatter(activeLocale(), {
+				day: "numeric",
+				hour: "numeric",
+				minute: "2-digit",
+				month: "short",
+				year: "numeric",
+			}).format(time);
 }

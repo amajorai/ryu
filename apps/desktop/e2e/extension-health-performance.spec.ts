@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("extension health probes pause hidden and cancel on node change or unmount", async ({
 	page,
@@ -70,9 +70,8 @@ test("extension health probes pause hidden and cancel on node change or unmount"
 			page.getByText("Connection restored", { exact: true })
 		).toBeVisible();
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/extension-health-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/extension-health-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -136,9 +135,8 @@ test("content-script status stops hidden and disposed work", async ({
 			"online"
 		);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/extension-content-health-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/extension-content-health-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",

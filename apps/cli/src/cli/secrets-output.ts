@@ -42,7 +42,7 @@ export function policyKey(
 
 export function describeChangeRequest(request: VaultChangeRequest): string {
 	return tf(
-		"Change request {id} created for {key}; it needs {requiredApprovals} approval(s).",
+		"Change request {id} created for {key}; it needs {requiredApprovals, plural, one {# approval} other {# approvals}}.",
 		{
 			id: request.id,
 			key: policyKey(
@@ -50,7 +50,7 @@ export function describeChangeRequest(request: VaultChangeRequest): string {
 				request.coords.path,
 				request.coords.name
 			),
-			requiredApprovals: String(request.requiredApprovals),
+			requiredApprovals: request.requiredApprovals,
 		}
 	);
 }
@@ -74,10 +74,16 @@ export function reportWrite(
 
 export function sealLine(seal: VaultSealStatus): string {
 	if (!seal.sealed) {
-		return `Unsealed (${seal.mode}, data key v${seal.activeKeyVersion}).`;
+		return tf("Unsealed ({mode}, data key v{version}).", {
+			mode: seal.mode,
+			version: String(seal.activeKeyVersion),
+		});
 	}
 	return seal.mode === "shamir"
-		? `Sealed (shamir): ${seal.progress}/${seal.threshold} key shares submitted.`
+		? tf("Sealed (shamir): {progress}/{threshold} key shares submitted.", {
+				progress: String(seal.progress),
+				threshold: String(seal.threshold),
+			})
 		: "Sealed (auto).";
 }
 

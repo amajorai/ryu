@@ -93,7 +93,23 @@ pub(super) async fn apply_inline_input_evaluators(
                     "inline evaluator",
                 ) {
                     Ok(true) => "sanitized",
-                    Ok(false) => "flagged (not redactable; forwarded)",
+                    Ok(false) if flag_is_injection_only(ev) => {
+                        "flagged (not redactable; forwarded)"
+                    }
+                    Ok(false) => {
+                        // A judge or PII/secret flag carries no span the regex
+                        // redaction could rewrite: forwarding it would turn
+                        // Sanitize into Warn, so refuse it instead.
+                        state.metrics.inc_firewall_blocked();
+                        audit_inline_evaluator(state, ctx, &model, &ev.id, "blocked", &reason);
+                        return Err(GatewayError::FirewallBlocked(
+                            format!(
+                                "Inbound content flagged by evaluator '{}' could not be redacted",
+                                ev.id
+                            ),
+                            firewall_policy_alert(scanner.config(), ctx, "block"),
+                        ));
+                    }
                     Err(error) => {
                         audit_inline_evaluator(state, ctx, &model, &ev.id, "blocked", &reason);
                         return Err(error);
@@ -207,17 +223,105 @@ pub(super) async fn apply_inline_output_evaluators(
             }
             InlineOutcome::Sanitize => {
                 let model = response["model"].as_str().unwrap_or("unknown").to_string();
+                let before = response_to_text(response);
+                sanitize_response(response, scanner.as_ref());
+                drop_choice_logprobs(response);
+                // A judge flag names no span: when redaction rewrote nothing,
+                // delivering the reply would turn Sanitize into Warn.
+                if !flag_is_injection_only(ev) && response_to_text(response) == before {
+                    state.metrics.inc_firewall_blocked();
+                    audit_inline_evaluator(state, ctx, &model, &ev.id, "blocked", &reason);
+                    return Err(GatewayError::FirewallBlocked(
+                        format!(
+                            "Outbound response flagged by evaluator '{}' could not be redacted",
+                            ev.id
+                        ),
+                        firewall_policy_alert(scanner.config(), ctx, "block"),
+                    ));
+                }
+                // Fail closed: when the evaluator's own detector still matches
+                // (a fold-only match, or `redact_pii` off), block rather than
+                // deliver flagged text recorded as "sanitized".
+                if let Some(survivor) =
+                    evaluator_sanitize_survivor(ev, scanner.as_ref(), &response_to_text(response))
+                {
+                    state.metrics.inc_firewall_blocked();
+                    audit_inline_evaluator(state, ctx, &model, &ev.id, "blocked", &reason);
+                    warn!(
+                        request_id = %ctx.request_id,
+                        evaluator = %ev.id,
+                        pattern = %survivor.pattern_name,
+                        "inline evaluator: match survived Sanitize; blocked outbound response"
+                    );
+                    return Err(GatewayError::FirewallBlocked(
+                        format!(
+                            "Outbound response blocked by evaluator '{}': {} survived redaction",
+                            ev.id, survivor.pattern_name
+                        ),
+                        firewall_policy_alert(scanner.config(), ctx, "block"),
+                    ));
+                }
                 warn!(
                     request_id = %ctx.request_id,
                     evaluator = %ev.id,
-                    "inline evaluator: sanitizing outbound response"
+                    "inline evaluator: sanitized outbound response"
                 );
                 audit_inline_evaluator(state, ctx, &model, &ev.id, "sanitized", &reason);
-                sanitize_response(response, scanner.as_ref());
             }
         }
     }
     Ok(())
+}
+
+/// Whether an inbound Sanitize flag from `ev` may continue unredacted: only an
+/// injection detector, whose match cannot be redacted (as with the regex
+/// firewall's injection match). Any other flag (an LLM judge, a PII or secret
+/// detector, a custom rule) is refused when redaction leaves the text as it was.
+pub(super) fn flag_is_injection_only(ev: &Evaluator) -> bool {
+    matches!(
+        inline_detection_kind(&ev.id),
+        Some(
+            crate::firewall::DetectionKind::PromptInjection
+                | crate::firewall::DetectionKind::CodeInjection
+        )
+    )
+}
+
+/// The match an evaluator's deterministic detector still finds in `text`
+/// after its Sanitize ran. `None` for a judge or custom-regex evaluator, whose
+/// verdict cannot be re-derived from the redacted text.
+pub(super) fn evaluator_sanitize_survivor(
+    ev: &Evaluator,
+    scanner: &FirewallScanner,
+    text: &str,
+) -> Option<crate::firewall::FirewallMatch> {
+    inline_detection_kind(&ev.id).and_then(|kind| scanner.scan_kind(text, kind))
+}
+
+/// For the streamed reply: the first enabled OUTPUT binding with a Sanitize
+/// action whose detector still matches the sanitized text, as a block reason.
+pub(super) fn output_sanitize_survivor(
+    state: &AppState,
+    scanner: &FirewallScanner,
+    sanitized: &str,
+) -> Option<String> {
+    let registry = state.evaluator_registry();
+    scanner
+        .config()
+        .evaluators
+        .iter()
+        .filter(|binding| binding.enabled)
+        .find_map(|binding| {
+            let ev = registry.get(&binding.id)?;
+            if !ev.capabilities.inline
+                || ev.target != EvaluatorTarget::Output
+                || inline_action_for(binding, ev) != FirewallPolicy::Sanitize
+            {
+                return None;
+            }
+            evaluator_sanitize_survivor(ev, scanner, sanitized)
+                .map(|m| format!("{}: {} survived redaction", ev.id, m.pattern_name))
+        })
 }
 
 /// Whether any enabled OUTPUT-target inline binding would BLOCK or SANITIZE — the
@@ -302,3 +406,7 @@ pub(super) fn inline_outcome_rank(o: InlineOutcome) -> u8 {
         InlineOutcome::Block => 3,
     }
 }
+
+#[cfg(test)]
+#[path = "inline_apply_sanitize_tests.rs"]
+mod inline_apply_sanitize_tests;

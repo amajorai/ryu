@@ -1,12 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/dropdrawer-proof.html";
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/dropdrawer"
-);
+const PROOF_DIR = proofEvidencePath("dropdrawer");
 
 test.describe.configure({ timeout: 90_000 });
 

@@ -11,7 +11,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
 import { BackdropControls } from "@ryu/ui/components/backdrop/backdrop-controls.tsx";
-import { BACKDROP_CATEGORIES } from "@ryu/ui/components/backdrop/definitions.ts";
+import {
+	BACKDROP_CATEGORIES,
+	backdropDescription,
+} from "@ryu/ui/components/backdrop/definitions.ts";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useState } from "react";
@@ -36,13 +39,14 @@ function BackdropTile({
 	onSelect: () => void;
 	selected: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [hovered, setHovered] = useState(false);
 	return (
 		<button
 			aria-label={definition.label}
 			aria-pressed={selected}
 			className={cn(
-				"group relative flex flex-col gap-1.5 text-left outline-none",
+				"group relative flex flex-col gap-1.5 text-start outline-none",
 				"focus-visible:[&>span:first-child]:ring-2 focus-visible:[&>span:first-child]:ring-ring"
 			)}
 			data-testid={`backdrop-tile-${definition.id}`}
@@ -51,7 +55,7 @@ function BackdropTile({
 			onFocus={() => setHovered(true)}
 			onPointerEnter={() => setHovered(true)}
 			onPointerLeave={() => setHovered(false)}
-			title={definition.description}
+			title={backdropDescription(definition, tl)}
 			type="button"
 		>
 			<span
@@ -66,7 +70,7 @@ function BackdropTile({
 					posterOnly={!hovered}
 				/>
 				{selected ? (
-					<span className="absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
+					<span className="absolute end-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
 						<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 					</span>
 				) : null}
@@ -150,11 +154,11 @@ export function BackdropTab({
 							live
 							params={preference.backdrop.params}
 						/>
-						<span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-white text-xs">
+						<span className="absolute start-2 bottom-2 rounded-full bg-black/50 px-2 py-0.5 text-white text-xs">
 							{selected.label}
 						</span>
 					</div>
-					<div className="max-h-72 overflow-y-auto pr-1">
+					<div className="max-h-72 overflow-y-auto pe-1">
 						{selected.origin === "marketplace" && selected.attributionUrl ? (
 							<p className="mb-3 text-muted-foreground text-xs">
 								Source:{" "}
@@ -212,7 +216,7 @@ export function BackdropTab({
 						<div className="relative min-w-48 flex-1 sm:max-w-sm">
 							<HugeiconsIcon
 								aria-hidden="true"
-								className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+								className="absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 								icon={Search01Icon}
 							/>
 							<Input

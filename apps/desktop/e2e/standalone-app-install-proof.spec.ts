@@ -1,11 +1,9 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proof = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/standalone-app-install"
-);
+const proof = proofEvidencePath("standalone-app-install");
 
 test("right-click installs and removes only the standalone launch surface", async ({
 	page,

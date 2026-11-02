@@ -297,7 +297,7 @@ export function Citations({
 			<button
 				aria-controls={contentId}
 				aria-expanded={currentOpen}
-				className="group -ml-1 flex min-h-8 items-center gap-2 rounded-lg px-1 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+				className="group -ms-1 flex min-h-8 items-center gap-2 rounded-lg px-1 text-start text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 				onClick={() => setOpen(!currentOpen)}
 				type="button"
 			>

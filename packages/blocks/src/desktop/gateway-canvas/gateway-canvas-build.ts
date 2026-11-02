@@ -1,3 +1,5 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
+import { reactFlowEdgeAriaLabel } from "../react-flow-labels.ts";
 import type { CanvasFlowEdge } from "./edges.tsx";
 import { type CanvasLayout, linkEnds } from "./layout.ts";
 import type { CanvasTopology } from "./model.ts";
@@ -54,4 +56,21 @@ export function buildEdges(
 		});
 	}
 	return edges;
+}
+
+/** Edges named by their nodes' labels in the active language. */
+export function labelEdges(
+	edges: CanvasFlowEdge[],
+	topology: CanvasTopology,
+	tl: LiteralMessage
+): CanvasFlowEdge[] {
+	const labels = new Map(topology.nodes.map((node) => [node.id, node.label]));
+	return edges.map((edge) => ({
+		...edge,
+		ariaLabel: reactFlowEdgeAriaLabel(
+			tl,
+			labels.get(edge.source) ?? edge.source,
+			labels.get(edge.target) ?? edge.target
+		),
+	}));
 }

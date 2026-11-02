@@ -1,5 +1,6 @@
 /** Built-in slash-command specs and their pure handlers (see `commands.ts`). */
 
+import { tf } from "../i18n/translate.ts";
 import type {
 	CommandAction,
 	CommandHandler,
@@ -18,7 +19,7 @@ const action = (value: CommandAction): CommandHandlerResult => ({
 
 const usage = (context: CommandHandlerContext): CommandHandlerResult => ({
 	kind: "usage",
-	message: `Usage: ${context.spec.usage}`,
+	message: tf("Usage: {usage}", { usage: context.spec.usage }),
 });
 
 const requireNoArguments = (

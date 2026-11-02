@@ -248,9 +248,12 @@ export interface GatewayComputerUseConfig {
 	/** Whether Ghost may request the platform's locked-session path. */
 	locked_use: boolean;
 	/**
-	 * Stored permission for features that use a hardware security key connected
-	 * to this node. No current feature reads it. Absent on Gateways that predate
-	 * the field.
+	 * Whether browsers on remote nodes and VMs may relay WebAuthn sign-in and
+	 * registration requests to a roaming hardware security key connected to
+	 * this node. On the node running the browser it allows the browser to ask;
+	 * on the desktop node it allows the key here to answer. Every request still
+	 * needs the user's approval and a touch of the key. Absent on Gateways that
+	 * predate the field.
 	 */
 	security_key?: boolean;
 }

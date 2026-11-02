@@ -79,7 +79,7 @@ export function NoticeboardNoteButton({
 			}}
 			aria-current={active ? "true" : undefined}
 			aria-describedby={descriptionId}
-			aria-label={noteAccessibleName(note, age)}
+			aria-label={noteAccessibleName(note)}
 			className={cn(
 				"group absolute flex select-none rounded-[3px] bg-card text-start text-card-foreground outline-none",
 				"shadow-foreground/15 shadow-sm transition-shadow duration-150",

@@ -198,7 +198,7 @@ function CancelVerificationButton({ onClick }: { onClick: () => void }) {
 			type="button"
 			variant="secondary"
 		>
-			<ArrowLeft aria-hidden="true" className="size-5" />
+			<ArrowLeft aria-hidden="true" className="size-5 rtl:-scale-x-100" />
 			Cancel
 		</Button>
 	);

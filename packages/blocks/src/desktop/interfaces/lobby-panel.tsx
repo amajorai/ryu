@@ -2,12 +2,11 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import type { ReactNode, Ref } from "react";
 import { GameSheet } from "./game-shell.tsx";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import { LobbyHead } from "./lobby-parts.tsx";
 
 /**
@@ -51,10 +50,10 @@ export function LobbyThreadPanel({
 			onClose={onClose}
 			sheetKey={thread?.id ?? "new"}
 			subtitle={
-				<span className="truncate">
-					{lead ? lead.name : "No agent"}
+				<span className="truncate" data-ryu-i18n="off">
+					{lead ? lead.name : tl("No agent")}
 					{others > 0 ? ` +${others}` : ""}
-					{status ? ` · ${THREAD_STATUS_LABELS[status]}` : ""}
+					{status ? ` · ${threadStatusLabel(status, tl)}` : ""}
 				</span>
 			}
 			title={title}

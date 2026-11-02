@@ -1,127 +1,14 @@
-import path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
-import { z } from "zod";
-import type { RyuBridge } from "../../../apps-store/activity/ui/src/ryu.d.ts";
-
-type ActivityProofPayload =
-	| Parameters<RyuBridge["activity"][keyof RyuBridge["activity"]]>[0]
-	| Parameters<RyuBridge["shell"]["openTab"]>[0];
-
-type ActivityProofOperation =
-	| "audit"
-	| "eval"
-	| "importTrace"
-	| "list"
-	| "openTab"
-	| "prune"
-	| "redteam"
-	| "score"
-	| "trace";
-
-interface ActivityProofCall {
-	operation: ActivityProofOperation;
-	payload?: ActivityProofPayload;
-}
-
-declare global {
-	interface Window {
-		__activityProof: {
-			calls: () => ActivityProofCall[];
-			failNext: (operation: ActivityProofOperation) => void;
-		};
-	}
-}
-
-const FIXED_NOW = new Date("2026-09-26T12:00:00.000Z");
-const AGENT_ID = "observability-proof-agent";
-const RUN_ID = "run-proof-success";
-const HOUR = 60 * 60 * 1000;
-const DAY = 24 * HOUR;
-
-function evidencePath(name: string): string {
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
-}
-
-async function openActivity(page: Page, query = ""): Promise<void> {
-	await page.clock.setFixedTime(FIXED_NOW);
-	await page.goto(`/activity-app-observability-proof.html${query}`);
-	await expect(page.getByTestId("activity-proof-status")).toHaveText(
-		"Activity Companion mounted"
-	);
-}
-
-async function selectObservability(page: Page): Promise<void> {
-	await page.getByRole("tab", { name: "Observability" }).click();
-	await expect(
-		page.getByRole("heading", { exact: true, name: "Agent observability" })
-	).toBeVisible();
-	await expect(page.getByText("Live · 15s", { exact: true })).toBeVisible();
-	await expect(
-		page.getByTestId("observability-event-audit-proof-success")
-	).toBeVisible();
-}
-
-async function openObservability(page: Page): Promise<void> {
-	await openActivity(page);
-	await selectObservability(page);
-}
-
-async function proofCalls(page: Page): Promise<ActivityProofCall[]> {
-	return page.evaluate(() => window.__activityProof.calls());
-}
-
-async function callsFor(
-	page: Page,
-	operation: ActivityProofOperation
-): Promise<ActivityProofCall[]> {
-	return (await proofCalls(page)).filter(
-		(call) => call.operation === operation
-	);
-}
-
-async function waitForCallCount(
-	page: Page,
-	operation: ActivityProofOperation,
-	count: number
-): Promise<void> {
-	await expect
-		.poll(async () => (await callsFor(page, operation)).length)
-		.toBe(count);
-}
-
-async function expectAuditWindow(
-	page: Page,
-	index: number,
-	window: "1h" | "24h" | "7d" | "all"
-): Promise<void> {
-	await waitForCallCount(page, "audit", index + 1);
-	const call = (await callsFor(page, "audit"))[index];
-	expect(call).toBeDefined();
-	const payload = z
-		.object({ from: z.string().optional(), limit: z.number().optional() })
-		.optional()
-		.parse(call?.payload);
-	expect(payload?.limit).toBe(100);
-	if (window === "all") {
-		expect(payload?.from).toBeUndefined();
-		return;
-	}
-	const duration = { "1h": HOUR, "24h": DAY, "7d": 7 * DAY }[window];
-	expect(payload?.from).toBe(
-		new Date(FIXED_NOW.getTime() - duration).toISOString()
-	);
-}
-
-const agentCallSchema = z.object({
-	agent_id: z.string(),
-	model: z.string().optional(),
-});
-function record(value: ActivityProofPayload) {
-	return agentCallSchema.parse(value);
-}
+import { expect, test } from "@playwright/test";
+import {
+	AGENT_ID,
+	callsFor,
+	evidencePath,
+	expectAuditWindow,
+	openActivity,
+	openObservability,
+	RUN_ID,
+	record,
+} from "./activity-app-observability-proof.helpers.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -590,33 +477,4 @@ test("bridge failures show recovery and preserve state for refresh, prune, impor
 	await page.getByRole("button", { name: "Run security checks" }).click();
 	await expect(page.getByText("5/5 protected", { exact: false })).toBeVisible();
 	expect(await callsFor(page, "redteam")).toHaveLength(2);
-});
-
-test("a selected run shows a retryable error when its Core trace read fails", async ({
-	page,
-}) => {
-	await openObservability(page);
-	await page.evaluate(() => window.__activityProof.failNext("trace"));
-	await page.getByTestId("observability-event-audit-proof-success").click();
-	await expect(page.getByRole("alert")).toContainText("trace failed for proof");
-	await expect(page.getByRole("button", { name: "Retry trace" })).toBeVisible();
-	await page.screenshot({
-		fullPage: true,
-		path: evidencePath("activity-observability-trace-read-error"),
-	});
-	expect(await callsFor(page, "trace")).toEqual([
-		{ operation: "trace", payload: { run_id: RUN_ID } },
-	]);
-	await page.getByRole("button", { name: "Retry trace" }).click();
-	await expect(
-		page.getByText("search_docs", { exact: true }).last()
-	).toBeVisible();
-	await page.screenshot({
-		fullPage: true,
-		path: evidencePath("activity-observability-trace-retried"),
-	});
-	expect(await callsFor(page, "trace")).toEqual([
-		{ operation: "trace", payload: { run_id: RUN_ID } },
-		{ operation: "trace", payload: { run_id: RUN_ID } },
-	]);
 });

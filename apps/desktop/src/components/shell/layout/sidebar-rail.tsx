@@ -1,3 +1,4 @@
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import {
 	clampWithRubberband,
 	createVelocityTracker,
@@ -23,6 +24,17 @@ import {
 	SIDEBAR_MIN_WIDTH,
 } from "./layout-constants.ts";
 
+/**
+ * Pointer `clientX` projected onto the axis the sidebar grows along. The docked
+ * sidebar sits at the inline start: the physical left in LTR, but the physical
+ * right in RTL (the shared `<Sidebar>` places it with `start-0`), where dragging
+ * its edge LEFT is what widens it. Negating the coordinate there keeps the width
+ * delta, the rubber band and the flick velocity all measured in "outward" pixels.
+ */
+export function sidebarRailAxis(clientX: number, direction: string): number {
+	return direction === "rtl" ? -clientX : clientX;
+}
+
 /** Pointer-driven resize (and flick-to-collapse) for the docked sidebar rail. */
 export function useSidebarRailResize(
 	sidebarWidth: number,
@@ -36,6 +48,11 @@ export function useSidebarRailResize(
 	const pointerIdRef = useRef<number | null>(null);
 	// Position history for the release velocity — see `endRailDrag`.
 	const railVelocityRef = useRef(createVelocityTracker());
+	// Read through a ref so a language switch mid-session does not re-bind the
+	// document listeners, and a drag in flight keeps one consistent axis.
+	const direction = useDirection();
+	const directionRef = useRef(direction);
+	directionRef.current = direction;
 
 	// POINTER events, not mouse events. The rail used to listen for
 	// `mousemove`/`mouseup`, which a pen or a touch drag never fires — the
@@ -51,11 +68,12 @@ export function useSidebarRailResize(
 			e.currentTarget.setPointerCapture?.(e.pointerId);
 			pointerIdRef.current = e.pointerId;
 			resizingRef.current = true;
-			startXRef.current = e.clientX;
+			const x = sidebarRailAxis(e.clientX, directionRef.current);
+			startXRef.current = x;
 			startWidthRef.current = sidebarWidth;
 			widthRef.current = sidebarWidth;
 			railVelocityRef.current.reset();
-			railVelocityRef.current.sample(e.clientX, e.timeStamp);
+			railVelocityRef.current.sample(x, e.timeStamp);
 			document.body.style.cursor = "col-resize";
 			document.body.style.userSelect = "none";
 		},
@@ -74,8 +92,9 @@ export function useSidebarRailResize(
 			if (!resizingRef.current || e.pointerId !== pointerIdRef.current) {
 				return;
 			}
-			railVelocityRef.current.sample(e.clientX, e.timeStamp);
-			const raw = startWidthRef.current + (e.clientX - startXRef.current);
+			const x = sidebarRailAxis(e.clientX, directionRef.current);
+			railVelocityRef.current.sample(x, e.timeStamp);
+			const raw = startWidthRef.current + (x - startXRef.current);
 			// Give at the limits instead of stopping dead. The overshoot is
 			// transient — `endRailDrag` snaps back to the hard bounds on release,
 			// so nothing out of range is ever the resting value.
@@ -93,7 +112,10 @@ export function useSidebarRailResize(
 			if (!resizingRef.current || e.pointerId !== pointerIdRef.current) {
 				return;
 			}
-			railVelocityRef.current.sample(e.clientX, e.timeStamp);
+			railVelocityRef.current.sample(
+				sidebarRailAxis(e.clientX, directionRef.current),
+				e.timeStamp
+			);
 			// Where the gesture was HEADED, not where the pointer happened to stop.
 			// A decisive inward flick collapses the sidebar even if the finger
 			// lifted well short of the edge; a slow drag to the same pixel does
@@ -217,25 +239,33 @@ export function FloatingSidebarPeek({
 	scheduleHide: () => void;
 	showFloat: () => void;
 }) {
+	// The peek mirrors the docked sidebar: it lives at the inline start and
+	// slides in from that edge, so under RTL it comes from the physical right.
+	const direction = useDirection();
+	const peekStyle: LayoutCssVariables = {
+		...cssVariables4,
+		"--desktop-inline4-sign": direction === "rtl" ? 1 : -1,
+	};
 	return (
 		<div
-			className={cn("fixed top-0 left-0 z-50 h-full", layoutStyles.inline3)}
+			className={cn("fixed start-0 top-0 z-50 h-full", layoutStyles.inline3)}
+			data-testid="sidebar-peek"
 			style={cssVariables3}
 		>
 			<div
 				className={cn(
-					"ryu-sidebar-surface absolute top-2 bottom-2 left-2 flex flex-col overflow-hidden rounded-2xl bg-card shadow-2xl",
+					"ryu-sidebar-surface absolute start-2 top-2 bottom-2 flex flex-col overflow-hidden rounded-2xl bg-card shadow-2xl",
 					layoutStyles.inline4
 				)}
 				data-sidebar-preview-boundary=""
 				onMouseEnter={showFloat}
 				onMouseLeave={scheduleHide}
-				style={cssVariables4}
+				style={peekStyle}
 			>
 				<SidebarPanelContent {...panelProps} />
 				<div
 					className={cn(
-						"absolute top-0 right-0 h-full w-1.5 cursor-col-resize opacity-0 transition-opacity hover:bg-sidebar-border hover:opacity-100",
+						"absolute end-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 transition-opacity hover:bg-sidebar-border hover:opacity-100",
 						layoutStyles.inline5
 					)}
 					onPointerDown={onRailPointerDown}
@@ -244,7 +274,7 @@ export function FloatingSidebarPeek({
 
 			<div
 				className={cn(
-					"absolute top-0 left-0 h-full w-10",
+					"absolute start-0 top-0 h-full w-10",
 					layoutStyles.inline6
 				)}
 				onMouseEnter={showFloat}

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { useId } from "react";
@@ -74,7 +75,7 @@ export function QaRail({
 										}
 										aria-pressed={selected}
 										className={cn(
-											"flex h-12 w-full items-center gap-3 rounded-md px-2 text-left outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+											"flex h-12 w-full items-center gap-3 rounded-md px-2 text-start outline-none transition-colors duration-100 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
 											selected && "bg-muted"
 										)}
 										onClick={() => onSelectAgent(entry.agent.id)}
@@ -83,14 +84,16 @@ export function QaRail({
 										<QaAvatar agent={entry.agent} size={32} />
 										<span className="flex min-w-0 flex-1 flex-col">
 											<span className="flex min-w-0 items-center gap-1.5 font-medium text-foreground text-sm leading-5">
-												<span className="truncate">{entry.agent.name}</span>
+												<span className="truncate" data-ryu-i18n="off">
+													{entry.agent.name}
+												</span>
 												{working ? <BoardStatusDot status="working" /> : null}
 											</span>
 											<span className="truncate text-muted-foreground text-xs leading-4">
-												{entry.agent.description || "Agent"}
+												{entry.agent.description || tr("Agent")}
 											</span>
 										</span>
-										<span className="shrink-0 text-right text-muted-foreground text-xs tabular-nums leading-4">
+										<span className="shrink-0 text-end text-muted-foreground text-xs tabular-nums leading-4">
 											<span className="block font-medium text-foreground text-sm leading-5">
 												{entry.answers}
 											</span>
@@ -116,9 +119,14 @@ export function QaRail({
 								/>
 								<span className="text-muted-foreground text-xs tabular-nums">
 									<span aria-hidden="true">× </span>
-									{entry.count}
+									<span aria-hidden="true">{entry.count}</span>
 									<span className="sr-only">
-										{entry.count === 1 ? " question" : " questions"}
+										{tr(
+											"{count, plural, one {# question} other {# questions}}",
+											{
+												count: entry.count,
+											}
+										)}
 									</span>
 								</span>
 							</li>

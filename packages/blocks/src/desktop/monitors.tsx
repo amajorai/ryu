@@ -144,7 +144,7 @@ export function MonitorsView({
 
 	return (
 		<div className="flex h-full overflow-hidden">
-			<div className="flex w-64 shrink-0 flex-col border-r">
+			<div className="flex w-64 shrink-0 flex-col border-e">
 				<div className="flex items-center justify-between border-b px-3 py-2">
 					<span className="font-medium text-sm">Monitors</span>
 					<Button
@@ -165,7 +165,7 @@ export function MonitorsView({
 						{monitors.map((m) => (
 							<li key={m.id}>
 								<button
-									className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent ${
+									className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-start hover:bg-accent ${
 										selectedId === m.id && !isNew ? "bg-accent" : ""
 									}`}
 									onClick={() => onSelect?.(m.id)}

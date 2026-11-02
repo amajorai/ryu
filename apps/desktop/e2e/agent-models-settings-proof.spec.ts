@@ -5,15 +5,13 @@ import {
 	type AgentModelsSnapshot,
 	agentModelsSnapshotSchema,
 } from "./agent-models-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // RYU_PROOF_EVIDENCE_DIR lets a revalidation run keep its screenshots out of
 // the tracked proof ledger; without it the committed evidence is refreshed.
 const evidenceDir =
 	process.env.RYU_PROOF_EVIDENCE_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 mkdirSync(evidenceDir, { recursive: true });
 

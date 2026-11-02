@@ -1,20 +1,24 @@
 // Team-chat timestamps for the Channels interface: clock times on messages
 // ("10:42 AM"), day dividers ("Today", "Monday, October 6th"), and the thread
-// bar's "Last reply …" phrase. Fixed to en-US so the copy stays stable.
+// bar's "Last reply …" phrase. English keeps the team-chat ordinal style
+// ("October 6th"); every other locale uses its own date formats.
 
+import {
+	activeLocale,
+	dateFormatter,
+	isEnglishLocale,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 const SAME_WEEK_DAYS = 6;
 
-const clockFormat = new Intl.DateTimeFormat("en-US", {
+const CLOCK: Intl.DateTimeFormatOptions = {
 	hour: "numeric",
 	minute: "2-digit",
-});
-const weekdayFormat = new Intl.DateTimeFormat("en-US", { weekday: "long" });
-const monthFormat = new Intl.DateTimeFormat("en-US", { month: "long" });
-const shortMonthFormat = new Intl.DateTimeFormat("en-US", { month: "short" });
+};
 
 function parse(iso: string): Date | null {
 	const time = Date.parse(iso);
@@ -61,36 +65,56 @@ export function dayKey(iso: string): string {
 	return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
-/** "10:42 AM". */
-export function clockTime(iso: string): string {
+/** "10:42 AM" in English; the locale's own clock elsewhere. */
+export function clockTime(
+	iso: string,
+	locale: string = activeLocale()
+): string {
 	const date = parse(iso);
-	return date ? clockFormat.format(date) : "";
+	return date ? dateFormatter(locale, CLOCK).format(date) : "";
 }
 
-/** Divider label: "Today", "Yesterday", "Monday, October 6th". */
-export function dayLabel(iso: string, now: number = Date.now()): string {
+/**
+ * Divider label: "Today", "Yesterday", "Monday, October 6th" in English;
+ * the locale's long weekday and date elsewhere ("Montag, 6. Oktober").
+ */
+export function dayLabel(
+	iso: string,
+	now: number = Date.now(),
+	locale: string = activeLocale()
+): string {
 	const date = parse(iso);
 	if (!date) {
-		return "Earlier";
+		return tr("Earlier");
 	}
 	const days = daysAgo(date, now);
 	if (days <= 0) {
-		return "Today";
+		return tr("Today");
 	}
 	if (days === 1) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
-	const label = `${weekdayFormat.format(date)}, ${monthFormat.format(date)} ${ordinal(date.getDate())}`;
-	return date.getFullYear() === new Date(now).getFullYear()
-		? label
-		: `${label}, ${date.getFullYear()}`;
+	const thisYear = date.getFullYear() === new Date(now).getFullYear();
+	if (!isEnglishLocale(locale)) {
+		return dateFormatter(locale, {
+			day: "numeric",
+			month: "long",
+			weekday: "long",
+			year: thisYear ? undefined : "numeric",
+		}).format(date);
+	}
+	const weekday = dateFormatter(locale, { weekday: "long" }).format(date);
+	const month = dateFormatter(locale, { month: "long" }).format(date);
+	const label = `${weekday}, ${month} ${ordinal(date.getDate())}`;
+	return thisYear ? label : `${label}, ${date.getFullYear()}`;
 }
 
 /** The thread bar's "Last reply …" phrase, without the "Last reply" prefix. */
 export function lastReplyPhrase(
 	iso: string,
 	tl: LiteralMessage,
-	now: number = Date.now()
+	now: number = Date.now(),
+	locale: string = activeLocale()
 ): string {
 	const date = parse(iso);
 	if (!date) {
@@ -107,15 +131,21 @@ export function lastReplyPhrase(
 	}
 	const days = daysAgo(date, now);
 	if (days <= 0) {
-		return tl("today at {time}", { time: clockTime(iso) });
+		return tl("today at {time}", { time: clockTime(iso, locale) });
 	}
 	if (days === 1) {
-		return tl("yesterday at {time}", { time: clockTime(iso) });
+		return tl("yesterday at {time}", { time: clockTime(iso, locale) });
 	}
 	if (days <= SAME_WEEK_DAYS) {
-		return tl("{days} days ago", { days });
+		return tl("{days, plural, one {# day ago} other {# days ago}}", { days });
 	}
-	return `${shortMonthFormat.format(date)} ${ordinal(date.getDate())}`;
+	if (!isEnglishLocale(locale)) {
+		return dateFormatter(locale, { day: "numeric", month: "short" }).format(
+			date
+		);
+	}
+	const month = dateFormatter(locale, { month: "short" }).format(date);
+	return `${month} ${ordinal(date.getDate())}`;
 }
 
 /** True when two timestamps are within `windowMs` of each other. */

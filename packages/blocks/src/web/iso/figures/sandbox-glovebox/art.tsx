@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Line, Solid } from "../../kit/react/draw.tsx";
 import { BOX_ART, HATCH_ART } from "./geometry.ts";
 import { SandboxGloveboxLive } from "./live.tsx";
@@ -24,12 +24,13 @@ const TRAY = (
 
 export function SandboxGloveboxArt() {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	return (
 		<SandboxGloveboxLive
 			box={BOX}
-			description={describeSandbox(tl)}
+			description={describeSandbox(tl, locale)}
 			door={<Solid crease="none" paths={HATCH_ART.door} tone="mid" />}
-			label={LABEL}
+			label={tl(LABEL)}
 			tray={TRAY}
 		/>
 	);

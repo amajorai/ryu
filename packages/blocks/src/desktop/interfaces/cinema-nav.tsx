@@ -84,7 +84,7 @@ export function CinemaNav({
 					<DropdownMenuTrigger
 						render={
 							<Button
-								className="-ml-2 gap-1 px-2 font-semibold"
+								className="-ms-2 gap-1 px-2 font-semibold"
 								size="sm"
 								type="button"
 								variant="ghost"
@@ -134,7 +134,7 @@ export function CinemaNav({
 					</ul>
 				</nav>
 			)}
-			<div className="ml-auto flex items-center gap-2">
+			<div className="ms-auto flex items-center gap-2">
 				<div
 					className={cn(
 						"flex h-9 items-center rounded-sm transition-[width,background-color,border-color] duration-300",
@@ -159,7 +159,7 @@ export function CinemaNav({
 						autoComplete="off"
 						className={cn(
 							"h-full min-w-0 bg-transparent text-foreground text-sm outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:appearance-none",
-							expanded ? "flex-1 pr-1" : "w-0"
+							expanded ? "flex-1 pe-1" : "w-0"
 						)}
 						id={searchId}
 						onBlur={() => setSearchOpen(false)}
@@ -180,7 +180,7 @@ export function CinemaNav({
 					{query ? (
 						<button
 							aria-label="Clear search"
-							className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+							className="me-1 flex size-7 shrink-0 items-center justify-center rounded-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={() => {
 								onQuery("");
 								searchRef.current?.focus();

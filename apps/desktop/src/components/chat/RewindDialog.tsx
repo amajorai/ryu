@@ -26,6 +26,7 @@ import {
 	pickInitialCheckpoint,
 	type RewindPreselect,
 } from "@/src/lib/chat-rewind.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 
 export type { RewindPreselect } from "@/src/lib/chat-rewind.ts";
 
@@ -54,7 +55,7 @@ function formatTime(iso: string): string {
 	const date = new Date(iso);
 	return Number.isNaN(date.getTime())
 		? iso
-		: date.toLocaleString(undefined, {
+		: formatLocalDateTime(date, {
 				day: "numeric",
 				hour: "numeric",
 				minute: "2-digit",
@@ -287,7 +288,7 @@ export function RewindDialog({
 								{checkpoints.map((checkpoint) => (
 									<button
 										aria-selected={selectedId === checkpoint.id}
-										className={`w-full rounded-lg px-3 py-2 text-left transition-colors duration-150 hover:duration-0 ${
+										className={`w-full rounded-lg px-3 py-2 text-start transition-colors duration-150 hover:duration-0 ${
 											selectedId === checkpoint.id
 												? "bg-accent"
 												: "hover:bg-muted"
@@ -332,7 +333,7 @@ export function RewindDialog({
 						onClick={() => void restore("code")}
 						variant="outline"
 					>
-						{working === "code" ? <Spinner className="mr-2" /> : null}
+						{working === "code" ? <Spinner className="me-2" /> : null}
 						Restore code
 					</Button>
 					<Button
@@ -340,7 +341,7 @@ export function RewindDialog({
 						onClick={() => void restore("conversation")}
 						variant="outline"
 					>
-						{working === "conversation" ? <Spinner className="mr-2" /> : null}
+						{working === "conversation" ? <Spinner className="me-2" /> : null}
 						Restore conversation
 					</Button>
 					<Button
@@ -348,7 +349,7 @@ export function RewindDialog({
 						onClick={() => void restore("codeAndConversation")}
 					>
 						{working === "codeAndConversation" ? (
-							<Spinner className="mr-2" />
+							<Spinner className="me-2" />
 						) : null}
 						Restore both
 					</Button>

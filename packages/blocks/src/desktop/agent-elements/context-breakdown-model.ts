@@ -1,4 +1,12 @@
 import {
+	type ContextLiteral,
+	type ContextSegmentCounts,
+	contextSegmentDetail,
+	contextSegmentLabel,
+	englishContextLiteral,
+} from "./context-breakdown-labels.ts";
+import { formatPercentValue } from "./locale-format.ts";
+import {
 	isPositiveContextCount,
 	nativeContextPct,
 	nativeContextRemaining,
@@ -14,11 +22,18 @@ import type { NativeTokenOperand } from "./native-token-count.mjs";
  */
 /** A category of context, as Core attributes it. Mirrors `ContextSegment`. */
 export interface ContextBreakdownSegment {
-	/** Optional sub-label ("24 tools across 5 servers"). */
+	/** Numbers behind `detail`, for client-side plurals. */
+	counts?: ContextSegmentCounts;
+	/** English sub-label fallback ("24 tools across 5 servers"). */
 	detail?: string;
+	/** Stable id of the detail sentence (`tools`, `messages`, …). */
+	detailKey?: string;
 	/** Stable category id — the key into {@link SEGMENT_STYLES}. */
 	kind: string;
+	/** English label fallback. */
 	label: string;
+	/** Stable id of the label, mapped to translated copy. */
+	labelKey?: string;
 	tokens: number;
 }
 /** One turn's attribution. Mirrors `ContextBreakdown`. */
@@ -94,16 +109,19 @@ export interface ContextBand {
  * shown, not swallowed. When it is SMALLER (Core over-estimates, e.g. its
  * `len / 3.5` heuristic on dense text), no negative band is produced; the panel
  * reports the delta numerically instead.
+ *
+ * `tl` translates the row copy from Core's stable keys; it defaults to English.
  */
 export function contextBands(
 	breakdown: ContextBreakdownData,
-	reported?: NativeTokenOperand
+	reported?: NativeTokenOperand,
+	tl: ContextLiteral = englishContextLiteral
 ): ContextBand[] {
 	const bands: ContextBand[] = breakdown.segments.map((s) => ({
 		className: segmentStyle(s.kind),
-		detail: s.detail,
+		detail: contextSegmentDetail(s, tl),
 		key: s.kind,
-		label: s.label,
+		label: contextSegmentLabel(s, tl),
 		tokens: s.tokens,
 	}));
 	const unattributed = nativeContextRemaining(
@@ -113,9 +131,9 @@ export function contextBands(
 	if (unattributed > 0) {
 		bands.push({
 			className: UNATTRIBUTED_STYLE,
-			detail: "Agent-side prompt and tool results Core cannot measure",
+			detail: tl("Agent-side prompt and tool results Core cannot measure"),
 			key: "unattributed",
-			label: "Unattributed",
+			label: tl("Unattributed"),
 			tokens: unattributed,
 		});
 	}
@@ -134,7 +152,7 @@ export function contextPct(
 /** One-decimal percentage, with a floor label so a tiny band never reads "0.0%". */
 export function formatContextPct(value: number): string {
 	if (value > 0 && value < 0.1) {
-		return "<0.1%";
+		return `<${formatPercentValue(0.1, 1)}`;
 	}
-	return `${value.toFixed(1)}%`;
+	return formatPercentValue(value, 1);
 }

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceEvent,
 	type InterfaceGroup,
@@ -7,6 +8,17 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+
+export {
+	notebookEditedLabel,
+	notebookRunTime,
+	notebookTimestamp,
+} from "./notebook-model-dates.ts";
+
+export {
+	type NotebookTreeMove,
+	notebookTreeMove,
+} from "./notebook-model-keys.ts";
 
 /**
  * Notebook view model: threads as pages in a Notion-style page tree. Pure, so
@@ -54,11 +66,21 @@ export interface NotebookSection {
 export type NotebookNode = NotebookGroup | NotebookPage | NotebookSection;
 
 export const NOTEBOOK_SECTION_LABELS: Record<NotebookSectionKey, string> = {
-	agents: "Agents",
-	favorites: "Favorites",
-	projects: "Projects",
-	teams: "Teams",
-	unfiled: "Unfiled",
+	get agents() {
+		return tr("Agents");
+	},
+	get favorites() {
+		return tr("Favorites");
+	},
+	get projects() {
+		return tr("Projects");
+	},
+	get teams() {
+		return tr("Teams");
+	},
+	get unfiled() {
+		return tr("Unfiled");
+	},
 };
 
 const SECTION_ORDER: readonly NotebookSectionKey[] = [
@@ -102,7 +124,7 @@ export function notebookPageTitle(
 	thread: Pick<InterfaceThread, "title"> | undefined
 ): string {
 	const title = thread?.title.trim();
-	return title || "Untitled";
+	return title || tr("Untitled");
 }
 
 function normalize(value: string): string {
@@ -381,62 +403,6 @@ export function initialNotebookExpanded(
 	return ids;
 }
 
-export type NotebookTreeMove =
-	| { type: "collapse"; id: string }
-	| { type: "expand"; id: string }
-	| { type: "focus"; id: string }
-	| { type: "open"; threadId: string }
-	| { type: "toggle"; id: string };
-
-/** What a key does at the focused row, per the WAI-ARIA tree pattern. */
-export function notebookTreeMove(
-	rows: readonly NotebookRow[],
-	currentId: string,
-	key: string
-): NotebookTreeMove | null {
-	const index = rows.findIndex((row) => row.id === currentId);
-	const row = rows[index];
-	if (!row) {
-		const first = rows[0];
-		return first ? { id: first.id, type: "focus" } : null;
-	}
-	const focus = (target: NotebookRow | undefined): NotebookTreeMove | null =>
-		target ? { id: target.id, type: "focus" } : null;
-	switch (key) {
-		case "ArrowDown":
-			return focus(rows[index + 1]);
-		case "ArrowUp":
-			return focus(rows[index - 1]);
-		case "Home":
-			return focus(rows[0]);
-		case "End":
-			return focus(rows.at(-1));
-		case "ArrowRight": {
-			if (!isExpandable(row.node)) {
-				return null;
-			}
-			if (!row.expanded) {
-				return { id: row.id, type: "expand" };
-			}
-			const child = rows[index + 1];
-			return child?.parentId === row.id ? focus(child) : null;
-		}
-		case "ArrowLeft": {
-			if (row.expanded) {
-				return { id: row.id, type: "collapse" };
-			}
-			return focus(rows.find((candidate) => candidate.id === row.parentId));
-		}
-		case "Enter":
-		case " ":
-			return row.node.kind === "page"
-				? { threadId: row.node.threadId, type: "open" }
-				: { id: row.id, type: "toggle" };
-		default:
-			return null;
-	}
-}
-
 /** The `startThread` input for a "+" on a parent row. */
 export function notebookStartInput(group: NotebookGroup): {
 	agentId?: string;
@@ -500,107 +466,4 @@ export function notebookGreeting(date: Date): string {
 		return "Good afternoon";
 	}
 	return "Good evening";
-}
-
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-function plural(count: number, unit: string): string {
-	return `${count} ${unit}${count === 1 ? "" : "s"} ago`;
-}
-
-/** Notion-style relative edit time: "Just now", "5 minutes ago", "Oct 4". */
-export function notebookEditedLabel(iso: string, now: number): string {
-	const then = Date.parse(iso);
-	if (Number.isNaN(then)) {
-		return "";
-	}
-	const elapsed = Math.max(0, now - then);
-	if (elapsed < MINUTE) {
-		return "Just now";
-	}
-	if (elapsed < HOUR) {
-		return plural(Math.floor(elapsed / MINUTE), "minute");
-	}
-	if (elapsed < DAY) {
-		return plural(Math.floor(elapsed / HOUR), "hour");
-	}
-	if (elapsed < 2 * DAY) {
-		return "Yesterday";
-	}
-	if (elapsed < 7 * DAY) {
-		return plural(Math.floor(elapsed / DAY), "day");
-	}
-	const date = new Date(then);
-	const sameYear = date.getFullYear() === new Date(now).getFullYear();
-	return date.toLocaleDateString(undefined, {
-		day: "numeric",
-		month: "short",
-		...(sameYear ? {} : { year: "numeric" }),
-	});
-}
-
-/** Full timestamp for the "Last edited" property ("October 13, 2026 2:41 PM"). */
-export function notebookTimestamp(iso: string): string {
-	const then = Date.parse(iso);
-	if (Number.isNaN(then)) {
-		return "";
-	}
-	return new Date(then).toLocaleString(undefined, {
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-		month: "long",
-		year: "numeric",
-	});
-}
-
-/**
- * When an upcoming run starts, as a day line and a time line:
- * { day: "In 45 min", time: "6:52 PM" }, { day: "Tomorrow", time: "9:00 AM" }.
- * Every run has both lines, so the rows share one rhythm.
- */
-export function notebookRunTime(
-	iso: string,
-	now: number
-): { day: string; time: string | null } {
-	const start = Date.parse(iso);
-	if (Number.isNaN(start)) {
-		return { day: "", time: null };
-	}
-	const ahead = start - now;
-	const date = new Date(start);
-	const time = date.toLocaleTimeString(undefined, {
-		hour: "numeric",
-		minute: "2-digit",
-	});
-	if (ahead < HOUR) {
-		return {
-			day: `In ${Math.max(1, Math.floor(ahead / MINUTE))} min`,
-			time,
-		};
-	}
-	const today = new Date(now);
-	const dayDiff = Math.round(
-		(new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() -
-			new Date(
-				today.getFullYear(),
-				today.getMonth(),
-				today.getDate()
-			).getTime()) /
-			DAY
-	);
-	if (dayDiff === 0) {
-		return { day: "Today", time };
-	}
-	if (dayDiff === 1) {
-		return { day: "Tomorrow", time };
-	}
-	const day = date.toLocaleDateString(undefined, {
-		day: "numeric",
-		month: "short",
-		weekday: "short",
-	});
-	return { day, time };
 }

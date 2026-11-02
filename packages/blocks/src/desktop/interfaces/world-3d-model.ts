@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	askBubble,
@@ -24,11 +25,21 @@ const URGENT: ReadonlySet<ThreadStatus> = new Set(["attention", "your-turn"]);
 
 /** Short status words for a conversation row, where the full label is too long. */
 export const SHORT_STATUS_LABELS: Record<ThreadStatus, string> = {
-	attention: "Failed",
-	quiet: "Not started",
-	waiting: "Waiting",
-	working: "Working",
-	"your-turn": "Your turn",
+	get attention() {
+		return tr("Failed");
+	},
+	get quiet() {
+		return tr("Not started");
+	},
+	get waiting() {
+		return tr("Waiting");
+	},
+	get working() {
+		return tr("Working");
+	},
+	get "your-turn"() {
+		return tr("Your turn");
+	},
 };
 
 /** The short status word for one conversation; a stopped run is not a failure. */
@@ -110,10 +121,6 @@ export interface TrackerGoal {
 	title: string;
 }
 
-function plural(count: number, noun: string): string {
-	return `${count} ${count === 1 ? noun : `${noun}s`}`;
-}
-
 /** The agent nearest the player, by walking distance on the grid. */
 export function nearestEntity(
 	entities: readonly WorldEntity[],
@@ -190,8 +197,8 @@ export function trackerGoal({
 			agentName: entity.name,
 			detail:
 				urgency.status === "attention"
-					? `${runOutcome(urgency.thread)} · ${urgency.thread.title || "Untitled"}`
-					: urgency.thread.title || "Untitled",
+					? `${runOutcome(urgency.thread)} · ${urgency.thread.title || tr("Untitled")}`
+					: urgency.thread.title || tr("Untitled"),
 			status: urgency.status,
 			title:
 				urgency.status === "attention"
@@ -206,11 +213,14 @@ export function trackerGoal({
 	return {
 		agentId: nearest?.agentId ?? null,
 		agentName: nearest?.name ?? null,
-		detail: `${plural(entities.length, "agent")} · ${working} working`,
+		detail: tl(
+			"{count, plural, one {# agent} other {# agents}} · {working} working",
+			{ count: entities.length, working }
+		),
 		status: null,
 		title: nearest
 			? tl("Talk to {agentName}", { agentName: nearest.name })
-			: "Explore",
+			: tl("Explore"),
 	};
 }
 
@@ -229,14 +239,14 @@ export function spokenLine(
 			? "Working on something right now."
 			: "What should we work on?";
 	}
-	const title = latest.title || "our last conversation";
+	const title = latest.title || tr("our last conversation");
 	if (latest.running) {
-		return `Working on “${title}”.`;
+		return tr("Working on “{title}”.", { title });
 	}
 	if (latest.lastMessage && latest.lastMessageRole === "assistant") {
 		return latest.lastMessage;
 	}
-	return `Pick up “${title}”?`;
+	return tr("Pick up “{title}”?", { title });
 }
 
 /**
@@ -307,6 +317,9 @@ export function askTrackerGoal(
 		detail: "",
 		status: null,
 		suffix: wait.trim() || undefined,
-		title: `${agent.name} asks: ${askBubble(first, privacy)}`,
+		title: tr("{name} asks: {question}", {
+			name: agent.name,
+			question: askBubble(first, privacy),
+		}),
 	};
 }

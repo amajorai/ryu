@@ -53,7 +53,7 @@ impl NativeAccounts {
             .map_err(|_| anyhow!("Account lifecycle lock unavailable"))?;
         let label = label.trim();
         if label.is_empty() || label.len() > 200 || label.chars().any(char::is_control) {
-            bail!("Account label must contain 1 to 200 printable bytes");
+            return Err(NativeAccountError::LabelInvalid.into());
         }
         let account_id = format!("acct_{}", uuid::Uuid::new_v4().simple());
         let registration = Registration {
@@ -86,7 +86,7 @@ impl NativeAccounts {
         let value = self
             .vault
             .credential(SCOPE, account_id)?
-            .ok_or_else(|| anyhow!("Native account is missing or has no custody registration"))?;
+            .ok_or(NativeAccountError::AccountRemoved)?;
         let record: Registration = serde_json::from_value(value.clone())
             .context("Invalid native account custody registration")?;
         if record.version != 1
@@ -150,7 +150,7 @@ impl NativeAccounts {
     pub fn capture(&self, account_id: &str) -> Result<NativeLaunch> {
         let (_, registration) = self.read(account_id)?;
         if registration.state != ConnectionState::Connected || registration.identity.is_none() {
-            bail!("Native account is not verified; finish signing in before launching");
+            return Err(NativeAccountError::NotVerified.into());
         }
         let env = self.profile_env(&registration)?;
         Ok(NativeLaunch {
@@ -168,7 +168,7 @@ impl NativeAccounts {
         let info = self
             .vault
             .active_info(SCOPE)?
-            .ok_or_else(|| anyhow!("No native account selected"))?;
+            .ok_or(NativeAccountError::NotSelected)?;
         self.capture(&info.account_id)
     }
 
@@ -251,7 +251,7 @@ impl NativeAccounts {
             .map_err(|_| anyhow!("Account lifecycle lock unavailable"))?;
         self.capture(account_id)?;
         if !self.vault.set_active(SCOPE, account_id)? {
-            bail!("Native account was removed");
+            return Err(NativeAccountError::AccountRemoved.into());
         }
         Ok(())
     }

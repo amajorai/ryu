@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { InterfaceThread } from "@ryuhq/protocol/interfaces";
 
 export const XP_PER_MESSAGE = 100;
@@ -19,5 +20,5 @@ export function byRecency(a: InterfaceThread, b: InterfaceThread): number {
 }
 
 export function threadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }

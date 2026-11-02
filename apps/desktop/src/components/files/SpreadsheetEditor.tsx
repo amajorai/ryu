@@ -188,10 +188,10 @@ export const SpreadsheetEditor = forwardRef<
 					data-spreadsheet-grid-width=""
 					style={spreadsheetWidthVariables1}
 				>
-					<div className="sticky left-0 z-30 w-[52px] shrink-0 border-border border-r bg-muted" />
+					<div className="sticky start-0 z-30 w-[52px] shrink-0 border-border border-e bg-muted" />
 					{Array.from({ length: columnCount }, (_, index) => (
 						<div
-							className="w-36 shrink-0 border-border border-r px-2 py-1 text-center font-medium text-muted-foreground text-xs"
+							className="w-36 shrink-0 border-border border-e px-2 py-1 text-center font-medium text-muted-foreground text-xs"
 							key={spreadsheetColumnLabel(index + 1)}
 						>
 							{spreadsheetColumnLabel(index + 1)}
@@ -209,12 +209,12 @@ export const SpreadsheetEditor = forwardRef<
 						} = { "--spreadsheet-row-top": `${(row - 1) * ROW_HEIGHT}px` };
 						return (
 							<div
-								className="absolute left-0 flex h-8"
+								className="absolute start-0 flex h-8"
 								data-spreadsheet-grid-row=""
 								key={row}
 								style={spreadsheetRowVariables3}
 							>
-								<div className="sticky left-0 z-10 w-[52px] shrink-0 border-border border-r border-b bg-muted px-2 py-2 text-right text-muted-foreground text-xs">
+								<div className="sticky start-0 z-10 w-[52px] shrink-0 border-border border-e border-b bg-muted px-2 py-2 text-end text-muted-foreground text-xs">
 									{row}
 								</div>
 								{Array.from({ length: columnCount }, (_, columnIndex) => {
@@ -223,7 +223,7 @@ export const SpreadsheetEditor = forwardRef<
 									return (
 										<input
 											aria-label={address}
-											className="text-(length:--text-detail) h-8 w-36 shrink-0 border-0 border-border border-r border-b bg-background px-2 font-mono outline-none focus:relative focus:z-10 focus:ring-2 focus:ring-primary"
+											className="text-(length:--text-detail) h-8 w-36 shrink-0 border-0 border-border border-e border-b bg-background px-2 font-mono outline-none focus:relative focus:z-10 focus:ring-2 focus:ring-primary"
 											defaultValue={cellText(worksheet, row, column)}
 											key={`${address}:${activeSheetIndex}:${revision}`}
 											onBlur={(event) => {

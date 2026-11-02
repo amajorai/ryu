@@ -42,7 +42,9 @@ function Recipient({
 			type="button"
 		>
 			<BoardAvatar agent={agent} name={agent.name} size={20} />
-			<span className="truncate">{agent.name}</span>
+			<span className="truncate" data-ryu-i18n="off">
+				{agent.name}
+			</span>
 		</button>
 	);
 }

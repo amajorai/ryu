@@ -86,7 +86,7 @@ export function ObservabilitySelectedSection({
 								{selected.session_id ?? selected.request_id}
 							</p>
 						</div>
-						<div className="text-right text-xs tabular-nums">
+						<div className="text-end text-xs tabular-nums">
 							<p className="font-medium">
 								{tl("{count} tokens", {
 									count: formatNumber(

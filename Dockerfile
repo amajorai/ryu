@@ -63,7 +63,7 @@ COPY . .
 # at all). They are still built by manifest path, matching the release workflow, but
 # the artifacts land in the WORKSPACE root /src/target/release — NOT
 # apps/<app>/target/release, which is where this stage used to copy from and does not
-# exist, so the build failed at the `cp`. Same note as release.yml's staging step.
+# exist, so the build failed at the `cp`. Same note as the release workflow's binaries staging step.
 # The public mirror ships this file WITHOUT the root Cargo.toml, so there each app
 # is its own root package; pinning CARGO_TARGET_DIR gives one output path in both
 # shapes.
@@ -86,8 +86,11 @@ RUN cargo build --locked --release --manifest-path apps/gateway/Cargo.toml \
  && cp /src/target/release/ryu-gateway /usr/local/bin/ryu-gateway \
  && cp /src/target/release/ryu-core /usr/local/bin/ryu-core
 
-# ---- runtime ------------------------------------------------------------------
-FROM debian:trixie-slim AS runtime
+# ---- runtime-base -------------------------------------------------------------
+# Everything the image needs except the two binaries, shared by both ways of
+# getting them: `runtime` (the default, compiles them in `builder`) and `prebuilt`
+# (packages binaries a CI runner already compiled). See the stages at the end.
+FROM debian:trixie-slim AS runtime-base
 
 # libstdc++6 is defensive cover for the `voice-parakeet` feature, which links ONNX
 # Runtime (C++) in. `ort` links its prebuilt copy STATICALLY — verified on macOS
@@ -113,8 +116,6 @@ RUN groupadd --gid 10001 ryu \
       --no-create-home --shell /usr/sbin/nologin ryu \
     && install -d -o 10001 -g 10001 -m 0750 /data
 
-COPY --from=builder /usr/local/bin/ryu-core /usr/local/bin/ryu-core
-COPY --from=builder /usr/local/bin/ryu-gateway /usr/local/bin/ryu-gateway
 COPY config/node-config.example.json /usr/share/ryu/node-config.example.json
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -143,3 +144,19 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # Do not run Core as root. Docker Compose additionally drops all Linux
 # capabilities and enables a read-only root filesystem.
 USER 10001:10001
+
+# ---- prebuilt -----------------------------------------------------------------
+# CI path (the public hub's .github/workflows/images.yml): the runner compiles
+# Core + Gateway with its persistent cargo cache, stages the two binaries in
+# .docker-prebuilt/, and builds this target. A source change then recompiles
+# incrementally instead of from scratch inside Docker (~34 min cold), and the
+# `builder` stage is never run. Binaries must be linked against glibc <= trixie's.
+FROM runtime-base AS prebuilt
+COPY .docker-prebuilt/ryu-core .docker-prebuilt/ryu-gateway /usr/local/bin/
+
+# ---- runtime (default) ----------------------------------------------------------
+# Must stay the LAST stage: one-click deploy buttons and `docker compose` build
+# the default target, which compiles from source in `builder`.
+FROM runtime-base AS runtime
+COPY --from=builder /usr/local/bin/ryu-core /usr/local/bin/ryu-core
+COPY --from=builder /usr/local/bin/ryu-gateway /usr/local/bin/ryu-gateway

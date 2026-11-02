@@ -1,3 +1,4 @@
+import { activeLocale, numberFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -58,7 +59,7 @@ function BodyCell({
 				CELL,
 				CELL_FOCUS,
 				rowTint(selected, open),
-				index === SHEET_COLUMNS.length - 1 && "border-r-0",
+				index === SHEET_COLUMNS.length - 1 && "border-e-0",
 				"font-normal text-foreground",
 				frozen && cn("sticky z-10", FROZEN_EDGE)
 			)}
@@ -67,7 +68,7 @@ function BodyCell({
 			data-sheet-row={rowIndex}
 			role={frozen ? "rowheader" : "gridcell"}
 			scope={frozen ? "row" : undefined}
-			style={frozen ? { left: SHEET_GUTTER_WIDTH } : undefined}
+			style={frozen ? { insetInlineStart: SHEET_GUTTER_WIDTH } : undefined}
 			tabIndex={cursor ? 0 : -1}
 		>
 			<div
@@ -113,7 +114,10 @@ export const SheetGridRow = memo(function SheetGridRowImpl({
 			case "title":
 				return (
 					<>
-						<span className="min-w-0 flex-1 truncate font-medium">
+						<span
+							className="min-w-0 flex-1 truncate font-medium"
+							data-ryu-i18n="off"
+						>
 							<SheetHighlight query={query} text={row.title} />
 						</span>
 						{/* Sits over the row-number gutter, which hides its number on hover, so the title keeps its width. */}
@@ -122,7 +126,7 @@ export const SheetGridRow = memo(function SheetGridRowImpl({
 							className="absolute top-1/2 hidden size-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground outline-none transition-colors hover:bg-foreground/8 hover:text-foreground focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring group-hover/row:flex"
 							onClick={() => onOpen(row.thread.id)}
 							onMouseDown={(event) => event.preventDefault()}
-							style={{ left: EXPAND_OFFSET }}
+							style={{ insetInlineStart: EXPAND_OFFSET }}
 							tabIndex={-1}
 							type="button"
 						>
@@ -141,7 +145,7 @@ export const SheetGridRow = memo(function SheetGridRowImpl({
 			case "messages":
 				return (
 					<span className="text-foreground/85 tabular-nums">
-						{row.thread.messageCount.toLocaleString()}
+						{numberFormatter(activeLocale()).format(row.thread.messageCount)}
 					</span>
 				);
 			case "lastMessage":
@@ -169,7 +173,7 @@ export const SheetGridRow = memo(function SheetGridRowImpl({
 				className={cn(
 					CELL,
 					rowTint(selected, open),
-					"sticky left-0 z-10 px-0 text-center text-muted-foreground text-xs tabular-nums",
+					"sticky start-0 z-10 px-0 text-center text-muted-foreground text-xs tabular-nums",
 					(selected || open) && "text-foreground"
 				)}
 			>
@@ -202,7 +206,7 @@ export function SkeletonRow({ index }: { index: number }) {
 		<tr>
 			<td
 				aria-hidden="true"
-				className={cn(CELL, "sticky left-0 z-10 bg-background px-0")}
+				className={cn(CELL, "sticky start-0 z-10 bg-background px-0")}
 			>
 				<span className="flex justify-center">
 					<Skeleton className="h-2 w-3" />
@@ -215,11 +219,13 @@ export function SkeletonRow({ index }: { index: number }) {
 						CELL,
 						"bg-background",
 						column.id === "title" && cn("sticky z-10", FROZEN_EDGE),
-						colIndex === SHEET_COLUMNS.length - 1 && "border-r-0"
+						colIndex === SHEET_COLUMNS.length - 1 && "border-e-0"
 					)}
 					key={column.id}
 					style={
-						column.id === "title" ? { left: SHEET_GUTTER_WIDTH } : undefined
+						column.id === "title"
+							? { insetInlineStart: SHEET_GUTTER_WIDTH }
+							: undefined
 					}
 				>
 					<Skeleton

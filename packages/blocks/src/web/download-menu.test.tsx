@@ -64,6 +64,42 @@ describe("DownloadMenu", () => {
 		expect(html).not.toContain(">Download<");
 	});
 
+	test("an undivided split pill balances its padding around the chevron", () => {
+		const container = document.createElement("div");
+		const classesOf = (separated: boolean) => {
+			container.innerHTML = renderToStaticMarkup(
+				<DownloadMenu
+					showOsLogo
+					showSeparator={separated}
+					size="sm"
+					variant="mono"
+				/>
+			);
+			const primary = container.querySelector("a");
+			const trigger = container.querySelector(
+				'button[aria-label="More download options"]'
+			);
+			return {
+				primary: primary?.className.split(/\s+/) ?? [],
+				trigger: trigger?.className.split(/\s+/) ?? [],
+			};
+		};
+
+		// No divider: the primary's end is trimmed and the chevron segment hugs
+		// the right end instead of sitting centered in a square.
+		const undivided = classesOf(false);
+		expect(undivided.primary).toContain("pe-1");
+		expect(undivided.trigger).toEqual(
+			expect.arrayContaining(["w-auto", "ps-0.5", "pe-2"])
+		);
+
+		// With a divider the segments stay separate, square-chevron buttons.
+		const divided = classesOf(true);
+		expect(divided.primary).not.toContain("pe-1");
+		expect(divided.trigger).not.toContain("w-auto");
+		expect(divided.trigger).toContain("w-8");
+	});
+
 	test("loads the dropdown body on intent, never with the page", () => {
 		// A static import (or re-export) would put the whole menu body and the
 		// page-level download.tsx graph into every page's header chunk.

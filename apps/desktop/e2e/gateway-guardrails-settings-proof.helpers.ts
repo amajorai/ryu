@@ -3,45 +3,23 @@
 import path from "node:path";
 import { expect } from "@playwright/test";
 import { z } from "zod";
-import type { GatewayFirewallOverlay } from "../src/lib/api/gateway.ts";
+import type { GatewayConfig } from "../src/lib/api/gateway.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export interface CapturedRequest {
 	body: unknown;
 	method: string;
 	path: string;
-	status: number;
+	status?: number;
 }
 
+/**
+ * What the harness's `__gatewayGuardrailsProof.snapshot()` returns
+ * (gateway-guardrails-proof.tsx): the stored config in the desktop's own
+ * GatewayConfig view, whose legacy firewall fields may be absent.
+ */
 export interface GuardrailsProofSnapshot {
-	config: {
-		firewall: {
-			alert?: string;
-			custom_patterns?: { kind: string; name: string; regex: string }[];
-			enabled: boolean;
-			evaluators?: {
-				enabled: boolean;
-				id: string;
-				inlineAction?: string;
-				locked?: boolean;
-			}[];
-			inspector?: {
-				action: string;
-				enabled: boolean;
-				min_chars: number;
-				mode: string;
-				model: string;
-				timeout_ms: number;
-			};
-			locked_fields?: string[];
-			policy: string;
-			redact_pii: boolean;
-			redact_secrets: boolean;
-			scan_inbound: boolean;
-			scan_outbound: boolean;
-		};
-		firewall_agent_overlays: Record<string, GatewayFirewallOverlay>;
-		firewall_org_overlays: Record<string, GatewayFirewallOverlay>;
-	};
+	config: GatewayConfig;
 	preferences: Record<string, string>;
 	requests: CapturedRequest[];
 }
@@ -73,10 +51,7 @@ export function evidencePath(name: string): string {
 	if (override) {
 		return path.join(override, `${name}.png`);
 	}
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 export async function openGuardrails(

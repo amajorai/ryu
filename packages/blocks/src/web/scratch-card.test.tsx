@@ -41,18 +41,19 @@ describe("ScratchCard", () => {
 		expect(html).toContain("RYU10");
 	});
 
-	test("hides the code under a blurred, aria-hidden copy instead of a solid foil", () => {
+	test("covers the code with a canvas foil instead of a masked DOM copy", () => {
 		const html = renderCard();
-		const frostStart = html.indexOf('data-testid="scratch-card-frost"');
-		expect(frostStart).toBeGreaterThan(-1);
-		const frost = html.slice(frostStart);
-		expect(frost).toContain("blur-[10px]");
-		expect(frost).toContain('aria-hidden="true"');
-		expect(frost).toContain("Scratch to reveal");
-		// The rub canvas is an invisible mask, not a painted foil.
-		expect(html).toMatch(/<canvas[^>]*opacity-0/);
-		// Sharp reward plus the blurred copy.
-		expect(html.split("RYU10").length - 1).toBe(2);
+		// The foil is painted on the rub canvas, which stays visible.
+		expect(html).toContain('data-testid="scratch-card-foil"');
+		expect(html).not.toMatch(/<canvas[^>]*opacity-0/);
+		expect(html).toContain("Scratch to reveal");
+		// No second (blurred) DOM copy of the code whose CSS mask could flash
+		// the whole reward while it is swapped mid-rub.
+		expect(html).not.toContain("scratch-card-frost");
+		expect(html).not.toContain("mask-image");
+		expect(html.split("RYU10").length - 1).toBe(1);
+		// The reward lines the foil re-draws blurred are tagged.
+		expect(html.split("data-foil-text").length - 1).toBe(3);
 	});
 
 	test("keeps the discount and code inside the card's margins", () => {

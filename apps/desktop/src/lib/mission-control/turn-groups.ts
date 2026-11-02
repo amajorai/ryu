@@ -18,6 +18,7 @@
 // did, and the closing prose is what it thinks happened. Summarising those with
 // a second model would launder the one honest signal in the transcript.
 
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	baseName,
 	clamp,
@@ -232,17 +233,27 @@ function recordTool(activity: TurnActivity, part: MissionStreamPart) {
 function describeFiles(files: MissionFileTouch[]): string | undefined {
 	const writes = files.filter((f) => f.kind !== "read");
 	if (writes.length === 0) {
-		return files.length > 0 ? `Read ${files.length} files` : undefined;
+		return files.length > 0
+			? tl("Read {count, plural, one {# file} other {# files}}", {
+					count: files.length,
+				})
+			: undefined;
 	}
-	const verb = writes.every((f) => f.kind === "create") ? "Created" : "Changed";
+	const created = writes.every((f) => f.kind === "create");
 	if (writes.length <= MAX_HEADLINE_PATHS) {
-		return `${verb} ${writes.map((f) => baseName(f.path)).join(", ")}`;
+		const files = writes.map((f) => baseName(f.path)).join(", ");
+		return created
+			? tl("Created {files}", { files })
+			: tl("Changed {files}", { files });
 	}
 	const shown = writes
 		.slice(0, MAX_HEADLINE_PATHS)
 		.map((f) => baseName(f.path))
 		.join(", ");
-	return `${verb} ${shown} +${writes.length - MAX_HEADLINE_PATHS} more`;
+	const more = writes.length - MAX_HEADLINE_PATHS;
+	return created
+		? tl("Created {files} +{more} more", { files: shown, more })
+		: tl("Changed {files} +{more} more", { files: shown, more });
 }
 
 /** A deterministic title for the card. Prefers the concrete artefact the turn
@@ -255,20 +266,28 @@ function buildHeadline(turn: Omit<MissionTurn, "headline">): string {
 	}
 	if (turn.shellCommands.length > 0) {
 		const n = turn.shellCommands.length;
-		clauses.push(`ran ${n} command${n === 1 ? "" : "s"}`);
+		clauses.push(
+			tl("ran {count, plural, one {# command} other {# commands}}", {
+				count: n,
+			})
+		);
 	}
 	if (turn.delegates.length > 0) {
 		const n = turn.delegates.length;
-		clauses.push(`delegated ${n} task${n === 1 ? "" : "s"}`);
+		clauses.push(
+			tl("delegated {count, plural, one {# task} other {# tasks}}", {
+				count: n,
+			})
+		);
 	}
 	if (clauses.length === 0 && turn.searches.length + turn.web.length > 0) {
-		clauses.push("Investigated");
+		clauses.push(tl("Investigated"));
 	}
 	if (clauses.length === 0 && turn.todos.length > 0) {
-		clauses.push("Planned the work");
+		clauses.push(tl("Planned the work"));
 	}
 	if (clauses.length === 0) {
-		return "Answered";
+		return tl("Answered");
 	}
 	const [first, ...rest] = clauses;
 	return rest.length === 0 ? first : `${first}, ${rest.join(", ")}`;

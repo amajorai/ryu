@@ -265,7 +265,7 @@ export function CommandPalette({
 		fireActivationEvent(target, commandId)
 			.then(() => {
 				if (isCurrentTarget()) {
-					toast.success(`Ran ${label}`);
+					toast.success(tl("Ran {label}", { label }));
 				}
 			})
 			.catch(() => {

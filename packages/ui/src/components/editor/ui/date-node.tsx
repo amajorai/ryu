@@ -5,6 +5,7 @@ import {
 	getDateDisplayLabel,
 	parseCanonicalDateValue,
 } from "@platejs/date";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Calendar } from "@ryu/ui/components/editor/ui/calendar.tsx";
 import {
 	Popover,
@@ -20,6 +21,7 @@ import { PlateElement, useReadOnly } from "platejs/react";
 export function DateElement(props: PlateElementProps<TDateElement>) {
 	const { editor, element } = props;
 	const readOnly = useReadOnly();
+	const tl = useLiteralMessages();
 	const selectedDate = parseCanonicalDateValue(element.date ?? "");
 
 	const trigger = (
@@ -34,7 +36,7 @@ export function DateElement(props: PlateElementProps<TDateElement>) {
 			{element.date || element.rawDate ? (
 				getDateDisplayLabel(element)
 			) : (
-				<span>Pick a date</span>
+				<span>{tl("Pick a date")}</span>
 			)}
 		</span>
 	);

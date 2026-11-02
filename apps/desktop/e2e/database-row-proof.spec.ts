@@ -6,6 +6,7 @@ import {
 	type DatabaseDoc,
 	parseDatabaseDoc,
 } from "@/src/lib/realtime/yjs-database.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const databasePath = "/api/spaces/space-proof/documents/database-proof";
 interface Write {
@@ -233,9 +234,8 @@ test("all typed row properties save exact values, preserve row identity and view
 	await expect.poll(() => fixture.read().rows[0]?.amount).toBeNull();
 	await property(page, "Amount").getByRole("spinbutton").fill("2500");
 	await expect.poll(() => fixture.read().rows[0]?.amount).toBe(2500);
-	const proof = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-database-row-properties-persisted.png"
+	const proof = proofEvidencePath(
+		"test-coverage-sweep-20260924/evidence/desktop-database-row-properties-persisted.png"
 	);
 	await expect(page.getByText("Project brief.", { exact: true })).toBeVisible({
 		timeout: 60_000,

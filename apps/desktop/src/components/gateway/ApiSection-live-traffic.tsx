@@ -1,3 +1,5 @@
+import { activeLocale, numberFormatter } from "@ryu/i18n/core";
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Table,
@@ -214,10 +216,13 @@ export function LiveTraffic({
 													e.service_usage?.documents ?? 0
 												),
 											})
-										: `${formatNumber(e.input_tokens ?? 0)} / ${formatNumber(e.output_tokens ?? 0)} tokens`}
+										: tl("{input} / {output} tokens", {
+												input: formatNumber(e.input_tokens ?? 0),
+												output: formatNumber(e.output_tokens ?? 0),
+											})}
 								</TableCell>
 								<TableCell className={cn(CELL, "tabular-nums")}>
-									{e.latency_ms ?? 0}ms
+									{formatDurationUnit(e.latency_ms ?? 0, "millisecond")}
 								</TableCell>
 								<TableCell className={CELL}>
 									{e.error ? (
@@ -243,7 +248,10 @@ function formatTokens(n: number): string {
 }
 
 function formatPercent(ratio: number): string {
-	return `${(ratio * 100).toFixed(0)}%`;
+	return numberFormatter(activeLocale(), {
+		maximumFractionDigits: 0,
+		style: "percent",
+	}).format(ratio);
 }
 
 function formatTime(iso: string | undefined): string {

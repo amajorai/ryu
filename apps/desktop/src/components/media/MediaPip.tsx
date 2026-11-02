@@ -143,7 +143,7 @@ function LiveMediaLightbox({
 					/>
 					<Button
 						aria-label="Close fullscreen media"
-						className="absolute top-3 right-3"
+						className="absolute end-3 top-3"
 						onClick={onClose}
 						size="icon"
 						type="button"
@@ -213,14 +213,14 @@ export function MediaPipDock() {
 				<motion.section
 					animate={{ opacity: 1, y: 0 }}
 					aria-label="Live media"
-					className="fixed right-4 bottom-4 z-[70] w-64 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
+					className="fixed end-4 bottom-4 z-[70] w-64 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
 					data-media-pip-dock="true"
 					exit={{ opacity: 0, y: 18 }}
 					initial={{ opacity: 0, y: 18 }}
 				>
 					<button
 						aria-label={tl("Expand {previewLabel}", { previewLabel })}
-						className="group relative block aspect-video w-full overflow-hidden bg-black/80 text-left"
+						className="group relative block aspect-video w-full overflow-hidden bg-black/80 text-start"
 						data-media-pip-preview="true"
 						onClick={() => setLightboxOpen(true)}
 						ref={originRef}

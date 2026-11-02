@@ -1,3 +1,5 @@
+import { translate as tr } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 /** Departures view model: board, status, and flight types and constants. */
 
 export type DeparturesBoard = "arrivals" | "departures";
@@ -20,6 +22,29 @@ export type FlightStatus =
 	| "in-flight"
 	| "landed"
 	| "scheduled";
+
+/** A flight status's label in the UI language, for copy that interpolates it. */
+export function flightStatusLabel(
+	status: FlightStatus,
+	tl: LiteralMessage = tr
+): string {
+	switch (status) {
+		case "arrived":
+			return tl("Arrived");
+		case "at-gate":
+			return tl("At gate");
+		case "boarding":
+			return tl("Boarding");
+		case "delayed":
+			return tl("Delayed");
+		case "in-flight":
+			return tl("In flight");
+		case "landed":
+			return tl("Landed");
+		default:
+			return tl("Scheduled");
+	}
+}
 
 export const FLIGHT_STATUS_LABELS: Record<FlightStatus, string> = {
 	arrived: "Arrived",

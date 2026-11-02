@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("campaign refreshes do not overlap, pause hidden, and stop after three failures", async ({
 	page,
@@ -81,9 +81,8 @@ test("campaign refreshes do not overlap, pause hidden, and stop after three fail
 			page.getByText("80 spots left.", { exact: true })
 		).toBeVisible();
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/campaign-polling-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/campaign-polling-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",

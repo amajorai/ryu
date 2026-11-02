@@ -4,24 +4,25 @@ import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronDown, ChevronsUpDown, ChevronUp } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	categoryLetters,
+	countWord,
 	DEFAULT_THREAD_SORT,
 	indexEntries,
 	nextSort,
 	sortThreads,
-	WIKI_INDEX_LABELS,
 	type WikiIndex,
 	type WikiSortState,
 	type WikiThreadSort,
 	wikiAgent,
 	wikiAgo,
+	wikiIndexLabel,
 	wikiStamp,
 	wikiThreadTitle,
 } from "./wiki-model.ts";
@@ -42,7 +43,7 @@ export function CategoryPage({
 	const tl = useLiteralMessages();
 	const entries = indexEntries(snapshot, index, tl);
 	const letters = categoryLetters(entries);
-	const label = WIKI_INDEX_LABELS[index];
+	const label = wikiIndexLabel(index);
 	return (
 		<div className="pt-4">
 			<p className={PROSE}>
@@ -61,8 +62,8 @@ export function CategoryPage({
 							"{count, plural, one {The following {countText} page is in this category, out of {total} total.} other {The following {countText} pages are in this category, out of {total} total.}}",
 							{
 								count: entries.length,
-								countText: entries.length.toLocaleString("en"),
-								total: entries.length.toLocaleString("en"),
+								countText: countWord(entries.length),
+								total: countWord(entries.length),
 							}
 						)}
 					</p>
@@ -117,7 +118,7 @@ export function ThreadListPage({
 	const working = snapshot.threads.filter((thread) => thread.running).length;
 	const threadValues = {
 		count: snapshot.threads.length,
-		countText: snapshot.threads.length.toLocaleString("en"),
+		countText: countWord(snapshot.threads.length),
 	};
 	return (
 		<div className="pt-4">
@@ -127,7 +128,7 @@ export function ThreadListPage({
 							"This is a list of all {count, plural, one {{countText} thread} other {{countText} threads}} in the workspace, {workingText} of them with a live run. Select a column heading to sort the table.",
 							{
 								...threadValues,
-								workingText: working.toLocaleString("en"),
+								workingText: countWord(working),
 							}
 						)
 					: tl(
@@ -156,7 +157,7 @@ export function ThreadListPage({
 											aria-sort={active ? sort.direction : "none"}
 											className={cn(
 												"border border-border p-0 font-semibold",
-												column.numeric ? "text-right" : "text-left"
+												column.numeric ? "text-end" : "text-start"
 											)}
 											key={column.key}
 											scope="col"
@@ -232,7 +233,7 @@ function ThreadRow({
 			<td className={cn(cell, "whitespace-nowrap")}>
 				<span className="inline-flex items-center gap-1.5">
 					<BoardStatusDot status={status} />
-					{THREAD_STATUS_LABELS[status]}
+					{threadStatusLabel(status)}
 				</span>
 			</td>
 			<td className={cell}>
@@ -249,7 +250,7 @@ function ThreadRow({
 					<span className="text-muted-foreground">&ndash;</span>
 				)}
 			</td>
-			<td className={cn(cell, "text-right tabular-nums")}>
+			<td className={cn(cell, "text-end tabular-nums")}>
 				{thread.messageCount}
 			</td>
 			<td className={cn(cell, "whitespace-nowrap")}>

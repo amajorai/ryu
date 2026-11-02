@@ -37,7 +37,12 @@ import {
 import { useTownSettings } from "./town-interface-settings.ts";
 import { loadScene, TownStageLayers } from "./town-interface-stage.tsx";
 import { useTownPanelView } from "./town-interface-view.ts";
-import { actHappiness, buildingFor, buildTown, plural } from "./town-model.ts";
+import {
+	actHappiness,
+	buildingFor,
+	buildTown,
+	districtSummary,
+} from "./town-model.ts";
 import { townPalette } from "./town-palette.ts";
 import { TownPanel, TownPanelActs } from "./town-panel.tsx";
 import type { SceneInsets, TownCamera } from "./town-scene.tsx";
@@ -201,9 +206,7 @@ export function TownInterface({
 				return;
 			}
 			cameraRef.current?.focus({ x: district.x, z: district.z, zoom: 1.75 });
-			setAnnouncement(
-				`${district.name}: ${plural(district.buildings.length, "building")}, ${plural(district.threads.length, "conversation")}`
-			);
+			setAnnouncement(districtSummary(district));
 		},
 		[town.districts]
 	);
@@ -296,7 +299,7 @@ export function TownInterface({
 	if (loading) {
 		summary = "Town, loading";
 	} else if (actsOn) {
-		summary = `Town: ${actSummaryLine(tally)}.`;
+		summary = tl("Town: {summary}.", { summary: actSummaryLine(tally) });
 	}
 	const hallCount = actsOn ? tally.needYou : town.petitions.length;
 	// With acts City Hall's desk holds what needs you, from the asks.

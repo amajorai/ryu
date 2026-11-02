@@ -143,8 +143,8 @@ export function PassportHud({
 				>
 					{(
 						[
-							["booklet", "Booklet", BookOpen],
-							["map", "Map of travels", MapIcon],
+							["booklet", tl("Booklet"), BookOpen],
+							["map", tl("Map of travels"), MapIcon],
 						] as const
 					).map(([value, label, Icon]) => (
 						<button

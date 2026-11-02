@@ -1,3 +1,5 @@
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
+
 export interface PairingConstraints {
 	agent_id?: string;
 	client_id?: string;
@@ -65,10 +67,7 @@ export function formatPairingTimestamp(timestamp: number): string | null {
 		return null;
 	}
 	try {
-		return new Intl.DateTimeFormat(undefined, {
-			dateStyle: "medium",
-			timeStyle: "short",
-		}).format(date);
+		return formatLocalDateTime(date);
 	} catch {
 		return null;
 	}

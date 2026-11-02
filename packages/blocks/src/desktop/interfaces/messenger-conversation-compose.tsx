@@ -44,9 +44,14 @@ function RecipientOption({
 			role="option"
 		>
 			<MessengerAvatar entry={entry} ringClassName="ring-muted" size="chip" />
-			<span className="shrink-0 font-medium text-sm">{entry.name}</span>
+			<span className="shrink-0 font-medium text-sm" data-ryu-i18n="off">
+				{entry.name}
+			</span>
 			{entry.description ? (
-				<span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+				<span
+					className="min-w-0 flex-1 truncate text-muted-foreground text-xs"
+					data-ryu-i18n="off"
+				>
 					{entry.description}
 				</span>
 			) : null}
@@ -133,10 +138,10 @@ export function MessengerCompose({
 				</label>
 				{recipient ? (
 					<span
-						className="flex h-6 shrink-0 items-center gap-1 rounded-full bg-primary/10 pr-1 pl-2.5 font-medium text-primary text-sm"
+						className="flex h-6 shrink-0 items-center gap-1 rounded-full bg-primary/10 ps-2.5 pe-1 font-medium text-primary text-sm"
 						data-testid="messenger-recipient"
 					>
-						{recipient.name}
+						<span data-ryu-i18n="off">{recipient.name}</span>
 						<button
 							aria-label={tl("Remove {name}", { name: recipient.name })}
 							className="flex size-4 items-center justify-center rounded-full outline-none hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring"

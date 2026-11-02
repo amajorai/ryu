@@ -1,10 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-panels/assistant"
+const proofDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-panels/assistant"
 );
 const coreProofPath = `${proofDir}/core-generated-history.fixture.json`;
 const literal =

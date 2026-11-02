@@ -20,7 +20,6 @@ import {
 	freelancerMeta,
 	type JobRow,
 	jobAge,
-	pluralize,
 } from "./jobs-model.ts";
 import {
 	availabilityLabel,
@@ -72,7 +71,7 @@ function FreelancerRow({
 			<span
 				aria-hidden="true"
 				className={cn(
-					"absolute inset-y-0 left-0 z-10 w-0.5 bg-primary transition-opacity",
+					"absolute inset-y-0 start-0 z-10 w-0.5 bg-primary transition-opacity",
 					selected ? "opacity-100" : "opacity-0"
 				)}
 			/>
@@ -82,7 +81,10 @@ function FreelancerRow({
 				surface={selected ? "ring-accent" : "ring-background"}
 			/>
 			<div className="flex min-w-0 flex-1 flex-col">
-				<p className="truncate font-semibold text-[15px] text-foreground leading-5 group-hover:underline group-hover:underline-offset-2">
+				<p
+					className="truncate font-semibold text-[15px] text-foreground leading-5 group-hover:underline group-hover:underline-offset-2"
+					data-ryu-i18n="off"
+				>
 					{agent.name}
 				</p>
 				<p className="mt-0.5 line-clamp-2 text-foreground/80 text-sm leading-5">
@@ -141,10 +143,10 @@ export function FreelancerList({
 					aria-live="polite"
 					className="text-muted-foreground text-xs leading-4"
 				>
-					{pluralize(profiles.length, "freelancer")}
-					{working > 0
-						? ` ${tl("· {working} working now", { working: String(working) })}`
-						: ""}
+					{tl("{count, plural, one {# freelancer} other {# freelancers}}", {
+						count: profiles.length,
+					})}
+					{working > 0 ? ` ${tl("· {working} working now", { working })}` : ""}
 				</p>
 			</header>
 			<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -280,7 +282,10 @@ export function FreelancerProfilePane({
 				<header className="flex items-center gap-4">
 					<FreelancerAvatar agent={agent} size={64} />
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<h2 className="truncate font-sans font-semibold! text-foreground text-xl leading-7 tracking-tight">
+						<h2
+							className="truncate font-sans font-semibold! text-foreground text-xl leading-7 tracking-tight"
+							data-ryu-i18n="off"
+						>
 							{agent.name}
 						</h2>
 						<p className="text-foreground/80 text-sm leading-5">
@@ -350,7 +355,7 @@ export function FreelancerProfilePane({
 								</p>
 							</div>
 							<Button
-								className="-mt-1.5 -mr-2 shrink-0"
+								className="-me-2 -mt-1.5 shrink-0"
 								onClick={onCancelHire}
 								size="sm"
 								type="button"
@@ -381,7 +386,9 @@ export function FreelancerProfilePane({
 					>
 						Work history
 						<span className="font-normal text-muted-foreground text-xs">
-							{pluralize(jobs.length, "job")}
+							{tl("{count, plural, one {# job} other {# jobs}}", {
+								count: jobs.length,
+							})}
 						</span>
 					</h3>
 					{jobs.length === 0 ? (
@@ -393,7 +400,7 @@ export function FreelancerProfilePane({
 							{jobs.map((row) => (
 								<li key={row.thread.id}>
 									<button
-										className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+										className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 										onClick={() => onOpenJob(row.thread.id)}
 										type="button"
 									>

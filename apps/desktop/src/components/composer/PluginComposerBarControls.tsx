@@ -22,6 +22,7 @@ import {
 	contributionSourceRequest,
 	sourceItemsFromResponse,
 } from "@ryu/app-host/views";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
 import {
@@ -32,7 +33,7 @@ import {
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	composerSelectOptions,
 	composerSelectValue,
@@ -41,6 +42,7 @@ import {
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { apiUrl, requestHeaders, toTarget } from "@/src/lib/api/client.ts";
 import { pluginHostInvoke } from "@/src/lib/api/plugins.ts";
+import { manifestCopy, optionalManifestCopy } from "@/src/lib/manifest-copy.ts";
 
 /** How often a `chip` re-reads its source. Slow enough to be free, fast enough
  *  that a pill tracking a recording/selection reads as live. */
@@ -87,8 +89,26 @@ export function PluginComposerBarControls({
 	);
 }
 
+/** A control's manifest copy (label, description, option labels) in the
+ *  active locale. Values, flags and the live chip title stay as they are. */
+function localizeControl(
+	tl: LiteralMessage,
+	control: KnownComposerControl
+): KnownComposerControl {
+	return {
+		...control,
+		description: optionalManifestCopy(tl, control.description),
+		label: manifestCopy(tl, control.label),
+		// Core forwards entries verbatim; `composerSelectOptions` drops a
+		// malformed option later, so only a real one is mapped here.
+		options: control.options?.map((option) =>
+			option ? { ...option, label: manifestCopy(tl, option.label) } : option
+		),
+	};
+}
+
 function PluginComposerBarControl({
-	control,
+	control: declared,
 	values,
 	onValueChange,
 	onActionFired,
@@ -98,6 +118,8 @@ function PluginComposerBarControl({
 	onValueChange: (flag: string, value: string | null) => void;
 	values: Record<string, string>;
 }) {
+	const tl = useLiteralMessages();
+	const control = useMemo(() => localizeControl(tl, declared), [tl, declared]);
 	if (control.type === "chip") {
 		return <PluginComposerChip control={control} onValue={onValueChange} />;
 	}

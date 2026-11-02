@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
@@ -32,7 +32,8 @@ export interface ChangelogEntryData {
 
 /** Compact changelog card for grids and home-page previews. */
 export function ChangelogCard({ entry }: { entry: ChangelogEntryData }) {
-	const formattedDate = formatPublicationDate(entry.date, "short");
+	const locale = useOptionalI18n()?.locale;
+	const formattedDate = formatPublicationDate(entry.date, "short", locale);
 	const bannerSrc = safeMediaUrl(entry.banner);
 	const bannerDarkSrc = safeMediaUrl(entry.bannerDark);
 
@@ -106,7 +107,8 @@ export function ChangelogEntry({
 	entry: ChangelogEntryData;
 	single?: boolean;
 }) {
-	const formattedDate = formatPublicationDate(entry.date, "long");
+	const locale = useOptionalI18n()?.locale;
+	const formattedDate = formatPublicationDate(entry.date, "long", locale);
 	const bannerSrc = safeMediaUrl(entry.banner);
 	const bannerDarkSrc = safeMediaUrl(entry.bannerDark);
 	// SAFETY: the host app serves /changelog/[slug]; this shared block cannot see

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceSnapshot,
@@ -65,9 +66,15 @@ export type PanelsView = "chat" | "home" | "projects";
 export const PANELS_VIEWS: readonly PanelsView[] = ["home", "chat", "projects"];
 
 export const PANELS_VIEW_LABELS: Record<PanelsView, string> = {
-	chat: "Chat",
-	home: "Home",
-	projects: "Projects",
+	get chat() {
+		return tr("Chat");
+	},
+	get home() {
+		return tr("Home");
+	},
+	get projects() {
+		return tr("Projects");
+	},
 };
 
 export function isPanelsView(value: unknown): value is PanelsView {

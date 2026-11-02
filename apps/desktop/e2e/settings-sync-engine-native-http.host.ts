@@ -48,6 +48,11 @@ let holdPushAck = false;
 let refuseShortcut = false;
 let refuseDelete = false;
 const releases = new Map<number, () => void>();
+// The desktop's sealed secret slots (desktop_secret_*), shared by every window
+// of the proof's browser context. Native IPC, not HTTP traffic: kept out of the
+// call ledger. Cleared by reset, like the rest of the seeded machine.
+const SECRET_SLOTS = ["auth-vault", "license-key"];
+let secrets = new Map<string, string>();
 async function persist() {
 	await writeFile(statePath, JSON.stringify(state));
 }
@@ -85,6 +90,12 @@ const server = Bun.serve({
 				"/api/desktop-settings-sync/pull": ["GET"],
 				"/api/desktop-settings-sync/push": ["POST"],
 				"/api/desktop-settings-sync": ["DELETE"],
+				...Object.fromEntries(
+					SECRET_SLOTS.map((name) => [
+						`/native/desktop-secret/${name}`,
+						["GET", "PUT", "DELETE"],
+					])
+				),
 			};
 			const requested = (
 				req.headers.get("access-control-request-headers") ?? ""
@@ -144,6 +155,7 @@ const server = Bun.serve({
 					holdPushAck?: boolean;
 					refuseShortcut?: boolean;
 					refuseDelete?: boolean;
+					vault?: unknown;
 				};
 				if (
 					!(b.state?.accounts?.A && b.state?.accounts?.B) ||
@@ -152,6 +164,9 @@ const server = Bun.serve({
 					return fail("Malformed seed");
 				}
 				state = b.state;
+				secrets = new Map(
+					b.vault ? [["auth-vault", JSON.stringify(b.vault)]] : []
+				);
 				calls = [];
 				unexpected = [];
 				holdPull = b.holdPull ?? false;
@@ -183,6 +198,25 @@ const server = Bun.serve({
 		}
 		if (req.headers.get("origin") !== origin) {
 			return fail("Unexpected browser origin");
+		}
+		const secret = p.match(/^\/native\/desktop-secret\/([a-z-]+)$/)?.[1];
+		if (secret !== undefined) {
+			if (!SECRET_SLOTS.includes(secret) || url.search) {
+				return fail("Unknown secret slot");
+			}
+			if (req.method === "GET") {
+				return json({ value: secrets.get(secret) ?? null });
+			}
+			if (req.method === "DELETE") {
+				secrets.delete(secret);
+				return json({ value: null });
+			}
+			const sealed = (await req.json()) as { value?: unknown };
+			if (req.method !== "PUT" || typeof sealed.value !== "string") {
+				return fail("Unexpected secret slot write");
+			}
+			secrets.set(secret, sealed.value);
+			return json({ value: null });
 		}
 		const body = ["PUT", "POST"].includes(req.method) ? await req.json() : null;
 		const call: Call = {

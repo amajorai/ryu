@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -64,7 +65,7 @@ export function TicketsPage({
 }) {
 	const reduceMotion = useReducedMotion();
 	const tl = useLiteralMessages();
-	const subject = ticket?.thread.title || "New ticket";
+	const subject = ticket?.thread.title || tr("New ticket");
 	const messages = ticket?.thread.messageCount ?? 0;
 	const sidebar = ticket ? (
 		<TicketsSidebar
@@ -172,7 +173,10 @@ export function TicketsPage({
 								{ticket.requester ? (
 									<>
 										Requested by{" "}
-										<span className="font-medium text-foreground">
+										<span
+											className="font-medium text-foreground"
+											data-ryu-i18n="off"
+										>
 											{ticket.requester.name}
 										</span>
 									</>
@@ -214,7 +218,7 @@ export function TicketsPage({
 						{detailsOpen && sidebar ? (
 							<motion.div
 								animate={{ opacity: 1, x: 0 }}
-								className="absolute inset-y-0 right-0 z-20 flex max-w-full"
+								className="absolute inset-y-0 end-0 z-20 flex max-w-full"
 								exit={{ opacity: 0, x: reduceMotion ? 0 : 24 }}
 								initial={{ opacity: 0, x: reduceMotion ? 0 : 24 }}
 								key="details"

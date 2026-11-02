@@ -1,14 +1,14 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	countWord,
 	eventOutcome,
@@ -19,7 +19,7 @@ import {
 import { PROSE, WikiLink } from "./wiki-parts.tsx";
 
 export const LIST =
-	"list-disc space-y-1 pl-6 text-sm leading-6 marker:text-muted-foreground";
+	"list-disc space-y-1 ps-6 text-sm leading-6 marker:text-muted-foreground";
 export const NOTE = "text-muted-foreground text-sm leading-6";
 
 export function Status({ thread }: { thread: InterfaceThread }) {
@@ -27,7 +27,7 @@ export function Status({ thread }: { thread: InterfaceThread }) {
 	return (
 		<span className="inline-flex items-center gap-1.5">
 			<BoardStatusDot status={status} />
-			{THREAD_STATUS_LABELS[status]}
+			{threadStatusLabel(status)}
 		</span>
 	);
 }
@@ -91,18 +91,24 @@ export function ThreadLine({
 			) : null}
 			<span className="text-muted-foreground">
 				{" "}
-				{tl(
-					"({count, plural, one {{countText} message} other {{countText} messages}}, updated {ago}{status})",
-					{
-						ago: wikiAgo(thread.updatedAt, now),
-						count: thread.messageCount,
-						countText: countWord(thread.messageCount),
-						status:
-							status === "quiet"
-								? ""
-								: `; ${THREAD_STATUS_LABELS[status].toLowerCase()}`,
-					}
-				)}
+				{status === "quiet"
+					? tl(
+							"({count, plural, one {{countText} message} other {{countText} messages}}, updated {ago})",
+							{
+								ago: wikiAgo(thread.updatedAt, now),
+								count: thread.messageCount,
+								countText: countWord(thread.messageCount),
+							}
+						)
+					: tl(
+							"({count, plural, one {{countText} message} other {{countText} messages}}, updated {ago}; {status})",
+							{
+								ago: wikiAgo(thread.updatedAt, now),
+								count: thread.messageCount,
+								countText: countWord(thread.messageCount),
+								status: threadStatusLabel(status, tl).toLocaleLowerCase(),
+							}
+						)}
 			</span>
 		</li>
 	);
@@ -149,6 +155,7 @@ export function RunList({
 
 export function Missing({ noun }: { noun: string }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	return (
 		<div className="pt-4">
 			<p className={PROSE}>
@@ -158,12 +165,20 @@ export function Missing({ noun }: { noun: string }) {
 				)}
 			</p>
 			<p className={`${PROSE} mt-3`}>
-				Return to the <WikiLink route={{ kind: "main" }}>Main Page</WikiLink> or
-				browse the{" "}
-				<WikiLink route={{ index: "threads", kind: "index" }}>
-					List of threads
-				</WikiLink>
-				.
+				{tlRich(
+					"Return to the <main>Main Page</main> or browse the <threads>List of threads</threads>.",
+					{},
+					{
+						main: (chunks) => (
+							<WikiLink route={{ kind: "main" }}>{chunks}</WikiLink>
+						),
+						threads: (chunks) => (
+							<WikiLink route={{ index: "threads", kind: "index" }}>
+								{chunks}
+							</WikiLink>
+						),
+					}
+				)}
 			</p>
 		</div>
 	);

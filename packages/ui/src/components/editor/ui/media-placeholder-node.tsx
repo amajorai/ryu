@@ -5,6 +5,9 @@ import {
 	PlaceholderProvider,
 	updateUploadHistory,
 } from "@platejs/media/react";
+import { activeLocale } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { useUploadFile } from "@ryu/ui/hooks/use-upload-file.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { AudioLines, FileUp, Film, ImageIcon, Loader2Icon } from "lucide-react";
@@ -24,7 +27,6 @@ import { useFilePicker } from "use-file-picker";
 
 interface PlaceholderContent {
 	accept: string[];
-	content: ReactNode;
 	icon: ReactNode;
 }
 
@@ -35,7 +37,6 @@ const CONTENT = new Map<TPlaceholderElement["mediaType"], PlaceholderContent>([
 		KEYS.audio,
 		{
 			accept: ["audio/*"],
-			content: "Add an audio file",
 			icon: <AudioLines />,
 		},
 	],
@@ -43,7 +44,6 @@ const CONTENT = new Map<TPlaceholderElement["mediaType"], PlaceholderContent>([
 		KEYS.file,
 		{
 			accept: ["*"],
-			content: "Add a file",
 			icon: <FileUp />,
 		},
 	],
@@ -51,7 +51,6 @@ const CONTENT = new Map<TPlaceholderElement["mediaType"], PlaceholderContent>([
 		KEYS.img,
 		{
 			accept: ["image/*"],
-			content: "Add an image",
 			icon: <ImageIcon />,
 		},
 	],
@@ -59,16 +58,36 @@ const CONTENT = new Map<TPlaceholderElement["mediaType"], PlaceholderContent>([
 		KEYS.video,
 		{
 			accept: ["video/*"],
-			content: "Add a video",
 			icon: <Film />,
 		},
 	],
 ]);
 
+/**
+ * The card's call to action. It renders inside the editable, which the DOM
+ * localizer skips, so each kind is its own literal tl() call.
+ */
+function placeholderLabel(
+	mediaType: TPlaceholderElement["mediaType"],
+	tl: LiteralMessage
+): string {
+	switch (mediaType) {
+		case KEYS.audio:
+			return tl("Add an audio file");
+		case KEYS.img:
+			return tl("Add an image");
+		case KEYS.video:
+			return tl("Add a video");
+		default:
+			return tl("Add a file");
+	}
+}
+
 export const PlaceholderElement = withHOC(
 	PlaceholderProvider,
 	function PlaceholderElement(props: PlateElementProps<TPlaceholderElement>) {
 		const { editor, element } = props;
+		const tl = useLiteralMessages();
 
 		const { api } = useEditorPlugin(PlaceholderPlugin);
 
@@ -211,7 +230,9 @@ export const PlaceholderElement = withHOC(
 						</div>
 						<div className="whitespace-nowrap text-muted-foreground text-sm">
 							<div>
-								{loading ? uploadingFile?.name : currentContent.content}
+								{loading
+									? uploadingFile?.name
+									: placeholderLabel(element.mediaType, tl)}
 							</div>
 
 							{loading && !isImage && (
@@ -289,27 +310,10 @@ export function ImageProgress({
 	);
 }
 
-function formatBytes(
-	bytes: number,
-	opts: {
-		decimals?: number;
-		sizeType?: "accurate" | "normal";
-	} = {}
-) {
-	const { decimals = 0, sizeType = "normal" } = opts;
-
-	const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-	const accurateSizes = ["Bytes", "KiB", "MiB", "GiB", "TiB"];
-
-	if (bytes === 0) {
-		return "0 Byte";
-	}
-
-	const i = Math.floor(Math.log(bytes) / Math.log(1024));
-
-	return `${(bytes / 1024 ** i).toFixed(decimals)} ${
-		sizeType === "accurate"
-			? (accurateSizes[i] ?? "Bytest")
-			: (sizes[i] ?? "Bytes")
-	}`;
+/** Whole units ("12 MB"), in the UI locale's own digits and unit names. */
+function formatBytes(bytes: number) {
+	return formatByteSize(bytes, activeLocale(), {
+		fractionDigits: 0,
+		maxUnit: "terabyte",
+	});
 }

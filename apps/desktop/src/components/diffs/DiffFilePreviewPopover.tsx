@@ -1,4 +1,6 @@
 import { LazyPatchDiff } from "@ryu/blocks/desktop/agent-elements/lazy-patch-diff.tsx";
+import { usePierreShadowLocalizer } from "@ryu/blocks/desktop/agent-elements/use-pierre-shadow-localizer.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
@@ -15,6 +17,8 @@ export function DiffFilePreviewPopover({
 	filePath: string;
 	patch: string;
 }) {
+	const tl = useLiteralMessages();
+	const localizeDiffCopy = usePierreShadowLocalizer();
 	return (
 		<HoverCard>
 			<HoverCardTrigger closeDelay={120} delay={180} render={children} />
@@ -29,9 +33,12 @@ export function DiffFilePreviewPopover({
 					<span className="min-w-0 flex-1 truncate font-mono text-foreground">
 						{filePath}
 					</span>
-					<span>Preview</span>
+					<span>{tl("Preview")}</span>
 				</div>
-				<div className="max-h-[28rem] overflow-auto rounded-xl border border-border/60 bg-background/60">
+				<div
+					className="max-h-[28rem] overflow-auto rounded-xl border border-border/60 bg-background/60"
+					ref={localizeDiffCopy}
+				>
 					<LazyPatchDiff
 						disableWorkerPool
 						options={{

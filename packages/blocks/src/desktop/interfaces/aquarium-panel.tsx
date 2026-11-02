@@ -3,7 +3,6 @@ import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { Inbox } from "lucide-react";
@@ -20,6 +19,7 @@ import { CreaturePortrait, CreatureStatusMark } from "./aquarium-parts.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import { GameSheet } from "./game-shell.tsx";
 import { InterfaceComposer } from "./interface-composer.tsx";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 export { AquariumPanelActs } from "./aquarium-panel-context.ts";
 
@@ -71,7 +71,9 @@ export function AquariumPanel({
 	if (view.kind === "thread") {
 		const { creature, thread } = view;
 		const status = thread ? threadStatus(thread) : null;
-		const back = creature ? `Back to ${creature.name}` : "Back to the reef";
+		const back = creature
+			? tl("Back to {name}", { name: creature.name })
+			: tl("Back to the reef");
 		return (
 			<GameSheet
 				backLabel={back}
@@ -109,7 +111,7 @@ export function AquariumPanel({
 									)}
 								>
 									<BoardStatusDot className="size-1.5" status={status} />
-									{THREAD_STATUS_LABELS[status]}
+									{threadStatusLabel(status)}
 								</span>
 							</>
 						) : null}

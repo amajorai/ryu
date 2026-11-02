@@ -1,18 +1,9 @@
-declare const window: Window;
-
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { asGlyphValue } from "@ryu/ui/components/glyph.ts";
-import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { IDLE_REORDER_SHIFT } from "@ryu/ui/hooks/use-reorder-shift.tsx";
+import { QueryClient } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import {
-	type ContextType,
-	Fragment,
-	useCallback,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { Fragment, useCallback, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { z } from "zod";
 import { SpaceSidebarRow } from "../../src/components/layout/AppSidebar.tsx";
@@ -20,15 +11,22 @@ import { ResourceVisibilityConfirmationDialog } from "../../src/components/layou
 import type { ChatRowHandlers } from "../../src/components/layout/sidebar-conversation-rows.tsx";
 import { ProjectRow } from "../../src/components/layout/sidebar-project-row.tsx";
 import { DestructiveConfirmDialog } from "../../src/components/ui/DestructiveConfirmDialog.tsx";
-import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
-import { TabsContext } from "../../src/contexts/TabsContext.tsx";
-import type { Space, SpaceDocument } from "../../src/lib/api/spaces.ts";
+import type { Space } from "../../src/lib/api/spaces.ts";
 import type { VisibilityChangeRequest } from "../../src/lib/resource-visibility.ts";
-import { projectIdForFolder } from "../../src/lib/workspace-projects.ts";
-import { type Node, useNodeStore } from "../../src/store/useNodeStore.ts";
-import type { WorkspaceProject } from "../../src/store/useWorkspaceStore.ts";
 import { useWorkspaceStore } from "../../src/store/useWorkspaceStore.ts";
-import type { Conversation } from "../../types/chat.ts";
+import {
+	DOCUMENTS,
+	PROJECT_PATH,
+	PROOF_NODE,
+	proofConversation,
+	readSpaces,
+	SPACE_ICON_STORAGE_KEY,
+	SPACE_STORAGE_KEY,
+} from "./app-sidebar-entity-rows-fixtures.ts";
+import {
+	ShellProofProviders,
+	type ShellTabsValue,
+} from "./shell-proof-providers.tsx";
 import "../../src/index.css";
 
 type ProjectBucket = Parameters<typeof ProjectRow>[0]["bucket"];
@@ -38,278 +36,6 @@ interface ProofEvent {
 	kind: string;
 	payload: object;
 }
-
-const PROJECT_PATH = "/workspace/project-alpha";
-const SPACE_STORAGE_KEY = "proof:spaces";
-const SPACE_ICON_STORAGE_KEY = "proof:space-icons";
-const PROOF_NODE: Node = {
-	name: "Proof cloud",
-	token: "entity-row-proof-token",
-	url: "https://proof-node.local",
-};
-
-const INITIAL_PROJECT: WorkspaceProject = {
-	folders: [PROJECT_PATH],
-	id: projectIdForFolder(PROJECT_PATH),
-	name: "Alpha",
-};
-
-const DEFAULT_SPACES: Space[] = [
-	{
-		createdAt: 1_700_000_000_000,
-		description: "Research source material",
-		documentCount: 3,
-		icon: null,
-		id: "space-research",
-		name: "Research notes",
-		retrievalMode: "vector",
-		system: false,
-		updatedAt: 1_700_000_000_000,
-		visibility: "private",
-	},
-	{
-		createdAt: 1_700_000_000_000,
-		description: "Shared team material",
-		documentCount: 1,
-		icon: null,
-		id: "space-team",
-		name: "Team notes",
-		retrievalMode: "vector",
-		system: false,
-		updatedAt: 1_700_000_000_000,
-		visibility: "org",
-	},
-	{
-		createdAt: 1_700_000_000_000,
-		description: null,
-		documentCount: 0,
-		icon: null,
-		id: "space-locked",
-		name: "Read-only notes",
-		retrievalMode: "vector",
-		system: false,
-		updatedAt: 1_700_000_000_000,
-		visibility: "private",
-	},
-	{
-		createdAt: 1_700_000_000_000,
-		description: null,
-		documentCount: 0,
-		icon: null,
-		id: "space-system",
-		name: "Uploads",
-		retrievalMode: "vector",
-		system: true,
-		updatedAt: 1_700_000_000_000,
-		visibility: "org",
-	},
-];
-
-const spaceSchema = z.object({
-	createdAt: z.number(),
-	description: z.string().nullable(),
-	documentCount: z.number(),
-	icon: z.json().transform((value) => asGlyphValue(value) ?? null),
-	id: z.string(),
-	name: z.string(),
-	retrievalMode: z.enum(["graph", "vector"]),
-	system: z.boolean(),
-	updatedAt: z.number(),
-	visibility: z.enum(["private", "org", "team"]).optional(),
-	teamId: z.string().nullable().optional(),
-});
-function readSpaces(): Space[] {
-	try {
-		const raw = localStorage.getItem(SPACE_STORAGE_KEY);
-		if (raw) {
-			return z.array(spaceSchema).parse(JSON.parse(raw));
-		}
-	} catch {
-		// Start from the deterministic fixture if storage is malformed.
-	}
-	return DEFAULT_SPACES;
-}
-
-function proofConversation(id: string, title: string): Conversation {
-	return {
-		agentId: undefined,
-		branch: undefined,
-		createdAt: 1_700_000_000_000,
-		folderPath: PROJECT_PATH,
-		id,
-		lastMessage: `Latest update for ${title}`,
-		lastMessageAt: 1_700_000_000_000,
-		lastMessageRole: "assistant",
-		messageCount: 2,
-		messages: [],
-		runStatus: "idle",
-		title,
-		updatedAt: 1_700_000_000_000,
-	};
-}
-
-function proofDocument(
-	id: string,
-	spaceId: string,
-	title: string,
-	kind: "page" | "database" | "file"
-): SpaceDocument {
-	return {
-		byteSize: null,
-		chunkCount: 1,
-		createdAt: 1_700_000_000_000,
-		icon: null,
-		id,
-		indexMessage: null,
-		indexState: null,
-		indexWarnings: [],
-		kind: kind === "file" ? "page" : kind,
-		mime: null,
-		rawKind: kind,
-		spaceId,
-		title,
-		updatedAt: 1_700_000_000_000,
-	};
-}
-
-const DOCUMENTS = {
-	"space-research": [
-		proofDocument("doc-brief", "space-research", "Launch brief", "page"),
-		proofDocument("db-decisions", "space-research", "Decision log", "database"),
-		proofDocument("file-source", "space-research", "Reference PDF", "file"),
-	],
-	"space-team": [
-		proofDocument("doc-team", "space-team", "Team roadmap", "page"),
-	],
-};
-
-const CONTRIBUTIONS = {
-	context_menu_items: [
-		{
-			anchor: "space",
-			args: { source: "sidebar" },
-			capability: "space.review",
-			id: "review-space",
-			label: "Review this space",
-			order: 5,
-			plugin: "@ryu/spaces",
-		},
-	],
-};
-
-const originalFetch = globalThis.fetch.bind(globalThis);
-window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-	const url = input instanceof Request ? input.url : String(input);
-	let parsed: URL;
-	try {
-		parsed = new URL(url, window.location.href);
-	} catch {
-		return originalFetch(input, init);
-	}
-	const json = <FixturePayload,>(value: FixturePayload, status = 200) =>
-		Promise.resolve(
-			new Response(JSON.stringify(value), {
-				headers: { "content-type": "application/json" },
-				status,
-			})
-		);
-	if (parsed.hostname === "api.iconify.design") {
-		if (parsed.pathname.endsWith("/search")) {
-			return json({ icons: ["lucide:folder"] });
-		}
-		if (parsed.pathname.endsWith("/collection")) {
-			return json({ uncategorized: ["folder"] });
-		}
-		return new Response('<svg xmlns="http://www.w3.org/2000/svg"></svg>', {
-			headers: { "content-type": "image/svg+xml" },
-			status: 200,
-		});
-	}
-	if (parsed.pathname === "/api/plugins/contributions") {
-		return json(CONTRIBUTIONS);
-	}
-	if (
-		parsed.pathname.startsWith("/api/plugins/") &&
-		parsed.pathname.endsWith("/host")
-	) {
-		const plugin = decodeURIComponent(
-			parsed.pathname.match(/\/api\/plugins\/([^/]+)\/host$/)?.[1] ?? ""
-		);
-		const body = isNativeText(init?.body) ? JSON.parse(init.body) : {};
-		document.documentElement.dataset.spaceHostInvocation = JSON.stringify({
-			args: body.args,
-			method: body.method,
-			plugin,
-		});
-		return json({ result: "review dispatched" });
-	}
-	if (parsed.pathname === "/api/org-project-mappings") {
-		return json({ mappings: [] });
-	}
-	if (parsed.pathname.startsWith("/api/")) {
-		return json({});
-	}
-	return originalFetch(input, init);
-};
-
-// SAFETY: This is the sole authored fixture kernel mutation view. Its complete
-// two-member value is derived from the actual object below, not a promise of the
-// installed Tauri runtime or a caller-selected command result. All other native
-// window slots retain their original ambient SDK ownership.
-const tauriWindow = window as Omit<
-	typeof globalThis.window,
-	"__TAURI_INTERNALS__"
-> & {
-	__TAURI_INTERNALS__?: typeof entityTauriBridge;
-};
-let nativeCall = 0;
-const entityTauriBridge = {
-	transformCallback: () => {
-		nativeCall += 1;
-		return nativeCall;
-	},
-	invoke: async (
-		command: Parameters<typeof import("@tauri-apps/api/core").invoke>[0],
-		args?: Parameters<typeof import("@tauri-apps/api/core").invoke>[1]
-	) => {
-		const calls = JSON.parse(
-			localStorage.getItem("proof:native-calls") ?? "[]"
-		);
-		const next = [...calls, { args, command }];
-		localStorage.setItem("proof:native-calls", JSON.stringify(next));
-		document.documentElement.dataset.nativeCalls = JSON.stringify(next);
-		if (command === "read_project_file") {
-			return "# Alpha project instructions";
-		}
-		if (command === "write_project_file") {
-			if (localStorage.getItem("proof:fail-project-write-once") === "true") {
-				localStorage.removeItem("proof:fail-project-write-once");
-				throw new Error("fixture project file write failed");
-			}
-			return undefined;
-		}
-		return undefined;
-	},
-};
-tauriWindow.__TAURI_INTERNALS__ = entityTauriBridge;
-
-const currentWorkspaceProjects = useWorkspaceStore.getState().projects;
-if (
-	!currentWorkspaceProjects.some((project) =>
-		project.folders.includes(PROJECT_PATH)
-	)
-) {
-	useWorkspaceStore.setState({
-		projects: [...currentWorkspaceProjects, INITIAL_PROJECT],
-	});
-}
-useNodeStore.setState({
-	activeNodeOnline: true,
-	cloudNodes: [],
-	defaultNode: PROOF_NODE.name,
-	localNodes: [PROOF_NODE],
-	nodes: [PROOF_NODE],
-});
 
 function Story() {
 	const [queryClient] = useState(
@@ -372,205 +98,25 @@ function Story() {
 		},
 		[]
 	);
-	const openTab = useCallback<
-		NonNullable<ContextType<typeof TabsContext>>["openTab"]
-	>(
-		(path, options) => {
-			record("tab", {
-				path,
-				title: options?.title,
-				forceNew: options?.forceNew ?? false,
-			});
-			return "entity-row-proof-tab";
-		},
-		[record]
-	);
-	const updateTabsIconWhere = useCallback<
-		NonNullable<ContextType<typeof TabsContext>>["updateTabsIconWhere"]
-	>(
-		(predicate, icon) => {
-			record("tab-icon-update", {
-				icon,
-				matches: predicate({
-					id: "entity-row-proof-tab",
-					path: "/spaces/space-research",
-					title: "Research notes",
-				}),
-			});
-		},
-		[record]
-	);
-	const tabsContext = useMemo<NonNullable<ContextType<typeof TabsContext>>>(
-		() => ({
-			activateTab: () => {
-				throw new Error("Unexpected entity-row Tabs operation: activateTab");
+	// The real Tabs value with the two operations the rows call recorded, then
+	// delegated, so the proof sees each target the row asked to open.
+	const observeTabs = useCallback(
+		(value: ShellTabsValue): ShellTabsValue => ({
+			...value,
+			openTab: (path, options) => {
+				record("tab", {
+					path,
+					title: options?.title,
+					forceNew: options?.forceNew ?? false,
+				});
+				return value.openTab(path, options);
 			},
-			activeTabId: "entity-row-proof-tab",
-			addTabToGroup: () => {
-				throw new Error("Unexpected entity-row Tabs operation: addTabToGroup");
-			},
-			addTabToSplit: () => {
-				throw new Error("Unexpected entity-row Tabs operation: addTabToSplit");
-			},
-			applySplitPreset: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: applySplitPreset"
-				);
-			},
-			applySplitPresetToNewTabs: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: applySplitPresetToNewTabs"
-				);
-			},
-			bindTabConversation: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: bindTabConversation"
-				);
-			},
-			canGoBack: false,
-			canGoForward: false,
-			clearScrollToMessage: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: clearScrollToMessage"
-				);
-			},
-			closeGroup: () => {
-				throw new Error("Unexpected entity-row Tabs operation: closeGroup");
-			},
-			closeTab: () => {
-				throw new Error("Unexpected entity-row Tabs operation: closeTab");
-			},
-			createGroup: () => {
-				throw new Error("Unexpected entity-row Tabs operation: createGroup");
-			},
-			equalizeSplit: () => {
-				throw new Error("Unexpected entity-row Tabs operation: equalizeSplit");
-			},
-			focusTab: () => {
-				throw new Error("Unexpected entity-row Tabs operation: focusTab");
-			},
-			goBack: () => {
-				throw new Error("Unexpected entity-row Tabs operation: goBack");
-			},
-			goForward: () => {
-				throw new Error("Unexpected entity-row Tabs operation: goForward");
-			},
-			groups: [],
-			hasClosedTabs: false,
-			moveTab: () => {
-				throw new Error("Unexpected entity-row Tabs operation: moveTab");
-			},
-			openTab,
-			prepareTabForWorkbenchSplit: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: prepareTabForWorkbenchSplit"
-				);
-			},
-			removeFromSplit: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: removeFromSplit"
-				);
-			},
-			removeTabFromGroup: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: removeTabFromGroup"
-				);
-			},
-			renameGroup: () => {
-				throw new Error("Unexpected entity-row Tabs operation: renameGroup");
-			},
-			renameSplit: () => {
-				throw new Error("Unexpected entity-row Tabs operation: renameSplit");
-			},
-			replacePaneTab: () => {
-				throw new Error("Unexpected entity-row Tabs operation: replacePaneTab");
-			},
-			requestScrollToMessage: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: requestScrollToMessage"
-				);
-			},
-			restoreTab: () => {
-				throw new Error("Unexpected entity-row Tabs operation: restoreTab");
-			},
-			setGroupColor: () => {
-				throw new Error("Unexpected entity-row Tabs operation: setGroupColor");
-			},
-			setSplitColor: () => {
-				throw new Error("Unexpected entity-row Tabs operation: setSplitColor");
-			},
-			setSplitOrientation: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: setSplitOrientation"
-				);
-			},
-			setSplitSizes: () => {
-				throw new Error("Unexpected entity-row Tabs operation: setSplitSizes");
-			},
-			setTabRoute: () => {
-				throw new Error("Unexpected entity-row Tabs operation: setTabRoute");
-			},
-			splitPane: () => {
-				throw new Error("Unexpected entity-row Tabs operation: splitPane");
-			},
-			splits: [],
-			splitTabs: () => {
-				throw new Error("Unexpected entity-row Tabs operation: splitTabs");
-			},
-			swapSplitPanes: () => {
-				throw new Error("Unexpected entity-row Tabs operation: swapSplitPanes");
-			},
-			tabs: [
-				{
-					id: "entity-row-proof-tab",
-					path: "/spaces/space-research",
-					title: "Research notes",
-				},
-			],
-			toggleGroupCollapsed: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: toggleGroupCollapsed"
-				);
-			},
-			togglePin: () => {
-				throw new Error("Unexpected entity-row Tabs operation: togglePin");
-			},
-			toggleSplitCollapsed: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: toggleSplitCollapsed"
-				);
-			},
-			ungroup: () => {
-				throw new Error("Unexpected entity-row Tabs operation: ungroup");
-			},
-			unloadTab: () => {
-				throw new Error("Unexpected entity-row Tabs operation: unloadTab");
-			},
-			unsplit: () => {
-				throw new Error("Unexpected entity-row Tabs operation: unsplit");
-			},
-			updateTabBusy: () => {
-				throw new Error("Unexpected entity-row Tabs operation: updateTabBusy");
-			},
-			updateTabIcon: () => {
-				throw new Error("Unexpected entity-row Tabs operation: updateTabIcon");
-			},
-			updateTabsIconWhere,
-			updateTabTitle: () => {
-				throw new Error("Unexpected entity-row Tabs operation: updateTabTitle");
-			},
-			updateTabWorkspaceSession: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: updateTabWorkspaceSession"
-				);
-			},
-			updateTabWorktreeMode: () => {
-				throw new Error(
-					"Unexpected entity-row Tabs operation: updateTabWorktreeMode"
-				);
+			updateTabsIconWhere: (predicate, icon) => {
+				record("tab-icon-update", { icon });
+				value.updateTabsIconWhere(predicate, icon);
 			},
 		}),
-		[openTab, updateTabsIconWhere]
+		[record]
 	);
 	const documentList = useCallback(async (spaceId: string) => {
 		const attempt = (readsRef.current[spaceId] ?? 0) + 1;
@@ -689,11 +235,13 @@ function Story() {
 		() => ({
 			draggingKey: null,
 			dragOverKey: null,
+			nestOverKey: null,
 			onDragEnd: () => undefined,
 			onDragOver: () => undefined,
 			onDragStart: () => undefined,
 			onDrop: () => undefined,
 			order: [PROJECT_PATH, "/workspace/empty-project"],
+			shift: IDLE_REORDER_SHIFT,
 		}),
 		[]
 	);
@@ -840,8 +388,8 @@ function Story() {
 			/>
 		</div>
 	);
-	const tabsProvider = (
-		<TabsContext.Provider value={tabsContext}>
+	const surface = (
+		<>
 			<main className="min-h-screen bg-background p-6 text-foreground">
 				<div className="mx-auto grid max-w-[1040px] gap-4 lg:grid-cols-2">
 					<section
@@ -1035,22 +583,25 @@ function Story() {
 					request={pendingVisibility}
 				/>
 			</main>
-		</TabsContext.Provider>
+		</>
 	);
 
 	return (
-		<QueryClientProvider client={queryClient}>
-			<ThemeProvider
-				attribute="class"
-				defaultTheme="dark"
-				enableSystem={false}
-				forcedTheme="dark"
+		<ThemeProvider
+			attribute="class"
+			defaultTheme="dark"
+			enableSystem={false}
+			forcedTheme="dark"
+		>
+			<ShellProofProviders
+				chatHistory
+				observeTabs={observeTabs}
+				queryClient={queryClient}
+				tabs
 			>
-				<AppSurfaceProvider surface="desktop">
-					{tabsProvider}
-				</AppSurfaceProvider>
-			</ThemeProvider>
-		</QueryClientProvider>
+				{surface}
+			</ShellProofProviders>
+		</ThemeProvider>
 	);
 }
 

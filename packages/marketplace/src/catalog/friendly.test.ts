@@ -84,6 +84,10 @@ describe("parseModelSize", () => {
 		const size = parseModelSize("Llama-3.1-8B-Instruct", tl);
 		expect(size?.raw).toBe("8B");
 		expect(size?.tier).toBe("Medium");
+		expect(size?.tooltip).toContain("8 billion parameters");
+		expect(parseModelSize("SmolLM-360M", tl)?.tooltip).toContain(
+			"360 million parameters"
+		);
 	});
 
 	test("picks the largest token as the headline (MoE active vs total)", () => {

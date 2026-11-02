@@ -37,7 +37,7 @@ export function MockupWindow({
 				<span className="type-micro min-w-0 truncate font-mono text-muted-foreground">
 					{label}
 				</span>
-				<span className="type-micro ml-auto inline-flex shrink-0 items-center gap-1 font-mono text-muted-foreground">
+				<span className="type-micro ms-auto inline-flex shrink-0 items-center gap-1 font-mono text-muted-foreground">
 					<span className="size-1.5 rounded-full bg-success" />
 					ready
 				</span>
@@ -55,7 +55,7 @@ export function MockupSidebar({
 	items: readonly string[];
 }) {
 	return (
-		<aside className="hidden border-border border-r bg-muted/20 p-2 sm:block">
+		<aside className="hidden border-border border-e bg-muted/20 p-2 sm:block">
 			<div className="mb-5 flex items-center gap-1.5 px-1.5">
 				<span className="type-tiny flex size-4 items-center justify-center rounded bg-foreground font-semibold text-background">
 					R

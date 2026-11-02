@@ -75,7 +75,7 @@ export function AssistantDock() {
 			// open panel read as the same card relaxing open.
 			bgClassName={ISLAND_FILL}
 			chromeClassName={ISLAND_CHROME}
-			className="fixed right-4 bottom-4 z-50"
+			className="fixed end-4 bottom-4 z-50"
 			contentHeight={panelSize.height}
 			contentWidth={panelSize.width}
 			dismissable={false}

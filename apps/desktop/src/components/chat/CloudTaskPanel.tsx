@@ -31,6 +31,7 @@ import { CLOUD_TASKS_BOX_BACKEND_FLAG } from "@ryu/auth/lib/feature-flags";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -270,7 +271,7 @@ export function CloudTaskPanel({
 						onClick={() => setOutputOpen((open) => !open)}
 						type="button"
 					>
-						<HugeiconsIcon
+						<DirectionalIcon
 							className="size-3.5"
 							icon={outputOpen ? ArrowDown01Icon : ArrowRight01Icon}
 						/>
@@ -281,7 +282,8 @@ export function CloudTaskPanel({
 							aria-live="polite"
 							className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-2 font-mono text-xs"
 						>
-							{task.activeRun.outputTail || "Waiting for output…"}
+							{/* The localizer skips pre, so the empty state is a literal tl(). */}
+							{task.activeRun.outputTail || tl("Waiting for output…")}
 						</pre>
 					) : null}
 				</div>

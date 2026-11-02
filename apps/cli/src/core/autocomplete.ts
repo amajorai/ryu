@@ -2,6 +2,7 @@ import type { AgentSummary } from "@ryuhq/core-client/agents";
 import type { MentionTargetUser } from "@ryuhq/core-client/notifications";
 import type { AppInfo } from "@ryuhq/core-client/plugins";
 import type { Workflow } from "@ryuhq/core-client/workflows";
+import { tf } from "../i18n/translate.ts";
 import {
 	COMMAND_PREFIX_RANK,
 	commandCompletions,
@@ -444,7 +445,7 @@ export function slashArgumentSuggestions(
 		options.push({
 			description: context.argument.custom.description,
 			kind: "slash-argument-option",
-			label: `Use "${customValue}"`,
+			label: tf('Use "{customValue}"', { customValue }),
 			value: customValue,
 		});
 	}

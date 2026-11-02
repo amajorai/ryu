@@ -42,7 +42,7 @@ const COUNTED: ReadonlySet<MailFolderId> = new Set([
 ]);
 
 const NAV_ITEM_CLASS =
-	"group/nav relative flex h-8 w-full items-center gap-4 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset";
+	"group/nav relative flex h-8 w-full items-center gap-4 text-start text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset";
 
 function NavItem({
 	collapsed,
@@ -71,7 +71,7 @@ function NavItem({
 				NAV_ITEM_CLASS,
 				collapsed
 					? "mx-auto w-14 justify-center rounded-full px-0"
-					: "rounded-r-full pr-3 pl-6",
+					: "rounded-e-full ps-6 pe-3",
 				selected
 					? "bg-primary/15 font-semibold text-foreground"
 					: "text-foreground/85 hover:bg-foreground/6"
@@ -107,7 +107,7 @@ function NavItem({
 			{collapsed && showCount && countStrong ? (
 				<span
 					aria-hidden="true"
-					className="absolute top-0.5 right-0.5 size-2 rounded-full bg-primary ring-2 ring-sidebar"
+					className="absolute end-0.5 top-0.5 size-2 rounded-full bg-primary ring-2 ring-sidebar"
 				/>
 			) : null}
 		</button>
@@ -142,7 +142,7 @@ function ComposeButton({
 				"flex h-14 items-center gap-3 rounded-2xl bg-primary/15 font-medium text-foreground text-sm outline-none transition-shadow",
 				"hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/60 active:shadow-sm",
 				"disabled:pointer-events-none disabled:opacity-50",
-				collapsed ? "mx-auto w-14 justify-center" : "mr-auto pr-6 pl-4"
+				collapsed ? "mx-auto w-14 justify-center" : "me-auto ps-4 pe-6"
 			)}
 			data-testid="mail-compose-button"
 			disabled={disabled}
@@ -166,7 +166,7 @@ function ComposeButton({
 
 function NavSkeleton() {
 	return (
-		<div aria-hidden="true" className="flex flex-col gap-3 pt-2 pr-4 pl-6">
+		<div aria-hidden="true" className="flex flex-col gap-3 ps-6 pe-4 pt-2">
 			{["w-24", "w-20", "w-24", "w-16", "w-20"].map((width) => (
 				<Skeleton className={cn("h-4", width)} key={width} radius="pill" />
 			))}
@@ -205,12 +205,12 @@ export function MailNav({
 			aria-label="Mail folders"
 			className={cn(
 				"flex min-h-0 shrink-0 flex-col gap-4 overflow-y-auto pb-4",
-				collapsed ? "w-[72px] items-stretch" : "w-64 pr-4"
+				collapsed ? "w-[72px] items-stretch" : "w-64 pe-4"
 			)}
 			data-collapsed={collapsed ? "" : undefined}
 			data-testid="mail-nav"
 		>
-			<div className={cn("pt-2", collapsed ? "px-2" : "pl-2")}>
+			<div className={cn("pt-2", collapsed ? "px-2" : "ps-2")}>
 				<ComposeButton
 					collapsed={collapsed}
 					disabled={composeDisabled}
@@ -242,7 +242,7 @@ export function MailNav({
 				<section aria-labelledby="mail-labels-heading" className="pt-2">
 					<h2
 						className={cn(
-							"flex h-10 items-center pl-6 font-medium text-base text-foreground",
+							"flex h-10 items-center ps-6 font-medium text-base text-foreground",
 							collapsed && "sr-only"
 						)}
 						id="mail-labels-heading"

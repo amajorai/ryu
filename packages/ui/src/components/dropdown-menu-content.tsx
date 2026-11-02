@@ -2,8 +2,9 @@
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString } from "@ryu/i18n/react";
 import { useDirection } from "@ryu/ui/components/direction.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { renderDropdownPopup } from "@ryu/ui/components/dropdown-menu-motion.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useRef } from "react";
@@ -17,7 +18,7 @@ function DropdownMenuContent({
 	side = "bottom",
 	sideOffset = 4,
 	className,
-	drawerLabel = "Menu",
+	drawerLabel,
 	withBackdrop = true,
 	...props
 }: MenuPrimitive.Popup.Props &
@@ -31,6 +32,8 @@ function DropdownMenuContent({
 		withBackdrop?: boolean;
 	}) {
 	const direction = useDirection();
+	const defaultDrawerLabel = useLocalizedString("Menu");
+	const backLabel = useLocalizedString("Back to previous menu");
 	const portalContainer = usePortalContainer();
 	const { goBack, isMobile, open, submenuPath, submenus } =
 		useDropdownMenuContext();
@@ -65,8 +68,8 @@ function DropdownMenuContent({
 					data-drawer-mode="true"
 				>
 					<DrawerHeader className="sr-only">
-						<DrawerTitle className="text-left text-base">
-							{activeSubmenu?.title ?? drawerLabel}
+						<DrawerTitle className="text-start text-base">
+							{activeSubmenu?.title ?? drawerLabel ?? defaultDrawerLabel}
 						</DrawerTitle>
 					</DrawerHeader>
 					<MenuPrimitive.Positioner
@@ -88,15 +91,15 @@ function DropdownMenuContent({
 							{...props}
 						>
 							{activeSubmenu && (
-								<div className="flex min-h-11 items-center gap-2 px-2 py-1 text-left">
+								<div className="flex min-h-11 items-center gap-2 px-2 py-1 text-start">
 									<MenuPrimitive.Item
-										aria-label="Back to previous menu"
+										aria-label={backLabel}
 										className="flex size-[44px] shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring"
 										closeOnClick={false}
 										data-slot="dropdown-menu-back"
 										onClick={goBack}
 									>
-										<HugeiconsIcon
+										<DirectionalIcon
 											aria-hidden="true"
 											icon={ArrowLeft01Icon}
 											strokeWidth={2}

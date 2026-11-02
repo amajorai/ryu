@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -425,14 +426,15 @@ export function qaNames(agents: readonly InterfaceAgent[]): string {
 		return first.name;
 	}
 	if (agents.length === 2) {
-		return `${first.name} and ${second.name}`;
+		return tr("{first} and {second}", {
+			first: first.name,
+			second: second.name,
+		});
 	}
-	return `${first.name} and ${agents.length - 1} others`;
-}
-
-/** Pluralized count, e.g. "1 answer", "3 answers". */
-export function qaCount(count: number, noun: string): string {
-	return `${count} ${noun}${count === 1 ? "" : "s"}`;
+	return tr(
+		"{count, plural, one {{first} and # other} other {{first} and # others}}",
+		{ count: agents.length - 1, first: first.name }
+	);
 }
 
 /** The feed heading for a filter, in Stack Overflow's words. */
@@ -448,7 +450,7 @@ export function qaHeading(
 		? snapshot.agents.find((candidate) => candidate.id === filter.agentId)
 		: undefined;
 	if (filter.query.trim()) {
-		return "Search results";
+		return tl("Search results");
 	}
 	if (topic && agent) {
 		return tl("{agentName} in {topicName}", {
@@ -462,19 +464,22 @@ export function qaHeading(
 	if (agent) {
 		return tl("Questions for {name}", { name: agent.name });
 	}
-	return "Top questions";
+	return tl("Top questions");
 }
 
-const ABSOLUTE = new Intl.DateTimeFormat("en", {
-	day: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-	month: "short",
-	year: "numeric",
-});
-
-/** A full timestamp for tooltips and `title` attributes. */
-export function qaAbsoluteTime(iso: string): string {
+/** A full timestamp for tooltips and `title` attributes, in the UI locale. */
+export function qaAbsoluteTime(
+	iso: string,
+	locale: string = activeLocale()
+): string {
 	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : ABSOLUTE.format(time);
+	return Number.isNaN(time)
+		? ""
+		: dateFormatter(locale, {
+				day: "numeric",
+				hour: "numeric",
+				minute: "2-digit",
+				month: "short",
+				year: "numeric",
+			}).format(time);
 }

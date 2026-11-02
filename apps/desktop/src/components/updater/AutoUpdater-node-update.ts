@@ -1,3 +1,5 @@
+import { activeLocale, translate as tl } from "@ryu/i18n/core";
+import { formatDateValue } from "@ryu/i18n/format-intl";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { installUpdate } from "@/src/components/updater/AutoUpdater-install.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -41,21 +43,49 @@ export async function scheduleReleaseUpdate(
 ): Promise<string> {
 	if (isLocalNode(node)) {
 		throw new Error(
-			"This node updates with the app itself, so there is nothing to schedule."
+			tl(
+				"This node updates with the app itself, so there is nothing to schedule."
+			)
 		);
 	}
 	if (!verdict.asset) {
-		throw new Error(
-			`No install asset published for v${verdict.latest} on this node's platform.`
-		);
+		throw new Error(noInstallAsset(verdict, tl));
 	}
 	const pending = await scheduleNodeUpdate(
 		target,
 		verdict.asset,
 		verdict.latest
 	);
-	const when = formatDateTime(pending.scheduled_for);
-	return `v${pending.version} will install at ${when} (${pending.time_zone}).`;
+	return tl("v{version} will install at {when} ({timeZone}).", {
+		timeZone: pending.time_zone,
+		version: pending.version,
+		when: nodeLocalTime(pending.scheduled_for, pending.time_zone),
+	});
+}
+
+function noInstallAsset(verdict: UpdateCheck, tl: LiteralMessage): string {
+	return tl(
+		"No install asset published for v{version} on this node's platform.",
+		{
+			version: verdict.latest,
+		}
+	);
+}
+
+/**
+ * The install time on the NODE's wall clock, since the sentence names the
+ * node's zone. A zone this runtime does not know falls back to the viewer's.
+ */
+function nodeLocalTime(scheduledFor: string, timeZone: string): string {
+	try {
+		return formatDateValue(activeLocale(), scheduledFor, {
+			dateStyle: "medium",
+			timeStyle: "short",
+			timeZone,
+		});
+	} catch {
+		return formatDateTime(scheduledFor);
+	}
 }
 
 export async function applyReleaseUpdate(
@@ -66,9 +96,7 @@ export async function applyReleaseUpdate(
 ): Promise<string | null> {
 	if (!isLocalNode(node)) {
 		if (!verdict.asset) {
-			throw new Error(
-				`No install asset published for v${verdict.latest} on this node's platform.`
-			);
+			throw new Error(noInstallAsset(verdict, tl));
 		}
 		// `POST /api/update/apply` is deliberately ungated: the caller supplies the
 		// asset URL, so an entitlement check there would be theatre. Do not "fix"

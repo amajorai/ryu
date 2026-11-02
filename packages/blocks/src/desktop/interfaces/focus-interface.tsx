@@ -282,7 +282,7 @@ export function FocusInterface({
 							{loading ? "Loading" : focusPosition(index, total)}
 						</p>
 						{loading || !current ? null : (
-							<p className="ml-auto text-muted-foreground text-sm tabular-nums">
+							<p className="ms-auto text-muted-foreground text-sm tabular-nums">
 								{remaining === 0
 									? "Last one"
 									: working > 0

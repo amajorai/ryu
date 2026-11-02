@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
@@ -308,7 +309,7 @@ export function JournalInterface({
 					composing ? (
 						<JournalComposer
 							agents={snapshot.agents}
-							dateLine={`Now · ${timeLabel(today)}`}
+							dateLine={tr("Now · {time}", { time: timeLabel(today) })}
 							onCancel={() => setComposing(false)}
 							onSubmit={({ agentId, prompt }) => {
 								setComposing(false);
@@ -364,7 +365,7 @@ export function JournalInterface({
 							{" day streak"}
 						</>
 					) : (
-						countLabel(entries.length, "entry", "entries")
+						countLabel(entries.length, "entry")
 					)}
 				</p>
 				{stacked ? (

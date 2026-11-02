@@ -331,6 +331,9 @@ export function CinemaInterface({
 		body = <CinemaEmpty agents={snapshot.agents} onNew={startThread} />;
 	} else if (query.trim()) {
 		const results = cinemaSearch(titles, query);
+		const resultCount = tl("{count, plural, one {# title} other {# titles}}", {
+			count: results.length,
+		});
 		body = (
 			<CinemaGrid
 				{...posterHandlers}
@@ -340,11 +343,7 @@ export function CinemaInterface({
 				heading={tl("Results for “{query}”", { query: query.trim() })}
 				onNew={startThread}
 				perRow={perRow}
-				subheading={
-					results.length > 0
-						? `${results.length.toString()} ${results.length === 1 ? "title" : "titles"}`
-						: undefined
-				}
+				subheading={results.length > 0 ? resultCount : undefined}
 				titles={results}
 			/>
 		);

@@ -67,7 +67,7 @@ function MoreButton({
 			onOpenDay={onOpenDay}
 			tabStop={tabStop}
 			triggerClassName={cn(
-				"h-5 w-full shrink-0 truncate whitespace-nowrap px-1 text-left @max-[6rem]:text-center font-medium text-muted-foreground text-xs outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground",
+				"h-5 w-full shrink-0 truncate whitespace-nowrap px-1 @max-[6rem]:text-center text-start font-medium text-muted-foreground text-xs outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground",
 				ITEM_RADIUS_CLASS
 			)}
 			triggerLabel={tl("{hiddenCount} more on {day}", {
@@ -112,18 +112,22 @@ function MonthCell({
 		capacity,
 		handlers.activeThreadId ? `thread:${handlers.activeThreadId}` : null
 	);
-	const summary =
-		items.length === 0
-			? "nothing scheduled"
-			: `${items.length} ${items.length === 1 ? "item" : "items"}`;
+
 	return (
 		<div
 			{...{ [CALENDAR_DAY_ATTRIBUTE]: key }}
 			aria-current={isToday ? "date" : undefined}
-			aria-label={`${longDay(date)}${isToday ? ", today" : ""}, ${summary}`}
+			aria-label={tl(
+				"{day}{today, select, yes {, today} other {}}, {count, plural, =0 {nothing scheduled} one {# item} other {# items}}",
+				{
+					count: items.length,
+					day: longDay(date),
+					today: isToday ? "yes" : "no",
+				}
+			)}
 			aria-selected={focused}
 			className={cn(
-				"@container relative flex min-h-0 min-w-0 flex-col gap-px overflow-hidden border-border border-r px-1 pb-px outline-none transition-colors last:border-r-0",
+				"@container relative flex min-h-0 min-w-0 flex-col gap-px overflow-hidden border-border border-e px-1 pb-px outline-none transition-colors last:border-e-0",
 				"focus-visible:z-[1] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 			)}
 			data-day-key={key}

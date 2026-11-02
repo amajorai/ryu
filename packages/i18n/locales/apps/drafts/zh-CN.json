@@ -1,0 +1,11 @@
+{
+  "Sending at a set time": "定时发送",
+  "Sending at {when}": "将于 {when} 发送",
+  "Waiting for agents to start, then finish": "正在等待智能体启动并完成",
+  "Waiting for every agent to finish": "正在等待所有智能体完成",
+  "Waiting for fewer than {limit} runs": "正在等待运行数少于 {limit}",
+  "Waiting for nothing to be running": "正在等待所有运行结束",
+  "Waiting for {agentId} to drop under {belowPercent}% used": "正在等待 {agentId} 的使用率降至 {belowPercent}% 以下",
+  "draft is already being sent": "草稿已在发送中",
+  "no such draft": "不存在该草稿"
+}

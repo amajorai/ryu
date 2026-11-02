@@ -1,4 +1,7 @@
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { ensureOwnedIconMap } from "./owned-icon-map.ts";
 
 // island-background-keys coverage run: the existing Island, Backgrounds,
 // keyboard-shortcut, split-preset and time-zone browser proofs plus the new
@@ -6,7 +9,11 @@ import { defineConfig, devices } from "@playwright/test";
 // the Vite cache and Playwright output are caller-owned so the run never
 // touches another agent's servers or the tracked proof evidence.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
-const viteCache = process.env.RYU_IBK_VITE_CACHE ?? "/tmp/ibk-pw/vite";
+const viteCache =
+	process.env.RYU_IBK_VITE_CACHE ?? path.join(tmpdir(), "ibk-pw/vite");
+// The timezone harness's installed-icon plugin needs an owned icon map;
+// generate one once here so every webServer inherits it.
+ensureOwnedIconMap();
 const portBase = Number(process.env.RYU_IBK_PORT_BASE ?? "5731");
 const LINUX_USER_AGENT =
 	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -80,7 +87,7 @@ export default defineConfig({
 	forbidOnly: true,
 	reporter: "list",
 	timeout: 90_000,
-	outputDir: process.env.RYU_IBK_PW_OUTPUT ?? "/tmp/ibk-pw/out",
+	outputDir: process.env.RYU_IBK_PW_OUTPUT ?? path.join(tmpdir(), "ibk-pw/out"),
 	projects: selected.map((harness) => ({
 		name: harness.name,
 		testMatch: harness.spec,

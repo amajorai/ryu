@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	Cloud,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { MotionConfig, motion } from "motion/react";
 import { useState } from "react";
+import { copyMarker as t } from "./copy-marker.ts";
 import { landingSurfaceCardFlexClass } from "./landing-card-tones.ts";
 import { SectionHeading } from "./sections.tsx";
 
@@ -18,42 +20,43 @@ const PLACES = [
 	{
 		id: "personal",
 		PlaceGlyph: Laptop,
-		place: "Your laptop",
-		use: "Keep sensitive work local while you get started.",
+		place: t("Your laptop"),
+		use: t("Keep sensitive work local while you get started."),
 	},
 	{
 		id: "work",
 		PlaceGlyph: MonitorSmartphone,
-		place: "Work machine",
-		use: "Run day-to-day agents where your team already works.",
+		place: t("Work machine"),
+		use: t("Run day-to-day agents where your team already works."),
 	},
 	{
 		id: "macmini",
 		PlaceGlyph: HardDrive,
-		place: "Mac mini",
-		use: "Keep a private server running for background work.",
+		place: t("Mac mini"),
+		use: t("Keep a private server running for background work."),
 	},
 	{
 		id: "pi",
 		PlaceGlyph: Cpu,
-		place: "Raspberry Pi",
-		use: "Run lightweight, always-on tasks on small hardware.",
+		place: t("Raspberry Pi"),
+		use: t("Run lightweight, always-on tasks on small hardware."),
 	},
 	{
 		id: "homeserver",
 		PlaceGlyph: Server,
-		place: "Home server",
-		use: "Keep monitoring and background jobs on your own network.",
+		place: t("Home server"),
+		use: t("Keep monitoring and background jobs on your own network."),
 	},
 	{
 		id: "cloud",
 		PlaceGlyph: Cloud,
-		place: "Cloud",
-		use: "Move to managed cloud when the team needs shared production.",
+		place: t("Cloud"),
+		use: t("Move to managed cloud when the team needs shared production."),
 	},
 ] as const;
 
 export default function InstallAnywhere() {
+	const tl = useLiteralMessages();
 	const [active, setActive] = useState(0);
 	const currentPlace = PLACES[active] ?? PLACES[0];
 
@@ -75,7 +78,7 @@ export default function InstallAnywhere() {
 									<button
 										aria-pressed={isActive}
 										className={cn(
-											"flex flex-col items-start gap-3 rounded-2xl p-3 text-left transition-colors duration-300",
+											"flex flex-col items-start gap-3 rounded-2xl p-3 text-start transition-colors duration-300",
 											isActive
 												? "bg-foreground/8"
 												: "bg-muted/50 hover:bg-muted/70"
@@ -98,7 +101,7 @@ export default function InstallAnywhere() {
 												isActive ? "text-foreground" : "text-foreground/70"
 											)}
 										>
-											{p.place}
+											{tl(p.place)}
 										</span>
 									</button>
 								);
@@ -121,10 +124,10 @@ export default function InstallAnywhere() {
 									);
 								})()}
 								<h3 className="font-medium text-foreground text-xl tracking-tight">
-									{currentPlace.place}
+									{tl(currentPlace.place)}
 								</h3>
 								<p className="mt-2 text-muted-foreground leading-relaxed">
-									{currentPlace.use}
+									{tl(currentPlace.use)}
 								</p>
 							</motion.div>
 

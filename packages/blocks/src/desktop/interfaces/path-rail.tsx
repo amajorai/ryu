@@ -1,3 +1,4 @@
+import { activeLocale, numberFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
@@ -67,10 +68,6 @@ export function PathGoalRing({
 			) : null}
 		</svg>
 	);
-}
-
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
 }
 
 /** A HUD counter: an icon tile, a big number, and its label under it. */
@@ -158,7 +155,7 @@ export function PathStatsBar({
 	const goalMet = stats.repliedToday >= PATH_DAILY_GOAL;
 	const capped = Math.min(stats.repliedToday, PATH_DAILY_GOAL);
 	const streakDaysText = String(stats.streakDays);
-	const xpText = stats.xp.toLocaleString("en-US");
+	const xpText = numberFormatter(activeLocale()).format(stats.xp);
 	const goalCounts = {
 		capped: String(capped),
 		dailyGoal: String(PATH_DAILY_GOAL),
@@ -202,7 +199,7 @@ export function PathStatsBar({
 							icon={<Zap aria-hidden="true" strokeWidth={2.5} />}
 							label="XP"
 							tile="bg-(--gk-gold) text-(--gk-edge)"
-							value={stats.xp.toLocaleString("en-US")}
+							value={xpText}
 						/>
 					}
 				>
@@ -350,7 +347,17 @@ function GoalCard({
 				>
 					{stats.week.map((day) => (
 						<li
-							aria-label={`${day.key}${day.today ? " (today)" : ""}: ${day.active ? "an outcome" : "no outcome"}`}
+							aria-label={
+								day.active
+									? tl(
+											"{day}{today, select, true { (today)} other {}}: an outcome",
+											{ day: day.key, today: day.today ? "true" : "false" }
+										)
+									: tl(
+											"{day}{today, select, true { (today)} other {}}: no outcome",
+											{ day: day.key, today: day.today ? "true" : "false" }
+										)
+							}
 							className="flex flex-col items-center gap-1.5"
 							key={day.key}
 						>
@@ -400,6 +407,7 @@ function Leaderboard({
 	bare?: boolean;
 	leaders: PathLeader[];
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<RailSection
 			bare={bare}
@@ -439,12 +447,15 @@ function Leaderboard({
 								{leader.agent.status === "working" ? (
 									<span
 										aria-hidden="true"
-										className="absolute -right-0.5 -bottom-0.5 size-3.5 rounded-full border-[3px] border-background bg-success"
+										className="absolute -end-0.5 -bottom-0.5 size-3.5 rounded-full border-[3px] border-background bg-success"
 									/>
 								) : null}
 							</span>
 							<span className="flex min-w-0 flex-1 flex-col">
-								<span className="truncate font-bold text-[15px] leading-5">
+								<span
+									className="truncate font-bold text-[15px] leading-5"
+									data-ryu-i18n="off"
+								>
 									{leader.agent.name}
 								</span>
 								<span
@@ -456,8 +467,10 @@ function Leaderboard({
 									)}
 								>
 									{leader.agent.status === "working"
-										? "Working now"
-										: plural(leader.threads, "thread", "threads")}
+										? tl("Working now")
+										: tl("{count, plural, one {# thread} other {# threads}}", {
+												count: leader.threads,
+											})}
 								</span>
 							</span>
 							<span

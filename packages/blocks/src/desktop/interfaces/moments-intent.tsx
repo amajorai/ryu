@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -39,7 +40,10 @@ export function MomentsClock() {
 			className="shrink-0 text-muted-foreground text-sm tabular-nums"
 			dateTime={now.toISOString()}
 		>
-			{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+			{dateFormatter(activeLocale(), {
+				hour: "numeric",
+				minute: "2-digit",
+			}).format(now)}
 		</time>
 	);
 }
@@ -224,7 +228,7 @@ export function MomentsIntentBar({
 			{open ? (
 				<div
 					aria-label="Agents"
-					className="absolute top-full left-0 z-30 mt-1 w-72 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-foreground/5 shadow-lg"
+					className="absolute start-0 top-full z-30 mt-1 w-72 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-foreground/5 shadow-lg"
 					id={listId}
 					role="listbox"
 				>
@@ -247,9 +251,14 @@ export function MomentsIntentBar({
 						>
 							<MomentsGlyph agent={agent} size="md" />
 							<span className="min-w-0 flex-1 truncate">
-								<span className="text-sm">{agent.name}</span>
+								<span className="text-sm" data-ryu-i18n="off">
+									{agent.name}
+								</span>
 								{agent.description ? (
-									<span className="ml-2 text-muted-foreground text-xs">
+									<span
+										className="ms-2 text-muted-foreground text-xs"
+										data-ryu-i18n="off"
+									>
 										{agent.description}
 									</span>
 								) : null}

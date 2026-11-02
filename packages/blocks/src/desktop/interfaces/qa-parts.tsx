@@ -1,44 +1,20 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import type { ReactNode } from "react";
-import { compactAge } from "./interface-renderer.ts";
-import { QaAvatar, QaFacepile } from "./qa-avatar.tsx";
-import {
-	type QaQuestion,
-	type QaTopic,
-	qaAbsoluteTime,
-	qaNames,
-} from "./qa-model.ts";
+import { relativeAge } from "./interface-renderer.ts";
+import type { QaQuestion, QaTopic } from "./qa-model.ts";
+
+export { QaByline } from "./qa-byline.tsx";
 
 /** Square ghost icon button shared by the top bar, page, and rails. */
 export const QA_ICON_BUTTON =
 	"flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-100 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50";
 
-/** "just now", "5m ago", "2h ago". */
+/** "now", "5m ago", "2h ago", in the UI locale. */
 export function qaAgo(iso: string, now: number): string {
-	const age = compactAge(iso, now);
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "just now" : `${age} ago`;
-}
-
-function Time({
-	iso,
-	now,
-	prefix,
-}: {
-	iso: string;
-	now: number;
-	prefix: string;
-}) {
-	return (
-		<time dateTime={iso} title={qaAbsoluteTime(iso)}>
-			{prefix} {qaAgo(iso, now)}
-		</time>
-	);
+	return relativeAge(iso, now);
 }
 
 /**
@@ -61,7 +37,9 @@ export function QaTag({
 	if (!onSelect) {
 		return (
 			<span className={className}>
-				<span className="truncate">{topic.name}</span>
+				<span className="truncate" data-ryu-i18n="off">
+					{topic.name}
+				</span>
 			</span>
 		);
 	}
@@ -78,7 +56,9 @@ export function QaTag({
 			onClick={() => onSelect(topic)}
 			type="button"
 		>
-			<span className="truncate">{topic.name}</span>
+			<span className="truncate" data-ryu-i18n="off">
+				{topic.name}
+			</span>
 		</button>
 	);
 }
@@ -112,16 +92,19 @@ export function QaAnswerBox({
 		>
 			{compact ? (
 				<>
-					{answers}
+					<span aria-hidden="true">{answers}</span>
 					<span className="sr-only">
-						{" "}
-						{answers === 1 ? "answer" : "answers"}
+						{tr("{count, plural, one {# answer} other {# answers}}", {
+							count: answers,
+						})}
 					</span>
 				</>
 			) : (
 				<>
 					<span className="font-medium">{answers}</span>
-					{answers === 1 ? "answer" : "answers"}
+					{tr("{count, plural, one {answer} other {answers}}", {
+						count: answers,
+					})}
 				</>
 			)}
 		</span>
@@ -137,99 +120,18 @@ export function QaStats({ question }: { question: QaQuestion }) {
 		>
 			<QaAnswerBox question={question} />
 			<span className="flex h-6 items-center whitespace-nowrap @[640px]/qa:px-1.5 tabular-nums">
-				<span className="pr-1 font-medium text-foreground">
+				<span className="pe-1 font-medium text-foreground">
 					{question.thread.messageCount}
 				</span>
-				{question.thread.messageCount === 1 ? "message" : "messages"}
+				{tr("{count, plural, one {message} other {messages}}", {
+					count: question.thread.messageCount,
+				})}
 			</span>
 			{question.thread.pinned ? (
 				<span className="flex h-6 items-center @[640px]/qa:px-1.5 text-xs">
 					Pinned
 				</span>
 			) : null}
-		</div>
-	);
-}
-
-function Name({ children }: { children: ReactNode }) {
-	return <span className="font-medium text-foreground">{children}</span>;
-}
-
-/**
- * Who said the newest thing, in Quora's byline shape: faces, a name, and
- * what happened when. Failed runs and live runs say so in their status tone.
- */
-export function QaByline({
-	now,
-	question,
-}: {
-	now: number;
-	question: QaQuestion;
-}) {
-	const tl = useLiteralMessages();
-	const { answerers, byline, thread } = question;
-	const names = qaNames(answerers);
-	let faces: ReactNode = <QaFacepile agents={answerers} />;
-	let text: ReactNode;
-	switch (byline) {
-		case "answered":
-			text = (
-				<>
-					<Name>{names || "An agent"}</Name>
-					<Time iso={thread.updatedAt} now={now} prefix="answered" />
-				</>
-			);
-			break;
-		case "answering":
-			text = (
-				<>
-					<Name>{names || "An agent"}</Name>
-					<span className="text-status-success">is answering</span>
-				</>
-			);
-			break;
-		case "failed":
-			text = (
-				<>
-					<Name>{names || "An agent"}</Name>
-					<span className="font-medium text-status-destructive">
-						run failed
-					</span>
-					<span aria-hidden="true">·</span>
-					<Time iso={thread.updatedAt} now={now} prefix="" />
-				</>
-			);
-			break;
-		case "asked":
-			faces = <QaAvatar agent={null} size={20} />;
-			text = (
-				<>
-					<Name>You</Name>
-					<Time iso={thread.updatedAt} now={now} prefix="asked" />
-					{names ? (
-						<>
-							<span aria-hidden="true">·</span>
-							<span>{tl("Waiting on {names}", { names })}</span>
-						</>
-					) : null}
-				</>
-			);
-			break;
-		default:
-			faces = <QaAvatar agent={null} size={20} />;
-			text = (
-				<>
-					<Name>You</Name>
-					<Time iso={thread.updatedAt} now={now} prefix="asked" />
-					<span aria-hidden="true">·</span>
-					<span>No answers yet</span>
-				</>
-			);
-	}
-	return (
-		<div className="flex h-6 min-w-0 items-center gap-2 text-muted-foreground text-sm">
-			{faces}
-			<span className="flex min-w-0 items-center gap-1 truncate">{text}</span>
 		</div>
 	);
 }

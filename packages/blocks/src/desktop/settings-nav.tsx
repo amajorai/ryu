@@ -32,6 +32,7 @@ import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useLocalizedString } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { type ReactNode, useEffect, useState } from "react";
 import {
@@ -167,7 +168,7 @@ export const SettingsNavRow = ({
 				{value ? (
 					<span className="text-muted-foreground text-sm">{value}</span>
 				) : null}
-				<HugeiconsIcon
+				<DirectionalIcon
 					className="size-4 text-muted-foreground"
 					icon={ArrowRight01Icon}
 				/>
@@ -184,7 +185,7 @@ export const SettingsNavRow = ({
 		navigation
 		title={
 			<button
-				className="flex w-full items-center gap-2 text-left"
+				className="flex w-full items-center gap-2 text-start"
 				onClick={onClick}
 				type="button"
 			>
@@ -301,7 +302,7 @@ export const SettingsSubpages = ({
 				<div className="flex flex-col gap-1">
 					{/* One back row: the back control and the page's single title. The
 					    pane's own name is the button's accessible label. */}
-					<div className="-ml-2 flex items-center gap-1">
+					<div className="-ms-2 flex items-center gap-1">
 						<Button
 							aria-label={localizedBackLabel}
 							onClick={() => setPage(null)}
@@ -309,7 +310,7 @@ export const SettingsSubpages = ({
 							title={localizedBackLabel}
 							variant="ghost-muted"
 						>
-							<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+							<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
 						</Button>
 						<h3 className="font-semibold text-lg tracking-tight">
 							{localizedCurrentTitle}

@@ -1,10 +1,14 @@
-import type { ProductExplainer } from "./explainer-types.ts";
+import {
+	type ProductExplainer,
+	statementSource as tl,
+} from "./explainer-types.ts";
 
 /** Build products: what you assemble agents, workflows, and apps from. */
 export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 	agents: {
-		statement:
-			"An agent in Ryu is yours to assemble. Choose its models, tools, memory, and instructions, change any part later, and package it as an App to share and install anywhere.",
+		statement: tl(
+			"An agent in Ryu is yours to assemble. Choose its models, tools, memory, and instructions, change any part later, and package it as an App to share and install anywhere."
+		),
 		steps: [
 			{
 				title: "Pick the models",
@@ -24,8 +28,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["workflows", "skills", "mcp", "marketplace"],
 	},
 	workflows: {
-		statement:
-			"Workflows chain agents, tools, skills, and other workflows on a visual canvas. Each finished step is saved, so a run can retry, wait for approval, and resume after a restart.",
+		statement: tl(
+			"Workflows chain agents, tools, skills, and other workflows on a visual canvas. Each finished step is saved, so a run can retry, wait for approval, and resume after a restart."
+		),
 		steps: [
 			{
 				title: "Add steps",
@@ -45,8 +50,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["agents", "skills", "cloud"],
 	},
 	skills: {
-		statement:
-			"Skills brings open-standard Agent Skills into Ryu. Search skills.sh, install in one click, and the skill lands in the standard folder other agents read too.",
+		statement: tl(
+			"Skills brings open-standard Agent Skills into Ryu. Search skills.sh, install in one click, and the skill lands in the standard folder other agents read too."
+		),
 		steps: [
 			{ title: "Search", description: "Search skills.sh for what you need." },
 			{
@@ -63,8 +69,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["agents", "marketplace", "mcp"],
 	},
 	mcp: {
-		statement:
-			"MCP connects agents to tools. Add any MCP server to Ryu and choose which agents may use its tools, or point Claude Desktop, Cursor, and other MCP hosts at your Ryu server with ryu-mcp.",
+		statement: tl(
+			"MCP connects agents to tools. Add any MCP server to Ryu and choose which agents may use its tools, or point Claude Desktop, Cursor, and other MCP hosts at your Ryu server with ryu-mcp."
+		),
 		steps: [
 			{
 				title: "Add a server",
@@ -83,8 +90,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["connections", "agents", "connect"],
 	},
 	connections: {
-		statement:
-			"Connections sign your agents in to Gmail, Slack, and the other apps your team uses, so they can send the email or open the PR. Risky actions wait for your approval, and agents never see raw tokens.",
+		statement: tl(
+			"Connections sign your agents in to Gmail, Slack, and the other apps your team uses, so they can send the email or open the PR. Risky actions wait for your approval, and agents never see raw tokens."
+		),
 		steps: [
 			{
 				title: "Connect an account",
@@ -103,8 +111,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["mcp", "agents", "connect"],
 	},
 	cli: {
-		statement:
-			"The Ryu CLI is the Ryu runtime in your terminal. Chat, run agents, and manage servers from the command line, headless or scripted, and pick up the same threads as Ryu Desktop.",
+		statement: tl(
+			"The Ryu CLI is the Ryu runtime in your terminal. Chat, run agents, and manage servers from the command line, headless or scripted, and pick up the same threads as Ryu Desktop."
+		),
 		steps: [
 			{
 				title: "Sign in",
@@ -124,8 +133,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["core", "desktop", "red-team"],
 	},
 	sdk: {
-		statement:
-			"The Ryu SDK lets you define agents, workflows, tools, and skills in TypeScript behind one interface, then pack them into an App with one command.",
+		statement: tl(
+			"The Ryu SDK lets you define agents, workflows, tools, and skills in TypeScript behind one interface, then pack them into an App with one command."
+		),
 		steps: [
 			{
 				title: "Scaffold",
@@ -145,8 +155,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["gateway", "extensions", "marketplace"],
 	},
 	marketplace: {
-		statement:
-			"The Marketplace is an app store for AI agents: apps, skills, models, workflows, themes, and more, installed in one click. Each app declares what it needs, and the Gateway enforces it.",
+		statement: tl(
+			"The Marketplace is an app store for AI agents: apps, skills, models, workflows, themes, and more, installed in one click. Each app declares what it needs, and the Gateway enforces it."
+		),
 		steps: [
 			{
 				title: "Search",
@@ -165,8 +176,9 @@ export const BUILD_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["skills", "extensions", "desktop"],
 	},
 	extensions: {
-		statement:
-			"Extensions add tools, model providers, and screens to Ryu as plugins. Plugins run in open-source Ryu Core, so they extend Ryu Desktop without changing it.",
+		statement: tl(
+			"Extensions add tools, model providers, and screens to Ryu as plugins. Plugins run in open-source Ryu Core, so they extend Ryu Desktop without changing it."
+		),
 		steps: [
 			{ title: "Build", description: "Build a plugin with the Ryu SDK." },
 			{ title: "Pack", description: "Pack it as an installable app." },

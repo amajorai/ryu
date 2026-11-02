@@ -21,6 +21,11 @@ import { Label } from "@ryu/ui/components/label.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import {
+	invalidNodeNameSentence,
+	isValidNodeName,
+	nodeCommandErrorMessage,
+} from "@/src/lib/node-command-error.ts";
+import {
 	isLocalNode,
 	type Node,
 	useNodeStore,
@@ -40,6 +45,7 @@ function RemoteNodeDialog({
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const addNode = useNodeStore((state) => state.addNode);
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
@@ -60,6 +66,10 @@ function RemoteNodeDialog({
 		if (!(name.trim() && url.trim()) || saving) {
 			return;
 		}
+		if (!isValidNodeName(name.trim())) {
+			setError(invalidNodeNameSentence(tl));
+			return;
+		}
 		setSaving(true);
 		setError(null);
 		try {
@@ -67,7 +77,10 @@ function RemoteNodeDialog({
 			onOpenChange(false);
 			sileo.success({ title: "Remote node added" });
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(
+				nodeCommandErrorMessage(cause, tl) ??
+					(cause instanceof Error ? cause.message : String(cause))
+			);
 		} finally {
 			setSaving(false);
 		}
@@ -89,7 +102,7 @@ function RemoteNodeDialog({
 							disabled={saving}
 							id="remote-node-name"
 							onChange={(event) => setName(event.target.value)}
-							placeholder="Build server"
+							placeholder="build-server"
 							value={name}
 						/>
 					</div>
@@ -169,7 +182,9 @@ export function RemoteNodesSection() {
 		} catch (cause) {
 			sileo.error({
 				title: "Could not switch nodes",
-				description: cause instanceof Error ? cause.message : String(cause),
+				description:
+					nodeCommandErrorMessage(cause, tl) ??
+					(cause instanceof Error ? cause.message : String(cause)),
 			});
 		}
 	};
@@ -177,11 +192,13 @@ export function RemoteNodesSection() {
 	const remove = async (node: Node) => {
 		try {
 			await removeNode(node.name);
-			sileo.success({ title: `${node.name} removed` });
+			sileo.success({ title: tl("{name} removed", { name: node.name }) });
 		} catch (cause) {
 			sileo.error({
 				title: "Could not remove node",
-				description: cause instanceof Error ? cause.message : String(cause),
+				description:
+					nodeCommandErrorMessage(cause, tl) ??
+					(cause instanceof Error ? cause.message : String(cause)),
 			});
 		}
 	};

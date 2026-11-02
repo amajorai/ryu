@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -8,7 +9,7 @@ const walletAddress = "0x1234567890abcdef1234567890abcdef12345678";
 const payeeAddress = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
 const challengeHash =
 	"sha256:91a75a13df08c63c5d58c3368320e520b79de900905b8f26b53e633f8e9c2a9e";
-const proofDirectory = path.resolve(import.meta.dirname, "../../../docs/proof");
+const proofDirectory = proofEvidencePath();
 
 async function installMppBridge(
 	page: Page,

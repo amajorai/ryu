@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -25,10 +26,19 @@ import {
 	CinemaFeature,
 	CinemaPoster,
 } from "./cinema-poster.tsx";
+import {
+	inlineArrowStep,
+	inlineScrollOffset,
+	scrollInlineBy,
+} from "./inline-direction.ts";
 
-/** Moves focus between posters in one row with the arrow keys. */
+/**
+ * Moves focus between posters in one row with the arrow keys, following the
+ * reading direction (ArrowLeft moves forward under `dir="rtl"`).
+ */
 function moveFocus(event: KeyboardEvent<HTMLUListElement>) {
-	if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
+	const step = inlineArrowStep(event.key, event.currentTarget);
+	if (step === 0) {
 		return;
 	}
 	const posters = [
@@ -41,7 +51,7 @@ function moveFocus(event: KeyboardEvent<HTMLUListElement>) {
 	if (index === -1) {
 		return;
 	}
-	const next = posters[index + (event.key === "ArrowRight" ? 1 : -1)];
+	const next = posters[index + step];
 	if (next) {
 		event.preventDefault();
 		next.focus();
@@ -68,7 +78,7 @@ function RowArrow({
 			className={cn(
 				"group/arrow absolute inset-y-2 z-10 flex items-center justify-center bg-background/50 text-foreground outline-none transition-opacity duration-200",
 				"hover:bg-background/70 focus-visible:bg-background/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-				direction === "next" ? "right-0 rounded-l-sm" : "left-0 rounded-r-sm",
+				direction === "next" ? "end-0 rounded-s-sm" : "start-0 rounded-e-sm",
 				visible
 					? "opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100"
 					: "pointer-events-none opacity-0"
@@ -78,11 +88,14 @@ function RowArrow({
 			tabIndex={-1}
 			type="button"
 		>
-			<Icon
-				aria-hidden="true"
-				className="size-7 transition-transform duration-150 group-hover/arrow:scale-125 motion-reduce:transition-none"
-				strokeWidth={2.5}
-			/>
+			{/* The mirror sits on a wrapper so the hover scale cannot undo it. */}
+			<span className={cn("flex", DIRECTIONAL_ICON_CLASS)}>
+				<Icon
+					aria-hidden="true"
+					className="size-7 transition-transform duration-150 group-hover/arrow:scale-125 motion-reduce:transition-none"
+					strokeWidth={2.5}
+				/>
+			</span>
 		</button>
 	);
 }
@@ -141,7 +154,7 @@ export const CinemaRow = memo(function CinemaRow({
 			return;
 		}
 		setScroll({
-			left: list.scrollLeft,
+			left: inlineScrollOffset(list),
 			max: Math.max(0, list.scrollWidth - list.clientWidth),
 		});
 	}, []);
@@ -153,10 +166,14 @@ export const CinemaRow = memo(function CinemaRow({
 
 	const page = (direction: 1 | -1) => {
 		onHoverEnd();
-		listRef.current?.scrollBy({
-			behavior: reduceMotion ? "auto" : "smooth",
-			left: direction * pageWidth,
-		});
+		const list = listRef.current;
+		if (list) {
+			scrollInlineBy(
+				list,
+				direction * pageWidth,
+				reduceMotion ? "auto" : "smooth"
+			);
+		}
 	};
 
 	const pages = cinemaPages(row.titles.length, perRow, scroll.left, pageWidth);
@@ -173,7 +190,7 @@ export const CinemaRow = memo(function CinemaRow({
 			>
 				<h2 className="min-w-0" id={headingId}>
 					<button
-						className="group/title flex min-w-0 items-baseline gap-2 rounded-xs text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+						className="group/title flex min-w-0 items-baseline gap-2 rounded-xs text-start outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 						onClick={() => onExplore(row.id)}
 						type="button"
 					>
@@ -181,9 +198,12 @@ export const CinemaRow = memo(function CinemaRow({
 							{row.title}
 						</span>
 						{more ? (
-							<span className="flex shrink-0 items-center gap-0.5 font-semibold text-foreground/80 text-sm leading-5 opacity-0 transition-[opacity,translate] duration-300 group-hover/title:translate-x-0 group-hover/title:opacity-100 group-focus-visible/title:translate-x-0 group-focus-visible/title:opacity-100 motion-safe:-translate-x-2">
+							<span className="flex shrink-0 items-center gap-0.5 font-semibold text-foreground/80 text-sm leading-5 opacity-0 transition-[opacity,translate] duration-300 group-hover/title:translate-x-0 group-hover/title:opacity-100 group-focus-visible/title:translate-x-0 group-focus-visible/title:opacity-100 motion-safe:-translate-x-2 rtl:motion-safe:translate-x-2">
 								Explore all
-								<ChevronRight aria-hidden="true" className="size-3.5" />
+								<ChevronRight
+									aria-hidden="true"
+									className={cn("size-3.5", DIRECTIONAL_ICON_CLASS)}
+								/>
 							</span>
 						) : null}
 					</button>

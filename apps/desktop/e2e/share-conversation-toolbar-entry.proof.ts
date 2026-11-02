@@ -1,10 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const EVIDENCE_ROOT = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+const EVIDENCE_ROOT = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 test.describe.configure({ timeout: 90_000 });

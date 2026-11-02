@@ -10,6 +10,12 @@
 	.chevron {
 		rotate: 0deg;
 	}
+	/* Closed, the chevron points along the reading direction: toward the
+	   inline end, which is the left edge in right-to-left layouts. Open, it
+	   points down in both directions (the rule below is more specific). */
+	.chevron:dir(rtl) {
+		rotate: 180deg;
+	}
 	[class~="group"][data-panel-open] .chevron {
 		rotate: 90deg;
 	}

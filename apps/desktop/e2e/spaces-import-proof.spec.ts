@@ -1,12 +1,10 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import type { ProofJsonRecord } from "./fixture-json.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidenceDirectory = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"../../..",
-	"docs/proof/test-coverage-sweep-20260924/evidence"
+const evidenceDirectory = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 test.describe.configure({ timeout: 90_000 });

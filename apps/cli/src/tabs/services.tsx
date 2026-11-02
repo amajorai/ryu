@@ -255,7 +255,7 @@ export function ServicesTab({ active }: TabProps) {
 					const name = SIDECAR_ORDER[index];
 					if (name && isInstalled(name)) {
 						setConfirm({
-							title: `Uninstall ${name}?`,
+							title: tf("Uninstall {name}?", { name }),
 							consequence: `${name} will be stopped and removed from this node; press d to reinstall it.`,
 							confirmLabel: "Uninstall",
 							run: () =>

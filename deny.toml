@@ -1,0 +1,123 @@
+# cargo-deny configuration (schema version 2).
+#
+# This is the dependency-license + advisory gate referenced in the README:
+# publishing the OSS units (core / gateway / cli) is gated on a third-party
+# dependency-license scan. `cargo deny check` enforces:
+#   * licenses  — every transitive crate must carry a known, permissive license
+#   * bans      — surfaces duplicate/multiple-version dependencies (warn)
+#   * advisories— fails on crates with known RUSTSEC security advisories
+#   * sources   — flags crates pulled from unexpected registries/git remotes
+#
+# Run locally with: cargo install cargo-deny --locked && cargo deny check
+# CI runs this in .github/workflows/ci.yml.
+
+[licenses]
+# Only allow well-understood permissive / weak-copyleft licenses. Anything not
+# in this list (e.g. GPL/AGPL) fails the scan and must be reviewed before ship.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-DFS-2016",
+  "Zlib",
+	"MPL-2.0",
+	"CC0-1.0",
+	"Unicode-3.0",
+	"CDLA-Permissive-2.0",
+	"0BSD",
+	"AGPL-3.0-only",
+	"NCSA",
+	"BSL-1.0",
+]
+# Require high confidence when license text is matched heuristically.
+confidence-threshold = 0.9
+# First-party exception, scoped to one crate so no third-party dependency can use
+# it: apps/gateway/LICENSE grants the AGPL v3 "or (at your option) any later
+# version", which its Cargo.toml declares as AGPL-3.0-or-later.
+exceptions = [
+	{ allow = ["AGPL-3.0-or-later"], crate = "ryu-gateway" },
+]
+
+[bans]
+# Duplicate versions of the same crate are noisy but not fatal — warn so they
+# stay visible without blocking the release.
+multiple-versions = "warn"
+
+[advisories]
+# Default behavior: error on crates with active security advisories and on
+# unmaintained/yanked crates. (cargo-deny v2 defaults `vulnerability`/`unsound`
+# to "deny" and pulls advisory data from the default RUSTSEC database.)
+ignore = [
+  # Transitive macro helper from `ratatui`/`genai`; upstream is archived and the
+  # advisory provides no compatible safe upgrade for those dependency chains.
+  "RUSTSEC-2024-0436",
+	# `ttf-parser` 0.25 (unmaintained, no vulnerability) is pulled by third-party
+	# font/image tooling: `ab_glyph` via `imageproc`, and `pdf-inspector` via
+	# `anydoc`. Neither has a release off ttf-parser yet (resvg 0.49 already moved
+	# to skrifa/harfrust, which also cleared RUSTSEC-2026-0206 for rustybuzz).
+	"RUSTSEC-2026-0192",
+	# `yrs` 0.27 pulls `smallstr`; the current collaboration API has no compatible
+	# upgrade that removes it. Keep this maintenance advisory visible until the
+	# collaboration dependency is migrated.
+	"RUSTSEC-2026-0215",
+	# UniFFI 0.28's proc-macro dependency still uses bincode 1.x. The binding
+	# surface is pinned to that UniFFI minor because its foreign-language
+	# generators must move together; no compatible upgrade removes this
+	# transitive maintenance advisory without a binding migration.
+	"RUSTSEC-2025-0141",
+	# `unsafe-libyaml` is unmaintained with no fixed release; it is pulled only by
+	# `serde_yaml` 0.9. The SDK's library graph is free of it: only its
+	# spec-conformance test (dev-dependency) and the opt-in `codegen` build
+	# reach it, the latter also through third-party `progenitor-macro` 0.8,
+	# which depends on `serde_yaml` itself. Desktop's CLI setup
+	# (`apps/desktop/src-tauri/src/cli_setup.rs`) round-trips users' Hermes and
+	# Continue config files through `serde_yaml::Value`. `serde_yaml_ng` still
+	# depends on `unsafe-libyaml`, and the pure-Rust replacements have no
+	# compatible `Value`/`Mapping` editing API, so switching would change how
+	# those persisted user configs are parsed and re-emitted. Keep this visible
+	# until that YAML editing moves to a maintained parser.
+	"RUSTSEC-2024-0449",
+	# `zip` 8.x: SUID/SGID preservation, symlink targets and permission
+	# handling in `ZipArchive::extract` / `ZipStreamReader::extract`. Ryu's own
+	# crates are on zip 9 and never call either (backups and Core read entries
+	# one by one and write paths they validate themselves), and the desktop
+	# updater is on `tauri-plugin-updater` 2.14.1 (zip 9). The old major that
+	# remains is pinned by `anydoc` 0.2.4 (`zip ^8.6.0`, no release on zip 9),
+	# which reads entries in memory and never extracts. Re-check this reasoning
+	# before adding any `extract` call.
+	"RUSTSEC-2026-0367",
+	"RUSTSEC-2026-0368",
+	"RUSTSEC-2026-0369",
+	# `crypto-bigint` 0.5 constant-time lapses: reached only through
+	# `elliptic-curve` 0.13 (`p256`/`p384`/`p521` 0.13) from `ssh-key` 0.6.7,
+	# which Core uses to parse and validate public keys the SSH CA is asked to
+	# sign (`apps/core/src/vault/ssh.rs`), never to operate on secret scalars.
+	# `ssh-key` has no stable release on `elliptic-curve` 0.14 (0.7 is still a
+	# release candidate); Core's own `p256`/`p384` are already on 0.14.
+	"RUSTSEC-2026-0387",
+	# `rsa` Marvin timing side channel: no fixed release exists (0.10 is still a
+	# release candidate). Used only by the authenticated vault transit engine
+	# (`apps/core/src/vault/transit.rs`). Revisit when rsa 0.10 is stable.
+	"RUSTSEC-2023-0071",
+	# Unmaintained (no vulnerability), transitive through the Tauri/GTK stack and
+	# zbus (`proc-macro-error`, `zbus_names`, `zvariant*`) and UniFFI 0.28
+	# (`basic-toml`). No compatible upgrade removes them without moving those
+	# frameworks; keep them visible here until it does. (Tauri 2.12 dropped the
+	# `unic-*` crates via urlpattern 0.6; both `apps/desktop/src-tauri` and
+	# `apps/web/src-tauri` are on Tauri 2.12, so
+	# RUSTSEC-2025-0075/0080/0081/0098/0100 are no longer ignored.)
+	"RUSTSEC-2024-0370",
+	"RUSTSEC-2026-0371",
+	"RUSTSEC-2026-0370",
+	"RUSTSEC-2026-0372",
+	"RUSTSEC-2026-0374",
+]
+
+[sources]
+# Crates should come from crates.io. Anything from an unknown registry or a git
+# remote is suspicious — surface it without blocking.
+unknown-registry = "warn"
+unknown-git = "warn"

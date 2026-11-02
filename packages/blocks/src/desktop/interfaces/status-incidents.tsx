@@ -1,7 +1,13 @@
+import {
+	activeLocale,
+	dateFormatter,
+	relativeTimeFormatter,
+	translate as tr,
+} from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { Fragment, type ReactNode } from "react";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 import type {
 	IncidentSeverity,
 	StatusHistoryDay,
@@ -14,28 +20,27 @@ export const SEVERITY_TEXT: Record<IncidentSeverity, string> = {
 	outage: "text-status-destructive",
 };
 
-const timeFormat = new Intl.DateTimeFormat("en-US", {
+const timeFormat: Intl.DateTimeFormatOptions = {
 	day: "numeric",
 	hour: "numeric",
 	minute: "2-digit",
 	month: "short",
-});
-const scheduleFormat = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-	month: "short",
+};
+const scheduleFormat: Intl.DateTimeFormatOptions = {
+	...timeFormat,
 	weekday: "short",
-});
-const dayHeadingFormat = new Intl.DateTimeFormat("en-US", {
+};
+const dayHeadingFormat: Intl.DateTimeFormatOptions = {
 	day: "numeric",
 	month: "short",
 	year: "numeric",
-});
+};
 
-function formatAt(iso: string, format: Intl.DateTimeFormat): string {
+function formatAt(iso: string, format: Intl.DateTimeFormatOptions): string {
 	const time = Date.parse(iso);
-	return Number.isNaN(time) ? "" : format.format(time);
+	return Number.isNaN(time)
+		? ""
+		: dateFormatter(activeLocale(), format).format(time);
 }
 
 /** "in 20h", "in 3d": the distance to an upcoming start. */
@@ -46,27 +51,26 @@ function untilLabel(iso: string, now: number, tl: LiteralMessage): string {
 	}
 	const minutes = Math.round((start - now) / 60_000);
 	if (minutes < 1) {
-		return "starting now";
+		return tl("starting now");
 	}
+	const until = relativeTimeFormatter(activeLocale(), "narrow", "always");
 	if (minutes < 60) {
-		return tl("in {minutes}m", { minutes: String(minutes) });
+		return until.format(minutes, "minute");
 	}
 	const hours = Math.round(minutes / 60);
 	return hours < 48
-		? tl("in {hours}h", { hours: String(hours) })
-		: tl("in {days}d", { days: String(Math.round(hours / 24)) });
+		? until.format(hours, "hour")
+		: until.format(Math.round(hours / 24), "day");
 }
 
 function ago(iso: string, now: number): string {
-	const age = compactAge(iso, now);
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "just now" : `${age} ago`;
+	return relativeAge(iso, now);
 }
 
 function affectsLabel(names: readonly string[]): string {
-	return names.length > 0 ? `Affects ${names.join(", ")}` : "No agent assigned";
+	return names.length > 0
+		? tr("Affects {names}", { names: names.join(", ") })
+		: tr("No agent assigned");
 }
 
 /** A ruled section with a heading, the shape every list below shares. */
@@ -127,7 +131,7 @@ function Update({
 		<span className="line-clamp-2 block text-foreground/90 text-sm leading-6">
 			<span className={cn("font-semibold", stageClassName)}>{stage}</span>
 			<span className="text-muted-foreground"> – </span>
-			{body}
+			<span data-ryu-i18n="off">{body}</span>
 		</span>
 	);
 }
@@ -150,6 +154,7 @@ function IncidentBody({
 					SEVERITY_TEXT[incident.severity],
 					incident.threadId && "group-hover:underline"
 				)}
+				data-ryu-i18n="off"
 			>
 				{incident.title}
 			</span>
@@ -279,7 +284,7 @@ export function StatusMaintenanceList({
 				<ul className="divide-y divide-border rounded-md border border-border bg-card">
 					{items.map((item) => {
 						const volume = item.count
-							? ` ${item.count} runs expected that day.`
+							? ` ${tl("{count, plural, one {# run expected that day.} other {# runs expected that day.}}", { count: item.count })}`
 							: "";
 						return (
 							<li
@@ -287,12 +292,15 @@ export function StatusMaintenanceList({
 								data-testid="status-maintenance"
 								key={item.id}
 							>
-								<p className="truncate font-semibold text-foreground text-sm">
+								<p
+									className="truncate font-semibold text-foreground text-sm"
+									data-ryu-i18n="off"
+								>
 									{item.title}
 								</p>
 								<div className="mt-1">
 									<Update
-										body={`${item.schedule ?? "One-off run"}.${volume}`}
+										body={`${item.schedule ?? tr("One-off run")}.${volume}`}
 										stage="Scheduled"
 										stageClassName="text-status-info"
 									/>
@@ -309,7 +317,7 @@ export function StatusMaintenanceList({
 										[
 											"affects",
 											item.affected
-												? `Affects ${item.affected}`
+												? tr("Affects {affected}", { affected: item.affected })
 												: "Workspace-wide",
 										],
 									]}
@@ -345,7 +353,9 @@ export function StatusHistory({
 					<li data-testid="status-history-day" key={day.key}>
 						<h3 className="border-border border-b pb-2 font-medium text-foreground text-sm">
 							<time dateTime={day.key}>
-								{dayHeadingFormat.format(day.start)}
+								{dateFormatter(activeLocale(), dayHeadingFormat).format(
+									day.start
+								)}
 							</time>
 						</h3>
 						{day.incidents.length === 0 ? (

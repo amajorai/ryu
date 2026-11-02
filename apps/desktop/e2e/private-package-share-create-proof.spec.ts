@@ -1,12 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/private-package-share-create-proof.html";
 const BASE_TIME = new Date("2026-09-28T00:00:00.000Z");
-const EVIDENCE_ROOT = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence/private-package-share-create"
+const EVIDENCE_ROOT = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence/private-package-share-create"
 );
 
 interface ApiCall {

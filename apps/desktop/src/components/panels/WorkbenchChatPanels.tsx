@@ -283,7 +283,7 @@ function PinnedSummaryLayout({
 			>
 				<div
 					className={cn(
-						"h-full overflow-y-auto border-border border-l px-3 pt-6",
+						"h-full overflow-y-auto border-border border-s px-3 pt-6",
 						floatingChrome && "pb-2"
 					)}
 				>

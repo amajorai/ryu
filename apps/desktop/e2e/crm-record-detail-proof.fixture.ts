@@ -11,6 +11,7 @@ import type {
 	SchemaResponse,
 	View,
 } from "@/src/lib/api/crm.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export const PROOF_PAGE = "/crm-record-detail-proof.html";
 export const TIMESTAMP = "2026-10-01T00:00:00.000Z";
@@ -40,10 +41,7 @@ export interface CrmFixtureOptions {
 
 export const evidenceDir =
 	process.env.RYU_CRM_RECORD_DETAIL_PROOF_DIR ??
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 export const proofStates = new WeakMap<
 	Page,
 	{ fixture?: CrmProofFixture; pageErrors: string[] }

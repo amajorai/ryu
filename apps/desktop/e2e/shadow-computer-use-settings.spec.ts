@@ -1,11 +1,9 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const committedProofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/shadow-computer-use"
-);
+const committedProofDir = proofEvidencePath("shadow-computer-use");
 // Ordinary runs write screenshots to Playwright's output directory. Set
 // RYU_REFRESH_SHADOW_PROOF=1 to deliberately regenerate the committed proof.
 const refreshCommittedProof = process.env.RYU_REFRESH_SHADOW_PROOF === "1";

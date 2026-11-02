@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -46,7 +47,7 @@ test("renders sent and seen states, then opens the full reader roster", async ({
 	).toBeVisible();
 	await page.screenshot({
 		fullPage: true,
-		path: "../../docs/proof/read-receipts/read-receipts-completed.png",
+		path: proofEvidencePath("read-receipts/read-receipts-completed.png"),
 	});
 	await expect(errors).toEqual([]);
 });

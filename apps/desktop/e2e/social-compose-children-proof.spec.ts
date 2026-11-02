@@ -1,190 +1,23 @@
-import { access, mkdir } from "node:fs/promises";
-import path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
-import { z } from "zod";
-import type {
-	Draft,
-	DraftBody,
-	MediaAsset,
-	ScheduledPost,
-	SocialAccount,
-} from "../../../apps-store/social/ui/src/types.ts";
-
-const evidenceDirectory = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
-);
-const openingText = "Alpha beta launches.";
-const imageDescription = "A lighthouse above the shoreline.";
-const variantText = "A LinkedIn-first launch message.";
-const tailText = "Tail follow-up.";
-
-interface SocialBridgeCall {
-	body?: unknown;
-	method: string;
-	path: string;
-}
-
-interface SocialProofResponse {
-	method: string;
-	path: string;
-	value: unknown;
-}
-
-interface SocialProofWindow {
-	__socialComposeChildrenProof?: {
-		calls: SocialBridgeCall[];
-		modelCalls: Array<{ prompt: string; system?: string }>;
-		responses: SocialProofResponse[];
-	};
-}
-
-interface AccountListResponse {
-	accounts: SocialAccount[];
-}
-
-interface DraftListResponse {
-	drafts: Draft[];
-}
-
-interface MediaListResponse {
-	media: MediaAsset[];
-}
-
-interface PostListResponse {
-	posts: ScheduledPost[];
-}
-
-const seedFixtureSchema = z.object({
-	accounts: z.array(z.object({ id: z.string() })),
-	media: z.object({
-		attachPath: z.string(),
-		enterPath: z.string(),
-		libraryPath: z.string(),
-		libraryAsset: z.object({
-			created_at: z.number(),
-			id: z.string(),
-			kind: z.enum(["image", "video"]),
-			mime_type: z.string().nullable(),
-			name: z.string(),
-			path: z.string(),
-			workspace_id: z.string(),
-		}),
-	}),
-});
-const timingResponseSchema = z.object({
-	best_times: z.object({
-		basis: z.enum(["defaults", "hour_of_day", "weekday_hour"]),
-		sample_size: z.number(),
-		timezone: z.string(),
-		slots: z.array(
-			z.object({
-				day_of_week: z.number().nullable(),
-				hour: z.number(),
-				lift_pct: z.number().nullable(),
-				next_occurrence: z.number(),
-				sample_size: z.number(),
-			})
-		),
-	}),
-});
-
-declare global {
-	interface Window extends SocialProofWindow {}
-}
-
-async function proofState(page: Page) {
-	return page.evaluate(() => {
-		const proof = window.__socialComposeChildrenProof;
-		return {
-			calls: proof?.calls ?? [],
-			modelCalls: proof?.modelCalls ?? [],
-			responses: proof?.responses ?? [],
-		};
-	});
-}
-
-function writeCalls(calls: SocialBridgeCall[]) {
-	return calls.filter(
-		(call) =>
-			["POST", "PATCH", "DELETE"].includes(call.method) &&
-			["/accounts", "/media", "/drafts", "/posts"].some(
-				(pathname) =>
-					call.path === pathname || call.path.startsWith(`${pathname}/`)
-			)
-	);
-}
-
-async function readAccounts(page: Page) {
-	const response = await page.request.get(
-		"/__social/accounts?workspace_id=default"
-	);
-	expect(response.ok()).toBe(true);
-	// SAFETY: This helper first requires a successful response from the private host, which forwards /__social/accounts unchanged to the rebuilt native ryu-social list handler. That handler serializes concrete Rust SocialAccount records under the accounts key; the imported UI wire type mirrors those actual serde fields/enums/nulls. This is the controlled native endpoint contract, not arbitrary JSON validation.
-	return (await response.json()) as AccountListResponse;
-}
-
-async function readDrafts(page: Page) {
-	const response = await page.request.get(
-		"/__social/drafts?workspace_id=default"
-	);
-	expect(response.ok()).toBe(true);
-	// SAFETY: This helper first requires a successful response from the private host, which forwards /__social/drafts unchanged to the rebuilt native ryu-social list handler. That handler serializes concrete Rust Draft records under the drafts key; the imported UI wire type mirrors those actual serde fields/enums/nulls. This is the controlled native endpoint contract, not arbitrary JSON validation.
-	return (await response.json()) as DraftListResponse;
-}
-
-async function readMedia(page: Page) {
-	const response = await page.request.get(
-		"/__social/media?workspace_id=default"
-	);
-	expect(response.ok()).toBe(true);
-	// SAFETY: This helper first requires a successful response from the private host, which forwards /__social/media unchanged to the rebuilt native ryu-social list handler. That handler serializes concrete Rust MediaAsset records under the media key; the imported UI wire type mirrors those actual serde fields/enums/nulls. This is the controlled native endpoint contract, not arbitrary JSON validation.
-	return (await response.json()) as MediaListResponse;
-}
-
-async function readPosts(page: Page) {
-	const response = await page.request.get(
-		"/__social/posts?workspace_id=default"
-	);
-	expect(response.ok()).toBe(true);
-	// SAFETY: This helper first requires a successful response from the private host, which forwards /__social/posts unchanged to the rebuilt native ryu-social list handler. That handler serializes concrete Rust ScheduledPost records under the posts key; the imported UI wire type mirrors those actual serde fields/enums/nulls. This is the controlled native endpoint contract, not arbitrary JSON validation.
-	return (await response.json()) as PostListResponse;
-}
-
-function draftBody(
-	segments: Array<{ media: DraftBody["media"]; text: string }>,
-	accountIds: string[]
-): DraftBody {
-	const primary = segments[0] ?? { media: [], text: "" };
-	return {
-		account_ids: accountIds,
-		media: primary.media,
-		schema_version: 2,
-		segments,
-		text: primary.text,
-	};
-}
-
-async function localDateTimeValue(page: Page, timestamp: number) {
-	return page.evaluate((at) => {
-		const date = new Date(at);
-		const pad = (value: number) => String(value).padStart(2, "0");
-		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-	}, timestamp);
-}
-
-async function saveScreenshot(page: Page, filename: string) {
-	await mkdir(evidenceDirectory, { recursive: true });
-	await page.screenshot({
-		animations: "disabled",
-		fullPage: true,
-		path: path.join(evidenceDirectory, filename),
-	});
-}
-
-async function waitForTransientAlerts(page: Page) {
-	await expect(page.getByRole("alert")).toHaveCount(0, { timeout: 10_000 });
-}
+import { access } from "node:fs/promises";
+import { expect, test } from "@playwright/test";
+import {
+	draftBody,
+	imageDescription,
+	localDateTimeValue,
+	openingText,
+	proofState,
+	readAccounts,
+	readDrafts,
+	readMedia,
+	readPosts,
+	saveScreenshot,
+	seedFixtureSchema,
+	tailText,
+	timingResponseSchema,
+	variantText,
+	waitForTransientAlerts,
+	writeCalls,
+} from "./social-compose-children-proof.helpers.ts";
 
 test("compose children produce real draft, media, variant, target, and timing outcomes", async ({
 	page,

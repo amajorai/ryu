@@ -61,7 +61,7 @@ export function ArenaThreadPanel({
 	return (
 		<aside
 			aria-label={tl("Thread: {title}", { title })}
-			className="flex min-h-0 w-[46%] min-w-90 max-w-[880px] shrink-0 flex-col border-border border-l bg-background max-md:absolute max-md:inset-0 max-md:z-20 max-md:w-full max-md:min-w-0 max-md:max-w-none max-md:border-l-0"
+			className="flex min-h-0 w-[46%] min-w-90 max-w-[880px] shrink-0 flex-col border-border border-s bg-background max-md:absolute max-md:inset-0 max-md:z-20 max-md:w-full max-md:min-w-0 max-md:max-w-none max-md:border-s-0"
 			data-testid="arena-thread-panel"
 		>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b px-4">
@@ -69,6 +69,7 @@ export function ArenaThreadPanel({
 				<div className="flex min-w-0 flex-1 flex-col items-start gap-1">
 					<h2
 						className="max-w-full truncate font-medium text-foreground text-sm leading-5 outline-none"
+						data-ryu-i18n="off"
 						ref={headingRef}
 						tabIndex={-1}
 					>

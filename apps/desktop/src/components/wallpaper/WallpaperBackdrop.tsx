@@ -10,7 +10,10 @@
 import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useState } from "react";
-import { backdropByAvailableId } from "@/src/lib/plugin-backgrounds.ts";
+import {
+	backdropByAvailableId,
+	usePluginBackgrounds,
+} from "@/src/lib/plugin-backgrounds.ts";
 import type { OsWallpaper } from "@/src/lib/wallpaper.ts";
 
 export function WallpaperBackdrop({
@@ -26,8 +29,10 @@ export function WallpaperBackdrop({
 	const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
 	const [failedUrl, setFailedUrl] = useState<string | null>(null);
 	const failed = failedUrl === wallpaper.url;
+	// Plugin-contributed wallpapers resolve only against the contribution table.
+	const pluginBackgrounds = usePluginBackgrounds();
 	const definition = wallpaper.backdrop
-		? backdropByAvailableId(wallpaper.backdrop.id)
+		? backdropByAvailableId(wallpaper.backdrop.id, pluginBackgrounds)
 		: undefined;
 	return (
 		<div

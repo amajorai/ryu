@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -51,6 +52,22 @@ export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
 	review: "Review",
 };
 
+/** A job status's label in the UI language, for copy that interpolates it. */
+export function jobStatusLabel(status: JobStatus): string {
+	switch (status) {
+		case "closed":
+			return tr("Closed");
+		case "in-progress":
+			return tr("In progress");
+		case "on-hold":
+			return tr("On hold");
+		case "open":
+			return tr("Open");
+		default:
+			return tr("Review");
+	}
+}
+
 export const PERSONAL_COMPANY_ID = "personal";
 
 export interface JobCompany {
@@ -84,7 +101,7 @@ export interface JobRow {
 }
 
 export function jobTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled job";
+	return thread.title.trim() || tr("Untitled job");
 }
 
 export function jobCompany(

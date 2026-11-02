@@ -30,8 +30,9 @@
 	width: var(--agent-width);
 	transition-property: width;
 }
+/* Measured from the inline start, like the bar fill it marks. */
 .cursor {
-	left: var(--agent-cursor);
+	inset-inline-start: var(--agent-cursor);
 }
 .height {
 	height: var(--agent-height);

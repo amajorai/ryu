@@ -192,7 +192,7 @@ function PostActionRow({
 }
 
 const TITLE_LINK =
-	"rounded-sm text-left outline-none after:absolute after:inset-0 after:rounded-2xl focus-visible:ring-2 focus-visible:ring-ring/50";
+	"rounded-sm text-start outline-none after:absolute after:inset-0 after:rounded-2xl focus-visible:ring-2 focus-visible:ring-ring/50";
 
 /**
  * Reddit's card view: meta row, title, flair, a short preview of the newest
@@ -228,6 +228,7 @@ export function PostCard({
 				<button
 					className={TITLE_LINK}
 					data-row-link=""
+					data-ryu-i18n="off"
 					onClick={() => actions.onOpen(thread.id)}
 					ref={(element) => registerRow(thread.id, element)}
 					type="button"
@@ -239,7 +240,10 @@ export function PostCard({
 				<PostFlair post={post} />
 			</div>
 			{excerpt ? (
-				<p className="line-clamp-3 text-foreground/80 text-sm leading-5">
+				<p
+					className="line-clamp-3 text-foreground/80 text-sm leading-5"
+					data-ryu-i18n="off"
+				>
 					{excerpt}
 				</p>
 			) : null}
@@ -271,7 +275,7 @@ export function PostRow({
 	return (
 		<article
 			aria-labelledby={titleId}
-			className="relative flex items-start gap-2 rounded-xl py-2 pr-3 transition-colors duration-100 has-[[data-row-link]:hover]:bg-muted/60"
+			className="relative flex items-start gap-2 rounded-xl py-2 pe-3 transition-colors duration-100 has-[[data-row-link]:hover]:bg-muted/60"
 			data-status={post.status}
 			data-thread-id={thread.id}
 		>
@@ -295,6 +299,7 @@ export function PostRow({
 						<button
 							className={cn(TITLE_LINK, "after:rounded-xl")}
 							data-row-link=""
+							data-ryu-i18n="off"
 							onClick={() => actions.onOpen(thread.id)}
 							ref={(element) => registerRow(thread.id, element)}
 							type="button"
@@ -328,7 +333,7 @@ export function PostRow({
 					<MetaDot />
 					<Age iso={thread.updatedAt} now={now} />
 					{thread.pinned ? <PinnedMark /> : null}
-					<span className="ml-1 flex items-center gap-0.5">
+					<span className="ms-1 flex items-center gap-0.5">
 						<button
 							aria-label={tl("{comments} comments on “{title}”", {
 								comments: String(post.comments),

@@ -66,7 +66,7 @@ export function TargetPicker({
 			<div className="flex flex-1 flex-col gap-1">
 				<Input
 					aria-label={tl("{target} identifier", {
-						target: TARGET_LABEL[row.target_type],
+						target: tl(TARGET_LABEL[row.target_type]),
 					})}
 					onChange={(e) => onChange(e.target.value)}
 					placeholder={TARGET_FALLBACK_PLACEHOLDER[row.target_type]}
@@ -216,7 +216,7 @@ export function PermissionGroupSection({
 		<Collapsible onOpenChange={setOpen} open={open}>
 			<CollapsibleTrigger
 				appearance="permission-group"
-				className="flex w-full items-center justify-between text-left"
+				className="flex w-full items-center justify-between text-start"
 			>
 				<span className="min-w-0 truncate text-sm" title={group.title}>
 					{group.title}

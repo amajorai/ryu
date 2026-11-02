@@ -228,6 +228,32 @@ fn project_guidance_is_projects_only() {
 }
 
 #[test]
+fn security_key_namespace_is_reserved_and_relay_is_browser_only() {
+    assert!(reserved_namespaces().contains(&"security-key".to_string()));
+    for id in [
+        "com.x.security-key",
+        "@evil/security-key",
+        "security-key",
+        "@acme/browser",
+        "@ryu/vault",
+    ] {
+        let result = validate_grants_for(
+            Some(id),
+            &scopes(&["security-key:relay", "security-key:admin"]),
+        );
+        assert!(result.approved.is_empty(), "{id}: {:?}", result.approved);
+    }
+    for id in ["@ryu/browser", "com.ryu.browser"] {
+        let result = validate_grants_for(
+            Some(id),
+            &scopes(&["security-key:relay", "security-key:admin"]),
+        );
+        assert_eq!(result.approved, vec!["security-key:relay".to_string()]);
+        assert_eq!(result.denied, vec!["security-key:admin".to_string()]);
+    }
+}
+
+#[test]
 fn subscriptions_namespace_is_reserved_and_only_read_is_allowlisted() {
     for id in [
         "com.x.subscriptions",
@@ -581,6 +607,7 @@ fn every_pre_grammar_allowlist_entry_still_validates() {
         ("@ryu/browser", "browser.connect"),
         ("@ryu/browser", "identity.read"),
         ("@ryu/browser", "vault:fill"),
+        ("@ryu/browser", "security-key:relay"),
         ("@ryu/projects", "chat:project-guidance"),
         // widget consent + companion host primitives
         ("sample-widget", "widget:render"),

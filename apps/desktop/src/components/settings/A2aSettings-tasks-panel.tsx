@@ -75,7 +75,7 @@ export function TasksPanel({
 										>
 											View artifacts
 										</summary>
-										<ul className="mt-1 space-y-0.5 pl-4">
+										<ul className="mt-1 space-y-0.5 ps-4">
 											{artifacts.map((artifact) => (
 												<li key={artifact.id}>
 													{artifact.name} · <code>{artifact.id}</code>

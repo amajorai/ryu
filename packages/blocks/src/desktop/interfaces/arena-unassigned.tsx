@@ -7,7 +7,7 @@ import {
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { ChevronRight } from "lucide-react";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 
 /* The status word carries the tone; failed and live rows stand out by colour too. */
 const STATUS_TONE: Record<ThreadStatus, string> = {
@@ -63,14 +63,17 @@ export function ArenaUnassigned({
 			<ul className="-mx-2 flex flex-col">
 				{threads.map((thread) => {
 					const status = threadStatus(thread);
-					const title = thread.title.trim() || "Untitled thread";
-					const age = compactAge(thread.updatedAt, now);
+					const title = thread.title.trim() || tl("Untitled thread");
+					const age = relativeAge(thread.updatedAt, now);
 					const open = thread.id === activeThreadId;
 					const rowClass =
 						"flex h-10 w-full min-w-0 items-center gap-3 rounded-md px-2 text-start";
 					const content = (
 						<>
-							<span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm leading-5">
+							<span
+								className="min-w-0 flex-1 truncate font-medium text-foreground text-sm leading-5"
+								data-ryu-i18n="off"
+							>
 								{title}
 							</span>
 							<span className="shrink-0 text-[13px] leading-4">
@@ -79,7 +82,7 @@ export function ArenaUnassigned({
 								</span>
 								{age ? (
 									<span className="text-muted-foreground max-sm:hidden">
-										{` · ${age === "now" ? "just now" : `${age} ago`}`}
+										{` · ${age}`}
 									</span>
 								) : null}
 							</span>
@@ -103,7 +106,7 @@ export function ArenaUnassigned({
 									{content}
 									<ChevronRight
 										aria-hidden="true"
-										className="-me-0.5 size-4 shrink-0 text-muted-foreground transition-colors group-hover/row:text-foreground"
+										className="-me-0.5 size-4 shrink-0 text-muted-foreground transition-colors group-hover/row:text-foreground rtl:-scale-x-100"
 									/>
 								</button>
 							)}

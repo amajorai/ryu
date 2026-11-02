@@ -1,9 +1,8 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceSnapshot,
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
+import type {
+	InterfaceSnapshot,
+	ThreadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import {
@@ -22,7 +21,11 @@ import {
 	StatusMark,
 	ThreadRow,
 } from "./hologram-parts.tsx";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	agentById,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 
 interface ListProps {
 	activeThreadId: string | null;
@@ -248,7 +251,7 @@ export function SystemPanel({
 	const { totals } = view;
 	const total = Math.max(1, totals.threads);
 	const age = view.lastUpdate
-		? compactAge(new Date(view.lastUpdate).toISOString(), now)
+		? relativeAge(new Date(view.lastUpdate).toISOString(), now)
 		: "";
 	return (
 		<HoloPanel className={className} id="system" label="System">
@@ -293,7 +296,7 @@ export function SystemPanel({
 								<div className="flex h-5 items-center gap-2" key={entry.status}>
 									<StatusMark status={entry.status} />
 									<dt className="min-w-0 flex-1 truncate text-(--holo-dim) text-[13px]">
-										{THREAD_STATUS_LABELS[entry.status]}
+										{threadStatusLabel(entry.status)}
 									</dt>
 									<dd
 										className={cn(
@@ -316,13 +319,7 @@ export function SystemPanel({
 						)}
 					>
 						<span>Last signal</span>
-						<span className="tabular-nums">
-							{age
-								? age === "now"
-									? "Just now"
-									: tl("{age} ago", { age })
-								: "None"}
-						</span>
+						<span className="tabular-nums">{age || tl("None")}</span>
 					</p>
 				</div>
 			</div>

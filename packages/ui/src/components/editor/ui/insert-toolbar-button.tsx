@@ -124,7 +124,7 @@ const groups: Group[] = [
 				value: KEYS.listTodo,
 			},
 			{
-				icon: <ChevronRightIcon />,
+				icon: <ChevronRightIcon className="rtl:-scale-x-100" />,
 				label: "Toggle list",
 				value: KEYS.toggle,
 			},

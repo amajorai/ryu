@@ -59,7 +59,7 @@ function TagFilterDropdown({
 						<HugeiconsIcon className="size-4" icon={TAG_ICON} />
 						Tags
 						{count > 0 && (
-							<Badge className="ml-1" size="download-label" variant="secondary">
+							<Badge className="ms-1" size="download-label" variant="secondary">
 								{formatCount(count)}
 							</Badge>
 						)}

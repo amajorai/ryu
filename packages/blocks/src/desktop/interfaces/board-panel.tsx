@@ -40,7 +40,7 @@ export function BoardThreadPanel({
 			// smooth while the host's conversation mounts.
 			animate={{ opacity: 1, transform: "translateX(0px)" }}
 			aria-label={tl("Thread: {title}", { title })}
-			className="flex min-h-0 w-[clamp(360px,45%,880px)] shrink-0 flex-col border-border border-l bg-background max-md:absolute max-md:inset-0 max-md:z-20 max-md:w-full max-md:border-l-0"
+			className="flex min-h-0 w-[clamp(360px,45%,880px)] shrink-0 flex-col border-border border-s bg-background max-md:absolute max-md:inset-0 max-md:z-20 max-md:w-full max-md:border-s-0"
 			data-testid="board-thread-panel"
 			initial={
 				reduceMotion ? false : { opacity: 0, transform: "translateX(16px)" }
@@ -53,7 +53,7 @@ export function BoardThreadPanel({
 		>
 			{/* Escape closes from the header only; the host chat keeps its own. */}
 			<header
-				className="flex h-12 shrink-0 items-center gap-2.5 border-border border-b pr-3 pl-4"
+				className="flex h-12 shrink-0 items-center gap-2.5 border-border border-b ps-4 pe-3"
 				onKeyDown={(event) => {
 					if (event.key === "Escape") {
 						event.preventDefault();
@@ -63,7 +63,10 @@ export function BoardThreadPanel({
 			>
 				{lead ? <BoardAvatar agent={lead} name={lead.name} size={20} /> : null}
 				<div className="flex min-w-0 flex-1 flex-col">
-					<h2 className="truncate font-medium text-[13px] text-foreground leading-4">
+					<h2
+						className="truncate font-medium text-[13px] text-foreground leading-4"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</h2>
 					{thread ? (

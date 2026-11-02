@@ -246,12 +246,12 @@ export function CrmPanel() {
 			{/* Object + view rail */}
 			<nav
 				aria-label="CRM objects and views"
-				className="flex w-52 shrink-0 flex-col border-r bg-muted/20"
+				className="flex w-52 shrink-0 flex-col border-e bg-muted/20"
 			>
 				<div className="border-b p-2">
 					<div className="relative">
 						<HugeiconsIcon
-							className="absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground"
+							className="absolute start-2 top-1/2 -translate-y-1/2 text-muted-foreground"
 							icon={Search01Icon}
 							size={14}
 						/>
@@ -277,7 +277,7 @@ export function CrmPanel() {
 								{hits.map((hit) => (
 									<li key={hit.record_id}>
 										<button
-											className="w-full rounded-lg px-2 py-1 text-left hover:bg-muted"
+											className="w-full rounded-lg px-2 py-1 text-start hover:bg-muted"
 											onClick={() => {
 												setObjectSlug(hit.object_slug);
 												setMode({
@@ -311,7 +311,7 @@ export function CrmPanel() {
 									<li key={entry.object.id}>
 										<button
 											className={cn(
-												"flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-sm hover:bg-muted",
+												"flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-start text-sm hover:bg-muted",
 												active && "bg-muted font-medium"
 											)}
 											onClick={() => {
@@ -332,12 +332,12 @@ export function CrmPanel() {
 											</Badge>
 										</button>
 										{active && entry.views.length > 0 && (
-											<ul className="mt-0.5 ml-2 space-y-0.5 border-l pl-2">
+											<ul className="ms-2 mt-0.5 space-y-0.5 border-s ps-2">
 												{entry.views.map((candidate) => (
 													<li key={candidate.id}>
 														<button
 															className={cn(
-																"w-full truncate rounded-lg px-2 py-0.5 text-left text-xs hover:bg-muted",
+																"w-full truncate rounded-lg px-2 py-0.5 text-start text-xs hover:bg-muted",
 																candidate.id === view?.id &&
 																	"bg-muted font-medium"
 															)}
@@ -348,7 +348,7 @@ export function CrmPanel() {
 															type="button"
 														>
 															{candidate.name}
-															<span className="ml-1 text-muted-foreground">
+															<span className="ms-1 text-muted-foreground">
 																{candidate.kind === "board" ? "▤" : "▦"}
 															</span>
 														</button>

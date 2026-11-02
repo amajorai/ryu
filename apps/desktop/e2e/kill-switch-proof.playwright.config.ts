@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const proofPort = process.env.RYU_KILL_SWITCH_PROOF_PORT ?? "5264";
 
@@ -7,10 +8,7 @@ export default defineConfig({
 	timeout: 120_000,
 	testDir: import.meta.dirname,
 	testMatch: "kill-switch-proof.spec.ts",
-	outputDir: path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/kill-switch"
-	),
+	outputDir: proofEvidencePath("kill-switch"),
 	use: {
 		...devices["Desktop Chrome"],
 		baseURL: `http://127.0.0.1:${proofPort}`,

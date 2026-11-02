@@ -1,8 +1,9 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronRight } from "lucide-react";
 import { type ReactNode, useId, useRef } from "react";
 import { FORUM_WRAP } from "./forum-header.tsx";
-import { type ForumTopic, fullDate, plural } from "./forum-model.ts";
+import { type ForumTopic, fullDate } from "./forum-model.ts";
 import {
 	CategoryBadge,
 	ForumAvatar,
@@ -14,7 +15,7 @@ import {
 	TopicTimeline,
 	useThreadScroll,
 } from "./forum-timeline.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, relativeAge } from "./interface-renderer.ts";
 
 function MapStat({ children, label }: { children: ReactNode; label: string }) {
 	return (
@@ -31,6 +32,7 @@ function MapStat({ children, label }: { children: ReactNode; label: string }) {
 
 /** The opening post: author, age, the latest message, and the topic map. */
 function OpeningPost({ now, topic }: { now: number; topic: ForumTopic }) {
+	const tl = useLiteralMessages();
 	const { thread } = topic;
 	const author = topic.author;
 	const users = topic.posters.length;
@@ -47,12 +49,15 @@ function OpeningPost({ now, topic }: { now: number; topic: ForumTopic }) {
 						{author?.name ?? "You"}
 					</span>
 					{author ? (
-						<span className="@min-[560px]:inline hidden truncate text-muted-foreground text-sm">
+						<span
+							className="@min-[560px]:inline hidden truncate text-muted-foreground text-sm"
+							data-ryu-i18n="off"
+						>
 							{author.description}
 						</span>
 					) : null}
 					<time
-						className="ml-auto shrink-0 text-muted-foreground text-sm"
+						className="ms-auto shrink-0 text-muted-foreground text-sm"
 						dateTime={thread.updatedAt}
 						title={fullDate(thread.updatedAt)}
 					>
@@ -65,13 +70,25 @@ function OpeningPost({ now, topic }: { now: number; topic: ForumTopic }) {
 					)}
 				</p>
 				<dl className="mt-4 flex flex-wrap items-start gap-x-8 gap-y-3 border-border border-t py-3">
-					<MapStat label={topic.replies === 1 ? "reply" : "replies"}>
+					<MapStat
+						label={tl("{count, plural, one {reply} other {replies}}", {
+							count: topic.replies,
+						})}
+					>
 						{topic.replies}
 					</MapStat>
-					<MapStat label={topic.views === 1 ? "view" : "views"}>
+					<MapStat
+						label={tl("{count, plural, one {view} other {views}}", {
+							count: topic.views,
+						})}
+					>
 						{topic.views}
 					</MapStat>
-					<MapStat label={users === 1 ? "user" : "users"}>
+					<MapStat
+						label={tl("{count, plural, one {user} other {users}}", {
+							count: users,
+						})}
+					>
 						{users > 0 ? (
 							<span className="flex items-center gap-2">
 								<span>{users}</span>
@@ -124,8 +141,9 @@ export function TopicPage({
 	const repliesRef = useRef<HTMLDivElement>(null);
 	const scroll = useThreadScroll(repliesRef, topic?.thread.id ?? null);
 	const total = Math.max(1, topic?.thread.messageCount ?? 1);
-	const age = topic ? compactAge(topic.thread.updatedAt, now) : "";
-	const lastLabel = age === "now" || !age ? "Latest" : `${age} ago`;
+	const tl = useLiteralMessages();
+	const age = topic ? relativeAge(topic.thread.updatedAt, now) : "";
+	const lastLabel = age || tl("Latest");
 
 	return (
 		<article
@@ -154,7 +172,7 @@ export function TopicPage({
 									<>
 										<li aria-hidden="true">
 											<ChevronRight
-												className="size-3.5 text-muted-foreground/70"
+												className="size-3.5 text-muted-foreground/70 rtl:-scale-x-100"
 												strokeWidth={2}
 											/>
 										</li>
@@ -195,7 +213,9 @@ export function TopicPage({
 									</span>
 								) : null}
 								<span className="text-muted-foreground text-xs leading-4">
-									{plural(total, "post", "posts")}
+									{tl("{count, plural, one {# post} other {# posts}}", {
+										count: total,
+									})}
 								</span>
 							</div>
 						) : null}

@@ -294,7 +294,7 @@ function setCountDragImage(
 	const ghost = document.createElement("div");
 	ghost.textContent = `${count} chats`;
 	ghost.className =
-		"fixed -top-96 left-0 rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground text-xs shadow-md";
+		"fixed -top-96 start-0 rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground text-xs shadow-md";
 	document.body.append(ghost);
 	event.dataTransfer.setDragImage(ghost, 12, 12);
 	setTimeout(() => ghost.remove(), 0);

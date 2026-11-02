@@ -325,7 +325,7 @@ export function RecordTable({
 									<TableHead
 										className={cn(
 											"min-w-32",
-											isNumericField(field) && "text-right"
+											isNumericField(field) && "text-end"
 										)}
 										key={field.id}
 									>
@@ -391,7 +391,7 @@ export function RecordTable({
 										</TableCell>
 										<TableCell>
 											<button
-												className="truncate text-left font-medium hover:underline"
+												className="truncate text-start font-medium hover:underline"
 												onClick={() => onOpenRecord(record.id)}
 												title={recordTitle(
 													record.title,
@@ -410,7 +410,7 @@ export function RecordTable({
 											const value = record.values?.[field.slug];
 											return (
 												<TableCell
-													className={cn(isNumericField(field) && "text-right")}
+													className={cn(isNumericField(field) && "text-end")}
 													key={field.id}
 												>
 													{isEditing ? (
@@ -425,7 +425,7 @@ export function RecordTable({
 														/>
 													) : (
 														<button
-															className="w-full truncate text-left"
+															className="w-full truncate text-start"
 															disabled={field.is_system}
 															onClick={() =>
 																setEditing({

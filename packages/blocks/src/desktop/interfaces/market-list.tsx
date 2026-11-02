@@ -55,7 +55,7 @@ export function MarketList({
 					>
 						<button
 							aria-current={selectedShopId === shop.id ? "true" : undefined}
-							aria-label={shopLabel(shop, acts?.needYou.get(shop.id))}
+							aria-label={shopLabel(shop, acts?.needYou.get(shop.id), tl)}
 							className={cn(
 								GAME_FOCUS,
 								"flex items-center gap-3 rounded-lg px-2 py-1 text-start hover:bg-(--gk-plate-sunk)"
@@ -66,11 +66,14 @@ export function MarketList({
 						>
 							<Store aria-hidden="true" className="size-5 shrink-0" />
 							<span className="flex min-w-0 flex-col">
-								<span className="gk-display truncate text-[17px]">
+								<span
+									className="gk-display truncate text-[17px]"
+									data-ryu-i18n="off"
+								>
 									{shop.name}
 								</span>
 								<span className="text-(--gk-ink-muted) text-[13px]">
-									{shopKindText(shop)} · {shopState(shop)}
+									{shopKindText(shop, tl)} · {shopState(shop, tl)}
 								</span>
 							</span>
 							{acts ? (
@@ -127,6 +130,7 @@ export function MarketList({
 													"rounded-full border-(--gk-plate-sunk) border-2 px-3 py-1 font-semibold text-[13px] hover:bg-(--gk-plate-sunk)"
 												)}
 												data-act-agent={sentence ? agent.id : undefined}
+												data-ryu-i18n="off"
 												onClick={() => onOpenKeeper(shop.id, agent.id)}
 												type="button"
 											>

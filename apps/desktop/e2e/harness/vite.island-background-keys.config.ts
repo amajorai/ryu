@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { mergeConfig, type Plugin, type UserConfig } from "vite";
 
@@ -7,7 +8,8 @@ import { mergeConfig, type Plugin, type UserConfig } from "vite";
 // move, so this run never collides with another agent's harness on the shared
 // host and never writes into the checkout's node_modules cache.
 const harnessName = process.env.RYU_IBK_HARNESS ?? "";
-const cacheRoot = process.env.RYU_IBK_VITE_CACHE ?? "/tmp/ibk-pw/vite";
+const cacheRoot =
+	process.env.RYU_IBK_VITE_CACHE ?? path.join(tmpdir(), "ibk-pw/vite");
 const port = Number(process.env.RYU_IBK_PORT ?? "0");
 if (!(Number.isInteger(port) && port > 0)) {
 	throw new Error("RYU_IBK_PORT must name the port this harness serves on");

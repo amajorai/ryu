@@ -158,11 +158,13 @@ function ScopedBackupSettings({
 		}
 		setNotice(
 			operation.status === "completed"
-				? `${operation.action === "restore" ? "Restore" : "Backup"} completed.`
+				? operation.action === "restore"
+					? tl("Restore completed.")
+					: tl("Backup completed.")
 				: null
 		);
 		setTrackedOperation(null);
-	}, [overview.operations, trackedOperation]);
+	}, [overview.operations, tl, trackedOperation]);
 	useEffect(() => {
 		setRecords(null);
 		if (browseController.current) {

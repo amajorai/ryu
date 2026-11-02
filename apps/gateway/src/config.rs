@@ -7743,9 +7743,14 @@ pub struct MarketplaceRecommendationsConfig {
 /// computer-use provider permission to request a locked-session execution path;
 /// it does not itself unlock the operating system or bypass its safety prompts.
 ///
-/// `security_key` is also opt-in: a stored permission for features that use a
-/// hardware security key (FIDO2/WebAuthn) connected to this node. No current
-/// feature reads it, and a key always requires its own touch or PIN.
+/// `security_key` is also opt-in: it lets a browser on this node (a VM, cloud
+/// node or hidden Bot lane) relay a site's WebAuthn sign-in or registration to
+/// the hardware security key on the user's desktop, and lets that desktop
+/// answer such requests with its key. Core reads it live on every relayed
+/// request and refuses when it is off or unreadable; both the node running the
+/// browser and the desktop holding the key must allow it. Each request is
+/// shown to the user, and the key still requires its own touch or PIN. Agents
+/// cannot change it through the self-API.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ComputerUseConfig {
     #[serde(default)]

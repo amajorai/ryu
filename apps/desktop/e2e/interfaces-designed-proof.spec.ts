@@ -16,14 +16,12 @@
 
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Cold Vite compiles the blocks and ui module graphs on first load.
 test.describe.configure({ timeout: 120_000 });
 
-const PROOF_DIR = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/interfaces"
-);
+const PROOF_DIR = proofEvidencePath("interfaces");
 
 const pageErrors = new WeakMap<Page, string[]>();
 

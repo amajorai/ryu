@@ -28,6 +28,7 @@ import {
 	type PairingRequest,
 	PendingRequestItem,
 } from "./NodeAccessSettings-pending-request.tsx";
+import { rotatedTokenDescription } from "./NodeAccessSettings-rotate-toast.ts";
 
 /**
  * Who is allowed to talk to this node.
@@ -203,7 +204,9 @@ export function NodeAccessSettings() {
 				},
 				responseCodec4
 			);
-			toast.success(`Revoked ${client.name}`, { id: `revoke-${client.id}` });
+			toast.success(tl("Revoked {name}", { name: client.name }), {
+				id: `revoke-${client.id}`,
+			});
 			await loadPending();
 		} catch (error) {
 			toast.error("Could not revoke that device", {
@@ -224,11 +227,7 @@ export function NodeAccessSettings() {
 			}>(target, "/api/node/token/rotate", { method: "POST" }, responseCodec5);
 			toast.success("Owner token rotated", {
 				id: "rotate-node-token",
-				description: result.restart_required
-					? tl("{message} Restart Core to finish.", {
-							message: result.message,
-						})
-					: result.message,
+				description: rotatedTokenDescription(result, tl),
 			});
 			await loadToken();
 		} catch (error) {

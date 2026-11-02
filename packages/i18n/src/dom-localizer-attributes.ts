@@ -10,6 +10,7 @@ export const DOM_TRANSLATABLE_ATTRIBUTES = [
 	"aria-roledescription",
 	"aria-valuetext",
 	"alt",
+	"label",
 	"placeholder",
 	"title",
 	"value",
@@ -17,6 +18,14 @@ export const DOM_TRANSLATABLE_ATTRIBUTES = [
 
 export type DomTranslatableAttribute =
 	(typeof DOM_TRANSLATABLE_ATTRIBUTES)[number];
+
+/** Elements whose `label` attribute is visible copy (a native select's group
+ * heading, an option's text, a captions track's name). On any other element
+ * `label` is data, such as a custom element's property. */
+const LABELLED_ELEMENTS = ["optgroup", "option", "track"] as const;
+
+/** Attributes only some elements show; each has its own selector below. */
+const ELEMENT_SCOPED_ATTRIBUTES: readonly string[] = ["label", "value"];
 
 /** `<input>` types whose `value` is a visible button label, not user data. */
 const BUTTON_INPUT_TYPES = ["button", "reset", "submit"] as const;
@@ -32,17 +41,22 @@ export const DOM_OBSERVED_ATTRIBUTES: readonly string[] = [
 /** Selector for elements carrying at least one translatable attribute. */
 export const DOM_ATTRIBUTE_SELECTOR = [
 	...DOM_TRANSLATABLE_ATTRIBUTES.filter(
-		(attribute) => attribute !== "value"
+		(attribute) => !ELEMENT_SCOPED_ATTRIBUTES.includes(attribute)
 	).map((attribute) => `[${attribute}]`),
+	...LABELLED_ELEMENTS.map((name) => `${name}[label]`),
 	...BUTTON_INPUT_TYPES.map((type) => `input[type="${type}"][value]`),
 ].join(",");
 
 /** Whether `attribute` on `element` holds UI copy. Only button-like inputs
- * expose their `value` as a label; every other `value` is user data. */
+ * expose their `value` as a label (every other `value` is user data), and
+ * only `<optgroup>`, `<option>` and `<track>` show their `label`. */
 export function isTranslatableAttribute(
 	element: Element,
 	attribute: DomTranslatableAttribute
 ): boolean {
+	if (attribute === "label") {
+		return LABELLED_ELEMENTS.some((name) => name === element.localName);
+	}
 	if (attribute !== "value") {
 		return true;
 	}

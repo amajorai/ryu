@@ -8,117 +8,7 @@ import {
 	fixture,
 	localDefault,
 	PROOF_URL,
-	toProfile,
 } from "./onboarding-setup-page-proof.fixture.ts";
-
-test("production paid connections search, reveal more, require permission, and read back connection", async ({
-	page,
-}) => {
-	const f = await fixture(page, { paid: true });
-	try {
-		await localDefault(page);
-		await chooseOrg(page);
-		await expect(
-			page.getByRole("button", { name: "Connected", exact: true })
-		).toBeDisabled();
-		await page.getByRole("button", { name: "More integrations" }).click();
-		await page
-			.getByPlaceholder("Search Gmail, Notion, Slack, GitHub, or more")
-			.fill("Notion");
-		await page.getByRole("button", { name: "Connect", exact: true }).click();
-		const dialog = page.getByTestId("connection-permission-dialog");
-		await expect(dialog).toBeVisible();
-		await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-		await expect(dialog).not.toBeVisible();
-		expect(f.calls.some((c) => c.path.endsWith("/initiate"))).toBe(false);
-		await page.getByRole("button", { name: "Connect", exact: true }).click();
-		await expect(dialog).toBeVisible();
-		expect(f.calls.some((c) => c.path.endsWith("/initiate"))).toBe(false);
-		await dialog.getByRole("button", { name: "Continue to connect" }).click();
-		await expect(dialog).toBeHidden();
-		await expect(
-			page.getByRole("button", { name: "Connected", exact: true })
-		).toBeDisabled();
-		const call = f.calls.find((c) => c.path.endsWith("/initiate"));
-		expect(call?.body).toEqual({
-			toolkit: "notion",
-			access_level: "risk_based",
-		});
-		expect(call?.authorization).toBe("Bearer setup-proof-node-token");
-		expect((await f.read()).connections.at(-1)?.toolkit).toBe("notion");
-		await page.screenshot({
-			path: path.join(EVIDENCE, "onboarding-production-connected-readback.png"),
-			fullPage: true,
-		});
-	} finally {
-		await f.close();
-	}
-});
-
-test("production profile failure retry materializes background and continues", async ({
-	page,
-}) => {
-	const f = await fixture(page, { paid: true, failedJob: true });
-	try {
-		await toProfile(page);
-		await page.getByRole("button", { name: "Build my profile" }).click();
-		await expect(page.getByText("Fixture draft failed")).toBeVisible();
-		await page.getByRole("button", { name: "Try again", exact: true }).click();
-		await page.getByRole("button", { name: "Run in background" }).click();
-		await expect(
-			page.getByRole("button", { name: "Continue setup", exact: true })
-		).toBeVisible();
-		expect((await f.read()).materialized).toBe(true);
-		const starts = f.calls.filter((c) => c.path.endsWith("/profile/start"));
-		expect(starts).toHaveLength(2);
-		expect(starts[0]?.body).toMatchObject({
-			recentDays: 90,
-			shareUserOrg: false,
-			importedConversationIds: [],
-			sourceIds: ["gmail-existing"],
-		});
-		expect(starts[0]?.authorization).toBe("Bearer setup-proof-node-token");
-		await page.screenshot({
-			path: path.join(
-				EVIDENCE,
-				"onboarding-production-profile-background-completed.png"
-			),
-			fullPage: true,
-		});
-		await page
-			.getByRole("button", { name: "Continue setup", exact: true })
-			.click();
-		await expect(
-			page.getByRole("heading", { name: "Choose how you talk to Ryu" })
-		).toBeVisible();
-	} finally {
-		await f.close();
-	}
-});
-
-test("production profile cancel calls exact job and permission denial skips gateway mutations", async ({
-	page,
-}) => {
-	const f = await fixture(page, { paid: true });
-	try {
-		await toProfile(page);
-		await page.getByRole("button", { name: "Build my profile" }).click();
-		await page.getByRole("button", { name: "Skip and cancel" }).click();
-		await expect(
-			page.getByRole("heading", { name: "Choose how you talk to Ryu" })
-		).toBeVisible();
-		expect((await f.read()).cancelled).toBe(true);
-		expect(
-			f.calls.some(
-				(c) =>
-					c.method === "POST" &&
-					c.path === "/api/onboarding/profile/cancel/profile-one"
-			)
-		).toBe(true);
-	} finally {
-		await f.close();
-	}
-});
 
 test("production gateway denial advances to the cloud lane without organization or provider mutations", async ({
 	page,
@@ -136,31 +26,6 @@ test("production gateway denial advances to the cloud lane without organization 
 					c.path === "/api/auth/organization/set-active"
 			)
 		).toBe(false);
-	} finally {
-		await f.close();
-	}
-});
-
-test("production failed connection read suppresses duplicate connects and allows safe continuation", async ({
-	page,
-}) => {
-	const f = await fixture(page, { paid: true, failedConnections: true });
-	try {
-		await localDefault(page);
-		await chooseOrg(page);
-		await expect(
-			page.getByText(
-				"Ryu could not verify your existing connections, so onboarding will not start another one."
-			)
-		).toBeVisible();
-		await expect(
-			page.getByRole("button", { name: "Connect", exact: true })
-		).toHaveCount(0);
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-		await expect(
-			page.getByRole("heading", { name: "Set your cloud default" })
-		).toBeVisible();
-		expect(f.calls.some((c) => c.path.endsWith("/initiate"))).toBe(false);
 	} finally {
 		await f.close();
 	}
@@ -190,11 +55,12 @@ test("production local and cloud lane selections persist distinct exact defaults
 		await page
 			.getByRole("button", { name: "Save default", exact: true })
 			.click();
+		// A paid plan goes from the organization straight to the cloud default
+		// (4f7563c79d); connections are no longer an onboarding step.
 		await chooseOrg(page);
 		await expect(
-			page.getByRole("heading", { name: "Connect your accounts" })
+			page.getByRole("heading", { name: "Set your cloud default" })
 		).toBeVisible();
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
 		await page
 			.getByRole("button", { name: "Choose default cloud agent", exact: true })
 			.click();
@@ -208,7 +74,7 @@ test("production local and cloud lane selections persist distinct exact defaults
 			.getByRole("button", { name: "Save default", exact: true })
 			.click();
 		await expect(
-			page.getByRole("heading", { name: "Import existing threads" })
+			page.getByRole("heading", { name: "A few things to know" })
 		).toBeVisible();
 		const saved = await f.read();
 		const writes = f.calls.filter(

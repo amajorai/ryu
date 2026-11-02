@@ -74,14 +74,14 @@ export function ForecastSummary({
 						{formatTrendValue(metric, forecast.total.value)}
 					</span>
 				</div>
-				<div className="flex min-w-0 flex-col gap-0.5 text-right">
+				<div className="flex min-w-0 flex-col gap-0.5 text-end">
 					<span className="text-muted-foreground text-xs">80% range</span>
 					<span className="text-sm tabular-nums">
 						{formatTrendValue(metric, forecast.total.lower)} –{" "}
 						{formatTrendValue(metric, forecast.total.upper)}
 					</span>
 				</div>
-				<div className="flex min-w-0 flex-col gap-0.5 text-right">
+				<div className="flex min-w-0 flex-col gap-0.5 text-end">
 					<span className="text-muted-foreground text-xs">Trend</span>
 					<span className={`text-sm tabular-nums ${forecastTone(forecast)}`}>
 						{formatForecastChange(forecast)}
@@ -92,18 +92,18 @@ export function ForecastSummary({
 	}
 	return (
 		<div className="overflow-x-auto" data-testid="usage-trend-forecast">
-			<table className="w-full text-left text-xs">
+			<table className="w-full text-start text-xs">
 				<caption className="sr-only">
 					{tl("Forecast by provider for the {horizonLabel}", { horizonLabel })}
 				</caption>
 				<thead className="border-border/50 border-b text-muted-foreground">
 					<tr>
 						<th className="py-2 font-normal">Provider</th>
-						<th className="px-3 text-right font-normal">In range</th>
-						<th className="px-3 text-right font-normal">
+						<th className="px-3 text-end font-normal">In range</th>
+						<th className="px-3 text-end font-normal">
 							{tl("Forecast · {horizonLabel}", { horizonLabel })}
 						</th>
-						<th className="py-2 text-right font-normal">Trend</th>
+						<th className="py-2 text-end font-normal">Trend</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -122,12 +122,12 @@ export function ForecastSummary({
 									<span className="truncate">{series.label}</span>
 								</span>
 							</td>
-							<td className="px-3 text-right tabular-nums">
+							<td className="px-3 text-end tabular-nums">
 								{series.actualTotal === null
 									? "—"
 									: formatTrendValue(metric, series.actualTotal)}
 							</td>
-							<td className="px-3 text-right tabular-nums">
+							<td className="px-3 text-end tabular-nums">
 								{series.forecast ? (
 									<span
 										title={tl("80% range {lower} – {upper}", {
@@ -148,7 +148,7 @@ export function ForecastSummary({
 								)}
 							</td>
 							<td
-								className={`py-2 text-right tabular-nums ${series.forecast ? forecastTone(series.forecast) : "text-muted-foreground"}`}
+								className={`py-2 text-end tabular-nums ${series.forecast ? forecastTone(series.forecast) : "text-muted-foreground"}`}
 							>
 								{series.forecast ? formatForecastChange(series.forecast) : "—"}
 							</td>

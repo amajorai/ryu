@@ -5,11 +5,11 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { NodeOnboardingSnapshot } from "../src/lib/api/onboarding-profile.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/node-onboarding-settings-story.html";
-const EVIDENCE = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
+const EVIDENCE = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
 );
 async function fixture(page: Page, denied = false) {
 	const dir = await mkdtemp(path.join(tmpdir(), "ryu-node-reset-proof-"));

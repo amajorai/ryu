@@ -66,7 +66,7 @@ const buttonVariantClasses = cva(
 				regular: "gap-1.5",
 				"body-preview": "px-0 py-1",
 			},
-			edge: { joined: "border-r-0" },
+			edge: { joined: "border-e-0" },
 			appearance: {
 				"download-primary": "gap-1.5",
 				"download-primary-transparent":
@@ -87,11 +87,11 @@ const buttonVariantClasses = cva(
 				"attachment-remove-hidden":
 					"relative size-4 rounded-full text-muted-foreground opacity-0 after:absolute after:-inset-1 after:content-[''] hover:text-foreground",
 				"composer-mode": [
-					"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-left font-medium text-sm",
+					"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-start font-medium text-sm",
 					"items-start",
 				],
 				"composer-mode-active": [
-					"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-left font-medium text-sm",
+					"h-auto w-full items-center justify-start gap-1.5 rounded-2xl px-1.5 py-1 text-start font-medium text-sm",
 					"items-start bg-accent",
 				],
 				"composer-settings":
@@ -104,7 +104,7 @@ const buttonVariantClasses = cva(
 				"workbench-tab-close":
 					"size-5 opacity-0 focus-visible:opacity-100 group-hover/workbench-tab:opacity-100",
 				"question-option":
-					"h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left font-normal",
+					"h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-start font-normal",
 				"question-navigation": "h-6 px-2",
 				"question-submit": "h-6 px-2.5",
 				"collapse-toggle": "h-6 px-2 text-xs",
@@ -141,9 +141,10 @@ const buttonVariantClasses = cva(
 				"recipient-remove": "size-6 rounded-full p-0",
 				"plain-label": "font-normal",
 				"account-return": "text-muted-foreground",
-				"password-reveal": "px-3 py-2 hover:bg-transparent",
+				"password-reveal":
+					"absolute inset-y-0 end-0 h-full px-3 py-2 hover:bg-transparent",
 				"agent-model-option":
-					"h-auto w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left font-medium text-sm",
+					"h-auto w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-start font-medium text-sm",
 				"agent-model-picker": "w-full justify-between font-normal",
 				"agent-integration-option":
 					"h-auto w-full justify-start gap-2 rounded-none px-3.5 py-2.5 font-normal",
@@ -157,7 +158,7 @@ const buttonVariantClasses = cva(
 				"account-menu-menubar":
 					"flex size-[24px] items-center justify-center rounded-lg p-0 text-white/70 transition-colors hover:bg-white/10 hover:text-white",
 				"account-menu-sidebar":
-					"flex w-full items-center justify-start gap-2 rounded-xl py-1.5 pr-2 pl-1 text-left transition-colors hover:bg-muted",
+					"flex w-full items-center justify-start gap-2 rounded-xl py-1.5 ps-1 pe-2 text-start transition-colors hover:bg-muted",
 				"composer-stop":
 					"size-7 rounded-full bg-foreground text-background hover:bg-foreground/90 disabled:opacity-100",
 				"composer-call":

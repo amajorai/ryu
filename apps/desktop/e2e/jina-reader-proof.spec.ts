@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("renders Jina Reader with its bundled layered icon", async ({ page }) => {
 	const errors: string[] = [];
@@ -14,10 +14,7 @@ test("renders Jina Reader with its bundled layered icon", async ({ page }) => {
 		.poll(() => icon.evaluate((image: HTMLImageElement) => image.naturalWidth))
 		.toBeGreaterThan(0);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/jina-reader/jina-reader-listing.png"
-		),
+		path: proofEvidencePath("jina-reader/jina-reader-listing.png"),
 		fullPage: true,
 	});
 	await page
@@ -31,10 +28,7 @@ test("renders Jina Reader with its bundled layered icon", async ({ page }) => {
 		)
 		.toBeGreaterThan(0);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/jina-reader/jina-reader-listing-dark.png"
-		),
+		path: proofEvidencePath("jina-reader/jina-reader-listing-dark.png"),
 		fullPage: true,
 	});
 	expect(errors).toEqual([]);

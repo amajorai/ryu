@@ -1,9 +1,12 @@
+import { formatMessage } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	businessIncludedCreditUsd,
 	businessMonthlyPriceUsd,
 } from "./business-pricing.ts";
 import {
-	formatCount,
+	ENGLISH_PRICING_FORMAT,
+	type PricingFormat,
 	PUBLISHED_PRICING,
 	type PublishedMailAllowance,
 } from "./data/standalone-pricing.ts";
@@ -30,13 +33,46 @@ import {
 	PLAN_CAPABILITIES,
 } from "./pricing-comparison-plans.ts";
 
-export const usd = (amount: number): string => `$${formatCount(amount)}`;
+const englishLiteral: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
 
-export const recurring = (monthly: number, isYearly: boolean): string =>
-	isYearly ? `${usd(annualTotalPrice(monthly))}/yr` : `${usd(monthly)}/mo`;
+/**
+ * How one comparison render words and formats its figures: the English
+ * published copy by default, the reader's language and number format on screen.
+ */
+export interface ComparisonFormat {
+	format: PricingFormat;
+	tl: LiteralMessage;
+}
 
-export const gib = (value: number): string => `${formatCount(value)} GiB`;
-export const gb = (value: number): string => `${formatCount(value)} GB`;
+export const ENGLISH_COMPARISON_FORMAT: ComparisonFormat = {
+	format: ENGLISH_PRICING_FORMAT,
+	tl: englishLiteral,
+};
+
+/** A whole-dollar price: "$1,200" in English, "1.200 $" in German. */
+export const usd = (
+	amount: number,
+	{ format }: ComparisonFormat = ENGLISH_COMPARISON_FORMAT
+): string => format.price(amount);
+
+export const recurring = (
+	monthly: number,
+	isYearly: boolean,
+	fmt: ComparisonFormat = ENGLISH_COMPARISON_FORMAT
+): string =>
+	isYearly
+		? fmt.tl("{price}/yr", { price: usd(annualTotalPrice(monthly), fmt) })
+		: fmt.tl("{price}/mo", { price: usd(monthly, fmt) });
+
+export const gib = (
+	value: number,
+	{ format }: ComparisonFormat = ENGLISH_COMPARISON_FORMAT
+): string => `${format.count(value)} GiB`;
+export const gb = (
+	value: number,
+	{ format }: ComparisonFormat = ENGLISH_COMPARISON_FORMAT
+): string => `${format.count(value)} GB`;
 
 export const { mail } = PUBLISHED_PRICING;
 
@@ -97,39 +133,58 @@ export function onlyRow(
 export const hasManagedServer = (plan: ComparisonCatalogPlanId): boolean =>
 	PLAN_CAPABILITIES[plan].managedAi;
 
-export function priceRow(isYearly: boolean, seats: number): ComparisonRow {
+export function priceRow(
+	isYearly: boolean,
+	seats: number,
+	fmt: ComparisonFormat = ENGLISH_COMPARISON_FORMAT
+): ComparisonRow {
+	const { tl } = fmt;
+	const forSeats = (price: string) =>
+		tl("{price} for {seats, plural, one {# seat} other {# seats}}", {
+			price,
+			seats,
+		});
 	return {
 		id: "price",
 		label: isYearly ? "Price, billed yearly" : "Price, billed monthly",
 		...(isYearly ? { hint: "Yearly billing includes two months free" } : {}),
 		values: {
-			pro: recurring(PRO_MONTHLY_USD, isYearly),
-			plus: recurring(PLUS_MONTHLY_USD, isYearly),
-			max: recurring(MAX_MONTHLY_USD, isYearly),
-			"desktop-license": `${usd(DESKTOP_LICENSE_LAUNCH_USD)} once`,
+			pro: recurring(PRO_MONTHLY_USD, isYearly, fmt),
+			plus: recurring(PLUS_MONTHLY_USD, isYearly, fmt),
+			max: recurring(MAX_MONTHLY_USD, isYearly, fmt),
+			"desktop-license": tl("{price} once", {
+				price: usd(DESKTOP_LICENSE_LAUNCH_USD, fmt),
+			}),
 			"marketplace-membership": isYearly
-				? `${usd(MARKETPLACE_PASS_YEARLY_USD)}/yr`
-				: `${usd(MARKETPLACE_PASS_MONTHLY_USD)}/mo`,
-			teams: `${recurring(hostedAgentMonthlyPriceUsd("teams", seats), isYearly)} for ${seats} seats`,
-			business: `${recurring(businessMonthlyPriceUsd(seats), isYearly)} for ${seats} seats`,
-			enterprise: "Custom",
+				? tl("{price}/yr", { price: usd(MARKETPLACE_PASS_YEARLY_USD, fmt) })
+				: tl("{price}/mo", { price: usd(MARKETPLACE_PASS_MONTHLY_USD, fmt) }),
+			teams: forSeats(
+				recurring(hostedAgentMonthlyPriceUsd("teams", seats), isYearly, fmt)
+			),
+			business: forSeats(
+				recurring(businessMonthlyPriceUsd(seats), isYearly, fmt)
+			),
+			enterprise: tl("Custom"),
 		},
 	};
 }
 
-export function creditsRow(seats: number): ComparisonRow {
+export function creditsRow(
+	seats: number,
+	fmt: ComparisonFormat = ENGLISH_COMPARISON_FORMAT
+): ComparisonRow {
 	return {
 		id: "included-credits",
 		label: "Included AI credits each month",
 		hint: "Organization pools are shared and grow with seats",
 		values: {
-			pro: usd(PRO_INCLUDED_USD),
-			plus: usd(PLUS_INCLUDED_USD),
-			max: usd(MAX_INCLUDED_USD),
+			pro: usd(PRO_INCLUDED_USD, fmt),
+			plus: usd(PLUS_INCLUDED_USD, fmt),
+			max: usd(MAX_INCLUDED_USD, fmt),
 			"desktop-license": false,
 			"marketplace-membership": false,
-			teams: usd(hostedAgentIncludedCreditUsd("teams", seats)),
-			business: usd(businessIncludedCreditUsd(seats)),
+			teams: usd(hostedAgentIncludedCreditUsd("teams", seats), fmt),
+			business: usd(businessIncludedCreditUsd(seats), fmt),
 			enterprise: CONTRACTED,
 		},
 	};

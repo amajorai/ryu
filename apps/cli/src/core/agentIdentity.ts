@@ -10,6 +10,7 @@
 
 import { TREG_ACCOUNT_KEY } from "@ryuhq/core-client/agent-account-access";
 import type { AgentIdentityMode } from "@ryuhq/core-client/agents";
+import { tf, tr } from "../i18n/translate.ts";
 
 export type { AgentIdentityMode } from "@ryuhq/core-client/agents";
 
@@ -334,12 +335,14 @@ export function accountAccessHeadline(
 	accountAccess: readonly string[] | null
 ): string {
 	if (accountAccess === null) {
-		return "No limit";
+		return tr("No limit");
 	}
 	if (accountAccess.length === 0) {
-		return "Limited: no accounts";
+		return tr("Limited: no accounts");
 	}
-	return `Limited to ${accountAccess.length} account${accountAccess.length === 1 ? "" : "s"}`;
+	return tf("Limited to {count, plural, one {# account} other {# accounts}}", {
+		count: accountAccess.length,
+	});
 }
 
 /** The sentence under the headline. */

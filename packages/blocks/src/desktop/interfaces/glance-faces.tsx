@@ -12,8 +12,8 @@ import {
 	type GlanceFaceProps,
 } from "./glance-faces-type-scale.ts";
 import {
-	GLANCE_AGENT_STATE_LABELS,
 	GLANCE_NEEDS_YOU_LABEL,
+	glanceAgentStateLabel,
 	glanceListWindow,
 	glanceRunWhen,
 	glanceThreadTitle,
@@ -67,10 +67,10 @@ function ThreadRow({
 		<li>
 			<button
 				aria-label={tl("Open {title}, {state}", {
-					state: GLANCE_AGENT_STATE_LABELS[state],
+					state: glanceAgentStateLabel(state),
 					title,
 				})}
-				className="group corner-squircle -mx-[2.4cqw] grid w-[calc(100%+4.8cqw)] grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-[2cqw] rounded-[2.4cqw] px-[2.4cqw] py-[1.6cqw] text-left outline-none transition-colors hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring active:bg-foreground/[0.08]"
+				className="group corner-squircle -mx-[2.4cqw] grid w-[calc(100%+4.8cqw)] grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-[2cqw] rounded-[2.4cqw] px-[2.4cqw] py-[1.6cqw] text-start outline-none transition-colors hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring active:bg-foreground/[0.08]"
 				onClick={onOpen}
 				type="button"
 			>
@@ -81,6 +81,7 @@ function ThreadRow({
 							"truncate font-semibold text-foreground",
 							GLANCE_TYPE.body
 						)}
+						data-ryu-i18n="off"
 					>
 						{title}
 					</span>
@@ -90,7 +91,9 @@ function ThreadRow({
 						<span className="font-medium text-foreground/80">
 							{agentNames(snapshot, thread)}
 						</span>
-						{thread.lastMessage ? ` · ${thread.lastMessage}` : null}
+						{thread.lastMessage ? (
+							<span data-ryu-i18n="off">{` · ${thread.lastMessage}`}</span>
+						) : null}
 					</span>
 				</span>
 				<span
@@ -236,7 +239,7 @@ export function GlanceClockFace({
 						<span className="font-medium text-foreground">{next.title}</span>
 						{nextAgent ? ` · ${nextAgent.name}` : null}
 					</span>
-					<span className="ml-auto shrink-0 tabular-nums">
+					<span className="ms-auto shrink-0 tabular-nums">
 						{glanceRunWhen(next.start, now)}
 					</span>
 				</p>

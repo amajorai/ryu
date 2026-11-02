@@ -1,7 +1,7 @@
-import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import type { ProjectEnvironment } from "../src/store/useWorkspaceStore.ts";
 import type { ProjectSettingsProofSnapshot } from "./harness/project-settings-proof.mock.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROJECT_PATH = "/fixture/projects/project-settings";
 const SECONDARY_PATH = "/fixture/projects/shared";
@@ -23,11 +23,7 @@ interface ProjectSettingsWindow extends Window {
 }
 
 const evidence = (name: string) =>
-	path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence",
-		name
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence", name);
 
 // A project row is a SettingsNavRow: its button is named by the folder
 // basename, and the full path is the row's muted value beside the chevron

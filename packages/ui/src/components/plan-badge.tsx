@@ -1,3 +1,6 @@
+"use client";
+
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties } from "react";
 import drawingStyles from "./plan-badge.drawing.module.css";
@@ -39,7 +42,7 @@ interface TierStyle {
 	readonly gradient: string;
 	/** Text colour chosen for AA contrast on this gradient. */
 	readonly ink: string;
-	/** Short, all-caps label shown in the badge. */
+	/** Short catalog label, shown in all caps by CSS. */
 	readonly label: string;
 }
 
@@ -271,11 +274,14 @@ export function PlanBadge({
 	label,
 	title,
 }: PlanBadgeProps) {
+	const tl = useLiteralMessages();
 	if (!plan) {
 		return null;
 	}
 	const style = TIER_STYLES[plan];
-	const text = (label ?? style.label).toUpperCase();
+	// Translate the mixed-case catalog label first; CSS `uppercase` then caps it
+	// in scripts that have case and leaves CJK, Arabic, and Devanagari alone.
+	const text = tl(label ?? style.label);
 
 	const badgeInkStyle: BadgeInkStyle = {
 		"--plan-badge-1-color": `var(--plan-tier-${plan}-ink)`,
@@ -286,7 +292,7 @@ export function PlanBadge({
 	return (
 		<span
 			className={cn("inline-flex shrink-0 select-none align-middle", className)}
-			title={title ?? TIER_TITLES[plan]}
+			title={title ?? tl(TIER_TITLES[plan])}
 		>
 			<span
 				className={cn(
@@ -324,7 +330,7 @@ export function PlanBadge({
 					aria-hidden="true"
 					className="t-plan-badge-border pointer-events-none"
 				/>
-				<span className="relative skew-x-12 font-medium italic leading-none tracking-wide">
+				<span className="relative skew-x-12 font-medium uppercase italic leading-none tracking-wide">
 					{text}
 				</span>
 			</span>

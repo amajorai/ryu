@@ -386,7 +386,7 @@ export function PostsInterface({
 			ref={rootRef}
 		>
 			{sidebarInline ? (
-				<div className="w-60 shrink-0 border-sidebar-border border-r">
+				<div className="w-60 shrink-0 border-sidebar-border border-e">
 					{sidebar}
 				</div>
 			) : (
@@ -407,7 +407,7 @@ export function PostsInterface({
 							/>
 							<motion.div
 								animate={{ x: 0 }}
-								className="absolute inset-y-0 left-0 z-40 w-64 max-w-[85%] border-sidebar-border border-r shadow-lg"
+								className="absolute inset-y-0 start-0 z-40 w-64 max-w-[85%] border-sidebar-border border-e shadow-lg"
 								exit={reduceMotion ? { opacity: 0 } : { x: "-100%" }}
 								initial={reduceMotion ? false : { x: "-100%" }}
 								key="sidebar"

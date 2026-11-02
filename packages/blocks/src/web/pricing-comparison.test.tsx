@@ -292,6 +292,15 @@ describe("plan comparison columns", () => {
 		expect(html).toContain('scope="colgroup"');
 		expect(html).toContain('<span class="sr-only">Included</span>');
 		expect(html).toContain('<span class="sr-only">Not included</span>');
-		expect(html).toContain("sticky left-0");
+		expect(html).toContain("sticky start-0");
+	});
+
+	it("passes the billing terms through the translator", () => {
+		const wrap = (source: string) => `[de] ${source}`;
+		const billing = comparisonSections(ALL_COLUMNS, wrap, "de")
+			.flatMap((section) => section.rows)
+			.find((row) => row.id === "billing-terms");
+		expect(billing?.values.pro).toBe("[de] Monthly or yearly");
+		expect(billing?.values.enterprise).toBe("[de] Annual contract");
 	});
 });

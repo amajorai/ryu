@@ -380,6 +380,7 @@ mod tests {
             title: "t".to_owned(),
             question: None,
             summary: "s".to_owned(),
+            i18n: None,
             agent_id: None,
             conversation_id: None,
             source_ref: source.map(str::to_owned),

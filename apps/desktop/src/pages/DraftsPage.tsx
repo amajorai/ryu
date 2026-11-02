@@ -225,7 +225,7 @@ export default function DraftsPage() {
 					<h2 className="font-semibold text-sm">Outbox</h2>
 					{rows.length > 0 ? (
 						<Button
-							className="ml-auto"
+							className="ms-auto"
 							onClick={() => setSpreadOpen(true)}
 							size="sm"
 							variant="ghost-muted"
@@ -300,7 +300,7 @@ export default function DraftsPage() {
 								<span className="truncate text-sm" title={draft.preview}>
 									{draft.preview}
 								</span>
-								<span className="ml-auto shrink-0 text-muted-foreground/70 text-xs tabular-nums">
+								<span className="ms-auto shrink-0 text-muted-foreground/70 text-xs tabular-nums">
 									{draft.sent_at ? compactAge(draft.sent_at) : ""}
 								</span>
 							</div>

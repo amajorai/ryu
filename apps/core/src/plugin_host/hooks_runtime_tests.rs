@@ -56,6 +56,8 @@ impl crate::tool_exec::SandboxBridge for Bridge {
                     }
                 }
                 "host.log" => Value::Null,
+                // English node: the catalog renders the source unchanged.
+                "host.t" => args["source"].clone(),
                 other => panic!("unexpected capability {other}: {args}"),
             };
             crate::tool_exec::InvokeOutcome::Result(crate::tool_exec::ToolInvokeResult {

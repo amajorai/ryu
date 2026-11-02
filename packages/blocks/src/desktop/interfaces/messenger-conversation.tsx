@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -54,7 +55,7 @@ export function MessengerConversation({
 	if (!entry) {
 		return (
 			<section
-				aria-label={activeThread?.title || "Conversation"}
+				aria-label={activeThread?.title || tr("Conversation")}
 				className="flex size-full min-h-0 flex-col"
 			>
 				<HeaderBar>
@@ -66,7 +67,9 @@ export function MessengerConversation({
 						<MessagesSquare className="size-4" />
 					</span>
 					<div className="min-w-0 flex-1">
-						<HeaderTitle>{activeThread?.title || "Conversation"}</HeaderTitle>
+						<HeaderTitle>
+							{activeThread?.title || tr("Conversation")}
+						</HeaderTitle>
 						<p className="truncate text-muted-foreground text-xs">
 							No agent assigned
 						</p>
@@ -86,8 +89,8 @@ export function MessengerConversation({
 	if (typing) {
 		subtitle =
 			entry.kind === "team"
-				? typingLabel(typingNames, tl) || "typing"
-				: "typing";
+				? typingLabel(typingNames, tl) || tl("typing")
+				: tl("typing");
 	}
 	const startable = canStartWith(entry);
 	return (
@@ -103,12 +106,16 @@ export function MessengerConversation({
 					size="header"
 				/>
 				<div className="min-w-0 flex-1">
-					<HeaderTitle>{entry.name}</HeaderTitle>
+					<HeaderTitle>
+						<span data-ryu-i18n="off">{entry.name}</span>
+					</HeaderTitle>
 					<p
 						aria-live="polite"
 						className="flex items-center gap-1.5 truncate text-muted-foreground text-xs"
 					>
-						<span className="truncate">{subtitle}</span>
+						<span className="truncate" data-ryu-i18n="off">
+							{subtitle}
+						</span>
 						{typing ? <TypingDots /> : null}
 					</p>
 				</div>

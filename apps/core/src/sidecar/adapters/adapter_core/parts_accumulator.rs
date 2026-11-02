@@ -132,13 +132,19 @@ impl PartsAccumulator {
     /// Append the terminal error card for a failed assistant turn. Unlike the
     /// AI SDK's stream-level `error` frame, this reduced UIMessage part is stored
     /// with the assistant row so the reason and recovery survive rehydration.
-    pub(crate) fn error(&mut self, code: &str, title: &str, message: &str) {
-        self.parts.push(serde_json::json!({
+    /// `i18n` (Core messages, `AlertText` wire) lets the card render the title
+    /// and message in the reader's locale; the English pair stays the fallback.
+    pub(crate) fn error(&mut self, code: &str, title: &str, message: &str, i18n: Option<Value>) {
+        let mut part = serde_json::json!({
             "type": "error",
             "code": code,
             "title": title,
             "message": message,
-        }));
+        });
+        if let Some(i18n) = i18n {
+            part["i18n"] = i18n;
+        }
+        self.parts.push(part);
     }
 
     /// Collapse every text part into ONE part carrying `text`, positioned where

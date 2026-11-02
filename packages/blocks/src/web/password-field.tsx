@@ -70,7 +70,7 @@ export default function PasswordField({
 				<Button
 					aria-label={showPassword ? "Hide password" : "Show password"}
 					aria-pressed={showPassword}
-					className="absolute top-1/2 right-3 -translate-y-1/2"
+					className="absolute end-3 top-1/2 -translate-y-1/2"
 					disabled={disabled}
 					onClick={() => setShowPassword((visible) => !visible)}
 					size="icon-sm"

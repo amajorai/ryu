@@ -28,7 +28,7 @@ import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useRecentUpdates } from "@/src/hooks/useRecentUpdates.ts";
 import type { RecentUpdateItem } from "@/src/lib/api/updates.ts";
 import { getAppVersion } from "@/src/lib/app-version.ts";
-import { compactAge } from "@/src/lib/time.ts";
+import { compactAgo } from "@/src/lib/time.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 
@@ -121,7 +121,7 @@ export function HelpSubmenu() {
 	const releasedAtMs = releasedAt ? Date.parse(releasedAt) : Number.NaN;
 	const updatedLabel = Number.isNaN(releasedAtMs)
 		? null
-		: tl("Updated {age} ago", { age: compactAge(releasedAtMs) });
+		: tl("Updated {when}", { when: compactAgo(releasedAtMs) });
 
 	return (
 		<DropdownMenuSub>
@@ -162,14 +162,14 @@ export function HelpSubmenu() {
 						    start/stop rather than a clipped line. */}
 							<span
 								aria-hidden
-								className="absolute top-4 bottom-4 left-[11px] w-px bg-border"
+								className="absolute start-[11px] top-4 bottom-4 w-px bg-border"
 							/>
 							{whatsNew.map((item) => (
 								<DropdownMenuItem
 									key={`${item.kind}-${item.id}`}
 									onClick={() => openUpdate(item, frontendBase)}
 								>
-									<span className="mr-3 size-1.5 shrink-0 rounded-full bg-foreground/70" />
+									<span className="me-3 size-1.5 shrink-0 rounded-full bg-foreground/70" />
 									<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 										<OverflowTooltip
 											className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-medium text-sm"
@@ -183,7 +183,7 @@ export function HelpSubmenu() {
 										/>
 									</span>
 									<HugeiconsIcon
-										className="ml-2 size-3.5 shrink-0 text-muted-foreground"
+										className="ms-2 size-3.5 shrink-0 text-muted-foreground"
 										icon={ArrowUpRight01Icon}
 									/>
 								</DropdownMenuItem>
@@ -206,7 +206,7 @@ export function HelpSubmenu() {
 							</span>
 						) : null}
 					</span>
-					<span className="ml-2 text-muted-foreground text-xs tabular-nums">
+					<span className="ms-2 text-muted-foreground text-xs tabular-nums">
 						{appVersion ? `v${appVersion}` : "—"}
 					</span>
 				</DropdownMenuItem>

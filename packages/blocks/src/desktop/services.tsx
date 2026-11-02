@@ -80,7 +80,7 @@ export function ServicesView({
 						variant="ghost"
 					>
 						{bulkPending !== "start" && (
-							<HugeiconsIcon className="mr-1.5 h-3.5 w-3.5" icon={PlayIcon} />
+							<HugeiconsIcon className="me-1.5 h-3.5 w-3.5" icon={PlayIcon} />
 						)}
 						{tl("Start all")}
 					</Button>
@@ -93,7 +93,7 @@ export function ServicesView({
 					>
 						{bulkPending !== "stop" && (
 							<HugeiconsIcon
-								className="mr-1.5 h-3.5 w-3.5"
+								className="me-1.5 h-3.5 w-3.5"
 								icon={Square01Icon}
 							/>
 						)}

@@ -21,10 +21,20 @@ export default defineConfig({
 		"process.env": {},
 	},
 	resolve: {
-		alias: {
-			"@": desktopRoot,
-		},
-		dedupe: ["react", "react-dom", "three"],
+		alias: [
+			{ find: "@", replacement: desktopRoot },
+			// One three.js for the logo scene and @react-three/*. `three` is a
+			// @ryu/ui dependency, so `resolve.dedupe` (which resolves from the
+			// harness root) cannot find it; point every bare import at that copy.
+			{
+				find: /^three$/,
+				replacement: path.resolve(
+					desktopRoot,
+					"../../packages/ui/node_modules/three"
+				),
+			},
+		],
+		dedupe: ["react", "react-dom"],
 	},
 	server: {
 		host: "127.0.0.1",

@@ -172,4 +172,59 @@ describe("WorkbenchItemHost", () => {
 			container.querySelector('[data-testid="mount-count"]')?.textContent
 		).toBe("1");
 	});
+
+	test("restores a parked item's scroll offset when it is shown again", async () => {
+		const VAULT_ITEM: WorkbenchItem = {
+			...ROUTE_ITEM,
+			id: "route-vault",
+			source: { kind: "route", path: "/vault" },
+			title: "Vault",
+		};
+		await act(async () => {
+			root.render(
+				<DesktopWorkbenchProvider
+					makeId={(prefix) => prefix}
+					persistenceDelayMs={60_000}
+					storage={localStorage}
+				>
+					<WorkbenchSlotProvider>
+						<Probe>
+							<ActiveSlots />
+							<WorkbenchItemHost
+								renderItem={(item) => (
+									<div data-scroller={item.id}>{item.title}</div>
+								)}
+							/>
+						</Probe>
+					</WorkbenchSlotProvider>
+				</DesktopWorkbenchProvider>
+			);
+		});
+		await act(async () => {
+			workbench?.openItem(VAULT_ITEM, { region: "center" });
+		});
+		const scroller = container.querySelector<HTMLElement>(
+			'[data-scroller="route-vault"]'
+		);
+		expect(scroller).not.toBeNull();
+		if (!scroller) {
+			return;
+		}
+		scroller.scrollTop = 260;
+		scroller.dispatchEvent(new Event("scroll"));
+
+		await act(async () => {
+			workbench?.openItem(ROUTE_ITEM, { region: "center" });
+		});
+		// The Vault container is parked; a real browser drops its scroll box.
+		expect(scroller.closest("[data-test-slot]")).toBeNull();
+		scroller.scrollTop = 0;
+		scroller.dispatchEvent(new Event("scroll"));
+
+		await act(async () => {
+			workbench?.openItem(VAULT_ITEM, { region: "center" });
+		});
+		expect(scroller.closest("[data-test-slot]")).not.toBeNull();
+		expect(scroller.scrollTop).toBe(260);
+	});
 });

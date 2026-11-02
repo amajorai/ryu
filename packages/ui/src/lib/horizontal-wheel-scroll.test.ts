@@ -3,12 +3,17 @@ import {
 	createHorizontalWheelHandler,
 	type HorizontalWheelElement,
 	type HorizontalWheelEvent,
+	inlineWheelDeltaY,
 	installHorizontalWheelScrolling,
 	normalizeWheelDelta,
 } from "./horizontal-wheel-scroll.ts";
 
-type TestElement = HorizontalWheelElement & { overflowX: string };
+type TestElement = HorizontalWheelElement & {
+	direction?: "ltr" | "rtl";
+	overflowX: string;
+};
 const overflowValues = new WeakMap<HorizontalWheelElement, string>();
+const directionValues = new WeakMap<HorizontalWheelElement, string>();
 
 function element(overrides: Partial<TestElement> = {}): TestElement {
 	let scrollLeft = overrides.scrollLeft ?? 0;
@@ -26,13 +31,16 @@ function element(overrides: Partial<TestElement> = {}): TestElement {
 		configurable: true,
 		get: () => scrollLeft,
 		set: (value: number) => {
-			scrollLeft = Math.min(
-				Math.max(0, value),
-				Math.max(0, result.scrollWidth - result.clientWidth)
-			);
+			const range = Math.max(0, result.scrollWidth - result.clientWidth);
+			// Chromium and WebKit run RTL scrollLeft from 0 toward -range.
+			scrollLeft =
+				result.direction === "rtl"
+					? Math.min(Math.max(-range, value), 0)
+					: Math.min(Math.max(0, value), range);
 		},
 	});
 	overflowValues.set(result, result.overflowX);
+	directionValues.set(result, result.direction ?? "ltr");
 	return result;
 }
 
@@ -57,7 +65,8 @@ function wheelEvent(
 
 function handler() {
 	return createHorizontalWheelHandler(
-		(candidate) => overflowValues.get(candidate) ?? ""
+		(candidate) => overflowValues.get(candidate) ?? "",
+		(candidate) => directionValues.get(candidate) ?? "ltr"
 	);
 }
 
@@ -77,6 +86,70 @@ describe("horizontal wheel scrolling", () => {
 
 		expect(scroller.scrollLeft).toBe(0);
 		expect(left.prevented).toBe(1);
+	});
+
+	test("wheel-down moves an RTL strip toward its inline end", () => {
+		const scroller = element({ direction: "rtl", scrollWidth: 500 });
+		const onWheel = handler();
+
+		const down = wheelEvent({ deltaY: 10, target: scroller });
+		onWheel(down);
+
+		expect(scroller.scrollLeft).toBe(-10);
+		expect(down.prevented).toBe(1);
+
+		const up = wheelEvent({ deltaY: -10, target: scroller });
+		onWheel(up);
+
+		expect(scroller.scrollLeft).toBe(0);
+		expect(up.prevented).toBe(1);
+
+		// At the inline start, wheel-up stays native rather than being swallowed.
+		const pastStart = wheelEvent({ deltaY: -10, target: scroller });
+		onWheel(pastStart);
+
+		expect(scroller.scrollLeft).toBe(0);
+		expect(pastStart.prevented).toBe(0);
+	});
+
+	test("keeps deltaX physical under RTL and flips only the vertical term", () => {
+		const scroller = element({ direction: "rtl", scrollWidth: 500 });
+		// deltaX -4 moves physically left (more negative); deltaY 6 maps to -6.
+		const event = wheelEvent({ deltaX: -4, deltaY: 6, target: scroller });
+
+		handler()(event);
+
+		expect(scroller.scrollLeft).toBe(-10);
+		expect(inlineWheelDeltaY(6, "rtl")).toBe(-6);
+		expect(inlineWheelDeltaY(6, " RTL ")).toBe(-6);
+		expect(inlineWheelDeltaY(6, "ltr")).toBe(6);
+	});
+
+	test("reads each candidate's own direction while walking ancestors", () => {
+		const parent = element({ direction: "rtl", scrollWidth: 500 });
+		const nested = element({
+			parentElement: parent,
+			scrollLeft: 100,
+			scrollWidth: 200,
+		});
+		const event = wheelEvent({ deltaY: 10, target: nested });
+
+		handler()(event);
+
+		expect(nested.scrollLeft).toBe(100);
+		expect(parent.scrollLeft).toBe(-10);
+		expect(event.prevented).toBe(1);
+	});
+
+	test("the default direction reader falls back to LTR off the DOM", () => {
+		const scroller = element({ scrollWidth: 500 });
+		const event = wheelEvent({ deltaY: 5, target: scroller });
+
+		createHorizontalWheelHandler(
+			(candidate) => overflowValues.get(candidate) ?? ""
+		)(event);
+
+		expect(scroller.scrollLeft).toBe(5);
 	});
 
 	test("normalizes line and page wheel deltas", () => {

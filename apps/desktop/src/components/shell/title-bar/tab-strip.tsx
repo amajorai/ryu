@@ -174,7 +174,7 @@ export function TabDropdownStrip({
 				/>
 				<Button
 					aria-label={t("shell.new-chat-tab", undefined, "New chat tab")}
-					className="ml-0.5 shrink-0"
+					className="ms-0.5 shrink-0"
 					data-tauri-drag-region={false}
 					onClick={handleNewTab}
 					size="icon-sm"

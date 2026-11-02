@@ -12,11 +12,12 @@ import type {
 import {
 	type LayoutItem,
 	nextWidgetSize,
-	WIDGET_SIZE_NAMES,
 	WIDGET_SIZE_SHORT,
 	type WidgetKind,
+	widgetSizeName,
 	widgetSpec,
 } from "./dashboard-model.ts";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /**
@@ -96,7 +97,11 @@ function DragHandle({
 }) {
 	const tl = useLiteralMessages();
 	const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-		const target = moveTarget(event.key, index, count);
+		const target = moveTarget(
+			logicalArrowKey(event.key, event.currentTarget),
+			index,
+			count
+		);
 		if (target === undefined) {
 			return;
 		}
@@ -138,8 +143,8 @@ function EditControls({
 }) {
 	const tl = useLiteralMessages();
 	const next = nextWidgetSize(item.id, item.size);
-	const size = WIDGET_SIZE_NAMES[item.size];
-	const nextSize = WIDGET_SIZE_NAMES[next];
+	const size = widgetSizeName(item.size);
+	const nextSize = widgetSizeName(next);
 	return (
 		<span className="ms-auto flex shrink-0 items-center gap-1">
 			<Button

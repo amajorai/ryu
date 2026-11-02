@@ -42,3 +42,11 @@ test("magic-link sign-in can remember the requesting browser for 30 days", () =>
 	expect(html).toContain("Remember this device for 30 days");
 	expect(html).toContain("Open the email link in this browser to remember it.");
 });
+
+test("the sign-in consent line is one sentence with both legal links inside", () => {
+	const html = renderToStaticMarkup(<SignInForm />);
+
+	expect(html).toContain(
+		'By signing in, you agree to our <a class="underline" href="/terms">Terms</a><br/>and <a class="underline" href="/privacy">Privacy Policy</a>'
+	);
+});

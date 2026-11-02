@@ -22,6 +22,7 @@ import {
 	identityModeLabel,
 	isRemotePeerEngine,
 } from "../core/agentIdentity.ts";
+import { tf } from "../i18n/translate.ts";
 import type { AgentsArgs } from "./agents-args.ts";
 import { type AgentIdentityView, viewJson } from "./agents-core.ts";
 import {
@@ -114,8 +115,13 @@ function describeAvailable(
 	accounts: AvailableAccounts
 ): string {
 	const lines = [
-		`Accounts '${view.name}' can be allowed (${identityModeLabel(view.identityMode)}).`,
-		`Account access: ${accountAccessHeadline(view.accountAccess)}`,
+		tf("Accounts '{name}' can be allowed ({mode}).", {
+			name: view.name,
+			mode: identityModeLabel(view.identityMode),
+		}),
+		tf("Account access: {headline}", {
+			headline: accountAccessHeadline(view.accountAccess),
+		}),
 		"",
 	];
 	const rows = accounts.sections.flatMap((entry) =>
@@ -189,7 +195,10 @@ function renderPickList(
 		return `    ${number(row)} ${mark(row)} ${accountLabel(row)}${note ? ` · ${note}` : ""}`;
 	};
 	const lines = [
-		`Account access for '${view.name}' · ${identityModeLabel(view.identityMode)}`,
+		tf("Account access for '{name}' · {mode}", {
+			name: view.name,
+			mode: identityModeLabel(view.identityMode),
+		}),
 		`${accountAccessHeadline(draft)}. ${accountAccessNote(draft, view.identityMode)}`,
 	];
 	let owner: string | null = null;
@@ -272,8 +281,8 @@ export async function pickCommand(
 					view,
 					{ accountAccess: draft, engine: engineFlag(args) },
 					draft === null
-						? `'${view.name}' has no account limit now.`
-						: `Saved '${view.name}''s account access.`
+						? tf("'{name}' has no account limit now.", { name: view.name })
+						: tf("Saved '{name}''s account access.", { name: view.name })
 				);
 			case "invalid":
 				ctx.io.err(`${command.message}\n`);

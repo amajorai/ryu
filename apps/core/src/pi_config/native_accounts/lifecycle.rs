@@ -13,10 +13,10 @@ impl NativeAccounts {
             .stderr(std::process::Stdio::null());
         let status = tokio::time::timeout(Duration::from_secs(600), command.status())
             .await
-            .context("Native login timed out")?
-            .context("Starting native login")?;
+            .context(NativeAccountError::LoginTimedOut)?
+            .context(NativeAccountError::LoginStartFailed)?;
         if !status.success() {
-            bail!("Native login failed; retry signing in");
+            return Err(NativeAccountError::LoginFailed.into());
         }
         self.finish_login(attempt).await
     }
@@ -32,7 +32,7 @@ impl NativeAccounts {
             .map_err(|_| anyhow!("Account lifecycle lock unavailable"))?;
         let (expected, mut registration) = self.read(account_id)?;
         if registration.state == ConnectionState::Connected {
-            bail!("Disconnect this native account before signing in again");
+            return Err(NativeAccountError::DisconnectFirst.into());
         }
         let env = self.profile_env(&registration)?;
         // New attempt identity makes competing and cancelled completions stale.
@@ -43,7 +43,7 @@ impl NativeAccounts {
             .vault
             .replace_credential(SCOPE, account_id, &expected, expected_new.clone())?
         {
-            bail!("Native account changed before login");
+            return Err(NativeAccountError::AccountChanged.into());
         }
         let command = self.command(&env, &["login", "--use-device-flow"]);
         Ok((
@@ -68,7 +68,7 @@ impl NativeAccounts {
         } = attempt;
         let (current, _) = self.read(&account_id)?;
         if current != expected {
-            bail!("Native account changed during login");
+            return Err(NativeAccountError::AccountChanged.into());
         }
         let identity_output = self
             .run(
@@ -98,7 +98,7 @@ impl NativeAccounts {
             &expected,
             serde_json::to_value(registration)?,
         )? {
-            bail!("Native account changed during login; authorization was not attached");
+            return Err(NativeAccountError::AccountChanged.into());
         }
         if self.vault.active_info(SCOPE)?.is_none() {
             self.select(&account_id)?;
@@ -121,7 +121,7 @@ impl NativeAccounts {
             &expected,
             serde_json::to_value(registration)?,
         )? {
-            bail!("Native account changed during disconnect");
+            return Err(NativeAccountError::AccountChanged.into());
         }
         Ok(())
     }
@@ -185,7 +185,7 @@ impl NativeAccounts {
     pub async fn verify_capture(&self, captured: &NativeLaunch) -> Result<()> {
         let current = self.capture(&captured.affinity.account_id)?;
         if current.affinity != captured.affinity {
-            bail!("Native account changed before dispatch");
+            return Err(NativeAccountError::AccountChanged.into());
         }
         let output = self
             .run(
@@ -197,10 +197,10 @@ impl NativeAccounts {
         let identity = parse_identity(&output)?;
         let (_, registration) = self.read(&captured.affinity.account_id)?;
         if registration.identity.as_ref() != Some(&identity) {
-            bail!("Native CLI identity changed; reconnect account");
+            return Err(NativeAccountError::IdentityChanged.into());
         }
         if self.capture(&captured.affinity.account_id)?.affinity != captured.affinity {
-            bail!("Native account changed during identity verification");
+            return Err(NativeAccountError::AccountChanged.into());
         }
         Ok(())
     }
@@ -229,7 +229,7 @@ impl NativeAccounts {
             }
             let status = child.wait().await?;
             if !status.success() {
-                bail!("Native CLI operation failed; reconnect the selected account");
+                return Err(NativeAccountError::OperationFailed.into());
             }
             Ok(output)
         };
@@ -272,6 +272,6 @@ impl NativeAccounts {
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone();
         lock.try_lock_owned()
-            .map_err(|_| anyhow!("An authorization operation is already running for this account"))
+            .map_err(|_| NativeAccountError::OperationRunning.into())
     }
 }

@@ -1,7 +1,7 @@
 //! Agent-resource-authorized native account lifecycle and retained device login.
 
 use super::ServerState;
-use crate::pi_config::native_accounts::NativeAccounts;
+use crate::pi_config::native_accounts::{NativeAccountError, NativeAccounts};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -28,7 +28,21 @@ struct Progress {
     account_id: String,
     state: String,
     instructions: String,
+    /// English text of the failure; `errorCode` and `errorI18n` carry it as a
+    /// coded Core message for the reader's language.
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_i18n: Option<serde_json::Value>,
+}
+impl Progress {
+    fn fail(&mut self, error: NativeAccountError) {
+        let message = error.message();
+        self.error = Some(message.render("en"));
+        self.error_code = Some(error.code());
+        self.error_i18n = Some(message.to_wire());
+    }
 }
 struct Operation {
     agent_id: String,
@@ -120,14 +134,19 @@ async fn authorized(
     };
     let spawn = super::resolve_acp_spawn_cmd_authorized(state, caller, permission, agent).await?;
     let Some(spawn) = spawn else {
-        return Err(failure("Not a native ACP agent"));
+        return Err(refusal(NativeAccountError::Unsupported));
     };
     crate::pi_config::native_accounts::for_spawn(&spawn)
-        .map_err(|error| failure(&error.to_string()))?
-        .ok_or_else(|| failure("This agent does not support native account custody"))
+        .map_err(|error| failure(&error))?
+        .ok_or_else(|| refusal(NativeAccountError::Unsupported))
 }
-fn failure(message: &str) -> Response {
-    (StatusCode::BAD_REQUEST, Json(json!({"error":message}))).into_response()
+/// `400 { error, code, i18n }` for a coded failure.
+fn refusal(error: NativeAccountError) -> Response {
+    (StatusCode::BAD_REQUEST, Json(error.body())).into_response()
+}
+/// A failed operation: its coded sentence, or the generic one (detail logged).
+fn failure(error: &anyhow::Error) -> Response {
+    refusal(NativeAccountError::of(error))
 }
 
 #[utoipa::path(get, path="/api/agents/{id}/native-accounts", tag="Agents", params(("id"=String, Path)), responses((status=200, body=serde_json::Value)))]
@@ -142,7 +161,7 @@ pub async fn list(
     };
     match accounts.list() {
         Ok(list) => Json(json!({"accounts":list,"nativeAccounts":true})).into_response(),
-        Err(error) => failure(&error.to_string()),
+        Err(error) => failure(&error),
     }
 }
 #[utoipa::path(post, path="/api/agents/{id}/native-accounts", tag="Agents", params(("id"=String, Path)), request_body=serde_json::Value, responses((status=200, body=serde_json::Value)))]
@@ -158,7 +177,7 @@ pub async fn create(
     };
     match accounts.create(&body.label) {
         Ok(account) => Json(json!({"account":account})).into_response(),
-        Err(error) => failure(&error.to_string()),
+        Err(error) => failure(&error),
     }
 }
 #[utoipa::path(post, path="/api/agents/{id}/native-accounts/{account_id}/login", tag="Agents", params(("id"=String, Path),("account_id"=String, Path)), responses((status=202, body=serde_json::Value)))]
@@ -173,14 +192,14 @@ pub async fn login(
     };
     let (attempt, mut command) = match accounts.begin_login(&account_id) {
         Ok(attempt) => attempt,
-        Err(error) => return failure(&error.to_string()),
+        Err(error) => return failure(&error),
     };
     command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let mut child = match command.spawn() {
         Ok(child) => child,
-        Err(_) => return failure("Unable to start native login"),
+        Err(_) => return refusal(NativeAccountError::LoginStartFailed),
     };
     let stdout = child.stdout.take().expect("piped native login stdout");
     let stderr = child.stderr.take().expect("piped native login stderr");
@@ -196,7 +215,7 @@ pub async fn login(
         });
         if store.len() >= 64 {
             let _ = child.kill().await;
-            return failure("Too many authorization operations are running");
+            return refusal(NativeAccountError::TooManyOperations);
         }
         store.insert(
             operation_id.clone(),
@@ -210,6 +229,8 @@ pub async fn login(
                     state: "running".into(),
                     instructions: String::new(),
                     error: None,
+                    error_code: None,
+                    error_i18n: None,
                 },
                 cancel,
             },
@@ -226,13 +247,13 @@ pub async fn login(
                 child.wait().await.map_err(anyhow::Error::from)
             })?;
             if !status.success() {
-                anyhow::bail!("Native login did not complete");
+                return Err(NativeAccountError::LoginIncomplete.into());
             }
             accounts.finish_login(attempt).await
         };
         let result = tokio::select! {
-            result = tokio::time::timeout(Duration::from_secs(600), work) => result.unwrap_or_else(|_| Err(anyhow::anyhow!("Native login timed out"))),
-            _ = cancelled.changed() => Err(anyhow::anyhow!("Native login cancelled")),
+            result = tokio::time::timeout(Duration::from_secs(600), work) => result.unwrap_or_else(|_| Err(NativeAccountError::LoginTimedOut.into())),
+            _ = cancelled.changed() => Err(NativeAccountError::LoginCancelled.into()),
         };
         let _ = child.kill().await;
         if result.is_err() {
@@ -246,7 +267,9 @@ pub async fn login(
             }
             .into();
             operation.progress.instructions.clear();
-            operation.progress.error = result.err().map(|error| error.to_string());
+            if let Err(error) = &result {
+                operation.progress.fail(NativeAccountError::of(error));
+            }
         }
     });
     (StatusCode::ACCEPTED, Json(json!({"operationId":operation_id,"accountId":account_id,"state":"running","verified":false}))).into_response()
@@ -330,7 +353,7 @@ pub async fn disconnect(
     cancel_account(&agent, &id).await;
     match accounts.disconnect(&id) {
         Ok(()) => Json(json!({"disconnected":true})).into_response(),
-        Err(error) => failure(&error.to_string()),
+        Err(error) => failure(&error),
     }
 }
 #[utoipa::path(post, path="/api/agents/{id}/native-accounts/{account_id}/logout", tag="Agents", params(("id"=String, Path),("account_id"=String, Path)), responses((status=200, body=serde_json::Value)))]
@@ -346,120 +369,10 @@ pub async fn logout(
     cancel_account(&agent, &id).await;
     match accounts.logout(&id).await {
         Ok(()) => Json(json!({"loggedOut":true})).into_response(),
-        Err(error) => failure(&error.to_string()),
+        Err(error) => failure(&error),
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[tokio::test]
-    async fn device_progress_retains_instructions_without_losing_the_process() {
-        let id = uuid::Uuid::new_v4().to_string();
-        let (cancel, _) = watch::channel(false);
-        operations().lock().await.insert(
-            id.clone(),
-            Operation {
-                agent_id: "agent-a".into(),
-                owner: None,
-                created: std::time::Instant::now(),
-                cancel,
-                progress: Progress {
-                    operation_id: id.clone(),
-                    account_id: "account-a".into(),
-                    state: "running".into(),
-                    instructions: String::new(),
-                    error: None,
-                },
-            },
-        );
-        collect_instructions(
-            &b"Open the device login page and enter the code"[..],
-            id.clone(),
-        )
-        .await
-        .unwrap();
-        let mut store = operations().lock().await;
-        let operation = store.remove(&id).unwrap();
-        assert_eq!(operation.agent_id, "agent-a");
-        assert!(operation.progress.instructions.contains("device login"));
-        assert_eq!(operation.progress.state, "running");
-    }
-    #[tokio::test]
-    async fn oversized_login_instructions_fail_with_bounded_retention() {
-        let id = uuid::Uuid::new_v4().to_string();
-        let output = vec![b'x'; 20 * 1024];
-        assert!(collect_instructions(output.as_slice(), id).await.is_err());
-    }
-
-    #[test]
-    fn login_progress_and_cancellation_require_the_original_owner_and_agent() {
-        use crate::identity_verify::{OrgRole, VerifiedCaller};
-        let caller = |user: &str, org: &str| {
-            Some(VerifiedCaller {
-                user_id: user.into(),
-                org_id: Some(org.into()),
-                email: None,
-                email_verified: false,
-                role: OrgRole::Viewer,
-                teams: Vec::new(),
-            })
-        };
-        let (cancel, _) = watch::channel(false);
-        let operation = Operation {
-            agent_id: "agent-a".into(),
-            owner: owner(&caller("a", "org-a")),
-            created: std::time::Instant::now(),
-            cancel,
-            progress: Progress {
-                operation_id: "op".into(),
-                account_id: "account".into(),
-                state: "running".into(),
-                instructions: "code".into(),
-                error: None,
-            },
-        };
-        assert!(visible(&operation, "agent-a", &caller("a", "org-a")));
-        assert!(!visible(&operation, "agent-a", &caller("b", "org-a")));
-        assert!(!visible(&operation, "agent-a", &caller("a", "org-b")));
-        assert!(!visible(&operation, "agent-b", &caller("a", "org-a")));
-        assert!(!visible(&operation, "agent-a", &None));
-    }
-
-    #[tokio::test]
-    async fn removing_or_disconnecting_account_signals_its_login_operation() {
-        let id = uuid::Uuid::new_v4().to_string();
-        let (cancel, mut receiver) = watch::channel(false);
-        operations().lock().await.insert(
-            id.clone(),
-            Operation {
-                agent_id: id.clone(),
-                owner: None,
-                created: std::time::Instant::now(),
-                cancel,
-                progress: Progress {
-                    operation_id: id.clone(),
-                    account_id: id.clone(),
-                    state: "running".into(),
-                    instructions: String::new(),
-                    error: None,
-                },
-            },
-        );
-        let signal_id = id.clone();
-        let listener = tokio::spawn(async move {
-            receiver.changed().await.unwrap();
-            assert!(*receiver.borrow());
-            operations()
-                .lock()
-                .await
-                .get_mut(&signal_id)
-                .unwrap()
-                .progress
-                .state = "failed".into();
-        });
-        cancel_account(&id, &id).await;
-        listener.await.unwrap();
-        operations().lock().await.remove(&id);
-    }
-}
+#[path = "native_accounts_tests.rs"]
+mod tests;

@@ -1,14 +1,15 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceEvent,
-	THREAD_STATUS_LABELS,
-	threadStatus,
-} from "@ryuhq/protocol/interfaces";
+import { type InterfaceEvent, threadStatus } from "@ryuhq/protocol/interfaces";
 import { motion } from "motion/react";
 import { BoardAvatar } from "./board-avatar.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import {
+	compactAge,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import { TickerPriceHistory } from "./ticker-chart.tsx";
 import {
@@ -16,7 +17,6 @@ import {
 	describeChange,
 	formatChange,
 	formatPrice,
-	plural,
 	type TickerQuote,
 	type TickerRange,
 	type TickerSeries,
@@ -64,11 +64,8 @@ function moreStats(
 	now: number
 ): Stat[] {
 	const { stats } = quote;
-	const age = quote.lastActive ? compactAge(quote.lastActive, now) : "";
-	let lastActive = "—";
-	if (age) {
-		lastActive = age === "now" ? "Just now" : `${age} ago`;
-	}
+	const lastActive =
+		(quote.lastActive ? relativeAge(quote.lastActive, now) : "") || "—";
 	return [
 		{ label: "Your turn", value: formatPrice(stats.yourTurn) },
 		{ label: "Waiting on agent", value: formatPrice(stats.waiting) },
@@ -135,7 +132,7 @@ function ThreadRow({
 }) {
 	const tl = useLiteralMessages();
 	const status = threadStatus(thread);
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tr("Untitled thread");
 	const age = compactAge(thread.updatedAt, now);
 	return (
 		<li>
@@ -145,7 +142,7 @@ function ThreadRow({
 					"Open {title}: {status}, {messageCount, plural, one {# message} other {# messages}}",
 					{
 						messageCount: thread.messageCount,
-						status: THREAD_STATUS_LABELS[status],
+						status: threadStatusLabel(status),
 						title,
 					}
 				)}
@@ -158,22 +155,28 @@ function ThreadRow({
 				type="button"
 			>
 				<span className="flex min-w-0 flex-col gap-0.5">
-					<span className="truncate font-medium text-foreground text-sm">
+					<span
+						className="truncate font-medium text-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</span>
 					{thread.lastMessage ? (
 						<span className="truncate text-muted-foreground text-xs">
-							{thread.lastMessageRole === "user" ? "You: " : ""}
-							{thread.lastMessage}
+							{thread.lastMessageRole === "user" ? `${tr("You:")} ` : ""}
+							<span data-ryu-i18n="off">{thread.lastMessage}</span>
 						</span>
 					) : null}
 				</span>
 				<span className="flex flex-col items-end gap-0.5 whitespace-nowrap text-xs">
 					<span className={cn("text-sm", STATUS_TEXT[status])}>
-						{THREAD_STATUS_LABELS[status]}
+						{threadStatusLabel(status)}
 					</span>
 					<span className="text-muted-foreground tabular-nums">
-						{plural(thread.messageCount, "message")} · {age}
+						{tr("{count, plural, one {# message} other {# messages}}", {
+							count: thread.messageCount,
+						})}{" "}
+						· {age}
 					</span>
 				</span>
 			</button>
@@ -242,7 +245,11 @@ export function TickerDetail({
 							{quote.symbol}
 							<span className="sr-only">, {agent.name}</span>
 						</h2>
-						<span aria-hidden="true" className="text-foreground text-sm">
+						<span
+							aria-hidden="true"
+							className="text-foreground text-sm"
+							data-ryu-i18n="off"
+						>
 							{agent.name}
 						</span>
 						{working ? (

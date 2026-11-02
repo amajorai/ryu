@@ -16,6 +16,7 @@ import { NewAutomationDialog } from "@/src/components/calendar/NewAutomationDial
 import { TimeGridView } from "@/src/components/calendar/TimeGridView.tsx";
 import { useCalendarLocale } from "@/src/components/calendar/use-calendar-locale.ts";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
+import { calendarWeekStart } from "@/src/lib/calendar/date-labels.ts";
 import {
 	civilDayKey,
 	displayCivilDay,
@@ -74,11 +75,17 @@ export function CalendarContent({
 	// unless the user opts in via the toolbar toggle.
 	const [showSystemJobs, setShowSystemJobs] = useState(false);
 
-	const days = useMemo(() => viewDays(view, cursor), [view, cursor]);
+	// The grid's first weekday follows the UI locale, so a language change
+	// re-lays the grid at once (the weekday header already follows `locale`).
+	const weekStartsOn = calendarWeekStart(locale);
+	const days = useMemo(
+		() => viewDays(view, cursor, weekStartsOn),
+		[view, cursor, weekStartsOn]
+	);
 	// The fetch window is a pair of display-zone instants, so it follows the zone.
 	const range = useMemo(
-		() => viewRange(view, cursor),
-		[view, cursor, zoneRevision]
+		() => viewRange(view, cursor, weekStartsOn),
+		[view, cursor, weekStartsOn, zoneRevision]
 	);
 
 	const hasSystemJobs = useMemo(() => jobs.some((j) => j.system), [jobs]);

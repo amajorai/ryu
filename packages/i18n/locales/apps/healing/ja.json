@@ -1,0 +1,7 @@
+{
+  "A failed run was diagnosed": "失敗した実行が診断されました",
+  "Auto-fix attempts used: {count}. Review it manually.": "自動修正の試行回数: {count}。手動で確認してください。",
+  "Auto-fix gave up": "自動修正を断念しました",
+  "Fix waiting in your inbox: {diagnosis}": "受信トレイに修正が届いています: {diagnosis}",
+  "heal engine unavailable": "修復エンジンを利用できません"
+}

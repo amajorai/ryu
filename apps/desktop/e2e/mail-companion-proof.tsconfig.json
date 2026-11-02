@@ -6,6 +6,8 @@
   "include": [
     "mail-companion-proof.playwright.config.ts",
     "mail-companion-proof.spec.ts",
+    "mail-companion-proof.helpers.ts",
+    "part2-mail-companion-proof.spec.ts",
     "mail-companion-proof.host.ts",
     "harness/mail-companion-proof.tsx",
     "harness/mail-companion-proof.types.ts",

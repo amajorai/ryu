@@ -1,12 +1,49 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
-	type InterfaceEvent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
 	localDayKey,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { assignInks } from "./passport-model-inks.ts";
+
+export {
+	latestLine,
+	spokenDate,
+	stampDate,
+	stampDayMonth,
+	stampTime,
+} from "./passport-model-dates.ts";
+export { assignInks } from "./passport-model-inks.ts";
+export {
+	bookletSpreads,
+	countryPage,
+	findStamp,
+	openingPage,
+	singleSpreads,
+	spreadOfPage,
+	stampPage,
+} from "./passport-model-pages.ts";
+export {
+	mrzCheckDigit,
+	mrzLines,
+	placeStamps,
+	recordNumber,
+	recordSerial,
+	rotatedInk,
+	type StampPlacement,
+	upcomingTravel,
+	wrapLines,
+} from "./passport-model-print.ts";
+export {
+	markingLabel,
+	markingMeaning,
+	markingName,
+	stampLabel,
+	unassignedLabel,
+} from "./passport-model-words.ts";
 
 /**
  * Passport view model. Every agent is a country with its own stamp; every
@@ -48,20 +85,40 @@ export const MARKING_ORDER: readonly StampMarking[] = [
 ];
 
 export const MARKING_LABELS: Record<StampMarking, string> = {
-	applied: "APPLIED",
-	arrived: "ARRIVED – AWAITING ENTRY",
-	denied: "ENTRY DENIED",
-	exited: "EXITED",
-	processing: "VISA PROCESSING",
+	get applied() {
+		return tr("APPLIED");
+	},
+	get arrived() {
+		return tr("ARRIVED – AWAITING ENTRY");
+	},
+	get denied() {
+		return tr("ENTRY DENIED");
+	},
+	get exited() {
+		return tr("EXITED");
+	},
+	get processing() {
+		return tr("VISA PROCESSING");
+	},
 };
 
 /** The same markings in plain words, for the notes page and the record. */
 export const MARKING_MEANINGS: Record<StampMarking, string> = {
-	applied: "Sent; waiting on the agent",
-	arrived: "The agent replied; your turn",
-	denied: "The last run failed or stopped",
-	exited: "Nothing is pending",
-	processing: "The agent is working now",
+	get applied() {
+		return tr("Sent; waiting on the agent");
+	},
+	get arrived() {
+		return tr("The agent replied; your turn");
+	},
+	get denied() {
+		return tr("The last run failed or stopped");
+	},
+	get exited() {
+		return tr("Nothing is pending");
+	},
+	get processing() {
+		return tr("The agent is working now");
+	},
 };
 
 const MARKING_BY_STATUS: Record<ThreadStatus, StampMarking> = {
@@ -163,90 +220,6 @@ export const UNASSIGNED_STYLE: StampStyle = {
 export const FIRST_PAGE_STAMPS = 4;
 export const PAGE_STAMPS = 6;
 
-/**
- * Inks that read alike on paper (blue and violet, blue and slate, green and
- * slate, oxblood and umber; see STAMP_INKS). Two countries with the same
- * stamp shape never take a pair from this list, so they stay told apart.
- */
-const SIMILAR_INKS: readonly (readonly [number, number])[] = [
-	[0, 3],
-	[0, 4],
-	[2, 4],
-	[1, 5],
-];
-
-function inksAlike(a: number, b: number): boolean {
-	return (
-		a === b ||
-		SIMILAR_INKS.some(
-			([first, second]) =>
-				(first === a && second === b) || (first === b && second === a)
-		)
-	);
-}
-
-/**
- * Hand out inks to one batch of at most `count` ids, each id trying slots
- * from its own hashed start. Backtracks so no two ids with the same shape
- * share an ink that reads alike; null when no such assignment exists.
- */
-function inkBatch(
-	ids: readonly string[],
-	shapes: ReadonlyMap<string, number>,
-	count: number
-): number[] | null {
-	const chosen: number[] = [];
-	const place = (index: number): boolean => {
-		const id = ids[index];
-		if (id === undefined) {
-			return true;
-		}
-		const start = stableHash(`ink:${id}`) % count;
-		for (let step = 0; step < count; step += 1) {
-			const slot = (start + step) % count;
-			const clash = chosen.some(
-				(ink, other) =>
-					ink === slot ||
-					(shapes.get(ids[other] ?? "") === shapes.get(id) &&
-						inksAlike(ink, slot))
-			);
-			if (!clash) {
-				chosen.push(slot);
-				if (place(index + 1)) {
-					return true;
-				}
-				chosen.pop();
-			}
-		}
-		return false;
-	};
-	return place(0) ? chosen : null;
-}
-
-/**
- * Inks per agent: every ink once per `count` agents (in sorted id order, so
- * the result depends only on the set of ids), and countries that share a
- * stamp shape never share an ink that reads alike. If that cannot be met,
- * it falls back to plain distinct slots.
- */
-export function assignInks(
-	ids: readonly string[],
-	shapes: ReadonlyMap<string, number>,
-	count: number
-): Map<string, number> {
-	const sorted = [...ids].sort();
-	const inks = new Map<string, number>();
-	for (let start = 0; start < sorted.length; start += count) {
-		const batch = sorted.slice(start, start + count);
-		const chosen = inkBatch(batch, shapes, count);
-		const fallback = chosen ? null : assignSlots(batch, count, "ink");
-		batch.forEach((id, index) => {
-			inks.set(id, chosen?.[index] ?? fallback?.get(id) ?? 0);
-		});
-	}
-	return inks;
-}
-
 /** FNV-1a: a small, stable string hash. */
 export function stableHash(value: string): number {
 	let hash = 2_166_136_261;
@@ -317,7 +290,7 @@ export function countryCodes(
 	return codes;
 }
 
-function parseTime(iso: string): number | null {
+export function parseTime(iso: string): number | null {
 	const time = Date.parse(iso);
 	return Number.isNaN(time) ? null : time;
 }
@@ -483,382 +456,4 @@ export function buildPassport(
 			travelDays: days.size,
 		},
 	};
-}
-
-/** Openings of the booklet: the closed cover, then pages two at a time. */
-export function bookletSpreads(pageCount: number): PassportSpread[] {
-	const spreads: PassportSpread[] = [{ left: null, right: 0 }];
-	for (let page = 1; page < pageCount; page += 2) {
-		spreads.push({
-			left: page,
-			right: page + 1 < pageCount ? page + 1 : null,
-		});
-	}
-	return spreads;
-}
-
-/** One page per view, for narrow windows. */
-export function singleSpreads(pageCount: number): PassportSpread[] {
-	return Array.from({ length: pageCount }, (_, page) => ({
-		left: null,
-		right: page,
-	}));
-}
-
-export function spreadOfPage(
-	spreads: readonly PassportSpread[],
-	page: number
-): number {
-	const index = spreads.findIndex(
-		(spread) => spread.left === page || spread.right === page
-	);
-	return Math.max(0, index);
-}
-
-/** The first page of a country (null: the unassigned pages), or -1. */
-export function countryPage(
-	pages: readonly PassportPage[],
-	countryId: string | null
-): number {
-	return pages.findIndex(
-		(page) => page.kind === "visa" && page.first && page.countryId === countryId
-	);
-}
-
-/**
- * Where the booklet opens: the first visa page with a stamp on it (the
- * passport is for its stamps), else the first visa page, else the cover.
- */
-export function openingPage(pages: readonly PassportPage[]): number {
-	const stamped = pages.findIndex(
-		(page) => page.kind === "visa" && page.stamps.length > 0
-	);
-	if (stamped > 0) {
-		return stamped;
-	}
-	const visa = pages.findIndex((page) => page.kind === "visa");
-	return Math.max(0, visa);
-}
-
-/** The page a thread's stamp is on, or -1. */
-export function stampPage(
-	pages: readonly PassportPage[],
-	threadId: string
-): number {
-	return pages.findIndex(
-		(page) =>
-			page.kind === "visa" &&
-			page.stamps.some((stamp) => stamp.thread.id === threadId)
-	);
-}
-
-export function findStamp(
-	passport: Passport,
-	threadId: string | null
-): PassportStamp | null {
-	if (!threadId) {
-		return null;
-	}
-	for (const country of passport.countries) {
-		const found = country.stamps.find((stamp) => stamp.thread.id === threadId);
-		if (found) {
-			return found;
-		}
-	}
-	return (
-		passport.unassigned.find((stamp) => stamp.thread.id === threadId) ?? null
-	);
-}
-
-const MONTHS = [
-	"JAN",
-	"FEB",
-	"MAR",
-	"APR",
-	"MAY",
-	"JUN",
-	"JUL",
-	"AUG",
-	"SEP",
-	"OCT",
-	"NOV",
-	"DEC",
-] as const;
-
-/** "14 OCT 2026", the way entry stamps print a date. */
-export function stampDate(time: number): string {
-	const date = new Date(time);
-	const day = String(date.getDate()).padStart(2, "0");
-	return `${day} ${MONTHS[date.getMonth()] ?? ""} ${date.getFullYear()}`;
-}
-
-/** "14 Oct 2026": the stamp's date with a title-case month, for speech. */
-export function spokenDate(time: number): string {
-	const date = new Date(time);
-	const month = MONTHS[date.getMonth()] ?? "";
-	const titleMonth = `${month.slice(0, 1)}${month.slice(1).toLowerCase()}`;
-	return `${String(date.getDate()).padStart(2, "0")} ${titleMonth} ${date.getFullYear()}`;
-}
-
-/** "14 OCT": day and month, for short date lines. */
-export function stampDayMonth(time: number): string {
-	const date = new Date(time);
-	return `${String(date.getDate()).padStart(2, "0")} ${MONTHS[date.getMonth()] ?? ""}`;
-}
-
-/** "09:41", 24-hour local time. */
-export function stampTime(time: number): string {
-	const date = new Date(time);
-	return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-/**
- * The stamp's second date line: the time when the latest activity fell on the
- * entry day, otherwise the latest day.
- */
-export function latestLine(stamp: Pick<PassportStamp, "entryAt" | "latestAt">) {
-	const sameDay =
-		localDayKey(new Date(stamp.entryAt)) ===
-		localDayKey(new Date(stamp.latestAt));
-	return `LAST ${sameDay ? stampTime(stamp.latestAt) : stampDayMonth(stamp.latestAt)}`;
-}
-
-/** Spaces and punctuation that should not sit right before an ellipsis. */
-const TRAILING_BREAK = /[\s\-–—,.:;/]+$/;
-
-/**
- * Break text into at most `maxLines` lines of `maxChars`, on word boundaries
- * where it can, with an ellipsis when it runs out of room.
- */
-export function wrapLines(
-	text: string,
-	maxChars: number,
-	maxLines: number
-): string[] {
-	const words = text.trim().split(/\s+/).filter(Boolean);
-	const lines: string[] = [];
-	let current = "";
-	let index = 0;
-	while (index < words.length && lines.length < maxLines) {
-		const word = words[index] ?? "";
-		const next = current ? `${current} ${word}` : word;
-		if (next.length <= maxChars) {
-			current = next;
-			index += 1;
-		} else if (current) {
-			lines.push(current);
-			current = "";
-		} else {
-			// One word longer than a line: cut it.
-			lines.push(word.slice(0, maxChars));
-			words[index] = word.slice(maxChars);
-		}
-	}
-	if (current && lines.length < maxLines) {
-		lines.push(current);
-		current = "";
-	}
-	const truncated = index < words.length || current.length > 0;
-	if (truncated && lines.length > 0) {
-		// Fill the last line with as much of the rest as fits, then mark the cut.
-		const rest = [current, ...words.slice(index)].filter(Boolean).join(" ");
-		const full = `${lines.at(-1) ?? ""} ${rest}`;
-		let room = full.slice(0, maxChars - 1);
-		const midWord = /\S/.test(full.charAt(room.length));
-		const lastSpace = room.lastIndexOf(" ");
-		// Never leave a one- or two-letter stub of a word before the ellipsis.
-		if (midWord && lastSpace > 0 && room.length - lastSpace - 1 < 3) {
-			room = room.slice(0, lastSpace);
-		}
-		lines[lines.length - 1] = `${room.replace(TRAILING_BREAK, "")}…`;
-	}
-	return lines;
-}
-
-const MRZ_LENGTH = 44;
-const MRZ_WEIGHTS = [7, 3, 1] as const;
-
-function mrzValue(char: string): number {
-	if (char >= "0" && char <= "9") {
-		return Number(char);
-	}
-	if (char >= "A" && char <= "Z") {
-		return (char.codePointAt(0) ?? 65) - 55;
-	}
-	return 0;
-}
-
-/** ICAO 9303 check digit (weights 7, 3, 1; `<` counts as zero). */
-export function mrzCheckDigit(value: string): string {
-	let sum = 0;
-	[...value].forEach((char, index) => {
-		sum += mrzValue(char) * (MRZ_WEIGHTS[index % 3] ?? 1);
-	});
-	return String(sum % 10);
-}
-
-function mrzDate(time: number | null): string {
-	if (time === null) {
-		return "<<<<<<";
-	}
-	const date = new Date(time);
-	return `${String(date.getFullYear() % 100).padStart(2, "0")}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
-}
-
-/** The two machine-readable lines at the foot of the identity page. */
-export function mrzLines(passport: Passport): [string, string] {
-	const first = "P<RYUWORKSPACE<<HOLDER".padEnd(MRZ_LENGTH, "<");
-	const issued = mrzDate(passport.issuedAt);
-	const latest = mrzDate(passport.latestAt);
-	const counts = `${String(passport.totals.countries).padStart(2, "0")}${String(passport.totals.stamps).padStart(3, "0")}`;
-	const second = [
-		passport.number,
-		mrzCheckDigit(passport.number),
-		"RYU",
-		issued,
-		mrzCheckDigit(issued),
-		"<",
-		latest,
-		mrzCheckDigit(latest),
-		counts,
-	]
-		.join("")
-		.padEnd(MRZ_LENGTH - 1, "<");
-	return [first, `${second}${mrzCheckDigit(second)}`];
-}
-
-/** Upcoming scheduled runs, soonest first. */
-export function upcomingTravel(
-	events: readonly InterfaceEvent[] | undefined,
-	now: number,
-	limit: number
-): InterfaceEvent[] {
-	return (events ?? [])
-		.filter(
-			(event) =>
-				event.kind === "upcoming" && (parseTime(event.start) ?? 0) >= now
-		)
-		.sort((a, b) => a.start.localeCompare(b.start))
-		.slice(0, limit);
-}
-
-/** "1 stamp", "3 stamps". */
-export function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
-/**
- * The entry's record number, as printed on the record and the stamp rims.
- * It comes from the conversation's id alone, so it never changes between
- * renders, browsers, or once the entry date is known.
- */
-export function recordSerial(threadId: string): string {
-	return String(stableHash(`record:${threadId}`) % 100_000).padStart(5, "0");
-}
-
-export function recordNumber(code: string, threadId: string): string {
-	return `${code}-${recordSerial(threadId)}`;
-}
-
-/** How much paper each stamp shape actually inks, inside its 168 × 140 box. */
-const INK_EXTENT: Record<StampShape, { height: number; width: number }> = {
-	circle: { height: 132, width: 132 },
-	octagon: { height: 138, width: 138 },
-	rectangle: { height: 112, width: 160 },
-	triangle: { height: 136, width: 164 },
-};
-
-/** The axis-aligned size of a shape's ink once it is rotated. */
-export function rotatedInk(
-	shape: StampShape,
-	rotation: number
-): { height: number; width: number } {
-	const extent = INK_EXTENT[shape];
-	const radians = (Math.abs(rotation) * Math.PI) / 180;
-	const cos = Math.cos(radians);
-	const sin = Math.sin(radians);
-	return {
-		height: extent.width * sin + extent.height * cos,
-		width: extent.width * cos + extent.height * sin,
-	};
-}
-
-/**
- * Where stamps land on a page: two columns, rows spread over the whole stamp
- * area, filled in a scattered order (top left, then bottom right, ...) so a
- * page with one or two entries is used top to bottom like a real one.
- */
-const SCATTER: Record<number, readonly [number, number][]> = {
-	2: [
-		[0, 0],
-		[1, 1],
-		[1, 0],
-		[0, 1],
-	],
-	3: [
-		[0, 0],
-		[1, 1],
-		[0, 2],
-		[1, 0],
-		[0, 1],
-		[1, 2],
-	],
-};
-
-export interface StampPlacement {
-	/** Horizontal centre of the stamp box, in page px from the area's start. */
-	centerX: number;
-	/** Vertical position as a fraction of the free height (0 top, 1 bottom). */
-	fraction: number;
-	/** Small vertical nudge in px that never pushes ink past the area. */
-	nudgeY: number;
-}
-
-/**
- * Place a page's stamps inside an area `areaWidth` wide. The stamp's rotated
- * ink always stays inside the area, whatever its nudge.
- */
-export function placeStamps(
-	stamps: readonly Pick<PassportStamp, "offset" | "rotation">[],
-	shape: StampShape,
-	areaWidth: number,
-	rows: 2 | 3
-): StampPlacement[] {
-	const order = SCATTER[rows] ?? SCATTER[3] ?? [];
-	return stamps.map((stamp, index) => {
-		const [column, row] = order[index % order.length] ?? [0, 0];
-		const ink = rotatedInk(shape, stamp.rotation);
-		const half = ink.width / 2;
-		const base = areaWidth * (column === 0 ? 0.25 : 0.75);
-		const centerX = Math.min(
-			areaWidth - half,
-			Math.max(half, base + stamp.offset.x * 1.5)
-		);
-		const fraction = rows > 1 ? row / (rows - 1) : 0;
-		const lift = Math.abs(stamp.offset.y);
-		let nudgeY = stamp.offset.y;
-		if (fraction === 0) {
-			nudgeY = lift;
-		} else if (fraction === 1) {
-			nudgeY = -lift;
-		}
-		return { centerX, fraction, nudgeY };
-	});
-}
-
-/** A sentence the stamp button reads out. */
-export function stampLabel(
-	stamp: PassportStamp,
-	countryName: string | null
-): string {
-	const parts = [
-		stamp.thread.title || "Untitled conversation",
-		countryName ?? "Unassigned",
-		MARKING_LABELS[stamp.marking].toLowerCase(),
-		`entered ${spokenDate(stamp.entryAt)}`,
-	];
-	if (stamp.latestAt !== stamp.entryAt) {
-		parts.push(`last ${spokenDate(stamp.latestAt)}`);
-	}
-	return parts.join(", ");
 }

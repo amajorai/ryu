@@ -2,6 +2,7 @@
 // learning-privacy toggle, app-contributed rows and the node handoff.
 // Called only by `ChatRow`, so every hook here is still that row's hook.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { resolveRnpNode } from "@ryuhq/protocol/continuity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,6 +21,7 @@ import {
 	type PluginContextMenuItem,
 	pluginHostInvoke,
 } from "@/src/lib/api/plugins.ts";
+import { contributedRowFailedLabel } from "@/src/lib/contributed-row-feedback.ts";
 import { type Node, useNodeStore } from "@/src/store/useNodeStore.ts";
 import type { Conversation } from "@/types/chat.ts";
 import type { ChatRowHandlers } from "./sidebar-chat-row-types.ts";
@@ -33,6 +35,7 @@ export function useChatRowActions(
 	menuOpened = true
 ) {
 	const { onAutoRenameConversation, target } = handlers;
+	const tl = useLiteralMessages();
 	const [isRetitling, setIsRetitling] = useState(false);
 	const retitlingRef = useRef(false);
 	const autoRename = () => {
@@ -47,7 +50,7 @@ export function useChatRowActions(
 		});
 		toast.promise(pending, {
 			loading: "Renaming chat…",
-			success: (title: string) => `Renamed to "${title}"`,
+			success: (title: string) => tl('Renamed to "{title}"', { title }),
 			error: (error) =>
 				error instanceof ApiError
 					? (error.serverMessage ?? "Couldn't auto-rename chat")
@@ -132,7 +135,7 @@ export function useChatRowActions(
 			toast.promise(run(), {
 				loading: feedback?.loading ?? item.label,
 				success: feedback?.success ?? item.label,
-				error: feedback?.error ?? `${item.label} failed`,
+				error: feedback?.error ?? contributedRowFailedLabel(item.label),
 			});
 		},
 		[conv.id, target]

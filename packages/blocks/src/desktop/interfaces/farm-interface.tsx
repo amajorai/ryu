@@ -249,10 +249,9 @@ export function FarmInterface({
 
 	const harvest = (threadId: string) => {
 		const crop = model.crops.find((item) => item.thread.id === threadId);
+		const title = crop?.stage === "ripe" ? crop.thread.title : null;
 		focusTarget.current = "panel";
-		setAnnouncement(
-			crop?.stage === "ripe" ? `Harvested ${crop.thread.title}` : ""
-		);
+		setAnnouncement(title === null ? "" : tl("Harvested {title}", { title }));
 		port.openThread(threadId);
 	};
 	const openPlot = (plotId: string | null) => {
@@ -312,7 +311,7 @@ export function FarmInterface({
 		model.plots.find((plot) => plot.crops.includes(crop))?.name ?? "";
 	const { totals } = model;
 	const summary = actsOn
-		? `Farm: ${actSummaryLine(tally)}.`
+		? tl("Farm: {summary}.", { summary: actSummaryLine(tally) })
 		: tl(
 				"Farm: {plots, plural, one {{plotsText} plot} other {{plotsText} plots}}, {ripe} ready to harvest, {growing} growing, {seeds} seeded, {withered} withered.",
 				{

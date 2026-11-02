@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -93,7 +94,9 @@ function StatusLine({
 			{agent.description ? (
 				<>
 					<span aria-hidden="true">·</span>
-					<span className="min-w-0 truncate">{agent.description}</span>
+					<span className="min-w-0 truncate" data-ryu-i18n="off">
+						{agent.description}
+					</span>
 				</>
 			) : null}
 		</p>
@@ -116,7 +119,7 @@ function ThreadRow({
 		<li>
 			<button className={ROW} onClick={() => onOpen(thread.id)} type="button">
 				<span className="min-w-0 flex-1 truncate">
-					{thread.title || "Untitled"}
+					{thread.title || tr("Untitled")}
 				</span>
 				<span
 					className={cn(
@@ -282,7 +285,10 @@ function DialogueBand({
 			>
 				<header className="flex min-w-0 flex-col">
 					{/* The speaker's name tab sits on the box's top edge. */}
-					<h2 className="absolute -top-3.5 left-5 flex h-7 max-w-[calc(100%-40px)] items-center truncate rounded-md bg-primary px-3 font-semibold text-primary-foreground text-sm">
+					<h2
+						className="absolute -top-3.5 left-5 flex h-7 max-w-[calc(100%-40px)] items-center truncate rounded-md bg-primary px-3 font-semibold text-primary-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{agent.name}
 					</h2>
 					{acts ? (

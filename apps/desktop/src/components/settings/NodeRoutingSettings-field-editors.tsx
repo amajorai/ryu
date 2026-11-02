@@ -62,7 +62,7 @@ export function ModelFallbackEditor({
 							key={`${model}-${index}`}
 						>
 							<span className="text-sm">
-								<span className="mr-2 text-muted-foreground">{index + 1}.</span>
+								<span className="me-2 text-muted-foreground">{index + 1}.</span>
 								<code>{model}</code>
 							</span>
 							<Button

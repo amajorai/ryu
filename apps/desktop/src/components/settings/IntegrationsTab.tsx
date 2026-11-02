@@ -33,6 +33,12 @@ import {
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 import { ComposioBillingSettings } from "./ComposioBillingSettings.tsx";
+import { IngressUrlSetting } from "./IntegrationsTab-ingress-url.tsx";
+import {
+	ArtificialAnalysisSetupSteps,
+	ComposioSetupSteps,
+	HuggingFaceSetupSteps,
+} from "./IntegrationsTab-setup-steps.tsx";
 import {
 	type IngressToast,
 	ingressErrorDescription,
@@ -349,26 +355,7 @@ export function IntegrationsTab() {
 						</p>
 					</SettingsItem>
 					<SettingsItem title="How to set this up">
-						<ol className="list-decimal space-y-1 pb-1 pl-4 text-muted-foreground text-xs">
-							<li>
-								Create a token at{" "}
-								<a
-									className="underline hover:text-foreground"
-									href="https://huggingface.co/settings/tokens"
-									rel="noopener noreferrer"
-									target="_blank"
-								>
-									huggingface.co/settings/tokens
-								</a>
-								. A <code>read</code> token is enough.
-							</li>
-							<li>Paste it above and click Save.</li>
-							<li>
-								For each gated model, open its Hugging Face page and accept the
-								model's terms first. A token alone does not unlock a gated
-								download.
-							</li>
-						</ol>
+						<HuggingFaceSetupSteps />
 					</SettingsItem>
 				</SettingsGroup>
 			</SettingsSection>
@@ -406,25 +393,7 @@ export function IntegrationsTab() {
 						</p>
 					</SettingsItem>
 					<SettingsItem title="How to set this up">
-						<ol className="list-decimal space-y-1 pb-1 pl-4 text-muted-foreground text-xs">
-							<li>
-								Create a free key at{" "}
-								<a
-									className="underline hover:text-foreground"
-									href="https://artificialanalysis.ai/api-reference"
-									rel="noopener noreferrer"
-									target="_blank"
-								>
-									artificialanalysis.ai/api-reference
-								</a>
-								.
-							</li>
-							<li>Paste it above and click Save.</li>
-							<li>
-								Stats appear on model detail pages in the catalog when a model
-								matches an Artificial Analysis entry.
-							</li>
-						</ol>
+						<ArtificialAnalysisSetupSteps />
 					</SettingsItem>
 					<SettingsItem
 						actions={
@@ -464,29 +433,7 @@ export function IntegrationsTab() {
 						title="Connected accounts"
 					/>
 					<SettingsItem title="How to set this up">
-						<ol className="list-decimal space-y-1 pb-1 pl-4 text-muted-foreground text-xs">
-							<li>
-								Open this device's settings → API keys and paste your Composio
-								API key (create one at{" "}
-								<a
-									className="underline hover:text-foreground"
-									href="https://platform.composio.dev"
-									rel="noopener noreferrer"
-									target="_blank"
-								>
-									platform.composio.dev
-								</a>
-								).
-							</li>
-							<li>
-								Go to Marketplace → Connections to connect the apps you want
-								(Gmail, GitHub, …).
-							</li>
-							<li>
-								Open an agent in the editor → Connections to attach connected
-								toolkits, choosing all tools or specific ones.
-							</li>
-						</ol>
+						<ComposioSetupSteps />
 					</SettingsItem>
 				</SettingsGroup>
 			</SettingsSection>
@@ -529,68 +476,15 @@ export function IntegrationsTab() {
 							description="Applies on the next node restart. Ryu Relay is the managed default and needs you to be signed in; Tailscale Funnel and Cloudflare Tunnel expose this node's own URL."
 							title="Ingress backend"
 						/>
-						{/*
-						 * The self-hosted relay is the one backend that cannot discover a
-						 * URL for itself: Core deliberately refuses to fall back to the
-						 * loopback bind address (it would report a green ingress on an
-						 * address no sender can reach), so with no base the ingress errors
-						 * and stays down. This input is the only writer of the
-						 * `webhook.ingress.url` pref — the other supplier is the
-						 * `RYU_WEBHOOK_INGRESS_URL` env var, which the client cannot see.
-						 *
-						 * It renders whenever the picker OFFERS the self-hosted relay, not
-						 * when it is selected. Gating on the selection made this a control
-						 * you could only reach from a state Core now refuses to enter (it
-						 * 400s an own-relay selection with no usable URL), i.e. the pref's
-						 * sole writer sat behind its own precondition. The title and the
-						 * copy scope it to that one backend so it reads as "configure this
-						 * to enable Self-hosted relay" while another backend is active,
-						 * rather than as a URL the current backend uses.
-						 */}
 						{showIngressUrl && (
-							<SettingsItem title="Self-hosted relay public URL">
-								<div className="flex items-center gap-2">
-									<Input
-										aria-label="Self-hosted relay public URL"
-										autoComplete="off"
-										className="flex-1"
-										disabled={!ingressUrlLoaded}
-										id="ingress-url"
-										onChange={(e) => setIngressUrlValue(e.target.value)}
-										placeholder="https://ryu.example.com"
-										size="compact"
-										type="url"
-										value={ingressUrl}
-									/>
-									<Button
-										disabled={
-											!ingressUrlLoaded || savingIngressUrl || !urlDirty
-										}
-										onClick={handleSaveIngressUrl}
-										size="sm"
-									>
-										{savingIngressUrl ? "Saving…" : "Save"}
-									</Button>
-								</div>
-								{urlDirty && ingressUrlLoaded ? (
-									<p className="font-medium text-foreground text-xs">
-										Not saved yet. Selecting Self-hosted relay checks the saved
-										value, not what is typed here.
-									</p>
-								) : null}
-								<p className="text-muted-foreground text-xs">
-									Save this first, then pick <em>Self-hosted relay</em> above:
-									that backend serves whatever base is configured and this node
-									refuses the selection until one is. Use the address this node
-									is reachable at from the public internet: scheme and host, no
-									path (your reverse proxy or tunnel); webhook paths are
-									appended to it. The other backends publish a URL of their own
-									and ignore this. Set <code>RYU_WEBHOOK_INGRESS_URL</code> in
-									this node's environment instead if you prefer. It takes
-									precedence over this field, and pins the backend to
-									Self-hosted relay.
-								</p>
-							</SettingsItem>
+							<IngressUrlSetting
+								dirty={urlDirty}
+								loaded={ingressUrlLoaded}
+								onChange={setIngressUrlValue}
+								onSave={handleSaveIngressUrl}
+								saving={savingIngressUrl}
+								value={ingressUrl}
+							/>
 						)}
 					</SettingsGroup>
 				</SettingsSection>

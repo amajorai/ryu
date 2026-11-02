@@ -62,6 +62,62 @@ const reads = new Map<string, PluginValue>(
 		"/api/drafts/list": { drafts: [] },
 		// LaunchConfig defaults omit each unset optional override on the wire.
 		"/api/models/gemma-4-e2b-it/launch-config": {},
+		"/api/models/auto/launch-config": {},
+		// local_egress_api desktop_status for a computer that routes no node.
+		"/api/local-egress/desktop": { enabled: false, nodes: [] },
+		// list_inference_presets: engines presets.rs builtin_presets, nothing saved.
+		"/api/inference/presets": {
+			presets: [
+				[
+					"precise",
+					"Precise",
+					"Low randomness for code, extraction, and factual answers.",
+					0.2,
+					0.9,
+				],
+				[
+					"balanced",
+					"Balanced",
+					"General chat with moderate variety.",
+					0.7,
+					0.95,
+				],
+				[
+					"creative",
+					"Creative",
+					"Higher variety for brainstorming and writing.",
+					1,
+					0.98,
+				],
+			].map(([id, name, description, temperature, top_p]) => ({
+				id: `builtin.${id}`,
+				name,
+				description,
+				target: "any",
+				sampling: { temperature, top_p },
+				builtin: true,
+				created_at: 0,
+				updated_at: 0,
+			})),
+		},
+		// inference_sampling_fields with neither engine nor provider: presets.rs
+		// remote_sampling_fields("") answers the OpenAI-compatible set.
+		"/api/inference/sampling-fields": {
+			local: false,
+			fields: [
+				"temperature",
+				"top_p",
+				"max_tokens",
+				"frequency_penalty",
+				"presence_penalty",
+				"seed",
+				"stop",
+				"prefill",
+				"extra",
+				"response_format",
+				"logit_bias",
+			],
+		},
 		"/api/agents/catalog": { agents: [] },
 		// PreferencesStore returns null for an absent preference; real readers apply defaults.
 		"/api/preferences/voice-input": { value: null },
@@ -372,12 +428,21 @@ export function responseForConsoleBootstrapRead(
 			? structuredClone(reads.get(url.pathname) ?? null)
 			: undefined;
 	}
-	// inference.ts getModelContextWindow: unknown model hides the meter.
+	// inference.ts getModelContextWindow: an unknown model (or the `auto`
+	// router) hides the meter.
 	if (
 		url.pathname === "/api/models/context-window" &&
-		matchesQuery(url, { model: "gemma-4-e2b-it" })
+		(matchesQuery(url, { model: "gemma-4-e2b-it" }) ||
+			matchesQuery(url, { model: "auto" }))
 	) {
 		return { contextLength: null };
+	}
+	// approvals.ts approvalsListPath opts in to app-job approvals.
+	if (
+		url.pathname === "/api/approvals" &&
+		matchesQuery(url, { include: "app_jobs" })
+	) {
+		return { approvals: [] };
 	}
 	if (url.pathname === "/api/activity" && matchesQuery(url, { limit: "24" })) {
 		return { items: [] };

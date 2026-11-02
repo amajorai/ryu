@@ -27,7 +27,7 @@ export interface Product {
 		secondaryCta?: CtaLink;
 		note?: string;
 	};
-	faq?: { q: string; a: string }[];
+	faq?: { question: string; answer: string }[];
 	/** An interactive anatomy figure shown full width after the hero. */
 	figure?: ProductFigureId;
 	hero: {

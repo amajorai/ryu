@@ -3,7 +3,10 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
 	testDir: ".",
-	testMatch: "app-update-transaction-proof.spec.ts",
+	testMatch: [
+		"app-update-transaction-proof.spec.ts",
+		"part*-app-update-transaction-proof.spec.ts",
+	],
 	outputDir: "../test-results/app-update-transaction-proof",
 	workers: 1,
 	retries: 0,

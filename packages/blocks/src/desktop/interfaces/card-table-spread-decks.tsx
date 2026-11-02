@@ -252,7 +252,7 @@ function DockedDeck({
 				{working && !fanned ? (
 					<span
 						aria-hidden="true"
-						className="absolute -top-1 -right-1 z-10 grid size-2.5 place-items-center"
+						className="absolute -end-1 -top-1 z-10 grid size-2.5 place-items-center"
 						data-live-marker=""
 					>
 						{reduceMotion ? null : (
@@ -264,7 +264,7 @@ function DockedDeck({
 				{failed && !fanned && !working ? (
 					<span
 						aria-hidden="true"
-						className="absolute -top-1 -right-1 z-10 size-2 rounded-full bg-destructive ring-2 ring-background"
+						className="absolute -end-1 -top-1 z-10 size-2 rounded-full bg-destructive ring-2 ring-background"
 					/>
 				) : null}
 			</span>
@@ -276,6 +276,7 @@ function DockedDeck({
 							? "font-medium text-foreground"
 							: "text-muted-foreground group-hover/deck:text-foreground"
 					)}
+					data-ryu-i18n="off"
 				>
 					{deck.name}
 				</span>

@@ -1,5 +1,6 @@
 import { cn } from "@ryu/ui/lib/utils";
 import type { FocusEvent, KeyboardEvent, MouseEvent, RefObject } from "react";
+import { inlineSign, logicalArrowKey } from "./inline-direction.ts";
 import {
 	ANIMATED_ROW_LIMIT,
 	CELL,
@@ -60,8 +61,10 @@ function revealCell(
 	if (frozen) {
 		return;
 	}
-	const left = box.left + frozenWidth;
-	const right = box.left + container.clientWidth;
+	// The frozen columns sit at the inline start: the physical right under RTL.
+	const rtl = inlineSign(container) === -1;
+	const left = box.left + (rtl ? 0 : frozenWidth);
+	const right = box.left + container.clientWidth - (rtl ? frozenWidth : 0);
 	if (cell.left < left) {
 		container.scrollLeft -= left - cell.left;
 	} else if (cell.right > right) {
@@ -167,15 +170,28 @@ export function SheetGrid({
 			(event.key === "ArrowLeft" || event.key === "ArrowRight")
 		) {
 			event.preventDefault();
+			// The column's end edge is the physical left under RTL, matching
+			// the pointer resize in sheet-grid-header.
 			const step =
-				event.key === "ArrowRight" ? KEY_RESIZE_STEP : -KEY_RESIZE_STEP;
+				logicalArrowKey(event.key, event.currentTarget) === "ArrowRight"
+					? KEY_RESIZE_STEP
+					: -KEY_RESIZE_STEP;
 			onResize(
 				column.id,
 				clampColumnWidth(column.id, widths[column.id] + step)
 			);
 			return;
 		}
-		const next = moveSheetCell(cell, event, rows.length);
+		// Arrow keys follow the reading direction: the grid mirrors under RTL.
+		const next = moveSheetCell(
+			cell,
+			{
+				ctrlKey: event.ctrlKey,
+				key: logicalArrowKey(event.key, event.currentTarget),
+				metaKey: event.metaKey,
+			},
+			rows.length
+		);
 		if (!next) {
 			return;
 		}
@@ -253,7 +269,7 @@ export function SheetGrid({
 						className={cn(
 							CELL,
 							HEADER_EDGE,
-							"sticky top-0 left-0 z-30 bg-muted px-0"
+							"sticky start-0 top-0 z-30 bg-muted px-0"
 						)}
 					/>
 					{SHEET_COLUMNS.map((column, index) => (

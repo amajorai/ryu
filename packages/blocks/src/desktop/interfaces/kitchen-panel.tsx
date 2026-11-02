@@ -273,12 +273,15 @@ function TicketSection({
 							<li key={ticket.id}>
 								<button
 									aria-label={ticketLabel(ticket, now, words)}
-									className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:ring-3 focus-visible:ring-ring/30"
+									className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-start outline-none transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:ring-3 focus-visible:ring-ring/30"
 									onClick={() => onOpen(ticket.id)}
 									type="button"
 								>
 									<StateMark state={state} />
-									<span className="min-w-0 flex-1 truncate text-foreground text-sm">
+									<span
+										className="min-w-0 flex-1 truncate text-foreground text-sm"
+										data-ryu-i18n="off"
+									>
 										{ticket.title}
 									</span>
 									<span
@@ -289,7 +292,7 @@ function TicketSection({
 									>
 										{words ? words.label : TICKET_LABELS[ticket.state]}
 									</span>
-									<span className="w-10 shrink-0 text-right text-[13px] text-muted-foreground tabular-nums">
+									<span className="w-10 shrink-0 text-end text-[13px] text-muted-foreground tabular-nums">
 										{words
 											? (words.elapsed ?? "")
 											: ticketTimer(

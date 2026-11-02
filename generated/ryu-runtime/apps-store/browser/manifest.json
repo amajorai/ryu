@@ -10,7 +10,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/browser",
   "name": "Browser",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "stability": "experimental",
   "system": true,
   "description": "A real-Chromium browser (Electron) exposed as the grant-gated `browser.control` capability. Local nodes can share one embedded session with the user; managed cloud nodes give each Bot a hidden tab lane with its own persistent Chromium profile, so each agent signs in to sites separately and never sees another agent's cookies, logins, browsing history, site permissions, or downloads. Core routes the desktop Browser panel and agent tools through its authenticated ext-proxy.",
@@ -853,7 +853,7 @@
       },
       "port": 7993,
       "health_path": "/health",
-      "host_api": { "grants": ["vault:fill"] },
+      "host_api": { "grants": ["vault:fill", "security-key:relay"] },
       "lazy": true,
       "idle_stop_secs": 300,
       "http": {
@@ -1005,7 +1005,8 @@
   "permission_grants": [
     "browser:control",
     "tool:http-egress:127.0.0.1",
-    "vault:fill"
+    "vault:fill",
+    "security-key:relay"
   ],
   "permission_levels": [
     {

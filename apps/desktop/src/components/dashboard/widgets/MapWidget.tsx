@@ -6,6 +6,10 @@ import {
 // from the widget value; center/zoom from config. The map instance is created once
 // and markers are reconciled when the value changes.
 
+import {
+	useMaplibreLabelLanguage,
+	useMaplibreLocale,
+} from "@ryu/blocks/desktop/maplibre-labels.ts";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef } from "react";
@@ -54,6 +58,9 @@ export function MapBody({
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const mapRef = useRef<maplibregl.Map | null>(null);
 	const markersRef = useRef<maplibregl.Marker[]>([]);
+	const maplibreLocale = useMaplibreLocale();
+	const localeRef = useRef(maplibreLocale);
+	localeRef.current = maplibreLocale;
 
 	// Create the map once.
 	useEffect(() => {
@@ -67,6 +74,7 @@ export function MapBody({
 			center: cfg.center ?? [0, 20],
 			zoom: cfg.zoom ?? 1.2,
 			attributionControl: false,
+			locale: localeRef.current,
 		});
 		mapRef.current = map;
 		return () => {
@@ -80,6 +88,7 @@ export function MapBody({
 		// Center/zoom changes are applied in the reconcile effect, not on re-create.
 		// map is created once
 	}, [cfg.zoom, cfg.center]);
+	useMaplibreLabelLanguage(mapRef);
 
 	// Reconcile markers + camera when the value or config changes.
 	useEffect(() => {

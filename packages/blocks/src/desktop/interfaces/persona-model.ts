@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -17,7 +18,6 @@ export type {
 } from "./persona-model-activity.ts";
 export {
 	agoLabel,
-	countLabel,
 	isThreadAnswered,
 	personaActivity,
 	personaGoals,
@@ -43,11 +43,21 @@ export const PERSONA_TABS = [
 export type PersonaTab = (typeof PERSONA_TABS)[number];
 
 export const PERSONA_TAB_LABELS: Record<PersonaTab, string> = {
-	activity: "Activity",
-	chat: "Chat",
-	feed: "Feed",
-	goals: "Goals",
-	ideas: "Ideas",
+	get activity() {
+		return tr("Activity");
+	},
+	get chat() {
+		return tr("Chat");
+	},
+	get feed() {
+		return tr("Feed");
+	},
+	get goals() {
+		return tr("Goals");
+	},
+	get ideas() {
+		return tr("Ideas");
+	},
 };
 
 /** How far the status line under the persona's name is unfolded. */
@@ -171,11 +181,21 @@ function stepRank(thread: InterfaceThread): number {
 
 /** The state that follows the task in the one-liner. */
 export const STEP_LABELS: Record<ThreadStatus, string> = {
-	attention: "Run stopped",
-	quiet: "Not started",
-	waiting: "Queued",
-	working: "Working",
-	"your-turn": "Your turn",
+	get attention() {
+		return tr("Run stopped");
+	},
+	get quiet() {
+		return tr("Not started");
+	},
+	get waiting() {
+		return tr("Queued");
+	},
+	get working() {
+		return tr("Working");
+	},
+	get "your-turn"() {
+		return tr("Your turn");
+	},
 };
 
 /**
@@ -199,7 +219,7 @@ export function personaStatus(
 	const lead = steps[0];
 	if (!lead) {
 		return {
-			headline: agent?.description || "Free to chat",
+			headline: agent?.description || tr("Free to chat"),
 			label: "",
 			status: "idle",
 			steps,
@@ -209,7 +229,7 @@ export function personaStatus(
 	const status = threadStatus(lead);
 	const label = STEP_LABELS[status];
 	return {
-		headline: `${lead.title || "Untitled"} · ${label}`,
+		headline: `${lead.title || tr("Untitled")} · ${label}`,
 		label,
 		status,
 		steps,

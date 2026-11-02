@@ -12,15 +12,15 @@ import type * as React from "react";
 import { usePortalContainer } from "./portal-container.tsx";
 
 const dialogHeaderPurpose = {
-	"license-browser": "border-border/60 border-b px-6 py-5 pr-14",
+	"license-browser": "border-border/60 border-b px-6 py-5 pe-14",
 	"package-install": "border-border/60 border-b px-6 py-5",
 	"project-settings": "space-y-1.5 border-b px-6 py-4",
 	"cloud-settings": "pe-8",
 	"records-panel": "border-b px-6 py-5",
-	"quick-preview": "pr-10",
+	"quick-preview": "pe-10",
 	"workflow-fork": "px-2 pt-1",
 	"agent-editor": "border-border/60 border-b px-6 py-4",
-	"marketplace-guide": "gap-2 pr-8",
+	"marketplace-guide": "gap-2 pe-8",
 	"agent-conversation": "items-center border-border/60 border-b px-4 py-3",
 };
 
@@ -40,7 +40,7 @@ const dialogTitleTypography = {
 	"wrapped-label": "break-words leading-tight",
 	code: "font-mono",
 	explanation: "text-xl leading-7",
-	"conversation-share": "pr-8 text-lg",
+	"conversation-share": "pe-8 text-lg",
 	"compact-preview": "text-base",
 	"marketplace-guide": "font-medium text-2xl tracking-tight sm:text-3xl",
 };
@@ -110,7 +110,7 @@ const dialogContentAppearance = {
 	// The settings frame (desktop settings, GatewayDialog): a fixed 880 x 640
 	// sheet that shrinks with the window, full screen on mobile.
 	"gateway-settings":
-		"!w-[min(880px,calc(100vw-48px))] !max-w-none max-md:!w-screen max-md:!max-w-none [&>[data-slot=dialog-close]]:!top-5 [&>[data-slot=dialog-close]]:!right-5 h-[min(640px,calc(100vh-48px))] gap-0 overflow-hidden rounded-2xl p-0 max-md:h-[100dvh] max-md:rounded-none",
+		"!w-[min(880px,calc(100vw-48px))] !max-w-none max-md:!w-screen max-md:!max-w-none [&>[data-slot=dialog-close]]:!top-5 [&>[data-slot=dialog-close]]:!end-5 h-[min(640px,calc(100vh-48px))] gap-0 overflow-hidden rounded-2xl p-0 max-md:h-[100dvh] max-md:rounded-none",
 	"marketplace-guide":
 		"max-h-[min(90vh,42rem)] max-w-xl overflow-y-auto p-0 sm:max-w-xl",
 	"license-browser":

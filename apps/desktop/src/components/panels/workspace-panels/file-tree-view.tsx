@@ -9,16 +9,21 @@ import type {
 	ContextMenuOpenContext as FileTreeContextMenuOpenContext,
 } from "@pierre/trees";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
+import { usePierreShadowLocalizer } from "@ryu/blocks/desktop/agent-elements/use-pierre-shadow-localizer.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { invoke } from "@tauri-apps/api/core";
-import { type CSSProperties, useEffect, useRef } from "react";
+import { type CSSProperties, useCallback, useEffect, useRef } from "react";
 import { fileTreeRowPathFromEvent } from "@/src/components/panels/FileAnnotationViewer.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import type { fileTreePrefsToOptions } from "@/src/hooks/useFileTreePrefs.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import type { PluginFileHandler } from "@/src/lib/api/plugins.ts";
 import { joinPath } from "@/src/lib/files.ts";
+import {
+	fileTreeModelErrorText,
+	workspaceItemOpenErrorToast,
+} from "@/src/lib/fs-command-error.ts";
 import { fileHandlersFor } from "@/src/lib/plugin-file-handlers.ts";
 import type { FileTreeSearchRequest } from "@/src/store/useFileTreeSearchStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
@@ -62,6 +67,7 @@ export function FileTreeView({
 	searchRequest: FileTreeSearchRequest | null;
 	style?: CSSProperties;
 }) {
+	const tl = useLiteralMessages();
 	const { model } = useFileTree({
 		...options,
 		paths,
@@ -73,7 +79,11 @@ export function FileTreeView({
 					},
 					onError: (message) =>
 						toast.error("Couldn't rename that workspace item", {
-							description: message,
+							description: fileTreeModelErrorText(
+								message,
+								tl,
+								tl("Ryu couldn't rename that item.")
+							),
 						}),
 				}
 			: false,
@@ -99,7 +109,11 @@ export function FileTreeView({
 					},
 					onDropError: (message) =>
 						toast.error("Couldn't move that workspace item", {
-							description: message,
+							description: fileTreeModelErrorText(
+								message,
+								tl,
+								tl("Ryu couldn't move that item.")
+							),
 						}),
 				}
 			: false,
@@ -148,6 +162,15 @@ export function FileTreeView({
 	// covers pointer clicks and keyboard activation without wrapping the tree in
 	// an interactive element of our own.
 	const hostRef = useRef<HTMLDivElement>(null);
+	// The tree draws its search field and row action labels in a shadow root.
+	const localizeTreeCopy = usePierreShadowLocalizer();
+	const setHost = useCallback(
+		(node: HTMLDivElement | null) => {
+			hostRef.current = node;
+			localizeTreeCopy(node);
+		},
+		[localizeTreeCopy]
+	);
 	const onViewFileRef = useRef(onViewFile);
 	onViewFileRef.current = onViewFile;
 	useEffect(() => {
@@ -168,7 +191,7 @@ export function FileTreeView({
 		return () => host.removeEventListener("click", handleClick);
 	}, []);
 	return (
-		<div className="h-full w-full" ref={hostRef}>
+		<div className="h-full w-full" ref={setHost}>
 			<FileTree
 				className="h-full w-full"
 				model={model}
@@ -193,7 +216,7 @@ export function FileTreeView({
 // geometry instead: a solid `rounded-xl p-1.5` popover with the primitive's
 // shadow, and `h-8 px-2 rounded-lg` items that highlight with `bg-accent`.
 const MENU_ITEM =
-	"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-150 hover:bg-accent hover:duration-0 focus-visible:bg-accent";
+	"flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-sm outline-none transition-colors duration-150 hover:bg-accent hover:duration-0 focus-visible:bg-accent";
 
 function FileTreeContextActions({
 	availableEditors,
@@ -238,9 +261,8 @@ function FileTreeContextActions({
 				root: folder,
 			});
 		} catch (error) {
-			toast.error("Couldn't open that workspace item", {
-				description: error instanceof Error ? error.message : String(error),
-			});
+			const { title, description } = workspaceItemOpenErrorToast(error, tl);
+			toast.error(title, { description });
 		}
 	};
 

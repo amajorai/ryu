@@ -154,7 +154,55 @@ fn is_public_ipv4(candidate: &str) -> bool {
 /// Replace recognized sensitive spans. The caller must still offer a review
 /// before the resulting content is pushed or shared: pattern matching cannot
 /// identify every person's name, novel credential, or confidential document.
+///
+/// The patterns run on the text as written and, separately, on the folded view
+/// of the input (NFKC per code point, invisible characters dropped, dash, space
+/// and digit variants to ASCII; see [`fold`]). When the folded scan redacts
+/// exactly what the as-written pass did, the text keeps its original form.
+/// Otherwise (PII typed in fullwidth, split by zero-width characters, written
+/// with native-script digits, or an invisible character that hid the head of an
+/// address from the as-written pass) the folded, redacted view is returned, and
+/// any as-written match the folded scan no longer recognises is redacted in it
+/// as well. Mirrors `redactShareText` in the public-share guard.
 pub fn redact_text(input: &str, counts: &mut RedactionCounts) -> String {
+    let mut raw_counts = RedactionCounts::default();
+    let mut raw_matches = Vec::new();
+    let raw = apply_rules(input, &mut raw_counts, Some(&mut raw_matches));
+    let folded = fold::fold(input);
+    let mut folded_counts = RedactionCounts::default();
+    let rescanned = (folded != input).then(|| apply_rules(&folded, &mut folded_counts, None));
+    let Some(mut rescanned) = rescanned.filter(|r| fold::fold(&raw) != r.as_str()) else {
+        counts.pii += raw_counts.pii;
+        counts.secrets += raw_counts.secrets;
+        return raw;
+    };
+    for (kind, label, text) in raw_matches {
+        let residue = fold::fold(&text);
+        let found = rescanned.matches(&*residue).count();
+        if residue.is_empty() || found == 0 {
+            continue;
+        }
+        match kind {
+            Kind::Pii => folded_counts.pii += found,
+            Kind::Secret => folded_counts.secrets += found,
+        }
+        rescanned = rescanned.replace(&*residue, &format!("[REDACTED:{label}]"));
+    }
+    counts.pii += folded_counts.pii;
+    counts.secrets += folded_counts.secrets;
+    rescanned
+}
+
+#[path = "redaction_fold.rs"]
+mod fold;
+
+type RuleMatch = (Kind, &'static str, String);
+
+fn apply_rules(
+    input: &str,
+    counts: &mut RedactionCounts,
+    mut matches: Option<&mut Vec<RuleMatch>>,
+) -> String {
     let mut result = input.to_owned();
     for rule in rules() {
         let placeholder = format!("[REDACTED:{}]", rule.label);
@@ -170,6 +218,9 @@ pub fn redact_text(input: &str, counts: &mut RedactionCounts) -> String {
                 match rule.kind {
                     Kind::Pii => counts.pii += 1,
                     Kind::Secret => counts.secrets += 1,
+                }
+                if let Some(matches) = matches.as_deref_mut() {
+                    matches.push((rule.kind, rule.label, capture[0].to_owned()));
                 }
                 placeholder.clone()
             })
@@ -232,6 +283,66 @@ mod tests {
         assert!(redacted.contains("127.0.0.1"));
         assert!(counts.pii >= 3);
         assert!(counts.secrets >= 1);
+    }
+
+    #[test]
+    fn obfuscated_pii_is_redacted_on_the_folded_view() {
+        for (input, expected) in [
+            (
+                "card ４１１１ １１１１ １１１１ １１１１",
+                "card [REDACTED:CARD]",
+            ),
+            ("mail ava＠example.com", "mail [REDACTED:EMAIL]"),
+            ("ssn 123\u{200B}-45-6789", "ssn [REDACTED:SSN]"),
+            ("call ５５５‑１２３‑４５６７", "call [REDACTED:PHONE]"),
+        ] {
+            let mut counts = RedactionCounts::default();
+            assert_eq!(redact_text(input, &mut counts), expected, "{input}");
+            assert_eq!(counts.pii, 1, "{input}");
+        }
+    }
+
+    #[test]
+    fn an_invisible_character_cannot_hide_the_head_of_an_address() {
+        for input in [
+            "mail jane.doe\u{200B}1@gmail.com",
+            "mail a\u{200B}va@example.com",
+            "mail jane\u{00AD}doe@example.com",
+        ] {
+            let mut counts = RedactionCounts::default();
+            assert_eq!(
+                redact_text(input, &mut counts),
+                "mail [REDACTED:EMAIL]",
+                "{input}"
+            );
+            assert_eq!(counts.pii, 1, "{input}");
+        }
+    }
+
+    #[test]
+    fn an_as_written_match_stays_redacted_when_folding_lengthens_its_run() {
+        // Dropping the zero-width space joins the key to the next letter, so the
+        // folded scan alone no longer sees a 20-character key.
+        let mut counts = RedactionCounts::default();
+        assert_eq!(
+            redact_text("key AKIAABCDEFGHIJKLMNOP\u{200B}Q \u{FF11}", &mut counts),
+            "key [REDACTED:AWS_KEY]Q 1"
+        );
+        assert_eq!(counts.secrets, 1);
+    }
+
+    #[test]
+    fn text_without_obfuscated_pii_keeps_its_original_form() {
+        let mut counts = RedactionCounts::default();
+        let input = "（メモ）ｶﾀｶﾅ ava@example.com";
+        assert_eq!(
+            redact_text(input, &mut counts),
+            "（メモ）ｶﾀｶﾅ [REDACTED:EMAIL]"
+        );
+        assert_eq!(counts.pii, 1);
+        let mut clean = RedactionCounts::default();
+        assert_eq!(redact_text("ﬁle ①", &mut clean), "ﬁle ①");
+        assert_eq!(clean.total(), 0);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -33,7 +34,7 @@ export function StatusThreadPanel({
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread
-		? thread.title.trim() || "Untitled thread"
+		? thread.title.trim() || tr("Untitled thread")
 		: "New thread";
 	const who =
 		agentNames.length > 0 ? agentNames.join(", ") : "No agent assigned";
@@ -41,7 +42,7 @@ export function StatusThreadPanel({
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}
 			aria-label={tl("Thread: {threadTitle}", { threadTitle: title })}
-			className="absolute inset-0 z-20 flex min-h-0 flex-col bg-background md:static md:w-[clamp(22rem,40vw,38rem)] md:shrink-0 md:border-border md:border-l"
+			className="absolute inset-0 z-20 flex min-h-0 flex-col bg-background md:static md:w-[clamp(22rem,40vw,38rem)] md:shrink-0 md:border-border md:border-s"
 			data-testid="status-thread-panel"
 			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
 			transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}

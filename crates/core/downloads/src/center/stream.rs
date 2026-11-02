@@ -2,6 +2,51 @@
 
 use super::*;
 
+/// The egress policy for every download hop: HTTPS only, so model weights and
+/// archives are never fetched in cleartext where an on-path attacker could swap
+/// unpinned bytes or read a host credential.
+pub(super) fn download_policy() -> ryu_egress::GuardedFetchPolicy {
+    ryu_egress::GuardedFetchPolicy {
+        allow_http: false,
+        max_body_bytes: MAX_TRANSFER_BYTES,
+        ..ryu_egress::GuardedFetchPolicy::default()
+    }
+}
+
+/// Refuse a production hop that is not HTTPS, whatever the egress defaults say.
+pub(super) fn require_https_hop(url: &str) -> Result<(), StreamErr> {
+    let parsed = url::Url::parse(url.trim()).map_err(|e| StreamErr::Io(e.to_string()))?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        other => Err(StreamErr::Io(format!(
+            "download URL must use https, not {other}"
+        ))),
+    }
+}
+
+/// Resolve one redirect `Location` against the hop that sent it. A hop that
+/// leaves HTTPS (or HTTP) is refused as a terminal error, so a redirect can
+/// never downgrade a download to cleartext, even where the egress screen is off.
+pub(super) fn next_redirect_url(current: &str, location: &str) -> Result<String, StreamErr> {
+    let base = url::Url::parse(current)
+        .map_err(|error| StreamErr::Io(format!("invalid download redirect: {error}")))?;
+    let next = base
+        .join(location)
+        .map_err(|error| StreamErr::Io(format!("invalid download redirect: {error}")))?;
+    let allowed = match base.scheme() {
+        "https" => next.scheme() == "https",
+        _ => matches!(next.scheme(), "https" | "http"),
+    };
+    if !allowed {
+        return Err(StreamErr::Io(format!(
+            "refusing a download redirect from {} to {}",
+            base.scheme(),
+            next.scheme()
+        )));
+    }
+    Ok(next.to_string())
+}
+
 /// One streaming pass: open `.part`, send Range+If-Range when resuming, write
 /// chunks to disk while polling the control channel.
 pub(super) async fn stream_once(
@@ -36,12 +81,9 @@ pub(super) async fn stream_once(
     // Production downloads are screened and DNS-pinned at the transfer sink,
     // immediately before each connection is made. Redirects are followed here,
     // one hop at a time, so a GitHub release asset can move to its CDN without
-    // allowing an un-screened redirect target or leaking host-specific auth.
-    let download_policy = ryu_egress::GuardedFetchPolicy {
-        allow_http: true,
-        max_body_bytes: MAX_TRANSFER_BYTES,
-        ..ryu_egress::GuardedFetchPolicy::default()
-    };
+    // allowing an un-screened redirect target, a downgrade to cleartext, or
+    // leaking host-specific auth.
+    let policy = download_policy();
     let mut current_url = spec.url.clone();
     let mut redirect_hops = 0usize;
     let resp = loop {
@@ -49,7 +91,8 @@ pub(super) async fn stream_once(
         let mut req = host().authorize(&current_url, inner.client.get(&current_url));
         #[cfg(not(test))]
         let mut req = {
-            let target = ryu_egress::resolve_guarded_url(&current_url, download_policy)
+            require_https_hop(&current_url)?;
+            let target = ryu_egress::resolve_guarded_url(&current_url, policy)
                 .await
                 .map_err(|error| StreamErr::Io(format!("download URL rejected: {error}")))?;
             let client = reqwest::Client::builder()
@@ -83,10 +126,10 @@ pub(super) async fn stream_once(
         if !(300..400).contains(&response.status().as_u16()) {
             break response;
         }
-        if redirect_hops >= download_policy.max_redirect_hops {
+        if redirect_hops >= policy.max_redirect_hops {
             return Err(StreamErr::Network(format!(
                 "too many redirects (more than {}) for {}",
-                download_policy.max_redirect_hops, spec.url
+                policy.max_redirect_hops, spec.url
             )));
         }
         let location = response
@@ -100,10 +143,7 @@ pub(super) async fn stream_once(
                     current_url
                 ))
             })?;
-        current_url = url::Url::parse(&current_url)
-            .and_then(|base| base.join(location))
-            .map_err(|error| StreamErr::Io(format!("invalid download redirect: {error}")))?
-            .to_string();
+        current_url = next_redirect_url(&current_url, location)?;
         redirect_hops += 1;
     };
     let status = resp.status();
@@ -454,3 +494,6 @@ pub(super) async fn sha256_file(path: &Path) -> Result<String> {
     })
     .await?
 }
+
+#[cfg(test)]
+mod redirect_tests;

@@ -37,7 +37,7 @@ const OBJECT_ID_HEX = /^[0-9a-f]{24}$/i;
  * import or a manual repair) still names the same organization, so its hex
  * form is accepted too. Anything else names no organization.
  */
-function organizationIdOf(value: unknown): string {
+export function organizationIdOf(value: unknown): string {
 	if (typeof value === "string") {
 		return value.trim();
 	}

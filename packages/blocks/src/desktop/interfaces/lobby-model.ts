@@ -1,3 +1,4 @@
+import { activeLocale, numberFormatter, translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -82,9 +83,9 @@ export function lobbyLevel(messages: number): LobbyLevel {
 	};
 }
 
-/** "1,200" in the user's locale, stable in tests. */
+/** "1,200" in the UI locale (English before a provider mounts, so tests stay stable). */
 export function formatXp(value: number): string {
-	return value.toLocaleString("en-US");
+	return numberFormatter(activeLocale()).format(value);
 }
 
 export type SquadState =
@@ -103,6 +104,22 @@ export const SQUAD_STATE_LABELS: Record<SquadState, string> = {
 };
 
 /** Plain words for screen readers and tooltips. */
+/** The label in the UI language, for copy that interpolates it. */
+export function squadStateDescription(value: SquadState): string {
+	switch (value) {
+		case "downed":
+			return tr("a run failed");
+		case "in-match":
+			return tr("working");
+		case "needs-you":
+			return tr("waiting on your reply");
+		case "ready":
+			return tr("idle");
+		default:
+			return tr("waiting on something");
+	}
+}
+
 export const SQUAD_STATE_DESCRIPTIONS: Record<SquadState, string> = {
 	downed: "a run failed",
 	"in-match": "working",

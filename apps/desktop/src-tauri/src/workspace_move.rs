@@ -1,6 +1,8 @@
 //! Native moves requested by the user in a selected workspace. A collision is
 //! refused atomically: a check followed by ordinary rename would overwrite a
-//! file created between those operations.
+//! file created between those operations. Failures are coded
+//! [`FsCommandError`]s; the raw OS error rides in `detail` for the logs.
+use crate::fs_command_error::{FsCommandError, FsCommandErrorCode as Code};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use nix::libc;
 use std::path::{Component, Path};
@@ -11,7 +13,7 @@ use std::{
     os::unix::ffi::OsStrExt,
 };
 
-fn relative_components(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {
+fn relative_components(path: &Path) -> Result<Vec<std::ffi::OsString>, FsCommandError> {
     let components: Vec<_> = path.components().collect();
     if components.is_empty()
         || path
@@ -23,7 +25,10 @@ fn relative_components(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {
             .iter()
             .any(|part| !matches!(part, Component::Normal(_)))
     {
-        return Err("Workspace item must be a nonempty relative path without traversal".into());
+        return Err(FsCommandError::with_detail(
+            Code::InvalidName,
+            "workspace item must be a nonempty relative path without traversal",
+        ));
     }
     #[cfg(target_os = "windows")]
     if components.iter().any(|part| {
@@ -46,7 +51,10 @@ fn relative_components(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {
             || name.ends_with(' ')
             || device_alias
     }) {
-        return Err("Workspace item contains a reserved Windows path component".into());
+        return Err(FsCommandError::with_detail(
+            Code::InvalidName,
+            "workspace item contains a reserved Windows path component",
+        ));
     }
     Ok(components
         .into_iter()
@@ -57,13 +65,8 @@ fn relative_components(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {
 /// Read Git-tracked and untracked visible paths, omitting deleted cached entries.
 /// Git emits nul separators, so filenames are never parsed as shell commands or
 /// split at newlines. The filesystem check reads metadata, never file contents.
-pub(crate) fn list_files(root: &Path) -> Result<Vec<String>, String> {
-    let root = root
-        .canonicalize()
-        .map_err(|error| format!("Invalid workspace root: {error}"))?;
-    if !root.is_dir() {
-        return Err("Workspace root must be a directory".into());
-    }
+pub(crate) fn list_files(root: &Path) -> Result<Vec<String>, FsCommandError> {
+    let root = canonical_root(root)?;
     let output = std::process::Command::new("git")
         .args(["-c", "core.fsmonitor=false", "-C"])
         .arg(&root)
@@ -80,11 +83,11 @@ pub(crate) fn list_files(root: &Path) -> Result<Vec<String>, String> {
         .env_remove("GIT_CONFIG_PARAMETERS")
         .env_remove("GIT_CONFIG_COUNT")
         .output()
-        .map_err(|error| format!("Cannot list workspace files: {error}"))?;
+        .map_err(|error| FsCommandError::with_detail(Code::ListFailed, error))?;
     if !output.status.success() {
-        return Err(format!(
-            "Cannot list workspace files: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+        return Err(FsCommandError::with_detail(
+            Code::ListFailed,
+            String::from_utf8_lossy(&output.stderr).trim(),
         ));
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -95,8 +98,9 @@ pub(crate) fn list_files(root: &Path) -> Result<Vec<String>, String> {
         .split(|byte| *byte == 0)
         .filter(|value| !value.is_empty())
     {
-        let name = std::str::from_utf8(raw)
-            .map_err(|_| "Workspace filename is not valid UTF-8".to_string())?;
+        let name = std::str::from_utf8(raw).map_err(|_| {
+            FsCommandError::with_detail(Code::ListFailed, "workspace filename is not valid UTF-8")
+        })?;
         // Listing supports newline names; move intentionally refuses control names.
         let parts: Vec<_> = Path::new(name).components().collect();
         if parts.is_empty()
@@ -104,7 +108,10 @@ pub(crate) fn list_files(root: &Path) -> Result<Vec<String>, String> {
                 .iter()
                 .any(|part| !matches!(part, Component::Normal(_)))
         {
-            return Err("Git returned a path outside the workspace".into());
+            return Err(FsCommandError::with_detail(
+                Code::ListFailed,
+                "git returned a path outside the workspace",
+            ));
         }
         let parts: Vec<_> = parts
             .into_iter()
@@ -164,30 +171,61 @@ pub(crate) fn list_files(root: &Path) -> Result<Vec<String>, String> {
     Ok(result)
 }
 
-pub(crate) fn move_item(root: &Path, source: &Path, destination: &Path) -> Result<(), String> {
+fn canonical_root(root: &Path) -> Result<std::path::PathBuf, FsCommandError> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| FsCommandError::with_detail(Code::WorkspaceUnavailable, error))?;
+    if !root.is_dir() {
+        return Err(FsCommandError::with_detail(
+            Code::WorkspaceUnavailable,
+            "workspace root must be a directory",
+        ));
+    }
+    Ok(root)
+}
+
+pub(crate) fn move_item(
+    root: &Path,
+    source: &Path,
+    destination: &Path,
+) -> Result<(), FsCommandError> {
     let source_parts = relative_components(source)?;
     let destination_parts = relative_components(destination)?;
     if destination.starts_with(source) {
-        return Err("Cannot move a workspace item into itself or its descendants".into());
+        return Err(FsCommandError::new(Code::IntoDescendant));
     }
-    let root = root
-        .canonicalize()
-        .map_err(|error| format!("Invalid workspace root: {error}"))?;
-    if !root.is_dir() {
-        return Err("Workspace root must be a directory".into());
-    }
+    let root = canonical_root(root)?;
     platform_move(&root, &source_parts, &destination_parts)
 }
 
+/// Classify the last OS error of a unix lookup or rename. `ELOOP` is what
+/// `O_NOFOLLOW` reports for a symlinked parent: the path leaves the project.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn component_name(value: &std::ffi::OsStr) -> Result<CString, String> {
-    CString::new(value.as_bytes()).map_err(|_| "Workspace path contains a null byte".into())
+fn last_os_error(fallback: Code) -> FsCommandError {
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ELOOP) => FsCommandError::with_detail(Code::OutsideProject, error),
+        Some(libc::EEXIST | libc::ENOTEMPTY) => {
+            FsCommandError::with_detail(Code::DestinationExists, error)
+        }
+        _ => FsCommandError::from_io(&error, fallback),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn component_name(value: &std::ffi::OsStr) -> Result<CString, FsCommandError> {
+    CString::new(value.as_bytes()).map_err(|_| {
+        FsCommandError::with_detail(Code::InvalidName, "workspace path contains a null byte")
+    })
 }
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn unix_parent(root: &OwnedFd, parts: &[std::ffi::OsString]) -> Result<(OwnedFd, CString), String> {
+fn unix_parent(
+    root: &OwnedFd,
+    parts: &[std::ffi::OsString],
+) -> Result<(OwnedFd, CString), FsCommandError> {
     let mut directory = root
         .try_clone()
-        .map_err(|error| format!("Cannot pin workspace root: {error}"))?;
+        .map_err(|error| FsCommandError::with_detail(Code::WorkspaceUnavailable, error))?;
     for part in &parts[..parts.len() - 1] {
         let name = component_name(part)?;
         let raw = unsafe {
@@ -198,10 +236,7 @@ fn unix_parent(root: &OwnedFd, parts: &[std::ffi::OsString]) -> Result<(OwnedFd,
             )
         };
         if raw < 0 {
-            return Err(format!(
-                "Workspace directory is unavailable or a symlink: {}",
-                std::io::Error::last_os_error()
-            ));
+            return Err(last_os_error(Code::ItemUnavailable));
         }
         directory = unsafe { OwnedFd::from_raw_fd(raw) };
     }
@@ -209,7 +244,7 @@ fn unix_parent(root: &OwnedFd, parts: &[std::ffi::OsString]) -> Result<(OwnedFd,
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn unix_root(root: &Path) -> Result<OwnedFd, String> {
+fn unix_root(root: &Path) -> Result<OwnedFd, FsCommandError> {
     let root_name = component_name(root.as_os_str())?;
     // Pin the selected canonical root once so both parent walks use the same
     // directory even if another process renames its original path.
@@ -220,9 +255,9 @@ fn unix_root(root: &Path) -> Result<OwnedFd, String> {
         )
     };
     if raw < 0 {
-        return Err(format!(
-            "Cannot open workspace root: {}",
-            std::io::Error::last_os_error()
+        return Err(FsCommandError::with_detail(
+            Code::WorkspaceUnavailable,
+            std::io::Error::last_os_error(),
         ));
     }
     Ok(unsafe { OwnedFd::from_raw_fd(raw) })
@@ -233,7 +268,7 @@ fn platform_move(
     root: &Path,
     source: &[std::ffi::OsString],
     destination: &[std::ffi::OsString],
-) -> Result<(), String> {
+) -> Result<(), FsCommandError> {
     let root = unix_root(root)?;
     let (source_parent, source_name) = unix_parent(&root, source)?;
     let (destination_parent, destination_name) = unix_parent(&root, destination)?;
@@ -247,14 +282,11 @@ fn platform_move(
         )
     } != 0
     {
-        return Err(format!(
-            "Workspace source is unavailable: {}",
-            std::io::Error::last_os_error()
-        ));
+        return Err(last_os_error(Code::ItemUnavailable));
     }
     let mode = unsafe { source_stat.assume_init() }.st_mode & libc::S_IFMT;
     if mode != libc::S_IFREG && mode != libc::S_IFDIR {
-        return Err("Only regular workspace files and directories can be moved".into());
+        return Err(FsCommandError::new(Code::UnsupportedItem));
     }
     #[cfg(target_os = "linux")]
     let result = unsafe {
@@ -278,7 +310,9 @@ fn platform_move(
         )
     };
     if result != 0 {
-        return Err(format!("Workspace move refused (destination must be empty and atomic exclusive rename supported): {}", std::io::Error::last_os_error()));
+        // EEXIST/ENOTEMPTY: the destination is occupied. EINVAL here means the
+        // filesystem lacks atomic exclusive rename.
+        return Err(last_os_error(Code::MoveFailed));
     }
     Ok(())
 }
@@ -288,7 +322,7 @@ fn platform_move(
     root: &Path,
     source: &[std::ffi::OsString],
     destination: &[std::ffi::OsString],
-) -> Result<(), String> {
+) -> Result<(), FsCommandError> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVE_FILE_FLAGS};
@@ -296,7 +330,7 @@ fn platform_move(
         root: &Path,
         parts: &[std::ffi::OsString],
         existing_leaf: bool,
-    ) -> Result<std::path::PathBuf, String> {
+    ) -> Result<std::path::PathBuf, FsCommandError> {
         let mut path = root.to_path_buf();
         for (index, part) in parts.iter().enumerate() {
             path.push(part);
@@ -304,16 +338,21 @@ fn platform_move(
                 break;
             }
             let metadata = std::fs::symlink_metadata(&path)
-                .map_err(|error| format!("Workspace item unavailable: {error}"))?;
+                .map_err(|error| FsCommandError::from_io(&error, Code::ItemUnavailable))?;
             // Windows reparse points can redirect traversal even without a
             // symlink type, so reject both directory junctions and symlinks.
             use std::os::windows::fs::MetadataExt;
             if metadata.file_attributes() & 0x400 != 0 {
-                return Err("Workspace moves cannot traverse reparse points".into());
+                return Err(FsCommandError::with_detail(
+                    Code::OutsideProject,
+                    "workspace moves cannot traverse reparse points",
+                ));
             }
-            let canonical = path.canonicalize().map_err(|error| error.to_string())?;
+            let canonical = path
+                .canonicalize()
+                .map_err(|error| FsCommandError::from_io(&error, Code::ItemUnavailable))?;
             if !canonical.starts_with(root) {
-                return Err("Workspace item escapes the project folder".into());
+                return Err(FsCommandError::new(Code::OutsideProject));
             }
         }
         Ok(path)
@@ -335,7 +374,15 @@ fn platform_move(
             MOVE_FILE_FLAGS(0),
         )
     }
-    .map_err(|error| format!("Workspace move refused: {error}"))
+    .map_err(|error| {
+        // HRESULT_FROM_WIN32(ERROR_FILE_EXISTS | ERROR_ALREADY_EXISTS).
+        let code = match error.code().0 as u32 {
+            0x8007_0050 | 0x8007_00B7 => Code::DestinationExists,
+            0x8007_0002 | 0x8007_0003 => Code::ItemUnavailable,
+            _ => Code::MoveFailed,
+        };
+        FsCommandError::with_detail(code, error)
+    })
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -343,329 +390,13 @@ fn platform_move(
     _root: &Path,
     _source: &[std::ffi::OsString],
     _destination: &[std::ffi::OsString],
-) -> Result<(), String> {
-    Err("Atomic exclusive workspace moves are unavailable on this platform".into())
+) -> Result<(), FsCommandError> {
+    Err(FsCommandError::with_detail(
+        Code::MoveFailed,
+        "atomic exclusive workspace moves are unavailable on this platform",
+    ))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    fn git(root: &Path, arguments: &[&str]) {
-        let result = std::process::Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(arguments)
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-    }
-
-    #[test]
-    fn git_listing_removes_tracked_ghosts_and_preserves_untracked_ignore_semantics() {
-        let root = tempfile::tempdir().unwrap();
-        git(root.path(), &["init", "-q"]);
-        fs::write(root.path().join("tracked.txt"), b"tracked bytes").unwrap();
-        fs::write(root.path().join(".gitignore"), b"ignored.txt\n").unwrap();
-        git(root.path(), &["add", "tracked.txt", ".gitignore"]);
-        fs::write(root.path().join("untracked.txt"), b"untracked").unwrap();
-        fs::write(root.path().join("ignored.txt"), b"ignored").unwrap();
-        move_item(
-            root.path(),
-            Path::new("tracked.txt"),
-            Path::new("renamed.txt"),
-        )
-        .unwrap();
-        assert_eq!(
-            list_files(root.path()).unwrap(),
-            vec![".gitignore", "renamed.txt", "untracked.txt"]
-        );
-        assert_eq!(
-            fs::read(root.path().join("renamed.txt")).unwrap(),
-            b"tracked bytes"
-        );
-        fs::remove_file(root.path().join("renamed.txt")).unwrap();
-        assert_eq!(
-            list_files(root.path()).unwrap(),
-            vec![".gitignore", "untracked.txt"]
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn git_listing_preserves_nul_delimited_names_and_omits_symlink_escape() {
-        use std::os::unix::fs::symlink;
-        let root = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        git(root.path(), &["init", "-q"]);
-        fs::write(root.path().join("line\nbreak.txt"), b"safe").unwrap();
-        fs::write(root.path().join("--option.txt"), b"safe").unwrap();
-        fs::write(outside.path().join("secret"), b"outside").unwrap();
-        symlink(
-            outside.path().join("secret"),
-            root.path().join("escape.txt"),
-        )
-        .unwrap();
-        assert_eq!(
-            list_files(root.path()).unwrap(),
-            vec!["--option.txt", "line\nbreak.txt"]
-        );
-        assert_eq!(fs::read(outside.path().join("secret")).unwrap(), b"outside");
-    }
-
-    #[test]
-    fn non_git_workspace_listing_reports_error_instead_of_empty_success() {
-        let root = tempfile::tempdir().unwrap();
-        assert!(list_files(root.path())
-            .unwrap_err()
-            .contains("Cannot list workspace files"));
-    }
-
-    #[test]
-    fn file_and_folder_moves_preserve_bytes_and_children() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir(root.path().join("archive")).unwrap();
-        fs::create_dir(root.path().join("src")).unwrap();
-        fs::write(root.path().join("src/alpha.ts"), b"original\0bytes\n").unwrap();
-        move_item(
-            root.path(),
-            Path::new("src/alpha.ts"),
-            Path::new("src/renamed.ts"),
-        )
-        .unwrap();
-        assert!(!root.path().join("src/alpha.ts").exists());
-        assert_eq!(
-            fs::read(root.path().join("src/renamed.ts")).unwrap(),
-            b"original\0bytes\n"
-        );
-        move_item(root.path(), Path::new("src"), Path::new("archive/moved")).unwrap();
-        assert!(!root.path().join("src").exists());
-        assert_eq!(
-            fs::read(root.path().join("archive/moved/renamed.ts")).unwrap(),
-            b"original\0bytes\n"
-        );
-    }
-
-    #[test]
-    fn occupied_file_and_directory_destinations_preserve_every_source() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("source"), b"source").unwrap();
-        fs::write(root.path().join("occupied"), b"do not replace").unwrap();
-        assert!(move_item(root.path(), Path::new("source"), Path::new("occupied")).is_err());
-        fs::create_dir(root.path().join("folder")).unwrap();
-        fs::create_dir(root.path().join("occupied-folder")).unwrap();
-        assert!(move_item(
-            root.path(),
-            Path::new("folder"),
-            Path::new("occupied-folder")
-        )
-        .is_err());
-        assert_eq!(fs::read(root.path().join("source")).unwrap(), b"source");
-        assert_eq!(
-            fs::read(root.path().join("occupied")).unwrap(),
-            b"do not replace"
-        );
-        assert!(root.path().join("folder").is_dir());
-        assert!(root.path().join("occupied-folder").is_dir());
-    }
-
-    #[test]
-    fn malformed_escape_and_subtree_moves_do_not_touch_disk() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("source"), b"source").unwrap();
-        fs::create_dir_all(root.path().join("folder/child")).unwrap();
-        for bad in [
-            "",
-            "../outside",
-            "/absolute",
-            "folder/../outside",
-            "line\nname",
-        ] {
-            assert!(
-                move_item(root.path(), Path::new("source"), Path::new(bad)).is_err(),
-                "{bad}"
-            );
-            assert!(
-                move_item(root.path(), Path::new(bad), Path::new("destination")).is_err(),
-                "{bad}"
-            );
-        }
-        assert!(move_item(
-            root.path(),
-            Path::new("folder"),
-            Path::new("folder/child/moved")
-        )
-        .is_err());
-        assert!(move_item(
-            root.path(),
-            Path::new("source"),
-            Path::new("missing/destination")
-        )
-        .is_err());
-        assert_eq!(fs::read(root.path().join("source")).unwrap(), b"source");
-        assert!(root.path().join("folder/child").is_dir());
-        assert!(!root.path().join("destination").exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn symlink_parents_sources_and_occupied_links_cannot_escape_or_replace() {
-        use std::os::unix::fs::symlink;
-        let root = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("source"), b"source").unwrap();
-        fs::write(outside.path().join("protected"), b"outside").unwrap();
-        symlink(outside.path(), root.path().join("escape")).unwrap();
-        symlink(
-            outside.path().join("protected"),
-            root.path().join("source-link"),
-        )
-        .unwrap();
-        symlink(
-            outside.path().join("absent"),
-            root.path().join("occupied-link"),
-        )
-        .unwrap();
-        assert!(move_item(
-            root.path(),
-            Path::new("source"),
-            Path::new("escape/destination")
-        )
-        .is_err());
-        assert!(move_item(
-            root.path(),
-            Path::new("escape/protected"),
-            Path::new("destination")
-        )
-        .is_err());
-        assert!(move_item(
-            root.path(),
-            Path::new("source-link"),
-            Path::new("destination")
-        )
-        .is_err());
-        assert!(move_item(root.path(), Path::new("source"), Path::new("occupied-link")).is_err());
-        assert_eq!(fs::read(root.path().join("source")).unwrap(), b"source");
-        assert_eq!(
-            fs::read(outside.path().join("protected")).unwrap(),
-            b"outside"
-        );
-        assert!(fs::symlink_metadata(root.path().join("occupied-link"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(!outside.path().join("destination").exists());
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn device_aliases_streams_and_ambiguous_windows_names_preserve_source() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("source"), b"source").unwrap();
-        for name in [
-            "CON",
-            "con.txt",
-            "PRN.log",
-            "aux",
-            "NuL.bin",
-            "COM1",
-            "com9.txt",
-            "LPT1",
-            "lpt9.json",
-            "folder/CON.txt",
-            "source:stream",
-            "trailing.",
-            "trailing ",
-        ] {
-            assert!(
-                move_item(root.path(), Path::new("source"), Path::new(name)).is_err(),
-                "{name}"
-            );
-            assert!(
-                move_item(root.path(), Path::new(name), Path::new("destination")).is_err(),
-                "{name}"
-            );
-            assert_eq!(fs::read(root.path().join("source")).unwrap(), b"source");
-            assert!(!root.path().join("destination").exists());
-        }
-    }
-
-    // The fixture uses this very production helper in separate OS processes.
-    #[test]
-    #[ignore = "subprocess fixture; started by external_processes_cannot_overwrite_one_destination"]
-    fn exclusive_move_subprocess_fixture() {
-        let root = std::env::var_os("RYU_WORKSPACE_MOVE_TEST_ROOT").expect("owned test root");
-        let source = std::env::var_os("RYU_WORKSPACE_MOVE_TEST_SOURCE").expect("owned test source");
-        let result = move_item(
-            Path::new(&root),
-            Path::new(&source),
-            Path::new("destination"),
-        );
-        if result.is_ok() {
-            println!("MOVE_ACCEPTED");
-        } else {
-            println!("MOVE_REFUSED");
-        }
-    }
-
-    #[test]
-    fn external_processes_cannot_overwrite_one_destination() {
-        use std::process::{Command, Stdio};
-        let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("a"), b"a bytes").unwrap();
-        fs::write(root.path().join("b"), b"b bytes").unwrap();
-        let launch = |source: &str| {
-            Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "exclusive_move_subprocess_fixture",
-                    "--ignored",
-                    "--nocapture",
-                    "--test-threads=1",
-                ])
-                .env("RYU_WORKSPACE_MOVE_TEST_ROOT", root.path())
-                .env("RYU_WORKSPACE_MOVE_TEST_SOURCE", source)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap()
-        };
-        let a = launch("a");
-        let b = launch("b");
-        let outputs = [a.wait_with_output().unwrap(), b.wait_with_output().unwrap()];
-        for output in &outputs {
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        assert_eq!(
-            outputs
-                .iter()
-                .filter(|output| String::from_utf8_lossy(&output.stdout).contains("MOVE_ACCEPTED"))
-                .count(),
-            1
-        );
-        assert_eq!(
-            outputs
-                .iter()
-                .filter(|output| String::from_utf8_lossy(&output.stdout).contains("MOVE_REFUSED"))
-                .count(),
-            1
-        );
-        let bytes = fs::read(root.path().join("destination")).unwrap();
-        if bytes == b"a bytes" {
-            assert!(!root.path().join("a").exists());
-            assert_eq!(fs::read(root.path().join("b")).unwrap(), b"b bytes");
-        } else {
-            assert_eq!(bytes, b"b bytes");
-            assert!(!root.path().join("b").exists());
-            assert_eq!(fs::read(root.path().join("a")).unwrap(), b"a bytes");
-        }
-    }
-}
+#[path = "workspace_move_tests.rs"]
+mod tests;

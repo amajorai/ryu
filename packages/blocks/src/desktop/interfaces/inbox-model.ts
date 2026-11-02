@@ -1,14 +1,14 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InboxSection,
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
 	projectInbox,
-	THREAD_STATUS_LABELS,
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { agentById } from "./interface-renderer.ts";
+import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 
 /** One inbox row, resolved from the snapshot. */
 export interface InboxItem {
@@ -66,9 +66,9 @@ function actorLabel(
 function previewLine(thread: InterfaceThread): string {
 	const text = thread.lastMessage?.trim();
 	if (!text) {
-		return "No messages yet";
+		return tr("No messages yet");
 	}
-	return thread.lastMessageRole === "user" ? `You: ${text}` : text;
+	return thread.lastMessageRole === "user" ? tr("You: {text}", { text }) : text;
 }
 
 export function inboxItem(
@@ -133,7 +133,7 @@ export function buildInboxModel(snapshot: InterfaceSnapshot): InboxModel {
 		sections.push({
 			id: "quiet",
 			items: notStarted,
-			label: THREAD_STATUS_LABELS.quiet,
+			label: threadStatusLabel("quiet"),
 			threadIds: notStarted.map((item) => item.thread.id),
 		});
 	}

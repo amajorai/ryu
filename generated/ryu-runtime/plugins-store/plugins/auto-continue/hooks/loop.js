@@ -3,7 +3,7 @@
 // host.runAgent / host.storage / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -58,6 +58,12 @@ const MAX_CONSECUTIVE = 5;
 // How much of the recent transcript to hand the scanner (chars). Enough for the
 // user's request plus the last exchange; a full novel is not a better judge.
 const MAX_SCAN_CHARS = 8000;
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const convId = ctx.conversation_id;
 if (!convId) {
@@ -79,19 +85,21 @@ if (/^\/auto-continue(?:\s|$)/u.test(typed)) {
 		await host.storage.delete(convId);
 		return {
 			kind: "note",
-			text: "Auto-continue is off for this chat. Turn it back on with '/auto-continue on'.",
+			text: await host.t("Auto-continue is off for this chat. Turn it back on with '/auto-continue on'."),
 		};
 	}
 	if (arg === "on" || arg === "start") {
 		await host.storage.set(convId, JSON.stringify({ status: "active" }));
 		return {
 			kind: "note",
-			text: "Auto-continue is on for this chat. After each turn a local agent will scan for genuinely unfinished work and keep going until it is done. Stop it anytime with '/auto-continue off'.",
+			text: await host.t(
+				"Auto-continue is on for this chat. After each turn a local agent will scan for genuinely unfinished work and keep going until it is done. Stop it anytime with '/auto-continue off'."
+			),
 		};
 	}
 	return {
 		kind: "note",
-		text: "Use '/auto-continue on' to arm Auto Continue or '/auto-continue off' to stop it.",
+		text: await host.t("Use '/auto-continue on' to arm Auto Continue or '/auto-continue off' to stop it."),
 	};
 }
 
@@ -132,10 +140,10 @@ for (let i = ctx.transcript.length - 1; i >= 0; i--) {
 if (consecutive >= MAX_CONSECUTIVE) {
 	return {
 		kind: "note",
-		text:
-			"Auto-continue stopped after " +
-			MAX_CONSECUTIVE +
-			" nudges. The work still has unfinished parts — send a real message to keep going.",
+		text: await host.t(
+			"Auto-continue stopped after {count} nudges. The work still has unfinished parts — send a real message to keep going.",
+			{ count: MAX_CONSECUTIVE }
+		),
 	};
 }
 
@@ -162,7 +170,7 @@ if (stalled) {
 	}
 	return {
 		kind: "note",
-		text: "Auto-continue stopped: the last two replies were identical, so the work is not moving.",
+		text: await host.t("Auto-continue stopped: the last two replies were identical, so the work is not moving."),
 	};
 }
 

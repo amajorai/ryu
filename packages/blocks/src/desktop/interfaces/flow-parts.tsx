@@ -1,8 +1,7 @@
+import { translate as tr } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import {
 	FolderOpen,
 	Inbox,
@@ -15,6 +14,7 @@ import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import type { FlowAction, FlowDotTone } from "./flow-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 /** The status mark on a node's right edge. */
 export function FlowDot({
@@ -66,14 +66,14 @@ export function FlowDot({
 	return <BoardStatusDot className={className} status={tone} />;
 }
 
-export function toneLabel(tone: FlowDotTone): string {
+export function toneLabel(tone: FlowDotTone, tl: LiteralMessage = tr): string {
 	if (tone === "idle") {
-		return "Idle";
+		return tl("Idle");
 	}
 	if (tone === "success") {
-		return "Succeeded";
+		return tl("Succeeded");
 	}
-	return THREAD_STATUS_LABELS[tone as ThreadStatus];
+	return threadStatusLabel(tone as ThreadStatus, tl);
 }
 
 /** The small square an action or node kind shows at its left. */

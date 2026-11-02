@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, type Route, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("checkout replacement cancels its old read and renders the current gift status", async ({
 	page,
@@ -30,10 +30,7 @@ test("checkout replacement cancels its old read and renders the current gift sta
 	await requests[1].fulfill({ json: { status: "active" } });
 	await expect(page.getByRole("status")).toContainText("Gift ready");
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/gift-settlement-completed.png"
-		),
+		path: proofEvidencePath("performance-sweep/gift-settlement-completed.png"),
 		fullPage: true,
 		animations: "disabled",
 	});

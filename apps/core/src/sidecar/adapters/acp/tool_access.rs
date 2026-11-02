@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{messages as m, Message};
 
 /// Whether this ACP transport can be handed an MCP server at all.
 ///
@@ -280,13 +281,12 @@ pub async fn run_acp_instance(
         let (failure, auth_message) = if session_live {
             // The turn in flight was already told the connection dropped; the
             // ones behind it never reached the agent.
-            let failure = AcpFailure {
-                code: "acp_transport_error".to_owned(),
-                title: "Agent connection lost".to_owned(),
-                message: format!(
-                    "The agent connection ended before this message was sent: {error:#}"
-                ),
-            };
+            let failure = AcpFailure::localized(
+                "acp_transport_error",
+                m::ACP_CONNECTION_LOST_TITLE_MESSAGE,
+                vec![Message::new(m::ACP_CONNECTION_LOST_BEFORE_SEND_MESSAGE)
+                    .text("error", format!("{error:#}"))],
+            );
             (failure, None)
         } else {
             instance_start_failure(error)

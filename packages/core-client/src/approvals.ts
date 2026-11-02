@@ -11,6 +11,7 @@ import {
 	appJsonValueSchema,
 	appResponseValueSchema,
 } from "./app-request-json.ts";
+import type { ApprovalI18n } from "./approval-text.ts";
 import { type ApiTarget, request } from "./client.ts";
 
 export type ApprovalKind =
@@ -196,6 +197,9 @@ export interface ApprovalRequest {
 	decided_at?: string | null;
 	error?: string | null;
 	expires_at?: string | null;
+	/** The title, question and summary as Core messages; render them with
+	 *  `localizeApproval` (`@ryuhq/core-client/approval-text`). */
+	i18n?: ApprovalI18n | null;
 	id: string;
 	kind: ApprovalKind;
 	note?: string | null;

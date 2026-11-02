@@ -2,11 +2,12 @@
 //
 // Ryu Messaging: routes whose writes the server deduplicates by
 // `Idempotency-Key`. Verified against the `requireIdempotencyKey(c)` call
-// sites in packages/api/src/routers/messaging.ts (the "Key" rows of the
-// public endpoint table): every send and the number purchase spend the
-// organization's credit, so the server refuses them without a key
-// (`400 idempotency_key_required`). The wrapped client always sends one;
-// messaging.test.ts re-reads the router so this table cannot drift.
+// sites in packages/api/src/routers/messaging-routes-numbers.ts (the number
+// purchase) and messaging-send.ts (every send), the "Key" rows of the public
+// endpoint table: they spend the organization's credit, so the server
+// refuses them without a key (`400 idempotency_key_required`). The wrapped
+// client always sends one; messaging-lockstep.test.ts re-reads the router's
+// route modules so this table cannot drift.
 //
 // `nonReplaySafe` lists writes the shim must not resend after a network
 // error, timeout or 5xx even though their method is idempotent:

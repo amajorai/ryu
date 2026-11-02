@@ -429,7 +429,10 @@ export function RidesDioramaScene({
 							{pinText(trip, acted, acts?.view.trips)}
 						</span>
 						{selected && !narrow ? (
-							<span className="max-w-36 truncate font-normal">
+							<span
+								className="max-w-36 truncate font-normal"
+								data-ryu-i18n="off"
+							>
 								{trip.thread.title}
 							</span>
 						) : null}
@@ -484,7 +487,7 @@ export function RidesDioramaScene({
 						}
 						pressed={spot.trip !== undefined && spot.trip.id === selectedTripId}
 					>
-						{spot.car.agent.name}
+						<span data-ryu-i18n="off">{spot.car.agent.name}</span>
 					</IsoMarker>
 				))}
 		</group>

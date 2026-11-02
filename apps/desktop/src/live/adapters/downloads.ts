@@ -6,6 +6,7 @@
 // settle — the download center is the durable history, not the dock.
 
 import type { LiveActivity } from "@ryu/app-host/live-activity";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import { useEffect } from "react";
 import { type DownloadTask, isInFlight } from "@/src/lib/api/downloads.ts";
 import { useDownloadsStore } from "@/src/store/useDownloadsStore.ts";
@@ -43,11 +44,13 @@ function downloadToActivity(task: DownloadTask): LiveActivity {
 	};
 }
 
-function formatSpeed(bps: number): string {
-	if (bps >= 1_048_576) {
-		return `${(bps / 1_048_576).toFixed(1)} MB/s`;
-	}
-	return `${Math.round(bps / 1024)} KB/s`;
+export function formatSpeed(bps: number): string {
+	return formatByteSize(bps, undefined, {
+		fractionDigits: (_value, unit) => (unit === "kilobyte" ? 0 : 1),
+		maxUnit: "megabyte",
+		minUnit: "kilobyte",
+		perSecond: true,
+	});
 }
 
 /** Reconcile the whole downloads store against the live-activity registry: every

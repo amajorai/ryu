@@ -13,6 +13,9 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "@ryu/blocks/desktop/settings-items";
+import { activeLocale } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { Button } from "@ryu/ui/components/button";
 import { Progress } from "@ryu/ui/components/progress";
 import type { ReactNode } from "react";
@@ -54,15 +57,19 @@ export interface HardwareViewProps {
 	usage?: SystemUsage | null;
 }
 
+/** Always in GiB with two decimals ("15.84 GB"), in the UI locale's own digits and unit. */
 function formatBytes(bytes: number): string {
-	const gb = bytes / (1024 * 1024 * 1024);
-	return `${gb.toFixed(2)} GB`;
+	return formatByteSize(bytes, activeLocale(), {
+		fractionDigits: 2,
+		maxUnit: "gigabyte",
+		minUnit: "gigabyte",
+	});
 }
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
 	return (
 		<SettingsItem
-			actions={<span className="text-right font-mono text-xs">{value}</span>}
+			actions={<span className="text-end font-mono text-xs">{value}</span>}
 			title={<span className="font-normal text-muted-foreground">{label}</span>}
 		/>
 	);
@@ -131,7 +138,9 @@ export function HardwareView({
 					value={
 						<div className="flex items-center gap-2">
 							<Progress className="h-1.5 w-20" value={usage.cpu} />
-							<span className="tabular-nums">{usage.cpu.toFixed(1)}%</span>
+							<span className="tabular-nums">
+								{formatPercent(usage.cpu / 100, 1)}
+							</span>
 						</div>
 					}
 				/>
@@ -148,7 +157,9 @@ export function HardwareView({
 					value={
 						<div className="flex items-center gap-2">
 							<Progress className="h-1.5 w-20" value={memUsedPct} />
-							<span className="tabular-nums">{memUsedPct.toFixed(1)}%</span>
+							<span className="tabular-nums">
+								{formatPercent(memUsedPct / 100, 1)}
+							</span>
 						</div>
 					}
 				/>
@@ -176,7 +187,7 @@ export function HardwareView({
 					size="sm"
 					variant="ghost"
 				>
-					<HugeiconsIcon className="mr-2 size-4" icon={Refresh01Icon} />
+					<HugeiconsIcon className="me-2 size-4" icon={Refresh01Icon} />
 					Refresh
 				</Button>
 			</div>

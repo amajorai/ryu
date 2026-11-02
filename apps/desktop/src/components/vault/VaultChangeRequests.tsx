@@ -109,8 +109,10 @@ export function VaultChangeRequests({
 										{request.coords.name}
 									</code>
 									<Badge variant="outline">
-										{request.approvals.length}/{request.requiredApprovals}{" "}
-										approvals
+										{tl("{approved}/{required} approvals", {
+											approved: request.approvals.length,
+											required: request.requiredApprovals,
+										})}
 									</Badge>
 								</div>
 								<p className="mt-1 truncate text-muted-foreground text-xs">

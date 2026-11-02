@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
@@ -62,25 +63,29 @@ export interface TripDay {
 	trips: RideTrip[];
 }
 
-export function dayLabel(dayKey: string, now: Date): string {
+export function dayLabel(
+	dayKey: string,
+	now: Date,
+	locale: string = activeLocale()
+): string {
 	const today = localDayKey(now);
 	const yesterday = localDayKey(
 		new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
 	);
 	if (dayKey === today) {
-		return "Today";
+		return tr("Today");
 	}
 	if (dayKey === yesterday) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
 	const [year, month, day] = dayKey.split("-").map(Number);
 	const date = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1);
-	return date.toLocaleDateString("en-US", {
+	return dateFormatter(locale, {
 		day: "numeric",
 		month: "short",
 		weekday: "short",
 		...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
-	});
+	}).format(date);
 }
 
 /**
@@ -97,7 +102,7 @@ export function tripHistory(
 	const sorted = [...trips].sort((a, b) => byRecency(a.thread, b.thread));
 	if (undated) {
 		return sorted.length > 0
-			? [{ key: "earlier", label: "Earlier", trips: sorted }]
+			? [{ key: "earlier", label: tr("Earlier"), trips: sorted }]
 			: [];
 	}
 	for (const trip of sorted) {
@@ -117,15 +122,17 @@ export function tripHistory(
 	}));
 }
 
-export function clockTime(iso: string): string {
+export function clockTime(
+	iso: string,
+	locale: string = activeLocale()
+): string {
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) {
 		return "";
 	}
-	return date.toLocaleTimeString("en-US", {
-		hour: "numeric",
-		minute: "2-digit",
-	});
+	return dateFormatter(locale, { hour: "numeric", minute: "2-digit" }).format(
+		date
+	);
 }
 
 export interface DriverOption {
@@ -161,8 +168,4 @@ export function driverOptions(
 				a.waitMinutes - b.waitMinutes ||
 				a.agent.name.localeCompare(b.agent.name)
 		);
-}
-
-export function plural(count: number, word: string): string {
-	return `${count} ${word}${count === 1 ? "" : "s"}`;
 }

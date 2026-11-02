@@ -1,0 +1,7 @@
+{
+  "A failed run was diagnosed": "تم تشخيص تشغيل فاشل",
+  "Auto-fix attempts used: {count}. Review it manually.": "محاولات الإصلاح التلقائي المستخدمة: {count}. راجعه يدويًا.",
+  "Auto-fix gave up": "تخلّى الإصلاح التلقائي عن المحاولة",
+  "Fix waiting in your inbox: {diagnosis}": "إصلاح بانتظارك في صندوق الوارد: {diagnosis}",
+  "heal engine unavailable": "محرك الإصلاح غير متاح"
+}

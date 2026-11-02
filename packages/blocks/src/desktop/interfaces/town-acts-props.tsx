@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -255,7 +256,7 @@ export function TownActProps({
 					};
 					let text: ReactNode = String(entry.asks.length);
 					if (entry.kind === "notice") {
-						text = queuePlateText(entry.agentName ?? "Inbox", timer, nowMs);
+						text = queuePlateText(entry.agentName ?? tr("Inbox"), timer, nowMs);
 					} else if (entry.kind === "tray") {
 						text = entry.count ? (
 							<span data-budgeted-overlay="count">{String(entry.count)}</span>

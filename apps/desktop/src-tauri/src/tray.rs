@@ -4,8 +4,9 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, Runtime,
 };
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_store::StoreExt;
+
+use crate::native_copy::ids;
 
 /// Stable id so the tray handle can be looked up again after creation to toggle
 /// its visibility at runtime (see `set_hide_tray_icon`).
@@ -173,19 +174,7 @@ pub(crate) fn request_quit<R: Runtime>(app: &tauri::AppHandle<R>) {
         }
 
         tracing::info!(active_runs = active, "delaying Ryu quit for active local runs");
-        let task_word = if active == 1 { "task is" } else { "tasks are" };
-        handle
-            .dialog()
-            .message(format!(
-                "{active} local {task_word} still running. Quitting Ryu will stop them. Keep the app open until they finish, or quit anyway."
-            ))
-            .title("Quit Ryu?")
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                "Quit anyway".to_owned(),
-                "Keep working".to_owned(),
-            ))
-            .show(finish);
+        crate::native_copy::show_confirm(&handle, crate::native_copy::quit_confirmation(active), finish);
     });
 }
 
@@ -305,43 +294,61 @@ pub(crate) fn read_close_to_tray<R: Runtime, M: Manager<R>>(app: &M) -> bool {
         .unwrap_or(true)
 }
 
-pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Show Ryu", true, None::<&str>)?;
-    // The island (companion overlay) and its capture pipeline are driven from here
-    // now that the island has no menu-bar icon of its own. The companion item is
-    // only added to the menu when the `ISLAND_ENABLED` release gate is on.
-    let companion = MenuItem::with_id(app, "companion", "Show/Hide Companion", true, None::<&str>)?;
-    let capture = MenuItem::with_id(app, "capture", "Pause Capture", true, None::<&str>)?;
-    let timeline = MenuItem::with_id(app, "timeline", "Open Timeline", true, None::<&str>)?;
-    let palette = MenuItem::with_id(app, "palette", "Search Everything…", true, None::<&str>)?;
+/// Tray rows in menu order with their label ids; `None` is a separator. The
+/// companion row is only shown when the `ISLAND_ENABLED` release gate is on:
+/// the island (companion overlay) and its capture pipeline are driven from
+/// here now that it has no menu-bar icon of its own.
+const TRAY_ROWS: &[Option<(&str, &str)>] = &[
+    Some(("show", ids::TRAY_SHOW)),
+    None,
+    Some(("companion", ids::TRAY_COMPANION)),
+    Some(("capture", ids::TRAY_CAPTURE_PAUSE)),
+    None,
+    Some(("timeline", ids::TRAY_TIMELINE)),
+    Some(("palette", ids::TRAY_PALETTE)),
     // Interface escape hatches that work whatever an interface draws.
-    let switch_interface =
-        MenuItem::with_id(app, "switch-interface", "Switch Interface…", true, None::<&str>)?;
-    let default_interface = MenuItem::with_id(
-        app,
-        "default-interface",
-        "Back to Default Interface",
-        true,
-        None::<&str>,
-    )?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-    let sep2 = PredefinedMenuItem::separator(app)?;
-    let sep3 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let mut items: Vec<&dyn tauri::menu::IsMenuItem<R>> = Vec::with_capacity(11);
-    items.push(&show);
-    items.push(&sep1);
-    if crate::ISLAND_ENABLED {
-        items.push(&companion);
+    Some(("switch-interface", ids::TRAY_SWITCH_INTERFACE)),
+    Some(("default-interface", ids::TRAY_DEFAULT_INTERFACE)),
+    None,
+    Some(("quit", ids::TRAY_QUIT)),
+];
+
+/// Whether Shadow capture is paused, so a language change keeps the right verb.
+static CAPTURE_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The tray's text rows and their label ids, for [`relabel_tray`].
+struct TrayLabelItems<R: Runtime>(Vec<(&'static str, MenuItem<R>)>);
+
+fn tray_label(id: &str) -> String {
+    let paused = CAPTURE_PAUSED.load(std::sync::atomic::Ordering::SeqCst);
+    let id = if id == ids::TRAY_CAPTURE_PAUSE && paused { ids::TRAY_CAPTURE_RESUME } else { id };
+    crate::native_copy::label(id)
+}
+
+/// Re-read every tray label after the webview sent new native copy.
+pub(crate) fn relabel_tray<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(items) = app.try_state::<TrayLabelItems<R>>() {
+        for (id, item) in &items.0 {
+            let _ = item.set_text(tray_label(id));
+        }
     }
-    items.push(&capture);
-    items.push(&sep2);
-    items.push(&timeline);
-    items.push(&palette);
-    items.push(&switch_interface);
-    items.push(&default_interface);
-    items.push(&sep3);
-    items.push(&quit);
+}
+
+pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
+    let mut labelled: Vec<(&'static str, MenuItem<R>)> = Vec::new();
+    let mut rows: Vec<Box<dyn tauri::menu::IsMenuItem<R>>> = Vec::with_capacity(TRAY_ROWS.len());
+    for row in TRAY_ROWS {
+        match row {
+            None => rows.push(Box::new(PredefinedMenuItem::separator(app)?)),
+            Some(("companion", _)) if !crate::ISLAND_ENABLED => {}
+            Some((menu_id, label_id)) => {
+                let item = MenuItem::with_id(app, *menu_id, tray_label(label_id), true, None::<&str>)?;
+                labelled.push((label_id, item.clone()));
+                rows.push(Box::new(item));
+            }
+        }
+    }
+    let items: Vec<&dyn tauri::menu::IsMenuItem<R>> = rows.iter().map(|row| row.as_ref()).collect();
     let menu = Menu::with_items(app, &items)?;
 
     // On macOS the menu bar recolors a "template" image automatically for the
@@ -359,7 +366,11 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 
     // Held so the "capture" item's label can flip between Pause/Resume after a
     // toggle round-trips to Shadow. Cloned into the menu-event closure below.
-    let capture_item = capture.clone();
+    let capture_item = labelled
+        .iter()
+        .find(|(id, _)| *id == ids::TRAY_CAPTURE_PAUSE)
+        .map(|(_, item)| item.clone());
+    app.manage(TrayLabelItems(labelled));
 
     let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(tray_icon)
@@ -379,12 +390,10 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
                 let item = capture_item.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Some(paused) = toggle_shadow_capture().await {
-                        let label = if paused {
-                            "Resume Capture"
-                        } else {
-                            "Pause Capture"
-                        };
-                        let _ = item.set_text(label);
+                        CAPTURE_PAUSED.store(paused, std::sync::atomic::Ordering::SeqCst);
+                        if let Some(item) = item {
+                            let _ = item.set_text(tray_label(ids::TRAY_CAPTURE_PAUSE));
+                        }
                     }
                 });
             }
@@ -477,32 +486,4 @@ pub fn set_close_to_tray(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{running_conversation_count, running_workflow_count};
-
-    #[test]
-    fn quit_guard_counts_only_active_conversations() {
-        let payload = serde_json::json!({
-            "runs": [
-                { "run_status": "running" },
-                { "run_status": "completed" },
-                { "run_status": "awaiting_input" },
-                { "run_status": null }
-            ]
-        });
-
-        assert_eq!(running_conversation_count(&payload), 1);
-    }
-
-    #[test]
-    fn quit_guard_reads_workflow_running_count() {
-        assert_eq!(
-            running_workflow_count(&serde_json::json!({
-                "running": 3,
-                "awaiting_input": 2
-            })),
-            3
-        );
-        assert_eq!(running_workflow_count(&serde_json::json!({})), 0);
-    }
-}
+mod tests;

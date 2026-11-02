@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/app-sidebar-agent-conversations-proof.html";
 
@@ -77,9 +77,8 @@ test("agent thread rows open the exact conversation from pointer and keyboard", 
 	});
 	await expect(markAsReadAction).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-agent-thread-mark-unread-menu-no-navigation.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/evidence/desktop-agent-thread-mark-unread-menu-no-navigation.png"
 		),
 		fullPage: true,
 		animations: "disabled",
@@ -88,16 +87,14 @@ test("agent thread rows open the exact conversation from pointer and keyboard", 
 		.getByRole("menu")
 		.last()
 		.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-agent-thread-unread-menu.png"
+			path: proofEvidencePath(
+				"test-coverage-sweep-20260924/evidence/desktop-agent-thread-unread-menu.png"
 			),
 			animations: "disabled",
 		});
 	await markAsReadAction.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-agent-thread-mark-as-read-action.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/evidence/desktop-agent-thread-mark-as-read-action.png"
 		),
 		animations: "disabled",
 	});

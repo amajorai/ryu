@@ -2,8 +2,8 @@
 // sidebar contribution primitive instead of shipping their own primary rail.
 
 import { writeFile } from "node:fs/promises";
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/app-sidebar-sections-proof.html";
 
@@ -39,9 +39,8 @@ test.describe("app-owned sidebar sections", () => {
 			"7"
 		);
 		await page.screenshot({
-			path: path.resolve(
-				import.meta.dirname,
-				"../../../docs/proof/performance-sweep/sidebar-source-shared-completed.png"
+			path: proofEvidencePath(
+				"performance-sweep/sidebar-source-shared-completed.png"
 			),
 			fullPage: true,
 			animations: "disabled",
@@ -93,18 +92,14 @@ test("staggered app feed readers retain one polling cadence", async ({
 	}
 	await expect(page.getByRole("button", { name: /Launch plan/ })).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/sidebar-source-cadence-completed.png"
+		path: proofEvidencePath(
+			"performance-sweep/sidebar-source-cadence-completed.png"
 		),
 		fullPage: true,
 		animations: "disabled",
 	});
 	await writeFile(
-		path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/sidebar-source-cadence.json"
-		),
+		proofEvidencePath("performance-sweep/sidebar-source-cadence.json"),
 		`${JSON.stringify(
 			{
 				readings,

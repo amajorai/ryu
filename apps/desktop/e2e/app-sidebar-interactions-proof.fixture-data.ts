@@ -1,6 +1,3 @@
-// Shared constants, types and Core fixture payloads for the AppSidebar
-// interactions proof, split out of the spec so each file stays in its limits.
-import { fileURLToPath } from "node:url";
 import type { ChannelInput } from "../src/lib/api/channels.ts";
 import type { Profile } from "../src/lib/api/identities.ts";
 import type {
@@ -8,18 +5,14 @@ import type {
 	SidebarProofJson,
 	SidebarProofState,
 } from "./app-sidebar-interactions-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export const STORY_URL = "/app-sidebar-interactions-proof.html";
 export const EXPECTED_OPTIONAL_RESOURCE_URLS = new Set([
 	"http://127.0.0.1:7989/control",
 	"https://api.svgl.app/",
 ]);
-export const EVIDENCE_DIRECTORY = fileURLToPath(
-	new URL(
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/app-sidebar-interactions/",
-		import.meta.url
-	)
-);
+export const EVIDENCE_DIRECTORY = `${proofEvidencePath("test-coverage-sweep-20260924/evidence/app-sidebar-interactions")}/`;
 export const PROJECT_PATH = "/Users/proof/Project Alpha";
 export const DEFAULT_PROOF_HIDDEN_SECTIONS = [
 	"channels",

@@ -34,7 +34,7 @@ import type { PromptSuiteState } from "./PromptStudio-suite-state.ts";
 export function usePromptSuiteLoad(
 	state: PromptSuiteState,
 	agentId: string | null,
-	onPromptChange: (value: string) => void,
+	onLoadedPrompt: (value: string) => void,
 	target: ApiTarget
 ): void {
 	const tl = useLiteralMessages();
@@ -161,7 +161,7 @@ export function usePromptSuiteLoad(
 				setRunTags(runTagsFromConfig(savedRunConfig));
 				setVariants(config.prompts.slice(1).map(promptVariantFromConfig));
 				if (config.prompts[0]?.content) {
-					onPromptChange(config.prompts[0].content);
+					onLoadedPrompt(config.prompts[0].content);
 				}
 				const [versions, runs] = await Promise.all([
 					listPromptSuiteVersions(target, nextSuite.id),
@@ -233,7 +233,7 @@ export function usePromptSuiteLoad(
 		return () => {
 			cancelled = true;
 		};
-	}, [agentId, onPromptChange, target]);
+	}, [agentId, onLoadedPrompt, target]);
 
 	useEffect(() => {
 		if (!agentId || loadedSuiteAgentRef.current !== agentId) {

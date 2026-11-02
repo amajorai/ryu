@@ -6,11 +6,11 @@ import {
 	addChannelProofCallsSchema,
 	addChannelProofInputSchema,
 } from "./add-channel-proof.contracts.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/add-channel-dialog-proof.html";
-const EVIDENCE_DIR = path.resolve(
-	process.cwd(),
-	"../../docs/proof/test-coverage-sweep-20260924/evidence/add-channel-dialog"
+const EVIDENCE_DIR = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence/add-channel-dialog"
 );
 
 interface CreateFixture {

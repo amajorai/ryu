@@ -11,6 +11,7 @@ import type {
 	VaultSecret,
 	VaultState,
 } from "@/src/lib/api/vault.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const vaultWriteSchema = z.object({
 	scope: z.enum(["user", "node", "team", "org"]),
@@ -108,10 +109,7 @@ export interface SaveCase {
 }
 
 function evidencePath(name: string): string {
-	return path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/test-coverage-sweep-20260924/evidence/${name}.png`
-	);
+	return proofEvidencePath(`test-coverage-sweep-20260924/evidence/${name}.png`);
 }
 
 function storageKey(

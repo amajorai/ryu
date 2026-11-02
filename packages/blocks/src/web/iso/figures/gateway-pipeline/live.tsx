@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import * as React from "react";
 import {
 	type Spring,
@@ -96,6 +97,8 @@ export function GatewayPipelineLive({
 	inFront,
 	parcel,
 }: GatewayPipelineLiveProps) {
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const root = React.useRef<HTMLDivElement | null>(null);
 	const descriptionId = React.useId();
 	const visible = useInView(root);
@@ -186,7 +189,7 @@ export function GatewayPipelineLive({
 				aria-valuemax={STAGE_COUNT}
 				aria-valuemin={1}
 				aria-valuenow={shown + 1}
-				aria-valuetext={spokenOf(shown)}
+				aria-valuetext={spokenOf(shown, tl, locale)}
 				className="iso-quiet-live gwp-live"
 				onBlur={() => choose(null)}
 				onKeyDown={(event) => {

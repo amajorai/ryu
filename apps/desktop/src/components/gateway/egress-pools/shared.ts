@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import type { GatewayEgressConfig } from "@/src/lib/api/gateway.ts";
 
 type Pool = GatewayEgressConfig["pools"][string];
@@ -110,7 +111,7 @@ export function validatePool(
 			try {
 				url = new URL(endpoint.url);
 			} catch {
-				return `Enter a valid URL for ${endpoint.id}.`;
+				return tl("Enter a valid URL for {id}.", { id: endpoint.id });
 			}
 			if (
 				!(url.protocol === "http:" || url.protocol === "https:") ||
@@ -120,11 +121,16 @@ export function validatePool(
 				url.search ||
 				url.hash
 			) {
-				return `Use an HTTP or HTTPS proxy origin without credentials or a path for ${endpoint.id}.`;
+				return tl(
+					"Use an HTTP or HTTPS proxy origin without credentials or a path for {id}.",
+					{ id: endpoint.id }
+				);
 			}
 		}
 		if (Boolean(endpoint.username_env) !== Boolean(endpoint.password_env)) {
-			return `Set both credential environment variable names for ${endpoint.id}.`;
+			return tl("Set both credential environment variable names for {id}.", {
+				id: endpoint.id,
+			});
 		}
 		for (const env of [endpoint.username_env, endpoint.password_env]) {
 			if (
@@ -133,7 +139,10 @@ export function validatePool(
 				!env.startsWith(WRITABLE_CREDENTIAL_ENV_PREFIX) &&
 				!savedEnvNames.has(env)
 			) {
-				return `Credential variable names for ${endpoint.id} must start with ${WRITABLE_CREDENTIAL_ENV_PREFIX}.`;
+				return tl(
+					"Credential variable names for {id} must start with {prefix}.",
+					{ id: endpoint.id, prefix: WRITABLE_CREDENTIAL_ENV_PREFIX }
+				);
 			}
 		}
 	}

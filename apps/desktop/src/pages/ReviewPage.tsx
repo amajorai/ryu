@@ -304,7 +304,7 @@ function Highlights(props: { items: string[] }) {
 	return (
 		<section>
 			<h2 className="mb-2 font-semibold text-sm">Highlights</h2>
-			<ul className="list-disc space-y-1 pl-4 text-muted-foreground text-sm">
+			<ul className="list-disc space-y-1 ps-4 text-muted-foreground text-sm">
 				{items.map((item) => (
 					<li key={item}>{item}</li>
 				))}

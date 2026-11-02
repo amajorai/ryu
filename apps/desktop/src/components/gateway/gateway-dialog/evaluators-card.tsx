@@ -159,7 +159,9 @@ export function EvaluatorsCard({
 	const renderControl = (item: EvaluatorCatalogItem) => {
 		const locked = broaderLocked.get(item.id);
 		if (locked) {
-			const label = POLICY_LABELS[locked.inlineAction ?? "warn_and_continue"];
+			const label = tl(
+				POLICY_LABELS[locked.inlineAction ?? "warn_and_continue"]
+			);
 			return <LockedByBroader summary={tl("Locked ({label})", { label })} />;
 		}
 		const binding = evalBindingFor(bindings, item.id);

@@ -203,7 +203,7 @@ function ItemDescription({
 	return (
 		<p
 			className={cn(
-				"line-clamp-2 text-left font-normal text-muted-foreground text-sm [&>a:hover]:text-primary [&>a]:underline [&>a]:underline-offset-4",
+				"line-clamp-2 text-start font-normal text-muted-foreground text-sm [&>a:hover]:text-primary [&>a]:underline [&>a]:underline-offset-4",
 				className
 			)}
 			data-slot="item-description"

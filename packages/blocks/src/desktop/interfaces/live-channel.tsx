@@ -1,3 +1,4 @@
+import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -26,15 +27,18 @@ import { LivePlayer } from "./live-player.tsx";
 
 export type LiveChannelTab = "about" | "schedule" | "videos";
 
-const DATE = new Intl.DateTimeFormat(undefined, {
-	day: "numeric",
-	month: "short",
-});
-const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: "short" });
-const TIME = new Intl.DateTimeFormat(undefined, {
-	hour: "numeric",
-	minute: "2-digit",
-});
+const DATE = (locale: string = activeLocale()) =>
+	dateFormatter(locale, {
+		day: "numeric",
+		month: "short",
+	});
+const WEEKDAY = (locale: string = activeLocale()) =>
+	dateFormatter(locale, { weekday: "short" });
+const TIME = (locale: string = activeLocale()) =>
+	dateFormatter(locale, {
+		hour: "numeric",
+		minute: "2-digit",
+	});
 
 function ScheduleRow({ event }: { event: InterfaceEvent }) {
 	const tl = useLiteralMessages();
@@ -48,15 +52,15 @@ function ScheduleRow({ event }: { event: InterfaceEvent }) {
 		<li className="grid grid-cols-[4rem_1fr_auto] items-center gap-4 border-border border-b py-3 last:border-b-0">
 			<span className="flex flex-col">
 				<span className="text-muted-foreground text-xs uppercase leading-4 tracking-wide">
-					{WEEKDAY.format(start)}
+					{WEEKDAY().format(start)}
 				</span>
 				<span className="font-semibold text-foreground text-sm leading-5">
-					{DATE.format(start)}
+					{DATE().format(start)}
 				</span>
 			</span>
 			<span className="flex min-w-0 flex-col">
 				<span className="truncate font-semibold text-foreground text-sm leading-5">
-					{event.title}
+					<span data-ryu-i18n="off">{event.title}</span>
 					{event.count && event.count > 1 ? (
 						<span className="font-normal text-muted-foreground">
 							{` ${tl("· {runCount} runs", { runCount: event.count.toString() })}`}
@@ -64,7 +68,7 @@ function ScheduleRow({ event }: { event: InterfaceEvent }) {
 					) : null}
 				</span>
 				<span className="truncate text-muted-foreground text-sm leading-5">
-					<time dateTime={event.start}>{TIME.format(start)}</time>
+					<time dateTime={event.start}>{TIME().format(start)}</time>
 					{event.label ? ` · ${event.label}` : ""}
 				</span>
 			</span>
@@ -268,6 +272,7 @@ function ChannelInfo({
 						{category ? (
 							<button
 								className="rounded-sm text-primary text-sm leading-5 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+								data-ryu-i18n="off"
 								onClick={() => onCategory(category.id)}
 								type="button"
 							>

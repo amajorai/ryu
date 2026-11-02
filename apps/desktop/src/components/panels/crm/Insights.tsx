@@ -188,7 +188,7 @@ export function Insights({
 									<div className="min-w-0 flex-1">
 										<button
 											className={cn(
-												"truncate text-left text-sm",
+												"truncate text-start text-sm",
 												task.completed_at &&
 													"text-muted-foreground line-through"
 											)}

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfacePort,
 	InterfaceSettingValue,
@@ -15,12 +16,11 @@ import {
 	cycleNode,
 	DEFAULT_SETTINGS,
 	displayLabel,
-	KIND_LABELS,
 	type KnowledgeNode,
 	type KnowledgeSettings,
+	kindLabel,
 	type Layout,
 	nodeId,
-	plural,
 } from "./knowledge-model.ts";
 import {
 	type CameraApi,
@@ -104,14 +104,19 @@ export function useKnowledgeInteractions({
 			}
 			setSelectedId(id);
 			port.openThread(node.refId);
-			setAnnouncement(`Opened ${node.label}`);
+			setAnnouncement(tr("Opened {label}", { label: node.label }));
 			return;
 		}
 		if (threadOpen) {
 			port.closeThread();
 		}
 		setSelectedId(id);
-		setAnnouncement(`${KIND_LABELS[node.kind]} ${displayLabel(node)} selected`);
+		setAnnouncement(
+			tr("{kind} {label} selected", {
+				kind: kindLabel(node.kind),
+				label: displayLabel(node),
+			})
+		);
 	};
 	const openThread = (threadId: string) => {
 		select(nodeId.conversation(threadId));
@@ -214,7 +219,10 @@ export function useKnowledgeInteractions({
 			if (node) {
 				cameraApi.current?.reveal(node.id);
 				setAnnouncement(
-					`${displayLabel(node)}, ${KIND_LABELS[node.kind].toLowerCase()}, ${plural(node.degree, "link")}`
+					tr(
+						"{label}, {kind, select, agent {agent} conversation {conversation} project {project} team {team} other {topic}}, {count, plural, one {# link} other {# links}}",
+						{ count: node.degree, kind: node.kind, label: displayLabel(node) }
+					)
 				);
 			}
 		} else if (key === "Enter" || key === " ") {

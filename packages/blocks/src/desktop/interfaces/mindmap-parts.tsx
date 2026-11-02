@@ -16,7 +16,6 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import {
 	FoldHorizontal,
 	Minus,
@@ -28,7 +27,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
-import { type MindmapStats, plural } from "./mindmap-model.ts";
+import { threadStatusLabel } from "./interface-renderer.ts";
+import type { MindmapStats } from "./mindmap-model.ts";
 import { MINDMAP_TOOLTIP_KBD } from "./mindmap-panel.tsx";
 
 /** The map's title bar: what it holds, and a way to start a thread. */
@@ -41,13 +41,16 @@ export function MindmapHeader({
 }) {
 	const tl = useLiteralMessages();
 	return (
-		<header className="flex h-14 shrink-0 items-center gap-4 border-border border-b pr-3 pl-4">
+		<header className="flex h-14 shrink-0 items-center gap-4 border-border border-b ps-4 pe-3">
 			<div className="flex min-w-0 flex-1 items-baseline gap-3">
 				<h2 className="shrink-0 font-semibold text-base text-foreground leading-6">
 					Mind map
 				</h2>
 				<p className="@max-[519px]:hidden truncate text-[13px] text-muted-foreground tabular-nums leading-5">
-					{plural(stats.agents, "agent")} · {plural(stats.threads, "thread")}
+					{tl(
+						"{agents, plural, one {# agent} other {# agents}} · {threads, plural, one {# thread} other {# threads}}",
+						{ agents: stats.agents, threads: stats.threads }
+					)}
 					{stats.needYou > 0 ? (
 						<>
 							{" · "}
@@ -57,7 +60,7 @@ export function MindmapHeader({
 						</>
 					) : null}
 					{stats.working > 0
-						? tl(" · {working} working", { working: stats.working })
+						? ` · ${tl("{working} working", { working: stats.working })}`
 						: null}
 				</p>
 			</div>
@@ -76,12 +79,12 @@ export function MindmapLegend() {
 	return (
 		<ul
 			aria-label="Thread marks"
-			className="pointer-events-none absolute bottom-4 left-4 z-10 flex @max-[719px]:hidden items-center gap-4 text-[13px] text-muted-foreground leading-5"
+			className="pointer-events-none absolute start-4 bottom-4 z-10 flex @max-[719px]:hidden items-center gap-4 text-[13px] text-muted-foreground leading-5"
 		>
 			{LEGEND.map((status) => (
 				<li className="flex items-center gap-1.5" key={status}>
 					<BoardStatusDot status={status} />
-					{THREAD_STATUS_LABELS[status]}
+					{threadStatusLabel(status)}
 				</li>
 			))}
 		</ul>
@@ -152,7 +155,7 @@ export function MindmapControls({
 	return (
 		<div
 			aria-label="Map view"
-			className="absolute right-4 bottom-4 z-10 flex items-center gap-0.5 rounded-full border border-border bg-background p-0.5 shadow-xs"
+			className="absolute end-4 bottom-4 z-10 flex items-center gap-0.5 rounded-full border border-border bg-background p-0.5 shadow-xs"
 			role="toolbar"
 		>
 			<ControlButton

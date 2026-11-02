@@ -13,6 +13,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll.tsx";
 import { Button } from "@ryu/ui/components/motion/button/index.tsx";
 import { EASE_OUT } from "@ryu/ui/lib/ease.ts";
@@ -261,7 +262,7 @@ export function ApprovalCard({
 									size="icon"
 									variant="ghost"
 								>
-									<HugeiconsIcon className="size-4" icon={ArrowLeft02Icon} />
+									<DirectionalIcon className="size-4" icon={ArrowLeft02Icon} />
 								</Button>
 								<ProgressDots
 									current={currentStep}
@@ -273,7 +274,7 @@ export function ApprovalCard({
 											? "Submit response"
 											: "Next question"
 									}
-									className="ml-auto"
+									className="ms-auto"
 									disabled={busy || !isAnswered(currentAnswer)}
 									onClick={continueQuestion}
 									size={currentStep === questions.length - 1 ? "sm" : "icon"}
@@ -286,13 +287,16 @@ export function ApprovalCard({
 									) : currentStep === questions.length - 1 ? (
 										<>
 											{submitLabel}
-											<HugeiconsIcon
+											<DirectionalIcon
 												className="size-3.5"
 												icon={ArrowRight02Icon}
 											/>
 										</>
 									) : (
-										<HugeiconsIcon className="size-4" icon={ArrowRight02Icon} />
+										<DirectionalIcon
+											className="size-4"
+											icon={ArrowRight02Icon}
+										/>
 									)}
 								</Button>
 							</div>

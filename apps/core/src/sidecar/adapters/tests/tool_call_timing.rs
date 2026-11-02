@@ -284,6 +284,7 @@ fn parts_accumulator_persists_a_failed_turn_as_an_error_card() {
         "provider_payment_required",
         "OpenRouter credits exhausted",
         "Add credits to your OpenRouter account, then retry.",
+        None,
     );
     let parts: Vec<Value> = serde_json::from_str(&acc.to_json()).unwrap();
     assert_eq!(
@@ -294,6 +295,35 @@ fn parts_accumulator_persists_a_failed_turn_as_an_error_card() {
             "title": "OpenRouter credits exhausted",
             "message": "Add credits to your OpenRouter account, then retry."
         })]
+    );
+}
+
+#[test]
+fn parts_accumulator_error_card_carries_the_failure_messages() {
+    let failure = crate::sidecar::adapters::acp::AcpFailure::localized(
+        "agent_start_failed",
+        crate::i18n::messages::ACP_START_FAILED_TITLE_MESSAGE,
+        vec![
+            crate::i18n::Message::new(crate::i18n::messages::ACP_START_FAILED_MESSAGE)
+                .text("detail", "spawn ENOENT"),
+        ],
+    );
+    let mut acc = PartsAccumulator::default();
+    acc.error(
+        &failure.code,
+        &failure.title,
+        &failure.message,
+        failure.i18n_wire(),
+    );
+    let parts: Vec<Value> = serde_json::from_str(&acc.to_json()).unwrap();
+    assert_eq!(parts[0]["title"], "Agent failed to start");
+    assert_eq!(
+        parts[0]["i18n"]["title"]["message"],
+        "Agent failed to start"
+    );
+    assert_eq!(
+        parts[0]["i18n"]["body"][0]["args"]["detail"],
+        "spawn ENOENT"
     );
 }
 

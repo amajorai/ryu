@@ -64,7 +64,7 @@ export function CinemaGrid({
 				</div>
 				{agent ? (
 					<Button
-						className="ml-auto gap-2 rounded-sm"
+						className="ms-auto gap-2 rounded-sm"
 						onClick={() => onNew(agent.id)}
 						size="sm"
 						type="button"

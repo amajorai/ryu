@@ -17,7 +17,7 @@ import type { PostSpace, PostsView } from "./posts-model.ts";
 import { viewKey } from "./posts-model.ts";
 
 const ROW =
-	"group/row flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm outline-none transition-colors duration-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring";
+	"group/row flex h-8 w-full items-center gap-2 rounded-md px-2 text-start text-sm outline-none transition-colors duration-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring";
 
 /**
  * Active is a firm tint with full-strength text and icon; hover is half of
@@ -150,7 +150,7 @@ export function PostsSidebar({
 			aria-label="Posts"
 			className="flex size-full flex-col bg-sidebar text-sidebar-foreground"
 		>
-			<div className="flex h-14 shrink-0 items-center gap-2 pr-2 pl-4">
+			<div className="flex h-14 shrink-0 items-center gap-2 ps-4 pe-2">
 				<span
 					aria-hidden="true"
 					className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sidebar-foreground/[0.08] font-semibold text-sidebar-foreground text-xs"

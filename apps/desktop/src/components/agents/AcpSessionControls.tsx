@@ -84,7 +84,7 @@ function AcpAuthSection({ agentId }: { agentId: string }) {
 				// be worded as a completed sign-in. Current Core reports this as
 				// `verificationRequired`; an older node sent `authenticated` unverified.
 				toast.info({
-					title: `${methodName} ran`,
+					title: tl("{methodName} ran", { methodName }),
 					description:
 						"The agent accepted the request. If its login happens elsewhere (a browser or terminal), finish it there — this can't confirm you're signed in.",
 				});

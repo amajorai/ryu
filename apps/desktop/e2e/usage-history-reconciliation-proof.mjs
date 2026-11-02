@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const sources = [
 	"../src/components/usage/UsageHistoryDashboard.tsx",
@@ -39,10 +41,7 @@ await test("unresolved live overlap has a separate responsive view", async () =>
 			"utf8"
 		)
 	);
-	const proofDir = new URL(
-		"../../../docs/proof/usage-history/",
-		import.meta.url
-	);
+	const proofDir = pathToFileURL(`${proofEvidencePath("usage-history")}/`);
 	await mkdir(proofDir, { recursive: true });
 	const browser = await chromium.launch();
 	const errors = [];

@@ -1,9 +1,9 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const evidence = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-data-flows/memory-library"
+const evidence = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-data-flows/memory-library"
 );
 const rows = {
 	items: [

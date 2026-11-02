@@ -29,9 +29,14 @@ export function ConversationStart({ entry }: { entry: MessengerEntry }) {
 				size="header"
 			/>
 			<div className="flex flex-col gap-1">
-				<p className="font-medium text-sm">{entry.name}</p>
+				<p className="font-medium text-sm" data-ryu-i18n="off">
+					{entry.name}
+				</p>
 				{entry.description ? (
-					<p className="max-w-sm text-muted-foreground text-sm">
+					<p
+						className="max-w-sm text-muted-foreground text-sm"
+						data-ryu-i18n="off"
+					>
 						{entry.description}
 					</p>
 				) : null}

@@ -91,7 +91,7 @@ function TimeGridEvent({
 				render={
 					<button
 						className={cn(
-							"absolute overflow-hidden rounded-lg px-1.5 py-0.5 text-left text-xs leading-tight transition-colors hover:brightness-95 dark:hover:brightness-125",
+							"absolute overflow-hidden rounded-lg px-1.5 py-0.5 text-start text-xs leading-tight transition-colors hover:brightness-95 dark:hover:brightness-125",
 							eventTone(event)
 						)}
 						data-calendar-event=""
@@ -130,11 +130,11 @@ function NowIndicator() {
 	} = { "--calendar-event-top": `${top}px` };
 	return (
 		<div
-			className="pointer-events-none absolute right-0 left-0 z-10 flex items-center"
+			className="pointer-events-none absolute start-0 end-0 z-10 flex items-center"
 			data-calendar-now=""
 			style={calendarPositionVariables2}
 		>
-			<span className="-ml-1 size-2 rounded-full bg-destructive" />
+			<span className="-ms-1 size-2 rounded-full bg-destructive" />
 			<span className="h-px flex-1 bg-destructive" />
 		</div>
 	);
@@ -174,12 +174,12 @@ export function TimeGridView({
 		<div className="flex min-h-0 flex-1 flex-col" style={calendarGridVariables}>
 			{/* Column headers (one per day) */}
 			<div className="flex shrink-0 border-b" data-calendar-heading="">
-				<div className="w-14 shrink-0 border-r" />
+				<div className="w-14 shrink-0 border-e" />
 				{days.map((day) => {
 					const today = isDisplayToday(day);
 					return (
 						<div
-							className="flex-1 border-r py-1.5 text-center last:border-r-0"
+							className="flex-1 border-e py-1.5 text-center last:border-e-0"
 							key={civilDayKey(day)}
 						>
 							<div className="font-medium text-muted-foreground text-xs">
@@ -207,11 +207,11 @@ export function TimeGridView({
 					<div className="w-14 shrink-0">
 						{HOURS.map((hour) => (
 							<div
-								className="relative border-r"
+								className="relative border-e"
 								data-calendar-hour=""
 								key={hour}
 							>
-								<span className="absolute -top-2 right-1.5 text-muted-foreground/70 text-xs tabular-nums">
+								<span className="absolute end-1.5 -top-2 text-muted-foreground/70 text-xs tabular-nums">
 									{hour === 0
 										? ""
 										: format(new Date(2000, 0, 1, hour), "HH:mm")}
@@ -223,7 +223,7 @@ export function TimeGridView({
 					{/* Day columns */}
 					{days.map((day, dayIndex) => (
 						<div
-							className="relative flex-1 border-r last:border-r-0"
+							className="relative flex-1 border-e last:border-e-0"
 							key={civilDayKey(day)}
 						>
 							{HOURS.map((hour) => (

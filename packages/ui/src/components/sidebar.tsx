@@ -1,9 +1,10 @@
 "use client";
 
 import { SidebarLeftIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useLocalizedString } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Sheet,
 	SheetContent,
@@ -187,6 +188,11 @@ function SidebarProvider({
 	);
 }
 
+/**
+ * `side` is logical: "left" pins the sidebar to the inline start (the physical
+ * right under `dir="rtl"`) and "right" to the inline end, so the fixed panel
+ * always lines up with the in-flow gap that reserves its space.
+ */
 function Sidebar({
 	side = "left",
 	variant = "sidebar",
@@ -203,6 +209,7 @@ function Sidebar({
 	collapsible?: "offcanvas" | "icon" | "none";
 }) {
 	const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+	const direction = useDirection();
 
 	if (collapsible === "none") {
 		return (
@@ -230,7 +237,7 @@ function Sidebar({
 					data-sidebar="sidebar"
 					data-slot="sidebar"
 					dir={dir}
-					side={side}
+					side={physicalSheetSide(side, dir ?? direction)}
 					style={
 						// SAFETY: React forwards this string CSS custom property to its native style declaration.
 						{
@@ -261,7 +268,10 @@ function Sidebar({
 			<div
 				className={cn(
 					// Snaps to its new width in one step; only the panel below animates.
-					"relative w-(--sidebar-width) bg-transparent",
+					// `transition-none` keeps it snapping under reduced motion too, where
+					// the global 0.01ms duration would otherwise animate its width for a
+					// frame and let the workbench measure a stale, narrower Center.
+					"relative w-(--sidebar-width) bg-transparent transition-none",
 					"group-data-[collapsible=offcanvas]:w-0",
 					"group-data-[side=right]:rotate-180",
 					variant === "floating" || variant === "inset"
@@ -274,11 +284,13 @@ function Sidebar({
 				className={cn(
 					// The panel slides and fades on transform and opacity only; its width
 					// (icon collapse) snaps, so nothing animates layout.
-					"fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[translate,opacity] duration-(--duration-base) ease-move data-[side=right]:right-0 data-[side=left]:left-0 group-data-[collapsible=offcanvas]:pointer-events-none group-data-[collapsible=offcanvas]:opacity-0 data-[side=left]:group-data-[collapsible=offcanvas]:-translate-x-full data-[side=right]:group-data-[collapsible=offcanvas]:translate-x-full md:flex",
+					"fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[translate,opacity] duration-(--duration-base) ease-move data-[side=left]:start-0 data-[side=right]:end-0 group-data-[collapsible=offcanvas]:pointer-events-none group-data-[collapsible=offcanvas]:opacity-0 data-[side=left]:group-data-[collapsible=offcanvas]:-translate-x-full data-[side=right]:group-data-[collapsible=offcanvas]:translate-x-full md:flex",
+					// Off-canvas slides toward the physical edge it is pinned to, which flips under RTL.
+					"rtl:data-[side=left]:group-data-[collapsible=offcanvas]:translate-x-full rtl:data-[side=right]:group-data-[collapsible=offcanvas]:-translate-x-full",
 					// Adjust the padding for floating and inset variants.
 					variant === "floating" || variant === "inset"
 						? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
-						: "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
+						: "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=right]:border-s group-data-[side=left]:border-e",
 					appearance === "showcase-frame" && "bg-transparent p-2",
 					appearance === "settings-navigation" && "rounded-xl",
 					className
@@ -297,6 +309,17 @@ function Sidebar({
 			</div>
 		</div>
 	);
+}
+
+/** Base UI's Sheet places "left"/"right" physically; map the logical side onto it. */
+function physicalSheetSide(
+	side: "left" | "right",
+	direction: string | undefined
+): "left" | "right" {
+	if (direction !== "rtl") {
+		return side;
+	}
+	return side === "left" ? "right" : "left";
 }
 
 function SidebarTrigger({
@@ -327,7 +350,7 @@ function SidebarTrigger({
 			{...props}
 			aria-label={localizedLabel}
 		>
-			<HugeiconsIcon icon={SidebarLeftIcon} strokeWidth={2} />
+			<DirectionalIcon icon={SidebarLeftIcon} strokeWidth={2} />
 			<span className="sr-only">{localizedLabel}</span>
 		</Button>
 	);
@@ -344,12 +367,14 @@ function SidebarRail({
 	return (
 		<button
 			className={cn(
-				"absolute inset-y-0 z-20 hidden w-4 transition-[translate,background-color] ease-linear after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+				"absolute inset-y-0 z-20 hidden w-4 transition-[translate,background-color] ease-linear after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:start-0 group-data-[side=left]:-end-4 sm:flex ltr:-translate-x-1/2 rtl:translate-x-1/2",
 				"in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
 				"[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
-				"group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
-				"[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
-				"[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
+				"rtl:in-data-[side=left]:cursor-e-resize rtl:in-data-[side=right]:cursor-w-resize",
+				"rtl:[[data-side=left][data-state=collapsed]_&]:cursor-w-resize rtl:[[data-side=right][data-state=collapsed]_&]:cursor-e-resize",
+				"group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:start-full",
+				"[[data-side=left][data-collapsible=offcanvas]_&]:-end-2",
+				"[[data-side=right][data-collapsible=offcanvas]_&]:-start-2",
 				className
 			)}
 			data-sidebar="rail"
@@ -375,7 +400,7 @@ function SidebarInset({
 	return (
 		<main
 			className={cn(
-				"relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2 md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-2xl md:peer-data-[variant=inset]:shadow-sm",
+				"relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-2 md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:rounded-2xl md:peer-data-[variant=inset]:shadow-sm",
 				motion === "assistant-dock" &&
 					"transition-[padding] duration-300 ease-out",
 				appearance === "os-canvas" &&
@@ -412,6 +437,7 @@ export {
 } from "./sidebar-sections.tsx";
 export {
 	parseSidebarOpenPreference,
+	physicalSheetSide,
 	readSidebarOpenPreference,
 	Sidebar,
 	SidebarInset,

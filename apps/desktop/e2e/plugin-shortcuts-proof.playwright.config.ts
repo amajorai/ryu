@@ -1,4 +1,8 @@
 import { defineConfig } from "@playwright/test";
+import { ensureOwnedIconMap } from "./owned-icon-map.ts";
+
+// The harness's installed-icon plugin requires an owned icon map.
+ensureOwnedIconMap();
 export default defineConfig({
 	testDir: import.meta.dirname,
 	testMatch: "plugin-shortcuts-proof.spec.ts",

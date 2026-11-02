@@ -250,7 +250,9 @@ export function SshConnectionsSection() {
 		const next = connections.filter((item) => item.id !== connection.id);
 		saveSshConnections(next);
 		setConnections(next);
-		sileo.success({ title: `${connection.name} removed` });
+		sileo.success({
+			title: tl("{name} removed", { name: connection.name }),
+		});
 	};
 
 	return (

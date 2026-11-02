@@ -1,5 +1,6 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
+import { localizeApproval } from "@ryuhq/core-client/approval-text";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import {
@@ -30,8 +31,8 @@ function osNotify(
 			showOsNotification({
 				title: sender
 					? tl("{name} needs your approval", { name: sender.name })
-					: "Approval needed",
-				body: request.summary,
+					: tl("Approval needed"),
+				body: localizeApproval(request, tl).summary,
 				tag: `approval-${request.id}`,
 				sender,
 			})
@@ -76,8 +77,8 @@ export function useApprovalEvents(): void {
 		const onEvent = (event: ApprovalEvent) => {
 			if (event.type === "created" && statusRef.current === "online") {
 				toast.info({
-					title: "Approval needed",
-					description: event.request.title,
+					title: tlRef.current("Approval needed"),
+					description: localizeApproval(event.request, tlRef.current).title,
 				});
 				playSound("approval-needed", {
 					key: `approval:${event.request.id}`,

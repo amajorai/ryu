@@ -8,13 +8,13 @@ import {
 	LEGACY_VAULT_LOCAL_STORAGE_KEYS,
 	parseAuthVaultSlot,
 } from "./harness/desktop-secret-slots.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 export const PROOF_URL = "/navuser-interactions-proof.html";
 export const ORIGIN = "http://127.0.0.1:5431";
 export const FRONTEND = "http://localhost:3001";
-export const EVIDENCE_DIR = path.resolve(
-	process.cwd(),
-	"../../docs/proof/test-coverage-sweep-20260924/evidence"
+export const EVIDENCE_DIR = proofEvidencePath(
+	"test-coverage-sweep-20260924/evidence"
 );
 
 export interface ApiCall {

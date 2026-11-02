@@ -25,3 +25,10 @@ export interface ProductExplainer {
 	/** Related product slugs, in display order. */
 	worksWith?: readonly string[];
 }
+
+/**
+ * Marks a statement for the i18n extractor and returns it unchanged.
+ * `ProductStatement` translates the whole paragraph at render time, before it
+ * splits off the lead sentence.
+ */
+export const statementSource = (source: string): string => source;

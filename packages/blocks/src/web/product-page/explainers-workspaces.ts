@@ -1,10 +1,14 @@
-import type { ProductExplainer } from "./explainer-types.ts";
+import {
+	type ProductExplainer,
+	statementSource as tl,
+} from "./explainer-types.ts";
 
 /** Workspaces: where people hand work to agents. */
 export const WORKSPACE_EXPLAINERS: Record<string, ProductExplainer> = {
 	bot: {
-		statement:
-			"Bot is managed AI you hand a task to, with nothing to set up. It uses your organization's default model, keeps the task's context in one thread, and waits for your approval before it reaches an important app, person, or system.",
+		statement: tl(
+			"Bot is managed AI you hand a task to, with nothing to set up. It uses your organization's default model, keeps the task's context in one thread, and waits for your approval before it reaches an important app, person, or system."
+		),
 		steps: [
 			{
 				title: "Hand it a task",
@@ -23,8 +27,9 @@ export const WORKSPACE_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["agent"],
 	},
 	agent: {
-		statement:
-			"Agent is where you run Ryu your way. Set the models, tools, and approvals your team uses, then review every model and tool call in a run, with its timing, errors, and cost.",
+		statement: tl(
+			"Agent is where you run Ryu your way. Set the models, tools, and approvals your team uses, then review every model and tool call in a run, with its timing, errors, and cost."
+		),
 		steps: [
 			{
 				title: "Set it up",
@@ -43,8 +48,9 @@ export const WORKSPACE_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["bot", "gateway"],
 	},
 	os: {
-		statement:
-			"OS is a desktop workspace for agents, apps, and windows. Open apps from the dock, keep each task in its own window, and jump anywhere with ⌘K. It runs on the same agents, Core, and permissions as Ryu Desktop.",
+		statement: tl(
+			"OS is a desktop workspace for agents, apps, and windows. Open apps from the dock, keep each task in its own window, and jump anywhere with ⌘K. It runs on the same agents, Core, and permissions as Ryu Desktop."
+		),
 		steps: [
 			{
 				title: "Open an App",
@@ -65,8 +71,9 @@ export const WORKSPACE_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["desktop", "marketplace"],
 	},
 	desktop: {
-		statement:
-			"Ryu Desktop is the Ryu app for your computer. Chat with agents, connect tools, manage models, and review runs in one app, with local models, your own keys, or a Ryu plan.",
+		statement: tl(
+			"Ryu Desktop is the Ryu app for your computer. Chat with agents, connect tools, manage models, and review runs in one app, with local models, your own keys, or a Ryu plan."
+		),
 		steps: [
 			{
 				title: "Choose your models",
@@ -86,16 +93,19 @@ export const WORKSPACE_EXPLAINERS: Record<string, ProductExplainer> = {
 		worksWith: ["core", "marketplace", "cli"],
 	},
 	island: {
-		statement:
-			"Ryu Island is a planned screen-aware companion: a small island that expands only when it has something useful, and suggests your next step from on-screen context read on your device.",
+		statement: tl(
+			"Ryu Island is a planned screen-aware companion: a small island that expands only when it has something useful, and suggests your next step from on-screen context read on your device."
+		),
 	},
 	mobile: {
-		statement:
-			"Ryu Mobile is coming to iPhone and Android. Chat with the agents on your Ryu server, or run small open models on the phone, even offline.",
+		statement: tl(
+			"Ryu Mobile is coming to iPhone and Android. Chat with the agents on your Ryu server, or run small open models on the phone, even offline."
+		),
 	},
 	"chrome-extension": {
-		statement:
-			"Ryu for Chrome is a page-aware companion in your browser. Summarize the page, ask about a selection, or save it to Ryu without leaving the tab. It reads the active tab only when you allow it.",
+		statement: tl(
+			"Ryu for Chrome is a page-aware companion in your browser. Summarize the page, ask about a selection, or save it to Ryu without leaving the tab. It reads the active tab only when you allow it."
+		),
 		steps: [
 			{
 				title: "Open it",
@@ -115,7 +125,8 @@ export const WORKSPACE_EXPLAINERS: Record<string, ProductExplainer> = {
 		],
 	},
 	devices: {
-		statement:
-			"Ryu Devices are a planned watch, necklace, and e-ink desk display that talk only to your own Ryu server, over Wi-Fi or through your phone over Bluetooth.",
+		statement: tl(
+			"Ryu Devices are a planned watch, necklace, and e-ink desk display that talk only to your own Ryu server, over Wi-Fi or through your phone over Bluetooth."
+		),
 	},
 };

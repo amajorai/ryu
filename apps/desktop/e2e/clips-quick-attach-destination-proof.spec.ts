@@ -1,15 +1,13 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Verification runs set RYU_PROOF_OUTPUT_ROOT so screenshots land in scratch
 // space instead of rewriting the tracked proof images.
 const proofDir = process.env.RYU_PROOF_OUTPUT_ROOT
 	? path.resolve(process.env.RYU_PROOF_OUTPUT_ROOT)
-	: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/clips-quick-attach-destination"
-		);
+	: proofEvidencePath("clips-quick-attach-destination");
 
 test("selects and saves every Clips destination", async ({ page }) => {
 	const pageErrors: string[] = [];

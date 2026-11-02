@@ -23,7 +23,7 @@ export function InboxSkeleton() {
 			role="status"
 		>
 			<span className="sr-only">Loading inbox</span>
-			<div aria-hidden="true" className="flex h-8 items-center gap-3 pr-4 pl-5">
+			<div aria-hidden="true" className="flex h-8 items-center gap-3 ps-5 pe-4">
 				<span className="flex w-6 shrink-0 justify-center">
 					<Skeleton className="size-3.5" radius="pill" />
 				</span>
@@ -32,14 +32,14 @@ export function InboxSkeleton() {
 			{PLACEHOLDER_ROWS.map((row) => (
 				<div
 					aria-hidden="true"
-					className="flex items-center gap-3 py-2 pr-4 pl-5"
+					className="flex items-center gap-3 py-2 ps-5 pe-4"
 					key={row.key}
 				>
 					<Skeleton className="size-6 shrink-0" radius="pill" />
 					<div className="flex min-w-0 flex-1 flex-col">
 						<div className="flex h-5 items-center gap-2">
 							<Skeleton className={`h-3 ${row.title}`} radius="block" />
-							<Skeleton className="ml-auto h-2.5 w-6" radius="block" />
+							<Skeleton className="ms-auto h-2.5 w-6" radius="block" />
 						</div>
 						<div className="flex h-4 items-center">
 							<Skeleton className={`h-2.5 ${row.preview}`} radius="block" />

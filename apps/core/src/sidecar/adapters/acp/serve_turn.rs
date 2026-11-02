@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{messages as m, Message};
 
 /// The next turn to serve: the peeked first turn, else the queue's next one.
 /// `None` when the pool closed the queue or the idle TTL passed (the loop ends).
@@ -50,20 +51,14 @@ pub(super) async fn admit_turn(
     let admission = match admission {
         Ok(admission) => admission,
         Err(message) => {
-            let _ = tx.send(AcpEvent::Error(AcpFailure {
-                code: "execution_paused".to_owned(),
-                title: "Execution paused".to_owned(),
-                message: message.to_owned(),
-            }));
+            let _ = tx.send(AcpEvent::Error(execution_paused_failure(message)));
             return None;
         }
     };
     if admission.is_cancelled() {
-        let _ = tx.send(AcpEvent::Error(AcpFailure {
-            code: "execution_paused".to_owned(),
-            title: "Execution paused".to_owned(),
-            message: crate::execution_control::PAUSED_MESSAGE.to_owned(),
-        }));
+        let _ = tx.send(AcpEvent::Error(execution_paused_failure(
+            crate::execution_control::PAUSED_MESSAGE,
+        )));
         return None;
     }
     // Point the bridge's permission sink at THIS turn's stream so a
@@ -82,23 +77,43 @@ pub(super) async fn admit_turn(
     if is_managed_pi {
         if let Some(captured) = captured_pi_account.as_ref() {
             if let Err(error) = captured.prepare_turn().await {
-                let _ = tx.send(AcpEvent::Error(AcpFailure {
-                    code: "pi_account_required".into(),
-                    title: "Pi account unavailable".into(),
-                    message: error.to_string(),
-                }));
+                let _ = tx.send(AcpEvent::Error(pi_account_failure(error)));
                 return None;
             }
         } else {
             if let Err(error) = crate::pi_config::refresh_pi_oauth_logins().await {
-                let _ = tx.send(AcpEvent::Error(AcpFailure {
-                    code: "pi_account_required".into(),
-                    title: "Pi account unavailable".into(),
-                    message: error.to_string(),
-                }));
+                let _ = tx.send(AcpEvent::Error(pi_account_failure(error)));
                 return None;
             }
         }
     }
     Some(admission)
+}
+
+/// The failure for a turn Kill Switch refused. Core's own pause notice is a
+/// Core message; any other refusal is relayed verbatim.
+pub(super) fn execution_paused_failure(message: &str) -> AcpFailure {
+    if message == crate::execution_control::PAUSED_MESSAGE {
+        AcpFailure::localized(
+            "execution_paused",
+            m::ACP_EXECUTION_PAUSED_TITLE_MESSAGE,
+            vec![Message::new(m::ACP_EXECUTION_PAUSED_MESSAGE)],
+        )
+    } else {
+        AcpFailure::relayed(
+            "execution_paused",
+            m::ACP_EXECUTION_PAUSED_TITLE_MESSAGE,
+            message,
+        )
+    }
+}
+
+/// The failure for a managed-Pi account that could not be prepared; the error
+/// is relayed verbatim.
+pub(super) fn pi_account_failure(error: impl std::fmt::Display) -> AcpFailure {
+    AcpFailure::relayed(
+        "pi_account_required",
+        m::ACP_PI_ACCOUNT_TITLE_MESSAGE,
+        error.to_string(),
+    )
 }

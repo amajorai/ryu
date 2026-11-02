@@ -34,7 +34,7 @@ export function DitherLayerControls({
 				<button
 					aria-pressed={enabled}
 					className={cn(
-						"flex w-full items-center justify-between rounded-md px-1 py-0.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						"flex w-full items-center justify-between rounded-md px-1 py-0.5 text-start text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					)}
 					onClick={() => onEnabledChange(!enabled)}
 					type="button"

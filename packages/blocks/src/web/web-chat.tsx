@@ -39,7 +39,7 @@ export default function WebChat({
 }: WebChatProps) {
 	return (
 		<div className="flex h-full overflow-hidden">
-			<div className="hidden w-80 border-r md:block">{sidebar}</div>
+			<div className="hidden w-80 border-e md:block">{sidebar}</div>
 
 			{mobileSidebarOpen && (
 				<div className="fixed inset-0 z-50 md:hidden">
@@ -49,7 +49,7 @@ export default function WebChat({
 						onClick={onCloseMobileSidebar}
 						type="button"
 					/>
-					<div className="absolute top-0 bottom-0 left-0 w-80 border-r bg-background">
+					<div className="absolute start-0 top-0 bottom-0 w-80 border-e bg-background">
 						{sidebar}
 					</div>
 				</div>

@@ -1,6 +1,6 @@
-import path from "node:path";
 import { expect, type Route, test } from "@playwright/test";
 import { LOGIN_APPROVAL_EXPIRES_IN_SECONDS } from "@ryu/auth/lib/login-approval-contract";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("account replacement cancels pending snapshots and unmount closes the stream", async ({
 	page,
@@ -68,9 +68,8 @@ test("account replacement cancels pending snapshots and unmount closes the strea
 	).toBeVisible();
 	await expect.poll(() => streams.length).toBe(2);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/performance-sweep/approval-lifetime-completed.png"
+		path: proofEvidencePath(
+			"performance-sweep/approval-lifetime-completed.png"
 		),
 		fullPage: true,
 		animations: "disabled",

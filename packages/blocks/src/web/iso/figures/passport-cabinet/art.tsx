@@ -1,7 +1,8 @@
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Line, Solid } from "../../kit/react/draw.tsx";
 import { CABINET_ART, SITE_ART, TRAY_ART } from "./geometry.ts";
 import { PassportCabinetLive } from "./live.tsx";
-import { DESCRIPTION, LABEL } from "./model.ts";
+import { describePassport, passportLabel } from "./model.ts";
 
 /**
  * The static drawing, far to near: the cabinet with the keys still hanging on it and the
@@ -22,8 +23,13 @@ const STATIC = (
 );
 
 export function PassportCabinetArt() {
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	return (
-		<PassportCabinetLive description={DESCRIPTION} label={LABEL}>
+		<PassportCabinetLive
+			description={describePassport(tl, locale)}
+			label={passportLabel(tl)}
+		>
 			{STATIC}
 		</PassportCabinetLive>
 	);

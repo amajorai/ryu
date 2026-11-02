@@ -199,7 +199,10 @@ export function ConnectionEditor({
 	if (connection.anonymous) {
 		status = "Anonymous";
 	} else if (connection.accounts.length > 0) {
-		status = `${connection.accounts.length} saved ${connection.accounts.length === 1 ? "account" : "accounts"}`;
+		status = tl(
+			"{count, plural, one {# saved account} other {# saved accounts}}",
+			{ count: connection.accounts.length }
+		);
 	}
 	let logo = (
 		<HugeiconsIcon
@@ -299,7 +302,11 @@ export function ConnectionEditor({
 									{replacement ? "Replacement API key (optional)" : "API key"}
 								</FieldLabel>
 								<Input
-									aria-label={`${label} ${replacement ? "replacement API key" : "API key"}`}
+									aria-label={
+										replacement
+											? tl("{label} replacement API key", { label })
+											: tl("{label} API key", { label })
+									}
 									autoComplete="off"
 									disabled={locked}
 									id={keyFieldId}

@@ -12,14 +12,10 @@ import {
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
 
-import {
-	formatDistanceToNow,
-	isThisWeek,
-	isToday,
-	isYesterday,
-} from "date-fns";
+import { isThisWeek, isToday, isYesterday } from "date-fns";
 import { NodeSelector } from "@/src/components/shell/NodeSelector.tsx";
 import { useNodeDisplayMode } from "@/src/hooks/useNodeDisplayMode.ts";
+import { relativeTimeAgo } from "@/src/lib/time.ts";
 import type { Conversation } from "@/types/chat.ts";
 
 interface ChatSidebarProps {
@@ -85,7 +81,7 @@ export function ChatSidebar({
 					size="sm"
 					variant="ghost"
 				>
-					<HugeiconsIcon className="mr-2" icon={Add01Icon} size={14} />
+					<HugeiconsIcon className="me-2" icon={Add01Icon} size={14} />
 					New chat
 				</Button>
 			</div>
@@ -124,9 +120,7 @@ export function ChatSidebar({
 										<div className="min-w-0 flex-1">
 											<p className="truncate text-sm">{conv.title}</p>
 											<p className="text-muted-foreground text-xs">
-												{formatDistanceToNow(conv.updatedAt, {
-													addSuffix: true,
-												})}
+												{relativeTimeAgo(conv.updatedAt)}
 											</p>
 										</div>
 
@@ -146,7 +140,7 @@ export function ChatSidebar({
 													tone="destructive"
 												>
 													<HugeiconsIcon
-														className="mr-2"
+														className="me-2"
 														icon={Delete01Icon}
 														size={12}
 													/>

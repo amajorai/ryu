@@ -16,6 +16,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
+import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { toastActionError } from "@/src/lib/action-error.ts";
@@ -31,7 +32,7 @@ import {
 } from "@/src/lib/api/prompt-suites.ts";
 import type { TestCaseRow } from "@/src/lib/prompt-studio.ts";
 import { parsePromptfooValue } from "@/src/lib/promptfoo.ts";
-import { formatMicroUsd, pct, scoreTone } from "./PromptStudio-format.ts";
+import { pct, scoreTone } from "./PromptStudio-format.ts";
 
 export function CaseLabel({
 	row,
@@ -241,7 +242,10 @@ export function MatrixCell({
 							Copy
 						</Button>
 					</div>
-					<pre className="max-h-28 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-1">
+					<pre
+						className="max-h-28 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-1"
+						dir="auto"
+					>
 						{score.rendered_prompt ?? score.prompt}
 					</pre>
 					<div className="flex items-center justify-between gap-2">
@@ -278,7 +282,10 @@ export function MatrixCell({
 							/>
 						</div>
 					) : (
-						<pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-1">
+						<pre
+							className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-1"
+							dir={renderMode === "json" ? undefined : "auto"}
+						>
 							{renderMode === "json"
 								? jsonOutput(score.response_text)
 								: score.response_text}
@@ -324,7 +331,7 @@ export function MatrixCell({
 			</details>
 			{runId && suiteId ? (
 				<div className="flex items-center gap-1">
-					<span className="type-compact mr-1 text-muted-foreground">
+					<span className="type-compact me-1 text-muted-foreground">
 						Review
 					</span>
 					<Button

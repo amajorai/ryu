@@ -1,6 +1,6 @@
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { countLabel, type NewspaperStory } from "./newspaper-model.ts";
+import { messageCount, type NewspaperStory } from "./newspaper-model.ts";
 import {
 	StoryByline,
 	StoryDeck,
@@ -39,7 +39,7 @@ export function LeadStory({
 			/>
 			<StoryByline
 				className="mt-4"
-				detail={countLabel(story.thread.messageCount, "message")}
+				detail={messageCount(story.thread.messageCount)}
 				now={now}
 				story={story}
 			/>
@@ -98,8 +98,8 @@ export function LeadPackage({
 				<FrontStory
 					className={cn(
 						index === 0
-							? "sm:pr-6"
-							: "max-sm:mt-5 max-sm:border-border max-sm:border-t max-sm:pt-5 sm:border-border sm:border-l sm:pl-6"
+							? "sm:pe-6"
+							: "max-sm:mt-5 max-sm:border-border max-sm:border-t max-sm:pt-5 sm:border-border sm:border-s sm:ps-6"
 					)}
 					key={story.thread.id}
 					now={now}
@@ -165,26 +165,26 @@ function SkeletonStory({ lines, size }: { lines: number; size: "lg" | "md" }) {
 export function FrontSkeleton() {
 	return (
 		<div aria-hidden="true" className="mt-6 grid grid-cols-1 lg:grid-cols-12">
-			<div className="grid grid-cols-1 md:grid-cols-3 lg:col-span-9 lg:pr-6">
-				<div className="md:col-span-2 md:pr-6">
+			<div className="grid grid-cols-1 md:grid-cols-3 lg:col-span-9 lg:pe-6">
+				<div className="md:col-span-2 md:pe-6">
 					<SkeletonStory lines={3} size="lg" />
 					<div className="mt-6 grid border-border border-t pt-5 sm:grid-cols-2">
-						<div className="sm:pr-6">
+						<div className="sm:pe-6">
 							<SkeletonStory lines={2} size="md" />
 						</div>
-						<div className="max-sm:hidden sm:border-border sm:border-l sm:pl-6">
+						<div className="max-sm:hidden sm:border-border sm:border-s sm:ps-6">
 							<SkeletonStory lines={2} size="md" />
 						</div>
 					</div>
 				</div>
-				<div className="max-md:mt-6 max-md:border-border max-md:border-t max-md:pt-6 md:border-border md:border-l md:pl-6">
+				<div className="max-md:mt-6 max-md:border-border max-md:border-t max-md:pt-6 md:border-border md:border-s md:ps-6">
 					<SkeletonStory lines={2} size="md" />
 					<div className="mt-5 border-border border-t pt-5">
 						<SkeletonStory lines={2} size="md" />
 					</div>
 				</div>
 			</div>
-			<div className="max-lg:hidden lg:col-span-3 lg:border-border lg:border-l lg:pl-6">
+			<div className="max-lg:hidden lg:col-span-3 lg:border-border lg:border-s lg:ps-6">
 				<div className="border-foreground border-t pt-2">
 					<Skeleton className="h-3 w-24" radius="block" />
 				</div>

@@ -30,11 +30,15 @@ function carName(
 		return carLabel(car, trip, tl);
 	}
 	if (!trip) {
-		return `${car.agent.name}. Book a trip`;
+		return tl("{name}. Book a trip", { name: car.agent.name });
 	}
 	return word
-		? `${car.agent.name}, ${word} for ${trip.thread.title}. Show the trip`
-		: `${carLabel(car, trip, tl)}. Show the trip`;
+		? tl("{name}, {word} for {title}. Show the trip", {
+				name: car.agent.name,
+				title: trip.thread.title,
+				word,
+			})
+		: tl("{car}. Show the trip", { car: carLabel(car, trip, tl) });
 }
 
 /**
@@ -113,7 +117,9 @@ export function RidesList({
 										type="button"
 									>
 										<CarFront aria-hidden="true" className="size-4" />
-										<span className="font-semibold">{car.agent.name}</span>
+										<span className="font-semibold" data-ryu-i18n="off">
+											{car.agent.name}
+										</span>
 									</button>
 									{row ? (
 										<>
@@ -161,7 +167,7 @@ export function RidesList({
 										>
 											<Flag aria-hidden="true" className="size-4" />
 											<span className="flex flex-col">
-												<span className="font-semibold">
+												<span className="font-semibold" data-ryu-i18n="off">
 													{trip.thread.title}
 												</span>
 												<span className="text-(--gk-ink-muted)">

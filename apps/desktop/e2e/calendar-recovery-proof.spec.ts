@@ -1,12 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PROOF_PAGE = "/calendar-recovery-proof.html";
 const NOW = "2026-10-01T08:00:00.000Z";
-const EVIDENCE = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
+const EVIDENCE = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-gateway/evidence"
 );
 interface JobBody {
 	enabled: boolean;

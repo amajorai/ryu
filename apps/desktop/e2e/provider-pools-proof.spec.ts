@@ -6,6 +6,7 @@ import { createServer as createTcpServer } from "node:net";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const nativeSocketAddressSchema = z.object({
 	address: z.string(),
@@ -32,10 +33,7 @@ test("production Gateway persists real policy writes and dispatches only to loop
 	const sha = (bytes: Uint8Array) =>
 		createHash("sha256").update(bytes).digest("hex");
 	expect(sha(await readFile(artifact.exe))).toBe(artifact.sha256);
-	const proofRoot = path.resolve(
-		import.meta.dirname,
-		`../../../docs/proof/provider-pools/native-${Date.now()}`
-	);
+	const proofRoot = proofEvidencePath(`provider-pools/native-${Date.now()}`);
 	await mkdir(proofRoot, { recursive: true });
 	const upstreamModels: string[] = [];
 	const upstream = createServer(async (request, response) => {
@@ -283,10 +281,7 @@ test("creates a named direct provider pool and shows its routing strategy", asyn
 	).toBeVisible();
 	await expect(page.getByRole("option", { name: "Least used" })).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-pools/provider-pools-strategies.png"
-		),
+		path: proofEvidencePath("provider-pools/provider-pools-strategies.png"),
 		fullPage: true,
 	});
 	await page.getByRole("option", { name: "Weighted round robin" }).click();
@@ -295,10 +290,7 @@ test("creates a named direct provider pool and shows its routing strategy", asyn
 	await page.getByRole("heading", { name: "Provider pool routing" }).click();
 	await expect(page.getByRole("option", { name: "Least used" })).toBeHidden();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-pools/provider-pools-editor.png"
-		),
+		path: proofEvidencePath("provider-pools/provider-pools-editor.png"),
 		fullPage: true,
 	});
 	await page.getByRole("button", { name: "Save pool" }).click();
@@ -319,10 +311,7 @@ test("creates a named direct provider pool and shows its routing strategy", asyn
 	await page.getByRole("button", { name: "Save pool" }).click();
 	await expect(page.getByText("3 new sessions per member")).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-pools/provider-pools.png"
-		),
+		path: proofEvidencePath("provider-pools/provider-pools.png"),
 		fullPage: true,
 	});
 	await page.setViewportSize({ width: 390, height: 844 });
@@ -333,10 +322,7 @@ test("creates a named direct provider pool and shows its routing strategy", asyn
 		page.getByRole("switch", { name: "Last resort" }).nth(1)
 	).toBeChecked();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-pools/provider-pools-mobile.png"
-		),
+		path: proofEvidencePath("provider-pools/provider-pools-mobile.png"),
 		fullPage: true,
 	});
 	expect(errors).toEqual([]);
@@ -415,9 +401,8 @@ test("edits bounded fusion with two models on one provider and preserves partial
 	await expect(page.getByLabel("Quorum grace (ms)")).toHaveValue("250");
 	await expect(page.getByRole("alert")).toHaveCount(0);
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-pools/provider-pools-fusion-settings.png"
+		path: proofEvidencePath(
+			"provider-pools/provider-pools-fusion-settings.png"
 		),
 		fullPage: true,
 	});
@@ -459,9 +444,8 @@ test("edits bounded fusion with two models on one provider and preserves partial
 	await expect(page.getByLabel("Health", { exact: true })).toHaveValue("");
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/provider-pools/provider-pools-auto-weights-mobile.png"
+		path: proofEvidencePath(
+			"provider-pools/provider-pools-auto-weights-mobile.png"
 		),
 		fullPage: true,
 	});

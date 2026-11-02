@@ -1,6 +1,6 @@
 import { MinusSignIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	Table,
 	TableBody,
@@ -23,7 +23,7 @@ import { SectionHeading } from "./sections.tsx";
 
 /** The sticky first column keeps row labels in view while plans scroll. */
 const STICKY_COLUMN =
-	"sticky left-0 z-10 bg-background shadow-[1px_0_0_var(--color-border)]";
+	"sticky start-0 z-10 bg-background shadow-[1px_0_0_var(--color-border)] rtl:shadow-[-1px_0_0_var(--color-border)]";
 
 function CellValue({ value }: { value: ComparisonCell }) {
 	if (value === true) {
@@ -68,7 +68,8 @@ function CellValue({ value }: { value: ComparisonCell }) {
 export function PricingComparisonTable(props: ComparisonOptions) {
 	const tl = useLiteralMessages();
 	const plans = comparisonPlans(props);
-	const sections = comparisonSections(props, tl);
+	const locale = useOptionalI18n()?.locale;
+	const sections = comparisonSections(props, tl, locale);
 	const seats = comparisonSeats(props.seats);
 	const isOrganization = props.audience === "business";
 
@@ -125,7 +126,7 @@ export function PricingComparisonTable(props: ComparisonOptions) {
 									colSpan={plans.length + 1}
 									scope="colgroup"
 								>
-									<span className="sticky left-3">{section.title}</span>
+									<span className="sticky start-3">{section.title}</span>
 								</TableHead>
 							</TableRow>
 							{section.rows.map((row) => (

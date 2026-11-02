@@ -2,7 +2,7 @@
 
 import { getCommentKey, getDraftCommentKey } from "@platejs/comment";
 import { CommentPlugin, useCommentId } from "@platejs/comment/react";
-import { BasicMarksKit } from "@ryu/ui/components/editor/plugins/basic-marks-kit.tsx";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	discussionPlugin,
 	type TDiscussion,
@@ -13,28 +13,8 @@ import {
 	AvatarImage,
 } from "@ryu/ui/components/editor/ui/avatar.tsx";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@ryu/ui/components/editor/ui/dropdown-menu.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	differenceInDays,
-	differenceInHours,
-	differenceInMinutes,
-	format,
-} from "date-fns";
-import {
-	ArrowUpIcon,
-	CheckIcon,
-	MoreHorizontalIcon,
-	PencilIcon,
-	TrashIcon,
-	XIcon,
-} from "lucide-react";
+import { ArrowUpIcon, CheckIcon, XIcon } from "lucide-react";
 import {
 	KEYS,
 	NodeApi,
@@ -43,12 +23,10 @@ import {
 	type TCommentText,
 	type Value,
 } from "platejs";
-import type { CreatePlateEditorOptions, PlateEditor } from "platejs/react";
 import {
 	Plate,
 	useEditorPlugin,
 	useEditorRef,
-	usePlateEditor,
 	usePluginOption,
 } from "platejs/react";
 import {
@@ -58,27 +36,19 @@ import {
 	useCallback,
 	useEffect,
 	useMemo,
-	useRef,
 	useState,
 } from "react";
+import { CommentMoreDropdown } from "./comment-more-dropdown.tsx";
+import {
+	formatCommentDate,
+	saveDiscussions,
+	type TComment,
+	useCommentEditor,
+} from "./comment-shared.ts";
 import { Editor, EditorContainer } from "./editor.tsx";
 
-export interface TComment {
-	contentRich: Value;
-	createdAt: Date;
-	discussionId: string;
-	id: string;
-	isEdited: boolean;
-	userId: string;
-}
-
-function saveDiscussions(
-	editor: PlateEditor,
-	discussions: TDiscussion[]
-): void {
-	editor.setOption(discussionPlugin, "discussions", discussions);
-	editor.getOption(discussionPlugin, "onDiscussionsChange")?.(discussions);
-}
+// biome-ignore lint/performance/noBarrelFile: keeps the comment module's public names stable after the split.
+export { formatCommentDate, type TComment } from "./comment-shared.ts";
 
 export function Comment(props: {
 	comment: TComment;
@@ -102,6 +72,7 @@ export function Comment(props: {
 	} = props;
 
 	const editor = useEditorRef();
+	const locale = useOptionalI18n()?.locale ?? "en";
 	const userInfo = usePluginOption(discussionPlugin, "user", comment.userId);
 	const currentUserId = usePluginOption(discussionPlugin, "currentUserId");
 
@@ -216,7 +187,7 @@ export function Comment(props: {
 
 				<div className="text-muted-foreground/80 text-xs leading-none">
 					<span className="me-1">
-						{formatCommentDate(new Date(comment.createdAt))}
+						{formatCommentDate(new Date(comment.createdAt), locale)}
 					</span>
 					{comment.isEdited && <span>(edited)</span>}
 				</div>
@@ -316,128 +287,6 @@ export function Comment(props: {
 	);
 }
 
-function CommentMoreDropdown(props: {
-	comment: TComment;
-	dropdownOpen: boolean;
-	setDropdownOpen: Dispatch<SetStateAction<boolean>>;
-	setEditingId: Dispatch<SetStateAction<string | null>>;
-	onCloseAutoFocus?: () => void;
-	onRemoveComment?: () => void;
-}) {
-	const {
-		comment,
-		dropdownOpen,
-		setDropdownOpen,
-		setEditingId,
-		onCloseAutoFocus,
-		onRemoveComment,
-	} = props;
-
-	const editor = useEditorRef();
-
-	const selectedEditCommentRef = useRef<boolean>(false);
-
-	const onDeleteComment = useCallback(() => {
-		if (!comment.id) {
-			return alert("You are operating too quickly, please try again later.");
-		}
-
-		// Find and update the discussion
-		const updatedDiscussions = editor
-			.getOption(discussionPlugin, "discussions")
-			.map((discussion) => {
-				if (discussion.id !== comment.discussionId) {
-					return discussion;
-				}
-
-				const commentIndex = discussion.comments.findIndex(
-					(c) => c.id === comment.id
-				);
-				if (commentIndex === -1) {
-					return discussion;
-				}
-
-				return {
-					...discussion,
-					comments: [
-						...discussion.comments.slice(0, commentIndex),
-						...discussion.comments.slice(commentIndex + 1),
-					],
-				};
-			});
-
-		// Save back to session storage
-		saveDiscussions(editor, updatedDiscussions);
-		onRemoveComment?.();
-	}, [comment.discussionId, comment.id, editor, onRemoveComment]);
-
-	const onEditComment = useCallback(() => {
-		selectedEditCommentRef.current = true;
-
-		if (!comment.id) {
-			return alert("You are operating too quickly, please try again later.");
-		}
-
-		setEditingId(comment.id);
-	}, [comment.id, setEditingId]);
-
-	return (
-		<DropdownMenu
-			modal={false}
-			onOpenChange={setDropdownOpen}
-			open={dropdownOpen}
-		>
-			<DropdownMenuTrigger
-				onClick={(e) => e.stopPropagation()}
-				render={
-					<Button className={"h-6 p-1 text-muted-foreground"} variant="ghost" />
-				}
-			>
-				<MoreHorizontalIcon className="size-4" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent
-				className="w-48"
-				onCloseAutoFocus={(e) => {
-					if (selectedEditCommentRef.current) {
-						onCloseAutoFocus?.();
-						selectedEditCommentRef.current = false;
-					}
-
-					return e.preventDefault();
-				}}
-			>
-				<DropdownMenuGroup>
-					<DropdownMenuItem onClick={onEditComment}>
-						<PencilIcon className="size-4" />
-						Edit comment
-					</DropdownMenuItem>
-					<DropdownMenuItem onClick={onDeleteComment}>
-						<TrashIcon className="size-4" />
-						Delete comment
-					</DropdownMenuItem>
-				</DropdownMenuGroup>
-			</DropdownMenuContent>
-		</DropdownMenu>
-	);
-}
-
-const useCommentEditor = (
-	options: Omit<CreatePlateEditorOptions, "plugins"> = {},
-	deps: any[] = []
-) => {
-	const commentEditor = usePlateEditor(
-		{
-			id: "comment",
-			plugins: BasicMarksKit,
-			value: [],
-			...options,
-		},
-		deps
-	);
-
-	return commentEditor;
-};
-
 export function CommentCreateForm({
 	autoFocus = false,
 	className,
@@ -450,6 +299,7 @@ export function CommentCreateForm({
 	focusOnMount?: boolean;
 }) {
 	const discussions = usePluginOption(discussionPlugin, "discussions");
+	const tl = useLiteralMessages();
 
 	const editor = useEditorRef();
 	const commentId = useCommentId();
@@ -606,7 +456,7 @@ export function CommentCreateForm({
 									onAddComment();
 								}
 							}}
-							placeholder="Reply…"
+							placeholder={tl("Reply…")}
 							variant="comment"
 						/>
 
@@ -631,22 +481,3 @@ export function CommentCreateForm({
 		</div>
 	);
 }
-
-export const formatCommentDate = (date: Date) => {
-	const now = new Date();
-	const diffMinutes = differenceInMinutes(now, date);
-	const diffHours = differenceInHours(now, date);
-	const diffDays = differenceInDays(now, date);
-
-	if (diffMinutes < 60) {
-		return `${diffMinutes}m`;
-	}
-	if (diffHours < 24) {
-		return `${diffHours}h`;
-	}
-	if (diffDays < 2) {
-		return `${diffDays}d`;
-	}
-
-	return format(date, "MM/dd/yyyy");
-};

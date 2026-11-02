@@ -8,6 +8,7 @@
 // banners and anything else that renders a `<Backdrop>`.
 
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Plus, RotateCcw, X } from "lucide-react";
 import { type CSSProperties, useId } from "react";
 import { z } from "zod";
@@ -176,7 +177,7 @@ function Control({
 						{list.length < spec.max ? (
 							<button
 								aria-label={tl("Add {label} colour", {
-									label: spec.label.toLowerCase(),
+									label: sentenceLabel(tl, spec.label),
 								})}
 								className="flex size-7 items-center justify-center rounded-full border border-border border-dashed text-muted-foreground hover:bg-muted"
 								onClick={() => onChange([...list, list.at(-1) ?? "#ffffff"])}

@@ -21,7 +21,7 @@ import {
 import type { PluginContributions } from "@/src/lib/api/plugins.ts";
 import type { ShadowSearchResult } from "@/src/lib/api/shadow.ts";
 import type { SpaceLexicalHit } from "@/src/lib/api/spaces.ts";
-import { compactAge } from "@/src/lib/time.ts";
+import { compactAgo } from "@/src/lib/time.ts";
 import type { DesktopWorkbenchValue } from "@/src/workbench/DesktopWorkbenchContext.tsx";
 import {
 	DESKTOP_SHELL_REGIONS,
@@ -84,8 +84,7 @@ const formatAgeAgo = (timestamp?: number): string | undefined => {
 	if (!(timestamp && Number.isFinite(timestamp))) {
 		return undefined;
 	}
-	const age = compactAge(timestamp);
-	return age === "now" ? "just now" : `${age} ago`;
+	return compactAgo(timestamp);
 };
 const resultMeta = (
 	subtitle: string | null | undefined,
@@ -269,7 +268,7 @@ export function buildCommandPaletteActions(
 				workbenchTools?.openTool(tool.id);
 				close();
 			},
-			title: `Open ${tool.label}`,
+			title: tl("Open {label}", { label: tool.label }),
 			value: `open ${tool.label.toLowerCase()} pane panel tool ${tool.region}`,
 		});
 	}
@@ -327,7 +326,7 @@ export function buildCommandPaletteActions(
 				// never hides a semantic hit that lacks a literal substring match.
 				value: `${q} message ${hit.messageId}`,
 				resultType: "messages",
-				trailing: `${hit.role === "user" ? "you" : "assistant"} · ${formatAgeAgo(hit.createdAt) ?? "just now"}`,
+				trailing: `${hit.role === "user" ? tl("you") : tl("assistant")} · ${formatAgeAgo(hit.createdAt) ?? tl("just now")}`,
 				onSelect: () => handleSelectChat(hit.conversationId, hit.messageId),
 			});
 		}
@@ -363,7 +362,7 @@ export function buildCommandPaletteActions(
 		items.push({
 			id: "remember-query",
 			group: "Memory",
-			title: `Remember "${q}"`,
+			title: tl('Remember "{q}"', { q }),
 			value: `remember ${q}`,
 			icon: Add01Icon,
 			onSelect: requestRemember,

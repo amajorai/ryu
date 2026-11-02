@@ -1,5 +1,6 @@
 import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -35,9 +36,9 @@ function formatLatency(ms: number | null): string {
 		return "—";
 	}
 	if (ms < 1000) {
-		return `${ms}ms`;
+		return formatDurationUnit(ms, "millisecond");
 	}
-	return `${(ms / 1000).toFixed(1)}s`;
+	return formatDurationUnit(ms / 1000, "second", 1);
 }
 
 function formatTokens(input: number | null, output: number | null): string {
@@ -72,12 +73,12 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 		<div className="overflow-x-auto">
 			<table className="w-full text-sm">
 				<thead>
-					<tr className="border-b text-left text-muted-foreground text-xs">
-						<th className="pr-3 pb-2 font-medium">Time</th>
-						<th className="pr-3 pb-2 font-medium">Event / target</th>
-						<th className="pr-3 pb-2 font-medium">Agent / caller</th>
-						<th className="pr-3 pb-2 font-medium">Trace IDs</th>
-						<th className="pr-3 pb-2 font-medium">Usage</th>
+					<tr className="border-b text-start text-muted-foreground text-xs">
+						<th className="pe-3 pb-2 font-medium">Time</th>
+						<th className="pe-3 pb-2 font-medium">Event / target</th>
+						<th className="pe-3 pb-2 font-medium">Agent / caller</th>
+						<th className="pe-3 pb-2 font-medium">Trace IDs</th>
+						<th className="pe-3 pb-2 font-medium">Usage</th>
 						<th className="pb-2 font-medium">Result</th>
 					</tr>
 				</thead>
@@ -92,14 +93,14 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 								<Tooltip>
 									<TooltipTrigger
 										render={
-											<td className="py-2 pr-3 text-xs tabular-nums">
+											<td className="py-2 pe-3 text-xs tabular-nums">
 												{timeStr}
 											</td>
 										}
 									/>
 									<TooltipContent>{entry.timestamp}</TooltipContent>
 								</Tooltip>
-								<td className="min-w-40 py-2 pr-3">
+								<td className="min-w-40 py-2 pe-3">
 									<span className="text-sm">{auditEventLabel(entry)}</span>
 									<div className="mt-1 max-w-48 truncate font-mono text-xs">
 										{entry.command ?? entry.model ?? entry.provider ?? "—"}
@@ -108,7 +109,7 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 										{entry.provider ?? entry.backend ?? "Gateway"}
 									</div>
 								</td>
-								<td className="min-w-40 py-2 pr-3 text-xs">
+								<td className="min-w-40 py-2 pe-3 text-xs">
 									<div className="break-all font-mono">
 										{tl("agent {id}", { id: entry.agent_id ?? "—" })}
 									</div>
@@ -116,7 +117,7 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 										{entry.user_name ?? entry.user_id ?? "system / gateway"}
 									</div>
 								</td>
-								<td className="min-w-44 py-2 pr-3 font-mono text-muted-foreground text-xs">
+								<td className="min-w-44 py-2 pe-3 font-mono text-muted-foreground text-xs">
 									<div className="break-all">
 										{tl("request {request_id}", {
 											request_id: entry.request_id,
@@ -130,7 +131,7 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 										</div>
 									) : null}
 								</td>
-								<td className="min-w-32 py-2 pr-3 text-xs tabular-nums">
+								<td className="min-w-32 py-2 pe-3 text-xs tabular-nums">
 									<div>
 										{tl("{tokens} tokens", {
 											tokens: formatTokens(

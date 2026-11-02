@@ -11,6 +11,10 @@ import { LanguagePackBridge } from "../../src/components/LanguagePackBridge.tsx"
 import Layout from "../../src/components/layout/Layout.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
+import {
+	hydrateSealedLocalStorage,
+	sealedLocalStorage,
+} from "../../src/lib/content-seal.ts";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { useArtifactStore } from "../../src/store/useArtifactStore.ts";
 import { LOCAL_FALLBACK, useNodeStore } from "../../src/store/useNodeStore.ts";
@@ -38,6 +42,10 @@ const fixtureHooks: TitlebarFixtureHooks = {
 		return { defaultNode, nodes: nodes.map((node) => node.name), tabOverrides };
 	},
 	__getRenameRequests: () => host.renameRequests,
+	// The session snapshot is sealed (content-seal.ts): plaintext is only ever
+	// the seed, so the proof reads what a restart restores through the app's
+	// own sealed reader.
+	__readSealedLocalStorage: (key) => sealedLocalStorage.getItem(key),
 };
 for (const [key, value] of Object.entries(fixtureHooks)) {
 	Object.defineProperty(window, key, { value });
@@ -193,6 +201,9 @@ for (const tab of artifacts) {
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
+// Hydrate before the first render, as main.tsx does, so a reload restores the
+// sealed session instead of only ever seeing the plaintext seed.
+await hydrateSealedLocalStorage();
 const root = document.getElementById("root");
 if (root) {
 	createRoot(root).render(

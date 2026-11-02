@@ -1,14 +1,14 @@
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 export default defineConfig({
 	testDir: ".",
 	testMatch: "desktop-shell-window-tray.spec.ts",
 	workers: 1,
 	retries: 0,
 	reporter: "list",
-	outputDir: path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-shell-flows/window-tray/results"
+	outputDir: proofEvidencePath(
+		"test-coverage-sweep-20260924/parallel/desktop-shell-flows/window-tray/results"
 	),
 	use: {
 		baseURL: "http://127.0.0.1:5531",

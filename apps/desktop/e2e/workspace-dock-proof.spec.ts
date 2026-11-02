@@ -2,9 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 
-const committedProofDir = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/desktop-panels/workspace-dock"
+const committedProofDir = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/desktop-panels/workspace-dock"
 );
 // Ordinary runs write screenshots and ledgers to this test's Playwright output
 // directory so the committed proof is never rewritten as a side effect. Set
@@ -16,6 +15,7 @@ const proofPath = (fileName: string) =>
 		: test.info().outputPath(fileName);
 
 import type { WorkspaceDockProofKernel } from "./harness/workspace-dock-proof.tsx";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 declare const window: Window & { dockProof: WorkspaceDockProofKernel };
 

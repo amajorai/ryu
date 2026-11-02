@@ -1,10 +1,11 @@
-import { formatDistanceToNow } from "date-fns";
+import { translate as tl } from "@ryu/i18n/core";
 import type {
 	JobTarget,
 	Schedule,
 	ScheduledJob,
 } from "@/src/lib/api/schedules.ts";
 import type { buildCalendarEvents } from "@/src/lib/calendar/events.ts";
+import { relativeTimeAgo } from "@/src/lib/time.ts";
 
 export type RoutineStatus =
 	| "failed"
@@ -118,9 +119,9 @@ export function formatLastRun(job: ScheduledJob): string {
 	}
 	const timestamp = Date.parse(job.lastRunAt);
 	if (!Number.isFinite(timestamp)) {
-		return "Last run unavailable";
+		return tl("Last run unavailable");
 	}
-	return `Last run ${formatDistanceToNow(new Date(timestamp), { addSuffix: true })}`;
+	return tl("Last run {when}", { when: relativeTimeAgo(timestamp) });
 }
 
 export function toSchedule(draft: RoutineDraft): Schedule {

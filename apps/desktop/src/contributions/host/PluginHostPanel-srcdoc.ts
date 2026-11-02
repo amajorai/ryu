@@ -2,6 +2,7 @@ import {
 	htmlCompanionSrcdoc,
 	thirdPartyPluginSrcdoc,
 } from "@ryu/app-host/third-party-plugin";
+import { activeDirection, activeLocale } from "@ryu/i18n/core";
 import { useMemo } from "react";
 import type { PluginCompanion } from "@/src/lib/api/plugins.ts";
 import type { readHostThemeTokens } from "./PluginHostPanel-theme-tokens.ts";
@@ -40,6 +41,10 @@ export function usePluginHostSrcdoc({
 		if (!code) {
 			return null;
 		}
+		// The frame's starting UI language. Read once per mount, not a memo dep: the
+		// bootstrap follows later changes over `i18n.subscribe`, so a language switch
+		// re-labels the open companion instead of remounting it.
+		const locale = { locale: activeLocale(), direction: activeDirection() };
 		// Path B (ui_format:"html"): a full self-contained HTML bundle (a heavy app
 		// like the whiteboard, built via vite-plugin-singlefile) is mounted directly
 		// as srcdoc with the window.ryu bridge injected inline — no new Function eval.
@@ -55,7 +60,11 @@ export function usePluginHostSrcdoc({
 				companion.csp,
 				initialThemeTokens,
 				true,
-				{ enforceDefaultCsp: companion.defaultCspEnforced, closeOnEscape }
+				{
+					enforceDefaultCsp: companion.defaultCspEnforced,
+					closeOnEscape,
+					locale,
+				}
 			);
 		}
 		return thirdPartyPluginSrcdoc(
@@ -65,7 +74,11 @@ export function usePluginHostSrcdoc({
 			mountContext,
 			initialThemeTokens,
 			true,
-			{ enforceDefaultCsp: companion.defaultCspEnforced, closeOnEscape }
+			{
+				enforceDefaultCsp: companion.defaultCspEnforced,
+				closeOnEscape,
+				locale,
+			}
 		);
 	}, [
 		code,

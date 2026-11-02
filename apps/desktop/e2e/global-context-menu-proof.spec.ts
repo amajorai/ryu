@@ -1,5 +1,4 @@
 import { mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import {
 	globalState,
@@ -8,14 +7,10 @@ import {
 	type ProofState,
 	selectAppearanceOption,
 } from "./global-context-menu-proof.fixture.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const STORY_URL = "/global-context-menu-proof.html";
-const EVIDENCE_DIRECTORY = fileURLToPath(
-	new URL(
-		"../../../docs/proof/test-coverage-sweep-20260924/evidence/global-context-menu/",
-		import.meta.url
-	)
-);
+const EVIDENCE_DIRECTORY = `${proofEvidencePath("test-coverage-sweep-20260924/evidence/global-context-menu")}/`;
 
 test.beforeEach(async ({ page }) => {
 	await mkdir(EVIDENCE_DIRECTORY, { recursive: true });

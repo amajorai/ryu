@@ -360,7 +360,7 @@ export function LayoutContent({
 				/>
 			)}
 
-			{/* Left-edge hover zone for floating sidebar. Hover-to-peek has no touch
+			{/* Start-edge hover zone for floating sidebar. Hover-to-peek has no touch
 			    equivalent, and a 288px panel pinned over a 375px viewport would just
 			    shadow the Sheet that `<AppSidebar>` already renders at this width —
 			    so the whole hand-rolled float stands down on mobile. */}
@@ -387,10 +387,10 @@ export function LayoutContent({
 					cn(
 						"relative flex flex-col overflow-hidden",
 						osProduct && "m-0",
-						// Inset mode normally keeps mr-2 so the canvas clears the window
+						// Inset mode normally keeps a right margin so the canvas clears the window
 						// edge; when the Ask Ryu rail is docked it plays the same role as
-						// the left sidebar (ml-0), so drop the right margin and let the
-						// canvas abut the flush rail.
+						// the start sidebar (ms-0), so drop the right margin and let the
+						// canvas abut the flush rail (the rail is physically right).
 						assistantMode === "sidebar" &&
 							sidebarVariant === "inset" &&
 							!isMobile &&
@@ -470,7 +470,7 @@ export function LayoutContent({
 				{!osProduct && (
 					<div
 						className={cn(
-							"pointer-events-none absolute right-0 left-0 z-40 flex flex-col [&>*]:pointer-events-auto",
+							"pointer-events-none absolute inset-x-0 z-40 flex flex-col [&>*]:pointer-events-auto",
 							titleBarClearsContent ? "top-14" : "top-0"
 						)}
 					>

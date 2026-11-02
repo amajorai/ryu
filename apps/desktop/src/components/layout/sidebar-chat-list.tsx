@@ -182,7 +182,7 @@ function ChatGroupedRows({
 	};
 
 	return (
-		<div className="ml-2 space-y-0.5">
+		<div className="ms-2 space-y-0.5">
 			{nested.orderedKeys.map((key) => {
 				const group = groupByKey.get(key);
 				if (!group) {
@@ -332,7 +332,7 @@ export function SidebarChatList({
 	}
 	return (
 		<DateGroupedRows
-			className="ml-2 space-y-0.5"
+			className="ms-2 space-y-0.5"
 			collapsedKey={storage.collapsedKey}
 			items={conversations}
 			// REMOUNT on a scope change. `useNestedSections` loads both storage keys in

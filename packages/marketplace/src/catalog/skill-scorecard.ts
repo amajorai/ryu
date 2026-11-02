@@ -1,5 +1,6 @@
 // Skill-specific marketplace scorecard rules.
 
+import { translate as tl } from "@ryu/i18n/lite";
 import type {
 	CheckStatus,
 	Scorecard,
@@ -32,27 +33,30 @@ function skillTrustChecks(
 			? check(
 					"source-trust",
 					"review",
-					"Registry trust signal",
+					tl("Registry trust signal"),
 					2,
 					"pass",
-					`The source marks this skill as ${trustLevel}.`
+					tl(
+						"The source marks this skill as {trustLevel, select, builtin {builtin} other {trusted}}.",
+						{ trustLevel }
+					)
 				)
 			: trustLevel === "community"
 				? check(
 						"source-trust",
 						"review",
-						"Registry trust signal",
+						tl("Registry trust signal"),
 						2,
 						"warn",
-						"The source marks this skill as community-provided."
+						tl("The source marks this skill as community-provided.")
 					)
 				: check(
 						"source-trust",
 						"review",
-						"Registry trust signal",
+						tl("Registry trust signal"),
 						2,
 						"unknown",
-						"This source does not publish a trust classification."
+						tl("This source does not publish a trust classification.")
 					)
 	);
 
@@ -61,10 +65,10 @@ function skillTrustChecks(
 			check(
 				"security-audits",
 				"review",
-				"Published security audits",
+				tl("Published security audits"),
 				3,
 				"unknown",
-				"Audits are checked after the skill detail loads."
+				tl("Audits are checked after the skill detail loads.")
 			)
 		);
 	} else if (audits.length === 0) {
@@ -72,10 +76,10 @@ function skillTrustChecks(
 			check(
 				"security-audits",
 				"review",
-				"Published security audits",
+				tl("Published security audits"),
 				3,
 				"warn",
-				"Nobody has published a security audit for this skill."
+				tl("Nobody has published a security audit for this skill.")
 			)
 		);
 	} else {
@@ -88,12 +92,18 @@ function skillTrustChecks(
 			check(
 				"security-audits",
 				"review",
-				"Published security audits",
+				tl("Published security audits"),
 				3,
 				failed.length > 0 ? "fail" : "pass",
 				failed.length > 0
-					? `${failed.length} published audit(s) report a failing or high-risk status.`
-					: `${audits.length} published audit(s) report no failing status.`
+					? tl(
+							"{count, plural, one {# published audit reports} other {# published audits report}} a failing or high-risk status.",
+							{ count: failed.length }
+						)
+					: tl(
+							"{count, plural, one {# published audit reports} other {# published audits report}} no failing status.",
+							{ count: audits.length }
+						)
 			)
 		);
 	}
@@ -116,10 +126,10 @@ function skillMaintenanceChecks(
 			check(
 				"activity",
 				"maintenance",
-				"Recently maintained",
+				tl("Recently maintained"),
 				2,
 				"unknown",
-				"This source does not publish a repository activity date."
+				tl("This source does not publish a repository activity date.")
 			)
 		);
 	} else {
@@ -129,10 +139,10 @@ function skillMaintenanceChecks(
 			check(
 				"activity",
 				"maintenance",
-				"Recently maintained",
+				tl("Recently maintained"),
 				2,
 				status,
-				`The latest repository activity was ${agoLabel(days)}.`
+				tl("The latest repository activity was {ago}.", { ago: agoLabel(days) })
 			)
 		);
 	}
@@ -145,27 +155,31 @@ function skillMaintenanceChecks(
 			? check(
 					"adoption",
 					"maintenance",
-					"Has observable adoption",
+					tl("Has observable adoption"),
 					1,
 					"pass",
-					"The source reports meaningful installs or repository adoption."
+					tl("The source reports meaningful installs or repository adoption.")
 				)
 			: adoption > 0
 				? check(
 						"adoption",
 						"maintenance",
-						"Has observable adoption",
+						tl("Has observable adoption"),
 						1,
 						"warn",
-						"The source reports some adoption, but not enough to establish a strong track record."
+						tl(
+							"The source reports some adoption, but not enough to establish a strong track record."
+						)
 					)
 				: check(
 						"adoption",
 						"maintenance",
-						"Has observable adoption",
+						tl("Has observable adoption"),
 						1,
 						"unknown",
-						"This source does not report install or repository adoption counts."
+						tl(
+							"This source does not report install or repository adoption counts."
+						)
 					)
 	);
 
@@ -201,27 +215,27 @@ function skillDisclosureChecks(
 			? check(
 					"source",
 					"disclosures",
-					"Source is inspectable",
+					tl("Source is inspectable"),
 					2,
 					"pass",
-					"Links to the repository that publishes this skill."
+					tl("Links to the repository that publishes this skill.")
 				)
 			: detail
 				? check(
 						"source",
 						"disclosures",
-						"Source is inspectable",
+						tl("Source is inspectable"),
 						2,
 						"warn",
-						"The detail does not link to a repository."
+						tl("The detail does not link to a repository.")
 					)
 				: check(
 						"source",
 						"disclosures",
-						"Source is inspectable",
+						tl("Source is inspectable"),
 						2,
 						"unknown",
-						"The source link is checked after the skill detail loads."
+						tl("The source link is checked after the skill detail loads.")
 					)
 	);
 
@@ -230,18 +244,20 @@ function skillDisclosureChecks(
 			? check(
 					"runtime-permissions",
 					"disclosures",
-					"Runtime permissions",
+					tl("Runtime permissions"),
 					2,
 					"pass",
-					"Skills are instruction packages and declare no plugin runtime permissions."
+					tl(
+						"Skills are instruction packages and declare no plugin runtime permissions."
+					)
 				)
 			: check(
 					"runtime-permissions",
 					"disclosures",
-					"Runtime permissions",
+					tl("Runtime permissions"),
 					2,
 					"unknown",
-					"The skill type is checked after the detail loads."
+					tl("The skill type is checked after the detail loads.")
 				)
 	);
 
@@ -250,20 +266,23 @@ function skillDisclosureChecks(
 			? check(
 					"package-files",
 					"disclosures",
-					"Package contents visible",
+					tl("Package contents visible"),
 					1,
 					detail.files.length > 0 ? "pass" : "warn",
 					detail.files.length > 0
-						? `${detail.files.length} package file(s) are available to inspect.`
-						: "The source returned no package files to inspect."
+						? tl(
+								"{count, plural, one {# package file is} other {# package files are}} available to inspect.",
+								{ count: detail.files.length }
+							)
+						: tl("The source returned no package files to inspect.")
 				)
 			: check(
 					"package-files",
 					"disclosures",
-					"Package contents visible",
+					tl("Package contents visible"),
 					1,
 					"unknown",
-					"Package contents are checked after the skill detail loads."
+					tl("Package contents are checked after the skill detail loads.")
 				)
 	);
 
@@ -286,27 +305,29 @@ function skillHygieneChecks(
 			? check(
 					"description",
 					"hygiene",
-					"Describes what it does",
+					tl("Describes what it does"),
 					2,
 					"pass",
-					"Carries a full description."
+					tl("Carries a full description.")
 				)
 			: description.trim()
 				? check(
 						"description",
 						"hygiene",
-						"Describes what it does",
+						tl("Describes what it does"),
 						2,
 						"warn",
-						"The description is too short to explain what using this skill does."
+						tl(
+							"The description is too short to explain what using this skill does."
+						)
 					)
 				: check(
 						"description",
 						"hygiene",
-						"Describes what it does",
+						tl("Describes what it does"),
 						2,
 						"fail",
-						"No description is available."
+						tl("No description is available.")
 					)
 	);
 
@@ -315,36 +336,36 @@ function skillHygieneChecks(
 			? check(
 					"readme",
 					"hygiene",
-					"Documented",
+					tl("Documented"),
 					2,
 					"pass",
-					"Ships a README with real documentation."
+					tl("Ships a README with real documentation.")
 				)
 			: readme.trim()
 				? check(
 						"readme",
 						"hygiene",
-						"Documented",
+						tl("Documented"),
 						2,
 						"warn",
-						"The README is a stub."
+						tl("The README is a stub.")
 					)
 				: detail
 					? check(
 							"readme",
 							"hygiene",
-							"Documented",
+							tl("Documented"),
 							2,
 							"fail",
-							"No README was found."
+							tl("No README was found.")
 						)
 					: check(
 							"readme",
 							"hygiene",
-							"Documented",
+							tl("Documented"),
 							2,
 							"unknown",
-							"The README is checked after the skill detail loads."
+							tl("The README is checked after the skill detail loads.")
 						)
 	);
 
@@ -353,27 +374,29 @@ function skillHygieneChecks(
 			? check(
 					"skill-file",
 					"hygiene",
-					"Contains SKILL.md",
+					tl("Contains SKILL.md"),
 					1,
 					"pass",
-					"The package includes the instruction file that defines the skill."
+					tl(
+						"The package includes the instruction file that defines the skill."
+					)
 				)
 			: hasSkillFile === false
 				? check(
 						"skill-file",
 						"hygiene",
-						"Contains SKILL.md",
+						tl("Contains SKILL.md"),
 						1,
 						"fail",
-						"The package does not include a SKILL.md file."
+						tl("The package does not include a SKILL.md file.")
 					)
 				: check(
 						"skill-file",
 						"hygiene",
-						"Contains SKILL.md",
+						tl("Contains SKILL.md"),
 						1,
 						"unknown",
-						"Package files are checked after the skill detail loads."
+						tl("Package files are checked after the skill detail loads.")
 					)
 	);
 
@@ -389,10 +412,10 @@ function skillErrorChecks(
 			check(
 				"content-integrity",
 				"errors",
-				"Package contents read cleanly",
+				tl("Package contents read cleanly"),
 				3,
 				"unknown",
-				"Package integrity is checked after the skill detail loads."
+				tl("Package integrity is checked after the skill detail loads.")
 			),
 		];
 	}
@@ -405,22 +428,22 @@ function skillErrorChecks(
 		check(
 			"content-integrity",
 			"errors",
-			"Package contents read cleanly",
+			tl("Package contents read cleanly"),
 			3,
 			invalidPaths || duplicatePaths ? "fail" : "pass",
 			invalidPaths || duplicatePaths
-				? "The source returned an empty or duplicate file path."
-				: "The package file list has unique, non-empty paths."
+				? tl("The source returned an empty or duplicate file path.")
+				: tl("The package file list has unique, non-empty paths.")
 		),
 		check(
 			"identity",
 			"errors",
-			"Listing identity is consistent",
+			tl("Listing identity is consistent"),
 			2,
 			identityMatches ? "pass" : "fail",
 			identityMatches
-				? "The card and detail identify the same skill."
-				: "The card and detail identify different skills."
+				? tl("The card and detail identify the same skill.")
+				: tl("The card and detail identify different skills.")
 		),
 	];
 }

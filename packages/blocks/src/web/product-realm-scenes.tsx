@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
+import { copyMarker as t } from "./copy-marker.ts";
 import type { ProductRealmId } from "./data/product-realms.ts";
+import { LiteralText } from "./literal-text.tsx";
 import styles from "./product-realm-scenes.module.css";
 import { BotScene } from "./product-scenes/bot.tsx";
 import { ConsoleScene } from "./product-scenes/console.tsx";
@@ -24,10 +26,10 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 						<div className="divide-y divide-border/45 px-4 pt-3">
 							{(
 								[
-									["MCP", "Hosted Skill resources", "/mcp"],
-									["Skills", "Discoverable instructions", "SKILL.md"],
-									["Tools", "Tenant-allowed calls", "/v1/exec/tool"],
-									["Composio", "Connected actions", "account-bound"],
+									["MCP", t("Hosted Skill resources"), "/mcp"],
+									[t("Skills"), t("Discoverable instructions"), "SKILL.md"],
+									[t("Tools"), t("Tenant-allowed calls"), "/v1/exec/tool"],
+									["Composio", t("Connected actions"), "account-bound"],
 								] as const
 							).map(([name, detail, scope]) => (
 								<div className="flex items-center gap-3 py-2.5" key={name}>
@@ -35,9 +37,11 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 										{name[0]}
 									</span>
 									<div className="min-w-0 flex-1">
-										<p className="type-caption font-medium">{name}</p>
+										<p className="type-caption font-medium">
+											<LiteralText text={name} />
+										</p>
 										<p className="type-compact truncate text-muted-foreground">
-											{detail}
+											<LiteralText text={detail} />
 										</p>
 									</div>
 									<span className="type-micro hidden font-mono text-muted-foreground sm:block">
@@ -63,7 +67,7 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 							<span className="text-muted-foreground">access</span>
 							<span>Scoped run · no host login</span>
 						</div>
-						<div className="type-compact mt-6 border-realm-capacity-marker/45 border-l-2 bg-realm-capacity-marker/10 px-3 py-2">
+						<div className="type-compact mt-6 border-realm-capacity-marker/45 border-s-2 bg-realm-capacity-marker/10 px-3 py-2">
 							Provider network not connected
 						</div>
 					</div>
@@ -151,9 +155,9 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 					<div className="absolute inset-0 overflow-hidden bg-muted/65">
 						<div className="divide-y divide-border/45 pt-3">
 							{[
-								["A", "Ava · Acme", "Project update", "10:42"],
-								["M", "Maya · Finance", "September report", "09:18"],
-								["J", "Jules · Team", "Next steps", "Yesterday"],
+								["A", "Ava · Acme", t("Project update"), "10:42"],
+								["M", "Maya · Finance", t("September report"), "09:18"],
+								["J", "Jules · Team", t("Next steps"), t("Yesterday")],
 							].map(([initial, sender, subject, time]) => (
 								<div
 									className="type-compact flex items-center gap-2.5 px-3 py-2.5"
@@ -164,10 +168,12 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 									</span>
 									<div className="min-w-0 flex-1">
 										<p className="truncate font-medium">{sender}</p>
-										<p className="truncate text-muted-foreground">{subject}</p>
+										<p className="truncate text-muted-foreground">
+											<LiteralText text={subject ?? ""} />
+										</p>
 									</div>
 									<span className="type-micro text-muted-foreground">
-										{time}
+										<LiteralText text={time ?? ""} />
 									</span>
 								</div>
 							))}
@@ -184,26 +190,28 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 								[
 									"10:42:18",
 									"deploy.completed",
-									"delivered",
+									t("delivered"),
 									"text-realm-complete dark:text-realm-complete-dark",
 								],
 								[
 									"10:40:04",
 									"payment.received",
-									"delivered",
+									t("delivered"),
 									"text-realm-complete dark:text-realm-complete-dark",
 								],
 								[
 									"10:38:51",
 									"backup.failed",
-									"retrying",
+									t("retrying"),
 									"text-realm-progress dark:text-realm-progress-dark",
 								],
 							].map(([time, event, status, tone]) => (
 								<div className="flex items-center gap-2 py-3" key={event}>
 									<span className="text-muted-foreground">{time}</span>
 									<span className="min-w-0 flex-1 truncate">{event}</span>
-									<span className={tone}>{status}</span>
+									<span className={tone}>
+										<LiteralText text={status ?? ""} />
+									</span>
 								</div>
 							))}
 						</div>
@@ -231,9 +239,9 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 					<div className="absolute inset-0 overflow-hidden bg-muted/65">
 						<div className="divide-y divide-border/45 px-3 pt-3">
 							{[
-								["PA", "Policy analyst", "Audits and reviews"],
-								["RR", "Release reviewer", "Ship checks"],
-								["IT", "Inbox triage", "Sorts and drafts replies"],
+								["PA", t("Policy analyst"), t("Audits and reviews")],
+								["RR", t("Release reviewer"), t("Ship checks")],
+								["IT", t("Inbox triage"), t("Sorts and drafts replies")],
 							].map(([initials, role, detail]) => (
 								<div
 									className="type-compact flex items-center gap-2 py-2.5"
@@ -243,13 +251,17 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 										{initials}
 									</span>
 									<div className="min-w-0 flex-1">
-										<p className="truncate font-medium">{role}</p>
-										<p className="truncate text-muted-foreground">{detail}</p>
+										<p className="truncate font-medium">
+											<LiteralText text={role ?? ""} />
+										</p>
+										<p className="truncate text-muted-foreground">
+											<LiteralText text={detail ?? ""} />
+										</p>
 									</div>
 								</div>
 							))}
 						</div>
-						<div className="type-compact mx-3 mt-3 border-realm-capacity-marker/45 border-l-2 bg-realm-capacity-marker/10 px-3 py-2">
+						<div className="type-compact mx-3 mt-3 border-realm-capacity-marker/45 border-s-2 bg-realm-capacity-marker/10 px-3 py-2">
 							Early access · runs not available yet
 						</div>
 					</div>
@@ -273,7 +285,7 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 							<span>Node access</span>
 							<span className="text-muted-foreground">Private only</span>
 						</div>
-						<div className="mt-4 border-realm-capacity-marker/45 border-l-2 bg-realm-capacity-marker/10 px-3 py-2 text-realm-review-foreground dark:text-realm-review-foreground-dark">
+						<div className="mt-4 border-realm-capacity-marker/45 border-s-2 bg-realm-capacity-marker/10 px-3 py-2 text-realm-review-foreground dark:text-realm-review-foreground-dark">
 							Provider enrollment not enabled
 						</div>
 					</div>

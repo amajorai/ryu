@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const catalogMetricsSchema = z.object({
 	catalogReads: z.number(),
@@ -35,10 +36,7 @@ test("measures cold catalog fan-out and warm workspace reuse", async ({
 	const baseline = Boolean(process.env.RYU_PERF_BASELINE);
 	expect(cold).toBe(baseline ? 32 : 4);
 	expect(warm).toBe(baseline ? 4 : 0);
-	const directory = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/performance-sweep"
-	);
+	const directory = proofEvidencePath("performance-sweep");
 	await mkdir(directory, { recursive: true });
 	await writeFile(
 		path.join(

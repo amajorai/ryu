@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const repository = path.resolve(import.meta.dirname, "../../..");
-const proof = path.join(repository, "docs/proof/app-icons-v2");
+const proof = proofEvidencePath("app-icons-v2");
 function manifestCount(roots: string[]) {
 	return roots.reduce(
 		(count, root) =>

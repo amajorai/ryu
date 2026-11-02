@@ -1,5 +1,5 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test("discovered package installation guide describes authoritative lifecycle state", async ({
 	page,
@@ -31,18 +31,16 @@ test("discovered package installation guide describes authoritative lifecycle st
 	await page.screenshot({
 		fullPage: false,
 		animations: "disabled",
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/discovered-package-lifecycle-completed.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/plugins-runtime/full/discovered-package-lifecycle-completed.png"
 		),
 	});
 	await page.evaluate(() => window.scrollTo(0, 0));
 	await page.screenshot({
 		fullPage: true,
 		animations: "disabled",
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/discovered-package-install-guide-completed.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/plugins-runtime/full/discovered-package-install-guide-completed.png"
 		),
 	});
 });
@@ -59,9 +57,8 @@ test("Marketplace guide explains readable package cards", async ({ page }) => {
 	await page.screenshot({
 		fullPage: false,
 		animations: "disabled",
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/cards/public-guide-completed.png"
+		path: proofEvidencePath(
+			"test-coverage-sweep-20260924/parallel/plugins-runtime/full/cards/public-guide-completed.png"
 		),
 	});
 });
@@ -101,9 +98,8 @@ for (const name of [
 			await page.screenshot({
 				fullPage: false,
 				animations: "disabled",
-				path: path.resolve(
-					import.meta.dirname,
-					"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/recap-model-failure-guide-completed.png"
+				path: proofEvidencePath(
+					"test-coverage-sweep-20260924/parallel/plugins-runtime/full/recap-model-failure-guide-completed.png"
 				),
 			});
 		} else if (name === "ego-browser") {
@@ -125,9 +121,8 @@ for (const name of [
 			await page.screenshot({
 				fullPage: false,
 				animations: "disabled",
-				path: path.resolve(
-					import.meta.dirname,
-					"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/ego-browser-effects-completed.png"
+				path: proofEvidencePath(
+					"test-coverage-sweep-20260924/parallel/plugins-runtime/full/ego-browser-effects-completed.png"
 				),
 			});
 		} else if (name === "spider") {
@@ -172,9 +167,8 @@ for (const name of [
 		await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 		await page.screenshot({
 			fullPage: true,
-			path: path.resolve(
-				import.meta.dirname,
-				`../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/${name}-guide-completed.png`
+			path: proofEvidencePath(
+				`test-coverage-sweep-20260924/parallel/plugins-runtime/full/${name}-guide-completed.png`
 			),
 			animations: "disabled",
 		});

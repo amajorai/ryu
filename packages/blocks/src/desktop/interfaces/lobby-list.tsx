@@ -1,18 +1,14 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	type InterfaceThread,
-	THREAD_STATUS_LABELS,
-	threadStatus,
-} from "@ryuhq/protocol/interfaces";
+import { type InterfaceThread, threadStatus } from "@ryuhq/protocol/interfaces";
 import { ArrowRight } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useId, useRef } from "react";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type LobbyMember,
 	SQUAD_SIZE,
-	SQUAD_STATE_DESCRIPTIONS,
+	squadStateDescription,
 	threadTitle,
 } from "./lobby-model.ts";
 import { LobbyHead, LobbyStateChip, STATUS_DOT } from "./lobby-parts.tsx";
@@ -64,7 +60,7 @@ function MemberRow({
 						})
 					: tl("{name}, {stateDescription}, level {level}", {
 							name: agent.name,
-							stateDescription: SQUAD_STATE_DESCRIPTIONS[state],
+							stateDescription: squadStateDescription(state),
 							level: String(level.level),
 						})
 			}
@@ -80,7 +76,10 @@ function MemberRow({
 			type="button"
 		>
 			<LobbyHead agent={agent} state={acted ? "ready" : state} />
-			<span className="gk-display min-w-0 flex-1 truncate text-[17px]">
+			<span
+				className="gk-display min-w-0 flex-1 truncate text-[17px]"
+				data-ryu-i18n="off"
+			>
 				{agent.name}
 			</span>
 			{acted ? null : <LobbyStateChip state={state} />}
@@ -194,7 +193,7 @@ function Squad({
 								>
 									{row.label}
 								</span>
-								<span className="gk-display text-[14px]">
+								<span className="gk-display text-[14px]" data-ryu-i18n="off">
 									{member.agent.name}
 								</span>
 								{row.status}
@@ -277,7 +276,29 @@ function RecentMatches({
 							>
 								<button
 									aria-current={open ? "true" : undefined}
-									aria-label={`${title}${agent ? ` with ${agent.name}` : ""}${acted ? "" : `, ${THREAD_STATUS_LABELS[status]}`}. ${open ? "Open now." : "Open thread."}`}
+									aria-label={
+										open
+											? tl(
+													"{title}{hasAgent, select, true { with {agent}} other {}}{showStatus, select, true {, {status}} other {}}. Open now.",
+													{
+														agent: agent?.name ?? "",
+														hasAgent: agent ? "true" : "false",
+														showStatus: acted ? "false" : "true",
+														status: threadStatusLabel(status, tl),
+														title,
+													}
+												)
+											: tl(
+													"{title}{hasAgent, select, true { with {agent}} other {}}{showStatus, select, true {, {status}} other {}}. Open thread.",
+													{
+														agent: agent?.name ?? "",
+														hasAgent: agent ? "true" : "false",
+														showStatus: acted ? "false" : "true",
+														status: threadStatusLabel(status, tl),
+														title,
+													}
+												)
+									}
 									className={cn(
 										"group/match relative flex h-10 w-full items-center gap-3 text-start outline-none before:absolute before:-inset-x-2 before:inset-y-0.5 before:rounded-lg before:transition-colors hover:before:bg-(--gk-plate-sunk) focus-visible:before:outline-(--gk-focus) focus-visible:before:outline-3 focus-visible:before:outline-solid",
 										open && "before:bg-(--gk-plate-sunk)"
@@ -295,7 +316,10 @@ function RecentMatches({
 											)}
 										/>
 									)}
-									<span className="relative min-w-0 flex-1 truncate font-semibold text-(--gk-ink) text-[14px]">
+									<span
+										className="relative min-w-0 flex-1 truncate font-semibold text-(--gk-ink) text-[14px]"
+										data-ryu-i18n="off"
+									>
 										{title}
 									</span>
 									{agent ? (
@@ -306,6 +330,7 @@ function RecentMatches({
 													? "font-bold text-(--gk-ink)"
 													: "font-medium text-(--gk-ink-muted)"
 											)}
+											data-ryu-i18n="off"
 										>
 											{agent.name}
 										</span>
@@ -392,7 +417,10 @@ export function LobbyList({
 							{ready}
 						</span>
 						Daily quests
-						<ArrowRight aria-hidden="true" className="size-4 shrink-0" />
+						<ArrowRight
+							aria-hidden="true"
+							className="size-4 shrink-0 rtl:-scale-x-100"
+						/>
 					</button>
 					<button
 						aria-label={tl("Squad {count} of {size}. Edit squad.", {

@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 async function measureAction(
 	page: Page,
@@ -65,9 +66,8 @@ test("warm switching avoids unrelated route renders and preserves working state"
 	// effect. Set RYU_REFRESH_NAV_PROOF=1 to deliberately regenerate it.
 	const proofDir =
 		process.env.RYU_REFRESH_NAV_PROOF === "1"
-			? path.resolve(
-					import.meta.dirname,
-					"../../../docs/proof/navigation-performance",
+			? proofEvidencePath(
+					"navigation-performance",
 					process.env.RYU_NAV_PROOF_RUN ?? "",
 					browserName === "chromium" ? "" : browserName,
 					testInfo.repeatEachIndex === 0

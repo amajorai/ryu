@@ -151,7 +151,7 @@ export function SectionAddButton({
 	title: string;
 }) {
 	return (
-		<span className="mr-1">
+		<span className="me-1">
 			<SectionActionButton icon={Add01Icon} onClick={onClick} title={title} />
 		</span>
 	);
@@ -405,7 +405,7 @@ export function SidebarSection({
 				/>
 			) : null}
 			<HugeiconsIcon
-				className={`-ml-1 size-3.5 shrink-0 opacity-0 transition duration-150 group-hover/hdr:opacity-100 group-hover/hdr:duration-0 ${collapsed ? "-rotate-90" : ""}`}
+				className={`-ms-1 size-3.5 shrink-0 opacity-0 transition duration-150 group-hover/hdr:opacity-100 group-hover/hdr:duration-0 ${collapsed ? "-rotate-90 rtl:rotate-90" : ""}`}
 				icon={ArrowDown01Icon}
 			/>
 		</button>
@@ -456,7 +456,7 @@ export function SidebarSection({
 						) : (
 							headerButton
 						)}
-						<div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
+						<div className="absolute end-1 top-1/2 flex -translate-y-1/2 items-center">
 							{action}
 							<SectionOverflowMenu
 								actions={menuActions}

@@ -45,6 +45,13 @@ export function McpDetailPanel({
 	installing: string | null;
 }) {
 	const tl = useLiteralMessages();
+	// Hooks run before the early returns below: the panel goes from no
+	// selection or loading to a loaded detail, and a hook that only runs for
+	// the detail changes the hook order and throws mid-render.
+	const { percent } = useInstallProgress(
+		["tool", "other"],
+		detail?.card.name ?? ""
+	);
 	if (!selectedId) {
 		return (
 			<Empty className="h-full">
@@ -77,7 +84,6 @@ export function McpDetailPanel({
 
 	const { card, packages, remotes } = detail;
 	const isInstalling = installing === card.id;
-	const { percent } = useInstallProgress(["tool", "other"], card.name);
 
 	const transports = Array.from(
 		new Set(
@@ -127,7 +133,7 @@ export function McpDetailPanel({
 						</InstallProgressButton>
 					)}
 					{card.installed ? (
-						<span className="ml-auto text-muted-foreground text-xs">
+						<span className="ms-auto text-muted-foreground text-xs">
 							Added to your MCP servers (disabled). Enable and start it from the
 							Tools page — Ryu never auto-launches a registry command.
 						</span>

@@ -1,6 +1,6 @@
 // Real Quests component and local sidecar; only the host transport is adapted.
 import { markCompanionAppRoot } from "@ryu/app-host/companion-theme";
-import { RyuAppShell } from "@ryu/blocks/companion/app-ui.tsx";
+import { RyuAppShell } from "@ryu/blocks/companion/app-ui";
 import { createRoot } from "react-dom/client";
 import { Quests } from "../../../../apps-store/quests/ui/src/Quests.tsx";
 import type { RyuQuests } from "../../../../apps-store/quests/ui/src/ryu.d.ts";

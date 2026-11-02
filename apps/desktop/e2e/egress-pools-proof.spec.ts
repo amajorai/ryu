@@ -1,8 +1,8 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import type { GatewayEgressConfig } from "../src/lib/api/gateway.ts";
 import { pluginDocumentSchema } from "../src/lib/api/plugin-wire-values.ts";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const endpointFieldsSchema = z.object({
 	id: z.string(),
@@ -131,10 +131,7 @@ test("creates and assigns an outbound proxy pool", async ({ page }) => {
 	await page.getByRole("button", { name: "Assign", exact: true }).click();
 	await expect(page.getByText("genai → private")).toBeVisible();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/egress-pools/egress-pools.png"
-		),
+		path: proofEvidencePath("egress-pools/egress-pools.png"),
 		fullPage: true,
 	});
 	await page.getByRole("button", { name: "Edit proxy pool private" }).click();
@@ -146,10 +143,7 @@ test("creates and assigns an outbound proxy pool", async ({ page }) => {
 		page.getByRole("switch", { name: "Use direct only as fallback" })
 	).toBeChecked();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/egress-pools/egress-pools-editor.png"
-		),
+		path: proofEvidencePath("egress-pools/egress-pools-editor.png"),
 		fullPage: true,
 	});
 	await page.reload({ waitUntil: "domcontentloaded" });
@@ -157,10 +151,7 @@ test("creates and assigns an outbound proxy pool", async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.getByRole("button", { name: "Edit proxy pool private" }).click();
 	await page.screenshot({
-		path: path.resolve(
-			import.meta.dirname,
-			"../../../docs/proof/egress-pools/egress-pools-mobile.png"
-		),
+		path: proofEvidencePath("egress-pools/egress-pools-mobile.png"),
 		fullPage: true,
 	});
 	expect(egress.assignments.openai).toBe("private");

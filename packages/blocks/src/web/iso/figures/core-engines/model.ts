@@ -32,33 +32,72 @@
  *   apps/core/src/sidecar/mod.rs:152-156.
  */
 
+import type { LiteralMessage } from "@ryu/i18n/react";
+
 export interface Engine {
 	id: string;
 	name: string;
-	role: string;
+	/** A few words on what the engine is for, in the reader's language. */
+	role: (tl: LiteralMessage) => string;
 }
 
 /** `LOCAL_ENGINES`, apps/core/src/sidecar/active_engine.rs:20-36. */
 export const ENGINES: readonly Engine[] = [
-	{ id: "llamacpp", name: "llama.cpp", role: "default · CPU or GPU" },
-	{ id: "ollama", name: "Ollama", role: "wraps llama.cpp" },
-	{ id: "lemonade", name: "Lemonade Server", role: "connects to your server" },
-	{ id: "magnitude", name: "Magnitude", role: "self-tuning kernels" },
-	{ id: "llama-swap", name: "llama-swap", role: "on-demand model switching" },
-	{ id: "freetoken", name: "FreeToken", role: "MoE on NVIDIA GPUs" },
-	{ id: "vllm", name: "vLLM", role: "high-throughput GPU serving" },
-	{ id: "sglang", name: "SGLang", role: "fast serving runtime" },
-	{ id: "mlx", name: "MLX (text)", role: "Apple Silicon, text" },
-	{ id: "mlx-vlm", name: "MLX (vision)", role: "Apple Silicon, vision" },
-	{ id: "mlx-serve", name: "MLX Serve", role: "native Apple Silicon" },
-	{ id: "omlx", name: "oMLX", role: "Apple Silicon, batching" },
+	{
+		id: "llamacpp",
+		name: "llama.cpp",
+		role: (tl) => tl("default · CPU or GPU"),
+	},
+	{ id: "ollama", name: "Ollama", role: (tl) => tl("wraps llama.cpp") },
+	{
+		id: "lemonade",
+		name: "Lemonade Server",
+		role: (tl) => tl("connects to your server"),
+	},
+	{
+		id: "magnitude",
+		name: "Magnitude",
+		role: (tl) => tl("self-tuning kernels"),
+	},
+	{
+		id: "llama-swap",
+		name: "llama-swap",
+		role: (tl) => tl("on-demand model switching"),
+	},
+	{
+		id: "freetoken",
+		name: "FreeToken",
+		role: (tl) => tl("MoE on NVIDIA GPUs"),
+	},
+	{ id: "vllm", name: "vLLM", role: (tl) => tl("high-throughput GPU serving") },
+	{ id: "sglang", name: "SGLang", role: (tl) => tl("fast serving runtime") },
+	{ id: "mlx", name: "MLX (text)", role: (tl) => tl("Apple Silicon, text") },
+	{
+		id: "mlx-vlm",
+		name: "MLX (vision)",
+		role: (tl) => tl("Apple Silicon, vision"),
+	},
+	{
+		id: "mlx-serve",
+		name: "MLX Serve",
+		role: (tl) => tl("native Apple Silicon"),
+	},
+	{ id: "omlx", name: "oMLX", role: (tl) => tl("Apple Silicon, batching") },
 	{
 		id: "docker-model-runner",
 		name: "Docker Model Runner",
-		role: "models via Docker",
+		role: (tl) => tl("models via Docker"),
 	},
-	{ id: "apfel", name: "Apple Intelligence", role: "on-device models" },
-	{ id: "mesh-llm", name: "Mesh LLM", role: "distributed inference" },
+	{
+		id: "apfel",
+		name: "Apple Intelligence",
+		role: (tl) => tl("on-device models"),
+	},
+	{
+		id: "mesh-llm",
+		name: "Mesh LLM",
+		role: (tl) => tl("distributed inference"),
+	},
 ];
 
 export const ENGINE_COUNT = ENGINES.length;
@@ -70,16 +109,19 @@ export const DEFAULT_ENGINE = 0;
 export const DEFAULT_MODEL = "Gemma 4 E2B";
 
 export interface Alongside {
-	detail: string;
 	id: "voice" | "image" | "embeddings";
-	name: string;
+	/** The category and its default engines, as the description names them. */
+	spoken: (tl: LiteralMessage) => string;
 }
 
 /** Categories that run alongside the chat engine, catalog/registry.rs:14-27. */
 export const ALONGSIDE: readonly Alongside[] = [
-	{ id: "voice", name: "Voice", detail: "Parakeet + Kokoro" },
-	{ id: "image", name: "Image", detail: "Stable Diffusion, optional" },
-	{ id: "embeddings", name: "Embeddings", detail: "nomic v1.5, 768-dim" },
+	{ id: "voice", spoken: (tl) => tl("voice (Parakeet + Kokoro)") },
+	{ id: "image", spoken: (tl) => tl("image (Stable Diffusion, optional)") },
+	{
+		id: "embeddings",
+		spoken: (tl) => tl("embeddings (nomic v1.5, 768-dim)"),
+	},
 ];
 
 /** `HEALTH_INTERVAL`, apps/core/src/sidecar/manager.rs:11. */
@@ -94,24 +136,49 @@ export const engineAt = (index: number): Engine =>
 	ENGINES[Math.min(ENGINE_COUNT - 1, Math.max(0, index))] ?? {
 		id: "",
 		name: "",
-		role: "",
+		role: () => "",
 	};
 
 export type Phase = "loaded" | "unloading" | "loading";
 
-export function spokenOf(loaded: number | null, phase: Phase, moving: number) {
-	if (phase !== "loaded") {
-		return `${phase === "unloading" ? "Unloading" : "Loading"} ${engineAt(moving).name}`;
+export function spokenOf(
+	loaded: number | null,
+	phase: Phase,
+	moving: number,
+	tl: LiteralMessage
+): string {
+	if (phase === "unloading") {
+		return tl("Unloading {engineName}", { engineName: engineAt(moving).name });
+	}
+	if (phase === "loading") {
+		return tl("Loading {engineName}", { engineName: engineAt(moving).name });
 	}
 	if (loaded === null) {
-		return "No chat engine loaded";
+		return tl("No chat engine loaded");
 	}
 	const engine = engineAt(loaded);
-	return `${engine.name} loaded, engine ${loaded + 1} of ${ENGINE_COUNT}: ${engine.role}`;
+	return tl("{engineName} loaded, engine {position} of {engineCount}: {role}", {
+		engineCount: ENGINE_COUNT,
+		engineName: engine.name,
+		position: loaded + 1,
+		role: engine.role(tl),
+	});
 }
 
-export const RESTING_SPOKEN = spokenOf(
-	DEFAULT_ENGINE,
-	"loaded",
-	DEFAULT_ENGINE
-);
+/** The value text while the reader previews an engine they have not loaded yet. */
+export function previewSpokenOf(index: number, tl: LiteralMessage): string {
+	const engine = engineAt(index);
+	return tl(
+		"{engineName}, engine {position} of {engineCount}: {role}. Press Enter to load it.",
+		{
+			engineCount: ENGINE_COUNT,
+			engineName: engine.name,
+			position: index + 1,
+			role: engine.role(tl),
+		}
+	);
+}
+
+/** The value text at rest: the default engine loaded. */
+export const restingSpoken = (tl: LiteralMessage): string =>
+	spokenOf(DEFAULT_ENGINE, "loaded", DEFAULT_ENGINE, tl);

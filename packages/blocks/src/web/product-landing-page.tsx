@@ -49,8 +49,8 @@ export function hasPublishedPricing(slug: string): boolean {
 export default function ProductLandingPage({ product }: { product: Product }) {
 	const faqItems = product.faq?.map((item, index) => ({
 		id: `${product.slug}-faq-${index}`,
-		title: item.q,
-		content: item.a,
+		title: item.question,
+		content: item.answer,
 	}));
 
 	const explainer = getProductExplainer(product.slug);

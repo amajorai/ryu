@@ -4,7 +4,7 @@ import {
 	passwordSchema,
 	passwordStrengthLabel,
 	passwordStrengthScore,
-	passwordValidationMessage,
+	passwordValidationIssue,
 } from "./password-policy.ts";
 
 describe("signup password policy", () => {
@@ -33,10 +33,8 @@ describe("signup password policy", () => {
 		expect(passwordStrengthLabel(4)).toBe("Strong");
 	});
 
-	it("returns an inline message without changing the entered password", () => {
-		expect(passwordValidationMessage("RyuLaunch9")).toBe(
-			"Password needs one symbol"
-		);
-		expect(passwordValidationMessage("RyuLaunch!9")).toBeNull();
+	it("returns an issue code without changing the entered password", () => {
+		expect(passwordValidationIssue("RyuLaunch9")).toBe("symbol");
+		expect(passwordValidationIssue("RyuLaunch!9")).toBeNull();
 	});
 });

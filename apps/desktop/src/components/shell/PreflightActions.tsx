@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useState } from "react";
@@ -24,7 +25,7 @@ export function PreflightActionButton({
 				try {
 					await onRun();
 				} catch (error) {
-					toast.error(`${label} failed`, {
+					toast.error(tl("{label} failed", { label }), {
 						description:
 							error instanceof Error ? error.message : "Please try again.",
 					});

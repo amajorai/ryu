@@ -2,10 +2,10 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
-const proof = path.resolve(
-	import.meta.dirname,
-	"../../../docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/cards"
+const proof = proofEvidencePath(
+	"test-coverage-sweep-20260924/parallel/plugins-runtime/full/cards"
 );
 const rowSchema = z.object({
 	entry: z

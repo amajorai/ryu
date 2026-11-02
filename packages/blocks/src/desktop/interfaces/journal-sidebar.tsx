@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -93,7 +94,7 @@ export function JournalStrip({
 					size="icon-xs"
 					variant="ghost-muted"
 				>
-					<ChevronLeft aria-hidden="true" className="size-4" />
+					<ChevronLeft aria-hidden="true" className="size-4 rtl:-scale-x-100" />
 				</Button>
 				<Button
 					aria-label={expanded ? tl("Next month") : tl("Next week")}
@@ -101,7 +102,10 @@ export function JournalStrip({
 					size="icon-xs"
 					variant="ghost-muted"
 				>
-					<ChevronRight aria-hidden="true" className="size-4" />
+					<ChevronRight
+						aria-hidden="true"
+						className="size-4 rtl:-scale-x-100"
+					/>
 				</Button>
 			</div>
 			<div className="mt-1 grid grid-cols-7" id={gridId}>
@@ -176,7 +180,10 @@ function StripDay({
 	today: boolean;
 }) {
 	const date = parseDayKey(dayKey);
-	const label = `${fullDateLabel(dayKey)}${today ? ", today" : ""}, ${count === 0 ? "no entries" : countLabel(count, "entry", "entries")}`;
+	const label = tr(
+		"{day}{today, select, yes {, today} other {}}, {count, plural, =0 {no entries} one {# entry} other {# entries}}",
+		{ count, day: fullDateLabel(dayKey), today: today ? "yes" : "no" }
+	);
 	return (
 		<button
 			aria-current={today ? "date" : undefined}
@@ -402,7 +409,7 @@ function TimelineRow({
 		<button
 			aria-current={active ? "page" : undefined}
 			className={cn(
-				"flex w-full rounded-lg py-2.5 ps-14 pe-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+				"flex w-full rounded-lg py-2.5 ps-14 pe-2 text-start outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
 				active ? "bg-muted" : "hover:bg-muted/60"
 			)}
 			data-thread-id={entry.thread.id}
@@ -416,6 +423,7 @@ function TimelineRow({
 							"truncate font-semibold text-base leading-6",
 							titleClass
 						)}
+						data-ryu-i18n="off"
 					>
 						{entryTitle(entry.thread)}
 					</span>
@@ -424,7 +432,10 @@ function TimelineRow({
 						status={entry.status}
 					/>
 				</span>
-				<span className="mt-0.5 line-clamp-2 text-muted-foreground text-sm leading-5">
+				<span
+					className="mt-0.5 line-clamp-2 text-muted-foreground text-sm leading-5"
+					data-ryu-i18n="off"
+				>
 					{entryExcerpt(entry.thread)}
 				</span>
 				<span className="mt-1.5 flex items-center gap-1.5 text-muted-foreground text-xs leading-4">
@@ -473,12 +484,12 @@ function TimelineSkeleton() {
 /** "Today", "Yesterday", or the weekday and date. */
 export function relativeDayName(key: string, todayKey: string): string {
 	if (key === todayKey) {
-		return "Today";
+		return tr("Today");
 	}
 	const yesterday = new Date(parseDayKey(todayKey));
 	yesterday.setDate(yesterday.getDate() - 1);
 	if (key === localDayKey(yesterday)) {
-		return "Yesterday";
+		return tr("Yesterday");
 	}
 	return weekdayShort(key);
 }

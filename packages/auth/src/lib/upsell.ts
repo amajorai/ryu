@@ -170,7 +170,7 @@ const investmentCandidates = (
 				lever: "investment",
 				metric: "conversations",
 				value: count,
-				headline: `You've started ${count.toLocaleString()} conversations`,
+				headline: `You've started ${count.toLocaleString("en-US")} conversations`,
 				subtext: "All that context lives in Ryu — keep it working for you.",
 			},
 		});
@@ -188,7 +188,7 @@ const investmentCandidates = (
 				lever: "investment",
 				metric: "agent-time",
 				value: agentHours,
-				headline: `Your agents have worked ${agentHours.toLocaleString()} hours for you`,
+				headline: `Your agents have worked ${agentHours.toLocaleString("en-US")} hours for you`,
 				subtext: "Keep managed AI running with a plan and usage credits.",
 			},
 		});
@@ -203,7 +203,7 @@ const investmentCandidates = (
 				lever: "investment",
 				metric: "requests",
 				value: count,
-				headline: `You've made ${count.toLocaleString()} requests`,
+				headline: `You've made ${count.toLocaleString("en-US")} requests`,
 				subtext: "You're getting real work done — keep the momentum on Pro.",
 			},
 		});

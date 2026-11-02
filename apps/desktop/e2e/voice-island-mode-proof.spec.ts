@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Locator, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 // Ryu Quiet (1506c7bce0, "Island wears one ring and token fill") removed the
 // VoiceGlow edge glow and sweeping beam from both Island voice states: the
@@ -68,10 +69,7 @@ test("renders both Island voice states and captures the finished UI", async ({
 	await expect(orb).toHaveCount(1);
 	await expect.poll(() => scaleOf(orb)).toBeCloseTo(ORB_SCALE, 3);
 
-	const screenshotPath = path.resolve(
-		process.cwd(),
-		"../../docs/proof/voice-glow/island-voice-mode.png"
-	);
+	const screenshotPath = proofEvidencePath("voice-glow/island-voice-mode.png");
 	await mkdir(path.dirname(screenshotPath), { recursive: true });
 	await page.screenshot({ fullPage: true, path: screenshotPath });
 

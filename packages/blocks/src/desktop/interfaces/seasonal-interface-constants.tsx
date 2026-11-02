@@ -1,14 +1,10 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { Ghost, Gift, Lamp } from "lucide-react";
 import type { ReactNode } from "react";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
 import type { IsoPortrait } from "./game3d-stage.tsx";
-import {
-	plural,
-	type Season,
-	type SeasonBoard,
-	type SeasonCopy,
-} from "./seasonal-model.ts";
+import type { Season, SeasonBoard, SeasonCopy } from "./seasonal-model.ts";
 
 /** Below this stage width the HUD plates go compact. */
 export const COMPACT_BELOW = 900;
@@ -50,22 +46,49 @@ export type SidePanel = "all" | "compose" | "more" | null;
 export function headerSummary(board: SeasonBoard, copy: SeasonCopy): string {
 	const { needsYou, threads, working } = board.totals;
 	return [
-		plural(threads, copy.door, copy.doors),
-		needsYou > 0 ? `${needsYou} need you` : null,
-		working > 0 ? `${working} working` : null,
+		copy.count(threads),
+		needsYou > 0 ? tr("{count} need you", { count: needsYou }) : null,
+		working > 0 ? tr("{count} working", { count: working }) : null,
 	]
 		.filter(Boolean)
 		.join(" \u00b7 ");
 }
 
 /** What each diorama shows, for the stage's name. */
+/** The diorama's description for screen readers, in the UI language. */
+export function dioramaLabel(season: Season): string {
+	switch (season) {
+		case "halloween":
+			return tr(
+				"a night pumpkin patch of 24 numbered pumpkins, one per conversation."
+			);
+		case "lunar-new-year":
+			return tr(
+				"a lantern festival street hung with 24 numbered lanterns, one per conversation."
+			);
+		default:
+			return tr(
+				"a snowy village square round an advent house whose 24 numbered doors and windows are conversations."
+			);
+	}
+}
+
 export const DIORAMA_LABEL: Record<Season, string> = {
-	advent:
-		"a snowy village square round an advent house whose 24 numbered doors and windows are conversations.",
-	halloween:
-		"a night pumpkin patch of 24 numbered pumpkins, one per conversation.",
-	"lunar-new-year":
-		"a lantern festival street hung with 24 numbered lanterns, one per conversation.",
+	get advent() {
+		return tr(
+			"a snowy village square round an advent house whose 24 numbered doors and windows are conversations."
+		);
+	},
+	get halloween() {
+		return tr(
+			"a night pumpkin patch of 24 numbered pumpkins, one per conversation."
+		);
+	},
+	get "lunar-new-year"() {
+		return tr(
+			"a lantern festival street hung with 24 numbered lanterns, one per conversation."
+		);
+	},
 };
 
 export const SEASON_ICON: Record<Season, ReactNode> = {

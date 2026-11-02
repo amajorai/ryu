@@ -85,7 +85,7 @@ export function WorkbenchTabMenu({
 					key={region}
 					onClick={() => moveToRegion(item.id, region)}
 				>
-					{tl("Move to {region}", { region: REGION_LABELS[region] })}
+					{tl("Move to {region}", { region: tl(REGION_LABELS[region]) })}
 				</ContextMenuItem>
 			))}
 			<ContextMenuSeparator />
@@ -221,7 +221,7 @@ export function WorkbenchStripActions({
 								}
 							}}
 						>
-							{tl("Move to {region}", { region: REGION_LABELS[region] })}
+							{tl("Move to {region}", { region: tl(REGION_LABELS[region]) })}
 						</DropdownMenuItem>
 					))}
 					{group.region === "bottom" ? (

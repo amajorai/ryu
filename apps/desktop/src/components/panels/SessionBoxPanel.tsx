@@ -23,7 +23,7 @@
 
 import { CLOUD_TASKS_BOX_BACKEND_FLAG } from "@ryu/auth/lib/feature-flags";
 import { VncCanvas } from "@ryu/blocks/session-box/vnc-canvas.tsx";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQueryClient } from "@tanstack/react-query";
@@ -50,6 +50,7 @@ import {
 	sessionBoxKey,
 	stopSessionBox,
 } from "@/src/lib/api/session-box.ts";
+import { formatLocalTime } from "@/src/lib/locale-format.ts";
 import { clearMediaSource, publishMediaSource } from "@/src/lib/media-pip.ts";
 
 const STATE_LABELS: Record<SessionBoxState, string> = {
@@ -81,8 +82,10 @@ function pageOrigin(): string | null {
 	}
 }
 
-function boxLabel(view: SessionBoxView): string {
-	return view.child === null ? "This session" : `Sub-agent ${view.child}`;
+function boxLabel(view: SessionBoxView, tl: LiteralMessage): string {
+	return view.child === null
+		? tl("This session")
+		: tl("Sub-agent {child}", { child: String(view.child) });
 }
 
 function Notice({ children }: { children: React.ReactNode }) {
@@ -167,7 +170,7 @@ export function SessionBoxPanel({
 				toast.success(
 					until
 						? tl("Box extended until {time}.", {
-								time: new Date(until).toLocaleTimeString(),
+								time: formatLocalTime(until),
 							})
 						: "Box extended."
 				);
@@ -216,7 +219,9 @@ export function SessionBoxPanel({
 				onPreviewFrame={(frame) =>
 					publishMediaSource({ ...frame, kind: "desktop" })
 				}
-				title={tl("{boxName} · Box screen", { boxName: boxLabel(selected) })}
+				title={tl("{boxName} · Box screen", {
+					boxName: boxLabel(selected, tl),
+				})}
 				viewOnly={viewOnly}
 			/>
 		);
@@ -269,14 +274,14 @@ export function SessionBoxPanel({
 									key={view.child ?? "session"}
 									value={view.child === null ? "" : String(view.child)}
 								>
-									{boxLabel(view)}
+									{boxLabel(view, tl)}
 								</option>
 							))}
 						</select>
 					</>
 				) : (
 					<span className="min-w-0 truncate text-muted-foreground text-xs">
-						{boxLabel(selected)}
+						{boxLabel(selected, tl)}
 					</span>
 				)}
 				<span
@@ -318,7 +323,7 @@ export function SessionBoxPanel({
 							onClick={() => runAction("extend")}
 							size="sm"
 							title={tl("Runs until {time}", {
-								time: new Date(selected.expiresAt).toLocaleTimeString(),
+								time: formatLocalTime(selected.expiresAt),
 							})}
 							type="button"
 							variant="ghost"
@@ -358,6 +363,7 @@ export function SessionBoxChildScreens({
 	conversationId: string;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const enabled = useFeatureFlag(CLOUD_TASKS_BOX_BACKEND_FLAG);
 	const { data: status } = useSessionBox(target, conversationId, enabled);
 	const children = enabled ? (status?.children ?? []) : [];
@@ -378,7 +384,9 @@ export function SessionBoxChildScreens({
 						className="flex min-w-0 items-center gap-2 text-xs"
 						key={view.child ?? view.id ?? "child"}
 					>
-						<span className="min-w-0 flex-1 truncate">{boxLabel(view)}</span>
+						<span className="min-w-0 flex-1 truncate">
+							{boxLabel(view, tl)}
+						</span>
 						<span className="text-muted-foreground">
 							{view.state ? STATE_LABELS[view.state] : "Unknown"}
 						</span>

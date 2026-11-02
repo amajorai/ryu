@@ -11,13 +11,13 @@ import type { InterfaceThread } from "@ryuhq/protocol/interfaces";
 import { LoaderCircle, MessageSquarePlus } from "lucide-react";
 import type { ReactNode } from "react";
 import { ArenaAvatar } from "./arena-avatar.tsx";
-import { Counts, plural } from "./arena-card-counts.tsx";
+import { Counts } from "./arena-card-counts.tsx";
 import {
 	ARENA_STATE_LABELS,
 	type ArenaAgentState,
 	type ArenaCardView,
 } from "./arena-model.ts";
-import { compactAge } from "./interface-renderer.ts";
+import { relativeAge } from "./interface-renderer.ts";
 
 /** Marks the one control per card that arrow keys move focus between. */
 export const ARENA_NAV_ATTRIBUTE = "data-arena-nav";
@@ -47,13 +47,14 @@ function threadTitle(thread: InterfaceThread): string {
 }
 
 /** "Launch Crew" stays a name; "+2" becomes "2 others". */
-function withLabel(focusWith: string): string {
+function withLabel(focusWith: string, tl: LiteralMessage): string {
 	const extra = /^\+(\d+)$/.exec(focusWith);
 	if (!extra) {
-		return `with ${focusWith}`;
+		return tl("with {name}", { name: focusWith });
 	}
-	const count = Number(extra[1]);
-	return `with ${count} ${count === 1 ? "other" : "others"}`;
+	return tl("{count, plural, one {with # other} other {with # others}}", {
+		count: Number(extra[1]),
+	});
 }
 
 function activityLabel(
@@ -61,15 +62,11 @@ function activityLabel(
 	now: number,
 	tl: LiteralMessage
 ): ReactNode {
-	const age = card.lastActivityAt ? compactAge(card.lastActivityAt, now) : "";
+	const age = card.lastActivityAt ? relativeAge(card.lastActivityAt, now) : "";
 	if (!(card.lastActivityAt && age)) {
-		return "No activity yet";
+		return tl("No activity yet");
 	}
-	return (
-		<time dateTime={card.lastActivityAt}>
-			{age === "now" ? "Just now" : tl("{age} ago", { age })}
-		</time>
-	);
+	return <time dateTime={card.lastActivityAt}>{age}</time>;
 }
 
 /** Which thread the card's focus area shows, and who else is on it. */
@@ -155,7 +152,9 @@ function FocusThread({
 		"-mx-1.5 -my-0.5 min-w-0 truncate px-1.5 py-0.5 text-start font-medium text-foreground text-sm leading-5";
 	// The open thread is already highlighted; its title is not a second link.
 	const heading = inPanel ? (
-		<span className={titleClass}>{title}</span>
+		<span className={titleClass} data-ryu-i18n="off">
+			{title}
+		</span>
 	) : (
 		<button
 			{...{ [ARENA_NAV_ATTRIBUTE]: "" }}
@@ -171,6 +170,7 @@ function FocusThread({
 				titleClass,
 				"rounded-md outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:ring-2 focus-visible:ring-ring"
 			)}
+			data-ryu-i18n="off"
 			onClick={() => onOpen(thread.id)}
 			tabIndex={tabIndex}
 			type="button"
@@ -184,7 +184,7 @@ function FocusThread({
 				{heading}
 				{focus.with ? (
 					<span className="min-w-0 shrink-[2] truncate text-[13px] text-muted-foreground">
-						{withLabel(focus.with)}
+						{withLabel(focus.with, tl)}
 					</span>
 				) : null}
 				{/* The state label already says Working for the agent's own run. */}
@@ -203,7 +203,7 @@ function FocusThread({
 					{thread.lastMessageRole === "user" ? (
 						<span className="text-foreground">You: </span>
 					) : null}
-					{thread.lastMessage}
+					<span data-ryu-i18n="off">{thread.lastMessage}</span>
 				</p>
 			) : null}
 		</div>
@@ -318,13 +318,21 @@ export function ArenaAgentCard({
 							className="min-w-0 flex-1 truncate text-base leading-6"
 							id={nameId}
 						>
-							<span className="font-semibold">{card.name}</span>
+							<span className="font-semibold" data-ryu-i18n="off">
+								{card.name}
+							</span>
 						</h3>
 						<StateLabel state={card.state} />
 					</div>
 					{compact ? null : (
 						<p className="truncate text-[13px] text-muted-foreground leading-5">
-							{card.agent?.description || plural(card.threadCount, "thread")}
+							{card.agent?.description ? (
+								<span data-ryu-i18n="off">{card.agent.description}</span>
+							) : (
+								tl("{count, plural, one {# thread} other {# threads}}", {
+									count: card.threadCount,
+								})
+							)}
 						</p>
 					)}
 				</div>

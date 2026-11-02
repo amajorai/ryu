@@ -95,14 +95,14 @@ export function CinemaEmpty({
 					{agents.map((agent) => (
 						<li key={agent.id}>
 							<Button
-								className="gap-2 rounded-sm pr-3 pl-2"
+								className="gap-2 rounded-sm ps-2 pe-3"
 								onClick={() => onNew(agent.id)}
 								size="sm"
 								type="button"
 								variant="outline"
 							>
 								<BoardAvatar agent={agent} name={agent.name} size={20} />
-								{agent.name}
+								<span data-ryu-i18n="off">{agent.name}</span>
 							</Button>
 						</li>
 					))}

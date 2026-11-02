@@ -61,7 +61,7 @@ export function MentionList({
 	return (
 		<ul
 			aria-label="Agent and team mentions"
-			className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-lg border bg-popover p-1 shadow-lg"
+			className="absolute start-0 bottom-full z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-lg border bg-popover p-1 shadow-lg"
 			ref={listRef}
 		>
 			{candidates.map((item, i) => (
@@ -70,7 +70,7 @@ export function MentionList({
 					key={`${item.isTeam ? "team" : "agent"}:${item.id}`}
 				>
 					<button
-						className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
+						className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-start text-sm hover:bg-muted ${
 							i === activeIndex ? "bg-accent" : ""
 						}`}
 						onMouseDown={(e) => {
@@ -130,7 +130,7 @@ export function CouncilView({
 					{participantSummary}
 				</span>
 				{statusBadge ? (
-					<Badge className="ml-auto" variant="secondary">
+					<Badge className="ms-auto" variant="secondary">
 						{statusBadge}
 					</Badge>
 				) : null}

@@ -41,6 +41,7 @@ import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { formatMessage } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Tooltip,
 	TooltipContent,
@@ -228,12 +229,12 @@ export function triggerTooltip(
 				return tl("Runs every {every}", { every: trigger.every });
 			}
 			if (trigger.cron) {
-				return `Cron: ${trigger.cron}`;
+				return tl("Cron: {cron}", { cron: trigger.cron });
 			}
-			return "Scheduled";
+			return tl("Scheduled");
 		}
 		case "webhook":
-			return "Runs on incoming webhook";
+			return tl("Runs on incoming webhook");
 		case "composio":
 			return `${trigger.toolkit || "Composio"} · ${trigger.trigger_slug || "event"}`;
 		case "event":
@@ -319,7 +320,7 @@ export function WorkflowFlowStrip({
 			{inputIcons.map((icon, i) => (
 				<HugeiconsIcon className="size-3.5" icon={icon} key={`in-${i}`} />
 			))}
-			<HugeiconsIcon
+			<DirectionalIcon
 				className="size-3 shrink-0 text-muted-foreground/50"
 				icon={ArrowRight01Icon}
 			/>

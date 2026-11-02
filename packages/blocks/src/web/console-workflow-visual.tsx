@@ -1,3 +1,6 @@
+"use client";
+
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { WindowFrame } from "./mockups.tsx";
 
@@ -5,15 +8,16 @@ const NAV = ["Models", "Runs", "Audit"] as const;
 const ACTIVE_NAV: (typeof NAV)[number] = "Runs";
 
 interface ConsoleRun {
+	/** The task name, shown in the Task column. */
+	label: string;
 	status: "Done" | "Needs approval" | "Running";
-	task: string;
 }
 
 // Illustrative rows: a task and its status, as Agent lists each run.
 const RUNS: readonly ConsoleRun[] = [
-	{ task: "Weekly report", status: "Done" },
-	{ task: "Invoice follow-up", status: "Needs approval" },
-	{ task: "Inbox triage", status: "Running" },
+	{ label: "Weekly report", status: "Done" },
+	{ label: "Invoice follow-up", status: "Needs approval" },
+	{ label: "Inbox triage", status: "Running" },
 ];
 
 function StatusLabel({ status }: { status: ConsoleRun["status"] }) {
@@ -42,6 +46,7 @@ function StatusLabel({ status }: { status: ConsoleRun["status"] }) {
 
 /** A static Agent window: a short section list on the left, recent runs and their status on the right. */
 export function ConsoleWorkflowVisual() {
+	const tl = useLiteralMessages();
 	return (
 		<WindowFrame
 			className="w-full min-w-0"
@@ -54,7 +59,7 @@ export function ConsoleWorkflowVisual() {
 			>
 				<nav
 					aria-label="Agent sections"
-					className="hidden border-border border-r p-3 sm:block"
+					className="hidden border-border border-e p-3 sm:block"
 				>
 					<ul className="space-y-0.5">
 						{NAV.map((item) => (
@@ -74,7 +79,7 @@ export function ConsoleWorkflowVisual() {
 				</nav>
 				<div className="min-w-0 p-3 sm:p-4">
 					<p className="font-medium text-foreground text-sm">Recent runs</p>
-					<table className="mt-3 w-full table-fixed text-left text-xs sm:text-sm">
+					<table className="mt-3 w-full table-fixed text-start text-xs sm:text-sm">
 						<thead>
 							<tr className="text-muted-foreground">
 								<th className="pb-2 font-normal">Task</th>
@@ -83,9 +88,9 @@ export function ConsoleWorkflowVisual() {
 						</thead>
 						<tbody>
 							{RUNS.map((run) => (
-								<tr key={run.task}>
-									<td className="truncate py-2.5 pr-2 text-foreground">
-										{run.task}
+								<tr key={run.label}>
+									<td className="truncate py-2.5 pe-2 text-foreground">
+										{tl(run.label)}
 									</td>
 									<td className="py-2.5">
 										<StatusLabel status={run.status} />

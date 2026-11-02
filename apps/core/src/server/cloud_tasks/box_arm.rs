@@ -27,6 +27,10 @@ use ryu_sandbox::{
 };
 use serde::Serialize;
 use serde_json::{json, Value};
+#[path = "box_chat.rs"]
+mod box_chat;
+pub(super) use box_chat::finish_event;
+use box_chat::run_event;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex, OnceLock},
@@ -792,20 +796,6 @@ fn managed_env(box_env: &[(String, String)], git_env_keys: &[String]) -> Vec<(St
         .collect()
 }
 
-fn run_message(summary: Option<&str>, exit_code: Option<i32>, reason: Option<&str>) -> String {
-    let mut content = summary
-        .map(str::trim)
-        .filter(|summary| !summary.is_empty())
-        .unwrap_or("The agent finished without output.")
-        .to_owned();
-    if let Some(reason) = reason {
-        content.push_str(&format!("\n\nThe run ended early ({reason})."));
-    } else if let Some(code) = exit_code.filter(|code| *code != 0) {
-        content.push_str(&format!("\n\nExit code {code}."));
-    }
-    content
-}
-
 fn rfc3339_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
@@ -1004,7 +994,7 @@ async fn poll_run(
             if view.is_terminal() {
                 task.active_run = None;
                 let last = last_run(view, &target.redactions);
-                let message = run_message(
+                let message = run_event(
                     last.summary.as_deref(),
                     last.exit_code,
                     last.reason.as_deref(),
@@ -1015,15 +1005,12 @@ async fn poll_run(
                 None
             }
         };
-        if let Some(content) = message {
-            if conversations
-                .append_message_as(
+        if let Some(event) = message {
+            if event
+                .append(
+                    &conversations,
                     &target.conversation_id,
-                    "assistant",
-                    &content,
                     Some(&format!("cloud:{executor}")),
-                    None,
-                    None,
                     tenancy,
                 )
                 .await
@@ -1374,45 +1361,6 @@ pub(super) fn default_pull_request_title(commit_message: &str) -> String {
         .collect()
 }
 
-/// The assistant message summarizing a finish.
-pub(super) fn finish_message(summary: &FinishSummary) -> String {
-    let stats = format!(
-        "{} file{} changed, +{} -{}",
-        summary.files,
-        if summary.files == 1 { "" } else { "s" },
-        summary.insertions,
-        summary.deletions
-    );
-    let branch = summary.branch.as_deref().unwrap_or("the task branch");
-    let mut message = if summary.pushed {
-        format!("Pushed branch `{branch}` ({stats}).")
-    } else if let Some(error) = &summary.push_error {
-        format!("Committed the changes ({stats}), but pushing `{branch}` failed ({error}). The cloud box was kept so no work is lost.")
-    } else {
-        format!("Finished the cloud task ({stats}).")
-    };
-    if let Some(pull_request) = &summary.pull_request {
-        message.push_str(&format!(
-            "\n\nOpened pull request #{}: {}",
-            pull_request.number, pull_request.url
-        ));
-    } else if let Some(url) = &summary.compare_url {
-        if let Some(error) = &summary.pull_request_error {
-            message.push_str(&format!(
-                "\n\nOpening a pull request failed ({error}). Open one here: {url}"
-            ));
-        } else {
-            message.push_str(&format!("\n\nOpen a pull request: {url}"));
-        }
-    }
-    message.push_str(if summary.teardown == "destroyed" {
-        "\n\nThe cloud box was destroyed."
-    } else {
-        "\n\nThe cloud box is still running until it expires or is stopped."
-    });
-    message
-}
-
 /// Finish summaries outlive a destroyed task so status can still report them.
 fn finished() -> &'static Mutex<HashMap<(String, String), FinishSummary>> {
     static FINISHED: OnceLock<Mutex<HashMap<(String, String), FinishSummary>>> = OnceLock::new();
@@ -1606,15 +1554,15 @@ mod tests {
     #[test]
     fn cloud_box_run_message_reports_exit_code_or_reason() {
         assert_eq!(
-            run_message(None, Some(0), None),
+            run_event(None, Some(0), None).text(),
             "The agent finished without output."
         );
         assert_eq!(
-            run_message(Some("Done"), Some(2), None),
+            run_event(Some("Done"), Some(2), None).text(),
             "Done\n\nExit code 2."
         );
         assert_eq!(
-            run_message(Some("Partial"), None, Some("timeout")),
+            run_event(Some("Partial"), None, Some("timeout")).text(),
             "Partial\n\nThe run ended early (timeout)."
         );
     }
@@ -1919,12 +1867,12 @@ mod tests {
             insertions: 2,
             deletions: 0,
         };
-        let message = finish_message(&summary);
+        let message = finish_event(&summary).text();
         assert!(message.contains("Opened pull request #7: https://github.com/acme/app/pull/7"));
         assert!(!message.contains("compare"));
         summary.pull_request = None;
         summary.pull_request_error = Some("already_exists".into());
-        let message = finish_message(&summary);
+        let message = finish_event(&summary).text();
         assert!(message.contains("Opening a pull request failed (already_exists)"));
         assert!(message.contains("/compare/main...ryu/abc"));
         let serialized = serde_json::to_value(&summary).unwrap();

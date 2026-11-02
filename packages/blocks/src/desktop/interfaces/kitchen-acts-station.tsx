@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type ClockOptions,
 	clockLabel,
@@ -53,9 +54,11 @@ export function eightySixed(
 	const blocker = act.blockers.find((item) => item.kind === "rate-limited");
 	const clears = blocker?.clearsAt ?? act.timer?.until ?? null;
 	const words = clears
-		? `86'd till ${clockLabel(clears, nowMs, clock)}`
-		: "86'd";
-	return blocker?.source === "estimate" ? `Likely ${words}` : words;
+		? tr("86'd till {time}", { time: clockLabel(clears, nowMs, clock) })
+		: tr("86'd");
+	return blocker?.source === "estimate"
+		? tr("Likely {text}", { text: words })
+		: words;
 }
 
 /** The act as a station shows it: a limited chef's bubble in kitchen words. */

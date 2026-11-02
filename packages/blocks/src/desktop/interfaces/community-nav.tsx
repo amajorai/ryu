@@ -10,7 +10,7 @@ import {
 import { CommunityIcon } from "./community-parts.tsx";
 
 const ITEM =
-	"flex h-10 w-full min-w-0 items-center gap-3 rounded-lg px-4 text-left text-sm outline-none transition-colors duration-100 focus-visible:ring-2 focus-visible:ring-ring/50";
+	"flex h-10 w-full min-w-0 items-center gap-3 rounded-lg px-4 text-start text-sm outline-none transition-colors duration-100 focus-visible:ring-2 focus-visible:ring-ring/50";
 
 function itemTone(active: boolean): string {
 	return active
@@ -42,7 +42,7 @@ function NavSection({
 						aria-hidden="true"
 						className={cn(
 							"size-4 transition-transform duration-150 motion-reduce:transition-none",
-							!open && "-rotate-90"
+							!open && "-rotate-90 rtl:rotate-90"
 						)}
 						strokeWidth={1.75}
 					/>

@@ -1,4 +1,5 @@
 import { ARENA_NAV_ATTRIBUTE } from "./arena-card.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 
 export const CARD_SELECTOR = "article[data-agent-id]";
 export const SCROLLER_ATTRIBUTE = "data-arena-scroller";
@@ -61,7 +62,8 @@ export function moveFocus(
 		End: cards.length - 1 - index,
 		Home: -index,
 	};
-	const delta = step[key];
+	// Left/right follow the reading direction: the grid mirrors under RTL.
+	const delta = step[logicalArrowKey(key, grid)];
 	if (delta === undefined) {
 		return false;
 	}

@@ -130,12 +130,14 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		},
 		faq: [
 			{
-				q: "Does Island have its own AI?",
-				a: "No. Every model call goes to your own Ryu server, so it uses the same agents, settings, and data-loss checks.",
+				question: "Does Island have its own AI?",
+				answer:
+					"No. Every model call goes to your own Ryu server, so it uses the same agents, settings, and data-loss checks.",
 			},
 			{
-				q: "Can I use Island today?",
-				a: "Not yet. Island is not in the current Ryu release. Join early access to hear when it ships.",
+				question: "Can I use Island today?",
+				answer:
+					"Not yet. Island is not in the current Ryu release. Join early access to hear when it ships.",
 			},
 		],
 		cta: {
@@ -192,12 +194,14 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		// workspaces.md W9, M5.
 		faq: [
 			{
-				q: "Can I install it today?",
-				a: "Not yet. Ryu Mobile is not in the app stores. Join early access to hear when it ships.",
+				question: "Can I install it today?",
+				answer:
+					"Not yet. Ryu Mobile is not in the app stores. Join early access to hear when it ships.",
 			},
 			{
-				q: "Do my Ryu server's rules still apply?",
-				a: "Yes. Requests sent to your Ryu server follow the same rules and limits.",
+				question: "Do my Ryu server's rules still apply?",
+				answer:
+					"Yes. Requests sent to your Ryu server follow the same rules and limits.",
 			},
 		],
 		cta: {
@@ -255,12 +259,13 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		faq: [
 			{
 				// workspaces.md X5; apps/extension/README.md:35-38.
-				q: "Does it work without my Ryu server?",
-				a: "Yes, with a private model that runs in the browser.",
+				question: "Does it work without my Ryu server?",
+				answer: "Yes, with a private model that runs in the browser.",
 			},
 			{
-				q: "Can I install it today?",
-				a: "Not from the Chrome Web Store yet. Join early access to hear when it is listed.",
+				question: "Can I install it today?",
+				answer:
+					"Not from the Chrome Web Store yet. Join early access to hear when it is listed.",
 			},
 		],
 		cta: {
@@ -320,12 +325,14 @@ export const DESKTOP_TO_DEVICES: Product[] = [
 		},
 		faq: [
 			{
-				q: "Can I buy one?",
-				a: "Not yet. The devices are still in development and have not finished hardware testing.",
+				question: "Can I buy one?",
+				answer:
+					"Not yet. The devices are still in development and have not finished hardware testing.",
 			},
 			{
-				q: "Will they work with my Ryu agents?",
-				a: "Yes. They use the same agents, memory, and Gateway rules as the rest of your Ryu server.",
+				question: "Will they work with my Ryu agents?",
+				answer:
+					"Yes. They use the same agents, memory, and Gateway rules as the rest of your Ryu server.",
 			},
 		],
 		cta: {

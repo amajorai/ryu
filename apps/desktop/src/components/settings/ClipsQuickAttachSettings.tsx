@@ -15,6 +15,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import type { ClipsQuickAttachDestination } from "@/src/lib/clips-quick-attach.ts";
 import {
+	formatNativeCaptureError,
+	type NativeCaptureError,
+} from "@/src/lib/native-capture-error.ts";
+import {
 	openInputMonitoringSettings,
 	requestInputMonitoringPermission,
 } from "@/src/lib/os/permissions.ts";
@@ -27,7 +31,7 @@ import {
 interface ClipsQuickAttachStatus {
 	destination: ClipsQuickAttachDestination;
 	enabled: boolean;
-	error: string | null;
+	error: NativeCaptureError | null;
 	input_monitoring: boolean;
 	listening: boolean;
 	supported: boolean;
@@ -128,15 +132,22 @@ export function ClipsQuickAttachSettings() {
 			setStatus(updated);
 			if (enabled && !updated.listening) {
 				toast.error({
-					title: "Clips quick attach couldn't start",
-					description:
-						updated.error ?? "Grant Input Monitoring to Ryu, then try again.",
+					title: tl("Clips quick attach couldn't start"),
+					description: formatNativeCaptureError(
+						updated.error,
+						tl,
+						tl("Grant Input Monitoring to Ryu, then try again.")
+					),
 				});
 			}
 		} catch (error) {
 			toast.error({
-				title: "Clips quick attach couldn't start",
-				description: error instanceof Error ? error.message : String(error),
+				title: tl("Clips quick attach couldn't start"),
+				description: formatNativeCaptureError(
+					error,
+					tl,
+					tl("Clips quick attach couldn't start")
+				),
 			});
 			await refresh();
 		} finally {
@@ -157,8 +168,12 @@ export function ClipsQuickAttachSettings() {
 			);
 		} catch (error) {
 			toast.error({
-				title: "Couldn't save Clips destination",
-				description: error instanceof Error ? error.message : String(error),
+				title: tl("Couldn't save Clips destination"),
+				description: formatNativeCaptureError(
+					error,
+					tl,
+					tl("Couldn't save Clips destination")
+				),
 			});
 			await refresh();
 		} finally {
@@ -266,7 +281,11 @@ export function ClipsQuickAttachSettings() {
 
 				{status.error ? (
 					<SettingsItem
-						description={status.error}
+						description={formatNativeCaptureError(
+							status.error,
+							tl,
+							tl("Clips quick attach couldn't start")
+						)}
 						title="Last Capture Failed"
 					/>
 				) : null}

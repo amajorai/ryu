@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import {
 	type KeyboardEvent,
@@ -34,7 +35,6 @@ import {
 	findRecordsView,
 	RECORDS_DEFAULT_SORT,
 	RECORDS_EMPTY_FILTER,
-	RECORDS_OBJECT_LABELS,
 	RECORDS_VIEWS,
 	type RecordsFilter,
 	type RecordsObject,
@@ -44,6 +44,7 @@ import {
 	recordsFiltered,
 	recordsNextSort,
 	recordsObjectCounts,
+	recordsObjectLabels,
 	recordsRows,
 	recordsSorted,
 	recordsStartInput,
@@ -366,7 +367,7 @@ export function RecordsInterface({
 		/>
 	) : null;
 
-	const labels = RECORDS_OBJECT_LABELS[object];
+	const labels = recordsObjectLabels(object);
 	let collection: ReactNode;
 	if (!loading && allRows.length === 0) {
 		collection = <RecordsEmptyState object={object} resetTo={resetTo} />;
@@ -483,7 +484,7 @@ export function RecordsInterface({
 							onSortChange={changeSort}
 							query={query}
 							searchLabel={tl("Search {plural}", {
-								plural: labels.plural.toLowerCase(),
+								plural: sentenceLabel(tl, labels.plural),
 							})}
 							searchRef={searchRef}
 							sort={sort}

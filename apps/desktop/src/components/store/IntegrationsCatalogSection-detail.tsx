@@ -170,7 +170,7 @@ export function IntegrationDetailPanel({
 		>
 			{options.length > 0 ? (
 				<ListingSection title="Integration options">
-					<div className="flex max-h-96 flex-col gap-1.5 overflow-y-auto pr-1">
+					<div className="flex max-h-96 flex-col gap-1.5 overflow-y-auto pe-1">
 						{options.map((option) => (
 							<ProviderOptionRow
 								brandName={detailBrand.name}

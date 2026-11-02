@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceAgent,
@@ -35,11 +36,24 @@ export const WIKI_INDEX_ORDER: readonly WikiIndex[] = [
 
 /** Labels in the main menu's Contents group. */
 export const WIKI_INDEX_LABELS: Record<WikiIndex, string> = {
-	agents: "Agents",
-	projects: "Projects",
-	teams: "Teams",
-	threads: "Threads",
+	get agents() {
+		return tr("Agents");
+	},
+	get projects() {
+		return tr("Projects");
+	},
+	get teams() {
+		return tr("Teams");
+	},
+	get threads() {
+		return tr("Threads");
+	},
 };
+
+/** An index's name in the UI language. */
+export function wikiIndexLabel(index: WikiIndex): string {
+	return WIKI_INDEX_LABELS[index];
+}
 
 export function sameRoute(a: WikiRoute, b: WikiRoute): boolean {
 	if (a.kind !== b.kind) {
@@ -109,15 +123,15 @@ export function wikiRouteTitle(
 ): string {
 	switch (route.kind) {
 		case "agent":
-			return wikiAgent(snapshot, route.id)?.name ?? "Missing agent";
+			return wikiAgent(snapshot, route.id)?.name ?? tr("Missing agent");
 		case "group":
-			return wikiGroup(snapshot, route.id)?.name ?? "Missing page";
+			return wikiGroup(snapshot, route.id)?.name ?? tr("Missing page");
 		case "thread":
 			return wikiThreadTitle(wikiThread(snapshot, route.id));
 		case "index":
 			return route.index === "threads"
 				? "List of threads"
-				: `Category:${WIKI_INDEX_LABELS[route.index]}`;
+				: tr("Category:{name}", { name: wikiIndexLabel(route.index) });
 		case "changes":
 			return "Recent changes";
 		case "search":
@@ -128,7 +142,7 @@ export function wikiRouteTitle(
 }
 
 export function wikiThreadTitle(thread: InterfaceThread | undefined): string {
-	return thread?.title.trim() || "Untitled thread";
+	return thread?.title.trim() || tr("Untitled thread");
 }
 
 /** The heading for a route on a given tab ("Talk:Atlas", "Atlas: Revision history"). */
@@ -143,7 +157,7 @@ export function wikiPageHeading(
 		return title;
 	}
 	if (tab === "talk") {
-		return `Talk:${title}`;
+		return tl("Talk:{title}", { title });
 	}
 	if (tab === "history") {
 		return tl("{title}: Revision history", { title });

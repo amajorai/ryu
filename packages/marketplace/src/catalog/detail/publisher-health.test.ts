@@ -10,9 +10,9 @@ describe("calculatePublisherHealth", () => {
 		});
 		expect(health.score).toBeLessThan(40);
 		expect(health.signals).toContainEqual({
-			label: "Publisher identity",
+			id: "identity",
 			status: "warning",
-			value: "Not verified",
+			value: { id: "not-verified" },
 		});
 	});
 
@@ -25,9 +25,26 @@ describe("calculatePublisherHealth", () => {
 		});
 		expect(health.score).toBeGreaterThan(70);
 		expect(
-			health.signals.some(
-				(signal) => signal.value === "Stripe identity verified"
-			)
+			health.signals.some((signal) => signal.value.id === "identity-verified")
 		).toBe(true);
+	});
+
+	test("returns raw counts and the rating average, never prebuilt English", () => {
+		const health = calculatePublisherHealth({
+			capabilities: ["net", "fs", "tools"],
+			publisherTrust: "dotted",
+			ratingAverage: 4.25,
+			ratingCount: 1200,
+		});
+		expect(health.signals).toContainEqual({
+			id: "capabilities",
+			status: "neutral",
+			value: { count: 3, id: "capabilities" },
+		});
+		expect(health.signals).toContainEqual({
+			id: "ratings",
+			status: "good",
+			value: { average: 4.25, count: 1200, id: "rating" },
+		});
 	});
 });

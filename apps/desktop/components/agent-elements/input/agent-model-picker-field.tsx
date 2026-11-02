@@ -408,7 +408,7 @@ export function AgentModelPickerField({
 					/>
 					<span
 						className={cn(
-							"min-w-0 flex-1 truncate text-left",
+							"min-w-0 flex-1 truncate text-start",
 							value ? "text-foreground" : "text-muted-foreground"
 						)}
 					>

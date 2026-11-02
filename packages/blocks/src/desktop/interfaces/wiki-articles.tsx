@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useRichLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import {
@@ -11,6 +12,7 @@ import {
 	threadRoute,
 } from "./wiki-articles-shared.tsx";
 import {
+	countWord,
 	latestAuthor,
 	pageCategories,
 	threadLead,
@@ -62,7 +64,11 @@ export function ThreadArticle({
 				<InfoboxRow label="Status">
 					<Status thread={thread} />
 				</InfoboxRow>
-				<InfoboxRow label={agents.length === 1 ? "Agent" : "Agents"}>
+				<InfoboxRow
+					label={tr("{count, plural, one {Agent} other {Agents}}", {
+						count: agents.length,
+					})}
+				>
 					{agents.length > 0 ? (
 						<Comma
 							items={agents.map((agent) => (
@@ -90,7 +96,7 @@ export function ThreadArticle({
 					</InfoboxRow>
 				) : null}
 				<InfoboxRow label="Messages">
-					{thread.messageCount.toLocaleString("en")}
+					{countWord(thread.messageCount)}
 				</InfoboxRow>
 				<InfoboxRow label="Updated">
 					{wikiAgo(thread.updatedAt, now)}
@@ -109,10 +115,13 @@ export function ThreadArticle({
 				<>
 					<WikiSectionHeading id="latest">Latest message</WikiSectionHeading>
 					<figure>
-						<blockquote className="border-border border-l-2 pl-4 font-serif text-[15px] text-foreground leading-6">
+						<blockquote
+							className="border-border border-s-2 ps-4 font-serif text-[15px] text-foreground leading-6"
+							data-ryu-i18n="off"
+						>
 							{thread.lastMessage}
 						</blockquote>
-						<figcaption className="mt-2 pl-4 text-muted-foreground text-sm leading-6">
+						<figcaption className="mt-2 ps-4 text-muted-foreground text-sm leading-6">
 							{tlRich(
 								"— {author}, {ago}. <button>Read the full conversation</button>",
 								{

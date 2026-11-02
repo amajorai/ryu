@@ -150,7 +150,7 @@ export function HubThreadRow({
 		<li>
 			<button
 				aria-label={label}
-				className="-mx-3 flex w-[calc(100%+1.5rem)] items-start gap-4 rounded-2xl px-3 py-3.5 text-left outline-none transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:ring-inset active:bg-muted"
+				className="-mx-3 flex w-[calc(100%+1.5rem)] items-start gap-4 rounded-2xl px-3 py-3.5 text-start outline-none transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:ring-inset active:bg-muted"
 				onClick={onOpen}
 				type="button"
 			>
@@ -185,7 +185,7 @@ export function HubOpenPill({ label = "Open" }: { label?: string }) {
 			</span>
 			<ChevronRight
 				aria-hidden="true"
-				className="@[22rem]/hub-card:hidden size-5 shrink-0 self-center text-muted-foreground"
+				className="@[22rem]/hub-card:hidden size-5 shrink-0 self-center text-muted-foreground rtl:-scale-x-100"
 			/>
 		</>
 	);

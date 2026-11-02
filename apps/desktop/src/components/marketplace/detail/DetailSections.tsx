@@ -121,7 +121,7 @@ export function MarketplacePreviewDetails({
 		<section className="border-border border-t pt-4">
 			<button
 				aria-expanded={open}
-				className="flex w-full items-center justify-between gap-3 text-left text-muted-foreground text-sm transition-colors hover:text-foreground"
+				className="flex w-full items-center justify-between gap-3 text-start text-muted-foreground text-sm transition-colors hover:text-foreground"
 				onClick={() => setOpen((value) => !value)}
 				type="button"
 			>

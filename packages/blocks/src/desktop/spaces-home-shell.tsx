@@ -3,6 +3,7 @@
 import {
 	Add01Icon,
 	ArrowDown01Icon,
+	ArrowRight02Icon,
 	FolderOpenIcon,
 	Home01Icon,
 	LibraryIcon,
@@ -10,6 +11,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Input } from "@ryu/ui/components/input";
 import type { ChangeEvent, ReactNode } from "react";
 import { useMemo, useRef, useState } from "react";
@@ -48,7 +50,7 @@ function SpaceHomeRail({
 	return (
 		<aside
 			aria-label="Space navigation"
-			className="hidden w-[94px] shrink-0 flex-col border-border/80 border-r bg-space-rail py-3 text-space-rail-foreground sm:flex dark:bg-space-rail-dark dark:text-space-rail-foreground-dark"
+			className="hidden w-[94px] shrink-0 flex-col border-border/80 border-e bg-space-rail py-3 text-space-rail-foreground sm:flex dark:bg-space-rail-dark dark:text-space-rail-foreground-dark"
 			data-testid="spaces-home-rail"
 		>
 			<div className="flex flex-col gap-2 px-2">
@@ -210,7 +212,12 @@ export function SpaceHomeShell({
 								onClick={onNewWhiteboard}
 							/>
 							<div className="flex shrink-0 items-center px-2 text-primary text-xs">
-								More templates <span className="ml-1 text-base">→</span>
+								More templates{" "}
+								<DirectionalIcon
+									aria-hidden="true"
+									className="ms-1 size-3.5"
+									icon={ArrowRight02Icon}
+								/>
 							</div>
 						</div>
 					</section>
@@ -223,7 +230,7 @@ export function SpaceHomeShell({
 						<div className="relative max-w-[430px]">
 							<HugeiconsIcon
 								aria-hidden="true"
-								className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+								className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 								icon={Search01Icon}
 							/>
 							<Input

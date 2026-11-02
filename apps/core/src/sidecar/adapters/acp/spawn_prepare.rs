@@ -4,6 +4,7 @@
 //! return its event receiver as-is.
 
 use super::*;
+use crate::i18n::{messages as m, Message};
 
 /// Captures the conversation's native vendor account into the child environment.
 pub(super) fn apply_native_account(
@@ -40,11 +41,11 @@ pub(super) fn apply_native_account(
             *provider_account_identity_override = Some(launch.affinity.process_identity());
         }
         Err(error) => {
-            let _ = events_tx.send(AcpEvent::Error(AcpFailure {
-                code: "native_account_required".into(),
-                title: "Native account unavailable".into(),
-                message: error.to_string(),
-            }));
+            let _ = events_tx.send(AcpEvent::Error(AcpFailure::relayed(
+                "native_account_required",
+                m::ACP_NATIVE_ACCOUNT_TITLE_MESSAGE,
+                error.to_string(),
+            )));
             return None;
         }
         Ok(None) => {}
@@ -71,11 +72,12 @@ pub(super) fn scope_spawn_cmd(
         match managed_pi_tool_scope(&spawn_cmd, agent_id, allowlist, public_agent_turn) {
             Ok(command) => command,
             Err(error) => {
-                let _ = events_tx.send(AcpEvent::Error(AcpFailure {
-                    code: "pi_tool_scope".into(),
-                    title: "Agent tools unavailable".into(),
-                    message: format!("Could not limit this agent to its allowed tools: {error}"),
-                }));
+                let _ = events_tx.send(AcpEvent::Error(AcpFailure::localized(
+                    "pi_tool_scope",
+                    m::ACP_SCOPE_FAILED_TITLE_MESSAGE,
+                    vec![Message::new(m::ACP_SCOPE_FAILED_MESSAGE)
+                        .text("error", error.to_string())],
+                )));
                 return None;
             }
         }
@@ -97,11 +99,12 @@ pub(super) fn scope_spawn_cmd(
         ) {
             Ok(command) => command,
             Err(error) => {
-                let _ = events_tx.send(AcpEvent::Error(AcpFailure {
-                    code: "pi_tool_scope".into(),
-                    title: "Agent tools unavailable".into(),
-                    message: format!("Could not limit this agent to its allowed tools: {error}"),
-                }));
+                let _ = events_tx.send(AcpEvent::Error(AcpFailure::localized(
+                    "pi_tool_scope",
+                    m::ACP_SCOPE_FAILED_TITLE_MESSAGE,
+                    vec![Message::new(m::ACP_SCOPE_FAILED_MESSAGE)
+                        .text("error", error.to_string())],
+                )));
                 return None;
             }
         }
@@ -139,22 +142,14 @@ pub(super) fn capture_pi_account(
                 match serde_json::to_string(&captured) {
                     Ok(value) => environment.push(("RYU_PI_ACCOUNT_CAPTURE".into(), value)),
                     Err(error) => {
-                        let _ = events_tx.send(AcpEvent::Error(AcpFailure {
-                            code: "pi_account_required".into(),
-                            title: "Pi account unavailable".into(),
-                            message: error.to_string(),
-                        }));
+                        let _ = events_tx.send(AcpEvent::Error(pi_account_failure(error)));
                         return None;
                     }
                 }
             }
             Ok(None) => {}
             Err(error) => {
-                let _ = events_tx.send(AcpEvent::Error(AcpFailure {
-                    code: "pi_account_required".into(),
-                    title: "Pi account unavailable".into(),
-                    message: error.to_string(),
-                }));
+                let _ = events_tx.send(AcpEvent::Error(pi_account_failure(error)));
                 return None;
             }
         }

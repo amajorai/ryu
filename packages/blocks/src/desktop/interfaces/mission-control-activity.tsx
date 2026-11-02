@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { AnimatePresence, motion } from "motion/react";
@@ -52,8 +52,11 @@ function hourRange(bucket: ActivityBucket): string {
 	return `${shortTime(bucket.start)}–${shortTime(bucket.start + HOUR_MS)}`;
 }
 
-function updatesLabel(count: number): string {
-	return `${count} ${count === 1 ? "thread" : "threads"} updated`;
+function updatesLabel(count: number, tl: LiteralMessage): string {
+	return tl(
+		"{count, plural, one {# thread updated} other {# threads updated}}",
+		{ count }
+	);
 }
 
 function BucketTooltip({
@@ -96,7 +99,7 @@ function BucketTooltip({
 					{hourRange(bucket)}
 				</span>
 				<span className="text-muted-foreground">
-					{updatesLabel(bucket.count)}
+					{updatesLabel(bucket.count, tl)}
 				</span>
 			</p>
 			<ul className="mt-1.5 flex flex-col gap-1 border-border/70 border-t pt-1.5">
@@ -105,7 +108,9 @@ function BucketTooltip({
 						className="flex min-w-0 items-center gap-1.5 text-xs"
 						key={item.id}
 					>
-						<span className="truncate text-foreground">{item.title}</span>
+						<span className="truncate text-foreground" data-ryu-i18n="off">
+							{item.title}
+						</span>
 					</li>
 				))}
 				{extra > 0 ? (
@@ -121,8 +126,16 @@ function BucketTooltip({
 	);
 }
 
-function runLabel(run: ActivityRun): string {
-	return `${run.title} ${run.outcome === "failure" ? "failed" : "succeeded"} at ${shortTime(run.at)}`;
+function runLabel(run: ActivityRun, tl: LiteralMessage): string {
+	return run.outcome === "failure"
+		? tl("{title} failed at {time}", {
+				time: shortTime(run.at),
+				title: run.title,
+			})
+		: tl("{title} succeeded at {time}", {
+				time: shortTime(run.at),
+				title: run.title,
+			});
 }
 
 const RUN_MARK: Record<ActivityRun["outcome"], string> = {
@@ -145,13 +158,14 @@ function RunMark({ outcome }: { outcome: ActivityRun["outcome"] }) {
  * share an hour.
  */
 function RunRug({ runs }: { runs: ActivityRun[] }) {
+	const tl = useLiteralMessages();
 	const byHour = new Map<number, ActivityRun[]>();
 	for (const run of runs) {
 		byHour.set(run.hour, [...(byHour.get(run.hour) ?? []), run]);
 	}
 	return (
 		<div className={cn(AXIS_ROW, "mt-3 h-3 items-center")}>
-			<span className={cn(AXIS_TEXT, "text-right")}>Runs</span>
+			<span className={cn(AXIS_TEXT, "text-end")}>Runs</span>
 			<ul
 				aria-label="Scheduled runs in the last 24 hours"
 				className={cn(COLUMNS, "h-full items-center")}
@@ -161,12 +175,12 @@ function RunRug({ runs }: { runs: ActivityRun[] }) {
 						className="flex items-center justify-center gap-0.5"
 						key={hour}
 						style={{ gridColumnStart: hour + 1, gridRowStart: 1 }}
-						title={hourRuns.map(runLabel).join("\n")}
+						title={hourRuns.map((run) => runLabel(run, tl)).join("\n")}
 					>
 						{hourRuns.map((run) => (
 							<span className="flex" key={run.id}>
 								<RunMark outcome={run.outcome} />
-								<span className="sr-only">{runLabel(run)}</span>
+								<span className="sr-only">{runLabel(run, tl)}</span>
 							</span>
 						))}
 					</li>
@@ -244,7 +258,7 @@ export function ActivityChart({
 					<ol aria-hidden="true" className={cn(AXIS_TEXT, "relative")}>
 						{ticks.map((tick) => (
 							<li
-								className="absolute right-0 translate-y-1/2"
+								className="absolute end-0 translate-y-1/2"
 								key={tick}
 								style={{ bottom: `${(tick / top) * 100}%` }}
 							>
@@ -275,7 +289,15 @@ export function ActivityChart({
 								const newestThread = newest
 									? snapshot.threads.find((thread) => thread.id === newest)
 									: undefined;
-								const label = `${hourRange(bucket)}${isCurrent ? " (this hour)" : ""}: ${updatesLabel(bucket.count)}`;
+								const label = isCurrent
+									? tl("{range} (this hour): {updates}", {
+											range: hourRange(bucket),
+											updates: updatesLabel(bucket.count, tl),
+										})
+									: tl("{range}: {updates}", {
+											range: hourRange(bucket),
+											updates: updatesLabel(bucket.count, tl),
+										});
 								const bar = (
 									<motion.span
 										animate={{ height: `${height}%` }}

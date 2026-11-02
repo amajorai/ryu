@@ -142,7 +142,7 @@ export function DoctorSection({
 								<span className="font-mono text-muted-foreground text-xs">
 									{fix.settingPath}
 								</span>
-								<span className="ml-2">{fix.action}</span>
+								<span className="ms-2">{fix.action}</span>
 							</div>
 						))}
 					</div>

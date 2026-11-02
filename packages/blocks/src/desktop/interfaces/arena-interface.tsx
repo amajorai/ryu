@@ -32,10 +32,10 @@ import {
 	SCROLLER_ATTRIBUTE,
 } from "./arena-interface-navigation.ts";
 import {
-	ARENA_FILTER_LABELS,
 	ARENA_FILTERS,
 	type ArenaFilter,
 	arenaAgentTally,
+	arenaFilterLabel,
 	arenaNextUp,
 	buildArenaCards,
 	matchesArenaFilter,
@@ -363,7 +363,7 @@ export function ArenaInterface({
 									aria-busy={loading}
 									aria-describedby={loading ? undefined : NAV_HINT_ID}
 									aria-label={tl("{filter} agents", {
-										filter: ARENA_FILTER_LABELS[filter],
+										filter: arenaFilterLabel(filter, tl),
 									})}
 									className={cn(
 										"grid grid-cols-1 gap-3",

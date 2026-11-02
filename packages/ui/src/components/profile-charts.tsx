@@ -9,6 +9,7 @@
 // deprecates the `Cell` API they would otherwise need); the activity trend line
 // uses the shared shadcn chart wrapper.
 
+import { dateFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type ChartConfig,
@@ -20,8 +21,22 @@ import { formatCount as formatSharedCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties, ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { useFormatLocale } from "../hooks/use-format-locale.ts";
 import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import drawingStyles from "./profile-charts.drawing.module.css";
+
+/** A `YYYY-MM-DD` axis tick as the locale writes a month and day ("10/30", "30.10."). */
+function formatDayTick(day: string, locale: string): string {
+	const at = Date.parse(`${day}T00:00:00Z`);
+	if (Number.isNaN(at)) {
+		return day;
+	}
+	return dateFormatter(locale, {
+		day: "numeric",
+		month: "numeric",
+		timeZone: "UTC",
+	}).format(at);
+}
 
 interface CategoryBarStyle extends CSSProperties {
 	"--profile-charts-1-background-color"?: CSSProperties["backgroundColor"];
@@ -239,6 +254,7 @@ export function ActivityArea({
 	formatCount?: (value: number) => string;
 }) {
 	const recent = data.slice(-days);
+	const formatLocale = useFormatLocale();
 
 	if (recent.every((entry) => entry.count === 0)) {
 		return <EmptyPanel text="No recent activity yet." />;
@@ -279,7 +295,7 @@ export function ActivityArea({
 					axisLine={false}
 					dataKey="day"
 					minTickGap={48}
-					tickFormatter={(value: string) => value.slice(5)}
+					tickFormatter={(value: string) => formatDayTick(value, formatLocale)}
 					tickLine={false}
 					tickMargin={8}
 				/>

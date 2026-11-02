@@ -81,7 +81,7 @@ export function modelBody(
 	const quant = pickRecommendedQuant(files);
 	if (!quant) {
 		return {
-			title: `Install ${card.name}?`,
+			title: tl("Install {name}?", { name: card.name }),
 			description: "This model has no downloadable GGUF file.",
 			error: true,
 		};
@@ -96,7 +96,7 @@ export function modelBody(
 		tl
 	);
 	return {
-		title: `Install ${card.name}?`,
+		title: tl("Install {name}?", { name: card.name }),
 		description: tl(
 			"Download {filename} ({sizeHuman}{fit}) and use it as the active model.",
 			{ filename: quant.filename, sizeHuman: quant.sizeHuman, fit }
@@ -133,7 +133,7 @@ export function skillBody(
 		};
 	}
 	return {
-		title: `Install ${card.name}?`,
+		title: tl("Install {name}?", { name: card.name }),
 		description:
 			description ?? tl("Install the {name} skill.", { name: card.name }),
 		confirm: "Install",
@@ -169,7 +169,7 @@ export function appBody(
 		};
 	}
 	return {
-		title: `Install ${name}?`,
+		title: tl("Install {name}?", { name }),
 		description: q.data.description ?? tl("Install the {name} app.", { name }),
 		confirm: "Install",
 		onConfirm: run,
@@ -197,7 +197,7 @@ export function bundleBody(
 		(member) => member.required
 	).length;
 	return {
-		title: `Install ${q.data.name}?`,
+		title: tl("Install {name}?", { name: q.data.name }),
 		description: tl(
 			"Install {length} Marketplace items ({required} required) through their existing trusted installers. Packages remain disabled until you review their permissions.",
 			{

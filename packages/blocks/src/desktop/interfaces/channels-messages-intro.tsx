@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	InterfaceAgent,
@@ -81,13 +82,19 @@ export function ChannelIntro({
 function memberSentence(members: InterfaceAgent[]): string {
 	const names = members.map((member) => member.name);
 	if (names.length === 1) {
-		return `${names[0]} is in this channel.`;
+		return tr("{name} is in this channel.", { name: names[0] });
 	}
 	if (names.length <= MAX_THREAD_FACES) {
-		return `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are in this channel.`;
+		return tr("{names} and {last} are in this channel.", {
+			last: names.at(-1),
+			names: names.slice(0, -1).join(", "),
+		});
 	}
 	const rest = names.length - (MAX_THREAD_FACES - 1);
-	return `${names.slice(0, MAX_THREAD_FACES - 1).join(", ")} and ${rest} others are in this channel.`;
+	return tr(
+		"{names} and {rest, plural, one {# other is} other {# others are}} in this channel.",
+		{ names: names.slice(0, MAX_THREAD_FACES - 1).join(", "), rest }
+	);
 }
 
 export function DayDivider({

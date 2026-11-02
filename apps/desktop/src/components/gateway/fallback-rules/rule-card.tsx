@@ -61,7 +61,7 @@ export function RuleCard({
 							<Switch
 								aria-label="Rule enabled"
 								checked={rule.enabled}
-								className="mr-1"
+								className="me-1"
 								disabled={disabled}
 								onCheckedChange={(enabled) => onChange({ ...rule, enabled })}
 							/>

@@ -151,7 +151,7 @@ export function WriteReviewForm({
 						size="sm"
 						variant="ghost"
 					>
-						<HugeiconsIcon className="mr-2 size-4" icon={Delete02Icon} />
+						<HugeiconsIcon className="me-2 size-4" icon={Delete02Icon} />
 						Delete
 					</Button>
 				) : null}

@@ -36,11 +36,14 @@ import {
 	listVaultCardApprovals,
 	type VaultBrokerProposal,
 	type VaultBrokerService,
-	type VaultCardApproval,
 	type VaultCardDecision,
 	type VaultPasswordManagerGrantMode,
 } from "@/src/lib/api/vault.ts";
-import { formatDateTime } from "@/src/lib/timezone.ts";
+import {
+	cardApprovalSummary,
+	proposalDetail,
+	whenLabel,
+} from "./vault-broker-summary.ts";
 import { isForbidden, vaultErrorMessage } from "./vault-errors.ts";
 
 type Decision = "approve" | "reject";
@@ -49,11 +52,6 @@ const DECISION_TOAST = {
 	approve: "Proposal approved",
 	reject: "Proposal rejected",
 } satisfies Record<Decision, string>;
-
-function whenLabel(value: string): string {
-	const date = new Date(value);
-	return Number.isNaN(date.getTime()) ? value : formatDateTime(value);
-}
 
 function upstream(service: VaultBrokerService): string {
 	const port = service.port ? `:${service.port}` : "";
@@ -89,11 +87,14 @@ function proposalSummary(
 		.map((service) => service.name ?? service.host)
 		.filter(Boolean);
 	if (services.length > 0) {
-		parts.push(`Services: ${services.join(", ")}`);
+		parts.push(tl("Services: {services}", { services: services.join(", ") }));
 	}
 	if (proposal.credentials.length > 0) {
+		const credentials = proposal.credentials.map(
+			(credential) => credential.ref
+		);
 		parts.push(
-			`Credentials: ${proposal.credentials.map((credential) => credential.ref).join(", ")}`
+			tl("Credentials: {credentials}", { credentials: credentials.join(", ") })
 		);
 	}
 	return parts.join(" · ");
@@ -166,7 +167,7 @@ function BrokerProposals({ target }: { target: ApiTarget }) {
 								<div className="min-w-0">
 									<div className="flex flex-wrap items-center gap-2">
 										<span className="font-medium text-sm">
-											{proposal.message || "Broker proposal"}
+											{proposal.message || tl("Broker proposal")}
 										</span>
 										<Badge variant="outline">{proposal.environment}</Badge>
 										{proposal.credentialUse ? (
@@ -176,13 +177,12 @@ function BrokerProposals({ target }: { target: ApiTarget }) {
 										) : null}
 									</div>
 									<p className="mt-1 truncate text-muted-foreground text-xs">
-										{[
+										{proposalDetail(
 											proposalSummary(proposal, tl),
 											proposal.requestedBy,
-											`expires ${whenLabel(proposal.expiresAt)}`,
-										]
-											.filter(Boolean)
-											.join(" · ")}
+											proposal.expiresAt,
+											tl
+										)}
 									</p>
 								</div>
 								<div className="flex shrink-0 items-center gap-1">
@@ -260,31 +260,6 @@ const CARD_DECISION_TOAST = {
 	grant: "Card use approved for 15 minutes",
 } satisfies Record<VaultCardDecision, string>;
 
-const CARD_CHANNEL_LABEL = {
-	broker: "agent request",
-	fill: "fill",
-	reveal: "reveal",
-} satisfies Record<VaultCardApproval["channel"], string>;
-
-function cardApprovalSummary(approval: VaultCardApproval): string {
-	const card = [
-		approval.brand ?? "card",
-		approval.last4 && `•••• ${approval.last4}`,
-	]
-		.filter(Boolean)
-		.join(" ");
-	return [
-		card,
-		approval.merchantHost && `at ${approval.merchantHost}`,
-		CARD_CHANNEL_LABEL[approval.channel],
-		approval.field && `field ${approval.field}`,
-		approval.requester,
-		`expires ${whenLabel(approval.requestExpiresAt)}`,
-	]
-		.filter(Boolean)
-		.join(" · ");
-}
-
 function CardApprovals({ target }: { target: ApiTarget }) {
 	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
@@ -354,9 +329,9 @@ function CardApprovals({ target }: { target: ApiTarget }) {
 									</div>
 									<p
 										className="mt-1 truncate text-muted-foreground text-xs"
-										title={cardApprovalSummary(approval)}
+										title={cardApprovalSummary(approval, tl)}
 									>
-										{cardApprovalSummary(approval)}
+										{cardApprovalSummary(approval, tl)}
 									</p>
 								</div>
 								<div className="flex shrink-0 gap-1">

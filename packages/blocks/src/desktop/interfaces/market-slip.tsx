@@ -1,19 +1,19 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import { Plus } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import { lookIndex, type MarketOrder, orderTitle } from "./market-model.ts";
 import { PIN_INK, SLIP_SHADOW } from "./market-palette.ts";
 
 /** Two-digit slip numbers read like a ticket roll: No. 04. */
 export function slipNumber(order: MarketOrder): string {
-	return `No. ${String(order.number).padStart(2, "0")}`;
+	return tr("No. {number}", {
+		number: String(order.number).padStart(2, "0"),
+	});
 }
 
 /** Height of the ticket stub above the perforation, in pixels. */
@@ -180,15 +180,17 @@ export function OrderSlip({
 }) {
 	const { thread } = order;
 	const tl = useLiteralMessages();
-	const title = orderTitle(thread);
+	const title = orderTitle(thread, tl);
 	const age = hideAge ? null : compactAge(thread.updatedAt, now);
-	const lastLine = thread.lastMessage
-		? `${thread.lastMessageRole === "user" ? "You: " : ""}${thread.lastMessage}`
-		: "";
+	const lastLine = thread.lastMessage ?? "";
+	const fromYou = thread.lastMessageRole === "user";
 	return (
 		<article
 			aria-current={active ? "true" : undefined}
-			aria-label={`${slipNumber(order)}: ${title}`}
+			aria-label={tl("{slipNumber}: {title}", {
+				slipNumber: slipNumber(order),
+				title,
+			})}
 			className="relative h-full rounded-[1px] outline-none has-[button:focus-visible]:outline-2 has-[button:focus-visible]:outline-ring has-[button:focus-visible]:outline-offset-4"
 			data-status={order.status}
 			data-testid="market-slip"
@@ -198,7 +200,7 @@ export function OrderSlip({
 				{active ? (
 					<span
 						aria-hidden="true"
-						className="absolute inset-y-0 left-0 w-0.5 bg-primary"
+						className="absolute inset-y-0 start-0 w-0.5 bg-primary"
 					/>
 				) : null}
 				<header
@@ -229,22 +231,35 @@ export function OrderSlip({
 				</header>
 				<Perforation />
 				<div className="flex flex-1 flex-col gap-1 px-3 pt-3">
-					<h4 className="line-clamp-2 text-pretty font-medium text-[15px] text-foreground leading-5">
+					<h4
+						className="line-clamp-2 text-pretty font-medium text-[15px] text-foreground leading-5"
+						data-ryu-i18n="off"
+					>
 						{title}
 					</h4>
 					{lastLine ? (
 						<p className="line-clamp-2 text-[13px] text-muted-foreground leading-[18px]">
-							{lastLine}
+							{fromYou ? `${tl("You:")} ` : null}
+							<span data-ryu-i18n="off">{lastLine}</span>
 						</p>
 					) : null}
 				</div>
 				<footer className="flex h-12 shrink-0 items-center justify-between gap-2 px-3">
 					<p className="min-w-0 truncate text-[13px]">
-						<span className="font-medium text-foreground">
-							{order.agent?.name ?? "Unassigned"}
-						</span>
+						{order.agent ? (
+							<span className="font-medium text-foreground" data-ryu-i18n="off">
+								{order.agent.name}
+							</span>
+						) : (
+							<span className="font-medium text-foreground">
+								{tl("Unassigned")}
+							</span>
+						)}
 						{homeName ? (
-							<span className="text-muted-foreground"> · {homeName}</span>
+							<span className="text-muted-foreground">
+								{" · "}
+								<span data-ryu-i18n="off">{homeName}</span>
+							</span>
 						) : null}
 					</p>
 					<Button
@@ -297,7 +312,7 @@ export function NewOrderSlot({
 			</span>
 			{description ? (
 				<span className="max-w-64 text-pretty text-[13px] text-foreground/70 leading-relaxed">
-					{description}
+					<span data-ryu-i18n="off">{description}</span>
 				</span>
 			) : null}
 		</button>
@@ -318,7 +333,7 @@ export function SectionHeading({
 				aria-hidden="true"
 				className={cn("size-2 rounded-full", STATUS_BG[status])}
 			/>
-			<span className="font-semibold">{THREAD_STATUS_LABELS[status]}</span>
+			<span className="font-semibold">{threadStatusLabel(status)}</span>
 			<span className="text-foreground/65 tabular-nums">{count}</span>
 		</h3>
 	);

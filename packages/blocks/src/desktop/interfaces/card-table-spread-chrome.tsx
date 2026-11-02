@@ -89,7 +89,11 @@ export function FanBar({
 					type="button"
 					variant="ghost"
 				>
-					<ChevronLeft aria-hidden="true" data-icon="inline-start" />
+					<ChevronLeft
+						aria-hidden="true"
+						className="rtl:-scale-x-100"
+						data-icon="inline-start"
+					/>
 					<span className="max-sm:sr-only">All decks</span>
 				</Button>
 				<span

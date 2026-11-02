@@ -1,13 +1,13 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type InterfaceAgent,
 	type InterfaceSnapshot,
 	type InterfaceThread,
-	THREAD_STATUS_LABELS,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import { PersonaAvatar } from "./persona-avatar.tsx";
 import { type FeedDay, fullTime } from "./persona-model.ts";
 import {
@@ -50,7 +50,7 @@ function FeedPost({
 }) {
 	const status = threadStatus(thread);
 	const fromUser = thread.lastMessageRole === "user";
-	const title = thread.title || "Untitled";
+	const title = thread.title || tr("Untitled");
 	const tl = useLiteralMessages();
 	return (
 		<li>
@@ -65,7 +65,7 @@ function FeedPost({
 				<div className="flex min-w-0 flex-1 flex-col gap-1">
 					<div className="flex items-baseline gap-2 text-sm">
 						<span className="min-w-0 truncate">
-							<span className="font-semibold">{author?.name ?? "You"}</span>
+							<span className="font-semibold">{author?.name ?? tr("You")}</span>
 							{others > 0 ? (
 								<span className="text-muted-foreground">
 									{" "}
@@ -75,11 +75,11 @@ function FeedPost({
 								</span>
 							) : null}
 						</span>
-						<span className="ml-auto flex shrink-0 items-baseline gap-1.5 text-muted-foreground text-xs">
+						<span className="ms-auto flex shrink-0 items-baseline gap-1.5 text-muted-foreground text-xs">
 							<span
 								className={cn(status === "attention" && "text-destructive")}
 							>
-								{THREAD_STATUS_LABELS[status]}
+								{threadStatusLabel(status)}
 							</span>
 							<span aria-hidden="true">·</span>
 							<time
@@ -93,7 +93,7 @@ function FeedPost({
 					</div>
 					<h3 className="text-sm">
 						<button
-							className="text-left font-medium text-foreground outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring"
+							className="text-start font-medium text-foreground outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring"
 							onClick={() => onOpen(thread.id)}
 							type="button"
 						>
@@ -104,7 +104,7 @@ function FeedPost({
 						{fromUser ? (
 							<span className="text-muted-foreground">You: </span>
 						) : null}
-						{thread.lastMessage}
+						<span data-ryu-i18n="off">{thread.lastMessage}</span>
 					</p>
 				</div>
 			</article>

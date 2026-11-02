@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -7,17 +8,16 @@ import {
 	localDayKey,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import {
-	type ComponentState,
-	DAY_LEVEL_LABELS,
-	type DayLevel,
-	type OverallState,
-	type StatusComponent,
-	type StatusIncident,
-	type StatusMaintenance,
-	type StatusPage,
-	type StatusSection,
-	type UptimeDay,
+import type {
+	ComponentState,
+	DayLevel,
+	OverallState,
+	StatusComponent,
+	StatusIncident,
+	StatusMaintenance,
+	StatusPage,
+	StatusSection,
+	UptimeDay,
 } from "./status-model-types.ts";
 
 /**
@@ -61,6 +61,12 @@ export {
 	DAY_LEVEL_LABELS,
 	OVERALL_LABELS,
 } from "./status-model-types.ts";
+
+export {
+	dayLevelLabel,
+	describeActivity,
+	describeDay,
+} from "./status-model-words.ts";
 
 const STATE_RANK: Record<ComponentState, number> = {
 	degraded: 2,
@@ -164,7 +170,7 @@ function threadIncident(
 		severity: interrupted ? "degraded" : "outage",
 		stage: interrupted ? "Interrupted" : "Failed",
 		threadId: thread.id,
-		title: thread.title.trim() || "Untitled thread",
+		title: thread.title.trim() || tr("Untitled thread"),
 	};
 }
 
@@ -272,7 +278,10 @@ function tallyDays(snapshot: InterfaceSnapshot) {
 		const tally = tallyFor(event.agentId, key);
 		if (event.outcome === "failure") {
 			tally.failures += 1;
-			tally.problems.push({ at: event.start, title: `${event.title} run` });
+			tally.problems.push({
+				at: event.start,
+				title: tr("{title} run", { title: event.title }),
+			});
 		} else if (event.outcome === "success") {
 			tally.successfulRuns += Math.max(1, event.count ?? 1);
 		}
@@ -293,7 +302,7 @@ function uptimeDays(
 			level: dayLevel(tally),
 			problems: [...tally.problems]
 				.sort((a, b) => b.at.localeCompare(a.at))
-				.map((problem) => problem.title.trim() || "Untitled thread"),
+				.map((problem) => problem.title.trim() || tr("Untitled thread")),
 			start,
 			successfulRuns: tally.successfulRuns,
 		};
@@ -456,38 +465,4 @@ export function buildStatusPage(
 		overall: overallState(open, affected.size),
 		sections,
 	};
-}
-
-/** Plain-language summary of one day, for the bar tooltip and its label. */
-export function describeDay(day: UptimeDay, tl: LiteralMessage): string {
-	if (day.level === "operational") {
-		return tl("{operational} on this day.", {
-			operational: DAY_LEVEL_LABELS.operational,
-		});
-	}
-	const count = day.problems.length;
-	return tl(
-		"{level}: {failedCount, plural, one {{count} failed run} other {{count} failed runs}}.",
-		{
-			count: String(count),
-			failedCount: count,
-			level: DAY_LEVEL_LABELS[day.level],
-		}
-	);
-}
-
-/** What the day saw besides failures ("3 threads active, 1 scheduled run"). */
-export function describeActivity(day: UptimeDay): string | null {
-	const parts: string[] = [];
-	if (day.active > 0) {
-		parts.push(
-			`${day.active} ${day.active === 1 ? "thread" : "threads"} active`
-		);
-	}
-	if (day.successfulRuns > 0) {
-		parts.push(
-			`${day.successfulRuns} scheduled ${day.successfulRuns === 1 ? "run" : "runs"} succeeded`
-		);
-	}
-	return parts.length > 0 ? parts.join(", ") : null;
 }

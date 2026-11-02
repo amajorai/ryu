@@ -3,7 +3,7 @@
 // host.sideModel / host.storage / host.getPreference / host.log / …).
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
-// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// (apps/core/src/plugin_host/hook_program.rs `build_hook_program`) and it `return`s a hook
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 //
@@ -17,6 +17,13 @@
 // recaps (`recap.turn`) reach back past the 20-message hook window, but only exist
 // for turns that were long enough to recap; the visible transcript tail covers the
 // short turns and anything typed since. Neither alone is the conversation.
+
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
 
 const MAX_TRANSCRIPT_CHARS = 16000;
 const MAX_MESSAGE_CHARS = 1500;
@@ -42,22 +49,28 @@ if (word === "off" || word === "mute" || word === "stop") {
 	const state = await readState();
 	state.muted = true;
 	if (!(await writeState(state))) {
-		return { kind: "handled", text: "Couldn't save that change. Automatic recap settings for this chat could not be confirmed. Try again." };
+		return {
+			kind: "handled",
+			text: await host.t("Couldn't save that change. Automatic recap settings for this chat could not be confirmed. Try again."),
+		};
 	}
 	return {
 		kind: "handled",
-		text: "Automatic per-turn recaps are off for this chat. `/recap on` turns them back on, and `/recap` still works on demand.",
+		text: await host.t("Automatic per-turn recaps are off for this chat. `/recap on` turns them back on, and `/recap` still works on demand."),
 	};
 }
 if (word === "on" || word === "unmute" || word === "start") {
 	const state = await readState();
 	state.muted = false;
 	if (!(await writeState(state))) {
-		return { kind: "handled", text: "Couldn't save that change. Automatic recap settings for this chat could not be confirmed. Try again." };
+		return {
+			kind: "handled",
+			text: await host.t("Couldn't save that change. Automatic recap settings for this chat could not be confirmed. Try again."),
+		};
 	}
 	return {
 		kind: "handled",
-		text: "Automatic per-turn recaps are back on for this chat.",
+		text: await host.t("Automatic per-turn recaps are back on for this chat."),
 	};
 }
 if (word === "clear" || word === "reset") {
@@ -68,11 +81,14 @@ if (word === "clear" || word === "reset") {
 		}
 	} catch (e) {
 		host.log("recap: clearing stored recaps failed", e);
-		return { kind: "handled", text: "Couldn't clear the stored recaps. The previous state could not be confirmed. Try again." };
+		return {
+			kind: "handled",
+			text: await host.t("Couldn't clear the stored recaps. The previous state could not be confirmed. Try again."),
+		};
 	}
 	return {
 		kind: "handled",
-		text: "Cleared the stored per-turn recaps for this chat. Automatic recaps are on.",
+		text: await host.t("Cleared the stored per-turn recaps for this chat. Automatic recaps are on."),
 	};
 }
 
@@ -92,7 +108,7 @@ const conversation = transcriptDigest(ctx.transcript || []);
 if (!notes && !conversation) {
 	return {
 		kind: "handled",
-		text: "Nothing to recap yet — this conversation has no completed turns.",
+		text: await host.t("Nothing to recap yet — this conversation has no completed turns."),
 	};
 }
 
@@ -125,7 +141,7 @@ try {
 } catch {
 	return {
 		kind: "handled",
-		text: "Couldn't generate the recap. Check the recap model in Settings → Recap, then try again.",
+		text: await host.t("Couldn't generate the recap. Check the recap model in Settings → Recap, then try again."),
 	};
 }
 
@@ -134,7 +150,7 @@ const recap = String(raw || "").trim();
 if (!recap) {
 	return {
 		kind: "handled",
-		text: "The recap model returned nothing. Check the recap model in Settings → Recap, or try again.",
+		text: await host.t("The recap model returned nothing. Check the recap model in Settings → Recap, or try again."),
 	};
 }
 return { kind: "handled", text: recap };

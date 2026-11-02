@@ -312,7 +312,7 @@ function ComboboxChip({
 	return (
 		<ComboboxPrimitive.Chip
 			className={cn(
-				"flex h-[calc(--spacing(5.5))] w-fit items-center justify-center gap-1 whitespace-nowrap rounded-3xl bg-input px-2 font-medium text-foreground text-xs has-disabled:pointer-events-none has-disabled:cursor-not-allowed has-data-[slot=combobox-chip-remove]:pr-0 has-disabled:opacity-50 dark:bg-input/60",
+				"flex h-[calc(--spacing(5.5))] w-fit items-center justify-center gap-1 whitespace-nowrap rounded-3xl bg-input px-2 font-medium text-foreground text-xs has-disabled:pointer-events-none has-disabled:cursor-not-allowed has-data-[slot=combobox-chip-remove]:pe-0 has-disabled:opacity-50 dark:bg-input/60",
 				className
 			)}
 			data-slot="combobox-chip"
@@ -322,7 +322,7 @@ function ComboboxChip({
 			{showRemove && (
 				<ComboboxPrimitive.ChipRemove
 					aria-label={removeLabel}
-					className="-ml-1 opacity-50 hover:opacity-100"
+					className="-ms-1 opacity-50 hover:opacity-100"
 					data-slot="combobox-chip-remove"
 					render={<Button size="icon-xs" variant="ghost" />}
 				>

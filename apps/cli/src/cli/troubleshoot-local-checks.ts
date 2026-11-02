@@ -55,7 +55,10 @@ export function checkBinaries(
 					title: "Core binary",
 					detail:
 						"ryu-core was not found in RYU_CORE_BIN, <data dir>/bin, or PATH.",
-					fix: `Install it: ${installCommand(host)}  (or run \`${host.commandName} troubleshoot --fix\` to download it)`,
+					fix: tf(
+						"Install it: {install}  (or run `{commandName} troubleshoot --fix` to download it)",
+						{ install: installCommand(host), commandName: host.commandName }
+					),
 					searchTerms: "ryu-core not found install",
 					unit: "apps/cli",
 				},
@@ -72,7 +75,9 @@ export function checkBinaries(
 					title: "Gateway binary",
 					detail:
 						"ryu-gateway was not found; Core runs without routing, firewall, and budgets.",
-					fix: `Re-run the installer: ${installCommand(host)}`,
+					fix: tf("Re-run the installer: {install}", {
+						install: installCommand(host),
+					}),
 					searchTerms: "ryu-gateway missing",
 					unit: "apps/gateway",
 				},
@@ -88,15 +93,20 @@ export async function checkDataDir(
 	let probe = await host.probeDir(host.dataDir);
 	if (!probe.exists && options.fix) {
 		if (options.dryRun) {
-			state.fixes.push(`Would create the data directory ${shown}.`);
+			state.fixes.push(
+				tf("Would create the data directory {shown}.", { shown })
+			);
 		} else {
 			try {
 				await host.makeDir(host.dataDir);
-				state.fixes.push(`Created the data directory ${shown}.`);
+				state.fixes.push(tf("Created the data directory {shown}.", { shown }));
 				probe = await host.probeDir(host.dataDir);
 			} catch (error) {
 				state.fixes.push(
-					`Could not create ${shown}: ${error instanceof Error ? error.message : String(error)}`
+					tf("Could not create {shown}: {reason}", {
+						shown,
+						reason: error instanceof Error ? error.message : String(error),
+					})
 				);
 			}
 		}
@@ -114,7 +124,9 @@ export async function checkDataDir(
 						shown,
 					}),
 			fix: probe.writable
-				? `Start Core, or run \`${host.commandName} troubleshoot --fix\`.`
+				? tf("Start Core, or run `{commandName} troubleshoot --fix`.", {
+						commandName: host.commandName,
+					})
 				: "Set RYU_DIR to a writable folder, or fix the parent folder's permissions.",
 			searchTerms: "data directory permission",
 			unit: "apps/core",
@@ -181,7 +193,7 @@ export function checkMemory(state: RunState, host: TroubleshootHost): void {
 						"{total} total; local models will be slow or fail to load. Prefer a cloud provider.",
 						{ total: gib(total) }
 					)
-				: `${gib(total)} total.`,
+				: tf("{total} total.", { total: gib(total) }),
 	});
 }
 

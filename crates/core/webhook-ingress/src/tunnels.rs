@@ -102,6 +102,7 @@ impl WebhookIngress for OwnRelaySource {
                  or the webhook.ingress.url pref)"
             );
         }
+        Self::arm_forwarding();
         Ok(())
     }
 

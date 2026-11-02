@@ -180,6 +180,26 @@ impl Harness {
     }
 }
 
+/// Run a fixture that approves through the real MCP registry dispatch, whose
+/// debug-build futures exceed the 2 MiB test thread, on one owned worker with
+/// the 16 MiB stack Core's runtime workers use (like `approvals::engine_test`).
+fn on_core_stack<F: std::future::Future<Output = ()> + 'static>(fixture: fn() -> F) {
+    let worker = std::thread::Builder::new()
+        .name("approval-fixture".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("create owned approval fixture runtime")
+                .block_on(Box::pin(fixture()));
+        })
+        .expect("start approval fixture worker");
+    if let Err(panic) = worker.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 #[tokio::test]
 async fn approvals_handlers_missing_principal_refuse_every_operation_without_transition() {
     let h = Harness::new().await;
@@ -260,8 +280,14 @@ async fn approvals_list_storage_failure_is_not_an_empty_inbox() {
     assert!(body.get("approvals").is_none(), "{body}");
 }
 
-#[tokio::test]
-async fn approvals_handlers_concurrent_approvals_have_one_transition_event_and_action() {
+#[test]
+fn approvals_handlers_concurrent_approvals_have_one_transition_event_and_action() {
+    on_core_stack(
+        approvals_handlers_concurrent_approvals_have_one_transition_event_and_action_fixture,
+    );
+}
+
+async fn approvals_handlers_concurrent_approvals_have_one_transition_event_and_action_fixture() {
     let h = Harness::new().await;
     let mut events = h.state.approvals.store.subscribe();
     let decide = |note| {
@@ -313,8 +339,14 @@ async fn approvals_handlers_concurrent_approvals_have_one_transition_event_and_a
     h.assert_unrelated_and_reopened().await;
 }
 
-#[tokio::test]
-async fn approvals_handlers_sql_refusal_keeps_pending_and_same_id_retry_persists_note() {
+#[test]
+fn approvals_handlers_sql_refusal_keeps_pending_and_same_id_retry_persists_note() {
+    on_core_stack(
+        approvals_handlers_sql_refusal_keeps_pending_and_same_id_retry_persists_note_fixture,
+    );
+}
+
+async fn approvals_handlers_sql_refusal_keeps_pending_and_same_id_retry_persists_note_fixture() {
     let h = Harness::new().await;
     let mut events = h.state.approvals.store.subscribe();
     let sql = rusqlite::Connection::open(h.directory.path().join("approvals.db")).unwrap();
@@ -403,8 +435,14 @@ async fn approvals_handlers_rejection_persists_note_and_never_executes_action() 
     h.assert_unrelated_and_reopened().await;
 }
 
-#[tokio::test]
-async fn approvals_handlers_approved_alias_cannot_manufacture_configuration_permission() {
+#[test]
+fn approvals_handlers_approved_alias_cannot_manufacture_configuration_permission() {
+    on_core_stack(
+        approvals_handlers_approved_alias_cannot_manufacture_configuration_permission_fixture,
+    );
+}
+
+async fn approvals_handlers_approved_alias_cannot_manufacture_configuration_permission_fixture() {
     for (caller, granted, expected) in [
         (
             None,

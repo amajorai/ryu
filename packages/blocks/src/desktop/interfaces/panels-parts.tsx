@@ -77,7 +77,7 @@ export function PanelsSidebar({
 	return (
 		<aside
 			aria-label="Panels"
-			className="hidden w-60 shrink-0 flex-col border-border border-r bg-background md:flex"
+			className="hidden w-60 shrink-0 flex-col border-border border-e bg-background md:flex"
 			data-testid="panels-sidebar"
 		>
 			<div className="flex flex-col gap-1 px-3 pt-3">
@@ -133,7 +133,7 @@ export function PanelsSidebar({
 									<button
 										aria-current={current ? "true" : undefined}
 										className={cn(
-											"flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+											"flex h-8 w-full items-center gap-2 rounded-md px-2 text-start text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
 											current
 												? "bg-muted text-foreground"
 												: "text-foreground/80 hover:bg-muted/60 hover:text-foreground"
@@ -142,7 +142,10 @@ export function PanelsSidebar({
 										title={thread.title}
 										type="button"
 									>
-										<span className="min-w-0 flex-1 truncate">
+										<span
+											className="min-w-0 flex-1 truncate"
+											data-ryu-i18n="off"
+										>
 											{thread.title}
 										</span>
 										<span className="flex w-2 shrink-0 justify-center">

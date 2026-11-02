@@ -1,11 +1,16 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
-import { THREAD_STATUS_LABELS } from "@ryuhq/protocol/interfaces";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { KeyboardEvent } from "react";
-import { compactAge } from "./interface-renderer.ts";
+import { logicalArrowKey } from "./inline-direction.ts";
+import {
+	compactAge,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import { type NewsItem, STATUS_SQUAD_STATE } from "./lobby-model.ts";
 import {
 	SELECTED_RING,
@@ -24,16 +29,12 @@ import {
 import { useReducedMotion } from "./reduced-motion.ts";
 
 function byline(item: NewsItem, now: number, acted: boolean): string {
-	const who = item.agent?.name ?? "No agent";
+	const who = item.agent?.name ?? tr("No agent");
 	return acted ? who : `${who} · ${compactAge(item.thread.updatedAt, now)}`;
 }
 
 function agoLabel(iso: string, now: number): string {
-	const age = compactAge(iso, now);
-	if (!age) {
-		return "";
-	}
-	return age === "now" ? "Just now" : `${age} ago`;
+	return relativeAge(iso, now);
 }
 
 function isEditable(target: EventTarget): boolean {
@@ -84,10 +85,12 @@ export function LobbyNews({
 		if (isEditable(event.target)) {
 			return;
 		}
-		if (event.key === "ArrowLeft") {
+		// Left and right follow the reading direction, like the mirrored chevrons.
+		const key = logicalArrowKey(event.key, event.currentTarget);
+		if (key === "ArrowLeft") {
 			event.preventDefault();
 			go(-1);
-		} else if (event.key === "ArrowRight") {
+		} else if (key === "ArrowRight") {
 			event.preventDefault();
 			go(1);
 		}
@@ -135,7 +138,10 @@ export function LobbyNews({
 								onClick={() => go(-1)}
 								tone="secondary"
 							>
-								<ChevronLeft aria-hidden="true" className="size-4" />
+								<ChevronLeft
+									aria-hidden="true"
+									className="size-4 rtl:-scale-x-100"
+								/>
 							</ChunkyButton>
 							<ChunkyButton
 								aria-label="Next story"
@@ -143,7 +149,10 @@ export function LobbyNews({
 								onClick={() => go(1)}
 								tone="secondary"
 							>
-								<ChevronRight aria-hidden="true" className="size-4" />
+								<ChevronRight
+									aria-hidden="true"
+									className="size-4 rtl:-scale-x-100"
+								/>
 							</ChunkyButton>
 						</div>
 					) : null}
@@ -155,7 +164,10 @@ export function LobbyNews({
 			{current ? (
 				<>
 					<div
-						aria-label={`${index + 1} of ${count}`}
+						aria-label={tl("{position} of {total}", {
+							position: index + 1,
+							total: count,
+						})}
 						aria-live="polite"
 						aria-roledescription="slide"
 						className={cn(
@@ -225,7 +237,7 @@ export function LobbyNews({
 											)}
 										/>
 										<span className="text-(--gk-ink)">
-											{THREAD_STATUS_LABELS[current.status]}
+											{threadStatusLabel(current.status)}
 										</span>
 										<span aria-hidden="true">·</span>
 									</>
@@ -245,11 +257,16 @@ export function LobbyNews({
 									DISPLAY,
 									"line-clamp-2 pe-2 @max-2xl:text-[32px] text-(--gk-ink) text-[44px] [line-height:0.95]"
 								)}
+								data-ryu-i18n="off"
 							>
 								{current.title}
 							</h3>
 							<p className="line-clamp-3 max-w-[60ch] text-(--gk-ink-muted) text-[15px] leading-6">
-								{current.thread.lastMessage ?? "No messages yet."}
+								{current.thread.lastMessage ? (
+									<span data-ryu-i18n="off">{current.thread.lastMessage}</span>
+								) : (
+									tl("No messages yet.")
+								)}
 							</p>
 							<div className="flex items-center gap-4 pt-2">
 								<ChunkyButton
@@ -265,8 +282,9 @@ export function LobbyNews({
 									{current.thread.id === activeThreadId ? "Reading" : "Read"}
 								</ChunkyButton>
 								<span className="text-(--gk-ink-muted) text-[13px] tabular-nums">
-									{current.thread.messageCount}{" "}
-									{current.thread.messageCount === 1 ? "message" : "messages"}
+									{tl("{count, plural, one {# message} other {# messages}}", {
+										count: current.thread.messageCount,
+									})}
 								</span>
 							</div>
 						</div>

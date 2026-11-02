@@ -460,7 +460,7 @@ export function FlowInterface({
 					<motion.aside
 						animate={{ opacity: 1 }}
 						aria-label="Details"
-						className="absolute inset-y-0 right-0 z-30 flex flex-col border-border border-l bg-background"
+						className="absolute inset-y-0 end-0 z-30 flex flex-col border-border border-s bg-background"
 						data-flow-panel=""
 						exit={{ opacity: 0 }}
 						initial={reduceMotion ? false : { opacity: 0 }}

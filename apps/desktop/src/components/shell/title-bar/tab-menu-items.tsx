@@ -12,6 +12,7 @@ import {
 	ContextMenuSubContent,
 	ContextMenuSubTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { openTabWindow } from "@/lib/tauri-bridge.ts";
 import { isDockableRoutePath } from "@/src/components/panels/dock-panels.ts";
@@ -22,6 +23,8 @@ import { conversationEntityKey } from "@/src/lib/window-routing.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSidePanelRouteStore } from "@/src/store/useSidePanelRouteStore.ts";
 import { useOptionalDesktopWorkbench } from "@/src/workbench/DesktopWorkbenchContext.tsx";
+import { useWorkbenchDockBridge } from "@/src/workbench/workbench-dock-bridge.tsx";
+import { tabCloseRanges } from "./tab-close-ranges.ts";
 
 /** Pointer/focus handler for a tab chip: an unloaded chat tab remounts cold and
  * refetches its history when activated, so start that fetch as soon as the
@@ -40,9 +43,11 @@ export function useColdChatTabPrefetch(tab: Tab): () => void {
  * "Open in side panel" — show what this tab is showing in the workspace's right
  * dock instead of (or as well as) a window tab.
  *
- * The dock lives inside the chat surface, so the page lands in the focused chat's
- * right panel; when the current tab is not a chat, the request is held until a
- * chat tab is next focused rather than being dropped.
+ * Under the workbench frame the shell serves the request at once as a tab in the
+ * Right region (`WorkbenchDockRequests`). Without it the dock lives inside the
+ * chat surface, so the page lands in the focused chat's right panel; when the
+ * current tab is not a chat, the request is held until a chat tab is next
+ * focused rather than being dropped.
  *
  * This is the USER-initiated half of the seam and so passes a raw path
  * (`openPath`); the system-/agent-facing half selects a page KEY from the shared
@@ -53,6 +58,7 @@ export function OpenInSidePanelItem({ tab }: { tab: Tab }) {
 	const openPath = useSidePanelRouteStore((s) => s.openPath);
 	const tabs = useTabSelector((state) => state.tabs);
 	const activeTabId = useTabSelector((state) => state.activeTabId);
+	const workbenchDocks = useWorkbenchDockBridge();
 	if (!isDockableRoutePath(tab.path)) {
 		return null;
 	}
@@ -61,7 +67,8 @@ export function OpenInSidePanelItem({ tab }: { tab: Tab }) {
 	// (better than dropping it), but silently held is not: the click would look
 	// dead now and produce a page appearing from nowhere later. Say where it went.
 	const focused = tabs.find((t) => t.id === activeTabId);
-	const dockIsLive = focused?.path.startsWith("/chat") ?? false;
+	const dockIsLive =
+		workbenchDocks !== null || (focused?.path.startsWith("/chat") ?? false);
 	return (
 		<ContextMenuItem
 			onClick={() => {
@@ -91,7 +98,8 @@ export function OpenInSidePanelItem({ tab }: { tab: Tab }) {
 }
 
 // Bulk-close helpers exclude pinned tabs — pinned tabs survive "close
-// others/left/right" the way they do in Chrome.
+// others/before/after" the way they do in Chrome. "Before" and "after" follow
+// the tab order, so they read correctly in either direction.
 export function bulkCloseItems(
 	tab: Tab,
 	tabs: Tab[],
@@ -99,8 +107,7 @@ export function bulkCloseItems(
 ) {
 	const idx = tabs.findIndex((t) => t.id === tab.id);
 	const others = tabs.filter((t) => t.id !== tab.id && !t.pinned);
-	const toLeft = tabs.slice(0, idx).filter((t) => !t.pinned);
-	const toRight = tabs.slice(idx + 1).filter((t) => !t.pinned);
+	const { before, after } = tabCloseRanges(tabs, idx);
 	return (
 		<>
 			<ContextMenuItem
@@ -115,26 +122,26 @@ export function bulkCloseItems(
 				Close other tabs
 			</ContextMenuItem>
 			<ContextMenuItem
-				disabled={toLeft.length === 0}
+				disabled={before.length === 0}
 				onClick={() => {
-					for (const t of toLeft) {
+					for (const t of before) {
 						closeTab(t.id);
 					}
 				}}
 			>
-				<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
-				Close tabs to the left
+				<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
+				Close tabs before this one
 			</ContextMenuItem>
 			<ContextMenuItem
-				disabled={toRight.length === 0}
+				disabled={after.length === 0}
 				onClick={() => {
-					for (const t of toRight) {
+					for (const t of after) {
 						closeTab(t.id);
 					}
 				}}
 			>
-				<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
-				Close tabs to the right
+				<DirectionalIcon className="size-4" icon={ArrowRight01Icon} />
+				Close tabs after this one
 			</ContextMenuItem>
 		</>
 	);

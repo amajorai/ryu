@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	DAY,
 	TICKET_PRIORITY_LABELS,
@@ -40,7 +41,9 @@ export const TICKET_VIEWS: readonly TicketView[] = [
 			title: "No unsolved tickets",
 		},
 		id: "unsolved",
-		label: "Your unsolved tickets",
+		get label() {
+			return tr("Your unsolved tickets");
+		},
 		matches: (ticket) => ticket.status !== "solved",
 	},
 	{
@@ -49,7 +52,9 @@ export const TICKET_VIEWS: readonly TicketView[] = [
 			title: "No urgent tickets",
 		},
 		id: "urgent",
-		label: "Urgent tickets",
+		get label() {
+			return tr("Urgent tickets");
+		},
 		matches: (ticket) => ticket.priority === "urgent",
 	},
 	{
@@ -58,7 +63,9 @@ export const TICKET_VIEWS: readonly TicketView[] = [
 			title: "No open tickets",
 		},
 		id: "open",
-		label: "Open tickets",
+		get label() {
+			return tr("Open tickets");
+		},
 		matches: (ticket) => ticket.status === "open" || ticket.status === "new",
 	},
 	{
@@ -67,7 +74,9 @@ export const TICKET_VIEWS: readonly TicketView[] = [
 			title: "No pending tickets",
 		},
 		id: "pending",
-		label: "Pending tickets",
+		get label() {
+			return tr("Pending tickets");
+		},
 		matches: (ticket) => ticket.status === "pending",
 	},
 	{
@@ -76,7 +85,9 @@ export const TICKET_VIEWS: readonly TicketView[] = [
 			title: "No recent updates",
 		},
 		id: "recent",
-		label: "Recently updated tickets",
+		get label() {
+			return tr("Recently updated tickets");
+		},
 		matches: (ticket, now) => now - ticket.updatedAt < TICKET_RECENT_MS,
 	},
 	{
@@ -86,7 +97,9 @@ export const TICKET_VIEWS: readonly TicketView[] = [
 			title: "No solved tickets",
 		},
 		id: "solved",
-		label: "Recently solved tickets",
+		get label() {
+			return tr("Recently solved tickets");
+		},
 		matches: (ticket) => ticket.status === "solved",
 	},
 	{
@@ -95,7 +108,9 @@ export const TICKET_VIEWS: readonly TicketView[] = [
 			title: "No tickets yet",
 		},
 		id: "all",
-		label: "All tickets",
+		get label() {
+			return tr("All tickets");
+		},
 		matches: () => true,
 	},
 ];
@@ -284,13 +299,17 @@ export function groupTickets(
 	if (groupBy === "priority") {
 		return TICKET_PRIORITY_ORDER.map((priority) => ({
 			id: priority,
-			label: `Priority: ${TICKET_PRIORITY_LABELS[priority]}`,
+			label: tr("Priority: {priority}", {
+				priority: tr(TICKET_PRIORITY_LABELS[priority]),
+			}),
 			tickets: tickets.filter((ticket) => ticket.priority === priority),
 		})).filter((section) => section.tickets.length > 0);
 	}
 	return TICKET_STATUS_ORDER.map((status) => ({
 		id: status,
-		label: `Status: ${TICKET_STATUS_LABELS[status]}`,
+		label: tr("Status: {status}", {
+			status: tr(TICKET_STATUS_LABELS[status]),
+		}),
 		tickets: tickets.filter((ticket) => ticket.status === status),
 	})).filter((section) => section.tickets.length > 0);
 }

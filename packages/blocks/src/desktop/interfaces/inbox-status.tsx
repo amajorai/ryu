@@ -1,8 +1,6 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	THREAD_STATUS_LABELS,
-	type ThreadStatus,
-} from "@ryuhq/protocol/interfaces";
+import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import {
 	CircleAlert,
 	CircleDashed,
@@ -11,6 +9,7 @@ import {
 	type LucideIcon,
 	Reply,
 } from "lucide-react";
+import { threadStatusLabel } from "./interface-renderer.ts";
 
 interface InboxStatusMeta {
 	/** Unread-style emphasis: the user is the one who should act. */
@@ -80,7 +79,7 @@ export function inboxStatusLabel(
 	status: ThreadStatus,
 	unassigned = false
 ): string {
-	return unassigned ? "Unassigned" : THREAD_STATUS_LABELS[status];
+	return unassigned ? tr("Unassigned") : threadStatusLabel(status);
 }
 
 /**

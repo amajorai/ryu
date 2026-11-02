@@ -1,3 +1,5 @@
+import { translate as tl } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import { ApiError } from "@ryuhq/core-client/client.ts";
 import type {
 	BackupOperation,
@@ -25,17 +27,18 @@ export function message<TError>(error: TError): string {
 		: "Backup request failed. Try again.";
 }
 export function bytes(value: number): string {
-	return value < 1024 * 1024
-		? `${(value / 1024).toFixed(1)} KB`
-		: `${(value / (1024 * 1024)).toFixed(1)} MB`;
+	return formatByteSize(value, undefined, {
+		maxUnit: "megabyte",
+		minUnit: "kilobyte",
+	});
 }
 export function active(operation: BackupOperation): boolean {
 	return operation.status === "pending" || operation.status === "running";
 }
 export function scopeLabel(scope: BackupScope): string {
 	return scope.kind === "node"
-		? "Entire node"
+		? tl("Entire node")
 		: scope.kind === "space"
-			? "Space"
-			: `App · ${scope.namespace}`;
+			? tl("Space")
+			: tl("App · {namespace}", { namespace: scope.namespace });
 }

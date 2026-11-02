@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 const PAGE_URL = "/node-routing-settings-proof.html";
 const ROUTING_PATH = "/api/preferences/node-routing-prefs";
@@ -9,10 +10,7 @@ const NODE_TOKEN = "node-routing-proof-token";
 // must not rewrite the tracked evidence images.
 const EVIDENCE_DIR =
 	process.env.RYU_NODE_ROUTING_PROOF_DIR ??
-	path.resolve(
-		process.cwd(),
-		"../../docs/proof/test-coverage-sweep-20260924/evidence"
-	);
+	proofEvidencePath("test-coverage-sweep-20260924/evidence");
 
 interface CoreCall {
 	authorization: string | null;

@@ -86,7 +86,9 @@ test("Desktop's language choice is mirrored to the Island's ui-language preferen
 		);
 	});
 	await settle(() => writes.length === 1);
+	// Auto mode carries the locale shown, so Core's messages match the UI.
 	expect(JSON.parse(writes[0] ?? "null")).toEqual({
+		locale: "en",
 		mode: "auto",
 		packId: null,
 	});
