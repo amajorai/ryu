@@ -134,7 +134,12 @@ test("with no display language the editor Calendar keeps DayPicker's English nam
 		"Fr",
 		"Sa",
 	]);
-	expect(firstWeek(container)).toEqual(["3/1/2026", "3/7/2026"]);
+	// No locale reaches the day buttons here, so their values follow the
+	// runtime's default locale (`3/1/2026` in en-US, `01/03/2026` in en-GB).
+	expect(firstWeek(container)).toEqual([
+		new Date(2026, 2, 1).toLocaleDateString(),
+		new Date(2026, 2, 7).toLocaleDateString(),
+	]);
 });
 
 test("a caller's own labels win key by key, and a caller's own locale keeps the display language out entirely", async () => {

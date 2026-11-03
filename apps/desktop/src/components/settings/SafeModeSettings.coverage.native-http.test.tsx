@@ -225,8 +225,8 @@ function captionFor(title: string): string {
 	const heading = [
 		...document.body.querySelectorAll('[data-slot="item-title"]'),
 	].find((element) => element.textContent?.trim() === title);
-	const card = heading?.closest('[role="list"]');
-	const caption = card?.nextElementSibling;
+	// A flush settings row renders its description under its own title.
+	const caption = heading?.nextElementSibling;
 	return caption instanceof HTMLParagraphElement
 		? (caption.textContent ?? "")
 		: "";

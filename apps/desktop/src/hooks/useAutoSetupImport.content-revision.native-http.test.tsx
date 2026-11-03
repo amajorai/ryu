@@ -93,7 +93,7 @@ const server = Bun.serve({
 			if (
 				typeof body?.path !== "string" ||
 				![".claude", ".cursor", ".codex"].some(
-					(s) => body.path === `${rootPath}/${s}`
+					(s) => body.path === join(rootPath, s)
 				)
 			) {
 				unexpected.push("scan body");
@@ -125,7 +125,7 @@ const server = Bun.serve({
 			if (
 				JSON.stringify(body) !==
 				JSON.stringify({
-					path: `${rootPath}/.claude`,
+					path: join(rootPath, ".claude"),
 					items: [{ kind: "instructions", id: "instructions/CLAUDE.md" }],
 				})
 			) {
@@ -280,7 +280,7 @@ test("same locator edited and reverted bytes refresh snapshot; unchanged rescan 
 	expect(writes).toBe(3);
 	expect(bodies).toEqual(
 		new Array(3).fill({
-			path: `${rootPath}/.claude`,
+			path: join(rootPath, ".claude"),
 			items: [{ kind: "instructions", id: "instructions/CLAUDE.md" }],
 		})
 	);
@@ -306,7 +306,7 @@ test("older Core without revision remains readable and rechecks changed same-ID 
 	omitRevision = true;
 	await scan();
 	await until(() => saved === "alpha");
-	const result = await scanImportFolder(target, `${rootPath}/.claude`);
+	const result = await scanImportFolder(target, join(rootPath, ".claude"));
 	expect(result.items[0]?.contentRevision).toBeUndefined();
 	await writeFile(file, "bravo");
 	await scan();

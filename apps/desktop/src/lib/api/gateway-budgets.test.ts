@@ -22,6 +22,7 @@ import {
 	match,
 	rustBlock,
 	rustEnumWireVariants,
+	rustModuleSource,
 	rustSource,
 	rustStructFieldType,
 } from "./gateway-test-support.ts";
@@ -336,7 +337,8 @@ describe("the firewall alert tier is lockable on both sides", () => {
 	// either half alone can regress silently. (This row shipped WITHOUT a toggle,
 	// justified by the resolver having no `alert` arm; the arm landed in the same
 	// batch, which is exactly the cross-file assumption this test pins down.)
-	const resolveRs = rustSource("apps/gateway/src/firewall/resolve.rs");
+	// The resolver is `firewall/resolve.rs` plus its `resolve/` submodules.
+	const resolveRs = rustModuleSource("apps/gateway/src/firewall/resolve.rs");
 	// The editor rows moved out of GatewayDialog.tsx into the shared guardrails
 	// block, which the dialog renders; the toggle now lives with the alert row.
 	const dialog = rustSource(

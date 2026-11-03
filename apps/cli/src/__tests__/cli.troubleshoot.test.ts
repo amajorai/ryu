@@ -3,6 +3,7 @@
 // reported) without a filesystem, sockets, a browser, or the network.
 
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { ApiError, type ApiTarget } from "@ryuhq/core-client/client";
 import { runCli } from "../cli/dispatch.ts";
 import {
@@ -14,6 +15,8 @@ import { VERSION } from "../cli/version.ts";
 
 const HOME = "/home/jane";
 const DATA_DIR = `${HOME}/.ryu`;
+// The CLI joins report and log paths with the running host's separator.
+const REPORT_FILE = "troubleshoot-2026-10-19T10-00-00-000Z.md";
 const TARGET: ApiTarget = { url: "http://127.0.0.1:7980", token: null };
 
 function capture(): { err: () => string; io: CliIO; out: () => string } {
@@ -195,9 +198,7 @@ describe("ryu troubleshoot", () => {
 		expect(out).toContain("GPU");
 		expect(out).not.toContain("✗");
 		const [path, saved] = [...state.written][0] ?? [];
-		expect(path).toBe(
-			`${DATA_DIR}/logs/troubleshoot-2026-10-19T10-00-00-000Z.md`
-		);
+		expect(path).toBe(join(DATA_DIR, "logs", REPORT_FILE));
 		expect(saved).toContain("# Ryu troubleshooting report");
 		// The saved report never carries the user's home path.
 		expect(saved).not.toContain(HOME);
@@ -503,7 +504,7 @@ describe("ryu troubleshoot", () => {
 	test("log errors are collected, redacted, and land in the issue", async () => {
 		const { host } = fakeHost({
 			readTail: async (path) =>
-				path === `${DATA_DIR}/logs/ryu-core.log`
+				path === join(DATA_DIR, "logs", "ryu-core.log")
 					? [
 							"INFO booting",
 							"\u001b[31mERROR\u001b[0m bind failed for /home/jane/.ryu token=abc123secret",
@@ -526,16 +527,14 @@ describe("ryu troubleshoot", () => {
 	test("falls back to the temp directory when the data dir is unwritable", async () => {
 		const { host, state } = fakeHost({
 			writeFile: async (path, content) => {
-				if (path.startsWith(DATA_DIR)) {
+				if (path.startsWith(join(DATA_DIR))) {
 					throw new Error("EACCES");
 				}
 				state.written.set(path, content);
 			},
 		});
 		const { out } = await run(["--json", "--offline"], fakeApi({}), host);
-		expect(jsonResult(out).reportPath).toBe(
-			"/tmp/troubleshoot-2026-10-19T10-00-00-000Z.md"
-		);
+		expect(jsonResult(out).reportPath).toBe(join("/tmp", REPORT_FILE));
 	});
 
 	test("the bug-report alias runs the same command", async () => {

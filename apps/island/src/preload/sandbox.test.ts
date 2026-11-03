@@ -10,7 +10,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { IPC } from "../shared/ipc.ts";
 import { SURFACE_CHANNELS } from "../shared/screen-surface.ts";
 import { SCREEN_WINDOW_CHANNELS } from "./surface-channels.ts";
@@ -96,8 +96,11 @@ describe("sandboxed preloads", () => {
 	});
 
 	test("the screen window's preload bundles only its own channel table", () => {
+		// Compared with `/` separators so the names read the same on Windows.
 		expect(
-			[...screenPreload.locals].map((file) => relative(sourceRoot, file)).sort()
+			[...screenPreload.locals]
+				.map((file) => relative(sourceRoot, file).split(sep).join("/"))
+				.sort()
 		).toEqual(["preload/surface-channels.ts", "preload/surface.ts"]);
 	});
 });

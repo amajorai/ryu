@@ -21,6 +21,8 @@ mock.module("@/src/contexts/entitlement-context.tsx", () => ({
 	}),
 }));
 mock.module("@/src/lib/window-routing.ts", () => ({
+	// UI sounds (#960) ask whether this is the main window.
+	isMainWindow: () => true,
 	listenForEntityActivation: async () => () => undefined,
 	registerWindowTabs: async () => undefined,
 	tabEntityKey: () => null,

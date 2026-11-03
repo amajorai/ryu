@@ -323,7 +323,7 @@ describe("direct account-JWT transports", () => {
 	const gateOwners = new Set(["lib/api/client.ts", "lib/realtime/jwt.ts"]);
 
 	test("never mint the account JWT without the node admission gate", () => {
-		const ungated = readdirSync(desktopSrc, {
+		const sources = readdirSync(desktopSrc, {
 			encoding: "utf8",
 			recursive: true,
 		})
@@ -333,14 +333,22 @@ describe("direct account-JWT transports", () => {
 					/\.tsx?$/.test(file) &&
 					!/\.test\.tsx?$/.test(file) &&
 					!gateOwners.has(file)
-			)
-			.filter((file) => {
-				const source = readFileSync(join(desktopSrc, file), "utf8");
-				return (
-					source.includes("getRealtimeJwt(") &&
-					!source.includes("mayAttachAccountJwt(")
-				);
-			});
+			);
+		// A component split into sibling modules (`Page.tsx`,
+		// `Page.document.ts`, `Page.persistence.ts`) is one unit: the module
+		// that mints may hand the token to the sibling that applies the gate.
+		const unitOf = (file: string) =>
+			file.replace(/^(.*\/)?([^./]+)\..*$/, "$1$2");
+		const read = (file: string) => readFileSync(join(desktopSrc, file), "utf8");
+		const gatedUnits = new Set(
+			sources
+				.filter((file) => read(file).includes("mayAttachAccountJwt("))
+				.map(unitOf)
+		);
+		const ungated = sources.filter(
+			(file) =>
+				read(file).includes("getRealtimeJwt(") && !gatedUnits.has(unitOf(file))
+		);
 		expect(ungated).toEqual([]);
 	});
 });

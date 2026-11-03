@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import packageJson from "../package.json";
 import { ENTRIES } from "../tsup.config.ts";
 import { NPM_PUBLISHED_VERSION, SDK_VERSION } from "./version.ts";
@@ -169,7 +169,7 @@ describe("package surface lockstep", () => {
 
 	test("the tools entry depends on no agent framework", () => {
 		const graph = importGraph(join(PACKAGE_DIR, ENTRIES["tools/index"]));
-		const packages = [...graph].filter((module) => !module.startsWith("/"));
+		const packages = [...graph].filter((module) => !isAbsolute(module));
 		// Structural adapters: no `ai`, no @ryuhq/sdk, no MCP SDK at runtime.
 		expect(packages).toContain("zod");
 		expect(

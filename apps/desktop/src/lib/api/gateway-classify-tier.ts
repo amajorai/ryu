@@ -274,6 +274,17 @@ export interface InspectorConfig {
 	action: GatewayFirewallPolicy;
 	/** Master switch. Off by default (adds a per-turn model round-trip). */
 	enabled: boolean;
+	/**
+	 * What a turn the inspector could not judge does: `closed` flags it so
+	 * `action` applies, `open` lets it through with a warning. Unset (`null`, or
+	 * absent: the gateway omits it) means closed under `block`, open otherwise.
+	 */
+	fail_mode?: InspectorFailMode | null;
+	/**
+	 * Judge windows (about 4,000 characters each) per turn, newest first; the
+	 * gateway keeps it within 1..=64 and omits it at the default of 16.
+	 */
+	max_windows?: number;
 	/** Skip inspection for turns shorter than this many characters. */
 	min_chars: number;
 	/** What the inspector looks for. */
@@ -312,10 +323,13 @@ export interface InspectorConfig {
 	timeout_ms: number;
 }
 
+/** `InspectorFailMode`'s wire values (apps/gateway/src/config/inspector.rs). */
+export type InspectorFailMode = "closed" | "open";
+
 /**
  * Default (disabled) inspector config used when the gateway omits one.
  *
- * MIRRORS `impl Default for InspectorConfig` (apps/gateway/src/config.rs). Two
+ * MIRRORS `impl Default for InspectorConfig` (apps/gateway/src/config/inspector.rs). Two
  * fields drifted from it and both drifts were silent:
  *
  * - `action` said `warn_and_continue`; the Rust default is `FirewallPolicy`'s
@@ -343,6 +357,8 @@ export const DEFAULT_INSPECTOR: InspectorConfig = {
 	min_chars: 40,
 	timeout_ms: 1500,
 	action: "block",
+	fail_mode: null,
+	max_windows: 16,
 };
 
 /**

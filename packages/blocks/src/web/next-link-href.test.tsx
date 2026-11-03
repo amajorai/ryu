@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Link from "next/link";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -16,7 +17,7 @@ beforeAll(async () => {
 	// Bundle the real App Router Link with that alias, without replacing modules.
 	const result = await Bun.build({
 		entrypoints: [
-			new URL("./next-link-app.fixture.tsx", import.meta.url).pathname,
+			fileURLToPath(new URL("./next-link-app.fixture.tsx", import.meta.url)),
 		],
 		target: "bun",
 		outdir: fixtureDirectory,
@@ -28,11 +29,12 @@ beforeAll(async () => {
 					build.onResolve(
 						{ filter: /^react-server-dom-webpack\/client$/ },
 						() => ({
-							path: import.meta
-								.resolve(
+							// fileURLToPath, not `.slice(7)`: a Windows file URL is `file:///D:/...`.
+							path: fileURLToPath(
+								import.meta.resolve(
 									"next/dist/compiled/react-server-dom-webpack/client.node.js"
 								)
-								.slice(7),
+							),
 						})
 					);
 				},

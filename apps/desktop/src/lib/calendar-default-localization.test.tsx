@@ -133,7 +133,12 @@ test("with no display language a Calendar keeps DayPicker's English names, abbre
 		"Fr",
 		"Sa",
 	]);
-	expect(firstWeek(container)).toEqual(["3/1/2026", "3/7/2026"]);
+	// With no locale `data-day` is Intl's host default, as the "de" case above
+	// is that locale's; the week still runs Sunday March 1 to Saturday March 7.
+	expect(firstWeek(container)).toEqual([
+		new Date(2026, 2, 1).toLocaleDateString(),
+		new Date(2026, 2, 7).toLocaleDateString(),
+	]);
 });
 
 test("a caller's own labels win key by key, and a caller's own locale keeps the display language out entirely", async () => {

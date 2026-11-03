@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -21,9 +22,11 @@ const { I18nProvider } = await import("@ryu/i18n/react");
 const { PageToolForm } = await import("./page-tools-form.tsx");
 
 function shippedCatalog(locale: string): Record<string, string> {
-	const url = new URL(`../../i18n/locales/${locale}.json`, import.meta.url)
-		.pathname;
-	return JSON.parse(readFileSync(url, "utf8")) as Record<string, string>;
+	// fileURLToPath, not `.pathname`: a Windows URL path is `/D:/...`.
+	const path = fileURLToPath(
+		new URL(`../../i18n/locales/${locale}.json`, import.meta.url)
+	);
+	return JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
 }
 
 const noop = () => undefined;

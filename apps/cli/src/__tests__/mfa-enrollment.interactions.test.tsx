@@ -44,6 +44,7 @@ const WORKSPACE = "Ask anything";
 const realFetch = globalThis.fetch;
 const originalNodeEnv = process.env.NODE_ENV;
 const originalConfigDir = process.env.RYU_CLI_CONFIG_DIR;
+const originalAuthUrl = process.env.RYU_AUTH_URL;
 type Setup = Awaited<ReturnType<typeof testRender>>;
 let setup: Setup | null = null;
 let configDir: string | undefined;
@@ -162,6 +163,10 @@ function NodeSelector() {
 
 beforeEach(() => {
 	process.env.NODE_ENV = "production";
+	// The gate reads enrollment with the account token, which only a configured
+	// account service receives. Under RYU_PROFILE=dev (as CI runs) the default
+	// is the loopback fallback, which strips it (core/authBackend.ts).
+	process.env.RYU_AUTH_URL = AUTH_BACKEND_URL;
 	openedUrls.length = 0;
 	configDir = mkdtempSync(join(tmpdir(), "ryu-mfa-enrollment-state-"));
 	process.env.RYU_CLI_CONFIG_DIR = configDir;
@@ -188,6 +193,11 @@ afterEach(async () => {
 		delete process.env.RYU_CLI_CONFIG_DIR;
 	} else {
 		process.env.RYU_CLI_CONFIG_DIR = originalConfigDir;
+	}
+	if (originalAuthUrl === undefined) {
+		delete process.env.RYU_AUTH_URL;
+	} else {
+		process.env.RYU_AUTH_URL = originalAuthUrl;
 	}
 	if (configDir) {
 		rmSync(configDir, { recursive: true, force: true });

@@ -178,7 +178,15 @@ function fileInput() {
 }
 /** The status and Export control of one pack's row in "Available language packs". */
 function packRow(name: string) {
-	return button(`Export ${name}`).parentElement!.textContent;
+	// The Export label follows the active pack: a French pack falls back to the
+	// official French catalog for the copy it does not carry ("Exporter").
+	const exportButton = Array.from(element!.querySelectorAll("button")).find(
+		(candidate) => candidate.getAttribute("aria-label")?.endsWith(` ${name}`)
+	);
+	if (!exportButton) {
+		throw new Error(`No Export control for ${name}`);
+	}
+	return exportButton.parentElement!.textContent;
 }
 function optionNames() {
 	return Array.from(document.querySelectorAll('[role="option"]')).map(
@@ -272,10 +280,12 @@ test("the language picker lists Auto detect, English and every installed pack; e
 	expect(shownChoice()).toBe(french.name);
 	expect(localStorage.getItem(LANGUAGE_MODE_KEY)).toBe("fixed");
 	expect(localStorage.getItem(LANGUAGE_PACK_STORAGE_KEY)).toBe(french.id);
-	expect(packRow(french.name)).toContain("Active");
+	// The page now reads in French, falling back to the official French catalog.
+	expect(packRow(french.name)).toContain("Actif");
 	expect(element!.textContent).toContain("1 translated string · Left to right");
 
-	await choose("English");
+	// The picker still reads in French, so English is listed as "Anglais".
+	await choose("Anglais");
 	await settle(() => consumer() === "en:Install");
 	expect(shownChoice()).toBe("English");
 	expect(localStorage.getItem(LANGUAGE_MODE_KEY)).toBe("fixed");

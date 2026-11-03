@@ -204,9 +204,10 @@ test("Show transcript in voice mode defaults on and drives the live call's chat 
 	expect(text(settingsHost.querySelector('[data-slot="item-title"]'))).toBe(
 		"Show transcript in voice mode"
 	);
+	// A flush settings row renders its description under its own title.
 	expect(
 		text(
-			settingsHost.querySelector('[data-slot="item-group"]')?.nextElementSibling
+			settingsHost.querySelector('[data-slot="item-title"]')?.nextElementSibling
 		)
 	).toBe("Show call turns in the chat while the call is live.");
 	// No stored choice: the setting and the call both default to the transcript.

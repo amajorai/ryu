@@ -119,6 +119,9 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 const opened: string[] = [];
 
+/** A stack frame in `lib/display-day.ts`, on POSIX or Windows paths. */
+const DISPLAY_DAY_FRAME = /[\\/]lib[\\/]display-day\.ts/;
+
 /** Day-store timers and focus/visibility listeners, by creation stack. */
 function auditDayResources() {
 	const originalSet = globalThis.setTimeout;
@@ -131,8 +134,7 @@ function auditDayResources() {
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	const listeners = new Set<EventListenerOrEventListenerObject>();
 	const owned = () =>
-		new Error("display-day ownership").stack?.includes("/lib/display-day.ts") ??
-		false;
+		DISPLAY_DAY_FRAME.test(new Error("display-day ownership").stack ?? "");
 	globalThis.setTimeout = ((
 		handler: (...args: unknown[]) => void,
 		delay?: number,

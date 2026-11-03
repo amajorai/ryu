@@ -384,11 +384,8 @@ function memberSeats() {
 		(item) =>
 			item.children.length === 0 && item.textContent?.trim() === "Member seats"
 	);
-	let section = title?.parentElement ?? null;
-	while (section && !section.className.includes("space-y-1.5")) {
-		section = section.parentElement;
-	}
-	return section?.textContent ?? "";
+	// A flush settings row carries its description under its own title.
+	return title?.closest('[data-slot="item"]')?.textContent ?? "";
 }
 function seatWrites() {
 	return calls

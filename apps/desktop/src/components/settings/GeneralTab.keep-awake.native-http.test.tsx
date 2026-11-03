@@ -264,7 +264,7 @@ test("a pending re-enable says on, and an unsupported platform locks the switch"
 	hardware = { active: true, enabled: true, supported: false };
 	await mount();
 	await openPage("System & tray");
-	await until(() => text().includes("can't be turned off here"), "unsupported");
+	await until(() => text().includes("Always on for macOS."), "unsupported");
 	expect(isDisabledSwitch(switchById("hardware-acceleration-toggle"))).toBe(
 		true
 	);

@@ -74,7 +74,11 @@ test("pool strategy wires match the canonical Rust enum, including explicit serd
 
 test("execution defaults match the canonical Rust configuration", async () => {
 	const source = await readFile(
-		new URL("../../../../../apps/gateway/src/config.rs", import.meta.url),
+		// The pool defaults live in the gateway config's `routing` submodule.
+		new URL(
+			"../../../../../apps/gateway/src/config/routing.rs",
+			import.meta.url
+		),
 		"utf8"
 	);
 	const functions: {

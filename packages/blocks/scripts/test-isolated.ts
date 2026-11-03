@@ -1,6 +1,7 @@
 // Bun module mocks survive mock.restore(). Run each suite in its own process
 // so fallback-engine and DOM fixtures cannot replace another suite's runtime.
 import { spawnSync } from "node:child_process";
+import { sep } from "node:path";
 import { Glob } from "bun";
 
 const files = [
@@ -18,7 +19,8 @@ for (const file of files) {
 	});
 	if (result.status !== 0) {
 		failed += 1;
-		console.error(`FAIL ${file}`);
+		// Named with `/` separators, as on POSIX, whatever the OS.
+		console.error(`FAIL ${file.split(sep).join("/")}`);
 	}
 }
 console.log(`\n${files.length - failed}/${files.length} test files green`);

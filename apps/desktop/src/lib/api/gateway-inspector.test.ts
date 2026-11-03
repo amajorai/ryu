@@ -27,7 +27,7 @@ describe("DEFAULT_INSPECTOR mirrors the Rust default", () => {
 		// that the parser's OUTPUT type matches — not that the values do.
 		const mirrored = {
 			...DEFAULT_INSPECTOR,
-		} satisfies Record<string, boolean | number | string>;
+		} satisfies Record<string, boolean | null | number | string>;
 		expect(Object.entries(mirrored)).toEqual(
 			Object.entries(rustInspectorDefault())
 		);

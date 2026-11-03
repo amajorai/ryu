@@ -33,6 +33,7 @@ const { EntitlementProvider } = await import(
 	"@/src/contexts/entitlement-context.tsx"
 );
 const { useNodeStore } = await import("@/src/store/useNodeStore.ts");
+const { I18nProvider } = await import("@ryu/i18n/react");
 const { resetTimezone, setTimezonePreference } = await import(
 	"@ryu/ui/lib/timezone.ts"
 );
@@ -153,18 +154,27 @@ async function mountCalendar(): Promise<HTMLElement> {
 	const root = createRoot(container);
 	mounted = { container, root };
 	await act(async () => {
+		// The app always mounts the i18n provider, so Calendar labels follow the
+		// UI language (English here), never the test machine's default locale.
 		root.render(
-			<EntitlementProvider>
-				<ChatHistoryProvider>
-					<CalendarContent
-						error={null}
-						jobs={jobs}
-						loading={false}
-						onReload={async () => undefined}
-						workflowNames={new Map()}
-					/>
-				</ChatHistoryProvider>
-			</EntitlementProvider>
+			<I18nProvider
+				autoLocalizeDom={false}
+				initialLocale="en"
+				initialPackId={null}
+				persistPackId={() => undefined}
+			>
+				<EntitlementProvider>
+					<ChatHistoryProvider>
+						<CalendarContent
+							error={null}
+							jobs={jobs}
+							loading={false}
+							onReload={async () => undefined}
+							workflowNames={new Map()}
+						/>
+					</ChatHistoryProvider>
+				</EntitlementProvider>
+			</I18nProvider>
 		);
 	});
 	return container;

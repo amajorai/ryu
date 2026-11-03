@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, type ReactNode } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { DownloadTask } from "@/src/lib/api/downloads.ts";
 
@@ -123,6 +123,36 @@ afterEach(async () => {
 	container.remove();
 	globalThis.fetch = originalFetch;
 });
+async function clickLabelled(label: string) {
+	const button = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${label}"]`
+	);
+	if (!button) {
+		throw new Error(`Missing action ${label}`);
+	}
+	await act(async () => {
+		button.click();
+	});
+}
+async function clickMenuItem(label: string) {
+	let item: HTMLElement | undefined;
+	for (let attempt = 0; attempt < 100 && !item; attempt += 1) {
+		item = [
+			...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+		].find((candidate) => candidate.textContent === label);
+		if (!item) {
+			await act(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			});
+		}
+	}
+	if (!item) {
+		throw new Error(`Missing menu item ${label}`);
+	}
+	await act(async () => {
+		item.click();
+	});
+}
 async function click(label: string) {
 	const button = Array.from(container.querySelectorAll("button")).find(
 		(item) => item.textContent === label
@@ -309,19 +339,22 @@ mock.module("@ryu/ui/components/pull-to-refresh.tsx", () => ({
 		<div>{children}</div>
 	),
 }));
+// Forwards the trigger props Base UI merges in (the page's More actions menu
+// renders through this Button) and the icon buttons' accessible names.
 mock.module("@ryu/ui/components/button.tsx", () => ({
 	Button: ({
 		children,
-		onClick,
 		disabled,
 		loading,
-	}: {
-		children: ReactNode;
-		onClick: () => void;
-		disabled?: boolean;
+		size: _size,
+		variant: _variant,
+		...rest
+	}: ComponentProps<"button"> & {
 		loading?: boolean;
+		size?: string;
+		variant?: string;
 	}) => (
-		<button disabled={disabled || loading} onClick={onClick} type="button">
+		<button {...rest} disabled={disabled || loading} type="button">
 			{children}
 		</button>
 	),
@@ -419,7 +452,8 @@ test("clear finished removes persisted history by reading back Core, then empty-
 		await waitUntil(
 			() => container.textContent?.includes("persisted") ?? false
 		);
-		await click("Clear finished");
+		await clickLabelled("More actions");
+		await clickMenuItem("Clear finished");
 		await waitUntil(
 			() => container.textContent?.includes("Nothing downloading") ?? false
 		);
@@ -444,13 +478,16 @@ test("Refresh requests both update and durable history feeds and immediately ren
 		);
 		reply = async () =>
 			NativeResponse.json({ history: [task("new-history", "completed")] });
-		await click("Refresh");
+		await clickLabelled("Refresh");
 		await waitUntil(
 			() => container.textContent?.includes("new-history") ?? false
 		);
 		expect(refreshUpdates).toBe(1);
 		expect(calls.filter((call) => call.method === "GET")).toHaveLength(2);
-		expect(container.textContent).toContain("Refreshing…");
+		// The icon-only Refresh button names its held state.
+		expect(
+			container.querySelector('button[aria-label="Refreshing…"]')
+		).not.toBeNull();
 	} finally {
 		client.clear();
 	}

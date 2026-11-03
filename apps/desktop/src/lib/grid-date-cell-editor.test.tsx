@@ -175,6 +175,18 @@ const navigationNames = () => {
 		dropdowns: selects.map((select) => select.getAttribute("aria-label")),
 	};
 };
+/**
+ * With no display language the calendar formats through Intl's host default
+ * (`calendarLocalization(undefined)`): its day labels are the `dateStyle:
+ * "full"` date and its `data-day` the default `toLocaleDateString()`. Built the
+ * same way here so the expectations hold on any host locale.
+ */
+const fullDate = (year: number, month: number, day: number) =>
+	new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(
+		new Date(year, month - 1, day)
+	);
+const hostDay = (year: number, month: number, day: number) =>
+	new Date(year, month - 1, day).toLocaleDateString();
 /** The `data-day` of the first and last day cells of the grid's first week. */
 const firstWeek = () => {
 	const days = [
@@ -202,7 +214,7 @@ test("F2 lands on the selected day, arrows move real focus, Escape cancels and a
 	await openWithF2(cell);
 	// The selected civil day, not "Go to the Previous Month".
 	expect(active()?.getAttribute("aria-label")).toBe(
-		"Sunday, March 15, 2026, selected"
+		`${fullDate(2026, 3, 15)}, selected`
 	);
 	expect(active()?.dataset.selectedSingle).toBe("true");
 	// English keeps its Sunday-first week and its navigation names.
@@ -215,7 +227,7 @@ test("F2 lands on the selected day, arrows move real focus, Escape cancels and a
 		"Friday",
 		"Saturday",
 	]);
-	expect(firstWeek()).toEqual(["3/1/2026", "3/7/2026"]);
+	expect(firstWeek()).toEqual([hostDay(2026, 3, 1), hostDay(2026, 3, 7)]);
 	expect(navigationNames()).toEqual({
 		nav: "Navigation bar",
 		previous: "Go to the Previous Month",
@@ -223,9 +235,9 @@ test("F2 lands on the selected day, arrows move real focus, Escape cancels and a
 		dropdowns: ["Choose the Month", "Choose the Year"],
 	});
 	await press(active(), "ArrowRight");
-	expect(active()?.getAttribute("aria-label")).toBe("Monday, March 16, 2026");
+	expect(active()?.getAttribute("aria-label")).toBe(fullDate(2026, 3, 16));
 	await press(active(), "ArrowDown");
-	expect(active()?.getAttribute("aria-label")).toBe("Monday, March 23, 2026");
+	expect(active()?.getAttribute("aria-label")).toBe(fullDate(2026, 3, 23));
 	expect(updates).toEqual([]);
 
 	await press(active(), "Escape");
@@ -239,7 +251,7 @@ test("F2 lands on the selected day, arrows move real focus, Escape cancels and a
 	// Reopen: the cancelled navigation is forgotten; the saved day is focused.
 	await openWithF2(cell);
 	expect(active()?.getAttribute("aria-label")).toBe(
-		"Sunday, March 15, 2026, selected"
+		`${fullDate(2026, 3, 15)}, selected`
 	);
 	await press(active(), "ArrowRight");
 	// happy-dom does not turn a dispatched Enter into a click; the genuine Enter
@@ -268,7 +280,7 @@ test("F2 on an empty date lands on today", async () => {
 	]);
 	await openWithF2(cell);
 	expect(active()?.getAttribute("aria-label")).toBe(
-		"Today, Tuesday, March 10, 2026"
+		`Today, ${fullDate(2026, 3, 10)}`
 	);
 });
 
@@ -294,7 +306,7 @@ test("F2 on an empty date opens the month of today in the display zone, not the 
 			focused: active()?.getAttribute("aria-label"),
 			// The month dropdown's value is the zero-based month: July is 6.
 			month: month?.value,
-		}).toEqual({ focused: "Today, Wednesday, July 1, 2026", month: "6" });
+		}).toEqual({ focused: `Today, ${fullDate(2026, 7, 1)}`, month: "6" });
 	} finally {
 		resetTimezone();
 		if (machineZone === undefined) {

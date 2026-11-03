@@ -17,6 +17,26 @@ export function rustSource(relative: string): string {
 	}
 }
 
+/** A Rust path under a split module that is test-only code, not the module. */
+const RUST_TEST_PATH = /(^|[/_])tests?([/._]|$)/;
+
+/**
+ * A Rust module's source: `root` (`foo.rs`) plus every non-test file of the
+ * submodules it was split into under `foo/`, read as one text, root first.
+ */
+export function rustModuleSource(root: string): string {
+	const dir = root.replace(/\.rs$/, "");
+	const parts = readdirSync(join(REPO_ROOT, dir), {
+		encoding: "utf8",
+		recursive: true,
+	})
+		.map((f) => f.replaceAll("\\", "/"))
+		.filter((f) => f.endsWith(".rs") && !RUST_TEST_PATH.test(f))
+		.sort()
+		.map((f) => rustSource(`${dir}/${f}`));
+	return [rustSource(root), ...parts].join("\n");
+}
+
 /**
  * The gateway dialog's source: `GatewayDialog.tsx` plus the section modules it
  * was split into under `gateway-dialog/`, read as one text (the dialog file
@@ -43,6 +63,7 @@ export function gatewayDialogSource(): string {
 	return [rustSource(dialog), ...siblings, ...parts].join("\n");
 }
 
+/** The gateway config module: `config.rs` and its `config/` submodules. */
 export const GATEWAY_CONFIG_RS = "apps/gateway/src/config.rs";
 const ROUTER_RS = "crates/gateway/router/src/lib.rs";
 export const CLASSIFY_SIDECAR_RS =
@@ -58,7 +79,7 @@ export const BUDGET_RS = "crates/gateway/budget/src/lib.rs";
 // `snake_case` there). The test below pins them equal.
 export const CORE_POLICY_ALERTS_RS = "apps/core/src/policy_alerts/mod.rs";
 
-export const gatewayConfigRs = rustSource(GATEWAY_CONFIG_RS);
+export const gatewayConfigRs = rustModuleSource(GATEWAY_CONFIG_RS);
 export const routerRs = rustSource(ROUTER_RS);
 export const classifySidecarRs = rustSource(CLASSIFY_SIDECAR_RS);
 export const contractsRs = rustSource(CONTRACTS_RS);
@@ -267,9 +288,19 @@ export function parseInspectorDefaultImpl() {
  * has not been taught — a new default expression must be understood here before
  * this file can claim to mirror it, which is the whole point.
  */
-function resolveRustDefault(expr: string): boolean | number | string {
+function resolveRustDefault(expr: string): boolean | null | number | string {
 	if (expr === "true" || expr === "false") {
 		return expr === "true";
+	}
+	if (expr === "None") {
+		// An unset `Option`; serde reads JSON `null` back as `None`.
+		return null;
+	}
+	if (/^[A-Z][A-Z0-9_]*$/.test(expr)) {
+		const pattern = new RegExp(`const ${expr}: \\w+ = (\\d+);`);
+		return Number(
+			match(gatewayConfigRs, GATEWAY_CONFIG_RS, pattern, `const ${expr}`)
+		);
 	}
 	if (expr === "default_inspector_model()") {
 		// `fn default_inspector_model()` → `classify_model_id()`, which prefers the
@@ -311,7 +342,7 @@ function resolveRustDefault(expr: string): boolean | number | string {
 
 /** `impl Default for InspectorConfig`, resolved to plain JSON values. */
 export function rustInspectorDefault() {
-	const out: Record<string, boolean | number | string> = {};
+	const out: Record<string, boolean | null | number | string> = {};
 	for (const [field, expr] of Object.entries(parseInspectorDefaultImpl())) {
 		out[field] = resolveRustDefault(expr);
 	}

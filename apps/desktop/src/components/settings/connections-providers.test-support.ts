@@ -115,15 +115,16 @@ export function settingsSection(
 }
 
 /**
- * The footer caption a SettingsGroup renders under the card that holds the row
- * titled `title` (SettingsItem descriptions are not rendered inside the row).
+ * The description a flush SettingsItem renders under the title of the row
+ * titled `title`.
  */
 export function rowCaption(
 	title: string,
 	scope: ParentNode = document
 ): string {
-	const card = settingsRow(title, scope)?.closest('[data-slot="item-group"]');
-	const caption = card?.nextElementSibling;
+	const caption = settingsRow(title, scope)?.querySelector(
+		'[data-slot="item-title"]'
+	)?.nextElementSibling;
 	return caption?.tagName === "P" ? (caption.textContent ?? "") : "";
 }
 

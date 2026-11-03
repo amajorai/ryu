@@ -104,9 +104,9 @@ test("mounted day consumers acknowledge zone and focus clock jumps, remount fres
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	const listeners = new Set<EventListenerOrEventListenerObject>();
 	const owned = () =>
-		new Error("Audit temporal resource ownership").stack?.includes(
-			"/lib/display-day.ts"
-		) ?? false;
+		/[\\/]lib[\\/]display-day\.ts/.test(
+			new Error("Audit temporal resource ownership").stack ?? ""
+		);
 	globalThis.setTimeout = ((
 		handler: (...args: unknown[]) => void,
 		delay?: number,

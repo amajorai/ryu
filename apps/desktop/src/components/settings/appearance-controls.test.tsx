@@ -25,16 +25,33 @@ const controls = z
 	})
 	.parse(archivedControls);
 // The archived markup predates the squircle removal; retired corner-shape
-// utilities are the only tokens the shared primitives dropped since.
+// utilities are the only tokens the shared primitives dropped since, apart
+// from the motion timing below.
 const RETIRED_CORNER_UTILITY =
 	/(?:^|:)corner-(?:[a-z]{1,2}-)?(?:squircle|round)$/;
+// Motion timing the shared button changed after the archive: the press
+// translate was removed (#967) and ghost hover snaps in, then fades out
+// (b8e06839ce). Neither touches typography, padding, SVG size or disabled
+// markup, which is what this comparison pins.
+const MOTION_TIMING_SINCE_ARCHIVE = new Set([
+	"active:not-aria-[haspopup]:translate-y-px",
+	"active:duration-75",
+	"duration-(--duration-fast)",
+	"hover:duration-0",
+]);
 
 function normalizeUtilityOrder(markup: string) {
 	return markup.replace(
 		/class="([^"]*)"/g,
 		(_attribute, classes: string) =>
 			`class="${[...new Set(classes.split(" "))]
-				.filter((value) => !RETIRED_CORNER_UTILITY.test(value))
+				.filter(
+					(value) =>
+						!(
+							RETIRED_CORNER_UTILITY.test(value) ||
+							MOTION_TIMING_SINCE_ARCHIVE.has(value)
+						)
+				)
 				.sort()
 				.join(" ")}"`
 	);

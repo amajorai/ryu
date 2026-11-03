@@ -8,6 +8,7 @@
 // the CLI authors passes through it: command output (`box exec`, file
 // contents) is never rewritten.
 
+import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The command line that runs this CLI when no host overrides it. */
@@ -41,9 +42,14 @@ export function workspaceLauncher(
 	moduleUrl: string = import.meta.url
 ): readonly string[] {
 	const fromSource = moduleUrl.endsWith(".ts");
+	// `/` separators on every OS: bun and node accept `D:/checkout/src/bin.ts`
+	// on Windows, and unlike `D:\checkout\...` it needs no shell quoting, so the
+	// printed line runs as-is in cmd, PowerShell and POSIX shells alike.
 	const bin = fileURLToPath(
 		new URL(fromSource ? "./bin.ts" : "./bin.js", moduleUrl)
-	);
+	)
+		.split(sep)
+		.join("/");
 	return [fromSource ? "bun" : "node", bin];
 }
 

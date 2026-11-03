@@ -112,9 +112,17 @@ const markedDay = () =>
 		?.querySelector('[aria-selected="true"] button[data-day]')
 		?.getAttribute("data-day");
 
+/**
+ * A day's `data-day` value under these English cases. The provider projects
+ * `en` as the host locale, so the calendar formats days with DayPicker's
+ * English (`en-US`) locale, not the machine's: an en-GB computer still reads
+ * `3/2/2026`.
+ */
+const dayValue = (date: Date) => date.toLocaleDateString("en-US");
+
 const dayButton = (date: Date) =>
 	popoverCalendar()?.querySelector<HTMLButtonElement>(
-		`button[data-day="${date.toLocaleDateString()}"]`
+		`button[data-day="${dayValue(date)}"]`
 	) ?? null;
 
 test("the date node's popover calendar speaks the display language: German navigation, Monday-first week", async () => {
@@ -159,7 +167,7 @@ test("the date node's popover opens on the node's own month with its day marked,
 	const trigger = await mountDateNode(undefined);
 	await click(trigger);
 	expect(shownMonth()).toBe("March 2026");
-	expect(markedDay()).toBe(new Date(2026, 2, 2).toLocaleDateString());
+	expect(markedDay()).toBe(dayValue(new Date(2026, 2, 2)));
 });
 
 test("after a day in another month is picked, the popover reopens on that month even if it was left elsewhere", async () => {
@@ -175,5 +183,5 @@ test("after a day in another month is picked, the popover reopens on that month 
 	expect(popoverCalendar()).toBeNull();
 	await click(trigger);
 	expect(shownMonth()).toBe("April 2026");
-	expect(markedDay()).toBe(new Date(2026, 3, 7).toLocaleDateString());
+	expect(markedDay()).toBe(dayValue(new Date(2026, 3, 7)));
 });

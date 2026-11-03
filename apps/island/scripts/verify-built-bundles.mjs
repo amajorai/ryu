@@ -22,7 +22,7 @@ import {
 	statSync,
 } from "node:fs";
 import { builtinModules, createRequire } from "node:module";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ISLAND_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -96,6 +96,11 @@ function packageName(specifier) {
 	return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
 }
 
+/** A bundle file named by its output path, with `/` separators on every OS. */
+function bundleLabel(outDir, file) {
+	return relative(outDir, file).split(sep).join("/");
+}
+
 /**
  * Check the main bundle: each package it imports at runtime must be a declared
  * dependency of the Island package and resolve from it to JavaScript. An
@@ -115,7 +120,7 @@ function verifyMain(outDir, root, manifest) {
 	]);
 	const requireFromIsland = createRequire(join(root, "package.json"));
 	for (const file of files) {
-		const label = relative(outDir, file);
+		const label = bundleLabel(outDir, file);
 		for (const specifier of runtimeSpecifiers(readFileSync(file, "utf8"))) {
 			if (isRelative(specifier) || isPlatformModule(specifier)) {
 				continue;
@@ -155,7 +160,7 @@ function verifyPreload(outDir) {
 		violations.push(`preload: no bundle under ${join(outDir, "preload")}`);
 	}
 	for (const file of files) {
-		const label = relative(outDir, file);
+		const label = bundleLabel(outDir, file);
 		for (const specifier of runtimeSpecifiers(readFileSync(file, "utf8"))) {
 			if (!SANDBOXED_PRELOAD_MODULES.has(specifier)) {
 				violations.push(

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 const WEBHOOKS_DIR = import.meta.dir;
 const SPECIFIER = /\b(?:from|import)\s*\(?\s*["']([^"']+)["']/g;
@@ -62,7 +62,7 @@ describe("webhooks edge safety", () => {
 
 	test("the entry point's whole graph loads no node:, bare package or client code", () => {
 		const reachable = [...graph(join(WEBHOOKS_DIR, "index.ts"))];
-		expect(reachable.filter((module) => !module.startsWith("/"))).toEqual([]);
+		expect(reachable.filter((module) => !isAbsolute(module))).toEqual([]);
 		for (const module of reachable) {
 			const source = readFileSync(module, "utf8");
 			expect({ module, usesBuffer: /\bBuffer\b/.test(source) }).toEqual({

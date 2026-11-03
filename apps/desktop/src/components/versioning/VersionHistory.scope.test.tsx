@@ -2,11 +2,14 @@ import { afterEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { VersionHistory, type VersionSource } from "./VersionHistory.tsx";
+import type { VersionSource } from "./VersionHistory.tsx";
 
 if (!GlobalRegistrator.isRegistered) {
 	GlobalRegistrator.register();
 }
+// History is a Base UI Popover since a2c35527d2. Its portal decides at import
+// whether a DOM exists, so the component loads only after happy-dom does.
+const { VersionHistory } = await import("./VersionHistory.tsx");
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let root: Root | undefined;
 afterEach(async () => {
@@ -63,7 +66,7 @@ function button(name: string): HTMLButtonElement {
 		b.textContent?.trim().startsWith(name)
 	);
 	if (!item) {
-		throw Error("Missing button " + name);
+		throw new Error(`Missing button ${name}`);
 	}
 	return item;
 }
@@ -109,8 +112,8 @@ test("same-resource callback refresh while restore is held preserves pending and
 	expect(document.body.textContent).not.toContain("Immutable checkpoint");
 });
 test("a held A restore cannot close B history or unlock B's own pending restore", async () => {
-	const a = held(),
-		b = held();
+	const a = held();
+	const b = held();
 	let restored = 0;
 	await render(source({}, { restore: () => a.promise }), "A", () => restored++);
 	await click("History");
@@ -127,10 +130,10 @@ test("a held A restore cannot close B history or unlock B's own pending restore"
 	expect(restored).toBe(1);
 });
 test("A to B to A gives a new generation even when the semantic scope object is reused", async () => {
-	const scopeA = {},
-		scopeB = {},
-		old = held(),
-		current = held();
+	const scopeA = {};
+	const scopeB = {};
+	const old = held();
+	const current = held();
 	let restored = 0;
 	await render(
 		source(scopeA, { restore: () => old.promise }),
@@ -147,7 +150,7 @@ test("A to B to A gives a new generation even when the semantic scope object is 
 	);
 	await click("Restore");
 	expect(button("Restore").disabled).toBe(true);
-	await act(async () => old.reject(Error("Old authority refused")));
+	await act(async () => old.reject(new Error("Old authority refused")));
 	expect(button("Restore").disabled).toBe(true);
 	expect(document.body.textContent).not.toContain("Old authority refused");
 	expect(restored).toBe(0);
@@ -156,12 +159,12 @@ test("A to B to A gives a new generation even when the semantic scope object is 
 });
 test("current refusal stays inline across a draft refresh and explicit retry completes", async () => {
 	const scope = {};
-	let attempts = 0,
-		restored = 0;
+	let attempts = 0;
+	let restored = 0;
 	const restore = async () => {
 		attempts++;
 		if (attempts === 1) {
-			throw Error("Current restore refused");
+			throw new Error("Current restore refused");
 		}
 	};
 	await render(source(scope, { restore }), "Draft", () => restored++);

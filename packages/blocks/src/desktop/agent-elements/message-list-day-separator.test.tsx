@@ -39,10 +39,11 @@ function auditDayResources() {
 	}));
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	const listeners = new Set<EventListenerOrEventListenerObject>();
+	// Either separator: a Windows stack names `\lib\display-day.ts`.
 	const owned = () =>
-		new Error("Audit display-day ownership").stack?.includes(
-			"/lib/display-day.ts"
-		) ?? false;
+		/[/\\]lib[/\\]display-day\.ts/u.test(
+			new Error("Audit display-day ownership").stack ?? ""
+		);
 	globalThis.setTimeout = ((
 		handler: (...args: unknown[]) => void,
 		delay?: number,

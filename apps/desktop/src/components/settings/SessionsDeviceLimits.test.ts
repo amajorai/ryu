@@ -1,4 +1,5 @@
 import { expect, mock, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import {
 	DEVICE_SURFACE_LABELS,
 	DEVICE_SURFACES,
@@ -7,7 +8,7 @@ import {
 import { formatMessage } from "@ryu/i18n/core";
 
 mock.module(
-	new URL("../../../lib/auth-client.ts", import.meta.url).pathname,
+	fileURLToPath(new URL("../../../lib/auth-client.ts", import.meta.url)),
 	() => ({
 		BACKEND_URL: "http://127.0.0.1:1",
 		getActiveToken: () => null,

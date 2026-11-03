@@ -249,7 +249,8 @@ function captionFor(title: string) {
 	const heading = [
 		...container.querySelectorAll('[data-slot="item-title"]'),
 	].find((candidate) => text(candidate) === title);
-	return text(heading?.closest('[data-slot="item-group"]')?.nextElementSibling);
+	// A flush settings row renders its description under its own title.
+	return text(heading?.nextElementSibling);
 }
 
 function alertMessage() {

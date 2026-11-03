@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { activeLocale } from "@ryu/i18n/lite";
 
 // Real DOM/CSS publication boundary used by I18nProvider; native Intl is untouched.
 GlobalRegistrator.register();
@@ -55,8 +56,9 @@ describe("grid date selected locale with calendar conservation", () => {
 				publish(locale, "Pacific/Kiritimati");
 				expect(formatDateForDisplay("2026-01-15")).toBe(expected(locale));
 			}
+			// System hands dates back to the UI language, not the host's locale.
 			publish("system", "America/Los_Angeles");
-			expect(formatDateForDisplay("2026-01-15")).toBe(expected());
+			expect(formatDateForDisplay("2026-01-15")).toBe(expected(activeLocale()));
 		}));
 	test("selected locale keeps calendar-only strings and local Date values on the same day across display zones", () =>
 		withDocumentTokens(() => {
@@ -95,7 +97,10 @@ describe("grid date selected locale with calendar conservation", () => {
 				"--ryu-locale",
 				"invalid_locale"
 			);
-			expect(formatDateForDisplay(early)).toBe(early.toLocaleDateString());
+			// A malformed token falls back to the UI language, not the host's.
+			expect(formatDateForDisplay(early)).toBe(
+				early.toLocaleDateString(activeLocale())
+			);
 		}));
 });
 
